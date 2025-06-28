@@ -34,7 +34,7 @@ from cosa.rest.fifo_queue import FifoQueue
 from cosa.rest.running_fifo_queue import RunningFifoQueue
 import cosa.utils.util as du
 import cosa.utils.util_stopwatch as sw
-from lib.clients import genie_client as gc
+from lib.clients import lupin_client as gc
 from cosa.agents.v010.two_word_id_generator import TwoWordIdGenerator
 from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.auth import get_current_user, get_current_user_id

@@ -1,8 +1,8 @@
-# GENIE-IN-THE-BOX DEVELOPMENT GUIDE
+# LUPIN DEVELOPMENT GUIDE
 
 ## COMMANDS
 - Run FastAPI server: `src/scripts/run-fastapi-gib.sh` (Runs on port 7999)
-- Run GUI client: `src/scripts/run-genie-gui.sh`
+- Run GUI client: `src/scripts/run-lupin-gui.sh`
 - Docker build: `docker build -f docker/gib/Dockerfile .`
 - Run GSM8K benchmarks: `src/scripts/run-gsm8k.sh --help`
 
@@ -35,8 +35,8 @@
   - CoSA has its own README.md and CLAUDE.md files
   - When working with CoSA code, be aware that changes may need to be committed to both repositories
   - **CRITICAL FOR CLAUDE**: Never attempt to manage the git state of the CoSA repository when working
-    within the Genie-in-the-Box project. Do not offer to stage, commit, or push changes to the CoSA
-    repository. Only manage git operations for the parent Genie-in-the-Box repository.
+    within the Lupin project. Do not offer to stage, commit, or push changes to the CoSA
+    repository. Only manage git operations for the parent Lupin repository.
 - `/src/cosa/agents/`: Agent implementations (math, calendar, etc.)
 - `/src/cosa/app/`: Core application components
 - `/src/cosa/memory/`: Data persistence and memory management
@@ -50,3 +50,6 @@
 
 ## STARTUP PROCEDURE
 - The first thing you should do when you start a session is read the global Claude configuration file And follow its instructions.
+
+## PROJECT SHORT NAMES
+- This rep SHORT_PROJECT_PREFIX Is [LUPIN]

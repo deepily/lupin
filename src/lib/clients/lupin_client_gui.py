@@ -8,7 +8,7 @@ from tkinter import ttk, ACTIVE, DISABLED
 
 sys.path.append( os.getcwd() )
 
-import lib.clients.genie_client as gc
+import lib.clients.lupin_client as gc
 import cosa.utils.util as du
 
 class GenieGui:
@@ -37,7 +37,7 @@ class GenieGui:
         self.main = tkinter.Tk()
         self.collections = [ ]
         self.main.geometry( self.geometry_bar )
-        self.main.title( "Genie in The Box" )
+        self.main.title( "Lupin" )
 
         # Now that we have a GUI object to point to, instantiate headless client object
         self.genie_client = gc.GenieClient( calling_gui=self.main, startup_mode=startup_mode,

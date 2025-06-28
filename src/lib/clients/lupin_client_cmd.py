@@ -5,7 +5,7 @@ import tkinter as tk
 from threading import Thread
 from tkinter import ttk, ACTIVE, DISABLED
 
-import genie_client as gc
+import lupin_client as gc
 from cosa.utils import util
 
 
