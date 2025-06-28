@@ -1,0 +1,147 @@
+| dot co dot uk = .co.uk
+| dot com dot mx = .com.mx
+| dot com dot au = .com.au
+| dot net dot au = .net.au
+| dot org dot au = .org.au
+| dot com = .com
+| dot org = .org
+| dot net = .net
+| dot info = .info
+| dot biz = .biz
+| dot us = .us
+| dot uk = .uk
+| dot ca = .ca
+| dot au = .au
+| dot de = .de
+| dot es = .es
+| dot in = .in
+| dot jp = .jp
+| dot cn = .cn
+| dot fr = .fr
+| dot ru = .ru
+| dot it = .it
+| dot nl = .nl
+| dot ch = .ch
+| dot ai = .ai
+| dot co = .co
+| dot mx = .mx
+| dot tw = .tw
+| dot uk = .uk
+
+equals equals equals = ===
+not equals equals = !==
+not equal equal = !==
+equals equals = ==
+does not equal = !=
+is not equal = !=
+not equals = !=
+not equal = !=
+equals sign equals sign equals sign = ===
+equal sign equal sign equal sign = ===
+equals sign equals sign = ==
+equal sign equal sign = ==
+equals sign = =
+equal sign = =
+equals = =
+
+period = .
+dot dot dot = ...
+dot dot slash = ../
+dot dot = ..
+dot = .
+ellipsis = ...
+|comma | = ,
+semicolon = ;
+colon = :
+colin = :
+bang = !
+exclamation point = !
+question mark = ?
+quotation mark = "
+single quote = '
+double quote = "
+|quote | = |" |
+apostrophe = '
+hyphen = -
+double dash = --
+double hyphen = --
+dash dash = --
+dash = -
+open parentheses = (
+open parenthesis = (
+close parentheses = )
+close parenthesis = )
+closed parentheses = )
+closed parenthesis = )
+open bracket = [
+close bracket = ]
+closed bracket = ]
+parentheses = ( )
+parenthesis = ( )
+brackets = [ ]
+braces = { }
+open brace = {
+close brace = }
+closed brace = }
+open angle bracket = <
+close angle bracket = >
+less than = <
+less then = <
+greater than = >
+ampersand = &
+asterisk = *
+plus equals = +=
+plus equal = +=
+plus sign = +
+plus = +
+minus equals = -=
+minus equal = -=
+minus sign = -
+minus = -
+negative = -
+
+divided by = /
+divide by = /
+divide = /
+slash = /
+backslash = \
+percent sign = %
+percent = %
+dollarsign = $
+dollar sign = $
+dollars = $
+dollar = $
+
+pound sign = #
+hash tag = #
+hashtag = #
+hash = #
+at sign = @
+# | at | = | @ |
+caret = ^
+underscore = _
+equals sign = =
+tilde = ~
+pipe = |||
+new line = \n
+newline = \n
+deaf = def
+speech to text = STT
+text to speech = TTS
+true = True
+false = False
+space = | |
+thinking emoji = 🤔
+happy emoji = 😊
+wink emoji = 😉
+laughing emoji = 😆
+smiling emoji = 😄
+smile emoji = 😃
+grinning emoji = 😁
+grin emoji = 😁
+lmao = 🤣
+laughing my ass off emoji = 🤣
+laughing my ass off = 🤣
+lol = 😂
+shruggy emoji = ¯\_(ツ)_/¯
+shruggi emoji = ¯\_(ツ)_/¯

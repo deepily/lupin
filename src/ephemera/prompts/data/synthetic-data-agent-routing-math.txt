@@ -1,0 +1,407 @@
+What is the sum of 57 and 89?
+How do you divide 345 by 15?
+If I buy 3 apples at $1.20 each and 2 bananas at $0.75 each, how much will the total cost be?
+How do you solve the equation 3x + 7 = 22?
+What’s the value of x in the quadratic equation x^2 + 5x - 6 = 0?
+If I know the area of a rectangle is 48 and the length is 12, how do I find the width?
+What is the area of a circle with a radius of 6?
+How do you calculate the perimeter of a triangle with sides of 3 cm, 4 cm, and 5 cm?
+If a triangle has two equal sides and an angle of 45 degrees, what type of triangle is this?
+How do you find the sine of a 30-degree angle?
+What’s the difference between sine and cosine in a right-angled triangle?
+Can you explain how to use the Pythagorean theorem to find the hypotenuse?
+What’s the derivative of f(x) = 3x squared + 4x?
+How do you find the integral of sin of x?
+If a car travels at a speed of 60 miles per hour for 2.5 hours, how far does it travel?
+A tank can be filled by a pipe in 5 hours, but it can be emptied by another pipe in 7 hours. If both pipes are opened, how long will it take to fill the tank?
+What is 253 plus 147?
+How do you subtract 89 from 123?
+If you multiply 56 by 8, what do you get?
+What is 45 divided by 9?
+How do you calculate the total of 34, 67, and 129?
+What’s the result of 25 times 16?
+If you add 327 and 548, what’s the sum?
+How do you subtract 492 from 980?
+What is the product of 64 and 23?
+How many times does 12 go into 144?
+What’s the remainder when you divide 345 by 23?
+How much is 789 minus 456?
+What’s the result of multiplying 78 by 56?
+If you have 300 and divide it by 25, what’s the quotient?
+How do you calculate the difference between 560 and 345?
+What is the sum of 98, 134, and 201?
+How much is 234 plus 167?
+What’s the result of dividing 1,000 by 40?
+If you subtract 299 from 450, what’s left?
+How do you multiply 15 by 35?
+How do you solve the equation 2x + 5 = 17?
+What’s the value of x in 4x - 7 = 9?
+If y = 3x + 4, what is y when x = 5?
+How do you factor x^2 - 9x + 14?
+What’s the solution to 5x + 12 = 37?
+Solve for x in the equation 3x^2 - 2x - 8 = 0
+If x + y = 15 and 2x - y = 7, what are x and y?
+How do you simplify the expression 2(x - 3) + 4x?
+What’s the value of x in \frac{3}{x} + 2 = 7?
+Solve the inequality 3x + 2 > 11
+What is the slope of the line y = 4x - 3?
+How do you solve for x in the equation \frac{x - 5}{2} = 6?
+If y = x^2 - 4x + 6, what is y when x = 3?
+What’s the value of x in 7x + 9 = 30?
+How do you factor x^2 - 6x - 7?
+Solve for x in the equation 2x + 3 = x - 5
+If 2x + 4 = 3x - 1, what is the value of x?
+What’s the quadratic formula for solving ax^2 + bx + c = 0?
+How do you simplify (3x + 2) - (2x - 5)?
+What are the roots of the equation x^2 - 8x + 15 = 0?
+How do you solve the equation two times x plus five equals seventeen?”
+What is the value of x in the equation four times x minus seven equals nine?”
+If y equals three times x plus four, what is y when x is five?”
+How do you factor the expression x squared minus nine x plus fourteen?”
+What is the solution to the equation five times x plus twelve equals thirty-seven?”
+Solve for x in the equation three times x squared minus two times x minus eight equals zero.”
+If x plus y equals fifteen and two times x minus y equals seven, what are the values of x and y?”
+How do you simplify the expression two times the quantity x minus three plus four times x?”
+What is the value of x in the equation three divided by x plus two equals seven?”
+Solve the inequality three times x plus two is greater than eleven.”
+What is the slope of the line described by y equals four times x minus three?”
+How do you solve for x in the equation x minus five divided by two equals six?”
+If y equals x squared minus four times x plus six, what is y when x is three?”
+What is the value of x in the equation seven times x plus nine equals thirty?”
+How do you factor the expression x squared minus six times x minus seven?”
+Solve for x in the equation two times x plus three equals x minus five.”
+If two times x plus four equals three times x minus one, what is the value of x?”
+What is the quadratic formula for solving an equation in the form a times x squared plus b times x plus c equals zero?”
+How do you simplify the expression three times x plus two minus two times x minus five?”
+What are the roots of the equation x squared minus eight times x plus fifteen equals zero?”
+What is the area of a circle with a radius of 7 cm?
+How do you calculate the perimeter of a rectangle with a length of 10 cm and a width of 5 cm?
+What’s the volume of a cylinder with a radius of 4 cm and a height of 10 cm?
+How do you find the area of a triangle with a base of 6 cm and a height of 8 cm?
+What is the circumference of a circle with a diameter of 12 inches?
+If a triangle has sides of 3 cm, 4 cm, and 5 cm, is it a right triangle?
+What is the surface area of a cube with a side length of 6 cm?
+How do you calculate the area of a parallelogram with a base of 9 cm and a height of 5 cm?
+What’s the measure of each interior angle of a regular pentagon?
+If two angles in a triangle are 45° and 55°, what is the third angle?
+How do you find the length of the hypotenuse in a right triangle with legs of 8 cm and 15 cm?
+What is the area of a trapezoid with bases of 5 cm and 7 cm, and a height of 4 cm?
+How do you calculate the diagonal of a square with side lengths of 10 cm?
+What is the volume of a sphere with a radius of 3 cm?
+If the sum of the angles in a quadrilateral is 360°, what is the missing angle if the other three are 80°, 100°, and 120°?
+How do you calculate the length of an arc in a circle with a radius of 10 cm and a central angle of 60°?
+What’s the perimeter of an equilateral triangle with side lengths of 8 cm?
+If a rectangle’s diagonal is 13 cm and one side is 5 cm, what is the length of the other side?
+How do you find the radius of a circle if its area is 50.24 square cm?
+What’s the sum of the interior angles of an octagon?
+How do you find the sine of a 45 degree angle?
+What is the cosine of 60 degrees?
+How do you calculate the tangent of a 30 degrees angle?
+What’s the relationship between sine, cosine, and tangent in a right-angled triangle?
+How do you use the Pythagorean theorem to find the hypotenuse in a right triangle where the legs are 5 and 12?
+What is the value of sign 90 degrees - theta in terms of theta?
+How do you find the angle of elevation if the opposite side is 8 meters and the adjacent side is 15 meters?
+What’s the exact value of tangent of 45 degrees?
+How do you calculate the angle theta in a right triangle where the opposite side is 7 and the hypotenuse is 25?
+What is the period of the sine function y = sign x?
+How do you use the unit circle to find the values of sign 30 degrees and cosine 30 degrees?
+What is the amplitude of the function y = 3 sign x?
+If the angle of depression is 35 degrees and the horizontal distance is 50 meters, how do you calculate the height?
+How do you solve the equation 2 sign x = 1 for x?
+What is the value of cosine 180 degrees?
+How do you find the exact value of tan 60 degrees using a 30-60-90 triangle?
+If tan theta = 1, what is the value of theta in degrees?
+How do you calculate the length of the opposite side in a right triangle if the angle is 25 degrees and the adjacent side is 10 meters?
+What’s the derivative of f of x = 3x squared + 5x - 7?
+How do you find the integral of cosine x?
+How do you compute the derivative of f of x = eto the x power?
+How do you find the critical points of the function f of x = x cubed - 3x squared + 2?
+What’s the second derivative of f of x = 4x cubed - 2x squared + x?
+How do you calculate the area under the curve f of x = x squared + 1 from x = 0 to x = 3?
+What is the chain rule, and how do you apply it to f of x = sign 3x?
+How do you find the local maximum of f of x = -x squared + 4x + 1?
+What is the integral of f of x = x cubed?
+What’s the slope of the tangent line to the curve y = x squared + 2x at x = 1?
+How do you find the derivative of a product of two functions, say f of x = (2x + 1)(x squared + 3x?
+How do you use the Mean Value Theorem to find a point where the derivative equals the average rate of change?
+What is the integral of sign squared(x) using a trigonometric identity?
+What is the derivative of the function f of x equals three times x squared plus five times x minus seven?
+How do you find the integral of cosine of x?
+What is the limit of one divided by x as x approaches infinity?
+How do you compute the derivative of the function f of x equals e raised to the power of x?
+What is the definite integral of the function three times x squared plus one, evaluated from zero to two?
+How do you find the critical points of the function f of x equals x cubed minus three times x squared plus two?
+What is the second derivative of the function f of x equals four times x cubed minus two times x squared plus x?
+How do you apply L'Hopital’s Rule to evaluate the limit of sine of x divided by x as x approaches zero?
+What is the antiderivative of the function f of x equals one divided by x?
+How do you calculate the area under the curve for the function f of x equals x squared plus one, from x equals zero to x equals three?
+What is the chain rule, and how do you apply it to the function f of x equals sine of three times x?
+What is the derivative of the function f of x equals the natural logarithm of x?
+How do you find the local maximum of the function f of x equals negative x squared plus four times x plus one?
+What is the integral of the function f of x equals x cubed?
+How do you solve the differential equation where the derivative of y with respect to x equals y?
+What is the slope of the tangent line to the curve y equals x squared plus two times x at x equals one?
+How do you find the derivative of a product of two functions, such as f of x equals the quantity two times x plus one times the quantity x squared plus three times x?
+What is the limit of e raised to the power of x divided by x squared as x approaches infinity?
+How do you use the Mean Value Theorem to find a point where the derivative equals the average rate of change?
+What is the integral of sine squared of x using a trigonometric identity?
+A car travels 60 miles per hour for 2.5 hours. How far does the car travel in total?
+If John has 3 apples and gives 1 to his friend, how many apples does he have left?
+A rectangle has a length of 10 cm and a width of 5 cm. What is its area?
+If a train travels at 80 km/h and covers 320 km, how long did the journey take?
+Sarah has $50. If she buys 5 pencils for $3 each, how much money does she have left?
+A swimming pool can be filled by a pipe in 4 hours, but drained by another pipe in 6 hours. How long will it take to fill the pool if both pipes are open?
+If a car uses 8 liters of fuel to travel 100 km, how many liters are needed to travel 250 km?
+A baker makes 120 cupcakes in 3 hours. How many cupcakes can the baker make in 8 hours?
+If the price of a jacket is $120 and there’s a 15% discount, what is the discounted price?
+Tom has $400. He wants to buy a video game console for $350 and a game for $60. Does he have enough money?
+A tree grows 15 inches per year. How tall will the tree be after 7 years if it’s currently 4 feet tall?
+A cyclist travels 45 miles in 3 hours. What is the cyclist's average speed?
+If 4 bags of flour cost $32, how much does 1 bag of flour cost?
+A plane flies 600 miles in 2 hours. At this rate, how far will it fly in 5 hours?
+A store sells shirts for $20 each. If a customer buys 5 shirts, how much will the customer pay after a 10% discount?
+There are 30 students in a class. If 12 of them are boys, what percentage of the class are girls?
+A box contains 12 chocolates. If you eat 3 chocolates every day, how many days will it take to finish the box?
+A car travels 360 km using 24 liters of gasoline. How many kilometers can it travel with 60 liters of gasoline?
+A rectangular garden has a length of 8 meters and a width of 6 meters. How much fencing is needed to go around the garden?
+If the temperature drops 2 degrees every hour, how much will it drop in 7 hours?
+Uh... what’s 253 plus, uh, 147?
+How do you... subtract 89... from 123?
+If you multiply, um, 56 by 8, what do you get?
+What’s... what’s 45 divided by, uh, 9?
+Uh... can you calculate the total of 34, 67, and... um, 129?
+What’s the result of... uh, 25 times 16?
+If you add, uh, 327... and 548, what’s the sum?
+How do you... subtract 492 from... um, 980?
+What’s the product of, uh, 64 and... 23?
+How many times does 12 go into, um... 144?
+What’s the remainder when you divide, um, 345 by 23?
+How much is... uh, 789 minus 456?
+What’s the result of multiplying... uh, 78 by 56?
+If you have 300... and divide it by, uh... 25, what’s the quotient?
+How do you calculate the difference between, uh... 560 and 345?
+What’s the sum of... uh, 98, 134, and... um, 201?
+How much is... um, 234 plus 167?
+What’s the result of dividing... uh, 1,000 by 40?
+If you subtract 299 from... um, 450, what’s left?
+Uh... how do you multiply 15 by... uh, 35?
+Um, how do you... solve the equation 2x plus 5 equals 17?
+What’s the value of x in... uh, 4x minus 7 equals 9?
+If y equals, um... 3x plus 4, what’s y when x is... uh, 5?
+Uh... how do you factor, uh, x squared minus 9x... plus 14?
+What’s the solution to, uh... 5x plus 12 equals 37?
+Solve for x in the equation... uh, 3x squared minus 2x minus... 8 equals 0?
+If x plus y equals, um, 15... and 2x minus y equals, uh, 7... what are x and y?
+How do you, um, simplify the expression... uh, 2 times (x minus 3) plus 4x?
+What’s the value of x in, uh... the equation... 3 over x plus 2 equals 7?
+Solve the, um... inequality 3x plus 2 is greater than... uh, 11
+What’s the slope of the line... uh, y equals 4x minus 3?
+How do you solve for x in... um, the equation (x minus 5) over 2 equals 6?
+If y equals, um, x squared minus 4x plus... uh, 6, what’s y when x is 3?
+What’s the value of x in, um... 7x plus 9 equals 30?
+Uh... how do you factor... um, x squared minus 6x... minus 7?
+Solve for x in the equation... um, 2x plus 3 equals... x minus 5?
+Uh, if 2x plus 4 equals, um... 3x minus 1, what’s x?
+What’s the quadratic formula for... uh, solving ax squared plus bx plus c equals 0?
+Uh, how do you simplify, um... (3x plus 2) minus (2x... minus 5?
+What are the roots of the equation... um, x squared minus 8x plus 15 equals... uh, 0?
+Uh... what’s the area of a circle with a, um... radius of 7 cm?
+How do you calculate the, um... perimeter of a rectangle... with a length of 10 cm and... uh, width of 5 cm?
+What’s the volume of a cylinder... um, with a radius of 4 cm... and height of 10 cm?
+Uh... how do you find the area of a triangle with... uh, base of 6 cm and height of 8 cm?
+What’s the circumference of a circle... um, with a diameter of... uh, 12 inches?
+Uh, if a triangle has sides of... um, 3 cm, 4 cm, and 5 cm, is it a... right triangle?
+What’s the surface area of a cube... um, with a side length of, uh... 6 cm?
+How do you calculate the area of a, uh... parallelogram with a base of 9 cm and a height of, um, 5 cm?
+What’s the measure of, um... each interior angle of a regular, uh... pentagon?
+If two angles in a triangle are... um, 45 degrees and 55 degrees, what’s the... third angle?
+Uh... how do you find the length of the hypotenuse in a, um... right triangle where the legs are 8 cm and, um, 15 cm?
+What’s the area of a, uh... trapezoid with bases of 5 cm and 7 cm, and a height of, um, 4 cm?
+How do you, uh... calculate the diagonal of a square with side lengths of... um, 10 cm?
+What’s the volume of a, um... sphere with a radius of... uh, 3 cm?
+If the sum of the angles in a quadrilateral is... um, 360 degrees, what’s the missing angle if the... other three are 80 degrees, 100 degrees, and, uh... 120 degrees?
+How do you calculate the length of an arc in a circle with a... um, radius of 10 cm and a central angle of... uh, 60 degrees?
+What’s the perimeter of an, uh... equilateral triangle with side lengths of... um, 8 cm?
+If a rectangle’s diagonal is, um... 13 cm and one side is... uh, 5 cm, what’s the length of the... other side?
+How do you find the, uh... radius of a circle if its area is... uh, 50.24 square cm?
+What’s the sum of the, uh... interior angles of an octagon?
+Uh... how do you find the sine of a... uh, 45-degree angle?
+What’s the, um... cosine of, uh... 60 degrees?
+How do you, um... calculate the tangent of a... uh, 30-degree angle?
+What’s the, um, relationship between... uh, sine, cosine, and tangent in a... right triangle?
+If sine theta equals, uh... one-half... what’s theta in degrees?
+Uh, how do you use the Pythagorean theorem to... uh, find the hypotenuse in a right triangle where... um, the legs are 5 and, um, 12?
+What’s the value of... uh, sine of 90 degrees minus theta in terms of... uh, theta?
+How do you, um, find the angle of elevation if... uh, the opposite side is 8 meters and the adjacent side is... uh, 15 meters?
+What’s the exact value of... uh, tangent of 45 degrees?
+If cosine theta equals... uh, four-fifths, what’s sine theta?
+Uh, how do you calculate the angle theta in a... um, right triangle where the opposite side is 7 and... um, the hypotenuse is 25?
+What’s the, um, period of the sine function, uh, y equals sine x?
+How do you, um, use the unit circle to find... uh, the values of sine 30 degrees and, uh, cosine 30 degrees?
+What’s the amplitude of the function... um, y equals 3 sine x?
+Uh, if the angle of depression is, um, 35 degrees and the horizontal distance is, uh... 50 meters, how do you... calculate the height?
+How do you solve the equation... uh, 2 sine x equals 1 for x?
+Uh... what’s the value of cosine... um, 180 degrees?
+How do you find the exact value of... uh, tangent 60 degrees using a, um... 30-60-90 triangle?
+If tangent theta equals... uh, 1, what’s the value of... uh, theta in degrees?
+Uh... how do you calculate the length of the opposite side in a, um... right triangle if the angle is... uh, 25 degrees and the adjacent side is... um, 10 meters?
+Uh... what’s the derivative of, um... f of x equals 3x squared plus 5x minus 7?
+How do you, um, find the integral of... uh, cosine x?
+What is the, um, limit of... uh, 1 over x as x approaches, um, infinity?
+Uh... how do you, um... compute the derivative of f of x equals e to the x?
+What’s the definite integral of... um, the integral from 0 to 2 of... uh, 3x squared plus 1 dx?
+How do you, um, find the critical points of the function... uh, f of x equals x cubed minus 3x squared plus... uh, 2?
+What’s the, um, second derivative of... uh, f of x equals 4x cubed minus 2x squared plus, um, x?
+How do you apply L'Hopital’s Rule to, um... evaluate the limit of... uh, sine x over x as x approaches... um, zero?
+Uh... what’s the antiderivative of f of x equals... um, one over x?
+How do you calculate the, um... area under the curve f of x equals x squared plus 1 from... uh, x equals 0 to x equals 3?
+What’s the, um, chain rule and how do you, uh... apply it to f of x equals sine of, um... 3x?
+What’s the derivative of, uh... f of x equals ln of x?
+Uh... how do you find the local maximum of... uh, f of x equals negative x squared plus 4x plus, um... 1?
+What’s the, um... integral of f of x equals x cubed?
+Uh, how do you solve the differential equation... um, dy over dx equals y?
+What’s the, um, slope of the tangent line to the curve... uh, y equals x squared plus 2x at... um, x equals 1?
+How do you, um... find the derivative of a product of two functions, say, um... f of x equals (2x plus 1) times, um, (x squared plus 3x?
+Uh... what’s the limit of... uh, e to the x over x squared as x approaches... uh, infinity?
+How do you use the Mean Value Theorem to, um... find a point where the derivative... equals the average rate of change?
+What’s the, uh, integral of sine squared x... using, um, a trigonometric identity?
+Uh... a car travels 60 miles per hour for... uh, 2.5 hours. How far does the car... um, travel in total?
+Uh... if John has 3 apples and, um, gives 1 to his friend... how many apples does he have left?
+A rectangle has a, um... length of 10 cm and a width of, uh... 5 cm. What’s its area?
+If a train travels at... um, 80 kilometers per hour and covers 320 kilometers, uh... how long did the journey, um, take?
+Uh... Sarah has $50. If she buys 5 pencils for, um... $3 each, how much money does she, uh... have left?
+A swimming pool can be, um... filled by a pipe in 4 hours but, uh... drained by another pipe in 6 hours. How long will it, um... take to fill the pool if both pipes are... uh, open?
+Uh, if a car uses 8 liters of fuel to, um... travel 100 kilometers, how many liters are needed to, uh... travel 250 kilometers?
+A baker makes 120 cupcakes in, um... 3 hours. How many cupcakes can the baker, uh... make in 8 hours?
+If the price of a jacket is, um... $120 and there’s a 15% discount, uh... what’s the discounted price?
+Tom has $400. He wants to buy a, um... video game console for $350 and a game for, uh... $60. Does he have enough, um, money?
+Uh... a tree grows 15 inches per year. How tall will the tree, uh... be after 7 years if it’s, um... currently 4 feet tall?
+A cyclist travels, uh... 45 miles in 3 hours. What’s the cyclist’s, uh, average speed?
+If 4 bags of flour cost, um... $32, how much does, uh... one bag of flour, uh, cost?
+Uh... a plane flies 600 miles in, um... 2 hours. At this rate, how far will it, uh... fly in 5 hours?
+Uh... a store sells shirts for $20 each. If a customer buys, um, 5 shirts... how much will the customer, um... pay after a 10% discount?
+Uh... there are 30 students in a class. If 12 of them are, uh... boys, what percentage of the class are, um... girls?
+Uh... a box contains 12 chocolates. If you, um... eat 3 chocolates every day... how many days will it, uh, take to finish the, um... box?
+Uh, a car travels 360 kilometers using, um... 24 liters of gasoline. How many kilometers can it, uh... travel with 60 liters of gasoline?
+Uh... a rectangular garden has a length of, um... 8 meters and a width of, uh, 6 meters. How much fencing is, um, needed to go around the... uh, garden?
+Uh... if the temperature drops, um... 2 degrees every hour, how much will it, uh... drop in 7 hours?
+This is a math problem
+Solve this like math
+Treat this as math
+Just a math question
+This is pure math
+Handle this as math
+Solve it like math
+Think of this as math
+It’s a math problem
+Work through this as math
+Math problem, solve it
+Approach this with math
+Solve it as a math question
+This is math, not a puzzle
+Do the math here
+Look at this as math
+It’s a simple math problem
+Process this as a math task
+Solve this math equation
+Treat it as a math calculation
+Consider this a math problem and solve it accordingly
+Treat this just like a standard math equation
+I’m giving you a math problem, please handle it as one
+Approach this like you would any other math problem
+This is a math question, so work through it step by step
+Think of this as a pure math problem, nothing else
+Solve this like it's a typical math exercise
+Look at this as a math problem and give me the solution
+Process this exactly as you would a math problem
+Treat this input as a math calculation
+Approach this with your math-solving logic
+Think of this entirely as a math equation to be solved
+Handle this the same way you would handle any math problem
+Take this as a math problem and provide the appropriate answer
+This isn't a riddle, treat this exactly like a math problem
+I'm not looking for anything tricky, just handle this like a straightforward math question
+This is purely a math problem, solve it as such
+I want you to interpret this strictly as a math problem, no need for anything else
+This isn't hypothetical, treat it as a math calculation
+Think of this like a math problem and solve it accordingly, nothing more
+This is a geometry question
+Treat this like a geometry problem
+This is a question about geometry, solve it as such
+Solve this as you would any geometry question
+This isn't just math, it's geometry, handle it that way
+Consider this a geometry question and approach it accordingly
+I’m giving you a geometry problem, solve it like one
+Think of this strictly as a geometry question
+Approach this as a geometry problem
+Work through this like a geometry exercise
+This is about geometry, solve it using geometric methods
+Focus on this as a pure geometry question
+This is purely a geometry problem, treat it accordingly
+Treat this question as geometry, not general math
+This is a geometry equation, find the correct answer
+Solve this as a problem in geometry
+Think of this like it’s a geometry test question
+Use geometry concepts to solve this one
+Handle this with geometry principles in mind
+This is a problem about shapes and spaces—solve it like a geometry problem
+This is a calculus question
+Treat this like a calculus problem
+This is a question about calculus, solve it accordingly
+Solve this as you would any calculus question
+This isn’t general math, it’s calculus, handle it that way
+Consider this a calculus problem and approach it as such
+I’m giving you a calculus problem, solve it like one
+Think of this strictly as a calculus question
+Approach this as a calculus-specific problem
+Work through this as a calculus exercise
+This is a calculus question, so use calculus methods
+Focus on this as a calculus problem
+Treat this problem with calculus concepts in mind
+This is purely a calculus equation, solve it accordingly
+Solve this like it’s part of a calculus exam
+This is a calculus equation—find the solution using calculus
+Handle this with calculus logic
+Use your calculus skills to solve this
+Think of this as a calculus problem, not general math
+Interpret this as a calculus question and solve it accordingly
+This is a math word problem
+Treat this like a math word problem
+This is a math word problem, solve it accordingly
+Solve this as you would any math word problem
+This isn’t just a puzzle, it’s a math word problem
+Consider this a math word problem and approach it that way
+I’m giving you a math word problem, solve it like one
+Think of this strictly as a math word problem
+Approach this as a real-world math word problem
+Work through this like any standard math word problem
+This is a math word problem, so break it down step by step
+Focus on this as a practical math word problem
+Treat this as a math word problem that needs calculation
+This is purely a math word problem, solve it accordingly
+Solve this as part of a math word problem test
+This is a math word problem—use logic and math to solve it
+Handle this like a math word problem that involves numbers
+Use your math word problem-solving strategies for this
+Think of this as a math word problem, not just a math equation
+Interpret this as a math word problem and solve it accordingly
+Put on your number-crunching hat and solve this
+Let's keep it simple—go into calculator mode for this one
+Time to flex your inner calculator and figure this out
+Turn on the math brain and crunch these numbers for me
+Channel your calculator spirit and handle this equation
+Shift into calculation mode and solve this like a pro
+Let's not overthink—give me a straight-up answer, calculator style
+Switch to math mode and compute this for me
+Time to play number wizard, give me the answer
+Become the ultimate number machine and solve this math problem
+Dust off the imaginary calculator and work through this one
+Crunch those numbers as if you were a calculator
+Go into your calculating zone and handle this
+Let’s keep it by the book—straight calculations, no flair
+Summon your inner math bot and figure this out
+I need you to turn into a number machine and solve this
+Imagine you’re a calculator, now tell me the answer
+Let's go back to basics—just crunch those numbers
+Flip the switch to calculator mode and handle this
+You’re in full calculation mode—give me the final answer

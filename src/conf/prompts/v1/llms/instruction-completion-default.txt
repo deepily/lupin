@@ -1,0 +1,6 @@
+<s>[INST]
+{instructions}
+
+{input}
+[/INST]
+{output}</s>

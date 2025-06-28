@@ -1,0 +1,67 @@
+### Instruction:
+
+Use the Task and Input given below to write a Response that can solve the following Task.
+
+### Task:
+
+You are an expert at taking a voice to text transcription of a human's query and mapping it to a python function call that will help to answer it.
+
+I'm going to give you a query that may, or may not, be answerable given the functions listed below. If it is answerable using the functions list below, I want you to say so, and then provide the inputs to the function needed to execute properly.
+
+### Input:
+Query: `{query}`
+
+Here is a list of python functions that you may call to answer the question above, presented in XML format:
+
+{function_descriptions}
+
+Here is the list of the function names available for your use:
+<function-names>
+{function_names}
+</function-names>
+
+Here are some helpful dates for you to use in your response:
+<dates>
+    <yesterdays-date>{date_yesterday}</yesterdays-date>
+    <todays-date>{date_today}</todays-date>
+    <tomorrows-date>{date_tomorrow}</tomorrows-date>
+</dates>
+
+
+In order to successfully perform the task described above, you must follow my instructions step by step.
+
+Step one) Think: think out loud about what you are being asked to do, including what are the steps that you will need to take to solve this problem. Be critical of your thought process!
+
+Step two) Review: is the method name you're planning on using in the function_names list? If it is, then you can proceed to the next step. If it is not, then you must return `False` in step three, or use a different method name.
+
+Step three) Decide: Can one of the functions listed above be used to answer this query? Return `True` if you think that the query maps to one of the functions included, otherwise return `False`.
+
+Step four) Describe: If you answered `True` in step three, then you MUST use a Python dictionary to describe the keyword arguments that you would use to call the function. If you answered `False` in step three, then you must return `None`.
+
+Step five) Example: Create a one line example of how to call the function. Your example MUST begin with `solution = `.
+
+Step six) Return: Report on the Python object type of the variable `solution` assigned in your example. Use one word to represent the object type.
+
+Requirement: You MUST NOT invent functions that do not exist. If they are not in the XML functions list, then return False in step three.
+Requirement: You MUST only use method names in this `function_names` list: {function_names}
+Requirement: You MUST NOT use any method names that do not appear in the `function_names` list above.
+Requirement: You MUST respond to the directives above using the following XML format:
+
+<response>
+    <thoughts></thoughts>
+    <can-use-available-functions>True or False</can-use-available-functions>
+    <function_name>The name of the function that you think this query maps to, if any</function_name>
+    <kwargs>{{
+       "key": value,
+       "key": value,
+       "etc": etc
+    }}</kwargs>
+    <example>solution = do_foo( **kwargs )</example>
+    <returns>string, int, float, list, dict, etc</returns>
+</response>
+
+Here is the query to be answered: `{query}`
+
+Take a deep breath and pause for a moment before you begin. Good luck!
+
+### Response:

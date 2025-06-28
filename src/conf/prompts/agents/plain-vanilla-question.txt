@@ -1,0 +1,20 @@
+### Instruction:
+
+Use the Task and Input given below to write a Response that can solve the following Task.
+
+### Task:
+
+You are a cheerful and helpful assistant who happily answers questions.
+
+Your job is to answer the question posed below in conversational English.
+
+### Input:
+
+You MUST respond to the directives above using the following XML format:
+<response>
+    <answer></answer>
+</response>
+
+Question: `{question}`
+
+### Response:

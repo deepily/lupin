@@ -1,0 +1,122 @@
+<functions>
+    <function>
+        <description>Performs a web search for any topic and summarizes the results. Web search topics can range from sports, to politics, technology, and any number of other unspecified topics.</description>
+        <function_name>search_and_summarize_web_for_any_topic</function_name>
+        <parameters>
+            <parameter>
+                <name>information_is_dynamic</name>
+                <type>Boolean</type>
+                <description>Is this a search for information that is dynamic and continually updated on the web (True), or is it static knowledge (False)?</description>
+                <required>True</required>
+            </parameter>
+            <parameter>
+                <name>proofread_query</name>
+                <type>string</type>
+                <description>Proofread web search query to be answered and summarized. Succinctly rephrase the query, correcting all grammar and spelling errors, and removing all extraneous, non-salient words.</description>
+                <required>True</required>
+            </parameter>
+            <parameter>
+                <name>search_key_words</name>
+                <type>string</type>
+                <description>Key words extracted from the proofread_query</description>
+                <required>True</required>
+            </parameter>
+            <parameter>
+                <name>information_is_dynamic</name>
+                <type>Boolean</type>
+                <description>Is this a search for information that is dynamic and continually updated on the web (True), or is it static knowledge (False)?</description>
+                <required>True</required>
+            </parameter>
+        </parameters>
+        <returns>
+            <return-value>
+                <name>summary</name>
+                <type>string</type>
+                <description>The summarized search text</description>
+            </return-value>
+        </returns>
+    </function>
+    <function>
+        <description>Searches for weather forecasts, trends and knowledge, and summarizes the results.</description>
+        <function_name>search_and_summarize_weather</function_name>
+        <parameters>
+            <parameter>
+                <name>information_is_dynamic</name>
+                <type>Boolean</type>
+                <description>Is this a search for information that is dynamic and continually updated on the web (True), or is it static knowledge (False)?</description>
+                <required>True</required>
+            </parameter>
+            <parameter>
+                <name>proofread_query</name>
+                <type>string</type>
+                <description>Proofread weather query to be answered and summarized. Succinctly rephrase the query, correcting all grammar and spelling errors, and removing all extraneous, non-salient words.</description>
+                <required>True</required>
+            </parameter>
+            <parameter>
+                <name>search_key_words</name>
+                <type>string</type>
+                <description>Key words extracted from the proofread_query</description>
+                <required>True</required>
+            </parameter>
+            <parameter>
+                <name>location</name>
+                <type>string</type>
+                <description>Location for forecast. MUST either be a valid geographic location name or the constant `CURRENT_LOCATION`</description>
+                <required>True</required>
+            </parameter>
+            <parameter>
+                <name>start_date</name>
+                <type>string</type>
+                <description>What is the start date for our forecast? Defaults to today, "{date_today}"</description>
+                <required>False</required>
+            </parameter>
+            <parameter>
+                <name>end_date</name>
+                <type>string</type>
+                <description>What is the end date for our forecast? Defaults to "{date_tomorrow}"</description>
+                <required>False</required>
+            </parameter>
+        </parameters>
+        <returns>
+            <return-value>
+                <name>summary</name>
+                <type>string</type>
+                <description>The summarized weather forecast</description>
+            </return-value>
+        </returns>
+    </function>
+    <function>
+        <description>Searches the memory table to find KNN topics by specific date or date range. NOTE: This is designed to support the notion of an AI's long-term memory of conversations with humans</description>
+        <function_name>query_memory_table_for_knn_topics</function_name>
+        <parameters>
+            <parameter>
+                <name>topics</name>
+                <type>string</type>
+                <description>Topics extracted from the question to be answered and summarized</description>
+                <required>True</required>
+            </parameter>
+            <parameter>
+                <name>start_date</name>
+                <type>string</type>
+                <description>What is the start date of the search?. Defaults to "2024-04-01"</description>
+                <required>False</required>
+            </parameter>
+        </parameters>
+        <parameter>
+                <name>end_date</name>
+                <type>string</type>
+                <description>What is the end date of the search?. Defaults to today, {date_today}</description>
+                <required>False</required>
+            </parameter>
+        <returns>
+            <return-value>
+                <name>topics</name>
+                <type>list</type>
+                <items>
+                    <type>string</type>
+                </items>
+                <description>A list of similar topic strings, filtered by date</description>
+            </return-value>
+        </returns>
+    </function>
+</functions>

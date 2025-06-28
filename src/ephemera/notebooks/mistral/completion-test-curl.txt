@@ -1,0 +1,7 @@
+curl -w "Total time: %{time_total} seconds\n" http://127.0.0.1:3000/v1/completions \
+  -H "Content-Type: application/json" \
+  -d "{
+    "model": "/mnt/DATA01/include/www.deepily.ai/projects/models/Ministral-8B-Instruct-2410-autoround-4-bits-sym.gptq/2025-01-24-at-20-48",
+    "max_tokens": 128,
+    "prompt": $PROMPT_CONTENT,
+  }"

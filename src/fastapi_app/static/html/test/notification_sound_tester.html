@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Notification Sound Candidates Testing</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .category {
+            background: white;
+            margin: 20px 0;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .category h2 {
+            color: #333;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .sound-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 15px;
+            margin: 10px 0;
+            background: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+        }
+        .sound-info {
+            flex-grow: 1;
+        }
+        .sound-name {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        .sound-description {
+            color: #666;
+            font-size: 14px;
+        }
+        .sound-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .play-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .play-btn:hover {
+            background: #218838;
+        }
+        .play-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .download-link {
+            color: #007bff;
+            text-decoration: none;
+            font-size: 12px;
+            padding: 4px 8px;
+            border: 1px solid #007bff;
+            border-radius: 3px;
+        }
+        .download-link:hover {
+            background: #007bff;
+            color: white;
+        }
+        .low-priority { border-left-color: #17a2b8; }
+        .high-priority { border-left-color: #dc3545; }
+        .error { border-left-color: #ffc107; }
+        
+        .instructions {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border-left: 4px solid #007bff;
+        }
+        .selection-form {
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 30px;
+            border-left: 4px solid #ffc107;
+        }
+        select {
+            padding: 5px 10px;
+            margin: 0 10px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+        .submit-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔊 Notification Sound Candidates Testing</h1>
+    
+    <div class="instructions">
+        <h3>Instructions:</h3>
+        <p>Listen to each candidate sound multiple times to compare them. Each sound represents:</p>
+        <ul>
+            <li><strong>Low Priority:</strong> Subtle notification for medium/low priority messages</li>
+            <li><strong>High Priority:</strong> Attention-grabbing sound for urgent/high priority messages</li>
+            <li><strong>Error:</strong> Distinctive alert when TTS fails or other errors occur</li>
+        </ul>
+        <p>Click "Play" multiple times to test each sound. Note: These are external links from Mixkit.</p>
+    </div>
+
+    <!-- Low Priority Candidates -->
+    <div class="category">
+        <h2>🔵 Low Priority Notification Candidates</h2>
+        <p style="color: #666; font-style: italic;">Subtle, gentle sounds for non-urgent notifications</p>
+        
+        <div class="sound-item low-priority">
+            <div class="sound-info">
+                <div class="sound-name">Doorbell Tone</div>
+                <div class="sound-description">A soft, gentle ding sound (~4 seconds) - peaceful and non-intrusive</div>
+            </div>
+            <div class="sound-controls">
+                <button class="play-btn" onclick="playAudio('lowPriority1')">Play</button>
+                <a href="https://mixkit.co/free-sound-effects/notification/" class="download-link" target="_blank">Source</a>
+                <audio id="lowPriority1" preload="none">
+                    <source src="https://assets.mixkit.co/active_storage/sfx/816/816-preview.mp3" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+        </div>
+
+        <div class="sound-item low-priority">
+            <div class="sound-info">
+                <div class="sound-name">Elevator Tone</div>
+                <div class="sound-description">A quick, minimal notification sound (~1 second) - brief and unobtrusive</div>
+            </div>
+            <div class="sound-controls">
+                <button class="play-btn" onclick="playAudio('lowPriority2')">Play</button>
+                <a href="https://mixkit.co/free-sound-effects/notification/" class="download-link" target="_blank">Source</a>
+                <audio id="lowPriority2" preload="none">
+                    <source src="https://assets.mixkit.co/active_storage/sfx/600/600-preview.mp3" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+        </div>
+
+        <div class="sound-item low-priority">
+            <div class="sound-info">
+                <div class="sound-name">Magic Notification Ring</div>
+                <div class="sound-description">A soft piano-based notification (~3 seconds) - light and delicate quality</div>
+            </div>
+            <div class="sound-controls">
+                <button class="play-btn" onclick="playAudio('lowPriority3')">Play</button>
+                <a href="https://mixkit.co/free-sound-effects/notification/" class="download-link" target="_blank">Source</a>
+                <audio id="lowPriority3" preload="none">
+                    <source src="https://assets.mixkit.co/active_storage/sfx/2037/2037-preview.mp3" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+        </div>
+    </div>
+
+    <!-- High Priority Candidates -->
+    <div class="category">
+        <h2>🔴 High Priority Notification Candidates</h2>
+        <p style="color: #666; font-style: italic;">Attention-grabbing sounds for urgent notifications</p>
+        
+        <div class="sound-item high-priority">
+            <div class="sound-info">
+                <div class="sound-name">Urgent Simple Tone Loop</div>
+                <div class="sound-description">A persistent alert sound (~9 seconds) - emergency/notification quality</div>
+            </div>
+            <div class="sound-controls">
+                <button class="play-btn" onclick="playAudio('highPriority1')">Play</button>
+                <a href="https://mixkit.co/free-sound-effects/alerts/" class="download-link" target="_blank">Source</a>
+                <audio id="highPriority1" preload="none">
+                    <source src="https://assets.mixkit.co/active_storage/sfx/2976/2976-preview.mp3" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+        </div>
+
+        <div class="sound-item high-priority">
+            <div class="sound-info">
+                <div class="sound-name">Signal Alert</div>
+                <div class="sound-description">A bleep-style alert (~4 seconds) - designed to grab attention quickly</div>
+            </div>
+            <div class="sound-controls">
+                <button class="play-btn" onclick="playAudio('highPriority2')">Play</button>
+                <a href="https://mixkit.co/free-sound-effects/alerts/" class="download-link" target="_blank">Source</a>
+                <audio id="highPriority2" preload="none">
+                    <source src="https://assets.mixkit.co/active_storage/sfx/2573/2573-preview.mp3" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+        </div>
+
+        <div class="sound-item high-priority">
+            <div class="sound-info">
+                <div class="sound-name">Game Quick Warning Notification</div>
+                <div class="sound-description">A high-tech alert sound (~4 seconds) - video game-style warning tone</div>
+            </div>
+            <div class="sound-controls">
+                <button class="play-btn" onclick="playAudio('highPriority3')">Play</button>
+                <a href="https://mixkit.co/free-sound-effects/alerts/" class="download-link" target="_blank">Source</a>
+                <audio id="highPriority3" preload="none">
+                    <source src="https://assets.mixkit.co/active_storage/sfx/2989/2989-preview.mp3" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Candidates -->
+    <div class="category">
+        <h2>🟡 Error Notification Candidates</h2>
+        <p style="color: #666; font-style: italic;">Distinctive sounds indicating errors or failures</p>
+        
+        <div class="sound-item error">
+            <div class="sound-info">
+                <div class="sound-name">Wrong Answer Bass Buzzer</div>
+                <div class="sound-description">A short, clear bass-toned buzzer (~1 second) - indicates incorrect response</div>
+            </div>
+            <div class="sound-controls">
+                <button class="play-btn" onclick="playAudio('error1')">Play</button>
+                <a href="https://mixkit.co/free-sound-effects/error/" class="download-link" target="_blank">Source</a>
+                <audio id="error1" preload="none">
+                    <source src="https://assets.mixkit.co/active_storage/sfx/948/948-preview.mp3" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+        </div>
+
+        <div class="sound-item error">
+            <div class="sound-info">
+                <div class="sound-name">Game Show Wrong Answer Buzz</div>
+                <div class="sound-description">A classic game show-style buzzer (~1 second) - signals failure or mistake</div>
+            </div>
+            <div class="sound-controls">
+                <button class="play-btn" onclick="playAudio('error2')">Play</button>
+                <a href="https://mixkit.co/free-sound-effects/error/" class="download-link" target="_blank">Source</a>
+                <audio id="error2" preload="none">
+                    <source src="https://assets.mixkit.co/active_storage/sfx/2099/2099-preview.mp3" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+        </div>
+
+        <div class="sound-item error">
+            <div class="sound-info">
+                <div class="sound-name">Wrong Electricity Buzz</div>
+                <div class="sound-description">An electric-style buzzing sound (~1 second) - suggests system error or failure</div>
+            </div>
+            <div class="sound-controls">
+                <button class="play-btn" onclick="playAudio('error3')">Play</button>
+                <a href="https://mixkit.co/free-sound-effects/error/" class="download-link" target="_blank">Source</a>
+                <audio id="error3" preload="none">
+                    <source src="https://assets.mixkit.co/active_storage/sfx/955/955-preview.mp3" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
+        </div>
+    </div>
+
+    <div class="selection-form">
+        <h3>📝 Make Your Selections</h3>
+        <p>After testing, select your preferred sound for each category:</p>
+        
+        <div style="margin: 10px 0;">
+            <label><strong>Low Priority:</strong></label>
+            <select id="lowPriorityChoice">
+                <option value="">-- Select Low Priority Sound --</option>
+                <option value="doorbell">Doorbell Tone</option>
+                <option value="elevator">Elevator Tone</option>
+                <option value="magic">Magic Notification Ring</option>
+            </select>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <label><strong>High Priority:</strong></label>
+            <select id="highPriorityChoice">
+                <option value="">-- Select High Priority Sound --</option>
+                <option value="urgent-loop">Urgent Simple Tone Loop</option>
+                <option value="signal">Signal Alert</option>
+                <option value="warning">Game Quick Warning Notification</option>
+            </select>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <label><strong>Error:</strong></label>
+            <select id="errorChoice">
+                <option value="">-- Select Error Sound --</option>
+                <option value="bass-buzzer">Wrong Answer Bass Buzzer</option>
+                <option value="game-show">Game Show Wrong Answer Buzz</option>
+                <option value="electricity">Wrong Electricity Buzz</option>
+            </select>
+        </div>
+        
+        <button class="submit-btn" onclick="showSelections()">Show My Selections</button>
+        
+        <div id="selectionResult" style="margin-top: 15px; padding: 10px; background: white; border-radius: 4px; display: none;">
+            <h4>Your Selections:</h4>
+            <div id="selectionText"></div>
+        </div>
+    </div>
+
+    <script>
+        // Play audio function that actually works with the embedded audio elements
+        function playAudio(audioId) {
+            const audio = document.getElementById(audioId);
+            if (audio) {
+                // Reset to beginning and play
+                audio.currentTime = 0;
+                audio.play().catch(error => {
+                    console.error('Error playing audio:', error);
+                    alert('Could not play audio. This might be due to browser security policies or network issues.');
+                });
+            } else {
+                alert('Audio element not found: ' + audioId);
+            }
+        }
+
+        function showSelections() {
+            const low = document.getElementById('lowPriorityChoice').value;
+            const high = document.getElementById('highPriorityChoice').value;
+            const error = document.getElementById('errorChoice').value;
+            
+            if (!low || !high || !error) {
+                alert('Please select one sound from each category.');
+                return;
+            }
+            
+            const lowNames = {
+                'doorbell': 'Doorbell Tone',
+                'elevator': 'Elevator Tone', 
+                'magic': 'Magic Notification Ring'
+            };
+            
+            const highNames = {
+                'urgent-loop': 'Urgent Simple Tone Loop',
+                'signal': 'Signal Alert',
+                'warning': 'Game Quick Warning Notification'
+            };
+            
+            const errorNames = {
+                'bass-buzzer': 'Wrong Answer Bass Buzzer',
+                'game-show': 'Game Show Wrong Answer Buzz',
+                'electricity': 'Wrong Electricity Buzz'
+            };
+            
+            const resultText = `
+                <strong>Low Priority:</strong> ${lowNames[low]}<br>
+                <strong>High Priority:</strong> ${highNames[high]}<br>
+                <strong>Error:</strong> ${errorNames[error]}
+            `;
+            
+            document.getElementById('selectionText').innerHTML = resultText;
+            document.getElementById('selectionResult').style.display = 'block';
+        }
+    </script>
+</body>
+</html>

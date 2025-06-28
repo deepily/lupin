@@ -1,0 +1,1360 @@
+#!/usr/bin/env python3
+from logging import debug
+
+from fastapi import FastAPI, Request, Query, HTTPException, File, UploadFile, WebSocket, WebSocketDisconnect, Depends
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+import uvicorn
+from datetime import datetime
+import os
+import sys
+import base64
+import json
+import time
+from typing import Optional
+import asyncio
+from contextlib import asynccontextmanager
+from urllib.parse import quote
+import uuid
+
+# Add paths for imports
+sys.path.append( os.path.join( os.path.dirname( __file__ ), '..' ) )
+sys.path.append( os.path.dirname( __file__ ) )
+
+import torch
+from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
+from openai import OpenAI
+
+from cosa.config.configuration_manager import ConfigurationManager
+from cosa.rest import multimodal_munger as mmm
+from cosa.memory.input_and_output_table import InputAndOutputTable
+from cosa.memory.solution_snapshot_mgr import SolutionSnapshotManager
+from cosa.rest.todo_fifo_queue import TodoFifoQueue
+from cosa.rest.fifo_queue import FifoQueue
+from cosa.rest.running_fifo_queue import RunningFifoQueue
+import cosa.utils.util as du
+import cosa.utils.util_stopwatch as sw
+from lib.clients import genie_client as gc
+from cosa.agents.v010.two_word_id_generator import TwoWordIdGenerator
+from cosa.rest.websocket_manager import WebSocketManager
+from cosa.rest.auth import get_current_user, get_current_user_id
+from cosa.rest.queue_extensions import push_job_with_user
+from cosa.rest.user_id_generator import email_to_system_id
+from cosa.rest.notification_fifo_queue import NotificationFifoQueue
+
+# Global variables
+config_mgr = None
+app_debug = False
+app_verbose = False
+app_silent = True
+whisper_pipeline = None
+jobs_todo_queue = None
+jobs_done_queue = None
+jobs_dead_queue = None
+jobs_run_queue = None
+jobs_notification_queue = None
+snapshot_mgr = None
+io_tbl = None
+id_generator = None
+
+# WebSocket connection management
+websocket_manager = WebSocketManager()
+# Background task tracking for cleanup
+active_tasks = {}
+
+
+
+async def emit_audio( msg: str, websocket_id: str = None ) -> None:
+    """
+    Skeletal implementation - logs calls and simulates audio emission
+    
+    Args:
+        msg: The text message to be converted to audio
+        websocket_id: Optional websocket identifier for future WebSocket routing
+    """
+    print( f"[STUB] emit_audio called:" )
+    print( f"  - Message: '{msg}'" )
+    print( f"  - WebSocket ID: {websocket_id if websocket_id else 'broadcast'}" )
+    print( f"  - Audio URL would be: /api/get-audio?msg={quote( msg )}" )
+    print( f"  - Timestamp: {datetime.now().isoformat()}" )
+    
+    # Simulate some async work
+    await asyncio.sleep( 0.1 )
+    
+    # Log successful "emission"
+    print( f"[STUB] Audio emission complete for websocket {websocket_id}" )
+
+
+def create_emit_audio_callback():
+    """Creates a sync wrapper for the async emit_audio function"""
+    def sync_emit_audio( msg: str, websocket_id: str = None ):
+        # Run async function in sync context
+        asyncio.create_task( emit_audio( msg, websocket_id ) )
+    return sync_emit_audio
+
+
+@asynccontextmanager
+async def lifespan( app: FastAPI ):
+    """
+    Manages the application lifecycle for FastAPI.
+    
+    Preconditions:
+        - Environment variable GIB_CONFIG_MGR_CLI_ARGS must be set or empty string
+        - Configuration files must exist at specified paths
+        - CUDA device must be available if using GPU
+    
+    Postconditions:
+        - All global components are initialized (config_mgr, queues, etc.)
+        - Whisper STT model is loaded and ready
+        - Application is ready to handle requests
+    
+    Args:
+        app: FastAPI application instance
+    
+    Yields:
+        None - Control returns to FastAPI after initialization
+    """
+    # Startup
+    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent
+    
+    config_mgr = ConfigurationManager( env_var_name="GIB_CONFIG_MGR_CLI_ARGS" )
+    
+    # Initialize the ID generator singleton
+    id_generator = TwoWordIdGenerator()
+    
+    # Get configuration flags
+    app_debug   = config_mgr.get( "app_debug",   default=False, return_type="boolean" )
+    app_verbose = config_mgr.get( "app_verbose", default=False, return_type="boolean" )
+    app_silent  = config_mgr.get( "app_silent",  default=True,  return_type="boolean" )
+    
+    # Initialize other components
+    path_to_snapshots_dir_wo_root = config_mgr.get( "path_to_snapshots_dir_wo_root" )
+    path_to_snapshots = du.get_project_root() + path_to_snapshots_dir_wo_root
+    snapshot_mgr = SolutionSnapshotManager( path_to_snapshots, debug=app_debug, verbose=app_verbose )
+    
+    # Initialize queues with emit_audio callback and websocket manager
+    jobs_todo_queue = TodoFifoQueue( websocket_manager, snapshot_mgr, app, config_mgr, emit_audio_callback=create_emit_audio_callback(), debug=app_debug, verbose=app_verbose, silent=app_silent )
+    jobs_done_queue = FifoQueue( websocket_mgr=websocket_manager, queue_name="done", emit_enabled=True )
+    jobs_dead_queue = FifoQueue( websocket_mgr=websocket_manager, queue_name="dead", emit_enabled=True )
+    jobs_run_queue = RunningFifoQueue( app, websocket_manager, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, config_mgr=config_mgr, emit_audio_callback=create_emit_audio_callback() )
+    
+    # Initialize notification queue with io_tbl logging
+    jobs_notification_queue = NotificationFifoQueue( websocket_mgr=websocket_manager, emit_enabled=True, debug=app_debug, verbose=app_verbose )
+    
+    # Initialize input/output table
+    io_tbl = InputAndOutputTable( debug=app_debug, verbose=app_verbose )
+    
+    # Load STT model on startup
+    global whisper_pipeline
+    print( "Loading distill whisper engine... ", end="" )
+    whisper_pipeline = await load_stt_model()
+    print( "Done!" )
+    
+    print( f"FastAPI startup complete at {datetime.now()}" )
+    
+    yield
+    
+    # Shutdown
+    print( f"FastAPI shutdown at {datetime.now()}" )
+    # Add any cleanup code here if needed
+
+app = FastAPI(
+    title="Genie-in-the-Box FastAPI",
+    description="A FastAPI migration of the Genie-in-the-Box agent system",
+    version="0.1.0",
+    lifespan=lifespan
+)
+
+# Mount static files
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+@app.websocket("/ws/{session_id}")
+async def websocket_endpoint(websocket: WebSocket, session_id: str):
+    """
+    WebSocket endpoint for real-time TTS audio streaming.
+    
+    Preconditions:
+        - session_id must be a valid session identifier
+        - WebSocket connection must be established
+        
+    Postconditions:
+        - Manages WebSocket connection lifecycle
+        - Stores connection in websocket_manager for audio streaming
+        - Handles disconnection cleanup
+        
+    Args:
+        websocket: WebSocket connection object
+        session_id: Unique session identifier for this client
+    """
+    await websocket.accept()
+    websocket_manager.connect( websocket, session_id )
+    
+    print( f"[WS] WebSocket connected for session: {session_id}" )
+    
+    try:
+        # Send connection confirmation
+        await websocket.send_json({
+            "type": "status",
+            "text": f"WebSocket connected for session {session_id}",
+            "status": "success"
+        })
+        
+        # Keep connection alive and handle incoming messages
+        while True:
+            try:
+                # Wait for messages from client (optional - for bidirectional communication)
+                data = await websocket.receive_text()
+                message = json.loads(data)
+                
+                if app_debug and app_verbose: 
+                    print( f"[WS] Received message from {session_id}: {message}" )
+                    
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                if app_debug: 
+                    print( f"[WS] Error handling message from {session_id}: {e}" )
+                break
+                
+    except WebSocketDisconnect:
+        pass
+    finally:
+        # Cancel any active streaming tasks for this session
+        if session_id in active_tasks:
+            print( f"[WS] Cancelling active streaming task for session: {session_id}" )
+            active_tasks[session_id].cancel()
+            try:
+                await active_tasks[session_id]
+            except asyncio.CancelledError:
+                pass
+            del active_tasks[session_id]
+        
+        # Clean up connection
+        websocket_manager.disconnect( session_id )
+        print( f"[WS] WebSocket disconnected for session: {session_id}" )
+
+
+@app.websocket("/ws/queue/{session_id}")
+async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
+    """
+    WebSocket endpoint for real-time queue updates and events.
+    
+    PHASE 2: WebSocket with authentication for user-specific updates.
+    
+    Preconditions:
+        - session_id must be a valid session identifier
+        - WebSocket connection must be established
+        - First message must contain authentication token
+        
+    Postconditions:
+        - Manages WebSocket connection for queue updates
+        - Associates connection with authenticated user
+        - Handles disconnection cleanup
+        
+    Args:
+        websocket: WebSocket connection object
+        session_id: Unique session identifier for this client
+    """
+    await websocket.accept()
+    print( f"[WS-QUEUE] Queue WebSocket connected for session: {session_id}" )
+    
+    # Wait for authentication message
+    try:
+        auth_message = await websocket.receive_json()
+        if auth_message.get("type") != "auth" or "token" not in auth_message:
+            await websocket.send_json({
+                "type": "error",
+                "message": "First message must be auth with token"
+            })
+            await websocket.close()
+            return
+            
+        # Verify token
+        from cosa.rest.auth import verify_firebase_token
+        try:
+            user_info = await verify_firebase_token(auth_message["token"])
+            user_id = user_info["uid"]
+            
+            # Connect with user association
+            websocket_manager.connect( websocket, session_id, user_id )
+            print( f"[WS-QUEUE] Authenticated session [{session_id}] for user [{user_id}]" )
+            
+            # Send auth success
+            await websocket.send_json({
+                "type": "auth_success",
+                "user_id": user_id,
+                "session_id": session_id
+            })
+            
+        except Exception as e:
+            await websocket.send_json({
+                "type": "auth_error",
+                "message": str(e)
+            })
+            await websocket.close()
+            return
+            
+    except Exception as e:
+        print( f"[WS-QUEUE] Auth error: {e}" )
+        await websocket.close()
+        return
+    
+    try:
+        # Send connection confirmation
+        await websocket.send_json({
+            "type": "connect",
+            "message": f"Queue WebSocket connected for session {session_id}",
+            "session_id": session_id,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # PHASE 2: Real queue updates now come from COSA queues via websocket_manager
+        # Keep connection alive and listen for incoming messages
+        while True:
+            try:
+                # Listen for any incoming messages (for future bidirectional communication)
+                data = await websocket.receive_text()
+                message = json.loads( data )
+                print( f"[WS-QUEUE] Received message from {session_id}: {message}" )
+                
+                # Handle specific message types if needed
+                if message.get( "type" ) == "ping":
+                    await websocket.send_json({
+                        "type": "pong",
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                print( f"[WS-QUEUE] Error in queue WebSocket for {session_id}: {e}" )
+                break
+                
+    except WebSocketDisconnect:
+        pass
+    finally:
+        websocket_manager.disconnect( session_id )
+        print( f"[WS-QUEUE] Queue WebSocket disconnected for session: {session_id}" )
+
+
+async def load_stt_model():
+    """
+    Load and initialize the speech-to-text model pipeline.
+    
+    Preconditions:
+        - config_mgr must be initialized
+        - CUDA toolkit installed if using GPU
+        - Model files available locally or downloadable
+    
+    Postconditions:
+        - Returns initialized Whisper pipeline ready for transcription
+        - Model loaded on specified device (CPU/GPU)
+    
+    Returns:
+        pipeline: Initialized HuggingFace pipeline for ASR
+    
+    Raises:
+        RuntimeError: If model cannot be loaded
+        KeyError: If required config values are missing
+    """
+    torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    stt_device_id = config_mgr.get( "stt_device_id", default="cuda:0" )
+    stt_model_id = config_mgr.get( "stt_model_id" )
+    
+    pipe = pipeline(
+        "automatic-speech-recognition",
+        model=stt_model_id,
+        torch_dtype=torch_dtype,
+        device=stt_device_id
+    )
+    return pipe
+
+@app.get( "/", response_class=JSONResponse )
+async def health_check():
+    """
+    Basic health check endpoint.
+    
+    Preconditions:
+        - Application must be running
+    
+    Postconditions:
+        - Returns current health status with timestamp
+    
+    Returns:
+        dict: Health status including service name, timestamp, and version
+    """
+    return {
+        "status": "healthy",
+        "service": "genie-in-the-box-fastapi",
+        "timestamp": datetime.now().isoformat(),
+        "version": "0.1.0"
+    }
+
+
+@app.get( "/health", response_class=JSONResponse )
+async def health():
+    """
+    Simple health endpoint for monitoring.
+    
+    Preconditions:
+        - Application must be running
+    
+    Postconditions:
+        - Returns OK status with current timestamp
+    
+    Returns:
+        dict: Status and timestamp
+    """
+    return {
+        "status": "ok",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.get( "/api/auth-test" )
+async def auth_test( current_user: dict = Depends( get_current_user ) ):
+    """
+    Test endpoint to verify authentication is working.
+    
+    Example usage:
+    curl -H "Authorization: Bearer mock_token_alice" http://localhost:8000/api/auth-test
+    
+    Returns:
+        dict: Current user information
+    """
+    return {
+        "message": "Authentication successful",
+        "user_id": current_user["uid"],
+        "email": current_user["email"],
+        "name": current_user["name"],
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.get( "/api/init", response_class=JSONResponse )
+async def init():
+    """
+    Refresh configuration and reload application resources.
+    
+    Preconditions:
+        - Application must be running
+        - Configuration files must exist at specified paths
+        - All global components must be previously initialized
+    
+    Postconditions:
+        - Configuration manager is refreshed with latest values
+        - Solution snapshots are reloaded from disk
+        - STT model remains loaded (already in memory)
+        - Returns success message
+    
+    Returns:
+        dict: Success message and timestamp
+    
+    Note:
+        Unlike Flask version, STT model is not reloaded as it's 
+        already managed by the lifespan context manager
+    """
+    global config_mgr, snapshot_mgr
+    
+    # Refresh configuration manager
+    if config_mgr:
+        config_mgr = ConfigurationManager( env_var_name="GIB_CONFIG_MGR_CLI_ARGS" )
+        config_mgr.print_configuration( brackets=True )
+    
+    # Reload snapshots
+    if snapshot_mgr:
+        du.print_banner( "Reloading solution snapshots..." )
+        snapshot_mgr.load_snapshots()
+    
+    # Note: STT model is already loaded in lifespan and doesn't need reloading
+    return {
+        "status": "success",
+        "message": "Configuration refreshed and snapshots reloaded",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.post( "/api/upload-and-transcribe-mp3" )
+async def upload_and_transcribe_mp3_file(
+    request: Request,
+    prefix: Optional[ str ] = Query( None ),
+    prompt_key: str = Query( "generic" ),
+    prompt_verbose: str = Query( "verbose" )
+):
+    """
+    Upload and transcribe MP3 audio file using Whisper model.
+    
+    Preconditions:
+        - Request body must contain base64 encoded MP3 audio
+        - Whisper pipeline must be initialized
+        - Write permissions to docker path
+        - Valid prompt_key in configuration
+    
+    Postconditions:
+        - Audio file saved to disk temporarily
+        - Transcription completed and processed
+        - Response saved to last_response.json
+        - Entry added to I/O table if not agent request
+        - Job queued if agent request detected
+    
+    Args:
+        request: FastAPI request containing base64 encoded audio
+        prefix: Optional prefix for transcription processing
+        prompt_key: Key for prompt selection (default: "generic")
+        prompt_verbose: Verbosity level (default: "verbose")
+    
+    Returns:
+        JSONResponse: Processed transcription results
+    
+    Raises:
+        HTTPException: If audio decoding or transcription fails
+    """
+    global app_debug, app_verbose
+    if debug:
+        print( "upload_and_transcribe_mp3_file() called" )
+        print( f"    prefix: [{prefix}]" )
+        print( f"prompt_key: [{prompt_key}]" )
+    
+    # Get the request body (base64 encoded audio)
+    body = await request.body()
+    decoded_audio = base64.b64decode( body )
+    
+    path = gc.docker_path.format( "recording.mp3" )
+    
+    if app_debug: print( f"Saving file recorded audio bytes to [{path}]...", end="" )
+    with open( path, "wb" ) as f:
+        f.write( decoded_audio )
+    if app_debug: print( " Done!" )
+    
+    # Transcribe the audio
+    if app_debug: timer = sw.Stopwatch( f"Transcribing {path}..." )
+    raw_transcription = whisper_pipeline( path, chunk_length_s=30, stride_length_s=5 )
+    if app_debug: timer.print( "Done!", use_millis=True, end="\n\n" )
+    
+    raw_transcription = raw_transcription[ "text" ].strip()
+    
+    if app_debug: print( f"Result: [{raw_transcription}]" )
+    
+    # Fetch last response processed
+    last_response_path = "/io/last_response.json"
+    if os.path.isfile( du.get_project_root() + last_response_path ):
+        with open( du.get_project_root() + last_response_path ) as json_file:
+            last_response = json.load( json_file )
+    else:
+        last_response = None
+    
+    # Process the transcription
+    # app_debug   = config_mgr.get( "app_debug", default=False, return_type="boolean" )
+    # app_verbose = config_mgr.get( "app_verbose", default=False, return_type="boolean" )
+    #
+    munger = mmm.MultiModalMunger(
+        raw_transcription, prefix=prefix, prompt_key=prompt_key, debug=app_debug, 
+        verbose=app_verbose, last_response=last_response, config_mgr=config_mgr
+    )
+    
+    try:
+        if munger.is_agent():
+            print( f"Munger: Posting [{munger.transcription}] to the agent's todo queue..." )
+            munger.results = jobs_todo_queue.push_job( munger.transcription )
+        else:
+            print( "Munger: Transcription is not for agent. Returning brute force munger string..." )
+            # Insert into I/O table
+            io_tbl.insert_io_row( 
+                input_type=f"upload and proofread mp3: {munger.mode}", 
+                input=raw_transcription, 
+                output_raw=munger.transcription, 
+                output_final=munger.get_jsons() 
+            )
+        
+        # Write JSON string to the file system
+        last_response = munger.get_jsons()
+        du.write_string_to_file( du.get_project_root() + last_response_path, last_response )
+        
+        return JSONResponse( content=json.loads( last_response ) )
+        
+    except Exception as e:
+        # Pass through the actual error details without assumptions
+        error_response = {
+            "status": "error",
+            "error_type": type( e ).__name__,
+            "error_message": str( e ),
+            "transcription": raw_transcription,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        print( f"ERROR: {type( e ).__name__}: {e}" )
+        print( f"Returning error response to client: {error_response}" )
+        
+        # Return 422 Unprocessable Entity instead of 500 to indicate business logic failure
+        return JSONResponse( 
+            status_code=422, 
+            content=error_response 
+        )
+
+
+@app.post( "/api/get-audio" )
+async def get_tts_audio( request: Request ):
+    """
+    WebSocket-based TTS endpoint that streams audio via WebSocket.
+    
+    Preconditions:
+        - Request body must contain session_id and text
+        - WebSocket connection must exist for session_id
+        - OpenAI API key must be available
+        - config_mgr must be initialized
+        
+    Postconditions:
+        - Returns immediate status response
+        - Streams audio chunks via WebSocket to specified session
+        
+    Args:
+        request: FastAPI request containing JSON body with session_id and text
+        
+    Returns:
+        JSONResponse: Immediate status response
+    """
+    try:
+        # Parse request body
+        request_data = await request.json()
+        session_id = request_data.get( "session_id" )
+        msg = request_data.get( "text" )
+        if not session_id or not msg:
+            raise HTTPException( status_code=400, detail="Missing session_id or text" )
+        
+        # Check if WebSocket connection exists
+        if not websocket_manager.is_connected( session_id ):
+            raise HTTPException( status_code=404, detail=f"No WebSocket connection for session {session_id}" )
+        
+        print( f"[TTS] Hybrid TTS request - session: {session_id}, msg: '{msg}'" )
+        
+        # Start hybrid TTS streaming in background
+        task = asyncio.create_task( stream_tts_hybrid( session_id, msg ) )
+        active_tasks[session_id] = task
+        
+        # Return immediate status response
+        return JSONResponse({
+            "status": "success",
+            "message": "TTS generation started",
+            "session_id": session_id
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print( f"[ERROR] TTS request failed: {e}" )
+        raise HTTPException( status_code=500, detail=f"TTS request error: {str(e)}" )
+
+
+async def stream_tts_hybrid( session_id: str, msg: str ):
+    """
+    Hybrid TTS streaming: Forward chunks immediately, client plays when complete.
+    Simple, no format complexity, no buffering - just pipe OpenAI chunks to WebSocket.
+    
+    Args:
+        session_id: Session ID for WebSocket connection
+        msg: Text to convert to speech
+    """
+    websocket = websocket_manager.active_connections.get( session_id )
+    if not websocket:
+        print( f"[ERROR] No WebSocket connection for session {session_id}" )
+        return
+    
+    try:
+        # Always use OpenAI with MP3 - simple and reliable
+        api_key = du.get_api_key( "openai" )
+        # TODO: We should be dynamically getting the proper base URL for this connection.
+        # Override base URL for TTS - vLLM doesn't support TTS, need real OpenAI API
+        client = OpenAI( api_key=api_key, base_url="https://api.openai.com/v1" )
+        
+        
+        print( f"[TTS-HYBRID] Starting generation for: '{msg}'" )
+        
+        # Send status update
+        await websocket.send_json({
+            "type": "status",
+            "text": "Generating and streaming audio...",
+            "status": "loading"
+        })
+        
+        
+        # Stream from OpenAI directly to WebSocket - no buffering, no format logic
+        try:
+            with client.audio.speech.with_streaming_response.create(
+                model="tts-1",
+                voice="alloy",
+                speed=1.125,
+                response_format="mp3",  # Always MP3 - simple and universal
+                input=msg
+            ) as response:
+                
+                chunk_count = 0
+                start_time = time.time()
+                
+                # Forward each chunk immediately as received
+                for chunk in response.iter_bytes( chunk_size=8192 ):
+                    # Check connection
+                    if not websocket_manager.is_connected( session_id ):
+                        print( f"[TTS-HYBRID] Connection lost for {session_id}" )
+                        break
+                    
+                    if chunk:
+                        chunk_count += 1
+                        
+                        # Forward chunk immediately - no processing, no buffering
+                        try:
+                            await websocket.send_bytes( chunk )
+                        except Exception as e:
+                            print( f"[ERROR] Failed to forward chunk {chunk_count}: {e}" )
+                            break
+                
+                # Calculate timing
+                total_time = time.time() - start_time
+                
+                print( f"[TTS-HYBRID] Complete - {chunk_count} chunks in {total_time:.2f}s" )
+                
+                # Signal completion
+                if websocket_manager.is_connected( session_id ):
+                    await websocket.send_json({
+                        "type": "audio_complete",
+                        "text": f"Streaming complete ({chunk_count} chunks, {total_time:.1f}s)",
+                        "status": "success"
+                    })
+        
+        except Exception as tts_error:
+            raise tts_error
+    
+    except Exception as e:
+        print( f"[ERROR] Hybrid TTS failed for {session_id}: {e}" )
+        if session_id in active_websockets:
+            await websocket.send_json({
+                "type": "status",
+                "text": f"TTS generation failed: {str(e)}",
+                "status": "error"
+            })
+
+
+
+
+@app.get( "/api/get-session-id" )
+async def get_session_id():
+    """
+    Generate and return a unique session ID for WebSocket communication.
+    
+    Preconditions:
+        - id_generator must be initialized
+        
+    Postconditions:
+        - Generates a unique two-word ID
+        - Returns the ID as a string
+        
+    Returns:
+        dict: Contains the generated session_id
+        
+    Note:
+        This ID will be used to route asynchronous WebSocket messages
+        to the correct client in future implementations
+    """
+    session_id = id_generator.get_id()
+    print( f"[API] Generated new session ID: {session_id}" )
+    
+    return {
+        "session_id": session_id,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.get( "/api/push" )
+async def push( 
+    question: str = Query( ... ), 
+    websocket_id: str = Query( ... ),
+    current_user: dict = Depends( get_current_user )
+):
+    """
+    Add a question to the todo queue with required websocket tracking and user authentication.
+    
+    Preconditions:
+        - jobs_todo_queue must be initialized
+        - Question parameter must be provided
+        - websocket_id parameter must be provided (from /api/get-session-id)
+        - User must be authenticated with valid token
+        
+    Postconditions:
+        - Question added to todo queue
+        - WebSocket ID and user ID associated with the job
+        
+    Args:
+        question: The question/query to process (required)
+        websocket_id: WebSocket identifier for WebSocket routing (required)
+        current_user: Authenticated user info from token
+        
+    Returns:
+        dict: Status, websocket_id, user_id, and result from queue push
+    """
+    user_id = current_user[ "uid" ]
+    print( f"[API] /api/push called - question: '{question}', websocket_id: {websocket_id}, user_id: {user_id}" )
+    
+    # Push to queue with websocket_id and user_id using our wrapper
+    result = push_job_with_user( jobs_todo_queue, question, websocket_id, user_id )
+    
+    return {
+        "status": "queued",
+        "websocket_id": websocket_id,
+        "user_id": user_id,
+        "result": result
+    }
+
+
+@app.get( "/api/get-queue/{queue_name}" )
+async def get_queue( 
+    queue_name: str,
+    current_user: dict = Depends( get_current_user )
+):
+    """
+    Retrieve jobs for specific queue (todo, run, done, dead) filtered by user.
+    
+    PHASE 2 IMPLEMENTATION: Connected to real COSA queue system with user filtering.
+    
+    Preconditions:
+        - queue_name must be one of: 'todo', 'run', 'done', 'dead'
+        - Global queue objects must be initialized
+        - User must be authenticated
+        
+    Postconditions:
+        - Returns JSON with queue-specific job arrays for authenticated user only
+        - Job format matches queue.html expectations
+        
+    Args:
+        queue_name: The queue to retrieve ('todo'|'run'|'done'|'dead')
+        current_user: Authenticated user info from token
+        
+    Returns:
+        dict: Queue data with job arrays filtered by user
+    """
+    global jobs_todo_queue, jobs_run_queue, jobs_done_queue, jobs_dead_queue
+    user_id = current_user["uid"]
+    
+    # TODO: For now, return all jobs. In production, we need to:
+    # 1. Add user_id field to SolutionSnapshot
+    # 2. Implement get_html_list_for_user(user_id) in FifoQueue
+    # 3. Filter jobs by user_id
+    
+    # For demonstration, we'll add a comment to each job showing it belongs to this user
+    if queue_name == "todo":
+        jobs = jobs_todo_queue.get_html_list( descending=True )
+    elif queue_name == "run":
+        jobs = jobs_run_queue.get_html_list()
+    elif queue_name == "dead":
+        jobs = jobs_dead_queue.get_html_list( descending=True )
+    elif queue_name == "done":
+        jobs = jobs_done_queue.get_html_list( descending=True )
+    else:
+        raise HTTPException( status_code=400, detail=f"Invalid queue name: {queue_name}" )
+    
+    # Add user context to demonstrate filtering (temporary)
+    filtered_jobs = [job.replace("</li>", f" [user: {user_id}]</li>") for job in jobs]
+    
+    return { f"{queue_name}_jobs": filtered_jobs }
+
+
+@app.post( "/api/notify" )
+async def notify_user(
+    message: str = Query( ..., description="Notification message text" ),
+    type: str = Query( "custom", description="Notification type (task, progress, alert, custom)" ),
+    priority: str = Query( "medium", description="Priority level (low, medium, high, urgent)" ),
+    target_user: str = Query( "ricardo.felipe.ruiz@gmail.com", description="Target user EMAIL ADDRESS (server converts to system ID internally)" ),
+    api_key: str = Query( ..., description="Simple API key for authentication" )
+):
+    """
+    Claude Code notification endpoint for user communication.
+    
+    This endpoint allows Claude Code and other agents to send notifications
+    to users through the Genie-in-the-Box application. Notifications are
+    delivered via WebSocket and converted to audio using HybridTTS.
+    
+    Preconditions:
+        - API key must match configured value
+        - WebSocket manager must be initialized
+        - Message must not be empty
+        
+    Postconditions:
+        - Notification logged in application logs
+        - WebSocket broadcast sent to all connected clients
+        - Audio notification triggered via HybridTTS
+        
+    Args:
+        message: The notification message text
+        type: Type of notification (task, progress, alert, custom)
+        priority: Priority level (low, medium, high, urgent)
+        api_key: Simple API key for authentication
+        
+    Returns:
+        dict: Success status and notification details
+        
+    Raises:
+        HTTPException: If authentication fails or invalid parameters
+    """
+    # Validate API key (Phase 1: Simple hardcoded key)
+    if api_key != "claude_code_simple_key":
+        print( f"[AUTH] Invalid API key attempt: {api_key}" )
+        raise HTTPException( status_code=401, detail="Invalid API key" )
+    
+    # Validate notification type
+    valid_types = [ "task", "progress", "alert", "custom" ]
+    if type not in valid_types:
+        raise HTTPException( 
+            status_code=400, 
+            detail=f"Invalid notification type: {type}. Valid types: {', '.join( valid_types )}" 
+        )
+    
+    # Validate priority
+    valid_priorities = [ "low", "medium", "high", "urgent" ]
+    if priority not in valid_priorities:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid priority: {priority}. Valid priorities: {', '.join( valid_priorities )}"
+        )
+    
+    # Validate message
+    if not message or not message.strip():
+        raise HTTPException( status_code=400, detail="Message cannot be empty" )
+    
+    # Create notification payload
+    notification = {
+        "message": message.strip(),
+        "type": type,
+        "priority": priority,
+        "timestamp": datetime.now().isoformat(),
+        "source": "claude_code"
+    }
+    
+    # Log notification (existing logging system)
+    print( f"[NOTIFY] Claude Code notification: {type}/{priority} - {message}" )
+    
+    try:
+        # Convert target email to system ID for user-specific routing
+        target_system_id = email_to_system_id( target_user )
+        
+        # Add to notification queue with state tracking and io_tbl logging
+        notification_item = jobs_notification_queue.push_notification(
+            message=message.strip(),
+            type=type,
+            priority=priority,
+            source="claude_code",
+            user_id=target_system_id
+        )
+        
+        # Check if user is available before attempting to send
+        is_connected = websocket_manager.is_user_connected( target_system_id )
+        connection_count = websocket_manager.get_user_connection_count( target_system_id )
+        
+        if not is_connected:
+            # User not available - log and return appropriate response
+            print( f"[NOTIFY] User {target_user} ({target_system_id}) is not connected to queue UI - notification not delivered" )
+            return {
+                "status": "user_not_available",
+                "message": f"User {target_user} is not connected to queue UI",
+                "notification": notification,
+                "target_user": target_user,
+                "target_system_id": target_system_id,
+                "connection_count": 0
+            }
+        
+        # Send to specific user via WebSocket
+        message_sent = await websocket_manager.emit_to_user( target_system_id, "user_notification", notification )
+        
+        if message_sent:
+            print( f"[NOTIFY] ✓ Notification delivered to {target_user} ({target_system_id}) - {connection_count} connection(s)" )
+            return {
+                "status": "success", 
+                "message": f"Notification sent successfully to {target_user}",
+                "notification": notification,
+                "target_user": target_user,
+                "target_system_id": target_system_id,
+                "connection_count": connection_count
+            }
+        else:
+            # This shouldn't happen since we checked connectivity, but handle gracefully
+            print( f"[NOTIFY] ✗ Failed to deliver notification to {target_user} ({target_system_id}) - connection lost during send" )
+            return {
+                "status": "delivery_failed",
+                "message": f"Failed to deliver notification to {target_user} - connection lost",
+                "notification": notification,
+                "target_user": target_user,
+                "target_system_id": target_system_id,
+                "connection_count": 0
+            }
+        
+    except Exception as e:
+        print( f"[ERROR] Failed to send notification: {e}" )
+        raise HTTPException( 
+            status_code=500, 
+            detail=f"Failed to send notification: {str( e )}" 
+        )
+
+
+@app.get( "/api/notifications/{user_id}" )
+async def get_user_notifications(
+    user_id: str,
+    include_played: bool = Query( True, description="Include notifications that have already been played" ),
+    api_key: str = Query( ..., description="Simple API key for authentication" )
+):
+    """
+    Get notifications for a specific user.
+    
+    Retrieves all notifications for a user from the notification queue,
+    optionally filtering out already played notifications.
+    
+    Args:
+        user_id: The system ID of the user (use email_to_system_id for conversion)
+        include_played: Whether to include notifications that have been played
+        api_key: Simple API key for authentication
+        
+    Returns:
+        dict: List of notifications for the user
+        
+    Raises:
+        HTTPException: If authentication fails
+    """
+    # Validate API key
+    if api_key != "claude_code_simple_key":
+        raise HTTPException( status_code=401, detail="Invalid API key" )
+    
+    try:
+        # Get user notifications from queue
+        notifications = jobs_notification_queue.get_user_notifications( user_id, include_played=include_played )
+        
+        # Convert to serializable format
+        notification_data = [ notif.to_dict() for notif in notifications ]
+        
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "notification_count": len( notification_data ),
+            "include_played": include_played,
+            "notifications": notification_data
+        }
+        
+    except Exception as e:
+        print( f"[ERROR] Failed to get notifications for user {user_id}: {e}" )
+        raise HTTPException( 
+            status_code=500, 
+            detail=f"Failed to retrieve notifications: {str( e )}" 
+        )
+
+
+@app.get( "/api/notifications/{user_id}/next" )
+async def get_next_notification(
+    user_id: str,
+    api_key: str = Query( ..., description="Simple API key for authentication" )
+):
+    """
+    Get the next unplayed notification for a user.
+    
+    Retrieves the next notification in queue that hasn't been played yet.
+    Useful for client-side notification playback systems.
+    
+    Args:
+        user_id: The system ID of the user
+        api_key: Simple API key for authentication
+        
+    Returns:
+        dict: Next unplayed notification or null if none available
+        
+    Raises:
+        HTTPException: If authentication fails
+    """
+    # Validate API key
+    if api_key != "claude_code_simple_key":
+        raise HTTPException( status_code=401, detail="Invalid API key" )
+    
+    try:
+        # Get next unplayed notification
+        next_notification = jobs_notification_queue.get_next_unplayed( user_id )
+        
+        if next_notification:
+            return {
+                "status": "success",
+                "user_id": user_id,
+                "notification": next_notification.to_dict()
+            }
+        else:
+            return {
+                "status": "no_notifications",
+                "user_id": user_id,
+                "notification": None
+            }
+        
+    except Exception as e:
+        print( f"[ERROR] Failed to get next notification for user {user_id}: {e}" )
+        raise HTTPException( 
+            status_code=500, 
+            detail=f"Failed to retrieve next notification: {str( e )}" 
+        )
+
+
+@app.post( "/api/notifications/{notification_id}/played" )
+async def mark_notification_played(
+    notification_id: str,
+    api_key: str = Query( ..., description="Simple API key for authentication" )
+):
+    """
+    Mark a notification as played.
+    
+    Updates the notification status to indicate it has been played,
+    incrementing the play count and logging the event to io_tbl.
+    
+    Args:
+        notification_id: The unique ID of the notification
+        api_key: Simple API key for authentication
+        
+    Returns:
+        dict: Updated notification status
+        
+    Raises:
+        HTTPException: If authentication fails or notification not found
+    """
+    # Validate API key
+    if api_key != "claude_code_simple_key":
+        raise HTTPException( status_code=401, detail="Invalid API key" )
+    
+    try:
+        # Mark notification as played
+        success = jobs_notification_queue.mark_played( notification_id )
+        
+        if success:
+            return {
+                "status": "success",
+                "notification_id": notification_id,
+                "message": "Notification marked as played"
+            }
+        else:
+            raise HTTPException( 
+                status_code=404, 
+                detail=f"Notification not found: {notification_id}" 
+            )
+        
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
+    except Exception as e:
+        print( f"[ERROR] Failed to mark notification {notification_id} as played: {e}" )
+        raise HTTPException( 
+            status_code=500, 
+            detail=f"Failed to mark notification as played: {str( e )}" 
+        )
+
+
+@app.delete( "/api/notifications/{notification_id}" )
+async def delete_notification(
+    notification_id: str,
+    request: Request
+):
+    """
+    Delete a notification from the queue.
+    
+    Removes the notification from the NotificationFifoQueue and logs the deletion.
+    
+    Args:
+        notification_id: The unique ID (id_hash) of the notification to delete
+        request: FastAPI request object containing JSON body with api_key
+        
+    Returns:
+        dict: Deletion status
+        
+    Raises:
+        HTTPException: If authentication fails or notification not found
+    """
+    try:
+        # Parse JSON body to get API key
+        body = await request.json()
+        api_key = body.get( "api_key" )
+        
+        # Validate API key
+        if api_key != "claude_code_simple_key":
+            raise HTTPException( status_code=401, detail="Invalid API key" )
+        
+        # Delete notification from queue
+        success = jobs_notification_queue.delete_by_id_hash( notification_id )
+        
+        if success:
+            print( f"[INFO] Notification {notification_id} deleted successfully" )
+            return {
+                "status": "success",
+                "notification_id": notification_id,
+                "message": "Notification deleted successfully"
+            }
+        else:
+            raise HTTPException( 
+                status_code=404, 
+                detail=f"Notification not found: {notification_id}" 
+            )
+        
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
+    except Exception as e:
+        print( f"[ERROR] Failed to delete notification {notification_id}: {e}" )
+        raise HTTPException( 
+            status_code=500, 
+            detail=f"Failed to delete notification: {str( e )}" 
+        )
+
+
+@app.get( "/api/delete-snapshot/{id}" )
+async def delete_snapshot( id: str ):
+    """
+    Delete a completed job snapshot.
+    
+    PHASE 1 STUB: Returns mock success response for testing.
+    
+    Preconditions:
+        - id must be a valid job identifier
+        
+    Postconditions:
+        - Returns success confirmation (stubbed)
+        
+    Args:
+        id: The job identifier to delete
+        
+    Returns:
+        dict: Deletion status
+    """
+    print( f"[STUB] /api/delete-snapshot/{id} called" )
+    
+    # Mock deletion logic
+    if not id or id.startswith( "invalid" ):
+        raise HTTPException( status_code=404, detail=f"Snapshot not found: {id}" )
+    
+    return {
+        "status": "deleted",
+        "id": id,
+        "message": f"Snapshot {id} deleted successfully (STUB)",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.get( "/get-answer/{id}" )
+async def get_answer( id: str ):
+    """
+    Retrieve audio answer for completed job.
+    
+    PHASE 1 STUB: Returns a placeholder audio file for testing.
+    
+    Preconditions:
+        - id must be a valid job identifier
+        - Audio file should exist for the job
+        
+    Postconditions:
+        - Returns audio file stream (stubbed with placeholder)
+        
+    Args:
+        id: The job identifier to get audio for
+        
+    Returns:
+        FileResponse: Audio file for playback
+    """
+    print( f"[STUB] /get-answer/{id} called" )
+    
+    # For now, return the gentle gong as placeholder audio
+    audio_file_path = os.path.join( static_dir, "audio", "gentle-gong.mp3" )
+    
+    if not os.path.exists( audio_file_path ):
+        raise HTTPException( status_code=404, detail=f"Audio file not found for job: {id}" )
+    
+    return FileResponse(
+        path=audio_file_path,
+        media_type="audio/mpeg",
+        filename=f"answer-{id}.mp3"
+    )
+
+
+@app.post( "/api/upload-and-transcribe-wav" )
+async def upload_and_transcribe_wav_file(
+    file: UploadFile = File( ... ),
+    prefix: Optional[ str ] = Query( None )
+):
+    """
+    Upload and transcribe WAV audio file using Whisper model.
+    
+    Preconditions:
+        - Request must contain a WAV file upload
+        - Whisper pipeline must be initialized
+        - Write permissions to /tmp directory
+        - Valid audio file format (WAV)
+    
+    Postconditions:
+        - Audio file saved to temp location and deleted after processing
+        - Transcription completed
+        - Entry added to I/O table
+        - Returns transcribed text (not JSON like MP3 endpoint)
+    
+    Args:
+        file: WAV audio file upload
+        prefix: Optional prefix for transcription processing
+    
+    Returns:
+        str: Transcribed and processed text
+    
+    Raises:
+        HTTPException: If file processing or transcription fails
+    
+    Note:
+        Unlike MP3 endpoint, this returns plain text, not JSON
+    """
+    print( "upload_and_transcribe_wav_file() called" )
+    
+    # Generate unique temp filename
+    timestamp = str( time.time() ).replace( ".", "-" )
+    temp_file = f"/tmp/{timestamp}-{file.filename}"
+    
+    try:
+        # Save uploaded file
+        print( f"Saving file [{file.filename}] to [{temp_file}]...", end="" )
+        contents = await file.read()
+        with open( temp_file, "wb" ) as f:
+            f.write( contents )
+        print( " Done!" )
+        
+        # Transcribe the audio
+        timer = sw.Stopwatch( msg=f"Transcribing {temp_file}..." )
+        raw_transcription = whisper_pipeline( temp_file )
+        timer.print( "Done!", use_millis=True, end="\n\n" )
+        
+        raw_transcription = raw_transcription[ "text" ].strip()
+        print( f"transcribed_text: [{raw_transcription}]" )
+        
+        # Process transcription
+        app_debug = config_mgr.get( "app_debug", default=False, return_type="boolean" )
+        app_verbose = config_mgr.get( "app_verbose", default=False, return_type="boolean" )
+        
+        munger = mmm.MultiModalMunger(
+            raw_transcription, prefix=prefix, debug=app_debug,
+            verbose=app_verbose, config_mgr=config_mgr
+        )
+        
+        # Insert into I/O table
+        io_tbl.insert_io_row(
+            input_type=f"upload and proofread wav: {munger.mode}",
+            input=raw_transcription,
+            output_raw=munger.transcription,
+            output_final=munger.get_jsons()
+        )
+        
+        return munger.transcription
+        
+    finally:
+        # Clean up temp file
+        if os.path.exists( temp_file ):
+            print( f"Deleting temp file [{temp_file}]...", end="" )
+            os.remove( temp_file )
+            print( " Done!" )
+
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "fastapi_app.main:app",
+        host="0.0.0.0",
+        port=7999,
+        reload=True,
+        log_level="info"
+    )

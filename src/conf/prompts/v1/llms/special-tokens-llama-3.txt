@@ -1,0 +1,3 @@
+<s> [INST] <<SYS>> {instructions} <</SYS>>
+
+{input} [/INST] {output} </s>

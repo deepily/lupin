@@ -1,0 +1,47 @@
+todo_item,due_date,priority,completed,list_name
+Knock'em dead kid!,2024-10-17,high,no,TO DO
+You've got a big demo today!,2024-10-19,high,no,TODO
+Break a leg kid!,2024-10-18,high,no,TODO
+fruit,2024-04-09,high,no,trader joe's
+cheese,2024-04-09,high,no,trader joe's
+fruit,2024-04-15,high,no,trader joe's
+nuts,2024-03-04,normal,no,trader joe's
+bread,2024-03-07,normal,no,trader joe's
+buy decorations,2024-03-29,low,no,birthday party
+create playlist,2024-04-24,low,no,birthday party
+buy decorations,2024-04-19,high,no,birthday party
+pack snacks,2024-03-09,low,no,packing for vacation
+buy sunscreen,2024-04-14,low,no,packing for vacation
+pack snacks,2024-04-15,high,no,packing for vacation
+pack clothes,2024-04-04,normal,no,packing for vacation
+charge electronics,2024-02-27,low,no,packing for vacation
+paint living room,2024-03-12,low,no,home maintenance
+fix leaky faucet,2024-04-22,high,no,home maintenance
+clean gutters,2024-03-02,high,no,home maintenance
+mow the lawn,2024-04-18,low,no,home maintenance
+talk to Yevon about total compensation,2024-03-07,normal,no,ongoing google interview marathon
+review budget,2024-04-01,low,no,work project
+submit proposal,2024-03-30,high,no,work project
+review budget,2024-03-10,high,no,work project
+attend meeting,2024-04-11,normal,no,work project
+study for midterms,2024-03-25,high,no,study schedule
+group project meeting,2024-03-04,low,no,study schedule
+complete assignment 2,2024-03-01,normal,no,study schedule
+read chapter 4,2024-04-03,high,no,study schedule
+bike ride,2024-03-11,low,no,fitness goals
+run 5km,2024-04-11,high,no,fitness goals
+run 5km,2024-03-11,low,no,fitness goals
+the great gatsby by f. scott fitzgerald,2024-03-01,high,no,books to read
+to kill a mockingbird by harper lee,2024-03-14,high,no,books to read
+moby dick by herman melville,2024-03-10,high,no,books to read
+christmas presents,2024-04-02,normal,no,gift shopping
+anniversary present,2024-04-16,normal,no,gift shopping
+graduation gift,2024-03-09,low,no,gift shopping
+meditate,2024-03-19,normal,no,personal goals
+meditate,2024-03-26,high,no,personal goals
+learn a new language,2024-04-09,high,no,personal goals
+budget review,2024-02-29,normal,no,financial planning
+save for vacation,2024-04-17,low,no,financial planning
+invest in stocks,2024-03-09,low,no,financial planning
+plan retirement,2024-03-25,low,no,financial planning
+pay off debt,2024-03-08,normal,no,financial planning

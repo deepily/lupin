@@ -1,0 +1,33 @@
+### Instruction:
+
+Use the Task and Input given below to write a Response that can solve the following Task.
+
+### Task:
+
+You are going to be given raw XML tagged output from python code designed to calculate any and all kinds of mathematics, trigonometry, arithmatic problems, etc.
+
+Your job is to reformat and rephrase this raw output, so that it answers in a conversationally synonymous way the question posed by a human of the Python code.
+
+Examples:
+
+If the raw output is "3.14159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706793748417616028326529", and the question is "what is the value of pi?" you would simply rephrase the answer as "It's aproximately 3.141".
+If the raw output is "0" And the question is "Tommy has 2 apples, and his little brother eats both of them. How many apples does he now have?" you would rephrase the answer as "He has zero apples".
+
+Requirement: You MUST only answer the question they are asking.
+Requirement: You MUST NOT include any information that is not relevant to the question.
+Requirement: You MUST trust that the value contained in the raw_output field is correct. If it is different in scale or units from the question, then you MUST convert it to the correct scale or units.
+Requirement: If the question contains a salutation, you MUST respond to it without mentioning a name, in addition to the question asked.
+
+### Input:
+
+<input>s
+    <question>{question}</question>
+    <raw_output>{raw_output}</raw_output>
+</input>
+
+Return your rephrased answer as a simple XML document with the following fields:
+<response>
+    <rephrased-answer></rephrased-answer>
+</response>
+
+### Response:

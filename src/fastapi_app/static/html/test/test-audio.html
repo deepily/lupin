@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Endpoint Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .input-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        audio {
+            width: 100%;
+            margin-top: 20px;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        .status.loading {
+            background-color: #e3f2fd;
+            color: #1976d2;
+            display: block;
+        }
+        .status.success {
+            background-color: #e8f5e9;
+            color: #388e3c;
+            display: block;
+        }
+        .status.error {
+            background-color: #ffebee;
+            color: #c62828;
+            display: block;
+        }
+        .endpoint-info {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Audio Endpoint Test</h1>
+        
+        <div class="input-group">
+            <label for="ttsText">Text to Convert to Speech:</label>
+            <input type="text" id="ttsText" placeholder="Enter text for TTS conversion" value="Hello, this is a test of the text to speech system.">
+        </div>
+        
+        <div class="input-group">
+            <label>Session ID:</label>
+            <div id="sessionIdDisplay" style="font-family: monospace; background-color: #f0f0f0; padding: 8px; border-radius: 4px; color: #666;">
+                Connecting...
+            </div>
+        </div>
+        
+        <button onclick="testAudioEndpoint()">Test Audio Endpoint</button>
+        
+        <div id="status" class="status"></div>
+        
+        <audio id="audioPlayer" controls preload="none" style="display: none;"></audio>
+        
+        <div class="endpoint-info">
+            <strong>Endpoint:</strong><br>
+            <code>http://localhost:7999/api/get-audio (WebSocket streaming)</code>
+        </div>
+    </div>
+
+    <script>
+        const audioPlayer = document.getElementById('audioPlayer');
+        const statusDiv = document.getElementById('status');
+        const ttsTextInput = document.getElementById('ttsText');
+        const sessionIdDisplay = document.getElementById('sessionIdDisplay');
+        let isRequesting = false;
+        let sessionId = null;
+        let websocket = null;
+        let audioChunks = [];
+        let mediaSource = null;
+        let sourceBuffer = null;
+
+        function showStatus(message, type) {
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+        }
+
+        // Get session ID and establish WebSocket connection on page load
+        async function initializeSession() {
+            try {
+                showStatus('Getting session ID...', 'loading');
+                sessionIdDisplay.textContent = 'Connecting...';
+                
+                // Get session ID from server
+                const response = await fetch('/api/get-session-id');
+                if (!response.ok) {
+                    throw new Error(`Failed to get session ID: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                sessionId = data.session_id;
+                console.log('Session ID:', sessionId);
+                
+                // Display session ID in UI
+                sessionIdDisplay.textContent = sessionId;
+                sessionIdDisplay.style.color = '#333';
+                
+                // Establish WebSocket connection
+                await connectWebSocket();
+                
+                showStatus(`Connected with session: ${sessionId}`, 'success');
+                
+            } catch (error) {
+                showStatus(`Initialization error: ${error.message}`, 'error');
+                sessionIdDisplay.textContent = 'Connection failed';
+                sessionIdDisplay.style.color = '#c62828';
+                console.error('Initialization error:', error);
+            }
+        }
+
+        // Establish WebSocket connection
+        async function connectWebSocket() {
+            return new Promise((resolve, reject) => {
+                try {
+                    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${wsProtocol}//${window.location.host}/ws/${sessionId}`;
+                    
+                    console.log('Connecting to WebSocket:', wsUrl);
+                    websocket = new WebSocket(wsUrl);
+                    
+                    websocket.onopen = () => {
+                        console.log('WebSocket connected');
+                        resolve();
+                    };
+                    
+                    websocket.onmessage = (event) => {
+                        handleWebSocketMessage(event);
+                    };
+                    
+                    websocket.onclose = () => {
+                        console.log('WebSocket disconnected');
+                        showStatus('WebSocket disconnected', 'error');
+                    };
+                    
+                    websocket.onerror = (error) => {
+                        console.error('WebSocket error:', error);
+                        reject(error);
+                    };
+                    
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        }
+
+        // Get preferred audio format based on browser capabilities
+        function getPreferredAudioFormat() {
+            const isFirefox = navigator.userAgent.includes( 'Firefox' );
+            
+            console.log( `Browser detection: ${isFirefox ? 'Firefox' : 'Chrome/Other'}` );
+            
+            if ( isFirefox ) {
+                // Firefox MediaSource support is limited - check for WebM/Opus first
+                const firefoxFormats = [
+                    'audio/webm; codecs="opus"',      // Opus in WebM container
+                    'audio/webm; codecs="vorbis"',    // Vorbis in WebM container
+                    'audio/mp4; codecs="mp4a.40.2"',  // AAC-LC in MP4
+                    'audio/mp4'                       // Basic MP4 audio
+                ];
+                
+                console.log( 'Testing Firefox audio format support:' );
+                for ( const type of firefoxFormats ) {
+                    const isSupported = MediaSource.isTypeSupported( type );
+                    console.log( `  ${type}: ${isSupported}` );
+                    if ( isSupported ) {
+                        // For now, we'll use fallback since OpenAI doesn't provide WebM
+                        // and raw AAC needs proper MP4 containerization
+                        console.log( 'Firefox: MediaSource available but using fallback for compatibility' );
+                        return null;  // Use fallback for reliable playback
+                    }
+                }
+                
+                console.log( 'Firefox MediaSource not supported - using fallback' );
+                return null;  // Will trigger fallback mode
+            } else {
+                // Chrome and others support direct MP3 streaming
+                const chromeFormats = [
+                    'audio/mpeg',
+                    'audio/mp3',
+                    'audio/mpeg; codecs="mp3"'
+                ];
+                
+                console.log( 'Testing Chrome MP3 support:' );
+                for ( const type of chromeFormats ) {
+                    const isSupported = MediaSource.isTypeSupported( type );
+                    console.log( `  ${type}: ${isSupported}` );
+                    if ( isSupported ) {
+                        return { format: 'mp3', mimeType: type };
+                    }
+                }
+            }
+            
+            console.log( 'No supported MediaSource format found' );
+            return null;
+        }
+
+        // Initialize MediaSource for streaming audio
+        function initializeMediaSource() {
+            console.log( '=== MediaSource Initialization Debug ===' );
+            console.log( 'Browser:', navigator.userAgent );
+            console.log( 'MediaSource available:', typeof MediaSource !== 'undefined' );
+            
+            if ( typeof MediaSource === 'undefined' ) {
+                console.error( 'MediaSource API not available in this browser' );
+                return false;
+            }
+            
+            // Get preferred format for this browser
+            const preferredFormat = getPreferredAudioFormat();
+            
+            if ( !preferredFormat ) {
+                console.error( 'No supported audio format found for MediaSource' );
+                console.log( 'Testing available formats:' );
+                console.log( '  MP3:', MediaSource.isTypeSupported( 'audio/mpeg' ) );
+                console.log( '  WebM/Opus:', MediaSource.isTypeSupported( 'audio/webm; codecs="opus"' ) );
+                console.log( '  WebM/Vorbis:', MediaSource.isTypeSupported( 'audio/webm; codecs="vorbis"' ) );
+                return false;
+            }
+            
+            console.log( 'Selected format:', preferredFormat.format );
+            console.log( 'Selected MIME type:', preferredFormat.mimeType );
+            
+            // Store for later use
+            window.selectedAudioFormat = preferredFormat;
+            
+            // Legacy code for compatibility - will use new logic above
+            const supportedTypes = [ preferredFormat.mimeType ];
+            
+            console.log( 'Testing MediaSource MIME type support:' );
+            let selectedType = null;
+            for ( const type of supportedTypes ) {
+                const isSupported = MediaSource.isTypeSupported( type );
+                console.log( `  ${type}: ${isSupported}` );
+                if ( isSupported && !selectedType ) {
+                    selectedType = type;
+                }
+            }
+            
+            if ( !selectedType ) {
+                console.error( 'No supported MP3 MediaSource type found' );
+                console.log( 'Available MediaSource support:' );
+                console.log( '  WebM Audio:', MediaSource.isTypeSupported( 'audio/webm; codecs="opus"' ) );
+                console.log( '  WebM Video:', MediaSource.isTypeSupported( 'video/webm; codecs="vorbis"' ) );
+                console.log( '  MP4:', MediaSource.isTypeSupported( 'video/mp4; codecs="avc1.42E01E"' ) );
+                console.log( 'Firefox detected - MP3 MediaSource not supported, using fallback method' );
+                return false;
+            }
+            
+            console.log( 'Selected MediaSource type:', selectedType );
+            
+            mediaSource = new MediaSource();
+            const mediaUrl = URL.createObjectURL( mediaSource );
+            
+            mediaSource.addEventListener( 'sourceopen', () => {
+                console.log( 'MediaSource sourceopen event fired' );
+                console.log( 'MediaSource readyState:', mediaSource.readyState );
+                
+                try {
+                    console.log( 'Creating SourceBuffer with type:', selectedType );
+                    sourceBuffer = mediaSource.addSourceBuffer( selectedType );
+                    
+                    // Try segments mode to preserve timestamps
+                    try {
+                        sourceBuffer.mode = 'segments';
+                        console.log( 'SourceBuffer created successfully with segments mode' );
+                    } catch (e) {
+                        // Fallback to sequence mode if segments not supported
+                        sourceBuffer.mode = 'sequence';
+                        console.log( 'SourceBuffer created with sequence mode (fallback)' );
+                    }
+                    console.log( 'SourceBuffer mode:', sourceBuffer.mode );
+                    console.log( 'SourceBuffer updating:', sourceBuffer.updating );
+                    
+                    sourceBuffer.addEventListener( 'updateend', () => {
+                        console.log( 'SourceBuffer updateend - chunks pending:', pendingChunks.length );
+                        // Reset flag and process any pending chunks
+                        isAppending = false;
+                        
+                        // Check if we can start playback with current buffer
+                        checkAndStartPlayback();
+                        
+                        // Process any remaining chunks
+                        processAudioQueue();
+                    } );
+                    
+                    sourceBuffer.addEventListener( 'error', ( error ) => {
+                        console.error( 'SourceBuffer error event:', error );
+                        console.log( 'SourceBuffer state:', {
+                            updating: sourceBuffer.updating,
+                            buffered: sourceBuffer.buffered.length,
+                            mode: sourceBuffer.mode
+                        } );
+                    } );
+                    
+                    sourceBuffer.addEventListener( 'abort', () => {
+                        console.log( 'SourceBuffer abort event' );
+                    } );
+                    
+                    console.log( 'MediaSource ready for streaming with type:', selectedType );
+                } catch ( error ) {
+                    console.error( 'Error setting up SourceBuffer:', error );
+                    console.log( 'Error details:', error.message );
+                    showStatus( 'Error setting up audio streaming', 'error' );
+                }
+            } );
+            
+            mediaSource.addEventListener( 'sourceended', () => {
+                console.log( 'MediaSource sourceended event' );
+            } );
+            
+            mediaSource.addEventListener( 'error', ( error ) => {
+                console.error( 'MediaSource error event:', error );
+            } );
+            
+            audioPlayer.src = mediaUrl;
+            audioPlayer.style.display = 'block';
+            
+            return true;
+        }
+
+        // Queue for pending audio chunks
+        let pendingChunks = [];
+        let isAppending = false;
+
+        // Track if we've started playback
+        let playbackStarted = false;
+        
+        // Check buffer duration and start playback when ready
+        function checkAndStartPlayback() {
+            if ( audioPlayer.paused && sourceBuffer && !sourceBuffer.updating ) {
+                // Check if we have sufficient buffered duration
+                if ( sourceBuffer.buffered.length > 0 ) {
+                    const bufferedDuration = sourceBuffer.buffered.end(0) - sourceBuffer.buffered.start(0);
+                    const totalChunks = audioChunks.length;
+                    console.log( `Buffer check: ${bufferedDuration.toFixed(2)}s buffered (${totalChunks} chunks received)` );
+                    
+                    // Chrome: Wait for significant chunks to ensure we capture the speech
+                    // OpenAI's TTS often has silence at the beginning
+                    const isChrome = !navigator.userAgent.includes( 'Firefox' );
+                    const minChunks = isChrome ? 3 : 1;  // Wait for 3 chunks in Chrome
+                    const minBufferTime = isChrome ? 1.0 : 0.3;  // Wait for 1 full second
+                    
+                    if ( bufferedDuration >= minBufferTime && totalChunks >= minChunks && !playbackStarted ) {
+                        console.log( `🎵 Starting playback with ${bufferedDuration.toFixed(2)}s buffered and ${totalChunks} chunks` );
+                        
+                        playbackStarted = true;
+                        
+                        // For Chrome: Start from the beginning and trust the buffer
+                        if ( isChrome ) {
+                            // Set currentTime to 0 explicitly to ensure we start from the beginning
+                            audioPlayer.currentTime = 0;
+                            console.log( '🎯 Chrome: Starting from beginning with full buffer' );
+                        }
+                        
+                        audioPlayer.play().then( () => {
+                            console.log( '✅ Playback started successfully at', audioPlayer.currentTime.toFixed(2), 's' );
+                            
+                            // Monitor for first non-silent audio
+                            let silenceDetected = true;
+                            const monitor = setInterval( () => {
+                                const currentTime = audioPlayer.currentTime;
+                                
+                                if ( currentTime > 0 && currentTime < 3 ) {
+                                    // Log current time and buffer status
+                                    const bufferEnd = sourceBuffer.buffered.length > 0 ? sourceBuffer.buffered.end(0) : 0;
+                                    console.log( `⏱️ Time: ${currentTime.toFixed(2)}s, Buffered to: ${bufferEnd.toFixed(2)}s` );
+                                    
+                                    // Detect transition from silence (optional enhancement)
+                                    if ( silenceDetected && currentTime > 0.5 ) {
+                                        silenceDetected = false;
+                                        console.log( '🔊 Audio content detected at', currentTime.toFixed(2), 's' );
+                                    }
+                                } else if ( currentTime >= 3 ) {
+                                    clearInterval( monitor );
+                                }
+                            }, 100 );  // Check every 100ms
+                        }).catch( e => console.log( 'Auto-play prevented:', e.message ) );
+                    } else if ( !playbackStarted ) {
+                        console.log( `⏳ Waiting: ${bufferedDuration.toFixed(2)}s < ${minBufferTime}s or ${totalChunks} < ${minChunks} chunks` );
+                    }
+                } else {
+                    console.log( '📭 No buffered ranges available yet' );
+                }
+            } else if ( !audioPlayer.paused ) {
+                console.log( '▶️ Audio already playing' );
+            }
+        }
+
+        // Process queued audio chunks
+        async function processAudioQueue() {
+            console.log( 'processAudioQueue called - pending chunks:', pendingChunks.length );
+            
+            if ( isAppending ) {
+                console.log( 'Already appending - skipping' );
+                return;
+            }
+            
+            if ( !sourceBuffer ) {
+                console.log( 'No sourceBuffer - skipping' );
+                return;
+            }
+            
+            if ( pendingChunks.length === 0 ) {
+                console.log( 'No pending chunks - skipping' );
+                return;
+            }
+            
+            if ( sourceBuffer.updating ) {
+                console.log( 'SourceBuffer updating - waiting' );
+                return; // Wait for current operation to finish
+            }
+            
+            console.log( 'Processing chunk - setting isAppending=true' );
+            isAppending = true;
+            const chunk = pendingChunks.shift();
+            
+            try {
+                console.log( 'Converting chunk to ArrayBuffer, size:', chunk.size );
+                const arrayBuffer = await chunk.arrayBuffer();
+                console.log( 'Appending buffer of size:', arrayBuffer.byteLength );
+                
+                sourceBuffer.appendBuffer( arrayBuffer );
+                console.log( 'appendBuffer called successfully' );
+                
+                // isAppending will be reset in the updateend event handler
+            } catch ( error ) {
+                console.error( 'Error appending audio chunk:', error );
+                console.log( 'Error details:', error.message );
+                console.log( 'SourceBuffer state:', {
+                    updating: sourceBuffer?.updating,
+                    readyState: mediaSource?.readyState
+                } );
+                isAppending = false;
+            }
+        }
+
+        // Handle incoming WebSocket messages
+        function handleWebSocketMessage( event ) {
+            try {
+                if ( event.data instanceof Blob ) {
+                    // Audio chunk received
+                    console.log( 'Received audio chunk:', event.data.size, 'bytes' );
+                    
+                    // If this is the first chunk, initialize MediaSource
+                    if ( audioChunks.length === 0 ) {
+                        console.log( 'First chunk received - initializing MediaSource' );
+                        if ( !initializeMediaSource() ) {
+                            // Fallback to blob method if MediaSource not supported
+                            console.log( 'MediaSource failed - using fallback method' );
+                            audioChunks.push( event.data );
+                            return;
+                        }
+                        showStatus( 'Starting streaming audio playback...', 'loading' );
+                        
+                        // For Chrome: Process first chunk immediately to avoid delay
+                        if ( !navigator.userAgent.includes( 'Firefox' ) ) {
+                            console.log( '🚀 Chrome detected - fast-tracking first chunk' );
+                        }
+                    }
+                    
+                    audioChunks.push( event.data );
+                    console.log( 'Total chunks received:', audioChunks.length );
+                    
+                    // Add chunk to processing queue
+                    if ( sourceBuffer ) {
+                        console.log( 'Adding chunk to processing queue' );
+                        pendingChunks.push( event.data );
+                        processAudioQueue();
+                    } else {
+                        console.log( 'No sourceBuffer yet - chunk will be processed when MediaSource opens' );
+                    }
+                    
+                } else {
+                    // Text message (status update)
+                    const message = JSON.parse( event.data );
+                    console.log( 'WebSocket message:', message );
+                    
+                    if ( message.type === 'status' ) {
+                        showStatus( message.text, message.status );
+                    } else if ( message.type === 'audio_complete' ) {
+                        console.log( `Audio streaming complete! Total chunks: ${audioChunks.length}` );
+                        
+                        // End the MediaSource stream
+                        if ( mediaSource && mediaSource.readyState === 'open' ) {
+                            // Wait for any pending chunks to be processed with more robust checking
+                            const endStream = () => {
+                                if ( !sourceBuffer ) {
+                                    console.log( 'No sourceBuffer - ending stream' );
+                                    try {
+                                        mediaSource.endOfStream();
+                                    } catch ( e ) {
+                                        console.log( 'EndOfStream already called or MediaSource closed' );
+                                    }
+                                    showStatus( 'Audio streaming completed!', 'success' );
+                                    isRequesting = false;
+                                    return;
+                                }
+                                
+                                if ( pendingChunks.length === 0 && !sourceBuffer.updating && !isAppending ) {
+                                    console.log( 'All chunks processed - ending stream' );
+                                    try {
+                                        if ( mediaSource.readyState === 'open' ) {
+                                            mediaSource.endOfStream();
+                                        }
+                                    } catch ( e ) {
+                                        console.log( 'Error ending stream (likely already ended):', e.message );
+                                    }
+                                    showStatus( 'Audio streaming completed!', 'success' );
+                                    isRequesting = false;
+                                } else {
+                                    console.log( `Waiting for chunks to finish: pending=${pendingChunks.length}, updating=${sourceBuffer.updating}, appending=${isAppending}` );
+                                    setTimeout( endStream, 50 );
+                                }
+                            };
+                            endStream();
+                        } else {
+                            console.log( 'MediaSource not available - using fallback' );
+                            fallbackAudioPlayback();
+                        }
+                    }
+                }
+            } catch ( error ) {
+                console.error( 'Error handling WebSocket message:', error );
+            }
+        }
+
+        // Fallback audio playback for browsers that don't support MediaSource
+        function fallbackAudioPlayback() {
+            if ( audioChunks.length > 0 ) {
+                // Use the correct MIME type based on the format we requested
+                const isFirefox = navigator.userAgent.includes( 'Firefox' );
+                
+                // For Firefox, always use MP3 for better compatibility
+                const mimeType = 'audio/mpeg';  // MP3 works best for fallback
+                
+                console.log( `Creating fallback blob with MIME type: ${mimeType}` );
+                const audioBlob = new Blob( audioChunks, { type: mimeType } );
+                const audioUrl = URL.createObjectURL( audioBlob );
+                
+                audioPlayer.src = audioUrl;
+                audioPlayer.style.display = 'block';
+                
+                // Start playback immediately for better user experience
+                audioPlayer.play().then( () => {
+                    console.log( '▶️ Fallback playback started' );
+                }).catch( e => {
+                    console.log( 'Auto-play prevented:', e.message );
+                });
+                
+                audioPlayer.addEventListener( 'ended', () => {
+                    URL.revokeObjectURL( audioUrl );
+                    resetAudioState();
+                }, { once: true } );
+                
+                // More informative status message
+                const statusMsg = isFirefox ? 
+                    'Audio playing (Firefox - Progressive download)' : 
+                    'Audio playing (Fallback mode)';
+                showStatus( statusMsg, 'success' );
+                isRequesting = false;
+            }
+        }
+
+        // Reset audio state for next request
+        function resetAudioState() {
+            audioChunks = [];
+            pendingChunks = [];
+            isAppending = false;
+            playbackStarted = false;
+            
+            if ( mediaSource ) {
+                if ( mediaSource.readyState === 'open' ) {
+                    mediaSource.endOfStream();
+                }
+                mediaSource = null;
+            }
+            sourceBuffer = null;
+        }
+
+        // Initialize session when page loads
+        window.addEventListener('load', initializeSession);
+
+        async function testAudioEndpoint() {
+            // Prevent multiple simultaneous requests
+            if ( isRequesting ) {
+                showStatus( 'Request already in progress...', 'loading' );
+                return;
+            }
+            
+            // Check if we have session ID and WebSocket connection
+            if ( !sessionId || !websocket ) {
+                showStatus( 'No session or WebSocket connection', 'error' );
+                return;
+            }
+            
+            isRequesting = true;
+            const text = ttsTextInput.value;
+            
+            showStatus( 'Sending TTS request...', 'loading' );
+            
+            // Reset audio state for new request
+            resetAudioState();
+            audioPlayer.src = '';
+            
+            try {
+                // Determine preferred format for this browser
+                const preferredFormat = getPreferredAudioFormat();
+                const format = preferredFormat ? preferredFormat.format : 'mp3';
+                
+                console.log( 'Requesting audio in format:', format );
+                
+                // Send POST request with session_id, text, and preferred format
+                const response = await fetch( '/api/get-audio', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify( {
+                        session_id: sessionId,
+                        text: text,
+                        preferred_format: format
+                    } )
+                } );
+                
+                if ( !response.ok ) {
+                    throw new Error( `HTTP error! status: ${response.status}` );
+                }
+                
+                const result = await response.json();
+                console.log( 'TTS request response:', result );
+                
+                showStatus( 'TTS request sent - waiting for audio chunks...', 'loading' );
+                
+                // Audio will arrive via WebSocket - handled by handleWebSocketMessage
+                
+            } catch ( error ) {
+                showStatus( `Error sending TTS request: ${error.message}`, 'error' );
+                console.error( 'Error:', error );
+                isRequesting = false;
+            }
+        }
+
+        // Allow Enter key to test endpoint
+        ttsTextInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                testAudioEndpoint();
+            }
+        });
+    </script>
+</body>
+</html>

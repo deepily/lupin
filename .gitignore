@@ -1,0 +1,70 @@
+# Skip CoSA repo
+src/cosa
+
+# Skip the usual OS X artifacts and noise
+.DS_Store
+._.DS_Store
+._run-genie-gui.sh
+.idea/
+._*
+
+# claude code
+.claude
+src/.claude/*
+
+# Weird Samba artifacts
+.smbdelete*
+
+**/__pycache__/**
+
+**/.ipynb_checkpoints/**
+
+# Don't track DB artifacts
+src/conf/long-term-memory/gib.lancedb**
+
+# No LLM's, please
+models/**
+
+# Skip OSX console script + icon based launcher experiment
+genie.app/**
+.app**
+
+# Omit the script because it contains the open API key
+src/scripts/run-genie-gui.command
+
+# This is personal information
+src/conf/contact-information.map
+
+# This is also personal information.
+src/conf/memory/**
+
+#skip the keys directory
+src/conf/keys/**
+
+# Skip the io/logs directory
+io/**
+
+# Omit Mail Map
+.mailmap
+
+# Skip the question embeddings dictionary, this can always be regenerated
+src/conf/long-term-memory/question-embeddings-dictionary.pickle
+
+# Re-don't want to track venv!
+venv/**
+
+# Python web server artifact
+nohup.out
+
+# skip anything contained within a directory called foo
+**/foo/**
+
+# Skip your voice come in training data, it's too big!
+# Why isn't this exclusion working?!?
+**/voice-commands-xml-*.jsonl
+#src/ephemera/prompts/data/voice-commands-xml-test.jsonl
+#src/ephemera/prompts/data/voice-commands-xml-train.jsonl
+#src/ephemera/prompts/data/voice-commands-xml-validate.jsonl
+.codiumai
+
+.qodo

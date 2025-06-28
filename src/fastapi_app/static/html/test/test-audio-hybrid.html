@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hybrid TTS Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .input-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        audio {
+            width: 100%;
+            margin-top: 20px;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        .status.loading {
+            background-color: #e3f2fd;
+            color: #1976d2;
+            display: block;
+        }
+        .status.success {
+            background-color: #e8f5e9;
+            color: #388e3c;
+            display: block;
+        }
+        .status.error {
+            background-color: #ffebee;
+            color: #c62828;
+            display: block;
+        }
+        .progress {
+            margin-top: 10px;
+            font-family: monospace;
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hybrid TTS Test</h1>
+        <p><strong>Concept:</strong> Stream chunks for speed, play when complete for reliability</p>
+        
+        <div class="input-group">
+            <label for="ttsText">Text to Convert to Speech:</label>
+            <input type="text" id="ttsText" placeholder="Enter text for TTS conversion" value="Hello, this is a test of the hybrid text to speech system.">
+        </div>
+        
+        <button onclick="testHybridTTS()">Generate Audio (Hybrid)</button>
+        
+        <div id="status" class="status"></div>
+        <div id="progress" class="progress"></div>
+        <audio id="audioPlayer" controls style="display: none;"></audio>
+    </div>
+
+    <script>
+        const ttsTextInput = document.getElementById( 'ttsText' );
+        const audioPlayer = document.getElementById( 'audioPlayer' );
+        const progressDiv = document.getElementById( 'progress' );
+        
+        let websocket = null;
+        let sessionId = null;
+        let isRequesting = false;
+        let audioChunks = [];
+        let startTime = null;
+
+        function showStatus( message, type ) {
+            const statusDiv = document.getElementById( 'status' );
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+        }
+
+        function updateProgress( message ) {
+            progressDiv.textContent = message;
+        }
+
+        async function initializeSession() {
+            try {
+                // Get session ID
+                const response = await fetch( '/api/get-session-id' );
+                const data = await response.json();
+                sessionId = data.session_id;
+                
+                // Connect WebSocket
+                websocket = new WebSocket( `ws://localhost:7999/ws/${sessionId}` );
+                
+                websocket.onopen = () => {
+                    console.log( 'WebSocket connected' );
+                };
+                
+                websocket.onmessage = handleWebSocketMessage;
+                
+                websocket.onerror = ( error ) => {
+                    console.error( 'WebSocket error:', error );
+                    showStatus( 'WebSocket connection failed', 'error' );
+                };
+                
+                websocket.onclose = () => {
+                    console.log( 'WebSocket disconnected' );
+                };
+                
+            } catch ( error ) {
+                console.error( 'Session initialization failed:', error );
+                showStatus( 'Failed to initialize session', 'error' );
+            }
+        }
+
+        function handleWebSocketMessage( event ) {
+            if ( event.data instanceof Blob ) {
+                // Audio chunk received
+                audioChunks.push( event.data );
+                
+                const elapsed = ( Date.now() - startTime ) / 1000;
+                updateProgress( `Received ${audioChunks.length} chunks in ${elapsed.toFixed(1)}s` );
+                
+            } else {
+                // Status message
+                const message = JSON.parse( event.data );
+                
+                if ( message.type === 'audio_complete' ) {
+                    // All chunks received - create and play audio
+                    playCollectedAudio();
+                } else if ( message.type === 'status' ) {
+                    if ( message.status === 'loading' && audioChunks.length === 0 ) {
+                        showStatus( message.text, 'loading' );
+                        startTime = Date.now();
+                    }
+                }
+            }
+        }
+
+        function playCollectedAudio() {
+            if ( audioChunks.length === 0 ) {
+                showStatus( 'No audio data received', 'error' );
+                return;
+            }
+
+            const totalTime = ( Date.now() - startTime ) / 1000;
+            updateProgress( `Complete! ${audioChunks.length} chunks in ${totalTime.toFixed(1)}s - Playing audio...` );
+
+            // Create single blob from all chunks
+            const audioBlob = new Blob( audioChunks, { type: 'audio/mpeg' } );
+            const audioUrl = URL.createObjectURL( audioBlob );
+
+            // Set up and play audio
+            audioPlayer.src = audioUrl;
+            audioPlayer.style.display = 'block';
+
+            audioPlayer.play().then( () => {
+                showStatus( `Audio playing! (${totalTime.toFixed(1)}s total time)`, 'success' );
+            }).catch( e => {
+                showStatus( `Audio ready (${totalTime.toFixed(1)}s total time)`, 'success' );
+                console.log( 'Auto-play prevented:', e.message );
+            });
+
+            // Clean up
+            audioPlayer.addEventListener( 'ended', () => {
+                URL.revokeObjectURL( audioUrl );
+                resetAudioState();
+            }, { once: true } );
+
+            isRequesting = false;
+        }
+
+        function resetAudioState() {
+            audioChunks = [];
+            startTime = null;
+            updateProgress( '' );
+        }
+
+        async function testHybridTTS() {
+            if ( isRequesting ) {
+                showStatus( 'Request already in progress...', 'loading' );
+                return;
+            }
+
+            if ( !websocket || !sessionId ) {
+                showStatus( 'WebSocket not connected', 'error' );
+                return;
+            }
+
+            isRequesting = true;
+            const text = ttsTextInput.value;
+
+            // Reset state
+            resetAudioState();
+            audioPlayer.src = '';
+            audioPlayer.style.display = 'none';
+
+            showStatus( 'Starting hybrid TTS...', 'loading' );
+
+            try {
+                // Send TTS request (will stream chunks via WebSocket)
+                const response = await fetch( '/api/get-audio', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify( {
+                        session_id: sessionId,
+                        text: text
+                    } )
+                } );
+
+                if ( !response.ok ) {
+                    throw new Error( `HTTP error! status: ${response.status}` );
+                }
+
+                // Response just confirms request started
+                // Audio will arrive via WebSocket
+                
+            } catch ( error ) {
+                showStatus( `Error: ${error.message}`, 'error' );
+                isRequesting = false;
+                resetAudioState();
+            }
+        }
+
+        // Initialize when page loads
+        window.addEventListener( 'load', initializeSession );
+
+        // Allow Enter key to test
+        ttsTextInput.addEventListener( 'keypress', ( e ) => {
+            if ( e.key === 'Enter' ) {
+                testHybridTTS();
+            }
+        } );
+    </script>
+</body>
+</html>
