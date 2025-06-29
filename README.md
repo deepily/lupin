@@ -1,7 +1,9 @@
 
 <picture>
- <img alt="Performant Vox 2 Vox Agents" src="https://deepily.ai/images/logo-no-background.svg">
+ <img alt="Lupin - Performant Vox 2 Vox Agents" src="https://deepily.ai/images/logo-no-background.svg">
 </picture>
+
+# Lupin
 
 ### YOU KNOW THE DREAM
 
@@ -63,17 +65,28 @@ and
 
 #### TECHNICAL ROADMAP & ARCHITECTURE
 
-For detailed technical documentation on where we're heading and current implementation status:
+Lupin is built on a modern FastAPI architecture with WebSocket support for real-time communication. The project integrates with the COSA (Collection of Small Agents) framework to provide intelligent agent capabilities.
 
-- **[FastAPI Migration Overview](src/rnd/2025.04.05-flask-to-fastapi-migration.md)** - Early migration planning and architectural considerations
-- **[Comprehensive Migration Plan](src/rnd/2025.05.19-flask-to-fastapi-migration-plan.md)** - Detailed phased approach to migrating from Flask to FastAPI with progress tracking
-- **[WebSocket TTS Streaming Design](src/rnd/2025.06.03-websocket-tts-streaming-design.md)** - Architecture for real-time text-to-speech streaming over WebSockets
+**Current Architecture:**
+- **FastAPI-only server** running on port 7999 (Flask has been completely eliminated as of 2025.06.28)
+- **WebSocket support** for real-time bidirectional communication
+- **COSA integration** for modular agent framework
+- **Notification system** for agent-to-user feedback
 
-These documents outline our transition from a Flask-SocketIO based system to a modern FastAPI architecture with native WebSocket support, async/await patterns, and streaming audio capabilities for more responsive voice interactions.
+**Key Technical Documents:**
+- **[WebSocket TTS Streaming Design](src/rnd/2025.06.03-websocket-tts-streaming-design.md)** - Architecture for real-time text-to-speech streaming
+- **[Claude Code Notification System](src/rnd/2025.06.20-claude-code-notification-system-design.md)** - Design for real-time agent notifications
+- **[FastAPI Queue Implementation](src/rnd/2025.06.17-fastapi-queue-implementation-plan.md)** - Queue-based request handling
+- **[Lupin Renaming Plan](src/rnd/2025.06.28-lupin-renaming-plan.md)** - Project rebranding documentation
+
+**Quick Start Commands:**
+- Run FastAPI server: `src/scripts/run-fastapi-gib.sh`
+- Run GUI client: `src/scripts/run-lupin-gui.sh`
+- Run GSM8K benchmarks: `src/scripts/run-gsm8k.sh --help`
 
 #### DISCLAIMER
 
-This [Genie-in-the-box project](https://www.linkedin.com/pulse/ai-virtual-prosthesis-how-i-created-genie-box-myself-r-p-ruiz) 
+This [Lupin project](https://www.linkedin.com/pulse/ai-virtual-prosthesis-how-i-created-genie-box-myself-r-p-ruiz) 
 is currently an **_extremely_** large set of working sketches which I am actively organizing & tidying up so that I can collaborate with others.
 
 So, I'm not there yet, _obviously_. But I'm working on it and getting closer every day.

@@ -1,4 +1,4 @@
-# FOR gib:0.8.0
+# FOR lupin:0.8.0
 #FROM python:3.10.12
 FROM nvidia/cuda:12.2.2-base-ubuntu22.04
 
@@ -115,11 +115,11 @@ RUN apt-get update && apt-get install -y curl
 
 RUN pip install pydantic-ai[slim]==0.2.5
 
-env GENIE_IN_THE_BOX_ROOT=/var/genie-in-the-box
+env LUPIN_ROOT=/var/lupin
 
-env GIB_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/gib-app.ini splainer_path=/src/conf/gib-app-splainer.ini config_block_id=Genie+in+the+Box:+Development" \
+env LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development" \
 
-WORKDIR /var/genie-in-the-box/src
+WORKDIR=/var/lupin/src
 RUN mkdir -p /var/io
 
 CMD ["/bin/bash", "-c", "echo '-- OR -- Run `python3 -m fastapi_app.main` to spin up FastAPI server' && exec /bin/bash"]

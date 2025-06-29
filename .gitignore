@@ -4,7 +4,6 @@ src/cosa
 # Skip the usual OS X artifacts and noise
 .DS_Store
 ._.DS_Store
-._run-genie-gui.sh
 .idea/
 ._*
 
@@ -20,17 +19,10 @@ src/.claude/*
 **/.ipynb_checkpoints/**
 
 # Don't track DB artifacts
-src/conf/long-term-memory/gib.lancedb**
+src/conf/long-term-memory/lupin.lancedb**
 
 # No LLM's, please
 models/**
-
-# Skip OSX console script + icon based launcher experiment
-genie.app/**
-.app**
-
-# Omit the script because it contains the open API key
-src/scripts/run-genie-gui.command
 
 # This is personal information
 src/conf/contact-information.map

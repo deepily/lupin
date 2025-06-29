@@ -1,9 +1,9 @@
 CDP
 
 # SDPEFT 8888 0.2.0 `pwd`
-docker container run --name gsm8k --restart no -it --volume "/mnt/DATA01/include/www.deepily.ai/projects/":"/var/models" --publish 0.0.0.0:8888:8888/tcp riqui/genie-in-the-box:0.6.0
+docker container run --name gsm8k --restart no -it --volume "/mnt/DATA01/include/www.deepily.ai/projects/":"/var/models" --publish 0.0.0.0:8888:8888/tcp riqui/lupin:0.6.0
 
-cd /var/model/genie-in-the-box/src
+cd /var/model/lupin/src
 # pip install groq
 # pip install google.generativeai
 
