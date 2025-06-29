@@ -102,7 +102,7 @@ async def lifespan( app: FastAPI ):
     Manages the application lifecycle for FastAPI.
     
     Preconditions:
-        - Environment variable GIB_CONFIG_MGR_CLI_ARGS must be set or empty string
+        - Environment variable LUPIN_CONFIG_MGR_CLI_ARGS must be set or empty string
         - Configuration files must exist at specified paths
         - CUDA device must be available if using GPU
     
@@ -120,7 +120,7 @@ async def lifespan( app: FastAPI ):
     # Startup
     global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent
     
-    config_mgr = ConfigurationManager( env_var_name="GIB_CONFIG_MGR_CLI_ARGS" )
+    config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
     
     # Initialize the ID generator singleton
     id_generator = TwoWordIdGenerator()
@@ -413,7 +413,6 @@ async def stream_tts_hybrid( session_id: str, msg: str ):
         # TODO: We should be dynamically getting the proper base URL for this connection.
         # Override base URL for TTS - vLLM doesn't support TTS, need real OpenAI API
         client = OpenAI( api_key=api_key, base_url="https://api.openai.com/v1" )
-        
         
         print( f"[TTS-HYBRID] Starting generation for: '{msg}'" )
         

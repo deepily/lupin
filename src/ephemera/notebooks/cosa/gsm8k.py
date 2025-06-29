@@ -269,13 +269,13 @@ if __name__ == "__main__":
     # this is designed to be run from within a container that has access to all of the projects mounted on /var/model
     # test to see if an environmental variable has been set
     du.print_banner( "Checking environment variables..." )
-    if "GENIE_IN_THE_BOX_ROOT" not in os.environ:
-        default = "/var/model/genie-in-the-box"
-        print( f"GENIE_IN_THE_BOX_ROOT not set, using default [{default}]..." )
-        os.environ[ "GENIE_IN_THE_BOX_ROOT"       ] = default
+    if "LUPIN_ROOT" not in os.environ:
+        default = "/var/model/lupin"
+        print( f"LUPIN_ROOT not set, using default [{default}]..." )
+        os.environ[ "LUPIN_ROOT"       ] = default
     else:
-        env_value = os.environ[ "GENIE_IN_THE_BOX_ROOT" ]
-        print( f"Using env.GENIE_IN_THE_BOX_ROOT [{env_value}]" )
+        env_value = os.environ[ "LUPIN_ROOT" ]
+        print( f"Using env.LUPIN_ROOT [{env_value}]" )
         
     if "GENIE_IN_THE_BOX_TGI_SERVER" not in os.environ:
         default = "http://127.0.0.1:3000/v1"
@@ -285,13 +285,13 @@ if __name__ == "__main__":
         env_value = os.environ[ "GENIE_IN_THE_BOX_TGI_SERVER" ]
         print( f"Using env.GENIE_IN_THE_BOX_TGI_SERVER [{env_value}]" )
         
-    if "GIB_CONFIG_MGR_CLI_ARGS" not in os.environ:
-        default = "config_path=/src/conf/gib-app.ini splainer_path=/src/conf/gib-app-splainer.ini config_block_id=Genie+in+the+Box:+Development"
-        print( f"GIB_CONFIG_MGR_CLI_ARGS not set, using default [{default}]..." )
-        os.environ[ "GIB_CONFIG_MGR_CLI_ARGS"     ] = default
+    if "LUPIN_CONFIG_MGR_CLI_ARGS" not in os.environ:
+        default = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
+        print( f"LUPIN_CONFIG_MGR_CLI_ARGS not set, using default [{default}]..." )
+        os.environ[ "LUPIN_CONFIG_MGR_CLI_ARGS"     ] = default
     else:
-        env_value = os.environ[ "GIB_CONFIG_MGR_CLI_ARGS" ]
-        print( f"Using env.GIB_CONFIG_MGR_CLI_ARGS [{env_value}]" )
+        env_value = os.environ[ "LUPIN_CONFIG_MGR_CLI_ARGS" ]
+        print( f"Using env.LUPIN_CONFIG_MGR_CLI_ARGS [{env_value}]" )
     
     args = get_cli_args()
     

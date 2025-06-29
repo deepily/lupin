@@ -11,7 +11,7 @@ sys.path.append( os.getcwd() )
 import lib.clients.lupin_client as gc
 import cosa.utils.util as du
 
-class GenieGui:
+class LupinGui:
     
     def __init__( self, startup_mode="transcribe_and_clean_prose", copy_transx_to_clipboard=True, record_once_on_startup=False, runtime_context="docker", write_method="api", recording_timeout=30, debug=False ):
         
@@ -40,7 +40,7 @@ class GenieGui:
         self.main.title( "Lupin" )
 
         # Now that we have a GUI object to point to, instantiate headless client object
-        self.genie_client = gc.GenieClient( calling_gui=self.main, startup_mode=startup_mode,
+        self.lupin_lupin = gc.GenieClient( calling_gui=self.main, startup_mode=startup_mode,
                                             copy_transx_to_clipboard=copy_transx_to_clipboard,
                                             runtime_context=runtime_context, write_method=write_method, debug=debug,
                                             recording_timeout=recording_timeout
@@ -70,8 +70,8 @@ class GenieGui:
         self.selected_mode = tk.StringVar()
         self.cmb_mode = ttk.Combobox( self.top_level_buttons, width=22, height=20, font=self.font_obj_big, state="readonly", textvariable=self.selected_mode )
         
-        self.cmb_mode[ "values" ] = self.genie_client.get_titles()
-        self.cmb_mode.current( self.genie_client.default_mode_index )
+        self.cmb_mode[ "values" ] = self.lupin_lupin.get_titles()
+        self.cmb_mode.current( self.lupin_lupin.default_mode_index )
         self.cmb_mode.bind( "<<ComboboxSelected>>", lambda event: self.set_ready_to_start() )
         self.cmb_mode.grid( row=0, column=2, columnspan=1, padx=5, pady=5 )
 
@@ -133,14 +133,14 @@ class GenieGui:
         #
         # el
         if ( event.keysym == "Escape" or event.keysym == "BackSpace" ) and (
-            self.genie_client.is_recording() or
-            self.genie_client.is_playing() ):
+            self.lupin_lupin.is_recording() or
+            self.lupin_lupin.is_playing() ):
 
             self.stop_processing()
 
         elif ( event.keysym == "Escape" or event.keysym == "BackSpace" ) and not (
-            self.genie_client.is_recording() or
-            self.genie_client.is_playing() ):
+            self.lupin_lupin.is_recording() or
+            self.lupin_lupin.is_playing() ):
 
             if self.debug: print( "Quitting... (Don't forget to check for stream right completion before destroying window?)" )
             # self.main.destroy()
@@ -149,7 +149,7 @@ class GenieGui:
 
     def _do_conditional_paste_from_clipboard( self ):
 
-        if not self.genie_client.is_recording():
+        if not self.lupin_lupin.is_recording():
 
             ranges = self.last_text_with_focus.tag_ranges( tk.SEL )
             if ranges:
@@ -159,7 +159,7 @@ class GenieGui:
             else:
                 print( 'NO Selected Text to delete' )
 
-            self.last_text_with_focus.insert( tk.INSERT, self.genie_client.get_from_clipboard() )
+            self.last_text_with_focus.insert( tk.INSERT, self.lupin_lupin.get_from_clipboard() )
 
         else:
             print( "Can't paste while recording!" )
@@ -171,7 +171,7 @@ class GenieGui:
         :param copy_to_clipboard:
         :return:
         """
-        if not self.genie_client.is_recording():
+        if not self.lupin_lupin.is_recording():
 
             ranges = self.last_text_with_focus.tag_ranges( tk.SEL )
             if ranges:
@@ -183,7 +183,7 @@ class GenieGui:
 
                 if delete_selected_text: self.last_text_with_focus.delete( *ranges )
 
-                if copy_to_clipboard: self.genie_client.copy_to_clipboard( selected_text )
+                if copy_to_clipboard: self.lupin_lupin.copy_to_clipboard( selected_text )
             else:
                 print( "Nothing selected to cut, copy or delete." )
         else:
@@ -214,7 +214,7 @@ class GenieGui:
         self.btn_stop.config( state=DISABLED )
 
         # Add Hock, Switch to display or hide interactive code editor.
-        key = self.genie_client.keys_dict[ self.selected_mode.get() ]
+        key = self.lupin_lupin.keys_dict[ self.selected_mode.get() ]
         if self.debug: print( "key [{}]".format( key ) )
 
     def start_processing( self ):
@@ -237,7 +237,7 @@ class GenieGui:
         # branch on mode_title
         mode_title = self.selected_mode.get()
         
-        self.finished_transcription = self.genie_client.process_by_mode_title( mode_title )
+        self.finished_transcription = self.lupin_lupin.process_by_mode_title( mode_title )
             
         self.stop_processing()
 
@@ -254,10 +254,10 @@ class GenieGui:
         self.btn_stop.config( state=DISABLED )
         self.main.update()
         
-        if self.genie_client.is_recording():
-            self.genie_client.stop_recording()
-        if self.genie_client.is_playing():
-            self.genie_client.stop_playing()
+        if self.lupin_lupin.is_recording():
+            self.lupin_lupin.stop_recording()
+        if self.lupin_lupin.is_playing():
+            self.lupin_lupin.stop_playing()
         
 # Create main function to run the program.
 if __name__ == "__main__":

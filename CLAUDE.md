@@ -1,9 +1,9 @@
 # LUPIN DEVELOPMENT GUIDE
 
 ## COMMANDS
-- Run FastAPI server: `src/scripts/run-fastapi-gib.sh` (Runs on port 7999)
+- Run FastAPI server: `src/scripts/run-fastapi-lupin.sh` (Runs on port 7999)
 - Run GUI client: `src/scripts/run-lupin-gui.sh`
-- Docker build: `docker build -f docker/gib/Dockerfile .`
+- Docker build: `docker build -f docker/lupin/Dockerfile .`
 - Run GSM8K benchmarks: `src/scripts/run-gsm8k.sh --help`
 
 ## CODE STYLE
@@ -11,7 +11,7 @@
 - **Naming**: snake_case for functions, PascalCase for classes, UPPER_SNAKE_CASE for constants
 - **File Naming**:
   - Python files: Use underscores as separators (e.g., `example_implementation.py`)
-  - All other files: Use dashes as separators (e.g., `websocket-design.md`, `gib-app.ini`)
+  - All other files: Use dashes as separators (e.g., `websocket-design.md`, `lupin-app.ini`)
   - Date prefixes: Use YYYY.MM.DD format (e.g., `2025.06.03-websocket-design.md`)
 - **Formatting**: 4 spaces indentation, spaces around operators, spaces inside brackets
 - **Error handling**: Catch specific exceptions, include context in error messages
@@ -21,7 +21,7 @@
 - **XML Formatting**: Use XML tags for structured responses in agent communication
 
 ## CONFIGURATION
-- Config files: `src/conf/gib-app.ini` and `src/conf/gib-app-splainer.ini`
+- Config files: `src/conf/lupin-app.ini` and `src/conf/lupin-app-splainer.ini`
 - Environment variables override config file settings
 - Use `ConfigurationManager` to access config values
 

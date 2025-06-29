@@ -3,8 +3,8 @@ peft
 Starting docker peft on port [8888] w/ image version [0.2.0] from [/mnt/DATA01/include/www.deepily.ai/projects]...
 
 After Docker starts, run this: [jupyter lab --ip=0.0.0.0 --allow-root --port 3000]
-root@fe0dd39a6dac:/# cd /var/model/genie-in-the-box/src/
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# ll
+root@fe0dd39a6dac:/# cd /var/model/lupin/src/
+root@fe0dd39a6dac:/var/model/lupin/src# ll
 total 92
 drwxr--r-- 11 1001 1001  4096 Oct  8 15:04 ./
 drwxr--r-- 12 1001 1001  4096 Oct  6 03:53 ../
@@ -21,16 +21,16 @@ drwxr--r--  3 1001 1001  4096 Mar 10  2023 resources/
 drwxr-xr-x  2 1001 1001  4096 Jan 24  2024 scripts/
 drwxr--r--  2 1001 1001  4096 Nov 20  2023 static/
 drwxr--r--  2 1001 1001  4096 Sep 26  2023 templates/
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# H export GENIE_IN_THE_BOX_ROOT=/var/model/genie-in-the-box
-root@4701293be064:/var/model/genie-in-the-box/src# python3 -m ephemera.notebooks.cosa.gsm8k
+root@fe0dd39a6dac:/var/model/lupin/src# H export GENIE_IN_THE_BOX_ROOT=/var/model/lupin
+root@4701293be064:/var/model/lupin/src# python3 -m ephemera.notebooks.cosa.gsm8k
 bash: H: command not found
-bash: root@4701293be064:/var/model/genie-in-the-box/src#: No such file or directory
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# ^C
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# env
+bash: root@4701293be064:/var/model/lupin/src#: No such file or directory
+root@fe0dd39a6dac:/var/model/lupin/src# ^C
+root@fe0dd39a6dac:/var/model/lupin/src# env
 NVIDIA_VISIBLE_DEVICES=all
 HOSTNAME=fe0dd39a6dac
 NVIDIA_REQUIRE_CUDA=cuda>=12.2 brand=tesla,driver>=470,driver<471 brand=unknown,driver>=470,driver<471 brand=nvidia,driver>=470,driver<471 brand=nvidiartx,driver>=470,driver<471 brand=geforce,driver>=470,driver<471 brand=geforcertx,driver>=470,driver<471 brand=quadro,driver>=470,driver<471 brand=quadrortx,driver>=470,driver<471 brand=titan,driver>=470,driver<471 brand=titanrtx,driver>=470,driver<471 brand=tesla,driver>=525,driver<526 brand=unknown,driver>=525,driver<526 brand=nvidia,driver>=525,driver<526 brand=nvidiartx,driver>=525,driver<526 brand=geforce,driver>=525,driver<526 brand=geforcertx,driver>=525,driver<526 brand=quadro,driver>=525,driver<526 brand=quadrortx,driver>=525,driver<526 brand=titan,driver>=525,driver<526 brand=titanrtx,driver>=525,driver<526
-PWD=/var/model/genie-in-the-box/src
+PWD=/var/model/lupin/src
 NVIDIA_DRIVER_CAPABILITIES=compute,utility
 NV_CUDA_CUDART_VERSION=12.2.140-1
 HOME=/root
@@ -46,28 +46,28 @@ LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64
 PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 OLDPWD=/
 _=/usr/bin/env
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# echo $GENIE_IN_THE_BOX_ROOT
+root@fe0dd39a6dac:/var/model/lupin/src# echo $GENIE_IN_THE_BOX_ROOT
 
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# export GENIE_IN_THE_BOX_ROOT=/var/model/genie-in-the-box
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# echo $GENIE_IN_THE_BOX_ROOT
-/var/model/genie-in-the-box
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# echo $GENIE_IN_THE_BOX_ROOT
-/var/model/genie-in-the-box
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# python3 -m ephemera.notebooks.cosa.gsm8k
+root@fe0dd39a6dac:/var/model/lupin/src# export GENIE_IN_THE_BOX_ROOT=/var/model/lupin
+root@fe0dd39a6dac:/var/model/lupin/src# echo $GENIE_IN_THE_BOX_ROOT
+/var/model/lupin
+root@fe0dd39a6dac:/var/model/lupin/src# echo $GENIE_IN_THE_BOX_ROOT
+/var/model/lupin
+root@fe0dd39a6dac:/var/model/lupin/src# python3 -m ephemera.notebooks.cosa.gsm8k
 Traceback (most recent call last):
   File "/usr/lib/python3.10/runpy.py", line 196, in _run_module_as_main
     return _run_code(code, main_globals, None,
   File "/usr/lib/python3.10/runpy.py", line 86, in _run_code
     exec(code, run_globals)
-  File "/var/model/genie-in-the-box/src/ephemera/notebooks/cosa/gsm8k.py", line 9, in <module>
+  File "/var/model/lupin/src/ephemera/notebooks/cosa/gsm8k.py", line 9, in <module>
     from lib.agents.math_agent           import MathAgent
-  File "/var/model/genie-in-the-box/src/lib/agents/math_agent.py", line 6, in <module>
+  File "/var/model/lupin/src/lib/agents/math_agent.py", line 6, in <module>
     from lib.agents.llm                  import Llm
-  File "/var/model/genie-in-the-box/src/lib/agents/llm.py", line 7, in <module>
+  File "/var/model/lupin/src/lib/agents/llm.py", line 7, in <module>
     from groq                       import Groq
 ModuleNotFoundError: No module named 'groq'
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# ^C
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# ll /var/model/benchmarks/gsm8k/
+root@fe0dd39a6dac:/var/model/lupin/src# ^C
+root@fe0dd39a6dac:/var/model/lupin/src# ll /var/model/benchmarks/gsm8k/
 total 2756
 drwxrwxr-x 2 1001 1001    4096 Oct  9 02:43 ./
 drwxrwxr-x 3 1001 1001    4096 Oct  6 17:50 ../
@@ -75,42 +75,42 @@ drwxrwxr-x 3 1001 1001    4096 Oct  6 17:50 ../
 -rw-r--r-- 1 root root    4033 Oct  9 02:43 results-2024-10-08-at-22-43-30-groq-llama-3.1-8b-instant.csv
 -rwxr--r-- 1 1001 1001  419088 Oct  6 17:51 test-00000-of-00001.parquet*
 -rwxr--r-- 1 1001 1001 2306545 Oct  6 17:51 train-00000-of-00001.parquet*
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# ll /var/model/benchmarks/gsm8k/results*groq*3.1*.csv
+root@fe0dd39a6dac:/var/model/lupin/src# ll /var/model/benchmarks/gsm8k/results*groq*3.1*.csv
 -rw-r--r-- 1 root root 4033 Oct  9 02:43 /var/model/benchmarks/gsm8k/results-2024-10-08-at-22-43-30-groq-llama-3.1-8b-instant.csv
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# rm /var/model/benchmarks/gsm8k/results*groq*3.1-8b*.csv
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# ll /var/model/benchmarks/gsm8k/results*groq*3.1*.csv
+root@fe0dd39a6dac:/var/model/lupin/src# rm /var/model/benchmarks/gsm8k/results*groq*3.1-8b*.csv
+root@fe0dd39a6dac:/var/model/lupin/src# ll /var/model/benchmarks/gsm8k/results*groq*3.1*.csv
 ls: cannot access '/var/model/benchmarks/gsm8k/results*groq*3.1*.csv': No such file or directory
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# ll /var/model/benchmarks/gsm8k/
+root@fe0dd39a6dac:/var/model/lupin/src# ll /var/model/benchmarks/gsm8k/
 total 2752
 drwxrwxr-x 2 1001 1001    4096 Oct  9 15:20 ./
 drwxrwxr-x 3 1001 1001    4096 Oct  6 17:50 ../
 -rw-r--r-- 1 root root   74719 Oct  8 16:29 results-2024-10-08-at-12-29-30-tgi-phind-codellama-34b-v2.csv
 -rwxr--r-- 1 1001 1001  419088 Oct  6 17:51 test-00000-of-00001.parquet*
 -rwxr--r-- 1 1001 1001 2306545 Oct  6 17:51 train-00000-of-00001.parquet*
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# mkdir /var/model/benchmarks/gsm8k/checkpoints
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# python3 -m ephemera.notebooks.cosa.gsm8k
+root@fe0dd39a6dac:/var/model/lupin/src# mkdir /var/model/benchmarks/gsm8k/checkpoints
+root@fe0dd39a6dac:/var/model/lupin/src# python3 -m ephemera.notebooks.cosa.gsm8k
 Traceback (most recent call last):
   File "/usr/lib/python3.10/runpy.py", line 196, in _run_module_as_main
     return _run_code(code, main_globals, None,
   File "/usr/lib/python3.10/runpy.py", line 86, in _run_code
     exec(code, run_globals)
-  File "/var/model/genie-in-the-box/src/ephemera/notebooks/cosa/gsm8k.py", line 3, in <module>
+  File "/var/model/lupin/src/ephemera/notebooks/cosa/gsm8k.py", line 3, in <module>
     from sqlalchemy.sql.functions import current_date
 ModuleNotFoundError: No module named 'sqlalchemy'
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# python3 -m ephemera.notebooks.cosa.gsm8k
+root@fe0dd39a6dac:/var/model/lupin/src# python3 -m ephemera.notebooks.cosa.gsm8k
 Traceback (most recent call last):
   File "/usr/lib/python3.10/runpy.py", line 196, in _run_module_as_main
     return _run_code(code, main_globals, None,
   File "/usr/lib/python3.10/runpy.py", line 86, in _run_code
     exec(code, run_globals)
-  File "/var/model/genie-in-the-box/src/ephemera/notebooks/cosa/gsm8k.py", line 9, in <module>
+  File "/var/model/lupin/src/ephemera/notebooks/cosa/gsm8k.py", line 9, in <module>
     from lib.agents.math_agent           import MathAgent
-  File "/var/model/genie-in-the-box/src/lib/agents/math_agent.py", line 6, in <module>
+  File "/var/model/lupin/src/lib/agents/math_agent.py", line 6, in <module>
     from lib.agents.llm                  import Llm
-  File "/var/model/genie-in-the-box/src/lib/agents/llm.py", line 7, in <module>
+  File "/var/model/lupin/src/lib/agents/llm.py", line 7, in <module>
     from groq                       import Groq
 ModuleNotFoundError: No module named 'groq'
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# pip install groq
+root@fe0dd39a6dac:/var/model/lupin/src# pip install groq
 Collecting groq
   Downloading groq-0.11.0-py3-none-any.whl.metadata (13 kB)
 Requirement already satisfied: anyio<5,>=3.5.0 in /usr/local/lib/python3.10/dist-packages (from groq) (4.2.0)
@@ -134,20 +134,20 @@ WARNING: Running pip as the 'root' user can result in broken permissions and con
 
 [notice] A new release of pip is available: 23.3.2 -> 24.2
 [notice] To update, run: python3 -m pip install --upgrade pip
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# python3 -m ephemera.notebooks.cosa.gsm8k
+root@fe0dd39a6dac:/var/model/lupin/src# python3 -m ephemera.notebooks.cosa.gsm8k
 Traceback (most recent call last):
   File "/usr/lib/python3.10/runpy.py", line 196, in _run_module_as_main
     return _run_code(code, main_globals, None,
   File "/usr/lib/python3.10/runpy.py", line 86, in _run_code
     exec(code, run_globals)
-  File "/var/model/genie-in-the-box/src/ephemera/notebooks/cosa/gsm8k.py", line 9, in <module>
+  File "/var/model/lupin/src/ephemera/notebooks/cosa/gsm8k.py", line 9, in <module>
     from lib.agents.math_agent           import MathAgent
-  File "/var/model/genie-in-the-box/src/lib/agents/math_agent.py", line 6, in <module>
+  File "/var/model/lupin/src/lib/agents/math_agent.py", line 6, in <module>
     from lib.agents.llm                  import Llm
-  File "/var/model/genie-in-the-box/src/lib/agents/llm.py", line 9, in <module>
+  File "/var/model/lupin/src/lib/agents/llm.py", line 9, in <module>
     import google.generativeai      as genai
 ModuleNotFoundError: No module named 'google.generativeai'
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# pip install google.generativeai
+root@fe0dd39a6dac:/var/model/lupin/src# pip install google.generativeai
 Collecting google.generativeai
   Downloading google_generativeai-0.8.3-py3-none-any.whl.metadata (3.9 kB)
 Collecting google-ai-generativelanguage==0.6.10 (from google.generativeai)
@@ -236,10 +236,10 @@ WARNING: Running pip as the 'root' user can result in broken permissions and con
 
 [notice] A new release of pip is available: 23.3.2 -> 24.2
 [notice] To update, run: python3 -m pip install --upgrade pip
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# c
+root@fe0dd39a6dac:/var/model/lupin/src# c
 bash: c: command not found
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# clear
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# pip install google.generativeai
+root@fe0dd39a6dac:/var/model/lupin/src# clear
+root@fe0dd39a6dac:/var/model/lupin/src# pip install google.generativeai
 Requirement already satisfied: google.generativeai in /usr/local/lib/python3.10/dist-packages (0.8.3)
 Requirement already satisfied: google-ai-generativelanguage==0.6.10 in /usr/local/lib/python3.10/dist-packages (from google.generativeai) (0.6.10)
 Requirement already satisfied: google-api-core in /usr/local/lib/python3.10/dist-packages (from google.generativeai) (2.21.0)
@@ -272,18 +272,18 @@ WARNING: Running pip as the 'root' user can result in broken permissions and con
 
 [notice] A new release of pip is available: 23.3.2 -> 24.2
 [notice] To update, run: python3 -m pip install --upgrade pip
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# clear
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# python3 -m ephemera.notebooks.cosa.gsm8k
+root@fe0dd39a6dac:/var/model/lupin/src# clear
+root@fe0dd39a6dac:/var/model/lupin/src# python3 -m ephemera.notebooks.cosa.gsm8k
 Traceback (most recent call last):
   File "/usr/lib/python3.10/runpy.py", line 196, in _run_module_as_main
     return _run_code(code, main_globals, None,
   File "/usr/lib/python3.10/runpy.py", line 86, in _run_code
     exec(code, run_globals)
-  File "/var/model/genie-in-the-box/src/ephemera/notebooks/cosa/gsm8k.py", line 233, in <module>
+  File "/var/model/lupin/src/ephemera/notebooks/cosa/gsm8k.py", line 233, in <module>
     llm_responses_dict = call_llms(
 TypeError: call_llms() got an unexpected keyword argument 'checkpoints_interval'
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# clear
-root@fe0dd39a6dac:/var/model/genie-in-the-box/src# python3 -m ephemera.notebooks.cosa.gsm8k
+root@fe0dd39a6dac:/var/model/lupin/src# clear
+root@fe0dd39a6dac:/var/model/lupin/src# python3 -m ephemera.notebooks.cosa.gsm8k
 Answering 13 questions...
 ------------------------------------------------------------------------------------------------------------------------
 - Question [0] of [13]: Carol and Jennifer are sisters from Los Angeles who love collecting signatures from celebrities. Dur
@@ -292,23 +292,23 @@ Answering 13 questions...
 Instantiating ConfigurationManager() singleton...
 
 Using environment variables to instantiate configuration manager
-[0]th arg = [config_path=/src/conf/gib-app.ini]... done!
-[1]th arg = [splainer_path=/src/conf/gib-app-splainer.ini]... done!
+[0]th arg = [config_path=/src/conf/lupin-app.ini]... done!
+[1]th arg = [splainer_path=/src/conf/lupin-app-splainer.ini]... done!
 [2]th arg = [config_block_id=Genie+in+the+Box:+Development]... done!
 
 Name value dictionary pairs:
 
 [ config_block_id] = [Genie in the Box: Development]
-[     config_path] = [/src/conf/gib-app.ini]
-[   splainer_path] = [/src/conf/gib-app-splainer.ini]
+[     config_path] = [/src/conf/lupin-app.ini]
+[   splainer_path] = [/src/conf/lupin-app-splainer.ini]
 
-File exists! [/var/model/genie-in-the-box/src/conf/gib-app.ini]
-File exists! [/var/model/genie-in-the-box/src/conf/gib-app-splainer.ini]
+File exists! [/var/model/lupin/src/conf/lupin-app.ini]
+File exists! [/var/model/lupin/src/conf/lupin-app-splainer.ini]
 
 ------------------------------------------------------------------------------------------------------------------------
-- Initializing configuration_manager [/var/model/genie-in-the-box/src/conf/gib-app.ini]
+- Initializing configuration_manager [/var/model/lupin/src/conf/lupin-app.ini]
 ------------------------------------------------------------------------------------------------------------------------
-Splainer path [/var/model/genie-in-the-box/src/conf/gib-app-splainer.ini]
+Splainer path [/var/model/lupin/src/conf/lupin-app-splainer.ini]
 
 ------------------------------------------------------------------------------------------------------------------------
 - Sections, '*' = current block ID
@@ -332,7 +332,7 @@ Scanning for immutable keys... Done!
 ------------------------------------------------------------------------------------------------------------------------
 
 ------------------------------------------------------------------------------------------------------------------------
-- Loading splainer file [/var/model/genie-in-the-box/src/conf/gib-app-splainer.ini]...
+- Loading splainer file [/var/model/lupin/src/conf/lupin-app-splainer.ini]...
 ------------------------------------------------------------------------------------------------------------------------
 
 ¡OJO! MathAgent is using last_question_asked because it wants all the specificity contained within the voice to text transcription

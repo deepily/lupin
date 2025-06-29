@@ -1,5 +1,93 @@
 # Lupin Session History
 
+## 2025.06.29 - Final Lupin Renaming Cleanup
+
+### Summary
+Completed final cleanup tasks for the Lupin project renaming, addressing remaining file artifacts, documentation references, and performing comprehensive verification to ensure all critical "gib" references have been resolved.
+
+### Work Performed
+1. **File Cleanup**:
+   - Removed macOS artifact files (`._gib*` files from docker, scripts, and config directories)
+   - Cleaned up old search tool cache files (`search_gib*.pyc`)
+
+2. **Documentation Updates**:
+   - Updated main CLAUDE.md with corrected script and config file paths
+   - Updated CoSA CLAUDE.md configuration references
+   - Changed environment variable from `GIB_CONFIG_MGR_CLI_ARGS` to `LUPIN_CONFIG_MGR_CLI_ARGS`
+
+3. **Code Updates**:
+   - Updated Dockerfile comment from "gib:0.8.0" to "lupin:0.8.0"
+   - Fixed script references in `run-fastapi-lupin.sh`
+   - Updated class name from `GenieGui` to `LupinGui` in GUI client
+   - Updated plugin references in command UI from "genie-plugin" to "lupin-plugin"
+
+4. **Final Verification**:
+   - Comprehensive grep search confirmed all critical references addressed
+   - Remaining references are in documentation, backups, and third-party libraries (acceptable)
+   - Application functionality preserved and tested
+
+### Files Modified
+- `/CLAUDE.md` (script and config references)
+- `/src/cosa/CLAUDE.md` (environment variable references)
+- `/docker/lupin/Dockerfile` (version comment)
+- `/src/scripts/run-fastapi-lupin.sh` (config references)
+- `/src/lib/clients/lupin_client_gui.py` (class name)
+- `/src/lib/clients/lupin_client_cmd.py` (plugin references)
+- Updated completion documentation in `/src/rnd/2025.06.29-cosa-lupin-renaming-completion.md`
+
+### Technical Status
+- ✅ All critical "gib" references resolved
+- ✅ Application functionality verified
+- ✅ Documentation updated and consistent
+- ✅ File naming conventions aligned
+
+### Next Steps
+Ready for commit and continued development under Lupin branding.
+
+---
+
+## 2025.06.29 - Completed Lupin Renaming in CoSA Module
+
+### Summary
+Successfully fixed remaining import errors from yesterday's project renaming, completing the transition from "Genie-in-the-Box" to "Lupin". Fixed critical import issues preventing FastAPI server startup and renamed search tools for consistency.
+
+### Work Performed
+1. **Fixed critical import errors**:
+   - Updated `audio.py` to import `lupin_client` instead of `genie_client`
+   - Updated commented references in `multimodal_munger.py`
+2. **Completed search tool renaming**:
+   - Renamed `search_gib.py` → `search_lupin.py`
+   - Renamed `search_gib_v010.py` → `search_lupin_v010.py`
+   - Updated class names from `GibSearch` to `LupinSearch`
+3. **Updated all imports and references**:
+   - Fixed imports in `weather_agent.py` (both v000 and v010 versions)
+   - Updated `todo_fifo_queue.py` imports and usage
+   - Updated documentation in CoSA README.md
+4. **Tested systems**:
+   - Verified FastAPI server startup (successful)
+   - Tested notification system (working with minor warning)
+
+### Technical Details
+- All search functionality now uses consistent "Lupin" branding
+- FastAPI server starts without import errors
+- File renames maintain compatibility with existing infrastructure
+- Notification system operational with runtime warning (not critical)
+
+### Files Modified
+- `/src/cosa/rest/routers/audio.py` (import fix)
+- `/src/cosa/rest/multimodal_munger.py` (comment updates)
+- `/src/cosa/tools/search_gib.py` → `/src/cosa/tools/search_lupin.py` (renamed + class update)
+- `/src/cosa/tools/search_gib_v010.py` → `/src/cosa/tools/search_lupin_v010.py` (renamed + class update)
+- `/src/cosa/agents/v000/weather_agent.py` (import + usage updates)
+- `/src/cosa/agents/v010/weather_agent.py` (import + usage + docstring updates)
+- `/src/cosa/rest/todo_fifo_queue.py` (import + usage updates)
+- `/src/cosa/agents/v010/README.md` (documentation update)
+
+### Current Status
+Project successfully rebranded to "Lupin" with all import issues resolved. FastAPI server operational and ready for development.
+
+---
+
 ## 2025.06.28 - Project Renaming to Lupin
 
 ### Summary

@@ -36,7 +36,7 @@ class CmdUi:
 
         self.selected_path = tk.StringVar()
         self.cmb_path = ttk.Combobox( self.bottom_frame, state="readonly", textvariable=self.selected_path )
-        self.cmb_path[ "values" ] = [ "/genie-in-a-box", "/genie-plugin-firefox", "/genie-plugin-intellij" ]
+        self.cmb_path[ "values" ] = [ "/lupin", "/lupin-plugin-firefox", "/lupin-plugin-intellij" ]
         self.cmb_path.current( 0 )
         self.cmb_path.bind( "<<ComboboxSelected>>", lambda event: self.update_path() )
         self.cmb_path.grid( row=0, column=0, padx=5, pady=5, sticky=tk.EW )
@@ -62,7 +62,7 @@ class CmdUi:
 
         self.btn_start.focus_set()
 
-        self.genie_client = gc.GenieClient( calling_gui=self.root, copy_transx_to_clipboard=copy_transx_to_clipboard,
+        self.lupin_lupin = gc.GenieClient( calling_gui=self.root, copy_transx_to_clipboard=copy_transx_to_clipboard,
                                             debug=debug, recording_timeout=recording_timeout
                                             )
 
@@ -122,12 +122,12 @@ class CmdUi:
         self.txt_console.insert( tk.END, "Done!\n" )
         self.btn_start.focus_set()
 
-        self.genie_client.stop_recording()
+        self.lupin_lupin.stop_recording()
 
     def _start_processing_thread( self ):
 
         if self.debug: print( "Processing. on a separate thread...", end="" )
-        transcription = self.genie_client.do_transcribe_and_clean_python()
+        transcription = self.lupin_lupin.do_transcribe_and_clean_python()
 
         self.txt_console.insert( tk.END, "Transcription [{}]\n".format( transcription ) )
 
