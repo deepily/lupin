@@ -64,6 +64,8 @@ id_generator = None
 websocket_manager = WebSocketManager()
 # Background task tracking for cleanup
 active_tasks = {}
+# Clock update background task
+clock_task = None
 
 
 
@@ -96,6 +98,36 @@ def create_emit_audio_callback():
     return sync_emit_audio
 
 
+async def clock_loop():
+    """
+    Background task that emits clock updates every second to all connected WebSocket clients.
+    
+    This replaces the Flask/Socket.IO enter_clock_loop() functionality with FastAPI/WebSocket.
+    """
+    print( "[CLOCK] Starting clock update loop..." )
+    while True:
+        try:
+            # Emit time update to all connected WebSocket clients
+            current_time = du.get_current_datetime()
+            await websocket_manager.async_emit( 'time_update', { 'date': current_time } )
+            
+            # Debug logging (only if verbose mode)
+            if app_debug and app_verbose:
+                connection_count = websocket_manager.get_connection_count()
+                print( f"[CLOCK] Emitted time update to {connection_count} connections: {current_time}" )
+            
+            # Wait 1 second before next update
+            await asyncio.sleep( 1 )
+            
+        except asyncio.CancelledError:
+            print( "[CLOCK] Clock loop cancelled" )
+            break
+        except Exception as e:
+            print( f"[CLOCK] Error in clock loop: {e}" )
+            # Wait before retrying to avoid rapid error loops
+            await asyncio.sleep( 5 )
+
+
 @asynccontextmanager
 async def lifespan( app: FastAPI ):
     """
@@ -118,7 +150,7 @@ async def lifespan( app: FastAPI ):
         None - Control returns to FastAPI after initialization
     """
     # Startup
-    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent
+    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task
     
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
     
@@ -153,13 +185,30 @@ async def lifespan( app: FastAPI ):
     whisper_pipeline = await load_stt_model()
     print( "Done!" )
     
+    # Start background clock task
+    print( "[CLOCK] Starting background clock task..." )
+    clock_task = asyncio.create_task( clock_loop() )
+    print( "[CLOCK] Background clock task started" )
+    
     print( f"FastAPI startup complete at {datetime.now()}" )
     
     yield
     
     # Shutdown
     print( f"FastAPI shutdown at {datetime.now()}" )
-    # Add any cleanup code here if needed
+    
+    # Cancel and cleanup background clock task
+    if clock_task:
+        print( "[CLOCK] Cancelling background clock task..." )
+        clock_task.cancel()
+        try:
+            await clock_task
+        except asyncio.CancelledError:
+            print( "[CLOCK] Background clock task cancelled successfully" )
+        except Exception as e:
+            print( f"[CLOCK] Error during clock task shutdown: {e}" )
+    
+    # Add any other cleanup code here if needed
 
 app = FastAPI(
     title="Genie-in-the-Box FastAPI",

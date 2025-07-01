@@ -4,7 +4,12 @@ This directory contains research and development documents for the Lupin project
 
 ## Active Documents
 
-### Current Development (2025.06)
+### Current Development (2025.07)
+- **[2025.07.01-queue-integration-plan.md](2025.07.01-queue-integration-plan.md)** - Plan for connecting running queue and implementing background tasks in FastAPI
+- **[2025.07.01-fastapi-clock-events-research.md](2025.07.01-fastapi-clock-events-research.md)** - Research plan for implementing clock update events using existing WebSocketManager
+- **[2025.07.01-fastapi-clock-implementation-success.md](2025.07.01-fastapi-clock-implementation-success.md)** - Success report documenting asyncio.create_task() pattern implementation
+
+### Previous Development (2025.06)
 - **[2025.06.28-lupin-renaming-plan.md](2025.06.28-lupin-renaming-plan.md)** - Project rebranding from Genie-in-the-Box to Lupin
 - **[2025.06.27-flask-elimination-plan.md](2025.06.27-flask-elimination-plan.md)** - Plan to remove deprecated Flask infrastructure
 - **[2025.06.20-claude-code-notification-system-design.md](2025.06.20-claude-code-notification-system-design.md)** - Real-time notification system design
