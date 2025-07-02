@@ -44,6 +44,7 @@ from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
 from cosa.rest.routers import system, notifications, audio, queues, jobs, websocket
+from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 
 # Global variables
 config_mgr = None
@@ -66,6 +67,8 @@ websocket_manager = WebSocketManager()
 active_tasks = {}
 # Clock update background task
 clock_task = None
+# Consumer thread for producer-consumer pattern
+consumer_thread = None
 
 
 
@@ -108,7 +111,7 @@ async def clock_loop():
     while True:
         try:
             # Emit time update to all connected WebSocket clients
-            current_time = du.get_current_datetime()
+            current_time = du.get_current_time( format="%Y-%m-%d @ %H:%M" )
             await websocket_manager.async_emit( 'time_update', { 'date': current_time } )
             
             # Debug logging (only if verbose mode)
@@ -116,8 +119,8 @@ async def clock_loop():
                 connection_count = websocket_manager.get_connection_count()
                 print( f"[CLOCK] Emitted time update to {connection_count} connections: {current_time}" )
             
-            # Wait 1 second before next update
-            await asyncio.sleep( 1 )
+            # Wait 1 minute before next update
+            await asyncio.sleep( 60 )
             
         except asyncio.CancelledError:
             print( "[CLOCK] Clock loop cancelled" )
@@ -125,7 +128,7 @@ async def clock_loop():
         except Exception as e:
             print( f"[CLOCK] Error in clock loop: {e}" )
             # Wait before retrying to avoid rapid error loops
-            await asyncio.sleep( 5 )
+            await asyncio.sleep( 60 )
 
 
 @asynccontextmanager
@@ -150,7 +153,7 @@ async def lifespan( app: FastAPI ):
         None - Control returns to FastAPI after initialization
     """
     # Startup
-    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task
+    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread
     
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
     
@@ -190,6 +193,11 @@ async def lifespan( app: FastAPI ):
     clock_task = asyncio.create_task( clock_loop() )
     print( "[CLOCK] Background clock task started" )
     
+    # Start consumer thread for producer-consumer pattern
+    print( "[CONSUMER] Starting todo-producer-run-consumer thread..." )
+    consumer_thread = start_todo_producer_run_consumer_thread( jobs_todo_queue, jobs_run_queue )
+    print( "[CONSUMER] Todo-producer-run-consumer thread started" )
+    
     print( f"FastAPI startup complete at {datetime.now()}" )
     
     yield
@@ -207,6 +215,20 @@ async def lifespan( app: FastAPI ):
             print( "[CLOCK] Background clock task cancelled successfully" )
         except Exception as e:
             print( f"[CLOCK] Error during clock task shutdown: {e}" )
+    
+    # Shutdown consumer thread
+    if consumer_thread:
+        print( "[CONSUMER] Stopping todo-producer-run-consumer thread..." )
+        with jobs_todo_queue.condition:
+            jobs_todo_queue.consumer_running = False
+            jobs_todo_queue.condition.notify()
+        
+        # Wait for consumer thread to finish
+        consumer_thread.join( timeout=5.0 )
+        if consumer_thread.is_alive():
+            print( "[CONSUMER] Warning: Consumer thread did not exit cleanly" )
+        else:
+            print( "[CONSUMER] Todo-producer-run-consumer thread stopped successfully" )
     
     # Add any other cleanup code here if needed
 

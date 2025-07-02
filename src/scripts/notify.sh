@@ -1,3 +1,3 @@
 #!/bin/bash
-export PYTHONPATH=/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src
-exec python -m cosa.cli.notify_user "$@"
+export PYTHONPATH="$LUPIN_ROOT/src"
+exec python $LUPIN_ROOT/src/cosa/cli/notify_user.py "$@"

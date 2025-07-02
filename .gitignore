@@ -1,5 +1,8 @@
 src/temp
 
+# Temporary testing directory
+src/tmp/
+
 # Skip CoSA repo
 src/cosa
 
