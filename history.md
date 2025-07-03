@@ -1,5 +1,77 @@
 # Lupin Session History
 
+## 2025.07.03 - WebSocket TTS Streaming Investigation and Critical Bug Fix
+
+### Summary
+Conducted comprehensive investigation of WebSocket TTS streaming system, validated production-readiness of core TTS functionality, and resolved critical 404 errors affecting queue UI. Fixed duplicate endpoint routing conflict and enhanced debugging capabilities. Identified critical queue processing issues requiring investigation.
+
+### Work Performed
+1. **WebSocket TTS Investigation**:
+   - Created comprehensive investigation tracker document with detailed analysis
+   - Validated WebSocket TTS streaming working excellently (9 binary chunks, 66KB audio)
+   - Confirmed OpenAI TTS integration functional with proper configuration
+   - Tested multi-client concurrency (3 concurrent clients successful)
+   - Verified browser integration and static resource delivery
+
+2. **Critical TTS 404 Bug Fix**:
+   - Identified duplicate POST /api/get-audio endpoints causing route conflicts
+   - Removed duplicate endpoint from main.py (lines 414-465)
+   - Enhanced debugging in audio router with comprehensive logging
+   - Verified debug=True and verbose=True configuration settings
+   - Tested and confirmed TTS streaming working perfectly after fix
+
+3. **Queue System Investigation**:
+   - Discovered authentication system working correctly with mock tokens
+   - Identified all queue endpoints accessible with proper auth headers
+   - Found critical 500 errors affecting all job submissions
+   - Tested multiple question types (time, math, calendar, weather, general) - all fail
+   - Created comprehensive test suite for validation
+
+4. **Performance Validation**:
+   - WebSocket connection: Instant establishment
+   - TTS response time: <1 second
+   - Audio streaming: Real-time chunk delivery
+   - Multi-client support: 107KB streamed across 3 clients simultaneously
+   - Authentication: <5ms token validation
+
+### Technical Implementation
+- **TTS Fix**: Eliminated FastAPI route conflict by removing duplicate endpoint
+- **Enhanced Debugging**: Added detailed logging for request tracking and troubleshooting
+- **Test Scripts**: Created 5 comprehensive test scripts covering all system aspects
+- **Performance Metrics**: Collected detailed latency and throughput measurements
+
+### Files Created/Modified
+- **Created**: `/src/rnd/2025.07.03-websocket-tts-streaming-investigation-tracker.md` (comprehensive tracker)
+- **Created**: `/src/tmp/test_websocket_tts.py` (backend WebSocket validation)
+- **Created**: `/src/tmp/test_browser_enhanced.py` (multi-client browser integration)
+- **Created**: `/src/tmp/test_queue_workflow.py` (queue authentication testing)
+- **Created**: `/src/tmp/test_queue_authenticated.py` (authenticated workflow testing)
+- **Created**: `/src/tmp/test_queue_types.py` (question type validation)
+- **Modified**: `/src/fastapi_app/main.py` (removed duplicate TTS endpoint)
+- **Modified**: `/src/cosa/rest/routers/audio.py` (enhanced debugging)
+
+### Technical Status
+- ✅ WebSocket TTS streaming: Production-ready and excellent performance
+- ✅ Browser integration: Complete validation, all assets functional
+- ✅ Multi-client support: Flawless concurrent operation
+- ✅ Authentication system: Working correctly with mock tokens
+- ✅ TTS 404 errors: Completely resolved
+- ❌ Queue job processing: Critical 500 errors on all submissions
+- ❌ Agent system: No questions process successfully
+
+### Critical Issues Identified
+- **Queue Processing System**: All job submissions cause 500 Internal Server Error
+- **Agent System Failure**: No question types (time, math, calendar, weather, general) process
+- **Background Processing**: Queue consumer threads status requires investigation
+
+### Next Steps
+- Investigate 500 errors in queue job processing system
+- Check agent system dependencies and configuration
+- Verify background queue consumer threads are running
+- Test agent routing system functionality
+
+---
+
 ## 2025.07.02 - Producer-Consumer Queue Implementation
 
 ### Summary

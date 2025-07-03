@@ -411,57 +411,7 @@ async def load_stt_model():
         )
 
 
-@app.post( "/api/get-audio" )
-async def get_tts_audio( request: Request ):
-    """
-    WebSocket-based TTS endpoint that streams audio via WebSocket.
-    
-    Preconditions:
-        - Request body must contain session_id and text
-        - WebSocket connection must exist for session_id
-        - OpenAI API key must be available
-        - config_mgr must be initialized
-        
-    Postconditions:
-        - Returns immediate status response
-        - Streams audio chunks via WebSocket to specified session
-        
-    Args:
-        request: FastAPI request containing JSON body with session_id and text
-        
-    Returns:
-        JSONResponse: Immediate status response
-    """
-    try:
-        # Parse request body
-        request_data = await request.json()
-        session_id = request_data.get( "session_id" )
-        msg = request_data.get( "text" )
-        if not session_id or not msg:
-            raise HTTPException( status_code=400, detail="Missing session_id or text" )
-        
-        # Check if WebSocket connection exists
-        if not websocket_manager.is_connected( session_id ):
-            raise HTTPException( status_code=404, detail=f"No WebSocket connection for session {session_id}" )
-        
-        print( f"[TTS] Hybrid TTS request - session: {session_id}, msg: '{msg}'" )
-        
-        # Start hybrid TTS streaming in background
-        task = asyncio.create_task( stream_tts_hybrid( session_id, msg ) )
-        active_tasks[session_id] = task
-        
-        # Return immediate status response
-        return JSONResponse({
-            "status": "success",
-            "message": "TTS generation started",
-            "session_id": session_id
-        })
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print( f"[ERROR] TTS request failed: {e}" )
-        raise HTTPException( status_code=500, detail=f"TTS request error: {str(e)}" )
+# Duplicate TTS endpoint removed - using audio router version instead
 
 
 async def stream_tts_hybrid( session_id: str, msg: str ):
