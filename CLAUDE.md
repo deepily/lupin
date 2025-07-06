@@ -53,3 +53,7 @@
 
 ## PROJECT SHORT NAMES
 - This rep SHORT_PROJECT_PREFIX Is [LUPIN]
+
+## REPOSITORY RELATIONS
+- There is another repo that's a part of the larger project contained in the directory `genie-plugin-firefox`
+- This repo must be managed separately and cannot be managed by Claude
