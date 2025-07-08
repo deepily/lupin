@@ -65,3 +65,7 @@ nohup.out
 .codiumai
 
 .qodo
+
+# Separate git repositories - managed independently
+src/lupin-mobile/
+src/lupin-plugin-firefox/

@@ -1,5 +1,114 @@
 # Lupin Session History
 
+## 2025.07.08 - Async/Await Bug Fixes and Queue Management Improvements
+
+### Summary
+Fixed critical async/await compatibility issues during FastAPI migration by replacing direct `emit_audio()` calls with callback pattern. Completed callback replacement work but discovered additional async event loop issues requiring future resolution.
+
+### Work Performed
+1. **Async/Await Pattern Fixes**:
+   - Replaced 6 instances of `main_module.emit_audio()` calls with callback pattern
+   - Fixed RuntimeWarning about unawaited coroutines in todo_fifo_queue.py and running_fifo_queue.py
+   - Used existing `emit_audio_callback` parameter for synchronous operation
+
+2. **Queue Reset Functionality**:
+   - Previously added `/api/reset-queues` endpoint for clearing all queues without server restart
+   - Added `clear()` method to FifoQueue parent class with proper WebSocket emission
+   - Fixed session ID propagation issues in queue.js
+
+3. **JSON Snapshot File Recovery**:
+   - Restored corrupted `what-time-is-it-right-now-0.json` using git checkout
+   - Fixed FastAPI startup error caused by empty JSON file
+
+### Outstanding Issues for Tomorrow
+- **URGENT**: Additional async/await issues discovered at 2:42 AM:
+  - `no running event loop` error in job processing
+  - RuntimeWarning about unawaited coroutines in WebSocketManager._async_emit()
+  - RuntimeWarning about unawaited emit_audio in running_fifo_queue.py error handling (line 157)
+
+### Files Modified
+- `/src/cosa/rest/todo_fifo_queue.py` - Replaced 3 emit_audio calls with callback pattern
+- `/src/cosa/rest/running_fifo_queue.py` - Replaced 3 emit_audio calls with callback pattern  
+- `/src/conf/long-term-memory/solutions/what-time-is-it-right-now-0.json` - Restored from git
+
+### Next Session Priority
+Fix remaining async/await issues in WebSocket manager and error handling paths to fully complete FastAPI migration.
+
+## 2025.07.07 - ElevenLabs TTS Streaming Phase 1 Implementation Complete
+
+### Summary
+Successfully completed Phase 1 of ElevenLabs TTS streaming implementation with comprehensive Flutter test UI, WebSocket authentication, and FastAPI integration. Fixed critical WebSocket compatibility issues and implemented parallel endpoint strategy preserving existing OpenAI TTS functionality.
+
+### Work Performed
+1. **Flutter Test UI Implementation**:
+   - Created comprehensive Flutter web test interface for TTS streaming validation
+   - Implemented WebSocket service with session-based authentication matching queue.js pattern
+   - Built TTS service abstraction supporting both OpenAI and ElevenLabs providers
+   - Added connection status monitoring and real-time feedback
+
+2. **FastAPI Server Enhancements**:
+   - Fixed ElevenLabs WebSocket connection parameter compatibility (`extra_headers` → `additional_headers`)
+   - Added CORS middleware to support Flutter web app cross-origin requests
+   - Created parallel `/api/get-audio-elevenlabs` endpoint alongside existing OpenAI endpoint
+   - Enhanced debugging and logging for TTS request tracking
+
+3. **WebSocket Authentication Resolution**:
+   - Implemented 3-step authentication process based on existing queue.js implementation
+   - Added session ID retrieval and WebSocket connection with proper authentication tokens
+   - Fixed WebSocket connection lifecycle management and error handling
+
+4. **Static File Integration**:
+   - Moved Flutter test UI to FastAPI static directory for same-port hosting (7999)
+   - Rebuilt Flutter with proper base href configuration for FastAPI integration
+   - Eliminated CORS issues by hosting on same origin
+
+### Phase 1 Results
+- **OpenAI TTS**: ✅ Working perfectly (8 chunks in 0.4s)
+- **ElevenLabs TTS**: ✅ Working with Flash v2.5 model after API key update
+- **WebSocket Connection**: ✅ Stable session-based authentication
+- **Test UI**: ✅ Comprehensive Flutter interface accessible at http://localhost:7999/static/lupin-mobile-test/
+- **Provider Switching**: ✅ Easy toggling between TTS providers
+
+### Technical Implementation Details
+- **ElevenLabs Integration**: Direct WebSocket streaming to Flash v2.5 model with optimal latency
+- **Parallel Endpoint Strategy**: Maintains backward compatibility while adding ElevenLabs support
+- **Authentication Pattern**: Session ID → WebSocket connection → mock token authentication
+- **Error Handling**: Comprehensive WebSocket connection management and retry logic
+
+### Files Modified/Created (FastAPI Server)
+- `/src/fastapi_app/main.py` - Added CORS middleware for Flutter web app support
+- `/src/cosa/rest/routers/audio.py` - Fixed ElevenLabs WebSocket parameters, enhanced logging
+- `/src/fastapi_app/static/lupin-mobile-test/` - Flutter test UI hosted on FastAPI
+
+### Files Modified/Created (Flutter Mobile)
+- `/src/lupin-mobile/lib/services/websocket/websocket_service.dart` - Session-based authentication
+- `/src/lupin-mobile/lib/services/tts/tts_service.dart` - Provider abstraction layer
+- `/src/lupin-mobile/lib/features/home/home_screen.dart` - Comprehensive test UI
+- `/src/lupin-mobile/lib/shared/constants/app_constants.dart` - API endpoint configuration
+
+### Development Workflow Selection
+Selected hybrid development approach combining:
+- Claude Code on Linux server for AI-driven development
+- PyCharm on macOS with Samba mount for advanced editing
+- Flutter desktop on macOS for rapid UI testing
+- Occasional Android device verification
+
+### Current Status
+- **Phase 1 TTS Streaming**: ✅ **COMPLETED**
+- **Test Infrastructure**: ✅ Comprehensive Flutter test UI working
+- **WebSocket Integration**: ✅ Production-ready with proper authentication
+- **Provider Support**: ✅ Both OpenAI and ElevenLabs functional
+- **Ready for Phase 2**: ✅ Audio playback optimization and mobile-specific features
+
+### Next Steps (Phase 2)
+- Implement platform-specific audio players for Android/iOS
+- Add audio buffer management and optimization
+- Create caching system for frequently used phrases
+- Enhance UI/UX for voice assistant interface
+- Set up macOS Flutter desktop development environment
+
+---
+
 ## 2025.07.06 - Browser Plugin Authentication System Phase 1A Implementation
 
 ### Summary

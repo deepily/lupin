@@ -52,8 +52,8 @@
 - The first thing you should do when you start a session is read the global Claude configuration file And follow its instructions.
 
 ## PROJECT SHORT NAMES
-- This rep SHORT_PROJECT_PREFIX Is [LUPIN]
+- This repo's SHORT_PROJECT_PREFIX is [LUPIN]
 
 ## REPOSITORY RELATIONS
-- There is another repo that's a part of the larger project contained in the directory `genie-plugin-firefox`
+- There is another repo that's a part of the larger project contained in the directory `lupin-plugin-firefox`
 - This repo must be managed separately and cannot be managed by Claude

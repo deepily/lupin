@@ -4,6 +4,7 @@ from logging import debug
 from fastapi import FastAPI, Request, Query, HTTPException, File, UploadFile, WebSocket, WebSocketDisconnect, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from datetime import datetime
 import os
@@ -74,23 +75,35 @@ consumer_thread = None
 
 async def emit_audio( msg: str, websocket_id: str = None ) -> None:
     """
-    Skeletal implementation - logs calls and simulates audio emission
+    Generate TTS audio and emit via WebSocket to specific session or broadcast.
     
     Args:
         msg: The text message to be converted to audio
-        websocket_id: Optional websocket identifier for future WebSocket routing
+        websocket_id: Optional websocket identifier for specific session routing
     """
-    print( f"[STUB] emit_audio called:" )
+    print( f"[AUDIO] emit_audio called:" )
     print( f"  - Message: '{msg}'" )
     print( f"  - WebSocket ID: {websocket_id if websocket_id else 'broadcast'}" )
-    print( f"  - Audio URL would be: /api/get-audio?msg={quote( msg )}" )
-    print( f"  - Timestamp: {datetime.now().isoformat()}" )
     
-    # Simulate some async work
-    await asyncio.sleep( 0.1 )
-    
-    # Log successful "emission"
-    print( f"[STUB] Audio emission complete for websocket {websocket_id}" )
+    try:
+        # Emit audio_update event to trigger TTS in browser
+        audio_data = {
+            "text": msg,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        if websocket_id:
+            # Emit to specific session
+            await websocket_manager.emit_to_session( websocket_id, "audio_update", audio_data )
+            print( f"[AUDIO] Emitted audio_update to session {websocket_id}" )
+        else:
+            # Broadcast to all connected clients
+            await websocket_manager.async_emit( "audio_update", audio_data )
+            print( f"[AUDIO] Broadcasted audio_update to all connections" )
+            
+    except Exception as e:
+        print( f"[AUDIO] Error emitting audio: {e}" )
+        # Don't raise - this shouldn't break the calling flow
 
 
 def create_emit_audio_callback():
@@ -237,6 +250,15 @@ app = FastAPI(
     description="A FastAPI migration of the Genie-in-the-Box agent system",
     version="0.1.0",
     lifespan=lifespan
+)
+
+# Add CORS middleware to allow Flutter web app to access API endpoints
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with specific origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Include routers
