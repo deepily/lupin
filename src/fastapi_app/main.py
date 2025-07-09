@@ -109,8 +109,19 @@ async def emit_audio( msg: str, websocket_id: str = None ) -> None:
 def create_emit_audio_callback():
     """Creates a sync wrapper for the async emit_audio function"""
     def sync_emit_audio( msg: str, websocket_id: str = None ):
-        # Run async function in sync context
-        asyncio.create_task( emit_audio( msg, websocket_id ) )
+        import threading
+        
+        def run_in_thread():
+            try:
+                # Run async function in isolated thread with its own event loop
+                asyncio.run( emit_audio( msg, websocket_id ) )
+            except Exception as e:
+                print( f"[AUDIO] Error in audio thread: {e}" )
+        
+        # Always run in separate thread to avoid event loop conflicts
+        thread = threading.Thread( target=run_in_thread, daemon=True )
+        thread.start()
+        print( f"[AUDIO] Started audio emission thread for: '{msg}'" )
     return sync_emit_audio
 
 

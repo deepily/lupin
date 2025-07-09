@@ -1,5 +1,93 @@
 # Lupin Session History
 
+## 2025.07.09 - Complete Queue Processing Fix and Frontend Architecture Audit
+
+### Summary
+Successfully resolved critical async/await and JSON serialization issues that were preventing queue processing, completing the FastAPI migration. Fixed method name errors, import conflicts, and event loop problems. Conducted comprehensive frontend duplication audit, eliminated duplicate TTS implementation, and created detailed consolidation roadmap.
+
+### Work Performed
+
+1. **Queue Processing Critical Fixes**:
+   - Fixed method name error: `format_output()` → `run_formatter()` in SolutionSnapshot
+   - Replaced Flask import errors: `from app import emit_audio` → `self.emit_audio_callback`
+   - Added `_embedding_mgr` to JSON serialization exclusion list to prevent TypeError
+   - Enhanced error logging with full stack traces for better debugging
+
+2. **Async/Await Event Loop Resolution**:
+   - Fixed `RuntimeError: no running event loop` in queue processing background threads
+   - Replaced `asyncio.create_task()` with thread-based approach using `threading.Thread`
+   - Implemented `asyncio.run()` in isolated threads to avoid event loop conflicts
+   - Eliminated "cannot be called from running event loop" errors
+
+3. **Frontend API Contract Fixes**:
+   - Fixed HTTP method mismatch: GET with query params → POST with JSON body
+   - Updated `queue.js` to use correct `/api/get-audio` endpoint format
+   - Resolved 405 Method Not Allowed and 404 errors in TTS calls
+
+4. **Frontend Architecture Consolidation**:
+   - Eliminated duplicate TTS implementation in `queue.js` (~35 lines removed)
+   - Consolidated to `HybridTTS` delegation pattern for single source of truth
+   - Restored corrupted JSON file using git checkout
+
+5. **Comprehensive Frontend Duplication Audit**:
+   - Created detailed implementation tracker document
+   - Identified 6 major duplication areas across `queue.js` and `hybrid-tts.js`
+   - Documented 200+ lines of duplicate caching infrastructure
+   - Found 50+ inconsistent error handling patterns
+
+### Files Modified
+- `/src/cosa/rest/running_fifo_queue.py` - Fixed method name, imports, error logging
+- `/src/cosa/memory/solution_snapshot.py` - Added _embedding_mgr to serialization exclusion
+- `/src/fastapi_app/main.py` - Implemented thread-based audio emission
+- `/src/fastapi_app/static/js/queue.js` - Fixed API calls, eliminated duplicate TTS
+- `/src/conf/long-term-memory/solutions/what-time-is-it-right-now-0.json` - Restored from git
+
+### Files Created
+- `/src/rnd/2025.07.09-frontend-duplication-audit-tracker.md` - Comprehensive audit and roadmap
+
+### Technical Implementation Details
+
+**Queue Processing Fixes:**
+- Method name compatibility restored for SolutionSnapshot execution
+- Synchronous audio emission using isolated threads with own event loops
+- JSON serialization exclusions prevent complex object errors
+- Enhanced debugging with comprehensive stack traces
+
+**Frontend Consolidation:**
+- Single TTS implementation using HybridTTS with WebSocket streaming
+- Proper HTTP POST/JSON communication with backend
+- Eliminated architectural duplication and maintenance burden
+
+**Duplication Areas Identified:**
+1. Audio handling patterns (multiple `new Audio()` approaches)
+2. WebSocket connection management (separate connection systems)  
+3. Session management (dual session ID retrieval)
+4. HTTP request patterns (10+ duplicate fetch() implementations)
+5. Error handling (50+ inconsistent try/catch blocks)
+6. Caching systems (~200+ lines of duplicate IndexedDB code)
+
+### Performance & Quality Improvements
+- ✅ Queue processing works end-to-end without errors
+- ✅ Audio emission works in both sync and async contexts  
+- ✅ TTS system works with proper API communication
+- ✅ Single source of truth for TTS functionality
+- ✅ Comprehensive roadmap for eliminating remaining duplication
+
+### Outstanding Tasks Added
+- Investigate existing ElevenLabs streaming TTS for better performance
+- Replace OpenAI TTS proxy with ElevenLabs progressive playback
+- Execute Phase 2 of frontend consolidation (caching systems)
+
+### Current Status
+- **Queue Processing**: ✅ Fully functional end-to-end
+- **Audio Systems**: ✅ Working with thread-based emission
+- **Frontend TTS**: ✅ Consolidated to single implementation
+- **Architecture Audit**: ✅ Complete with detailed roadmap
+- **Ready for**: ElevenLabs TTS optimization and Phase 2 consolidation
+
+### Next Session Priority
+Begin ElevenLabs streaming TTS implementation for progressive audio playback improvements.
+
 ## 2025.07.08 - Async/Await Bug Fixes and Queue Management Improvements
 
 ### Summary

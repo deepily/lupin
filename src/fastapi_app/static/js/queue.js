@@ -880,42 +880,18 @@ function handleNotificationSound( data ) {
 async function handleAudioUpdate( data ) {
     console.log( "Received audio update:", data );
     
-    // Check if we have text to convert to speech via server's get-audio endpoint
+    // Use HybridTTS for all text-to-speech conversion
     if ( data.text ) {
-        console.log( `Converting text to speech via /api/get-audio: "${data.text}"` );
+        console.log( `Converting text to speech via HybridTTS: "${data.text}"` );
         
         try {
-            const response = await fetch( `/api/get-audio?text=${encodeURIComponent(data.text)}`, {
-                headers: {
-                    'Authorization': getAuthHeader(),
-                    'X-Session-ID': sessionId
-                }
-            });
-            
-            if ( response.ok ) {
-                const audioBlob = await response.blob();
-                const audioUrl = URL.createObjectURL( audioBlob );
-                console.log( `Playing server-generated TTS audio for: "${data.text}"` );
-                addToAudioQueue( 'audio', audioUrl, 'high' );
+            if ( window.hybridTTS ) {
+                await window.hybridTTS.speak( data.text );
             } else {
-                console.error( `Failed to get TTS audio from server: ${response.status}` );
-                // Fallback to local HybridTTS if server TTS fails
-                if ( hybridTTS ) {
-                    console.log( `Falling back to local TTS for: "${data.text}"` );
-                    await hybridTTS.speak( data.text );
-                } else {
-                    console.error( `No fallback TTS available` );
-                }
+                console.error( "HybridTTS not available for audio conversion" );
             }
         } catch ( error ) {
-            console.error( `Error fetching TTS audio from server:`, error );
-            // Fallback to local HybridTTS if server request fails
-            if ( hybridTTS ) {
-                console.log( `Falling back to local TTS for: "${data.text}"` );
-                await hybridTTS.speak( data.text );
-            } else {
-                console.error( `No fallback TTS available` );
-            }
+            console.error( `Error in HybridTTS:`, error );
         }
         return;
     }
