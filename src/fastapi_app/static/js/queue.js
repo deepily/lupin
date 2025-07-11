@@ -243,8 +243,14 @@ function submitQuestion() {
         return;
     }
     
-    // Generate a websocket ID for this session
-    const websocketId = `websocket_${Date.now()}`;
+    if ( !sessionId ) {
+        alert( "Session not established. Please wait for connection." );
+        return;
+    }
+    
+    // Use the existing WebSocket session ID
+    const websocketId = sessionId;
+    console.log( `Using session ID as websocket ID: ${websocketId}` );
     
     // Show loading status
     const statusElement = document.getElementById( "response-status" );
@@ -255,7 +261,8 @@ function submitQuestion() {
     
     fetch( url, {
         headers: {
-            'Authorization': getAuthHeader()
+            'Authorization': getAuthHeader(),
+            'X-Session-ID': sessionId
         }
     })
     .then( response => {
@@ -873,7 +880,23 @@ function handleNotificationSound( data ) {
 async function handleAudioUpdate( data ) {
     console.log( "Received audio update:", data );
     
-    // Check if we have job completion text for TTS
+    // Use HybridTTS for all text-to-speech conversion
+    if ( data.text ) {
+        console.log( `Converting text to speech via HybridTTS: "${data.text}"` );
+        
+        try {
+            if ( window.hybridTTS ) {
+                await window.hybridTTS.speak( data.text );
+            } else {
+                console.error( "HybridTTS not available for audio conversion" );
+            }
+        } catch ( error ) {
+            console.error( `Error in HybridTTS:`, error );
+        }
+        return;
+    }
+    
+    // Legacy: Check if we have job completion text for local TTS
     if ( data.text && hybridTTS ) {
         console.log( `Playing job completion audio via TTS: "${data.text}"` );
         
@@ -1792,6 +1815,58 @@ async function handleNotificationUpdate( data ) {
     
     // Process it immediately for auto-play (server already filtered by user)
     await processServerNotification( notification );
+}
+
+// Reset all queues via API endpoint
+async function resetAllQueues() {
+    if ( !confirm( "Are you sure you want to reset ALL queues? This will clear todo, running, done, dead, and notification queues. This action cannot be undone." ) ) {
+        return;
+    }
+    
+    console.log( "Resetting all queues..." );
+    
+    try {
+        const response = await fetch( "/api/reset-queues", {
+            method: "POST",
+            headers: {
+                'Authorization': getAuthHeader(),
+                'X-Session-ID': sessionId,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if ( response.ok ) {
+            const result = await response.json();
+            console.log( "Queue reset successful:", result );
+            
+            // Show success message
+            alert( `✅ All queues reset successfully!\n\nCleared ${result.total_items_cleared} total items:\n- Todo: ${result.queues_reset.todo}\n- Running: ${result.queues_reset.run}\n- Done: ${result.queues_reset.done}\n- Dead: ${result.queues_reset.dead}\n- Notifications: ${result.queues_reset.notification}` );
+            
+            // Note: Queue displays will refresh automatically via WebSocket events from _emit_queue_update()
+            console.log( "Queue displays will refresh automatically via WebSocket notifications" );
+            
+            // Clear any local job storage
+            if ( window.fallbackJobMessages ) {
+                window.fallbackJobMessages.clear();
+                console.log( "Cleared fallback job messages storage" );
+            }
+            
+            // Refresh notifications if available
+            if ( typeof loadNotifications === 'function' ) {
+                await loadNotifications();
+                console.log( "Refreshed notifications display" );
+            }
+            
+        } else {
+            const errorText = await response.text();
+            console.error( "Failed to reset queues:", response.status, errorText );
+            alert( `❌ Failed to reset queues: ${response.status}\n${errorText}` );
+        }
+        
+    } catch ( error ) {
+        console.error( "Error calling reset-queues endpoint:", error );
+        alert( `❌ Error resetting queues: ${error.message}` );
+    }
 }
 
 // Initialize notification state when DOM is ready

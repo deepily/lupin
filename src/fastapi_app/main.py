@@ -4,6 +4,7 @@ from logging import debug
 from fastapi import FastAPI, Request, Query, HTTPException, File, UploadFile, WebSocket, WebSocketDisconnect, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from datetime import datetime
 import os
@@ -44,6 +45,7 @@ from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
 from cosa.rest.routers import system, notifications, audio, queues, jobs, websocket
+from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 
 # Global variables
 config_mgr = None
@@ -64,36 +66,93 @@ id_generator = None
 websocket_manager = WebSocketManager()
 # Background task tracking for cleanup
 active_tasks = {}
+# Clock update background task
+clock_task = None
+# Consumer thread for producer-consumer pattern
+consumer_thread = None
 
 
 
 async def emit_audio( msg: str, websocket_id: str = None ) -> None:
     """
-    Skeletal implementation - logs calls and simulates audio emission
+    Generate TTS audio and emit via WebSocket to specific session or broadcast.
     
     Args:
         msg: The text message to be converted to audio
-        websocket_id: Optional websocket identifier for future WebSocket routing
+        websocket_id: Optional websocket identifier for specific session routing
     """
-    print( f"[STUB] emit_audio called:" )
+    print( f"[AUDIO] emit_audio called:" )
     print( f"  - Message: '{msg}'" )
     print( f"  - WebSocket ID: {websocket_id if websocket_id else 'broadcast'}" )
-    print( f"  - Audio URL would be: /api/get-audio?msg={quote( msg )}" )
-    print( f"  - Timestamp: {datetime.now().isoformat()}" )
     
-    # Simulate some async work
-    await asyncio.sleep( 0.1 )
-    
-    # Log successful "emission"
-    print( f"[STUB] Audio emission complete for websocket {websocket_id}" )
+    try:
+        # Emit audio_update event to trigger TTS in browser
+        audio_data = {
+            "text": msg,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        if websocket_id:
+            # Emit to specific session
+            await websocket_manager.emit_to_session( websocket_id, "audio_update", audio_data )
+            print( f"[AUDIO] Emitted audio_update to session {websocket_id}" )
+        else:
+            # Broadcast to all connected clients
+            await websocket_manager.async_emit( "audio_update", audio_data )
+            print( f"[AUDIO] Broadcasted audio_update to all connections" )
+            
+    except Exception as e:
+        print( f"[AUDIO] Error emitting audio: {e}" )
+        # Don't raise - this shouldn't break the calling flow
 
 
 def create_emit_audio_callback():
     """Creates a sync wrapper for the async emit_audio function"""
     def sync_emit_audio( msg: str, websocket_id: str = None ):
-        # Run async function in sync context
-        asyncio.create_task( emit_audio( msg, websocket_id ) )
+        import threading
+        
+        def run_in_thread():
+            try:
+                # Run async function in isolated thread with its own event loop
+                asyncio.run( emit_audio( msg, websocket_id ) )
+            except Exception as e:
+                print( f"[AUDIO] Error in audio thread: {e}" )
+        
+        # Always run in separate thread to avoid event loop conflicts
+        thread = threading.Thread( target=run_in_thread, daemon=True )
+        thread.start()
+        print( f"[AUDIO] Started audio emission thread for: '{msg}'" )
     return sync_emit_audio
+
+
+async def clock_loop():
+    """
+    Background task that emits clock updates every second to all connected WebSocket clients.
+    
+    This replaces the Flask/Socket.IO enter_clock_loop() functionality with FastAPI/WebSocket.
+    """
+    print( "[CLOCK] Starting clock update loop..." )
+    while True:
+        try:
+            # Emit time update to all connected WebSocket clients
+            current_time = du.get_current_time( format="%Y-%m-%d @ %H:%M" )
+            await websocket_manager.async_emit( 'time_update', { 'date': current_time } )
+            
+            # Debug logging (only if verbose mode)
+            if app_debug and app_verbose:
+                connection_count = websocket_manager.get_connection_count()
+                print( f"[CLOCK] Emitted time update to {connection_count} connections: {current_time}" )
+            
+            # Wait 1 minute before next update
+            await asyncio.sleep( 60 )
+            
+        except asyncio.CancelledError:
+            print( "[CLOCK] Clock loop cancelled" )
+            break
+        except Exception as e:
+            print( f"[CLOCK] Error in clock loop: {e}" )
+            # Wait before retrying to avoid rapid error loops
+            await asyncio.sleep( 60 )
 
 
 @asynccontextmanager
@@ -118,7 +177,7 @@ async def lifespan( app: FastAPI ):
         None - Control returns to FastAPI after initialization
     """
     # Startup
-    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent
+    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread
     
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
     
@@ -153,19 +212,64 @@ async def lifespan( app: FastAPI ):
     whisper_pipeline = await load_stt_model()
     print( "Done!" )
     
+    # Start background clock task
+    print( "[CLOCK] Starting background clock task..." )
+    clock_task = asyncio.create_task( clock_loop() )
+    print( "[CLOCK] Background clock task started" )
+    
+    # Start consumer thread for producer-consumer pattern
+    print( "[CONSUMER] Starting todo-producer-run-consumer thread..." )
+    consumer_thread = start_todo_producer_run_consumer_thread( jobs_todo_queue, jobs_run_queue )
+    print( "[CONSUMER] Todo-producer-run-consumer thread started" )
+    
     print( f"FastAPI startup complete at {datetime.now()}" )
     
     yield
     
     # Shutdown
     print( f"FastAPI shutdown at {datetime.now()}" )
-    # Add any cleanup code here if needed
+    
+    # Cancel and cleanup background clock task
+    if clock_task:
+        print( "[CLOCK] Cancelling background clock task..." )
+        clock_task.cancel()
+        try:
+            await clock_task
+        except asyncio.CancelledError:
+            print( "[CLOCK] Background clock task cancelled successfully" )
+        except Exception as e:
+            print( f"[CLOCK] Error during clock task shutdown: {e}" )
+    
+    # Shutdown consumer thread
+    if consumer_thread:
+        print( "[CONSUMER] Stopping todo-producer-run-consumer thread..." )
+        with jobs_todo_queue.condition:
+            jobs_todo_queue.consumer_running = False
+            jobs_todo_queue.condition.notify()
+        
+        # Wait for consumer thread to finish
+        consumer_thread.join( timeout=5.0 )
+        if consumer_thread.is_alive():
+            print( "[CONSUMER] Warning: Consumer thread did not exit cleanly" )
+        else:
+            print( "[CONSUMER] Todo-producer-run-consumer thread stopped successfully" )
+    
+    # Add any other cleanup code here if needed
 
 app = FastAPI(
     title="Genie-in-the-Box FastAPI",
     description="A FastAPI migration of the Genie-in-the-Box agent system",
     version="0.1.0",
     lifespan=lifespan
+)
+
+# Add CORS middleware to allow Flutter web app to access API endpoints
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with specific origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Include routers
@@ -340,57 +444,7 @@ async def load_stt_model():
         )
 
 
-@app.post( "/api/get-audio" )
-async def get_tts_audio( request: Request ):
-    """
-    WebSocket-based TTS endpoint that streams audio via WebSocket.
-    
-    Preconditions:
-        - Request body must contain session_id and text
-        - WebSocket connection must exist for session_id
-        - OpenAI API key must be available
-        - config_mgr must be initialized
-        
-    Postconditions:
-        - Returns immediate status response
-        - Streams audio chunks via WebSocket to specified session
-        
-    Args:
-        request: FastAPI request containing JSON body with session_id and text
-        
-    Returns:
-        JSONResponse: Immediate status response
-    """
-    try:
-        # Parse request body
-        request_data = await request.json()
-        session_id = request_data.get( "session_id" )
-        msg = request_data.get( "text" )
-        if not session_id or not msg:
-            raise HTTPException( status_code=400, detail="Missing session_id or text" )
-        
-        # Check if WebSocket connection exists
-        if not websocket_manager.is_connected( session_id ):
-            raise HTTPException( status_code=404, detail=f"No WebSocket connection for session {session_id}" )
-        
-        print( f"[TTS] Hybrid TTS request - session: {session_id}, msg: '{msg}'" )
-        
-        # Start hybrid TTS streaming in background
-        task = asyncio.create_task( stream_tts_hybrid( session_id, msg ) )
-        active_tasks[session_id] = task
-        
-        # Return immediate status response
-        return JSONResponse({
-            "status": "success",
-            "message": "TTS generation started",
-            "session_id": session_id
-        })
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print( f"[ERROR] TTS request failed: {e}" )
-        raise HTTPException( status_code=500, detail=f"TTS request error: {str(e)}" )
+# Duplicate TTS endpoint removed - using audio router version instead
 
 
 async def stream_tts_hybrid( session_id: str, msg: str ):

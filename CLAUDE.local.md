@@ -6,3 +6,6 @@
 
 ## Project Identifiers
 - This rep SHORT_PROJECT_PREFIX Is [LUPIN]
+
+## Project Repositories
+- The project includes a repository named `genie-plugin-firefox` which is part of the larger project, but must be managed separately from this main repository

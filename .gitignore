@@ -1,3 +1,8 @@
+src/temp
+
+# Temporary testing directory
+src/tmp/
+
 # Skip CoSA repo
 src/cosa
 
@@ -60,3 +65,7 @@ nohup.out
 .codiumai
 
 .qodo
+
+# Separate git repositories - managed independently
+src/lupin-mobile/
+src/lupin-plugin-firefox/
