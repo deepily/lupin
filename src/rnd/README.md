@@ -5,6 +5,7 @@ This directory contains research and development documents for the Lupin project
 ## Active Documents
 
 ### Current Development (2025.07)
+- **[2025.07.11-websocket-user-routing-architecture.md](2025.07.11-websocket-user-routing-architecture.md)** - User-centric event routing architecture to replace ephemeral WebSocket ID dependencies
 - **[2025.07.01-fastapi-clock-events-research.md](2025.07.01-fastapi-clock-events-research.md)** - Research plan for implementing clock update events using existing WebSocketManager
 
 ### Previous Development (2025.06)
