@@ -1,5 +1,78 @@
 # Lupin Session History
 
+## 2025.07.11 - WebSocket User Routing Architecture Design
+
+### Summary
+Investigated FastAPI migration status and analyzed the `/api/push` endpoint's end-to-end flow. Identified critical architectural issue where WebSocket IDs (ephemeral) are used instead of user IDs (persistent) for event routing. Created comprehensive design document for user-centric event routing system with multi-session support and future offline event queuing.
+
+### Work Performed
+
+1. **FastAPI Migration Status Analysis**:
+   - Confirmed complete migration from Flask to FastAPI (completed June 28, 2025)
+   - Verified `/api/push` endpoint functionality with producer-consumer queue pattern
+   - Analyzed WebSocketManager capabilities and existing event emission infrastructure
+   - Documented comprehensive event types currently supported
+
+2. **Critical Issue Identification**:
+   - Found that `websocket_id` parameter in `/api/push` gets lost during job processing
+   - Identified fundamental problem: WebSocket IDs are ephemeral (browser refresh, network issues, multiple tabs)
+   - Determined that agents cannot emit user-specific events, causing all responses to broadcast
+   - Analyzed serialization concerns with ephemeral data in persistent snapshots
+
+3. **Architectural Design Development**:
+   - Designed user-centric event routing replacing websocket_id with user_id
+   - Leveraged existing WebSocketManager user-to-session mapping infrastructure
+   - Planned multi-session support for users with multiple tabs/devices
+   - Designed resilient system handling disconnections and reconnections
+
+4. **Implementation Planning**:
+   - Created 3-phase implementation strategy (15h + 20h + 44h effort estimates)
+   - Phase 1: User-based routing (immediate, low risk)
+   - Phase 2: Enhanced event types (near-term, medium risk)
+   - Phase 3: Persistent event queue (future, high risk - stubbed)
+
+5. **Technical Specifications**:
+   - Defined serialization exclusion requirements for ephemeral data
+   - Documented event flow architecture and message formats
+   - Planned edge cases handling (offline users, multiple sessions, security)
+   - Created comprehensive tracking matrix with dependencies and risks
+
+### Files Created
+- `/src/rnd/2025.07.11-websocket-user-routing-architecture.md` - Comprehensive design document with 3-phase implementation plan
+
+### Files Modified
+- `/src/rnd/README.md` - Added link to new architecture document
+
+### Key Insights
+
+**WebSocket Infrastructure Status**: 
+- WebSocketManager already supports user-based routing via `emit_to_user()` and session mapping
+- FIFO queues have full access to WebSocketManager for rich event emission
+- Current event types: queue updates, audio streaming, job notifications, system events
+
+**Architectural Principle Established**:
+- Store persistent user_id with jobs, never ephemeral websocket_id
+- Resolve current sessions dynamically at emission time
+- Support multiple concurrent sessions per user
+- Plan for offline event persistence (stubbed for future implementation)
+
+**Implementation Strategy**:
+- Immediate: Fix user_id propagation through job processing chain (~15 hours)
+- Near-term: Enhance event taxonomy for richer user experience (~20 hours)
+- Future: Add persistent event queue for offline users (~44 hours, stubbed)
+
+### Current Status
+- **FastAPI Migration**: ✅ Complete - Flask eliminated, all endpoints functional
+- **Queue Processing**: ✅ Working with producer-consumer pattern (6700x performance improvement)
+- **WebSocket Events**: ✅ Infrastructure ready, needs user-centric routing
+- **Architecture Design**: ✅ Complete with phased implementation plan
+- **Ready for Phase 1**: User-based routing implementation
+
+### Next Session Priority
+Begin Phase 1 implementation: Add user_id propagation to job processing chain and update event emission to use user-based routing.
+
+---
+
 ## 2025.07.09 - Complete Queue Processing Fix and Frontend Architecture Audit
 
 ### Summary
