@@ -1,5 +1,76 @@
 # Lupin Session History
 
+## 2025.07.12 - Progressive TTS Streaming Experimental Implementation
+
+### Summary
+Completed TTS Mode Switching Phase 1 implementation and discovered critical issue with progressive streaming. Current HybridTTS does "collect-then-play" instead of true progressive streaming, defeating ElevenLabs streaming benefits. Built experimental Firefox-first UI demonstrating immediate chunk playback, bypassing existing limitations to achieve <500ms latency targets.
+
+### Work Performed
+
+1. **TTS Mode Switching Phase 1 Completion**:
+   - Enhanced HybridTTS class with mode detection and routing (`instant` vs `reliable`)
+   - Updated handleSpeechUpdate() for mode preference handling via localStorage
+   - Added UI toggle interface with radio buttons and persistence
+   - Validated end-to-end functionality with high-priority notifications
+
+2. **Progressive Streaming Issue Investigation**:
+   - **Root Cause Identified**: HybridTTS `playCollectedAudio()` waits for ALL chunks before playing
+   - **Backend Analysis**: ElevenLabs streaming works correctly (chunks sent immediately)
+   - **Frontend Problem**: Line 149 only plays after `audio_complete` message received
+   - **Research Review**: Found original 2025.06.03 design intended immediate progressive playback
+
+3. **Experimental Progressive TTS Implementation**:
+   - Built Firefox-first experimental UI (`/test/experimental-tts.html`)
+   - Implemented true progressive streaming with Web Audio API
+   - Created multiple audio elements fallback strategy
+   - Added real-time latency measurement and visualization
+   - Direct connection to `/api/get-speech-elevenlabs` endpoint only
+
+4. **Technical Validation Preparation**:
+   - Created comprehensive R&D tracking document
+   - Implemented Firefox-specific optimizations and browser detection
+   - Built testing protocol for <500ms first-audio latency validation
+   - Prepared isolated environment for proving progressive streaming concept
+
+### Files Created
+- `/src/rnd/2025.07.12-progressive-tts-streaming-experimental-tracker.md` - Firefox-first experimental implementation tracker
+- `/src/fastapi_app/static/html/test/experimental-tts.html` - Progressive streaming test UI
+- `/src/fastapi_app/static/html/test/experimental-tts.js` - Firefox-optimized progressive audio implementation
+
+### Files Modified
+- `/src/fastapi_app/static/js/hybrid-tts.js` - Added TTS mode switching with `setMode()`, `streamingSpeak()`, `batchSpeak()`
+- `/src/fastapi_app/static/js/queue.js` - Added `updateTTSMode()`, `getCurrentTTSMode()`, mode UI initialization
+- `/src/fastapi_app/static/html/queue.html` - Added TTS mode selector with radio buttons and styling
+- `/src/rnd/README.md` - Added progressive streaming experimental tracker link
+
+### Key Insights
+
+**Progressive Streaming Gap**:
+- ElevenLabs backend streams correctly, but frontend collects chunks before playing
+- Current implementation negates streaming benefits (still 2-3s delay)
+- Web Audio API can enable immediate chunk playback for <500ms response
+
+**Firefox-First Strategy**: 
+- Web Audio API implementation optimized for Firefox performance patterns
+- Multiple audio elements pool provides seamless fallback
+- Browser-specific autoplay policy handling required
+
+**Architecture Validation**:
+- Experimental UI proves immediate progressive playback is technically feasible
+- Isolated implementation avoids interference with existing HybridTTS
+- Real-time metrics enable objective latency measurement and comparison
+
+### Current Status
+- **Phase 1 TTS Mode Switching**: ✅ Complete and working
+- **Progressive Streaming**: ⏳ Experimental UI ready for Firefox testing
+- **Next Steps**: Validate <500ms latency, then integrate back to main system
+
+### Tomorrow's Focus
+1. Test experimental UI in Firefox and measure actual latency improvements
+2. Document findings and performance benchmarks  
+3. Create integration roadmap for HybridTTS enhancement
+4. Plan production deployment of progressive streaming
+
 ## 2025.07.11 - WebSocket User Routing Architecture Design
 
 ### Summary

@@ -44,7 +44,7 @@ from cosa.rest.user_id_generator import email_to_system_id
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, audio, queues, jobs, websocket
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 
 # Global variables
@@ -106,15 +106,15 @@ async def emit_audio( msg: str, websocket_id: str = None ) -> None:
         # Don't raise - this shouldn't break the calling flow
 
 
-def create_emit_audio_callback():
-    """Creates a sync wrapper for the async emit_audio function"""
-    def sync_emit_audio( msg: str, websocket_id: str = None ):
+def create_emit_speech_callback():
+    """Creates a sync wrapper for the async emit_speech function"""
+    def sync_emit_speech( msg: str, websocket_id: str = None ):
         import threading
         
         def run_in_thread():
             try:
                 # Run async function in isolated thread with its own event loop
-                asyncio.run( emit_audio( msg, websocket_id ) )
+                asyncio.run( emit_speech( msg, websocket_id ) )
             except Exception as e:
                 print( f"[AUDIO] Error in audio thread: {e}" )
         
@@ -122,7 +122,7 @@ def create_emit_audio_callback():
         thread = threading.Thread( target=run_in_thread, daemon=True )
         thread.start()
         print( f"[AUDIO] Started audio emission thread for: '{msg}'" )
-    return sync_emit_audio
+    return sync_emit_speech
 
 
 async def clock_loop():
@@ -194,11 +194,11 @@ async def lifespan( app: FastAPI ):
     path_to_snapshots = du.get_project_root() + path_to_snapshots_dir_wo_root
     snapshot_mgr = SolutionSnapshotManager( path_to_snapshots, debug=app_debug, verbose=app_verbose )
     
-    # Initialize queues with emit_audio callback and websocket manager
-    jobs_todo_queue = TodoFifoQueue( websocket_manager, snapshot_mgr, app, config_mgr, emit_audio_callback=create_emit_audio_callback(), debug=app_debug, verbose=app_verbose, silent=app_silent )
+    # Initialize queues with emit_speech callback and websocket manager
+    jobs_todo_queue = TodoFifoQueue( websocket_manager, snapshot_mgr, app, config_mgr, emit_speech_callback=create_emit_speech_callback(), debug=app_debug, verbose=app_verbose, silent=app_silent )
     jobs_done_queue = FifoQueue( websocket_mgr=websocket_manager, queue_name="done", emit_enabled=True )
     jobs_dead_queue = FifoQueue( websocket_mgr=websocket_manager, queue_name="dead", emit_enabled=True )
-    jobs_run_queue = RunningFifoQueue( app, websocket_manager, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, config_mgr=config_mgr, emit_audio_callback=create_emit_audio_callback() )
+    jobs_run_queue = RunningFifoQueue( app, websocket_manager, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, config_mgr=config_mgr, emit_speech_callback=create_emit_speech_callback() )
     
     # Initialize notification queue with io_tbl logging
     jobs_notification_queue = NotificationFifoQueue( websocket_mgr=websocket_manager, emit_enabled=True, debug=app_debug, verbose=app_verbose )
@@ -275,7 +275,7 @@ app.add_middleware(
 # Include routers
 app.include_router(system.router)
 app.include_router(notifications.router)
-app.include_router(audio.router)
+app.include_router(speech.router)
 app.include_router(queues.router)
 app.include_router(jobs.router)
 app.include_router(websocket.router)

@@ -75,7 +75,7 @@ async def emit_audio( msg: str, websocket_id: str = None ) -> None:
     print( f"[STUB] emit_audio called:" )
     print( f"  - Message: '{msg}'" )
     print( f"  - WebSocket ID: {websocket_id if websocket_id else 'broadcast'}" )
-    print( f"  - Audio URL would be: /api/get-audio?msg={quote( msg )}" )
+    print( f"  - Audio URL would be: /api/get-speech?msg={quote( msg )}" )
     print( f"  - Timestamp: {datetime.now().isoformat()}" )
     
     # Simulate some async work
@@ -594,7 +594,7 @@ async def upload_and_transcribe_mp3_file(
         )
 
 
-@app.post( "/api/get-audio" )
+@app.post( "/api/get-speech" )
 async def get_tts_audio( request: Request ):
     """
     WebSocket-based TTS endpoint that streams audio via WebSocket.

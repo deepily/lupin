@@ -15,8 +15,14 @@ class HybridTTS {
     constructor(options = {}) {
         // Configuration options
         this.wsUrl = options.wsUrl || `ws://${window.location.host}/ws`;
-        this.apiUrl = options.apiUrl || '/api/get-audio';
+        this.apiUrl = options.apiUrl || '/api/get-speech';
         this.sessionUrl = options.sessionUrl || '/api/get-session-id';
+        
+        // TTS Mode switching (new functionality)
+        this.mode = localStorage.getItem('tts-mode') || 'reliable';
+        this.fallbackEnabled = options.fallbackEnabled !== false; // Default true
+        this.apiUrlBatch = '/api/get-speech';        // OpenAI batch TTS
+        this.apiUrlStreaming = '/api/get-speech-elevenlabs'; // ElevenLabs streaming
         
         // State management
         this.websocket = null;
@@ -240,13 +246,27 @@ class HybridTTS {
         this.isRequesting = false;
     }
     
+    // TTS Mode management methods
+    setMode(mode) {
+        if (!['instant', 'reliable'].includes(mode)) {
+            throw new Error(`Invalid TTS mode: ${mode}. Must be 'instant' or 'reliable'.`);
+        }
+        this.mode = mode;
+        localStorage.setItem('tts-mode', mode);
+        console.log(`[HybridTTS] Mode changed to: ${mode}`);
+    }
+    
+    getMode() {
+        return this.mode;
+    }
+    
     resetAudioState() {
         this.audioChunks = [];
         this.startTime = null;
         this.onProgressUpdate('');
     }
     
-    async speak(text) {
+    async speak(text, options = {}) {
         if (this.isRequesting) {
             this.onStatusUpdate('Request already in progress...', 'loading');
             return Promise.reject(new Error('Request already in progress'));
@@ -256,7 +276,81 @@ class HybridTTS {
             this.onError('WebSocket not connected');
             return Promise.reject(new Error('WebSocket not connected'));
         }
-
+        
+        // Determine mode for this request
+        const mode = options.mode || this.mode;
+        console.log(`[HybridTTS] Using TTS mode: ${mode} for text: "${text.substring(0, 30)}..."`);
+        
+        try {
+            switch(mode) {
+                case 'instant':
+                    return await this.streamingSpeak(text, options);
+                case 'reliable':
+                    return await this.batchSpeak(text, options);
+                default:
+                    throw new Error(`Unknown TTS mode: ${mode}`);
+            }
+        } catch (error) {
+            console.error(`[HybridTTS] ${mode} mode failed:`, error);
+            if (this.fallbackEnabled) {
+                return await this.fallbackSpeak(text, options, mode);
+            }
+            throw error;
+        }
+    }
+    
+    async batchSpeak(text, options = {}) {
+        console.log(`[HybridTTS] Using reliable (batch) mode for: "${text.substring(0, 30)}..."`);
+        
+        // Use the existing speak implementation (OpenAI batch)
+        const currentApiUrl = this.apiUrl;
+        this.apiUrl = this.apiUrlBatch;
+        
+        try {
+            return await this.originalSpeak(text);
+        } finally {
+            this.apiUrl = currentApiUrl;
+        }
+    }
+    
+    async streamingSpeak(text, options = {}) {
+        console.log(`[HybridTTS] Using instant (streaming) mode for: "${text.substring(0, 30)}..."`);
+        
+        // Use ElevenLabs streaming endpoint
+        const currentApiUrl = this.apiUrl;
+        this.apiUrl = this.apiUrlStreaming;
+        
+        try {
+            return await this.originalSpeak(text);
+        } finally {
+            this.apiUrl = currentApiUrl;
+        }
+    }
+    
+    async fallbackSpeak(text, options, failedMode) {
+        console.warn(`[HybridTTS] Attempting fallback after ${failedMode} mode failed`);
+        
+        // Try the opposite mode
+        const fallbackMode = failedMode === 'instant' ? 'reliable' : 'instant';
+        
+        this.onStatusUpdate(`Switching to ${fallbackMode} mode...`, 'loading');
+        
+        try {
+            switch(fallbackMode) {
+                case 'instant':
+                    return await this.streamingSpeak(text, options);
+                case 'reliable':
+                    return await this.batchSpeak(text, options);
+            }
+        } catch (fallbackError) {
+            console.error(`[HybridTTS] Fallback to ${fallbackMode} also failed:`, fallbackError);
+            throw new Error(`Both ${failedMode} and ${fallbackMode} modes failed`);
+        }
+    }
+    
+    async originalSpeak(text) {
+        // This contains the original speak method logic
+        
         // Update analytics
         this.analytics.totalRequests++;
         this.updatePhraseFrequency(text);

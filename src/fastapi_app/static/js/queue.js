@@ -431,8 +431,8 @@ async function connectToQueueWebSocket() {
                     handleNotificationSound( data );
                     break;
                     
-                case "audio_update":
-                    handleAudioUpdate( data );
+                case "speech_update":
+                    handleSpeechUpdate( data );
                     break;
                     
                 case "user_notification":
@@ -877,21 +877,23 @@ function handleNotificationSound( data ) {
 }
 
 // Handle server notifications to play audio with HybridTTS
-async function handleAudioUpdate( data ) {
-    console.log( "Received audio update:", data );
+async function handleSpeechUpdate( data ) {
+    console.log( "Received speech update:", data );
     
     // Use HybridTTS for all text-to-speech conversion
     if ( data.text ) {
-        console.log( `Converting text to speech via HybridTTS: "${data.text}"` );
+        // Get current TTS mode preference
+        const currentMode = localStorage.getItem('tts-mode') || 'reliable';
+        console.log( `Converting text to speech via HybridTTS (${currentMode} mode): "${data.text}"` );
         
         try {
             if ( window.hybridTTS ) {
-                await window.hybridTTS.speak( data.text );
+                await window.hybridTTS.speak( data.text, { mode: currentMode } );
             } else {
                 console.error( "HybridTTS not available for audio conversion" );
             }
         } catch ( error ) {
-            console.error( `Error in HybridTTS:`, error );
+            console.error( `Error in HybridTTS (${currentMode} mode):`, error );
         }
         return;
     }
@@ -908,7 +910,7 @@ async function handleAudioUpdate( data ) {
         // Use advanced cache if available, fallback to simple storage
         if ( jobCache ) {
             await jobCache.store( jobId, data.text, timestamp, userEmail, {
-                source: 'websocket_audio_update',
+                source: 'websocket_speech_update',
                 audioGenerated: true
             });
             console.log( `Stored job completion message with ID: ${jobId} (advanced cache)` );
@@ -972,6 +974,30 @@ function fallbackToNotificationSound() {
     
     // Use the error notification sound for TTS failures
     playNotificationSoundByPriority( "error" );
+}
+
+// TTS Mode switching functions
+function updateTTSMode(newMode) {
+    if (!['instant', 'reliable'].includes(newMode)) {
+        console.error(`Invalid TTS mode: ${newMode}. Must be 'instant' or 'reliable'.`);
+        return;
+    }
+    
+    localStorage.setItem('tts-mode', newMode);
+    console.log(`[TTS] Mode changed to: ${newMode}`);
+    
+    // Update HybridTTS instance if available
+    if (window.hybridTTS && typeof window.hybridTTS.setMode === 'function') {
+        window.hybridTTS.setMode(newMode);
+    }
+    
+    // Show user feedback
+    const modeDescription = newMode === 'instant' ? 'streaming (starts immediately)' : 'complete audio (2-3s delay)';
+    console.log(`[TTS] Now using ${modeDescription} mode`);
+}
+
+function getCurrentTTSMode() {
+    return localStorage.getItem('tts-mode') || 'reliable';
 }
 
 // Handle Claude Code notifications from the /api/notify endpoint
@@ -1496,8 +1522,8 @@ function testJobCompletion() {
     
     const randomMessage = testMessages[Math.floor(Math.random() * testMessages.length)];
     
-    // Simulate an audio_update event
-    handleAudioUpdate({
+    // Simulate a speech_update event
+    handleSpeechUpdate({
         text: randomMessage,
         timestamp: new Date().toISOString()
     });
@@ -1869,9 +1895,48 @@ async function resetAllQueues() {
     }
 }
 
+// Initialize TTS mode UI controls
+function initializeTTSModeUI() {
+    console.log('[TTS] Initializing TTS mode UI controls');
+    
+    // Get current TTS mode from localStorage
+    const currentMode = getCurrentTTSMode();
+    console.log(`[TTS] Current mode from localStorage: ${currentMode}`);
+    
+    // Initialize radio buttons to match current preference
+    const radioButtons = document.querySelectorAll('input[name="tts-mode"]');
+    radioButtons.forEach(radio => {
+        radio.checked = (radio.value === currentMode);
+    });
+    
+    // Add event listeners to radio buttons
+    radioButtons.forEach(radio => {
+        radio.addEventListener('change', function() {
+            if (this.checked) {
+                const newMode = this.value;
+                console.log(`[TTS] User selected mode: ${newMode}`);
+                updateTTSMode(newMode);
+                
+                // Provide user feedback
+                const modeDescription = newMode === 'instant' 
+                    ? 'streaming audio (starts immediately)' 
+                    : 'complete audio (2-3s delay)';
+                console.log(`[TTS] Switched to ${newMode} mode: ${modeDescription}`);
+            }
+        });
+    });
+    
+    console.log('[TTS] TTS mode UI controls initialized successfully');
+}
+
 // Initialize notification state when DOM is ready
 document.addEventListener( "DOMContentLoaded", function() {
-    // Delay initialization to allow auth system to load
+    console.log('[Init] DOM content loaded, initializing components');
+    
+    // Initialize TTS mode UI first (critical for speech functionality)
+    initializeTTSModeUI();
+    
+    // Delay notification initialization to allow auth system to load
     setTimeout( initializeNotificationState, 1000 );
 });
 
