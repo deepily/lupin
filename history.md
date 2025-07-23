@@ -1,6 +1,6 @@
 # Lupin Session History
 
-## 2025.07.23 - Progressive TTS Streaming Integration Complete
+## 2025.07.23 - (First session) Progressive TTS Streaming Integration Complete
 
 ### Summary
 Successfully integrated the experimental progressive TTS streaming (<500ms latency) into the main queue.html UI system. Changed default TTS mode to "instant" and implemented Web Audio API-based progressive chunk playback in HybridTTS, achieving the same sub-second audio response proven in experimental testing while maintaining full backward compatibility with "reliable" mode.

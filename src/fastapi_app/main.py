@@ -73,55 +73,65 @@ consumer_thread = None
 
 
 
-async def emit_audio( msg: str, websocket_id: str = None ) -> None:
+async def emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", websocket_id: str = None ) -> None:
     """
-    Generate TTS audio and emit via WebSocket to specific session or broadcast.
+    Generate TTS speech and emit via WebSocket to specific user or broadcast.
     
     Args:
-        msg: The text message to be converted to audio
-        websocket_id: Optional websocket identifier for specific session routing
+        msg: The text message to be converted to speech
+        user_id: User ID for user-specific routing (preferred)
+        websocket_id: Optional websocket identifier for backwards compatibility
     """
-    print( f"[AUDIO] emit_audio called:" )
+    print( f"[SPEECH] emit_speech called:" )
     print( f"  - Message: '{msg}'" )
-    print( f"  - WebSocket ID: {websocket_id if websocket_id else 'broadcast'}" )
+    print( f"  - User ID: {user_id if user_id else 'none'}" )
+    print( f"  - WebSocket ID: {websocket_id if websocket_id else 'none'}" )
     
     try:
-        # Emit audio_update event to trigger TTS in browser
-        audio_data = {
+        # Emit speech_update event to trigger TTS in browser
+        speech_data = {
             "text": msg,
             "timestamp": datetime.now().isoformat()
         }
         
-        if websocket_id:
-            # Emit to specific session
-            await websocket_manager.emit_to_session( websocket_id, "audio_update", audio_data )
-            print( f"[AUDIO] Emitted audio_update to session {websocket_id}" )
+        if user_id and user_id != "ricardo_felipe_ruiz_6bdc":
+            # Emit to specific user (preferred method)
+            await websocket_manager.emit_to_user( user_id, "speech_update", speech_data )
+            print( f"[SPEECH] Emitted speech_update to user {user_id}" )
+        elif user_id == "ricardo_felipe_ruiz_6bdc":
+            # Default user - still use user-based routing
+            await websocket_manager.emit_to_user( user_id, "speech_update", speech_data )
+            print( f"[SPEECH] Emitted speech_update to default user {user_id}" )
+        elif websocket_id:
+            # Backwards compatibility: Emit to specific session
+            await websocket_manager.emit_to_session( websocket_id, "speech_update", speech_data )
+            print( f"[SPEECH] Emitted speech_update to session {websocket_id} (backwards compatibility)" )
         else:
-            # Broadcast to all connected clients
-            await websocket_manager.async_emit( "audio_update", audio_data )
-            print( f"[AUDIO] Broadcasted audio_update to all connections" )
+            # Fallback: Broadcast to all connected clients
+            await websocket_manager.async_emit( "speech_update", speech_data )
+            print( f"[SPEECH] Broadcasted speech_update to all connections (fallback)" )
             
     except Exception as e:
-        print( f"[AUDIO] Error emitting audio: {e}" )
+        print( f"[SPEECH] Error emitting speech: {e}" )
         # Don't raise - this shouldn't break the calling flow
 
 
 def create_emit_speech_callback():
-    """Creates a sync wrapper for the async emit_speech function"""
-    def sync_emit_speech( msg: str, websocket_id: str = None ):
+    """Creates a sync wrapper for the async emit_speech function with user-based routing"""
+    def sync_emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", websocket_id: str = None ):
         import threading
         
         def run_in_thread():
             try:
                 # Run async function in isolated thread with its own event loop
-                asyncio.run( emit_speech( msg, websocket_id ) )
+                asyncio.run( emit_speech( msg, user_id=user_id, websocket_id=websocket_id ) )
             except Exception as e:
-                print( f"[AUDIO] Error in audio thread: {e}" )
+                print( f"[SPEECH] Error in speech thread: {e}" )
         
         # Always run in separate thread to avoid event loop conflicts
         thread = threading.Thread( target=run_in_thread, daemon=True )
         thread.start()
-        print( f"[AUDIO] Started audio emission thread for: '{msg}'" )
+        print( f"[SPEECH] Started speech emission thread for: '{msg}' (user: {user_id})" )
     return sync_emit_speech
 
 

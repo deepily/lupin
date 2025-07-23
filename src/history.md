@@ -1,5 +1,41 @@
 # Development Session History
 
+## 2025.07.23 - Complete Audio-to-Speech Renaming Migration + WebSocket User Routing Implementation (Session 6)
+**Branch: v0.6.0-2025.07.10-wip-home-phased-websocket-to-identity-mapping**
+
+### Work Performed
+
+#### WebSocket User Routing Architecture Implementation - COMPLETED
+- **User Context Integration**: Added `user_id` parameter to `AgentBase` and `SolutionSnapshot` classes with default value `"ricardo_felipe_ruiz_6bdc"`
+- **Serialization Configuration**: Configured `user_id` to be available for runtime processing but excluded from JSON serialization to maintain data separation
+- **Queue Processing Updates**: Modified `TodoFifoQueue` and `RunningFifoQueue` to pass user context through the agent pipeline
+- **Event Routing Migration**: Updated from broadcast-based to user-specific event routing for speech events
+- **Migration Script**: Created comprehensive script to handle solution snapshot migrations (used for testing, then reverted)
+
+#### Audio-to-Speech Renaming Migration - COMPLETED
+- **Critical Bug Fix**: Fixed `running_fifo_queue.py` emitting `"audio_update"` instead of expected `"speech_update"` events (restored audio playback functionality)
+- **Method Renaming**: Updated `_emit_audio_to_user` → `_emit_speech_to_user` with all references and documentation
+- **System-Wide Verification**: Confirmed complete migration per `2025.07.12-audio-to-speech-renaming-design.md` specification
+- **Client Compatibility**: Verified client-side JavaScript already handles `"speech_update"` events correctly
+
+#### Technical Implementation Details
+- **User ID Generation**: Leveraged existing `email_to_system_id()` function for consistent user identification
+- **Event Routing**: Implemented user-based WebSocket events instead of session-based broadcasting
+- **Backwards Compatibility**: Maintained fallback routing during transition period
+- **Data Integrity**: Ensured user context available for processing without affecting persisted solution snapshots
+
+### Issues Resolved
+- **Audio Playback Failure**: Fixed `/api/push` endpoint not triggering client-side audio due to event type mismatch
+- **Multi-User Broadcasting**: Replaced broadcast speech events with user-specific routing for true multi-user support
+- **Naming Confusion**: Eliminated misleading "audio" terminology in favor of precise "speech" terminology for TTS functionality
+
+### Next Steps / Outstanding Tasks
+- Test complete system functionality with user-based routing
+- Verify WebSocket event routing works correctly across multiple user connections
+- Consider implementing Phase 2 and 3 of WebSocket user routing architecture (per July 11th design document)
+
+---
+
 ## 2025.06.24 - FastAPI Test Infrastructure Organization and HTML File Cleanup (Session 5)
 **Branch: wip-shrini-create-cosa**
 
