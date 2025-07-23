@@ -883,7 +883,7 @@ async function handleSpeechUpdate( data ) {
     // Use HybridTTS for all text-to-speech conversion
     if ( data.text ) {
         // Get current TTS mode preference
-        const currentMode = localStorage.getItem('tts-mode') || 'reliable';
+        const currentMode = localStorage.getItem('tts-mode') || 'instant';
         console.log( `Converting text to speech via HybridTTS (${currentMode} mode): "${data.text}"` );
         
         try {
@@ -977,7 +977,7 @@ function fallbackToNotificationSound() {
 }
 
 // TTS Mode switching functions
-function updateTTSMode(newMode) {
+async function updateTTSMode(newMode) {
     if (!['instant', 'reliable'].includes(newMode)) {
         console.error(`Invalid TTS mode: ${newMode}. Must be 'instant' or 'reliable'.`);
         return;
@@ -988,7 +988,7 @@ function updateTTSMode(newMode) {
     
     // Update HybridTTS instance if available
     if (window.hybridTTS && typeof window.hybridTTS.setMode === 'function') {
-        window.hybridTTS.setMode(newMode);
+        await window.hybridTTS.setMode(newMode);
     }
     
     // Show user feedback
@@ -997,7 +997,7 @@ function updateTTSMode(newMode) {
 }
 
 function getCurrentTTSMode() {
-    return localStorage.getItem('tts-mode') || 'reliable';
+    return localStorage.getItem('tts-mode') || 'instant';
 }
 
 // Handle Claude Code notifications from the /api/notify endpoint
@@ -1911,11 +1911,11 @@ function initializeTTSModeUI() {
     
     // Add event listeners to radio buttons
     radioButtons.forEach(radio => {
-        radio.addEventListener('change', function() {
+        radio.addEventListener('change', async function() {
             if (this.checked) {
                 const newMode = this.value;
                 console.log(`[TTS] User selected mode: ${newMode}`);
-                updateTTSMode(newMode);
+                await updateTTSMode(newMode);
                 
                 // Provide user feedback
                 const modeDescription = newMode === 'instant' 

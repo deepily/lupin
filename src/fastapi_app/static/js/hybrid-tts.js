@@ -19,7 +19,7 @@ class HybridTTS {
         this.sessionUrl = options.sessionUrl || '/api/get-session-id';
         
         // TTS Mode switching (new functionality)
-        this.mode = localStorage.getItem('tts-mode') || 'reliable';
+        this.mode = localStorage.getItem('tts-mode') || 'instant';
         this.fallbackEnabled = options.fallbackEnabled !== false; // Default true
         this.apiUrlBatch = '/api/get-speech';        // OpenAI batch TTS
         this.apiUrlStreaming = '/api/get-speech-elevenlabs'; // ElevenLabs streaming
@@ -39,6 +39,11 @@ class HybridTTS {
         
         // Audio element (can be provided or created)
         this.audioElement = options.audioElement || this.createAudioElement();
+        
+        // Web Audio API for progressive streaming (Firefox-optimized)
+        this.audioContext = null;
+        this.currentPlaybackTime = 0;
+        this.useWebAudioAPI = this.mode === 'instant'; // Use Web Audio for instant mode
         
         // Cache configuration
         this.cacheEnabled = options.cacheEnabled !== false; // Default true
@@ -107,8 +112,14 @@ class HybridTTS {
             this.websocket = new WebSocket(wsFullUrl);
             
             return new Promise((resolve, reject) => {
-                this.websocket.onopen = () => {
+                this.websocket.onopen = async () => {
                     console.log('HybridTTS: WebSocket connected');
+                    
+                    // Initialize Web Audio API for instant mode
+                    if (this.useWebAudioAPI) {
+                        await this.initializeWebAudio();
+                    }
+                    
                     resolve();
                 };
                 
@@ -132,6 +143,29 @@ class HybridTTS {
         }
     }
     
+    async initializeWebAudio() {
+        try {
+            // Create AudioContext (Firefox-optimized)
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                latencyHint: 'interactive', // Optimize for low latency
+                sampleRate: 44100 // Standard sample rate
+            });
+            
+            // Handle suspended state (autoplay policy)
+            if (this.audioContext.state === 'suspended') {
+                console.log('HybridTTS: AudioContext suspended, will resume on user interaction');
+                // We'll resume it when needed during playback
+            }
+            
+            this.currentPlaybackTime = this.audioContext.currentTime;
+            console.log(`HybridTTS: Web Audio API initialized (${this.audioContext.sampleRate}Hz) for instant mode`);
+            
+        } catch (error) {
+            console.warn('HybridTTS: Web Audio API initialization failed, falling back to audio element:', error);
+            this.useWebAudioAPI = false;
+        }
+    }
+    
     handleWebSocketMessage(event) {
         if (event.data instanceof Blob) {
             // Audio chunk received
@@ -140,6 +174,11 @@ class HybridTTS {
             const elapsed = (Date.now() - this.startTime) / 1000;
             this.onProgressUpdate(`Received ${this.audioChunks.length} chunks in ${elapsed.toFixed(1)}s`);
             
+            // In instant mode with Web Audio API, play chunks immediately
+            if (this.mode === 'instant' && this.useWebAudioAPI && this.audioContext) {
+                this.playChunkProgressive(event.data);
+            }
+            
         } else {
             // Status message
             try {
@@ -147,8 +186,21 @@ class HybridTTS {
                 console.log('HybridTTS WebSocket message:', message);
                 
                 if (message.type === 'audio_complete') {
-                    // All chunks received - create and play audio
-                    this.playCollectedAudio();
+                    // All chunks received
+                    if (this.mode === 'instant' && this.useWebAudioAPI) {
+                        // In instant mode, we've already played chunks progressively
+                        const totalTime = (Date.now() - this.startTime) / 1000;
+                        this.onProgressUpdate(`Complete! ${this.audioChunks.length} chunks streamed in ${totalTime.toFixed(1)}s`);
+                        this.onStatusUpdate(`Audio streaming complete (${totalTime.toFixed(1)}s)`, 'success');
+                        this.onComplete(null, totalTime); // No URL in progressive mode
+                        this.isRequesting = false;
+                        
+                        // Don't reset audio state immediately to allow final chunks to play
+                        setTimeout(() => this.resetAudioState(), 1000);
+                    } else {
+                        // Reliable mode - create and play collected audio
+                        this.playCollectedAudio();
+                    }
                 } else if (message.type === 'status') {
                     if (message.status === 'loading' && this.audioChunks.length === 0) {
                         this.onStatusUpdate(message.text, 'loading');
@@ -247,13 +299,23 @@ class HybridTTS {
     }
     
     // TTS Mode management methods
-    setMode(mode) {
+    async setMode(mode) {
         if (!['instant', 'reliable'].includes(mode)) {
             throw new Error(`Invalid TTS mode: ${mode}. Must be 'instant' or 'reliable'.`);
         }
         this.mode = mode;
         localStorage.setItem('tts-mode', mode);
         console.log(`[HybridTTS] Mode changed to: ${mode}`);
+        
+        // Update Web Audio API usage based on mode
+        const shouldUseWebAudio = mode === 'instant';
+        if (shouldUseWebAudio !== this.useWebAudioAPI) {
+            this.useWebAudioAPI = shouldUseWebAudio;
+            if (this.useWebAudioAPI && !this.audioContext) {
+                // Initialize Web Audio API if switching to instant mode
+                await this.initializeWebAudio();
+            }
+        }
     }
     
     getMode() {
@@ -264,6 +326,51 @@ class HybridTTS {
         this.audioChunks = [];
         this.startTime = null;
         this.onProgressUpdate('');
+        
+        // Reset progressive playback state
+        if (this.audioContext) {
+            this.currentPlaybackTime = this.audioContext.currentTime;
+        }
+    }
+    
+    async playChunkProgressive(audioBlob) {
+        // Resume audio context if suspended (Firefox autoplay policy)
+        if (this.audioContext && this.audioContext.state === 'suspended') {
+            await this.audioContext.resume();
+        }
+        
+        try {
+            // Convert blob to ArrayBuffer
+            const arrayBuffer = await audioBlob.arrayBuffer();
+            
+            // Decode audio data
+            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+            
+            // Create buffer source
+            const source = this.audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(this.audioContext.destination);
+            
+            // Schedule for immediate playback
+            const playTime = Math.max(this.audioContext.currentTime, this.currentPlaybackTime);
+            source.start(playTime);
+            
+            // Update playback time for next chunk
+            this.currentPlaybackTime = playTime + audioBuffer.duration;
+            
+            // Track first chunk latency
+            if (this.audioChunks.length === 1 && this.startTime) {
+                const latency = Date.now() - this.startTime;
+                console.log(`HybridTTS: First audio chunk playing in ${latency}ms (instant mode)`);
+            }
+            
+            console.log(`HybridTTS: Progressive chunk ${this.audioChunks.length} scheduled (duration: ${audioBuffer.duration.toFixed(2)}s)`);
+            
+        } catch (error) {
+            console.error('HybridTTS: Progressive playback failed:', error);
+            // Fall back to collecting chunks
+            this.useWebAudioAPI = false;
+        }
     }
     
     async speak(text, options = {}) {

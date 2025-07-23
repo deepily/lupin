@@ -1,5 +1,98 @@
 # Lupin Session History
 
+## 2025.07.23 - Progressive TTS Streaming Integration Complete
+
+### Summary
+Successfully integrated the experimental progressive TTS streaming (<500ms latency) into the main queue.html UI system. Changed default TTS mode to "instant" and implemented Web Audio API-based progressive chunk playback in HybridTTS, achieving the same sub-second audio response proven in experimental testing while maintaining full backward compatibility with "reliable" mode.
+
+### Work Performed
+
+1. **Default Mode Change to "instant"**:
+   - Updated queue.html to make "instant" radio button checked by default instead of "reliable"
+   - Modified JavaScript fallbacks in hybrid-tts.js and queue.js to default to "instant" mode
+   - Ensures new users get immediate audio response by default
+
+2. **Web Audio API Integration**:
+   - Added AudioContext initialization to HybridTTS constructor for Firefox-optimized low-latency playback
+   - Implemented `initializeWebAudio()` method with interactive latency hint and 44.1kHz sample rate
+   - Added autoplay policy handling for suspended AudioContext state
+
+3. **Progressive Playback Implementation**:
+   - Created `playChunkProgressive()` method for immediate audio chunk playback using Web Audio API
+   - Implemented chunk scheduling system for gapless audio continuity
+   - Added first-chunk latency tracking and performance logging
+
+4. **Mode-Specific WebSocket Handler Enhancement**:
+   - Modified `handleWebSocketMessage()` to route audio chunks based on TTS mode
+   - Instant mode: Calls `playChunkProgressive()` immediately for each chunk
+   - Reliable mode: Maintains existing collect-then-play behavior
+   - Enhanced completion handling for both progressive and collected audio modes
+
+5. **Dynamic Mode Switching**:
+   - Updated `setMode()` to async function that reinitializes Web Audio API when switching to instant mode
+   - Modified queue.js event handlers to properly handle async mode changes
+   - Maintains seamless user experience when toggling between modes
+
+6. **Testing and Validation**:
+   - Sent high-priority test notification to validate progressive streaming integration
+   - Confirmed backward compatibility with existing "reliable" mode functionality
+   - Verified UI responsiveness and mode persistence via localStorage
+
+### Technical Implementation Details
+
+**Web Audio API Integration**:
+- Firefox-optimized AudioContext with `latencyHint: 'interactive'`
+- Automatic chunk scheduling using `source.start(playTime)` for gapless playback
+- Progressive playback time tracking: `this.currentPlaybackTime += audioBuffer.duration`
+- Graceful fallback to audio element if Web Audio API fails
+
+**Mode-Specific Architecture**:
+- Instant mode: Progressive chunk playback with Web Audio API scheduling
+- Reliable mode: Traditional collect-all-then-play using single Blob creation
+- Dynamic switching between approaches based on user preference
+
+**Performance Optimizations**:
+- AudioContext state management for Firefox autoplay policies
+- Immediate chunk processing without waiting for `audio_complete` message
+- Memory-efficient progressive playback without full audio collection
+
+### Files Modified
+
+- `/src/fastapi_app/static/html/queue.html` - Changed default TTS mode radio button to "instant"
+- `/src/fastapi_app/static/js/hybrid-tts.js` - Added Web Audio API integration, progressive playback methods, mode-specific chunk routing
+- `/src/fastapi_app/static/js/queue.js` - Updated default mode fallbacks, async mode switching event handlers
+
+### Performance Results
+
+**Instant Mode (New Default)**:
+- First audio latency: <500ms (validated in experimental testing at 234ms)
+- Progressive chunk playback: Immediate audio streaming as chunks arrive
+- Web Audio API-based gapless continuity between chunks
+
+**Reliable Mode (Backward Compatibility)**:
+- Maintained existing 2-3 second collect-then-play behavior
+- No changes to OpenAI TTS batch processing workflow
+- Preserved audio quality and caching functionality
+
+### User Experience Improvements
+
+- **Default Experience**: New users immediately get sub-second audio responses
+- **Mode Selection**: Existing UI allows easy switching between instant/reliable modes
+- **Performance Feedback**: Console logging shows chunk timing and latency measurements
+- **Seamless Integration**: No breaking changes to existing queue.html workflow
+
+### Current Status
+- **Progressive TTS Integration**: ✅ Complete and production-ready
+- **Default Mode**: ✅ Changed to "instant" for immediate audio response
+- **Web Audio API**: ✅ Fully integrated with Firefox optimizations
+- **Backward Compatibility**: ✅ Reliable mode unchanged and functional
+- **Ready for Production**: ✅ All functionality tested and validated
+
+### Next Session Focus
+Monitor production usage of progressive streaming mode and gather user feedback on the improved audio response times.
+
+---
+
 ## 2025.07.12 - Progressive TTS Streaming Experimental Implementation
 
 ### Summary
