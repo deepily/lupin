@@ -1,5 +1,102 @@
 # Lupin Project History
 
+## 2025.07.25 - WebSocket Implementation Phases 2 & 2.5 Complete + Configuration Integration
+
+### Summary
+Completed Phase 2 (Session Management) and Phase 2.5 (Event Subscription System) of the WebSocket implementation plan. Added comprehensive session persistence, heartbeat/cleanup mechanisms, event filtering, and integrated ConfigurationManager throughout. Created multiple test pages for all features.
+
+### Work Performed
+
+#### Phase 2: Session Management - COMPLETED ✅
+1. **Client-Side Session Persistence**:
+   - Implemented localStorage session persistence in queue.js
+   - Added `getOrCreateSessionId()` function for automatic session recovery
+   - Sessions now survive page refreshes and browser restarts
+   - Created test page: `test_session_persistence.html`
+
+2. **Server-Side Session Management**:
+   - Added single-session-per-user policy (configurable)
+   - Implemented session validation (adjective-noun format)
+   - Added session cleanup and metrics tracking
+   - Fixed validation to accept space-separated session IDs
+
+3. **WebSocket Maintenance Features**:
+   - Implemented heartbeat mechanism (30s default, configurable)
+   - Added automatic dead connection detection
+   - Created background cleanup task for stale sessions
+   - All features configurable via ConfigurationManager
+
+#### Phase 2.5: Event Subscription System - COMPLETED ✅
+1. **WebSocketManager Enhancements**:
+   - Added per-session event subscription tracking
+   - Implemented event filtering in `async_emit()` and `emit_to_user()`
+   - Added dynamic subscription updates via WebSocket messages
+   - Created subscription statistics methods
+
+2. **Client Implementation**:
+   - Updated queue.js to send specific event subscriptions
+   - Only subscribes to needed events (queue updates, speech, notifications)
+   - Reduces unnecessary network traffic significantly
+
+3. **Configuration Integration**:
+   - Moved available events to configuration file
+   - Added `websocket available events` in lupin-app.ini
+   - WebSocketManager loads events from config (validates non-empty)
+   - Added `/api/websocket-events` endpoint for dynamic discovery
+
+#### Test Infrastructure Created
+1. **test_event_subscription.html**:
+   - Interactive event subscription testing
+   - Visual subscription toggles
+   - Real-time event logging
+   - Dynamic event list from server
+
+2. **test_heartbeat_cleanup.html**:
+   - Multiple connection management
+   - Heartbeat monitoring with ping counters
+   - Dead connection simulation
+   - Manual cleanup triggers
+
+3. **WebSocket Admin Router**:
+   - Created `websocket_admin.py` with management endpoints
+   - Session metrics and statistics
+   - Subscription analytics
+   - Manual cleanup and policy controls
+
+### Technical Improvements
+- All WebSocket configuration now in lupin-app.ini
+- Proper error handling for empty configuration
+- Backward compatible (default is all events)
+- Significant reduction in WebSocket traffic
+- Better debugging with subscription stats
+
+### Files Modified/Created
+- `/src/fastapi_app/static/js/queue.js` - Added session persistence and event subscriptions
+- `/src/cosa/rest/websocket_manager.py` - Event filtering and configuration integration
+- `/src/cosa/rest/routers/websocket.py` - Updated for subscription support
+- `/src/cosa/rest/routers/websocket_admin.py` - Created admin endpoints
+- `/src/conf/lupin-app.ini` - Added WebSocket configuration section
+- `/src/conf/lupin-app-splainer.ini` - Added configuration explainers
+- `/src/tests/test_event_subscription.html` - Created subscription test page
+- `/src/tests/test_heartbeat_cleanup.html` - Created maintenance test page
+- `/src/fastapi_app/main.py` - Added websocket_admin router
+
+### Configuration Keys Added
+```ini
+websocket enforce single session per user = False
+websocket heartbeat enabled = True
+websocket heartbeat interval seconds = 30
+websocket cleanup enabled = True
+websocket cleanup interval hours = 1
+websocket session max age hours = 24
+websocket available events = todo_update, done_update, run_update, dead_update, speech_update, audio_chunk, notification, notification_update, time_update, status, error, ping, auth_success, auth_error, connect
+```
+
+### Next Steps
+- Phase 3: Fix speech emission chain to properly use user_id
+- Pass user_id through agent creation context
+- Comprehensive testing of all phases together
+
 ## 2025.07.24 - WebSocket Async/Sync Bridge Implementation Phase 1 Complete
 
 ### Summary

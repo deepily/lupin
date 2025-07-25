@@ -44,7 +44,7 @@ from cosa.rest.user_id_generator import email_to_system_id
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 
 # Global variables
@@ -70,6 +70,9 @@ active_tasks = {}
 clock_task = None
 # Consumer thread for producer-consumer pattern
 consumer_thread = None
+# WebSocket maintenance background tasks
+websocket_heartbeat_task = None
+websocket_cleanup_task = None
 
 
 
@@ -177,6 +180,75 @@ async def clock_loop():
             await asyncio.sleep( 60 )
 
 
+async def websocket_heartbeat_loop():
+    """
+    Background task for WebSocket heartbeat checks.
+    
+    Periodically sends ping messages to all WebSocket connections
+    to detect and remove dead connections.
+    """
+    # Get interval from config
+    interval = websocket_manager.config_mgr.get(
+        "websocket heartbeat interval seconds", default=30, return_type="int"
+    )
+    
+    print( f"[WS-HEARTBEAT] Starting heartbeat loop with {interval}s interval" )
+    
+    while True:
+        try:
+            # Run heartbeat check
+            dead_count = await websocket_manager.heartbeat_check()
+            
+            if app_debug and app_verbose and dead_count > 0:
+                print( f"[WS-HEARTBEAT] Heartbeat removed {dead_count} dead connection(s)" )
+            
+            # Wait for next interval
+            await asyncio.sleep( interval )
+            
+        except asyncio.CancelledError:
+            print( "[WS-HEARTBEAT] Heartbeat loop cancelled" )
+            break
+        except Exception as e:
+            print( f"[WS-HEARTBEAT] Error in heartbeat loop: {e}" )
+            # Wait before retrying to avoid rapid error loops
+            await asyncio.sleep( interval )
+
+
+async def websocket_cleanup_loop():
+    """
+    Background task for automatic session cleanup.
+    
+    Periodically removes stale WebSocket sessions that have been
+    connected for longer than the configured maximum age.
+    """
+    # Get interval from config
+    interval_hours = websocket_manager.config_mgr.get(
+        "websocket cleanup interval hours", default=1, return_type="int"
+    )
+    interval_seconds = interval_hours * 3600
+    
+    print( f"[WS-CLEANUP] Starting cleanup loop with {interval_hours} hour interval" )
+    
+    while True:
+        try:
+            # Run cleanup
+            cleaned = await websocket_manager.auto_cleanup()
+            
+            if app_debug and app_verbose and cleaned > 0:
+                print( f"[WS-CLEANUP] Cleaned {cleaned} stale session(s)" )
+            
+            # Wait for next interval
+            await asyncio.sleep( interval_seconds )
+            
+        except asyncio.CancelledError:
+            print( "[WS-CLEANUP] Cleanup loop cancelled" )
+            break
+        except Exception as e:
+            print( f"[WS-CLEANUP] Error in cleanup loop: {e}" )
+            # Wait before retrying to avoid rapid error loops
+            await asyncio.sleep( interval_seconds )
+
+
 @asynccontextmanager
 async def lifespan( app: FastAPI ):
     """
@@ -199,7 +271,7 @@ async def lifespan( app: FastAPI ):
         None - Control returns to FastAPI after initialization
     """
     # Startup
-    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread
+    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task
     
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
     
@@ -244,6 +316,17 @@ async def lifespan( app: FastAPI ):
     clock_task = asyncio.create_task( clock_loop() )
     print( "[CLOCK] Background clock task started" )
     
+    # Start WebSocket maintenance tasks
+    if websocket_manager.config_mgr.get( "websocket heartbeat enabled", default=True, return_type="boolean" ):
+        print( "[WS-HEARTBEAT] Starting heartbeat task..." )
+        websocket_heartbeat_task = asyncio.create_task( websocket_heartbeat_loop() )
+        print( "[WS-HEARTBEAT] Heartbeat task started" )
+    
+    if websocket_manager.config_mgr.get( "websocket cleanup enabled", default=True, return_type="boolean" ):
+        print( "[WS-CLEANUP] Starting cleanup task..." )
+        websocket_cleanup_task = asyncio.create_task( websocket_cleanup_loop() )
+        print( "[WS-CLEANUP] Cleanup task started" )
+    
     # Start consumer thread for producer-consumer pattern
     print( "[CONSUMER] Starting todo-producer-run-consumer thread..." )
     consumer_thread = start_todo_producer_run_consumer_thread( jobs_todo_queue, jobs_run_queue )
@@ -266,6 +349,27 @@ async def lifespan( app: FastAPI ):
             print( "[CLOCK] Background clock task cancelled successfully" )
         except Exception as e:
             print( f"[CLOCK] Error during clock task shutdown: {e}" )
+    
+    # Cancel and cleanup WebSocket maintenance tasks
+    if websocket_heartbeat_task:
+        print( "[WS-HEARTBEAT] Cancelling heartbeat task..." )
+        websocket_heartbeat_task.cancel()
+        try:
+            await websocket_heartbeat_task
+        except asyncio.CancelledError:
+            print( "[WS-HEARTBEAT] Heartbeat task cancelled successfully" )
+        except Exception as e:
+            print( f"[WS-HEARTBEAT] Error during heartbeat task shutdown: {e}" )
+    
+    if websocket_cleanup_task:
+        print( "[WS-CLEANUP] Cancelling cleanup task..." )
+        websocket_cleanup_task.cancel()
+        try:
+            await websocket_cleanup_task
+        except asyncio.CancelledError:
+            print( "[WS-CLEANUP] Cleanup task cancelled successfully" )
+        except Exception as e:
+            print( f"[WS-CLEANUP] Error during cleanup task shutdown: {e}" )
     
     # Shutdown consumer thread
     if consumer_thread:
@@ -306,6 +410,7 @@ app.include_router(speech.router)
 app.include_router(queues.router)
 app.include_router(jobs.router)
 app.include_router(websocket.router)
+app.include_router(websocket_admin.router)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")

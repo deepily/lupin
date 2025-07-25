@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Heartbeat & Cleanup Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        button { margin: 5px; padding: 5px 10px; }
+        pre { background: #f4f4f4; padding: 10px; overflow-x: auto; max-height: 200px; overflow-y: auto; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+        .info { color: blue; }
+        .connection { 
+            display: inline-block; 
+            padding: 5px 10px; 
+            margin: 5px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        .connection.connected { background: #d4edda; }
+        .connection.disconnected { background: #f8d7da; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Heartbeat & Cleanup Test</h1>
+    
+    <div class="test-section">
+        <h2>Heartbeat Test</h2>
+        <p>Open connections and watch for ping messages (every 30 seconds by default)</p>
+        <button onclick="openConnection()">Open New Connection</button>
+        <button onclick="killConnection()">Kill a Connection (simulate network failure)</button>
+        <button onclick="closeAllConnections()">Close All Connections</button>
+        <div id="connections"></div>
+        <pre id="heartbeat-log"></pre>
+    </div>
+    
+    <div class="test-section">
+        <h2>Session Info</h2>
+        <button onclick="getSessionMetrics()">Get Session Metrics</button>
+        <pre id="session-metrics"></pre>
+    </div>
+    
+    <div class="test-section">
+        <h2>Cleanup Test</h2>
+        <p>Sessions older than max age (24 hours default) will be cleaned automatically</p>
+        <button onclick="triggerManualCleanup()">Trigger Manual Cleanup</button>
+        <pre id="cleanup-log"></pre>
+    </div>
+
+    <script>
+        const connections = new Map();
+        let connectionCounter = 0;
+        
+        function log(elementId, message, type = 'info') {
+            const timestamp = new Date().toISOString();
+            const color = type === 'error' ? 'red' : type === 'success' ? 'green' : type === 'warning' ? 'orange' : type === 'info' ? 'blue' : 'black';
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<span style="color: ${color}">[${timestamp}] ${message}</span>\n` + element.innerHTML;
+            
+            // Keep only last 50 lines
+            const lines = element.innerHTML.split('\n');
+            if (lines.length > 50) {
+                element.innerHTML = lines.slice(0, 50).join('\n');
+            }
+        }
+        
+        async function openConnection() {
+            const connectionId = ++connectionCounter;
+            
+            try {
+                // Get session ID
+                const response = await fetch('/api/get-session-id');
+                const data = await response.json();
+                const sessionId = data.session_id;
+                
+                // Create WebSocket
+                const wsUrl = `ws://localhost:7999/ws/queue/${sessionId}`;
+                const ws = new WebSocket(wsUrl);
+                
+                const connection = {
+                    id: connectionId,
+                    sessionId: sessionId,
+                    ws: ws,
+                    status: 'connecting',
+                    pingCount: 0,
+                    startTime: new Date()
+                };
+                
+                connections.set(connectionId, connection);
+                
+                ws.onopen = () => {
+                    connection.status = 'connected';
+                    log('heartbeat-log', `Connection ${connectionId} opened (${sessionId})`, 'success');
+                    updateConnectionsDisplay();
+                    
+                    // Send auth with subscriptions
+                    ws.send(JSON.stringify({
+                        type: 'auth',
+                        token: 'mock_token_ricardo_felipe_ruiz_6bdc',
+                        session_id: sessionId,
+                        subscribed_events: ['ping', 'auth_success', 'connect']  // Only subscribe to necessary events
+                    }));
+                };
+                
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'ping') {
+                        connection.pingCount++;
+                        log('heartbeat-log', `Connection ${connectionId} received ping #${connection.pingCount}`, 'info');
+                        
+                        // Optionally send pong back (not required, but good practice)
+                        ws.send(JSON.stringify({
+                            type: 'pong',
+                            timestamp: new Date().toISOString()
+                        }));
+                    } else if (data.type === 'auth_success') {
+                        log('heartbeat-log', `Connection ${connectionId} authenticated`, 'success');
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    log('heartbeat-log', `Connection ${connectionId} error: ${error}`, 'error');
+                };
+                
+                ws.onclose = (event) => {
+                    connection.status = 'disconnected';
+                    const duration = Math.round((new Date() - connection.startTime) / 1000);
+                    log('heartbeat-log', `Connection ${connectionId} closed after ${duration}s (code: ${event.code}, reason: ${event.reason})`, 'warning');
+                    updateConnectionsDisplay();
+                };
+                
+                updateConnectionsDisplay();
+                
+            } catch (error) {
+                log('heartbeat-log', `Failed to open connection: ${error}`, 'error');
+            }
+        }
+        
+        function killConnection() {
+            // Find a connected connection to kill
+            let connectionToKill = null;
+            for (const [id, conn] of connections) {
+                if (conn.status === 'connected') {
+                    connectionToKill = conn;
+                    break;
+                }
+            }
+            
+            if (connectionToKill) {
+                // Simulate network failure by setting ws to null without closing
+                log('heartbeat-log', `Killing connection ${connectionToKill.id} (simulating network failure)`, 'warning');
+                connectionToKill.ws.onclose = null; // Prevent normal close handling
+                connectionToKill.ws = null;
+                connectionToKill.status = 'killed';
+                updateConnectionsDisplay();
+            } else {
+                log('heartbeat-log', 'No connected connections to kill', 'warning');
+            }
+        }
+        
+        function closeAllConnections() {
+            for (const [id, conn] of connections) {
+                if (conn.ws && conn.status === 'connected') {
+                    conn.ws.close();
+                }
+            }
+            connections.clear();
+            updateConnectionsDisplay();
+            log('heartbeat-log', 'All connections closed', 'info');
+        }
+        
+        function updateConnectionsDisplay() {
+            const container = document.getElementById('connections');
+            let html = '<h3>Active Connections:</h3>';
+            
+            if (connections.size === 0) {
+                html += '<p>No active connections</p>';
+            } else {
+                for (const [id, conn] of connections) {
+                    const cssClass = conn.status === 'connected' ? 'connected' : 'disconnected';
+                    const duration = Math.round((new Date() - conn.startTime) / 1000);
+                    html += `<div class="connection ${cssClass}">
+                        ID: ${id}<br>
+                        Session: ${conn.sessionId}<br>
+                        Status: ${conn.status}<br>
+                        Pings: ${conn.pingCount}<br>
+                        Duration: ${duration}s
+                    </div>`;
+                }
+            }
+            
+            container.innerHTML = html;
+        }
+        
+        async function getSessionMetrics() {
+            try {
+                const response = await fetch('/api/websocket-sessions', {
+                    headers: {
+                        'Authorization': 'Bearer mock_token_ricardo_felipe_ruiz_6bdc'
+                    }
+                });
+                const data = await response.json();
+                
+                const metricsElement = document.getElementById('session-metrics');
+                metricsElement.innerHTML = JSON.stringify(data, null, 2);
+                
+                log('cleanup-log', `Retrieved metrics: ${data.total_sessions} total sessions`, 'info');
+            } catch (error) {
+                log('cleanup-log', `Failed to get metrics: ${error}`, 'error');
+            }
+        }
+        
+        async function triggerManualCleanup() {
+            try {
+                const response = await fetch('/api/websocket-sessions/cleanup', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer mock_token_ricardo_felipe_ruiz_6bdc',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ max_age_hours: 0.01 }) // 36 seconds for testing
+                });
+                const data = await response.json();
+                
+                log('cleanup-log', `Manual cleanup: ${data.sessions_cleaned} sessions cleaned`, 'success');
+            } catch (error) {
+                log('cleanup-log', `Failed to trigger cleanup: ${error}`, 'error');
+            }
+        }
+        
+        // Update connections display every second
+        setInterval(updateConnectionsDisplay, 1000);
+        
+        // Auto-refresh metrics every 10 seconds
+        setInterval(getSessionMetrics, 10000);
+        
+        // Initial metrics load
+        window.onload = () => {
+            getSessionMetrics();
+        };
+    </script>
+</body>
+</html>

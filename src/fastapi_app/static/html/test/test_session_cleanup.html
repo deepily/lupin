@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Session Cleanup Policy Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        button { margin: 5px; padding: 5px 10px; }
+        pre { background: #f4f4f4; padding: 10px; overflow-x: auto; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+    </style>
+</head>
+<body>
+    <h1>Session Cleanup Policy Test</h1>
+    
+    <div class="test-section">
+        <h2>Multi-Session Test</h2>
+        <p>Test multiple sessions from same user</p>
+        <button onclick="openMultipleSessions()">Open 3 Sessions</button>
+        <button onclick="closeAllSessions()">Close All Sessions</button>
+        <pre id="multi-session-output"></pre>
+    </div>
+    
+    <div class="test-section">
+        <h2>Single-Session Policy Test</h2>
+        <p>Test that old sessions are closed when new one connects (if policy enabled)</p>
+        <button onclick="testSingleSessionPolicy()">Test Single Session Policy</button>
+        <pre id="single-session-output"></pre>
+    </div>
+    
+    <div class="test-section">
+        <h2>Session Info</h2>
+        <button onclick="getSessionInfo()">Get Current Session Info</button>
+        <pre id="session-info-output"></pre>
+    </div>
+
+    <script>
+        const SESSION_STORAGE_KEY = 'lupin_session_id';
+        let sessions = [];
+        
+        function log(outputId, message, type = 'info') {
+            const timestamp = new Date().toISOString();
+            const color = type === 'error' ? 'red' : type === 'success' ? 'green' : type === 'warning' ? 'orange' : 'black';
+            const output = document.getElementById(outputId);
+            output.innerHTML += `<span style="color: ${color}">[${timestamp}] ${message}</span>\n`;
+        }
+        
+        async function createWebSocketConnection(sessionId = null, outputId = 'multi-session-output') {
+            // Get or create session ID
+            if (!sessionId) {
+                const response = await fetch('/api/get-session-id');
+                const data = await response.json();
+                sessionId = data.session_id;
+            }
+            
+            const wsUrl = `ws://localhost:7999/ws/queue/${sessionId}`;
+            log(outputId, `Creating WebSocket connection with session: ${sessionId}`, 'info');
+            
+            const ws = new WebSocket(wsUrl);
+            
+            return new Promise((resolve, reject) => {
+                ws.onopen = () => {
+                    log(outputId, `WebSocket connected: ${sessionId}`, 'success');
+                    // Send auth
+                    ws.send(JSON.stringify({
+                        type: 'auth',
+                        token: 'mock_token_ricardo_felipe_ruiz_6bdc',
+                        session_id: sessionId
+                    }));
+                    
+                    sessions.push({ sessionId, ws, status: 'connected' });
+                    resolve({ sessionId, ws });
+                };
+                
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'auth_success') {
+                        log(outputId, `Auth success for session: ${sessionId}`, 'success');
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    log(outputId, `WebSocket error for ${sessionId}: ${error}`, 'error');
+                    reject(error);
+                };
+                
+                ws.onclose = (event) => {
+                    const session = sessions.find(s => s.sessionId === sessionId);
+                    if (session) {
+                        session.status = 'closed';
+                    }
+                    
+                    if (event.code === 1000 && event.reason === 'New session opened') {
+                        log(outputId, `Session ${sessionId} closed by server: ${event.reason}`, 'warning');
+                    } else {
+                        log(outputId, `Session ${sessionId} closed (code: ${event.code})`, 'info');
+                    }
+                };
+            });
+        }
+        
+        async function openMultipleSessions() {
+            const output = document.getElementById('multi-session-output');
+            output.innerHTML = '';
+            
+            try {
+                // Open 3 sessions with different IDs
+                for (let i = 0; i < 3; i++) {
+                    await createWebSocketConnection(null, 'multi-session-output');
+                    await new Promise(resolve => setTimeout(resolve, 500)); // Small delay
+                }
+                
+                log('multi-session-output', `Opened ${sessions.length} sessions`, 'success');
+                log('multi-session-output', `Active sessions: ${sessions.filter(s => s.status === 'connected').length}`, 'info');
+            } catch (error) {
+                log('multi-session-output', `Error: ${error}`, 'error');
+            }
+        }
+        
+        function closeAllSessions() {
+            sessions.forEach(session => {
+                if (session.ws && session.status === 'connected') {
+                    session.ws.close();
+                }
+            });
+            sessions = [];
+            log('multi-session-output', 'Closed all sessions', 'info');
+        }
+        
+        async function testSingleSessionPolicy() {
+            const output = document.getElementById('single-session-output');
+            output.innerHTML = '';
+            
+            closeAllSessions(); // Clean up first
+            
+            try {
+                // First session
+                log('single-session-output', 'Opening first session...', 'info');
+                const session1 = await createWebSocketConnection(null, 'single-session-output');
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Second session (should close first if policy enabled)
+                log('single-session-output', 'Opening second session (should close first if policy enabled)...', 'info');
+                const session2 = await createWebSocketConnection(null, 'single-session-output');
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Check status
+                const activeCount = sessions.filter(s => s.status === 'connected').length;
+                if (activeCount === 1) {
+                    log('single-session-output', 'Single-session policy appears to be ENABLED (only 1 active session)', 'success');
+                } else {
+                    log('single-session-output', `Single-session policy appears to be DISABLED (${activeCount} active sessions)`, 'warning');
+                }
+            } catch (error) {
+                log('single-session-output', `Error: ${error}`, 'error');
+            }
+        }
+        
+        async function getSessionInfo() {
+            const output = document.getElementById('session-info-output');
+            output.innerHTML = '';
+            
+            const currentSession = localStorage.getItem(SESSION_STORAGE_KEY);
+            
+            if (currentSession) {
+                log('session-info-output', `Current localStorage session: ${currentSession}`, 'info');
+            } else {
+                log('session-info-output', 'No session in localStorage', 'warning');
+            }
+            
+            log('session-info-output', `\nActive WebSocket connections:`, 'info');
+            sessions.forEach((session, idx) => {
+                log('session-info-output', `  ${idx + 1}. ${session.sessionId} - Status: ${session.status}`, 
+                    session.status === 'connected' ? 'success' : 'warning');
+            });
+        }
+        
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            closeAllSessions();
+        });
+    </script>
+</body>
+</html>

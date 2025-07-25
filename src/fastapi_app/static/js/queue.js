@@ -338,20 +338,50 @@ function playAnswer( id ) {
 var queueSocket = null;
 var sessionId = null;
 
+// Session persistence constants
+const SESSION_STORAGE_KEY = 'lupin_session_id';
+
+/**
+ * Get or create a persistent session ID using localStorage
+ * @returns {Promise<string>} The session ID (from localStorage or newly generated)
+ */
+async function getOrCreateSessionId() {
+    // Check localStorage first
+    let storedSessionId = localStorage.getItem( SESSION_STORAGE_KEY );
+    
+    if ( storedSessionId && storedSessionId !== 'undefined' && storedSessionId !== 'null' ) {
+        console.log( `[SESSION] Reusing existing session ID from localStorage: ${storedSessionId}` );
+        return storedSessionId;
+    }
+    
+    // No valid session in localStorage, fetch new one from server
+    console.log( '[SESSION] No valid session ID in localStorage, fetching new one from server' );
+    
+    try {
+        const response = await fetch( "/api/get-session-id" );
+        const data = await response.json();
+        const newSessionId = data.session_id;
+        
+        // Store in localStorage for future use
+        localStorage.setItem( SESSION_STORAGE_KEY, newSessionId );
+        console.log( `[SESSION] Created new session ID and stored in localStorage: ${newSessionId}` );
+        
+        return newSessionId;
+    } catch ( error ) {
+        console.error( '[SESSION] Failed to get session ID:', error );
+        throw error;
+    }
+}
 
 async function connectToQueueWebSocket() {
     try {
         // Update debug status
         updateWebSocketDebugInfo( "Connecting...", "Connecting", "None" );
         
-        // Get session ID first
-        const response = await fetch( "/api/get-session-id" );
-        const data = await response.json();
-        sessionId = data.session_id;
-        console.log( "Got session ID:", sessionId );
-    
-    // Clear any old session data
-    console.log( "Clearing old session data and WebSocket connections" );
+        // Get or create session ID with localStorage persistence
+        sessionId = await getOrCreateSessionId();
+        window.SESSION_ID = sessionId; // Make available globally for other components
+        console.log( "Using session ID:", sessionId );
         
         // Update debug info with session ID
         const authToken = getAuthHeader().replace( "Bearer ", "" );
@@ -367,14 +397,36 @@ async function connectToQueueWebSocket() {
         queueSocket.onopen = function() {
             console.log( "Connected to FastAPI queue WebSocket" );
             
-            // Send authentication with current user ID
+            // Send authentication with current user ID and subscribed events
             const authToken = getAuthHeader().replace( "Bearer ", "" );
             updateWebSocketDebugInfo( sessionId, "Connected", authToken );
-            console.log( "Sending auth message with token:", authToken );
+            
+            // Define which events this client wants to receive
+            // queue.js needs: queue updates, speech, time, notifications
+            const subscribedEvents = [
+                "todo_update",
+                "run_update", 
+                "done_update",
+                "dead_update",
+                "speech_update",
+                "time_update",
+                "notification_sound_update",
+                "notification_update",
+                "user_notification",
+                "auth_success",
+                "auth_error",
+                "connect",
+                "ping"
+            ];
+            
+            console.log( "Sending auth message with token and subscriptions:", authToken );
+            console.log( "Subscribed to events:", subscribedEvents );
+            
             queueSocket.send( JSON.stringify({
                 "type": "auth",
                 "token": authToken,
-                "session_id": sessionId
+                "session_id": sessionId,
+                "subscribed_events": subscribedEvents
             }));
         };
         
