@@ -21,20 +21,16 @@ function createAudioContext() {
 // Initialize HybridTTS for job completion audio
 async function initializeHybridTTS() {
     try {
-        // Wait for sessionId if not available yet
+        // Session ID should already be available from WebSocket connection
         if (!sessionId) {
-            console.log('Waiting for queue WebSocket to establish session ID...');
-            // Wait up to 5 seconds for sessionId
-            let attempts = 0;
-            while (!sessionId && attempts < 50) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-                attempts++;
-            }
+            throw new Error('Cannot initialize HybridTTS: No session ID available from WebSocket connection');
         }
+        
+        console.log(`Initializing HybridTTS with session ID: ${sessionId}`);
         
         hybridTTS = new HybridTTS({
             sessionId: sessionId, // Pass the session ID to HybridTTS
-            wsUrl: sessionId ? `ws://${window.location.host}/ws/${sessionId}` : undefined,
+            wsUrl: undefined, // Let HybridTTS create its own connection with the same sessionId
             cacheEnabled: true,
             cacheMaxSize: 50 * 1024 * 1024, // 50MB cache for job audio
             cacheMaxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
@@ -46,9 +42,25 @@ async function initializeHybridTTS() {
             },
             onComplete: (audioUrl, totalTime) => {
                 console.log(`HybridTTS Complete in ${totalTime}s`);
+                
+                // If we're using instant mode and playing from the queue, continue to next item
+                if ( unifiedAudioQueue.isPlaying && unifiedAudioQueue.currentItem?.type === 'tts' ) {
+                    console.log( "HybridTTS audio finished, continuing queue playback" );
+                    unifiedAudioQueue.currentAudio = null;
+                    unifiedAudioQueue.currentItem = null;
+                    playNext();
+                }
             },
             onError: (error) => {
                 console.error('HybridTTS Error:', error);
+                
+                // If queue is playing and this was a TTS item, continue to next
+                if ( unifiedAudioQueue.isPlaying && unifiedAudioQueue.currentItem?.type === 'tts' ) {
+                    console.log( "HybridTTS error, continuing queue playback" );
+                    unifiedAudioQueue.currentAudio = null;
+                    unifiedAudioQueue.currentItem = null;
+                    playNext();
+                }
             }
         });
         
@@ -178,14 +190,14 @@ document.addEventListener( "DOMContentLoaded", async function() {
     setEnterKeyListener();
     createAudioContext();
     
-    // Initialize HybridTTS for job completion audio
-    await initializeHybridTTS();
-    
     // Initialize JobCompletionCache for advanced message caching
     await initializeJobCache();
     
     // Connect to FastAPI WebSocket first to get session ID
     await connectToQueueWebSocket();
+    
+    // Initialize HybridTTS AFTER we have the session ID from WebSocket
+    await initializeHybridTTS();
     
     updateQueueLists( "todo" );
     updateQueueLists( "run" );
@@ -337,6 +349,9 @@ async function connectToQueueWebSocket() {
         const data = await response.json();
         sessionId = data.session_id;
         console.log( "Got session ID:", sessionId );
+    
+    // Clear any old session data
+    console.log( "Clearing old session data and WebSocket connections" );
         
         // Update debug info with session ID
         const authToken = getAuthHeader().replace( "Bearer ", "" );
@@ -587,22 +602,33 @@ async function playNext() {
             console.log( 'Attempting HybridTTS speak...' );
             
             try {
-                // Create a promise to handle TTS completion
+                // Get current TTS mode
+                const currentMode = localStorage.getItem('tts-mode') || 'instant';
+                console.log( `Playing TTS in ${currentMode} mode` );
+                
+                // Start TTS playback
                 const ttsPromise = hybridTTS.speak( item.content );
-                console.log( 'HybridTTS promise created:', ttsPromise );
+                console.log( 'HybridTTS speak initiated' );
                 
-                // HybridTTS returns the audio element in its onComplete callback
-                // We need to wait for it to complete before moving to next
-                const result = await ttsPromise;
-                console.log( `TTS completed: "${item.content.substring(0, 50)}..."` );
-                
-                // Small pause between items for clarity
-                if ( unifiedAudioQueue.items.length > 0 ) {
-                    await new Promise( resolve => setTimeout( resolve, 300 ) );
+                // In instant mode, audio plays progressively via Web Audio
+                // The onComplete callback will handle moving to next item
+                // In reliable mode, we wait for the promise
+                if ( currentMode === 'reliable' ) {
+                    console.log( 'Waiting for reliable mode TTS to complete...' );
+                    const result = await ttsPromise;
+                    console.log( `TTS completed: "${item.content.substring(0, 50)}..."` );
+                    
+                    // Small pause between items for clarity
+                    if ( unifiedAudioQueue.items.length > 0 ) {
+                        await new Promise( resolve => setTimeout( resolve, 300 ) );
+                    }
+                    
+                    // Continue to next item
+                    playNext();
+                } else {
+                    // Instant mode - onComplete callback will handle continuation
+                    console.log( 'Instant mode TTS started, waiting for onComplete callback' );
                 }
-                
-                // Continue to next item
-                playNext();
             } catch ( ttsError ) {
                 console.error( 'HybridTTS speak failed:', ttsError );
                 
@@ -886,15 +912,10 @@ async function handleSpeechUpdate( data ) {
         const currentMode = localStorage.getItem('tts-mode') || 'instant';
         console.log( `Converting text to speech via HybridTTS (${currentMode} mode): "${data.text}"` );
         
-        try {
-            if ( window.hybridTTS ) {
-                await window.hybridTTS.speak( data.text, { mode: currentMode } );
-            } else {
-                console.error( "HybridTTS not available for audio conversion" );
-            }
-        } catch ( error ) {
-            console.error( `Error in HybridTTS (${currentMode} mode):`, error );
-        }
+        // Add to the audio queue for automatic playback
+        console.log( "Adding speech update to audio queue for automatic playback" );
+        addToAudioQueue( 'tts', data.text, 'high' );  // Use 'high' priority for speech updates
+        
         return;
     }
     

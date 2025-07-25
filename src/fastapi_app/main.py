@@ -152,6 +152,18 @@ async def clock_loop():
             if app_debug and app_verbose:
                 connection_count = websocket_manager.get_connection_count()
                 print( f"[CLOCK] Emitted time update to {connection_count} connections: {current_time}" )
+                
+                # Show detailed connection info
+                all_sessions = list( websocket_manager.active_connections.keys() )
+                if all_sessions:
+                    print( f"[CLOCK] Active session IDs: {', '.join( all_sessions )}" )
+                    
+                    # Show user associations if any
+                    user_info = []
+                    for session_id in all_sessions:
+                        user_id = websocket_manager.session_to_user.get( session_id, "no-auth" )
+                        user_info.append( f"{session_id}→{user_id}" )
+                    print( f"[CLOCK] Session→User mapping: {', '.join( user_info )}" )
             
             # Wait 1 minute before next update
             await asyncio.sleep( 60 )
@@ -221,6 +233,11 @@ async def lifespan( app: FastAPI ):
     print( "Loading distill whisper engine... ", end="" )
     whisper_pipeline = await load_stt_model()
     print( "Done!" )
+    
+    # Store event loop reference in WebSocketManager for thread-safe operations
+    print( "[WS] Storing event loop reference for thread-safe operations..." )
+    loop = asyncio.get_running_loop()
+    websocket_manager.set_event_loop( loop )
     
     # Start background clock task
     print( "[CLOCK] Starting background clock task..." )

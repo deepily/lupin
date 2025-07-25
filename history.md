@@ -1,5 +1,61 @@
 # Lupin Project History
 
+## 2025.07.24 - WebSocket Async/Sync Bridge Implementation Phase 1 Complete
+
+### Summary
+Successfully implemented Phase 1 of the WebSocket async/sync bridge fix, eliminating all RuntimeWarnings when COSA background threads emit WebSocket messages. Created comprehensive implementation plan with new Event Subscription System design for optimized network traffic.
+
+### Work Performed
+
+#### Phase 1: Async/Sync Bridge Fix - COMPLETED ✅
+1. **Event Loop Storage**:
+   - Added `main_loop` attribute to WebSocketManager to store FastAPI's event loop reference
+   - Created `set_event_loop()` method for thread-safe operations
+   - Updated main.py startup to store loop reference after initialization
+
+2. **Thread-Safe Emission Implementation**:
+   - Replaced problematic threading approach with `asyncio.run_coroutine_threadsafe()`
+   - Fixed both `emit()` and `emit_to_user_sync()` methods to use proper async bridge
+   - Removed `threading.Thread` creation and `asyncio.run()` calls that created conflicting event loops
+
+3. **Testing and Validation**:
+   - Created comprehensive test script: `src/tests/test_websocket_async_bridge.py`
+   - Verified NO RuntimeWarnings during sync-to-async emissions
+   - Tested rapid sequential emissions from multiple threads successfully
+
+#### Implementation Planning Document Created
+- Created `src/rnd/2025.07.24-websocket-async-bridge-implementation.md`
+- Comprehensive plan with progress tracking for all phases
+- Added new Phase 2.5: Event Subscription System for optimized performance
+
+#### Event Subscription System Design (Phase 2.5)
+- Allows clients to subscribe only to events they need
+- queue.js can skip speech_update events
+- hybrid-tts.js can skip queue update events
+- Includes subscription validation, dynamic updates, and metrics
+- Significant network traffic reduction expected
+
+### Technical Details
+- Used `asyncio.run_coroutine_threadsafe()` for proper thread-to-event-loop communication
+- Maintained backward compatibility while fixing core issues
+- All WebSocket operations now properly scheduled on main event loop
+
+### Files Modified
+- `/src/cosa/rest/websocket_manager.py` - Added event loop storage and thread-safe emission methods
+- `/src/fastapi_app/main.py` - Added event loop reference storage during startup
+- `/src/tests/test_websocket_async_bridge.py` - Created comprehensive test suite
+- `/src/rnd/2025.07.24-websocket-async-bridge-implementation.md` - Created implementation plan
+
+### Next Steps
+- Implement Phase 2: Session Management (localStorage persistence)
+- Implement Phase 2.5: Event Subscription System (can be done in parallel)
+- Implement Phase 3: User-Based Routing Enhancement
+- Complete Phase 4: Testing & Documentation
+
+---
+
+# Lupin Project History
+
 ## 2025.07.23 - Complete Audio-to-Speech Renaming Migration + WebSocket User Routing Implementation (Development Session 6)
 **Branch: v0.6.0-2025.07.10-wip-home-phased-websocket-to-identity-mapping**
 

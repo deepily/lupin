@@ -97,18 +97,16 @@ class HybridTTS {
     
     async initialize() {
         try {
-            // Use provided session ID if available, otherwise get a new one
+            // Session ID is REQUIRED - fail fast if not provided
             if (!this.sessionId) {
-                const response = await fetch(this.sessionUrl);
-                const data = await response.json();
-                this.sessionId = data.session_id;
-                console.log(`HybridTTS: Got new session ID: ${this.sessionId}`);
-            } else {
-                console.log(`HybridTTS: Using provided session ID: ${this.sessionId}`);
+                throw new Error('HybridTTS: Session ID is required. Must be provided in constructor options.');
             }
             
-            // Connect WebSocket
+            console.log(`HybridTTS: Using provided session ID: ${this.sessionId}`);
+            
+            // Connect WebSocket using the required session ID
             const wsFullUrl = `${this.wsUrl}/${this.sessionId}`;
+            console.log(`HybridTTS: Connecting to WebSocket: ${wsFullUrl}`);
             this.websocket = new WebSocket(wsFullUrl);
             
             return new Promise((resolve, reject) => {
@@ -351,6 +349,14 @@ class HybridTTS {
             source.buffer = audioBuffer;
             source.connect(this.audioContext.destination);
             
+            // Check AudioContext state
+            if (this.audioContext.state === 'suspended') {
+                console.warn('HybridTTS: AudioContext is suspended, attempting to resume...');
+                await this.audioContext.resume();
+            }
+            
+            console.log(`HybridTTS: AudioContext state: ${this.audioContext.state}, currentTime: ${this.audioContext.currentTime.toFixed(3)}`);
+            
             // Schedule for immediate playback
             const playTime = Math.max(this.audioContext.currentTime, this.currentPlaybackTime);
             source.start(playTime);
@@ -364,7 +370,10 @@ class HybridTTS {
                 console.log(`HybridTTS: First audio chunk playing in ${latency}ms (instant mode)`);
             }
             
-            console.log(`HybridTTS: Progressive chunk ${this.audioChunks.length} scheduled (duration: ${audioBuffer.duration.toFixed(2)}s)`);
+            console.log(`HybridTTS: Progressive chunk ${this.audioChunks.length} scheduled at ${playTime.toFixed(3)}s (duration: ${audioBuffer.duration.toFixed(2)}s)`);
+            
+            // Add debug for audio destination
+            console.log(`HybridTTS: Audio routed to: ${this.audioContext.destination.channelCount} channels, sampleRate: ${this.audioContext.sampleRate}`);
             
         } catch (error) {
             console.error('HybridTTS: Progressive playback failed:', error);
@@ -506,6 +515,7 @@ class HybridTTS {
 
         try {
             // Send TTS request (will stream chunks via WebSocket)
+            console.log(`[HybridTTS] Sending TTS request with session_id: ${this.sessionId}, apiUrl: ${this.apiUrl}`);
             const response = await fetch(this.apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
