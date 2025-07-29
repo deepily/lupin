@@ -189,7 +189,7 @@ class HybridTTS {
         }
     }
     
-    handleWebSocketMessage(event) {
+    async handleWebSocketMessage(event) {
         if (event.data instanceof Blob) {
             // Audio chunk received
             this.audioChunks.push(event.data);
@@ -222,8 +222,25 @@ class HybridTTS {
                         const totalTime = (Date.now() - this.startTime) / 1000;
                         this.onProgressUpdate(`Complete! ${this.audioChunks.length} chunks streamed in ${totalTime.toFixed(1)}s`);
                         this.onStatusUpdate(`Audio streaming complete (${totalTime.toFixed(1)}s)`, 'success');
+                        
+                        // Cache the audio for future use, even in instant mode
+                        if (this._currentText && this.cacheEnabled && this.audioChunks.length > 0) {
+                            // Create blob from all chunks for caching
+                            const audioBlob = new Blob(this.audioChunks, { type: 'audio/mpeg' });
+                            const metadata = {
+                                chunks: this.audioChunks.length,
+                                duration: totalTime,
+                                mode: 'instant'
+                            };
+                            await this.saveToCache(this._currentText, audioBlob, metadata);
+                            console.log('HybridTTS: Cached audio from instant mode playback');
+                        }
+                        
                         this.onComplete(null, totalTime); // No URL in progressive mode
                         this.isRequesting = false;
+                        
+                        // Clear current text after caching
+                        this._currentText = null;
                         
                         // Don't reset audio state immediately to allow final chunks to play
                         setTimeout(() => this.resetAudioState(), 1000);

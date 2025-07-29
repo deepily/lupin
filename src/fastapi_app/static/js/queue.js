@@ -20,6 +20,15 @@ function createAudioContext() {
 
 // Initialize HybridTTS for job completion audio
 async function initializeHybridTTS() {
+    console.log( 'Starting HybridTTS initialization...' );
+    
+    // Check if HybridTTS class is available
+    if ( typeof HybridTTS === 'undefined' ) {
+        console.error( 'HybridTTS class is not defined! Check if hybrid-tts.js is loaded properly.' );
+        hybridTTS = null;
+        return;
+    }
+    
     try {
         // Generate separate audio session ID
         const audioSessionId = await getOrCreateSessionId( 'audio' );
@@ -64,9 +73,16 @@ async function initializeHybridTTS() {
         await hybridTTS.initialize();
         console.log('HybridTTS initialized successfully for job audio');
     } catch (error) {
-        console.error('Failed to initialize HybridTTS:', error);
+        console.error('Failed to initialize HybridTTS with detailed error:', error);
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        
         // Fall back to simple audio playback if HybridTTS fails
         hybridTTS = null;
+        
+        // Alert user about the failure
+        console.warn('HybridTTS initialization failed - TTS audio will not work. Check console for details.');
     }
 }
 
@@ -194,7 +210,9 @@ document.addEventListener( "DOMContentLoaded", async function() {
     await connectToQueueWebSocket();
     
     // Initialize HybridTTS AFTER we have the session ID from WebSocket
+    console.log( 'About to call initializeHybridTTS...' );
     await initializeHybridTTS();
+    console.log( 'initializeHybridTTS call completed. hybridTTS is now:', hybridTTS );
     
     updateQueueLists( "todo" );
     updateQueueLists( "run" );
@@ -731,7 +749,12 @@ async function playNext() {
             
         } else {
             // Fallback for unsupported types or missing TTS
-            console.log( `Unsupported type or missing handler for ${item.type}, playing fallback sound` );
+            if ( item.type === 'tts' && !hybridTTS ) {
+                console.error( `TTS requested but HybridTTS is not available! Item: "${item.content.substring ? item.content.substring(0, 50) + '...' : item.content}"` );
+                console.error( 'This likely means HybridTTS initialization failed. Check earlier console messages.' );
+            } else {
+                console.log( `Unsupported type or missing handler for ${item.type}, playing fallback sound` );
+            }
             fallbackToNotificationSound();
             // Small delay for fallback sound
             await new Promise( resolve => setTimeout( resolve, 1000 ) );
