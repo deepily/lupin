@@ -39,7 +39,6 @@ from lib.clients import lupin_client as gc
 from cosa.agents.v010.two_word_id_generator import TwoWordIdGenerator
 from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.auth import get_current_user, get_current_user_id
-from cosa.rest.queue_extensions import push_job_with_user
 from cosa.rest.user_id_generator import email_to_system_id
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
@@ -604,7 +603,7 @@ async def stream_tts_hybrid( session_id: str, msg: str ):
         
         # Send status update
         await websocket.send_json({
-            "type": "status",
+            "type": "audio_status",
             "text": "Generating and streaming audio...",
             "status": "loading"
         })
@@ -660,7 +659,7 @@ async def stream_tts_hybrid( session_id: str, msg: str ):
         print( f"[ERROR] Hybrid TTS failed for {session_id}: {e}" )
         if session_id in active_websockets:
             await websocket.send_json({
-                "type": "status",
+                "type": "audio_status",
                 "text": f"TTS generation failed: {str(e)}",
                 "status": "error"
             })

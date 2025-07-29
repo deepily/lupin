@@ -21,16 +21,13 @@ function createAudioContext() {
 // Initialize HybridTTS for job completion audio
 async function initializeHybridTTS() {
     try {
-        // Session ID should already be available from WebSocket connection
-        if (!sessionId) {
-            throw new Error('Cannot initialize HybridTTS: No session ID available from WebSocket connection');
-        }
-        
-        console.log(`Initializing HybridTTS with session ID: ${sessionId}`);
+        // Generate separate audio session ID
+        const audioSessionId = await getOrCreateSessionId( 'audio' );
+        console.log( `Initializing HybridTTS with audio session ID: ${audioSessionId}` );
         
         hybridTTS = new HybridTTS({
-            sessionId: sessionId, // Pass the session ID to HybridTTS
-            wsUrl: undefined, // Let HybridTTS create its own connection with the same sessionId
+            sessionId: audioSessionId, // Use audio-specific session, different from queue!
+            wsUrl: undefined, // Let HybridTTS create its own connection
             cacheEnabled: true,
             cacheMaxSize: 50 * 1024 * 1024, // 50MB cache for job audio
             cacheMaxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
@@ -338,37 +335,41 @@ function playAnswer( id ) {
 var queueSocket = null;
 var sessionId = null;
 
-// Session persistence constants
-const SESSION_STORAGE_KEY = 'lupin_session_id';
+// Session persistence constants - separate keys for queue and audio
+const QUEUE_SESSION_KEY = 'lupin_queue_session_id';
+const AUDIO_SESSION_KEY = 'lupin_audio_session_id';
 
 /**
  * Get or create a persistent session ID using localStorage
+ * @param {string} sessionType - Type of session ('queue' or 'audio')
  * @returns {Promise<string>} The session ID (from localStorage or newly generated)
  */
-async function getOrCreateSessionId() {
+async function getOrCreateSessionId( sessionType ) {
+    const storageKey = sessionType === 'audio' ? AUDIO_SESSION_KEY : QUEUE_SESSION_KEY;
+    
     // Check localStorage first
-    let storedSessionId = localStorage.getItem( SESSION_STORAGE_KEY );
+    let storedSessionId = localStorage.getItem( storageKey );
     
     if ( storedSessionId && storedSessionId !== 'undefined' && storedSessionId !== 'null' ) {
-        console.log( `[SESSION] Reusing existing session ID from localStorage: ${storedSessionId}` );
+        console.log( `[SESSION] Reusing ${sessionType} session: ${storedSessionId}` );
         return storedSessionId;
     }
     
     // No valid session in localStorage, fetch new one from server
-    console.log( '[SESSION] No valid session ID in localStorage, fetching new one from server' );
+    console.log( `[SESSION] No ${sessionType} session in localStorage, fetching new one from server` );
     
     try {
         const response = await fetch( "/api/get-session-id" );
         const data = await response.json();
         const newSessionId = data.session_id;
         
-        // Store in localStorage for future use
-        localStorage.setItem( SESSION_STORAGE_KEY, newSessionId );
-        console.log( `[SESSION] Created new session ID and stored in localStorage: ${newSessionId}` );
+        // Store in localStorage with typed key
+        localStorage.setItem( storageKey, newSessionId );
+        console.log( `[SESSION] Created ${sessionType} session: ${newSessionId}` );
         
         return newSessionId;
     } catch ( error ) {
-        console.error( '[SESSION] Failed to get session ID:', error );
+        console.error( `[SESSION] Failed to get ${sessionType} session ID:`, error );
         throw error;
     }
 }
@@ -378,10 +379,10 @@ async function connectToQueueWebSocket() {
         // Update debug status
         updateWebSocketDebugInfo( "Connecting...", "Connecting", "None" );
         
-        // Get or create session ID with localStorage persistence
-        sessionId = await getOrCreateSessionId();
-        window.SESSION_ID = sessionId; // Make available globally for other components
-        console.log( "Using session ID:", sessionId );
+        // Get or create queue session ID with localStorage persistence
+        sessionId = await getOrCreateSessionId( 'queue' );
+        window.QUEUE_SESSION_ID = sessionId; // Make available globally for debugging
+        console.log( "Using queue session ID:", sessionId );
         
         // Update debug info with session ID
         const authToken = getAuthHeader().replace( "Bearer ", "" );
@@ -431,7 +432,14 @@ async function connectToQueueWebSocket() {
         };
         
         queueSocket.onmessage = function( event ) {
-            const data = JSON.parse( event.data );
+            let data;
+            try {
+                data = JSON.parse( event.data );
+            } catch ( e ) {
+                console.error( "Failed to parse WebSocket message:", event.data );
+                console.error( "Parse error:", e );
+                return;
+            }
             console.log( "Received queue event:", data );
             
             switch( data.type ) {
@@ -517,6 +525,25 @@ async function connectToQueueWebSocket() {
                 case "notification_update":
                     // Handle real-time notification updates from NotificationFifoQueue
                     handleNotificationUpdate( data );
+                    break;
+                    
+                case "audio_status":
+                    // TTS audio status updates
+                    console.log( "TTS audio status update:", data.text, `(${data.status})` );
+                    if ( window.hybridTTS ) {
+                        // Forward status to HybridTTS if needed
+                        window.hybridTTS.handleStatusUpdate && window.hybridTTS.handleStatusUpdate( data );
+                    }
+                    break;
+                    
+                case "audio_complete":
+                    // TTS audio streaming complete
+                    console.log( "TTS audio complete:", data.text );
+                    break;
+                    
+                case "ping":
+                    // WebSocket heartbeat
+                    console.log( "WebSocket ping received at", data.timestamp );
                     break;
                     
                 default:
@@ -898,6 +925,9 @@ function getAuthHeader() {
     // Use email directly as the identifier
     return `Bearer mock_token_email_${email}`;
 }
+
+// Make auth header function available globally for HybridTTS
+window.getAuthHeader = getAuthHeader;
 
 function updateAuthStatus() {
     const statusElement = document.getElementById( "auth-status" );

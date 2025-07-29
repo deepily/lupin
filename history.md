@@ -1,5 +1,86 @@
 # Lupin Project History
 
+## 2025.07.26 - WebSocket Phase 3: Dual Session Architecture + Audio Troubleshooting
+
+### Summary
+Implemented Phase 3 of the WebSocket user routing architecture with significant architectural improvements. Converted UserJobTracker to singleton pattern, unified speech emission through base class inheritance, and resolved WebSocket session conflicts by implementing dual session architecture. Added audio troubleshooting features to address system-level audio driver issues.
+
+### Work Performed
+
+#### Phase 3: User-Based Routing Architecture - COMPLETED ✅
+
+1. **UserJobTracker Singleton Implementation**:
+   - Converted to thread-safe singleton pattern with `__new__` and Lock
+   - Added to FifoQueue base class for universal access
+   - Maintains job-to-user associations across all queue types
+
+2. **Unified Speech Emission Architecture**:
+   - Updated `_emit_speech` in base class to support user_id, websocket_id, and job parameters
+   - Removed redundant `_emit_speech_to_user` from RunningFifoQueue
+   - All queues now use consistent speech emission through inheritance
+   - Fixed parameter passing to use named arguments
+
+3. **WebSocket Endpoint Improvements**:
+   - Renamed `/ws/{session_id}` to `/ws/audio/{session_id}` for clarity
+   - Changed ambiguous 'status' event to 'audio_status'
+   - Added session-to-user pre-registration for TTS requests
+   - Fixed hardcoded user_id in audio WebSocket endpoint
+
+4. **Dual Session Architecture**:
+   - Separated queue and audio WebSocket sessions to prevent conflicts
+   - Queue session: handles queue events (todo_update, run_update, etc.)
+   - Audio session: handles only audio streaming and status
+   - Added typed localStorage keys for session management
+   - Fixed event routing issues caused by session ID conflicts
+
+5. **Client-Side Updates**:
+   - Updated HybridTTS to generate its own audio session
+   - Fixed missing Authorization header in TTS requests
+   - Added event subscription filtering for audio WebSocket
+   - Updated all test files with new endpoint naming
+
+#### Audio System Troubleshooting
+
+1. **Volume and Gain Improvements**:
+   - Increased audio gain to 3x for better audibility
+   - Added gain node to Web Audio API pipeline
+
+2. **Diagnostic Enhancements**:
+   - Added audio buffer amplitude checking
+   - Enhanced AudioContext state monitoring
+   - Added automatic fallback to reliable mode on audio errors
+   - Improved logging for audio debugging
+
+3. **Mode Switching**:
+   - Added localStorage-based TTS mode toggle
+   - Supports 'instant' (Web Audio API) and 'reliable' (HTML audio element) modes
+   - Automatic fallback when audio issues detected
+
+### Files Modified (Main Repo Only)
+- `/src/fastapi_app/static/js/queue.js` - Dual session implementation
+- `/src/fastapi_app/static/js/hybrid-tts.js` - Audio fixes and diagnostics
+- `/src/fastapi_app/static/html/test/test_tts_websocket_routing.html` - Updated endpoints
+
+### Files Modified (CoSA Submodule - Manual Update Required)
+- `/src/cosa/rest/queue_extensions.py` - UserJobTracker singleton
+- `/src/cosa/rest/fifo_queue.py` - Base class speech emission
+- `/src/cosa/rest/todo_fifo_queue.py` - Updated emit calls
+- `/src/cosa/rest/running_fifo_queue.py` - Removed duplicate methods
+- `/src/cosa/rest/routers/websocket.py` - Endpoint renaming and fixes
+- `/src/cosa/rest/routers/speech.py` - Session registration
+- `/src/cosa/rest/websocket_manager.py` - Session registration method
+
+### Technical Notes
+- WebSocketManager uses session_id as primary key, causing overwrites with duplicate IDs
+- Dual session architecture completely resolves event routing conflicts
+- Audio issues appear to be system/driver-level, not code-related
+- Web Audio API chunks play successfully but audio output is intermittent
+
+### Next Steps
+- Monitor audio driver stability after system reboot
+- Consider implementing volume controls in UI
+- Potential future enhancement: Connection type tracking in WebSocketManager
+
 ## 2025.07.25 - WebSocket Implementation Phases 2 & 2.5 Complete + Configuration Integration
 
 ### Summary

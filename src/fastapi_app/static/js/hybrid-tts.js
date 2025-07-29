@@ -14,13 +14,16 @@
 class HybridTTS {
     constructor(options = {}) {
         // Configuration options
-        this.wsUrl = options.wsUrl || `ws://${window.location.host}/ws`;
+        this.wsUrl = options.wsUrl || `ws://${window.location.host}/ws/audio`;
         this.apiUrl = options.apiUrl || '/api/get-speech';
         this.sessionUrl = options.sessionUrl || '/api/get-session-id';
         
         // TTS Mode switching (new functionality)
         this.mode = localStorage.getItem('tts-mode') || 'instant';
         this.fallbackEnabled = options.fallbackEnabled !== false; // Default true
+        
+        // Log current mode for debugging
+        console.log(`HybridTTS: Initialized in ${this.mode} mode (change with localStorage.setItem('tts-mode', 'reliable'))`)
         this.apiUrlBatch = '/api/get-speech';        // OpenAI batch TTS
         this.apiUrlStreaming = '/api/get-speech-elevenlabs'; // ElevenLabs streaming
         
@@ -199,7 +202,7 @@ class HybridTTS {
                         // Reliable mode - create and play collected audio
                         this.playCollectedAudio();
                     }
-                } else if (message.type === 'status') {
+                } else if (message.type === 'audio_status') {
                     if (message.status === 'loading' && this.audioChunks.length === 0) {
                         this.onStatusUpdate(message.text, 'loading');
                         this.startTime = Date.now();
@@ -347,7 +350,13 @@ class HybridTTS {
             // Create buffer source
             const source = this.audioContext.createBufferSource();
             source.buffer = audioBuffer;
-            source.connect(this.audioContext.destination);
+            
+            // Add a gain node to control volume and debug
+            const gainNode = this.audioContext.createGain();
+            gainNode.gain.value = 3.0; // Boost volume 3x for driver issues
+            
+            source.connect(gainNode);
+            gainNode.connect(this.audioContext.destination);
             
             // Check AudioContext state
             if (this.audioContext.state === 'suspended') {
@@ -355,11 +364,39 @@ class HybridTTS {
                 await this.audioContext.resume();
             }
             
+            // Enhanced audio diagnostics
             console.log(`HybridTTS: AudioContext state: ${this.audioContext.state}, currentTime: ${this.audioContext.currentTime.toFixed(3)}`);
+            console.log(`HybridTTS: Audio buffer - duration: ${audioBuffer.duration.toFixed(2)}s, channels: ${audioBuffer.numberOfChannels}, sampleRate: ${audioBuffer.sampleRate}Hz`);
+            
+            // Check for silent audio
+            const channelData = audioBuffer.getChannelData(0);
+            const maxAmplitude = Math.max(...channelData.map(Math.abs));
+            if (maxAmplitude < 0.001) {
+                console.warn('HybridTTS: WARNING - Audio chunk appears to be silent (max amplitude: ' + maxAmplitude + ')');
+            } else {
+                console.log(`HybridTTS: Audio chunk amplitude OK (max: ${maxAmplitude.toFixed(3)})`);
+            }
             
             // Schedule for immediate playback
             const playTime = Math.max(this.audioContext.currentTime, this.currentPlaybackTime);
             source.start(playTime);
+            
+            // Add debug to track when audio actually plays
+            source.onended = () => {
+                console.log(`HybridTTS: Audio chunk finished playing at ${this.audioContext.currentTime.toFixed(3)}s`);
+                
+                // Check if audio context is still running properly
+                if (this.audioContext.state !== 'running') {
+                    console.error(`HybridTTS: AudioContext state changed to ${this.audioContext.state} - audio may have stopped!`);
+                    
+                    // Try to fallback to reliable mode
+                    if (this.mode === 'instant' && this.fallbackEnabled) {
+                        console.log('HybridTTS: Audio issues detected, switching to reliable mode for next playback');
+                        localStorage.setItem('tts-mode', 'reliable');
+                        this.mode = 'reliable';
+                    }
+                }
+            };
             
             // Update playback time for next chunk
             this.currentPlaybackTime = playTime + audioBuffer.duration;
@@ -518,7 +555,10 @@ class HybridTTS {
             console.log(`[HybridTTS] Sending TTS request with session_id: ${this.sessionId}, apiUrl: ${this.apiUrl}`);
             const response = await fetch(this.apiUrl, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': window.getAuthHeader ? window.getAuthHeader() : ''
+                },
                 body: JSON.stringify({
                     session_id: this.sessionId,
                     text: text
