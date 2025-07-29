@@ -1,5 +1,83 @@
 # Lupin Project History
 
+## 2025.07.29 - WebSocket Event Filtering + Instant Mode Caching Implementation
+
+### Summary
+Fixed critical audio playback issues by implementing WebSocket event filtering and resolved instant mode caching. Eliminated race condition where both queue.js and HybridTTS were receiving speech_update events, causing audio conflicts. Added comprehensive error diagnostics and instant mode audio caching for optimal performance.
+
+### Work Performed
+
+#### WebSocket Event Filtering Implementation - COMPLETED ✅
+
+1. **Root Cause Analysis**:
+   - Identified duplicate event handling: both queue.js and HybridTTS receiving speech_update events
+   - This caused race conditions preventing audio playback
+   - HybridTTS was receiving events it didn't need, causing conflicts
+
+2. **Event Subscription Implementation**:
+   - Added event subscription to HybridTTS WebSocket connection with auth message
+   - HybridTTS now only subscribes to audio-related events: audio_chunk, audio_status, audio_complete, ping
+   - Removed speech_update from HybridTTS subscriptions - exclusively for queue.js
+   - Added auth response handling (auth_success, auth_error, connect) in HybridTTS
+
+3. **Separation of Concerns**:
+   - queue.js handles WHEN audio should play (via speech_update events)
+   - HybridTTS handles HOW audio is streamed (via audio_chunk events only)
+   - No duplicate event processing or conflicts
+
+#### HybridTTS Initialization Debugging - COMPLETED ✅
+
+1. **Enhanced Error Diagnostics**:
+   - Added pre-initialization checks for HybridTTS class availability
+   - Comprehensive error logging with error name, message, and stack trace
+   - Better failure feedback when TTS requested but HybridTTS unavailable
+
+2. **Syntax Error Resolution**:
+   - Identified JavaScript syntax error preventing HybridTTS from loading
+   - Fixed: made handleWebSocketMessage() async to support await operations
+   - Verified syntax correctness with node -c validation
+
+#### Instant Mode Caching Implementation - COMPLETED ✅
+
+1. **Caching Enhancement**:
+   - Added audio chunk caching to instant mode after progressive playback
+   - Creates blob from collected chunks when audio_complete received
+   - Saves to cache with metadata including mode='instant'
+   - Preserves _currentText until after caching completion
+
+2. **Performance Optimization**:
+   - First playback: low latency streaming (progressive chunks)
+   - Repeat playback: instantaneous (from cache)
+   - Best of both worlds: instant response + caching efficiency
+   - Matches reliable mode caching behavior
+
+### Technical Results
+
+**Before Fix:**
+- Audio playback failed due to event conflicts
+- "HybridTTS class is not defined" errors
+- No caching in instant mode
+
+**After Fix:**
+- ✅ Audio plays reliably in both instant and reliable modes
+- ✅ Event filtering prevents race conditions
+- ✅ Instant mode caches audio for subsequent requests
+- ✅ Comprehensive error diagnostics for troubleshooting
+
+### Files Modified (Main Repo Only)
+- `/src/fastapi_app/static/js/hybrid-tts.js` - Event subscriptions, async fix, instant caching
+- `/src/fastapi_app/static/js/queue.js` - Enhanced error logging and initialization tracking
+- `/src/conf/long-term-memory/solutions/what-time-is-it-right-now-0.json` - Updated solution
+
+### Commits Created
+- `0383425` - Fix audio playback by implementing WebSocket event filtering
+- `8426550` - Fix instant mode caching + HybridTTS initialization error
+
+### Next Steps
+- Monitor instant mode caching performance in production
+- Consider implementing Phase 3 of WebSocket user routing architecture
+- Potential future enhancement: Volume controls in UI
+
 ## 2025.07.26 - WebSocket Phase 3: Dual Session Architecture + Audio Troubleshooting
 
 ### Summary
