@@ -116,6 +116,28 @@ class HybridTTS {
                 this.websocket.onopen = async () => {
                     console.log('HybridTTS: WebSocket connected');
                     
+                    // Send auth message with event subscriptions
+                    // HybridTTS only needs audio-related events, NOT speech_update
+                    const authToken = window.getAuthHeader ? window.getAuthHeader().replace("Bearer ", "") : "mock_token";
+                    const authMessage = {
+                        type: "auth",
+                        token: authToken,
+                        session_id: this.sessionId,
+                        subscribed_events: [
+                            "audio_chunk",      // Audio data chunks
+                            "audio_status",     // Loading/streaming status
+                            "audio_complete",   // Streaming complete
+                            "ping",             // Heartbeat
+                            "auth_success",     // Auth confirmation
+                            "auth_error",       // Auth errors
+                            "connect"           // Connection events
+                            // NOT subscribing to "speech_update" - that's for queue.js only
+                        ]
+                    };
+                    
+                    console.log('HybridTTS: Sending auth with audio-only event subscriptions');
+                    this.websocket.send(JSON.stringify(authMessage));
+                    
                     // Initialize Web Audio API for instant mode
                     if (this.useWebAudioAPI) {
                         await this.initializeWebAudio();
@@ -186,7 +208,14 @@ class HybridTTS {
                 const message = JSON.parse(event.data);
                 console.log('HybridTTS WebSocket message:', message);
                 
-                if (message.type === 'audio_complete') {
+                // Handle auth responses
+                if (message.type === 'auth_success') {
+                    console.log('HybridTTS: WebSocket authentication successful');
+                } else if (message.type === 'auth_error') {
+                    console.error('HybridTTS: WebSocket authentication failed:', message.message);
+                } else if (message.type === 'connect') {
+                    console.log('HybridTTS: WebSocket connection confirmed:', message.message);
+                } else if (message.type === 'audio_complete') {
                     // All chunks received
                     if (this.mode === 'instant' && this.useWebAudioAPI) {
                         // In instant mode, we've already played chunks progressively

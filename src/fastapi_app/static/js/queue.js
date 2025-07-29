@@ -440,7 +440,7 @@ async function connectToQueueWebSocket() {
                 console.error( "Parse error:", e );
                 return;
             }
-            console.log( "Received queue event:", data );
+            console.log( "queueSocket.onmessage: Received queue event:", data );
             
             switch( data.type ) {
                 case "connect":
@@ -514,13 +514,13 @@ async function connectToQueueWebSocket() {
                     handleUserNotification( data );
                     break;
                     
-                case "task":
-                case "progress": 
-                case "alert":
-                case "custom":
-                    // Legacy Claude Code notification types - now handled via notification_update
-                    console.log( "Received legacy notification event (now handled via notification_update):", data.type );
-                    break;
+                // case "task":
+                // case "progress":
+                // case "alert":
+                // case "custom":
+                //     // Legacy Claude Code notification types - now handled via notification_update
+                //     console.log( "Received legacy notification event (now handled via notification_update):", data.type );
+                //     break;
                     
                 case "notification_update":
                     // Handle real-time notification updates from NotificationFifoQueue
@@ -722,6 +722,7 @@ async function playNext() {
             }
             
         } else if ( item.type === 'audio' ) {
+
             // Regular audio playback
             const audio = new Audio( item.content );
             setupAudioEvents( audio );
