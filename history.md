@@ -1,6 +1,6 @@
 # Lupin Project History
 
-## 2025.07.29 - WebSocket Event Filtering + Instant Mode Caching Implementation
+## 2025.07.28 - WebSocket Event Filtering + Instant Mode Caching Implementation
 
 ### Summary
 Fixed critical audio playback issues by implementing WebSocket event filtering and resolved instant mode caching. Eliminated race condition where both queue.js and HybridTTS were receiving speech_update events, causing audio conflicts. Added comprehensive error diagnostics and instant mode audio caching for optimal performance.
