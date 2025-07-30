@@ -73,8 +73,6 @@ consumer_thread = None
 websocket_heartbeat_task = None
 websocket_cleanup_task = None
 
-
-
 async def emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", websocket_id: str = None ) -> None:
     """
     Generate TTS speech and emit via WebSocket to specific user or broadcast.
@@ -98,20 +96,20 @@ async def emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", webs
         
         if user_id and user_id != "ricardo_felipe_ruiz_6bdc":
             # Emit to specific user (preferred method)
-            await websocket_manager.emit_to_user( user_id, "speech_update", speech_data )
-            print( f"[SPEECH] Emitted speech_update to user {user_id}" )
+            await websocket_manager.emit_to_user( user_id, "tts_job_request", speech_data )
+            print( f"[SPEECH] Emitted tts_job_request to user {user_id}" )
         elif user_id == "ricardo_felipe_ruiz_6bdc":
             # Default user - still use user-based routing
-            await websocket_manager.emit_to_user( user_id, "speech_update", speech_data )
-            print( f"[SPEECH] Emitted speech_update to default user {user_id}" )
+            await websocket_manager.emit_to_user( user_id, "tts_job_request", speech_data )
+            print( f"[SPEECH] Emitted tts_job_request to default user {user_id}" )
         elif websocket_id:
             # Backwards compatibility: Emit to specific session
-            await websocket_manager.emit_to_session( websocket_id, "speech_update", speech_data )
-            print( f"[SPEECH] Emitted speech_update to session {websocket_id} (backwards compatibility)" )
+            await websocket_manager.emit_to_session( websocket_id, "tts_job_request", speech_data )
+            print( f"[SPEECH] Emitted tts_job_request to session {websocket_id} (backwards compatibility)" )
         else:
             # Fallback: Broadcast to all connected clients
-            await websocket_manager.async_emit( "speech_update", speech_data )
-            print( f"[SPEECH] Broadcasted speech_update to all connections (fallback)" )
+            await websocket_manager.async_emit( "tts_job_request", speech_data )
+            print( f"[SPEECH] Broadcasted tts_job_request to all connections (fallback)" )
             
     except Exception as e:
         print( f"[SPEECH] Error emitting speech: {e}" )
@@ -148,7 +146,7 @@ async def clock_loop():
         try:
             # Emit time update to all connected WebSocket clients
             current_time = du.get_current_time( format="%Y-%m-%d @ %H:%M" )
-            await websocket_manager.async_emit( 'time_update', { 'date': current_time } )
+            await websocket_manager.async_emit( 'sys_time_update', { 'date': current_time } )
             
             # Debug logging (only if verbose mode)
             if app_debug and app_verbose:
@@ -167,8 +165,9 @@ async def clock_loop():
                         user_info.append( f"{session_id}→{user_id}" )
                     print( f"[CLOCK] Session→User mapping: {', '.join( user_info )}" )
             
-            # Wait 1 minute before next update
-            await asyncio.sleep( 60 )
+            # Wait 1 minute before next update (or 5 seconds in debug mode for testing)
+            sleep_time = 5 if app_debug else 60
+            await asyncio.sleep( sleep_time )
             
         except asyncio.CancelledError:
             print( "[CLOCK] Clock loop cancelled" )
@@ -603,7 +602,7 @@ async def stream_tts_hybrid( session_id: str, msg: str ):
         
         # Send status update
         await websocket.send_json({
-            "type": "audio_status",
+            "type": "audio_streaming_status",
             "text": "Generating and streaming audio...",
             "status": "loading"
         })
@@ -647,7 +646,7 @@ async def stream_tts_hybrid( session_id: str, msg: str ):
                 # Signal completion
                 if websocket_manager.is_connected( session_id ):
                     await websocket.send_json({
-                        "type": "audio_complete",
+                        "type": "audio_streaming_complete",
                         "text": f"Streaming complete ({chunk_count} chunks, {total_time:.1f}s)",
                         "status": "success"
                     })
@@ -659,7 +658,7 @@ async def stream_tts_hybrid( session_id: str, msg: str ):
         print( f"[ERROR] Hybrid TTS failed for {session_id}: {e}" )
         if session_id in active_websockets:
             await websocket.send_json({
-                "type": "audio_status",
+                "type": "audio_streaming_status",
                 "text": f"TTS generation failed: {str(e)}",
                 "status": "error"
             })

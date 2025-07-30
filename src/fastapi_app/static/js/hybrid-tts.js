@@ -120,18 +120,18 @@ class HybridTTS {
                     // HybridTTS only needs audio-related events, NOT speech_update
                     const authToken = window.getAuthHeader ? window.getAuthHeader().replace("Bearer ", "") : "mock_token";
                     const authMessage = {
-                        type: "auth",
+                        type: "auth_request",
                         token: authToken,
                         session_id: this.sessionId,
                         subscribed_events: [
-                            "audio_chunk",      // Audio data chunks
-                            "audio_status",     // Loading/streaming status
-                            "audio_complete",   // Streaming complete
-                            "ping",             // Heartbeat
+                            "audio_streaming_chunk",      // Audio data chunks
+                            "audio_streaming_status",     // Loading/streaming status
+                            "audio_streaming_complete",   // Streaming complete
+                            "sys_ping",             // Heartbeat
                             "auth_success",     // Auth confirmation
                             "auth_error",       // Auth errors
                             "connect"           // Connection events
-                            // NOT subscribing to "speech_update" - that's for queue.js only
+                            // NOT subscribing to "tts_job_request" - that's for queue.js only
                         ]
                     };
                     
@@ -215,7 +215,7 @@ class HybridTTS {
                     console.error('HybridTTS: WebSocket authentication failed:', message.message);
                 } else if (message.type === 'connect') {
                     console.log('HybridTTS: WebSocket connection confirmed:', message.message);
-                } else if (message.type === 'audio_complete') {
+                } else if (message.type === 'audio_streaming_complete') {
                     // All chunks received
                     if (this.mode === 'instant' && this.useWebAudioAPI) {
                         // In instant mode, we've already played chunks progressively
@@ -248,7 +248,7 @@ class HybridTTS {
                         // Reliable mode - create and play collected audio
                         this.playCollectedAudio();
                     }
-                } else if (message.type === 'audio_status') {
+                } else if (message.type === 'audio_streaming_status') {
                     if (message.status === 'loading' && this.audioChunks.length === 0) {
                         this.onStatusUpdate(message.text, 'loading');
                         this.startTime = Date.now();

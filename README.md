@@ -74,6 +74,7 @@ Lupin is built on a modern FastAPI architecture with WebSocket support for real-
 - **Notification system** for agent-to-user feedback
 
 **Key Technical Documents:**
+- **[WebSocket Events Documentation](src/docs/websocket-events.md)** - Comprehensive guide to all WebSocket events and their usage
 - **[WebSocket TTS Streaming Design](src/rnd/2025.06.03-websocket-tts-streaming-design.md)** - Architecture for real-time text-to-speech streaming
 - **[Claude Code Notification System](src/rnd/2025.06.20-claude-code-notification-system-design.md)** - Design for real-time agent notifications
 - **[FastAPI Queue Implementation](src/rnd/2025.06.17-fastapi-queue-implementation-plan.md)** - Queue-based request handling

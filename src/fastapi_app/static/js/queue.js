@@ -423,26 +423,26 @@ async function connectToQueueWebSocket() {
             // Define which events this client wants to receive
             // queue.js needs: queue updates, speech, time, notifications
             const subscribedEvents = [
-                "todo_update",
-                "run_update", 
-                "done_update",
-                "dead_update",
-                "speech_update",
-                "time_update",
-                "notification_sound_update",
-                "notification_update",
-                "user_notification",
+                "queue_todo_update",
+                "queue_running_update", 
+                "queue_done_update",
+                "queue_dead_update",
+                "tts_job_request",
+                "sys_time_update",
+                "notification_play_sound",
+                "notification_queue_update",
+                "notification_message_user",
                 "auth_success",
                 "auth_error",
                 "connect",
-                "ping"
+                "sys_ping"
             ];
             
             console.log( "Sending auth message with token and subscriptions:", authToken );
             console.log( "Subscribed to events:", subscribedEvents );
             
             queueSocket.send( JSON.stringify({
-                "type": "auth",
+                "type": "auth_request",
                 "token": authToken,
                 "session_id": sessionId,
                 "subscribed_events": subscribedEvents
@@ -496,56 +496,48 @@ async function connectToQueueWebSocket() {
                     }
                     break;
                     
-                case "time_update":
+                case "sys_time_update":
                     document.getElementById( "clock" ).innerHTML = data.date;
                     break;
                     
-                case "todo_update":
+                case "queue_todo_update":
                     document.getElementById( "todo" ).innerHTML = "Jobs TODO: " + data.value;
                     updateQueueLists( "todo" );
                     break;
                     
-                case "run_update":
+                case "queue_running_update":
                     document.getElementById( "run" ).innerHTML = "Jobs RUNNING: " + data.value;
                     updateQueueLists( "run" );
                     break;
                     
-                case "done_update":
+                case "queue_done_update":
                     document.getElementById( "done" ).innerHTML = "Jobs DONE: " + data.value;
                     updateQueueLists( "done" );
                     break;
                     
-                case "dead_update":
+                case "queue_dead_update":
                     document.getElementById( "dead" ).innerHTML = "Jobs DEAD: " + data.value;
                     updateQueueLists( "dead" );
                     break;
                     
-                case "notification_sound_update":
+                case "notification_play_sound":
                     handleNotificationSound( data );
                     break;
                     
-                case "speech_update":
+                case "tts_job_request":
                     handleSpeechUpdate( data );
                     break;
                     
-                case "user_notification":
+                case "notification_message_user":
                     handleUserNotification( data );
                     break;
-                    
-                // case "task":
-                // case "progress":
-                // case "alert":
-                // case "custom":
-                //     // Legacy Claude Code notification types - now handled via notification_update
-                //     console.log( "Received legacy notification event (now handled via notification_update):", data.type );
-                //     break;
-                    
-                case "notification_update":
+
+                case "notification_queue_update":
                     // Handle real-time notification updates from NotificationFifoQueue
                     handleNotificationUpdate( data );
                     break;
                     
-                case "audio_status":
+                case "audio_streaming_status":
                     // TTS audio status updates
                     console.log( "TTS audio status update:", data.text, `(${data.status})` );
                     if ( window.hybridTTS ) {
@@ -554,12 +546,12 @@ async function connectToQueueWebSocket() {
                     }
                     break;
                     
-                case "audio_complete":
+                case "audio_streaming_complete":
                     // TTS audio streaming complete
                     console.log( "TTS audio complete:", data.text );
                     break;
                     
-                case "ping":
+                case "sys_ping":
                     // WebSocket heartbeat
                     console.log( "WebSocket ping received at", data.timestamp );
                     break;
@@ -1002,7 +994,7 @@ function updateWebSocketDebugInfo( sessionId, status, authToken ) {
 }
 
 function handleNotificationSound( data ) {
-    console.log( "Received notification_sound_update:", data );
+    console.log( "Received notification_play_sound:", data );
     let url = data.soundFile;
     console.log( `Adding audio url to unified queue: ${ url }` );
     addToAudioQueue( 'audio', url, 'medium' );
@@ -1947,7 +1939,7 @@ function getNotificationState() {
 
 // Handle real-time notification updates via WebSocket
 async function handleNotificationUpdate( data ) {
-    console.log( "Received notification_update WebSocket event:", data );
+    console.log( "Received notification_queue_update WebSocket event:", data );
     
     const notification = data.notification;
     if ( !notification ) {
