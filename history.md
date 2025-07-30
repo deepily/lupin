@@ -1,5 +1,159 @@
 # Lupin Project History
 
+## 2025.07.30 - WebSocket Branch Polish Planning and Documentation Setup
+
+### Summary
+Initiated debugging, polishing, and documentation phase for the WebSocket branch. Created comprehensive tracking document to organize code quality improvements, testing procedures, and final release preparation for the completed WebSocket functionality.
+
+### Work Performed
+
+#### Session Initialization and Current State Analysis - COMPLETED ✅
+- **Global Configuration Review**: Read and followed Claude Code global instructions for session startup
+- **History Document Analysis**: Reviewed comprehensive development history including latest WebSocket implementations
+- **Implementation Status Verification**: Confirmed all core WebSocket functionality is complete:
+  - Phase 1 (Async/Sync Bridge): ✅ Complete - No RuntimeWarnings, proper thread-safe emissions
+  - Phase 2 (Session Management): ✅ Complete - localStorage persistence, cleanup policies, validation
+  - Phase 2.5 (Event Subscription): ✅ Complete - Client-specific event filtering working
+  - Event Filtering Resolution: ✅ Complete - Race conditions resolved, audio playback working
+
+#### Polish Planning and Documentation Creation - COMPLETED ✅
+- **Comprehensive Task Analysis**: Identified 62 specific tasks across 10 categories for code polish
+- **Created Tracking Document**: Built detailed `2025.07.30-websocket-branch-polish-tracker.md` with:
+  - 10 major categories: Development Artifacts Cleanup, Error Handling, Code Quality, Performance, Testing, Documentation, Configuration, API Docs, Migration Guide, Final Release
+  - Progress tracking with checkboxes and completion percentages
+  - Priority levels (Critical, High, Medium, Low) and time estimates (~30-35 hours total)
+  - File locations, line numbers, and specific implementation details
+  - Dependencies, risk mitigation, and rollback strategies
+
+#### Current Branch Status Assessment - COMPLETED ✅
+- **Branch Analysis**: Working on `v0.6.0-2025.07.10-wip-home-phased-websocket-to-identity-mapping`
+- **Uncommitted Changes**: Only the new polish tracking document (clean working tree otherwise)
+- **WebSocket Functionality**: All core features working reliably with proper event filtering
+- **Ready for Polish Phase**: Comprehensive plan in place, no blockers identified
+
+### Current Status
+
+**WebSocket Core Functionality:**
+- ✅ **All phases complete and working** - Audio playback reliable in both instant and reliable modes
+- ✅ **Session persistence** - localStorage-based session management across page reloads
+- ✅ **Event subscription filtering** - HybridTTS only receives audio events, queue.js filtered appropriately
+- ✅ **Error diagnostics** - Enhanced debugging and initialization error handling
+
+**Polish Planning:**
+- ✅ **Comprehensive tracking document** - 62 tasks organized across 10 categories
+- ✅ **Priority framework** - Critical, High, Medium, Low priority assignments
+- ✅ **Time estimates** - Detailed effort calculations for each task category
+- ✅ **Implementation roadmap** - Clear next steps and dependencies identified
+
+**Next Steps for Next Session:**
+- **Priority 1**: Begin implementing tasks from the polish tracking document
+- **Start with Category 1**: Development Artifacts Cleanup (Critical priority)
+  - Remove debug console output and development logging
+  - Clean up TODO comments and commented code
+  - Make debug output conditional based on app_debug flag
+- **Continue with Category 5**: Testing Documentation and Code Quality (High priority)
+- **Progress through**: All 10 categories systematically
+
+### Files Created
+- `/src/rnd/2025.07.30-websocket-branch-polish-tracker.md` - Comprehensive polish planning document
+
+### Implementation Note
+**CRITICAL**: No polish tasks have been implemented yet. This session focused entirely on planning and documentation setup. The tracking document provides a complete roadmap for the next development phases, but all 62 tasks remain at 0% completion pending immediate implementation work. The polish tracking document should be the first priority in our next session.
+
+---
+
+## 2025.07.30 - WebSocket Event Name Normalization and Documentation Enhancement
+
+### Summary
+Completed comprehensive normalization of WebSocket event names for improved clarity and consistency across the entire system. Renamed 8 core events with clearer semantic names, updated all client and server code, added comprehensive documentation, and improved testing infrastructure.
+
+### Work Performed
+
+#### WebSocket Event Name Standardization - COMPLETED ✅
+- **Event Name Mappings**: Implemented systematic renaming for better semantics:
+  - `speech_update` → `tts_job_request` (clearer TTS purpose)
+  - `user_notification` → `notification_message_user` (user-specific messaging)
+  - `notification_update` → `notification_queue_update` (queue-specific updates)
+  - `time_update` → `sys_time_update` (system-level events)
+  - `ping`/`pong` → `sys_ping`/`sys_pong` (system heartbeat)
+  - `auth` → `auth_request` (explicit request semantics)
+  - `audio_status` → `audio_streaming_status` (streaming context)
+  - `audio_complete` → `audio_streaming_complete` (streaming completion)
+
+#### Configuration and Server Updates - COMPLETED ✅
+- **Configuration Management**: Updated `lupin-app.ini` websocket available events with normalized names
+- **Configuration Documentation**: Added comprehensive event explanations in `lupin-app-splainer.ini`
+- **Server-Side Implementation**: Updated `main.py` clock loop to emit `sys_time_update`
+- **Event Validation**: All events validated against new naming convention
+
+#### Client-Side Event Integration - COMPLETED ✅
+- **Queue.js Updates**: Updated event subscriptions and handlers for all renamed events:
+  - Event subscription list updated with new names
+  - Message handlers updated to use new event types
+  - WebSocket authentication flow updated to use `auth_request`
+- **HybridTTS Updates**: Updated audio event subscriptions for streaming events
+- **Backward Compatibility**: Ensured smooth transition without breaking existing functionality
+
+#### Comprehensive Documentation Creation - COMPLETED ✅
+- **Created Documentation Directory**: New `src/docs/` directory for WebSocket documentation
+- **WebSocket Events Reference**: Added comprehensive `websocket-events.md` documenting:
+  - All event types with descriptions and usage examples
+  - Client subscription patterns and server emission contexts
+  - Event categorization (System, Queue, Audio, Notification, Authentication)
+- **Testing Documentation**: Added `websocket-testing-results.md` with detailed testing results and issue resolutions
+- **README Integration**: Updated main README.md to reference new WebSocket events documentation
+- **Design Document Updates**: Updated existing R&D documents with new event names
+
+#### Testing Infrastructure Improvements - COMPLETED ✅
+- **WebSocket Test Fixes**: Enhanced `test_websockets.py` with:
+  - Valid session ID format validation
+  - New event name compatibility
+  - Proper WebSocket authentication flow
+  - Improved test timing for debug mode (5-second intervals)
+  - URL encoding for session IDs with spaces
+- **Quality Assurance**: All tests passing with new event names
+
+### Current Status
+
+**Event Naming:**
+- ✅ **Systematic naming convention** - All events follow clear semantic patterns
+- ✅ **Complete coverage** - 8 core events normalized across entire system
+- ✅ **Documentation consistency** - All references updated in code and docs
+
+**System Integration:**
+- ✅ **Client-server sync** - All event names consistent between JavaScript and Python
+- ✅ **Configuration management** - Events properly documented and validated
+- ✅ **Testing coverage** - All WebSocket tests updated and passing
+
+**Documentation:**
+- ✅ **Comprehensive reference** - Complete WebSocket events documentation
+- ✅ **Testing results** - Detailed testing documentation with issue resolutions
+- ✅ **Integration guides** - Updated README and design documents
+
+### Files Modified
+- `README.md` - Added WebSocket events documentation reference
+- `src/conf/lupin-app-splainer.ini` - Added comprehensive event explanations
+- `src/conf/lupin-app.ini` - Updated websocket available events list
+- `src/fastapi_app/main.py` - Updated clock loop event emission
+- `src/fastapi_app/static/js/hybrid-tts.js` - Updated audio event subscriptions
+- `src/fastapi_app/static/js/queue.js` - Updated event subscriptions and handlers
+- `src/tests/test_websockets.py` - Enhanced testing with new event names
+
+### Files Created
+- `src/docs/websocket-events.md` - Comprehensive WebSocket events reference
+- `src/docs/websocket-testing-results.md` - Detailed testing documentation
+
+### Files Updated
+- `src/rnd/2025.06.03-websocket-tts-streaming-design.md` - Updated with new event names
+- `src/rnd/2025.07.11-websocket-user-routing-architecture.md` - Updated event references
+
+### Next Steps
+- **Event monitoring** - Monitor production usage with new event names
+- **Performance analysis** - Measure impact of normalized event names on system performance
+- **Documentation maintenance** - Keep WebSocket documentation updated as system evolves
+
+---
+
 ## 2025.07.28 - WebSocket Event Filtering + Instant Mode Caching Implementation
 
 ### Summary
