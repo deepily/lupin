@@ -17,6 +17,8 @@ import asyncio
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 import uuid
+import aiohttp
+import websockets
 
 # Add paths for imports
 sys.path.append( os.path.join( os.path.dirname( __file__ ), '..' ) )
@@ -165,8 +167,8 @@ async def clock_loop():
                         user_info.append( f"{session_id}→{user_id}" )
                     print( f"[CLOCK] Session→User mapping: {', '.join( user_info )}" )
             
-            # Wait 1 minute before next update (or 5 seconds in debug mode for testing)
-            sleep_time = 5 if app_debug else 60
+            # Wait 1 minute before next update
+            sleep_time = 60
             await asyncio.sleep( sleep_time )
             
         except asyncio.CancelledError:
@@ -388,7 +390,7 @@ async def lifespan( app: FastAPI ):
 app = FastAPI(
     title="Genie-in-the-Box FastAPI",
     description="A FastAPI migration of the Genie-in-the-Box agent system",
-    version="0.1.0",
+    version="0.6.0",
     lifespan=lifespan
 )
 
@@ -413,13 +415,6 @@ app.include_router(websocket_admin.router)
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
-
-# REMOVED: websocket_endpoint - moved to websocket router
-
-
-# REMOVED: websocket_queue_endpoint - moved to websocket router
-
 
 async def load_stt_model():
     """
@@ -453,128 +448,147 @@ async def load_stt_model():
     )
     return pipe
 
-
-
-
-
-# REMOVED: auth_test - moved to websocket router
-
-
-
-
-# REMOVED: upload_and_transcribe_mp3_file - moved to audio router
+async def stream_tts_elevenlabs( session_id: str, msg: str, voice_id: str = "21m00Tcm4TlvDq8ikWAM", stability: float = 0.5, similarity_boost: float = 0.5 ):
     """
-    Upload and transcribe MP3 audio file using Whisper model.
-    
-    Preconditions:
-        - Request body must contain base64 encoded MP3 audio
-        - Whisper pipeline must be initialized
-        - Write permissions to docker path
-        - Valid prompt_key in configuration
-    
-    Postconditions:
-        - Audio file saved to disk temporarily
-        - Transcription completed and processed
-        - Response saved to last_response.json
-        - Entry added to I/O table if not agent request
-        - Job queued if agent request detected
+    ElevenLabs TTS streaming: Forward chunks immediately via WebSocket.
+    Connects to ElevenLabs WebSocket API and streams audio chunks in real-time.
     
     Args:
-        request: FastAPI request containing base64 encoded audio
-        prefix: Optional prefix for transcription processing
-        prompt_key: Key for prompt selection (default: "generic")
-        prompt_verbose: Verbosity level (default: "verbose")
-    
-    Returns:
-        JSONResponse: Processed transcription results
-    
-    Raises:
-        HTTPException: If audio decoding or transcription fails
+        session_id: Session ID for WebSocket connection
+        msg: Text to convert to speech
+        voice_id: ElevenLabs voice ID (default: Rachel)
+        stability: Voice stability (0.0-1.0)
+        similarity_boost: Voice similarity boost (0.0-1.0)
     """
-    global app_debug, app_verbose
-    if debug:
-        print( "upload_and_transcribe_mp3_file() called" )
-        print( f"    prefix: [{prefix}]" )
-        print( f"prompt_key: [{prompt_key}]" )
-    
-    # Get the request body (base64 encoded audio)
-    body = await request.body()
-    decoded_audio = base64.b64decode( body )
-    
-    path = gc.docker_path.format( "recording.mp3" )
-    
-    if app_debug: print( f"Saving file recorded audio bytes to [{path}]...", end="" )
-    with open( path, "wb" ) as f:
-        f.write( decoded_audio )
-    if app_debug: print( " Done!" )
-    
-    # Transcribe the audio
-    if app_debug: timer = sw.Stopwatch( f"Transcribing {path}..." )
-    raw_transcription = whisper_pipeline( path, chunk_length_s=30, stride_length_s=5 )
-    if app_debug: timer.print( "Done!", use_millis=True, end="\n\n" )
-    
-    raw_transcription = raw_transcription[ "text" ].strip()
-    
-    if app_debug: print( f"Result: [{raw_transcription}]" )
-    
-    # Fetch last response processed
-    last_response_path = "/io/last_response.json"
-    if os.path.isfile( du.get_project_root() + last_response_path ):
-        with open( du.get_project_root() + last_response_path ) as json_file:
-            last_response = json.load( json_file )
-    else:
-        last_response = None
-    
-    # Process the transcription
-    # app_debug   = config_mgr.get( "app_debug", default=False, return_type="boolean" )
-    # app_verbose = config_mgr.get( "app_verbose", default=False, return_type="boolean" )
-    #
-    munger = mmm.MultiModalMunger(
-        raw_transcription, prefix=prefix, prompt_key=prompt_key, debug=app_debug, 
-        verbose=app_verbose, last_response=last_response, config_mgr=config_mgr
-    )
+    websocket = websocket_manager.active_connections.get( session_id )
+    if not websocket:
+        print( f"[ERROR] No WebSocket connection for session {session_id}" )
+        return
     
     try:
-        if munger.is_agent():
-            print( f"Munger: Posting [{munger.transcription}] to the agent's todo queue..." )
-            munger.results = jobs_todo_queue.push_job( munger.transcription )
-        else:
-            print( "Munger: Transcription is not for agent. Returning brute force munger string..." )
-            # Insert into I/O table
-            io_tbl.insert_io_row( 
-                input_type=f"upload and proofread mp3: {munger.mode}", 
-                input=raw_transcription, 
-                output_raw=munger.transcription, 
-                output_final=munger.get_jsons() 
-            )
+        # Get ElevenLabs API key
+        api_key = du.get_api_key( "elevenlabs" )
+        if not api_key:
+            raise Exception( "ElevenLabs API key not found" )
         
-        # Write JSON string to the file system
-        last_response = munger.get_jsons()
-        du.write_string_to_file( du.get_project_root() + last_response_path, last_response )
+        print( f"[TTS-ELEVENLABS] Starting generation for: '{msg}'" )
         
-        return JSONResponse( content=json.loads( last_response ) )
+        # Send status update
+        await websocket.send_json({
+            "type": "audio_streaming_status",
+            "text": "Connecting to ElevenLabs...",
+            "status": "loading",
+            "provider": "elevenlabs"
+        })
         
+        # ElevenLabs WebSocket URL
+        elevenlabs_ws_url = f"wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream-input?model_id=eleven_turbo_v2_5"
+        
+        chunk_count = 0
+        start_time = time.time()
+        
+        # Connect to ElevenLabs WebSocket
+        async with websockets.connect(
+            elevenlabs_ws_url,
+            additional_headers={
+                "xi-api-key": api_key
+            }
+        ) as elevenlabs_ws:
+            
+            # Send initial configuration
+            config = {
+                "text": " ",  # Initial space to start the stream
+                "voice_settings": {
+                    "stability": stability,
+                    "similarity_boost": similarity_boost
+                },
+                "generation_config": {
+                    "chunk_length_schedule": [120, 160, 250, 290]
+                }
+            }
+            await elevenlabs_ws.send( json.dumps( config ) )
+            
+            # Send the actual text
+            text_message = {
+                "text": msg + " ",
+                "try_trigger_generation": True
+            }
+            await elevenlabs_ws.send( json.dumps( text_message ) )
+            
+            # Send end-of-stream marker
+            eos_message = {"text": ""}
+            await elevenlabs_ws.send( json.dumps( eos_message ) )
+            
+            # Send status update
+            await websocket.send_json({
+                "type": "audio_streaming_status", 
+                "text": "Streaming audio from ElevenLabs...",
+                "status": "streaming",
+                "provider": "elevenlabs"
+            })
+            
+            # Receive and forward audio chunks
+            try:
+                async for message in elevenlabs_ws:
+                    # Check if our client is still connected
+                    if not websocket_manager.is_connected( session_id ):
+                        print( f"[TTS-ELEVENLABS] Connection lost for {session_id}" )
+                        break
+                    
+                    try:
+                        # ElevenLabs sends JSON messages
+                        data = json.loads( message )
+                        
+                        if "audio" in data:
+                            # Decode base64 audio and forward as binary
+                            audio_chunk = base64.b64decode( data["audio"] )
+                            chunk_count += 1
+                            
+                            # Forward chunk immediately to client
+                            try:
+                                await websocket.send_bytes( audio_chunk )
+                            except Exception as e:
+                                print( f"[ERROR] Failed to forward ElevenLabs chunk {chunk_count}: {e}" )
+                                break
+                        
+                        elif "isFinal" in data and data["isFinal"]:
+                            # Stream is complete
+                            print( f"[TTS-ELEVENLABS] Stream marked as final" )
+                            break
+                            
+                    except json.JSONDecodeError:
+                        # Might be binary data, skip
+                        continue
+                    except Exception as e:
+                        print( f"[ERROR] Error processing ElevenLabs message: {e}" )
+                        continue
+            
+            except websockets.exceptions.ConnectionClosed:
+                print( f"[TTS-ELEVENLABS] ElevenLabs WebSocket connection closed" )
+        
+        # Calculate timing
+        total_time = time.time() - start_time
+        
+        print( f"[TTS-ELEVENLABS] Complete - {chunk_count} chunks in {total_time:.2f}s" )
+        
+        # Signal completion - use audio_streaming_complete for consistency
+        if websocket_manager.is_connected( session_id ):
+            await websocket.send_json({
+                "type": "audio_streaming_complete",
+                "text": f"ElevenLabs streaming complete ({chunk_count} chunks, {total_time:.1f}s)",
+                "status": "success",
+                "provider": "elevenlabs"
+            })
+    
     except Exception as e:
-        # Pass through the actual error details without assumptions
-        error_response = {
-            "status": "error",
-            "error_type": type( e ).__name__,
-            "error_message": str( e ),
-            "transcription": raw_transcription,
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        print( f"ERROR: {type( e ).__name__}: {e}" )
-        print( f"Returning error response to client: {error_response}" )
-        
-        # Return 422 Unprocessable Entity instead of 500 to indicate business logic failure
-        return JSONResponse( 
-            status_code=422, 
-            content=error_response 
-        )
-
-
-# Duplicate TTS endpoint removed - using audio router version instead
+        print( f"[ERROR] ElevenLabs TTS failed for {session_id}: {e}" )
+        if websocket_manager.is_connected( session_id ):
+            await websocket.send_json({
+                "type": "audio_streaming_status",
+                "text": f"ElevenLabs TTS generation failed: {str(e)}",
+                "status": "error",
+                "provider": "elevenlabs"
+            })
 
 
 async def stream_tts_hybrid( session_id: str, msg: str ):
@@ -662,36 +676,6 @@ async def stream_tts_hybrid( session_id: str, msg: str ):
                 "text": f"TTS generation failed: {str(e)}",
                 "status": "error"
             })
-
-
-
-
-
-
-# REMOVED: push - moved to queues router
-
-
-# REMOVED: get_queue - moved to queues router
-
-
-
-
-
-
-
-
-
-
-
-
-# REMOVED: delete_snapshot - moved to jobs router
-
-
-# REMOVED: get_answer - moved to jobs router
-
-
-# REMOVED: upload_and_transcribe_wav_file - moved to audio router
-
 
 if __name__ == "__main__":
     uvicorn.run(

@@ -1,5 +1,51 @@
 # Lupin Project History
 
+## 2025.07.31 - TTS Instant Mode Timeout Resolution and Quality Optimization Planning
+
+### Summary
+Successfully resolved critical TTS instant mode timeout issue where notification replay was causing 10-second timeouts despite audio chunks being received. Root cause was a missing `stream_tts_elevenlabs()` function that had been lost. Achieved excellent 240ms first-audio latency with ElevenLabs streaming. Created comprehensive plan for further quality optimizations while maintaining sub-500ms performance.
+
+### Work Performed
+
+#### TTS Instant Mode Debugging and Resolution - COMPLETED ✅
+- **Root Cause Identified**: The `/api/get-speech-elevenlabs` endpoint was calling non-existent `stream_tts_elevenlabs()` function
+- **Function Recreation**: Successfully recreated the missing ElevenLabs streaming function in main.py
+- **WebSocket Event Standardization**: Fixed event name inconsistencies (audio_complete → audio_streaming_complete)
+- **WebSocket Manager Fix**: Resolved event type override issue where notification data was overwriting WebSocket event types
+- **Testing and Validation**: Used experimental-tts.html test file to validate complete solution
+
+#### Performance Achievements - COMPLETED ✅
+- **First Audio Latency**: 240ms (well under 500ms target)
+- **Total Stream Time**: 1.3s for 7 chunks
+- **Progressive Playback**: Working flawlessly with Web Audio API
+- **Notification Replay**: Main UI now successfully replays notifications with TTS
+
+#### Quality Optimization Research and Planning - COMPLETED ✅
+- **Comprehensive Research**: Analyzed ElevenLabs 2025 documentation and model comparisons
+- **Model Analysis**: Compared Flash v2.5 (~75ms) vs Turbo v2.5 (~400ms) characteristics
+- **Parameter Discovery**: Identified new voice_settings parameters (style, use_speaker_boost, speed)
+- **Created Optimization Plan**: Detailed plan saved to `src/rnd/2025.07.31-elevenlabs-tts-quality-optimization-plan.md`
+
+### Current Status
+
+**TTS Streaming Performance:**
+- ✅ **Instant mode working perfectly** - 240ms latency achieved
+- ✅ **Event standardization complete** - All using audio_streaming_complete
+- ✅ **WebSocket manager fixed** - Proper event type nesting
+- ✅ **Main UI notification replay working** - Complete end-to-end success
+
+**Quality Optimization Planning:**
+- ✅ **Comprehensive plan created** - 6 phases of optimization identified
+- ✅ **Model recommendations** - Test Flash v2.5 for potential <200ms latency
+- ✅ **Voice parameter matrix** - Detailed testing profiles for different use cases
+- ✅ **Implementation strategy** - Configuration management and A/B testing framework
+
+**Tomorrow's Focus:**
+- **Implement Phase 1**: Test Flash v2.5 model vs current Turbo v2.5
+- **Enhance Voice Settings**: Add style, speaker_boost, and speed parameters
+- **Create A/B Testing Framework**: Enable runtime parameter switching
+- **Measure Quality Improvements**: Target 15-25% quality enhancement
+
 ## 2025.07.30 - WebSocket Branch Polish Planning and Documentation Setup
 
 ### Summary

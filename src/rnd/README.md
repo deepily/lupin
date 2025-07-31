@@ -5,6 +5,7 @@ This directory contains research and development documents for the Lupin project
 ## Active Documents
 
 ### Current Development (2025.07)
+- **[2025.07.31-elevenlabs-tts-quality-optimization-plan.md](2025.07.31-elevenlabs-tts-quality-optimization-plan.md)** - Comprehensive plan to improve TTS audio quality while maintaining sub-500ms latency (📋 ready for implementation)
 - **[2025.07.30-websocket-branch-polish-tracker.md](2025.07.30-websocket-branch-polish-tracker.md)** - Comprehensive tracking document for debugging, polishing, and documenting completed WebSocket functionality (📋 planning phase)
 - **[2025.07.24-websocket-async-bridge-implementation.md](2025.07.24-websocket-async-bridge-implementation.md)** - WebSocket implementation progress tracker through Phases 1, 2, and 2.5 (✅ completed)
 - **[2025.07.12-progressive-tts-streaming-experimental-tracker.md](2025.07.12-progressive-tts-streaming-experimental-tracker.md)** - Firefox-first experimental implementation of true progressive audio streaming (✅ completed - integrated into main system)

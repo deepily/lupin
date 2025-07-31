@@ -231,7 +231,7 @@ class ExperimentalProgressiveTTS {
         try {
             this.log('🔌 Connecting to WebSocket...', 'info');
             
-            const wsUrl = `ws://${window.location.host}/ws/${this.sessionId}`;
+            const wsUrl = `ws://${window.location.host}/ws/audio/${encodeURIComponent(this.sessionId)}`;
             this.websocket = new WebSocket(wsUrl);
             
             this.websocket.onopen = () => {
@@ -396,6 +396,7 @@ class ExperimentalProgressiveTTS {
                 break;
                 
             case 'audio_complete':
+            case 'audio_streaming_complete':
                 this.log(`✅ ${text} (${provider})`, 'success');
                 this.onStreamComplete();
                 break;
@@ -520,7 +521,8 @@ class ExperimentalProgressiveTTS {
             const response = await fetch('/api/get-speech-elevenlabs', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer mock_token_email_ricardo.felipe.ruiz@gmail.com'
                 },
                 body: JSON.stringify({
                     session_id: this.sessionId,

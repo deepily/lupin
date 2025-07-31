@@ -1123,7 +1123,9 @@ function getCurrentTTSMode() {
 async function handleUserNotification( data ) {
     console.log( "Received Claude Code notification:", data );
     
-    const { message, type, priority, source, timestamp } = data;
+    // Extract the notification data from the nested structure
+    const notificationData = data.data || data;
+    const { message, type, priority, source, timestamp } = notificationData;
     
     // Create formatted notification message for TTS
     let ttsMessage = `${type} notification: ${message}`;
