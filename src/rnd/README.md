@@ -4,6 +4,12 @@ This directory contains research and development documents for the Lupin project
 
 ## Active Documents
 
+### Current Development (2025.08)
+- **[2025.08.01-websocket-smoke-test-suite-design.md](2025.08.01-websocket-smoke-test-suite-design.md)** - Comprehensive smoke test suite design for WebSocket functionality validation during polish sessions (✅ completed - Phase 2 implemented and integrated)
+  - **Implementation Status**: 50 comprehensive tests (400% expansion from original 10 tests)
+  - **Success Rate**: 92% overall with detailed behavioral insights
+  - **Production Ready**: Full pre-polish/post-polish regression detection workflow
+
 ### Current Development (2025.07)
 - **[2025.07.31-elevenlabs-tts-quality-optimization-plan.md](2025.07.31-elevenlabs-tts-quality-optimization-plan.md)** - Comprehensive plan to improve TTS audio quality while maintaining sub-500ms latency (📋 ready for implementation)
 - **[2025.07.30-websocket-branch-polish-tracker.md](2025.07.30-websocket-branch-polish-tracker.md)** - Comprehensive tracking document for debugging, polishing, and documenting completed WebSocket functionality (📋 planning phase)

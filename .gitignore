@@ -66,6 +66,9 @@ nohup.out
 
 .qodo
 
+# Test baseline files - generated automatically, should not be tracked
+src/tests/websocket_smoke/config/baselines/*.json
+
 # Separate git repositories - managed independently
 src/lupin-mobile/
 src/lupin-plugin-firefox/

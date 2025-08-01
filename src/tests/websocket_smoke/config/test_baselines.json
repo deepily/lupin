@@ -1,0 +1,109 @@
+{
+  "version": "1.0",
+  "created": "2025-08-01T22:16:00Z",
+  "description": "Performance baselines for WebSocket smoke tests",
+  "server": {
+    "base_url": "localhost:7999",
+    "last_updated": "2025-08-01T22:16:00Z"
+  },
+  "performance_baselines": {
+    "connection_times": {
+      "queue_websocket_ms": {
+        "mean": 5.0,
+        "p95": 10.0,
+        "p99": 20.0,
+        "max_acceptable": 500.0
+      },
+      "audio_websocket_ms": {
+        "mean": 3.0,
+        "p95": 8.0,
+        "p99": 15.0,
+        "max_acceptable": 500.0
+      }
+    },
+    "authentication_times": {
+      "queue_auth_ms": {
+        "mean": 1.0,
+        "p95": 3.0,
+        "p99": 5.0,
+        "max_acceptable": 1000.0
+      },
+      "audio_auth_ms": {
+        "mean": 0.5,
+        "p95": 1.0,
+        "p99": 2.0,
+        "max_acceptable": 1000.0
+      }
+    },
+    "event_delivery": {
+      "first_event_ms": {
+        "mean": 10.0,
+        "p95": 50.0,
+        "p99": 100.0,
+        "max_acceptable": 200.0
+      },
+      "event_throughput_per_sec": {
+        "mean": 10.0,
+        "min_acceptable": 5.0
+      }
+    },
+    "concurrent_load": {
+      "max_connections_tested": 10,
+      "success_rate_percent": 100.0,
+      "min_acceptable_success_rate": 95.0
+    }
+  },
+  "functional_baselines": {
+    "event_types": {
+      "queue_websocket_events": [
+        "connect",
+        "auth_success", 
+        "sys_time_update",
+        "sys_ping",
+        "queue_todo_update",
+        "queue_running_update",
+        "queue_done_update",
+        "queue_dead_update"
+      ],
+      "audio_websocket_events": [
+        "audio_streaming_status",
+        "audio_streaming_chunk",
+        "audio_streaming_complete"
+      ]
+    },
+    "authentication": {
+      "queue_auth_required": true,
+      "audio_auth_required": false,
+      "mock_token_format": "mock_token_{user_id}"
+    },
+    "session_management": {
+      "session_id_format": "{adjective} {noun}",
+      "session_persistence": true,
+      "single_session_per_user": false
+    }
+  },
+  "test_execution_history": [
+    {
+      "timestamp": "2025-08-01T22:15:51Z",
+      "test_suite_version": "1.0",
+      "results": {
+        "server_health": "pass",
+        "queue_websocket": "pass",
+        "audio_websocket": "pass",
+        "total_tests": 3,
+        "passed_tests": 3,
+        "failed_tests": 0
+      },
+      "performance_measurements": {
+        "queue_connection_ms": 5.69,
+        "queue_auth_ms": 0.43,
+        "audio_connection_ms": 2.38,
+        "audio_auth_ms": 0.20,
+        "events_collected": {
+          "queue": 1,
+          "audio": 0
+        }
+      }
+    }
+  ]
+}
