@@ -72,10 +72,29 @@ class SmokeTestRunner:
     
     def __init__( self, config_file: str = None ):
         """
-        Initialize the smoke test runner.
+        Initialize the smoke test runner with configuration and test utilities.
         
+        Requires:
+            - Configuration file must exist at specified or default path
+            - WebSocketTestUtilities module must be available
+            - Configuration file must contain required sections (server, logging, baselines)
+            
+        Ensures:
+            - Configuration is loaded and validated
+            - WebSocketTestUtilities instance is created with server URL
+            - Baseline data is loaded (empty dict if file not found)
+            - Debug mode is configured based on config settings
+            
         Args:
             config_file: Path to configuration file (default: smoke_test_config.ini)
+            
+        Returns:
+            None
+            
+        Raises:
+            FileNotFoundError: If configuration file cannot be found
+            configparser.Error: If configuration file is malformed
+            KeyError: If required configuration sections are missing
         """
         self.config_file = config_file or self._get_default_config_path()
         self.config = self._load_configuration()
@@ -95,7 +114,28 @@ class SmokeTestRunner:
         return str( config_dir / "smoke_test_config.ini" )
     
     def _load_configuration( self ) -> configparser.ConfigParser:
-        """Load test configuration from INI file."""
+        """
+        Load test configuration from INI file.
+        
+        Requires:
+            - self.config_file must be set to a valid path
+            - Configuration file must exist and be readable
+            - File must contain valid INI format
+            
+        Ensures:
+            - Returns fully loaded ConfigParser instance
+            - All configuration sections and values are accessible
+            
+        Args:
+            None
+            
+        Returns:
+            configparser.ConfigParser: Loaded configuration object
+            
+        Raises:
+            FileNotFoundError: If configuration file does not exist
+            configparser.Error: If INI file format is invalid
+        """
         config = configparser.ConfigParser()
         
         if not Path( self.config_file ).exists():
@@ -105,7 +145,27 @@ class SmokeTestRunner:
         return config
     
     def _load_baselines( self ) -> Dict[str, Any]:
-        """Load performance baselines from JSON file."""
+        """
+        Load performance baselines from JSON file for comparison.
+        
+        Requires:
+            - Configuration must be loaded with baselines section
+            - Baseline file path must be configured in baseline_file setting
+            
+        Ensures:
+            - Returns dictionary containing baseline data
+            - Returns empty dict if baseline file not found or invalid
+            - Logs warnings for missing or corrupted baseline files
+            
+        Args:
+            None
+            
+        Returns:
+            Dict[str, Any]: Baseline data dictionary (empty if file issues)
+            
+        Raises:
+            KeyError: If baselines section is missing from configuration
+        """
         baseline_file = self.config.get( "baselines", "baseline_file" )
         baseline_path = Path( self.config_file ).parent / baseline_file
         
@@ -121,7 +181,29 @@ class SmokeTestRunner:
             return {}
     
     def log( self, message: str, level: str = "INFO" ):
-        """Log message with timestamp if enabled."""
+        """
+        Log message with optional timestamp based on configuration.
+        
+        Requires:
+            - Configuration must be loaded with logging section
+            - message must be a valid string
+            - level must be a valid log level string
+            
+        Ensures:
+            - Message is printed if debug logging is enabled
+            - Timestamp is included if log_timestamps is enabled
+            - Message format follows [timestamp] [level] message pattern
+            
+        Args:
+            message: The message to log
+            level: Log level (default: "INFO")
+            
+        Returns:
+            None
+            
+        Raises:
+            AttributeError: If configuration is not properly initialized
+        """
         if self.config.getboolean( "logging", "debug_enabled" ):
             if self.config.getboolean( "logging", "log_timestamps" ):
                 timestamp = datetime.now().strftime( "%H:%M:%S.%f" )[:-3]

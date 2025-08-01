@@ -1,6 +1,32 @@
 import cosa.utils.util as du
 
 def remove_line_numbers( path, write_back=True ):
+    """
+    Remove line numbers from a text file that uses "number. " formatting.
+    
+    Requires:
+        - path must be a valid file path to existing text file
+        - File must be readable and writable (if write_back=True)
+        - Lines must follow "number. content" format
+        
+    Ensures:
+        - Loads file content as list of lines
+        - Removes line number prefix and extraneous quotes from each line
+        - Displays first 5 processed lines for verification
+        - Writes modified content back to file if write_back=True
+        
+    Args:
+        path: File path to process
+        write_back: If True, writes modified content back to file (default: True)
+        
+    Returns:
+        None
+        
+    Raises:
+        FileNotFoundError: If file does not exist
+        IOError: If file cannot be read or written
+        IndexError: If line format doesn't contain ". " separator
+    """
     
     lines = du.get_file_as_list( path, clean=True )
     
@@ -17,6 +43,30 @@ def remove_line_numbers( path, write_back=True ):
         du.write_lines_to_file( path, lines )
 
 def remove_zero_length_strings( path ):
+    """
+    Remove empty lines from a text file.
+    
+    Requires:
+        - path must be a valid file path to existing text file
+        - File must be readable and writable
+        - du utility functions must be available
+        
+    Ensures:
+        - Loads file content as list of lines
+        - Filters out all zero-length strings/empty lines
+        - Reports before/after line counts
+        - Writes filtered content back to original file
+        
+    Args:
+        path: File path to process
+        
+    Returns:
+        None
+        
+    Raises:
+        FileNotFoundError: If file does not exist
+        IOError: If file cannot be read or written
+    """
     
     lines = du.get_file_as_list( path, clean=True )
     
@@ -29,6 +79,26 @@ def remove_zero_length_strings( path ):
     du.write_lines_to_file( path, lines )
 
 def get_agent_synonyms():
+    """
+    Get predefined dictionary of agent types and their synonyms.
+    
+    Requires:
+        - No preconditions
+        
+    Ensures:
+        - Returns dictionary with agent types as keys
+        - Each value is a list of synonym strings for that agent type
+        - Includes synonyms for receptionist, timekeeper, meteorologist, todo list, calendaring
+        
+    Args:
+        None
+        
+    Returns:
+        dict: Dictionary mapping agent types to lists of synonyms
+        
+    Raises:
+        No exceptions raised
+    """
     
     agent_synonyms = {
         "receptionist" : [ "receptionist", "front desk", "administrator", "secretary", "office assistant", "operator" ],

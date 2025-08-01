@@ -79,10 +79,26 @@ async def emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", webs
     """
     Generate TTS speech and emit via WebSocket to specific user or broadcast.
     
+    Requires:
+        - websocket_manager must be initialized and running
+        - msg must be a non-empty string
+        - user_id or websocket_id must be valid if provided
+        
+    Ensures:
+        - TTS job request is emitted via WebSocket to target recipient
+        - No exceptions are propagated to caller (errors are logged)
+        - Speech data includes text and timestamp
+        
     Args:
         msg: The text message to be converted to speech
-        user_id: User ID for user-specific routing (preferred)
+        user_id: User ID for user-specific routing (preferred method)
         websocket_id: Optional websocket identifier for backwards compatibility
+        
+    Returns:
+        None
+        
+    Raises:
+        No exceptions raised - all errors are caught and logged
     """
     print( f"[SPEECH] emit_speech called:" )
     print( f"  - Message: '{msg}'" )
@@ -119,7 +135,26 @@ async def emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", webs
 
 
 def create_emit_speech_callback():
-    """Creates a sync wrapper for the async emit_speech function with user-based routing"""
+    """
+    Creates a sync wrapper for the async emit_speech function with user-based routing.
+    
+    Requires:
+        - No preconditions
+        
+    Ensures:
+        - Returns a callable synchronous wrapper function
+        - Wrapper function runs emit_speech in isolated thread with own event loop
+        - Thread execution is non-blocking and daemon-enabled
+        
+    Args:
+        None
+        
+    Returns:
+        function: Synchronous wrapper function that accepts (msg, user_id, websocket_id) parameters
+        
+    Raises:
+        No exceptions raised - wrapper function handles all errors internally
+    """
     def sync_emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", websocket_id: str = None ):
         import threading
         
@@ -139,9 +174,27 @@ def create_emit_speech_callback():
 
 async def clock_loop():
     """
-    Background task that emits clock updates every second to all connected WebSocket clients.
+    Background task that emits clock updates every minute to all connected WebSocket clients.
     
-    This replaces the Flask/Socket.IO enter_clock_loop() functionality with FastAPI/WebSocket.
+    Requires:
+        - websocket_manager must be initialized and running
+        - du.get_current_time() function must be available
+        - app_debug and app_verbose global variables must be initialized
+        
+    Ensures:
+        - Emits 'sys_time_update' event every 60 seconds to all connections
+        - Continues until cancelled or exception occurs
+        - Provides detailed debug logging when verbose mode enabled
+        
+    Args:
+        None
+        
+    Returns:
+        None - runs until cancelled
+        
+    Raises:
+        asyncio.CancelledError: When task is cancelled during shutdown
+        Exception: For any other errors during clock updates
     """
     print( "[CLOCK] Starting clock update loop..." )
     while True:
@@ -184,8 +237,25 @@ async def websocket_heartbeat_loop():
     """
     Background task for WebSocket heartbeat checks.
     
-    Periodically sends ping messages to all WebSocket connections
-    to detect and remove dead connections.
+    Requires:
+        - websocket_manager must be initialized with config_mgr
+        - websocket_manager.heartbeat_check() method must be available
+        - app_debug and app_verbose global variables must be initialized
+        
+    Ensures:
+        - Performs heartbeat checks at configured intervals (default 30s)
+        - Removes dead connections automatically
+        - Continues until cancelled or exception occurs
+        
+    Args:
+        None
+        
+    Returns:
+        None - runs until cancelled
+        
+    Raises:
+        asyncio.CancelledError: When task is cancelled during shutdown
+        Exception: For any other errors during heartbeat operations
     """
     # Get interval from config
     interval = websocket_manager.config_mgr.get(
@@ -218,8 +288,25 @@ async def websocket_cleanup_loop():
     """
     Background task for automatic session cleanup.
     
-    Periodically removes stale WebSocket sessions that have been
-    connected for longer than the configured maximum age.
+    Requires:
+        - websocket_manager must be initialized with config_mgr
+        - websocket_manager.auto_cleanup() method must be available
+        - app_debug and app_verbose global variables must be initialized
+        
+    Ensures:
+        - Performs cleanup at configured intervals (default 1 hour)
+        - Removes stale sessions exceeding maximum age
+        - Continues until cancelled or exception occurs
+        
+    Args:
+        None
+        
+    Returns:
+        None - runs until cancelled
+        
+    Raises:
+        asyncio.CancelledError: When task is cancelled during shutdown
+        Exception: For any other errors during cleanup operations
     """
     # Get interval from config
     interval_hours = websocket_manager.config_mgr.get(

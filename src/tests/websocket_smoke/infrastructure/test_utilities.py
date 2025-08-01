@@ -30,10 +30,24 @@ class WebSocketTestUtilities:
     
     def __init__( self, base_url: str = "localhost:7999" ):
         """
-        Initialize test utilities.
+        Initialize WebSocket test utilities with server configuration.
         
+        Requires:
+            - base_url must be valid server address format
+            
+        Ensures:
+            - HTTP and WebSocket base URLs are properly configured
+            - Debug logging is enabled by default
+            - Instance is ready for WebSocket testing operations
+            
         Args:
-            base_url: Base server URL (default: localhost:7999)
+            base_url: Base server URL (default: "localhost:7999")
+            
+        Returns:
+            None
+            
+        Raises:
+            No exceptions raised during initialization
         """
         self.base_url = base_url
         self.http_base = f"http://{base_url}"
@@ -56,8 +70,24 @@ class WebSocketTestUtilities:
         """
         Check if FastAPI server is healthy and responding.
         
+        Requires:
+            - HTTP base URL must be configured
+            - httpx client must be available
+            
+        Ensures:
+            - Makes HTTP GET request to /health endpoint
+            - Returns True only if status code is 200
+            - Logs health check result with status
+            - Returns False on any exception or non-200 status
+            
+        Args:
+            None
+            
         Returns:
-            True if server is healthy, False otherwise
+            bool: True if server is healthy (status 200), False otherwise
+            
+        Raises:
+            No exceptions raised - all errors are caught and logged
         """
         try:
             async with httpx.AsyncClient() as client:
@@ -114,18 +144,31 @@ class WebSocketTestUtilities:
         timeout: float = 10.0 
     ) -> websockets.WebSocketClientProtocol:
         """
-        Connect to a WebSocket endpoint.
+        Connect to a WebSocket endpoint with session authentication.
         
+        Requires:
+            - endpoint must be 'queue' or 'audio'
+            - session_id must be valid, non-empty session identifier
+            - WebSocket server must be running at configured base URL
+            - timeout must be positive number
+            
+        Ensures:
+            - Returns connected WebSocket client if successful
+            - URL encodes session_id for safe transmission
+            - Logs connection attempt and result
+            - Raises ConnectionError on failure
+            
         Args:
             endpoint: WebSocket endpoint ('queue' or 'audio')
             session_id: Session ID for the connection
-            timeout: Connection timeout in seconds
+            timeout: Connection timeout in seconds (default: 10.0)
             
         Returns:
-            Connected WebSocket client
+            websockets.WebSocketClientProtocol: Connected WebSocket client
             
         Raises:
-            ConnectionError: If connection fails
+            ConnectionError: If connection fails or times out
+            ValueError: If endpoint or session_id is invalid
         """
         encoded_session = urllib.parse.quote( session_id )
         uri = f"{self.ws_base}/ws/{endpoint}/{encoded_session}"

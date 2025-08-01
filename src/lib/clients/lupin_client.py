@@ -36,6 +36,41 @@ class GenieClient:
                   write_method="api", debug=False, recording_timeout=30, stt_address="127.0.0.1:7999",
                   tts_address="127.0.0.1:5002", tts_output_path="/var/io/tts.wav"
                   ):
+        """
+        Initialize the GenieClient with configuration for audio recording, transcription, and AI processing.
+        
+        Requires:
+            - Project configuration files must exist (translation-dictionary.map, prompts.map, modes.json)
+            - PyAudio must be available for audio operations
+            - du.get_project_root() must return valid project root path
+            
+        Ensures:
+            - All instance variables are initialized with provided or default values
+            - Audio configuration is set up with specified parameters
+            - Configuration dictionaries are loaded from project files
+            - PyAudio instance is created and ready for recording
+            
+        Args:
+            calling_gui: Optional GUI instance that created this client
+            startup_mode: Default processing mode (default: "transcribe_and_clean_prose")
+            prefix: Prefix for multimodal text processing (default: "multimodal text punctuation")
+            copy_transx_to_clipboard: Whether to copy transcriptions to clipboard (default: True)
+            runtime_context: Runtime environment context - "docker" or "local" (default: "docker")
+            write_method: Output method - "api" or "file" (default: "api")
+            debug: Enable debug logging (default: False)
+            recording_timeout: Maximum recording duration in seconds (default: 30)
+            stt_address: Speech-to-text service address (default: "127.0.0.1:7999")
+            tts_address: Text-to-speech service address (default: "127.0.0.1:5002")
+            tts_output_path: Path for TTS output files (default: "/var/io/tts.wav")
+            
+        Returns:
+            None
+            
+        Raises:
+            FileNotFoundError: If required configuration files are missing
+            ImportError: If PyAudio is not available
+            Exception: If project root cannot be determined
+        """
         
         self.debug = debug
         self.bar = "*" * 80
@@ -89,6 +124,26 @@ class GenieClient:
         self.finished_transcription     = None
  
     def get_titles( self ):
+        """
+        Get list of available processing mode titles.
+        
+        Requires:
+            - modes_dict must be initialized with valid mode configuration
+            
+        Ensures:
+            - Returns list of all available mode titles
+            - List contains string titles extracted from modes_dict
+            
+        Args:
+            None
+            
+        Returns:
+            list: List of mode title strings
+            
+        Raises:
+            KeyError: If modes_dict structure is invalid
+            AttributeError: If modes_dict is not initialized
+        """
     
         titles = [ ]
         for key in self.modes_dict.keys():
@@ -138,6 +193,28 @@ class GenieClient:
         return index
     
     def process_by_mode_title( self, mode_title ):
+        """
+        Process audio transcription using specified mode title.
+        
+        Requires:
+            - mode_title must exist in methods_dict
+            - Corresponding method must be available on this instance
+            - methods_dict must be properly initialized
+            
+        Ensures:
+            - Executes the method associated with mode_title
+            - Returns transcription result from the called method
+            
+        Args:
+            mode_title: String title of the processing mode to execute
+            
+        Returns:
+            str: Transcription result from the executed processing method
+            
+        Raises:
+            KeyError: If mode_title is not found in methods_dict
+            AttributeError: If the corresponding method does not exist
+        """
     
         function_name = self.methods_dict[ mode_title ]
         print()
@@ -147,14 +224,69 @@ class GenieClient:
         return transcription
             
     def is_recording( self ):
+        """
+        Check if audio recording is currently active.
+        
+        Requires:
+            - No preconditions
+            
+        Ensures:
+            - Returns current recording state
+            
+        Args:
+            None
+            
+        Returns:
+            bool: True if recording is active, False otherwise
+            
+        Raises:
+            No exceptions raised
+        """
         
         return self.recording
 
     def stop_recording( self ):
+        """
+        Stop the current audio recording session.
+        
+        Requires:
+            - No preconditions
+            
+        Ensures:
+            - Sets recording flag to False
+            - Current recording session will terminate
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            No exceptions raised
+        """
     
         self.recording = False
 
     def is_playing( self ):
+        """
+        Check if audio playback is currently active.
+        
+        Requires:
+            - No preconditions
+            
+        Ensures:
+            - Returns current playback state
+            
+        Args:
+            None
+            
+        Returns:
+            bool: True if audio is playing, False otherwise
+            
+        Raises:
+            No exceptions raised
+        """
         
         return self.playing
     
@@ -186,6 +318,31 @@ class GenieClient:
         self.timer_running = False
 
     def start_recording( self ):
+        """
+        Start audio recording and save to configured output path.
+        
+        Requires:
+            - PyAudio instance must be initialized (self.py)
+            - Audio format, channels, and rate must be configured
+            - Output path must be writable
+            
+        Ensures:
+            - Sets recording flag to True
+            - Starts recording timeout thread
+            - Captures audio data until recording stops
+            - Saves audio data to configured output path
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            OSError: If audio device cannot be opened
+            IOError: If output file cannot be written
+            Exception: If PyAudio operations fail
+        """
 
         if self.debug: print( "Recording...", end="" )
         

@@ -14,6 +14,36 @@ import cosa.utils.util as du
 class LupinGui:
     
     def __init__( self, startup_mode="transcribe_and_clean_prose", copy_transx_to_clipboard=True, record_once_on_startup=False, runtime_context="docker", write_method="api", recording_timeout=30, debug=False ):
+        """
+        Initialize the Lupin GUI application with Tkinter interface.
+        
+        Requires:
+            - Tkinter must be available
+            - GenieClient dependencies must be available
+            - Display environment must support GUI applications
+            
+        Ensures:
+            - Creates main Tkinter window with specified geometry
+            - Initializes GenieClient instance with provided configuration
+            - Sets up font objects and UI components
+            - GUI is ready for user interaction
+            
+        Args:
+            startup_mode: Default processing mode (default: "transcribe_and_clean_prose")
+            copy_transx_to_clipboard: Auto-copy transcriptions to clipboard (default: True)
+            record_once_on_startup: Start recording immediately on startup (default: False)
+            runtime_context: Runtime environment - "docker" or "local" (default: "docker")
+            write_method: Output method - "api" or "file" (default: "api")
+            recording_timeout: Maximum recording duration in seconds (default: 30)
+            debug: Enable debug logging (default: False)
+            
+        Returns:
+            None
+            
+        Raises:
+            ImportError: If Tkinter is not available
+            Exception: If GenieClient initialization fails
+        """
         
         self.finished_transcription = None
         
@@ -100,6 +130,27 @@ class LupinGui:
             tkinter.mainloop()
 
     def key_event( self, event ):
+        """
+        Handle keyboard events for GUI interaction.
+        
+        Requires:
+            - event must be a valid Tkinter key event object
+            - event.keysym must be accessible
+            
+        Ensures:
+            - Processes keyboard shortcuts and special key combinations
+            - Updates GUI state based on key events
+            - Handles recording control via keyboard
+            
+        Args:
+            event: Tkinter KeyEvent object containing key information
+            
+        Returns:
+            None
+            
+        Raises:
+            AttributeError: If event object is malformed
+        """
         
         if self.debug: print( "key_event [{}] keysym [{}]".format( event, event.keysym ) )
         
@@ -218,6 +269,30 @@ class LupinGui:
         if self.debug: print( "key [{}]".format( key ) )
 
     def start_processing( self ):
+        """
+        Start audio recording and processing workflow.
+        
+        Requires:
+            - GUI components must be initialized (cmb_mode, btn_start, btn_stop)
+            - lupin_lupin client must be initialized
+            - Selected mode must be valid
+            
+        Ensures:
+            - Disables mode selection and start button
+            - Enables and focuses stop button
+            - Starts processing thread for audio recording
+            - Updates GUI to reflect processing state
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            AttributeError: If GUI components are not initialized
+            Exception: If processing thread fails to start
+        """
 
         if self.debug: print( "start_processing() called..." )
 
@@ -246,6 +321,28 @@ class LupinGui:
             self.record_once_on_startup_finished = True
             
     def stop_processing( self ):
+        """
+        Stop audio recording and processing workflow.
+        
+        Requires:
+            - GUI components must be initialized (cmb_mode, btn_start, btn_stop)
+            - lupin_lupin client must be initialized
+            
+        Ensures:
+            - Stops audio recording in the client
+            - Re-enables mode selection and start button
+            - Disables stop button
+            - Restores GUI to ready state
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            AttributeError: If GUI components are not initialized
+        """
     
         if self.debug: print( "stop_processing() called..." )
         self.cmb_mode.config( state=ACTIVE )

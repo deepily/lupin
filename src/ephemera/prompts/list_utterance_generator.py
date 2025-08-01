@@ -22,6 +22,31 @@ list_types_and_items = {
 
 # Function to generate random list management utterances
 def generate_utterances( num_utterances ):
+    """
+    Generate random list management utterances for natural language training.
+    
+    Requires:
+        - num_utterances must be a positive integer
+        - action_verbs list must be defined and non-empty
+        - list_types_and_items dictionary must be defined and populated
+        
+    Ensures:
+        - Returns list of exactly num_utterances utterance strings
+        - Each utterance follows the format: "{action} '{item}' in the {list_type}."
+        - Action verbs, items, and list types are randomly selected
+        - All combinations are valid based on predefined mappings
+        
+    Args:
+        num_utterances: Number of utterances to generate (must be positive integer)
+        
+    Returns:
+        list: List of generated utterance strings
+        
+    Raises:
+        IndexError: If action_verbs or list_types_and_items are empty
+        KeyError: If list_types_and_items values are empty lists
+        ValueError: If num_utterances is not a positive integer
+    """
     
     utterances = [ ]
     for _ in range( num_utterances ):

@@ -32,10 +32,25 @@ class EventSystemTests:
     
     def __init__( self, server_url: str = "localhost:7999" ):
         """
-        Initialize event system tests.
+        Initialize event system tests with WebSocket utilities and known event types.
         
+        Requires:
+            - server_url must be valid server address
+            - WebSocketTestUtilities must be available
+            
+        Ensures:
+            - WebSocketTestUtilities instance is created with server URL
+            - Results list is initialized for test outcomes
+            - Known event types are configured for testing
+            
         Args:
-            server_url: Server URL to test against
+            server_url: Server URL to test against (default: "localhost:7999")
+            
+        Returns:
+            None
+            
+        Raises:
+            ImportError: If WebSocketTestUtilities is not available
         """
         self.utils = WebSocketTestUtilities( server_url )
         self.results = []
@@ -52,10 +67,27 @@ class EventSystemTests:
     
     async def run_all_tests( self ) -> List[Dict[str, Any]]:
         """
-        Run all event system tests.
+        Execute comprehensive event system test suite.
         
+        Requires:
+            - WebSocket utilities must be initialized
+            - Server must be running and accessible
+            - Test methods must be properly implemented
+            
+        Ensures:
+            - Executes all event system test methods in sequence
+            - Each test result is recorded in self.results
+            - Returns complete list of test outcomes
+            - Logs test progress and summary
+            
+        Args:
+            None
+            
         Returns:
-            List of test results
+            List[Dict[str, Any]]: Complete list of test results with success/failure status
+            
+        Raises:
+            Exception: If any critical test setup or execution fails
         """
         self.utils.log( "📡 Starting Event System Tests" )
         self.utils.log( "=" * 50 )
@@ -83,7 +115,30 @@ class EventSystemTests:
         return self.results
     
     async def _test_basic_event_subscription( self ):
-        """Test basic event subscription functionality."""
+        """
+        Test basic event subscription functionality with WebSocket connection.
+        
+        Requires:
+            - WebSocket utilities must be initialized
+            - Server must support queue endpoint WebSocket connections
+            - Event subscription protocol must be implemented
+            
+        Ensures:
+            - Creates WebSocket connection with generated session ID
+            - Authenticates with mock token
+            - Tests event subscription for known event types
+            - Records test result (success/failure) in self.results
+            - Properly closes WebSocket connection
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: Any errors are caught and recorded as test failures
+        """
         test_name = "basic_event_subscription"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         

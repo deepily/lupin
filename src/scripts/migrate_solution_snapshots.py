@@ -36,12 +36,26 @@ class SolutionSnapshotMigrator:
     
     def __init__(self, dry_run: bool = False, create_backup: bool = False, debug: bool = False):
         """
-        Initialize the migrator.
+        Initialize the solution snapshot migrator with operational flags.
         
+        Requires:
+            - All parameters must be boolean values
+            
+        Ensures:
+            - Sets migration operational modes (dry_run, backup, debug)
+            - Initializes statistics dictionary for tracking migration results
+            - Prepares migrator for file processing operations
+            
         Args:
-            dry_run: If True, show changes without applying them
-            create_backup: If True, create .bak files before modification
-            debug: If True, show detailed debug output
+            dry_run: If True, show changes without applying them (default: False)
+            create_backup: If True, create .bak files before modification (default: False)
+            debug: If True, show detailed debug output (default: False)
+            
+        Returns:
+            None
+            
+        Raises:
+            No exceptions raised during initialization
         """
         self.dry_run = dry_run
         self.create_backup = create_backup
@@ -140,13 +154,30 @@ class SolutionSnapshotMigrator:
         
     def migrate_file(self, file_path: Path) -> bool:
         """
-        Migrate a single snapshot file.
+        Migrate a single snapshot file to include default user_id.
         
+        Requires:
+            - file_path must be a valid Path object to existing JSON file
+            - File must be readable and writable (unless dry_run mode)
+            - File must contain valid JSON format
+            
+        Ensures:
+            - Loads snapshot data from file
+            - Checks if migration is needed (user_id missing)
+            - Adds default user_id if required
+            - Saves migrated data back to file (unless dry_run)
+            - Returns True if migrated, False if skipped
+            
+        Args:
+            file_path: Path to the snapshot JSON file to migrate
+            
         Returns:
             bool: True if file was migrated, False if skipped
             
         Raises:
-            Exception: If migration fails
+            Exception: If migration fails (file I/O, JSON parsing, etc.)
+            FileNotFoundError: If file does not exist
+            PermissionError: If file cannot be read/written
         """
         self.log(f"Processing: {file_path.name}")
         
