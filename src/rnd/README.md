@@ -5,6 +5,7 @@ This directory contains research and development documents for the Lupin project
 ## Active Documents
 
 ### Current Development (2025.08)
+- **[2025.08.01-design-by-contract-audit.md](2025.08.01-design-by-contract-audit.md)** - Comprehensive audit of Python files lacking Design by Contract docstrings (📋 ready for implementation)
 - **[2025.08.01-websocket-smoke-test-suite-design.md](2025.08.01-websocket-smoke-test-suite-design.md)** - Comprehensive smoke test suite design for WebSocket functionality validation during polish sessions (✅ completed - Phase 2 implemented and integrated)
   - **Implementation Status**: 50 comprehensive tests (400% expansion from original 10 tests)
   - **Success Rate**: 92% overall with detailed behavioral insights

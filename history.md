@@ -1,5 +1,51 @@
 # Lupin Project History
 
+## 2025.08.01 - Design by Contract Docstring Audit
+
+### Session 3: Comprehensive Code Documentation Audit
+
+Conducted a thorough audit of the Lupin repository to identify Python files lacking proper Design by Contract (DbC) docstrings. Created comprehensive documentation and implementation plan for adding DbC docstrings across the entire codebase to improve maintainability and reduce bugs.
+
+### Work Performed
+
+#### Design by Contract Audit - COMPLETED ✅
+- **File Analysis**: Audited 41 Python files (excluding cosa, lupin-mobile, lupin-plugin-firefox)
+- **Current State**: Only 3 files have partial DbC implementation (7% coverage)
+- **Scope Identified**: ~100-150 functions/methods require DbC docstrings
+- **Priority Categorization**: Organized files into High/Medium/Low priority groups
+- **Implementation Plan**: Created detailed roadmap for systematic documentation
+
+#### Documentation Created
+- **Audit Report**: Created comprehensive audit document (`src/rnd/2025.08.01-design-by-contract-audit.md`)
+- **Format Guidelines**: Documented the existing DbC format from main.py for consistency
+- **Effort Estimation**: Provided realistic timeline (5-7 days) for full implementation
+- **Quality Standards**: Established requirements for preconditions, postconditions, and exception documentation
+
+### Key Findings
+
+#### Files with Existing DbC (Partial)
+1. `/src/fastapi_app/main.py` - 2 functions with complete DbC
+2. `/src/scripts/migrate_solution_snapshots.py` - 1 function with Raises section
+3. `/src/tests/websocket_smoke/infrastructure/test_utilities.py` - 1 function with Raises section
+
+#### High Priority Files Identified
+- `lupin_client.py` (661 lines, 30+ methods)
+- `lupin_client_gui.py` (284 lines, 10+ methods)
+- `lupin_client_cmd.py` (158 lines, 5+ methods)
+- `main.py` (needs completion for 5 more functions)
+
+### Next Steps
+- Begin implementing DbC docstrings starting with high-priority core files
+- Focus on public methods and complex functions first
+- Establish code review process for new code
+- Consider adding linting rules for docstring enforcement
+
+### Key Files Created/Updated
+- `src/rnd/2025.08.01-design-by-contract-audit.md` - Complete audit findings and implementation plan
+- `src/rnd/README.md` - Added reference to new audit document
+
+---
+
 ## 2025.08.01 - Audio Diagnostic Analysis and ElevenLabs Configuration Fix
 
 ### Session 2: Root Cause Analysis and Sequential Playback Strategy
