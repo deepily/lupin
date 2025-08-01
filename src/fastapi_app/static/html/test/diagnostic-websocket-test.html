@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔍 WebSocket Audio Diagnostic Tool</title>
+    <style>
+        * {
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            box-sizing: border-box;
+        }
+        
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #9c27b0, #673ab7);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 300;
+        }
+        
+        .header p {
+            margin: 8px 0 0 0;
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        
+        .main-content {
+            padding: 20px;
+        }
+        
+        .diagnostic-section {
+            margin-bottom: 25px;
+            padding: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            background: #fafafa;
+        }
+        
+        .diagnostic-section h3 {
+            margin: 0 0 15px 0;
+            color: #444;
+            font-size: 18px;
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        
+        .alert-warning {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            color: #856404;
+        }
+        
+        .alert-info {
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            color: #1976d2;
+        }
+        
+        .input-group {
+            margin-bottom: 15px;
+        }
+        
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        
+        .text-input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: inherit;
+            resize: vertical;
+            min-height: 60px;
+        }
+        
+        .text-input:focus {
+            outline: none;
+            border-color: #9c27b0;
+            box-shadow: 0 0 0 3px rgba(156, 39, 176, 0.1);
+        }
+        
+        .btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+            margin: 5px;
+        }
+        
+        .btn-primary {
+            background: #9c27b0;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #7b1fa2;
+            transform: translateY(-1px);
+        }
+        
+        .btn-primary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+        
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }
+        
+        .status-card {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+        }
+        
+        .status-card h4 {
+            margin: 0 0 10px 0;
+            color: #555;
+        }
+        
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+        }
+        
+        .metric-label {
+            font-weight: bold;
+        }
+        
+        .metric-value {
+            font-family: monospace;
+            color: #666;
+        }
+        
+        .connection-list {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            max-height: 150px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        
+        .connection-item {
+            padding: 5px;
+            margin: 2px 0;
+            border-radius: 3px;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .connection-item.active {
+            background: #e8f5e8;
+            border-left: 3px solid #4caf50;
+        }
+        
+        .connection-item.closed {
+            background: #ffebee;
+            border-left: 3px solid #f44336;
+        }
+        
+        .connection-item.duplicate {
+            background: #fff3e0;
+            border-left: 3px solid #ff9800;
+            font-weight: bold;
+        }
+        
+        .chunk-timeline {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            height: 120px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 11px;
+        }
+        
+        .chunk-entry {
+            padding: 3px 5px;
+            margin: 1px 0;
+            border-radius: 2px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .chunk-entry.received {
+            background: #e3f2fd;
+            border-left: 3px solid #2196f3;
+        }
+        
+        .chunk-entry.played {
+            background: #e8f5e8;
+            border-left: 3px solid #4caf50;
+        }
+        
+        .chunk-entry.duplicate {
+            background: #ffebee;
+            border-left: 3px solid #f44336;
+            font-weight: bold;
+        }
+        
+        .console-log {
+            background: #1e1e1e;
+            color: #f0f0f0;
+            border-radius: 4px;
+            padding: 15px;
+            height: 250px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .console-log .timestamp {
+            color: #888;
+        }
+        
+        .console-log .info {
+            color: #4fc3f7;
+        }
+        
+        .console-log .success {
+            color: #81c784;
+        }
+        
+        .console-log .warning {
+            color: #ffb74d;
+        }
+        
+        .console-log .error {
+            color: #e57373;
+        }
+        
+        .console-log .diagnostic {
+            color: #ab47bc;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 WebSocket Audio Diagnostic Tool</h1>
+            <p>Root Cause Analysis • Connection Tracking • Audio Flow Monitoring</p>
+        </div>
+        
+        <div class="main-content">
+            <!-- Alert Section -->
+            <div class="alert alert-warning">
+                <strong>🔍 Diagnostic Mode:</strong> This tool analyzes WebSocket connections and audio playback to identify the root cause of duplication/ordering issues. 
+                No fixes applied - pure observation and logging.
+            </div>
+            
+            <!-- Test Configuration -->
+            <div class="diagnostic-section">
+                <h3>🎛️ Test Configuration</h3>
+                
+                <div class="input-group">
+                    <label for="test-text">Test Message (Use problematic text):</label>
+                    <textarea 
+                        id="test-text" 
+                        class="text-input" 
+                        placeholder="Enter the text that causes duplication/ordering issues...">Testing progressive streaming with a short message.</textarea>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                    <div class="input-group">
+                        <label for="voice-select">Voice:</label>
+                        <select id="voice-select" class="text-input" style="height: auto; min-height: auto;">
+                            <option value="21m00Tcm4TlvDq8ikWAM" selected>Rachel</option>
+                            <option value="pNInz6obpgDQGcFmaJgB">Adam</option>
+                            <option value="EXAVITQu4vr4xnSDxMaL">Sarah</option>
+                        </select>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label for="model-select">Model:</label>
+                        <select id="model-select" class="text-input" style="height: auto; min-height: auto;">
+                            <option value="eleven_flash_v2_5" selected>Flash v2.5</option>
+                            <option value="eleven_turbo_v2_5">Turbo v2.5</option>
+                        </select>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label for="profile-select">Profile:</label>
+                        <select id="profile-select" class="text-input" style="height: auto; min-height: auto;">
+                            <option value="balanced" selected>Balanced</option>
+                            <option value="fast">Fast</option>
+                            <option value="quality">Quality</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div style="text-align: center; margin-top: 15px;">
+                    <button class="btn btn-primary" id="diagnostic-test-btn" onclick="startDiagnosticTest()">🔍 Start Diagnostic Test</button>
+                    <button class="btn btn-secondary" onclick="stopDiagnosticTest()">⏹️ Stop Test</button>
+                    <button class="btn btn-secondary" onclick="clearDiagnosticLogs()">🗑️ Clear Logs</button>
+                </div>
+            </div>
+            
+            <!-- Real-time Connection Monitoring -->
+            <div class="diagnostic-section">
+                <h3>🔌 WebSocket Connection Analysis</h3>
+                
+                <div class="status-grid">
+                    <div class="status-card">
+                        <h4>Connection Status</h4>
+                        <div class="metric">
+                            <span class="metric-label">Session ID:</span>
+                            <span class="metric-value" id="session-id">-</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Active Connections:</span>
+                            <span class="metric-value" id="active-connections">0</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Total Created:</span>
+                            <span class="metric-value" id="total-connections">0</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Duplicates Detected:</span>
+                            <span class="metric-value" id="duplicate-connections">0</span>
+                        </div>
+                    </div>
+                    
+                    <div class="status-card">
+                        <h4>Audio Metrics</h4>
+                        <div class="metric">
+                            <span class="metric-label">Chunks Received:</span>
+                            <span class="metric-value" id="chunks-received">0</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Audio Elements:</span>
+                            <span class="metric-value" id="audio-elements">0</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Simultaneous Play:</span>
+                            <span class="metric-value" id="simultaneous-play">0</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">First Audio:</span>
+                            <span class="metric-value" id="first-audio-latency">-</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div>
+                    <h4>Connection Timeline:</h4>
+                    <div class="connection-list" id="connection-list">
+                        <div style="color: #888; font-style: italic;">No connections yet...</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Audio Flow Analysis -->
+            <div class="diagnostic-section">
+                <h3>🎵 Audio Flow Analysis</h3>
+                
+                <div>
+                    <h4>Chunk & Audio Timeline:</h4>
+                    <div class="chunk-timeline" id="chunk-timeline">
+                        <div style="color: #888; font-style: italic;">No audio activity yet...</div>
+                    </div>
+                </div>
+                
+                <div class="alert alert-info" style="margin-top: 15px;">
+                    <strong>What to Look For:</strong><br>
+                    🔴 <strong>Multiple Connections:</strong> Same session with multiple WebSocket connections<br>
+                    🟠 <strong>Timing Overlap:</strong> Multiple audio elements playing simultaneously<br>
+                    🟡 <strong>Duplicate Chunks:</strong> Same audio content received/played multiple times<br>
+                    🟢 <strong>Expected:</strong> Single connection, sequential chunks, no overlaps
+                </div>
+            </div>
+            
+            <!-- Diagnostic Console -->
+            <div class="diagnostic-section">
+                <h3>📝 Diagnostic Console</h3>
+                <div class="console-log" id="diagnostic-console">
+                    <span class="timestamp">[Loading]</span> <span class="diagnostic">WebSocket Audio Diagnostic Tool Initialized</span>
+                    <span class="timestamp">[Info]</span> <span class="info">Ready to analyze WebSocket connections and audio flow</span>
+                    <span class="timestamp">[Info]</span> <span class="info">Use 'Start Diagnostic Test' to begin root cause analysis</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Load the diagnostic JavaScript -->
+    <script src="/static/js/websocket-diagnostic.js"></script>
+</body>
+</html>
