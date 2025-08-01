@@ -20,21 +20,23 @@ function createAudioContext() {
 
 // Initialize HybridTTS for job completion audio
 async function initializeHybridTTS() {
+    console.log( 'Starting HybridTTS initialization...' );
+    
+    // Check if HybridTTS class is available
+    if ( typeof HybridTTS === 'undefined' ) {
+        console.error( 'HybridTTS class is not defined! Check if hybrid-tts.js is loaded properly.' );
+        hybridTTS = null;
+        return;
+    }
+    
     try {
-        // Wait for sessionId if not available yet
-        if (!sessionId) {
-            console.log('Waiting for queue WebSocket to establish session ID...');
-            // Wait up to 5 seconds for sessionId
-            let attempts = 0;
-            while (!sessionId && attempts < 50) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-                attempts++;
-            }
-        }
+        // Generate separate audio session ID
+        const audioSessionId = await getOrCreateSessionId( 'audio' );
+        console.log( `Initializing HybridTTS with audio session ID: ${audioSessionId}` );
         
         hybridTTS = new HybridTTS({
-            sessionId: sessionId, // Pass the session ID to HybridTTS
-            wsUrl: sessionId ? `ws://${window.location.host}/ws/${sessionId}` : undefined,
+            sessionId: audioSessionId, // Use audio-specific session, different from queue!
+            wsUrl: undefined, // Let HybridTTS create its own connection
             cacheEnabled: true,
             cacheMaxSize: 50 * 1024 * 1024, // 50MB cache for job audio
             cacheMaxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
@@ -46,18 +48,41 @@ async function initializeHybridTTS() {
             },
             onComplete: (audioUrl, totalTime) => {
                 console.log(`HybridTTS Complete in ${totalTime}s`);
+                
+                // If we're using instant mode and playing from the queue, continue to next item
+                if ( unifiedAudioQueue.isPlaying && unifiedAudioQueue.currentItem?.type === 'tts' ) {
+                    console.log( "HybridTTS audio finished, continuing queue playback" );
+                    unifiedAudioQueue.currentAudio = null;
+                    unifiedAudioQueue.currentItem = null;
+                    playNext();
+                }
             },
             onError: (error) => {
                 console.error('HybridTTS Error:', error);
+                
+                // If queue is playing and this was a TTS item, continue to next
+                if ( unifiedAudioQueue.isPlaying && unifiedAudioQueue.currentItem?.type === 'tts' ) {
+                    console.log( "HybridTTS error, continuing queue playback" );
+                    unifiedAudioQueue.currentAudio = null;
+                    unifiedAudioQueue.currentItem = null;
+                    playNext();
+                }
             }
         });
         
         await hybridTTS.initialize();
         console.log('HybridTTS initialized successfully for job audio');
     } catch (error) {
-        console.error('Failed to initialize HybridTTS:', error);
+        console.error('Failed to initialize HybridTTS with detailed error:', error);
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        
         // Fall back to simple audio playback if HybridTTS fails
         hybridTTS = null;
+        
+        // Alert user about the failure
+        console.warn('HybridTTS initialization failed - TTS audio will not work. Check console for details.');
     }
 }
 
@@ -178,14 +203,16 @@ document.addEventListener( "DOMContentLoaded", async function() {
     setEnterKeyListener();
     createAudioContext();
     
-    // Initialize HybridTTS for job completion audio
-    await initializeHybridTTS();
-    
     // Initialize JobCompletionCache for advanced message caching
     await initializeJobCache();
     
     // Connect to FastAPI WebSocket first to get session ID
     await connectToQueueWebSocket();
+    
+    // Initialize HybridTTS AFTER we have the session ID from WebSocket
+    console.log( 'About to call initializeHybridTTS...' );
+    await initializeHybridTTS();
+    console.log( 'initializeHybridTTS call completed. hybridTTS is now:', hybridTTS );
     
     updateQueueLists( "todo" );
     updateQueueLists( "run" );
@@ -326,17 +353,54 @@ function playAnswer( id ) {
 var queueSocket = null;
 var sessionId = null;
 
+// Session persistence constants - separate keys for queue and audio
+const QUEUE_SESSION_KEY = 'lupin_queue_session_id';
+const AUDIO_SESSION_KEY = 'lupin_audio_session_id';
+
+/**
+ * Get or create a persistent session ID using localStorage
+ * @param {string} sessionType - Type of session ('queue' or 'audio')
+ * @returns {Promise<string>} The session ID (from localStorage or newly generated)
+ */
+async function getOrCreateSessionId( sessionType ) {
+    const storageKey = sessionType === 'audio' ? AUDIO_SESSION_KEY : QUEUE_SESSION_KEY;
+    
+    // Check localStorage first
+    let storedSessionId = localStorage.getItem( storageKey );
+    
+    if ( storedSessionId && storedSessionId !== 'undefined' && storedSessionId !== 'null' ) {
+        console.log( `[SESSION] Reusing ${sessionType} session: ${storedSessionId}` );
+        return storedSessionId;
+    }
+    
+    // No valid session in localStorage, fetch new one from server
+    console.log( `[SESSION] No ${sessionType} session in localStorage, fetching new one from server` );
+    
+    try {
+        const response = await fetch( "/api/get-session-id" );
+        const data = await response.json();
+        const newSessionId = data.session_id;
+        
+        // Store in localStorage with typed key
+        localStorage.setItem( storageKey, newSessionId );
+        console.log( `[SESSION] Created ${sessionType} session: ${newSessionId}` );
+        
+        return newSessionId;
+    } catch ( error ) {
+        console.error( `[SESSION] Failed to get ${sessionType} session ID:`, error );
+        throw error;
+    }
+}
 
 async function connectToQueueWebSocket() {
     try {
         // Update debug status
         updateWebSocketDebugInfo( "Connecting...", "Connecting", "None" );
         
-        // Get session ID first
-        const response = await fetch( "/api/get-session-id" );
-        const data = await response.json();
-        sessionId = data.session_id;
-        console.log( "Got session ID:", sessionId );
+        // Get or create queue session ID with localStorage persistence
+        sessionId = await getOrCreateSessionId( 'queue' );
+        window.QUEUE_SESSION_ID = sessionId; // Make available globally for debugging
+        console.log( "Using queue session ID:", sessionId );
         
         // Update debug info with session ID
         const authToken = getAuthHeader().replace( "Bearer ", "" );
@@ -352,20 +416,49 @@ async function connectToQueueWebSocket() {
         queueSocket.onopen = function() {
             console.log( "Connected to FastAPI queue WebSocket" );
             
-            // Send authentication with current user ID
+            // Send authentication with current user ID and subscribed events
             const authToken = getAuthHeader().replace( "Bearer ", "" );
             updateWebSocketDebugInfo( sessionId, "Connected", authToken );
-            console.log( "Sending auth message with token:", authToken );
+            
+            // Define which events this client wants to receive
+            // queue.js needs: queue updates, speech, time, notifications
+            const subscribedEvents = [
+                "queue_todo_update",
+                "queue_running_update", 
+                "queue_done_update",
+                "queue_dead_update",
+                "tts_job_request",
+                "sys_time_update",
+                "notification_play_sound",
+                "notification_queue_update",
+                "notification_message_user",
+                "auth_success",
+                "auth_error",
+                "connect",
+                "sys_ping"
+            ];
+            
+            console.log( "Sending auth message with token and subscriptions:", authToken );
+            console.log( "Subscribed to events:", subscribedEvents );
+            
             queueSocket.send( JSON.stringify({
-                "type": "auth",
+                "type": "auth_request",
                 "token": authToken,
-                "session_id": sessionId
+                "session_id": sessionId,
+                "subscribed_events": subscribedEvents
             }));
         };
         
         queueSocket.onmessage = function( event ) {
-            const data = JSON.parse( event.data );
-            console.log( "Received queue event:", data );
+            let data;
+            try {
+                data = JSON.parse( event.data );
+            } catch ( e ) {
+                console.error( "Failed to parse WebSocket message:", event.data );
+                console.error( "Parse error:", e );
+                return;
+            }
+            console.log( "queueSocket.onmessage: Received queue event:", data );
             
             switch( data.type ) {
                 case "connect":
@@ -403,53 +496,64 @@ async function connectToQueueWebSocket() {
                     }
                     break;
                     
-                case "time_update":
+                case "sys_time_update":
                     document.getElementById( "clock" ).innerHTML = data.date;
                     break;
                     
-                case "todo_update":
+                case "queue_todo_update":
                     document.getElementById( "todo" ).innerHTML = "Jobs TODO: " + data.value;
                     updateQueueLists( "todo" );
                     break;
                     
-                case "run_update":
+                case "queue_running_update":
                     document.getElementById( "run" ).innerHTML = "Jobs RUNNING: " + data.value;
                     updateQueueLists( "run" );
                     break;
                     
-                case "done_update":
+                case "queue_done_update":
                     document.getElementById( "done" ).innerHTML = "Jobs DONE: " + data.value;
                     updateQueueLists( "done" );
                     break;
                     
-                case "dead_update":
+                case "queue_dead_update":
                     document.getElementById( "dead" ).innerHTML = "Jobs DEAD: " + data.value;
                     updateQueueLists( "dead" );
                     break;
                     
-                case "notification_sound_update":
+                case "notification_play_sound":
                     handleNotificationSound( data );
                     break;
                     
-                case "audio_update":
-                    handleAudioUpdate( data );
+                case "tts_job_request":
+                    handleSpeechUpdate( data );
                     break;
                     
-                case "user_notification":
+                case "notification_message_user":
                     handleUserNotification( data );
                     break;
-                    
-                case "task":
-                case "progress": 
-                case "alert":
-                case "custom":
-                    // Legacy Claude Code notification types - now handled via notification_update
-                    console.log( "Received legacy notification event (now handled via notification_update):", data.type );
-                    break;
-                    
-                case "notification_update":
+
+                case "notification_queue_update":
                     // Handle real-time notification updates from NotificationFifoQueue
                     handleNotificationUpdate( data );
+                    break;
+                    
+                case "audio_streaming_status":
+                    // TTS audio status updates
+                    console.log( "TTS audio status update:", data.text, `(${data.status})` );
+                    if ( window.hybridTTS ) {
+                        // Forward status to HybridTTS if needed
+                        window.hybridTTS.handleStatusUpdate && window.hybridTTS.handleStatusUpdate( data );
+                    }
+                    break;
+                    
+                case "audio_streaming_complete":
+                    // TTS audio streaming complete
+                    console.log( "TTS audio complete:", data.text );
+                    break;
+                    
+                case "sys_ping":
+                    // WebSocket heartbeat
+                    console.log( "WebSocket ping received at", data.timestamp );
                     break;
                     
                 default:
@@ -587,22 +691,33 @@ async function playNext() {
             console.log( 'Attempting HybridTTS speak...' );
             
             try {
-                // Create a promise to handle TTS completion
+                // Get current TTS mode
+                const currentMode = localStorage.getItem('tts-mode') || 'instant';
+                console.log( `Playing TTS in ${currentMode} mode` );
+                
+                // Start TTS playback
                 const ttsPromise = hybridTTS.speak( item.content );
-                console.log( 'HybridTTS promise created:', ttsPromise );
+                console.log( 'HybridTTS speak initiated' );
                 
-                // HybridTTS returns the audio element in its onComplete callback
-                // We need to wait for it to complete before moving to next
-                const result = await ttsPromise;
-                console.log( `TTS completed: "${item.content.substring(0, 50)}..."` );
-                
-                // Small pause between items for clarity
-                if ( unifiedAudioQueue.items.length > 0 ) {
-                    await new Promise( resolve => setTimeout( resolve, 300 ) );
+                // In instant mode, audio plays progressively via Web Audio
+                // The onComplete callback will handle moving to next item
+                // In reliable mode, we wait for the promise
+                if ( currentMode === 'reliable' ) {
+                    console.log( 'Waiting for reliable mode TTS to complete...' );
+                    const result = await ttsPromise;
+                    console.log( `TTS completed: "${item.content.substring(0, 50)}..."` );
+                    
+                    // Small pause between items for clarity
+                    if ( unifiedAudioQueue.items.length > 0 ) {
+                        await new Promise( resolve => setTimeout( resolve, 300 ) );
+                    }
+                    
+                    // Continue to next item
+                    playNext();
+                } else {
+                    // Instant mode - onComplete callback will handle continuation
+                    console.log( 'Instant mode TTS started, waiting for onComplete callback' );
                 }
-                
-                // Continue to next item
-                playNext();
             } catch ( ttsError ) {
                 console.error( 'HybridTTS speak failed:', ttsError );
                 
@@ -617,6 +732,7 @@ async function playNext() {
             }
             
         } else if ( item.type === 'audio' ) {
+
             // Regular audio playback
             const audio = new Audio( item.content );
             setupAudioEvents( audio );
@@ -625,7 +741,12 @@ async function playNext() {
             
         } else {
             // Fallback for unsupported types or missing TTS
-            console.log( `Unsupported type or missing handler for ${item.type}, playing fallback sound` );
+            if ( item.type === 'tts' && !hybridTTS ) {
+                console.error( `TTS requested but HybridTTS is not available! Item: "${item.content.substring ? item.content.substring(0, 50) + '...' : item.content}"` );
+                console.error( 'This likely means HybridTTS initialization failed. Check earlier console messages.' );
+            } else {
+                console.log( `Unsupported type or missing handler for ${item.type}, playing fallback sound` );
+            }
             fallbackToNotificationSound();
             // Small delay for fallback sound
             await new Promise( resolve => setTimeout( resolve, 1000 ) );
@@ -821,6 +942,9 @@ function getAuthHeader() {
     return `Bearer mock_token_email_${email}`;
 }
 
+// Make auth header function available globally for HybridTTS
+window.getAuthHeader = getAuthHeader;
+
 function updateAuthStatus() {
     const statusElement = document.getElementById( "auth-status" );
     const systemIdDisplay = document.getElementById( "system-id-display" );
@@ -870,29 +994,26 @@ function updateWebSocketDebugInfo( sessionId, status, authToken ) {
 }
 
 function handleNotificationSound( data ) {
-    console.log( "Received notification_sound_update:", data );
+    console.log( "Received notification_play_sound:", data );
     let url = data.soundFile;
     console.log( `Adding audio url to unified queue: ${ url }` );
     addToAudioQueue( 'audio', url, 'medium' );
 }
 
 // Handle server notifications to play audio with HybridTTS
-async function handleAudioUpdate( data ) {
-    console.log( "Received audio update:", data );
+async function handleSpeechUpdate( data ) {
+    console.log( "Received speech update:", data );
     
     // Use HybridTTS for all text-to-speech conversion
     if ( data.text ) {
-        console.log( `Converting text to speech via HybridTTS: "${data.text}"` );
+        // Get current TTS mode preference
+        const currentMode = localStorage.getItem('tts-mode') || 'instant';
+        console.log( `Converting text to speech via HybridTTS (${currentMode} mode): "${data.text}"` );
         
-        try {
-            if ( window.hybridTTS ) {
-                await window.hybridTTS.speak( data.text );
-            } else {
-                console.error( "HybridTTS not available for audio conversion" );
-            }
-        } catch ( error ) {
-            console.error( `Error in HybridTTS:`, error );
-        }
+        // Add to the audio queue for automatic playback
+        console.log( "Adding speech update to audio queue for automatic playback" );
+        addToAudioQueue( 'tts', data.text, 'high' );  // Use 'high' priority for speech updates
+        
         return;
     }
     
@@ -908,7 +1029,7 @@ async function handleAudioUpdate( data ) {
         // Use advanced cache if available, fallback to simple storage
         if ( jobCache ) {
             await jobCache.store( jobId, data.text, timestamp, userEmail, {
-                source: 'websocket_audio_update',
+                source: 'websocket_speech_update',
                 audioGenerated: true
             });
             console.log( `Stored job completion message with ID: ${jobId} (advanced cache)` );
@@ -974,11 +1095,37 @@ function fallbackToNotificationSound() {
     playNotificationSoundByPriority( "error" );
 }
 
+// TTS Mode switching functions
+async function updateTTSMode(newMode) {
+    if (!['instant', 'reliable'].includes(newMode)) {
+        console.error(`Invalid TTS mode: ${newMode}. Must be 'instant' or 'reliable'.`);
+        return;
+    }
+    
+    localStorage.setItem('tts-mode', newMode);
+    console.log(`[TTS] Mode changed to: ${newMode}`);
+    
+    // Update HybridTTS instance if available
+    if (window.hybridTTS && typeof window.hybridTTS.setMode === 'function') {
+        await window.hybridTTS.setMode(newMode);
+    }
+    
+    // Show user feedback
+    const modeDescription = newMode === 'instant' ? 'streaming (starts immediately)' : 'complete audio (2-3s delay)';
+    console.log(`[TTS] Now using ${modeDescription} mode`);
+}
+
+function getCurrentTTSMode() {
+    return localStorage.getItem('tts-mode') || 'instant';
+}
+
 // Handle Claude Code notifications from the /api/notify endpoint
 async function handleUserNotification( data ) {
     console.log( "Received Claude Code notification:", data );
     
-    const { message, type, priority, source, timestamp } = data;
+    // Extract the notification data from the nested structure
+    const notificationData = data.data || data;
+    const { message, type, priority, source, timestamp } = notificationData;
     
     // Create formatted notification message for TTS
     let ttsMessage = `${type} notification: ${message}`;
@@ -1496,8 +1643,8 @@ function testJobCompletion() {
     
     const randomMessage = testMessages[Math.floor(Math.random() * testMessages.length)];
     
-    // Simulate an audio_update event
-    handleAudioUpdate({
+    // Simulate a speech_update event
+    handleSpeechUpdate({
         text: randomMessage,
         timestamp: new Date().toISOString()
     });
@@ -1794,7 +1941,7 @@ function getNotificationState() {
 
 // Handle real-time notification updates via WebSocket
 async function handleNotificationUpdate( data ) {
-    console.log( "Received notification_update WebSocket event:", data );
+    console.log( "Received notification_queue_update WebSocket event:", data );
     
     const notification = data.notification;
     if ( !notification ) {
@@ -1869,9 +2016,48 @@ async function resetAllQueues() {
     }
 }
 
+// Initialize TTS mode UI controls
+function initializeTTSModeUI() {
+    console.log('[TTS] Initializing TTS mode UI controls');
+    
+    // Get current TTS mode from localStorage
+    const currentMode = getCurrentTTSMode();
+    console.log(`[TTS] Current mode from localStorage: ${currentMode}`);
+    
+    // Initialize radio buttons to match current preference
+    const radioButtons = document.querySelectorAll('input[name="tts-mode"]');
+    radioButtons.forEach(radio => {
+        radio.checked = (radio.value === currentMode);
+    });
+    
+    // Add event listeners to radio buttons
+    radioButtons.forEach(radio => {
+        radio.addEventListener('change', async function() {
+            if (this.checked) {
+                const newMode = this.value;
+                console.log(`[TTS] User selected mode: ${newMode}`);
+                await updateTTSMode(newMode);
+                
+                // Provide user feedback
+                const modeDescription = newMode === 'instant' 
+                    ? 'streaming audio (starts immediately)' 
+                    : 'complete audio (2-3s delay)';
+                console.log(`[TTS] Switched to ${newMode} mode: ${modeDescription}`);
+            }
+        });
+    });
+    
+    console.log('[TTS] TTS mode UI controls initialized successfully');
+}
+
 // Initialize notification state when DOM is ready
 document.addEventListener( "DOMContentLoaded", function() {
-    // Delay initialization to allow auth system to load
+    console.log('[Init] DOM content loaded, initializing components');
+    
+    // Initialize TTS mode UI first (critical for speech functionality)
+    initializeTTSModeUI();
+    
+    // Delay notification initialization to allow auth system to load
     setTimeout( initializeNotificationState, 1000 );
 });
 

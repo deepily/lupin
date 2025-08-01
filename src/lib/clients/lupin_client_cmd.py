@@ -12,6 +12,35 @@ from cosa.utils import util
 class CmdUi:
 
     def __init__( self, recording_timeout=15, copy_transx_to_clipboard=False, debug=False ):
+        """
+        Initialize the command-line UI with Tkinter interface and GenieClient integration.
+        
+        Requires:
+            - Tkinter must be available
+            - GenieClient (lupin_client) must be available
+            - CLI commands configuration file must exist (conf/cli-commands.map)
+            - util module must be available
+            
+        Ensures:
+            - Creates main Tkinter window with console and command interface
+            - Initializes GenieClient with specified configuration
+            - Sets up GUI components (text console, command entry, buttons)
+            - Loads command dictionary from configuration file
+            - GUI enters mainloop for user interaction
+            
+        Args:
+            recording_timeout: Maximum recording duration in seconds (default: 15)
+            copy_transx_to_clipboard: Auto-copy transcriptions to clipboard (default: False)
+            debug: Enable debug logging (default: False)
+            
+        Returns:
+            None
+            
+        Raises:
+            ImportError: If required modules are not available
+            FileNotFoundError: If CLI commands configuration file is missing
+            Exception: If GUI initialization fails
+        """
 
         self.debug = debug
         self.cwd = os.getcwd()
@@ -69,6 +98,29 @@ class CmdUi:
         self.root.mainloop()
 
     def execute_command( self ):
+        """
+        Execute the command entered in the command text field.
+        
+        Requires:
+            - txt_cmd widget must be initialized and contain valid text
+            - Command must be a valid system command or empty string
+            
+        Ensures:
+            - Executes command using subprocess.Popen
+            - Displays command output in console text widget
+            - Shows live stdout output during execution
+            - Handles command completion and error codes
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            subprocess.CalledProcessError: If command exits with non-zero return code
+            Exception: If subprocess execution fails
+        """
 
         command = self.txt_cmd.get().strip()
         print( "Execute command [{}]...".format( command ) )
@@ -102,6 +154,29 @@ class CmdUi:
         self.txt_console.insert( tk.END, "Current path: {}{}\n".format( self.cwd, self.selected_path.get() ) )
 
     def start_processing( self ):
+        """
+        Start audio recording and transcription processing.
+        
+        Requires:
+            - GUI components must be initialized (btn_start, btn_stop, txt_console)
+            - lupin_lupin client must be initialized
+            
+        Ensures:
+            - Disables start button and enables stop button
+            - Updates console with recording status
+            - Starts processing thread for audio transcription
+            - Shifts focus to stop button
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            AttributeError: If GUI components are not initialized
+            Exception: If processing thread fails to start
+        """
 
         print( "Start processing..." )
         self.btn_start.config( state=DISABLED )
@@ -114,6 +189,28 @@ class CmdUi:
         processing_thread.start()
 
     def stop_processing( self ):
+        """
+        Stop audio recording and transcription processing.
+        
+        Requires:
+            - GUI components must be initialized (btn_start, btn_stop, txt_console)
+            - lupin_lupin client must be initialized
+            
+        Ensures:
+            - Re-enables start button and disables stop button
+            - Updates console with completion status
+            - Stops recording in lupin_lupin client
+            - Shifts focus to start button
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            AttributeError: If GUI components are not initialized
+        """
 
         print( "Stop processing..." )
         self.btn_start.config( state=ACTIVE )

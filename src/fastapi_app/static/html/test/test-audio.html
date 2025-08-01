@@ -114,7 +114,7 @@
         
         <div class="endpoint-info">
             <strong>Endpoint:</strong><br>
-            <code>http://localhost:7999/api/get-audio (WebSocket streaming)</code>
+            <code>http://localhost:7999/api/get-speech (WebSocket streaming)</code>
         </div>
     </div>
 
@@ -670,7 +670,7 @@
                 console.log( 'Requesting audio in format:', format );
                 
                 // Send POST request with session_id, text, and preferred format
-                const response = await fetch( '/api/get-audio', {
+                const response = await fetch( '/api/get-speech', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'

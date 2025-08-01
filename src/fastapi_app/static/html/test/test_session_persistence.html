@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Session Persistence Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        button { margin: 5px; padding: 5px 10px; }
+        pre { background: #f4f4f4; padding: 10px; overflow-x: auto; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Session Persistence Test</h1>
+    
+    <div class="test-section">
+        <h2>LocalStorage Session Test</h2>
+        <button onclick="checkLocalStorage()">Check LocalStorage</button>
+        <button onclick="clearLocalStorage()">Clear LocalStorage</button>
+        <button onclick="getNewSessionId()">Get New Session ID</button>
+        <pre id="localStorage-output"></pre>
+    </div>
+    
+    <div class="test-section">
+        <h2>WebSocket Connection Test</h2>
+        <button onclick="connectWebSocket()">Connect WebSocket</button>
+        <button onclick="disconnectWebSocket()">Disconnect WebSocket</button>
+        <pre id="websocket-output"></pre>
+    </div>
+    
+    <div class="test-section">
+        <h2>Page Refresh Test</h2>
+        <p>Session ID should persist across page refreshes</p>
+        <button onclick="location.reload()">Refresh Page</button>
+    </div>
+
+    <script>
+        const SESSION_STORAGE_KEY = 'lupin_session_id';
+        let ws = null;
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toISOString();
+            const color = type === 'error' ? 'red' : type === 'success' ? 'green' : 'black';
+            return `<span style="color: ${color}">[${timestamp}] ${message}</span>\n`;
+        }
+        
+        function checkLocalStorage() {
+            const output = document.getElementById('localStorage-output');
+            const sessionId = localStorage.getItem(SESSION_STORAGE_KEY);
+            
+            if (sessionId) {
+                output.innerHTML = log(`Found session ID in localStorage: ${sessionId}`, 'success');
+            } else {
+                output.innerHTML = log('No session ID found in localStorage', 'error');
+            }
+        }
+        
+        function clearLocalStorage() {
+            localStorage.removeItem(SESSION_STORAGE_KEY);
+            const output = document.getElementById('localStorage-output');
+            output.innerHTML = log('Cleared localStorage session ID', 'success');
+        }
+        
+        async function getNewSessionId() {
+            const output = document.getElementById('localStorage-output');
+            try {
+                const response = await fetch('/api/get-session-id');
+                const data = await response.json();
+                localStorage.setItem(SESSION_STORAGE_KEY, data.session_id);
+                output.innerHTML = log(`Got new session ID and stored in localStorage: ${data.session_id}`, 'success');
+            } catch (error) {
+                output.innerHTML = log(`Error getting session ID: ${error.message}`, 'error');
+            }
+        }
+        
+        async function connectWebSocket() {
+            const output = document.getElementById('websocket-output');
+            
+            // Check for existing session ID
+            let sessionId = localStorage.getItem(SESSION_STORAGE_KEY);
+            
+            if (!sessionId) {
+                // Get new session ID if none exists
+                try {
+                    const response = await fetch('/api/get-session-id');
+                    const data = await response.json();
+                    sessionId = data.session_id;
+                    localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+                    output.innerHTML += log(`No session ID in localStorage, got new one: ${sessionId}`, 'info');
+                } catch (error) {
+                    output.innerHTML += log(`Error getting session ID: ${error.message}`, 'error');
+                    return;
+                }
+            } else {
+                output.innerHTML += log(`Using existing session ID from localStorage: ${sessionId}`, 'success');
+            }
+            
+            // Connect WebSocket
+            const wsUrl = `ws://localhost:7999/ws/queue/${sessionId}`;
+            output.innerHTML += log(`Connecting to: ${wsUrl}`, 'info');
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                output.innerHTML += log('WebSocket connected!', 'success');
+                // Send auth message
+                ws.send(JSON.stringify({
+                    type: 'auth',
+                    token: 'mock_token_ricardo_felipe_ruiz_6bdc',
+                    session_id: sessionId
+                }));
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                output.innerHTML += log(`Received: ${data.type} - ${JSON.stringify(data)}`, 'info');
+            };
+            
+            ws.onerror = (error) => {
+                output.innerHTML += log(`WebSocket error: ${error}`, 'error');
+            };
+            
+            ws.onclose = () => {
+                output.innerHTML += log('WebSocket disconnected', 'info');
+            };
+        }
+        
+        function disconnectWebSocket() {
+            if (ws) {
+                ws.close();
+                ws = null;
+                document.getElementById('websocket-output').innerHTML += log('Disconnected WebSocket', 'info');
+            }
+        }
+        
+        // Check on page load
+        window.onload = () => {
+            checkLocalStorage();
+        };
+    </script>
+</body>
+</html>

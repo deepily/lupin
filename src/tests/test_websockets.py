@@ -9,25 +9,27 @@ import json
 import websockets
 from datetime import datetime
 import sys
+import urllib.parse
 from typing import Dict, Optional
 
 class WebSocketTester:
     def __init__(self, base_url: str = "ws://localhost:7999"):
         self.base_url = base_url
-        self.test_session_id = "test-session-123"
+        self.test_session_id = "wise penguin"
         
     async def test_basic_connection(self) -> bool:
         """Test basic WebSocket connection"""
         print("🔌 Testing basic WebSocket connection...")
         
         try:
-            uri = f"{self.base_url}/ws/{self.test_session_id}"
+            encoded_session = urllib.parse.quote(self.test_session_id)
+            uri = f"{self.base_url}/ws/queue/{encoded_session}"
             async with websockets.connect(uri) as websocket:
                 print(f"✅ Connected to {uri}")
                 
                 # Send auth message
                 auth_msg = {
-                    "type": "auth",
+                    "type": "auth_request",
                     "token": "mock_token_test"
                 }
                 await websocket.send(json.dumps(auth_msg))
@@ -56,15 +58,33 @@ class WebSocketTester:
         print("\n📊 Testing queue WebSocket events...")
         
         try:
-            uri = f"{self.base_url}/ws/queue/{self.test_session_id}"
+            encoded_session = urllib.parse.quote(self.test_session_id)
+            uri = f"{self.base_url}/ws/queue/{encoded_session}"
             async with websockets.connect(uri) as websocket:
                 print(f"✅ Connected to queue WebSocket")
                 
-                # Collect events for 10 seconds
+                # Send authentication first
+                auth_msg = {
+                    "type": "auth_request",
+                    "token": "mock_token_test"
+                }
+                await websocket.send(json.dumps(auth_msg))
+                
+                # Wait for auth response
+                auth_response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                auth_data = json.loads(auth_response)
+                
+                if auth_data.get("type") != "auth_success":
+                    print(f"❌ Authentication failed: {auth_data}")
+                    return False
+                
+                print("✅ Queue WebSocket authenticated")
+                
+                # Collect events for 15 seconds (to catch at least one 5-second time update)
                 events = []
                 start_time = asyncio.get_event_loop().time()
                 
-                while asyncio.get_event_loop().time() - start_time < 10:
+                while asyncio.get_event_loop().time() - start_time < 15:
                     try:
                         message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
                         data = json.loads(message)
@@ -75,16 +95,16 @@ class WebSocketTester:
                 
                 # Check if we received expected events
                 event_types = {event.get("type") for event in events}
-                expected_events = {"time_update", "todo_update", "run_update", "done_update", "dead_update"}
+                expected_events = {"sys_time_update", "queue_todo_update", "queue_running_update", "queue_done_update", "queue_dead_update"}
                 
                 print(f"\n📋 Received event types: {event_types}")
                 
-                # time_update should definitely be there (every 5 seconds)
-                if "time_update" in event_types:
-                    print("✅ Received time_update events")
+                # sys_time_update should definitely be there (every 5 seconds)
+                if "sys_time_update" in event_types:
+                    print("✅ Received sys_time_update events")
                     return True
                 else:
-                    print("❌ No time_update events received")
+                    print("❌ No sys_time_update events received")
                     return False
                     
         except Exception as e:
@@ -97,10 +117,14 @@ class WebSocketTester:
         
         async def connect_client(client_id: str) -> bool:
             try:
-                uri = f"{self.base_url}/ws/client-{client_id}"
+                # Use valid session ID format: adjective noun
+                session_names = ["clever giraffe", "wise owl", "brave lion", "quick fox", "calm bear"]
+                session_id = session_names[int(client_id) % len(session_names)]
+                encoded_session = urllib.parse.quote(session_id)
+                uri = f"{self.base_url}/ws/queue/{encoded_session}"
                 async with websockets.connect(uri) as websocket:
                     # Send auth
-                    auth_msg = {"type": "auth", "token": f"mock_token_{client_id}"}
+                    auth_msg = {"type": "auth_request", "token": f"mock_token_{client_id}"}
                     await websocket.send(json.dumps(auth_msg))
                     
                     # Wait for response
@@ -122,7 +146,7 @@ class WebSocketTester:
                 return False
         
         # Test 5 concurrent connections
-        tasks = [connect_client(f"user{i}") for i in range(5)]
+        tasks = [connect_client(str(i)) for i in range(5)]
         results = await asyncio.gather(*tasks)
         
         success_count = sum(results)
@@ -135,10 +159,11 @@ class WebSocketTester:
         print("\n🔔 Testing notification events...")
         
         try:
-            uri = f"{self.base_url}/ws/{self.test_session_id}"
+            encoded_session = urllib.parse.quote(self.test_session_id)
+            uri = f"{self.base_url}/ws/queue/{encoded_session}"
             async with websockets.connect(uri) as websocket:
                 # Authenticate
-                auth_msg = {"type": "auth", "token": "mock_token_test"}
+                auth_msg = {"type": "auth_request", "token": "mock_token_test"}
                 await websocket.send(json.dumps(auth_msg))
                 
                 # Wait for auth success
@@ -160,7 +185,7 @@ class WebSocketTester:
                         message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
                         data = json.loads(message)
                         
-                        if data.get("type") == "notification_update":
+                        if data.get("type") == "notification_queue_update":
                             print(f"✅ Received notification: {data}")
                             notification_received = True
                             break
@@ -232,7 +257,7 @@ if __name__ == "__main__":
     import httpx
     
     try:
-        response = httpx.get("http://localhost:7999/health", timeout=2.0)
+        response = httpx.get("http://localhost:7999/health", timeout=10.0)
         if response.status_code != 200:
             print("❌ Server is not healthy")
             sys.exit(1)

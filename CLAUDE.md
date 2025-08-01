@@ -50,6 +50,11 @@
 
 ## STARTUP PROCEDURE
 - The first thing you should do when you start a session is read the global Claude configuration file And follow its instructions.
+- **HISTORY FILE READING**: When reading project history at startup, ONLY read the master history file located at the repo root (`/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md`). 
+- **IGNORE SUB-REPO HISTORIES**: Do NOT read these sub-repository history files as they are managed separately:
+  - `src/lupin-plugin-firefox/history.md` (Firefox plugin sub-repo)
+  - `src/cosa/history.md` (CoSA framework sub-repo)  
+  - `src/lupin-mobile/history.md` (Mobile app sub-repo)
 
 ## PROJECT SHORT NAMES
 - This repo's SHORT_PROJECT_PREFIX is [LUPIN]
@@ -57,3 +62,6 @@
 ## REPOSITORY RELATIONS
 - There is another repo that's a part of the larger project contained in the directory `lupin-plugin-firefox`
 - This repo must be managed separately and cannot be managed by Claude
+
+## RUNNING/TESTING FASTAPI APPLICATIONS
+- Please assume that there is a Fast API server instance bound to port 7999. I will start and stop it if needed. You never need to spin up another instance unless it's for a ephemeral use on port 8000.

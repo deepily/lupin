@@ -66505,7 +66505,7 @@ return A.P(A.mR(A.cP(0,500,0),null,t.z),$async$mg)
 case 9:case 7:j=k.x
 n=j==null?"session_"+Date.now():j
 s=10
-return A.P(o.b.N8("http://localhost:7999/api/get-audio-elevenlabs",A.at(["session_id",n,"text",a,"voice_id","21m00Tcm4TlvDq8ikWAM","stability",0.5,"similarity_boost",0.8],t.N,t.K),t.z),$async$mg)
+return A.P(o.b.N8("http://localhost:7999/api/get-speech-elevenlabs",A.at(["session_id",n,"text",a,"voice_id","21m00Tcm4TlvDq8ikWAM","stability",0.5,"similarity_boost",0.8],t.N,t.K),t.z),$async$mg)
 case 10:m=c
 if(m.c===200){k=o.c
 if(k!=null)k.t(0,"requested")
@@ -66533,7 +66533,7 @@ k=o.a.x
 n=k==null?"session_"+Date.now():k
 j=t.N
 s=6
-return A.P(o.b.N8("http://localhost:7999/api/get-audio",A.at(["session_id",n,"text",a],j,j),t.z),$async$rv)
+return A.P(o.b.N8("http://localhost:7999/api/get-speech",A.at(["session_id",n,"text",a],j,j),t.z),$async$rv)
 case 6:m=c
 if(m.c===200){j=o.c
 if(j!=null)j.t(0,"success")

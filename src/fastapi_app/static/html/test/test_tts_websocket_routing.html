@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TTS WebSocket Routing Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #00ff00;
+        }
+        .section {
+            border: 1px solid #00ff00;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        .log {
+            background: #000;
+            padding: 10px;
+            height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        button {
+            background: #003300;
+            color: #00ff00;
+            border: 1px solid #00ff00;
+            padding: 10px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #005500;
+        }
+        .error { color: #ff0000; }
+        .success { color: #00ff00; }
+        .info { color: #ffff00; }
+    </style>
+</head>
+<body>
+    <h1>TTS WebSocket Routing Test</h1>
+    
+    <div class="section">
+        <h2>Test Controls</h2>
+        <button onclick="testWebSocketRouting()">Test WebSocket Routing</button>
+        <button onclick="clearLogs()">Clear Logs</button>
+    </div>
+    
+    <div class="section">
+        <h2>Queue WebSocket Log</h2>
+        <div id="queueLog" class="log"></div>
+    </div>
+    
+    <div class="section">
+        <h2>Audio WebSocket Log</h2>
+        <div id="audioLog" class="log"></div>
+    </div>
+    
+    <div class="section">
+        <h2>API Response Log</h2>
+        <div id="apiLog" class="log"></div>
+    </div>
+
+    <script>
+        let queueWs = null;
+        let audioWs = null;
+        const sessionId = 'test session'; // Valid format: two words separated by space
+        
+        function log(logId, message, type = 'info') {
+            const log = document.getElementById(logId);
+            const timestamp = new Date().toISOString().substr(11, 12);
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : 'info';
+            log.innerHTML += `<span class="${className}">[${timestamp}] ${message}</span>\n`;
+            log.scrollTop = log.scrollHeight;
+        }
+        
+        function clearLogs() {
+            document.getElementById('queueLog').innerHTML = '';
+            document.getElementById('audioLog').innerHTML = '';
+            document.getElementById('apiLog').innerHTML = '';
+        }
+        
+        async function testWebSocketRouting() {
+            clearLogs();
+            
+            // Step 1: Connect Queue WebSocket
+            log('queueLog', 'Connecting queue WebSocket to /ws/queue/' + sessionId);
+            queueWs = new WebSocket(`ws://${window.location.host}/ws/queue/${sessionId}`);
+            
+            queueWs.onopen = () => {
+                log('queueLog', 'Queue WebSocket connected', 'success');
+                // Send auth
+                queueWs.send(JSON.stringify({
+                    type: 'auth',
+                    token: 'mock_token_test_user'
+                }));
+            };
+            
+            queueWs.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    log('queueLog', `Received: ${data.type} - ${JSON.stringify(data)}`, 
+                        data.type === 'status' ? 'error' : 'info');
+                } catch (e) {
+                    log('queueLog', `Received non-JSON: ${event.data}`, 'error');
+                }
+            };
+            
+            queueWs.onerror = (error) => {
+                log('queueLog', `Error: ${error}`, 'error');
+            };
+            
+            // Step 2: Connect Audio WebSocket
+            setTimeout(() => {
+                log('audioLog', 'Connecting audio WebSocket to /ws/audio/' + sessionId);
+                audioWs = new WebSocket(`ws://${window.location.host}/ws/audio/${sessionId}`);
+                
+                audioWs.onopen = () => {
+                    log('audioLog', 'Audio WebSocket connected', 'success');
+                };
+                
+                audioWs.onmessage = (event) => {
+                    if (event.data instanceof Blob) {
+                        log('audioLog', `Received audio chunk: ${event.data.size} bytes`, 'success');
+                    } else {
+                        try {
+                            const data = JSON.parse(event.data);
+                            log('audioLog', `Received: ${data.type} - ${JSON.stringify(data)}`, 'info');
+                        } catch (e) {
+                            log('audioLog', `Received non-JSON: ${event.data}`, 'error');
+                        }
+                    }
+                };
+                
+                audioWs.onerror = (error) => {
+                    log('audioLog', `Error: ${error}`, 'error');
+                };
+                
+                // Step 3: Make TTS Request
+                setTimeout(async () => {
+                    log('apiLog', 'Sending TTS request to /api/get-speech');
+                    
+                    try {
+                        const response = await fetch('/api/get-speech', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': 'Bearer mock_token_test_user'
+                            },
+                            body: JSON.stringify({
+                                session_id: sessionId,
+                                text: 'Testing WebSocket routing'
+                            })
+                        });
+                        
+                        const result = await response.json();
+                        log('apiLog', `Response: ${JSON.stringify(result)}`, 
+                            response.ok ? 'success' : 'error');
+                            
+                    } catch (e) {
+                        log('apiLog', `Request failed: ${e.message}`, 'error');
+                    }
+                }, 1000);
+                
+            }, 1000);
+        }
+        
+        // Auto-run test on load
+        window.addEventListener('load', () => {
+            setTimeout(testWebSocketRouting, 500);
+        });
+    </script>
+</body>
+</html>

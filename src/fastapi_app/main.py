@@ -17,6 +17,8 @@ import asyncio
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 import uuid
+import aiohttp
+import websockets
 
 # Add paths for imports
 sys.path.append( os.path.join( os.path.dirname( __file__ ), '..' ) )
@@ -39,12 +41,11 @@ from lib.clients import lupin_client as gc
 from cosa.agents.v010.two_word_id_generator import TwoWordIdGenerator
 from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.auth import get_current_user, get_current_user_id
-from cosa.rest.queue_extensions import push_job_with_user
 from cosa.rest.user_id_generator import email_to_system_id
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, audio, queues, jobs, websocket
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 
 # Global variables
@@ -70,81 +71,158 @@ active_tasks = {}
 clock_task = None
 # Consumer thread for producer-consumer pattern
 consumer_thread = None
+# WebSocket maintenance background tasks
+websocket_heartbeat_task = None
+websocket_cleanup_task = None
 
-
-
-async def emit_audio( msg: str, websocket_id: str = None ) -> None:
+async def emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", websocket_id: str = None ) -> None:
     """
-    Generate TTS audio and emit via WebSocket to specific session or broadcast.
+    Generate TTS speech and emit via WebSocket to specific user or broadcast.
     
+    Requires:
+        - websocket_manager must be initialized and running
+        - msg must be a non-empty string
+        - user_id or websocket_id must be valid if provided
+        
+    Ensures:
+        - TTS job request is emitted via WebSocket to target recipient
+        - No exceptions are propagated to caller (errors are logged)
+        - Speech data includes text and timestamp
+        
     Args:
-        msg: The text message to be converted to audio
-        websocket_id: Optional websocket identifier for specific session routing
+        msg: The text message to be converted to speech
+        user_id: User ID for user-specific routing (preferred method)
+        websocket_id: Optional websocket identifier for backwards compatibility
+        
+    Returns:
+        None
+        
+    Raises:
+        No exceptions raised - all errors are caught and logged
     """
-    print( f"[AUDIO] emit_audio called:" )
+    print( f"[SPEECH] emit_speech called:" )
     print( f"  - Message: '{msg}'" )
-    print( f"  - WebSocket ID: {websocket_id if websocket_id else 'broadcast'}" )
+    print( f"  - User ID: {user_id if user_id else 'none'}" )
+    print( f"  - WebSocket ID: {websocket_id if websocket_id else 'none'}" )
     
     try:
-        # Emit audio_update event to trigger TTS in browser
-        audio_data = {
+        # Emit speech_update event to trigger TTS in browser
+        speech_data = {
             "text": msg,
             "timestamp": datetime.now().isoformat()
         }
         
-        if websocket_id:
-            # Emit to specific session
-            await websocket_manager.emit_to_session( websocket_id, "audio_update", audio_data )
-            print( f"[AUDIO] Emitted audio_update to session {websocket_id}" )
+        if user_id and user_id != "ricardo_felipe_ruiz_6bdc":
+            # Emit to specific user (preferred method)
+            await websocket_manager.emit_to_user( user_id, "tts_job_request", speech_data )
+            print( f"[SPEECH] Emitted tts_job_request to user {user_id}" )
+        elif user_id == "ricardo_felipe_ruiz_6bdc":
+            # Default user - still use user-based routing
+            await websocket_manager.emit_to_user( user_id, "tts_job_request", speech_data )
+            print( f"[SPEECH] Emitted tts_job_request to default user {user_id}" )
+        elif websocket_id:
+            # Backwards compatibility: Emit to specific session
+            await websocket_manager.emit_to_session( websocket_id, "tts_job_request", speech_data )
+            print( f"[SPEECH] Emitted tts_job_request to session {websocket_id} (backwards compatibility)" )
         else:
-            # Broadcast to all connected clients
-            await websocket_manager.async_emit( "audio_update", audio_data )
-            print( f"[AUDIO] Broadcasted audio_update to all connections" )
+            # Fallback: Broadcast to all connected clients
+            await websocket_manager.async_emit( "tts_job_request", speech_data )
+            print( f"[SPEECH] Broadcasted tts_job_request to all connections (fallback)" )
             
     except Exception as e:
-        print( f"[AUDIO] Error emitting audio: {e}" )
+        print( f"[SPEECH] Error emitting speech: {e}" )
         # Don't raise - this shouldn't break the calling flow
 
 
-def create_emit_audio_callback():
-    """Creates a sync wrapper for the async emit_audio function"""
-    def sync_emit_audio( msg: str, websocket_id: str = None ):
+def create_emit_speech_callback():
+    """
+    Creates a sync wrapper for the async emit_speech function with user-based routing.
+    
+    Requires:
+        - No preconditions
+        
+    Ensures:
+        - Returns a callable synchronous wrapper function
+        - Wrapper function runs emit_speech in isolated thread with own event loop
+        - Thread execution is non-blocking and daemon-enabled
+        
+    Args:
+        None
+        
+    Returns:
+        function: Synchronous wrapper function that accepts (msg, user_id, websocket_id) parameters
+        
+    Raises:
+        No exceptions raised - wrapper function handles all errors internally
+    """
+    def sync_emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", websocket_id: str = None ):
         import threading
         
         def run_in_thread():
             try:
                 # Run async function in isolated thread with its own event loop
-                asyncio.run( emit_audio( msg, websocket_id ) )
+                asyncio.run( emit_speech( msg, user_id=user_id, websocket_id=websocket_id ) )
             except Exception as e:
-                print( f"[AUDIO] Error in audio thread: {e}" )
+                print( f"[SPEECH] Error in speech thread: {e}" )
         
         # Always run in separate thread to avoid event loop conflicts
         thread = threading.Thread( target=run_in_thread, daemon=True )
         thread.start()
-        print( f"[AUDIO] Started audio emission thread for: '{msg}'" )
-    return sync_emit_audio
+        print( f"[SPEECH] Started speech emission thread for: '{msg}' (user: {user_id})" )
+    return sync_emit_speech
 
 
 async def clock_loop():
     """
-    Background task that emits clock updates every second to all connected WebSocket clients.
+    Background task that emits clock updates every minute to all connected WebSocket clients.
     
-    This replaces the Flask/Socket.IO enter_clock_loop() functionality with FastAPI/WebSocket.
+    Requires:
+        - websocket_manager must be initialized and running
+        - du.get_current_time() function must be available
+        - app_debug and app_verbose global variables must be initialized
+        
+    Ensures:
+        - Emits 'sys_time_update' event every 60 seconds to all connections
+        - Continues until cancelled or exception occurs
+        - Provides detailed debug logging when verbose mode enabled
+        
+    Args:
+        None
+        
+    Returns:
+        None - runs until cancelled
+        
+    Raises:
+        asyncio.CancelledError: When task is cancelled during shutdown
+        Exception: For any other errors during clock updates
     """
     print( "[CLOCK] Starting clock update loop..." )
     while True:
         try:
             # Emit time update to all connected WebSocket clients
             current_time = du.get_current_time( format="%Y-%m-%d @ %H:%M" )
-            await websocket_manager.async_emit( 'time_update', { 'date': current_time } )
+            await websocket_manager.async_emit( 'sys_time_update', { 'date': current_time } )
             
             # Debug logging (only if verbose mode)
             if app_debug and app_verbose:
                 connection_count = websocket_manager.get_connection_count()
                 print( f"[CLOCK] Emitted time update to {connection_count} connections: {current_time}" )
+                
+                # Show detailed connection info
+                all_sessions = list( websocket_manager.active_connections.keys() )
+                if all_sessions:
+                    print( f"[CLOCK] Active session IDs: {', '.join( all_sessions )}" )
+                    
+                    # Show user associations if any
+                    user_info = []
+                    for session_id in all_sessions:
+                        user_id = websocket_manager.session_to_user.get( session_id, "no-auth" )
+                        user_info.append( f"{session_id}→{user_id}" )
+                    print( f"[CLOCK] Session→User mapping: {', '.join( user_info )}" )
             
             # Wait 1 minute before next update
-            await asyncio.sleep( 60 )
+            sleep_time = 60
+            await asyncio.sleep( sleep_time )
             
         except asyncio.CancelledError:
             print( "[CLOCK] Clock loop cancelled" )
@@ -153,6 +231,109 @@ async def clock_loop():
             print( f"[CLOCK] Error in clock loop: {e}" )
             # Wait before retrying to avoid rapid error loops
             await asyncio.sleep( 60 )
+
+
+async def websocket_heartbeat_loop():
+    """
+    Background task for WebSocket heartbeat checks.
+    
+    Requires:
+        - websocket_manager must be initialized with config_mgr
+        - websocket_manager.heartbeat_check() method must be available
+        - app_debug and app_verbose global variables must be initialized
+        
+    Ensures:
+        - Performs heartbeat checks at configured intervals (default 30s)
+        - Removes dead connections automatically
+        - Continues until cancelled or exception occurs
+        
+    Args:
+        None
+        
+    Returns:
+        None - runs until cancelled
+        
+    Raises:
+        asyncio.CancelledError: When task is cancelled during shutdown
+        Exception: For any other errors during heartbeat operations
+    """
+    # Get interval from config
+    interval = websocket_manager.config_mgr.get(
+        "websocket heartbeat interval seconds", default=30, return_type="int"
+    )
+    
+    print( f"[WS-HEARTBEAT] Starting heartbeat loop with {interval}s interval" )
+    
+    while True:
+        try:
+            # Run heartbeat check
+            dead_count = await websocket_manager.heartbeat_check()
+            
+            if app_debug and app_verbose and dead_count > 0:
+                print( f"[WS-HEARTBEAT] Heartbeat removed {dead_count} dead connection(s)" )
+            
+            # Wait for next interval
+            await asyncio.sleep( interval )
+            
+        except asyncio.CancelledError:
+            print( "[WS-HEARTBEAT] Heartbeat loop cancelled" )
+            break
+        except Exception as e:
+            print( f"[WS-HEARTBEAT] Error in heartbeat loop: {e}" )
+            # Wait before retrying to avoid rapid error loops
+            await asyncio.sleep( interval )
+
+
+async def websocket_cleanup_loop():
+    """
+    Background task for automatic session cleanup.
+    
+    Requires:
+        - websocket_manager must be initialized with config_mgr
+        - websocket_manager.auto_cleanup() method must be available
+        - app_debug and app_verbose global variables must be initialized
+        
+    Ensures:
+        - Performs cleanup at configured intervals (default 1 hour)
+        - Removes stale sessions exceeding maximum age
+        - Continues until cancelled or exception occurs
+        
+    Args:
+        None
+        
+    Returns:
+        None - runs until cancelled
+        
+    Raises:
+        asyncio.CancelledError: When task is cancelled during shutdown
+        Exception: For any other errors during cleanup operations
+    """
+    # Get interval from config
+    interval_hours = websocket_manager.config_mgr.get(
+        "websocket cleanup interval hours", default=1, return_type="int"
+    )
+    interval_seconds = interval_hours * 3600
+    
+    print( f"[WS-CLEANUP] Starting cleanup loop with {interval_hours} hour interval" )
+    
+    while True:
+        try:
+            # Run cleanup
+            cleaned = await websocket_manager.auto_cleanup()
+            
+            if app_debug and app_verbose and cleaned > 0:
+                print( f"[WS-CLEANUP] Cleaned {cleaned} stale session(s)" )
+            
+            # Wait for next interval
+            await asyncio.sleep( interval_seconds )
+            
+        except asyncio.CancelledError:
+            print( "[WS-CLEANUP] Cleanup loop cancelled" )
+            break
+        except Exception as e:
+            print( f"[WS-CLEANUP] Error in cleanup loop: {e}" )
+            # Wait before retrying to avoid rapid error loops
+            await asyncio.sleep( interval_seconds )
 
 
 @asynccontextmanager
@@ -177,7 +358,7 @@ async def lifespan( app: FastAPI ):
         None - Control returns to FastAPI after initialization
     """
     # Startup
-    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread
+    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task
     
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
     
@@ -194,11 +375,11 @@ async def lifespan( app: FastAPI ):
     path_to_snapshots = du.get_project_root() + path_to_snapshots_dir_wo_root
     snapshot_mgr = SolutionSnapshotManager( path_to_snapshots, debug=app_debug, verbose=app_verbose )
     
-    # Initialize queues with emit_audio callback and websocket manager
-    jobs_todo_queue = TodoFifoQueue( websocket_manager, snapshot_mgr, app, config_mgr, emit_audio_callback=create_emit_audio_callback(), debug=app_debug, verbose=app_verbose, silent=app_silent )
+    # Initialize queues with emit_speech callback and websocket manager
+    jobs_todo_queue = TodoFifoQueue( websocket_manager, snapshot_mgr, app, config_mgr, emit_speech_callback=create_emit_speech_callback(), debug=app_debug, verbose=app_verbose, silent=app_silent )
     jobs_done_queue = FifoQueue( websocket_mgr=websocket_manager, queue_name="done", emit_enabled=True )
     jobs_dead_queue = FifoQueue( websocket_mgr=websocket_manager, queue_name="dead", emit_enabled=True )
-    jobs_run_queue = RunningFifoQueue( app, websocket_manager, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, config_mgr=config_mgr, emit_audio_callback=create_emit_audio_callback() )
+    jobs_run_queue = RunningFifoQueue( app, websocket_manager, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, config_mgr=config_mgr, emit_speech_callback=create_emit_speech_callback() )
     
     # Initialize notification queue with io_tbl logging
     jobs_notification_queue = NotificationFifoQueue( websocket_mgr=websocket_manager, emit_enabled=True, debug=app_debug, verbose=app_verbose )
@@ -212,10 +393,26 @@ async def lifespan( app: FastAPI ):
     whisper_pipeline = await load_stt_model()
     print( "Done!" )
     
+    # Store event loop reference in WebSocketManager for thread-safe operations
+    print( "[WS] Storing event loop reference for thread-safe operations..." )
+    loop = asyncio.get_running_loop()
+    websocket_manager.set_event_loop( loop )
+    
     # Start background clock task
     print( "[CLOCK] Starting background clock task..." )
     clock_task = asyncio.create_task( clock_loop() )
     print( "[CLOCK] Background clock task started" )
+    
+    # Start WebSocket maintenance tasks
+    if websocket_manager.config_mgr.get( "websocket heartbeat enabled", default=True, return_type="boolean" ):
+        print( "[WS-HEARTBEAT] Starting heartbeat task..." )
+        websocket_heartbeat_task = asyncio.create_task( websocket_heartbeat_loop() )
+        print( "[WS-HEARTBEAT] Heartbeat task started" )
+    
+    if websocket_manager.config_mgr.get( "websocket cleanup enabled", default=True, return_type="boolean" ):
+        print( "[WS-CLEANUP] Starting cleanup task..." )
+        websocket_cleanup_task = asyncio.create_task( websocket_cleanup_loop() )
+        print( "[WS-CLEANUP] Cleanup task started" )
     
     # Start consumer thread for producer-consumer pattern
     print( "[CONSUMER] Starting todo-producer-run-consumer thread..." )
@@ -240,6 +437,27 @@ async def lifespan( app: FastAPI ):
         except Exception as e:
             print( f"[CLOCK] Error during clock task shutdown: {e}" )
     
+    # Cancel and cleanup WebSocket maintenance tasks
+    if websocket_heartbeat_task:
+        print( "[WS-HEARTBEAT] Cancelling heartbeat task..." )
+        websocket_heartbeat_task.cancel()
+        try:
+            await websocket_heartbeat_task
+        except asyncio.CancelledError:
+            print( "[WS-HEARTBEAT] Heartbeat task cancelled successfully" )
+        except Exception as e:
+            print( f"[WS-HEARTBEAT] Error during heartbeat task shutdown: {e}" )
+    
+    if websocket_cleanup_task:
+        print( "[WS-CLEANUP] Cancelling cleanup task..." )
+        websocket_cleanup_task.cancel()
+        try:
+            await websocket_cleanup_task
+        except asyncio.CancelledError:
+            print( "[WS-CLEANUP] Cleanup task cancelled successfully" )
+        except Exception as e:
+            print( f"[WS-CLEANUP] Error during cleanup task shutdown: {e}" )
+    
     # Shutdown consumer thread
     if consumer_thread:
         print( "[CONSUMER] Stopping todo-producer-run-consumer thread..." )
@@ -259,7 +477,7 @@ async def lifespan( app: FastAPI ):
 app = FastAPI(
     title="Genie-in-the-Box FastAPI",
     description="A FastAPI migration of the Genie-in-the-Box agent system",
-    version="0.1.0",
+    version="0.6.0",
     lifespan=lifespan
 )
 
@@ -275,21 +493,15 @@ app.add_middleware(
 # Include routers
 app.include_router(system.router)
 app.include_router(notifications.router)
-app.include_router(audio.router)
+app.include_router(speech.router)
 app.include_router(queues.router)
 app.include_router(jobs.router)
 app.include_router(websocket.router)
+app.include_router(websocket_admin.router)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
-
-# REMOVED: websocket_endpoint - moved to websocket router
-
-
-# REMOVED: websocket_queue_endpoint - moved to websocket router
-
 
 async def load_stt_model():
     """
@@ -323,245 +535,309 @@ async def load_stt_model():
     )
     return pipe
 
+# async def stream_tts_elevenlabs(
+#     session_id: str,
+#     msg: str,
+#     voice_id: str = None,
+#     model_id: str = None,
+#     stability: float = None,
+#     similarity_boost: float = None,
+#     style: float = None,
+#     use_speaker_boost: bool = None,
+#     speed: float = None,
+#     quality_profile: str = None
+# ):
+#     """
+#     ElevenLabs TTS streaming: Forward chunks immediately via WebSocket.
+#     Connects to ElevenLabs WebSocket API and streams audio chunks in real-time.
+#
+#     Args:
+#         session_id: Session ID for WebSocket connection
+#         msg: Text to convert to speech
+#         voice_id: ElevenLabs voice ID (default from config)
+#         model_id: ElevenLabs model ID (default from config)
+#         stability: Voice stability (0.0-1.0, default from config)
+#         similarity_boost: Voice similarity boost (0.0-1.0, default from config)
+#         style: Voice style/expressiveness (0.0-1.0, default from config)
+#         use_speaker_boost: Enable speaker boost (default from config)
+#         speed: Speech speed multiplier (0.25-4.0, default from config)
+#         quality_profile: Quality profile name (default from config)
+#     """
+#     global config_mgr, app_verbose
+#
+#     # Load quality profile if specified, otherwise use individual parameters with config defaults
+#     if quality_profile is None:
+#         quality_profile = config_mgr.get( "elevenlabs tts default quality profile", default="balanced" )
+#
+#     # Load profile settings if using a profile
+#     if quality_profile and quality_profile != "custom":
+#         profile_prefix = f"elevenlabs tts profile {quality_profile}"
+#
+#         # Override None values with profile settings
+#         if model_id is None:
+#             model_id = config_mgr.get( f"{profile_prefix} model", default="eleven_turbo_v2_5" )
+#         if stability is None:
+#             stability = config_mgr.get( f"{profile_prefix} stability", default=0.5, return_type="float" )
+#         if similarity_boost is None:
+#             similarity_boost = config_mgr.get( f"{profile_prefix} similarity boost", default=0.5, return_type="float" )
+#         if style is None:
+#             style = config_mgr.get( f"{profile_prefix} style", default=0.0, return_type="float" )
+#         if use_speaker_boost is None:
+#             use_speaker_boost = config_mgr.get( f"{profile_prefix} use speaker boost", default=False, return_type="boolean" )
+#         if speed is None:
+#             speed = config_mgr.get( f"{profile_prefix} speed", default=1.0, return_type="float" )
+#
+#     # Fall back to default config values for any still-None parameters
+#     if voice_id is None:
+#         voice_id = config_mgr.get( "elevenlabs tts default voice id", default="21m00Tcm4TlvDq8ikWAM" )
+#     if model_id is None:
+#         model_id = config_mgr.get( "elevenlabs tts default model", default="eleven_turbo_v2_5" )
+#     if stability is None:
+#         stability = config_mgr.get( "elevenlabs tts default stability", default=0.5, return_type="float" )
+#     if similarity_boost is None:
+#         similarity_boost = config_mgr.get( "elevenlabs tts default similarity boost", default=0.5, return_type="float" )
+#     if style is None:
+#         style = config_mgr.get( "elevenlabs tts default style", default=0.0, return_type="float" )
+#     if use_speaker_boost is None:
+#         use_speaker_boost = config_mgr.get( "elevenlabs tts default use speaker boost", default=False, return_type="boolean" )
+#     if speed is None:
+#         speed = config_mgr.get( "elevenlabs tts default speed", default=1.0, return_type="float" )
+#     websocket = websocket_manager.active_connections.get( session_id )
+#     if not websocket:
+#         print( f"[ERROR] No WebSocket connection for session {session_id}" )
+#         return
+#
+#     try:
+#         # Get ElevenLabs API key
+#         api_key = du.get_api_key( "elevenlabs" )
+#         if not api_key:
+#             raise Exception( "ElevenLabs API key not found" )
+#
+#         print( f"[TTS-ELEVENLABS] Starting generation for: '{msg}'" )
+#         print( f"[TTS-ELEVENLABS] Using model: {model_id}, profile: {quality_profile}" )
+#
+#         # Verbose voice quality settings dump
+#         if app_verbose:
+#             print( f"[TTS-ELEVENLABS-VERBOSE] ╔═══ Voice Quality Settings ═══╗" )
+#             print( f"[TTS-ELEVENLABS-VERBOSE] ║ Model ID:         {model_id:<15} ║" )
+#             print( f"[TTS-ELEVENLABS-VERBOSE] ║ Voice ID:         {voice_id:<15} ║" )
+#             print( f"[TTS-ELEVENLABS-VERBOSE] ║ Quality Profile:  {quality_profile:<15} ║" )
+#             print( f"[TTS-ELEVENLABS-VERBOSE] ║ ──────────────────────────── ║" )
+#             print( f"[TTS-ELEVENLABS-VERBOSE] ║ Stability:        {stability:<15.2f} ║" )
+#             print( f"[TTS-ELEVENLABS-VERBOSE] ║ Similarity Boost: {similarity_boost:<15.2f} ║" )
+#             print( f"[TTS-ELEVENLABS-VERBOSE] ║ Style:            {style:<15.2f} ║" )
+#             print( f"[TTS-ELEVENLABS-VERBOSE] ║ Speaker Boost:    {str(use_speaker_boost):<15} ║" )
+#             print( f"[TTS-ELEVENLABS-VERBOSE] ║ Speed:            {speed:<15.2f} ║" )
+#             print( f"[TTS-ELEVENLABS-VERBOSE] ╚══════════════════════════════╝" )
+#         else:
+#             print( f"[TTS-ELEVENLABS] Voice settings: stability={stability}, similarity_boost={similarity_boost}, style={style}, speaker_boost={use_speaker_boost}, speed={speed}" )
+#
+#         # Send status update
+#         await websocket.send_json({
+#             "type": "audio_streaming_status",
+#             "text": "Connecting to ElevenLabs...",
+#             "status": "loading",
+#             "provider": "elevenlabs"
+#         })
+#
+#         # ElevenLabs WebSocket URL with dynamic model
+#         elevenlabs_ws_url = f"wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream-input?model_id={model_id}"
+#
+#         chunk_count = 0
+#         start_time = time.time()
+#
+#         # Connect to ElevenLabs WebSocket
+#         async with websockets.connect(
+#             elevenlabs_ws_url,
+#             additional_headers={
+#                 "xi-api-key": api_key
+#             }
+#         ) as elevenlabs_ws:
+#
+#             # Send initial configuration
+#             config = {
+#                 "text": " ",  # Initial space to start the stream
+#                 "voice_settings": {
+#                     "stability": stability,
+#                     "similarity_boost": similarity_boost,
+#                     "style": style,
+#                     "use_speaker_boost": use_speaker_boost,
+#                     "speed": speed
+#                 },
+#                 "generation_config": {
+#                     "chunk_length_schedule": [120, 160, 250, 290]
+#                 }
+#             }
+#             await elevenlabs_ws.send( json.dumps( config ) )
+#
+#             # Send the actual text
+#             text_message = {
+#                 "text": msg + " ",
+#                 "try_trigger_generation": True
+#             }
+#             await elevenlabs_ws.send( json.dumps( text_message ) )
+#
+#             # Send end-of-stream marker
+#             eos_message = {"text": ""}
+#             await elevenlabs_ws.send( json.dumps( eos_message ) )
+#
+#             # Send status update
+#             await websocket.send_json({
+#                 "type": "audio_streaming_status",
+#                 "text": "Streaming audio from ElevenLabs...",
+#                 "status": "streaming",
+#                 "provider": "elevenlabs"
+#             })
+#
+#             # Receive and forward audio chunks
+#             try:
+#                 async for message in elevenlabs_ws:
+#                     # Check if our client is still connected
+#                     if not websocket_manager.is_connected( session_id ):
+#                         print( f"[TTS-ELEVENLABS] Connection lost for {session_id}" )
+#                         break
+#
+#                     try:
+#                         # ElevenLabs sends JSON messages
+#                         data = json.loads( message )
+#
+#                         if "audio" in data:
+#                             # Decode base64 audio and forward as binary
+#                             audio_chunk = base64.b64decode( data["audio"] )
+#                             chunk_count += 1
+#
+#                             # Forward chunk immediately to client
+#                             try:
+#                                 await websocket.send_bytes( audio_chunk )
+#                             except Exception as e:
+#                                 print( f"[ERROR] Failed to forward ElevenLabs chunk {chunk_count}: {e}" )
+#                                 break
+#
+#                         elif "isFinal" in data and data["isFinal"]:
+#                             # Stream is complete
+#                             print( f"[TTS-ELEVENLABS] Stream marked as final" )
+#                             break
+#
+#                     except json.JSONDecodeError:
+#                         # Might be binary data, skip
+#                         continue
+#                     except Exception as e:
+#                         print( f"[ERROR] Error processing ElevenLabs message: {e}" )
+#                         continue
+#
+#             except websockets.exceptions.ConnectionClosed:
+#                 print( f"[TTS-ELEVENLABS] ElevenLabs WebSocket connection closed" )
+#
+#         # Calculate timing
+#         total_time = time.time() - start_time
+#
+#         print( f"[TTS-ELEVENLABS] Complete - {chunk_count} chunks in {total_time:.2f}s" )
+#
+#         # Signal completion - use audio_streaming_complete for consistency
+#         if websocket_manager.is_connected( session_id ):
+#             await websocket.send_json({
+#                 "type": "audio_streaming_complete",
+#                 "text": f"ElevenLabs streaming complete ({chunk_count} chunks, {total_time:.1f}s)",
+#                 "status": "success",
+#                 "provider": "elevenlabs"
+#             })
+#
+#     except Exception as e:
+#         print( f"[ERROR] ElevenLabs TTS failed for {session_id}: {e}" )
+#         if websocket_manager.is_connected( session_id ):
+#             await websocket.send_json({
+#                 "type": "audio_streaming_status",
+#                 "text": f"ElevenLabs TTS generation failed: {str(e)}",
+#                 "status": "error",
+#                 "provider": "elevenlabs"
+#             })
 
 
-
-
-# REMOVED: auth_test - moved to websocket router
-
-
-
-
-# REMOVED: upload_and_transcribe_mp3_file - moved to audio router
-    """
-    Upload and transcribe MP3 audio file using Whisper model.
-    
-    Preconditions:
-        - Request body must contain base64 encoded MP3 audio
-        - Whisper pipeline must be initialized
-        - Write permissions to docker path
-        - Valid prompt_key in configuration
-    
-    Postconditions:
-        - Audio file saved to disk temporarily
-        - Transcription completed and processed
-        - Response saved to last_response.json
-        - Entry added to I/O table if not agent request
-        - Job queued if agent request detected
-    
-    Args:
-        request: FastAPI request containing base64 encoded audio
-        prefix: Optional prefix for transcription processing
-        prompt_key: Key for prompt selection (default: "generic")
-        prompt_verbose: Verbosity level (default: "verbose")
-    
-    Returns:
-        JSONResponse: Processed transcription results
-    
-    Raises:
-        HTTPException: If audio decoding or transcription fails
-    """
-    global app_debug, app_verbose
-    if debug:
-        print( "upload_and_transcribe_mp3_file() called" )
-        print( f"    prefix: [{prefix}]" )
-        print( f"prompt_key: [{prompt_key}]" )
-    
-    # Get the request body (base64 encoded audio)
-    body = await request.body()
-    decoded_audio = base64.b64decode( body )
-    
-    path = gc.docker_path.format( "recording.mp3" )
-    
-    if app_debug: print( f"Saving file recorded audio bytes to [{path}]...", end="" )
-    with open( path, "wb" ) as f:
-        f.write( decoded_audio )
-    if app_debug: print( " Done!" )
-    
-    # Transcribe the audio
-    if app_debug: timer = sw.Stopwatch( f"Transcribing {path}..." )
-    raw_transcription = whisper_pipeline( path, chunk_length_s=30, stride_length_s=5 )
-    if app_debug: timer.print( "Done!", use_millis=True, end="\n\n" )
-    
-    raw_transcription = raw_transcription[ "text" ].strip()
-    
-    if app_debug: print( f"Result: [{raw_transcription}]" )
-    
-    # Fetch last response processed
-    last_response_path = "/io/last_response.json"
-    if os.path.isfile( du.get_project_root() + last_response_path ):
-        with open( du.get_project_root() + last_response_path ) as json_file:
-            last_response = json.load( json_file )
-    else:
-        last_response = None
-    
-    # Process the transcription
-    # app_debug   = config_mgr.get( "app_debug", default=False, return_type="boolean" )
-    # app_verbose = config_mgr.get( "app_verbose", default=False, return_type="boolean" )
-    #
-    munger = mmm.MultiModalMunger(
-        raw_transcription, prefix=prefix, prompt_key=prompt_key, debug=app_debug, 
-        verbose=app_verbose, last_response=last_response, config_mgr=config_mgr
-    )
-    
-    try:
-        if munger.is_agent():
-            print( f"Munger: Posting [{munger.transcription}] to the agent's todo queue..." )
-            munger.results = jobs_todo_queue.push_job( munger.transcription )
-        else:
-            print( "Munger: Transcription is not for agent. Returning brute force munger string..." )
-            # Insert into I/O table
-            io_tbl.insert_io_row( 
-                input_type=f"upload and proofread mp3: {munger.mode}", 
-                input=raw_transcription, 
-                output_raw=munger.transcription, 
-                output_final=munger.get_jsons() 
-            )
-        
-        # Write JSON string to the file system
-        last_response = munger.get_jsons()
-        du.write_string_to_file( du.get_project_root() + last_response_path, last_response )
-        
-        return JSONResponse( content=json.loads( last_response ) )
-        
-    except Exception as e:
-        # Pass through the actual error details without assumptions
-        error_response = {
-            "status": "error",
-            "error_type": type( e ).__name__,
-            "error_message": str( e ),
-            "transcription": raw_transcription,
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        print( f"ERROR: {type( e ).__name__}: {e}" )
-        print( f"Returning error response to client: {error_response}" )
-        
-        # Return 422 Unprocessable Entity instead of 500 to indicate business logic failure
-        return JSONResponse( 
-            status_code=422, 
-            content=error_response 
-        )
-
-
-# Duplicate TTS endpoint removed - using audio router version instead
-
-
-async def stream_tts_hybrid( session_id: str, msg: str ):
-    """
-    Hybrid TTS streaming: Forward chunks immediately, client plays when complete.
-    Simple, no format complexity, no buffering - just pipe OpenAI chunks to WebSocket.
-    
-    Args:
-        session_id: Session ID for WebSocket connection
-        msg: Text to convert to speech
-    """
-    websocket = websocket_manager.active_connections.get( session_id )
-    if not websocket:
-        print( f"[ERROR] No WebSocket connection for session {session_id}" )
-        return
-    
-    try:
-        # Always use OpenAI with MP3 - simple and reliable
-        api_key = du.get_api_key( "openai" )
-        # TODO: We should be dynamically getting the proper base URL for this connection.
-        # Override base URL for TTS - vLLM doesn't support TTS, need real OpenAI API
-        client = OpenAI( api_key=api_key, base_url="https://api.openai.com/v1" )
-        
-        print( f"[TTS-HYBRID] Starting generation for: '{msg}'" )
-        
-        # Send status update
-        await websocket.send_json({
-            "type": "status",
-            "text": "Generating and streaming audio...",
-            "status": "loading"
-        })
-        
-        
-        # Stream from OpenAI directly to WebSocket - no buffering, no format logic
-        try:
-            with client.audio.speech.with_streaming_response.create(
-                model="tts-1",
-                voice="alloy",
-                speed=1.125,
-                response_format="mp3",  # Always MP3 - simple and universal
-                input=msg
-            ) as response:
-                
-                chunk_count = 0
-                start_time = time.time()
-                
-                # Forward each chunk immediately as received
-                for chunk in response.iter_bytes( chunk_size=8192 ):
-                    # Check connection
-                    if not websocket_manager.is_connected( session_id ):
-                        print( f"[TTS-HYBRID] Connection lost for {session_id}" )
-                        break
-                    
-                    if chunk:
-                        chunk_count += 1
-                        
-                        # Forward chunk immediately - no processing, no buffering
-                        try:
-                            await websocket.send_bytes( chunk )
-                        except Exception as e:
-                            print( f"[ERROR] Failed to forward chunk {chunk_count}: {e}" )
-                            break
-                
-                # Calculate timing
-                total_time = time.time() - start_time
-                
-                print( f"[TTS-HYBRID] Complete - {chunk_count} chunks in {total_time:.2f}s" )
-                
-                # Signal completion
-                if websocket_manager.is_connected( session_id ):
-                    await websocket.send_json({
-                        "type": "audio_complete",
-                        "text": f"Streaming complete ({chunk_count} chunks, {total_time:.1f}s)",
-                        "status": "success"
-                    })
-        
-        except Exception as tts_error:
-            raise tts_error
-    
-    except Exception as e:
-        print( f"[ERROR] Hybrid TTS failed for {session_id}: {e}" )
-        if session_id in active_websockets:
-            await websocket.send_json({
-                "type": "status",
-                "text": f"TTS generation failed: {str(e)}",
-                "status": "error"
-            })
-
-
-
-
-
-
-# REMOVED: push - moved to queues router
-
-
-# REMOVED: get_queue - moved to queues router
-
-
-
-
-
-
-
-
-
-
-
-
-# REMOVED: delete_snapshot - moved to jobs router
-
-
-# REMOVED: get_answer - moved to jobs router
-
-
-# REMOVED: upload_and_transcribe_wav_file - moved to audio router
-
+# async def stream_tts_hybrid( session_id: str, msg: str ):
+#     """
+#     Hybrid TTS streaming: Forward chunks immediately, client plays when complete.
+#     Simple, no format complexity, no buffering - just pipe OpenAI chunks to WebSocket.
+#
+#     Args:
+#         session_id: Session ID for WebSocket connection
+#         msg: Text to convert to speech
+#     """
+#     websocket = websocket_manager.active_connections.get( session_id )
+#     if not websocket:
+#         print( f"[ERROR] No WebSocket connection for session {session_id}" )
+#         return
+#
+#     try:
+#         # Always use OpenAI with MP3 - simple and reliable
+#         api_key = du.get_api_key( "openai" )
+#         # TODO: We should be dynamically getting the proper base URL for this connection.
+#         # Override base URL for TTS - vLLM doesn't support TTS, need real OpenAI API
+#         client = OpenAI( api_key=api_key, base_url="https://api.openai.com/v1" )
+#
+#         print( f"[TTS-HYBRID] Starting generation for: '{msg}'" )
+#
+#         # Send status update
+#         await websocket.send_json({
+#             "type": "audio_streaming_status",
+#             "text": "Generating and streaming audio...",
+#             "status": "loading"
+#         })
+#
+#
+#         # Stream from OpenAI directly to WebSocket - no buffering, no format logic
+#         try:
+#             with client.audio.speech.with_streaming_response.create(
+#                 model="tts-1",
+#                 voice="alloy",
+#                 speed=1.125,
+#                 response_format="mp3",  # Always MP3 - simple and universal
+#                 input=msg
+#             ) as response:
+#
+#                 chunk_count = 0
+#                 start_time = time.time()
+#
+#                 # Forward each chunk immediately as received
+#                 for chunk in response.iter_bytes( chunk_size=8192 ):
+#                     # Check connection
+#                     if not websocket_manager.is_connected( session_id ):
+#                         print( f"[TTS-HYBRID] Connection lost for {session_id}" )
+#                         break
+#
+#                     if chunk:
+#                         chunk_count += 1
+#
+#                         # Forward chunk immediately - no processing, no buffering
+#                         try:
+#                             await websocket.send_bytes( chunk )
+#                         except Exception as e:
+#                             print( f"[ERROR] Failed to forward chunk {chunk_count}: {e}" )
+#                             break
+#
+#                 # Calculate timing
+#                 total_time = time.time() - start_time
+#
+#                 print( f"[TTS-HYBRID] Complete - {chunk_count} chunks in {total_time:.2f}s" )
+#
+#                 # Signal completion
+#                 if websocket_manager.is_connected( session_id ):
+#                     await websocket.send_json({
+#                         "type": "audio_streaming_complete",
+#                         "text": f"Streaming complete ({chunk_count} chunks, {total_time:.1f}s)",
+#                         "status": "success"
+#                     })
+#
+#         except Exception as tts_error:
+#             raise tts_error
+#
+#     except Exception as e:
+#         print( f"[ERROR] Hybrid TTS failed for {session_id}: {e}" )
+#         if session_id in active_websockets:
+#             await websocket.send_json({
+#                 "type": "audio_streaming_status",
+#                 "text": f"TTS generation failed: {str(e)}",
+#                 "status": "error"
+#             })
 
 if __name__ == "__main__":
     uvicorn.run(

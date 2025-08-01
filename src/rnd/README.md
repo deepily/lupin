@@ -4,9 +4,23 @@ This directory contains research and development documents for the Lupin project
 
 ## Active Documents
 
+### Current Development (2025.08)
+- **[2025.08.01-design-by-contract-audit.md](2025.08.01-design-by-contract-audit.md)** - Comprehensive audit of Python files lacking Design by Contract docstrings (📋 ready for implementation)
+- **[2025.08.01-websocket-smoke-test-suite-design.md](2025.08.01-websocket-smoke-test-suite-design.md)** - Comprehensive smoke test suite design for WebSocket functionality validation during polish sessions (✅ completed - Phase 2 implemented and integrated)
+  - **Implementation Status**: 50 comprehensive tests (400% expansion from original 10 tests)
+  - **Success Rate**: 92% overall with detailed behavioral insights
+  - **Production Ready**: Full pre-polish/post-polish regression detection workflow
+
 ### Current Development (2025.07)
-- **[2025.07.11-websocket-user-routing-architecture.md](2025.07.11-websocket-user-routing-architecture.md)** - User-centric event routing architecture to replace ephemeral WebSocket ID dependencies
-- **[2025.07.01-fastapi-clock-events-research.md](2025.07.01-fastapi-clock-events-research.md)** - Research plan for implementing clock update events using existing WebSocketManager
+- **[2025.07.31-elevenlabs-tts-quality-optimization-plan.md](2025.07.31-elevenlabs-tts-quality-optimization-plan.md)** - Comprehensive plan to improve TTS audio quality while maintaining sub-500ms latency (📋 ready for implementation)
+- **[2025.07.30-websocket-branch-polish-tracker.md](2025.07.30-websocket-branch-polish-tracker.md)** - Comprehensive tracking document for debugging, polishing, and documenting completed WebSocket functionality (📋 planning phase)
+- **[2025.07.24-websocket-async-bridge-implementation.md](2025.07.24-websocket-async-bridge-implementation.md)** - WebSocket implementation progress tracker through Phases 1, 2, and 2.5 (✅ completed)
+- **[2025.07.12-progressive-tts-streaming-experimental-tracker.md](2025.07.12-progressive-tts-streaming-experimental-tracker.md)** - Firefox-first experimental implementation of true progressive audio streaming (✅ completed - integrated into main system)
+- **[2025.07.12-tts-mode-switching-design.md](2025.07.12-tts-mode-switching-design.md)** - Add dynamic switching between OpenAI batch TTS and ElevenLabs streaming TTS (✅ completed)
+- **[2025.07.12-tts-mode-switching-phase1-tracker.md](2025.07.12-tts-mode-switching-phase1-tracker.md)** - Phase 1 implementation tracker for TTS mode switching (✅ completed)
+- **[2025.07.12-audio-to-speech-renaming-design.md](2025.07.12-audio-to-speech-renaming-design.md)** - Rename misleading "audio" terminology to accurate "speech" terminology for TTS functionality (✅ completed)
+- **[2025.07.11-websocket-user-routing-architecture.md](2025.07.11-websocket-user-routing-architecture.md)** - User-centric event routing architecture to replace ephemeral WebSocket ID dependencies (✅ core phases completed)
+- **[2025.07.01-fastapi-clock-events-research.md](2025.07.01-fastapi-clock-events-research.md)** - Research plan for implementing clock update events using existing WebSocketManager (✅ completed)
 
 ### Previous Development (2025.06)
 - **[2025.06.20-claude-code-notification-system-design.md](2025.06.20-claude-code-notification-system-design.md)** - Real-time notification system design

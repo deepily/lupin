@@ -74,13 +74,23 @@ Lupin is built on a modern FastAPI architecture with WebSocket support for real-
 - **Notification system** for agent-to-user feedback
 
 **Key Technical Documents:**
+- **[WebSocket Events Documentation](src/docs/websocket-events.md)** - Comprehensive guide to all WebSocket events and their usage
 - **[WebSocket TTS Streaming Design](src/rnd/2025.06.03-websocket-tts-streaming-design.md)** - Architecture for real-time text-to-speech streaming
 - **[Claude Code Notification System](src/rnd/2025.06.20-claude-code-notification-system-design.md)** - Design for real-time agent notifications
 - **[FastAPI Queue Implementation](src/rnd/2025.06.17-fastapi-queue-implementation-plan.md)** - Queue-based request handling
 - **[Lupin Renaming Plan](src/rnd/2025.06.28-lupin-renaming-plan.md)** - Project rebranding documentation
+- **[Audio Chunk Sequential Playback Analysis](src/rnd/2025.08.01-audio-chunk-sequential-playback-analysis.md)** - Root cause analysis and solution for ElevenLabs audio duplication issues
+
+**Current Development Status (2025.08.01):**
+
+The project currently has **three ongoing parallel development efforts**:
+
+1. **Audio Chunk Sequential Playback Fix** - Resolving ElevenLabs WebSocket audio duplication through sequential scheduling
+2. **WebSocket FastAPI Test Suite** - Comprehensive diagnostic and testing tools for WebSocket functionality
+3. **FastAPI and Socket Polishing** - Continued refinement of WebSocket infrastructure and API endpoints
 
 **Quick Start Commands:**
-- Run FastAPI server: `src/scripts/run-fastapi-gib.sh`
+- Run FastAPI server: `src/scripts/run-fastapi-lupin.sh` (port 7999)
 - Run GUI client: `src/scripts/run-lupin-gui.sh`
 - Run GSM8K benchmarks: `src/scripts/run-gsm8k.sh --help`
 

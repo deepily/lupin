@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Event Subscription Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        button { margin: 5px; padding: 8px 15px; cursor: pointer; }
+        button:hover { background: #f0f0f0; }
+        pre { background: #f4f4f4; padding: 10px; overflow-x: auto; max-height: 300px; overflow-y: auto; }
+        .event-item { 
+            margin: 5px 0; 
+            padding: 5px 10px; 
+            border-left: 3px solid #007bff;
+            background: #f8f9fa;
+        }
+        .subscription-item {
+            display: inline-block;
+            margin: 3px;
+            padding: 5px 10px;
+            background: #e9ecef;
+            border-radius: 15px;
+            font-size: 12px;
+        }
+        .subscription-item.active {
+            background: #28a745;
+            color: white;
+        }
+        .connection-info {
+            padding: 10px;
+            background: #e9ecef;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .connected { color: #28a745; font-weight: bold; }
+        .disconnected { color: #dc3545; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Event Subscription Test</h1>
+    
+    <div class="test-section">
+        <h2>Connection Status</h2>
+        <div class="connection-info">
+            <div>Session ID: <span id="session-id">Not connected</span></div>
+            <div>Status: <span id="connection-status" class="disconnected">Disconnected</span></div>
+            <div>User ID: <span id="user-id">Not authenticated</span></div>
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Event Subscriptions</h2>
+        <p>Click events to toggle subscription:</p>
+        <div id="available-events">
+            <!-- Will be populated dynamically -->
+        </div>
+        <br>
+        <button onclick="updateSubscriptions()">Update Subscriptions</button>
+        <button onclick="subscribeToAll()">Subscribe to All</button>
+        <button onclick="subscribeToNone()">Unsubscribe All</button>
+        <button onclick="subscribeToDefaults()">Default Set</button>
+    </div>
+    
+    <div class="test-section">
+        <h2>Connection Controls</h2>
+        <button onclick="connect()">Connect</button>
+        <button onclick="disconnect()">Disconnect</button>
+        <button onclick="getStats()">Get Subscription Stats</button>
+    </div>
+    
+    <div class="test-section">
+        <h2>Event Log</h2>
+        <div id="stats"></div>
+        <pre id="event-log"></pre>
+    </div>
+
+    <script>
+        let ws = null;
+        let sessionId = null;
+        let isConnected = false;
+        let subscribedEvents = new Set(['auth_success', 'auth_error', 'connect', 'ping']);
+        
+        // Will be loaded from server
+        let availableEvents = [];
+        
+        // Initialize UI
+        function initializeUI() {
+            const container = document.getElementById('available-events');
+            container.innerHTML = '';
+            
+            availableEvents.forEach(event => {
+                const item = document.createElement('span');
+                item.className = 'subscription-item';
+                item.textContent = event;
+                item.onclick = () => toggleSubscription(event);
+                
+                if (subscribedEvents.has(event)) {
+                    item.classList.add('active');
+                }
+                
+                container.appendChild(item);
+            });
+        }
+        
+        function toggleSubscription(event) {
+            if (subscribedEvents.has(event)) {
+                subscribedEvents.delete(event);
+            } else {
+                subscribedEvents.add(event);
+            }
+            initializeUI();
+        }
+        
+        function subscribeToAll() {
+            subscribedEvents = new Set(['*']);
+            initializeUI();
+        }
+        
+        function subscribeToNone() {
+            subscribedEvents = new Set();
+            initializeUI();
+        }
+        
+        function subscribeToDefaults() {
+            subscribedEvents = new Set(['auth_success', 'auth_error', 'connect', 'ping', 'time_update']);
+            initializeUI();
+        }
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toISOString();
+            const logElement = document.getElementById('event-log');
+            const color = type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#007bff';
+            
+            logElement.innerHTML = `<div class="event-item" style="border-left-color: ${color}">
+                <small style="color: #666">[${timestamp}]</small> ${message}
+            </div>` + logElement.innerHTML;
+            
+            // Keep only last 20 events
+            const children = logElement.children;
+            while (children.length > 20) {
+                logElement.removeChild(children[children.length - 1]);
+            }
+        }
+        
+        async function connect() {
+            if (isConnected) {
+                log('Already connected', 'error');
+                return;
+            }
+            
+            try {
+                // Get session ID
+                const response = await fetch('/api/get-session-id');
+                const data = await response.json();
+                sessionId = data.session_id;
+                
+                document.getElementById('session-id').textContent = sessionId;
+                
+                // Create WebSocket
+                const wsUrl = `ws://localhost:7999/ws/queue/${sessionId}`;
+                ws = new WebSocket(wsUrl);
+                
+                ws.onopen = () => {
+                    isConnected = true;
+                    document.getElementById('connection-status').textContent = 'Connected';
+                    document.getElementById('connection-status').className = 'connected';
+                    
+                    log('WebSocket connected', 'success');
+                    
+                    // Send auth with subscriptions
+                    const subscriptionArray = subscribedEvents.has('*') ? ['*'] : Array.from(subscribedEvents);
+                    
+                    ws.send(JSON.stringify({
+                        type: 'auth',
+                        token: 'mock_token_ricardo_felipe_ruiz_6bdc',
+                        session_id: sessionId,
+                        subscribed_events: subscriptionArray
+                    }));
+                    
+                    log(`Sent auth with subscriptions: ${subscriptionArray.join(', ')}`);
+                };
+                
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'auth_success') {
+                        document.getElementById('user-id').textContent = data.user_id;
+                        log(`Authentication successful: ${data.user_id}`, 'success');
+                    } else if (data.type === 'subscription_update') {
+                        log(`Subscription update ${data.success ? 'successful' : 'failed'}: ${data.subscriptions.join(', ')}`);
+                    } else {
+                        log(`Received event: ${data.type}`);
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    log('WebSocket error', 'error');
+                };
+                
+                ws.onclose = () => {
+                    isConnected = false;
+                    document.getElementById('connection-status').textContent = 'Disconnected';
+                    document.getElementById('connection-status').className = 'disconnected';
+                    document.getElementById('user-id').textContent = 'Not authenticated';
+                    log('WebSocket disconnected');
+                };
+                
+            } catch (error) {
+                log(`Connection failed: ${error.message}`, 'error');
+            }
+        }
+        
+        function disconnect() {
+            if (ws && isConnected) {
+                ws.close();
+                ws = null;
+            }
+        }
+        
+        function updateSubscriptions() {
+            if (!isConnected || !ws) {
+                log('Not connected', 'error');
+                return;
+            }
+            
+            const subscriptionArray = subscribedEvents.has('*') ? ['*'] : Array.from(subscribedEvents);
+            
+            ws.send(JSON.stringify({
+                type: 'update_subscriptions',
+                events: subscriptionArray,
+                action: 'replace'
+            }));
+            
+            log(`Updating subscriptions to: ${subscriptionArray.join(', ')}`);
+        }
+        
+        async function getStats() {
+            try {
+                const response = await fetch('/api/websocket-sessions/stats', {
+                    headers: {
+                        'Authorization': 'Bearer mock_token_ricardo_felipe_ruiz_6bdc'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                const statsDiv = document.getElementById('stats');
+                statsDiv.innerHTML = `
+                    <h3>Subscription Statistics</h3>
+                    <ul>
+                        <li>Total Connections: ${data.subscription_stats.total_connections}</li>
+                        <li>Wildcard Subscribers: ${data.subscription_stats.wildcard_subscribers}</li>
+                        <li>Filtered Connections: ${data.subscription_stats.filtered_connections}</li>
+                    </ul>
+                    <h4>Event Subscription Counts:</h4>
+                    <ul>
+                        ${Object.entries(data.subscription_stats.subscription_counts || {})
+                            .map(([event, count]) => `<li>${event}: ${count}</li>`)
+                            .join('')}
+                    </ul>
+                `;
+                
+                log('Retrieved subscription statistics');
+                
+            } catch (error) {
+                log(`Failed to get stats: ${error.message}`, 'error');
+            }
+        }
+        
+        // Load available events from server
+        async function loadAvailableEvents() {
+            try {
+                const response = await fetch('/api/websocket-events', {
+                    headers: {
+                        'Authorization': 'Bearer mock_token_ricardo_felipe_ruiz_6bdc'
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    availableEvents = data.available_events;
+                    log(`Loaded ${availableEvents.length} available event types from server`, 'success');
+                    initializeUI();
+                } else {
+                    log('Failed to load available events from server', 'error');
+                    // Fallback to hardcoded list
+                    availableEvents = [
+                        "todo_update", "done_update", "run_update", "dead_update",
+                        "speech_update", "audio_chunk", "notification", "notification_update",
+                        "time_update", "status", "error", "ping", "auth_success", "auth_error", "connect"
+                    ];
+                    log('Using fallback event list', 'warning');
+                    initializeUI();
+                }
+            } catch (error) {
+                log(`Error loading events: ${error.message}`, 'error');
+                // Use fallback
+                availableEvents = ["auth_success", "auth_error", "connect", "ping"];
+                initializeUI();
+            }
+        }
+        
+        // Initialize on load
+        window.onload = async () => {
+            await loadAvailableEvents();
+        };
+    </script>
+</body>
+</html>
