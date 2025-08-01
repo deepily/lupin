@@ -5,7 +5,9 @@ This directory contains research and development documents for the Lupin project
 ## Active Documents
 
 ### Current Development (2025.08)
-- **[2025.08.01-design-by-contract-audit.md](2025.08.01-design-by-contract-audit.md)** - Comprehensive audit of Python files lacking Design by Contract docstrings (📋 ready for implementation)
+- **[2025.08.01-design-by-contract-audit.md](2025.08.01-design-by-contract-audit.md)** - Comprehensive audit and implementation of Design by Contract docstrings (✅ Phases 1 & 2 completed - 83 functions documented across 7 files with zero regressions)
+- **[2025.08.01-sequential-audio-production-migration.md](2025.08.01-sequential-audio-production-migration.md)** - Production migration plan for Sequential Audio Element Queue from experimental validation to HybridTTS integration (📋 ready for implementation)
+- **[2025.08.01-audio-chunk-sequential-playback-analysis.md](2025.08.01-audio-chunk-sequential-playback-analysis.md)** - Root cause analysis and implementation strategy for fixing audio chunk overlap issues (✅ completed - experimental validation successful)
 - **[2025.08.01-websocket-smoke-test-suite-design.md](2025.08.01-websocket-smoke-test-suite-design.md)** - Comprehensive smoke test suite design for WebSocket functionality validation during polish sessions (✅ completed - Phase 2 implemented and integrated)
   - **Implementation Status**: 50 comprehensive tests (400% expansion from original 10 tests)
   - **Success Rate**: 92% overall with detailed behavioral insights
