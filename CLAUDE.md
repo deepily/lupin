@@ -62,3 +62,6 @@
 ## REPOSITORY RELATIONS
 - There is another repo that's a part of the larger project contained in the directory `lupin-plugin-firefox`
 - This repo must be managed separately and cannot be managed by Claude
+
+## RUNNING/TESTING FASTAPI APPLICATIONS
+- Please assume that there is a Fast API server instance bound to port 7999. I will start and stop it if needed. You never need to spin up another instance unless it's for a ephemeral use on port 8000.

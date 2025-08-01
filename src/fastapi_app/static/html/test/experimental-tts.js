@@ -517,6 +517,9 @@ class ExperimentalProgressiveTTS {
             this.startTime = Date.now();
             this.updateStatus('playbackStatus', 'Requesting...');
             
+            // Get current UI settings
+            const settings = getCurrentSettings();
+            
             // Send TTS request to ElevenLabs endpoint
             const response = await fetch('/api/get-speech-elevenlabs', {
                 method: 'POST',
@@ -526,7 +529,8 @@ class ExperimentalProgressiveTTS {
                 },
                 body: JSON.stringify({
                     session_id: this.sessionId,
-                    text: text
+                    text: text,
+                    ...settings
                 })
             });
             
@@ -542,6 +546,102 @@ class ExperimentalProgressiveTTS {
             testBtn.disabled = false;
             testBtn.textContent = '🚀 Test Progressive Streaming';
             this.updateStatus('playbackStatus', 'Error');
+        }
+    }
+    
+    async testABComparison() {
+        const textInput = document.getElementById('test-text');
+        const text = textInput?.value.trim();
+        
+        if (!text) {
+            this.log('⚠️ Please enter text to test', 'warning');
+            return;
+        }
+        
+        this.log('⚖️ Starting A/B Comparison: Flash vs Turbo models', 'info');
+        
+        // Test 1: Flash v2.5 (Balanced Profile)
+        this.log('🔵 Testing Flash v2.5 (Balanced Profile)...', 'info');
+        await this.runSingleTest(text, {
+            model_id: 'eleven_flash_v2_5',
+            quality_profile: 'balanced'
+        }, 'Flash v2.5');
+        
+        // Wait between tests
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Test 2: Turbo v2.5 (Quality Profile)
+        this.log('🔴 Testing Turbo v2.5 (Quality Profile)...', 'info');
+        await this.runSingleTest(text, {
+            model_id: 'eleven_turbo_v2_5',
+            quality_profile: 'quality'
+        }, 'Turbo v2.5');
+        
+        this.log('✅ A/B Comparison Complete! Check logs above for latency comparison.', 'success');
+    }
+    
+    async runSingleTest(text, settings, modelName) {
+        try {
+            // Reset metrics for this test
+            this.resetMetrics();
+            
+            // Initialize if needed
+            if (this.useWebAudioAPI) {
+                await this.initializeWebAudioContext();
+            }
+            
+            // Connect WebSocket
+            await this.connectWebSocket();
+            
+            this.isStreaming = true;
+            this.startTime = Date.now();
+            this.updateStatus('playbackStatus', `Testing ${modelName}...`);
+            
+            // Send TTS request with specific settings
+            const response = await fetch('/api/get-speech-elevenlabs', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer mock_token_email_ricardo.felipe.ruiz@gmail.com'
+                },
+                body: JSON.stringify({
+                    session_id: this.sessionId,
+                    text: text,
+                    ...settings
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+            // Wait for completion (max 10 seconds)
+            const testTimeout = setTimeout(() => {
+                this.isStreaming = false;
+                this.log(`⏰ ${modelName} test timeout after 10 seconds`, 'warning');
+            }, 10000);
+            
+            // Wait for streaming to complete
+            while (this.isStreaming && Date.now() - this.startTime < 10000) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            clearTimeout(testTimeout);
+            
+            // Log results
+            const totalTime = Date.now() - this.startTime;
+            const firstAudioLatency = this.firstAudioTime ? (this.firstAudioTime - this.startTime) : 'N/A';
+            
+            this.log(`📊 ${modelName} Results: First Audio: ${firstAudioLatency}ms, Total: ${totalTime}ms, Chunks: ${this.chunksReceived}`, 'success');
+            
+            // Close WebSocket
+            if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                this.websocket.close();
+            }
+            
+        } catch (error) {
+            this.log(`❌ ${modelName} test failed: ${error.message}`, 'error');
+            this.isStreaming = false;
         }
     }
     
@@ -666,6 +766,64 @@ function stopStreaming() {
 function clearLogs() {
     if (window.experimentalTTS) {
         window.experimentalTTS.clearLogs();
+    }
+}
+
+// A/B Testing Functions
+function testABComparison() {
+    if (window.experimentalTTS) {
+        window.experimentalTTS.testABComparison();
+    }
+}
+
+function updateCustomSettings() {
+    const profileSelect = document.getElementById('profile-select');
+    const customSettings = document.getElementById('custom-settings');
+    const modelSelect = document.getElementById('model-select');
+    
+    if (profileSelect.value === 'custom') {
+        customSettings.style.display = 'block';
+    } else {
+        customSettings.style.display = 'none';
+        
+        // Update model based on profile
+        switch(profileSelect.value) {
+            case 'balanced':
+            case 'fast':
+                modelSelect.value = 'eleven_flash_v2_5';
+                break;
+            case 'quality':
+                modelSelect.value = 'eleven_turbo_v2_5';
+                break;
+        }
+    }
+}
+
+function getCurrentSettings() {
+    const profileSelect = document.getElementById('profile-select');
+    const modelSelect = document.getElementById('model-select');
+    const voiceSelect = document.getElementById('voice-select');
+    
+    const baseSettings = {
+        model_id: modelSelect.value,
+        voice_id: voiceSelect.value
+    };
+    
+    if (profileSelect.value === 'custom') {
+        return {
+            ...baseSettings,
+            quality_profile: 'custom',
+            stability: parseFloat(document.getElementById('stability-input').value),
+            similarity_boost: parseFloat(document.getElementById('similarity-input').value),
+            style: parseFloat(document.getElementById('style-input').value),
+            speed: parseFloat(document.getElementById('speed-input').value),
+            use_speaker_boost: document.getElementById('speaker-boost-input').checked
+        };
+    } else {
+        return {
+            ...baseSettings,
+            quality_profile: profileSelect.value
+        };
     }
 }
 
