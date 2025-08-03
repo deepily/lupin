@@ -5,11 +5,18 @@
  * that streams audio chunks via WebSocket for speed while playing the
  * complete audio for reliability.
  * 
+ * Features:
+ * - Sequential audio playback for instant mode (eliminates overlap)
+ * - Reliable mode with collected playback (unchanged)
+ * - Production-grade error handling and fallbacks
+ * 
  * Usage:
  *   const tts = new HybridTTS();
  *   await tts.initialize();
  *   await tts.speak("Hello, world!");
  */
+
+// SequentialAudioManager will be loaded dynamically when needed
 
 class HybridTTS {
     constructor(options = {}) {
@@ -47,6 +54,14 @@ class HybridTTS {
         this.audioContext = null;
         this.currentPlaybackTime = 0;
         this.useWebAudioAPI = this.mode === 'instant'; // Use Web Audio for instant mode
+        
+        // Sequential Audio Manager for instant mode (eliminates audio overlap)
+        this.sequentialAudioManager = null;
+        this.useSequentialPlayback = options.useSequentialPlayback !== false; // Default true
+        
+        // Error handling with audio feedback
+        this.errorAudio = null;
+        this.enableErrorAudio = options.enableErrorAudio !== false; // Default true
         
         // Cache configuration
         this.cacheEnabled = options.cacheEnabled !== false; // Default true
@@ -141,6 +156,12 @@ class HybridTTS {
                     // Initialize Web Audio API for instant mode
                     if (this.useWebAudioAPI) {
                         await this.initializeWebAudio();
+                        
+                        // Initialize Sequential Audio Manager for overlap elimination
+                        this.initializeSequentialAudioManager();
+                        
+                        // Initialize error audio system
+                        this.initializeErrorAudio();
                     }
                     
                     resolve();
@@ -189,6 +210,121 @@ class HybridTTS {
         }
     }
     
+    /**
+     * Initialize Sequential Audio Manager for instant mode
+     * Eliminates audio chunk overlap issues with proper queue-based playback
+     */
+    initializeSequentialAudioManager() {
+        if (!this.useSequentialPlayback) {
+            console.log('HybridTTS: Sequential playback disabled, using original Web Audio API method');
+            return;
+        }
+        
+        try {
+            // Check if SequentialAudioManager is available globally
+            if (typeof window.SequentialAudioManager === 'undefined') {
+                console.error('HybridTTS: SequentialAudioManager not available globally');
+                this.useSequentialPlayback = false;
+                return;
+            }
+            
+            this.sequentialAudioManager = new window.SequentialAudioManager(
+                // onChunkStart callback - integrate with existing progress tracking
+                ( chunkIndex ) => {
+                    // Track first chunk latency
+                    if ( chunkIndex === 1 && this.startTime ) {
+                        const latency = Date.now() - this.startTime;
+                        console.log( `HybridTTS: First audio chunk playing in ${latency}ms (sequential mode)` );
+                    }
+                    
+                    // Maintain existing progress callback integration
+                    try {
+                        this.onProgressUpdate( `Playing chunk ${chunkIndex}` );
+                    } catch ( error ) {
+                        console.error( 'HybridTTS: Error in progress callback:', error );
+                    }
+                },
+                
+                // onChunkEnd callback - maintain analytics and metrics
+                ( chunkIndex ) => {
+                    // Could add analytics here if needed
+                },
+                
+                // Debug mode - enable for development (can be configured via options later)
+                false
+            );
+            
+            console.log( 'HybridTTS: SequentialAudioManager initialized for instant mode' );
+            
+        } catch ( error ) {
+            console.error( 'HybridTTS: Failed to initialize SequentialAudioManager:', error );
+            console.warn( 'HybridTTS: Falling back to original Web Audio API method' );
+            this.useSequentialPlayback = false;
+        }
+    }
+    
+    /**
+     * Initialize error audio system for subtle user feedback
+     */
+    initializeErrorAudio() {
+        if (!this.enableErrorAudio) {
+            console.log('HybridTTS: Error audio disabled');
+            return;
+        }
+        
+        try {
+            // Create error audio element (implementation detail: gentle gong sound)
+            this.errorAudio = new Audio('/static/audio/gentle-gong.mp3');
+            this.errorAudio.volume = 0.3; // Subtle volume
+            this.errorAudio.preload = 'auto';
+            
+            console.log('HybridTTS: Error audio system initialized');
+            
+        } catch (error) {
+            console.warn('HybridTTS: Failed to initialize error audio:', error);
+            this.enableErrorAudio = false;
+        }
+    }
+    
+    /**
+     * Play error sound for user feedback
+     */
+    playErrorSound() {
+        if (!this.enableErrorAudio || !this.errorAudio) {
+            return;
+        }
+        
+        try {
+            // Generic method - implementation detail is gentle notification sound
+            this.errorAudio.currentTime = 0; // Reset to beginning
+            this.errorAudio.play().catch(e => {
+                console.warn('HybridTTS: Error sound playback failed:', e);
+            });
+        } catch (error) {
+            console.warn('HybridTTS: Error playing error sound:', error);
+        }
+    }
+    
+    /**
+     * Handle TTS service errors with graceful fallback
+     */
+    async handleTTSServiceError(errorMessage = 'TTS service error') {
+        console.log(`HybridTTS: Handling TTS service error: ${errorMessage}`);
+        
+        // Play subtle error notification
+        this.playErrorSound();
+        
+        // Silent fallback to reliable mode if currently in instant mode
+        if (this.mode === 'instant') {
+            console.log('HybridTTS: Switching to reliable mode due to TTS service error');
+            await this.setMode('reliable');
+            this.onStatusUpdate('Switched to backup TTS system', 'warning');
+        }
+        
+        // Update user with friendly message
+        this.onError('TTS service temporarily unavailable - please try again');
+    }
+    
     async handleWebSocketMessage(event) {
         if (event.data instanceof Blob) {
             // Audio chunk received
@@ -199,7 +335,13 @@ class HybridTTS {
             
             // In instant mode with Web Audio API, play chunks immediately
             if (this.mode === 'instant' && this.useWebAudioAPI && this.audioContext) {
-                this.playChunkProgressive(event.data);
+                // Use Sequential Audio Manager if available (eliminates overlap)
+                if (this.useSequentialPlayback && this.sequentialAudioManager) {
+                    this.sequentialAudioManager.addChunk(event.data);
+                } else {
+                    // Fallback to original method if sequential playback disabled or failed
+                    this.playChunkProgressive(event.data);
+                }
             }
             
         } else {
@@ -281,8 +423,21 @@ class HybridTTS {
                             console.log('No promise to reject!');
                         }
                     }
+                } else if (message.type === 'tts_error') {
+                    // Handle TTS service errors with graceful fallback
+                    console.log('HybridTTS received TTS service error:', message);
+                    await this.handleTTSServiceError(message.text || message.details);
+                    
+                    // Reset state and reject promise
+                    if (this._currentPromise && this._currentPromise.reject) {
+                        this._currentPromise.reject(new Error(message.text || 'TTS service temporarily unavailable'));
+                        this._currentPromise = null;
+                    }
+                    this.resetAudioState();
+                    this.isRequesting = false;
+                    
                 } else if (message.type === 'error') {
-                    // Handle error type messages too
+                    // Handle generic error type messages
                     console.log('HybridTTS received error type:', message);
                     if (this._currentPromise && this._currentPromise.reject) {
                         this._currentPromise.reject(new Error(message.text || message.error || 'TTS generation failed'));
@@ -361,6 +516,9 @@ class HybridTTS {
             if (this.useWebAudioAPI && !this.audioContext) {
                 // Initialize Web Audio API if switching to instant mode
                 await this.initializeWebAudio();
+                
+                // Initialize Sequential Audio Manager for instant mode
+                this.initializeSequentialAudioManager();
             }
         }
     }
@@ -378,29 +536,25 @@ class HybridTTS {
         if (this.audioContext) {
             this.currentPlaybackTime = this.audioContext.currentTime;
         }
+        
+        // Reset Sequential Audio Manager if active
+        if (this.sequentialAudioManager) {
+            this.sequentialAudioManager.reset();
+        }
     }
     
     async playChunkProgressive(audioBlob) {
-        const chunkId = Date.now() + '-' + Math.random().toString(36).substr(2, 5);
-        console.log( `🔍 [CHUNK-${chunkId}] playChunkProgressive START` );
-        console.log( `🔍 [CHUNK-${chunkId}] audioBlob size:`, audioBlob.size );
-        console.log( `🔍 [CHUNK-${chunkId}] audioContext state before:`, this.audioContext?.state );
-        
         // Resume audio context if suspended (Firefox autoplay policy)
         if (this.audioContext && this.audioContext.state === 'suspended') {
-            console.log( `🔍 [CHUNK-${chunkId}] Resuming suspended audioContext` );
             await this.audioContext.resume();
-            console.log( `🔍 [CHUNK-${chunkId}] audioContext state after resume:`, this.audioContext.state );
         }
         
         try {
             // Convert blob to ArrayBuffer
             const arrayBuffer = await audioBlob.arrayBuffer();
-            console.log( `🔍 [CHUNK-${chunkId}] ArrayBuffer size:`, arrayBuffer.byteLength );
             
             // Decode audio data
             const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-            console.log( `🔍 [CHUNK-${chunkId}] Decoded audio - duration:`, audioBuffer.duration, 'channels:', audioBuffer.numberOfChannels );
             
             // Create buffer source
             const source = this.audioContext.createBufferSource();
@@ -409,17 +563,14 @@ class HybridTTS {
             // Add a gain node to control volume and debug
             const gainNode = this.audioContext.createGain();
             gainNode.gain.value = 3.0; // Boost volume 3x for driver issues
-            console.log( `🔍 [CHUNK-${chunkId}] Gain node value:`, gainNode.gain.value );
             
             source.connect(gainNode);
             gainNode.connect(this.audioContext.destination);
-            console.log( `🔍 [CHUNK-${chunkId}] Audio graph connected: source → gain → destination` );
             
             // Check AudioContext state
             if (this.audioContext.state === 'suspended') {
-                console.warn(`🔍 [CHUNK-${chunkId}] AudioContext is suspended, attempting to resume...`);
+                console.warn('HybridTTS: AudioContext is suspended, attempting to resume...');
                 await this.audioContext.resume();
-                console.log( `🔍 [CHUNK-${chunkId}] AudioContext state after second resume:`, this.audioContext.state );
             }
             
             // Enhanced audio diagnostics
@@ -437,19 +588,14 @@ class HybridTTS {
             
             // Schedule for immediate playback
             const playTime = Math.max(this.audioContext.currentTime, this.currentPlaybackTime);
-            console.log( `🔍 [CHUNK-${chunkId}] Calculated playTime:`, playTime, 'currentTime:', this.audioContext.currentTime, 'currentPlaybackTime:', this.currentPlaybackTime );
             source.start(playTime);
-            console.log( `🔍 [CHUNK-${chunkId}] Source.start() called successfully at time:`, playTime );
             
             // Add debug to track when audio actually plays
             source.onended = () => {
-                const endTime = this.audioContext.currentTime.toFixed(3);
-                console.log( `🔍 [CHUNK-${chunkId}] Audio chunk finished playing at ${endTime}s` );
-                console.log(`HybridTTS: Audio chunk finished playing at ${endTime}s`);
+                console.log(`HybridTTS: Audio chunk finished playing at ${this.audioContext.currentTime.toFixed(3)}s`);
                 
                 // Check if audio context is still running properly
                 if (this.audioContext.state !== 'running') {
-                    console.error( `🔍 [CHUNK-${chunkId}] AudioContext state changed to ${this.audioContext.state}` );
                     console.error(`HybridTTS: AudioContext state changed to ${this.audioContext.state} - audio may have stopped!`);
                     
                     // Try to fallback to reliable mode
@@ -458,13 +604,7 @@ class HybridTTS {
                         localStorage.setItem('tts-mode', 'reliable');
                         this.mode = 'reliable';
                     }
-                } else {
-                    console.log( `🔍 [CHUNK-${chunkId}] Audio chunk completed successfully, AudioContext still running` );
                 }
-            };
-            
-            source.onerror = (error) => {
-                console.error( `🔍 [CHUNK-${chunkId}] Audio source error:`, error );
             };
             
             // Update playback time for next chunk
@@ -622,16 +762,28 @@ class HybridTTS {
         try {
             // Send TTS request (will stream chunks via WebSocket)
             console.log(`[HybridTTS] Sending TTS request with session_id: ${this.sessionId}, apiUrl: ${this.apiUrl}`);
+            
+            // Check if error simulation is enabled
+            const simulateErrors = window.getTTSErrorSimulationEnabled ? window.getTTSErrorSimulationEnabled() : false;
+            
+            const requestBody = {
+                session_id: this.sessionId,
+                text: text
+            };
+            
+            // Add debug flag if error simulation is enabled
+            if (simulateErrors) {
+                requestBody.debug_simulate_error = true;
+                console.log('[HybridTTS] 🧪 Debug mode: Error simulation enabled for this request');
+            }
+            
             const response = await fetch(this.apiUrl, {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
                     'Authorization': window.getAuthHeader ? window.getAuthHeader() : ''
                 },
-                body: JSON.stringify({
-                    session_id: this.sessionId,
-                    text: text
-                })
+                body: JSON.stringify(requestBody)
             });
 
             if (!response.ok) {
@@ -916,7 +1068,20 @@ class HybridTTS {
     }
 }
 
-// Export for use in other modules
-if (typeof module !== 'undefined' && module.exports) {
+// Export for ES6 modules (only when loaded as module)
+if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') {
+    // CommonJS export
     module.exports = HybridTTS;
+} else if (typeof window !== 'undefined') {
+    // Browser global export
+    window.HybridTTS = HybridTTS;
+}
+
+// Also try ES6 export for module environments (this will be ignored in script mode)
+try {
+    if (typeof exports !== 'undefined') {
+        exports.HybridTTS = HybridTTS;
+    }
+} catch (e) {
+    // ES6 export not supported in this environment, ignore
 }

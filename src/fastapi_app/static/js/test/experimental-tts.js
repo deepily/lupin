@@ -5,7 +5,7 @@
  * audio playback to prevent simultaneous chunk overlap issues.
  * 
  * Key Features:
- * - Sequential Audio Element Queue for proper chunk ordering
+ * - Sequential Audio Element Queue for proper chunk ordering (imported from standalone module)
  * - Firefox-optimized Web Audio API implementation
  * - Multiple audio elements fallback strategy
  * - Real-time latency measurement
@@ -13,139 +13,8 @@
  * - No dependencies on existing HybridTTS class
  */
 
-/**
- * Sequential Audio Manager
- * 
- * Manages audio chunks in a queue to ensure sequential playback without overlap.
- * Uses HTML5 audio elements with 'ended' event listeners for reliable timing.
- */
-class SequentialAudioManager {
-    constructor( onChunkStart = null, onChunkEnd = null, debug = false ) {
-        this.chunkQueue = [];
-        this.currentlyPlaying = false;
-        this.currentAudio = null;
-        this.chunksPlayed = 0;
-        this.debug = debug;
-        
-        // Callbacks for external tracking
-        this.onChunkStart = onChunkStart;
-        this.onChunkEnd = onChunkEnd;
-        
-        if ( this.debug ) {
-            console.log( '[SequentialAudioManager] Initialized' );
-        }
-    }
-    
-    addChunk( audioBlob ) {
-        this.chunkQueue.push( audioBlob );
-        
-        if ( this.debug ) {
-            console.log( `[SequentialAudioManager] Added chunk to queue (${this.chunkQueue.length} total)` );
-        }
-        
-        // Start playing if not already playing
-        if ( !this.currentlyPlaying ) {
-            this.playNextChunk();
-        }
-    }
-    
-    playNextChunk() {
-        // Check if queue is empty
-        if ( this.chunkQueue.length === 0 ) {
-            this.currentlyPlaying = false;
-            this.currentAudio = null;
-            
-            if ( this.debug ) {
-                console.log( '[SequentialAudioManager] Queue empty, playback complete' );
-            }
-            
-            return;
-        }
-        
-        // Get next chunk from queue
-        const nextChunk = this.chunkQueue.shift();
-        this.chunksPlayed++;
-        
-        if ( this.debug ) {
-            console.log( `[SequentialAudioManager] Playing chunk ${this.chunksPlayed} (${this.chunkQueue.length} remaining)` );
-        }
-        
-        // Create audio element for this chunk
-        this.currentAudio = new Audio( URL.createObjectURL( nextChunk ) );
-        this.currentlyPlaying = true;
-        
-        // Set up event handlers
-        this.currentAudio.addEventListener( 'ended', () => {
-            this.onChunkComplete();
-        } );
-        
-        this.currentAudio.addEventListener( 'error', ( e ) => {
-            console.error( '[SequentialAudioManager] Audio playback error:', e.target.error );
-            this.onChunkComplete(); // Continue to next chunk even on error
-        } );
-        
-        // Notify external callback
-        if ( this.onChunkStart ) {
-            this.onChunkStart( this.chunksPlayed );
-        }
-        
-        // Start playback
-        const playPromise = this.currentAudio.play();
-        if ( playPromise !== undefined ) {
-            playPromise.catch( ( error ) => {
-                console.error( '[SequentialAudioManager] Play promise rejected:', error );
-                this.onChunkComplete(); // Continue to next chunk
-            } );
-        }
-    }
-    
-    onChunkComplete() {
-        if ( this.debug ) {
-            console.log( `[SequentialAudioManager] Chunk ${this.chunksPlayed} completed` );
-        }
-        
-        // Clean up current audio
-        if ( this.currentAudio ) {
-            URL.revokeObjectURL( this.currentAudio.src );
-            this.currentAudio = null;
-        }
-        
-        // Notify external callback
-        if ( this.onChunkEnd ) {
-            this.onChunkEnd( this.chunksPlayed );
-        }
-        
-        // Play next chunk
-        this.playNextChunk();
-    }
-    
-    stop() {
-        if ( this.debug ) {
-            console.log( '[SequentialAudioManager] Stopping playback' );
-        }
-        
-        // Clear queue
-        this.chunkQueue = [];
-        
-        // Stop current audio
-        if ( this.currentAudio && !this.currentAudio.paused ) {
-            this.currentAudio.pause();
-            URL.revokeObjectURL( this.currentAudio.src );
-        }
-        
-        this.currentlyPlaying = false;
-        this.currentAudio = null;
-    }
-    
-    reset() {
-        this.stop();
-        this.chunksPlayed = 0;
-        
-        if ( this.debug ) {
-            console.log( '[SequentialAudioManager] Reset complete' );
-        }
-    }
-}
+// Import the production-ready SequentialAudioManager
+import { SequentialAudioManager } from '/static/js/sequential-audio-manager.js';
 
 class ExperimentalProgressiveTTS {
     constructor() {
@@ -1014,3 +883,11 @@ function getCurrentSettings() {
 document.addEventListener('DOMContentLoaded', () => {
     window.experimentalTTS = new ExperimentalProgressiveTTS();
 });
+
+// Make functions globally available for HTML onclick handlers (ES6 module compatibility)
+window.setTestText = setTestText;
+window.testProgressiveStreaming = testProgressiveStreaming;
+window.stopStreaming = stopStreaming;
+window.clearLogs = clearLogs;
+window.testABComparison = testABComparison;
+window.updateCustomSettings = updateCustomSettings;

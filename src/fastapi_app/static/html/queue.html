@@ -75,6 +75,7 @@
 </head>
 <body>
 
+<script src="/static/js/sequential-audio-manager.js"></script>
 <script src="/static/js/hybrid-tts.js?v=20250724220500"></script>
 <script src="/static/js/job-completion-cache.js"></script>
 <script src="/static/js/queue.js?v=20250724220500"></script>
@@ -149,6 +150,29 @@
             <strong>Instant:</strong> Starts playing immediately as audio streams in (immediate gratification).
         </div>
     </div>
+    
+    <div style="margin-bottom: 10px; padding: 8px; background-color: #fff3cd; border-left: 4px solid #ffc107; border-radius: 3px;">
+        <div style="font-size: 13px; color: #333; margin-bottom: 8px;">🧪 Debug Settings</div>
+        <label style="display: flex; align-items: center; cursor: pointer;">
+            <input type="checkbox" id="simulate-tts-errors" style="margin-right: 8px;">
+            <span style="font-weight: bold;">Simulate TTS Errors</span>
+        </label>
+        <div style="font-size: 11px; color: #666; margin-top: 4px; margin-left: 20px;">
+            When enabled: All TTS requests will simulate ElevenLabs quota_exceeded errors to test error handling and gentle audio feedback.
+        </div>
+    </div>
+    
+    <div style="margin-bottom: 15px; padding: 10px; background-color: #f0f8ff; border: 1px solid #007acc; border-radius: 5px;">
+        <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">🧪 Direct TTS Test</div>
+        <div style="margin-bottom: 8px;">
+            <input type="text" id="direct-tts-input" value="It's 10:34 AM" style="width: 200px; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
+            <button id="direct-tts-test" style="margin-left: 10px; padding: 5px 15px; background-color: #007acc; color: white; border: none; border-radius: 3px; cursor: pointer;">Test Direct TTS</button>
+        </div>
+        <div style="font-size: 11px; color: #666;">
+            Bypasses all WebSocket/notification complexity - direct hybridTTS.speak() call from button click.
+        </div>
+    </div>
+    
     <ol id="notifications-list" reversed>
 
     </ol>

@@ -1,5 +1,259 @@
 # Lupin Project History
 
+> **Current Investigation**: Q&A responses produce silence while notifications work - see `src/rnd/2025.08.03-qa-audio-silence-mystery.md` for ongoing technical mystery requiring resolution.
+
+## 2025.08.03 - Sequential Audio Integration & Q&A Silence Mystery Investigation
+
+### Session Summary - Integration Rollback & Deep Debugging
+
+Attempted Sequential Audio Manager integration but discovered deeper TTS audio issues. Successfully implemented comprehensive debugging tools including PathTracer system, but uncovered a critical mystery: Q&A responses produce complete silence while notifications produce choppy audio, despite identical execution paths.
+
+### 🎯 TECHNICAL MYSTERY DISCOVERED - REQUIRES RESOLUTION
+
+#### Problem Statement
+- **Q&A Responses**: Complete silence in instant TTS mode
+- **Notifications**: Choppy but audible audio (programmatic)  
+- **Direct Button Test**: Perfect audio playback
+- **Execution Paths**: Identical via PathTracer analysis
+
+#### Investigation Tools Implemented ✅
+- **PathTracer System**: Custom debugging tool comparing execution flows between working/silent scenarios
+- **Granular Chunk Logging**: Detailed audio processing pipeline instrumentation
+- **Direct TTS Test UI**: Isolated test environment proving HybridTTS functionality
+- **Sequential Audio Manager**: Production-ready queue-based solution (rolled back due to issues)
+
+#### Key Discoveries 🔍
+- **WebSocket Data Structure**: Fixed `data.text` → `data.data.text` bug from previous session
+- **Queue System**: Proven not the issue via direct `hybridTTS.speak()` bypass
+- **AudioContext Timeline**: Irrelevant - silence occurs at both 11s and 95s positions
+- **User Gesture Theory**: Disproven - notifications work programmatically
+- **Code Execution**: Identical paths show different results (mystery!)
+
+#### Files Modified/Created ✅
+- **Mystery Documentation**: `src/rnd/2025.08.03-qa-audio-silence-mystery.md`
+- **Backup Created**: `src/fastapi_app/static/js/hybrid-tts-FAILED-INTEGRATION.js`
+- **PathTracer Implementation**: Added to `src/fastapi_app/static/js/queue.js`
+- **Direct Test UI**: Added to `src/fastapi_app/static/html/queue.html`
+- **Sequential Audio Manager**: `src/fastapi_app/static/js/sequential-audio-manager.js`
+
+#### Current Status & Next Session
+- **Integration Rollback**: Completed - hybrid-tts.js restored to working state
+- **Mystery Status**: UNSOLVED - requires investigation of browser state/context differences
+- **Priority**: HIGH - affects Q&A user experience significantly
+
+### 📋 Next Session TODO List
+1. **Audio Content Analysis**: Compare blob content between working/silent scenarios
+2. **Browser State Investigation**: Check AudioContext state, permissions, timing differences  
+3. **Event Loop Timing**: Investigate microtask/macrotask timing effects
+4. **Clean Up**: Remove debug logging from queue.js once mystery resolved
+5. **Integration Planning**: Design cleaner Sequential Audio Manager integration approach
+
+---
+
+## 2025.08.02 - TTS Audio Queue System Debugging Session - CRITICAL BUG DISCOVERED & FIXED 🎯
+
+### Session Summary - Complete Investigation & Resolution
+
+Successfully investigated and resolved a critical TTS audio playback failure affecting regular questions. Through systematic debugging, discovered the root cause was a WebSocket data structure mismatch preventing text from reaching the TTS system.
+
+### 🔍 DEBUGGING BREAKTHROUGH - MYSTERY SOLVED ✅
+
+#### Root Cause Identified 🎯
+- **Primary Issue**: WebSocket data structure mismatch in message parsing
+- **Technical Problem**: `handleSpeechUpdate()` received full WebSocket message but expected nested data
+- **Code Bug**: `data.text` was `undefined` because text was actually at `data.data.text`
+- **Result**: TTS branch never executed, system fell back to gentle-gong notification sound
+
+#### The Data Structure Bug 📋
+```javascript
+// RECEIVED MESSAGE STRUCTURE:
+{
+  type: "tts_job_request",
+  data: {
+    text: "It's 6:49 PM."  // ← Text nested in data.data!
+  }
+}
+
+// FUNCTION EXPECTED:
+{
+  text: "It's 6:49 PM."  // ← Text directly in data object
+}
+
+// BUG: handleSpeechUpdate(data) looked for data.text but got undefined
+// FIX: handleSpeechUpdate(data.data) correctly passes nested text
+```
+
+#### Technical Investigation Complete ✅
+- **Authentication Flow**: ✅ Working correctly with proper headers
+- **WebSocket Communication**: ✅ Messages received properly  
+- **HybridTTS Initialization**: ✅ Properly initialized and ready
+- **Queue System Logic**: ✅ Working correctly once data structure fixed
+- **Impossible Code Execution**: ✅ Solved - was due to data.text being undefined
+
+### 🛠️ IMPLEMENTATION & FIX APPLIED
+
+#### Comprehensive Debugging Added ✅
+- **Function Entry/Exit Tracking**: Unique call IDs, call stack tracing, data validation
+- **Branch Execution Monitoring**: TTS/fallback branch tracking, return statement validation
+- **Queue State Tracking**: Complete addToAudioQueue logging with before/after states
+- **Variable State Monitoring**: Type checking, truthy evaluation, nested object inspection
+
+#### Critical Bug Fix Applied 🔧
+**File**: `/src/fastapi_app/static/js/queue.js:531`
+```javascript
+// BEFORE (Bug):
+case "tts_job_request":
+    handleSpeechUpdate( data );  // Passed full message object
+
+// AFTER (Fixed):  
+case "tts_job_request":
+    handleSpeechUpdate( data.data );  // Pass nested data object with text
+```
+
+### 🧪 TESTING STATUS - READY FOR VALIDATION
+
+#### Current State
+- **Bug Fix**: ✅ Applied - WebSocket data structure mismatch resolved
+- **Debug Logging**: ✅ Comprehensive tracking active for validation
+- **Expected Behavior**: TTS audio should now play correctly for questions like "What time is it?"
+- **Fallback Logic**: Should only trigger for actual errors, not data structure issues
+
+#### Next Testing Steps
+1. **Refresh browser** to load fixed code
+2. **Test with "What time is it?"** 
+3. **Verify TTS audio plays** instead of gentle-gong
+4. **Confirm debug logs show** `data.data.text: "It's X:XX PM."`
+
+### 📋 SESSION COMPLETION STATUS
+
+#### Completed Tasks ✅
+- ✅ HybridTTS authentication verification
+- ✅ WebSocket communication validation  
+- ✅ Queue system analysis
+- ✅ "Impossible code execution" mystery solved
+- ✅ Data structure mismatch identified and fixed
+- ✅ Comprehensive debugging instrumentation added
+
+#### Ready for Testing ⏳
+- ⏳ Validate TTS audio playback fix
+- ⏳ Remove debug logging after confirmation
+- ⏳ Verify no regression in error handling paths
+
+### 🔧 TECHNICAL BREAKTHROUGH
+
+The session successfully solved a complex debugging challenge involving "impossible code execution" where a function appeared to execute mutually exclusive branches. Through systematic instrumentation, discovered the actual issue was data structure mismatch causing undefined variables and unexpected fallback behavior.
+
+**Break Point**: User taking system break to address potential audio hardware issues. Ready to resume testing when system is refreshed.
+
+## 2025.08.02 - CoSA Smoke Test Suite Implementation Session 2
+
+### Session Summary - Phase 4 HIGH Priority Modules COMPLETE ✅
+
+Completed the implementation of comprehensive smoke tests for all 8 HIGH priority modules identified for v000 agent deprecation. This session focused on critical infrastructure modules that must be validated before legacy v000 code can be safely removed.
+
+**Reference Document**: `/src/cosa/rnd/2025.08.02-cosa-smoke-test-suite-design.md`
+
+### Work Performed - PHASE 4 COMPLETE 🚀
+
+#### Major Accomplishments ✅
+- **Phase 4 100% Complete**: All 8 HIGH priority modules now have comprehensive smoke tests with full validation
+- **Zero v000 Dependencies**: All critical infrastructure confirmed CLEAN and ready for v000 deprecation
+- **Specialized ML Testing**: Successfully implemented lightweight structural tests for resource-intensive modules (peft_trainer, quantizer)
+- **Perfect Test Results**: All HIGH priority smoke tests pass with comprehensive validation
+
+#### Modules Implemented This Session 🎯
+1. **rest/auth.py** - Authentication system (CLEAN - 0 v000 deps)
+2. **rest/fifo_queue.py** - Base queue implementation (CLEAN - 0 v000 deps)  
+3. **rest/running_fifo_queue.py** - Active queue management (CLEAN - 0 v000 deps)
+4. **agents/v010/model_registry.py** - Model management (CLEAN - 0 v000 deps)
+5. **training/peft_trainer.py** - PEFT training (CLEAN - lightweight structural test)
+6. **training/quantizer.py** - Model quantization (CLEAN - lightweight structural test)
+7. **rest/routers/jobs.py** - Job management API (CLEAN - 0 v000 deps)
+8. **rest/routers/websocket.py** - WebSocket API (CLEAN - 0 v000 deps)
+
+#### Critical Findings 📊
+- **v000 Deprecation Ready**: Core infrastructure (authentication, queues, WebSockets, model management) is completely CLEAN
+- **Test Coverage**: 32/34 modules passing (94.1% success rate across framework)
+- **Only 2 Minor Issues**: Easily fixable import/API signature problems in existing tests
+
+#### Current Test Suite Status 📈
+- **Master Test Runner**: Fully operational with auto-discovery and comprehensive reporting
+- **Standardized Patterns**: All smoke tests follow consistent DbC documentation and validation patterns  
+- **v000 Dependency Scanning**: Automated detection confirms no legacy dependencies in critical modules
+- **Test Execution Time**: ~75 seconds for full suite (34 modules)
+
+### Next Session Priorities - **CONTINUATION REQUIRED** 🔄
+
+**Reference**: Continue from `/src/cosa/rnd/2025.08.02-cosa-smoke-test-suite-design.md` session 2 progress update
+
+#### Phase 5: Final Cleanup (30 minutes) 🔴
+1. **Fix 2 failing tests**:
+   - `agents.v010.two_word_id_generator` - Missing `du` import (trivial fix)
+   - `memory.solution_snapshot` - API signature issue (needs investigation)
+
+#### Remaining Work (Optional) 🟡
+2. **MEDIUM Priority Modules** (~15-20 actual files):
+   - REST routers: notifications, queues, speech, system, websocket_admin
+   - Training modules: xml_prompt_generator, xml_response_validator, hf_downloader
+   - Utils: pandas, pytorch, xml helpers
+
+3. **LOW Priority Modules** (~8-12 files):
+   - Tools: search integrations (kagi, lupin variants)
+   - CLI: notification utilities
+   - Training configs
+
+### Technical Notes 🔧
+- **Lightweight Testing Approach**: Successfully validated for ML modules that require GPU/model resources
+- **Comprehensive v000 Scanning**: Automated detection excludes comments and smoke test code itself
+- **Design by Contract**: All smoke tests include proper DbC documentation patterns
+- **Error Handling**: Robust exception handling with detailed error reporting and stack traces
+
+---
+
+## 2025.08.02 - TTS Audio Queue System Debugging Session
+
+### Session Summary - Audio Playback Issue Investigation
+
+Investigated a critical issue where TTS audio playback was failing for regular questions (e.g., "What time is it?") despite successful text responses. Continued from previous session's work on Sequential Audio Production Migration and TTS error handling system debugging.
+
+### Work Performed - DEBUGGING IN PROGRESS 🔍
+
+#### Issue Identification ⚠️
+- **Primary Problem**: Questions like "What time is it?" return text responses but fail to play audio
+- **Observed Behavior**: Instead of TTS playback, system plays gentle-gong.mp3 fallback notification sound
+- **Console Evidence**: Shows "Playing audio (medium): '/static/audio/gentle-gong.mp3...'" instead of expected TTS playback
+- **Authentication Status**: Verified HybridTTS is properly initialized and WebSocket authentication is working correctly
+
+#### Technical Investigation Progress 🔍
+- **HybridTTS Status**: ✅ Confirmed properly initialized (`HybridTTS exists: true`, `hybridTTS variable: true`)
+- **Authentication Flow**: ✅ Verified correct auth headers (`Bearer mock_token_email_ricardo.felipe.ruiz@gmail.com`)
+- **WebSocket Communication**: ✅ TTS job requests properly received via WebSocket
+- **Queue System Analysis**: 🔍 **IN PROGRESS** - Investigating why TTS items not being processed correctly
+
+#### Code Flow Analysis 📋
+1. ✅ Question submitted with correct authentication
+2. ✅ `tts_job_request` received via WebSocket with text: "It's 6:16 PM."
+3. ✅ `addToAudioQueue('tts', data.text, 'high')` called to add TTS item to queue
+4. ❌ **ISSUE**: Instead of processing TTS item, system plays gentle-gong.mp3 fallback
+5. ❌ **MISSING**: Expected debug logs "Attempting HybridTTS speak..." never appear
+
+#### Key Findings 🎯
+- **Queue Logic Issue**: The unified audio queue appears to be processing the wrong item type
+- **Expected vs Actual**: Should see "Playing tts (high): 'It's 6:16 PM...'" but seeing "Playing audio (medium): '/static/audio/gentle-gong.mp3...'"
+- **Root Cause Hypothesis**: Either wrong item being added to queue OR TTS condition failing in playback logic
+
+#### Investigation Status 📊
+- **Completed**: HybridTTS initialization verification, authentication flow validation, WebSocket communication testing
+- **In Progress**: Audio queue contents analysis to determine why TTS item not being processed
+- **Next Step**: Examine `unifiedAudioQueue.items` to see actual queue contents and identify queue logic bug
+
+### Todo List Status
+- ✅ Debug HybridTTS authentication headers
+- ✅ Check HybridTTS variable initialization  
+- 🔍 **ACTIVE**: Investigate why wrong audio item (gentle-gong) being played instead of TTS item
+- ⏳ Add debug logging to hybridTTS.speak() to see authentication errors
+- ⏳ Fix duplicate audio URL detection logic for TTS failures
+
 ## 2025.08.01 - Sequential Audio Playback Fix Implementation & Production Migration Planning
 
 ### Session 5: Experimental Validation Complete + Production Migration Strategy
