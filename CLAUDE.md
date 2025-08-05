@@ -49,8 +49,10 @@
 - Use `du.print_banner()` from `utils.py` for formatted console messages
 
 ## STARTUP PROCEDURE
-- The first thing you should do when you start a session is read the global Claude configuration file And follow its instructions.
-- **HISTORY FILE READING**: When reading project history at startup, ONLY read the master history file located at the repo root (`/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md`). 
+- The first thing you should do when you start a session is read the global Claude configuration file and follow its instructions.
+- **HISTORY FILE READING**: Read the main history file (`/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md`) which contains recent 30-day context and links to archived periods
+- **IMPLEMENTATION DOCUMENT**: Read the current implementation document referenced at the top of history.md
+- **ARCHIVE ACCESS**: If deeper historical context needed, follow links to `history/YYYY-MM-history.md` files
 - **IGNORE SUB-REPO HISTORIES**: Do NOT read these sub-repository history files as they are managed separately:
   - `src/lupin-plugin-firefox/history.md` (Firefox plugin sub-repo)
   - `src/cosa/history.md` (CoSA framework sub-repo)  
@@ -65,3 +67,13 @@
 
 ## RUNNING/TESTING FASTAPI APPLICATIONS
 - Please assume that there is a Fast API server instance bound to port 7999. I will start and stop it if needed. You never need to spin up another instance unless it's for a ephemeral use on port 8000.
+
+## HISTORY STRUCTURE NOTES
+- **Project Span**: December 2024 - Present (Lupin evolution from Genie-in-the-Box)
+- **Key Archived Periods**: 
+  - 2024.12-2025.05: PEFT training, agent migrations, Flask→FastAPI transition
+  - 2025.06: Lupin renaming, notification system, WebSocket foundation
+  - 2025.07: Progressive TTS streaming, user routing architecture
+  - 2025.08: Unit testing framework, Fresh Queue UI, audio debugging
+- **Current Implementation Docs**: Referenced in history.md header
+- **Archive Location**: `history/` directory with monthly organization
