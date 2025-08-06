@@ -61,6 +61,10 @@ class FreshQueueUI {
         this.processedEvents = new Set();
         this.maxProcessedEvents = 100; // Prevent memory leaks
         
+        // Notification sound system
+        this.notificationSounds = {};
+        this.soundsInitialized = false;
+        
         // Storage keys
         this.QUEUE_SESSION_KEY = 'fresh_queue_session_id';
         this.AUDIO_SESSION_KEY = 'fresh_audio_session_id';
@@ -88,6 +92,9 @@ class FreshQueueUI {
             
             // Create audio context
             await this.createAudioContext();
+            
+            // Initialize notification sound system
+            await this.initializeNotificationSounds();
             
             // Setup event listeners
             this.setupEventListeners();
@@ -188,6 +195,77 @@ class FreshQueueUI {
             }
         } catch ( error ) {
             this.error( "Failed to create AudioContext:", error );
+        }
+    }
+    
+    async initializeNotificationSounds() {
+        try {
+            // Pre-load and cache notification sounds for instant playback
+            this.notificationSounds = {
+                lowPriority: new Audio( '/static/audio/notification-low-priority.mp3' ),
+                highPriority: new Audio( '/static/audio/notification-high-priority.mp3' ),
+                error: new Audio( '/static/audio/notification-error.mp3' )
+            };
+            
+            // Set properties for better performance
+            Object.values( this.notificationSounds ).forEach( audio => {
+                audio.preload = 'auto';
+                audio.volume = 0.7; // Slightly quieter than default
+            } );
+            
+            this.soundsInitialized = true;
+            this.log( "Notification sounds initialized and cached" );
+            
+        } catch ( error ) {
+            this.error( "Failed to initialize notification sounds:", error );
+            this.notificationSounds = {};
+            this.soundsInitialized = false;
+        }
+    }
+    
+    async playNotificationSoundByPriority( priority ) {
+        try {
+            if ( !this.soundsInitialized ) {
+                this.log( "Notification sounds not initialized, skipping sound playback" );
+                return;
+            }
+            
+            let audio = null;
+            
+            // Map priority to appropriate sound
+            switch ( priority ) {
+                case "urgent":
+                case "high":
+                    audio = this.notificationSounds.highPriority;
+                    this.log( `Playing high priority notification sound for ${priority} priority` );
+                    break;
+                case "medium":
+                case "low":
+                    audio = this.notificationSounds.lowPriority;
+                    this.log( `Playing low priority notification sound for ${priority} priority` );
+                    break;
+                case "error":
+                    audio = this.notificationSounds.error;
+                    this.log( `Playing error notification sound` );
+                    break;
+                default:
+                    // Default to low priority sound for unknown priorities
+                    audio = this.notificationSounds.lowPriority;
+                    this.log( `Playing default (low priority) notification sound for unknown priority: ${priority}` );
+                    break;
+            }
+            
+            if ( audio ) {
+                // Reset audio to beginning in case it was played before
+                audio.currentTime = 0;
+                await audio.play();
+            } else {
+                this.error( 'No notification sound available for priority:', priority );
+            }
+            
+        } catch ( error ) {
+            this.error( 'Failed to play notification sound:', error );
+            // Continue execution even if sound fails
         }
     }
     
@@ -422,7 +500,6 @@ class FreshQueueUI {
                 "tts_job_request",
                 "sys_time_update",
                 "notification_play_sound",
-                "notification_message_user",
                 "notification_queue_update",
                 "auth_success",
                 "auth_error", 
@@ -511,10 +588,6 @@ class FreshQueueUI {
                 case "queue_dead_update":
                     this.log( `Queue DEAD update: ${envelope.value}` );
                     this.updateQueueLists( "dead" );
-                    break;
-                    
-                case "notification_message_user":
-                    this.handleUserNotification( envelope );
                     break;
                     
                 case "notification_queue_update":
@@ -1212,22 +1285,56 @@ class FreshQueueUI {
     // NOTIFICATION HANDLERS (from original queue.js)
     // ========================================
     
-    handleUserNotification( envelope ) {
-        this.log( "Claude Code notification received for list:", envelope );
-        
-        // Extract the actual notification data from the nested structure
-        const notificationData = envelope.data || envelope;
-        this.addNotificationToList( notificationData );
-    }
-    
-    handleNotificationUpdate( envelope ) {
+    async handleNotificationUpdate( envelope ) {
         this.log( "Notification queue update received:", envelope );
         
         // Handle real-time notification updates from NotificationFifoQueue
-        if ( envelope.notification ) {
-            this.addNotificationToList( envelope.notification );
-        } else if ( envelope.data?.notification ) {
-            this.addNotificationToList( envelope.data.notification );
+        const notification = envelope.notification || envelope.data?.notification;
+        
+        if ( !notification ) {
+            this.log( "No notification data in WebSocket event" );
+            return;
+        }
+        
+        // Check for duplicates (same logic as old queue.js)
+        const exists = this.notificationState.notifications.find( n => n.id_hash === notification.id_hash );
+        if ( exists ) {
+            this.log( `Notification ${notification.id_hash} already processed - ignoring duplicate` );
+            return;
+        }
+        
+        // New notification - add to local cache
+        this.notificationState.notifications.push( notification );
+        this.log( `Processing new notification: ${notification.type}/${notification.priority} - ${notification.message}` );
+        
+        // 1. ALWAYS play notification sound first based on priority
+        await this.playNotificationSoundByPriority( notification.priority );
+        
+        // 2. Add to visual list
+        this.addNotificationToList( notification );
+        
+        // 3. Optional TTS for high/urgent priority notifications (like old queue.js)
+        if ( notification.priority === "high" || notification.priority === "urgent" ) {
+            // Create formatted notification message for TTS
+            let ttsMessage = `${notification.type} notification: ${notification.message}`;
+            
+            // Add priority prefix for urgent/high priority notifications
+            if ( notification.priority === "urgent" ) {
+                ttsMessage = `Urgent! ${ttsMessage}`;
+            } else if ( notification.priority === "high" ) {
+                ttsMessage = `Important! ${ttsMessage}`;
+            }
+            
+            this.log( `Queuing high priority notification for TTS playback: "${ttsMessage}"` );
+            
+            // Add slight delay to let notification sound finish (like old queue.js)
+            setTimeout( () => {
+                this.playTTS( ttsMessage, 'instant' ).catch( error => {
+                    this.error( 'TTS failed for high priority notification:', error );
+                });
+            }, 300 );
+        } else {
+            this.log( `Skipping TTS for ${notification.priority} priority notification` );
         }
     }
     
@@ -1491,8 +1598,17 @@ class FreshQueueUI {
                 break;
         }
         
-        // Truncate long messages for list display
-        const displayMessage = message.length > 80 ? message.substring( 0, 77 ) + "..." : message;
+        // Process message for project prefix formatting (e.g., [LUPIN] -> LUPIN:)
+        let processedMessage = message;
+        const prefixMatch = message.match( /^\[([A-Z]+)\]\s*(.*)$/ );
+        if ( prefixMatch ) {
+            const prefix = prefixMatch[1];  // Extract "LUPIN"
+            const remainingMessage = prefixMatch[2];  // Extract remaining message
+            processedMessage = `<strong><em>${prefix}:</em></strong> ${remainingMessage}`;
+        }
+        
+        // Truncate long messages for list display (use processed message)
+        const displayMessage = processedMessage.length > 80 ? processedMessage.substring( 0, 77 ) + "..." : processedMessage;
         
         // Use the server-provided id_hash for proper identification
         const notificationId = data.id_hash || `notification_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -1504,16 +1620,29 @@ class FreshQueueUI {
         listItem.id = notificationId;
         listItem.style.marginBottom = "8px";
         listItem.style.padding = "5px";
+        listItem.style.border = "1px solid transparent";
         listItem.style.borderLeft = `3px solid ${priorityColor}`;
         listItem.style.backgroundColor = "#f8f9fa";
+        listItem.style.transition = "border 0.2s ease";
+        listItem.style.cursor = "default";
+        
+        // Add hover effect for entire notification border
+        listItem.addEventListener( 'mouseenter', () => {
+            listItem.style.border = `1px solid ${priorityColor}`;
+            listItem.style.borderLeft = `3px solid ${priorityColor}`;
+        });
+        
+        listItem.addEventListener( 'mouseleave', () => {
+            listItem.style.border = "1px solid transparent";
+            listItem.style.borderLeft = `3px solid ${priorityColor}`;
+        });
         listItem.innerHTML = `
             <div style="display: flex; align-items: center; font-size: 12px;">
-                <span style="margin-right: 5px;">${typeEmoji}</span>
-                <span style="margin-right: 5px; color: ${priorityColor}; font-weight: bold;">${priorityEmoji}</span>
-                <span style="color: #666; margin-right: 10px;">[${time}]</span>
+                <span style="margin-right: 8px; color: ${priorityColor}; font-weight: bold;">${priorityEmoji}</span>
+                <span style="color: #666; margin-right: 10px; font-size: 10px; font-style: italic; font-weight: bold;">${time}</span>
                 <span style="color: ${priorityColor}; font-weight: bold; margin-right: 5px;">${type.toUpperCase()}</span>
                 <span style="color: ${priorityColor}; font-size: 10px; margin-right: 10px;">(${priority})</span>
-                <span style="flex: 1; color: #333;">${displayMessage}</span>
+                <span style="flex: 1; color: #333;" title="${message}">${displayMessage}</span>
                 <span class="replay-notification" data-notification-id="${notificationId}" 
                       style="cursor: pointer; margin-left: auto; margin-right: 8px; opacity: 0.7; transition: opacity 0.2s; font-size: 14px;" 
                       title="Replay notification audio" role="button" tabindex="0" aria-label="Replay notification audio">🔊</span>
@@ -1688,6 +1817,9 @@ class FreshQueueUI {
         
         const { ttsMessage, type, priority, message } = listItem.notificationData;
         
+        // Store original background color for restoration in finally block
+        const originalBackground = listItem.style.backgroundColor;
+        
         try {
             // Show loading state on replay button
             const replayButton = listItem.querySelector( '.replay-notification' );
@@ -1700,7 +1832,6 @@ class FreshQueueUI {
             replayButton.style.pointerEvents = 'none'; // Prevent multiple clicks
             
             // Highlight the notification being replayed with smooth animation
-            const originalBackground = listItem.style.backgroundColor;
             listItem.style.transition = "background-color 0.3s ease";
             listItem.style.backgroundColor = "#e3f2fd"; // Light blue highlight
             

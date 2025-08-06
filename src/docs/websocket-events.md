@@ -131,25 +131,8 @@ These events handle text-to-speech and audio streaming functionality.
 
 These events handle user notifications and system alerts.
 
-#### `notification_message_user`
-- **Purpose**: Claude Code notifications targeted to specific users
-- **Direction**: Server → Client
-- **Payload**:
-  ```json
-  {
-    "type": "notification_message_user",
-    "message": "Task completion notification",
-    "type": "task",
-    "priority": "high",
-    "source": "claude_code",
-    "timestamp": "2025-07-30T10:30:00Z"
-  }
-  ```
-- **Subscribed by**: queue.js
-- **Handler**: `handleUserNotification()` - Plays TTS and shows visual notification
-
 #### `notification_queue_update`
-- **Purpose**: Real-time notification updates from NotificationFifoQueue
+- **Purpose**: ALL notification updates - handles both queue-based notifications and Claude Code notifications
 - **Direction**: Server → Client
 - **Payload**:
   ```json
@@ -164,8 +147,8 @@ These events handle user notifications and system alerts.
     }
   }
   ```
-- **Subscribed by**: queue.js
-- **Handler**: `handleNotificationUpdate()` - Processes new notifications with auto-play
+- **Subscribed by**: queue.js, queue-fresh.js  
+- **Handler**: `handleNotificationUpdate()` - Plays notification sounds, adds to list, handles TTS for high priority
 
 #### `notification_play_sound`
 - **Purpose**: Play notification sound files
@@ -328,7 +311,6 @@ const queueSubscriptions = [
     "tts_job_request",
     "sys_time_update",
     "notification_play_sound",
-    "notification_message_user",
     "notification_queue_update",
     "auth_success",
     "auth_error", 
@@ -405,7 +387,7 @@ const audioSubscriptions = [
 The available events are configured in `lupin-app.ini`:
 
 ```ini
-websocket available events = queue_todo_update, queue_done_update, queue_running_update, queue_dead_update, tts_job_request, audio_streaming_chunk, notification_message_user, notification_queue_update, notification_play_sound, sys_time_update, sys_ping, sys_pong, auth_request, auth_success, auth_error, connect, audio_streaming_status, audio_streaming_complete, update_subscriptions
+websocket available events = queue_todo_update, queue_done_update, queue_running_update, queue_dead_update, tts_job_request, audio_streaming_chunk, notification_queue_update, notification_play_sound, sys_time_update, sys_ping, sys_pong, auth_request, auth_success, auth_error, connect, audio_streaming_status, audio_streaming_complete, update_subscriptions
 ```
 
 ## Error Handling
@@ -432,7 +414,7 @@ This system replaces the previous Flask-SocketIO implementation. Legacy event na
 |--------------|-----------|-------|
 | `todo_update` | `queue_todo_update` | Prefixed for clarity |
 | `speech_update` | `tts_job_request` | More descriptive purpose |
-| `user_notification` | `notification_message_user` | Consistent naming |
+| `user_notification` | `notification_queue_update` | Consolidated into single notification path |
 | `time_update` | `sys_time_update` | System event prefix |
 | `ping` | `sys_ping` | System event prefix |
 | `auth` | `auth_request` | Clarifies direction |
