@@ -65,6 +65,15 @@ class FreshQueueUI {
         this.notificationSounds = {};
         this.soundsInitialized = false;
         
+        // TTS audio cache system
+        this.audioCache = new TTSAudioCache({
+            cacheEnabled: true,
+            maxAge: 24 * 60 * 60 * 1000, // 24 hours
+            maxSize: 50 * 1024 * 1024,   // 50MB
+            debug: this.debug
+        });
+        this.audioCacheInitialized = false;
+        
         // Storage keys
         this.QUEUE_SESSION_KEY = 'fresh_queue_session_id';
         this.AUDIO_SESSION_KEY = 'fresh_audio_session_id';
@@ -95,6 +104,10 @@ class FreshQueueUI {
             
             // Initialize notification sound system
             await this.initializeNotificationSounds();
+            
+            // Initialize TTS audio cache system
+            await this.audioCache.initialize();
+            this.audioCacheInitialized = true;
             
             // Setup event listeners
             this.setupEventListeners();
@@ -852,6 +865,21 @@ class FreshQueueUI {
         this.log( `Playing TTS: "${text}" in ${mode} mode` );
         
         try {
+            // Check cache first if available
+            if ( this.audioCacheInitialized ) {
+                const cachedAudioUrl = await this.audioCache.checkCache( text );
+                if ( cachedAudioUrl ) {
+                    this.log( `Cache hit! Playing cached audio for: "${text.substring( 0, 30 )}..."` );
+                    await this.playAudioBlob( cachedAudioUrl );
+                    return;
+                }
+                this.log( `Cache miss - generating TTS for: "${text.substring( 0, 30 )}..."` );
+            }
+            
+            // Store current text for caching after TTS generation
+            this.currentTTSText = text;
+            
+            // Cache miss or cache not available - generate TTS as normal
             if ( mode === 'instant' ) {
                 await this.playInstantTTS( text );
             } else {
@@ -860,6 +888,34 @@ class FreshQueueUI {
         } catch ( error ) {
             this.error( `TTS playback failed in ${mode} mode:`, error );
         }
+    }
+    
+    async playAudioBlob( audioUrl ) {
+        return new Promise( ( resolve, reject ) => {
+            const audio = this.createAudioElement();
+            
+            audio.onloadeddata = () => {
+                this.log( "Cached audio loaded successfully" );
+            };
+            
+            audio.onended = () => {
+                this.log( "Cached audio playback completed" );
+                resolve();
+            };
+            
+            audio.onerror = ( error ) => {
+                this.error( "Cached audio playback failed:", error );
+                reject( error );
+            };
+            
+            audio.src = audioUrl;
+            audio.style.display = 'block';
+            
+            audio.play().catch( error => {
+                this.log( "Auto-play prevented for cached audio, but audio is ready" );
+                resolve(); // Resolve anyway as audio is ready to play
+            });
+        });
     }
     
     async playInstantTTS( text ) {
@@ -950,14 +1006,15 @@ class FreshQueueUI {
     handleAudioChunk( blobData ) {
         if ( this.debug ) this.log( `Received audio chunk: ${blobData.size} bytes` );
         
+        // Always collect chunks for caching (both instant and reliable modes)
+        this.audioChunks = this.audioChunks || [];
+        this.audioChunks.push( blobData );
+        
         if ( this.currentTTSMode === 'instant' ) {
-            // Use sequential queue for Chrome compatibility
+            // Use sequential queue for Chrome compatibility AND collect for caching
             this.playChunkSequential( blobData );
-        } else {
-            // Collect chunks for later playback
-            this.audioChunks = this.audioChunks || [];
-            this.audioChunks.push( blobData );
         }
+        // For reliable mode, chunks are just collected and played later in playCollectedAudio()
     }
     
     handleAudioComplete( data ) {
@@ -975,6 +1032,9 @@ class FreshQueueUI {
         if ( this.currentTTSMode === 'reliable' && this.audioChunks && this.audioChunks.length > 0 ) {
             // Use proven reliable mode playback (adapted from original HybridTTS)
             this.playCollectedAudio();
+        } else if ( this.currentTTSMode === 'instant' && this.audioChunks && this.audioChunks.length > 0 ) {
+            // For instant mode, cache the collected chunks (even though they were already played sequentially)
+            this.cacheGeneratedAudio();
         }
         
         // Clean up
@@ -985,6 +1045,37 @@ class FreshQueueUI {
         // Reset first chunk timing for next request
         this.firstChunkStartTime = null;
         this.firstChunkPlayed = false;
+        
+        // Clear current TTS text after processing
+        this.currentTTSText = null;
+    }
+    
+    async cacheGeneratedAudio( audioBlob = null ) {
+        if ( !this.audioCacheInitialized || !this.currentTTSText ) {
+            if ( this.debug ) this.log( "Cache not available or no current TTS text - skipping cache storage" );
+            return;
+        }
+        
+        try {
+            let blobToCache = audioBlob;
+            
+            // If no blob provided, create one from collected chunks (instant mode)
+            if ( !blobToCache && this.audioChunks && this.audioChunks.length > 0 ) {
+                blobToCache = new Blob( this.audioChunks, { type: 'audio/mpeg' } );
+                this.log( `Created audio blob from ${this.audioChunks.length} chunks for caching (${blobToCache.size} bytes)` );
+            }
+            
+            if ( blobToCache && blobToCache.size > 0 ) {
+                await this.audioCache.saveToCache( this.currentTTSText, blobToCache );
+                this.log( `Cached TTS audio for: "${this.currentTTSText.substring( 0, 30 )}..." (${blobToCache.size} bytes)` );
+            } else {
+                this.log( "No valid audio blob to cache" );
+            }
+            
+        } catch ( error ) {
+            this.error( "Failed to cache generated audio:", error );
+            // Continue execution even if caching fails
+        }
     }
     
     // ========================================
@@ -1156,6 +1247,9 @@ class FreshQueueUI {
         // Create single blob from all chunks (same as original HybridTTS)
         const audioBlob = new Blob( this.audioChunks, { type: 'audio/mpeg' } );
         const audioUrl = URL.createObjectURL( audioBlob );
+        
+        // Cache the generated audio for future use
+        this.cacheGeneratedAudio( audioBlob );
 
         // Set up and play audio using HTML audio element
         this.audioElement.src = audioUrl;
