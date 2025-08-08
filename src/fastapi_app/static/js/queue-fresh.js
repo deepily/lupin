@@ -25,6 +25,7 @@ class FreshQueueUI {
         // Audio management
         this.audioContext = null;
         this.currentAudio = null;
+        this.currentNotificationId = null;
         this.isPlaying = false;
         
         // HTML audio element for reliable mode (like original HybridTTS)
@@ -867,13 +868,18 @@ class FreshQueueUI {
         try {
             // Check cache first if available
             if ( this.audioCacheInitialized ) {
-                const cachedAudioUrl = await this.audioCache.checkCache( text );
-                if ( cachedAudioUrl ) {
-                    this.log( `Cache hit! Playing cached audio for: "${text.substring( 0, 30 )}..."` );
-                    await this.playAudioBlob( cachedAudioUrl );
+                this.log( `Cache check for: "${text.substring( 0, 50 )}..." (Cache initialized: ${this.audioCacheInitialized})` );
+                const cachedAudioBlob = await this.audioCache.checkCache( text );
+                if ( cachedAudioBlob ) {
+                    const stats = this.audioCache.getStats();
+                    this.log( `🎯 Cache hit! Playing cached audio for: "${text.substring( 0, 30 )}..." (Hit rate: ${stats.hitRate})` );
+                    await this.playAudioBlob( cachedAudioBlob );
                     return;
                 }
-                this.log( `Cache miss - generating TTS for: "${text.substring( 0, 30 )}..."` );
+                const stats = this.audioCache.getStats();
+                this.log( `❌ Cache miss - generating TTS for: "${text.substring( 0, 30 )}..." (Hit rate: ${stats.hitRate})` );
+            } else {
+                this.log( `⚠️ Cache not initialized - skipping cache check for: "${text.substring( 0, 30 )}..."` );
             }
             
             // Store current text for caching after TTS generation
@@ -1017,7 +1023,7 @@ class FreshQueueUI {
         // For reliable mode, chunks are just collected and played later in playCollectedAudio()
     }
     
-    handleAudioComplete( data ) {
+    async handleAudioComplete( data ) {
         const collectedChunks = this.audioChunks ? this.audioChunks.length : 0;
         const processedChunks = this.processedChunks || 0;
         const sequentialPlayed = this.sequentialChunksPlayed || 0;
@@ -1029,12 +1035,16 @@ class FreshQueueUI {
             this.log( `Audio streaming complete: ${data.chunks || 0} server chunks, ${collectedChunks} collected chunks, ${data.duration || 0}s` );
         }
         
+        // Cache the audio BEFORE clearing currentTTSText to avoid race condition
+        if ( this.audioChunks && this.audioChunks.length > 0 ) {
+            // Create audio blob for caching
+            const audioBlob = new Blob( this.audioChunks, { type: 'audio/mpeg' } );
+            await this.cacheGeneratedAudio( audioBlob );
+        }
+        
         if ( this.currentTTSMode === 'reliable' && this.audioChunks && this.audioChunks.length > 0 ) {
             // Use proven reliable mode playback (adapted from original HybridTTS)
             this.playCollectedAudio();
-        } else if ( this.currentTTSMode === 'instant' && this.audioChunks && this.audioChunks.length > 0 ) {
-            // For instant mode, cache the collected chunks (even though they were already played sequentially)
-            this.cacheGeneratedAudio();
         }
         
         // Clean up
@@ -1046,13 +1056,15 @@ class FreshQueueUI {
         this.firstChunkStartTime = null;
         this.firstChunkPlayed = false;
         
-        // Clear current TTS text after processing
+        // Clear current TTS text after caching is complete
         this.currentTTSText = null;
     }
     
     async cacheGeneratedAudio( audioBlob = null ) {
+        this.log( `Attempting to cache audio - Cache initialized: ${this.audioCacheInitialized}, Current TTS text: ${this.currentTTSText ? '"' + this.currentTTSText.substring( 0, 30 ) + '..."' : 'null'}` );
+        
         if ( !this.audioCacheInitialized || !this.currentTTSText ) {
-            if ( this.debug ) this.log( "Cache not available or no current TTS text - skipping cache storage" );
+            this.log( "❌ Cache storage skipped - cache not initialized or no current TTS text" );
             return;
         }
         
@@ -1067,9 +1079,10 @@ class FreshQueueUI {
             
             if ( blobToCache && blobToCache.size > 0 ) {
                 await this.audioCache.saveToCache( this.currentTTSText, blobToCache );
-                this.log( `Cached TTS audio for: "${this.currentTTSText.substring( 0, 30 )}..." (${blobToCache.size} bytes)` );
+                const stats = this.audioCache.getStats();
+                this.log( `✅ Cached TTS audio for: "${this.currentTTSText.substring( 0, 30 )}..." (${blobToCache.size} bytes) - Cache stats: ${stats.stores} stored, ${stats.hitRate} hit rate` );
             } else {
-                this.log( "No valid audio blob to cache" );
+                this.log( "❌ No valid audio blob to cache" );
             }
             
         } catch ( error ) {
@@ -1248,8 +1261,7 @@ class FreshQueueUI {
         const audioBlob = new Blob( this.audioChunks, { type: 'audio/mpeg' } );
         const audioUrl = URL.createObjectURL( audioBlob );
         
-        // Cache the generated audio for future use
-        this.cacheGeneratedAudio( audioBlob );
+        // Note: Audio caching now happens in handleAudioStreamingComplete() to avoid race condition
 
         // Set up and play audio using HTML audio element
         this.audioElement.src = audioUrl;
@@ -1282,6 +1294,7 @@ class FreshQueueUI {
     async playAudioBlob( audioBlob ) {
         return new Promise( ( resolve, reject ) => {
             try {
+                // Create URL from Blob (cache now returns Blobs, not URLs)
                 const audioUrl = URL.createObjectURL( audioBlob );
                 const audio = new Audio( audioUrl );
                 
@@ -1293,12 +1306,30 @@ class FreshQueueUI {
                     this.log( "Audio playback started" );
                     this.isPlaying = true;
                     this.currentAudio = audio;
+                    // Update UI to playing state
+                    if ( this.currentNotificationId ) {
+                        this.updateAudioControlStates( this.currentNotificationId, 'playing' );
+                    }
+                };
+                
+                audio.onpause = () => {
+                    this.log( "Audio playback paused" );
+                    this.isPlaying = false;
+                    // Update UI to paused state
+                    if ( this.currentNotificationId ) {
+                        this.updateAudioControlStates( this.currentNotificationId, 'paused' );
+                    }
                 };
                 
                 audio.onended = () => {
                     this.log( "Audio playback ended" );
                     this.isPlaying = false;
                     this.currentAudio = null;
+                    // Reset UI to stopped state
+                    if ( this.currentNotificationId ) {
+                        this.updateAudioControlStates( this.currentNotificationId, 'stopped' );
+                        this.currentNotificationId = null;
+                    }
                     URL.revokeObjectURL( audioUrl );
                     resolve();
                 };
@@ -1307,6 +1338,11 @@ class FreshQueueUI {
                     this.error( "Audio playback error:", error );
                     this.isPlaying = false;
                     this.currentAudio = null;
+                    // Reset UI to stopped state on error
+                    if ( this.currentNotificationId ) {
+                        this.updateAudioControlStates( this.currentNotificationId, 'stopped' );
+                        this.currentNotificationId = null;
+                    }
                     URL.revokeObjectURL( audioUrl );
                     reject( error );
                 };
@@ -1737,11 +1773,22 @@ class FreshQueueUI {
                 <span style="color: ${priorityColor}; font-weight: bold; margin-right: 5px;">${type.toUpperCase()}</span>
                 <span style="color: ${priorityColor}; font-size: 10px; margin-right: 10px;">(${priority})</span>
                 <span style="flex: 1; color: #333;" title="${message}">${displayMessage}</span>
-                <span class="replay-notification" data-notification-id="${notificationId}" 
-                      style="cursor: pointer; margin-left: auto; margin-right: 8px; opacity: 0.7; transition: opacity 0.2s; font-size: 14px;" 
-                      title="Replay notification audio" role="button" tabindex="0" aria-label="Replay notification audio">🔊</span>
+                <span class="audio-control-panel" data-notification-id="${notificationId}" style="margin-left: auto; margin-right: 8px; display: flex; gap: 3px; align-items: center;">
+                    <span class="audio-restart-btn audio-control-enabled" 
+                          style="cursor: pointer; opacity: 1.0; transition: opacity 0.2s; font-size: 14px;" 
+                          title="Restart notification audio from beginning" role="button" tabindex="0" aria-label="Restart notification audio from beginning">⏮️</span>
+                    <span class="audio-resume-btn audio-control-disabled" 
+                          style="cursor: not-allowed; opacity: 0.4; transition: opacity 0.2s; font-size: 14px;" 
+                          title="Resume notification audio" role="button" tabindex="-1" aria-label="Resume notification audio">▶️</span>
+                    <span class="audio-pause-btn audio-control-disabled" 
+                          style="cursor: not-allowed; opacity: 0.4; transition: opacity 0.2s; font-size: 14px;" 
+                          title="Pause notification audio" role="button" tabindex="-1" aria-label="Pause notification audio">⏸️</span>
+                    <span class="audio-stop-btn audio-control-disabled" 
+                          style="cursor: not-allowed; opacity: 0.4; transition: opacity 0.2s; font-size: 14px;" 
+                          title="Stop notification audio" role="button" tabindex="-1" aria-label="Stop notification audio">⏹️</span>
+                </span>
                 <span class="delete-notification" data-notification-id="${notificationId}" 
-                      style="cursor: pointer; opacity: 0.6; transition: opacity 0.2s; font-size: 14px; color: #dc3545;" 
+                      style="cursor: pointer; opacity: 0.6; transition: opacity 0.2s; font-size: 14px; color: #dc3545; margin-left: 4px;" 
                       title="Delete notification" role="button" tabindex="0" aria-label="Delete notification">🗑️</span>
             </div>
         `;
@@ -1757,36 +1804,24 @@ class FreshQueueUI {
             ttsMessage: message
         };
         
-        // Add event listeners for replay and delete buttons (better than onclick)
-        const replayButton = listItem.querySelector( '.replay-notification' );
+        // Add event listeners for audio control panel and delete button
+        const restartButton = listItem.querySelector( '.audio-restart-btn' );
+        const resumeButton = listItem.querySelector( '.audio-resume-btn' );
+        const pauseButton = listItem.querySelector( '.audio-pause-btn' );
+        const stopButton = listItem.querySelector( '.audio-stop-btn' );
         const deleteButton = listItem.querySelector( '.delete-notification' );
         
-        if ( replayButton ) {
-            // Mouse click
-            replayButton.addEventListener( 'click', ( e ) => {
-                e.stopPropagation();
-                this.replayNotificationAudio( notificationId );
-            });
-            
-            // Keyboard support (Enter/Space)
-            replayButton.addEventListener( 'keydown', ( e ) => {
-                if ( e.key === 'Enter' || e.key === ' ' ) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this.replayNotificationAudio( notificationId );
-                }
-            });
-            
-            // Hover effects
-            replayButton.addEventListener( 'mouseenter', () => {
-                replayButton.style.opacity = '1';
-                replayButton.style.transform = 'scale(1.1)';
-            });
-            
-            replayButton.addEventListener( 'mouseleave', () => {
-                replayButton.style.opacity = '0.7';
-                replayButton.style.transform = 'scale(1)';
-            });
+        if ( restartButton ) {
+            this.addAudioControlListeners( restartButton, 'restart', notificationId );
+        }
+        if ( resumeButton ) {
+            this.addAudioControlListeners( resumeButton, 'resume', notificationId );
+        }
+        if ( pauseButton ) {
+            this.addAudioControlListeners( pauseButton, 'pause', notificationId );
+        }
+        if ( stopButton ) {
+            this.addAudioControlListeners( stopButton, 'stop', notificationId );
         }
         
         if ( deleteButton ) {
@@ -1825,6 +1860,229 @@ class FreshQueueUI {
         }
         
         this.log( `Added ${type}/${priority} notification to list: "${displayMessage}"` );
+    }
+    
+    addAudioControlListeners( button, action, notificationId ) {
+        // Add listeners to all buttons, but only respond when enabled
+        
+        // Mouse click
+        button.addEventListener( 'click', ( e ) => {
+            e.stopPropagation();
+            if ( button.classList.contains( 'audio-control-enabled' ) ) {
+                this.handleAudioControl( action, notificationId );
+            }
+        });
+        
+        // Keyboard support (Enter/Space)
+        button.addEventListener( 'keydown', ( e ) => {
+            if ( e.key === 'Enter' || e.key === ' ' ) {
+                e.preventDefault();
+                e.stopPropagation();
+                if ( button.classList.contains( 'audio-control-enabled' ) ) {
+                    this.handleAudioControl( action, notificationId );
+                }
+            }
+        });
+        
+        // Hover effects only for enabled buttons
+        button.addEventListener( 'mouseenter', () => {
+            if ( button.classList.contains( 'audio-control-enabled' ) ) {
+                button.style.transform = 'scale(1.1)';
+            }
+        });
+        
+        button.addEventListener( 'mouseleave', () => {
+            if ( button.classList.contains( 'audio-control-enabled' ) ) {
+                button.style.transform = 'scale(1)';
+            }
+        });
+    }
+    
+    async handleAudioControl( action, notificationId ) {
+        this.log( `Audio control: ${action} for notification ${notificationId}` );
+        
+        switch ( action ) {
+            case 'restart':
+                // If another notification is playing, stop it first
+                if ( this.currentNotificationId && this.currentNotificationId !== notificationId ) {
+                    this.stopCurrentAudio();
+                }
+                // Start playing this notification from beginning
+                await this.playNotificationAudio( notificationId, true ); // true = restart from beginning
+                break;
+                
+            case 'resume':
+                if ( this.currentAudio && this.currentNotificationId === notificationId ) {
+                    // Resume from current position
+                    this.currentAudio.play();
+                    this.updateAudioControlStates( notificationId, 'playing' );
+                }
+                break;
+                
+            case 'pause':
+                if ( this.currentAudio && this.currentNotificationId === notificationId ) {
+                    this.currentAudio.pause();
+                    this.updateAudioControlStates( notificationId, 'paused' );
+                }
+                break;
+                
+            case 'stop':
+                if ( this.currentNotificationId === notificationId ) {
+                    this.stopCurrentAudio();
+                }
+                break;
+        }
+    }
+    
+    stopCurrentAudio() {
+        if ( this.currentAudio ) {
+            this.currentAudio.pause();
+            this.currentAudio.currentTime = 0;
+            this.currentAudio = null;
+        }
+        
+        if ( this.currentNotificationId ) {
+            // Reset UI to stopped state
+            this.updateAudioControlStates( this.currentNotificationId, 'stopped' );
+            this.currentNotificationId = null;
+        }
+        
+        this.isPlaying = false;
+        this.log( "Audio stopped and reset" );
+    }
+    
+    updateAudioControlStates( notificationId, audioState ) {
+        // Find all notification control panels and reset them to default
+        const allPanels = document.querySelectorAll( '.audio-control-panel' );
+        allPanels.forEach( panel => {
+            const panelNotificationId = panel.dataset.notificationId;
+            if ( panelNotificationId !== notificationId ) {
+                // Reset other notifications to default (stopped) state
+                this.setControlPanelState( panel, 'stopped' );
+            }
+        });
+        
+        // Update the target notification's control panel
+        const targetPanel = document.querySelector( `.audio-control-panel[data-notification-id="${notificationId}"]` );
+        if ( targetPanel ) {
+            this.setControlPanelState( targetPanel, audioState );
+        }
+    }
+    
+    setControlPanelState( panel, audioState ) {
+        const restartBtn = panel.querySelector( '.audio-restart-btn' );
+        const resumeBtn = panel.querySelector( '.audio-resume-btn' );
+        const pauseBtn = panel.querySelector( '.audio-pause-btn' );
+        const stopBtn = panel.querySelector( '.audio-stop-btn' );
+        
+        // Remove all existing state classes
+        [restartBtn, resumeBtn, pauseBtn, stopBtn].forEach( btn => {
+            if ( btn ) {
+                btn.classList.remove( 'audio-control-enabled', 'audio-control-disabled' );
+            }
+        });
+        
+        switch ( audioState ) {
+            case 'stopped':
+                // [⏮️ enabled] [▶️ disabled] [⏸️ disabled] [⏹️ disabled]
+                restartBtn?.classList.add( 'audio-control-enabled' );
+                resumeBtn?.classList.add( 'audio-control-disabled' );
+                pauseBtn?.classList.add( 'audio-control-disabled' );
+                stopBtn?.classList.add( 'audio-control-disabled' );
+                this.updateButtonVisualState( restartBtn, true );
+                this.updateButtonVisualState( resumeBtn, false );
+                this.updateButtonVisualState( pauseBtn, false );
+                this.updateButtonVisualState( stopBtn, false );
+                break;
+                
+            case 'playing':
+                // [⏮️ disabled] [▶️ disabled] [⏸️ enabled] [⏹️ enabled]
+                restartBtn?.classList.add( 'audio-control-disabled' );
+                resumeBtn?.classList.add( 'audio-control-disabled' );
+                pauseBtn?.classList.add( 'audio-control-enabled' );
+                stopBtn?.classList.add( 'audio-control-enabled' );
+                this.updateButtonVisualState( restartBtn, false );
+                this.updateButtonVisualState( resumeBtn, false );
+                this.updateButtonVisualState( pauseBtn, true );
+                this.updateButtonVisualState( stopBtn, true );
+                break;
+                
+            case 'paused':
+                // [⏮️ enabled] [▶️ enabled] [⏸️ disabled] [⏹️ enabled]
+                restartBtn?.classList.add( 'audio-control-enabled' );
+                resumeBtn?.classList.add( 'audio-control-enabled' );
+                pauseBtn?.classList.add( 'audio-control-disabled' );
+                stopBtn?.classList.add( 'audio-control-enabled' );
+                this.updateButtonVisualState( restartBtn, true );
+                this.updateButtonVisualState( resumeBtn, true );
+                this.updateButtonVisualState( pauseBtn, false );
+                this.updateButtonVisualState( stopBtn, true );
+                break;
+        }
+    }
+    
+    updateButtonVisualState( button, enabled ) {
+        if ( !button ) return;
+        
+        if ( enabled ) {
+            button.style.opacity = '1.0';
+            button.style.cursor = 'pointer';
+            button.setAttribute( 'tabindex', '0' );
+        } else {
+            button.style.opacity = '0.4';
+            button.style.cursor = 'not-allowed';
+            button.setAttribute( 'tabindex', '-1' );
+        }
+    }
+    
+    async playNotificationAudio( notificationId, restart = false ) {
+        const listItem = document.getElementById( notificationId );
+        if ( !listItem || !listItem.notificationData ) {
+            this.error( `No notification data found for ID: ${notificationId}` );
+            return;
+        }
+        
+        const { ttsMessage, type, priority } = listItem.notificationData;
+        
+        try {
+            // Set current notification tracking
+            this.currentNotificationId = notificationId;
+            
+            // Update UI to playing state
+            this.updateAudioControlStates( notificationId, 'playing' );
+            
+            // Highlight the notification being played
+            listItem.style.transition = "background-color 0.3s ease";
+            listItem.style.backgroundColor = "#e3f2fd"; // Light blue highlight
+            
+            this.log( `${restart ? 'Restarting' : 'Playing'} notification audio: "${ttsMessage}"` );
+            
+            // Use the current TTS mode (instant/reliable) from the UI
+            const currentMode = document.getElementById( 'tts-mode' )?.value || 'instant';
+            
+            // Use playTTS() to ensure cache checking and proper currentTTSText handling
+            await this.playTTS( ttsMessage, currentMode );
+            
+            // If we have currentAudio and this is a restart, reset position to beginning
+            if ( restart && this.currentAudio ) {
+                this.currentAudio.currentTime = 0;
+            }
+            
+            this.log( `Successfully ${restart ? 'restarted' : 'played'} ${type}/${priority} notification` );
+            
+        } catch ( error ) {
+            this.error( `Failed to ${restart ? 'restart' : 'play'} notification audio:`, error );
+            // Reset UI state on error
+            this.updateAudioControlStates( notificationId, 'stopped' );
+            this.currentNotificationId = null;
+        } finally {
+            // Always restore the notification background after a delay
+            setTimeout( () => {
+                if ( listItem ) {
+                    listItem.style.backgroundColor = '';
+                }
+            }, 1000 );
+        }
     }
     
     async loadInitialNotifications() {
@@ -1935,13 +2193,8 @@ class FreshQueueUI {
             // Use the current TTS mode (instant/reliable) from the UI
             const currentMode = document.getElementById( 'tts-mode' )?.value || 'instant';
             
-            if ( currentMode === 'instant' ) {
-                // Use instant mode - direct WebSocket streaming
-                await this.playInstantTTS( ttsMessage );
-            } else {
-                // Use reliable mode - collected audio playback
-                await this.playReliableTTS( ttsMessage );
-            }
+            // Use playTTS() to ensure cache checking and proper currentTTSText handling
+            await this.playTTS( ttsMessage, currentMode );
             
             this.log( `Successfully replayed ${type}/${priority} notification` );
             

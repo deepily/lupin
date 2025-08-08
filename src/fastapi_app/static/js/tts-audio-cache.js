@@ -48,9 +48,6 @@ class TTSAudioCache {
             totalSize: 0
         };
         
-        // Blob URL tracking for cleanup
-        this.activeBlobUrls = new Set();
-        
         if ( this.debug ) console.log( 'TTSAudioCache: Initialized with', options );
     }
     
@@ -109,11 +106,10 @@ class TTSAudioCache {
                 if ( !this.isExpired( entry ) ) {
                     this.stats.hits++;
                     if ( this.debug ) console.log( 'TTSAudioCache: Memory hit for', text.substring( 0, 30 ) + '...' );
-                    return this.createPlayableAudio( entry.audioBlob );
+                    return entry.audioBlob; // Return the Blob directly
                 } else {
                     // Remove expired entry
                     this.memoryCache.delete( key );
-                    this.revokeActiveBlobUrls( key );
                 }
             }
             
@@ -125,7 +121,7 @@ class TTSAudioCache {
                     this.memoryCache.set( key, entry );
                     this.stats.hits++;
                     if ( this.debug ) console.log( 'TTSAudioCache: IndexedDB hit for', text.substring( 0, 30 ) + '...' );
-                    return this.createPlayableAudio( entry.audioBlob );
+                    return entry.audioBlob; // Return the Blob directly
                 }
             }
             
@@ -175,12 +171,6 @@ class TTSAudioCache {
         }
     }
     
-    createPlayableAudio( audioBlob ) {
-        const blobUrl = URL.createObjectURL( audioBlob );
-        this.activeBlobUrls.add( blobUrl );
-        return blobUrl;
-    }
-    
     async getFromIndexedDB( key ) {
         if ( !this.db ) return null;
         
@@ -226,7 +216,6 @@ class TTSAudioCache {
         for ( const [key, entry] of this.memoryCache ) {
             if ( this.isExpired( entry ) ) {
                 this.memoryCache.delete( key );
-                this.revokeActiveBlobUrls( key );
                 removedSize += entry.size;
             }
         }
@@ -261,16 +250,6 @@ class TTSAudioCache {
         setInterval( () => this.cleanup(), 30 * 60 * 1000 );
     }
     
-    revokeActiveBlobUrls( key ) {
-        // Cleanup blob URLs associated with this key
-        for ( const url of this.activeBlobUrls ) {
-            if ( url.includes( key ) ) {
-                URL.revokeObjectURL( url );
-                this.activeBlobUrls.delete( url );
-            }
-        }
-    }
-    
     getStats() {
         const hitRate = this.stats.hits + this.stats.misses > 0 
             ? ( this.stats.hits / ( this.stats.hits + this.stats.misses ) * 100 ).toFixed( 1 )
@@ -290,10 +269,6 @@ class TTSAudioCache {
     clearCache() {
         // Clear memory cache
         this.memoryCache.clear();
-        
-        // Revoke all active blob URLs
-        this.activeBlobUrls.forEach( url => URL.revokeObjectURL( url ) );
-        this.activeBlobUrls.clear();
         
         // Clear IndexedDB
         if ( this.db ) {

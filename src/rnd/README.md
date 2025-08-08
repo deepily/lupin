@@ -2,6 +2,40 @@
 
 This directory contains research and development documents for the Lupin project.
 
+## Project Architecture Overview
+
+Lupin is built on/uses:
+- **FastAPI** server architecture
+- **PydanticAI** for Agent-based abstractions & data validation
+- **WebSockets** support for real-time communication
+
+Lupin contains multiple sub repos:
+- **CoSA** support for real-time communication
+- **Lupin Mobile** implements queue UI for agent-to-user communication
+- **Lupin Plugin for Firefox** provides browser integration for Lupin features
+
+Lupin does a lot of things:
+- **Notification system** for agent-to-user feedback
+- **Voice drives Firefox with plugin**
+- **Text-to-Speech (TTS)** streaming and caching of TTS audio responses
+- **Speech-to-Text (STT)** for voice input
+- **Abstracted access to LLMs** both local and industrial strength
+- **Easy PEFT** High level training object performs all the things before during and after training a new LoRA for you
+- **Code is memory** 
+
+## Project Goals for v0.1.0
+- **JWT authentication** using firebase? (See RND docs for details)
+- **PydanticAI** data validation for XML-based I/O interactions with agents
+- **Agentic frameworks** implement high-level abstraction for running the same query on multiple agentic frameworks
+  - Google ADK 
+  - OpenAI
+  - Anthropic 
+  - Perplexity 
+- **Host on GCP** (Google Cloud Platform) for demoing and R&D purposes
+- 
+
+For implementation details, see the specific documents listed below.
+
 ## Active Documents
 
 ### Current Development (2025.08)
@@ -60,12 +94,3 @@ This directory contains research and development documents for the Lupin project
 - Archived documents represent completed initiatives
 - Each document should include a clear purpose and current status
 
-## Project Architecture Overview
-
-Lupin is built on:
-- **FastAPI** server architecture (Flask completely removed as of 2025.06.28)
-- **COSA** (Collection of Small Agents) framework integration
-- **WebSocket** support for real-time communication
-- **Notification system** for agent-to-user feedback
-
-For implementation details, see the specific documents listed above.
