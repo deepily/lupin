@@ -75,6 +75,15 @@ class FreshQueueUI {
         });
         this.audioCacheInitialized = false;
         
+        // Job completion cache system for replay functionality
+        this.jobCompletionCache = new JobCompletionCache({
+            cacheEnabled: true,
+            cacheMaxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+            maxEntries: 1000,
+            debug: this.debug
+        });
+        this.jobCompletionCacheInitialized = false;
+        
         // Storage keys
         this.QUEUE_SESSION_KEY = 'fresh_queue_session_id';
         this.AUDIO_SESSION_KEY = 'fresh_audio_session_id';
@@ -109,6 +118,11 @@ class FreshQueueUI {
             // Initialize TTS audio cache system
             await this.audioCache.initialize();
             this.audioCacheInitialized = true;
+            
+            // Initialize job completion cache system
+            await this.jobCompletionCache.initializeIndexedDB();
+            this.jobCompletionCacheInitialized = true;
+            this.log( "Job completion cache initialized for replay functionality" );
             
             // Setup event listeners
             this.setupEventListeners();
@@ -822,8 +836,66 @@ class FreshQueueUI {
         // Update response area with job completion
         this.updateElement( "response-text", `Job completed: ${actualText || 'No text provided'}` );
         
+        // Store job completion data in cache for replay functionality
+        this.storeJobCompletionForReplay( envelope, actualText );
+        
         // Play TTS audio based on current mode
         this.playTTS( actualText || "Job completed", mode );
+    }
+    
+    async storeJobCompletionForReplay( envelope, actualText ) {
+        /**
+         * Store job completion data in JobCompletionCache for replay functionality.
+         * 
+         * Requires:
+         *     - envelope contains WebSocket job completion event data
+         *     - actualText is the extracted completion response text
+         *     - jobCompletionCache is initialized
+         *     
+         * Ensures:
+         *     - Job data stored with consistent ID and metadata
+         *     - Original question and response text preserved
+         *     - User context and timestamp included
+         *     - Cache storage errors handled gracefully
+         */
+        try {
+            if ( !this.jobCompletionCacheInitialized || !this.jobCompletionCache ) {
+                this.log( "⚠️ Job completion cache not available - skipping cache storage" );
+                return;
+            }
+            
+            // Generate consistent job ID from envelope data
+            const jobId = envelope.id || envelope.job_id || envelope.timestamp || `job_${Date.now()}`;
+            
+            // Use original Q&A text as question context
+            const questionText = this.lastQASubmissionText || "Q&A submission";
+            const responseText = actualText || "Job completed";
+            const timestamp = envelope.timestamp || new Date().toISOString();
+            
+            // Store in JobCompletionCache with full context
+            await this.jobCompletionCache.store(
+                jobId,
+                responseText, // Primary text for cache key generation
+                timestamp,
+                this.currentUser, // User context for filtering
+                {
+                    originalQuestion: questionText,
+                    submissionTime: this.lastQASubmissionTime,
+                    envelope: envelope, // Store full envelope for debugging
+                    ttsMode: document.getElementById( 'tts-mode' )?.value || 'instant'
+                }
+            );
+            
+            this.log( `✅ Job completion stored in cache: "${questionText}" → "${responseText.substring( 0, 50 )}..."` );
+            
+            // Update analytics
+            const stats = this.jobCompletionCache.getAnalytics();
+            this.log( `📊 Job cache stats: ${stats.cacheEntries} entries, ${stats.totalStores} stored` );
+            
+        } catch ( error ) {
+            this.error( "Failed to store job completion for replay:", error );
+            // Continue execution - cache storage failure shouldn't break TTS
+        }
     }
     
     // ========================================
@@ -1541,29 +1613,11 @@ class FreshQueueUI {
                 document.getElementById( "run-list" ).innerHTML = data.run_jobs.join( "" );
                 document.getElementById( "run-count" ).textContent = data.run_jobs.length;
             } else if ( queueName === "done" ) {
-                // Enhanced done list with playback and delete icons
-                const doneListHtml = data.done_jobs.map( ( jobHtml, index ) => {
-                    // Extract job ID from the HTML if possible, or generate one
-                    const jobIdMatch = jobHtml.match( /id=['"]([^'"]+)['"]/ );
-                    const jobId = jobIdMatch ? jobIdMatch[1] : `done-job-${index}`;
-                    
-                    // Add playback and delete icons to each job
-                    const enhancedJobHtml = jobHtml.replace( 
-                        /(<\/li>)$/,
-                        `<span class="job-controls" style="margin-left: 10px;">
-                            <span class="replay-job" data-job-id="${jobId}" 
-                                  style="cursor: pointer; margin-right: 8px; opacity: 0.7; transition: opacity 0.2s; font-size: 14px;" 
-                                  title="Replay job audio" role="button" tabindex="0" aria-label="Replay job audio">🔊</span>
-                            <span class="delete-job" data-job-id="${jobId}" 
-                                  style="cursor: pointer; opacity: 0.6; transition: opacity 0.2s; font-size: 14px; color: #dc3545;" 
-                                  title="Delete job" role="button" tabindex="0" aria-label="Delete job">🗑️</span>
-                        </span>$1`
-                    );
-                    
-                    return enhancedJobHtml;
-                }).join( "" );
+                // Enhanced done queue handling with structured job metadata for replay functionality
+                await this.handleDoneQueueUpdate( data );
                 
-                document.getElementById( "done-list" ).innerHTML = doneListHtml;
+                // Keep original HTML rendering for backward compatibility
+                document.getElementById( "done-list" ).innerHTML = this.enhancedDoneListHtml;
                 document.getElementById( "done-count" ).textContent = data.done_jobs.length;
                 
                 // Add event listeners for the new icons
@@ -1578,6 +1632,144 @@ class FreshQueueUI {
         } catch ( error ) {
             this.error( `Error updating ${queueName} queue:`, error );
         }
+    }
+    
+    async handleDoneQueueUpdate( data ) {
+        /**
+         * Handle done queue update with enhanced structured job metadata.
+         * 
+         * Requires:
+         *     - data contains done_jobs (HTML list) and done_jobs_metadata (structured data)
+         *     - JobCompletionCache and audio cache are initialized
+         *     
+         * Ensures:
+         *     - Job metadata stored for replay functionality
+         *     - Audio cache availability checked and indicated
+         *     - Enhanced HTML generated with proper replay button states
+         *     - Backward compatibility maintained with original HTML format
+         */
+        try {
+            this.log( `Processing ${data.done_jobs?.length || 0} done jobs with metadata enhancement` );
+            
+            // Use structured metadata if available, fallback to HTML parsing
+            const jobsMetadata = data.done_jobs_metadata || [];
+            const jobsHtml = data.done_jobs || [];
+            
+            // Store job metadata for replay functionality
+            this.doneJobsMetadata = new Map();
+            
+            // Process each job and check audio cache availability
+            const enhancedJobs = [];
+            
+            for ( let i = 0; i < jobsHtml.length; i++ ) {
+                const jobHtml = jobsHtml[i];
+                const jobMetadata = jobsMetadata[i] || this.parseJobMetadataFromHtml( jobHtml, i );
+                
+                // Check if audio is available in cache
+                jobMetadata.has_audio_cache = await this.checkJobAudioCacheAvailability( jobMetadata );
+                
+                // Store metadata for replay access
+                this.doneJobsMetadata.set( jobMetadata.job_id, jobMetadata );
+                
+                // Generate enhanced HTML with proper replay button state
+                const enhancedJobHtml = this.generateEnhancedJobHtml( jobMetadata );
+                enhancedJobs.push( enhancedJobHtml );
+                
+                this.log( `Job ${jobMetadata.job_id}: cache=${jobMetadata.has_audio_cache ? '✓' : '✗'}` );
+            }
+            
+            // Store enhanced HTML for rendering
+            this.enhancedDoneListHtml = enhancedJobs.join( "" );
+            
+            this.log( `✅ Processed ${enhancedJobs.length} done jobs with replay metadata` );
+            
+        } catch ( error ) {
+            this.error( "Error processing done queue metadata:", error );
+            
+            // Fallback to basic HTML rendering
+            this.enhancedDoneListHtml = data.done_jobs?.join( "" ) || "";
+            this.doneJobsMetadata = new Map();
+        }
+    }
+    
+    parseJobMetadataFromHtml( jobHtml, index ) {
+        /**
+         * Parse job metadata from HTML for backward compatibility.
+         * Fallback when structured metadata not available from API.
+         */
+        const jobIdMatch = jobHtml.match( /id=['"]([^'"]+)['"]/ );
+        const jobId = jobIdMatch ? jobIdMatch[1] : `done-job-${index}`;
+        
+        // Extract text content (basic parsing)
+        const textMatch = jobHtml.match( />([^<]+)</);
+        const text = textMatch ? textMatch[1].trim() : "Job completed";
+        
+        return {
+            job_id: jobId,
+            html: jobHtml,
+            question_text: "Q&A submission",
+            response_text: text,
+            timestamp: new Date().toISOString(),
+            user_id: this.currentUser,
+            has_audio_cache: false
+        };
+    }
+    
+    async checkJobAudioCacheAvailability( jobMetadata ) {
+        /**
+         * Check if audio is available in TTS cache for this job.
+         * 
+         * Requires:
+         *     - jobMetadata contains response_text
+         *     - audioCache is initialized
+         *     
+         * Ensures:
+         *     - Returns true if audio cached, false otherwise
+         *     - Handles cache check errors gracefully
+         */
+        try {
+            if ( !this.audioCacheInitialized || !this.audioCache ) {
+                return false;
+            }
+            
+            // Check TTS cache for response text
+            const cachedAudio = await this.audioCache.checkCache( jobMetadata.response_text );
+            
+            return cachedAudio !== null;
+            
+        } catch ( error ) {
+            this.log( `Cache check failed for job ${jobMetadata.job_id}:`, error );
+            return false;
+        }
+    }
+    
+    generateEnhancedJobHtml( jobMetadata ) {
+        /**
+         * Generate enhanced HTML with replay and delete controls.
+         * 
+         * Requires:
+         *     - jobMetadata contains job_id, html, has_audio_cache
+         *     
+         * Ensures:
+         *     - Returns HTML with properly styled replay/delete buttons
+         *     - Replay button state reflects audio availability
+         */
+        const replayOpacity = jobMetadata.has_audio_cache ? '1.0' : '0.7';
+        const replayTitle = jobMetadata.has_audio_cache 
+            ? "Replay cached audio" 
+            : "Generate and replay audio";
+        
+        return jobMetadata.html.replace( 
+            /(<\/li>)$/,
+            `<span class="job-controls" style="margin-left: 10px;">
+                <span class="replay-job" data-job-id="${jobMetadata.job_id}" 
+                      style="cursor: pointer; margin-right: 8px; opacity: ${replayOpacity}; transition: opacity 0.2s; font-size: 14px;" 
+                      title="${replayTitle}" role="button" tabindex="0" aria-label="Replay job audio">🔊</span>
+                <span class="delete-job" data-job-id="${jobMetadata.job_id}" 
+                      style="cursor: pointer; opacity: 0.6; transition: opacity 0.2s; font-size: 14px; color: #dc3545;" 
+                      title="Delete job" role="button" tabindex="0" aria-label="Delete job">🗑️</span>
+            </span>$1`
+        );
     }
     
     addDoneListEventListeners() {
@@ -1658,10 +1850,110 @@ class FreshQueueUI {
         this.log( `Added event listeners to ${replayButtons.length} replay and ${deleteButtons.length} delete buttons in done list` );
     }
     
-    replayJobAudio( jobId ) {
-        this.log( `Replay requested for job: ${jobId}` );
-        // TODO: Implement job audio replay functionality
-        alert( `Replay job audio for: ${jobId}\n\n(Functionality coming soon!)` );
+    async replayJobAudio( jobId ) {
+        /**
+         * Replay audio for a completed job using cached or generated TTS.
+         * 
+         * Requires:
+         *     - jobId exists in doneJobsMetadata
+         *     - TTS system is initialized
+         *     - Audio replay infrastructure is available
+         *     
+         * Ensures:
+         *     - Plays job audio using existing TTS system
+         *     - Uses cached audio when available for instant playback
+         *     - Stops any currently playing audio (single session model)
+         *     - Provides visual feedback during replay
+         *     - Handles errors gracefully with user notification
+         */
+        this.log( `🔊 Job replay requested for: ${jobId}` );
+        
+        try {
+            // Get job metadata
+            const jobMetadata = this.doneJobsMetadata?.get( jobId );
+            if ( !jobMetadata ) {
+                this.error( `Job metadata not found for: ${jobId}` );
+                alert( `Cannot replay job: ${jobId}\n\nJob data not available.` );
+                return;
+            }
+            
+            // Stop any currently playing audio (single active session model)
+            if ( this.isPlaying ) {
+                this.stopAudio();
+                this.log( "Stopped current audio for job replay" );
+            }
+            
+            // Get replay button for visual feedback
+            const replayButton = document.querySelector( `.replay-job[data-job-id="${jobId}"]` );
+            let originalContent = null;
+            let originalOpacity = null;
+            
+            if ( replayButton ) {
+                originalContent = replayButton.textContent;
+                originalOpacity = replayButton.style.opacity;
+                
+                // Visual feedback - loading state
+                replayButton.textContent = '⏳';
+                replayButton.style.opacity = '1';
+                replayButton.style.pointerEvents = 'none';
+            }
+            
+            // Determine text to replay - use JobCompletionCache for correct response text
+            let replayText = "Job completed";
+            
+            try {
+                // First, try to get the actual response text from JobCompletionCache
+                const cachedJob = await this.jobCompletionCache.get( jobId );
+                if ( cachedJob && cachedJob.text ) {
+                    replayText = cachedJob.text; // This is the actual TTS response like "It's 6:27 PM."
+                    this.log( `✅ Found cached response text: "${replayText.substring( 0, 30 )}..."` );
+                } else {
+                    // Fallback to SolutionSnapshot data (but this contains wrong text)
+                    replayText = jobMetadata.response_text || jobMetadata.question_text || "Job completed";
+                    this.log( `⚠️ Using fallback text from SolutionSnapshot: "${replayText.substring( 0, 30 )}..."` );
+                }
+            } catch ( error ) {
+                this.log( `❌ Failed to get cached response, using fallback: ${error}` );
+                replayText = jobMetadata.response_text || jobMetadata.question_text || "Job completed";
+            }
+            
+            this.log( `🔊 Replaying job audio: "${replayText.substring( 0, 50 )}..." (cached: ${jobMetadata.has_audio_cache})` );
+            
+            // Use current TTS mode from UI
+            const currentMode = document.getElementById( 'tts-mode' )?.value || 'instant';
+            
+            // Play using existing TTS infrastructure
+            await this.playTTS( replayText, currentMode );
+            
+            this.log( `✅ Job replay completed for: ${jobId}` );
+            
+            // Success feedback
+            if ( replayButton ) {
+                replayButton.textContent = '✅';
+                setTimeout( () => {
+                    replayButton.textContent = originalContent;
+                    replayButton.style.opacity = originalOpacity;
+                    replayButton.style.pointerEvents = 'auto';
+                }, 1000 );
+            }
+            
+        } catch ( error ) {
+            this.error( `Job replay failed for ${jobId}:`, error );
+            
+            // Error feedback
+            const replayButton = document.querySelector( `.replay-job[data-job-id="${jobId}"]` );
+            if ( replayButton ) {
+                replayButton.textContent = '❌';
+                setTimeout( () => {
+                    replayButton.textContent = '🔊';
+                    replayButton.style.opacity = '0.7';
+                    replayButton.style.pointerEvents = 'auto';
+                }, 2000 );
+            }
+            
+            // User notification
+            alert( `Job replay failed: ${jobId}\n\nError: ${error.message}` );
+        }
     }
     
     deleteJob( jobId ) {
@@ -2240,6 +2532,17 @@ class FreshQueueUI {
                 this.updateQueueLists( "dead" )
             ]);
             this.log( "Initial queue lists loaded successfully" );
+            
+            // Add manual refresh capability for debugging
+            window.refreshQueues = () => {
+                this.log( "🔄 Manual queue refresh triggered" );
+                Promise.all([
+                    this.updateQueueLists( "todo" ),
+                    this.updateQueueLists( "run" ),
+                    this.updateQueueLists( "done" ),
+                    this.updateQueueLists( "dead" )
+                ]);
+            };
         } catch ( error ) {
             this.error( "Error loading initial queue lists:", error );
         }
