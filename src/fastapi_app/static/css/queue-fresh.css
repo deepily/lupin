@@ -1,0 +1,240 @@
+        * {
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 20px;
+            background-color: #f8f9fa;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        /* Collapsible section styles */
+        .collapsible-section {
+            margin-bottom: 30px;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            background-color: #f8f9fa;
+            position: relative;
+        }
+
+        .section-header {
+            padding: 15px 20px;
+            background-color: #e9ecef;
+            border-bottom: 1px solid #dee2e6;
+            border-radius: 6px 6px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .section-header h3 {
+            margin: 0;
+            color: #495057;
+        }
+
+        .toggle-button {
+            background: none;
+            border: none;
+            font-size: 18px;
+            cursor: pointer;
+            color: #6c757d;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: color 0.2s;
+        }
+
+        .toggle-button:hover {
+            color: #495057;
+            background-color: rgba(0,0,0,0.05);
+        }
+
+        .section-content {
+            padding: 20px;
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+
+        .section-content.collapsed {
+            padding: 0 20px;
+            max-height: 0;
+        }
+
+        .qa-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            background-color: #f8f9fa;
+        }
+
+        .qa-section h3 {
+            margin-top: 0;
+            color: #495057;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #495057;
+        }
+
+        #qa-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 14px;
+            height: 36px;
+        }
+
+        #tts-mode {
+            width: 200px;
+            padding: 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        #submit-qa {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        #submit-qa:hover {
+            background-color: #0056b3;
+        }
+
+        #submit-qa:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .status-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 6px;
+            background-color: #e9ecef;
+        }
+
+        .status-item {
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .status-good {
+            color: #28a745;
+        }
+
+        .status-error {
+            color: #dc3545;
+        }
+
+        .status-warning {
+            color: #ffc107;
+        }
+
+        .response-area {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            background-color: #ffffff;
+            min-height: 100px;
+        }
+
+        .response-area h4 {
+            margin-top: 0;
+            color: #495057;
+        }
+
+        #response-text {
+            font-family: monospace;
+            font-size: 13px;
+            color: #6c757d;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .debug-info {
+            font-family: monospace;
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 5px;
+        }
+
+        .debug-log-scrollable {
+            max-height: 300px;
+            overflow-y: auto;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .audio-controls {
+            margin-top: 15px;
+        }
+
+        .audio-controls button {
+            margin-right: 10px;
+            padding: 6px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            background-color: white;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .audio-controls button:hover {
+            background-color: #e9ecef;
+        }
+
+        .loading {
+            display: inline-block;
+            margin-left: 10px;
+            color: #007bff;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }

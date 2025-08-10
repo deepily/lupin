@@ -113,7 +113,9 @@ RUN python3 -m spacy download en_core_web_sm
 
 RUN apt-get update && apt-get install -y curl
 
-RUN pip install pydantic-ai[slim]==0.2.5
+RUN pip install --no-cache-dir pydantic-ai[slim]==0.6.2
+
+RUN pip install --no-cache-dir xmltodict==0.14.2
 
 env LUPIN_ROOT=/var/lupin
 
@@ -122,4 +124,6 @@ env LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path
 WORKDIR=/var/lupin/src
 RUN mkdir -p /var/io
 
-CMD ["/bin/bash", "-c", "echo '-- OR -- Run `python3 -m fastapi_app.main` to spin up FastAPI server' && exec /bin/bash"]
+# CMD ["/bin/bash", "-c", "echo '-- OR -- Run `python3 -m fastapi_app.main` to spin up FastAPI server' && exec /bin/bash"]
+# Run the script: /var/lupin/src/scripts/run-fastapi-lupin.sh
+CMD [ "/bin/bash", "/var/lupin/src/scripts/run-fastapi-lupin.sh" ]

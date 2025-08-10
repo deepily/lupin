@@ -127,6 +127,9 @@ class FreshQueueUI {
             // Setup event listeners
             this.setupEventListeners();
             
+            // Apply Firefox compatibility hack
+            this.applyFirefoxCompatibilityHack();
+            
             // Connect WebSockets
             await this.connectWebSockets();
             
@@ -135,6 +138,46 @@ class FreshQueueUI {
         } catch ( error ) {
             this.error( "Initialization failed:", error );
             this.updateStatus( "auth-status", "Initialization failed", "error" );
+        }
+    }
+    
+    applyFirefoxCompatibilityHack() {
+        /**
+         * Firefox Runtime Compatibility Hack
+         * 
+         * Problem: Instant mode (11labs streaming) has compatibility issues with Firefox
+         * Solution: Auto-detect Firefox and force reliable mode (OpenAI batch)
+         * 
+         * This is a temporary workaround until Firefox instant mode issues are resolved.
+         */
+        
+        // Detect Firefox using multiple methods for reliability
+        const isFirefox = navigator.userAgent.toLowerCase().includes( 'firefox' ) || 
+                         typeof InstallTrigger !== 'undefined' ||
+                         ( navigator.userAgent.includes( 'Gecko/' ) && !navigator.userAgent.includes( 'Chrome' ) );
+        
+        if ( isFirefox ) {
+            console.log( "🦊 [FIREFOX-HACK] Firefox detected - forcing reliable mode for TTS compatibility" );
+            
+            // Get the TTS mode selector
+            const ttsMode = document.getElementById( 'tts-mode' );
+            if ( ttsMode ) {
+                // Force reliable mode
+                ttsMode.value = 'reliable';
+                
+                // Optional: Disable instant mode option to prevent manual switching
+                const instantOption = ttsMode.querySelector( 'option[value="instant"]' );
+                if ( instantOption ) {
+                    instantOption.disabled = true;
+                    instantOption.textContent = 'Instant (Disabled in Firefox)';
+                }
+                
+                console.log( "🦊 [FIREFOX-HACK] Switched TTS mode to 'reliable' - instant mode disabled" );
+            } else {
+                console.warn( "🦊 [FIREFOX-HACK] Could not find TTS mode selector to apply Firefox hack" );
+            }
+        } else {
+            console.log( "🌐 [BROWSER-DETECT] Non-Firefox browser detected - instant mode available" );
         }
     }
     
@@ -321,9 +364,10 @@ class FreshQueueUI {
             this.stopAudio();
         });
         
-        // Enter key in textarea
+        // Enter key in Q&A input
         document.getElementById( 'qa-input' ).addEventListener( 'keydown', ( e ) => {
-            if ( e.key === 'Enter' && ( e.ctrlKey || e.metaKey ) ) {
+            if ( e.key === 'Enter' ) {
+                e.preventDefault(); // Prevent default form submission behavior
                 this.submitQA();
             }
         });
@@ -756,11 +800,72 @@ class FreshQueueUI {
             this.error( "Q&A submission failed:", error );
             this.updateElement( "response-text", `Error: ${error.message}` );
             
+            // Check for server errors and trigger spoken notification
+            this.handleServerError( error );
+            
         } finally {
             // Reset UI
             submitButton.disabled = false;
             loadingSpinner.style.display = 'none';
         }
+    }
+    
+    handleServerError( error ) {
+        /**
+         * Detect server errors (500, 503, etc.) and create spoken notifications
+         * to alert the developer to check system logs.
+         */
+        
+        let isServerError = false;
+        let errorType = 'unknown';
+        
+        // Detect different types of server errors
+        if ( error.message && error.message.includes( '500' ) ) {
+            isServerError = true;
+            errorType = '500 Internal Server Error';
+        } else if ( error.message && error.message.includes( '503' ) ) {
+            isServerError = true;
+            errorType = '503 Service Unavailable';
+        } else if ( error.message && error.message.includes( '502' ) ) {
+            isServerError = true;
+            errorType = '502 Bad Gateway';
+        }
+        
+        if ( isServerError ) {
+            console.log( `🚨 [ERROR-NOTIFICATION] Server error detected: ${errorType}` );
+            
+            // Create notification data mimicking server-sent notification_queue_update
+            const errorNotification = {
+                id_hash: `error_${Date.now()}`,
+                message: "System error detected - check logs",
+                type: "alert", 
+                priority: "urgent",
+                source: "frontend-error-handler",
+                timestamp: new Date().toISOString()
+            };
+            
+            // Trigger the same notification flow as server-sent notifications
+            this.simulateNotificationUpdate( errorNotification );
+        }
+    }
+    
+    simulateNotificationUpdate( notification ) {
+        /**
+         * Simulate a notification_queue_update WebSocket event locally
+         * to trigger the same audio + visual feedback as server notifications.
+         */
+        
+        console.log( `🔔 [ERROR-NOTIFICATION] Triggering local notification: ${notification.message}` );
+        
+        // Create envelope structure matching WebSocket notification_queue_update format
+        const envelope = {
+            type: "notification_queue_update",
+            notification: notification,
+            timestamp: notification.timestamp
+        };
+        
+        // Call existing notification handler (reuse all existing logic)
+        this.handleNotificationUpdate( envelope );
     }
     
     handleJobCompletion( envelope ) {
