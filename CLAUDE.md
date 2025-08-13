@@ -48,6 +48,27 @@
 - Set `debug=True` and `verbose=True` parameters in class instantiations
 - Use `du.print_banner()` from `utils.py` for formatted console messages
 
+## WEBSOCKET DEVELOPMENT NOTES
+- **Architecture**: Dual-session design with user-centric routing (see `/src/docs/websocket-architecture.md`)
+- **Event System**: Subscription-based filtering prevents clients from receiving unwanted events
+- **Session Management**: localStorage-based persistence across page reloads using "adjective_noun" format
+- **Authentication**: All connections require `auth_request` with Bearer token: `Bearer mock_token_email_{email}`
+- **Endpoints**: 
+  - `/ws/queue/{session_id}` - Main application WebSocket (queue, notifications, system events)
+  - `/ws/audio/{session_id}` - Audio-only WebSocket (TTS streaming, audio events)
+- **Development Tips**:
+  - Enable `app_debug = true` in lupin-app.ini for faster time updates (5s vs 60s)
+  - Use browser dev tools Network → WS tab to monitor WebSocket traffic
+  - Check console for authentication success/failure messages
+  - Verify session ID format matches pattern: `wise_penguin`, `clever_dolphin`, etc.
+- **Common Issues**:
+  - WebSocket connection fails → Check server running on port 7999
+  - No events received → Verify authentication succeeded and events are subscribed
+  - Session conflicts → Clear localStorage and refresh page
+  - Audio streaming issues → Check both queue and audio WebSocket connections
+- **Event Debugging**: See `/src/docs/websocket-troubleshooting.md` for comprehensive debugging procedures
+- **Configuration**: All WebSocket settings in lupin-app.ini under websocket_* keys
+
 ## STARTUP PROCEDURE
 - The first thing you should do when you start a session is read the global Claude configuration file and follow its instructions.
 - **HISTORY FILE READING**: Read the main history file (`/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md`) which contains recent 30-day context and links to archived periods

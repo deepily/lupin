@@ -18,7 +18,11 @@ function createAudioContext() {
     }
 }
 
-// Initialize HybridTTS for job completion audio
+/**
+ * Initialize HybridTTS system for advanced audio processing and caching
+ * Sets up WebSocket connection, caching, and event handlers for job completion audio
+ * @returns {Promise<void>}
+ */
 async function initializeHybridTTS() {
     console.log( 'Starting HybridTTS initialization...' );
     
@@ -79,16 +83,13 @@ async function initializeHybridTTS() {
         await hybridTTS.initialize();
         console.log('HybridTTS initialized successfully for job audio');
     } catch (error) {
-        console.error('Failed to initialize HybridTTS with detailed error:', error);
-        console.error('Error name:', error.name);
-        console.error('Error message:', error.message);
-        console.error('Error stack:', error.stack);
+        logError( 'HybridTTS initialization', error, true );
         
         // Fall back to simple audio playback if HybridTTS fails
         hybridTTS = null;
         
         // Alert user about the failure
-        console.warn('HybridTTS initialization failed - TTS audio will not work. Check console for details.');
+        console.warn('Advanced audio features unavailable - falling back to basic audio playback.');
     }
 }
 
@@ -104,7 +105,7 @@ async function initializeJobCache() {
         
         console.log('JobCompletionCache initialized successfully');
     } catch (error) {
-        console.error('Failed to initialize JobCompletionCache:', error);
+        logError( 'JobCompletionCache initialization', error );
         // Fall back to simple Map storage if cache fails
         jobCache = null;
     }
@@ -128,7 +129,7 @@ function initializeNotificationSounds() {
         
         console.log('Notification sounds initialized and cached');
     } catch (error) {
-        console.error('Failed to initialize notification sounds:', error);
+        logError( 'Notification sounds initialization', error );
         notificationSounds = {};
     }
 }
@@ -170,7 +171,7 @@ async function playNotificationSoundByPriority( priority ) {
         }
         
     } catch ( error ) {
-        console.error( 'Failed to play notification sound:', error );
+        logError( 'Notification sound playback', error );
         // Continue execution even if sound fails
     }
 }
@@ -194,7 +195,7 @@ document.addEventListener( "DOMContentLoaded", async function() {
             if ( queueSocket ) {
                 queueSocket.close();
             }
-            setTimeout( connectToQueueWebSocket, 500 );
+            setTimeout( connectToQueueWebSocket, DELAYS.WEBSOCKET_RECONNECT );
             
             // Refresh all queues with new authentication
             setTimeout( function() {
@@ -313,7 +314,7 @@ function submitQuestion() {
         questionInput.value = "";
         
         // Refresh the todo queue to show the new job
-        setTimeout( () => updateQueueLists( "todo" ), 500 );
+        setTimeout( () => updateQueueLists( "todo" ), DELAYS.QUEUE_REFRESH );
     })
     .catch( error => {
         console.error( "Error submitting question:", error );
@@ -359,9 +360,97 @@ function playAnswer( id ) {
 var queueSocket = null;
 var sessionId = null;
 
+// WebSocket retry configuration
+var reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const INITIAL_RETRY_DELAY = 1000; // 1 second
+const MAX_RETRY_DELAY = 30000;    // 30 seconds
+
+// Polling mode fallback
+var pollingMode = false;
+var pollingInterval = null;
+const POLLING_INTERVAL_MS = 3000; // 3 seconds
+
+// Timing constants for consistent delays
+const DELAYS = {
+    WEBSOCKET_RECONNECT: 500,        // WebSocket reconnection delay
+    QUEUE_REFRESH: 500,              // Queue list refresh delay  
+    AUDIO_PLAYBACK: 300,             // Audio element delay
+    NOTIFICATION_MARK_PLAYED: 1000,  // Mark notification as played
+    NOTIFICATION_QUEUE: 300,         // TTS message queueing
+    AUDIO_QUEUE_NEXT: 1000,          // Audio queue next item delay
+    NOTIFICATION_INIT: 1000          // Notification state initialization
+};
+
 // Session persistence constants - separate keys for queue and audio
 const QUEUE_SESSION_KEY = 'lupin_queue_session_id';
 const AUDIO_SESSION_KEY = 'lupin_audio_session_id';
+
+/**
+ * Standardized error logging with consistent format and detail level
+ * @param {string} context - Description of what operation failed
+ * @param {Error} error - The error object to log
+ * @param {boolean} detailed - Whether to log detailed error information
+ */
+function logError( context, error, detailed = false ) {
+    console.error( `[ERROR] ${context}:`, error.message || error );
+    
+    if ( detailed && error instanceof Error ) {
+        console.error( `[ERROR] ${context} - Name:`, error.name );
+        console.error( `[ERROR] ${context} - Stack:`, error.stack );
+    }
+}
+
+/**
+ * Calculate exponential backoff delay for WebSocket reconnection
+ * Implements exponential backoff: 1s, 2s, 4s, 8s, 16s up to 30s max
+ * @returns {number|null} Delay in milliseconds, or null if max attempts exceeded
+ */
+function getReconnectDelay() {
+    if ( reconnectAttempts >= MAX_RECONNECT_ATTEMPTS ) {
+        return null; // Stop retrying
+    }
+    
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
+    const delay = Math.min( INITIAL_RETRY_DELAY * Math.pow( 2, reconnectAttempts ), MAX_RETRY_DELAY );
+    return delay;
+}
+
+/**
+ * Reset reconnection attempt counter on successful connection
+ */
+function resetReconnectAttempts() {
+    reconnectAttempts = 0;
+}
+
+/**
+ * Enable polling mode as fallback when WebSocket fails
+ * Starts HTTP polling to update queues when WebSocket connection is lost
+ * @returns {void}
+ */
+function enablePollingMode() {
+    if ( pollingMode ) return; // Already in polling mode
+    
+    pollingMode = true;
+    console.log( "Enabling HTTP polling mode for queue updates" );
+    
+    // Stop any existing polling
+    if ( pollingInterval ) {
+        clearInterval( pollingInterval );
+    }
+    
+    // Start polling all queues
+    pollingInterval = setInterval( function() {
+        console.log( "Polling queue updates..." );
+        updateQueueLists( "todo" );
+        updateQueueLists( "run" );
+        updateQueueLists( "done" );
+        updateQueueLists( "dead" );
+    }, POLLING_INTERVAL_MS );
+    
+    // Show user notification about fallback mode
+    console.warn( "WebSocket connection failed. Using HTTP polling for updates (slower but functional)." );
+}
 
 /**
  * Get or create a persistent session ID using localStorage
@@ -398,6 +487,11 @@ async function getOrCreateSessionId( sessionType ) {
     }
 }
 
+/**
+ * Establishes WebSocket connection to queue server with retry logic
+ * Handles authentication, event subscriptions, and automatic reconnection
+ * @returns {Promise<void>}
+ */
 async function connectToQueueWebSocket() {
     try {
         // Update debug status
@@ -421,6 +515,17 @@ async function connectToQueueWebSocket() {
         
         queueSocket.onopen = function() {
             console.log( "Connected to FastAPI queue WebSocket" );
+            resetReconnectAttempts(); // Reset retry counter on successful connection
+            
+            // Disable polling mode if it was active
+            if ( pollingMode ) {
+                pollingMode = false;
+                if ( pollingInterval ) {
+                    clearInterval( pollingInterval );
+                    pollingInterval = null;
+                }
+                console.log( "WebSocket reconnected - disabled polling mode" );
+            }
             
             // Send authentication with current user ID and subscribed events
             const authToken = getAuthHeader().replace( "Bearer ", "" );
@@ -464,14 +569,39 @@ async function connectToQueueWebSocket() {
                 console.error( "Parse error:", e );
                 return;
             }
+            
+            // Validate message structure
+            if ( !data || typeof data !== 'object' ) {
+                console.error( "Invalid WebSocket message format - not an object:", data );
+                return;
+            }
+            
+            if ( !data.type || typeof data.type !== 'string' ) {
+                console.error( "Invalid WebSocket message - missing or invalid type field:", data );
+                return;
+            }
+            
+            // Sanitize message type to prevent injection
+            const messageType = data.type.trim().toLowerCase();
+            if ( !/^[a-z_]+$/.test( messageType ) ) {
+                console.error( "Invalid WebSocket message type - contains invalid characters:", data.type );
+                return;
+            }
+            
             console.log( "queueSocket.onmessage: Received queue event:", data );
             
-            switch( data.type ) {
+            switch( messageType ) {
                 case "connect":
                     console.log( "Queue WebSocket connection confirmed:", data.message );
                     break;
                     
                 case "auth_success":
+                    // Validate user_id field
+                    if ( !data.user_id || typeof data.user_id !== 'string' ) {
+                        console.error( "Invalid auth_success message - missing or invalid user_id:", data );
+                        return;
+                    }
+                    
                     console.log( "WebSocket authentication successful for user:", data.user_id );
                     const successToken = getAuthHeader().replace( "Bearer ", "" );
                     updateWebSocketDebugInfo( sessionId, "Authenticated ✓", successToken );
@@ -579,14 +709,34 @@ async function connectToQueueWebSocket() {
         queueSocket.onclose = function() {
             console.log( "Queue WebSocket connection closed" );
             updateWebSocketDebugInfo( sessionId || "Unknown", "Disconnected", "None" );
-            // Attempt to reconnect after 5 seconds
-            setTimeout( connectToQueueWebSocket, 5000 );
+            
+            // Attempt to reconnect with exponential backoff
+            const delay = getReconnectDelay();
+            if ( delay !== null ) {
+                reconnectAttempts++;
+                console.log( `Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})` );
+                setTimeout( connectToQueueWebSocket, delay );
+            } else {
+                console.error( `Maximum reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Switching to polling mode.` );
+                updateWebSocketDebugInfo( sessionId || "Unknown", "Polling mode", "Using HTTP polling instead" );
+                enablePollingMode();
+            }
         };
         
     } catch( error ) {
         console.error( "Failed to connect to queue WebSocket:", error );
-        // Retry connection after 5 seconds
-        setTimeout( connectToQueueWebSocket, 5000 );
+        
+        // Retry connection with exponential backoff
+        const delay = getReconnectDelay();
+        if ( delay !== null ) {
+            reconnectAttempts++;
+            console.log( `Retrying connection in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})` );
+            setTimeout( connectToQueueWebSocket, delay );
+        } else {
+            console.error( `Maximum reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Switching to polling mode.` );
+            updateWebSocketDebugInfo( "Unknown", "Polling mode", "Using HTTP polling instead" );
+            enablePollingMode();
+        }
     }
 }
 
@@ -860,7 +1010,12 @@ async function queueTTSMessage( message, priority = "medium", autoPlay = true ) 
     addToAudioQueue( 'tts', message, priority );
 }
 
-// Event-driven playback - plays next item in queue
+/**
+ * Event-driven audio queue playback - processes next item in unified audio queue
+ * Handles different audio types (TTS, notification sounds, job audio) with appropriate routing
+ * @param {string|null} sessionId - Optional session ID for tracing
+ * @returns {Promise<void>}
+ */
 async function playNext( sessionId = null ) {
     if ( unifiedAudioQueue.items.length === 0 ) {
         console.log( "Queue empty, playback complete" );
@@ -926,7 +1081,7 @@ async function playNext( sessionId = null ) {
                     
                     // Small pause between items for clarity
                     if ( unifiedAudioQueue.items.length > 0 ) {
-                        await new Promise( resolve => setTimeout( resolve, 300 ) );
+                        await new Promise( resolve => setTimeout( resolve, DELAYS.AUDIO_PLAYBACK ) );
                     }
                     
                     // Continue to next item
@@ -966,7 +1121,7 @@ async function playNext( sessionId = null ) {
             }
             fallbackToNotificationSound();
             // Small delay for fallback sound
-            await new Promise( resolve => setTimeout( resolve, 1000 ) );
+            await new Promise( resolve => setTimeout( resolve, DELAYS.AUDIO_QUEUE_NEXT ) );
             playNext();
         }
     } catch ( error ) {
@@ -1218,6 +1373,13 @@ function handleNotificationSound( data ) {
 }
 
 // Handle server notifications to play audio with HybridTTS
+/**
+ * Handles speech update events from WebSocket, processing TTS audio generation
+ * Creates job completion cache entries and manages audio playback routing
+ * @param {Object} data - Speech update data containing text and metadata
+ * @param {string|null} sessionId - Optional session ID for tracing
+ * @returns {Promise<void>}
+ */
 async function handleSpeechUpdate( data, sessionId = null ) {
     
     if ( sessionId ) {
@@ -1760,18 +1922,6 @@ async function replayNotificationAudio( notificationId ) {
 async function deleteNotification( notificationId ) {
     console.log( `Delete button clicked for notification: ${notificationId}` );
     
-    // COMMENTED OUT: Show confirmation dialog - browser confirm() has issues
-    // try {
-    //     const confirmDelete = window.confirm( "Are you sure you want to permanently delete this notification? This action cannot be undone." );
-    //     if ( !confirmDelete ) {
-    //         console.log( "User cancelled deletion" );
-    //         return; // User cancelled deletion
-    //     }
-    //     console.log( `User confirmed deletion of notification: ${notificationId}` );
-    // } catch ( error ) {
-    //     console.error( "Confirmation dialog failed, proceeding without confirmation:", error );
-    //     // Continue with deletion if confirm() fails
-    // }
     
     console.log( `Proceeding with deletion of notification: ${notificationId} (confirmation disabled)` );
     
@@ -1829,12 +1979,6 @@ async function deleteNotification( notificationId ) {
 // Make deleteNotification available globally for onclick handlers
 window.deleteNotification = deleteNotification;
 
-// Simple test function to verify onclick works
-function testDelete() {
-    console.log( "TEST: Delete function called!" );
-    alert( "Delete test function works!" );
-}
-window.testDelete = testDelete;
 
 // Add a completed job to the done list with replay button
 // IMPORTANT: This function is only for testing/demo mock jobs.
@@ -1982,24 +2126,6 @@ function setEnterKeyListener() {
     }
 }
 
-// Test functions for manual replay testing
-function testJobCompletion() {
-    const testMessages = [
-        "Your test calculation has been completed successfully.",
-        "The test query has finished processing.",
-        "Your test request is now complete.",
-        "The test analysis has been finished.",
-        "Test job completed with excellent results."
-    ];
-    
-    const randomMessage = testMessages[Math.floor(Math.random() * testMessages.length)];
-    
-    // Simulate a speech_update event
-    handleSpeechUpdate({
-        text: randomMessage,
-        timestamp: new Date().toISOString()
-    });
-}
 
 async function clearCompletedJobs() {
     const doneList = document.getElementById( "done-list" );
@@ -2216,7 +2342,7 @@ async function processServerNotification( notification ) {
         console.log( `Queuing high priority notification for TTS playback: "${ttsMessage}"` );
         
         // Add to unified audio queue for playback (slight delay to let notification sound finish)
-        setTimeout( () => queueTTSMessage( ttsMessage, priority ), 300 );
+        setTimeout( () => queueTTSMessage( ttsMessage, priority ), DELAYS.NOTIFICATION_QUEUE );
     } else {
         console.log( `Skipping TTS for ${priority} priority notification (auto-play: ${ttsAutoplayEnabled})` );
     }
@@ -2228,7 +2354,7 @@ async function processServerNotification( notification ) {
     addNotificationToList( notification );
     
     // Mark as played on server after successful processing
-    setTimeout( () => markNotificationAsPlayed( id_hash ), 1000 );
+    setTimeout( () => markNotificationAsPlayed( id_hash ), DELAYS.NOTIFICATION_MARK_PLAYED );
 }
 
 // Mark notification as played on server
@@ -2507,7 +2633,7 @@ document.addEventListener( "DOMContentLoaded", function() {
     initializeDirectTTSTest();
     
     // Delay notification initialization to allow auth system to load
-    setTimeout( initializeNotificationState, 1000 );
+    setTimeout( initializeNotificationState, DELAYS.NOTIFICATION_INIT );
 });
 
 // create a method that closes this window after escape has been hit 2 times in a row

@@ -393,10 +393,12 @@ websocket available events = queue_todo_update, queue_done_update, queue_running
 ## Error Handling
 
 All WebSocket implementations include:
-- **Connection failure recovery**: Automatic reconnection with exponential backoff
+- **Connection failure recovery**: Automatic reconnection with exponential backoff (max 10 attempts)
 - **Authentication failure handling**: Clear error messages and retry mechanisms  
 - **Message validation**: Events not in subscription list are ignored
-- **Graceful degradation**: System continues functioning if WebSocket disconnects
+- **Graceful degradation**: HTTP polling fallback when WebSocket connections fail
+- **Input validation**: Comprehensive validation on all WebSocket message handlers and API endpoints
+- **User-friendly error messages**: Technical errors converted to actionable user guidance
 
 ## Security Considerations
 
@@ -420,3 +422,24 @@ This system replaces the previous Flask-SocketIO implementation. Legacy event na
 | `auth` | `auth_request` | Clarifies direction |
 
 The new event names provide better categorization and clearer intent while maintaining all existing functionality.
+
+## Recent Updates (2025.08.13)
+
+### Code Quality Improvements
+- **Magic Numbers Extraction**: Critical timing constants moved to DELAYS object in queue.js
+- **Error Handling Standardization**: Consistent logError() function across JavaScript codebase  
+- **Input Validation**: Comprehensive validation added to all WebSocket message handlers
+- **JSDoc Documentation**: Added to complex JavaScript functions for better maintainability
+
+### Connection Management Enhancements
+- **Exponential Backoff**: WebSocket reconnection now uses exponential backoff (1s → 30s max)
+- **Connection Limits**: Maximum 10 reconnection attempts before falling back to HTTP polling
+- **Graceful Degradation**: Automatic HTTP polling fallback when WebSocket fails
+- **Health Monitoring**: Improved connection health tracking and status reporting
+
+### Documentation Updates
+- **[Architecture Overview](websocket-architecture.md)**: Complete system design documentation
+- **[Troubleshooting Guide](websocket-troubleshooting.md)**: Comprehensive debugging procedures
+- **Configuration Guide**: Detailed WebSocket configuration options and examples
+
+For the most current implementation details and architectural patterns, see the complete documentation suite in `/src/docs/`.

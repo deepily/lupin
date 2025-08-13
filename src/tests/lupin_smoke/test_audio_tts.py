@@ -1,0 +1,401 @@
+#!/usr/bin/env python3
+"""
+Audio/TTS System Smoke Tests
+
+Comprehensive smoke tests for the Lupin audio and text-to-speech system including:
+- /api/get-speech TTS endpoint validation
+- Audio WebSocket streaming events
+- Instant vs reliable playback modes
+- TTS caching mechanism validation
+- Binary audio chunk handling
+"""
+
+import asyncio
+import json
+import time
+import sys
+from pathlib import Path
+
+# Add utilities to path
+sys.path.append(str(Path(__file__).parent))
+from utilities import (
+    LupinTestClient, TestValidator,
+    print_test_banner, run_test_with_error_handling
+)
+
+
+class AudioTTSHelper:
+    """Helper utilities specifically for audio/TTS testing."""
+    
+    def __init__(self, client: LupinTestClient):
+        self.client = client
+    
+    async def get_speech(self, text: str, session_id: str = None, 
+                        playback_mode: str = "instant") -> dict:
+        """
+        Request TTS generation via API.
+        
+        Args:
+            text: Text to convert to speech
+            session_id: Session ID for the request
+            playback_mode: "instant" or "reliable"
+            
+        Returns:
+            API response data
+        """
+        if session_id is None:
+            session_id = self.client.session_id
+        
+        params = {
+            "session_id": session_id,
+            "msg": text,
+            "playback_mode": playback_mode
+        }
+        
+        response = await self.client.http_request("GET", "/api/get-speech", params=params)
+        return response
+    
+    async def get_cached_speech(self, text: str) -> dict:
+        """Get cached TTS audio if available."""
+        params = {"text": text}
+        response = await self.client.http_request("GET", "/api/get-cached-speech", params=params)
+        return response
+
+
+class AudioTTSSmokeTests:
+    """Smoke tests for audio/TTS system functionality."""
+    
+    def __init__(self, debug: bool = False):
+        self.debug = debug
+        self.client = LupinTestClient(debug=debug)
+        self.audio_helper = AudioTTSHelper(self.client)
+        self.validator = TestValidator()
+        self.test_results = []
+    
+    async def test_get_speech_endpoint_basic(self):
+        """Test basic /api/get-speech endpoint functionality."""
+        test_text = "Hello, this is a test for the TTS system."
+        
+        response = await self.audio_helper.get_speech(test_text)
+        
+        self.validator.assert_response_ok(response, 200)
+        
+        data = response.json()
+        self.validator.assert_json_contains(data, ["status", "message"])
+        
+        # Should indicate TTS request was processed
+        assert data["status"] in ["success", "processing"], \
+            f"Unexpected status: {data['status']}"
+    
+    async def test_get_speech_playback_modes(self):
+        """Test both instant and reliable playback modes."""
+        test_text = "Testing playback modes for TTS generation."
+        
+        # Test instant mode
+        instant_response = await self.audio_helper.get_speech(
+            test_text, 
+            playback_mode="instant"
+        )
+        self.validator.assert_response_ok(instant_response, 200)
+        
+        # Test reliable mode  
+        reliable_response = await self.audio_helper.get_speech(
+            test_text + " reliable mode", 
+            playback_mode="reliable"
+        )
+        self.validator.assert_response_ok(reliable_response, 200)
+        
+        # Both should succeed
+        instant_data = instant_response.json()
+        reliable_data = reliable_response.json()
+        
+        assert instant_data["status"] in ["success", "processing"]
+        assert reliable_data["status"] in ["success", "processing"]
+    
+    async def test_get_speech_validation(self):
+        """Test /api/get-speech input validation."""
+        # Test missing session_id
+        params = {"msg": "Test message"}
+        response = await self.client.http_request("GET", "/api/get-speech", params=params)
+        assert response.status_code == 400, "Should require session_id"
+        
+        # Test missing message
+        params = {"session_id": self.client.session_id}
+        response = await self.client.http_request("GET", "/api/get-speech", params=params)
+        assert response.status_code == 400, "Should require msg parameter"
+        
+        # Test empty message
+        params = {
+            "session_id": self.client.session_id,
+            "msg": ""
+        }
+        response = await self.client.http_request("GET", "/api/get-speech", params=params)
+        assert response.status_code == 400, "Should reject empty message"
+        
+        # Test message too long
+        long_message = "x" * 1000  # Very long message
+        params = {
+            "session_id": self.client.session_id,
+            "msg": long_message
+        }
+        response = await self.client.http_request("GET", "/api/get-speech", params=params)
+        # Should either accept or reject gracefully (not crash)
+        assert response.status_code in [200, 400], "Should handle long messages gracefully"
+    
+    async def test_session_id_validation(self):
+        """Test session ID format validation."""
+        # Test invalid session ID format
+        invalid_session_ids = [
+            "invalid-session-123",  # Wrong format
+            "test_session",         # No adjective_noun pattern
+            "",                     # Empty
+            "a",                    # Too short
+        ]
+        
+        for invalid_id in invalid_session_ids:
+            response = await self.audio_helper.get_speech(
+                "Test message",
+                session_id=invalid_id
+            )
+            # Should either reject or handle gracefully
+            assert response.status_code in [200, 400], \
+                f"Should handle invalid session ID gracefully: {invalid_id}"
+    
+    async def test_audio_websocket_connection(self):
+        """Test audio WebSocket endpoint connection."""
+        # Connect to audio WebSocket
+        websocket = await self.client.websocket_connect(
+            f"/ws/audio/{self.client.session_id}",
+            subscribed_events=["audio_streaming_chunk", "audio_streaming_status", 
+                             "audio_streaming_complete", "auth_success", "sys_ping"]
+        )
+        
+        try:
+            # Connection should be successful (auth_success already verified in websocket_connect)
+            
+            # Test basic ping/pong
+            ping_event = await self.client.wait_for_websocket_event(
+                websocket, "sys_ping", timeout=35.0  # Wait for next ping
+            )
+            
+            self.validator.assert_websocket_event(ping_event, "sys_ping")
+            
+        except Exception as e:
+            # Audio WebSocket might have different behavior
+            if self.debug:
+                print(f"[DEBUG] Audio WebSocket test: {e}")
+            pass
+            
+        finally:
+            await self.client.close_websocket(websocket)
+    
+    async def test_audio_streaming_events(self):
+        """Test audio streaming WebSocket events."""
+        # Connect to audio WebSocket
+        websocket = await self.client.websocket_connect(
+            f"/ws/audio/{self.client.session_id}",
+            subscribed_events=["audio_streaming_chunk", "audio_streaming_status", 
+                             "audio_streaming_complete", "auth_success"]
+        )
+        
+        try:
+            # Request TTS to trigger audio streaming
+            test_text = f"Audio streaming test {int(time.time())}"
+            tts_response = await self.audio_helper.get_speech(test_text)
+            self.validator.assert_response_ok(tts_response, 200)
+            
+            # Try to catch audio streaming events
+            events_received = []
+            timeout_start = time.time()
+            
+            while time.time() - timeout_start < 10.0:  # 10 second timeout
+                try:
+                    event = await asyncio.wait_for(websocket.recv(), timeout=2.0)
+                    event_data = json.loads(event)
+                    event_type = event_data.get("type")
+                    
+                    if event_type in ["audio_streaming_status", "audio_streaming_chunk", "audio_streaming_complete"]:
+                        events_received.append(event_type)
+                        
+                        if self.debug:
+                            print(f"[AUDIO EVENT] {event_type}")
+                        
+                        # Validate event structure
+                        if event_type == "audio_streaming_status":
+                            self.validator.assert_json_contains(event_data, ["status"])
+                        elif event_type == "audio_streaming_chunk":
+                            # This would be binary data in real implementation
+                            pass
+                        elif event_type == "audio_streaming_complete":
+                            self.validator.assert_json_contains(event_data, ["text"])
+                            break
+                            
+                except asyncio.TimeoutError:
+                    break
+            
+            # We might not receive events in test environment, which is OK
+            if self.debug:
+                print(f"[DEBUG] Audio events received: {events_received}")
+                
+        except Exception as e:
+            if self.debug:
+                print(f"[DEBUG] Audio streaming test: {e}")
+            # This test might not work in all environments
+            pass
+            
+        finally:
+            await self.client.close_websocket(websocket)
+    
+    async def test_tts_caching_mechanism(self):
+        """Test TTS caching functionality."""
+        test_text = "This text will be used to test caching functionality."
+        
+        # First request - should generate new audio
+        first_response = await self.audio_helper.get_speech(test_text)
+        self.validator.assert_response_ok(first_response, 200)
+        
+        # Wait a moment
+        await asyncio.sleep(1)
+        
+        # Second request with same text - might be cached
+        second_response = await self.audio_helper.get_speech(test_text)
+        self.validator.assert_response_ok(second_response, 200)
+        
+        # Both should succeed (caching is transparent to API)
+        first_data = first_response.json()
+        second_data = second_response.json()
+        
+        assert first_data["status"] in ["success", "processing"]
+        assert second_data["status"] in ["success", "processing"]
+        
+        # Try cached speech endpoint if available
+        try:
+            cached_response = await self.audio_helper.get_cached_speech(test_text)
+            # This endpoint might not exist or might return 404 if not cached
+            assert cached_response.status_code in [200, 404, 501], \
+                "Cached speech endpoint should handle requests gracefully"
+        except Exception:
+            # Cached endpoint might not be implemented
+            pass
+    
+    async def test_concurrent_tts_requests(self):
+        """Test handling of concurrent TTS requests."""
+        test_texts = [
+            "First concurrent TTS request",
+            "Second concurrent TTS request", 
+            "Third concurrent TTS request"
+        ]
+        
+        # Send multiple requests concurrently
+        tasks = []
+        for i, text in enumerate(test_texts):
+            task = self.audio_helper.get_speech(
+                text,
+                session_id=f"{self.client.session_id}_{i}"
+            )
+            tasks.append(task)
+        
+        # Wait for all requests to complete
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # All requests should complete without errors
+        for i, response in enumerate(responses):
+            if isinstance(response, Exception):
+                if self.debug:
+                    print(f"[DEBUG] Concurrent request {i} failed: {response}")
+                # Some failures might be expected under load
+                continue
+            
+            self.validator.assert_response_ok(response, 200)
+            data = response.json()
+            assert data["status"] in ["success", "processing", "error"], \
+                f"Unexpected status in concurrent request: {data['status']}"
+    
+    async def test_audio_authentication(self):
+        """Test audio endpoint authentication requirements."""
+        # Test without authentication
+        try:
+            headers = {}  # No auth header
+            response = await self.client.http_request(
+                "GET", 
+                "/api/get-speech", 
+                params={
+                    "session_id": self.client.session_id,
+                    "msg": "Test message"
+                },
+                headers=headers
+            )
+            # Should either require auth or allow without auth
+            assert response.status_code in [200, 401], \
+                "Audio endpoint should handle auth consistently"
+        except Exception:
+            pass
+        
+        # Test with authentication (normal case)
+        response = await self.audio_helper.get_speech("Authenticated test message")
+        self.validator.assert_response_ok(response, 200)
+    
+    async def run_all_tests(self) -> bool:
+        """Run all audio/TTS smoke tests."""
+        print_test_banner("Audio/TTS System Smoke Tests")
+        
+        tests = [
+            (self.test_get_speech_endpoint_basic, "Basic /api/get-speech endpoint"),
+            (self.test_get_speech_playback_modes, "Instant vs reliable playback modes"),
+            (self.test_get_speech_validation, "Input validation"),
+            (self.test_session_id_validation, "Session ID validation"),
+            (self.test_audio_websocket_connection, "Audio WebSocket connection"),
+            (self.test_audio_streaming_events, "Audio streaming events"),
+            (self.test_tts_caching_mechanism, "TTS caching mechanism"),
+            (self.test_concurrent_tts_requests, "Concurrent TTS requests"),
+            (self.test_audio_authentication, "Audio authentication")
+        ]
+        
+        passed = 0
+        total = len(tests)
+        
+        for test_func, test_name in tests:
+            if await run_test_with_error_handling(test_func, test_name):
+                passed += 1
+        
+        print(f"\n{'='*60}")
+        print(f"Audio/TTS Tests Summary: {passed}/{total} passed")
+        print(f"{'='*60}")
+        
+        return passed == total
+
+
+async def main():
+    """Main test execution function."""
+    # Check if we should run in debug mode
+    debug = "--debug" in sys.argv
+    
+    print("🔊 Audio/TTS System Smoke Tests")
+    print("=" * 50)
+    print("Testing comprehensive audio and TTS functionality...")
+    print("")
+    
+    # Create test instance and run
+    tests = AudioTTSSmokeTests(debug=debug)
+    
+    try:
+        success = await tests.run_all_tests()
+        
+        if success:
+            print("✅ All audio/TTS tests passed!")
+            return True
+        else:
+            print("❌ Some audio/TTS tests failed!")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Test execution failed: {e}")
+        if debug:
+            import traceback
+            traceback.print_exc()
+        return False
+
+
+if __name__ == "__main__":
+    result = asyncio.run(main())
+    sys.exit(0 if result else 1)

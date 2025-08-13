@@ -35,6 +35,8 @@ Lupin is built on a modern FastAPI architecture with WebSocket support for real-
 
 **Key Technical Documents:**
 - **[WebSocket Events Documentation](src/docs/websocket-events.md)** - Comprehensive guide to all WebSocket events and their usage
+- **[WebSocket Architecture Overview](src/docs/websocket-architecture.md)** - Complete system design and architectural patterns
+- **[WebSocket Troubleshooting Guide](src/docs/websocket-troubleshooting.md)** - Common issues, solutions, and debugging procedures
 - **[WebSocket TTS Streaming Design](src/rnd/2025.06.03-websocket-tts-streaming-design.md)** - Architecture for real-time text-to-speech streaming
 - **[Claude Code Notification System](src/rnd/2025.06.20-claude-code-notification-system-design.md)** - Design for real-time agent notifications
 - **[FastAPI Queue Implementation](src/rnd/2025.06.17-fastapi-queue-implementation-plan.md)** - Queue-based request handling
@@ -53,6 +55,37 @@ The project currently has **three ongoing parallel development efforts**:
 - Run FastAPI server: `src/scripts/run-fastapi-lupin.sh` (port 7999)
 - Run GUI client: `src/scripts/run-lupin-gui.sh`
 - Run GSM8K benchmarks: `src/scripts/run-gsm8k.sh --help`
+
+**WebSocket Configuration:**
+
+The Lupin system uses WebSocket connections for real-time communication between the server and client applications. Configuration is managed through `src/conf/lupin-app.ini`.
+
+*Key WebSocket Settings:*
+```ini
+# Enable/disable WebSocket functionality
+websocket_enabled = true
+
+# Connection health monitoring
+websocket_heartbeat_interval = 30        # Ping interval (seconds)
+websocket_cleanup_interval = 3600        # Stale session cleanup (seconds)
+
+# Connection limits
+websocket_max_connections_per_user = 5   # Multiple tabs support
+websocket_single_session_policy = false  # Allow multiple sessions per user
+
+# Available events (comma-separated)
+websocket_available_events = queue_todo_update, queue_done_update, 
+                             audio_streaming_chunk, notification_queue_update, 
+                             sys_time_update, sys_ping, auth_request, auth_success
+```
+
+*WebSocket Endpoints:*
+- `ws://localhost:7999/ws/queue/{session_id}` - Main application WebSocket for authenticated users
+- `ws://localhost:7999/ws/audio/{session_id}` - Audio-only WebSocket for TTS streaming
+
+*Authentication:* All WebSocket connections require authentication via `auth_request` message with Bearer token format: `Bearer mock_token_email_{your_email}`
+
+For detailed configuration options, troubleshooting, and architecture information, see the WebSocket documentation links above.
 
 #### DISCLAIMER
 
