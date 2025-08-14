@@ -69,6 +69,9 @@ nohup.out
 # Test baseline files - generated automatically, should not be tracked
 src/tests/websocket_smoke/config/baselines/*.json
 
+# Test execution logs - temporary diagnostic data, should not be tracked
+src/tests/logs/
+
 # Separate git repositories - managed independently
 src/lupin-mobile/
 src/lupin-plugin-firefox/
