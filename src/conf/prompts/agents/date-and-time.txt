@@ -33,27 +33,7 @@ Requirement: The first word of your response MUST the XML tag `<response>` and y
 ### Input:
 
 You MUST respond to the directives above using the following XML format:
-<response>
-    <thoughts>Your thoughts</thoughts>
-    <brainstorm>
-        <idea1>Your first idea</idea1>
-        <idea2>Your second idea</idea2>
-        <idea3>Your third idea</idea3>
-    </brainstorm>
-    <evaluation>Your evaluation</evaluation>
-    <code>
-        <line>All imports here</line>
-        <line></line>
-        <line>def your_function_name_here( optional_arguments ):</line>
-        <line>    ...</line>
-        <line>    ...</line>
-        <line>    return solution</line>
-        <line></line>
-    </code>
-    <returns>Object type of the variable `solution`</returns>
-    <example>solution = your_function_name_here( optional_arguments )</example>
-    <explanation>Explanation of how the code works</explanation>
-</response>
+{{PYDANTIC_XML_EXAMPLE}}
 
 Question: `{question}`
 
