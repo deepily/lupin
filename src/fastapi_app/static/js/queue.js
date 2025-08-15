@@ -18,7 +18,11 @@ function createAudioContext() {
     }
 }
 
-// Initialize HybridTTS for job completion audio
+/**
+ * Initialize HybridTTS system for advanced audio processing and caching
+ * Sets up WebSocket connection, caching, and event handlers for job completion audio
+ * @returns {Promise<void>}
+ */
 async function initializeHybridTTS() {
     console.log( 'Starting HybridTTS initialization...' );
     
@@ -52,6 +56,12 @@ async function initializeHybridTTS() {
                 // If we're using instant mode and playing from the queue, continue to next item
                 if ( unifiedAudioQueue.isPlaying && unifiedAudioQueue.currentItem?.type === 'tts' ) {
                     console.log( "HybridTTS audio finished, continuing queue playback" );
+                    
+                    // End tracing session if this was tracked
+                    if ( unifiedAudioQueue.currentItem?.sessionId ) {
+                        PathTracer.endSession( unifiedAudioQueue.currentItem.sessionId, 'SUCCESS - Audio played via queue' );
+                    }
+                    
                     unifiedAudioQueue.currentAudio = null;
                     unifiedAudioQueue.currentItem = null;
                     playNext();
@@ -73,16 +83,13 @@ async function initializeHybridTTS() {
         await hybridTTS.initialize();
         console.log('HybridTTS initialized successfully for job audio');
     } catch (error) {
-        console.error('Failed to initialize HybridTTS with detailed error:', error);
-        console.error('Error name:', error.name);
-        console.error('Error message:', error.message);
-        console.error('Error stack:', error.stack);
+        logError( 'HybridTTS initialization', error, true );
         
         // Fall back to simple audio playback if HybridTTS fails
         hybridTTS = null;
         
         // Alert user about the failure
-        console.warn('HybridTTS initialization failed - TTS audio will not work. Check console for details.');
+        console.warn('Advanced audio features unavailable - falling back to basic audio playback.');
     }
 }
 
@@ -98,7 +105,7 @@ async function initializeJobCache() {
         
         console.log('JobCompletionCache initialized successfully');
     } catch (error) {
-        console.error('Failed to initialize JobCompletionCache:', error);
+        logError( 'JobCompletionCache initialization', error );
         // Fall back to simple Map storage if cache fails
         jobCache = null;
     }
@@ -122,7 +129,7 @@ function initializeNotificationSounds() {
         
         console.log('Notification sounds initialized and cached');
     } catch (error) {
-        console.error('Failed to initialize notification sounds:', error);
+        logError( 'Notification sounds initialization', error );
         notificationSounds = {};
     }
 }
@@ -164,7 +171,7 @@ async function playNotificationSoundByPriority( priority ) {
         }
         
     } catch ( error ) {
-        console.error( 'Failed to play notification sound:', error );
+        logError( 'Notification sound playback', error );
         // Continue execution even if sound fails
     }
 }
@@ -188,7 +195,7 @@ document.addEventListener( "DOMContentLoaded", async function() {
             if ( queueSocket ) {
                 queueSocket.close();
             }
-            setTimeout( connectToQueueWebSocket, 500 );
+            setTimeout( connectToQueueWebSocket, DELAYS.WEBSOCKET_RECONNECT );
             
             // Refresh all queues with new authentication
             setTimeout( function() {
@@ -284,13 +291,19 @@ function submitQuestion() {
     statusElement.textContent = "Submitting...";
     statusElement.style.color = "#007bff";
     
-    const url = `/api/push?question=${encodeURIComponent(question)}&websocket_id=${websocketId}`;
+    const url = `/api/push`;
     
     fetch( url, {
+        method: 'POST',
         headers: {
             'Authorization': getAuthHeader(),
-            'X-Session-ID': sessionId
-        }
+            'X-Session-ID': sessionId,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            question: question,
+            websocket_id: websocketId
+        })
     })
     .then( response => {
         if ( !response.ok ) {
@@ -307,7 +320,7 @@ function submitQuestion() {
         questionInput.value = "";
         
         // Refresh the todo queue to show the new job
-        setTimeout( () => updateQueueLists( "todo" ), 500 );
+        setTimeout( () => updateQueueLists( "todo" ), DELAYS.QUEUE_REFRESH );
     })
     .catch( error => {
         console.error( "Error submitting question:", error );
@@ -353,9 +366,97 @@ function playAnswer( id ) {
 var queueSocket = null;
 var sessionId = null;
 
+// WebSocket retry configuration
+var reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const INITIAL_RETRY_DELAY = 1000; // 1 second
+const MAX_RETRY_DELAY = 30000;    // 30 seconds
+
+// Polling mode fallback
+var pollingMode = false;
+var pollingInterval = null;
+const POLLING_INTERVAL_MS = 3000; // 3 seconds
+
+// Timing constants for consistent delays
+const DELAYS = {
+    WEBSOCKET_RECONNECT: 500,        // WebSocket reconnection delay
+    QUEUE_REFRESH: 500,              // Queue list refresh delay  
+    AUDIO_PLAYBACK: 300,             // Audio element delay
+    NOTIFICATION_MARK_PLAYED: 1000,  // Mark notification as played
+    NOTIFICATION_QUEUE: 300,         // TTS message queueing
+    AUDIO_QUEUE_NEXT: 1000,          // Audio queue next item delay
+    NOTIFICATION_INIT: 1000          // Notification state initialization
+};
+
 // Session persistence constants - separate keys for queue and audio
 const QUEUE_SESSION_KEY = 'lupin_queue_session_id';
 const AUDIO_SESSION_KEY = 'lupin_audio_session_id';
+
+/**
+ * Standardized error logging with consistent format and detail level
+ * @param {string} context - Description of what operation failed
+ * @param {Error} error - The error object to log
+ * @param {boolean} detailed - Whether to log detailed error information
+ */
+function logError( context, error, detailed = false ) {
+    console.error( `[ERROR] ${context}:`, error.message || error );
+    
+    if ( detailed && error instanceof Error ) {
+        console.error( `[ERROR] ${context} - Name:`, error.name );
+        console.error( `[ERROR] ${context} - Stack:`, error.stack );
+    }
+}
+
+/**
+ * Calculate exponential backoff delay for WebSocket reconnection
+ * Implements exponential backoff: 1s, 2s, 4s, 8s, 16s up to 30s max
+ * @returns {number|null} Delay in milliseconds, or null if max attempts exceeded
+ */
+function getReconnectDelay() {
+    if ( reconnectAttempts >= MAX_RECONNECT_ATTEMPTS ) {
+        return null; // Stop retrying
+    }
+    
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
+    const delay = Math.min( INITIAL_RETRY_DELAY * Math.pow( 2, reconnectAttempts ), MAX_RETRY_DELAY );
+    return delay;
+}
+
+/**
+ * Reset reconnection attempt counter on successful connection
+ */
+function resetReconnectAttempts() {
+    reconnectAttempts = 0;
+}
+
+/**
+ * Enable polling mode as fallback when WebSocket fails
+ * Starts HTTP polling to update queues when WebSocket connection is lost
+ * @returns {void}
+ */
+function enablePollingMode() {
+    if ( pollingMode ) return; // Already in polling mode
+    
+    pollingMode = true;
+    console.log( "Enabling HTTP polling mode for queue updates" );
+    
+    // Stop any existing polling
+    if ( pollingInterval ) {
+        clearInterval( pollingInterval );
+    }
+    
+    // Start polling all queues
+    pollingInterval = setInterval( function() {
+        console.log( "Polling queue updates..." );
+        updateQueueLists( "todo" );
+        updateQueueLists( "run" );
+        updateQueueLists( "done" );
+        updateQueueLists( "dead" );
+    }, POLLING_INTERVAL_MS );
+    
+    // Show user notification about fallback mode
+    console.warn( "WebSocket connection failed. Using HTTP polling for updates (slower but functional)." );
+}
 
 /**
  * Get or create a persistent session ID using localStorage
@@ -392,6 +493,11 @@ async function getOrCreateSessionId( sessionType ) {
     }
 }
 
+/**
+ * Establishes WebSocket connection to queue server with retry logic
+ * Handles authentication, event subscriptions, and automatic reconnection
+ * @returns {Promise<void>}
+ */
 async function connectToQueueWebSocket() {
     try {
         // Update debug status
@@ -415,6 +521,17 @@ async function connectToQueueWebSocket() {
         
         queueSocket.onopen = function() {
             console.log( "Connected to FastAPI queue WebSocket" );
+            resetReconnectAttempts(); // Reset retry counter on successful connection
+            
+            // Disable polling mode if it was active
+            if ( pollingMode ) {
+                pollingMode = false;
+                if ( pollingInterval ) {
+                    clearInterval( pollingInterval );
+                    pollingInterval = null;
+                }
+                console.log( "WebSocket reconnected - disabled polling mode" );
+            }
             
             // Send authentication with current user ID and subscribed events
             const authToken = getAuthHeader().replace( "Bearer ", "" );
@@ -458,14 +575,39 @@ async function connectToQueueWebSocket() {
                 console.error( "Parse error:", e );
                 return;
             }
+            
+            // Validate message structure
+            if ( !data || typeof data !== 'object' ) {
+                console.error( "Invalid WebSocket message format - not an object:", data );
+                return;
+            }
+            
+            if ( !data.type || typeof data.type !== 'string' ) {
+                console.error( "Invalid WebSocket message - missing or invalid type field:", data );
+                return;
+            }
+            
+            // Sanitize message type to prevent injection
+            const messageType = data.type.trim().toLowerCase();
+            if ( !/^[a-z_]+$/.test( messageType ) ) {
+                console.error( "Invalid WebSocket message type - contains invalid characters:", data.type );
+                return;
+            }
+            
             console.log( "queueSocket.onmessage: Received queue event:", data );
             
-            switch( data.type ) {
+            switch( messageType ) {
                 case "connect":
                     console.log( "Queue WebSocket connection confirmed:", data.message );
                     break;
                     
                 case "auth_success":
+                    // Validate user_id field
+                    if ( !data.user_id || typeof data.user_id !== 'string' ) {
+                        console.error( "Invalid auth_success message - missing or invalid user_id:", data );
+                        return;
+                    }
+                    
                     console.log( "WebSocket authentication successful for user:", data.user_id );
                     const successToken = getAuthHeader().replace( "Bearer ", "" );
                     updateWebSocketDebugInfo( sessionId, "Authenticated ✓", successToken );
@@ -525,11 +667,16 @@ async function connectToQueueWebSocket() {
                     break;
                     
                 case "tts_job_request":
-                    handleSpeechUpdate( data );
+                    // 🔍 BUG FIX: Pass the nested data.data object, not the full message
+                    console.log( `🔍 🐛 FIX: WebSocket message structure - data.data exists:`, !!data.data );
+                    console.log( `🔍 🐛 FIX: data.data.text:`, data.data?.text );
+                    const qaSession = PathTracer.startSession( 'QA', data.data );
+                    handleSpeechUpdate( data.data, qaSession );  // Pass data.data instead of data
                     break;
                     
                 case "notification_message_user":
-                    handleUserNotification( data );
+                    const notifSession = PathTracer.startSession( 'NOTIFICATION', data );
+                    handleUserNotification( data, notifSession );
                     break;
 
                 case "notification_queue_update":
@@ -568,14 +715,34 @@ async function connectToQueueWebSocket() {
         queueSocket.onclose = function() {
             console.log( "Queue WebSocket connection closed" );
             updateWebSocketDebugInfo( sessionId || "Unknown", "Disconnected", "None" );
-            // Attempt to reconnect after 5 seconds
-            setTimeout( connectToQueueWebSocket, 5000 );
+            
+            // Attempt to reconnect with exponential backoff
+            const delay = getReconnectDelay();
+            if ( delay !== null ) {
+                reconnectAttempts++;
+                console.log( `Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})` );
+                setTimeout( connectToQueueWebSocket, delay );
+            } else {
+                console.error( `Maximum reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Switching to polling mode.` );
+                updateWebSocketDebugInfo( sessionId || "Unknown", "Polling mode", "Using HTTP polling instead" );
+                enablePollingMode();
+            }
         };
         
     } catch( error ) {
         console.error( "Failed to connect to queue WebSocket:", error );
-        // Retry connection after 5 seconds
-        setTimeout( connectToQueueWebSocket, 5000 );
+        
+        // Retry connection with exponential backoff
+        const delay = getReconnectDelay();
+        if ( delay !== null ) {
+            reconnectAttempts++;
+            console.log( `Retrying connection in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})` );
+            setTimeout( connectToQueueWebSocket, delay );
+        } else {
+            console.error( `Maximum reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Switching to polling mode.` );
+            updateWebSocketDebugInfo( "Unknown", "Polling mode", "Using HTTP polling instead" );
+            enablePollingMode();
+        }
     }
 }
 
@@ -628,33 +795,212 @@ var playing      = false; // Old playing state - to be migrated
 var quiet        = false;
 var lastAudioURL = null;
 
+// Path Tracer for debugging audio playback issues
+window.PathTracer = {
+    sessions: {},
+    
+    startSession( type, data ) {
+        const id = Date.now() + '-' + Math.random().toString(36).substr(2, 5);
+        this.sessions[id] = {
+            type: type, // 'NOTIFICATION' or 'QA'
+            startTime: Date.now(),
+            steps: [],
+            audioState: {},
+            data: JSON.parse( JSON.stringify( data ) ) // Deep copy
+        };
+        console.log( `\n🔍 PATH TRACER: Starting ${type} session ${id}` );
+        return id;
+    },
+    
+    addStep( sessionId, step, data = {} ) {
+        if ( !this.sessions[sessionId] ) return;
+        
+        const session = this.sessions[sessionId];
+        const elapsed = Date.now() - session.startTime;
+        
+        // Capture detailed audio context state if HybridTTS exists
+        let audioContextState = 'unknown';
+        let audioContextDetails = {};
+        if ( window.hybridTTS && window.hybridTTS.audioContext ) {
+            const ctx = window.hybridTTS.audioContext;
+            audioContextState = ctx.state;
+            audioContextDetails = {
+                state: ctx.state,
+                currentTime: ctx.currentTime,
+                sampleRate: ctx.sampleRate,
+                baseLatency: ctx.baseLatency || 'unknown',
+                outputLatency: ctx.outputLatency || 'unknown',
+                destination: {
+                    maxChannelCount: ctx.destination.maxChannelCount,
+                    channelCount: ctx.destination.channelCount,
+                    numberOfInputs: ctx.destination.numberOfInputs,
+                    numberOfOutputs: ctx.destination.numberOfOutputs
+                }
+            };
+        }
+        
+        const stepData = {
+            time: elapsed,
+            step: step,
+            data: data,
+            audioContextState: audioContextState,
+            audioContextDetails: audioContextDetails,
+            stack: new Error().stack.split('\n').slice(2, 5)
+                .map(s => s.trim().replace(/^at /, ''))
+                .join(' → ')
+        };
+        
+        session.steps.push( stepData );
+        console.log( `🔍 [${elapsed}ms] ${step}`, data );
+        
+        // Log detailed audio context for critical steps
+        if ( step.includes('hybridTTS.speak()') ) {
+            console.log( `🔍 [${elapsed}ms] AudioContext Details:`, audioContextDetails );
+        }
+    },
+    
+    endSession( sessionId, result ) {
+        if ( !this.sessions[sessionId] ) return;
+        
+        const session = this.sessions[sessionId];
+        session.endTime = Date.now();
+        session.duration = session.endTime - session.startTime;
+        session.result = result;
+        
+        console.log( `\n🔍 PATH TRACER: Ending ${session.type} session ${sessionId}` );
+        console.log( `Duration: ${session.duration}ms, Result: ${result}` );
+        
+        this.visualizePath( sessionId );
+        
+        // Compare if we have both types
+        this.compareRecentPaths();
+    },
+    
+    visualizePath( sessionId ) {
+        const session = this.sessions[sessionId];
+        if ( !session ) return;
+        
+        console.log( `\n${'='.repeat(60)}` );
+        console.log( `${session.type} PATH (${session.result})` );
+        console.log( `${'='.repeat(60)}` );
+        console.log( `[0ms] START: ${session.type}` );
+        console.log( `  │   data: ${JSON.stringify(session.data).substring(0, 60)}...` );
+        
+        session.steps.forEach( step => {
+            console.log( `  │` );
+            console.log( `[${step.time}ms] → ${step.step}` );
+            if ( Object.keys(step.data).length > 0 ) {
+                console.log( `  │   ${JSON.stringify(step.data).substring(0, 80)}` );
+            }
+            console.log( `  │   audioContext: ${step.audioContextState}` );
+        });
+        
+        console.log( `  │` );
+        console.log( `[${session.duration}ms] END: ${session.result}` );
+        console.log( `${'='.repeat(60)}\n` );
+    },
+    
+    compareRecentPaths() {
+        // Find most recent NOTIFICATION and QA sessions
+        const recent = Object.values( this.sessions )
+            .sort( (a, b) => b.startTime - a.startTime )
+            .slice( 0, 10 );
+        
+        const recentNotif = recent.find( s => s.type === 'NOTIFICATION' );
+        const recentQA = recent.find( s => s.type === 'QA' );
+        
+        if ( recentNotif && recentQA && recentNotif.endTime && recentQA.endTime ) {
+            console.log( `\n${'*'.repeat(60)}` );
+            console.log( `PATH COMPARISON: NOTIFICATION vs Q&A` );
+            console.log( `${'*'.repeat(60)}` );
+            
+            // Find divergence point
+            let divergenceFound = false;
+            const maxSteps = Math.max( recentNotif.steps.length, recentQA.steps.length );
+            
+            for ( let i = 0; i < maxSteps; i++ ) {
+                const notifStep = recentNotif.steps[i];
+                const qaStep = recentQA.steps[i];
+                
+                if ( !notifStep || !qaStep ) {
+                    console.log( `\n⚠️  Path length differs at step ${i}` );
+                    break;
+                }
+                
+                if ( notifStep.step !== qaStep.step && !divergenceFound ) {
+                    console.log( `\n🔴 DIVERGENCE at step ${i}:` );
+                    console.log( `   NOTIFICATION: ${notifStep.step}` );
+                    console.log( `   Q&A: ${qaStep.step}` );
+                    divergenceFound = true;
+                }
+                
+                if ( notifStep.audioContextState !== qaStep.audioContextState ) {
+                    console.log( `\n⚠️  AudioContext state differs at step ${i}:` );
+                    console.log( `   NOTIFICATION: ${notifStep.audioContextState}` );
+                    console.log( `   Q&A: ${qaStep.audioContextState}` );
+                }
+            }
+            
+            console.log( `\nNOTIFICATION result: ${recentNotif.result} (${recentNotif.duration}ms)` );
+            console.log( `Q&A result: ${recentQA.result} (${recentQA.duration}ms)` );
+            console.log( `${'*'.repeat(60)}\n` );
+        }
+    }
+};
+
 // Add item to unified audio queue
-function addToAudioQueue( type, content, priority = "medium" ) {
+function addToAudioQueue( type, content, priority = "medium", sessionId = null ) {
+    if ( sessionId ) {
+        PathTracer.addStep( sessionId, 'addToAudioQueue ENTRY', { 
+            type, 
+            priority, 
+            queueLength: unifiedAudioQueue.items.length,
+            isPlaying: unifiedAudioQueue.isPlaying
+        } );
+    }
+    
     const item = {
         type,      // 'tts' or 'audio'
         content,   // text for TTS, URL for audio
         priority,
         id: Date.now(),
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        sessionId: sessionId // Track which session created this item
     };
     
+    console.log( `🔍 📥 QUEUE-ADD: Created item:`, JSON.stringify( item ) );
     console.log( `Adding to audio queue (${type}, priority: ${priority}): "${content.substring ? content.substring(0, 50) + '...' : content}"` );
     
     unifiedAudioQueue.items.push( item );
+    console.log( `🔍 📥 QUEUE-ADD: Queue after push:`, JSON.stringify( unifiedAudioQueue.items ) );
     
     // Sort by priority if needed
     if ( priority === "urgent" || priority === "high" ) {
+        console.log( `🔍 📥 QUEUE-ADD: Sorting queue due to ${priority} priority` );
         const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
         unifiedAudioQueue.items.sort( ( a, b ) => priorityOrder[a.priority] - priorityOrder[b.priority] );
+        console.log( `🔍 📥 QUEUE-ADD: Queue after sorting:`, JSON.stringify( unifiedAudioQueue.items ) );
     }
     
     console.log( `Audio queue now has ${unifiedAudioQueue.items.length} items` );
     updateQueueDisplay();
     
+    if ( sessionId ) {
+        PathTracer.addStep( sessionId, 'addToAudioQueue - Item added to queue', { 
+            itemId: item.id,
+            queueLength: unifiedAudioQueue.items.length
+        } );
+    }
+    
     // Auto-start playback if nothing is playing
     if ( !unifiedAudioQueue.isPlaying ) {
         console.log( "Queue was idle, starting playback automatically" );
-        playNext();
+        
+        if ( sessionId ) {
+            PathTracer.addStep( sessionId, 'Starting queue playback (was idle)', {} );
+        }
+        
+        playNext( sessionId );
     } else {
         console.log( "Already playing, item will play when its turn comes" );
     }
@@ -670,8 +1016,13 @@ async function queueTTSMessage( message, priority = "medium", autoPlay = true ) 
     addToAudioQueue( 'tts', message, priority );
 }
 
-// Event-driven playback - plays next item in queue
-async function playNext() {
+/**
+ * Event-driven audio queue playback - processes next item in unified audio queue
+ * Handles different audio types (TTS, notification sounds, job audio) with appropriate routing
+ * @param {string|null} sessionId - Optional session ID for tracing
+ * @returns {Promise<void>}
+ */
+async function playNext( sessionId = null ) {
     if ( unifiedAudioQueue.items.length === 0 ) {
         console.log( "Queue empty, playback complete" );
         unifiedAudioQueue.isPlaying = false;
@@ -684,16 +1035,39 @@ async function playNext() {
     const item = unifiedAudioQueue.items.shift();
     unifiedAudioQueue.currentItem = item;
     
+    // Use the sessionId from the item if available
+    const trackingSessionId = sessionId || item.sessionId;
+    
+    if ( trackingSessionId ) {
+        PathTracer.addStep( trackingSessionId, 'playNext - Processing queue item', { 
+            type: item.type,
+            priority: item.priority,
+            itemId: item.id
+        } );
+    }
+    
     console.log( `Playing ${item.type} (${item.priority}): "${item.content.substring ? item.content.substring(0, 50) + '...' : item.content}"` );
     
     try {
         if ( item.type === 'tts' && hybridTTS ) {
             console.log( 'Attempting HybridTTS speak...' );
             
+            if ( trackingSessionId ) {
+                PathTracer.addStep( trackingSessionId, 'TTS type - attempting HybridTTS', {} );
+            }
+            
             try {
                 // Get current TTS mode
                 const currentMode = localStorage.getItem('tts-mode') || 'instant';
                 console.log( `Playing TTS in ${currentMode} mode` );
+                
+                if ( trackingSessionId ) {
+                    PathTracer.addStep( trackingSessionId, 'VIA QUEUE hybridTTS.speak() CALL', { 
+                        content: item.content,
+                        mode: currentMode,
+                        hybridTTSMode: hybridTTS.getMode()
+                    } );
+                }
                 
                 // Start TTS playback
                 const ttsPromise = hybridTTS.speak( item.content );
@@ -707,9 +1081,13 @@ async function playNext() {
                     const result = await ttsPromise;
                     console.log( `TTS completed: "${item.content.substring(0, 50)}..."` );
                     
+                    if ( trackingSessionId ) {
+                        PathTracer.endSession( trackingSessionId, 'SUCCESS - Audio played (reliable mode)' );
+                    }
+                    
                     // Small pause between items for clarity
                     if ( unifiedAudioQueue.items.length > 0 ) {
-                        await new Promise( resolve => setTimeout( resolve, 300 ) );
+                        await new Promise( resolve => setTimeout( resolve, DELAYS.AUDIO_PLAYBACK ) );
                     }
                     
                     // Continue to next item
@@ -749,7 +1127,7 @@ async function playNext() {
             }
             fallbackToNotificationSound();
             // Small delay for fallback sound
-            await new Promise( resolve => setTimeout( resolve, 1000 ) );
+            await new Promise( resolve => setTimeout( resolve, DELAYS.AUDIO_QUEUE_NEXT ) );
             playNext();
         }
     } catch ( error ) {
@@ -1001,20 +1379,93 @@ function handleNotificationSound( data ) {
 }
 
 // Handle server notifications to play audio with HybridTTS
-async function handleSpeechUpdate( data ) {
+/**
+ * Handles speech update events from WebSocket, processing TTS audio generation
+ * Creates job completion cache entries and manages audio playback routing
+ * @param {Object} data - Speech update data containing text and metadata
+ * @param {string|null} sessionId - Optional session ID for tracing
+ * @returns {Promise<void>}
+ */
+async function handleSpeechUpdate( data, sessionId = null ) {
+    
+    if ( sessionId ) {
+        PathTracer.addStep( sessionId, 'handleSpeechUpdate ENTRY', { text: data.text } );
+    }
+    
     console.log( "Received speech update:", data );
     
     // Use HybridTTS for all text-to-speech conversion
     if ( data.text ) {
+        if ( sessionId ) {
+            PathTracer.addStep( sessionId, 'TTS BRANCH - data.text truthy', { text: data.text } );
+        }
+        
         // Get current TTS mode preference
         const currentMode = localStorage.getItem('tts-mode') || 'instant';
         console.log( `Converting text to speech via HybridTTS (${currentMode} mode): "${data.text}"` );
         
-        // Add to the audio queue for automatic playback
-        console.log( "Adding speech update to audio queue for automatic playback" );
-        addToAudioQueue( 'tts', data.text, 'high' );  // Use 'high' priority for speech updates
+        // SIMPLE FIX: Use direct hybridTTS.speak() call like notifications
+        // This bypasses the queue system that was causing async timing issues
+        if ( hybridTTS ) {
+            try {
+                if ( sessionId ) {
+                    PathTracer.addStep( sessionId, 'DIRECT hybridTTS.speak() CALL (Q&A)', { 
+                        text: data.text,
+                        mode: currentMode,
+                        hybridTTSMode: hybridTTS.getMode(),
+                        textLength: data.text.length,
+                        isRequesting: hybridTTS.isRequesting,
+                        sessionId: hybridTTS.sessionId
+                    } );
+                }
+                
+                console.log( `🔍 Q&A: About to call hybridTTS.speak() with text: "${data.text}"` );
+                console.log( `🔍 Q&A: HybridTTS state before call:`, {
+                    mode: hybridTTS.getMode(),
+                    isRequesting: hybridTTS.isRequesting,
+                    sessionId: hybridTTS.sessionId,
+                    audioChunks: hybridTTS.audioChunks?.length || 0
+                } );
+                
+                console.log( "Playing Q&A response directly via HybridTTS (bypassing queue)" );
+                await hybridTTS.speak( data.text );
+                console.log( `Successfully played Q&A response: "${data.text}"` );
+                
+                if ( sessionId ) {
+                    PathTracer.endSession( sessionId, 'SUCCESS - Q&A audio played directly' );
+                }
+                
+            } catch ( error ) {
+                console.error( 'Direct HybridTTS speak failed for Q&A:', error );
+                
+                if ( sessionId ) {
+                    PathTracer.addStep( sessionId, 'DIRECT TTS FAILED - falling back to queue', { error: error.message } );
+                }
+                
+                // Fallback to queue system if direct call fails
+                console.log( "Direct TTS failed, falling back to queue system" );
+                addToAudioQueue( 'tts', data.text, 'high', sessionId );
+                
+                if ( sessionId ) {
+                    PathTracer.addStep( sessionId, 'FALLBACK - Using queue system', {} );
+                }
+            }
+        } else {
+            console.log( 'HybridTTS not available, using queue system' );
+            
+            if ( sessionId ) {
+                PathTracer.addStep( sessionId, 'HybridTTS not available - using queue', {} );
+            }
+            
+            // Fallback to queue if HybridTTS not available
+            addToAudioQueue( 'tts', data.text, 'high', sessionId );
+        }
         
         return;
+    } else {
+        if ( sessionId ) {
+            PathTracer.addStep( sessionId, 'TTS BRANCH SKIPPED - data.text falsy', { text: data.text } );
+        }
     }
     
     // Legacy: Check if we have job completion text for local TTS
@@ -1061,21 +1512,34 @@ async function handleSpeechUpdate( data ) {
     }
     
     // Fall back to unified audio queue for URLs/notification sounds
+    
+    if ( sessionId ) {
+        PathTracer.addStep( sessionId, 'FALLBACK BRANCH - Using gentle-gong sound', { text: data.text } );
+    }
+    
     let url;
+    console.log( `🔍 [${callId}] quiet variable:`, quiet );
     if ( quiet ) {
         console.log( `Quiet mode, using gentle gong` );
+        console.log( `🔍 [${callId}] Setting URL to gentle-gong (quiet mode)` );
         url = "/static/audio/gentle-gong.mp3";
     } else {
+        console.log( `🔍 [${callId}] Not quiet mode, checking data.audioURL:`, data.audioURL );
         if ( data.audioURL ) {
+            console.log( `🔍 [${callId}] Using provided audioURL:`, data.audioURL );
             url = data.audioURL;
         } else {
+            console.log( `🔍 [${callId}] No audioURL provided, defaulting to gentle-gong` );
             url = "/static/audio/gentle-gong.mp3";
         }
     }
     
+    console.log( `🔍 [${callId}] Final URL selected:`, url );
+    
     // Avoid duplicate audio
     if ( lastAudioURL === url ) {
         console.log( "Same audio URL, not adding to queue" );
+        console.log( `🔍 [${callId}] Duplicate URL detected, returning early` );
         return;
     }
     
@@ -1085,6 +1549,10 @@ async function handleSpeechUpdate( data ) {
 
     console.log( `Adding audio url to unified queue: ${ url }` );
     addToAudioQueue( 'audio', url, 'medium' );
+    
+    if ( sessionId ) {
+        PathTracer.endSession( sessionId, 'FALLBACK - Used gentle-gong sound' );
+    }
 }
 
 // Fallback function for when TTS fails
@@ -1120,7 +1588,16 @@ function getCurrentTTSMode() {
 }
 
 // Handle Claude Code notifications from the /api/notify endpoint
-async function handleUserNotification( data ) {
+async function handleUserNotification( data, sessionId = null ) {
+    
+    if ( sessionId ) {
+        PathTracer.addStep( sessionId, 'handleUserNotification ENTRY', { 
+            type: data.type,
+            priority: data.priority,
+            message: data.message?.substring(0, 50) + '...'
+        } );
+    }
+    
     console.log( "Received Claude Code notification:", data );
     
     // Extract the notification data from the nested structure
@@ -1137,19 +1614,61 @@ async function handleUserNotification( data ) {
         ttsMessage = `Important! ${ttsMessage}`;
     }
     
+    if ( sessionId ) {
+        PathTracer.addStep( sessionId, 'TTS message formatted', { 
+            ttsMessage: ttsMessage,
+            priority: priority
+        } );
+    }
+    
     console.log( `Playing Claude Code notification via TTS: "${ttsMessage}"` );
     
     // Use HybridTTS for audio notification if available
     if ( hybridTTS ) {
         try {
+            if ( sessionId ) {
+                PathTracer.addStep( sessionId, 'DIRECT hybridTTS.speak() CALL', { 
+                    ttsMessage: ttsMessage,
+                    hybridTTSMode: hybridTTS.getMode(),
+                    textLength: ttsMessage.length,
+                    isRequesting: hybridTTS.isRequesting,
+                    sessionId: hybridTTS.sessionId
+                } );
+            }
+            
+            console.log( `🔍 NOTIFICATION: About to call hybridTTS.speak() with text: "${ttsMessage.substring(0, 50)}..."` );
+            console.log( `🔍 NOTIFICATION: HybridTTS state before call:`, {
+                mode: hybridTTS.getMode(),
+                isRequesting: hybridTTS.isRequesting,
+                sessionId: hybridTTS.sessionId,
+                audioChunks: hybridTTS.audioChunks?.length || 0
+            } );
+            
             await hybridTTS.speak( ttsMessage );
             console.log( `Successfully played Claude Code notification: ${type}/${priority}` );
+            
+            if ( sessionId ) {
+                PathTracer.endSession( sessionId, 'SUCCESS - Audio played' );
+            }
+            
         } catch ( error ) {
             console.error( 'TTS failed for Claude Code notification, using fallback sound:', error );
+            
+            if ( sessionId ) {
+                PathTracer.addStep( sessionId, 'TTS FAILED - using fallback', { error: error.message } );
+                PathTracer.endSession( sessionId, 'FAILED - Using fallback sound' );
+            }
+            
             fallbackToNotificationSound();
         }
     } else {
         console.log( 'HybridTTS not available, using fallback notification sound' );
+        
+        if ( sessionId ) {
+            PathTracer.addStep( sessionId, 'HybridTTS not available', {} );
+            PathTracer.endSession( sessionId, 'FAILED - HybridTTS not available' );
+        }
+        
         fallbackToNotificationSound();
     }
     
@@ -1409,18 +1928,6 @@ async function replayNotificationAudio( notificationId ) {
 async function deleteNotification( notificationId ) {
     console.log( `Delete button clicked for notification: ${notificationId}` );
     
-    // COMMENTED OUT: Show confirmation dialog - browser confirm() has issues
-    // try {
-    //     const confirmDelete = window.confirm( "Are you sure you want to permanently delete this notification? This action cannot be undone." );
-    //     if ( !confirmDelete ) {
-    //         console.log( "User cancelled deletion" );
-    //         return; // User cancelled deletion
-    //     }
-    //     console.log( `User confirmed deletion of notification: ${notificationId}` );
-    // } catch ( error ) {
-    //     console.error( "Confirmation dialog failed, proceeding without confirmation:", error );
-    //     // Continue with deletion if confirm() fails
-    // }
     
     console.log( `Proceeding with deletion of notification: ${notificationId} (confirmation disabled)` );
     
@@ -1478,12 +1985,6 @@ async function deleteNotification( notificationId ) {
 // Make deleteNotification available globally for onclick handlers
 window.deleteNotification = deleteNotification;
 
-// Simple test function to verify onclick works
-function testDelete() {
-    console.log( "TEST: Delete function called!" );
-    alert( "Delete test function works!" );
-}
-window.testDelete = testDelete;
 
 // Add a completed job to the done list with replay button
 // IMPORTANT: This function is only for testing/demo mock jobs.
@@ -1604,7 +2105,20 @@ async function playAll() {
 
 function pushQuestion() {
     var question = document.getElementById( "question-input" ).value;
-    fetch( "/api/push?question=" + question )
+    
+    // Use global sessionId or generate a fallback
+    const websocketId = sessionId || "legacy_session";
+    
+    fetch( "/api/push", {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            question: question,
+            websocket_id: websocketId
+        })
+    })
         .then( response => {
             if ( response.status === 200 ) {
                 document.getElementById( "response-status" ).textContent = "Success!";
@@ -1631,24 +2145,6 @@ function setEnterKeyListener() {
     }
 }
 
-// Test functions for manual replay testing
-function testJobCompletion() {
-    const testMessages = [
-        "Your test calculation has been completed successfully.",
-        "The test query has finished processing.",
-        "Your test request is now complete.",
-        "The test analysis has been finished.",
-        "Test job completed with excellent results."
-    ];
-    
-    const randomMessage = testMessages[Math.floor(Math.random() * testMessages.length)];
-    
-    // Simulate a speech_update event
-    handleSpeechUpdate({
-        text: randomMessage,
-        timestamp: new Date().toISOString()
-    });
-}
 
 async function clearCompletedJobs() {
     const doneList = document.getElementById( "done-list" );
@@ -1865,7 +2361,7 @@ async function processServerNotification( notification ) {
         console.log( `Queuing high priority notification for TTS playback: "${ttsMessage}"` );
         
         // Add to unified audio queue for playback (slight delay to let notification sound finish)
-        setTimeout( () => queueTTSMessage( ttsMessage, priority ), 300 );
+        setTimeout( () => queueTTSMessage( ttsMessage, priority ), DELAYS.NOTIFICATION_QUEUE );
     } else {
         console.log( `Skipping TTS for ${priority} priority notification (auto-play: ${ttsAutoplayEnabled})` );
     }
@@ -1877,7 +2373,7 @@ async function processServerNotification( notification ) {
     addNotificationToList( notification );
     
     // Mark as played on server after successful processing
-    setTimeout( () => markNotificationAsPlayed( id_hash ), 1000 );
+    setTimeout( () => markNotificationAsPlayed( id_hash ), DELAYS.NOTIFICATION_MARK_PLAYED );
 }
 
 // Mark notification as played on server
@@ -2047,7 +2543,102 @@ function initializeTTSModeUI() {
         });
     });
     
+    // Initialize debug toggle
+    initializeTTSDebugToggle();
+    
     console.log('[TTS] TTS mode UI controls initialized successfully');
+}
+
+// Initialize TTS debug toggle
+function initializeTTSDebugToggle() {
+    const debugToggle = document.getElementById('simulate-tts-errors');
+    if (debugToggle) {
+        // Load saved state from localStorage
+        const savedState = localStorage.getItem('tts-debug-simulate-errors') === 'true';
+        debugToggle.checked = savedState;
+        
+        // Add event listener
+        debugToggle.addEventListener('change', function() {
+            const isEnabled = this.checked;
+            localStorage.setItem('tts-debug-simulate-errors', isEnabled.toString());
+            console.log(`[TTS-DEBUG] Error simulation ${isEnabled ? 'enabled' : 'disabled'}`);
+            
+            // Show visual feedback
+            if (isEnabled) {
+                alert('🧪 Debug Mode: TTS errors will now be simulated to test error handling');
+            } else {
+                alert('✅ Debug Mode: TTS error simulation disabled - normal operation');
+            }
+        });
+        
+        console.log(`[TTS-DEBUG] Error simulation toggle initialized: ${savedState ? 'enabled' : 'disabled'}`);
+    }
+}
+
+// Get current debug simulation state
+function getTTSErrorSimulationEnabled() {
+    return localStorage.getItem('tts-debug-simulate-errors') === 'true';
+}
+
+// Initialize direct TTS test functionality
+function initializeDirectTTSTest() {
+    const testButton = document.getElementById('direct-tts-test');
+    const testInput = document.getElementById('direct-tts-input');
+    
+    if (testButton && testInput) {
+        testButton.addEventListener('click', async function() {
+            const text = testInput.value.trim();
+            if (!text) {
+                console.warn('🧪 DIRECT TEST: No text entered');
+                return;
+            }
+            
+            if (!hybridTTS) {
+                console.error('🧪 DIRECT TEST: HybridTTS not available');
+                alert('HybridTTS not initialized yet. Please wait a moment and try again.');
+                return;
+            }
+            
+            console.log('🧪 DIRECT TEST: Starting test with text:', text);
+            console.log('🧪 DIRECT TEST: HybridTTS state:', {
+                mode: hybridTTS.getMode(),
+                isRequesting: hybridTTS.isRequesting,
+                sessionId: hybridTTS.sessionId,
+                audioChunks: hybridTTS.audioChunks?.length || 0
+            });
+            
+            // Add detailed AudioContext logging
+            if (hybridTTS.audioContext) {
+                console.log('🧪 DIRECT TEST: AudioContext details:', {
+                    state: hybridTTS.audioContext.state,
+                    currentTime: hybridTTS.audioContext.currentTime,
+                    sampleRate: hybridTTS.audioContext.sampleRate,
+                    baseLatency: hybridTTS.audioContext.baseLatency || 'unknown',
+                    outputLatency: hybridTTS.audioContext.outputLatency || 'unknown'
+                });
+            }
+            
+            try {
+                console.log('🧪 DIRECT TEST: Calling hybridTTS.speak()...');
+                await hybridTTS.speak(text);
+                console.log('🧪 DIRECT TEST: ✅ SUCCESS - hybridTTS.speak() completed');
+                
+            } catch (error) {
+                console.error('🧪 DIRECT TEST: ❌ FAILED - hybridTTS.speak() threw error:', error);
+            }
+        });
+        
+        // Allow Enter key to trigger test
+        testInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                testButton.click();
+            }
+        });
+        
+        console.log('[Init] Direct TTS test functionality initialized');
+    } else {
+        console.warn('[Init] Direct TTS test elements not found');
+    }
 }
 
 // Initialize notification state when DOM is ready
@@ -2057,8 +2648,11 @@ document.addEventListener( "DOMContentLoaded", function() {
     // Initialize TTS mode UI first (critical for speech functionality)
     initializeTTSModeUI();
     
+    // Initialize direct TTS test button
+    initializeDirectTTSTest();
+    
     // Delay notification initialization to allow auth system to load
-    setTimeout( initializeNotificationState, 1000 );
+    setTimeout( initializeNotificationState, DELAYS.NOTIFICATION_INIT );
 });
 
 // create a method that closes this window after escape has been hit 2 times in a row

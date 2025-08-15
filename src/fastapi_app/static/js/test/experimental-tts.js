@@ -1,16 +1,20 @@
 /**
  * Experimental Progressive TTS Streaming - Firefox-First Implementation
  * 
- * This module implements true progressive audio streaming by playing chunks
- * immediately as they arrive, rather than collecting them for batch playback.
+ * This module implements true progressive audio streaming using sequential
+ * audio playback to prevent simultaneous chunk overlap issues.
  * 
  * Key Features:
+ * - Sequential Audio Element Queue for proper chunk ordering (imported from standalone module)
  * - Firefox-optimized Web Audio API implementation
  * - Multiple audio elements fallback strategy
  * - Real-time latency measurement
  * - Direct ElevenLabs endpoint connection
  * - No dependencies on existing HybridTTS class
  */
+
+// Import the production-ready SequentialAudioManager
+import { SequentialAudioManager } from '/static/js/sequential-audio-manager.js';
 
 class ExperimentalProgressiveTTS {
     constructor() {
@@ -29,10 +33,13 @@ class ExperimentalProgressiveTTS {
         this.chunksPlayed = 0;
         this.currentPlaybackTime = 0;
         
-        // Audio elements pool for fallback
+        // Audio elements pool for fallback (kept for Web Audio API compatibility)
         this.audioElements = [];
         this.audioElementIndex = 0;
         this.maxAudioElements = 5;
+        
+        // Sequential Audio Manager for proper chunk ordering
+        this.sequentialAudioManager = null;
         
         // Metrics tracking
         this.latencyMeasurements = [];
@@ -57,6 +64,9 @@ class ExperimentalProgressiveTTS {
         
         // Initialize audio system
         await this.initializeAudioSystem();
+        
+        // Initialize sequential audio manager
+        this.initializeSequentialAudioManager();
         
         // Get session ID
         await this.getSessionId();
@@ -176,6 +186,29 @@ class ExperimentalProgressiveTTS {
             document.body.appendChild(audio);
             this.audioElements.push(audio);
         }
+    }
+    
+    initializeSequentialAudioManager() {
+        this.log( '🎯 Initializing Sequential Audio Manager for proper chunk ordering', 'info' );
+        
+        // Create sequential audio manager with callbacks for metrics tracking
+        this.sequentialAudioManager = new SequentialAudioManager(
+            // onChunkStart callback
+            ( chunkIndex ) => {
+                this.chunksPlayed++;
+                this.updateStatus( 'chunksPlayed', this.chunksPlayed );
+                this.log( `🎵 Sequential chunk ${chunkIndex} started playing`, 'success' );
+            },
+            // onChunkEnd callback
+            ( chunkIndex ) => {
+                this.log( `⏹️ Sequential chunk ${chunkIndex} completed`, 'info' );
+            },
+            // debug flag
+            true
+        );
+        
+        this.updateStatus( 'audioMethod', 'Sequential Audio Elements (fixed)' );
+        this.log( '✅ Sequential Audio Manager initialized successfully', 'success' );
     }
     
     async getSessionId() {
@@ -304,11 +337,18 @@ class ExperimentalProgressiveTTS {
         // Add chunk indicator to UI
         this.addChunkIndicator();
         
-        // Play audio chunk immediately
-        if (this.useWebAudioAPI && this.audioContext) {
-            await this.playChunkWithWebAudio(audioBlob);
+        // Add chunk to sequential audio manager for proper ordering
+        if ( this.sequentialAudioManager ) {
+            this.sequentialAudioManager.addChunk( audioBlob );
+            this.log( `📦 Audio chunk ${this.chunksReceived} added to sequential queue`, 'info' );
         } else {
-            await this.playChunkWithAudioElement(audioBlob);
+            this.log( '❌ Sequential Audio Manager not initialized!', 'error' );
+            // Fallback to immediate playback (should not happen)
+            if ( this.useWebAudioAPI && this.audioContext ) {
+                await this.playChunkWithWebAudio( audioBlob );
+            } else {
+                await this.playChunkWithAudioElement( audioBlob );
+            }
         }
     }
     
@@ -671,6 +711,12 @@ class ExperimentalProgressiveTTS {
         }
         
         this.latencyMeasurements = [];
+        
+        // Reset sequential audio manager
+        if ( this.sequentialAudioManager ) {
+            this.sequentialAudioManager.reset();
+            this.log( '🔄 Sequential Audio Manager reset', 'info' );
+        }
     }
     
     stopStreaming() {
@@ -681,7 +727,13 @@ class ExperimentalProgressiveTTS {
             this.websocket.close();
         }
         
-        // Stop all audio elements
+        // Stop sequential audio manager
+        if ( this.sequentialAudioManager ) {
+            this.sequentialAudioManager.stop();
+            this.log( '⏹️ Sequential Audio Manager stopped', 'info' );
+        }
+        
+        // Stop all audio elements (fallback pool)
         this.audioElements.forEach((audio, index) => {
             if (!audio.paused) {
                 audio.pause();
@@ -831,3 +883,11 @@ function getCurrentSettings() {
 document.addEventListener('DOMContentLoaded', () => {
     window.experimentalTTS = new ExperimentalProgressiveTTS();
 });
+
+// Make functions globally available for HTML onclick handlers (ES6 module compatibility)
+window.setTestText = setTestText;
+window.testProgressiveStreaming = testProgressiveStreaming;
+window.stopStreaming = stopStreaming;
+window.clearLogs = clearLogs;
+window.testABComparison = testABComparison;
+window.updateCustomSettings = updateCustomSettings;

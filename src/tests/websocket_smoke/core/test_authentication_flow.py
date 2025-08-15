@@ -35,8 +35,21 @@ class AuthenticationFlowTests:
         """
         Initialize authentication tests.
         
+        Requires:
+            - server_url is a non-empty string in format "host:port"
+            
+        Ensures:
+            - self.utils is initialized with WebSocketTestUtilities
+            - self.results is initialized as empty list
+            
         Args:
             server_url: Server URL to test against
+            
+        Returns:
+            None
+            
+        Raises:
+            TypeError: If server_url is not a string
         """
         self.utils = WebSocketTestUtilities( server_url )
         self.results = []
@@ -45,8 +58,23 @@ class AuthenticationFlowTests:
         """
         Run all authentication tests.
         
+        Requires:
+            - self.utils is properly initialized
+            - self.results is initialized as a list
+            
+        Ensures:
+            - returns list of test result dictionaries
+            - each result contains name, success, duration_ms fields
+            - self.results contains all test outcomes
+            
+        Args:
+            None
+            
         Returns:
-            List of test results
+            List of test results with success/failure status
+            
+        Raises:
+            Exception: If WebSocket connections fail or test infrastructure errors occur
         """
         self.utils.log( "🔐 Starting Authentication Flow Tests" )
         self.utils.log( "=" * 50 )
@@ -74,7 +102,27 @@ class AuthenticationFlowTests:
         return self.results
     
     async def _test_valid_queue_authentication( self ):
-        """Test valid queue WebSocket authentication."""
+        """
+        Test valid queue WebSocket authentication.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            
+        Ensures:
+            - test result is appended to self.results
+            - WebSocket connection is properly closed
+            - test timing is recorded
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: If WebSocket connection or authentication fails
+        """
         test_name = "valid_queue_authentication"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -115,7 +163,27 @@ class AuthenticationFlowTests:
             self.utils.log( f"   Queue Auth: ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_valid_audio_authentication( self ):
-        """Test valid audio WebSocket authentication (different behavior expected)."""
+        """
+        Test valid audio WebSocket authentication (different behavior expected).
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            
+        Ensures:
+            - test result is appended to self.results
+            - WebSocket connection is properly closed
+            - audio endpoint behavior is validated
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: If WebSocket connection or authentication fails
+        """
         test_name = "valid_audio_authentication"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -161,7 +229,27 @@ class AuthenticationFlowTests:
             self.utils.log( f"   Audio Auth: ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_token_formats( self ):
-        """Test various authentication token formats."""
+        """
+        Test various authentication token formats.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            
+        Ensures:
+            - all token format test cases are executed
+            - test result is appended to self.results
+            - all WebSocket connections are properly closed
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: If WebSocket connections fail or test infrastructure errors occur
+        """
         test_name = "token_formats"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -249,7 +337,28 @@ class AuthenticationFlowTests:
             self.utils.log( f"   ❌ FAIL ({overall_duration:.1f}ms) - {len(incorrect)} unexpected token behaviors" )
     
     async def _test_invalid_tokens( self ):
-        """Test various invalid token scenarios."""
+        """
+        Test various invalid token scenarios.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            
+        Ensures:
+            - all invalid token cases are tested
+            - test result is appended to self.results
+            - all WebSocket connections are properly closed
+            - invalid tokens are properly rejected
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: If WebSocket connections fail or test infrastructure errors occur
+        """
         test_name = "invalid_tokens"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -338,7 +447,28 @@ class AuthenticationFlowTests:
             self.utils.log( f"   ❌ FAIL ({overall_duration:.1f}ms) - {len(accepted)} invalid tokens were incorrectly accepted" )
     
     async def _test_authentication_timing( self ):
-        """Test authentication timing scenarios."""
+        """
+        Test authentication timing scenarios.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            
+        Ensures:
+            - immediate and delayed authentication scenarios are tested
+            - timeout handling is validated
+            - test result is appended to self.results
+            - all WebSocket connections are properly closed
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: If WebSocket connections fail or test infrastructure errors occur
+        """
         test_name = "authentication_timing"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -437,7 +567,28 @@ class AuthenticationFlowTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_multiple_auth_attempts( self ):
-        """Test multiple authentication attempts on the same connection."""
+        """
+        Test multiple authentication attempts on the same connection.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            
+        Ensures:
+            - multiple authentication attempts are tested on same connection
+            - test result is appended to self.results
+            - WebSocket connection is properly closed
+            - server behavior for multiple auth attempts is validated
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: If WebSocket connection or authentication fails
+        """
         test_name = "multiple_auth_attempts" 
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -497,7 +648,28 @@ class AuthenticationFlowTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_authentication_without_token( self ):
-        """Test connection behavior without authentication."""
+        """
+        Test connection behavior without authentication.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            
+        Ensures:
+            - connection behavior without authentication is tested
+            - test result is appended to self.results
+            - WebSocket connection is properly closed
+            - server response to unauthenticated connections is validated
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: If WebSocket connection fails
+        """
         test_name = "authentication_without_token"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -548,7 +720,28 @@ class AuthenticationFlowTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_malformed_auth_messages( self ):
-        """Test various malformed authentication messages."""
+        """
+        Test various malformed authentication messages.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            
+        Ensures:
+            - all malformed message cases are tested
+            - test result is appended to self.results
+            - all WebSocket connections are properly closed
+            - malformed messages are properly rejected
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: If WebSocket connections fail or test infrastructure errors occur
+        """
         test_name = "malformed_auth_messages"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -635,7 +828,28 @@ class AuthenticationFlowTests:
             self.utils.log( f"   ❌ FAIL ({overall_duration:.1f}ms) - {len(accepted)} malformed messages were incorrectly accepted" )
     
     async def _test_connection_after_auth_failure( self ):
-        """Test connection behavior after authentication failure."""
+        """
+        Test connection behavior after authentication failure.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            
+        Ensures:
+            - authentication failure behavior is tested
+            - connection recovery scenarios are validated
+            - test result is appended to self.results
+            - WebSocket connection is properly closed
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: If WebSocket connection fails
+        """
         test_name = "connection_after_auth_failure"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -706,7 +920,28 @@ class AuthenticationFlowTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_concurrent_authentications( self ):
-        """Test multiple concurrent authentication attempts."""
+        """
+        Test multiple concurrent authentication attempts.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            
+        Ensures:
+            - concurrent authentication attempts are tested
+            - test result is appended to self.results
+            - all WebSocket connections are properly closed
+            - server handling of concurrent auths is validated
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: If WebSocket connections fail or test infrastructure errors occur
+        """
         test_name = "concurrent_authentications"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -767,7 +1002,29 @@ class AuthenticationFlowTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _single_concurrent_auth( self, session_id: str, user_id: str ) -> Dict[str, Any]:
-        """Perform a single authentication for concurrent testing."""
+        """
+        Perform a single authentication for concurrent testing.
+        
+        Requires:
+            - session_id is a non-empty string
+            - user_id is a non-empty string
+            - self.utils is properly initialized
+            
+        Ensures:
+            - returns dictionary with success status and auth data
+            - WebSocket connection is properly closed
+            - authentication attempt is completed
+            
+        Args:
+            session_id: Unique session identifier for WebSocket connection
+            user_id: User identifier for authentication token
+            
+        Returns:
+            Dictionary containing success status, user_id, session_id, and auth_data or error
+            
+        Raises:
+            None (exceptions are caught and returned in result dictionary)
+        """
         try:
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=3.0 )
             token = self.utils.generate_mock_token( user_id )
@@ -790,7 +1047,26 @@ class AuthenticationFlowTests:
 
 
 async def main():
-    """Run all authentication flow tests."""
+    """
+    Run all authentication flow tests.
+    
+    Requires:
+        - WebSocket server is running and accessible
+        
+    Ensures:
+        - all authentication tests are executed
+        - test summary is printed to console
+        - returns appropriate exit code (0 for success, 1 for failure)
+        
+    Args:
+        None
+        
+    Returns:
+        Exit code: 0 if all tests pass, 1 if any tests fail
+        
+    Raises:
+        Exception: If test infrastructure fails
+    """
     print( "🔐 WebSocket Authentication Flow Tests" )
     print( "=" * 50 )
     

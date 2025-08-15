@@ -131,25 +131,8 @@ These events handle text-to-speech and audio streaming functionality.
 
 These events handle user notifications and system alerts.
 
-#### `notification_message_user`
-- **Purpose**: Claude Code notifications targeted to specific users
-- **Direction**: Server → Client
-- **Payload**:
-  ```json
-  {
-    "type": "notification_message_user",
-    "message": "Task completion notification",
-    "type": "task",
-    "priority": "high",
-    "source": "claude_code",
-    "timestamp": "2025-07-30T10:30:00Z"
-  }
-  ```
-- **Subscribed by**: queue.js
-- **Handler**: `handleUserNotification()` - Plays TTS and shows visual notification
-
 #### `notification_queue_update`
-- **Purpose**: Real-time notification updates from NotificationFifoQueue
+- **Purpose**: ALL notification updates - handles both queue-based notifications and Claude Code notifications
 - **Direction**: Server → Client
 - **Payload**:
   ```json
@@ -164,8 +147,8 @@ These events handle user notifications and system alerts.
     }
   }
   ```
-- **Subscribed by**: queue.js
-- **Handler**: `handleNotificationUpdate()` - Processes new notifications with auto-play
+- **Subscribed by**: queue.js, queue-fresh.js  
+- **Handler**: `handleNotificationUpdate()` - Plays notification sounds, adds to list, handles TTS for high priority
 
 #### `notification_play_sound`
 - **Purpose**: Play notification sound files
@@ -328,7 +311,6 @@ const queueSubscriptions = [
     "tts_job_request",
     "sys_time_update",
     "notification_play_sound",
-    "notification_message_user",
     "notification_queue_update",
     "auth_success",
     "auth_error", 
@@ -405,16 +387,18 @@ const audioSubscriptions = [
 The available events are configured in `lupin-app.ini`:
 
 ```ini
-websocket available events = queue_todo_update, queue_done_update, queue_running_update, queue_dead_update, tts_job_request, audio_streaming_chunk, notification_message_user, notification_queue_update, notification_play_sound, sys_time_update, sys_ping, sys_pong, auth_request, auth_success, auth_error, connect, audio_streaming_status, audio_streaming_complete, update_subscriptions
+websocket available events = queue_todo_update, queue_done_update, queue_running_update, queue_dead_update, tts_job_request, audio_streaming_chunk, notification_queue_update, notification_play_sound, sys_time_update, sys_ping, sys_pong, auth_request, auth_success, auth_error, connect, audio_streaming_status, audio_streaming_complete, update_subscriptions
 ```
 
 ## Error Handling
 
 All WebSocket implementations include:
-- **Connection failure recovery**: Automatic reconnection with exponential backoff
+- **Connection failure recovery**: Automatic reconnection with exponential backoff (max 10 attempts)
 - **Authentication failure handling**: Clear error messages and retry mechanisms  
 - **Message validation**: Events not in subscription list are ignored
-- **Graceful degradation**: System continues functioning if WebSocket disconnects
+- **Graceful degradation**: HTTP polling fallback when WebSocket connections fail
+- **Input validation**: Comprehensive validation on all WebSocket message handlers and API endpoints
+- **User-friendly error messages**: Technical errors converted to actionable user guidance
 
 ## Security Considerations
 
@@ -432,9 +416,30 @@ This system replaces the previous Flask-SocketIO implementation. Legacy event na
 |--------------|-----------|-------|
 | `todo_update` | `queue_todo_update` | Prefixed for clarity |
 | `speech_update` | `tts_job_request` | More descriptive purpose |
-| `user_notification` | `notification_message_user` | Consistent naming |
+| `user_notification` | `notification_queue_update` | Consolidated into single notification path |
 | `time_update` | `sys_time_update` | System event prefix |
 | `ping` | `sys_ping` | System event prefix |
 | `auth` | `auth_request` | Clarifies direction |
 
 The new event names provide better categorization and clearer intent while maintaining all existing functionality.
+
+## Recent Updates (2025.08.13)
+
+### Code Quality Improvements
+- **Magic Numbers Extraction**: Critical timing constants moved to DELAYS object in queue.js
+- **Error Handling Standardization**: Consistent logError() function across JavaScript codebase  
+- **Input Validation**: Comprehensive validation added to all WebSocket message handlers
+- **JSDoc Documentation**: Added to complex JavaScript functions for better maintainability
+
+### Connection Management Enhancements
+- **Exponential Backoff**: WebSocket reconnection now uses exponential backoff (1s → 30s max)
+- **Connection Limits**: Maximum 10 reconnection attempts before falling back to HTTP polling
+- **Graceful Degradation**: Automatic HTTP polling fallback when WebSocket fails
+- **Health Monitoring**: Improved connection health tracking and status reporting
+
+### Documentation Updates
+- **[Architecture Overview](websocket-architecture.md)**: Complete system design documentation
+- **[Troubleshooting Guide](websocket-troubleshooting.md)**: Comprehensive debugging procedures
+- **Configuration Guide**: Detailed WebSocket configuration options and examples
+
+For the most current implementation details and architectural patterns, see the complete documentation suite in `/src/docs/`.

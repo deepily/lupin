@@ -215,7 +215,30 @@ class EventSystemTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_event_delivery( self ):
-        """Test event delivery reliability and timing."""
+        """
+        Test event delivery reliability and timing with trigger messages.
+        
+        Requires:
+            - WebSocket utilities must be initialized
+            - Server must support queue endpoint WebSocket connections
+            - Event system must be capable of responding to trigger messages
+            
+        Ensures:
+            - Creates WebSocket connection and authenticates
+            - Sends multiple trigger messages to generate events
+            - Collects and analyzes event responses to triggers
+            - Records test result with event delivery metrics
+            - Properly closes WebSocket connection
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: Any errors are caught and recorded as test failures
+        """
         test_name = "event_delivery"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -312,7 +335,31 @@ class EventSystemTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_event_type_filtering( self ):
-        """Test event type filtering and selective subscription."""
+        """
+        Test event type filtering and selective subscription functionality.
+        
+        Requires:
+            - WebSocket utilities must be initialized
+            - Server must support event subscription filtering
+            - Event system must handle subscription modification requests
+            
+        Ensures:
+            - Creates WebSocket connection and authenticates
+            - Attempts to modify event subscription with whitelist filtering
+            - Sends various message types to test filtering behavior
+            - Analyzes which event types are received vs requested
+            - Records test result with filtering effectiveness metrics
+            - Properly closes WebSocket connection
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: Any errors are caught and recorded as test failures
+        """
         test_name = "event_type_filtering"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -415,7 +462,31 @@ class EventSystemTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_event_unsubscription( self ):
-        """Test event unsubscription functionality."""
+        """
+        Test event unsubscription functionality and effectiveness.
+        
+        Requires:
+            - WebSocket utilities must be initialized
+            - Server must support event unsubscription requests
+            - Baseline event flow must be established before unsubscription
+            
+        Ensures:
+            - Creates WebSocket connection and authenticates
+            - Establishes baseline event flow with initial messages
+            - Sends unsubscription request for all event types
+            - Compares event flow before and after unsubscription
+            - Records test result with unsubscription effectiveness metrics
+            - Properly closes WebSocket connection
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: Any errors are caught and recorded as test failures
+        """
         test_name = "event_unsubscription"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -522,7 +593,31 @@ class EventSystemTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_system_events( self ):
-        """Test system-generated events."""
+        """
+        Test system-generated events and system event triggers.
+        
+        Requires:
+            - WebSocket utilities must be initialized
+            - Server must support system event generation
+            - System must respond to ping, health_check, and session_info triggers
+            
+        Ensures:
+            - Creates WebSocket connection and authenticates
+            - Sends system event triggers (ping, health_check, session_info)
+            - Identifies and collects system-generated events
+            - Analyzes system event types and responsiveness
+            - Records test result with system event metrics
+            - Properly closes WebSocket connection
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: Any errors are caught and recorded as test failures
+        """
         test_name = "system_events"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -617,7 +712,31 @@ class EventSystemTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_user_generated_events( self ):
-        """Test user-generated events and responses."""
+        """
+        Test user-generated events and system responses to user input.
+        
+        Requires:
+            - WebSocket utilities must be initialized
+            - Server must support user message processing
+            - Event system must respond to user interaction messages
+            
+        Ensures:
+            - Creates WebSocket connection and authenticates
+            - Sends various user message types (user_message, user_input, user_question)
+            - Collects and analyzes response events to user input
+            - Identifies user interaction event types in responses
+            - Records test result with user interaction metrics
+            - Properly closes WebSocket connection
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: Any errors are caught and recorded as test failures
+        """
         test_name = "user_generated_events"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -716,7 +835,31 @@ class EventSystemTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_event_ordering( self ):
-        """Test event ordering and sequence consistency."""
+        """
+        Test event ordering and sequence consistency in event delivery.
+        
+        Requires:
+            - WebSocket utilities must be initialized
+            - Server must support sequence-based event processing
+            - Event system must maintain some ordering characteristics
+            
+        Ensures:
+            - Creates WebSocket connection and authenticates
+            - Sends sequence of numbered messages with timestamps
+            - Collects all events with reception timestamps
+            - Analyzes event ordering by sequence ID
+            - Records test result with ordering behavior analysis
+            - Properly closes WebSocket connection
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: Any errors are caught and recorded as test failures
+        """
         test_name = "event_ordering"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -820,7 +963,31 @@ class EventSystemTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_high_frequency_events( self ):
-        """Test system behavior under high-frequency event generation."""
+        """
+        Test system behavior and stability under high-frequency event generation.
+        
+        Requires:
+            - WebSocket utilities must be initialized
+            - Server must handle high-frequency message processing
+            - Event system must remain stable under load
+            
+        Ensures:
+            - Creates WebSocket connection and authenticates
+            - Sends rapid sequence of messages (50 messages/second rate)
+            - Collects events during high-frequency period
+            - Calculates event processing rate and system responsiveness
+            - Records test result with high-frequency performance metrics
+            - Properly closes WebSocket connection
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: Any errors are caught and recorded as test failures
+        """
         test_name = "high_frequency_events"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -918,7 +1085,31 @@ class EventSystemTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_invalid_event_subscriptions( self ):
-        """Test handling of invalid event subscription requests."""
+        """
+        Test handling of invalid event subscription requests and error responses.
+        
+        Requires:
+            - WebSocket utilities must be initialized
+            - Server must handle malformed subscription requests gracefully
+            - System must maintain normal operation after invalid requests
+            
+        Ensures:
+            - Creates WebSocket connection and authenticates
+            - Sends various invalid subscription requests (null, empty, malformed)
+            - Collects and analyzes error responses from invalid requests
+            - Tests that normal operation continues after invalid requests
+            - Records test result with error handling and graceful degradation metrics
+            - Properly closes WebSocket connection
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: Any errors are caught and recorded as test failures
+        """
         test_name = "invalid_event_subscriptions"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -1031,7 +1222,32 @@ class EventSystemTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_event_system_under_load( self ):
-        """Test event system behavior under load conditions."""
+        """
+        Test event system behavior and stability under concurrent load conditions.
+        
+        Requires:
+            - WebSocket utilities must be initialized
+            - Server must support multiple concurrent WebSocket connections
+            - Event system must handle concurrent sessions effectively
+            
+        Ensures:
+            - Creates multiple concurrent WebSocket sessions (3 sessions)
+            - Authenticates all concurrent sessions
+            - Sends concurrent messages from all sessions simultaneously
+            - Collects events from all sessions during load test
+            - Analyzes load test performance and session stability
+            - Records test result with concurrent load metrics
+            - Properly closes all WebSocket connections
+            
+        Args:
+            None
+            
+        Returns:
+            None
+            
+        Raises:
+            Exception: Any errors are caught and recorded as test failures
+        """
         test_name = "event_system_under_load"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -1155,7 +1371,29 @@ class EventSystemTests:
 
 
 async def main():
-    """Run all event system tests."""
+    """
+    Run comprehensive event system test suite and display results summary.
+    
+    Requires:
+        - EventSystemTests class must be available and functional
+        - Server must be running and accessible for WebSocket connections
+        
+    Ensures:
+        - Creates EventSystemTests instance
+        - Executes complete test suite via run_all_tests()
+        - Displays comprehensive test summary with pass/fail statistics
+        - Shows event system behavior insights from test results
+        - Returns appropriate exit code (0 for success, 1 for failures)
+        
+    Args:
+        None
+        
+    Returns:
+        int: Exit code (0 if all tests pass, 1 if any tests fail)
+        
+    Raises:
+        Exception: Critical errors during test execution
+    """
     print( "📡 WebSocket Event System Tests" )
     print( "=" * 50 )
     

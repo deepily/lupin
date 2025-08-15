@@ -32,20 +32,53 @@ class ConnectionBasicTests:
     
     def __init__( self, server_url: str = "localhost:7999" ):
         """
-        Initialize connection tests.
+        Initialize connection test suite with server configuration.
         
+        Requires:
+            - server_url is a non-empty string in format "host:port"
+            - server_url contains valid hostname or IP address
+            
+        Ensures:
+            - self.utils is initialized with WebSocketTestUtilities instance
+            - self.results is initialized as empty list
+            - object is ready to execute connection tests
+            
         Args:
-            server_url: Server URL to test against
+            server_url: Server URL to test against in "host:port" format
+            
+        Raises:
+            - ValueError if server_url is empty or malformed
+            - ConnectionError if server_url is unreachable
         """
         self.utils = WebSocketTestUtilities( server_url )
         self.results = []
     
     async def run_all_tests( self ) -> List[Dict[str, Any]]:
         """
-        Run all connection tests.
+        Execute comprehensive WebSocket connection test suite.
         
+        Requires:
+            - self.utils is properly initialized
+            - self.results is initialized as empty list
+            - WebSocket server is running and accessible
+            
+        Ensures:
+            - all connection test methods are executed in sequence
+            - each test result is appended to self.results
+            - returns complete list of test results with success/failure status
+            - no connections remain open after completion
+            
         Returns:
-            List of test results
+            List of test result dictionaries containing:
+            - name: test identifier
+            - success: boolean test outcome
+            - duration_ms: execution time in milliseconds
+            - details: test-specific result data
+            - error: error message if test failed
+            
+        Raises:
+            - ConnectionError if server is unreachable
+            - TimeoutError if tests exceed reasonable time limits
         """
         self.utils.log( "🔌 Starting Basic Connection Tests" )
         self.utils.log( "=" * 50 )
@@ -73,7 +106,25 @@ class ConnectionBasicTests:
         return self.results
     
     async def _test_valid_queue_connection( self ):
-        """Test basic queue WebSocket connection."""
+        """
+        Test basic WebSocket connection to queue endpoint.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running on configured port
+            - /ws/queue/ endpoint is available
+            
+        Ensures:
+            - attempts connection to queue endpoint with valid session ID
+            - verifies connection is active using ping
+            - properly closes connection after test
+            - appends test result to self.results
+            - logs test outcome with duration
+            
+        Raises:
+            - websockets.ConnectionClosed if connection fails
+            - asyncio.TimeoutError if connection times out
+        """
         test_name = "valid_queue_connection"
         self.utils.log( f"\n🧪 Testing: {test_name}" )
         
@@ -107,7 +158,25 @@ class ConnectionBasicTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms): {e}" )
     
     async def _test_valid_audio_connection( self ):
-        """Test basic audio WebSocket connection."""
+        """
+        Test basic WebSocket connection to audio endpoint.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running on configured port
+            - /ws/audio/ endpoint is available
+            
+        Ensures:
+            - attempts connection to audio endpoint with valid session ID
+            - checks for immediate audio streaming status message
+            - properly closes connection after test
+            - appends test result to self.results with audio status info
+            - logs test outcome with duration and audio message status
+            
+        Raises:
+            - websockets.ConnectionClosed if connection fails
+            - asyncio.TimeoutError if connection or message times out
+        """
         test_name = "valid_audio_connection"
         self.utils.log( f"\n🧪 Testing: {test_name}" )
         
@@ -150,7 +219,25 @@ class ConnectionBasicTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms): {e}" )
     
     async def _test_session_id_formats( self ):
-        """Test various session ID formats."""
+        """
+        Test WebSocket connections with various session ID formats.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            - test cases include valid and invalid session ID formats
+            
+        Ensures:
+            - tests multiple session ID formats against expected behavior
+            - validates server correctly accepts/rejects session IDs
+            - measures connection attempt duration for each test case
+            - appends comprehensive test result to self.results
+            - logs individual test case outcomes
+            
+        Raises:
+            - websockets.ConnectionClosed for expected invalid session IDs
+            - asyncio.TimeoutError if connections exceed timeout limits
+        """
         test_name = "session_id_formats"
         self.utils.log( f"\n🧪 Testing: {test_name}" )
         
@@ -228,7 +315,26 @@ class ConnectionBasicTests:
             self.utils.log( f"   ❌ FAIL ({overall_duration:.1f}ms) - {len(incorrect)} unexpected behaviors" )
     
     async def _test_session_id_edge_cases( self ):
-        """Test session ID edge cases and special characters."""
+        """
+        Test WebSocket connections with session ID edge cases and special characters.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            - test cases include edge cases with special characters
+            
+        Ensures:
+            - tests session IDs with Unicode, whitespace, and special characters
+            - validates server correctly handles edge case session IDs
+            - measures connection attempt duration for each edge case
+            - appends comprehensive test result to self.results
+            - logs edge case outcomes with repr() for special character visibility
+            
+        Raises:
+            - websockets.ConnectionClosed for expected invalid session IDs
+            - asyncio.TimeoutError if connections exceed timeout limits
+            - UnicodeError if session ID encoding fails
+        """
         test_name = "session_id_edge_cases"
         self.utils.log( f"\n🧪 Testing: {test_name}" )
         
@@ -307,7 +413,26 @@ class ConnectionBasicTests:
             self.utils.log( f"   ❌ FAIL ({overall_duration:.1f}ms) - {len(incorrect)} unexpected edge case behaviors" )
     
     async def _test_connection_cleanup( self ):
-        """Test connection cleanup and resource management."""
+        """
+        Test WebSocket connection cleanup and resource management.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            - server supports multiple concurrent connections
+            
+        Ensures:
+            - creates multiple WebSocket connections successfully
+            - properly closes all created connections
+            - verifies server resources are cleaned up after connection closure
+            - confirms new connections can be established after cleanup
+            - appends test result to self.results with cleanup details
+            
+        Raises:
+            - websockets.ConnectionClosed if connections fail unexpectedly
+            - asyncio.TimeoutError if operations exceed timeout limits
+            - ResourceError if server fails to clean up resources
+        """
         test_name = "connection_cleanup"
         self.utils.log( f"\n🧪 Testing: {test_name}" )
         
@@ -358,7 +483,26 @@ class ConnectionBasicTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms): {e}" )
     
     async def _test_rapid_connections( self ):
-        """Test rapid connection creation and closing."""
+        """
+        Test rapid WebSocket connection creation and closing patterns.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            - server can handle rapid connection establishment/teardown
+            
+        Ensures:
+            - creates and closes connections in rapid succession
+            - includes small delays to avoid overwhelming server
+            - counts successful rapid connections
+            - calculates average connection time per rapid connection
+            - appends test result to self.results with timing metrics
+            
+        Raises:
+            - websockets.ConnectionClosed if rapid connections fail
+            - asyncio.TimeoutError if connections exceed timeout limits
+            - ServerOverloadError if server cannot handle rapid connections
+        """
         test_name = "rapid_connections"
         self.utils.log( f"\n🧪 Testing: {test_name}" )
         
@@ -401,7 +545,26 @@ class ConnectionBasicTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms): Failed after {successful_connections} connections - {e}" )
     
     async def _test_invalid_endpoints( self ):
-        """Test connections to invalid endpoints."""
+        """
+        Test WebSocket connections to invalid or non-existent endpoints.
+        
+        Requires:
+            - self.utils is properly initialized
+            - test includes various invalid endpoint patterns
+            - server properly rejects invalid endpoint connections
+            
+        Ensures:
+            - attempts connections to known invalid endpoints
+            - verifies server correctly rejects invalid endpoint requests
+            - measures rejection response time for each invalid endpoint
+            - appends test result to self.results with rejection details
+            - logs expected failures as successful test outcomes
+            
+        Raises:
+            - websockets.InvalidURI for malformed endpoint URIs
+            - websockets.ConnectionClosed for properly rejected endpoints
+            - Unexpected success exceptions if invalid endpoints are accepted
+        """
         test_name = "invalid_endpoints"
         self.utils.log( f"\n🧪 Testing: {test_name}" )
         
@@ -469,7 +632,25 @@ class ConnectionBasicTests:
             self.utils.log( f"   ❌ FAIL ({duration:.1f}ms) - {len(unexpected)} endpoints had unexpected behavior" )
     
     async def _test_connection_timeouts( self ):
-        """Test connection timeout behavior."""
+        """
+        Test WebSocket connection timeout behavior and handling.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            - timeout values include both very short and reasonable timeouts
+            
+        Ensures:
+            - tests connection behavior with extremely short timeout
+            - tests connection behavior with normal reasonable timeout
+            - measures performance for different timeout scenarios
+            - validates timeout handling works correctly
+            - appends test result to self.results with timeout behavior details
+            
+        Raises:
+            - asyncio.TimeoutError for expected short timeout failures
+            - websockets.ConnectionClosed if connections fail unexpectedly
+        """
         test_name = "connection_timeouts"
         self.utils.log( f"\n🧪 Testing: {test_name}" )
         
@@ -530,7 +711,26 @@ class ConnectionBasicTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms): {e}" )
     
     async def _test_concurrent_same_session( self ):
-        """Test multiple connections with the same session ID."""
+        """
+        Test multiple concurrent WebSocket connections using same session ID.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            - server has defined behavior for multiple connections per session
+            
+        Ensures:
+            - attempts multiple concurrent connections with identical session ID
+            - executes connection attempts concurrently using asyncio.gather
+            - counts successful vs failed concurrent connections
+            - properly closes all successful connections
+            - appends test result to self.results with concurrency details
+            - determines server behavior (allows/restricts multiple connections)
+            
+        Raises:
+            - websockets.ConnectionClosed if connections are rejected
+            - asyncio.TimeoutError if concurrent connections exceed timeout
+        """
         test_name = "concurrent_same_session"
         self.utils.log( f"\n🧪 Testing: {test_name}" )
         
@@ -596,7 +796,28 @@ class ConnectionBasicTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms): {e}" )
     
     async def _test_concurrent_different_sessions( self ):
-        """Test multiple connections with different session IDs."""
+        """
+        Test multiple concurrent WebSocket connections using different session IDs.
+        
+        Requires:
+            - self.utils is properly initialized
+            - WebSocket server is running and accessible
+            - server supports multiple concurrent sessions
+            
+        Ensures:
+            - creates multiple unique session IDs for concurrent testing
+            - attempts concurrent connections with different session IDs
+            - executes all connections concurrently using asyncio.gather
+            - analyzes success rate of concurrent different-session connections
+            - properly closes all successful connections
+            - appends test result to self.results with success rate metrics
+            - requires minimum 80% success rate for test to pass
+            
+        Raises:
+            - websockets.ConnectionClosed if connections fail unexpectedly
+            - asyncio.TimeoutError if concurrent connections exceed timeout
+            - ServerCapacityError if server cannot handle concurrent sessions
+        """
         test_name = "concurrent_different_sessions"
         self.utils.log( f"\n🧪 Testing: {test_name}" )
         
@@ -664,7 +885,27 @@ class ConnectionBasicTests:
 
 
 async def main():
-    """Run all basic connection tests."""
+    """
+    Execute complete basic WebSocket connection test suite and display results.
+    
+    Requires:
+        - WebSocket server is running and accessible
+        - ConnectionBasicTests class is properly implemented
+        
+    Ensures:
+        - creates ConnectionBasicTests instance
+        - executes all connection tests via run_all_tests()
+        - displays comprehensive test summary with statistics
+        - shows detailed failure information for failed tests
+        - returns appropriate exit code (0 for success, 1 for failures)
+        
+    Returns:
+        Exit code: 0 if all tests passed, 1 if any tests failed
+        
+    Raises:
+        - ConnectionError if server is unreachable
+        - Exception if test execution fails catastrophically
+    """
     print( "🧪 WebSocket Basic Connection Tests" )
     print( "=" * 50 )
     

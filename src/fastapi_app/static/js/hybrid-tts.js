@@ -381,17 +381,26 @@ class HybridTTS {
     }
     
     async playChunkProgressive(audioBlob) {
+        const chunkId = Date.now() + '-' + Math.random().toString(36).substr(2, 5);
+        console.log( `🔍 [CHUNK-${chunkId}] playChunkProgressive START` );
+        console.log( `🔍 [CHUNK-${chunkId}] audioBlob size:`, audioBlob.size );
+        console.log( `🔍 [CHUNK-${chunkId}] audioContext state before:`, this.audioContext?.state );
+        
         // Resume audio context if suspended (Firefox autoplay policy)
         if (this.audioContext && this.audioContext.state === 'suspended') {
+            console.log( `🔍 [CHUNK-${chunkId}] Resuming suspended audioContext` );
             await this.audioContext.resume();
+            console.log( `🔍 [CHUNK-${chunkId}] audioContext state after resume:`, this.audioContext.state );
         }
         
         try {
             // Convert blob to ArrayBuffer
             const arrayBuffer = await audioBlob.arrayBuffer();
+            console.log( `🔍 [CHUNK-${chunkId}] ArrayBuffer size:`, arrayBuffer.byteLength );
             
             // Decode audio data
             const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+            console.log( `🔍 [CHUNK-${chunkId}] Decoded audio - duration:`, audioBuffer.duration, 'channels:', audioBuffer.numberOfChannels );
             
             // Create buffer source
             const source = this.audioContext.createBufferSource();
@@ -400,14 +409,17 @@ class HybridTTS {
             // Add a gain node to control volume and debug
             const gainNode = this.audioContext.createGain();
             gainNode.gain.value = 3.0; // Boost volume 3x for driver issues
+            console.log( `🔍 [CHUNK-${chunkId}] Gain node value:`, gainNode.gain.value );
             
             source.connect(gainNode);
             gainNode.connect(this.audioContext.destination);
+            console.log( `🔍 [CHUNK-${chunkId}] Audio graph connected: source → gain → destination` );
             
             // Check AudioContext state
             if (this.audioContext.state === 'suspended') {
-                console.warn('HybridTTS: AudioContext is suspended, attempting to resume...');
+                console.warn(`🔍 [CHUNK-${chunkId}] AudioContext is suspended, attempting to resume...`);
                 await this.audioContext.resume();
+                console.log( `🔍 [CHUNK-${chunkId}] AudioContext state after second resume:`, this.audioContext.state );
             }
             
             // Enhanced audio diagnostics
@@ -425,14 +437,19 @@ class HybridTTS {
             
             // Schedule for immediate playback
             const playTime = Math.max(this.audioContext.currentTime, this.currentPlaybackTime);
+            console.log( `🔍 [CHUNK-${chunkId}] Calculated playTime:`, playTime, 'currentTime:', this.audioContext.currentTime, 'currentPlaybackTime:', this.currentPlaybackTime );
             source.start(playTime);
+            console.log( `🔍 [CHUNK-${chunkId}] Source.start() called successfully at time:`, playTime );
             
             // Add debug to track when audio actually plays
             source.onended = () => {
-                console.log(`HybridTTS: Audio chunk finished playing at ${this.audioContext.currentTime.toFixed(3)}s`);
+                const endTime = this.audioContext.currentTime.toFixed(3);
+                console.log( `🔍 [CHUNK-${chunkId}] Audio chunk finished playing at ${endTime}s` );
+                console.log(`HybridTTS: Audio chunk finished playing at ${endTime}s`);
                 
                 // Check if audio context is still running properly
                 if (this.audioContext.state !== 'running') {
+                    console.error( `🔍 [CHUNK-${chunkId}] AudioContext state changed to ${this.audioContext.state}` );
                     console.error(`HybridTTS: AudioContext state changed to ${this.audioContext.state} - audio may have stopped!`);
                     
                     // Try to fallback to reliable mode
@@ -441,7 +458,13 @@ class HybridTTS {
                         localStorage.setItem('tts-mode', 'reliable');
                         this.mode = 'reliable';
                     }
+                } else {
+                    console.log( `🔍 [CHUNK-${chunkId}] Audio chunk completed successfully, AudioContext still running` );
                 }
+            };
+            
+            source.onerror = (error) => {
+                console.error( `🔍 [CHUNK-${chunkId}] Audio source error:`, error );
             };
             
             // Update playback time for next chunk

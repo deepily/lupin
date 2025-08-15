@@ -35,8 +35,17 @@ class SessionManagementTests:
         """
         Initialize session management tests.
         
+        Requires:
+            - server_url is a valid string representing server endpoint
+            - server_url follows format "host:port" or "host"
+            
+        Ensures:
+            - self.utils is initialized with WebSocketTestUtilities
+            - self.results is empty list ready for test results
+            - self.active_sessions is empty set ready for session tracking
+            
         Args:
-            server_url: Server URL to test against
+            server_url: Server URL to test against in format "host:port"
         """
         self.utils = WebSocketTestUtilities( server_url )
         self.results = []
@@ -46,8 +55,21 @@ class SessionManagementTests:
         """
         Run all session management tests.
         
+        Requires:
+            - self is properly initialized with utils, results, and active_sessions
+            - WebSocket server is running and accessible
+            
+        Ensures:
+            - returns list of dictionaries containing test results
+            - each result dict contains name, success, duration_ms fields
+            - all test methods are executed in proper sequence
+            - self.results contains all test outcomes
+            
         Returns:
-            List of test results
+            List of test result dictionaries with test outcomes and metrics
+            
+        Raises:
+            Exception: If critical test infrastructure fails
         """
         self.utils.log( "📋 Starting Session Management Tests" )
         self.utils.log( "=" * 50 )
@@ -75,7 +97,25 @@ class SessionManagementTests:
         return self.results
     
     async def _test_session_creation_lifecycle( self ):
-        """Test basic session creation and lifecycle."""
+        """
+        Test basic session creation and lifecycle.
+        
+        Requires:
+            - self.utils is initialized and functional
+            - WebSocket server is running and accepting connections
+            - self.results list exists for appending test results
+            
+        Ensures:
+            - creates new session with unique session_id
+            - performs authentication workflow
+            - tests session responsiveness
+            - performs clean session termination
+            - appends test result to self.results
+            - manages self.active_sessions set properly
+            
+        Raises:
+            Exception: If session creation, authentication, or communication fails
+        """
         test_name = "session_creation_lifecycle"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -137,7 +177,24 @@ class SessionManagementTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_session_persistence( self ):
-        """Test session persistence and state maintenance."""
+        """
+        Test session persistence and state maintenance.
+        
+        Requires:
+            - self.utils is initialized and functional
+            - WebSocket server supports session persistence features
+            - self.results list exists for appending test results
+            
+        Ensures:
+            - creates session and sends data for persistence
+            - closes and reconnects to same session
+            - tests whether session state is maintained across reconnections
+            - appends comprehensive test result to self.results
+            - properly closes all WebSocket connections
+            
+        Raises:
+            Exception: If session creation, persistence testing, or reconnection fails
+        """
         test_name = "session_persistence"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -230,7 +287,25 @@ class SessionManagementTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_session_isolation( self ):
-        """Test that sessions are properly isolated from each other."""
+        """
+        Test that sessions are properly isolated from each other.
+        
+        Requires:
+            - self.utils is initialized and functional
+            - WebSocket server supports multiple concurrent sessions
+            - self.results list exists for appending test results
+            
+        Ensures:
+            - creates two separate sessions with different users
+            - authenticates both sessions independently
+            - sends distinct data to each session
+            - verifies sessions operate independently without interference
+            - appends test result documenting isolation behavior
+            - properly closes all WebSocket connections
+            
+        Raises:
+            Exception: If session creation, authentication, or isolation testing fails
+        """
         test_name = "session_isolation"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -354,7 +429,25 @@ class SessionManagementTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_cross_session_communication( self ):
-        """Test whether sessions can or cannot communicate with each other."""
+        """
+        Test whether sessions can or cannot communicate with each other.
+        
+        Requires:
+            - self.utils is initialized and functional
+            - WebSocket server supports multiple concurrent sessions
+            - self.results list exists for appending test results
+            
+        Ensures:
+            - creates sender and receiver sessions
+            - authenticates both sessions
+            - attempts cross-session message transmission
+            - documents whether cross-session communication is enabled or isolated
+            - appends test result with communication behavior analysis
+            - properly closes all WebSocket connections
+            
+        Raises:
+            Exception: If session creation, authentication, or communication testing fails
+        """
         test_name = "cross_session_communication"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -459,7 +552,25 @@ class SessionManagementTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_session_cleanup_on_disconnect( self ):
-        """Test that sessions are properly cleaned up when connections close."""
+        """
+        Test that sessions are properly cleaned up when connections close.
+        
+        Requires:
+            - self.utils is initialized and functional
+            - WebSocket server implements proper cleanup mechanisms
+            - self.results list exists for appending test results
+            
+        Ensures:
+            - creates session and establishes state
+            - abruptly closes connection to simulate network issues
+            - waits for server cleanup processes
+            - tests reconnection capability after cleanup
+            - appends test result documenting cleanup behavior
+            - verifies server remains functional after cleanup
+            
+        Raises:
+            Exception: If session creation, cleanup testing, or reconnection verification fails
+        """
         test_name = "session_cleanup_on_disconnect"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -543,7 +654,25 @@ class SessionManagementTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_multiple_sessions_same_user( self ):
-        """Test behavior when same user has multiple sessions."""
+        """
+        Test behavior when same user has multiple sessions.
+        
+        Requires:
+            - self.utils is initialized and functional
+            - WebSocket server supports user authentication
+            - self.results list exists for appending test results
+            
+        Ensures:
+            - creates multiple sessions for same user_id
+            - attempts authentication for each session
+            - sends unique messages to each session
+            - documents multi-session behavior (allowed/restricted)
+            - appends test result with session count and behavior analysis
+            - properly closes all WebSocket connections
+            
+        Raises:
+            Exception: If session creation, authentication, or multi-session testing fails
+        """
         test_name = "multiple_sessions_same_user"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -639,7 +768,25 @@ class SessionManagementTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_session_reconnection( self ):
-        """Test session reconnection scenarios."""
+        """
+        Test session reconnection scenarios.
+        
+        Requires:
+            - self.utils is initialized and functional
+            - WebSocket server supports reconnection workflows
+            - self.results list exists for appending test results
+            
+        Ensures:
+            - creates initial session and sends data
+            - closes connection and attempts quick reconnection
+            - tests delayed reconnection after longer wait
+            - documents reconnection behavior for both scenarios
+            - appends test result with reconnection capability analysis
+            - properly closes all WebSocket connections
+            
+        Raises:
+            Exception: If initial session, reconnection attempts, or testing fails
+        """
         test_name = "session_reconnection"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -736,7 +883,25 @@ class SessionManagementTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_session_timeout_behavior( self ):
-        """Test session behavior with idle connections."""
+        """
+        Test session behavior with idle connections.
+        
+        Requires:
+            - self.utils is initialized and functional
+            - WebSocket server implements timeout/keepalive mechanisms
+            - self.results list exists for appending test results
+            
+        Ensures:
+            - creates session and establishes baseline
+            - waits through idle period to test timeout behavior
+            - tests connection liveness after idle period
+            - attempts message sending after idle period
+            - documents timeout and idle handling behavior
+            - appends test result with timeout robustness analysis
+            
+        Raises:
+            Exception: If session creation, timeout testing, or idle behavior verification fails
+        """
         test_name = "session_timeout_behavior"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -827,7 +992,25 @@ class SessionManagementTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_maximum_sessions_per_user( self ):
-        """Test server limits on sessions per user."""
+        """
+        Test server limits on sessions per user.
+        
+        Requires:
+            - self.utils is initialized and functional
+            - WebSocket server implements session limiting mechanisms
+            - self.results list exists for appending test results
+            
+        Ensures:
+            - attempts to create many sessions for single user
+            - tracks successful vs failed session creations
+            - documents session limits and server behavior
+            - calculates success rates and estimated limits
+            - appends test result with session scaling analysis
+            - properly closes all created WebSocket connections
+            
+        Raises:
+            Exception: If session limit testing infrastructure fails
+        """
         test_name = "maximum_sessions_per_user"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -918,7 +1101,25 @@ class SessionManagementTests:
             self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - {e}" )
     
     async def _test_session_resource_cleanup( self ):
-        """Test that sessions don't leak resources over time."""
+        """
+        Test that sessions don't leak resources over time.
+        
+        Requires:
+            - self.utils is initialized and functional
+            - WebSocket server implements proper resource management
+            - self.results list exists for appending test results
+            
+        Ensures:
+            - creates and destroys sessions in multiple cycles
+            - tests server responsiveness after resource cycling
+            - verifies no resource leaks affect server performance
+            - documents resource cleanup effectiveness
+            - appends test result with resource management analysis
+            - properly closes all WebSocket connections
+            
+        Raises:
+            Exception: If resource cycling, cleanup testing, or final verification fails
+        """
         test_name = "session_resource_cleanup"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
         
@@ -1000,7 +1201,25 @@ class SessionManagementTests:
 
 
 async def main():
-    """Run all session management tests."""
+    """
+    Run all session management tests.
+    
+    Requires:
+        - WebSocket server is running and accessible
+        - Test environment is properly configured
+        
+    Ensures:
+        - executes complete session management test suite
+        - prints formatted test results and summary
+        - returns exit code (0 for success, 1 for failures)
+        - displays session behavior insights
+        
+    Returns:
+        int: Exit code where 0 indicates all tests passed, 1 indicates failures
+        
+    Raises:
+        Exception: If test suite execution fails critically
+    """
     print( "📋 WebSocket Session Management Tests" )
     print( "=" * 50 )
     

@@ -58,9 +58,26 @@ class WebSocketTestUtilities:
         """
         Log message with timestamp if debug enabled.
         
+        Requires:
+            - message must be a valid string
+            - level must be a valid log level string
+            - self.debug attribute must be set (boolean)
+            
+        Ensures:
+            - Message is printed to stdout if debug is enabled
+            - Message includes timestamp in HH:MM:SS.mmm format
+            - Message format follows [timestamp] [level] message pattern
+            - No output if debug is disabled
+            
         Args:
             message: Message to log
             level: Log level (INFO, ERROR, DEBUG)
+            
+        Returns:
+            None
+            
+        Raises:
+            No exceptions raised - string formatting is guaranteed to work
         """
         if self.debug:
             timestamp = datetime.now().strftime( "%H:%M:%S.%f" )[:-3]
@@ -103,14 +120,24 @@ class WebSocketTestUtilities:
         """
         Generate a valid WebSocket session ID.
         
-        Uses the expected 'adjective noun' format that the server validates.
-        Based on the working test format: exactly two words, no prefix.
-        
+        Requires:
+            - prefix must be None or a valid string if provided
+            - random module must be available for choice selection
+            
+        Ensures:
+            - Returns string in 'adjective noun' format for server compatibility
+            - Uses predefined adjectives and nouns lists for consistency
+            - Without prefix: returns exactly 2 words separated by space
+            - With prefix: returns prefix + space + adjective + space + noun
+            
         Args:
             prefix: Optional prefix for the session ID (usually None for server compatibility)
             
         Returns:
-            Valid session ID string
+            str: Valid session ID string in expected server format
+            
+        Raises:
+            No exceptions raised - random.choice and string formatting are guaranteed
         """
         adjectives = ["wise", "clever", "brave", "quick", "calm", "bright", "noble", "swift", "bold", "keen"]
         nouns = ["penguin", "giraffe", "owl", "lion", "fox", "bear", "eagle", "wolf", "tiger", "hawk"]
@@ -129,11 +156,22 @@ class WebSocketTestUtilities:
         """
         Generate a mock authentication token.
         
+        Requires:
+            - user_id must be a valid string identifier
+            
+        Ensures:
+            - Returns token string in format 'mock_token_{user_id}'
+            - Token format is consistent for testing purposes
+            - String concatenation always succeeds
+            
         Args:
             user_id: User identifier for the token
             
         Returns:
-            Mock token string in expected format
+            str: Mock token string in expected format
+            
+        Raises:
+            No exceptions raised - string formatting is guaranteed to work
         """
         return f"mock_token_{user_id}"
     
@@ -196,6 +234,19 @@ class WebSocketTestUtilities:
         """
         Authenticate a WebSocket connection.
         
+        Requires:
+            - websocket must be a connected WebSocket client
+            - token must be a valid non-empty authentication string
+            - subscribed_events must be None or list of valid event name strings
+            - timeout must be positive number
+            
+        Ensures:
+            - Sends auth_request message with token and subscribed events
+            - Waits for server response within timeout period
+            - Returns tuple with success boolean and full response data
+            - Logs authentication result with user ID or error message
+            - Uses default event subscriptions if none provided
+            
         Args:
             websocket: Connected WebSocket client
             token: Authentication token
@@ -203,7 +254,12 @@ class WebSocketTestUtilities:
             timeout: Authentication timeout in seconds
             
         Returns:
-            Tuple of (success, response_data)
+            Tuple[bool, Dict[str, Any]]: (success, response_data) where success indicates auth result
+            
+        Raises:
+            asyncio.TimeoutError: If server doesn't respond within timeout
+            json.JSONDecodeError: If server response is not valid JSON
+            websockets.exceptions.ConnectionClosed: If connection is lost during auth
         """
         # Default event subscriptions for testing
         if subscribed_events is None:
@@ -251,6 +307,19 @@ class WebSocketTestUtilities:
         """
         Wait for a specific WebSocket event type.
         
+        Requires:
+            - websocket must be connected and authenticated WebSocket client
+            - event_type must be valid non-empty event name string
+            - timeout must be positive number
+            - max_events must be positive integer
+            
+        Ensures:
+            - Listens for incoming WebSocket messages up to timeout duration
+            - Processes up to max_events messages while searching
+            - Returns first matching event data with specified type
+            - Returns None if timeout reached or max_events exceeded
+            - Logs search progress and result status
+            
         Args:
             websocket: Connected WebSocket client
             event_type: Type of event to wait for
@@ -258,7 +327,12 @@ class WebSocketTestUtilities:
             max_events: Maximum number of events to process while waiting
             
         Returns:
-            Event data if found, None if timeout or not found
+            Optional[Dict[str, Any]]: Event data if found, None if timeout or not found
+            
+        Raises:
+            asyncio.TimeoutError: If timeout is reached without finding event
+            json.JSONDecodeError: If received message is not valid JSON
+            websockets.exceptions.ConnectionClosed: If connection is lost during wait
         """
         self.log( f"Waiting for event type: {event_type} (timeout: {timeout}s)" )
         
@@ -307,13 +381,29 @@ class WebSocketTestUtilities:
         """
         Collect WebSocket events for a specified duration.
         
+        Requires:
+            - websocket must be connected and authenticated WebSocket client
+            - duration must be positive number of seconds
+            - max_events must be positive integer
+            
+        Ensures:
+            - Collects events for exactly the specified duration
+            - Stops early if max_events limit is reached
+            - Returns chronological list of all collected events
+            - Logs collection progress and final count
+            - Returns empty list if no events received
+            
         Args:
             websocket: Connected WebSocket client
             duration: Time to collect events (seconds)
             max_events: Maximum number of events to collect
             
         Returns:
-            List of collected event data
+            List[Dict[str, Any]]: List of collected event data dictionaries in chronological order
+            
+        Raises:
+            json.JSONDecodeError: If received message is not valid JSON
+            websockets.exceptions.ConnectionClosed: If connection is lost during collection
         """
         self.log( f"Collecting events for {duration}s (max {max_events})" )
         
@@ -353,11 +443,24 @@ class WebSocketTestUtilities:
         """
         Context manager for measuring operation performance.
         
+        Requires:
+            - operation_name must be valid non-empty string
+            - PerformanceTimer class must be available
+            
+        Ensures:
+            - Returns PerformanceTimer context manager instance
+            - Context manager will measure and log execution time
+            - Timing starts on context entry and ends on context exit
+            - Final timing is logged through self.log method
+            
         Args:
             operation_name: Name of the operation being measured
             
         Returns:
-            Context manager that logs execution time
+            PerformanceTimer: Context manager that logs execution time
+            
+        Raises:
+            No exceptions raised - PerformanceTimer handles all timing logic
         """
         return PerformanceTimer( operation_name, self.log )
     
@@ -370,13 +473,32 @@ class WebSocketTestUtilities:
         """
         Test a complete WebSocket connection flow.
         
+        Requires:
+            - endpoint must be 'queue' or 'audio'
+            - user_id must be valid non-empty string identifier
+            - duration must be positive number of seconds
+            - WebSocket server must be running and accessible
+            
+        Ensures:
+            - Performs full connection, authentication, and event collection cycle
+            - Measures connection and authentication timing
+            - Collects events for specified duration
+            - Returns comprehensive test results including success status
+            - Properly closes WebSocket connection after test
+            - Logs all test phases and their outcomes
+            
         Args:
             endpoint: WebSocket endpoint to test ('queue' or 'audio')
             user_id: User ID for authentication
             duration: How long to maintain connection and collect events
             
         Returns:
-            Dictionary with test results and collected data
+            Dict[str, Any]: Dictionary with test results including success, timing, and collected data
+            
+        Raises:
+            ConnectionError: If WebSocket connection fails
+            asyncio.TimeoutError: If authentication or event collection times out
+            json.JSONDecodeError: If server sends invalid JSON responses
         """
         results = {
             "endpoint": endpoint,
@@ -436,21 +558,80 @@ class PerformanceTimer:
         """
         Initialize performance timer.
         
+        Requires:
+            - operation_name must be valid non-empty string
+            - log_func must be callable that accepts (message: str, level: str = "INFO")
+            
+        Ensures:
+            - Sets operation_name and log_func attributes
+            - Initializes start_time to None
+            - Instance is ready for use as context manager
+            
         Args:
             operation_name: Name of operation being measured
-            log_func: Logging function to use
+            log_func: Logging function to use for timing results
+            
+        Returns:
+            None
+            
+        Raises:
+            No exceptions raised during initialization
         """
         self.operation_name = operation_name
         self.log_func = log_func
         self.start_time = None
     
     def __enter__( self ):
-        """Start timing the operation."""
+        """
+        Start timing the operation.
+        
+        Requires:
+            - Context manager entry (called by 'with' statement)
+            - time.time() function must be available
+            
+        Ensures:
+            - Records current timestamp as start_time
+            - Returns self for context manager protocol
+            - Timer is ready to measure elapsed time on exit
+            
+        Args:
+            None
+            
+        Returns:
+            PerformanceTimer: Self reference for context manager protocol
+            
+        Raises:
+            No exceptions raised - time.time() is guaranteed to work
+        """
         self.start_time = time.time()
         return self
     
     def __exit__( self, exc_type, exc_val, exc_tb ):
-        """End timing and log the result."""
+        """
+        End timing and log the result.
+        
+        Requires:
+            - Context manager exit (called at end of 'with' block)
+            - start_time must be set (from __enter__ call)
+            - log_func must be callable and available
+            
+        Ensures:
+            - Calculates elapsed time from start_time to current time
+            - Logs timing result in milliseconds with operation name
+            - Uses emoji prefix for easy identification in logs
+            - Only logs if start_time was properly set
+            
+        Args:
+            exc_type: Exception type (from context manager protocol)
+            exc_val: Exception value (from context manager protocol)
+            exc_tb: Exception traceback (from context manager protocol)
+            
+        Returns:
+            None (implicitly returns None to not suppress exceptions)
+            
+        Raises:
+            No exceptions raised - timing calculation and logging are safe operations
+        """
         if self.start_time:
             duration = time.time() - self.start_time
             self.log_func( f"⏱️ {self.operation_name}: {duration*1000:.2f}ms" )
@@ -458,13 +639,57 @@ class PerformanceTimer:
 
 # Convenience functions for common operations
 async def quick_health_check( base_url: str = "localhost:7999" ) -> bool:
-    """Quick server health check."""
+    """
+    Quick server health check.
+    
+    Requires:
+        - base_url must be valid server address format
+        - Server should be running at specified address
+        
+    Ensures:
+        - Creates temporary WebSocketTestUtilities instance
+        - Performs HTTP health check via utils.check_server_health()
+        - Returns boolean result of health status
+        
+    Args:
+        base_url: Server base URL to check (default: "localhost:7999")
+        
+    Returns:
+        bool: True if server is healthy, False otherwise
+        
+    Raises:
+        No exceptions raised - all errors handled by check_server_health()
+    """
     utils = WebSocketTestUtilities( base_url )
     return await utils.check_server_health()
 
 
 async def quick_websocket_test( endpoint: str = "queue", user_id: str = "test" ) -> Dict[str, Any]:
-    """Quick WebSocket connection and authentication test."""
+    """
+    Quick WebSocket connection and authentication test.
+    
+    Requires:
+        - endpoint must be 'queue' or 'audio'
+        - user_id must be valid non-empty string identifier
+        - WebSocket server must be running at default location
+        
+    Ensures:
+        - Creates temporary WebSocketTestUtilities instance with default config
+        - Performs complete WebSocket flow test with 2-second duration
+        - Returns comprehensive test results including success status
+        
+    Args:
+        endpoint: WebSocket endpoint to test (default: "queue")
+        user_id: User ID for authentication (default: "test")
+        
+    Returns:
+        Dict[str, Any]: Test results including success, timing, and event data
+        
+    Raises:
+        ConnectionError: If WebSocket connection fails
+        asyncio.TimeoutError: If authentication or event collection times out
+        json.JSONDecodeError: If server sends invalid JSON responses
+    """
     utils = WebSocketTestUtilities()
     return await utils.test_websocket_flow( endpoint, user_id, duration=2.0 )
 

@@ -31,12 +31,7 @@ Requirement: You MUST respect and reproduce the white space preceding the one li
 Requirement: The first word of your response MUST the XML tag `<response>` and your last, MUST be the XML tag `</response>`, and all of your work and output MUST occur between these two tags.
 
 You MUST respond to the directives above using the following XML format:
-<response>
-    <thoughts>Your thoughts</thoughts>
-    <line-number></line-number>
-    <one-line-of-code>One line of code with proper indentation</one-line-of-code>
-    <success>True or False</success>
-</response>
+{{PYDANTIC_XML_EXAMPLE}}
 
 Take a deep breath and pause for a moment before you begin. Good luck!
 

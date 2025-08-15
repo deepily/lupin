@@ -45,11 +45,7 @@ Requirement: The last word of your response MUST be the XML tag `</response>`
 Requirement: All of your work and output MUST be between `<response>` and `</response>`.
 Requirement: You MUST respond to the step by step directives above using the following XML format:
 
-<response>
-    <thoughts></thoughts>
-    <category>benign OR humorous OR salacious</category>
-    <answer></answer>
-</response>
+{{PYDANTIC_XML_EXAMPLE}}
 
 Take a deep breath and pause before you begin. Good luck!
 

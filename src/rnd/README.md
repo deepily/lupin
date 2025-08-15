@@ -2,17 +2,61 @@
 
 This directory contains research and development documents for the Lupin project.
 
+## Project Architecture Overview
+
+Lupin is built on/uses:
+- **FastAPI** server architecture
+- **PydanticAI** for Agent-based abstractions & data validation
+- **WebSockets** support for real-time communication
+
+Lupin contains multiple sub repos:
+- **CoSA** support for real-time communication
+- **Lupin Mobile** implements queue UI for agent-to-user communication
+- **Lupin Plugin for Firefox** provides browser integration for Lupin features
+
+Lupin does a lot of things:
+- **Notification system** for agent-to-user feedback
+- **Voice drives Firefox with plugin**
+- **Text-to-Speech (TTS)** streaming and caching of TTS audio responses
+- **Speech-to-Text (STT)** for voice input
+- **Abstracted access to LLMs** both local and industrial strength
+- **Easy PEFT** High level training object performs all the things before during and after training a new LoRA for you
+- **Code is memory** 
+
+## Project Goals for v0.1.0
+- **JWT authentication** using firebase? (See RND docs for details)
+- **PydanticAI** data validation for XML-based I/O interactions with agents
+- **Agentic frameworks** implement high-level abstraction for running the same query on multiple agentic frameworks
+  - Google ADK 
+  - OpenAI
+  - Anthropic 
+  - Perplexity 
+- **Host on GCP** (Google Cloud Platform) for demoing and R&D purposes
+- 
+
+For implementation details, see the specific documents listed below.
+
 ## Active Documents
 
 ### Current Development (2025.08)
-- **[2025.08.01-design-by-contract-audit.md](2025.08.01-design-by-contract-audit.md)** - Comprehensive audit of Python files lacking Design by Contract docstrings (📋 ready for implementation)
-- **[2025.08.01-websocket-smoke-test-suite-design.md](2025.08.01-websocket-smoke-test-suite-design.md)** - Comprehensive smoke test suite design for WebSocket functionality validation during polish sessions (✅ completed - Phase 2 implemented and integrated)
-  - **Implementation Status**: 50 comprehensive tests (400% expansion from original 10 tests)
-  - **Success Rate**: 92% overall with detailed behavioral insights
-  - **Production Ready**: Full pre-polish/post-polish regression detection workflow
+
+#### 🎉 Major Infrastructure Completions
+- **[2025.08.13-smoke-test-data-collection-strategy.md](2025.08.13-smoke-test-data-collection-strategy.md)** - Comprehensive data-collection-first smoke testing methodology for systematic diagnostics (✅ completed - reusable framework established for future test runs)
+- **[2025.08.13-smoke-test-execution-report.md](2025.08.13-smoke-test-execution-report.md)** - Complete analysis of 72-test smoke test suite with failure patterns and remediation priorities (✅ completed - critical API endpoint failures identified)
+- **[2025.08.13-session-state-for-tomorrow.md](2025.08.13-session-state-for-tomorrow.md)** - Detailed continuation plan for immediate pickup of smoke test remediation work (✅ completed - ready for tomorrow's session)
+- **[2025.08.12-template-rendering-investigation.md](2025.08.12-template-rendering-investigation.md)** - Investigation of prompt template rendering approaches: Python dictionaries vs Pydantic objects (✅ completed - current approach documented, future enhancement opportunities identified)
+- **[2025.08.12-phase-6-complex-agent-requirements.md](2025.08.12-phase-6-complex-agent-requirements.md)** - Phase 6 complex agent migration requirements for IterativeDebuggingAgent and BugInjector (✅ completed - all complex agents migrated successfully to production)
+- **[2025.08.10-xml-compatibility-investigation-findings.md](2025.08.10-xml-compatibility-investigation-findings.md)** - Analysis of baseline vs Pydantic XML parsing discrepancies and data integrity improvements (✅ completed - critical data loss issues resolved)
+- **[2025.08.09-pydantic-xml-migration-plan.md](2025.08.09-pydantic-xml-migration-plan.md)** - **🏆 MAJOR MILESTONE**: Complete Pydantic XML migration from legacy util_xml.py to modern structured parsing (✅ 100% COMPLETE - all agents migrated to production with full type safety and zero issues)
+
+#### Audio & UI Systems
+- **[2025.08.06-tts-audio-caching-implementation.md](2025.08.06-tts-audio-caching-implementation.md)** - Lightweight TTS audio caching system with cross-mode compatibility and SHA-256 hashing (✅ completed - 71.4% hit rate achieved, ready for browser testing)
+- **[2025.08.04-fresh-queue-ui-implementation.md](2025.08.04-fresh-queue-ui-implementation.md)** - Modern Fresh Queue UI with notification system and comprehensive job management (✅ completed)
+- **[2025.08.03-qa-audio-silence-mystery.md](2025.08.03-qa-audio-silence-mystery.md)** - Critical technical mystery: Q&A responses produce silence while notifications work, despite identical execution paths (🔍 resolved)
+- **[2025.08.01-sequential-audio-production-migration.md](2025.08.01-sequential-audio-production-migration.md)** - Production migration plan for Sequential Audio Element Queue from experimental validation to HybridTTS integration (✅ completed)
+- **[2025.08.01-audio-chunk-sequential-playback-analysis.md](2025.08.01-audio-chunk-sequential-playback-analysis.md)** - Root cause analysis and implementation strategy for fixing audio chunk overlap issues (✅ completed - experimental validation successful)
 
 ### Current Development (2025.07)
-- **[2025.07.31-elevenlabs-tts-quality-optimization-plan.md](2025.07.31-elevenlabs-tts-quality-optimization-plan.md)** - Comprehensive plan to improve TTS audio quality while maintaining sub-500ms latency (📋 ready for implementation)
 - **[2025.07.30-websocket-branch-polish-tracker.md](2025.07.30-websocket-branch-polish-tracker.md)** - Comprehensive tracking document for debugging, polishing, and documenting completed WebSocket functionality (📋 planning phase)
 - **[2025.07.24-websocket-async-bridge-implementation.md](2025.07.24-websocket-async-bridge-implementation.md)** - WebSocket implementation progress tracker through Phases 1, 2, and 2.5 (✅ completed)
 - **[2025.07.12-progressive-tts-streaming-experimental-tracker.md](2025.07.12-progressive-tts-streaming-experimental-tracker.md)** - Firefox-first experimental implementation of true progressive audio streaming (✅ completed - integrated into main system)
@@ -29,7 +73,12 @@ This directory contains research and development documents for the Lupin project
 
 ## Archived Documents
 
+### Completed Work (2025.08)
+- **[archived/2025.08.01-websocket-smoke-test-suite-design.md](archived/2025.08.01-websocket-smoke-test-suite-design.md)** - Comprehensive WebSocket smoke test suite implementation (✅ completed - 50 tests deployed with 92% success rate, production-ready regression detection)
+- **[archived/2025.08.01-design-by-contract-audit.md](archived/2025.08.01-design-by-contract-audit.md)** - Design by Contract documentation implementation (✅ largely completed - 83 functions documented across 7 high/medium priority files, professional-grade specifications)
+
 ### Completed Work (2025.07)
+- **[archived/2025.07.31-elevenlabs-tts-quality-optimization-plan.md](archived/2025.07.31-elevenlabs-tts-quality-optimization-plan.md)** - ElevenLabs TTS quality optimization implementation (✅ completed - Flash v2.5 model deployed with <200ms latency, provider switching operational)
 - **[archived/2025.07.01-todo-and-running-queues-as-producer-consumer.md](archived/2025.07.01-todo-and-running-queues-as-producer-consumer.md)** - Producer-consumer queue implementation (6700x performance improvement)
 - **[archived/2025.07.01-fastapi-clock-implementation-success.md](archived/2025.07.01-fastapi-clock-implementation-success.md)** - Success report documenting asyncio.create_task() pattern implementation
 - **[archived/2025.07.01-queue-integration-plan.md](archived/2025.07.01-queue-integration-plan.md)** - Plan for connecting running queue and implementing background tasks in FastAPI
@@ -56,12 +105,3 @@ This directory contains research and development documents for the Lupin project
 - Archived documents represent completed initiatives
 - Each document should include a clear purpose and current status
 
-## Project Architecture Overview
-
-Lupin is built on:
-- **FastAPI** server architecture (Flask completely removed as of 2025.06.28)
-- **COSA** (Collection of Small Agents) framework integration
-- **WebSocket** support for real-time communication
-- **Notification system** for agent-to-user feedback
-
-For implementation details, see the specific documents listed above.

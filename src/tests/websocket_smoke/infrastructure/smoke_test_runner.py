@@ -109,7 +109,26 @@ class SmokeTestRunner:
         self.log( f"   Config: {self.config_file}" )
     
     def _get_default_config_path( self ) -> str:
-        """Get the default configuration file path."""
+        """
+        Get the default configuration file path.
+        
+        Requires:
+            - __file__ must be available (running in proper module context)
+            - Parent directory structure must exist
+            
+        Ensures:
+            - Returns absolute path to default smoke_test_config.ini file
+            - Path points to config directory relative to this module
+            
+        Args:
+            None
+            
+        Returns:
+            str: Absolute path to default configuration file
+            
+        Raises:
+            None (constructs path regardless of file existence)
+        """
         config_dir = Path( __file__ ).parent.parent / "config"
         return str( config_dir / "smoke_test_config.ini" )
     
@@ -213,14 +232,28 @@ class SmokeTestRunner:
     
     async def run_all_tests( self, save_baseline: bool = False, compare_baseline: bool = False ) -> TestSuiteResults:
         """
-        Run all enabled smoke tests.
+        Run all enabled smoke tests across multiple phases and categories.
         
+        Requires:
+            - Configuration must be loaded with test_categories section
+            - WebSocketTestUtilities must be properly initialized
+            - Server must be accessible at configured base_url
+            
+        Ensures:
+            - Returns complete TestSuiteResults with all test outcomes
+            - Results include execution time, pass/fail counts, and detailed results
+            - Baseline operations are performed if requested
+            - Test execution stops early if server health check fails
+            
         Args:
             save_baseline: If True, save results as baseline for future comparison
             compare_baseline: If True, compare results with saved baseline
         
         Returns:
-            Complete test suite results
+            TestSuiteResults: Complete test suite results with timing and outcomes
+        
+        Raises:
+            Exception: If critical test infrastructure failures occur
         """
         results = TestSuiteResults( start_time=datetime.now( timezone.utc ) )
         
@@ -268,7 +301,28 @@ class SmokeTestRunner:
         return results
     
     async def _run_server_health_test( self, results: TestSuiteResults ):
-        """Run server health check test."""
+        """
+        Run server health check test to verify FastAPI server is operational.
+        
+        Requires:
+            - results must be a valid TestSuiteResults instance
+            - WebSocketTestUtilities must be initialized
+            - Server must be running at configured URL
+            
+        Ensures:
+            - Adds health check TestResult to results.results list
+            - Logs health check outcome with timing information
+            - Sets success status based on server accessibility
+            
+        Args:
+            results: TestSuiteResults object to append health check result
+            
+        Returns:
+            None (modifies results parameter in-place)
+            
+        Raises:
+            None (captures all exceptions as test failures)
+        """
         self.log( "\n🏥 Testing Server Health..." )
         
         start_time = time.time()
@@ -301,7 +355,28 @@ class SmokeTestRunner:
             self.log( f"   Server Health: ❌ FAIL ({duration:.2f}ms) - {e}", "ERROR" )
     
     async def _run_basic_connection_tests( self, results: TestSuiteResults ):
-        """Run basic WebSocket connection tests."""
+        """
+        Run basic WebSocket connection tests for queue and audio endpoints.
+        
+        Requires:
+            - results must be a valid TestSuiteResults instance
+            - WebSocketTestUtilities must be initialized
+            - Server must be healthy and accessible
+            
+        Ensures:
+            - Tests connection to both queue and audio WebSocket endpoints
+            - Adds connection test results to results.results list
+            - Logs connection outcomes with timing information
+            
+        Args:
+            results: TestSuiteResults object to append connection test results
+            
+        Returns:
+            None (modifies results parameter in-place)
+            
+        Raises:
+            None (delegates exception handling to individual connection tests)
+        """
         self.log( "\n🔌 Testing Basic WebSocket Connections..." )
         
         # Test queue WebSocket connection
@@ -311,7 +386,31 @@ class SmokeTestRunner:
         await self._test_websocket_connection( "audio", results )
     
     async def _test_websocket_connection( self, endpoint: str, results: TestSuiteResults ):
-        """Test connection to a specific WebSocket endpoint."""
+        """
+        Test connection to a specific WebSocket endpoint.
+        
+        Requires:
+            - endpoint must be a valid string ("queue" or "audio")
+            - results must be a valid TestSuiteResults instance
+            - WebSocketTestUtilities must be initialized
+            - Server must be accessible at configured URL
+            
+        Ensures:
+            - Attempts WebSocket connection to specified endpoint
+            - Generates unique session ID for connection
+            - Adds TestResult to results.results list with timing and outcome
+            - Properly closes WebSocket connection after test
+            
+        Args:
+            endpoint: WebSocket endpoint name ("queue" or "audio")
+            results: TestSuiteResults object to append test result
+            
+        Returns:
+            None (modifies results parameter in-place)
+            
+        Raises:
+            None (captures all exceptions as test failures)
+        """
         test_name = f"{endpoint}_websocket_connection"
         
         start_time = time.time()
@@ -345,7 +444,29 @@ class SmokeTestRunner:
             self.log( f"   {endpoint.capitalize()} Connection: ❌ FAIL ({duration:.2f}ms) - {e}", "ERROR" )
     
     async def _run_authentication_tests( self, results: TestSuiteResults ):
-        """Run WebSocket authentication flow tests."""
+        """
+        Run WebSocket authentication flow tests for queue and audio endpoints.
+        
+        Requires:
+            - results must be a valid TestSuiteResults instance
+            - WebSocketTestUtilities must be initialized
+            - Server must be healthy and accessible
+            
+        Ensures:
+            - Tests authentication flow for both queue and audio WebSocket endpoints
+            - Handles different authentication behaviors per endpoint type
+            - Adds authentication test results to results.results list
+            - Logs authentication outcomes with timing information
+            
+        Args:
+            results: TestSuiteResults object to append authentication test results
+            
+        Returns:
+            None (modifies results parameter in-place)
+            
+        Raises:
+            None (delegates exception handling to individual authentication tests)
+        """
         self.log( "\n🔐 Testing Authentication Flows..." )
         
         # Test queue WebSocket authentication
@@ -355,7 +476,31 @@ class SmokeTestRunner:
         await self._test_websocket_authentication( "audio", results )
     
     async def _test_websocket_authentication( self, endpoint: str, results: TestSuiteResults ):
-        """Test authentication for a specific WebSocket endpoint."""
+        """
+        Test authentication for a specific WebSocket endpoint.
+        
+        Requires:
+            - endpoint must be a valid string ("queue" or "audio")
+            - results must be a valid TestSuiteResults instance
+            - WebSocketTestUtilities must be initialized
+            - Server must be accessible and healthy
+            
+        Ensures:
+            - Connects to WebSocket and attempts authentication with mock token
+            - Handles different authentication behaviors for queue vs audio endpoints
+            - Adds TestResult with authentication outcome and details
+            - Properly closes WebSocket connection after test
+            
+        Args:
+            endpoint: WebSocket endpoint name ("queue" or "audio")
+            results: TestSuiteResults object to append authentication result
+            
+        Returns:
+            None (modifies results parameter in-place)
+            
+        Raises:
+            None (captures all exceptions as test failures)
+        """
         test_name = f"{endpoint}_websocket_authentication"
         
         start_time = time.time()
@@ -402,7 +547,29 @@ class SmokeTestRunner:
             self.log( f"   {endpoint.capitalize()} Auth: ❌ FAIL ({duration:.2f}ms) - {e}", "ERROR" )
     
     async def _run_event_system_tests( self, results: TestSuiteResults ):
-        """Run WebSocket event system tests."""
+        """
+        Run WebSocket event system tests for queue and audio endpoints.
+        
+        Requires:
+            - results must be a valid TestSuiteResults instance
+            - WebSocketTestUtilities must be initialized
+            - Server must be healthy and accessible
+            
+        Ensures:
+            - Tests event collection from both queue and audio WebSocket endpoints
+            - Uses different collection durations for different endpoint types
+            - Adds event collection test results to results.results list
+            - Logs event collection outcomes with timing and event counts
+            
+        Args:
+            results: TestSuiteResults object to append event test results
+            
+        Returns:
+            None (modifies results parameter in-place)
+            
+        Raises:
+            None (delegates exception handling to individual event tests)
+        """
         self.log( "\n📡 Testing Event System..." )
         
         # Test event collection from queue WebSocket
@@ -412,7 +579,32 @@ class SmokeTestRunner:
         await self._test_event_collection( "audio", results, duration=2.0 )
     
     async def _test_event_collection( self, endpoint: str, results: TestSuiteResults, duration: float = 3.0 ):
-        """Test event collection from a WebSocket endpoint."""
+        """
+        Test event collection from a WebSocket endpoint.
+        
+        Requires:
+            - endpoint must be a valid string ("queue" or "audio")
+            - results must be a valid TestSuiteResults instance
+            - duration must be a positive float
+            - WebSocketTestUtilities must be initialized
+            
+        Ensures:
+            - Executes complete WebSocket flow test for specified duration
+            - Collects and analyzes events received during test period
+            - Adds TestResult with event collection outcome and details
+            - Includes event count and event types in test details
+            
+        Args:
+            endpoint: WebSocket endpoint name ("queue" or "audio")
+            results: TestSuiteResults object to append event collection result
+            duration: Duration in seconds to collect events (default: 3.0)
+            
+        Returns:
+            None (modifies results parameter in-place)
+            
+        Raises:
+            None (captures all exceptions as test failures)
+        """
         test_name = f"{endpoint}_event_collection"
         
         start_time = time.time()
@@ -450,7 +642,31 @@ class SmokeTestRunner:
             self.log( f"   {endpoint.capitalize()} Events: ❌ FAIL ({test_duration:.2f}ms) - {e}", "ERROR" )
     
     async def _run_performance_tests( self, results: TestSuiteResults ):
-        """Run performance measurement tests."""
+        """
+        Run performance measurement tests to analyze connection timing.
+        
+        Requires:
+            - results must be a valid TestSuiteResults instance
+            - Configuration must contain performance section
+            - WebSocketTestUtilities must be initialized
+            - Server must be healthy and accessible
+            
+        Ensures:
+            - Executes multiple connection samples for statistical analysis
+            - Measures connection times for queue and audio endpoints
+            - Calculates average and maximum connection times
+            - Compares performance against configured thresholds
+            - Adds performance TestResults with detailed timing statistics
+            
+        Args:
+            results: TestSuiteResults object to append performance test results
+            
+        Returns:
+            None (modifies results parameter in-place)
+            
+        Raises:
+            None (handles individual connection failures gracefully)
+        """
         self.log( "\n⚡ Testing Performance Metrics..." )
         
         # Test multiple connection attempts to get performance statistics
@@ -497,7 +713,31 @@ class SmokeTestRunner:
                 self.log( f"   {endpoint.capitalize()} Perf: {status} ({avg_time:.2f}ms avg, {len(times)} samples)" )
     
     async def _run_concurrent_tests( self, results: TestSuiteResults ):
-        """Run concurrent connection tests."""
+        """
+        Run concurrent connection tests to validate multi-user scenarios.
+        
+        Requires:
+            - results must be a valid TestSuiteResults instance
+            - Configuration must contain testing section with max_concurrent_connections
+            - WebSocketTestUtilities must be initialized
+            - Server must be healthy and capable of handling multiple connections
+            
+        Ensures:
+            - Creates multiple concurrent WebSocket connections
+            - Tests authentication for each concurrent connection
+            - Calculates success rate and compares against minimum threshold
+            - Adds TestResult with concurrent connection outcome and statistics
+            - Properly handles connection cleanup and error scenarios
+            
+        Args:
+            results: TestSuiteResults object to append concurrent test result
+            
+        Returns:
+            None (modifies results parameter in-place)
+            
+        Raises:
+            None (captures all exceptions as test failures)
+        """
         self.log( "\n👥 Testing Concurrent Connections..." )
         
         max_connections = self.config.getint( "testing", "max_concurrent_connections", fallback=5 )
@@ -550,7 +790,32 @@ class SmokeTestRunner:
             self.log( f"   Concurrent Test: ❌ FAIL ({test_duration:.2f}ms) - {e}", "ERROR" )
     
     async def _test_concurrent_connection( self, endpoint: str, session_id: str, user_id: str ) -> bool:
-        """Test a single concurrent connection."""
+        """
+        Test a single concurrent connection for load testing scenarios.
+        
+        Requires:
+            - endpoint must be a valid string ("queue" or "audio")
+            - session_id must be a valid session identifier string
+            - user_id must be a valid user identifier string
+            - WebSocketTestUtilities must be initialized
+            
+        Ensures:
+            - Attempts WebSocket connection to specified endpoint
+            - Performs authentication with generated mock token
+            - Properly closes connection after authentication test
+            - Returns boolean indicating overall connection success
+            
+        Args:
+            endpoint: WebSocket endpoint name ("queue" or "audio")
+            session_id: Unique session identifier for this connection
+            user_id: User identifier for authentication
+            
+        Returns:
+            bool: True if connection and authentication succeeded, False otherwise
+            
+        Raises:
+            None (returns False for any exception)
+        """
         try:
             websocket = await self.utils.connect_websocket( endpoint, session_id )
             token = self.utils.generate_mock_token( user_id )
@@ -563,7 +828,31 @@ class SmokeTestRunner:
     # Phase 2: Comprehensive Test Suite Integration
     
     async def _run_phase2_connection_tests( self, results: TestSuiteResults ):
-        """Run Phase 2 comprehensive connection tests."""
+        """
+        Run Phase 2 comprehensive connection tests using ConnectionBasicTests.
+        
+        Requires:
+            - results must be a valid TestSuiteResults instance
+            - Configuration must contain server section with base_url
+            - ConnectionBasicTests class must be available and importable
+            - Server must be healthy and accessible
+            
+        Ensures:
+            - Instantiates ConnectionBasicTests with server URL
+            - Executes all comprehensive connection tests
+            - Converts Phase 2 test results to TestResult format
+            - Adds all connection test results to results.results list
+            - Logs summary of connection test outcomes
+            
+        Args:
+            results: TestSuiteResults object to append Phase 2 connection test results
+            
+        Returns:
+            None (modifies results parameter in-place)
+            
+        Raises:
+            None (captures all exceptions as test failures)
+        """
         self.log( "\\n🔌 Phase 2: Comprehensive Connection Tests" )
         
         try:
@@ -598,7 +887,31 @@ class SmokeTestRunner:
             results.results.append( error_result )
     
     async def _run_phase2_authentication_tests( self, results: TestSuiteResults ):
-        """Run Phase 2 comprehensive authentication tests."""
+        """
+        Run Phase 2 comprehensive authentication tests using AuthenticationFlowTests.
+        
+        Requires:
+            - results must be a valid TestSuiteResults instance
+            - Configuration must contain server section with base_url
+            - AuthenticationFlowTests class must be available and importable
+            - Server must be healthy and accessible
+            
+        Ensures:
+            - Instantiates AuthenticationFlowTests with server URL
+            - Executes all comprehensive authentication tests
+            - Converts Phase 2 test results to TestResult format
+            - Adds all authentication test results to results.results list
+            - Logs summary of authentication test outcomes
+            
+        Args:
+            results: TestSuiteResults object to append Phase 2 authentication test results
+            
+        Returns:
+            None (modifies results parameter in-place)
+            
+        Raises:
+            None (captures all exceptions as test failures)
+        """
         self.log( "\\n🔐 Phase 2: Comprehensive Authentication Tests" )
         
         try:
@@ -633,7 +946,31 @@ class SmokeTestRunner:
             results.results.append( error_result )
     
     async def _run_phase2_session_tests( self, results: TestSuiteResults ):
-        """Run Phase 2 comprehensive session management tests."""
+        """
+        Run Phase 2 comprehensive session management tests using SessionManagementTests.
+        
+        Requires:
+            - results must be a valid TestSuiteResults instance
+            - Configuration must contain server section with base_url
+            - SessionManagementTests class must be available and importable
+            - Server must be healthy and accessible
+            
+        Ensures:
+            - Instantiates SessionManagementTests with server URL
+            - Executes all comprehensive session management tests
+            - Converts Phase 2 test results to TestResult format
+            - Adds all session test results to results.results list
+            - Logs summary of session management test outcomes
+            
+        Args:
+            results: TestSuiteResults object to append Phase 2 session test results
+            
+        Returns:
+            None (modifies results parameter in-place)
+            
+        Raises:
+            None (captures all exceptions as test failures)
+        """
         self.log( "\\n📋 Phase 2: Comprehensive Session Management Tests" )
         
         try:
@@ -668,7 +1005,31 @@ class SmokeTestRunner:
             results.results.append( error_result )
     
     async def _run_phase2_event_tests( self, results: TestSuiteResults ):
-        """Run Phase 2 comprehensive event system tests."""
+        """
+        Run Phase 2 comprehensive event system tests using EventSystemTests.
+        
+        Requires:
+            - results must be a valid TestSuiteResults instance
+            - Configuration must contain server section with base_url
+            - EventSystemTests class must be available and importable
+            - Server must be healthy and accessible
+            
+        Ensures:
+            - Instantiates EventSystemTests with server URL
+            - Executes all comprehensive event system tests
+            - Converts Phase 2 test results to TestResult format
+            - Adds all event test results to results.results list
+            - Logs summary of event system test outcomes
+            
+        Args:
+            results: TestSuiteResults object to append Phase 2 event test results
+            
+        Returns:
+            None (modifies results parameter in-place)
+            
+        Raises:
+            None (captures all exceptions as test failures)
+        """
         self.log( "\\n📡 Phase 2: Comprehensive Event System Tests" )
         
         try:
@@ -703,7 +1064,32 @@ class SmokeTestRunner:
             results.results.append( error_result )
     
     def _save_baseline( self, results: TestSuiteResults ):
-        """Save current test results as baseline for future comparison."""
+        """
+        Save current test results as baseline for future comparison.
+        
+        Requires:
+            - results must be a completed TestSuiteResults instance
+            - Configuration must contain baselines section
+            - Parent directory of config file must be writable
+            - results.start_time and results.end_time must be set
+            
+        Ensures:
+            - Creates baselines directory if it doesn't exist
+            - Saves timestamped baseline file with comprehensive test data
+            - Saves "latest_baseline.json" for easy comparison access
+            - Extracts performance and functional test data separately
+            - Includes system information and test categorization
+            - Logs baseline save status and summary statistics
+            
+        Args:
+            results: TestSuiteResults containing complete test execution data
+            
+        Returns:
+            None
+            
+        Raises:
+            None (logs errors if baseline save fails)
+        """
         baseline_dir = Path( self.config_file ).parent / "baselines"
         baseline_dir.mkdir( exist_ok=True )
         
@@ -768,7 +1154,31 @@ class SmokeTestRunner:
             self.log( f"❌ Failed to save baseline: {e}", "ERROR" )
 
     def _compare_with_baseline( self, results: TestSuiteResults ) -> Dict[str, Any]:
-        """Compare current results with saved baseline."""
+        """
+        Compare current results with saved baseline for regression analysis.
+        
+        Requires:
+            - results must be a completed TestSuiteResults instance
+            - Configuration must contain baselines section with tolerance settings
+            - Parent directory of config file must contain baselines directory
+            
+        Ensures:
+            - Loads latest baseline data from file system
+            - Compares performance metrics against tolerance thresholds
+            - Identifies functional test regressions and improvements
+            - Calculates overall success rate changes
+            - Returns comprehensive comparison result dictionary
+            - Logs comparison status and regression warnings
+            
+        Args:
+            results: TestSuiteResults containing current test execution data
+            
+        Returns:
+            Dict[str, Any]: Comparison results including regressions and improvements
+            
+        Raises:
+            None (returns error status dict if comparison fails)
+        """
         baseline_dir = Path( self.config_file ).parent / "baselines"
         latest_baseline = baseline_dir / "latest_baseline.json"
         
@@ -875,7 +1285,33 @@ class SmokeTestRunner:
         return comparison_result
 
     def _generate_report( self, results: TestSuiteResults, baseline_comparison: Optional[Dict[str, Any]] = None ):
-        """Generate a comprehensive test report."""
+        """
+        Generate a comprehensive test report with results and analysis.
+        
+        Requires:
+            - results must be a completed TestSuiteResults instance
+            - results.start_time and results.end_time must be set
+            - baseline_comparison must be valid dict or None
+            
+        Ensures:
+            - Displays comprehensive test execution summary
+            - Shows category breakdown with pass/fail statistics
+            - Lists failed tests with error details
+            - Displays performance test highlights
+            - Includes baseline comparison results if provided
+            - Determines and logs final test status
+            - Exits with appropriate status code (0 for success, 1 for failure)
+            
+        Args:
+            results: TestSuiteResults containing complete test execution data
+            baseline_comparison: Optional baseline comparison results
+            
+        Returns:
+            None (exits process with appropriate status code)
+            
+        Raises:
+            SystemExit: Always exits with status 0 (success) or 1 (failure)
+        """
         self.log( "\n" + "=" * 60 )
         self.log( "📊 SMOKE TEST RESULTS SUMMARY" )
         self.log( "=" * 60 )
@@ -945,7 +1381,30 @@ class SmokeTestRunner:
             sys.exit( 1 )
 
     def _report_baseline_comparison( self, comparison: Dict[str, Any] ):
-        """Generate baseline comparison report section."""
+        """
+        Generate baseline comparison report section.
+        
+        Requires:
+            - comparison must be a valid baseline comparison result dictionary
+            - comparison must contain status, performance_changes, and regression data
+            
+        Ensures:
+            - Displays baseline comparison header and timestamp
+            - Shows performance changes with percentage improvements/regressions
+            - Lists critical regressions with details and thresholds
+            - Highlights improvements found during comparison
+            - Provides overall assessment of regression status
+            - Uses appropriate status icons and formatting
+            
+        Args:
+            comparison: Dictionary containing baseline comparison results
+            
+        Returns:
+            None (outputs formatted report to console)
+            
+        Raises:
+            None (handles missing comparison data gracefully)
+        """
         self.log( "\n📊 BASELINE COMPARISON" )
         self.log( "=" * 60 )
         
@@ -1006,7 +1465,30 @@ class SmokeTestRunner:
 
 
 async def main():
-    """Main entry point for the smoke test runner."""
+    """
+    Main entry point for the smoke test runner.
+    
+    Requires:
+        - Command line arguments must be parseable
+        - Configuration file must exist if specified
+        - System must have access to required modules and dependencies
+        
+    Ensures:
+        - Parses command line arguments for configuration and options
+        - Initializes SmokeTestRunner with specified or default configuration
+        - Executes complete test suite with baseline operations if requested
+        - Handles user interruption and system errors gracefully
+        - Exits with appropriate status codes
+        
+    Args:
+        None (uses sys.argv for command line arguments)
+        
+    Returns:
+        None (exits process with status code)
+        
+    Raises:
+        SystemExit: Always exits with status 0 (success), 1 (error), or 130 (interrupted)
+    """
     parser = argparse.ArgumentParser( description="WebSocket Smoke Test Runner" )
     parser.add_argument( "--config", help="Configuration file path" )
     parser.add_argument( "--category", choices=["core", "integration", "performance", "load"], 

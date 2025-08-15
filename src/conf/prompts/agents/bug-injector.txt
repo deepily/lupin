@@ -7,10 +7,7 @@ Requirement: The syntax error MUST prevent the program from running.
 Requirement: You MUST return the one line of source code that you have modified to fail at runtime
 
 Format the response as follows, replacing the placeholders with the actual details:
-<response>
-    <line-number>[line number where bug is introduced]</line-number>
-    <bug>[one line of modified source code with bug in it]</bug>
-</response>
+{{PYDANTIC_XML_EXAMPLE}}
 
 ### User Message
 Source code:
