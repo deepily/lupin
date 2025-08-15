@@ -773,14 +773,19 @@ class FreshQueueUI {
             this.lastQASubmissionTime = Date.now();
             this.lastQASubmissionText = text;
             
-            // Submit to /api/push endpoint (GET request with query parameters)
-            const url = `/api/push?question=${encodeURIComponent(text)}&websocket_id=${this.queueSessionId}`;
+            // Submit to /api/push endpoint (POST request with JSON body)
+            const url = `/api/push`;
             const response = await fetch( url, {
-                method: 'GET',
+                method: 'POST',
                 headers: {
                     'Authorization': this.authToken,
-                    'X-Session-ID': this.queueSessionId
-                }
+                    'X-Session-ID': this.queueSessionId,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    question: text,
+                    websocket_id: this.queueSessionId
+                })
             });
             
             if ( !response.ok ) {

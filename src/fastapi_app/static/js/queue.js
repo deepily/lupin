@@ -291,13 +291,19 @@ function submitQuestion() {
     statusElement.textContent = "Submitting...";
     statusElement.style.color = "#007bff";
     
-    const url = `/api/push?question=${encodeURIComponent(question)}&websocket_id=${websocketId}`;
+    const url = `/api/push`;
     
     fetch( url, {
+        method: 'POST',
         headers: {
             'Authorization': getAuthHeader(),
-            'X-Session-ID': sessionId
-        }
+            'X-Session-ID': sessionId,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            question: question,
+            websocket_id: websocketId
+        })
     })
     .then( response => {
         if ( !response.ok ) {
@@ -2099,7 +2105,20 @@ async function playAll() {
 
 function pushQuestion() {
     var question = document.getElementById( "question-input" ).value;
-    fetch( "/api/push?question=" + question )
+    
+    // Use global sessionId or generate a fallback
+    const websocketId = sessionId || "legacy_session";
+    
+    fetch( "/api/push", {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            question: question,
+            websocket_id: websocketId
+        })
+    })
         .then( response => {
             if ( response.status === 200 ) {
                 document.getElementById( "response-status" ).textContent = "Success!";

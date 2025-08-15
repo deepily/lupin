@@ -38,21 +38,21 @@ class AudioTTSHelper:
         Args:
             text: Text to convert to speech
             session_id: Session ID for the request
-            playback_mode: "instant" or "reliable"
+            playback_mode: "instant" or "reliable" (included for compatibility but not used by API)
             
         Returns:
             API response data
         """
         if session_id is None:
-            session_id = self.client.session_id
+            # Use the last generated session ID if available (from WebSocket connection)
+            session_id = getattr(self.client, 'last_generated_session_id', self.client.session_id)
         
-        params = {
+        data = {
             "session_id": session_id,
-            "msg": text,
-            "playback_mode": playback_mode
+            "text": text
         }
         
-        response = await self.client.http_request("GET", "/api/get-speech", params=params)
+        response = await self.client.http_request("POST", "/api/get-speech", json=data)
         return response
     
     async def get_cached_speech(self, text: str) -> dict:
@@ -74,73 +74,98 @@ class AudioTTSSmokeTests:
     
     async def test_get_speech_endpoint_basic(self):
         """Test basic /api/get-speech endpoint functionality."""
-        test_text = "Hello, this is a test for the TTS system."
+        # TTS endpoint requires active WebSocket connection - establish it first
+        audio_ws = await self.client.websocket_connect(
+            "/ws/audio/{session_id}",
+            subscribed_events=["audio_streaming_chunk", "audio_streaming_status", 
+                             "audio_streaming_complete", "auth_success", "sys_ping"]
+        )
         
-        response = await self.audio_helper.get_speech(test_text)
-        
-        self.validator.assert_response_ok(response, 200)
-        
-        data = response.json()
-        self.validator.assert_json_contains(data, ["status", "message"])
-        
-        # Should indicate TTS request was processed
-        assert data["status"] in ["success", "processing"], \
-            f"Unexpected status: {data['status']}"
+        try:
+            test_text = "Hello, this is a test for the TTS system."
+            
+            response = await self.audio_helper.get_speech(test_text)
+            
+            self.validator.assert_response_ok(response, 200)
+            
+            data = response.json()
+            self.validator.assert_json_contains(data, ["status", "message"])
+            
+            # Should indicate TTS request was processed
+            assert data["status"] in ["success", "processing"], \
+                f"Unexpected status: {data['status']}"
+                
+        finally:
+            await self.client.close_websocket(audio_ws)
     
     async def test_get_speech_playback_modes(self):
         """Test both instant and reliable playback modes."""
-        test_text = "Testing playback modes for TTS generation."
-        
-        # Test instant mode
-        instant_response = await self.audio_helper.get_speech(
-            test_text, 
-            playback_mode="instant"
+        # Establish WebSocket connection first
+        audio_ws = await self.client.websocket_connect(
+            "/ws/audio/{session_id}",
+            subscribed_events=["audio_streaming_chunk", "audio_streaming_status", "auth_success"]
         )
-        self.validator.assert_response_ok(instant_response, 200)
         
-        # Test reliable mode  
-        reliable_response = await self.audio_helper.get_speech(
-            test_text + " reliable mode", 
-            playback_mode="reliable"
-        )
-        self.validator.assert_response_ok(reliable_response, 200)
-        
-        # Both should succeed
-        instant_data = instant_response.json()
-        reliable_data = reliable_response.json()
-        
-        assert instant_data["status"] in ["success", "processing"]
-        assert reliable_data["status"] in ["success", "processing"]
+        try:
+            test_text = "Testing playback modes for TTS generation."
+            
+            # Test instant mode
+            instant_response = await self.audio_helper.get_speech(
+                test_text, 
+                playback_mode="instant"
+            )
+            self.validator.assert_response_ok(instant_response, 200)
+            
+            # Test reliable mode  
+            reliable_response = await self.audio_helper.get_speech(
+                test_text + " reliable mode", 
+                playback_mode="reliable"
+            )
+            self.validator.assert_response_ok(reliable_response, 200)
+            
+            # Both should succeed
+            instant_data = instant_response.json()
+            reliable_data = reliable_response.json()
+            
+            assert instant_data["status"] in ["success", "processing"]
+            assert reliable_data["status"] in ["success", "processing"]
+            
+        finally:
+            await self.client.close_websocket(audio_ws)
     
     async def test_get_speech_validation(self):
         """Test /api/get-speech input validation."""
         # Test missing session_id
-        params = {"msg": "Test message"}
-        response = await self.client.http_request("GET", "/api/get-speech", params=params)
+        data = {"text": "Test message"}
+        response = await self.client.http_request("POST", "/api/get-speech", json=data)
         assert response.status_code == 400, "Should require session_id"
         
         # Test missing message
-        params = {"session_id": self.client.session_id}
-        response = await self.client.http_request("GET", "/api/get-speech", params=params)
-        assert response.status_code == 400, "Should require msg parameter"
+        data = {"session_id": self.client.session_id}
+        response = await self.client.http_request("POST", "/api/get-speech", json=data)
+        assert response.status_code == 400, "Should require text parameter"
         
         # Test empty message
-        params = {
+        data = {
             "session_id": self.client.session_id,
-            "msg": ""
+            "text": ""
         }
-        response = await self.client.http_request("GET", "/api/get-speech", params=params)
+        response = await self.client.http_request("POST", "/api/get-speech", json=data)
         assert response.status_code == 400, "Should reject empty message"
         
-        # Test message too long
-        long_message = "x" * 1000  # Very long message
-        params = {
-            "session_id": self.client.session_id,
-            "msg": long_message
-        }
-        response = await self.client.http_request("GET", "/api/get-speech", params=params)
-        # Should either accept or reject gracefully (not crash)
-        assert response.status_code in [200, 400], "Should handle long messages gracefully"
+        # Test message too long - establish WebSocket first for this test
+        audio_ws = await self.client.websocket_connect(
+            "/ws/audio/{session_id}",
+            subscribed_events=["audio_streaming_chunk", "audio_streaming_status", "auth_success"]
+        )
+        
+        try:
+            long_message = "x" * 1000  # Very long message
+            response = await self.audio_helper.get_speech(long_message)
+            # Should either accept or reject gracefully (not crash)
+            assert response.status_code in [200, 400], "Should handle long messages gracefully"
+        finally:
+            await self.client.close_websocket(audio_ws)
     
     async def test_session_id_validation(self):
         """Test session ID format validation."""
@@ -157,15 +182,15 @@ class AudioTTSSmokeTests:
                 "Test message",
                 session_id=invalid_id
             )
-            # Should either reject or handle gracefully
-            assert response.status_code in [200, 400], \
-                f"Should handle invalid session ID gracefully: {invalid_id}"
+            # Should either reject or handle gracefully (400=bad request, 404=no audio connection)
+            assert response.status_code in [200, 400, 404], \
+                f"Should handle invalid session ID gracefully: {invalid_id} (got {response.status_code})"
     
     async def test_audio_websocket_connection(self):
         """Test audio WebSocket endpoint connection."""
-        # Connect to audio WebSocket
+        # Connect to audio WebSocket using placeholder that will be replaced with real session ID
         websocket = await self.client.websocket_connect(
-            f"/ws/audio/{self.client.session_id}",
+            "/ws/audio/{session_id}",
             subscribed_events=["audio_streaming_chunk", "audio_streaming_status", 
                              "audio_streaming_complete", "auth_success", "sys_ping"]
         )
@@ -191,9 +216,9 @@ class AudioTTSSmokeTests:
     
     async def test_audio_streaming_events(self):
         """Test audio streaming WebSocket events."""
-        # Connect to audio WebSocket
+        # Connect to audio WebSocket using placeholder that will be replaced with real session ID
         websocket = await self.client.websocket_connect(
-            f"/ws/audio/{self.client.session_id}",
+            "/ws/audio/{session_id}",
             subscribed_events=["audio_streaming_chunk", "audio_streaming_status", 
                              "audio_streaming_complete", "auth_success"]
         )
@@ -248,68 +273,85 @@ class AudioTTSSmokeTests:
     
     async def test_tts_caching_mechanism(self):
         """Test TTS caching functionality."""
-        test_text = "This text will be used to test caching functionality."
+        # Establish WebSocket connection first
+        audio_ws = await self.client.websocket_connect(
+            "/ws/audio/{session_id}",
+            subscribed_events=["audio_streaming_chunk", "audio_streaming_status", "auth_success"]
+        )
         
-        # First request - should generate new audio
-        first_response = await self.audio_helper.get_speech(test_text)
-        self.validator.assert_response_ok(first_response, 200)
-        
-        # Wait a moment
-        await asyncio.sleep(1)
-        
-        # Second request with same text - might be cached
-        second_response = await self.audio_helper.get_speech(test_text)
-        self.validator.assert_response_ok(second_response, 200)
-        
-        # Both should succeed (caching is transparent to API)
-        first_data = first_response.json()
-        second_data = second_response.json()
-        
-        assert first_data["status"] in ["success", "processing"]
-        assert second_data["status"] in ["success", "processing"]
-        
-        # Try cached speech endpoint if available
         try:
-            cached_response = await self.audio_helper.get_cached_speech(test_text)
-            # This endpoint might not exist or might return 404 if not cached
-            assert cached_response.status_code in [200, 404, 501], \
-                "Cached speech endpoint should handle requests gracefully"
-        except Exception:
-            # Cached endpoint might not be implemented
-            pass
+            test_text = "This text will be used to test caching functionality."
+            
+            # First request - should generate new audio
+            first_response = await self.audio_helper.get_speech(test_text)
+            self.validator.assert_response_ok(first_response, 200)
+            
+            # Wait a moment
+            await asyncio.sleep(1)
+            
+            # Second request with same text - might be cached
+            second_response = await self.audio_helper.get_speech(test_text)
+            self.validator.assert_response_ok(second_response, 200)
+            
+            # Both should succeed (caching is transparent to API)
+            first_data = first_response.json()
+            second_data = second_response.json()
+            
+            assert first_data["status"] in ["success", "processing"]
+            assert second_data["status"] in ["success", "processing"]
+            
+            # Try cached speech endpoint if available
+            try:
+                cached_response = await self.audio_helper.get_cached_speech(test_text)
+                # This endpoint might not exist or might return 404 if not cached
+                assert cached_response.status_code in [200, 404, 501], \
+                    "Cached speech endpoint should handle requests gracefully"
+            except Exception:
+                # Cached endpoint might not be implemented
+                pass
+                
+        finally:
+            await self.client.close_websocket(audio_ws)
     
     async def test_concurrent_tts_requests(self):
         """Test handling of concurrent TTS requests."""
-        test_texts = [
-            "First concurrent TTS request",
-            "Second concurrent TTS request", 
-            "Third concurrent TTS request"
-        ]
+        # Establish WebSocket connection first
+        audio_ws = await self.client.websocket_connect(
+            "/ws/audio/{session_id}",
+            subscribed_events=["audio_streaming_chunk", "audio_streaming_status", "auth_success"]
+        )
         
-        # Send multiple requests concurrently
-        tasks = []
-        for i, text in enumerate(test_texts):
-            task = self.audio_helper.get_speech(
-                text,
-                session_id=f"{self.client.session_id}_{i}"
-            )
-            tasks.append(task)
-        
-        # Wait for all requests to complete
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # All requests should complete without errors
-        for i, response in enumerate(responses):
-            if isinstance(response, Exception):
-                if self.debug:
-                    print(f"[DEBUG] Concurrent request {i} failed: {response}")
-                # Some failures might be expected under load
-                continue
+        try:
+            test_texts = [
+                "First concurrent TTS request",
+                "Second concurrent TTS request", 
+                "Third concurrent TTS request"
+            ]
             
-            self.validator.assert_response_ok(response, 200)
-            data = response.json()
-            assert data["status"] in ["success", "processing", "error"], \
-                f"Unexpected status in concurrent request: {data['status']}"
+            # Send multiple requests concurrently
+            tasks = []
+            for i, text in enumerate(test_texts):
+                task = self.audio_helper.get_speech(text)  # Use same session for all
+                tasks.append(task)
+            
+            # Wait for all requests to complete
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # All requests should complete without errors
+            for i, response in enumerate(responses):
+                if isinstance(response, Exception):
+                    if self.debug:
+                        print(f"[DEBUG] Concurrent request {i} failed: {response}")
+                    # Some failures might be expected under load
+                    continue
+                
+                self.validator.assert_response_ok(response, 200)
+                data = response.json()
+                assert data["status"] in ["success", "processing", "error"], \
+                    f"Unexpected status in concurrent request: {data['status']}"
+                    
+        finally:
+            await self.client.close_websocket(audio_ws)
     
     async def test_audio_authentication(self):
         """Test audio endpoint authentication requirements."""
@@ -317,11 +359,11 @@ class AudioTTSSmokeTests:
         try:
             headers = {}  # No auth header
             response = await self.client.http_request(
-                "GET", 
+                "POST", 
                 "/api/get-speech", 
-                params={
+                json={
                     "session_id": self.client.session_id,
-                    "msg": "Test message"
+                    "text": "Test message"
                 },
                 headers=headers
             )
@@ -331,9 +373,17 @@ class AudioTTSSmokeTests:
         except Exception:
             pass
         
-        # Test with authentication (normal case)
-        response = await self.audio_helper.get_speech("Authenticated test message")
-        self.validator.assert_response_ok(response, 200)
+        # Test with authentication (normal case) - establish WebSocket first
+        audio_ws = await self.client.websocket_connect(
+            "/ws/audio/{session_id}",
+            subscribed_events=["audio_streaming_chunk", "audio_streaming_status", "auth_success"]
+        )
+        
+        try:
+            response = await self.audio_helper.get_speech("Authenticated test message")
+            self.validator.assert_response_ok(response, 200)
+        finally:
+            await self.client.close_websocket(audio_ws)
     
     async def run_all_tests(self) -> bool:
         """Run all audio/TTS smoke tests."""

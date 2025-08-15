@@ -36,14 +36,14 @@ class QueueWorkflowHelper:
         
         Args:
             message: Job message/content
-            job_type: Type of job to submit
+            job_type: Type of job to submit (included for compatibility but not used by API)
             
         Returns:
             API response
         """
         data = {
-            "message": message,
-            "type": job_type
+            "question": message,
+            "websocket_id": self.client.session_id
         }
         
         response = await self.client.http_request("POST", "/api/push", json=data)
@@ -371,7 +371,7 @@ class QueueWorkflowSmokeTests:
             response = await self.client.http_request(
                 "POST",
                 "/api/push",
-                json={"message": "Test message", "type": "test"},
+                json={"question": "Test message", "websocket_id": self.client.session_id},
                 headers=headers
             )
             # Should either require auth or allow without auth

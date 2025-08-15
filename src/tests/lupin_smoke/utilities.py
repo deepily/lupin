@@ -13,6 +13,7 @@ import httpx
 import websockets
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+from urllib.parse import quote
 
 
 class LupinTestClient:
@@ -70,12 +71,34 @@ class LupinTestClient:
             
         return response
     
+    async def get_session_id(self) -> str:
+        """
+        Get a valid session ID from the API.
+        
+        Returns:
+            Session ID string in 'adjective noun' format
+        """
+        response = await self.http_request("GET", "/api/get-session-id")
+        if response.status_code != 200:
+            raise Exception(f"Failed to get session ID: {response.status_code}")
+        
+        data = response.json()
+        session_id = data.get("session_id")
+        if not session_id:
+            raise Exception("Session ID not found in response")
+        
+        if self.debug:
+            print(f"[SESSION] Generated session ID: {session_id}")
+        
+        return session_id
+    
     async def websocket_connect(self, endpoint: str, subscribed_events: List[str] = None) -> websockets.WebSocketServerProtocol:
         """
         Connect to WebSocket endpoint with authentication.
         
         Args:
-            endpoint: WebSocket endpoint path (e.g., '/ws/queue/session_id')
+            endpoint: WebSocket endpoint path (e.g., '/ws/queue/{session_id}' or '/ws/audio/session_id')
+                     If endpoint contains '{session_id}', it will be replaced with a valid session ID
             subscribed_events: List of events to subscribe to
             
         Returns:
@@ -84,6 +107,21 @@ class LupinTestClient:
         if subscribed_events is None:
             subscribed_events = ["sys_ping", "auth_success", "auth_error"]
         
+        # Handle session ID placeholder
+        session_id_for_auth = self.session_id  # Default session ID for auth
+        if "{session_id}" in endpoint:
+            # Generate a valid session ID from the API
+            real_session_id = await self.get_session_id()
+            encoded_session_id = quote(real_session_id)  # URL encode for path
+            endpoint = endpoint.replace("{session_id}", encoded_session_id)
+            session_id_for_auth = real_session_id  # Use unencoded for auth message
+            
+            # Store the generated session ID for use by other methods
+            self.last_generated_session_id = real_session_id
+            
+            if self.debug:
+                print(f"[WS] Using session ID: {real_session_id} (encoded: {encoded_session_id})")
+        
         ws_url = f"ws://localhost:7999{endpoint}"
         
         if self.debug:
@@ -91,29 +129,52 @@ class LupinTestClient:
         
         websocket = await websockets.connect(ws_url)
         
-        # Send authentication
+        # Send authentication with unencoded session ID
         auth_message = {
             "type": "auth_request",
-            "token": self.auth_token,
-            "session_id": self.session_id,
+            "token": self.auth_token.replace("Bearer ", ""),  # Strip Bearer prefix
+            "session_id": session_id_for_auth,
             "subscribed_events": subscribed_events
         }
         
         await websocket.send(json.dumps(auth_message))
         
         if self.debug:
-            print(f"[WS] Sent auth request")
+            print(f"[WS] Sent auth request with session: {session_id_for_auth}")
         
         # Wait for auth response
         try:
-            response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+            response = await asyncio.wait_for(websocket.recv(), timeout=10.0)
             auth_data = json.loads(response)
+            
+            if self.debug:
+                print(f"[WS] Received: {auth_data.get('type', 'unknown')}")
             
             if auth_data.get("type") == "auth_success":
                 if self.debug:
                     print(f"[WS] Authentication successful")
                 return websocket
+            elif auth_data.get("type") == "auth_error":
+                raise Exception(f"WebSocket authentication failed: {auth_data.get('message', 'Unknown error')}")
+            elif auth_data.get("type") == "audio_streaming_status":
+                # Audio WebSocket doesn't send auth_success, just confirms connection
+                if auth_data.get("status") == "success":
+                    if self.debug:
+                        print(f"[WS] Audio WebSocket connected successfully")
+                    return websocket
+                else:
+                    raise Exception(f"Audio WebSocket connection failed: {auth_data}")
             else:
+                # Some other endpoints send connection confirmation first
+                if auth_data.get("type") == "connect":
+                    if self.debug:
+                        print(f"[WS] Connection confirmed, waiting for auth...")
+                    # Wait for auth response
+                    response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                    auth_data = json.loads(response)
+                    if auth_data.get("type") == "auth_success":
+                        return websocket
+                
                 raise Exception(f"WebSocket authentication failed: {auth_data}")
                 
         except asyncio.TimeoutError:
