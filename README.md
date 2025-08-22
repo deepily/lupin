@@ -92,5 +92,5 @@ For detailed configuration options, troubleshooting, and architecture informatio
 This [Lupin project]() 
 started out as an **_extremely_** large set of working sketches that I've been actively organizing & tidying up so that I can collaborate with others.
 
-And I'm getting closer: I'm currently at v0.0.6, with a plan to share and build upon it when I arrive at v0.1.0, coming RealSoonNow!
+And I'm getting closer: I'm currently at v0.0.7, with a plan to share and build upon it when I arrive at v0.1.0, coming RealSoonNow!
 

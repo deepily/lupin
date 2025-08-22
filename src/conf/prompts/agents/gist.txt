@@ -23,9 +23,7 @@ Requirement: You MUST resist the urge to editorialize, explain, or add any perso
 ### Input:
 
 You MUST respond to the directives above using the following XML format:
-<response>
-    <gist></gist>
-</response>
+{{PYDANTIC_XML_EXAMPLE}}
 
 Utterance: `{utterance}`
 

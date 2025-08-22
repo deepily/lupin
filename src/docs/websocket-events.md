@@ -220,7 +220,7 @@ These events manage WebSocket authentication and connection lifecycle.
   {
     "type": "auth_request",
     "token": "Bearer mock_token_email_user@example.com",
-    "session_id": "wise_penguin",
+    "session_id": "wise penguin",
     "subscribed_events": ["queue_todo_update", "audio_streaming_status", ...]
   }
   ```
@@ -234,7 +234,7 @@ These events manage WebSocket authentication and connection lifecycle.
   {
     "type": "auth_success",
     "user_id": "user_12345",
-    "session_id": "wise_penguin",
+    "session_id": "wise penguin",
     "timestamp": "2025-07-30T10:30:00Z"
   }
   ```
@@ -262,8 +262,8 @@ These events manage WebSocket authentication and connection lifecycle.
   ```json
   {
     "type": "connect",
-    "message": "Queue WebSocket connected for session wise_penguin",
-    "session_id": "wise_penguin",
+    "message": "Queue WebSocket connected for session wise penguin",
+    "session_id": "wise penguin",
     "timestamp": "2025-07-30T10:30:00Z"
   }
   ```

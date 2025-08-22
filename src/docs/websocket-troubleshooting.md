@@ -48,7 +48,7 @@
 3. **Validate session ID format**:
    ```javascript
    // Correct: "adjective noun" format
-   "wise_penguin", "clever_dolphin", "brave_falcon"
+   "wise penguin", "clever dolphin", "brave falcon"
    
    // Incorrect: other formats
    "test-123", "user_session", "abc123"
@@ -71,7 +71,7 @@
    {
      "type": "auth_request",
      "token": "Bearer mock_token_email_user@example.com",
-     "session_id": "wise_penguin",
+      "session_id": "wise_penguin",
      "subscribed_events": ["sys_ping", "queue_todo_update"]
    }
    ```
