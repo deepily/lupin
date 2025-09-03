@@ -15,6 +15,13 @@ from typing import Dict, Any
 # Add src to path for imports
 sys.path.append( os.path.join( os.path.dirname( __file__ ), "..", "" ) )
 
+class PerformanceMetricsEncoder( json.JSONEncoder ):
+    """Custom JSON encoder to handle PerformanceMetrics objects."""
+    def default( self, obj ):
+        if hasattr( obj, 'to_dict' ):
+            return obj.to_dict()
+        return super().default( obj )
+
 import cosa.utils.util as du
 from cosa.memory.solution_manager_factory import SolutionSnapshotManagerFactory
 from cosa.tests.comparison.manager_comparison_suite import ManagerComparisonSuite
@@ -107,7 +114,7 @@ def save_comparison_results( results: Dict[str, Any], output_file: str = None ) 
     
     try:
         with open( output_file, "w" ) as f:
-            json.dump( results, f, indent=2 )
+            json.dump( results, f, indent=2, cls=PerformanceMetricsEncoder )
         
         print( f"\n💾 Comparison results saved to: {output_file}" )
         return output_file
