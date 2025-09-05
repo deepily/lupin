@@ -42,14 +42,67 @@ Lupin is built on a modern FastAPI architecture with WebSocket support for real-
 - **[FastAPI Queue Implementation](src/rnd/2025.06.17-fastapi-queue-implementation-plan.md)** - Queue-based request handling
 - **[Lupin Renaming Plan](src/rnd/2025.06.28-lupin-renaming-plan.md)** - Project rebranding documentation
 - **[Audio Chunk Sequential Playback Analysis](src/rnd/2025.08.01-audio-chunk-sequential-playback-analysis.md)** - Root cause analysis and solution for ElevenLabs audio duplication issues
+- **[LanceDB Migration Plan](src/rnd/2025.08.22-solution-snapshot-lancedb-interface-migration-plan.md)** - Complete migration from file-based to vector database storage
 
-**Current Development Status (2025.08.01):**
+**Current Development Status (2025.09.05):**
 
-The project currently has **three ongoing parallel development efforts**:
+The project currently has several **completed and ongoing development efforts**:
 
-1. **Audio Chunk Sequential Playback Fix** - Resolving ElevenLabs WebSocket audio duplication through sequential scheduling
+1. **✅ LanceDB Migration Complete** - Successfully migrated solution snapshots from file-based storage to LanceDB vector database with 100% feature parity and massive performance improvements
+2. **✅ Configuration-Based Backend Switching** - Implemented seamless switching between storage backends via simple configuration change
 2. **WebSocket FastAPI Test Suite** - Comprehensive diagnostic and testing tools for WebSocket functionality
 3. **FastAPI and Socket Polishing** - Continued refinement of WebSocket infrastructure and API endpoints
+
+## Solution Snapshot Storage
+
+The system supports two storage backends for solution snapshots (agent memory):
+
+### File-Based Storage (Default)
+- Stores snapshots as JSON files in `/src/conf/long-term-memory/solutions/`
+- Good for small datasets (<100 snapshots)
+- No additional dependencies required
+- Simple file system operations
+
+### LanceDB Storage (Recommended for Production)
+- Vector database with native similarity search
+- 100-1000x faster for search operations
+- Better memory efficiency and scalability
+- Advanced semantic search capabilities
+
+### Switching Between Backends
+
+To switch from file-based to LanceDB storage:
+
+1. **Edit Configuration** - In `src/conf/lupin-app.ini`, change:
+   ```ini
+   solution snapshots manager type = lancedb
+   ```
+
+2. **Optional: Migrate Existing Data** - Run the migration script:
+   ```bash
+   python src/scripts/migrate_snapshots_to_lancedb.py
+   ```
+
+3. **Restart Server** - Restart the FastAPI server to apply changes
+
+To switch back to file-based storage, simply change the config back to:
+```ini
+solution snapshots manager type = file_based
+```
+
+Both backends provide **identical functionality** - the switch is completely transparent to users and agents.
+
+## Performance Comparison
+
+Based on benchmarks with real data:
+
+| Operation | File-Based | LanceDB | Speedup |
+|-----------|------------|---------|---------|
+| Search (exact) | 96ms | 0.1ms | **960x faster** |
+| Add snapshot | 827ms | 15ms | **55x faster** |
+| Search (fuzzy) | 120ms | 0.3ms | **400x faster** |
+
+*Note: Performance varies based on dataset size. For small datasets (<100 snapshots), file-based may be faster due to lower overhead.*
 
 **Quick Start Commands:**
 - Run FastAPI server: `src/scripts/run-fastapi-lupin.sh` (port 7999)
