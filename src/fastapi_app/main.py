@@ -31,6 +31,7 @@ from cosa.config.configuration_manager import ConfigurationManager
 from cosa.memory.input_and_output_table import InputAndOutputTable
 from cosa.memory.solution_snapshot_mgr import SolutionSnapshotManager
 from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+from cosa.memory.solution_manager_factory import SolutionSnapshotManagerFactory
 from cosa.rest.todo_fifo_queue import TodoFifoQueue
 from cosa.rest.fifo_queue import FifoQueue
 from cosa.rest.running_fifo_queue import RunningFifoQueue
@@ -365,7 +366,7 @@ async def lifespan( app: FastAPI ):
     app_verbose = config_mgr.get( "app_verbose", default=False, return_type="boolean" )
     app_silent  = config_mgr.get( "app_silent",  default=True,  return_type="boolean" )
     
-    # Initialize solution snapshot manager based on configuration
+    # Initialize solution snapshot manager using factory pattern
     manager_type = config_mgr.get( "solution snapshots manager type", default="file_based" )
     
     if manager_type.lower() == "lancedb":
@@ -384,21 +385,24 @@ async def lifespan( app: FastAPI ):
         
         if app_debug:
             print( f"Using LanceDB solution snapshot manager: {lancedb_path}" )
-        
-        snapshot_mgr = LanceDBSolutionManager( config, debug=app_debug, verbose=app_verbose )
-        # Initialize the LanceDB manager
-        snapshot_mgr.initialize()
-        
+            
     else:
         # Use file-based backend (default)
         path_to_snapshots_dir_wo_root = config_mgr.get( "path_to_snapshots_dir_wo_root" )
         path_to_snapshots = du.get_project_root() + path_to_snapshots_dir_wo_root
         
+        config = {"path": path_to_snapshots}
+        
         if app_debug:
             print( f"Using file-based solution snapshot manager: {path_to_snapshots}" )
-        
-        snapshot_mgr = SolutionSnapshotManager( path_to_snapshots, debug=app_debug, verbose=app_verbose )
-        # File-based manager initializes automatically
+    
+    # Create manager using factory pattern for true swappability
+    snapshot_mgr = SolutionSnapshotManagerFactory.create_manager(
+        manager_type, config, debug=app_debug, verbose=app_verbose
+    )
+    
+    # Initialize the manager (required for both backends)
+    snapshot_mgr.initialize()
     
     # Initialize queues with emit_speech callback and websocket manager
     jobs_todo_queue = TodoFifoQueue( websocket_manager, snapshot_mgr, app, config_mgr, emit_speech_callback=create_emit_speech_callback(), debug=app_debug, verbose=app_verbose, silent=app_silent )
