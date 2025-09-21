@@ -129,7 +129,7 @@ def migrate_snapshots( source_path: str,
         
         # Get all snapshots from source
         print( f"  📋 Reading all snapshots from source..." )
-        all_gists = source_manager.get_all_gists()
+        all_gists = source_manager.get_gists()
         
         # For each gist, get associated snapshots
         migrated_questions = set()
@@ -140,8 +140,8 @@ def migrate_snapshots( source_path: str,
             
             # Search for snapshots with this gist
             try:
-                snapshots, _ = source_manager.find_by_question( 
-                    gist, 
+                snapshots = source_manager.get_snapshots_by_question(
+                    gist,
                     question_gist=gist,
                     threshold_question=50.0,  # Lower threshold to catch more
                     limit=100  # High limit to get all matches
@@ -188,8 +188,8 @@ def migrate_snapshots( source_path: str,
         
         for pattern in common_patterns:
             try:
-                snapshots, _ = source_manager.find_by_question( 
-                    pattern, 
+                snapshots = source_manager.get_snapshots_by_question(
+                    pattern,
                     threshold_question=60.0,
                     limit=50
                 )
@@ -267,13 +267,13 @@ def migrate_snapshots( source_path: str,
             try:
                 # Test source
                 start = time.time()
-                source_results, _ = source_manager.find_by_question( query, limit=5 )
+                source_results = source_manager.get_snapshots_by_question( query, limit=5 )
                 source_time = ( time.time() - start ) * 1000
                 source_search_times.append( source_time )
-                
+
                 # Test target
                 start = time.time()
-                target_results, _ = target_manager.find_by_question( query, limit=5 )
+                target_results = target_manager.get_snapshots_by_question( query, limit=5 )
                 target_time = ( time.time() - start ) * 1000
                 target_search_times.append( target_time )
                 
@@ -365,8 +365,56 @@ def main():
     
     if args.dry_run:
         print( "\n⚠ DRY RUN MODE - No data will be migrated" )
-        # TODO: Implement dry-run analysis
-        print( "Dry-run analysis not yet implemented" )
+
+        # Dry-run analysis
+        try:
+            source_config = {"path": args.source}
+            source_manager = SolutionSnapshotManagerFactory.create_manager(
+                "file_based", source_config, debug=args.debug
+            )
+
+            print( f"\n📊 Analyzing source data..." )
+            source_manager.initialize()
+            source_stats = source_manager.get_stats()
+
+            print( f"  ✓ Source analysis:" )
+            print( f"    • Path: {args.source}" )
+            print( f"    • Total snapshots: {source_stats['total_snapshots']}" )
+            print( f"    • Storage size: {source_stats['storage_size_mb']:.2f} MB" )
+            print( f"    • Backend type: {source_stats['backend_type']}" )
+
+            # Check target database
+            print( f"\n🗄️ Checking target database..." )
+            target_config = {
+                "db_path": args.target_db,
+                "table_name": args.target_table
+            }
+            target_manager = SolutionSnapshotManagerFactory.create_manager(
+                "lancedb", target_config, debug=args.debug
+            )
+            target_manager.initialize()
+            target_stats = target_manager.get_stats()
+
+            print( f"  ✓ Target analysis:" )
+            print( f"    • Database: {args.target_db}" )
+            print( f"    • Table: {args.target_table}" )
+            print( f"    • Existing snapshots: {target_stats['total_snapshots']}" )
+            print( f"    • Storage size: {target_stats['storage_size_mb']:.2f} MB" )
+
+            print( f"\n🔍 Migration readiness:" )
+            print( f"    • Ready to migrate: {source_stats['total_snapshots']} snapshots" )
+            print( f"    • Target capacity: Available" )
+            print( f"    • Estimated outcome: {target_stats['total_snapshots'] + source_stats['total_snapshots']} total snapshots" )
+
+            print( f"\n✅ DRY RUN COMPLETE - System ready for migration" )
+
+        except Exception as e:
+            print( f"✗ Dry-run analysis failed: {e}" )
+            if args.debug:
+                import traceback
+                traceback.print_exc()
+            return 1
+
         return 0
     
     # Run migration

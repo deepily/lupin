@@ -38,7 +38,12 @@ For implementation details, see the specific documents listed below.
 
 ## Active Documents
 
-### Current Development (2025.08)
+### Current Development (2025.09)
+#### 🎉 Major Infrastructure Completions
+- **[2025.09.20-memory-corruption-incident-report.md](2025.09.20-memory-corruption-incident-report.md)** - Complete incident report and recovery documentation for LanceDB database deletion and restoration (✅ completed - 44/44 snapshots recovered, all 4 tables operational with enhanced robustness)
+- **[2025.08.22-solution-snapshot-lancedb-interface-migration-plan.md](2025.08.22-solution-snapshot-lancedb-interface-migration-plan.md)** - **🏆 MAJOR MILESTONE**: Complete LanceDB migration project from file-based JSON to vector database (✅ 100% COMPLETE - Phase 5 production deployment finished, enhanced table creation robustness)
+
+### Previous Development (2025.08)
 
 #### 🎉 Major Infrastructure Completions
 - **[2025.08.13-smoke-test-data-collection-strategy.md](2025.08.13-smoke-test-data-collection-strategy.md)** - Comprehensive data-collection-first smoke testing methodology for systematic diagnostics (✅ completed - reusable framework established for future test runs)
