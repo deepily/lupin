@@ -117,8 +117,9 @@ RUN pip install --no-cache-dir pydantic-ai[slim]==0.6.2
 
 RUN pip install --no-cache-dir xmltodict==0.14.2
 
-env LUPIN_ROOT=/var/lupin
+RUN pip install --no-cache-dir pylance==0.36.0
 
+env LUPIN_ROOT=/var/lupin
 env LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development" \
 
 WORKDIR=/var/lupin/src
