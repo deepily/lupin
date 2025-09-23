@@ -36,7 +36,7 @@ from cosa.rest.todo_fifo_queue import TodoFifoQueue
 from cosa.rest.fifo_queue import FifoQueue
 from cosa.rest.running_fifo_queue import RunningFifoQueue
 import cosa.utils.util as du
-from cosa.agents.v010.two_word_id_generator import TwoWordIdGenerator
+from cosa.agents.two_word_id_generator import TwoWordIdGenerator
 from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 

@@ -75,3 +75,6 @@ src/tests/logs/
 # Separate git repositories - managed independently
 src/lupin-mobile/
 src/lupin-plugin-firefox/
+
+# Migration archives - historical artifacts not for tracking
+history/migrations/
