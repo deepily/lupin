@@ -2,6 +2,13 @@
 
 This directory contains research and development documents for the Lupin project.
 
+## Recent Additions
+
+### 2025.09.23 - Smoke Test Prompt Infrastructure
+- **Smoke Test Prompts**: [/src/rnd/prompts/](prompts/) - Comprehensive baseline and remediation testing infrastructure with Claude Code integration
+- **Universal Templates**: [/src/rnd/prompts/templates/](prompts/templates/) - Reusable smoke test templates for any project
+- **Claude Code Commands**: [/src/cosa/.claude/commands/](../cosa/.claude/commands/) - Intelligent slash commands for automated testing workflows
+
 ## Project Architecture Overview
 
 Lupin is built on/uses:

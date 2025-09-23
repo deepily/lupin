@@ -10,6 +10,77 @@
 
 ### 🎯 September 2025 Achievements
 
+#### 2025.09.23 - Lupin Claude Code Slash Commands Implementation COMPLETE
+
+**Summary**: Implemented comprehensive Claude Code slash commands for Lupin smoke testing workflow, leveraging existing prompt infrastructure to create intelligent, automated testing tools with scope configuration and auto-detection capabilities.
+
+**Claude Code Slash Commands Implemented**:
+- ✅ **`/smoke-test-baseline [scope]`** - Establishes pre-change baseline with configurable scope (full|lupin)
+- ✅ **`/smoke-test-remediation [baseline_report] [scope]`** - Post-change verification and systematic remediation
+- ✅ **Intelligent Auto-Detection** - Remediation command automatically finds latest baseline report
+- ✅ **Scope Configuration** - Both commands support full (Lupin + COSA) or lupin-only testing
+- ✅ **Progress Tracking** - Full TodoWrite integration with [LUPIN] prefix throughout execution
+
+**Technical Implementation**:
+- **Location**: `.claude/commands/` directory in Lupin root
+- **YAML Frontmatter**: Proper Claude Code command format with argument specifications
+- **Infrastructure Integration**: Leverages existing comprehensive prompt infrastructure from parallel development
+- **Smart Features**: Auto-baseline detection, scope validation, time boxing, rollback mechanisms
+- **Results Organization**: Structured output in `src/tests/logs/` and `src/rnd/` directories
+
+**Enhanced Features**:
+- **Time Boxing**: Critical (10min), High (5min), Medium (2min) issue remediation limits
+- **Remediation Scopes**: FULL|CRITICAL_ONLY|SELECTIVE|ANALYSIS_ONLY options
+- **Notification Integration**: Real-time status updates via Lupin notification system
+- **Emergency Escalation**: Automatic urgent notifications for critical failures
+- **Git Safety**: Pre-remediation state capture with rollback capabilities
+
+**Files Created**:
+- `.claude/commands/smoke-test-baseline.md` (9.8KB) - Baseline establishment command
+- `.claude/commands/smoke-test-remediation.md` (14.5KB) - Verification and remediation command
+- Updated `CLAUDE.md` with comprehensive slash command documentation
+
+**Current Status**: Claude Code slash commands fully operational and documented. Streamlined workflow available for establishing baselines and performing systematic post-change remediation with intelligent automation.
+
+**Next Focus**: Slash commands ready for use in future development cycles requiring comprehensive change validation.
+
+#### 2025.09.23 - Smoke Test Prompt Infrastructure + Claude Code Slash Commands
+
+**Summary**: Created comprehensive smoke testing infrastructure with baseline and remediation prompts for both Lupin and COSA contexts. Developed intelligent Claude Code slash commands with auto-detection features and organized results directory structure.
+
+**Smoke Test Infrastructure Created**:
+- ✅ **Lupin Prompts** - baseline-smoke-test-prompt.md and post-change-smoke-test-prompt.md with TEST_SCOPE branching logic
+- ✅ **COSA Framework Prompts** - cosa-baseline-smoke-test-prompt.md and cosa-post-change-smoke-test-prompt.md for standalone framework testing
+- ✅ **Universal Templates** - baseline-smoke-test-template.md and post-change-smoke-test-template.md with {{PLACEHOLDER}} system
+- ✅ **Comprehensive Documentation** - README.md files in both Lupin and COSA prompt directories explaining all prompt types and usage
+
+**Claude Code Slash Commands Developed**:
+- ✅ **Baseline Command** - `/smoke-test-baseline` for COSA framework baseline collection with "Observe First, Fix Later" methodology
+- ✅ **Remediation Command** - `/smoke-test-remediation` with intelligent features: auto-baseline detection, prioritized remediation phases, progress tracking, rollback mechanism
+- ✅ **Enhanced Features** - Time boxing, selective scope options (FULL|CRITICAL_ONLY|SELECTIVE|ANALYSIS_ONLY), emergency escalation triggers
+- ✅ **Organized Results** - All outputs now stored in structured `tests/results/` directory with logs/, analysis/, and reports/ subdirectories
+
+**Key Technical Features**:
+- **Branching Logic**: Lupin prompts support configurable TEST_SCOPE ("full" or "lupin") for selective testing
+- **Auto-Detection**: Remediation command automatically finds latest baseline report for comparison
+- **Progress Tracking**: Real-time remediation progress tables with fix validation
+- **Time Management**: Intelligent time limits per issue priority (Critical: 10min, High: 5min, Medium: 2min)
+- **Rollback Safety**: Git state capture before remediation with automatic rollback commands
+- **Notification Integration**: Optional integration with Lupin notification system
+
+**Directory Organization**:
+- **Lupin Prompts**: `/src/rnd/prompts/` (production ready)
+- **COSA Prompts**: `/src/cosa/rnd/prompts/` (framework specific)
+- **Templates**: `/src/rnd/prompts/templates/` (universal, customizable)
+- **Slash Commands**: `/src/cosa/.claude/commands/` (Claude Code integration)
+- **Results**: `/src/cosa/tests/results/` (organized output structure)
+
+**Documentation Quality**: Comprehensive README files with decision trees, usage examples, prompt role explanations, and customization guides for both repositories.
+
+**Current Status**: Complete smoke testing workflow infrastructure ready for use. Both baseline establishment and post-change remediation workflows operational with intelligent automation features.
+
+**Next Focus**: Framework testing workflows now standardized and automated for reliable change validation.
+
 #### 2025.09.23 - CoSA Agents v010 → agents Migration EXECUTION COMPLETE + Artifacts Archival
 
 **Summary**: Successfully executed the comprehensive zero-risk migration plan to consolidate all agent code from cosa/agents/v010/ to cosa/agents/ directory. Achieved 100% success with zero data loss, complete import compatibility, and clean archival of all migration artifacts.
