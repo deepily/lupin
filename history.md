@@ -1,5 +1,7 @@
 # Lupin Project History
 
+> **🚀 NEXT MAJOR MILESTONE**: cosa/agents/v010 → cosa/agents Migration - Comprehensive zero-risk plan ready for implementation. See: [2025.09.22-cosa-agents-v010-migration-plan.md](src/rnd/2025.09.22-cosa-agents-v010-migration-plan.md)
+
 > **✅ RECOVERY COMPLETE**: 2025.09.20 - Successfully recovered from memory corruption incident. LanceDB migration fully restored with 44/44 snapshots (100% success). All required database tables recreated with proper permissions. Phase 5 LanceDB Migration now 100% COMPLETE.
 
 > **Current Achievement**: LanceDB Migration Phase 5 COMPLETE - Production database fully operational! All phases 1-5 complete with 44/44 snapshots migrated, 100% test parity, and 1283x performance improvement. System now running on LanceDB backend with complete data integrity.
@@ -7,6 +9,29 @@
 ## Recent Activity (Last 30 Days)
 
 ### 🎯 September 2025 Achievements
+
+#### 2025.09.22 - Agent user_id Parameter Fixes + cosa/agents Migration Planning
+
+**Summary**: Fixed TypeError preventing agent instantiation by adding missing user_id parameter to all agent classes. Researched and documented comprehensive zero-risk migration plan for moving 25 files from cosa/agents/v010 to cosa/agents directory.
+
+**Agent Fixes Completed**:
+- ✅ **DateAndTimeAgent**: Added user_id parameter to __init__ and super() call
+- ✅ **CalendaringAgent**: Added user_id parameter to __init__ and super() call
+- ✅ **TodoListAgent**: Already had user_id parameter (verified)
+- ✅ **WeatherAgent**: Added user_id parameter to __init__ and super() call
+- ✅ **ReceptionistAgent**: Added user_id parameter to __init__ and super() call
+- ✅ **Verification**: Created and ran test script - all agents instantiate successfully with user_id
+
+**Migration Planning Completed**:
+- ✅ **Comprehensive Analysis**: Identified 25 files to migrate from v010 directory
+- ✅ **Dependency Mapping**: Found 29 external files requiring import updates
+- ✅ **Risk Assessment**: Zero-risk 6-phase migration plan with multiple rollback points
+- ✅ **Documentation**: Plan saved to [2025.09.22-cosa-agents-v010-migration-plan.md](src/rnd/2025.09.22-cosa-agents-v010-migration-plan.md)
+- ✅ **History Update**: Next milestone prominently featured in history.md header
+
+**Technical Context**: This session resolved the `TypeError: DateAndTimeAgent.__init__() got an unexpected keyword argument 'user_id'` error that was preventing todo_fifo_queue.py from instantiating agents. All agent classes now properly accept and pass the user_id parameter to AgentBase.
+
+**Next Steps**: Execute the comprehensive migration plan to consolidate agent architecture from v010 subdirectory to main agents directory with zero data loss risk.
 
 #### 2025.09.20 - INCIDENT RECOVERY COMPLETE: LanceDB Production Database Fully Restored
 
