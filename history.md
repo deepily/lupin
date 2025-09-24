@@ -10,6 +10,91 @@
 
 ### 🎯 September 2025 Achievements
 
+#### 2025.09.23 - Lupin Baseline Smoke Test Remediation SESSION (IN PROGRESS)
+
+**Summary**: Systematic remediation of critical issues identified in morning baseline collection. Successfully fixed 4/8 major issues including critical security vulnerabilities. Uncovered root cause of queue state monitoring failure as Gister XML parsing bug requiring further investigation.
+
+**Completed Remediation Work**:
+- ✅ **Session ID Validation** - Fixed tab/newline acceptance vulnerability (regex: `\s` → literal space)
+- ✅ **Token Validation** - Enhanced auth.py with type/length/null rejection (7 invalid types now properly rejected)
+- ✅ **Malformed Message Handling** - Added comprehensive WebSocket auth validation (8 message types now properly rejected)
+- ✅ **WebSocket Authentication** - Fixed session ID format issue preventing valid connections
+
+**Critical Discovery**: Queue state monitoring 500 error traced to "lxml not found" error in Gister XML parsing pipeline. Manual Gister testing shows individual component works perfectly, indicating context-dependent bug in TodoFifoQueue job processing flow.
+
+**Investigation Status**: Gister bug isolated but not resolved. First job processes successfully, subsequent jobs (2nd, 3rd) fail during LLM response parsing. Issue appears state/timing related rather than component malfunction.
+
+**Files Modified**:
+- `src/cosa/rest/routers/websocket.py` - Enhanced session ID validation and auth message handling
+- `src/cosa/rest/auth.py` - Added comprehensive token validation
+- `src/cosa/rest/routers/queues.py` - Added error handling to /api/push endpoint
+
+**Files Created**:
+- `src/rnd/2025.09.23-baseline-smoke-test-remediation.md` - **Comprehensive remediation tracking document**
+- `src/tests/unit/test_session_id_validation_simple.py` - Session ID validation unit test
+- `src/tests/unit/test_websocket_auth_validation_simple.py` - WebSocket auth validation test
+- `src/tests/unit/test_token_validation_simple.py` - Token validation unit test
+- `src/tests/unit/test_gister_debug_manual.py` - Gister debug investigation tool
+
+**Current Status**: 4 critical security issues resolved, remaining issues blocked on Gister investigation. Next session should focus on context-dependent Gister bug before completing queue monitoring and notification fixes.
+
+#### 2025.09.23 - Lupin Baseline Smoke Test Collection COMPLETE
+
+**Summary**: Established comprehensive Lupin system baseline before planned changes using `/smoke-test-baseline lupin` Claude Code slash command. Pure data collection session documented current system health across all test categories with systematic analysis for future regression detection.
+
+**Baseline Results**:
+- **Test Scope**: Lupin-only testing (CoSA framework tests skipped)
+- **Lupin Tests**: 62.2% pass rate (46/74 tests)
+- **Overall Health**: FAIR with 4 critical issues identified
+- **Categories Passing**: 1/5 (Audio/TTS system at 100%)
+- **Total Execution Time**: 138 seconds with comprehensive test coverage
+
+**Critical Issues Identified**:
+- **WebSocket Edge Cases**: 2 unexpected behaviors in session ID validation
+- **Authentication Problems**: 7 invalid tokens incorrectly accepted
+- **API Method Issues**: Auth test endpoint returning 403 instead of expected 401
+- **Queue Integration**: WebSocket delivery and state monitoring failures
+
+**Technical Achievements**:
+- ✅ **Slash Command Validation** - Second production execution of `/smoke-test-baseline` command successful
+- ✅ **Pure Data Collection** - Zero remediation attempts, accurate baseline establishment
+- ✅ **Comprehensive Documentation** - Generated detailed baseline report and execution logs
+- ✅ **System Health Documentation** - Complete status across 5 test categories
+
+**Files Created**:
+- `src/rnd/2025.09.23-baseline-smoke-test-report.md` - Comprehensive baseline documentation
+- `src/tests/logs/baseline_lupin_smoke_20250923_175010.log` - Complete test execution record
+- Updated `history.md` with session documentation
+
+**Project Impact**: Established baseline protection for upcoming Lupin changes. System health thoroughly documented with regression detection capabilities. Identified priority areas needing attention before modifications.
+
+**Current Status**: Lupin baseline fully established. System ready for planned changes with post-change validation using `/smoke-test-remediation` command.
+
+#### 2025.09.23 - COSA Framework Baseline Collection COMPLETE
+
+**Summary**: Successfully executed first production use of `/smoke-test-baseline` Claude Code slash command, establishing comprehensive COSA framework baseline with 100% pass rate across all categories. Pure data collection session validated framework health before planned changes.
+
+**Baseline Results**:
+- **COSA Framework Tests**: 100.0% pass rate (16/16 tests)
+- **Categories**: Core (3/3), REST (5/5), Memory (7/7), Training (1/1) all at 100%
+- **Total Execution Time**: 38.04 seconds with normal performance distribution
+- **External Dependencies**: All operational (OpenAI API ✓, LanceDB ✓, XML Schema ✓)
+
+**Technical Achievements**:
+- ✅ **Slash Command Validation** - First production execution of `/smoke-test-baseline` command successful
+- ✅ **Pure Data Collection** - Zero remediation attempts, focused on accurate baseline establishment
+- ✅ **Comprehensive Documentation** - Generated detailed baseline report and execution logs
+- ✅ **Framework Health Confirmation** - Perfect test results confirm COSA framework excellence
+
+**Files Created**:
+- `src/cosa/tests/results/reports/2025.09.23-cosa-baseline-smoke-test-report.md` - Comprehensive baseline documentation
+- `src/cosa/tests/results/logs/baseline_cosa_smoke_20250923_173035.log` - Complete test execution record
+- Updated `src/cosa/history.md` with detailed session documentation
+
+**Project Impact**: Established baseline protection for upcoming COSA framework changes. Framework confirmed ready for modifications with comprehensive regression detection capabilities.
+
+**Current Status**: COSA framework baseline fully established. Ready for planned changes with post-change validation using `/smoke-test-remediation` command.
+
 #### 2025.09.23 - Lupin Claude Code Slash Commands Implementation COMPLETE
 
 **Summary**: Implemented comprehensive Claude Code slash commands for Lupin smoke testing workflow, leveraging existing prompt infrastructure to create intelligent, automated testing tools with scope configuration and auto-detection capabilities.
