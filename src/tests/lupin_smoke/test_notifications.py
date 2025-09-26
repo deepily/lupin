@@ -191,7 +191,7 @@ class NotificationSmokeTests:
         """Test notification delivery via WebSocket events."""
         # Connect to queue WebSocket with notification events
         websocket = await self.client.websocket_connect(
-            f"/ws/queue/{self.client.session_id}",
+            "/ws/queue/{session_id}",
             subscribed_events=["notification_queue_update", "auth_success", "sys_ping"]
         )
         
