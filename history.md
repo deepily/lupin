@@ -10,6 +10,61 @@
 
 ### 🎯 September 2025 Achievements
 
+#### 2025.09.27 - Three-Level Question Representation Architecture COMPLETE
+
+**Summary**: Successfully completed comprehensive R&D documentation for three-level question representation architecture (Verbatim → Normalized → Gist) with ultrathinking analysis and six-phase implementation plan. Created detailed technical proposal addressing normalization inconsistency causing search failures and established systematic remediation path.
+
+**Major Achievements**:
+- ✅ **Architecture Design Complete** - Three-level representation: Verbatim (exact user input), Normalized (standardized form), Gist (LLM-extracted essence)
+- ✅ **Root Cause Analysis** - Identified normalizer punctuation preservation causing "what time is it?" vs "what time is it" search mismatches
+- ✅ **Comprehensive Planning** - Six implementation phases with detailed specifications and tracking framework
+- ✅ **Ultrathinking Documentation** - Captured all architectural decisions, user feedback, and implementation nuances
+- ✅ **API Error Resolution** - Fixed LanceDBSolutionManager missing `reload()` method via interface abstraction
+- ✅ **Verbosity Optimization** - Reduced console output requiring both `debug AND verbose` for detailed logs
+
+**Technical Problem Solved**:
+- **Search Failure**: "What time is it?" returning 0 snapshots despite database containing "what time is it" (without punctuation)
+- **Interface Violation**: LanceDBSolutionManager lacked `load_snapshots()` method while FileBasedSolutionManager had it
+- **Console Verbosity**: Excessive output when `app_verbose=False` but `app_debug=True`
+
+**Architecture Overview**:
+```
+User Input: "What's the time right now???"
+    ↓
+Verbatim: "What's the time right now???" (exact storage)
+    ↓
+Normalized: "what time is right now" (contraction expansion, punctuation removal)
+    ↓
+Gist: "current_time_request" (LLM semantic extraction)
+```
+
+**Implementation Phases Documented**:
+1. **Phase 1**: Fix normalizer punctuation removal (immediate search fix)
+2. **Phase 2**: Add QueryLog table for temporal history tracking
+3. **Phase 3**: Add CanonicalSynonyms table for validated question mappings
+4. **Phase 4**: Update SolutionSnapshot schema with three-level fields
+5. **Phase 5**: Implement hierarchical search with early exits
+6. **Phase 6**: Add async embedding generation and caching
+
+**Files Created**:
+- **R&D Document**: `/src/rnd/2025.09.27-three-level-question-representation-architecture.md` - Comprehensive 50+ section technical proposal
+- **Implementation Plan**: Complete with tracking framework, performance metrics, and rollback procedures
+
+**Files Modified**:
+- **Interface Fix**: `/src/cosa/memory/snapshot_manager_interface.py` - Added abstract `reload()` method
+- **Manager Implementations**: Added `reload()` to both FileBasedSolutionManager and LanceDBSolutionManager
+- **API Endpoint**: `/src/cosa/rest/routers/system.py` - Fixed `/api/init` to use `reload()` instead of `load_snapshots()`
+- **Verbosity Controls**: Updated normalizer, completion_client, and llm_client_factory for proper debug/verbose hierarchy
+
+**User Feedback Integration**:
+- Rejected periodic index rebuilding: "I do not like the idea of periodically rebuilding an index"
+- Emphasized immediate exact match returns: "I think if you have a verbatim match, you should return it immediately"
+- Simplified over-complex weighted search proposals based on user preference for straightforward solutions
+
+**Current Status**: R&D document complete with comprehensive implementation roadmap. Ready to begin Phase 1 implementation after branch creation and PR merge.
+
+**Next Session Goal**: Push current work, create PR for merge, establish new branch for systematic three-level architecture implementation.
+
 #### 2025.09.26 - SNAPSHOT CACHING SYSTEM FULLY OPERATIONAL SESSION
 
 **Summary**: Successfully implemented snapshot caching system that dramatically speeds up repeated questions. Cache hits now return in ~0.1 seconds instead of ~5+ seconds (50x performance improvement). The solution storage was working, but queue system wasn't checking cache before creating agents.
