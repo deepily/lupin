@@ -106,10 +106,10 @@ Client Connect → Send auth_request → Server Validates → auth_success/auth_
 ### Session Relationship
 ```
 User "ricardo.felipe.ruiz@gmail.com"
-├── Queue Session: "wise_penguin"
+├── Queue Session: "wise penguin"
 │   ├── Subscriptions: [queue_*, notification_*, sys_*]
 │   └── Purpose: Main UI interaction
-└── Audio Session: "wise_penguin_audio"  
+└── Audio Session: "wise penguin audio"  
     ├── Subscriptions: [audio_*, sys_ping]
     └── Purpose: TTS streaming only
 ```
@@ -242,7 +242,7 @@ function getOrCreateSession() {
     let sessionId = localStorage.getItem("session_id");
     
     if (!sessionId || !isValidSessionFormat(sessionId)) {
-        sessionId = generateSessionId(); // "wise_penguin" format
+        sessionId = generateSessionId(); // "wise penguin" format
         localStorage.setItem("session_id", sessionId);
     }
     

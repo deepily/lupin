@@ -6,6 +6,16 @@
 - Docker build: `docker build -f docker/lupin/Dockerfile .`
 - Run GSM8K benchmarks: `src/scripts/run-gsm8k.sh --help`
 
+## CLAUDE CODE SLASH COMMANDS
+- `/smoke-test-baseline [scope]` - Establish comprehensive baseline before changes
+  - **scope**: `full` (Lupin + COSA) or `lupin` (Lupin-only), default: `full`
+  - Creates timestamped logs and baseline report in `src/rnd/`
+  - Pure data collection - no remediation attempts
+- `/smoke-test-remediation [baseline_report] [scope]` - Verify and fix post-change issues
+  - **baseline_report**: Path to baseline report (auto-detects latest if not provided)
+  - **scope**: `FULL|CRITICAL_ONLY|SELECTIVE|ANALYSIS_ONLY`, default: `FULL`
+  - Compares against baseline, identifies regressions, performs systematic remediation
+
 ## CODE STYLE
 - **Imports**: Group by stdlib, third-party, local
 - **Naming**: snake_case for functions, PascalCase for classes, UPPER_SNAKE_CASE for constants

@@ -107,7 +107,7 @@ class QueueWorkflowSmokeTests:
     
     async def test_job_submission(self):
         """Test job submission via /api/push."""
-        test_message = f"Test job submission {int(time.time())}"
+        test_message = "What is 5 + 5?"
         
         # Get initial TODO count
         initial_response = await self.queue_helper.get_queue_status("todo")
@@ -167,15 +167,15 @@ class QueueWorkflowSmokeTests:
         """Test queue-related WebSocket events."""
         # Connect to queue WebSocket
         websocket = await self.client.websocket_connect(
-            f"/ws/queue/{self.client.session_id}",
-            subscribed_events=["queue_todo_update", "queue_running_update", 
-                             "queue_done_update", "tts_job_request", 
+            "/ws/queue/{session_id}",
+            subscribed_events=["queue_todo_update", "queue_running_update",
+                             "queue_done_update", "tts_job_request",
                              "auth_success", "sys_ping"]
         )
         
         try:
             # Submit a job to trigger events
-            test_message = f"WebSocket event test {int(time.time())}"
+            test_message = "What is 10 + 10?"
             push_response = await self.queue_helper.push_job(test_message)
             self.validator.assert_response_ok(push_response, 200)
             
@@ -240,10 +240,15 @@ class QueueWorkflowSmokeTests:
         if self.debug:
             print(f"[DEBUG] Initial queue states: {initial_states}")
         
-        # Submit multiple jobs
-        for i in range(3):
-            test_message = f"State monitoring test job {i+1}"
-            response = await self.queue_helper.push_job(test_message)
+        # Submit multiple jobs with real questions
+        test_questions = [
+            "What is 2 + 2?",
+            "What time is it?",
+            "What day is today?"
+        ]
+
+        for question in test_questions:
+            response = await self.queue_helper.push_job(question)
             self.validator.assert_response_ok(response, 200)
         
         # Wait for processing
@@ -315,7 +320,7 @@ class QueueWorkflowSmokeTests:
         # This test might not work in all environments since it depends on
         # actual job processing, but we can test the basic flow
         
-        test_message = f"Completion flow test {int(time.time())}"
+        test_message = "What is 3 + 3?"
         
         # Submit job
         push_response = await self.queue_helper.push_job(test_message)

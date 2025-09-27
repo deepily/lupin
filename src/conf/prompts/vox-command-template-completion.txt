@@ -52,10 +52,7 @@ Below is the raw human voice command transcription formatted using simple XML:
 
 The standardized command that you translate MUST be returned wrapped in simple, well-formed XML:
 
-<response>
-    <command></command>
-    <args></args>
-</response>
+{{PYDANTIC_XML_EXAMPLE}}
 
 [/INST]
 ### Response:
