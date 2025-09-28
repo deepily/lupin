@@ -6,7 +6,7 @@ This directory contains research and development documents for the Lupin project
 
 ### 2025.09.27 - Three-Level Question Representation Architecture COMPLETE
 - **Architecture Implementation**: [2025.09.27-three-level-question-representation-architecture.md](2025.09.27-three-level-question-representation-architecture.md) - **✅ COMPLETE** - Comprehensive implementation fixing critical search failures with hierarchical Verbatim → Normalized → Gist architecture
-- **Session-End Automation**: [/src/rnd/prompts/session-end-prompt.md](prompts/session-end-prompt.md) - Automated end-of-session ritual extracted from configuration files
+- **Session-End Automation**: [/src/rnd/prompts/lupin-session-end.md](prompts/lupin-session-end.md) - Automated end-of-session ritual extracted from configuration files
 
 ### 2025.09.23 - Smoke Test Prompt Infrastructure
 - **Smoke Test Prompts**: [/src/rnd/prompts/](prompts/) - Comprehensive baseline and remediation testing infrastructure with Claude Code integration
