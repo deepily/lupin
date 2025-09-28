@@ -6,6 +6,14 @@ This directory contains comprehensive smoke test prompts for establishing baseli
 
 ### 🎯 Lupin Project Prompts (Production Ready)
 
+#### `lupin-test-harness-update.md` ⭐ NEW
+**Role**: Systematic test harness update prompt for post-change testing validation
+- **When to use**: After any significant code changes to ensure comprehensive test coverage
+- **Scope**: Dual-repository (Lupin + CoSA) with cross-repo impact analysis
+- **Mode**: Automated discovery, gap analysis, and implementation planning
+- **Output**: Priority-based test implementation plan with templates and validation criteria
+- **Key feature**: Reconciles existing test coverage with new requirements, maintains smoke/unit test distinction
+
 #### `baseline-smoke-test-prompt.md`
 **Role**: Establishes comprehensive baseline before major Lupin changes
 - **When to use**: Before any significant refactoring, migrations, or infrastructure changes
@@ -82,6 +90,7 @@ Are you working in the full Lupin project context?
 
 | Scenario | Prompt to Use | Notes |
 |----------|---------------|-------|
+| **After any code changes** | `lupin-test-harness-update.md` ⭐ | **NEW: Test coverage validation** |
 | Major Lupin refactoring affecting everything | `baseline-smoke-test-prompt.md` (TEST_SCOPE="full") | Full ecosystem testing |
 | Lupin-specific changes (UI, API, etc.) | `baseline-smoke-test-prompt.md` (TEST_SCOPE="lupin") | Faster, focused testing |
 | COSA framework development only | `/src/cosa/rnd/prompts/cosa-*` | Framework-focused |
@@ -89,6 +98,13 @@ Are you working in the full Lupin project context?
 | After making changes | Use corresponding post-change prompt | Must match baseline scope |
 
 ### Examples
+
+**⭐ NEW: After Code Changes:**
+```bash
+# Use: lupin-test-harness-update.md
+# When: After implementing three-level architecture changes
+# Output: Comprehensive test update plan with priority rankings
+```
 
 **🎯 Full System Baseline Before Migration:**
 ```bash
