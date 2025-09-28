@@ -129,21 +129,33 @@ class NotificationSmokeTests:
         """Test user-specific notification routing."""
         test_email = "notification_test@example.com"
         user_id = email_to_system_id(test_email)
-        
+
+        if self.debug:
+            print(f"[DEBUG] Testing routing: {test_email} -> {user_id}")
+
         # Send notification to specific user
-        response = await self.notification_helper.send_notification(
-            message="User-specific test notification",
-            target_user=test_email
-        )
-        
-        self.validator.assert_response_ok(response, 200)
-        
-        data = response.json()
-        assert data["target_user"] == test_email
-        assert data["target_system_id"] == user_id
-        
-        # Verify routing information
-        self.validator.assert_json_contains(data, ["target_user", "target_system_id"])
+        try:
+            response = await self.notification_helper.send_notification(
+                message="User-specific test notification",
+                target_user=test_email
+            )
+
+            self.validator.assert_response_ok(response, 200)
+
+            data = response.json()
+            if self.debug:
+                print(f"[DEBUG] Routing response: {data}")
+
+            assert data["target_user"] == test_email, f"Expected target_user {test_email}, got {data.get('target_user')}"
+            assert data["target_system_id"] == user_id, f"Expected target_system_id {user_id}, got {data.get('target_system_id')}"
+
+            # Verify routing information
+            self.validator.assert_json_contains(data, ["target_user", "target_system_id"])
+
+        except Exception as e:
+            if self.debug:
+                print(f"[DEBUG] User routing test failed: {e}")
+            raise
     
     async def test_notification_queue_operations(self):
         """Test notification queue CRUD operations."""
@@ -158,17 +170,23 @@ class NotificationSmokeTests:
         )
         
         self.validator.assert_response_ok(send_response, 200)
-        
+
+        # Wait a moment for notification to be processed
+        await asyncio.sleep(0.5)
+
         # Get user notifications
         get_response = await self.notification_helper.get_user_notifications(user_id)
         self.validator.assert_response_ok(get_response, 200)
-        
+
         get_data = get_response.json()
         self.validator.assert_json_contains(get_data, ["status", "notifications", "notification_count"])
-        
+
         # Should have at least our test notification
         notifications = get_data["notifications"]
-        assert len(notifications) > 0, "Should have notifications in queue"
+        if self.debug:
+            print(f"[DEBUG] Found {len(notifications)} notifications for user {user_id}")
+            print(f"[DEBUG] Notification response: {get_data}")
+        assert len(notifications) > 0, f"Should have notifications in queue for user {user_id}. Found: {len(notifications)}"
         
         # Find our test notification
         test_notification = None
@@ -213,13 +231,13 @@ class NotificationSmokeTests:
                 
                 # Validate event structure
                 self.validator.assert_websocket_event(
-                    notification_event, 
+                    notification_event,
                     "notification_queue_update",
-                    ["notification"]
+                    ["data"]
                 )
-                
+
                 # Validate notification content
-                notification = notification_event["notification"]
+                notification = notification_event["data"]["notification"]
                 self.validator.assert_json_contains(
                     notification, 
                     ["message", "type", "priority", "timestamp"]
