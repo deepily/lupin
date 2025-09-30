@@ -53,6 +53,10 @@ For implementation details, see the specific documents listed below.
 ## Active Documents
 
 ### Current Development (2025.09)
+
+#### 🚀 Authentication System Design
+- **[2025.09.29-jwt-oauth-implementation-design-and-tracker.md](2025.09.29-jwt-oauth-implementation-design-and-tracker.md)** - **📋 PLANNING**: Comprehensive JWT/OAuth authentication system design with 10-phase implementation plan, backward-compatible migration strategy, and complete tracking framework for upgrading from mock authentication to production-ready security (⏳ Phase 1-2 ready to begin)
+
 #### 🎉 Major Infrastructure Completions
 - **[2025.09.28-three-level-testing-design-and-progress.md](2025.09.28-three-level-testing-design-and-progress.md)** - **🔄 ACTIVE**: Comprehensive testing framework design for three-level representation system with progress tracking, testing patterns documentation, and critical test case specifications (📋 design complete - implementation in progress)
 - **[2025.09.27-three-level-question-representation-architecture.md](2025.09.27-three-level-question-representation-architecture.md)** - **✅ COMPLETE**: Comprehensive three-level question representation architecture (Verbatim → Normalized → Gist) with ultrathinking analysis and six-phase implementation plan for systematic question indexing refactoring (🚀 implementation complete - search failures resolved)

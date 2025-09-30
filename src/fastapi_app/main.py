@@ -41,7 +41,7 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 
 # Global variables
@@ -415,7 +415,13 @@ async def lifespan( app: FastAPI ):
     
     # Initialize input/output table
     io_tbl = InputAndOutputTable( debug=app_debug, verbose=app_verbose )
-    
+
+    # Initialize authentication database
+    print( "[AUTH] Initializing authentication database..." )
+    from cosa.rest.auth_database import init_auth_database
+    init_auth_database()
+    print( "[AUTH] Authentication database initialized" )
+
     # Load STT model on startup
     global whisper_pipeline
     print( "Loading distill whisper engine... ", end="" )
@@ -519,7 +525,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Add security headers middleware (Phase 8)
+@app.middleware( "http" )
+async def add_security_headers( request: Request, call_next ):
+    """
+    Add security headers to all HTTP responses (Phase 8).
+
+    Requires:
+        - request is FastAPI Request object
+        - call_next is the next middleware/endpoint function
+
+    Ensures:
+        - Security headers added to response
+        - X-Content-Type-Options: nosniff (prevent MIME sniffing)
+        - X-Frame-Options: DENY (prevent clickjacking)
+        - X-XSS-Protection: 1; mode=block (XSS protection)
+        - Strict-Transport-Security: enforce HTTPS
+
+    Returns:
+        Response with security headers
+    """
+    response = await call_next( request )
+
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    return response
+
+
 # Include routers
+app.include_router(auth.router)
 app.include_router(system.router)
 app.include_router(notifications.router)
 app.include_router(speech.router)
