@@ -12,8 +12,10 @@ src/cosa
 .idea/
 ._*
 
-# claude code
-.claude
+# Claude Code - track team configs, ignore personal overrides
+.claude/settings.local.json
+.claude/cache/
+.claude/*.log
 src/.claude/*
 
 # Weird Samba artifacts
