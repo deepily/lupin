@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lupin - Login</title>
+    <link rel="stylesheet" href="css/auth.css">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-header">
+            <div class="lupin-logo">🔐</div>
+            <h1>Welcome to Lupin</h1>
+            <p>Login to access your account</p>
+        </div>
+
+        <div class="error-message" id="error-message"></div>
+        <div class="success-message" id="success-message"></div>
+
+        <form class="auth-form" id="login-form">
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input
+                    type="email"
+                    id="email"
+                    name="email"
+                    placeholder="ricardo.felipe.ruiz@gmail.com"
+                    required
+                    autocomplete="email"
+                />
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input
+                    type="password"
+                    id="password"
+                    name="password"
+                    placeholder="Enter your password"
+                    required
+                    autocomplete="current-password"
+                />
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="login-button">
+                Login
+            </button>
+        </form>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p class="mt-2">Authenticating...</p>
+        </div>
+
+        <div class="auth-link">
+            Don't have an account? <a href="register.html">Register</a>
+        </div>
+    </div>
+
+    <script src="js/auth.js"></script>
+    <script>
+        // Redirect if already authenticated
+        if ( isAuthenticated() ) {
+            window.location.href = 'profile.html';
+        }
+
+        // Handle login form submission
+        document.getElementById( 'login-form' ).addEventListener( 'submit', async function( e ) {
+            e.preventDefault();
+
+            const email = document.getElementById( 'email' ).value.trim();
+            const password = document.getElementById( 'password' ).value;
+
+            // Clear previous messages
+            hideError( 'error-message' );
+            hideSuccess( 'success-message' );
+
+            // Validate inputs
+            if ( !email || !password ) {
+                showError( 'error-message', 'Please enter both email and password' );
+                return;
+            }
+
+            // Show loading
+            document.getElementById( 'login-form' ).style.display = 'none';
+            showLoading( 'loading' );
+
+            try {
+                // Attempt login
+                const response = await login( email, password );
+
+                // Show success message briefly
+                hideLoading( 'loading' );
+                showSuccess( 'success-message', 'Login successful! Redirecting...' );
+
+                // Redirect to profile page
+                setTimeout( () => {
+                    window.location.href = 'profile.html';
+                }, 1000 );
+
+            } catch ( error ) {
+                // Show error
+                hideLoading( 'loading' );
+                document.getElementById( 'login-form' ).style.display = 'flex';
+
+                let errorMessage = error.message || 'Login failed. Please try again.';
+
+                // Provide helpful error messages
+                if ( errorMessage.includes( 'Invalid credentials' ) || errorMessage.includes( 'Incorrect' ) ) {
+                    errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+                } else if ( errorMessage.includes( 'Account is locked' ) ) {
+                    errorMessage = 'Your account has been temporarily locked due to too many failed login attempts. Please try again in 15 minutes.';
+                } else if ( errorMessage.includes( 'Account is inactive' ) ) {
+                    errorMessage = 'Your account is inactive. Please contact support.';
+                }
+
+                showError( 'error-message', errorMessage );
+            }
+        } );
+
+        // Auto-focus email field
+        document.getElementById( 'email' ).focus();
+
+        console.log( '🔐 Lupin Login Page Ready' );
+        console.log( 'First time logging in? Use your generated password from migration!' );
+    </script>
+</body>
+</html>

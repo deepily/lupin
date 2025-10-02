@@ -1,12 +1,87 @@
 # Lupin Project History
 
-> **🎯 CURRENT ACHIEVEMENT**: 2025.09.29 - JWT/OAuth Authentication PHASES 7 & 8 COMPLETE! Email verification, password reset, rate limiting, and security hardening fully implemented and tested. 131/131 tests passing (100%). Overall progress: 8/10 phases complete (80%).
+> **🎯 CURRENT ACHIEVEMENT**: 2025.10.01 - JWT/OAuth PHASE 9 CORE COMPLETE! 🎉 Full authentication flow working: login, profile display, password change, re-authentication. User can successfully change from generated password to their own. Overall progress: 9/10 phases core complete (90%), Phase 10 (documentation) remaining.
 
-> **Previous Achievement**: 2025.09.29 - JWT/OAuth Phases 1-6 COMPLETE. Comprehensive authentication system with token management, user auth, password security, WebSocket integration, and RBAC implemented with 113/113 tests passing.
+> **Previous Achievement**: 2025.09.29 - JWT/OAuth Authentication PHASES 7 & 8 COMPLETE! Email verification, password reset, rate limiting, and security hardening fully implemented and tested. 131/131 tests passing (100%). Overall progress: 8/10 phases complete (80%).
 
 > **Earlier Achievement**: 2025.09.26 - Math Agent Issue #5 COMPLETELY RESOLVED! Fixed XML whitespace stripping and comprehensive debugging. All arithmetic operations generate properly indented Python code.
 
 ## Recent Activity (Last 7 Days)
+
+### 🎯 October 2025 - Recent Sessions
+
+#### 2025.10.01 - JWT/OAuth Phase 9 (Data Migration) - CORE COMPLETE ✅
+
+**Summary**: Implemented and debugged complete Phase 9 authentication UI and data migration system. Successfully achieved full working authentication flow: login → profile → password change → re-login. User can now change from generated password to their own password.
+
+**User Credentials** (for future reference):
+- **Email**: ricardo.felipe.ruiz@gmail.com
+- **Generated Password**: `pswfJ^WP&1AXA1nB` (successfully changed by user)
+- **Roles**: `['user', 'admin']` - SUPERUSER status
+
+**What Works ✅**:
+1. **Login Flow**: Email/password authentication with JWT tokens
+2. **Profile Display**: Shows user ID, email, roles, verification status, admin features
+3. **Password Change**: Complete workflow with strength validation, current password verification
+4. **Re-authentication**: Login with new password works perfectly
+5. **Token Refresh**: Automatic token rotation on expiry
+
+**Bugs Fixed (6 total)**:
+1. **`authenticate_user()` missing fields** - Added `is_active`, `created_at`, `last_login_at` to returned user_data
+2. **`login()` token structure mismatch** - Changed `response.access_token` → `response.tokens.access_token`
+3. **`refreshAccessToken()` token structure mismatch** - Updated to access nested tokens + rotate both tokens
+4. **JWT payload field mismatch** 🎯 - **ROOT CAUSE**: Changed `payload.get("user_id")` → `payload.get("sub")` (JWT standard)
+5. **Profile UI user ID mismatch** - Changed `user.user_id` → `user.id`
+6. **Infinite retry loop** - Added recursion limit (max 2 retries) + comprehensive debug logging
+
+**Root Cause Analysis**:
+The critical bug was in `/auth/change-password` endpoint looking for `"user_id"` in JWT payload, but tokens contain `"sub"` (JWT standard for subject/user_id). This caused infinite 401 loops:
+- Token validation: `payload.get("user_id")` returned `None`
+- Server rejected token: 401 Unauthorized
+- Client refreshed token: New token also has `"sub"` not `"user_id"`
+- Infinite loop until retry limit
+
+**Debug Process**:
+- Added token logging (first 20 chars), retry counters, full error responses
+- Browser console with "Preserve log" revealed: `'Token validation failed: Invalid token payload'`
+- Traced to JWT standard: tokens use `"sub"` (jwt_service.py:70), not `"user_id"`
+
+**Files Created/Modified**:
+1. `src/scripts/auth_migration/migrate_mock_users.py` - Created 3 users (ricardo admin+user, alice/bob users)
+2. `src/scripts/auth_migration/validate_migration.py` - Migration validation
+3. `src/scripts/auth_migration/rollback_migration.py` - Safety rollback script
+4. `src/scripts/auth_migration/migration_results.json` - Generated passwords (gitignored)
+5. `src/fastapi_app/static/html/auth/js/auth.js` - Complete auth utilities with debug logging
+6. `src/fastapi_app/static/html/auth/css/auth.css` - Professional gradient styling
+7. `src/fastapi_app/static/html/auth/login.html` - Login page
+8. `src/fastapi_app/static/html/auth/profile.html` - Profile with admin features
+9. `src/fastapi_app/static/html/auth/change-password.html` - Password change with strength validation
+10. `src/cosa/rest/auth_models.py` - Added `ChangePasswordRequest` model
+11. `src/cosa/rest/routers/auth.py` - Added PUT `/auth/change-password` endpoint
+12. `src/cosa/rest/user_service.py` - Fixed `authenticate_user()` return fields
+13. `src/conf/lupin-app.ini` - Set `auth_mode = jwt`, new db path
+14. `src/conf/lupin-app-splainer.ini` - Updated explanations
+15. `.gitignore` - Added auth database and migration results
+
+**Known Issue (Deferred)**:
+Fresh Queue WebSocket authentication failing with UTF-8 decoding error:
+```
+'utf-8' codec can't decode byte 0x9a in position 0: invalid start byte
+```
+- **Scope**: Queue WebSocket only (Audio WebSocket works fine)
+- **Type**: Token validation UTF-8 decoding issue (different auth handler than HTTP)
+- **Impact**: Queue UI can't connect, but separate from HTTP auth system
+- **Next session**: Investigate WebSocket-specific token handling
+
+**Phase 9 Status**: Core authentication complete and working! Phase 10 (documentation) remains.
+
+**TODO for Next Session**:
+- [ ] Investigate Fresh Queue WebSocket UTF-8 token decoding error
+- [ ] Create Phase 9 integration test suite (8 tests planned)
+- [ ] Optional: Build register.html page (bonus feature)
+- [ ] Phase 10: API reference, integration guide, security guide, operations guide
+
+---
 
 ### 🎯 September 2025 - Recent Sessions (Sept 24-30)
 

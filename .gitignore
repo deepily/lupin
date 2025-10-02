@@ -28,6 +28,12 @@ src/.claude/*
 # Don't track DB artifacts
 src/conf/long-term-memory/lupin.lancedb**
 
+# Authentication database - contains sensitive user data (passwords, tokens)
+src/conf/long-term-memory/lupin-auth.db
+
+# Migration results - contains plaintext passwords for initial setup
+src/scripts/auth_migration/migration_results.json
+
 # No LLM's, please
 models/**
 
