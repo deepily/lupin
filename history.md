@@ -10,6 +10,46 @@
 
 ### 🎯 October 2025 - Recent Sessions
 
+#### 2025.10.03 - Testing Infrastructure Fix: pytest Environment Resolution ✅
+
+**Summary**: Resolved critical testing environment mismatch preventing integration tests from running. Root cause was pytest installed in miniconda but not in venv, while authentication dependencies (passlib) were only in venv. Implemented long-term solution with separate test dependencies file.
+
+**Problem Diagnosed**:
+- **Symptom**: `ModuleNotFoundError: No module named 'passlib'` when running pytest
+- **Root Cause**: Environment mismatch
+  - `python` → venv (has passlib ✓)
+  - `pytest` → miniconda (no passlib ✗)
+- **Discovery**: `which pytest` showed `/home/rruiz/miniconda/bin/pytest` instead of venv
+
+**Solution Implemented**:
+1. **Installed pytest in venv**: `pip install pytest==8.4.2 pytest-asyncio==1.2.0`
+2. **Created requirements-test.txt**: Separate test dependencies file for maintainability
+3. **Updated AUTH_REQUIREMENTS.md**: Added Testing Dependencies section with installation guide
+4. **Updated history-management command**: Now uses global scripts (`count-words.sh` + `calculate-tokens.sh`)
+
+**Testing Validation**:
+- ✅ All 8 integration tests collected successfully
+- ✅ No import errors with `python -m pytest src/tests/integration/ --collect-only`
+- ✅ Both pytest and passlib available in same environment
+
+**Files Created**:
+- `requirements-test.txt` - Test dependencies (pytest, pytest-asyncio, pytest-cov, websockets, requests)
+
+**Files Modified**:
+- `AUTH_REQUIREMENTS.md` - Added Testing Dependencies section
+- `.claude/commands/history-management.md` - Updated to use `/home/rruiz/.claude/scripts/count-words.sh` and `calculate-tokens.sh`
+
+**Key Learning**: Always use `python -m pytest` instead of just `pytest` to ensure correct virtual environment is used.
+
+**Status**: Testing infrastructure now properly configured. Integration tests ready to run.
+
+**TODO for Next Session**:
+- [ ] Run full integration test suite to validate all 8 tests pass
+- [ ] Consider adding requirements-test.txt to Docker build process
+- [ ] Update project README with testing setup instructions
+
+---
+
 #### 2025.10.01 - JWT/OAuth Phase 9 (Data Migration) - CORE COMPLETE ✅
 
 **Summary**: Implemented and debugged complete Phase 9 authentication UI and data migration system. Successfully achieved full working authentication flow: login → profile → password change → re-login. User can now change from generated password to their own password.
@@ -80,6 +120,24 @@ Fresh Queue WebSocket authentication failing with UTF-8 decoding error:
 - [ ] Create Phase 9 integration test suite (8 tests planned)
 - [ ] Optional: Build register.html page (bonus feature)
 - [ ] Phase 10: API reference, integration guide, security guide, operations guide
+
+---
+
+#### 2025.10.01 - COSA Selective .claude/ Directory Tracking SESSION
+
+**Summary**: Updated COSA repository's .gitignore to enable team collaboration on custom slash commands while protecting personal settings. Shift from blanket exclusion to selective tracking aligns with 2024-2025 Claude Code best practices.
+
+**COSA Achievements**:
+- ✅ Updated `.gitignore` for selective .claude/ tracking (blanket exclusion → 3 explicit exclusions)
+- ✅ Enabled version control of 3 custom slash commands for team workflow sharing
+- ✅ Maintained privacy protection (settings.local.json, cache/, *.log remain excluded)
+- ✅ Implemented "workflows as code" philosophy - slash commands as team assets
+
+**Files Modified in COSA**:
+- `src/cosa/.gitignore` (+3/-1 lines) - Selective tracking configuration
+- `src/cosa/history.md` - Session documentation
+
+**Current COSA Status**: .gitignore update committed locally (ef3bf57), ready to push. Team collaboration on slash commands now enabled.
 
 ---
 
