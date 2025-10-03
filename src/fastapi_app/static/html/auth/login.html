@@ -59,9 +59,14 @@
 
     <script src="js/auth.js"></script>
     <script>
+        // Get safe redirect URL
+        const redirectUrl = getSafeRedirectUrl();
+        console.log( `🔄 Redirect URL after login: ${redirectUrl}` );
+
         // Redirect if already authenticated
         if ( isAuthenticated() ) {
-            window.location.href = 'profile.html';
+            console.log( '✓ Already authenticated - redirecting to:', redirectUrl );
+            window.location.href = redirectUrl;
         }
 
         // Handle login form submission
@@ -93,9 +98,10 @@
                 hideLoading( 'loading' );
                 showSuccess( 'success-message', 'Login successful! Redirecting...' );
 
-                // Redirect to profile page
+                // Redirect to requested page (or profile if no redirect param)
+                console.log( '✓ Login successful - redirecting to:', redirectUrl );
                 setTimeout( () => {
-                    window.location.href = 'profile.html';
+                    window.location.href = redirectUrl;
                 }, 1000 );
 
             } catch ( error ) {

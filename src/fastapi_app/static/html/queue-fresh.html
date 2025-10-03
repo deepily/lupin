@@ -88,23 +88,24 @@
             </div>
             <div class="section-content" id="status-section">
                 <div class="status-item">
-                    <strong>Queue WebSocket:</strong> 
+                    <strong>Queue WebSocket:</strong>
                     <span id="queue-ws-status" class="status-warning">Disconnected</span>
                 </div>
                 <div class="status-item">
-                    <strong>Audio WebSocket:</strong> 
+                    <strong>Audio WebSocket:</strong>
                     <span id="audio-ws-status" class="status-warning">Disconnected</span>
                 </div>
                 <div class="status-item">
-                    <strong>Authentication:</strong> 
+                    <strong>Authentication:</strong>
                     <span id="auth-status" class="status-warning">Not authenticated</span>
                 </div>
                 <div class="status-item">
-                    <strong>User:</strong> 
+                    <strong>User:</strong>
                     <span id="user-display">Loading...</span>
+                    <button id="logout-button" type="button" style="margin-left: 10px; padding: 4px 12px; font-size: 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;" onclick="window.freshQueueUI.logout()">Logout</button>
                 </div>
                 <div class="status-item">
-                    <strong>Sessions:</strong> 
+                    <strong>Sessions:</strong>
                     Queue: <span id="queue-session">-</span>, Audio: <span id="audio-session">-</span>
                 </div>
             </div>

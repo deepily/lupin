@@ -13,7 +13,7 @@
  * @returns {string|null} Access token or null if not found
  */
 function getAccessToken() {
-    return localStorage.getItem( 'access_token' );
+    return localStorage.getItem( 'lupin_access_token' );
 }
 
 /**
@@ -21,7 +21,7 @@ function getAccessToken() {
  * @returns {string|null} Refresh token or null if not found
  */
 function getRefreshToken() {
-    return localStorage.getItem( 'refresh_token' );
+    return localStorage.getItem( 'lupin_refresh_token' );
 }
 
 /**
@@ -30,16 +30,16 @@ function getRefreshToken() {
  * @param {string} refreshToken - JWT refresh token
  */
 function setTokens( accessToken, refreshToken ) {
-    localStorage.setItem( 'access_token', accessToken );
-    localStorage.setItem( 'refresh_token', refreshToken );
+    localStorage.setItem( 'lupin_access_token', accessToken );
+    localStorage.setItem( 'lupin_refresh_token', refreshToken );
 }
 
 /**
  * Clear all tokens from localStorage (logout).
  */
 function clearTokens() {
-    localStorage.removeItem( 'access_token' );
-    localStorage.removeItem( 'refresh_token' );
+    localStorage.removeItem( 'lupin_access_token' );
+    localStorage.removeItem( 'lupin_refresh_token' );
     localStorage.removeItem( 'user_data' );
 }
 
@@ -322,6 +322,34 @@ async function changePassword( currentPassword, newPassword ) {
             new_password: newPassword
         }
     );
+}
+
+// ============================================================================
+// Redirect Handling
+// ============================================================================
+
+/**
+ * Get safe redirect URL from query parameter.
+ * Validates that redirect path is internal (/static/html/*) to prevent open redirect vulnerabilities.
+ *
+ * @returns {string} Safe redirect URL or default profile page
+ */
+function getSafeRedirectUrl() {
+    const params = new URLSearchParams( window.location.search );
+    const redirect = params.get( 'redirect' );
+
+    // Validate redirect parameter
+    if ( redirect && redirect.startsWith( '/static/html/' ) ) {
+        console.log( `✓ Valid redirect parameter: ${redirect}` );
+        return redirect;
+    }
+
+    if ( redirect ) {
+        console.warn( `⚠️ Invalid redirect parameter (must start with /static/html/): ${redirect}` );
+    }
+
+    // Default to profile page
+    return '/static/html/auth/profile.html';
 }
 
 // ============================================================================

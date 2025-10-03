@@ -45,6 +45,7 @@ class FreshQueueUI {
         this.isConnecting = false;
         this.connectionRetries = 0;
         this.maxRetries = 5;
+        this.authRefreshAttempted = false; // Track refresh attempts to prevent loops
         
         // Job completion debugging
         this.lastQASubmissionTime = null;
@@ -222,23 +223,218 @@ class FreshQueueUI {
     }
     
     async setupAuthentication() {
-        // Get or create user email (mock system)
-        let userEmail = localStorage.getItem( this.USER_EMAIL_KEY );
-        
-        if ( !userEmail || userEmail === 'null' || userEmail === 'undefined' ) {
-            // Use actual user email instead of generating random ones
-            userEmail = "ricardo.felipe.ruiz@gmail.com";
-            
-            localStorage.setItem( this.USER_EMAIL_KEY, userEmail );
-            this.log( `Set user email: ${userEmail}` );
+        // JWT Authentication: Check for stored tokens
+        const tokens = this.getStoredTokens();
+
+        if ( !tokens.accessToken ) {
+            // No tokens found - redirect to login with current page as redirect target
+            this.log( "No authentication tokens found - redirecting to login" );
+            const currentPath = window.location.pathname;
+            window.location.href = `/static/html/auth/login.html?redirect=${currentPath}`;
+            return;
         }
-        
-        this.currentUser = userEmail;
-        this.authToken = `Bearer mock_token_email_${userEmail}`;
-        
+
+        // Check if access token is expired
+        if ( this.isTokenExpired( tokens.accessToken ) ) {
+            this.log( "Access token expired - attempting refresh" );
+            const refreshed = await this.refreshAccessToken();
+
+            if ( !refreshed ) {
+                this.log( "Token refresh failed - redirecting to login" );
+                this.handleAuthFailure();
+                return;
+            }
+
+            // Get refreshed tokens
+            const newTokens = this.getStoredTokens();
+            this.authToken = newTokens.accessToken;
+        } else {
+            this.authToken = tokens.accessToken;
+        }
+
+        // Extract user info from JWT payload
+        const payload = this.parseJWTPayload( this.authToken );
+        this.currentUser = payload.email;
+
         // Update UI
-        this.updateElement( "user-display", userEmail );
-        this.log( `Authentication setup complete for user: ${userEmail}` );
+        this.updateElement( "user-display", this.currentUser );
+        this.updateStatus( "auth-status", "Authenticated", "success" );
+        this.log( `Authentication setup complete for user: ${this.currentUser}` );
+    }
+
+    getStoredTokens() {
+        /**
+         * Retrieve JWT tokens from localStorage.
+         *
+         * Returns:
+         *     Object with accessToken and refreshToken properties (may be null)
+         */
+        return {
+            accessToken: localStorage.getItem( 'lupin_access_token' ),
+            refreshToken: localStorage.getItem( 'lupin_refresh_token' )
+        };
+    }
+
+    parseJWTPayload( token ) {
+        /**
+         * Decode JWT payload without verification (client-side).
+         * Used to extract user info like email.
+         *
+         * Note: This does NOT validate the token - validation happens server-side.
+         *
+         * Args:
+         *     token: JWT token string
+         *
+         * Returns:
+         *     Object with decoded payload
+         */
+        try {
+            // JWT format: header.payload.signature
+            const parts = token.split( '.' );
+            if ( parts.length !== 3 ) {
+                throw new Error( "Invalid JWT format" );
+            }
+
+            // Decode base64url payload (second part)
+            const payload = parts[1];
+            // Base64url to base64: replace - with + and _ with /
+            const base64 = payload.replace( /-/g, '+' ).replace( /_/g, '/' );
+            // Decode and parse JSON
+            const jsonPayload = decodeURIComponent( atob( base64 ).split( '' ).map( function( c ) {
+                return '%' + ( '00' + c.charCodeAt( 0 ).toString( 16 ) ).slice( -2 );
+            }).join( '' ) );
+
+            return JSON.parse( jsonPayload );
+        } catch ( error ) {
+            this.error( "Failed to parse JWT payload:", error );
+            return {};
+        }
+    }
+
+    isTokenExpired( token ) {
+        /**
+         * Check if JWT token is expired by examining exp claim.
+         *
+         * Args:
+         *     token: JWT token string
+         *
+         * Returns:
+         *     Boolean - true if expired or invalid, false otherwise
+         */
+        try {
+            const payload = this.parseJWTPayload( token );
+
+            if ( !payload.exp ) {
+                return true; // No expiration claim - consider invalid
+            }
+
+            // exp is in seconds, Date.now() is in milliseconds
+            const now = Math.floor( Date.now() / 1000 );
+
+            // Add 60 second buffer to refresh before actual expiry
+            return payload.exp < ( now + 60 );
+        } catch ( error ) {
+            this.error( "Failed to check token expiration:", error );
+            return true; // Consider expired on error
+        }
+    }
+
+    async refreshAccessToken() {
+        /**
+         * Refresh access token using refresh token.
+         *
+         * Returns:
+         *     Boolean - true if refresh succeeded, false otherwise
+         */
+        const tokens = this.getStoredTokens();
+
+        if ( !tokens.refreshToken ) {
+            this.error( "No refresh token available" );
+            return false;
+        }
+
+        try {
+            this.log( "Refreshing access token..." );
+
+            const response = await fetch( '/auth/refresh', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    refresh_token: tokens.refreshToken
+                })
+            });
+
+            if ( response.ok ) {
+                const data = await response.json();
+
+                // Store new tokens
+                localStorage.setItem( 'lupin_access_token', data.tokens.access_token );
+                localStorage.setItem( 'lupin_refresh_token', data.tokens.refresh_token );
+
+                this.authToken = data.tokens.access_token;
+                this.log( "Access token refreshed successfully" );
+                return true;
+            } else {
+                this.error( `Token refresh failed: ${response.status} ${response.statusText}` );
+                return false;
+            }
+        } catch ( error ) {
+            this.error( "Token refresh error:", error );
+            return false;
+        }
+    }
+
+    handleAuthFailure() {
+        /**
+         * Handle authentication failure by clearing tokens and redirecting to login.
+         */
+        this.log( "Handling authentication failure" );
+
+        // Clear tokens
+        localStorage.removeItem( 'lupin_access_token' );
+        localStorage.removeItem( 'lupin_refresh_token' );
+
+        // Disconnect WebSockets
+        if ( this.queueWS ) {
+            this.queueWS.close();
+        }
+        if ( this.audioWS ) {
+            this.audioWS.close();
+        }
+
+        // Redirect to login with current page as redirect target
+        const currentPath = window.location.pathname;
+        window.location.href = `/static/html/auth/login.html?redirect=${currentPath}`;
+    }
+
+    logout() {
+        /**
+         * Logout user by clearing authentication and redirecting to login.
+         * Called by logout button in UI.
+         */
+        this.log( "User logout initiated" );
+
+        // Clear tokens
+        localStorage.removeItem( 'lupin_access_token' );
+        localStorage.removeItem( 'lupin_refresh_token' );
+
+        // Disconnect WebSockets gracefully
+        if ( this.queueWS ) {
+            this.queueWS.close();
+            this.queueWS = null;
+        }
+        if ( this.audioWS ) {
+            this.audioWS.close();
+            this.audioWS = null;
+        }
+
+        // Update UI
+        this.updateStatus( "auth-status", "Logged out", "warning" );
+
+        // Redirect to login page (no redirect param - go to profile after login)
+        window.location.href = '/static/html/auth/login.html';
     }
     
     createAudioElement() {
@@ -630,6 +826,27 @@ class FreshQueueUI {
                 case "auth_error":
                     this.error( `Queue WebSocket auth failed: ${envelope.message}` );
                     this.updateStatus( "auth-status", `Auth failed: ${envelope.message}`, "error" );
+
+                    // Attempt token refresh once
+                    if ( !this.authRefreshAttempted ) {
+                        this.authRefreshAttempted = true;
+                        this.log( "Attempting token refresh after auth error..." );
+
+                        this.refreshAccessToken().then( ( success ) => {
+                            if ( success ) {
+                                this.log( "Token refreshed - reconnecting WebSockets" );
+                                this.authRefreshAttempted = false;
+                                this.connectWebSockets();
+                            } else {
+                                this.error( "Token refresh failed - redirecting to login" );
+                                this.handleAuthFailure();
+                            }
+                        });
+                    } else {
+                        // Already tried refresh - give up and redirect to login
+                        this.error( "Auth error after refresh attempt - redirecting to login" );
+                        this.handleAuthFailure();
+                    }
                     break;
                     
                 case "connect":
@@ -706,6 +923,25 @@ class FreshQueueUI {
                     
                 case "auth_error":
                     this.error( `Audio WebSocket auth failed: ${envelope.message}` );
+                    this.updateStatus( "auth-status", "Auth failed", "error" );
+
+                    // Audio WebSocket auth error - delegate to queue handler logic
+                    // (Both WebSockets use same auth token, so one refresh attempt handles both)
+                    if ( !this.authRefreshAttempted ) {
+                        this.authRefreshAttempted = true;
+                        this.log( "Attempting token refresh after audio auth error..." );
+
+                        this.refreshAccessToken().then( ( success ) => {
+                            if ( success ) {
+                                this.log( "Token refreshed - reconnecting WebSockets" );
+                                this.authRefreshAttempted = false;
+                                this.connectWebSockets();
+                            } else {
+                                this.error( "Token refresh failed - redirecting to login" );
+                                this.handleAuthFailure();
+                            }
+                        });
+                    }
                     break;
                     
                 case "connect":
@@ -1689,8 +1925,21 @@ class FreshQueueUI {
     }
     
     getAuthHeader() {
-        const email = this.getCurrentUserEmail();
-        return `Bearer mock_token_email_${email}`;
+        // Return JWT access token for authentication
+        if ( this.authToken ) {
+            return `Bearer ${this.authToken}`;
+        }
+
+        // Fallback: try to get token from localStorage
+        const tokens = this.getStoredTokens();
+        if ( tokens.accessToken ) {
+            return `Bearer ${tokens.accessToken}`;
+        }
+
+        // No token available - this shouldn't happen if setupAuthentication() ran correctly
+        this.error( "No authentication token available" );
+        this.handleAuthFailure();
+        return null;
     }
     
     // ========================================

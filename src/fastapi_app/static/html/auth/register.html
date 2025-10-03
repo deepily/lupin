@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lupin - Register</title>
+    <link rel="stylesheet" href="css/auth.css">
+    <style>
+        /* Password strength meter styles */
+        .password-strength {
+            margin-top: 8px;
+            margin-bottom: 12px;
+        }
+
+        .strength-meter {
+            height: 6px;
+            background: #e9ecef;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .strength-meter-fill {
+            height: 100%;
+            width: 0%;
+            transition: all 0.3s ease;
+            border-radius: 3px;
+        }
+
+        .strength-meter-fill.weak {
+            width: 33%;
+            background: #dc3545;
+        }
+
+        .strength-meter-fill.medium {
+            width: 66%;
+            background: #ffc107;
+        }
+
+        .strength-meter-fill.strong {
+            width: 100%;
+            background: #28a745;
+        }
+
+        .strength-text {
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .strength-text.weak {
+            color: #dc3545;
+        }
+
+        .strength-text.medium {
+            color: #ffc107;
+        }
+
+        .strength-text.strong {
+            color: #28a745;
+        }
+
+        .password-requirements {
+            font-size: 12px;
+            color: #6c757d;
+            margin-top: 8px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            line-height: 1.6;
+        }
+
+        .password-requirements ul {
+            margin: 4px 0 0 0;
+            padding-left: 20px;
+        }
+
+        .password-requirements li {
+            margin: 2px 0;
+        }
+
+        .requirement-met {
+            color: #28a745;
+        }
+
+        .requirement-unmet {
+            color: #6c757d;
+        }
+
+        .input-error {
+            border-color: #dc3545 !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-header">
+            <div class="lupin-logo">🔐</div>
+            <h1>Create Your Account</h1>
+            <p>Join Lupin to get started</p>
+        </div>
+
+        <div class="error-message" id="error-message"></div>
+        <div class="success-message" id="success-message"></div>
+
+        <form class="auth-form" id="register-form">
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input
+                    type="email"
+                    id="email"
+                    name="email"
+                    placeholder="your.email@example.com"
+                    required
+                    autocomplete="email"
+                />
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input
+                    type="password"
+                    id="password"
+                    name="password"
+                    placeholder="Create a strong password"
+                    required
+                    autocomplete="new-password"
+                />
+
+                <!-- Password strength meter -->
+                <div class="password-strength">
+                    <div class="strength-meter">
+                        <div class="strength-meter-fill" id="strength-meter-fill"></div>
+                    </div>
+                    <div class="strength-text" id="strength-text"></div>
+                </div>
+
+                <!-- Password requirements -->
+                <div class="password-requirements">
+                    <strong>Password must contain:</strong>
+                    <ul id="requirements-list">
+                        <li id="req-length" class="requirement-unmet">At least 8 characters</li>
+                        <li id="req-uppercase" class="requirement-unmet">One uppercase letter</li>
+                        <li id="req-lowercase" class="requirement-unmet">One lowercase letter</li>
+                        <li id="req-number" class="requirement-unmet">One number</li>
+                        <li id="req-special" class="requirement-unmet">One special character (!@#$%^&*)</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="confirm-password">Confirm Password</label>
+                <input
+                    type="password"
+                    id="confirm-password"
+                    name="confirm-password"
+                    placeholder="Re-enter your password"
+                    required
+                    autocomplete="new-password"
+                />
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="register-button">
+                Create Account
+            </button>
+        </form>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p class="mt-2">Creating your account...</p>
+        </div>
+
+        <div class="auth-link">
+            Already have an account? <a href="login.html">Login</a>
+        </div>
+    </div>
+
+    <script src="js/auth.js"></script>
+    <script>
+        // Redirect if already authenticated
+        if ( isAuthenticated() ) {
+            window.location.href = 'profile.html';
+        }
+
+        // Password strength calculation
+        function calculatePasswordStrength( password ) {
+            let strength = 0;
+            const requirements = {
+                length: password.length >= 8,
+                uppercase: /[A-Z]/.test( password ),
+                lowercase: /[a-z]/.test( password ),
+                number: /[0-9]/.test( password ),
+                special: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test( password )
+            };
+
+            // Count met requirements
+            if ( requirements.length ) strength++;
+            if ( requirements.uppercase ) strength++;
+            if ( requirements.lowercase ) strength++;
+            if ( requirements.number ) strength++;
+            if ( requirements.special ) strength++;
+
+            // Update visual requirements list
+            updateRequirement( 'req-length', requirements.length );
+            updateRequirement( 'req-uppercase', requirements.uppercase );
+            updateRequirement( 'req-lowercase', requirements.lowercase );
+            updateRequirement( 'req-number', requirements.number );
+            updateRequirement( 'req-special', requirements.special );
+
+            // Return strength level
+            if ( strength <= 2 ) return 'weak';
+            if ( strength <= 4 ) return 'medium';
+            return 'strong';
+        }
+
+        function updateRequirement( elementId, met ) {
+            const element = document.getElementById( elementId );
+            if ( met ) {
+                element.classList.remove( 'requirement-unmet' );
+                element.classList.add( 'requirement-met' );
+            } else {
+                element.classList.remove( 'requirement-met' );
+                element.classList.add( 'requirement-unmet' );
+            }
+        }
+
+        function updatePasswordStrengthUI( strength ) {
+            const meter = document.getElementById( 'strength-meter-fill' );
+            const text = document.getElementById( 'strength-text' );
+
+            // Remove all strength classes
+            meter.classList.remove( 'weak', 'medium', 'strong' );
+            text.classList.remove( 'weak', 'medium', 'strong' );
+
+            // Add appropriate class
+            if ( strength ) {
+                meter.classList.add( strength );
+                text.classList.add( strength );
+                text.textContent = `Password strength: ${strength.charAt( 0 ).toUpperCase() + strength.slice( 1 )}`;
+            } else {
+                text.textContent = '';
+            }
+        }
+
+        // Password input event listener
+        document.getElementById( 'password' ).addEventListener( 'input', function( e ) {
+            const password = e.target.value;
+
+            if ( password.length === 0 ) {
+                updatePasswordStrengthUI( '' );
+                // Reset all requirements to unmet
+                [ 'req-length', 'req-uppercase', 'req-lowercase', 'req-number', 'req-special' ].forEach( id => {
+                    updateRequirement( id, false );
+                });
+            } else {
+                const strength = calculatePasswordStrength( password );
+                updatePasswordStrengthUI( strength );
+            }
+
+            // Clear confirm password error if passwords now match
+            const confirmPassword = document.getElementById( 'confirm-password' ).value;
+            if ( confirmPassword && password === confirmPassword ) {
+                document.getElementById( 'confirm-password' ).classList.remove( 'input-error' );
+            }
+        });
+
+        // Confirm password input event listener
+        document.getElementById( 'confirm-password' ).addEventListener( 'input', function( e ) {
+            const password = document.getElementById( 'password' ).value;
+            const confirmPassword = e.target.value;
+
+            if ( confirmPassword && password !== confirmPassword ) {
+                e.target.classList.add( 'input-error' );
+            } else {
+                e.target.classList.remove( 'input-error' );
+            }
+        });
+
+        // Handle registration form submission
+        document.getElementById( 'register-form' ).addEventListener( 'submit', async function( e ) {
+            e.preventDefault();
+
+            const email = document.getElementById( 'email' ).value.trim();
+            const password = document.getElementById( 'password' ).value;
+            const confirmPassword = document.getElementById( 'confirm-password' ).value;
+
+            // Clear previous messages
+            hideError( 'error-message' );
+            hideSuccess( 'success-message' );
+
+            // Validate inputs
+            if ( !email || !password || !confirmPassword ) {
+                showError( 'error-message', 'Please fill in all fields' );
+                return;
+            }
+
+            // Validate email format
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if ( !emailRegex.test( email ) ) {
+                showError( 'error-message', 'Please enter a valid email address' );
+                return;
+            }
+
+            // Check password strength
+            const strength = calculatePasswordStrength( password );
+            if ( strength === 'weak' ) {
+                showError( 'error-message', 'Password is too weak. Please meet all requirements.' );
+                return;
+            }
+
+            // Check password confirmation
+            if ( password !== confirmPassword ) {
+                showError( 'error-message', 'Passwords do not match' );
+                document.getElementById( 'confirm-password' ).classList.add( 'input-error' );
+                return;
+            }
+
+            // Show loading
+            document.getElementById( 'register-form' ).style.display = 'none';
+            showLoading( 'loading' );
+
+            try {
+                // Attempt registration
+                const response = await register( email, password );
+
+                // Show success message
+                hideLoading( 'loading' );
+                showSuccess( 'success-message', 'Account created successfully! Redirecting to login...' );
+
+                // Redirect to login page after 2 seconds
+                setTimeout( () => {
+                    window.location.href = 'login.html';
+                }, 2000 );
+
+            } catch ( error ) {
+                // Show error
+                hideLoading( 'loading' );
+                document.getElementById( 'register-form' ).style.display = 'flex';
+
+                let errorMessage = error.message || 'Registration failed. Please try again.';
+
+                // Provide helpful error messages
+                if ( errorMessage.includes( 'already exists' ) || errorMessage.includes( 'duplicate' ) ) {
+                    errorMessage = 'An account with this email already exists. Please login or use a different email.';
+                } else if ( errorMessage.includes( 'Password' ) ) {
+                    errorMessage = 'Password does not meet requirements. Please ensure it contains uppercase, lowercase, number, and special characters.';
+                } else if ( errorMessage.includes( 'Invalid email' ) ) {
+                    errorMessage = 'Please enter a valid email address.';
+                }
+
+                showError( 'error-message', errorMessage );
+            }
+        } );
+
+        // Auto-focus email field
+        document.getElementById( 'email' ).focus();
+
+        console.log( '🔐 Lupin Registration Page Ready' );
+    </script>
+</body>
+</html>
