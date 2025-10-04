@@ -61,7 +61,7 @@
 ## WEBSOCKET DEVELOPMENT NOTES
 - **Architecture**: Dual-session design with user-centric routing (see `/src/docs/websocket-architecture.md`)
 - **Event System**: Subscription-based filtering prevents clients from receiving unwanted events
-- **Session Management**: localStorage-based persistence across page reloads using "adjective_noun" format
+- **Session Management**: localStorage-based persistence across page reloads using "adjective noun" format (e.g., "wise penguin")
 - **Authentication**: All connections require `auth_request` with Bearer token: `Bearer mock_token_email_{email}`
 - **Endpoints**: 
   - `/ws/queue/{session_id}` - Main application WebSocket (queue, notifications, system events)
@@ -70,7 +70,7 @@
   - Enable `app_debug = true` in lupin-app.ini for faster time updates (5s vs 60s)
   - Use browser dev tools Network → WS tab to monitor WebSocket traffic
   - Check console for authentication success/failure messages
-  - Verify session ID format matches pattern: `wise_penguin`, `clever_dolphin`, etc.
+  - Verify session ID format matches pattern: `wise penguin`, `clever dolphin`, etc.
 - **Common Issues**:
   - WebSocket connection fails → Check server running on port 7999
   - No events received → Verify authentication succeeded and events are subscribed

@@ -90,7 +90,13 @@ class FreshQueueUI {
         this.AUDIO_SESSION_KEY = 'fresh_audio_session_id';
         this.USER_EMAIL_KEY = 'fresh_user_email';
         this.VERSION_KEY = 'fresh_queue_version';
+        this.QUEUE_FILTER_PREF_KEY = 'fresh_queue_filter_preference';  // NEW: Filter mode storage
         this.CURRENT_VERSION = '1.1.1'; // Increment to invalidate old cache
+
+        // User role and filter state
+        this.userRoles = [];  // NEW: User's roles from JWT
+        this.isAdmin = false;  // NEW: Quick admin check
+        this.queueFilterMode = 'own';  // NEW: 'own' or 'all' (admin only)
         
         // Initialize
         this.init();
@@ -109,7 +115,10 @@ class FreshQueueUI {
             
             // Setup user and authentication
             await this.setupAuthentication();
-            
+
+            // Initialize filter UI based on user role
+            this.initializeFilterUI();
+
             // Create audio context
             await this.createAudioContext();
             
@@ -255,11 +264,13 @@ class FreshQueueUI {
         // Extract user info from JWT payload
         const payload = this.parseJWTPayload( this.authToken );
         this.currentUser = payload.email;
+        this.userRoles = payload.roles || [];  // Extract roles array
+        this.isAdmin = this.userRoles.includes( 'admin' );  // Check admin status
 
         // Update UI
         this.updateElement( "user-display", this.currentUser );
         this.updateStatus( "auth-status", "Authenticated", "success" );
-        this.log( `Authentication setup complete for user: ${this.currentUser}` );
+        this.log( `Authentication setup complete for user: ${this.currentUser} (admin: ${this.isAdmin})` );
     }
 
     getStoredTokens() {
@@ -567,7 +578,17 @@ class FreshQueueUI {
                 this.submitQA();
             }
         });
-        
+
+        // Queue filter toggle (admin only - buttons may not exist for regular users)
+        const filterOwnBtn = document.getElementById( 'filter-own-jobs' );
+        const filterAllBtn = document.getElementById( 'filter-all-jobs' );
+
+        if ( filterOwnBtn && filterAllBtn ) {
+            filterOwnBtn.addEventListener( 'click', () => this.setFilterMode( 'own' ) );
+            filterAllBtn.addEventListener( 'click', () => this.setFilterMode( 'all' ) );
+            this.log( "Filter button event listeners added" );
+        }
+
         this.log( "Event listeners setup complete" );
     }
     
@@ -1948,8 +1969,17 @@ class FreshQueueUI {
     
     async updateQueueLists( queueName ) {
         this.log( `Updating queue list for: ${queueName}` );
-        const url = `/api/get-queue/${queueName}`;
-        
+
+        // Build URL with user_filter parameter for admins viewing all jobs
+        let url = `/api/get-queue/${queueName}`;
+        if ( this.isAdmin && this.queueFilterMode === 'all' ) {
+            url += '?user_filter=*';  // Admin viewing all jobs
+            this.log( `Admin mode: fetching ALL users' jobs for ${queueName}` );
+        } else {
+            this.log( `Fetching own jobs only for ${queueName}` );
+        }
+        // Regular users and admins in 'own' mode: no parameter = own jobs only
+
         try {
             const response = await fetch( url, {
                 headers: {
@@ -1992,7 +2022,113 @@ class FreshQueueUI {
             this.error( `Error updating ${queueName} queue:`, error );
         }
     }
-    
+
+    setFilterMode( mode ) {
+        /**
+         * Change the queue filter mode for admin users.
+         *
+         * Requires:
+         *     - mode is 'own' or 'all'
+         *     - User is authenticated
+         *
+         * Ensures:
+         *     - Regular users cannot change filter mode (warning logged)
+         *     - Admin users can toggle between 'own' and 'all'
+         *     - UI buttons update to reflect active mode
+         *     - Filter preference persists in localStorage
+         *     - All queues refresh with new filter applied
+         *
+         * Args:
+         *     mode: 'own' (user's jobs only) or 'all' (all users' jobs)
+         */
+        if ( !this.isAdmin ) {
+            this.warn( 'Only admin users can change filter mode' );
+            return;
+        }
+
+        this.queueFilterMode = mode;
+
+        // Update UI button states
+        document.getElementById( 'filter-own-jobs' ).classList.toggle( 'active', mode === 'own' );
+        document.getElementById( 'filter-all-jobs' ).classList.toggle( 'active', mode === 'all' );
+        document.getElementById( 'filter-mode-display' ).textContent =
+            mode === 'own' ? 'Your jobs only' : 'All users\' jobs';
+
+        // Save preference to localStorage
+        localStorage.setItem( this.QUEUE_FILTER_PREF_KEY, mode );
+
+        // Refresh all queues with new filter
+        this.log( `Filter mode changed to: ${mode} - refreshing queues` );
+        this.refreshAllQueues();
+    }
+
+    initializeFilterUI() {
+        /**
+         * Initialize the filter UI based on user role.
+         *
+         * Requires:
+         *     - this.isAdmin is set (from authentication)
+         *     - Filter panel HTML elements exist
+         *
+         * Ensures:
+         *     - Admin users see filter panel, regular users don't
+         *     - Admin filter preference loaded from localStorage (default: 'own')
+         *     - UI button states match current filter mode
+         *     - Filter mode defaulted to 'own' for regular users
+         */
+        const filterSection = document.getElementById( 'filter-settings-section' );
+
+        if ( this.isAdmin ) {
+            // Show filter panel for admins
+            filterSection.style.display = 'block';
+
+            // Load saved preference or default to 'own'
+            const savedFilter = localStorage.getItem( this.QUEUE_FILTER_PREF_KEY );
+            this.queueFilterMode = ( savedFilter === 'all' ) ? 'all' : 'own';
+
+            // Update button states
+            document.getElementById( 'filter-own-jobs' ).classList.toggle( 'active', this.queueFilterMode === 'own' );
+            document.getElementById( 'filter-all-jobs' ).classList.toggle( 'active', this.queueFilterMode === 'all' );
+            document.getElementById( 'filter-mode-display' ).textContent =
+                this.queueFilterMode === 'own' ? 'Your jobs only' : 'All users\' jobs';
+
+            this.log( `Admin filter UI initialized - mode: ${this.queueFilterMode}` );
+        } else {
+            // Hide for regular users
+            filterSection.style.display = 'none';
+            this.queueFilterMode = 'own';  // Force own jobs only
+
+            this.log( 'Regular user - filter locked to own jobs' );
+        }
+    }
+
+    async refreshAllQueues() {
+        /**
+         * Refresh all queue lists with current filter settings.
+         *
+         * Requires:
+         *     - WebSocket connections established
+         *     - Authentication complete
+         *
+         * Ensures:
+         *     - All four queues (todo, run, done, dead) are refreshed
+         *     - Fetches use current queueFilterMode setting
+         *     - Errors logged but don't block other queues
+         */
+        this.log( 'Refreshing all queue lists...' );
+        try {
+            await Promise.all( [
+                this.updateQueueLists( 'todo' ),
+                this.updateQueueLists( 'run' ),
+                this.updateQueueLists( 'done' ),
+                this.updateQueueLists( 'dead' )
+            ] );
+            this.log( 'All queues refreshed successfully' );
+        } catch ( error ) {
+            this.error( 'Error refreshing queues:', error );
+        }
+    }
+
     async handleDoneQueueUpdate( data ) {
         /**
          * Handle done queue update with enhanced structured job metadata.

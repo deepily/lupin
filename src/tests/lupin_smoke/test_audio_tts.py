@@ -172,7 +172,7 @@ class AudioTTSSmokeTests:
         # Test invalid session ID format
         invalid_session_ids = [
             "invalid-session-123",  # Wrong format
-            "test_session",         # No adjective_noun pattern
+            "test_session",         # Underscore instead of space
             "",                     # Empty
             "a",                    # Too short
         ]

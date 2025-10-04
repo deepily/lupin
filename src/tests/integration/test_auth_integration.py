@@ -550,14 +550,16 @@ async def test_websocket_jwt_authentication( create_test_user ):
     access_token = login_response.json()["tokens"]["access_token"]
 
     # Step 2: Connect to WebSocket
-    ws_url = "ws://localhost:7999/ws/queue/test_session"
+    # Use valid session ID format: "adjective noun" (e.g., "wise penguin")
+    # URL-encode space as %20
+    ws_url = "ws://localhost:7999/ws/queue/test%20session"
 
     async with websockets.connect( ws_url ) as websocket:
         # Step 3: Send auth request
         auth_message = {
             "type": "auth_request",
             "token": access_token,
-            "session_id": "test_session",
+            "session_id": "test session",
             "subscribed_events": ["*"]
         }
 
@@ -570,9 +572,14 @@ async def test_websocket_jwt_authentication( create_test_user ):
         # Step 5: Verify auth success
         assert response_data["type"] == "auth_success", f"Expected auth_success, got {response_data['type']}"
         assert response_data["user_id"] is not None
-        assert response_data["session_id"] == "test_session"
+        assert response_data["session_id"] == "test session"
 
         # Step 6: Verify connection remains open
+        # Server sends 'connect' message after successful auth
+        connect_response = await asyncio.wait_for( websocket.recv(), timeout=5.0 )
+        connect_data = json.loads( connect_response )
+        assert connect_data["type"] == "connect"
+
         # Send ping to verify WebSocket is active
         ping_message = {"type": "sys_ping"}
         await websocket.send( json.dumps( ping_message ) )

@@ -16,7 +16,7 @@ async def test_queue_state_monitoring_debug():
 
     server_url = "http://localhost:7999"
     auth_token = "Bearer mock_token_email_test@example.com"
-    session_id = "wise_penguin"
+    session_id = "wise penguin"
 
     headers = {
         "Authorization": auth_token,
