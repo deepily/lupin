@@ -56,6 +56,13 @@ All completed phases archived in **[completed-phases/](completed-phases/)** dire
 ### 📦 Archive
 - **[Original Monolithic Document](archive/)** - Historical reference (preserved but not actively maintained)
 
+### 🧪 Testing & Debugging
+- **[Integration Test Failure Analysis](2025.10.03-integration-test-failure-analysis-and-remediation.md)** - 2025.10.03
+  - Analysis of 4 test failures from first integration test run
+  - Root cause investigation and remediation phases
+  - UTF-8 encoding issues, field name mismatches, WebSocket auth bugs
+  - 3-phase fix strategy: Quick wins → Database → WebSocket
+
 ---
 
 ## 🚀 Implementation Summary

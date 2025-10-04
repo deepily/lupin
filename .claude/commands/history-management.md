@@ -61,9 +61,8 @@ When invoked with `mode=check` (or no mode parameter):
 
 ### Step 1: Count Current Tokens
 ```bash
-# Use global word counting and token calculation scripts
-WORD_COUNT=$(/home/rruiz/.claude/scripts/count-words.sh /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md)
-CURRENT_TOKENS=$(/home/rruiz/.claude/scripts/calculate-tokens.sh $WORD_COUNT)
+# Use global token counting script
+CURRENT_TOKENS=$(/home/rruiz/.claude/scripts/get-token-count.sh /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md)
 ```
 
 ### Step 2: Calculate Velocity (7-day)

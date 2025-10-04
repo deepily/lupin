@@ -189,7 +189,7 @@ def test_failed_login_rate_limiting( create_test_user ):
 
         assert response.status_code == 401, f"Attempt {i+1} should fail"
         data = response.json()
-        assert "Invalid credentials" in data["detail"] or "Incorrect" in data["detail"]
+        assert "Invalid email or password" in data["detail"]
 
     # Step 2: Verify account locked
     response = requests.post(
@@ -197,7 +197,7 @@ def test_failed_login_rate_limiting( create_test_user ):
         json={"email": email, "password": wrong_password}
     )
 
-    assert response.status_code == 401, "Should return 401 when locked"
+    assert response.status_code == 429, "Should return 429 (Too Many Requests) when locked"
     data = response.json()
     assert "locked" in data["detail"].lower(), f"Should indicate account locked: {data['detail']}"
 
@@ -207,7 +207,7 @@ def test_failed_login_rate_limiting( create_test_user ):
         json={"email": email, "password": correct_password}
     )
 
-    assert response.status_code == 401, "Correct password should fail when locked"
+    assert response.status_code == 429, "Correct password should fail with 429 when locked"
     data = response.json()
     assert "locked" in data["detail"].lower()
 
@@ -329,7 +329,7 @@ def test_password_change_flow( create_test_user ):
 
     assert change_response.status_code == 200, f"Password change failed: {change_response.text}"
     data = change_response.json()
-    assert data["message"] == "Password updated successfully"
+    assert data["message"] == "Password changed successfully"
 
     # Step 3: Try login with old password (should fail)
     old_login_response = requests.post(

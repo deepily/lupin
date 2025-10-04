@@ -1,16 +1,65 @@
 # Lupin Project History
 
-> **🎯 CURRENT ACHIEVEMENT**: 2025.10.01 - JWT/OAuth PHASE 9 CORE COMPLETE! 🎉 Full authentication flow working: login, profile display, password change, re-authentication. User can successfully change from generated password to their own. Overall progress: 9/10 phases core complete (90%), Phase 10 (documentation) remaining.
+> **🎯 CURRENT ACHIEVEMENT**: 2025.10.03 - Integration Test Analysis & Remediation PHASE 1 COMPLETE! 🎉 Fixed 4 test failures, achieved 7/8 passing (87.5%). Comprehensive test failure analysis documented. Email service configuration-based fix implemented. Only WebSocket JWT auth remaining.
 
-> **Previous Achievement**: 2025.09.29 - JWT/OAuth Authentication PHASES 7 & 8 COMPLETE! Email verification, password reset, rate limiting, and security hardening fully implemented and tested. 131/131 tests passing (100%). Overall progress: 8/10 phases complete (80%).
+> **Previous Achievement**: 2025.10.01 - JWT/OAuth PHASE 9 CORE COMPLETE! Full authentication flow working: login, profile display, password change, re-authentication. User can successfully change from generated password to their own. Overall progress: 9/10 phases core complete (90%).
 
-> **Earlier Achievement**: 2025.09.26 - Math Agent Issue #5 COMPLETELY RESOLVED! Fixed XML whitespace stripping and comprehensive debugging. All arithmetic operations generate properly indented Python code.
+> **Earlier Achievement**: 2025.09.29 - JWT/OAuth Authentication PHASES 7 & 8 COMPLETE! Email verification, password reset, rate limiting, and security hardening fully implemented and tested. 131/131 tests passing (100%). Overall progress: 8/10 phases complete (80%).
 
 ## Recent Activity (Last 7 Days)
 
 ### 🎯 October 2025 - Recent Sessions
 
-#### 2025.10.03 - Testing Infrastructure Fix: pytest Environment Resolution ✅
+#### 2025.10.03 - Part 2: Integration Test Failure Analysis & Phase 1 Remediation ✅
+
+**Summary**: Ran first integration tests after environment fix, discovered 4 failures. Conducted deep root cause analysis, created comprehensive remediation documentation, and successfully fixed Phase 1 issues achieving 87.5% pass rate.
+
+**Test Results - Initial Run**: 4 passed, 4 failed (50%)
+1. ❌ test_failed_login_rate_limiting - Assertion expected 401, got 429
+2. ❌ test_password_change_flow - Message mismatch ("updated" vs "changed")
+3. ❌ test_email_verification_flow - KeyError: 'id' → should be 'user_id'
+4. ❌ test_websocket_jwt_authentication - HTTP 403 on WebSocket connection
+
+**Phase 1 Fixes Implemented**:
+1. **Rate Limiting Status Code** - Updated test to expect 429 (Too Many Requests) - correct HTTP status
+2. **Password Change Message** - Fixed test assertion to match actual message "Password changed successfully"
+3. **Email Verification KeyError** - Changed `user["id"]` → `user["user_id"]` in auth.py:690
+4. **Email Service Configuration** - Added `send email enabled = False` config flag (no SMTP mocking!)
+   - Updated email_service.py to check config flag (return_type="boolean")
+   - Prints "TO DO: Implement SMTP _send_email(...)" when disabled
+   - Returns True without sending (dev/test safe)
+
+**Test Results - After Phase 1**: 7 passed, 1 failed (87.5%) ✅
+- All Phase 1 tests now passing
+- Only WebSocket JWT authentication remains (Phase 3)
+
+**Documentation Created**:
+- `src/rnd/jwt-oauth/2025.10.03-integration-test-failure-analysis-and-remediation.md` (comprehensive analysis)
+- Updated `src/rnd/jwt-oauth/README.md` with link to analysis doc
+
+**Files Modified**:
+- `src/tests/integration/test_auth_integration.py` - Fixed assertions (3 changes)
+- `src/cosa/rest/routers/auth.py` - Fixed user["id"] → user["user_id"]
+- `src/cosa/rest/email_service.py` - Added send_email_enabled check
+- `src/conf/lupin-app.ini` - Added `send email enabled = False`
+- `src/conf/lupin-app-splainer.ini` - Added email config explanations
+- `.claude/commands/history-management.md` - Updated to use get-token-count.sh script
+
+**Key Discoveries**:
+- UTF-8 error in Phase 2 **doesn't exist** - password change works fine!
+- Email mock wasn't needed - configuration-based approach is cleaner
+- HTTP 429 is correct status for rate limiting (not 401)
+- Server restart required for Python module code reload (`/api/init` only reloads config)
+
+**TODO for Next Session**:
+- [ ] Phase 3: Investigate WebSocket JWT authentication (HTTP 403 rejection)
+- [ ] Fix WebSocket to accept JWT tokens (last failing test)
+- [ ] Achieve 100% integration test pass rate (8/8)
+- [ ] Update analysis document with Phase 3 findings
+
+---
+
+#### 2025.10.03 - Part 1: Testing Infrastructure Fix - pytest Environment Resolution ✅
 
 **Summary**: Resolved critical testing environment mismatch preventing integration tests from running. Root cause was pytest installed in miniconda but not in venv, while authentication dependencies (passlib) were only in venv. Implemented long-term solution with separate test dependencies file.
 
