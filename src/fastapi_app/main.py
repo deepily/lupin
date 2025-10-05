@@ -29,8 +29,8 @@ from transformers import pipeline
 
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.memory.input_and_output_table import InputAndOutputTable
-from cosa.memory.solution_snapshot_mgr import SolutionSnapshotManager
-from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+# from cosa.memory.solution_snapshot_mgr import SolutionSnapshotManager
+# from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
 from cosa.memory.solution_manager_factory import SolutionSnapshotManagerFactory
 from cosa.rest.todo_fifo_queue import TodoFifoQueue
 from cosa.rest.fifo_queue import FifoQueue
@@ -41,7 +41,7 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 
 # Global variables
@@ -558,6 +558,7 @@ async def add_security_headers( request: Request, call_next ):
 
 # Include routers
 app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(system.router)
 app.include_router(notifications.router)
 app.include_router(speech.router)

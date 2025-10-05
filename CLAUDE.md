@@ -120,8 +120,8 @@ Lupin uses a three-tier testing strategy for comprehensive validation:
 3. **Integration Tests** (`src/tests/integration/`)
    - End-to-end user flow validation (100-1000ms per test)
    - Test complete workflows across API, database, and authentication
-   - Coverage: 8 comprehensive tests (registration, login, rate limiting, token refresh, password change, email verification, password reset, WebSocket auth)
-   - Run: `pytest src/tests/integration/` (requires server running)
+   - Coverage: 43 comprehensive tests (auth, admin user management, queue filtering)
+   - Run: `./src/tests/run-integration-tests.sh -v` (automated with server management)
 
 4. **WebSocket Tests** (`src/tests/websocket_smoke/`)
    - WebSocket functionality validation
@@ -131,19 +131,19 @@ Lupin uses a three-tier testing strategy for comprehensive validation:
 ### Running Tests
 
 ```bash
-# Run all pytest tests (unit + integration)
-pytest src/tests/
+# Integration tests (RECOMMENDED - automated)
+./src/tests/run-integration-tests.sh -v              # All integration tests
+./src/tests/run-integration-tests.sh -v -s           # Very verbose
+./src/tests/run-integration-tests.sh test_auth*.py   # Specific pattern
 
-# Run only unit tests
-pytest src/tests/unit/
+# Unit tests
+pytest src/tests/unit/                               # All unit tests
+pytest -v src/tests/unit/                            # Verbose
 
-# Run only integration tests (requires FastAPI server on port 7999)
-pytest src/tests/integration/
+# All pytest tests (unit + integration)
+pytest src/tests/                                    # Requires manual server setup
 
-# Run with verbose output
-pytest -v src/tests/
-
-# Run with coverage report
+# With coverage report
 pytest --cov=cosa.rest --cov-report=html src/tests/
 ```
 

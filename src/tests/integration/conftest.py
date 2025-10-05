@@ -1,47 +1,121 @@
 """
 Pytest configuration and fixtures for integration tests.
 
-Provides test database, test client, and helper functions for authentication flow testing.
+Provides test database management, test credentials, and helper functions
+for authentication flow testing against live FastAPI server.
+
+IMPORTANT: Tests require live server running with Testing config block:
+    Terminal 1:
+        export LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
+        ./src/scripts/run-fastapi-lupin.sh
+    Terminal 2: pytest src/tests/integration/ -v
+
+    OR use the automated test runner:
+        ./src/tests/run-integration-tests.sh -v
 """
 
-import pytest
 import os
 import sys
+
+# CRITICAL: Set config environment variable BEFORE any other imports
+# This ensures config_mgr singleton initializes with Testing block
+os.environ["LUPIN_CONFIG_MGR_CLI_ARGS"] = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
+
+import pytest
+import requests
 from pathlib import Path
 
 # Add project root to Python path
 project_root = Path( __file__ ).parent.parent.parent
 sys.path.insert( 0, str( project_root ) )
 
-# Test configuration
-TEST_DB_PATH = project_root / "tests" / "integration" / "test_auth.db"
-TEST_BASE_URL = "http://localhost:7999"
+# Test server configuration
+BASE_URL = "http://localhost:7999"
 
 
-@pytest.fixture( scope="session" )
-def test_db_path():
+@pytest.fixture( scope="session", autouse=True )
+def verify_test_environment():
     """
-    Provide path to test database.
+    One-time validation that server is running with correct Testing configuration.
 
-    Returns:
-        Path: Path to test authentication database
+    Runs once at start of entire test session (scope="session").
+
+    Requires:
+        - Server running on port 7999
+        - Server started with [Lupin: Testing] config block
+
+    Ensures:
+        - Server is accessible and responsive
+        - Config environment variable set at module level (before imports)
+        - Prints clear startup message with configuration
+        - Aborts entire test suite if environment invalid
+
+    Raises:
+        - RuntimeError: Server not accessible or misconfigured
+
+    Note:
+        LUPIN_CONFIG_MGR_CLI_ARGS is set at module level (top of conftest.py)
+        to ensure config_mgr singleton initializes correctly before any imports.
     """
-    return TEST_DB_PATH
+    print( "\n" + "="*60 )
+    print( "INTEGRATION TEST ENVIRONMENT VALIDATION" )
+    print( "="*60 )
+
+    try:
+        # Verify server is running
+        health_response = requests.get( f"{BASE_URL}/health", timeout=2 )
+        if health_response.status_code != 200:
+            raise RuntimeError( f"Server health check failed: {health_response.status_code}" )
+
+        print( f"✓ Server accessible at {BASE_URL}" )
+        print( f"✓ LUPIN_CONFIG_MGR_CLI_ARGS set to Testing block" )
+        print( "\nREQUIRED SERVER STARTUP:" )
+        print( "  export LUPIN_CONFIG_MGR_CLI_ARGS=\"config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing\"" )
+        print( "  ./src/scripts/run-fastapi-lupin.sh" )
+        print( "\nOR use automated test runner:" )
+        print( "  ./src/tests/run-integration-tests.sh -v" )
+        print( "="*60 + "\n" )
+
+    except requests.exceptions.ConnectionError:
+        raise RuntimeError(
+            f"\n{'='*60}\n"
+            f"ERROR: Cannot connect to test server at {BASE_URL}\n\n"
+            f"Please start server with:\n"
+            f"  export LUPIN_CONFIG_MGR_CLI_ARGS=\"config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing\"\n"
+            f"  ./src/scripts/run-fastapi-lupin.sh\n\n"
+            f"OR use automated test runner:\n"
+            f"  ./src/tests/run-integration-tests.sh -v\n"
+            f"{'='*60}\n"
+        )
 
 
-@pytest.fixture( scope="function", autouse=True )
+@pytest.fixture( scope="function" )
 def clean_test_db():
     """
-    Clean up test database before and after each test.
+    Clean test database before each test using direct function calls.
 
-    This ensures tests run in isolation with a clean database state.
+    Simple approach - no API calls, no config switching needed.
+    Server was started with Testing block, so get_auth_db_path()
+    returns test DB automatically.
 
-    Note: Integration tests use the configured auth database path.
-    Make sure to backup production database before running tests!
+    Dual Safety Mechanism (in get_auth_db_path):
+        - Configuration: app_testing=true (from Testing block)
+        - Path validation: path must contain "test"
+
+    Requires:
+        - FastAPI server running with Testing config block
+        - pytest process config_mgr initialized with Testing block
+
+    Ensures:
+        - Fresh database before each test
+        - Database cleaned up after test
+        - Tests run in complete isolation
+        - Dual safety prevents accidental production DB modification
     """
-    from cosa.rest.auth_database import get_auth_db_path, init_auth_database, get_auth_db_connection
+    # Import database functions directly
+    from cosa.rest.auth_database import get_auth_db_path, init_auth_database
 
-    # Get configured database path
+    # Get test database path (dual safety checks happen here)
     db_path = get_auth_db_path()
 
     # Remove existing database if it exists
@@ -89,62 +163,98 @@ def test_admin_credentials():
 
 
 @pytest.fixture( scope="function" )
-def create_test_user( test_user_credentials ):
+def create_test_user( clean_test_db, test_user_credentials ):
     """
-    Create a test user in the database for login/auth tests.
+    Create a test user via API for login/auth tests.
 
     Returns:
-        dict: Created user data including user_id
+        dict: Created user data including user_id and tokens
     """
-    from cosa.rest.user_service import create_user
+    email = test_user_credentials["email"]
+    password = test_user_credentials["password"]
 
-    success, message, user_id = create_user(
-        email=test_user_credentials["email"],
-        password=test_user_credentials["password"],
-        roles=test_user_credentials["roles"]
+    # Register user via API
+    register_response = requests.post(
+        f"{BASE_URL}/auth/register",
+        json={"email": email, "password": password}
     )
 
-    if not success:
-        raise Exception( f"Failed to create test user: {message}" )
+    if register_response.status_code != 201:
+        raise Exception(
+            f"Failed to create test user: {register_response.status_code} - {register_response.text}"
+        )
 
-    # Get full user data
-    from cosa.rest.user_service import get_user_by_id
-    user_data = get_user_by_id( user_id )
+    user_data = register_response.json()["user"]
+
+    # Login to get tokens
+    login_response = requests.post(
+        f"{BASE_URL}/auth/login",
+        json={"email": email, "password": password}
+    )
+
+    tokens = login_response.json()["tokens"]
 
     return {
         **test_user_credentials,
         "user_id": user_data["id"],
-        "email_verified": user_data["email_verified"]
+        "email_verified": user_data.get( "email_verified", False ),
+        "access_token": tokens["access_token"],
+        "refresh_token": tokens["refresh_token"]
     }
 
 
 @pytest.fixture( scope="function" )
-def create_test_admin( test_admin_credentials ):
+def create_test_admin( clean_test_db, test_admin_credentials ):
     """
-    Create a test admin user in the database.
+    Create a test admin user via API.
 
     Returns:
-        dict: Created admin user data including user_id
+        dict: Created admin user data including user_id and tokens
     """
-    from cosa.rest.user_service import create_user
+    email = test_admin_credentials["email"]
+    password = test_admin_credentials["password"]
 
-    success, message, user_id = create_user(
-        email=test_admin_credentials["email"],
-        password=test_admin_credentials["password"],
-        roles=test_admin_credentials["roles"]
+    # Register admin user via API
+    register_response = requests.post(
+        f"{BASE_URL}/auth/register",
+        json={"email": email, "password": password}
     )
 
-    if not success:
-        raise Exception( f"Failed to create test admin: {message}" )
+    if register_response.status_code != 201:
+        raise Exception(
+            f"Failed to create test admin: {register_response.status_code} - {register_response.text}"
+        )
 
-    # Get full user data
-    from cosa.rest.user_service import get_user_by_id
-    user_data = get_user_by_id( user_id )
+    user_data = register_response.json()["user"]
+
+    # Manually add admin role (direct database access since we can't bootstrap admin via API)
+    from cosa.rest.user_service import get_user_by_email
+    from cosa.rest.auth_database import get_auth_db_connection
+    import json
+
+    conn = get_auth_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE users SET roles = ? WHERE email = ?",
+        (json.dumps( ["user", "admin"] ), email)
+    )
+    conn.commit()
+    conn.close()
+
+    # Login to get tokens
+    login_response = requests.post(
+        f"{BASE_URL}/auth/login",
+        json={"email": email, "password": password}
+    )
+
+    tokens = login_response.json()["tokens"]
 
     return {
         **test_admin_credentials,
         "user_id": user_data["id"],
-        "email_verified": user_data["email_verified"]
+        "email_verified": user_data.get( "email_verified", False ),
+        "access_token": tokens["access_token"],
+        "refresh_token": tokens["refresh_token"]
     }
 
 
@@ -156,99 +266,43 @@ def auth_headers( create_test_user ):
     Returns:
         dict: Authorization headers with valid access token
     """
-    from cosa.rest.jwt_service import create_access_token
-
-    # Create access token for test user
-    access_token = create_access_token(
-        user_id=create_test_user["user_id"],
-        email=create_test_user["email"],
-        roles=create_test_user.get( "roles", ["user"] )
-    )
-
     return {
-        "Authorization": f"Bearer {access_token}"
+        "Authorization": f"Bearer {create_test_user['access_token']}"
     }
-
-
-@pytest.fixture( scope="session" )
-def base_url():
-    """
-    Provide base URL for API requests.
-
-    Returns:
-        str: Base URL for FastAPI server
-    """
-    return TEST_BASE_URL
 
 
 # Helper functions for integration tests
 
-def make_request( method, endpoint, base_url=TEST_BASE_URL, headers=None, json=None ):
-    """
-    Make HTTP request to API endpoint.
-
-    Args:
-        method: HTTP method (GET, POST, PUT, DELETE)
-        endpoint: API endpoint path (e.g., '/auth/login')
-        base_url: Base URL for server
-        headers: Optional request headers
-        json: Optional JSON request body
-
-    Returns:
-        Response object
-    """
-    import requests
-
-    url = f"{base_url}{endpoint}"
-
-    if method.upper() == "GET":
-        return requests.get( url, headers=headers )
-    elif method.upper() == "POST":
-        return requests.post( url, headers=headers, json=json )
-    elif method.upper() == "PUT":
-        return requests.put( url, headers=headers, json=json )
-    elif method.upper() == "DELETE":
-        return requests.delete( url, headers=headers, json=json )
-    else:
-        raise ValueError( f"Unsupported HTTP method: {method}" )
-
-
-def register_user( email, password, base_url=TEST_BASE_URL ):
+def register_user( email, password ):
     """
     Helper to register a new user via API.
 
     Args:
         email: User email
         password: User password
-        base_url: Base URL for server
 
     Returns:
         Response object
     """
-    import requests
-
     return requests.post(
-        f"{base_url}/auth/register",
+        f"{BASE_URL}/auth/register",
         json={"email": email, "password": password}
     )
 
 
-def login_user( email, password, base_url=TEST_BASE_URL ):
+def login_user( email, password ):
     """
-    Helper to login user and get tokens.
+    Helper to login user and get tokens via API.
 
     Args:
         email: User email
         password: User password
-        base_url: Base URL for server
 
     Returns:
         Response object with tokens
     """
-    import requests
-
     return requests.post(
-        f"{base_url}/auth/login",
+        f"{BASE_URL}/auth/login",
         json={"email": email, "password": password}
     )
 

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lupin - User Management</title>
+    <link rel="stylesheet" href="../css/auth.css">
+    <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+    <div class="admin-container">
+        <!-- Header -->
+        <div class="admin-header">
+            <h1>👥 User Management</h1>
+            <div class="admin-actions">
+                <button class="btn btn-secondary btn-small" onclick="window.location.href='../profile.html'">
+                    ← Back to Profile
+                </button>
+            </div>
+        </div>
+
+        <!-- Error/Success Messages -->
+        <div class="error-message" id="error-message"></div>
+        <div class="success-message" id="success-message"></div>
+
+        <!-- Search and Filter Bar -->
+        <div class="filter-bar">
+            <input
+                type="search"
+                id="user-search"
+                placeholder="Search by email..."
+                class="search-input"
+            >
+
+            <select id="role-filter" class="filter-select">
+                <option value="">All Roles</option>
+                <option value="admin">Admin</option>
+                <option value="user">User</option>
+            </select>
+
+            <select id="status-filter" class="filter-select">
+                <option value="">All Status</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+            </select>
+
+            <button class="btn btn-secondary btn-small" onclick="clearFilters()">
+                Clear Filters
+            </button>
+        </div>
+
+        <!-- Loading State -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p class="mt-2">Loading users...</p>
+        </div>
+
+        <!-- Users Table -->
+        <div id="users-table-container" style="display: none;">
+            <table class="users-table">
+                <thead>
+                    <tr>
+                        <th>Email</th>
+                        <th>Roles</th>
+                        <th>Status</th>
+                        <th>Verified</th>
+                        <th>Created</th>
+                        <th>Last Login</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="users-tbody">
+                    <!-- Populated by JavaScript -->
+                </tbody>
+            </table>
+
+            <!-- Pagination -->
+            <div class="pagination">
+                <button id="prev-page" class="btn btn-secondary btn-small" onclick="previousPage()" disabled>
+                    ← Previous
+                </button>
+                <span id="page-info">Page 1</span>
+                <button id="next-page" class="btn btn-secondary btn-small" onclick="nextPage()">
+                    Next →
+                </button>
+            </div>
+        </div>
+
+        <!-- No Results Message -->
+        <div id="no-results" style="display: none;" class="no-results">
+            <p>No users found matching your criteria.</p>
+            <button class="btn btn-secondary" onclick="clearFilters()">Clear Filters</button>
+        </div>
+    </div>
+
+    <!-- User Detail Modal -->
+    <div id="user-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeUserModal()">&times;</span>
+            <h2>User Details</h2>
+
+            <div id="user-details" class="user-details">
+                <!-- Populated by JavaScript -->
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-primary" onclick="showRoleEditor()">
+                    Edit Roles
+                </button>
+                <button class="btn btn-warning" onclick="confirmToggleStatus()">
+                    Toggle Status
+                </button>
+                <button class="btn btn-danger" onclick="confirmResetPassword()">
+                    Reset Password
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Role Editor Modal -->
+    <div id="role-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeRoleModal()">&times;</span>
+            <h2>Edit User Roles</h2>
+
+            <div class="role-editor">
+                <p class="mb-2">Select roles for <strong id="role-user-email">user</strong>:</p>
+
+                <label class="role-checkbox">
+                    <input type="checkbox" id="role-admin" value="admin">
+                    <span>⭐ Admin (Superuser privileges)</span>
+                </label>
+
+                <label class="role-checkbox">
+                    <input type="checkbox" id="role-user" value="user">
+                    <span>👤 User (Standard access)</span>
+                </label>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-primary" onclick="saveRoles()">
+                    Save Changes
+                </button>
+                <button class="btn btn-secondary" onclick="closeRoleModal()">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Password Reset Modal -->
+    <div id="password-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closePasswordModal()">&times;</span>
+            <h2>⚠️ Temporary Password Generated</h2>
+
+            <div class="password-result">
+                <p class="warning-text">
+                    <strong>IMPORTANT:</strong> Copy this password now - it will not be shown again!
+                </p>
+
+                <div class="password-display">
+                    <input
+                        type="text"
+                        id="temp-password"
+                        readonly
+                        class="password-input"
+                    >
+                    <button class="btn btn-primary btn-small" onclick="copyPassword()">
+                        📋 Copy
+                    </button>
+                </div>
+
+                <p class="mt-2">User has been logged out and must use this password to login.</p>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-primary" onclick="closePasswordModal()">
+                    Done
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Dialog -->
+    <div id="confirm-modal" class="modal">
+        <div class="modal-content modal-confirm">
+            <h2>Confirm Action</h2>
+            <p id="confirm-message">Are you sure?</p>
+
+            <div class="modal-actions">
+                <button class="btn btn-danger" id="confirm-yes" onclick="confirmYes()">
+                    Confirm
+                </button>
+                <button class="btn btn-secondary" onclick="closeConfirmModal()">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Include Scripts -->
+    <script src="../js/auth.js"></script>
+    <script src="js/admin-users.js"></script>
+    <script>
+        // Require authentication
+        requireAuth();
+
+        // Load users on page load
+        loadUsers();
+
+        console.log( '👥 Lupin User Management Page Ready' );
+    </script>
+</body>
+</html>

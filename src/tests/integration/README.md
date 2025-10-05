@@ -1,4 +1,4 @@
-# Integration Tests for JWT Authentication
+# Integration Tests for Lupin
 
 This directory contains integration tests that validate complete user flows end-to-end across multiple system components.
 
@@ -11,7 +11,9 @@ Integration tests differ from unit tests and smoke tests by testing the entire s
 
 ## Test Suite
 
-### 8 Comprehensive Integration Tests
+### 43 Comprehensive Integration Tests
+
+**Authentication Tests** (8 tests in `test_auth_integration.py`)
 
 1. **`test_complete_registration_flow()`**
    - Tests full user registration from API call to database storage to login
@@ -54,8 +56,20 @@ Integration tests differ from unit tests and smoke tests by testing the entire s
    - **Runtime**: ~500ms
    - **Note**: Async test using pytest-asyncio
 
+**Admin User Management Tests** (23 tests in `test_admin_users.py`)
+- User listing, searching, filtering
+- User creation, updates, deletions
+- Role management (promote/demote admin)
+- Admin permission enforcement
+
+**Queue Filtering Tests** (12 tests in `test_queue_filtering_integration.py`)
+- User-filtered queue access
+- Admin wildcard access
+- Multi-queue validation
+- Response format validation
+
 ### Total Runtime
-Expected: **~4-6 seconds** for all 8 tests
+Expected: **~20-30 seconds** for all 43 tests
 
 ## Prerequisites
 
@@ -66,16 +80,58 @@ Install with pip:
 pip install pytest pytest-asyncio websockets requests
 ```
 
-### FastAPI Server
+### Running Tests - Two Options
 
-Tests require the FastAPI server running on `localhost:7999`:
+#### Option 1: Automated Test Runner (Recommended)
+
+**One command does everything**:
 
 ```bash
-# Start server (from project root)
-src/scripts/run-fastapi-lupin.sh
+# From project root
+./src/tests/run-integration-tests.sh -v
 ```
 
-**Important**: Tests use an isolated test database (`src/tests/integration/test_auth.db`) that is created fresh for each test and cleaned up automatically.
+**Features**:
+- ✅ Checks port 7999 availability
+- ✅ Starts FastAPI server automatically with Testing config
+- ✅ Waits for health check
+- ✅ Runs pytest with your arguments
+- ✅ Cleans up server on exit
+- ✅ Returns pytest exit code (CI/CD friendly)
+
+**Usage Examples**:
+```bash
+./src/tests/run-integration-tests.sh           # Run all tests
+./src/tests/run-integration-tests.sh -v        # Verbose
+./src/tests/run-integration-tests.sh -v -s     # Very verbose (show prints)
+./src/tests/run-integration-tests.sh test_auth_integration.py  # Specific file
+```
+
+#### Option 2: Manual (For Debugging)
+
+**Start server manually with Testing config block**:
+
+```bash
+export LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
+./src/scripts/run-fastapi-lupin.sh
+```
+
+Then run tests in separate terminal:
+```bash
+pytest src/tests/integration/ -v
+```
+
+**Why Testing Config Block?**
+- Uses isolated test database (`/src/conf/long-term-memory/test-lupin-auth.db`)
+- Dual safety validation prevents accidental production database modification
+- Both server AND pytest process use same configuration (from environment variable)
+- Tests call database functions directly (no API overhead)
+
+**Dual Safety Mechanism**:
+1. Configuration flag: `app_testing=true` (from Testing block)
+2. Path validation: Database path must contain "test"
+
+Both checks must pass or operations fail with safety violation error.
 
 ### Configuration
 
@@ -84,80 +140,68 @@ Ensure `lupin-app.ini` has:
 auth mode = jwt
 ```
 
-## Running Tests
+## Quick Start
 
-### Run All Integration Tests
-
+**Simplest way** (automated):
 ```bash
-# From project root
-pytest src/tests/integration/
-
-# With verbose output
-pytest -v src/tests/integration/
-
-# With detailed output (shows print statements)
-pytest -v -s src/tests/integration/
+./src/tests/run-integration-tests.sh -v
 ```
+
+**Manual way** (for debugging - see "Running Tests" section below)
 
 ### Run Specific Test
 
 ```bash
-# Run single test
+# With automated runner
+./src/tests/run-integration-tests.sh test_auth_integration.py::test_complete_registration_flow
+
+# Manual (if server already running)
 pytest src/tests/integration/test_auth_integration.py::test_complete_registration_flow
-
-# Run multiple specific tests
-pytest src/tests/integration/test_auth_integration.py::test_login_with_valid_credentials \
-       src/tests/integration/test_auth_integration.py::test_token_refresh_flow
-```
-
-### Run with Coverage
-
-```bash
-# Install coverage tool
-pip install pytest-cov
-
-# Run with coverage report
-pytest --cov=cosa.rest --cov-report=html src/tests/integration/
-
-# View coverage report
-open htmlcov/index.html
 ```
 
 ## Test Structure
 
 ### Fixtures (conftest.py)
 
-**Database Fixtures**:
-- `test_db_path` - Path to isolated test database
-- `clean_test_db` - Auto-cleanup before/after each test
+**Environment Fixtures** (session-level):
+- `verify_test_environment` - One-time validation that server is running with Testing config block (runs automatically)
+
+**Database Fixtures** (function-level):
+- `clean_test_db` - Reinitializes test database by calling `init_auth_database()` directly before each test
 
 **User Fixtures**:
 - `test_user_credentials` - Standard test user credentials
 - `test_admin_credentials` - Admin user credentials
-- `create_test_user` - Creates test user in database
-- `create_test_admin` - Creates admin user in database
+- `create_test_user` - Creates test user via API and returns user data + tokens
+- `create_test_admin` - Creates admin user via API (with database role elevation)
 
 **Auth Fixtures**:
 - `auth_headers` - Pre-authenticated headers with JWT token
-- `base_url` - Base URL for API requests
 
 **Helper Functions**:
-- `make_request()` - Generic HTTP request helper
-- `register_user()` - Helper to register via API
-- `login_user()` - Helper to login via API
-- `get_auth_header()` - Create auth headers from token
+- `register_user(email, password)` - Register via API
+- `login_user(email, password)` - Login via API
+- `get_auth_header(access_token)` - Create auth headers from token
+
+**Configuration**:
+- `BASE_URL = "http://localhost:7999"` - Live server endpoint
 
 ### Test Isolation
 
 Each test runs in complete isolation:
-- **Fresh database** created before each test
-- **Automatic cleanup** after each test
+- **Fresh database** reinitialized by direct function calls (`init_auth_database()`) before each test
+- **Automatic cleanup** - database deleted after each test
 - **No state sharing** between tests
 - **Can run in any order** (no dependencies)
+- **Tests use requests library** to make real HTTP calls to live server
+- **Server manages all infrastructure** (queues, WebSocket, database)
+- **Dual safety** validates test mode before every database operation
 
 ## What Gets Tested
 
 ### API Endpoints
+
+**Authentication**:
 - `POST /auth/register` - User registration
 - `POST /auth/login` - User login
 - `POST /auth/refresh` - Token refresh
@@ -169,6 +213,22 @@ Each test runs in complete isolation:
 - `POST /auth/request-password-reset` - Request password reset
 - `POST /auth/reset-password` - Reset password with token
 - `WS /ws/queue/{session_id}` - WebSocket with JWT auth
+
+**Admin User Management**:
+- `GET /admin/users` - List all users
+- `GET /admin/users/{user_id}` - Get user by ID
+- `POST /admin/users` - Create new user
+- `PUT /admin/users/{user_id}` - Update user
+- `DELETE /admin/users/{user_id}` - Delete user
+- `POST /admin/users/{user_id}/promote` - Promote to admin
+- `POST /admin/users/{user_id}/demote` - Demote from admin
+
+**Queue Filtering**:
+- `GET /api/get-queue/{queue_name}?user_filter=<uid|*>` - Get filtered queue
+- `POST /api/push` - Push job to queue
+
+**System**:
+- Health and status endpoints
 
 ### Database Operations
 - User creation and retrieval
@@ -191,18 +251,34 @@ Each test runs in complete isolation:
 
 ### Server Not Running
 
-**Error**: `ConnectionRefusedError: [Errno 111] Connection refused`
+**Error**: `Cannot connect to test server at http://localhost:7999`
 
-**Solution**: Start FastAPI server:
+**Solution**: Use the automated test runner (it starts the server automatically):
 ```bash
-src/scripts/run-fastapi-lupin.sh
+./src/tests/run-integration-tests.sh -v
 ```
 
-### Database Permission Errors
+**Or** start server manually:
+```bash
+export LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
+./src/scripts/run-fastapi-lupin.sh
+```
 
-**Error**: `PermissionError: Cannot delete test_auth.db`
+### Port Already in Use
 
-**Solution**: Ensure no other processes have the test database open
+**Error**: `Port 7999 is already in use`
+
+**Solution**:
+- Kill the existing process: `lsof -Pi :7999 -sTCP:LISTEN` then `kill <PID>`
+- Or use a different port (requires code changes)
+
+### Dual Safety Violation
+
+**Error**: `ValueError: SAFETY VIOLATION: app_testing=true but database path missing 'test'`
+
+**Solution**: This error indicates a configuration mismatch. Ensure:
+1. Server started with `config_block_id=Lupin:+Testing`
+2. Testing config block has `app_testing=true` and test database path
 
 ### WebSocket Test Timeout
 
@@ -274,12 +350,8 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install pytest pytest-asyncio websockets requests
-      - name: Start FastAPI server
-        run: |
-          src/scripts/run-fastapi-lupin.sh &
-          sleep 5  # Wait for server startup
       - name: Run integration tests
-        run: pytest -v src/tests/integration/
+        run: ./src/tests/run-integration-tests.sh -v
 ```
 
 ## Maintenance

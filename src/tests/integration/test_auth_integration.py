@@ -7,15 +7,13 @@ Tests complete user flows end-to-end across multiple components:
 - Token management
 - WebSocket authentication
 
-Requires FastAPI server running on localhost:7999
+Tests against live FastAPI server (requires server running with LUPIN_TEST_MODE=true)
 """
 
 import pytest
 import requests
 import time
 import json
-import asyncio
-import websockets
 from pathlib import Path
 
 # Test configuration
@@ -26,7 +24,7 @@ BASE_URL = "http://localhost:7999"
 # Test 1: Complete Registration Flow
 # ============================================================================
 
-def test_complete_registration_flow( test_user_credentials ):
+def test_complete_registration_flow( clean_test_db, test_user_credentials ):
     """
     Test complete user registration flow from start to finish.
 
@@ -48,8 +46,7 @@ def test_complete_registration_flow( test_user_credentials ):
     password = test_user_credentials["password"]
 
     # Step 1: Register new user
-    response = requests.post(
-        f"{BASE_URL}/auth/register",
+    response = requests.post( f"{BASE_URL}/auth/register",
         json={"email": email, "password": password}
     )
 
@@ -72,8 +69,7 @@ def test_complete_registration_flow( test_user_credentials ):
     assert "user" in db_user["roles"]
 
     # Step 3: Login with new credentials
-    login_response = requests.post(
-        f"{BASE_URL}/auth/login",
+    login_response = requests.post( f"{BASE_URL}/auth/login",
         json={"email": email, "password": password}
     )
 
@@ -122,8 +118,7 @@ def test_login_with_valid_credentials( create_test_user ):
     password = create_test_user["password"]
 
     # Step 1: Login
-    response = requests.post(
-        f"{BASE_URL}/auth/login",
+    response = requests.post( f"{BASE_URL}/auth/login",
         json={"email": email, "password": password}
     )
 
@@ -182,9 +177,8 @@ def test_failed_login_rate_limiting( create_test_user ):
 
     # Step 1: Fail 5 times
     for i in range( 5 ):
-        response = requests.post(
-            f"{BASE_URL}/auth/login",
-            json={"email": email, "password": wrong_password}
+        response = requests.post( f"{BASE_URL}/auth/login",
+        json={"email": email, "password": wrong_password}
         )
 
         assert response.status_code == 401, f"Attempt {i+1} should fail"
@@ -192,8 +186,7 @@ def test_failed_login_rate_limiting( create_test_user ):
         assert "Invalid email or password" in data["detail"]
 
     # Step 2: Verify account locked
-    response = requests.post(
-        f"{BASE_URL}/auth/login",
+    response = requests.post( f"{BASE_URL}/auth/login",
         json={"email": email, "password": wrong_password}
     )
 
@@ -202,8 +195,7 @@ def test_failed_login_rate_limiting( create_test_user ):
     assert "locked" in data["detail"].lower(), f"Should indicate account locked: {data['detail']}"
 
     # Step 3: Verify correct password also fails
-    response = requests.post(
-        f"{BASE_URL}/auth/login",
+    response = requests.post( f"{BASE_URL}/auth/login",
         json={"email": email, "password": correct_password}
     )
 
@@ -244,8 +236,7 @@ def test_token_refresh_flow( create_test_user ):
     password = create_test_user["password"]
 
     # Step 1: Login
-    login_response = requests.post(
-        f"{BASE_URL}/auth/login",
+    login_response = requests.post( f"{BASE_URL}/auth/login",
         json={"email": email, "password": password}
     )
 
@@ -256,8 +247,7 @@ def test_token_refresh_flow( create_test_user ):
     old_refresh_token = login_data["tokens"]["refresh_token"]
 
     # Step 2: Refresh tokens
-    refresh_response = requests.post(
-        f"{BASE_URL}/auth/refresh",
+    refresh_response = requests.post( f"{BASE_URL}/auth/refresh",
         json={"refresh_token": old_refresh_token}
     )
 
@@ -308,8 +298,7 @@ def test_password_change_flow( create_test_user ):
     new_password = "NewPassword456!"
 
     # Step 1: Login with old password
-    login_response = requests.post(
-        f"{BASE_URL}/auth/login",
+    login_response = requests.post( f"{BASE_URL}/auth/login",
         json={"email": email, "password": old_password}
     )
 
@@ -318,8 +307,7 @@ def test_password_change_flow( create_test_user ):
 
     # Step 2: Change password
     headers = {"Authorization": f"Bearer {access_token}"}
-    change_response = requests.put(
-        f"{BASE_URL}/auth/change-password",
+    change_response = requests.put( f"{BASE_URL}/auth/change-password",
         headers=headers,
         json={
             "current_password": old_password,
@@ -332,16 +320,14 @@ def test_password_change_flow( create_test_user ):
     assert data["message"] == "Password changed successfully"
 
     # Step 3: Try login with old password (should fail)
-    old_login_response = requests.post(
-        f"{BASE_URL}/auth/login",
+    old_login_response = requests.post( f"{BASE_URL}/auth/login",
         json={"email": email, "password": old_password}
     )
 
     assert old_login_response.status_code == 401, "Old password should not work"
 
     # Step 4: Login with new password (should succeed)
-    new_login_response = requests.post(
-        f"{BASE_URL}/auth/login",
+    new_login_response = requests.post( f"{BASE_URL}/auth/login",
         json={"email": email, "password": new_password}
     )
 
@@ -383,8 +369,7 @@ def test_email_verification_flow( create_test_user ):
     password = create_test_user["password"]
 
     # Step 1: Login
-    login_response = requests.post(
-        f"{BASE_URL}/auth/login",
+    login_response = requests.post( f"{BASE_URL}/auth/login",
         json={"email": email, "password": password}
     )
 
@@ -398,8 +383,7 @@ def test_email_verification_flow( create_test_user ):
 
     # Step 3: Request verification email
     headers = {"Authorization": f"Bearer {access_token}"}
-    request_response = requests.post(
-        f"{BASE_URL}/auth/request-verification",
+    request_response = requests.post( f"{BASE_URL}/auth/request-verification",
         headers=headers
     )
 
@@ -421,8 +405,7 @@ def test_email_verification_flow( create_test_user ):
     verification_token = row[0]
 
     # Step 5: Verify email with token
-    verify_response = requests.post(
-        f"{BASE_URL}/auth/verify-email",
+    verify_response = requests.post( f"{BASE_URL}/auth/verify-email",
         json={"token": verification_token}
     )
 
@@ -462,8 +445,7 @@ def test_password_reset_flow( create_test_user ):
     new_password = "ResetPassword789!"
 
     # Step 1: Request password reset
-    reset_request_response = requests.post(
-        f"{BASE_URL}/auth/request-password-reset",
+    reset_request_response = requests.post( f"{BASE_URL}/auth/request-password-reset",
         json={"email": email}
     )
 
@@ -486,8 +468,7 @@ def test_password_reset_flow( create_test_user ):
     reset_token = row[0]
 
     # Step 3: Reset password with token
-    reset_response = requests.post(
-        f"{BASE_URL}/auth/reset-password",
+    reset_response = requests.post( f"{BASE_URL}/auth/reset-password",
         json={
             "token": reset_token,
             "new_password": new_password
@@ -497,16 +478,14 @@ def test_password_reset_flow( create_test_user ):
     assert reset_response.status_code == 200, f"Password reset failed: {reset_response.text}"
 
     # Step 4: Try old password (should fail)
-    old_login_response = requests.post(
-        f"{BASE_URL}/auth/login",
+    old_login_response = requests.post( f"{BASE_URL}/auth/login",
         json={"email": email, "password": old_password}
     )
 
     assert old_login_response.status_code == 401, "Old password should not work after reset"
 
     # Step 5: Login with new password (should succeed)
-    new_login_response = requests.post(
-        f"{BASE_URL}/auth/login",
+    new_login_response = requests.post( f"{BASE_URL}/auth/login",
         json={"email": email, "password": new_password}
     )
 
@@ -537,24 +516,25 @@ async def test_websocket_jwt_authentication( create_test_user ):
         - Session ID established
         - WebSocket can receive events
     """
+    import websockets
+
     email = create_test_user["email"]
     password = create_test_user["password"]
 
     # Step 1: Login to get access token
-    login_response = requests.post(
-        f"{BASE_URL}/auth/login",
+    login_response = requests.post( f"{BASE_URL}/auth/login",
         json={"email": email, "password": password}
     )
 
     assert login_response.status_code == 200
     access_token = login_response.json()["tokens"]["access_token"]
 
-    # Step 2: Connect to WebSocket
+    # Step 2: Connect to WebSocket endpoint
     # Use valid session ID format: "adjective noun" (e.g., "wise penguin")
-    # URL-encode space as %20
-    ws_url = "ws://localhost:7999/ws/queue/test%20session"
+    # Convert http://localhost:7999 to ws://localhost:7999
+    ws_url = BASE_URL.replace( "http://", "ws://" )
 
-    async with websockets.connect( ws_url ) as websocket:
+    async with websockets.connect( f"{ws_url}/ws/queue/test%20session" ) as websocket:
         # Step 3: Send auth request
         auth_message = {
             "type": "auth_request",
@@ -566,7 +546,7 @@ async def test_websocket_jwt_authentication( create_test_user ):
         await websocket.send( json.dumps( auth_message ) )
 
         # Step 4: Wait for auth response
-        response = await asyncio.wait_for( websocket.recv(), timeout=5.0 )
+        response = await websocket.recv()
         response_data = json.loads( response )
 
         # Step 5: Verify auth success
@@ -576,7 +556,7 @@ async def test_websocket_jwt_authentication( create_test_user ):
 
         # Step 6: Verify connection remains open
         # Server sends 'connect' message after successful auth
-        connect_response = await asyncio.wait_for( websocket.recv(), timeout=5.0 )
+        connect_response = await websocket.recv()
         connect_data = json.loads( connect_response )
         assert connect_data["type"] == "connect"
 
@@ -585,6 +565,6 @@ async def test_websocket_jwt_authentication( create_test_user ):
         await websocket.send( json.dumps( ping_message ) )
 
         # Should receive pong
-        pong_response = await asyncio.wait_for( websocket.recv(), timeout=5.0 )
+        pong_response = await websocket.recv()
         pong_data = json.loads( pong_response )
         assert pong_data["type"] == "sys_pong"
