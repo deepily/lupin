@@ -8,7 +8,20 @@ performance comparison metrics.
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+# Bootstrap using LUPIN_ROOT environment variable
+lupin_root = os.environ.get( 'LUPIN_ROOT' )
+if lupin_root is None:
+    raise RuntimeError(
+        "LUPIN_ROOT environment variable not set.\n"
+        "Set it before running benchmark:\n"
+        "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box\n"
+        "  python src/scripts/benchmark_snapshot_managers.py"
+    )
+
+src_path = os.path.join( lupin_root, 'src' )
+if src_path not in sys.path:
+    sys.path.insert( 0, src_path )
 
 import time
 import random

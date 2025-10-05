@@ -6,12 +6,9 @@ Tests validation logic for session IDs, tokens, and auth messages
 to ensure proper security validation at the component level.
 """
 
-import sys
-import os
 import pytest
 
-# Add the cosa module to the Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+# Python path configured by src/tests/conftest.py
 
 # Import the validation function we need to test
 from cosa.rest.routers.websocket import is_valid_session_id

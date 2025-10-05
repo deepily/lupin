@@ -20,9 +20,19 @@ import uuid
 import aiohttp
 import websockets
 
-# Add paths for imports
-sys.path.append( os.path.join( os.path.dirname( __file__ ), '..' ) )
-sys.path.append( os.path.dirname( __file__ ) )
+# Bootstrap using LUPIN_ROOT environment variable
+lupin_root = os.environ.get( 'LUPIN_ROOT' )
+if lupin_root is None:
+    raise RuntimeError(
+        "LUPIN_ROOT environment variable not set.\n"
+        "Set it before starting FastAPI server:\n"
+        "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box\n"
+        "  python src/fastapi_app/main.py"
+    )
+
+src_path = os.path.join( lupin_root, 'src' )
+if src_path not in sys.path:
+    sys.path.insert( 0, src_path )
 
 import torch
 from transformers import pipeline

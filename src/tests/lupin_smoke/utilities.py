@@ -15,10 +15,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 from urllib.parse import quote
 
-# Import server's email_to_system_id function to ensure consistency
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+# Python path configured by src/tests/conftest.py - just import directly
 from cosa.rest.user_id_generator import email_to_system_id
 
 

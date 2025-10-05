@@ -329,15 +329,27 @@ import sys
 import os
 import secrets
 import string
-from pathlib import Path
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root / 'src'))
+# Bootstrap using LUPIN_ROOT environment variable
+lupin_root = os.environ.get( 'LUPIN_ROOT' )
+if lupin_root is None:
+    raise RuntimeError(
+        "LUPIN_ROOT not set. Export it to your project root:\n"
+        "  export LUPIN_ROOT=/path/to/your/project"
+    )
 
+src_path = os.path.join( lupin_root, 'src' )
+if src_path not in sys.path:
+    sys.path.insert( 0, src_path )
+
+# Now cosa is importable - use canonical patterns
+import cosa.utils.util as du
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.user_service import register_user, get_user_by_email
 from cosa.rest.auth_database import get_auth_db_connection
+
+# For any other paths, use du.get_project_root()
+project_root = du.get_project_root()
 
 # Mock users to migrate
 MOCK_USERS = [

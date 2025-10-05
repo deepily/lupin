@@ -21,9 +21,19 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Any
 
-# Add the project root to Python path for imports
-project_root = Path(__file__).parent.parent.parent
-sys.path.append(str(project_root / "src"))
+# Bootstrap using LUPIN_ROOT environment variable
+lupin_root = os.environ.get( 'LUPIN_ROOT' )
+if lupin_root is None:
+    raise RuntimeError(
+        "LUPIN_ROOT environment variable not set.\n"
+        "Set it before running migration script:\n"
+        "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box\n"
+        "  python src/scripts/migrate_solution_snapshots.py"
+    )
+
+src_path = os.path.join( lupin_root, 'src' )
+if src_path not in sys.path:
+    sys.path.insert( 0, src_path )
 
 import cosa.utils.util as du
 

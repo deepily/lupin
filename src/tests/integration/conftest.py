@@ -15,7 +15,6 @@ IMPORTANT: Tests require live server running with Testing config block:
 """
 
 import os
-import sys
 
 # CRITICAL: Set config environment variable BEFORE any other imports
 # This ensures config_mgr singleton initializes with Testing block
@@ -25,9 +24,7 @@ import pytest
 import requests
 from pathlib import Path
 
-# Add project root to Python path
-project_root = Path( __file__ ).parent.parent.parent
-sys.path.insert( 0, str( project_root ) )
+# Python path configured by src/tests/conftest.py
 
 # Test server configuration
 BASE_URL = "http://localhost:7999"

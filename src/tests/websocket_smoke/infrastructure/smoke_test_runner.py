@@ -23,14 +23,11 @@ from dataclasses import dataclass
 # Import our test utilities
 from test_utilities import WebSocketTestUtilities
 
-# Import Phase 2 comprehensive test suites
-import sys
-from pathlib import Path
-sys.path.append( str( Path( __file__ ).parent.parent / "core" ) )
-from test_connection_basic import ConnectionBasicTests
-from test_authentication_flow import AuthenticationFlowTests
-from test_session_management import SessionManagementTests
-from test_event_system import EventSystemTests
+# Use relative imports for test modules
+from ..core.test_connection_basic import ConnectionBasicTests
+from ..core.test_authentication_flow import AuthenticationFlowTests
+from ..core.test_session_management import SessionManagementTests
+from ..core.test_event_system import EventSystemTests
 
 
 @dataclass

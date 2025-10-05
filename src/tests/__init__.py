@@ -1,0 +1,3 @@
+"""
+Lupin test suite package.
+"""
