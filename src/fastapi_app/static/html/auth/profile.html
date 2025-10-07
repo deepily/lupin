@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lupin - Profile</title>
+    <link rel="stylesheet" href="css/auth.css">
+</head>
+<body>
+    <div class="profile-container">
+        <div class="profile-header">
+            <h1>Your Profile</h1>
+            <button class="btn btn-secondary" onclick="logout()">Logout</button>
+        </div>
+
+        <div class="error-message" id="error-message"></div>
+        <div class="success-message" id="success-message"></div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p class="mt-2">Loading profile...</p>
+        </div>
+
+        <div id="profile-content" style="display: none;">
+            <div class="profile-info">
+                <div class="info-row">
+                    <span class="info-label">Email</span>
+                    <span class="info-value" id="user-email">-</span>
+                </div>
+
+                <div class="info-row">
+                    <span class="info-label">User ID</span>
+                    <span class="info-value" id="user-id">-</span>
+                </div>
+
+                <div class="info-row">
+                    <span class="info-label">Roles</span>
+                    <span class="info-value" id="user-roles">-</span>
+                </div>
+
+                <div class="info-row">
+                    <span class="info-label">Email Verified</span>
+                    <span class="info-value" id="email-verified">-</span>
+                </div>
+
+                <div class="info-row">
+                    <span class="info-label">Account Status</span>
+                    <span class="info-value" id="account-status">-</span>
+                </div>
+            </div>
+
+            <!-- Admin Section (only visible to admins) -->
+            <div class="admin-section" id="admin-section" style="display: none;">
+                <h2>🔐 ADMIN ACCESS</h2>
+                <p>You have administrative privileges on this system.</p>
+                <div class="button-group">
+                    <button class="btn btn-secondary" onclick="window.location.href='admin/users.html'">👥 Manage Users</button>
+                    <button class="btn btn-secondary" onclick="alert('System Settings coming soon!')">⚙️ System Settings</button>
+                    <button class="btn btn-secondary" onclick="alert('Audit Logs coming soon!')">📋 Audit Logs</button>
+                </div>
+            </div>
+
+            <div class="button-group mt-3">
+                <button class="btn btn-primary" onclick="window.location.href='change-password.html'">
+                    Change Password
+                </button>
+                <button class="btn btn-secondary" onclick="window.location.href='../queue-fresh.html'">
+                    Go to Queue
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/auth.js"></script>
+    <script>
+        // Require authentication
+        requireAuth();
+
+        // Load user profile
+        async function loadProfile() {
+            try {
+                showLoading( 'loading' );
+
+                const user = await getCurrentUser();
+
+                if ( !user ) {
+                    throw new Error( 'Failed to load user data' );
+                }
+
+                // Display user information
+                document.getElementById( 'user-email' ).textContent = user.email || '-';
+                document.getElementById( 'user-id' ).textContent = user.id || '-';
+
+                // Display roles with badges
+                const rolesContainer = document.getElementById( 'user-roles' );
+                rolesContainer.innerHTML = '';
+
+                if ( user.roles && user.roles.length > 0 ) {
+                    user.roles.forEach( role => {
+                        const badge = document.createElement( 'span' );
+                        badge.className = 'role-badge';
+
+                        if ( role === 'admin' ) {
+                            badge.className += ' role-admin';
+                            badge.textContent = '⭐ ' + role.toUpperCase();
+                        } else {
+                            badge.className += ' role-user';
+                            badge.textContent = role.toUpperCase();
+                        }
+
+                        rolesContainer.appendChild( badge );
+                    } );
+                } else {
+                    rolesContainer.textContent = 'None';
+                }
+
+                // Email verification status
+                const emailVerifiedEl = document.getElementById( 'email-verified' );
+                if ( user.email_verified ) {
+                    emailVerifiedEl.className = 'info-value verified';
+                    emailVerifiedEl.textContent = 'Verified';
+                } else {
+                    emailVerifiedEl.className = 'info-value not-verified';
+                    emailVerifiedEl.textContent = 'Not Verified';
+                }
+
+                // Account status
+                const statusEl = document.getElementById( 'account-status' );
+                if ( user.is_active ) {
+                    statusEl.textContent = 'Active';
+                    statusEl.style.color = '#059669';
+                } else {
+                    statusEl.textContent = 'Inactive';
+                    statusEl.style.color = '#dc2626';
+                }
+
+                // Show admin section if user is admin
+                const isUserAdmin = user.roles && user.roles.includes( 'admin' );
+                if ( isUserAdmin ) {
+                    document.getElementById( 'admin-section' ).style.display = 'block';
+                }
+
+                // Show profile content
+                hideLoading( 'loading' );
+                document.getElementById( 'profile-content' ).style.display = 'block';
+
+            } catch ( error ) {
+                hideLoading( 'loading' );
+                showError( 'error-message', 'Failed to load profile: ' + error.message );
+                console.error( 'Profile load error:', error );
+
+                // If authentication failed, redirect to login
+                if ( error.message.includes( 'Session expired' ) || error.message.includes( '401' ) ) {
+                    setTimeout( () => {
+                        window.location.href = 'login.html';
+                    }, 2000 );
+                }
+            }
+        }
+
+        // Load profile on page load
+        loadProfile();
+
+        console.log( '👤 Lupin Profile Page Ready' );
+    </script>
+</body>
+</html>

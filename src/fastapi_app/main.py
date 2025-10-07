@@ -20,17 +20,27 @@ import uuid
 import aiohttp
 import websockets
 
-# Add paths for imports
-sys.path.append( os.path.join( os.path.dirname( __file__ ), '..' ) )
-sys.path.append( os.path.dirname( __file__ ) )
+# Bootstrap using LUPIN_ROOT environment variable
+lupin_root = os.environ.get( 'LUPIN_ROOT' )
+if lupin_root is None:
+    raise RuntimeError(
+        "LUPIN_ROOT environment variable not set.\n"
+        "Set it before starting FastAPI server:\n"
+        "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box\n"
+        "  python src/fastapi_app/main.py"
+    )
+
+src_path = os.path.join( lupin_root, 'src' )
+if src_path not in sys.path:
+    sys.path.insert( 0, src_path )
 
 import torch
 from transformers import pipeline
 
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.memory.input_and_output_table import InputAndOutputTable
-from cosa.memory.solution_snapshot_mgr import SolutionSnapshotManager
-from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
+# from cosa.memory.solution_snapshot_mgr import SolutionSnapshotManager
+# from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
 from cosa.memory.solution_manager_factory import SolutionSnapshotManagerFactory
 from cosa.rest.todo_fifo_queue import TodoFifoQueue
 from cosa.rest.fifo_queue import FifoQueue
@@ -41,7 +51,7 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 
 # Global variables
@@ -415,7 +425,13 @@ async def lifespan( app: FastAPI ):
     
     # Initialize input/output table
     io_tbl = InputAndOutputTable( debug=app_debug, verbose=app_verbose )
-    
+
+    # Initialize authentication database
+    print( "[AUTH] Initializing authentication database..." )
+    from cosa.rest.auth_database import init_auth_database
+    init_auth_database()
+    print( "[AUTH] Authentication database initialized" )
+
     # Load STT model on startup
     global whisper_pipeline
     print( "Loading distill whisper engine... ", end="" )
@@ -519,7 +535,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Add security headers middleware (Phase 8)
+@app.middleware( "http" )
+async def add_security_headers( request: Request, call_next ):
+    """
+    Add security headers to all HTTP responses (Phase 8).
+
+    Requires:
+        - request is FastAPI Request object
+        - call_next is the next middleware/endpoint function
+
+    Ensures:
+        - Security headers added to response
+        - X-Content-Type-Options: nosniff (prevent MIME sniffing)
+        - X-Frame-Options: DENY (prevent clickjacking)
+        - X-XSS-Protection: 1; mode=block (XSS protection)
+        - Strict-Transport-Security: enforce HTTPS
+
+    Returns:
+        Response with security headers
+    """
+    response = await call_next( request )
+
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    return response
+
+
 # Include routers
+app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(system.router)
 app.include_router(notifications.router)
 app.include_router(speech.router)

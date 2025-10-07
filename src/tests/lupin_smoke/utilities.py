@@ -15,6 +15,9 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 from urllib.parse import quote
 
+# Python path configured by src/tests/conftest.py - just import directly
+from cosa.rest.user_id_generator import email_to_system_id
+
 
 class LupinTestClient:
     """
@@ -333,15 +336,5 @@ async def run_test_with_error_handling(test_func, test_name: str) -> bool:
         return False
 
 
-def email_to_system_id(email: str) -> str:
-    """
-    Convert email to system user ID (matches server logic).
-    
-    Args:
-        email: User email address
-        
-    Returns:
-        System user ID
-    """
-    clean_email = email.replace("@", "_").replace(".", "_")
-    return f"user_{clean_email}"
+# email_to_system_id function is now imported from cosa.rest.user_id_generator
+# This ensures the test uses the exact same logic as the server

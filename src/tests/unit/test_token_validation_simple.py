@@ -3,12 +3,9 @@
 Simple test script for token validation (no pytest dependency)
 """
 
-import sys
-import os
 import asyncio
 
-# Add the cosa module to the Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+# Python path configured by src/tests/conftest.py
 
 # Import the validation function we need to test
 from cosa.rest.auth import verify_firebase_token

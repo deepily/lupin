@@ -3,14 +3,11 @@
 Simple test script for WebSocket authentication validation (no pytest dependency)
 """
 
-import sys
-import os
 import asyncio
 import json
 import websockets
 
-# Add the cosa module to the Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+# Python path configured by src/tests/conftest.py
 
 async def test_websocket_auth_validation():
     """Test WebSocket authentication validation behavior"""

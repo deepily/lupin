@@ -10,15 +10,29 @@ Comprehensive smoke tests for the Lupin audio and text-to-speech system includin
 - Binary audio chunk handling
 """
 
+import sys
+import os
+
+# Bootstrap using LUPIN_ROOT for standalone script execution
+# (conftest.py handles this for pytest)
+if __name__ == "__main__":
+    lupin_root = os.environ.get( 'LUPIN_ROOT' )
+    if lupin_root is None:
+        raise RuntimeError(
+            "LUPIN_ROOT environment variable not set.\n"
+            "Set it before running:\n"
+            "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box\n"
+            "  python src/tests/lupin_smoke/test_audio_tts.py"
+        )
+    src_path = os.path.join( lupin_root, 'src' )
+    if src_path not in sys.path:
+        sys.path.insert( 0, src_path )
+
 import asyncio
 import json
 import time
-import sys
-from pathlib import Path
 
-# Add utilities to path
-sys.path.append(str(Path(__file__).parent))
-from utilities import (
+from tests.lupin_smoke.utilities import (
     LupinTestClient, TestValidator,
     print_test_banner, run_test_with_error_handling
 )
@@ -172,7 +186,7 @@ class AudioTTSSmokeTests:
         # Test invalid session ID format
         invalid_session_ids = [
             "invalid-session-123",  # Wrong format
-            "test_session",         # No adjective_noun pattern
+            "test_session",         # Underscore instead of space
             "",                     # Empty
             "a",                    # Too short
         ]

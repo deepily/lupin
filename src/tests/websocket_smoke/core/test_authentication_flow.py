@@ -509,34 +509,34 @@ class AuthenticationFlowTests:
                 "duration_ms": delayed_duration
             } )
             
-            # Test 3: Authentication timeout (very slow response simulation)
+            # Test 3: Authentication response time validation (ensure reasonable performance)
             session_id = self.utils.generate_session_id()
             token = self.utils.generate_mock_token( "timing_user_3" )
-            
+
             websocket = await self.utils.connect_websocket( "queue", session_id )
-            try:
-                # Send auth but use very short timeout to simulate slow server
-                auth_message = {"type": "authenticate", "token": token}
-                await websocket.send( json.dumps( auth_message ) )
-                response = await asyncio.wait_for( websocket.recv(), timeout=0.1 )  # 100ms timeout
-                timeout_occurred = False
-            except asyncio.TimeoutError:
-                timeout_occurred = True
+            response_start = time.time()
+            auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
+            response_duration = ( time.time() - response_start ) * 1000
             await websocket.close()
-            
+
+            # Authentication should complete within reasonable time (under 500ms)
+            reasonable_performance = response_duration < 500.0
+
             timing_results.append( {
-                "scenario": "timeout_test",
-                "timeout_occurred": timeout_occurred,
-                "expected_timeout": True
+                "scenario": "performance_test",
+                "success": auth_success,
+                "duration_ms": response_duration,
+                "reasonable_performance": reasonable_performance
             } )
             
             duration = ( time.time() - start_time ) * 1000
             
-            # Success if immediate and delayed auth work, and timeout handling works
+            # Success if immediate and delayed auth work, and performance is reasonable
             success = (
-                timing_results[0]["success"] and 
+                timing_results[0]["success"] and
                 timing_results[1]["success"] and
-                timing_results[2]["timeout_occurred"]
+                timing_results[2]["success"] and
+                timing_results[2]["reasonable_performance"]
             )
             
             self.results.append( {
@@ -546,13 +546,14 @@ class AuthenticationFlowTests:
                 "details": {
                     "timing_scenarios": timing_results,
                     "immediate_auth_ms": timing_results[0]["duration_ms"],
-                    "delayed_auth_ms": timing_results[1]["duration_ms"]
+                    "delayed_auth_ms": timing_results[1]["duration_ms"],
+                    "performance_test_ms": timing_results[2]["duration_ms"]
                 }
             } )
             
             if success:
                 self.utils.log( f"   ✅ PASS ({duration:.2f}ms) - All timing scenarios work correctly" )
-                self.utils.log( f"     Immediate: {timing_results[0]['duration_ms']:.1f}ms, Delayed: {timing_results[1]['duration_ms']:.1f}ms" )
+                self.utils.log( f"     Immediate: {timing_results[0]['duration_ms']:.1f}ms, Delayed: {timing_results[1]['duration_ms']:.1f}ms, Performance: {timing_results[2]['duration_ms']:.1f}ms" )
             else:
                 self.utils.log( f"   ❌ FAIL ({duration:.2f}ms) - Timing issues detected" )
                 

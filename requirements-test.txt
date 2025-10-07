@@ -1,0 +1,16 @@
+# Testing Dependencies for Lupin Project
+# Install with: pip install -r requirements-test.txt
+
+# Core Testing Framework
+pytest==8.4.2                # Testing framework
+pytest-asyncio==1.2.0        # Async test support for WebSocket tests
+pytest-cov>=2.12.0           # Coverage reporting (optional)
+
+# Additional Test Dependencies
+websockets>=15.0.1           # WebSocket client for integration tests
+requests>=2.32.3             # HTTP client for API integration tests
+
+# Note: Main dependencies are in src/cosa/requirements.txt
+# Install both files for complete development environment:
+#   pip install -r src/cosa/requirements.txt
+#   pip install -r requirements-test.txt

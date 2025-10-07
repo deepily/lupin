@@ -9,11 +9,8 @@ without RuntimeWarnings.
 import asyncio
 import threading
 import time
-import sys
-import os
 
-# Add project paths
-sys.path.append( os.path.join( os.path.dirname( __file__ ), '../..' ) )
+# Python path configured by src/tests/conftest.py
 
 from cosa.rest.websocket_manager import WebSocketManager
 import cosa.utils.util as du

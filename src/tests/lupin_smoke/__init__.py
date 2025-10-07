@@ -1,0 +1,3 @@
+"""
+Lupin smoke test package.
+"""

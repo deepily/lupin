@@ -251,7 +251,7 @@ class ConnectionBasicTests:
             ( "", False, "Empty session ID should fail" ),
             ( "wise  penguin", False, "Multiple spaces should fail" ),
             ( "123 456", False, "Numeric session ID should fail" ),
-            ( "wise_penguin", False, "Underscore format should fail" ),
+            ( "wise_penguin", False, "Underscore format should fail (use space)" ),
         ]
         
         results = []

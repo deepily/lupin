@@ -4,6 +4,19 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2025.10.04 - Admin User Management Implementation
+- **Admin Interface**: [2025.10.04-admin-user-management-implementation-plan.md](2025.10.04-admin-user-management-implementation-plan.md) - **📋 READY TO IMPLEMENT** - Complete MVP plan for administrative user management interface. Includes user listing/search, role management, account status control, and admin password reset. Backend (admin_service.py, routers/admin.py), Frontend (admin/users.html, admin-users.js, admin.css), comprehensive API specs, security requirements, and integration testing strategy. Estimated 6-8 hours implementation.
+
+### 2025.10.03 - User-Filtered Queue Views Implementation
+- **Multi-Tenant Feature**: [2025.10.03-user-filtered-queue-views-implementation-plan.md](2025.10.03-user-filtered-queue-views-implementation-plan.md) - **✅ PHASE 1 COMPLETE** - Role-based queue filtering backend infrastructure with 32/32 unit tests passing (100%). Multi-tenant isolation with admin override capability. Phase 2 (Admin UI) and Phase 3 (Documentation) pending.
+
+### 2025.09.28 - Three-Level Testing Framework Design
+- **Testing Strategy**: [2025.09.28-three-level-testing-design-and-progress.md](2025.09.28-three-level-testing-design-and-progress.md) - **✅ COMPLETE** - Comprehensive testing implementation complete: 47 unit tests across 6 files, 100% success rate, all phases 1-3 finished
+
+### 2025.09.27 - Three-Level Question Representation Architecture COMPLETE
+- **Architecture Implementation**: [2025.09.27-three-level-question-representation-architecture.md](2025.09.27-three-level-question-representation-architecture.md) - **✅ COMPLETE** - Comprehensive implementation fixing critical search failures with hierarchical Verbatim → Normalized → Gist architecture
+- **Session-End Automation**: [/src/rnd/prompts/lupin-session-end.md](prompts/lupin-session-end.md) - Automated end-of-session ritual extracted from configuration files
+
 ### 2025.09.23 - Smoke Test Prompt Infrastructure
 - **Smoke Test Prompts**: [/src/rnd/prompts/](prompts/) - Comprehensive baseline and remediation testing infrastructure with Claude Code integration
 - **Universal Templates**: [/src/rnd/prompts/templates/](prompts/templates/) - Reusable smoke test templates for any project
@@ -46,8 +59,13 @@ For implementation details, see the specific documents listed below.
 ## Active Documents
 
 ### Current Development (2025.09)
+
+#### 🚀 Authentication System Design
+- **[2025.09.29-jwt-oauth-implementation-design-and-tracker.md](2025.09.29-jwt-oauth-implementation-design-and-tracker.md)** - **📋 PLANNING**: Comprehensive JWT/OAuth authentication system design with 10-phase implementation plan, backward-compatible migration strategy, and complete tracking framework for upgrading from mock authentication to production-ready security (⏳ Phase 1-2 ready to begin)
+
 #### 🎉 Major Infrastructure Completions
-- **[2025.09.27-three-level-question-representation-architecture.md](2025.09.27-three-level-question-representation-architecture.md)** - **🚀 NEXT MILESTONE**: Comprehensive three-level question representation architecture (Verbatim → Normalized → Gist) with ultrathinking analysis and six-phase implementation plan for systematic question indexing refactoring (📋 R&D complete - ready for implementation)
+- **[2025.09.28-three-level-testing-design-and-progress.md](2025.09.28-three-level-testing-design-and-progress.md)** - **🔄 ACTIVE**: Comprehensive testing framework design for three-level representation system with progress tracking, testing patterns documentation, and critical test case specifications (📋 design complete - implementation in progress)
+- **[2025.09.27-three-level-question-representation-architecture.md](2025.09.27-three-level-question-representation-architecture.md)** - **✅ COMPLETE**: Comprehensive three-level question representation architecture (Verbatim → Normalized → Gist) with ultrathinking analysis and six-phase implementation plan for systematic question indexing refactoring (🚀 implementation complete - search failures resolved)
 - **[2025.09.22-cosa-agents-v010-migration-plan.md](2025.09.22-cosa-agents-v010-migration-plan.md)** - ✅ **COMPLETED**: Comprehensive zero-risk migration plan for moving 25 agent files from v010 subdirectory to main agents directory (✅ successfully executed - all agents consolidated)
 - **[2025.09.20-memory-corruption-incident-report.md](2025.09.20-memory-corruption-incident-report.md)** - Complete incident report and recovery documentation for LanceDB database deletion and restoration (✅ completed - 44/44 snapshots recovered, all 4 tables operational with enhanced robustness)
 - **[2025.08.22-solution-snapshot-lancedb-interface-migration-plan.md](2025.08.22-solution-snapshot-lancedb-interface-migration-plan.md)** - **🏆 MAJOR MILESTONE**: Complete LanceDB migration project from file-based JSON to vector database (✅ 100% COMPLETE - Phase 5 production deployment finished, enhanced table creation robustness)

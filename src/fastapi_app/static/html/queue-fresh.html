@@ -88,24 +88,51 @@
             </div>
             <div class="section-content" id="status-section">
                 <div class="status-item">
-                    <strong>Queue WebSocket:</strong> 
+                    <strong>Queue WebSocket:</strong>
                     <span id="queue-ws-status" class="status-warning">Disconnected</span>
                 </div>
                 <div class="status-item">
-                    <strong>Audio WebSocket:</strong> 
+                    <strong>Audio WebSocket:</strong>
                     <span id="audio-ws-status" class="status-warning">Disconnected</span>
                 </div>
                 <div class="status-item">
-                    <strong>Authentication:</strong> 
+                    <strong>Authentication:</strong>
                     <span id="auth-status" class="status-warning">Not authenticated</span>
                 </div>
                 <div class="status-item">
-                    <strong>User:</strong> 
+                    <strong>User:</strong>
                     <span id="user-display">Loading...</span>
+                    <button id="logout-button" type="button" style="margin-left: 10px; padding: 4px 12px; font-size: 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;" onclick="window.freshQueueUI.logout()">Logout</button>
                 </div>
                 <div class="status-item">
-                    <strong>Sessions:</strong> 
+                    <strong>Sessions:</strong>
                     Queue: <span id="queue-session">-</span>, Audio: <span id="audio-session">-</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Queue Filter Settings (Admin Only) -->
+        <div class="collapsible-section" id="filter-settings-section" style="display: none;">
+            <div class="section-header" onclick="toggleSection('filter-section')">
+                <h3>⚙️ Queue Filter Settings</h3>
+                <button class="toggle-button" id="filter-toggle">▼</button>
+            </div>
+            <div class="section-content" id="filter-section">
+                <div class="filter-controls">
+                    <label style="display: block; margin-bottom: 10px;">
+                        <strong>View Mode:</strong>
+                    </label>
+                    <div style="display: flex; gap: 10px;">
+                        <button id="filter-own-jobs" class="filter-button active" type="button">
+                            👤 My Jobs Only
+                        </button>
+                        <button id="filter-all-jobs" class="filter-button" type="button">
+                            👥 All Users' Jobs
+                        </button>
+                    </div>
+                    <div id="filter-status" style="margin-top: 15px; padding: 10px; background: #e7f3ff; border-radius: 4px; font-size: 13px;">
+                        Currently viewing: <strong id="filter-mode-display">Your jobs only</strong>
+                    </div>
                 </div>
             </div>
         </div>

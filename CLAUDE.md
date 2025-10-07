@@ -61,7 +61,7 @@
 ## WEBSOCKET DEVELOPMENT NOTES
 - **Architecture**: Dual-session design with user-centric routing (see `/src/docs/websocket-architecture.md`)
 - **Event System**: Subscription-based filtering prevents clients from receiving unwanted events
-- **Session Management**: localStorage-based persistence across page reloads using "adjective_noun" format
+- **Session Management**: localStorage-based persistence across page reloads using "adjective noun" format (e.g., "wise penguin")
 - **Authentication**: All connections require `auth_request` with Bearer token: `Bearer mock_token_email_{email}`
 - **Endpoints**: 
   - `/ws/queue/{session_id}` - Main application WebSocket (queue, notifications, system events)
@@ -70,7 +70,7 @@
   - Enable `app_debug = true` in lupin-app.ini for faster time updates (5s vs 60s)
   - Use browser dev tools Network → WS tab to monitor WebSocket traffic
   - Check console for authentication success/failure messages
-  - Verify session ID format matches pattern: `wise_penguin`, `clever_dolphin`, etc.
+  - Verify session ID format matches pattern: `wise penguin`, `clever dolphin`, etc.
 - **Common Issues**:
   - WebSocket connection fails → Check server running on port 7999
   - No events received → Verify authentication succeeded and events are subscribed
@@ -98,6 +98,68 @@
 
 ## RUNNING/TESTING FASTAPI APPLICATIONS
 - Please assume that there is a Fast API server instance bound to port 7999. I will start and stop it if needed. You never need to spin up another instance unless it's for a ephemeral use on port 8000.
+
+## TESTING
+
+Lupin uses a three-tier testing strategy for comprehensive validation:
+
+### Test Types
+
+1. **Unit Tests** (`src/tests/unit/`)
+   - Fast, isolated function tests (1-10ms per test)
+   - Test individual functions with mocked dependencies
+   - Coverage: jwt_service (14 tests), password_service, user_service, etc.
+   - Run: `pytest src/tests/unit/`
+
+2. **Smoke Tests** (inline `quick_smoke_test()` functions)
+   - Quick module-level sanity checks (10-100ms per module)
+   - Validate modules load and core functions work
+   - Coverage: ~50 tests across all major modules
+   - Run: `python -m cosa.rest.jwt_service` (per module)
+
+3. **Integration Tests** (`src/tests/integration/`)
+   - End-to-end user flow validation (100-1000ms per test)
+   - Test complete workflows across API, database, and authentication
+   - Coverage: 43 comprehensive tests (auth, admin user management, queue filtering)
+   - Run: `./src/tests/run-integration-tests.sh -v` (automated with server management)
+
+4. **WebSocket Tests** (`src/tests/websocket_smoke/`)
+   - WebSocket functionality validation
+   - Coverage: 50 tests (92% pass rate)
+   - Run: `src/scripts/run-websocket-smoke-tests.sh`
+
+### Running Tests
+
+```bash
+# Integration tests (RECOMMENDED - automated)
+./src/tests/run-integration-tests.sh -v              # All integration tests
+./src/tests/run-integration-tests.sh -v -s           # Very verbose
+./src/tests/run-integration-tests.sh test_auth*.py   # Specific pattern
+
+# Unit tests
+pytest src/tests/unit/                               # All unit tests
+pytest -v src/tests/unit/                            # Verbose
+
+# All pytest tests (unit + integration)
+pytest src/tests/                                    # Requires manual server setup
+
+# With coverage report
+pytest --cov=cosa.rest --cov-report=html src/tests/
+```
+
+### Documentation
+
+- **Testing Overview**: `src/tests/README.md` - Complete testing strategy and hierarchy
+- **Integration Tests**: `src/tests/integration/README.md` - Detailed integration test guide
+- **Unit Tests**: Inline documentation in test files
+
+### Test Coverage
+
+- **Total Tests**: ~122 (14+ unit, ~50 smoke, 8 integration, 50 WebSocket)
+- **Auth System Coverage**: 85-90%
+- **Critical Paths**: Login, registration, token refresh, password change all tested
+
+See `src/tests/README.md` for comprehensive testing documentation.
 
 ## HISTORY STRUCTURE NOTES
 - **Project Span**: December 2024 - Present (Lupin evolution from Genie-in-the-Box)

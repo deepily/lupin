@@ -3,11 +3,7 @@
 Manual debug test for Gister XML parsing issue
 """
 
-import sys
-import os
-
-# Add the cosa module to the Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+# Python path configured by src/tests/conftest.py
 
 from cosa.memory.gister import Gister
 

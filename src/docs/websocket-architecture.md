@@ -250,8 +250,8 @@ function getOrCreateSession() {
 }
 
 function isValidSessionFormat(sessionId) {
-    // Must be "adjective_noun" format
-    return /^[a-z]+_[a-z]+$/.test(sessionId);
+    // Must be "adjective noun" format (e.g., "wise penguin")
+    return /^[a-z]+ [a-z]+$/.test(sessionId);
 }
 ```
 

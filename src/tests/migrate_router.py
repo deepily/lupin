@@ -14,9 +14,12 @@ from typing import List, Dict, Tuple, Optional
 import ast
 import textwrap
 
+# Python path configured by src/tests/conftest.py - use canonical pattern
+import cosa.utils.util as du
+
 class RouterMigrator:
     def __init__(self):
-        self.project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+        self.project_root = du.get_project_root()
         self.src_dir = os.path.join(self.project_root, "src")
         self.main_py = os.path.join(self.src_dir, "fastapi_app/main.py")
         self.cosa_rest = os.path.join(self.src_dir, "cosa/rest")

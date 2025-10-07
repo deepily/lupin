@@ -1,0 +1,533 @@
+/**
+ * Admin Interface Styles
+ *
+ * Professional styling for admin user management interface.
+ * Consistent with auth.css gradient theme.
+ */
+
+/* ============================================================================
+   Container & Layout
+   ============================================================================ */
+
+.admin-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.admin-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    padding: 20px;
+    background: linear-gradient( 135deg, #667eea 0%, #764ba2 100% );
+    border-radius: 10px;
+    color: white;
+}
+
+.admin-header h1 {
+    margin: 0;
+    font-size: 2rem;
+}
+
+.admin-actions {
+    display: flex;
+    gap: 10px;
+}
+
+/* ============================================================================
+   Filter Bar
+   ============================================================================ */
+
+.filter-bar {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 20px;
+    padding: 15px;
+    background: #f7fafc;
+    border-radius: 8px;
+    flex-wrap: wrap;
+}
+
+.search-input {
+    flex: 1;
+    min-width: 250px;
+    padding: 10px 15px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 14px;
+    transition: border-color 0.2s;
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba( 102, 126, 234, 0.1 );
+}
+
+.filter-select {
+    padding: 10px 15px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 14px;
+    background: white;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.filter-select:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba( 102, 126, 234, 0.1 );
+}
+
+/* ============================================================================
+   Users Table
+   ============================================================================ */
+
+.users-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba( 0, 0, 0, 0.1 );
+    margin-bottom: 20px;
+}
+
+.users-table thead {
+    background: linear-gradient( 135deg, #667eea 0%, #764ba2 100% );
+    color: white;
+}
+
+.users-table th {
+    padding: 15px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.users-table tbody tr {
+    border-bottom: 1px solid #e2e8f0;
+    transition: background-color 0.2s;
+}
+
+.users-table tbody tr:nth-child( even ) {
+    background-color: #f7fafc;
+}
+
+.users-table tbody tr:hover {
+    background-color: #edf2f7;
+    cursor: pointer;
+}
+
+.users-table td {
+    padding: 12px 15px;
+    font-size: 14px;
+}
+
+.user-row {
+    transition: all 0.2s;
+}
+
+.user-row:hover {
+    transform: translateY( -1px );
+    box-shadow: 0 2px 4px rgba( 0, 0, 0, 0.05 );
+}
+
+/* ============================================================================
+   Badges
+   ============================================================================ */
+
+.badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: 5px;
+}
+
+.badge-admin {
+    background: linear-gradient( 135deg, #f093fb 0%, #f5576c 100% );
+    color: white;
+}
+
+.badge-user {
+    background: #cbd5e0;
+    color: #2d3748;
+}
+
+.badge-active {
+    background: #48bb78;
+    color: white;
+}
+
+.badge-inactive {
+    background: #f56565;
+    color: white;
+}
+
+.badge-verified {
+    background: #4299e1;
+    color: white;
+}
+
+/* ============================================================================
+   Buttons
+   ============================================================================ */
+
+.btn-icon {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 18px;
+    padding: 5px 10px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.btn-icon:hover {
+    background-color: #e2e8f0;
+}
+
+.btn-small {
+    padding: 8px 16px;
+    font-size: 14px;
+}
+
+/* ============================================================================
+   Pagination
+   ============================================================================ */
+
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+    padding: 20px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba( 0, 0, 0, 0.1 );
+}
+
+#page-info {
+    font-size: 14px;
+    color: #4a5568;
+    font-weight: 500;
+}
+
+/* ============================================================================
+   Modals
+   ============================================================================ */
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba( 0, 0, 0, 0.5 );
+    animation: fadeIn 0.2s;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.modal-content {
+    background-color: white;
+    margin: 5% auto;
+    padding: 30px;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 600px;
+    box-shadow: 0 10px 40px rgba( 0, 0, 0, 0.2 );
+    animation: slideDown 0.3s;
+}
+
+@keyframes slideDown {
+    from {
+        transform: translateY( -50px );
+        opacity: 0;
+    }
+    to {
+        transform: translateY( 0 );
+        opacity: 1;
+    }
+}
+
+.modal-confirm {
+    max-width: 400px;
+    text-align: center;
+}
+
+.modal h2 {
+    margin-top: 0;
+    color: #2d3748;
+    margin-bottom: 20px;
+}
+
+.close {
+    color: #a0aec0;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    line-height: 20px;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.close:hover,
+.close:focus {
+    color: #2d3748;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 25px;
+}
+
+.modal-confirm .modal-actions {
+    justify-content: center;
+}
+
+/* ============================================================================
+   User Details
+   ============================================================================ */
+
+.user-details {
+    padding: 10px 0;
+}
+
+.detail-row {
+    display: flex;
+    padding: 12px 0;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.detail-row:last-child {
+    border-bottom: none;
+}
+
+.detail-label {
+    font-weight: 600;
+    color: #4a5568;
+    min-width: 140px;
+}
+
+.detail-value {
+    color: #2d3748;
+    flex: 1;
+}
+
+/* ============================================================================
+   Role Editor
+   ============================================================================ */
+
+.role-editor {
+    padding: 15px 0;
+}
+
+.role-checkbox {
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    margin: 10px 0;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.role-checkbox:hover {
+    border-color: #667eea;
+    background-color: #f7fafc;
+}
+
+.role-checkbox input[type="checkbox"] {
+    margin-right: 12px;
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+
+.role-checkbox span {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* ============================================================================
+   Password Display
+   ============================================================================ */
+
+.password-result {
+    padding: 15px 0;
+}
+
+.warning-text {
+    background: #fff5f5;
+    border-left: 4px solid #f56565;
+    padding: 12px;
+    margin-bottom: 15px;
+    border-radius: 4px;
+}
+
+.warning-text strong {
+    color: #c53030;
+}
+
+.password-display {
+    display: flex;
+    gap: 10px;
+    margin: 15px 0;
+}
+
+.password-input {
+    flex: 1;
+    padding: 12px 15px;
+    border: 2px solid #667eea;
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 16px;
+    font-weight: bold;
+    background: #f7fafc;
+    color: #2d3748;
+}
+
+/* ============================================================================
+   Loading States
+   ============================================================================ */
+
+.loading {
+    text-align: center;
+    padding: 60px 20px;
+}
+
+.spinner {
+    border: 4px solid #e2e8f0;
+    border-top: 4px solid #667eea;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 15px;
+}
+
+@keyframes spin {
+    0% { transform: rotate( 0deg ); }
+    100% { transform: rotate( 360deg ); }
+}
+
+/* ============================================================================
+   No Results
+   ============================================================================ */
+
+.no-results {
+    text-align: center;
+    padding: 60px 20px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba( 0, 0, 0, 0.1 );
+}
+
+.no-results p {
+    color: #4a5568;
+    font-size: 16px;
+    margin-bottom: 20px;
+}
+
+/* ============================================================================
+   Messages
+   ============================================================================ */
+
+.error-message,
+.success-message {
+    display: none;
+    padding: 15px 20px;
+    margin-bottom: 20px;
+    border-radius: 8px;
+    font-weight: 500;
+}
+
+.error-message {
+    background: #fff5f5;
+    border-left: 4px solid #f56565;
+    color: #c53030;
+}
+
+.success-message {
+    background: #f0fff4;
+    border-left: 4px solid #48bb78;
+    color: #22543d;
+}
+
+/* ============================================================================
+   Utilities
+   ============================================================================ */
+
+.text-muted {
+    color: #a0aec0;
+    font-style: italic;
+}
+
+.mb-2 {
+    margin-bottom: 10px;
+}
+
+.mt-2 {
+    margin-top: 10px;
+}
+
+/* ============================================================================
+   Responsive Design
+   ============================================================================ */
+
+@media ( max-width: 768px ) {
+    .admin-header {
+        flex-direction: column;
+        gap: 15px;
+        text-align: center;
+    }
+
+    .filter-bar {
+        flex-direction: column;
+    }
+
+    .search-input {
+        min-width: 100%;
+    }
+
+    .users-table {
+        font-size: 12px;
+    }
+
+    .users-table th,
+    .users-table td {
+        padding: 8px;
+    }
+
+    .modal-content {
+        margin: 10% auto;
+        width: 95%;
+        padding: 20px;
+    }
+
+    .modal-actions {
+        flex-direction: column;
+    }
+
+    .modal-actions .btn {
+        width: 100%;
+    }
+}

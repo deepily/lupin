@@ -113,11 +113,14 @@ RUN python3 -m spacy download en_core_web_sm
 
 RUN apt-get update && apt-get install -y curl
 
-RUN pip install --no-cache-dir pydantic-ai[slim]==0.6.2
+RUN pip install --no-cache-dir pydantic[email] pydantic-ai[slim]==0.6.2
 
 RUN pip install --no-cache-dir xmltodict==0.14.2
 
 RUN pip install --no-cache-dir pylance==0.36.0
+
+RUN pip install --no-cache-dir PyJWT==2.10.1 passlib==1.7.4 bcrypt==3.2.2 cffi==2.0.0 pycparser==2.23
+
 
 env LUPIN_ROOT=/var/lupin
 env LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development" \

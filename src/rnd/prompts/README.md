@@ -1,10 +1,79 @@
-# Smoke Test Prompts Directory
+# Lupin Prompts & Templates Directory
 
-This directory contains comprehensive smoke test prompts for establishing baselines and verifying system health after changes.
+This directory contains comprehensive prompts for testing, design, planning, and session management.
+
+## 📚 Prompt Categories
+
+### 🎨 Design & Planning (NEW - 2025.09.30)
+- **`design-planning-docs.md`** ⭐ - Meta-pattern system for creating maintainable documentation structures
+
+### 🧪 Testing & Quality Assurance
+- Smoke test prompts for baseline establishment and post-change verification
+- Test harness update prompts for coverage validation
+
+### 🏁 Session Management
+- **`lupin-session-end.md`** - Comprehensive end-of-session ritual automation
+
+### 📦 Templates Library
+- **`templates/design-planning/`** - 9 production-ready templates for documentation structures
+
+---
 
 ## Prompt Types and Their Roles
 
+### 🎨 Design & Planning Documentation Generator ⭐ NEW
+
+#### `design-planning-docs.md`
+**Role**: Meta-pattern system for creating and maintaining well-structured design and planning documentation
+- **When to use**: Starting any new design/planning project, or reorganizing overgrown documentation
+- **Scope**: Supports 5 battle-tested patterns (implementation, research, features, troubleshooting, architecture)
+- **Mode**: Interactive questionnaire → Pattern recommendation → Structure generation → Validation
+- **Output**: Complete documentation structure with README, active work doc, architecture reference, phase archives
+- **Key features**:
+  - Prevents monolithic document bloat (keeps under 25k token limit)
+  - Research integration (4-tier structure: Research → Architecture → Active → Archive)
+  - Token budget planning for each document type
+  - Cross-reference generation
+  - Support for both new projects and reorganization of existing docs
+
+**Available in two locations**:
+- **Executable**: `.claude/commands/design-planning-docs.md` (Claude Code slash command)
+- **Reference**: `src/rnd/prompts/design-planning-docs.md` (version controlled documentation)
+
+**Template Library**: `src/rnd/prompts/templates/design-planning/` (9 templates)
+- README-template.md
+- active-work-template.md
+- architecture-reference-template.md
+- phase-milestone-template.md
+- decision-log-template.md
+- testing-tracking-template.md
+- risk-issues-template.md
+- research-README-template.md
+- research-synthesis-template.md
+
+**Example Usage**:
+```bash
+# In Claude Code, invoke the slash command:
+/design-planning-docs
+
+# Or with parameters:
+/design-planning-docs mode=create project-name=websocket-refactor
+/design-planning-docs mode=reorganize
+```
+
+**Real-World Success**: This meta-pattern was created after successfully reorganizing the JWT/OAuth documentation from a 37k-token monolithic file into a maintainable 4-tier structure.
+
+---
+
 ### 🎯 Lupin Project Prompts (Production Ready)
+
+#### `lupin-test-harness-update.md` ⭐ NEW
+**Role**: Systematic test harness update prompt for post-change testing validation
+- **When to use**: After any significant code changes to ensure comprehensive test coverage
+- **Scope**: Dual-repository (Lupin + CoSA) with cross-repo impact analysis
+- **Mode**: Automated discovery, gap analysis, and implementation planning
+- **Output**: Priority-based test implementation plan with templates and validation criteria
+- **Key feature**: Reconciles existing test coverage with new requirements, maintains smoke/unit test distinction
 
 #### `baseline-smoke-test-prompt.md`
 **Role**: Establishes comprehensive baseline before major Lupin changes
@@ -82,6 +151,7 @@ Are you working in the full Lupin project context?
 
 | Scenario | Prompt to Use | Notes |
 |----------|---------------|-------|
+| **After any code changes** | `lupin-test-harness-update.md` ⭐ | **NEW: Test coverage validation** |
 | Major Lupin refactoring affecting everything | `baseline-smoke-test-prompt.md` (TEST_SCOPE="full") | Full ecosystem testing |
 | Lupin-specific changes (UI, API, etc.) | `baseline-smoke-test-prompt.md` (TEST_SCOPE="lupin") | Faster, focused testing |
 | COSA framework development only | `/src/cosa/rnd/prompts/cosa-*` | Framework-focused |
@@ -89,6 +159,13 @@ Are you working in the full Lupin project context?
 | After making changes | Use corresponding post-change prompt | Must match baseline scope |
 
 ### Examples
+
+**⭐ NEW: After Code Changes:**
+```bash
+# Use: lupin-test-harness-update.md
+# When: After implementing three-level architecture changes
+# Output: Comprehensive test update plan with priority rankings
+```
 
 **🎯 Full System Baseline Before Migration:**
 ```bash

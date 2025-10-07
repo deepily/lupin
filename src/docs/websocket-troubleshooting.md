@@ -71,7 +71,7 @@
    {
      "type": "auth_request",
      "token": "Bearer mock_token_email_user@example.com",
-      "session_id": "wise_penguin",
+      "session_id": "wise penguin",
      "subscribed_events": ["sys_ping", "queue_todo_update"]
    }
    ```

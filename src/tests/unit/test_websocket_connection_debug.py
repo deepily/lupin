@@ -7,11 +7,8 @@ import asyncio
 import json
 import websockets
 from urllib.parse import quote
-import sys
-import os
 
-# Add the cosa module to the Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+# Python path configured by src/tests/conftest.py
 
 async def debug_websocket_connection():
     """Debug WebSocket connection step by step"""
