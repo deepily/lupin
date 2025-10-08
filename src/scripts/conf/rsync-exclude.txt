@@ -1,0 +1,29 @@
+# Rsync Exclusion Patterns for Backup
+# Excludes only build artifacts and noise - everything else is backed up
+
+# Git repository data
+.git/
+
+# Virtual environments
+.venv/
+venv/
+
+# Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# macOS metadata
+.DS_Store
+
+# Large model files
+models/
+
+# Build/log artifacts
+io/
+
+# Server process output
+nohup.out
