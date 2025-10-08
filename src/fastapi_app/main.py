@@ -397,14 +397,16 @@ async def lifespan( app: FastAPI ):
             print( f"Using LanceDB solution snapshot manager: {lancedb_path}" )
             
     else:
-        # Use file-based backend (default)
-        path_to_snapshots_dir_wo_root = config_mgr.get( "path_to_snapshots_dir_wo_root" )
-        path_to_snapshots = du.get_project_root() + path_to_snapshots_dir_wo_root
-        
-        config = {"path": path_to_snapshots}
-        
-        if app_debug:
-            print( f"Using file-based solution snapshot manager: {path_to_snapshots}" )
+        # # Use file-based backend (default)
+        # path_to_snapshots_dir_wo_root = config_mgr.get( "path_to_snapshots_dir_wo_root" )
+        # path_to_snapshots = du.get_project_root() + path_to_snapshots_dir_wo_root
+        #
+        # config = {"path": path_to_snapshots}
+        #
+        # if app_debug:
+        #     print( f"Using file-based solution snapshot manager: {path_to_snapshots}" )
+        # throw value error
+        raise ValueError( "As of v0.1.0, only lancedb solution snapshot type supported" )
     
     # Create manager using factory pattern for true swappability
     snapshot_mgr = SolutionSnapshotManagerFactory.create_manager(
