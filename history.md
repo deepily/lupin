@@ -1,10 +1,10 @@
 # Lupin Project History
 
-> **🎁 CURRENT**: 2025.10.06 - JWT Auth Database User Recovery. Restored authentication access after database wipe, created password reset utility with LUPIN_ROOT bootstrap pattern. Fixed root ownership issue preventing database writes.
+> **🎁 CURRENT**: 2025.10.08 - v0.1.0 Pre-Release Cleanup. Deprecated file-based snapshot manager (removed 46 JSON files), added developer workflow utilities (session-start slash command, backup sync script). Two clean commits advancing toward v0.1.0 release.
 
-> **⚠️ PREVIOUS**: 2025.10.04 (Session 5) - Path Manipulation Cleanup COMPLETE! Eradicated fragile path manipulation across 20 files (75% reduction), implemented LUPIN_ROOT bootstrap pattern, enhanced global CLAUDE.md with comprehensive bootstrap guidance. All tests passing with canonical pattern.
+> **⚠️ PREVIOUS**: 2025.10.06 - JWT Auth Database User Recovery. Restored authentication access after database wipe, created password reset utility with LUPIN_ROOT bootstrap pattern. Fixed root ownership issue preventing database writes.
 
-> **🎉 EARLIER**: 2025.10.04 (Session 4) - Test Configuration Final Polish COMPLETE! Simplified to dual safety, removed unnecessary API endpoints, created automated test runner script. 43/43 integration tests passing (100%). One-command testing: `./src/tests/run-integration-tests.sh -v`
+> **🎉 EARLIER**: 2025.10.04 (Session 5) - Path Manipulation Cleanup COMPLETE! Eradicated fragile path manipulation across 20 files (75% reduction), implemented LUPIN_ROOT bootstrap pattern, enhanced global CLAUDE.md with comprehensive bootstrap guidance. All tests passing with canonical pattern.
 
 > **Prior**: 2025.10.04 (Session 3) - Configuration Block-Based Test Mode (PARTIAL). Implemented triple safety but discovered architecture blocker. 15/43 tests passing. Led to breakthrough simplification in Session 4.
 
@@ -19,6 +19,112 @@
 ## Recent Activity (Last 7 Days)
 
 ### 🎯 October 2025 - Recent Sessions
+
+#### 2025.10.08 (Session 2) - Debug Output Control Refinement ✅
+
+**Summary**: Implemented consistent debug/verbose flag handling across embedding and LLM streaming subsystems. Fixed verbose output leakage that was dumping embeddings details and LLM response chunks to console despite `app_verbose = False` configuration. All debug output now requires BOTH `app_debug = True` AND `app_verbose = True` for proper non-verbose debug mode operation.
+
+**Problem Identified**: User reported verbose output appearing with Baseline config (`app_debug = True, app_verbose = False`):
+- Embedding operations showed normalization details, cache HIT/MISS messages, configuration dumps
+- LLM streaming showed "🔄 Streaming from..." headers and complete XML response chunks
+- Expected behavior: Non-verbose debug mode shows only critical errors and basic status
+
+**Root Cause Analysis**:
+- **Inconsistent flag usage**: Code mixed `if self.debug:` (wrong) with `if self.debug and self.verbose:` (correct)
+- **EmbeddingManager** used constructor parameters instead of reading from config (unlike Normalizer pattern)
+- **LLM clients** (3 files) had streaming output controlled by debug flag alone
+- Result: Verbose output appeared whenever debug=True, regardless of verbose setting
+
+**Solution Implemented - Embedding Subsystem** (`embedding_manager.py`):
+- Updated **13 debug checks** to require `if self.debug and self.verbose:`
+  - Lines 153, 164, 167: Normalization timing and config display
+  - Lines 189-191: Normalization results
+  - Lines 232-238: Cache key selection messages
+  - Lines 244-249: Cache HIT/MISS messages
+  - Lines 258-290: API configuration details and embedding generation
+  - Lines 300, 304: Success and cache storage confirmations
+- **Error handling preserved**: All critical error banners remain visible regardless of verbose setting
+- **Verified consistency**: Now matches Normalizer.py pattern (lines 216, 241 already correct)
+
+**Solution Implemented - LLM Streaming** (3 client files):
+- **llm_client.py** - Updated **3 locations**:
+  - Line 247: Streaming header message
+  - Line 161: Chunk output (completion mode)
+  - Line 174: Chunk output (chat mode)
+- **chat_client.py** - Updated **2 locations**:
+  - Line 149: Streaming header message
+  - Line 96: Chunk output
+- **completion_client.py** - Updated **2 locations**:
+  - Line 188: Streaming header message
+  - Line 131: Chunk output
+
+**Expected Behavior After Fix**:
+- **With Baseline config** (`app_debug = True, app_verbose = False`):
+  - ✅ Basic initialization messages visible
+  - ✅ Error messages and banners visible
+  - ❌ Embedding normalization/caching details hidden
+  - ❌ LLM streaming headers and chunks hidden
+  - ✅ Progress dots still show (non-verbose mode indicator)
+- **With Testing config** (`app_debug = True, app_verbose = True`):
+  - ✅ Full verbosity (all debug output visible)
+
+**Files Modified** (4 files, ~20 checks updated):
+- `src/cosa/memory/embedding_manager.py` - 13 debug checks updated
+- `src/cosa/agents/llm_client.py` - 3 streaming checks updated
+- `src/cosa/agents/chat_client.py` - 2 streaming checks updated
+- `src/cosa/agents/completion_client.py` - 2 streaming checks updated
+
+**Testing Validation**: All critical paths preserved:
+- Configuration error banners (embedding_manager.py lines 264-272)
+- API error messages (lines 315-344)
+- Stack traces via `du.print_stack_trace()` (always print)
+- LLM error handling unchanged
+
+**Impact**: Console output now properly respects verbose flag configuration. Non-verbose debug mode provides clean logs with only essential information, while verbose mode provides comprehensive debugging output when needed.
+
+**Key Pattern Established**: All verbose debug output must use `if self.debug and self.verbose:` pattern consistently across codebase. Basic status and errors use `if self.debug:` alone.
+
+---
+
+#### 2025.10.08 - v0.1.0 Pre-Release Cleanup
+
+**Summary**: Completed repository cleanup in preparation for v0.1.0 release. Deprecated file-based solution snapshot manager in favor of LanceDB-only storage, removing 46 legacy JSON files (~93k lines). Added developer workflow utilities including session-start slash command and backup sync script. Two clean, well-documented commits advancing codebase toward release readiness.
+
+**Deprecation Work**:
+- ✅ Removed 46 legacy JSON solution snapshots from `src/conf/long-term-memory/solutions/`
+- ✅ Commented out file-based manager initialization in `main.py`
+- ✅ Added `ValueError` enforcement for LanceDB-only mode (v0.1.0+)
+- ✅ Disabled `path_to_snapshots_dir_wo_root` config in `lupin-app.ini`
+- ✅ Rationale: LanceDB provides superior vector search, scalability, modern architecture
+
+**Developer Utilities Added**:
+- ✅ `.claude/commands/plan-session-start.md` - Session initialization slash command
+  - Wraps canonical workflow from planning-is-prompting
+  - Loads history.md, displays status, shows recent TODOs
+  - Project-specific LUPIN configuration
+- ✅ `src/scripts/sync-to-backup.sh` (100 lines) - Backup sync utility
+  - Syncs DATA01 → DATA02 with rsync
+  - Dry-run by default (`--write` for actual sync)
+  - Colored output, validation, progress stats
+- ✅ `src/scripts/conf/rsync-exclude.txt` - Smart exclusion patterns
+  - Excludes .git, venv, cache, models, io/
+  - Keeps all source and config files
+
+**Commits Created**:
+1. `976485e` - Deprecate file-based snapshot manager (48 files, -92,973 lines)
+2. `0db6f0b` - Add developer workflow utilities (3 files, +173 lines)
+
+**Breaking Change**: File-based snapshot manager no longer supported as of v0.1.0. LanceDB is now the only supported backend for solution snapshots.
+
+**Current Status**: Repository cleaned, two commits ready. Project advancing toward v0.1.0 release with modern storage architecture and improved developer workflows.
+
+**TODO for Next Session**:
+- [ ] Review v0.1.0 release checklist
+- [ ] Update version numbers in relevant files
+- [ ] Test LanceDB snapshot manager end-to-end
+- [ ] Prepare release notes
+
+---
 
 #### 2025.10.06 - COSA Branch Analyzer Professional Refactoring SESSION
 
