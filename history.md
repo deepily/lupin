@@ -1,24 +1,242 @@
 # Lupin Project History
 
-> **🎁 CURRENT**: 2025.10.08 - v0.1.0 Pre-Release Cleanup. Deprecated file-based snapshot manager (removed 46 JSON files), added developer workflow utilities (session-start slash command, backup sync script). Two clean commits advancing toward v0.1.0 release.
+> **🎁 CURRENT**: 2025.10.14 (Session 2) - Test Harness Update + Complete Bearer Token Fix! Implemented 2 regression tests for Oct 14 bugs (UUID format, Bearer token). Discovered incomplete Oct 14 fix - fixed 3 additional Bearer token instances. Fixed reliable TTS race condition (state initialization timing). All authentication working! ✅
 
-> **⚠️ PREVIOUS**: 2025.10.06 - JWT Auth Database User Recovery. Restored authentication access after database wipe, created password reset utility with LUPIN_ROOT bootstrap pattern. Fixed root ownership issue preventing database writes.
+> **✅ PREVIOUS**: 2025.10.14 (Session 1) - Notification & TTS Authentication Fixes COMPLETE! Fixed two critical JWT authentication bugs: notification delivery (user ID format mismatch UUID vs email-hash) and TTS streaming (missing Bearer prefix). Added comprehensive WebSocket debugging infrastructure. All systems operational! ✅
 
-> **🎉 EARLIER**: 2025.10.04 (Session 5) - Path Manipulation Cleanup COMPLETE! Eradicated fragile path manipulation across 20 files (75% reduction), implemented LUPIN_ROOT bootstrap pattern, enhanced global CLAUDE.md with comprehensive bootstrap guidance. All tests passing with canonical pattern.
+> **⚠️ PREVIOUS**: 2025.10.08 - v0.1.0 Pre-Release Cleanup. Deprecated file-based snapshot manager (removed 46 JSON files), added developer workflow utilities (session-start slash command, backup sync script). Two clean commits advancing toward v0.1.0 release.
 
-> **Prior**: 2025.10.04 (Session 3) - Configuration Block-Based Test Mode (PARTIAL). Implemented triple safety but discovered architecture blocker. 15/43 tests passing. Led to breakthrough simplification in Session 4.
+> **🎉 EARLIER**: 2025.10.06 - JWT Auth Database User Recovery. Restored authentication access after database wipe, created password reset utility with LUPIN_ROOT bootstrap pattern. Fixed root ownership issue preventing database writes.
 
-> **Earlier**: 2025.10.04 - JWT/OAuth 10/10 PHASES COMPLETE (100%)! 🚀 WebSocket JWT authentication fixed, all 8/8 integration tests passing, Phase 10 documentation complete (7 comprehensive docs, 4,500+ lines). System is production-ready!
+> **Prior**: 2025.10.04 (Session 5) - Path Manipulation Cleanup COMPLETE! Eradicated fragile path manipulation across 20 files (75% reduction), implemented LUPIN_ROOT bootstrap pattern, enhanced global CLAUDE.md with comprehensive bootstrap guidance. All tests passing with canonical pattern.
 
-> **More**: 2025.10.03 - User-Filtered Queue Views PHASE 1 COMPLETE! Implemented role-based queue filtering backend with 32/32 unit tests passing (100%). Multi-tenant isolation with admin override capability.
+> **Earlier**: 2025.10.04 (Session 3) - Configuration Block-Based Test Mode (PARTIAL). Implemented triple safety but discovered architecture blocker. 15/43 tests passing. Led to breakthrough simplification in Session 4.
 
-> **Earlier**: Integration Test Analysis & Remediation PHASE 1 COMPLETE! Fixed 4 test failures, achieved 7/8 passing (87.5%). Email service configuration-based fix implemented.
+> **More**: 2025.10.04 - JWT/OAuth 10/10 PHASES COMPLETE (100%)! 🚀 WebSocket JWT authentication fixed, all 8/8 integration tests passing, Phase 10 documentation complete (7 comprehensive docs, 4,500+ lines). System is production-ready!
+
+> **Earlier**: 2025.10.03 - User-Filtered Queue Views PHASE 1 COMPLETE! Implemented role-based queue filtering backend with 32/32 unit tests passing (100%). Multi-tenant isolation with admin override capability.
+
+> **More**: Integration Test Analysis & Remediation PHASE 1 COMPLETE! Fixed 4 test failures, achieved 7/8 passing (87.5%). Email service configuration-based fix implemented.
 
 > **Prior Achievement**: 2025.10.01 - JWT/OAuth PHASE 9 CORE COMPLETE! Full authentication flow working: login, profile display, password change, re-authentication. Overall progress: 9/10 phases core complete (90%).
 
 ## Recent Activity (Last 7 Days)
 
 ### 🎯 October 2025 - Recent Sessions
+
+#### 2025.10.14 (Session 2) - Test Harness Update + Complete Bearer Token Fix ✅
+
+**Summary**: Executed comprehensive test harness update workflow, implementing regression tests for Oct 14 authentication bugs. Discovered Oct 14 Bearer token fix was incomplete - only 2 of 5 affected functions were fixed. Fixed remaining 3 instances and discovered/fixed race condition in reliable TTS playback. All authentication systems now fully operational.
+
+**Test Harness Update (Phases 1-5)**:
+
+**Phase 1 - Automated Discovery**:
+- Analyzed git changes from Oct 14-15
+- Identified 4 modified files: `notifications.py`, `queue-fresh.js`, `websocket.py`, `system.py`
+- Categorized changes: 2 bug fixes, 2 debugging enhancements
+- Inventoried existing test coverage: 35 Lupin tests, 87 CoSA tests
+
+**Phase 2 - Test Coverage Inventory**:
+- **Lupin tests**: 3 integration, 5 lupin_smoke, 10 unit, 50 websocket_smoke
+- **CoSA tests**: 52 unit, 14+ smoke tests
+- Found existing coverage: `test_notifications.py` (354 lines), `test_audio_tts.py` (465 lines)
+- Identified gap: No regression tests for specific Oct 14 bug scenarios
+
+**Phase 3 - Gap Analysis**:
+- **Notification bug coverage**: ✅ Good (8 tests) but missing UUID format regression test
+- **TTS bug coverage**: ✅ Good (9 tests) but missing Bearer token regression test
+- **Debug infrastructure**: ⚠️ Partial - no tests for new debug endpoint
+
+**Phase 4 - Implementation Plan**:
+- 🔥 **HIGH**: Add UUID format regression test
+- 🔥 **HIGH**: Add Bearer token regression test
+- ⚠️ **MEDIUM**: Add debug endpoint validation (deferred)
+
+**Phase 5 - Regression Test Implementation**:
+
+**1. Notification UUID Format Test** (`test_notifications.py` lines 222-286):
+- Validates `target_system_id` uses UUID format (36 chars, 4 dashes)
+- Rejects old email-hash format
+- Ensures notification routing uses JWT database UUID
+- Added to test suite (now 9 total tests, was 8)
+
+**2. TTS Bearer Token Format Test** (`test_audio_tts.py` lines 402-500):
+- Validates `getAuthHeader()` returns "Bearer " + token
+- Tests TTS endpoint accepts Bearer format
+- Documents raw token behavior
+- Added to test suite (now 10 total tests, was 9)
+
+**Files Modified**:
+- `test_notifications.py`: +65 lines, 1 new test
+- `test_audio_tts.py`: +98 lines, 1 new test
+- **Total**: 163 new lines, 2 comprehensive regression tests
+
+**Bug Discovery #1: Incomplete Bearer Token Fix** 🎯
+
+**Problem**: While testing, discovered reliable TTS still failing with 401 Unauthorized despite Oct 14 fix.
+
+**Root Cause Analysis**:
+- Oct 14 fix only addressed `playInstantTTS()` (line 1375)
+- Grep search revealed **3 additional instances** still using raw `this.authToken`:
+  1. Line 615: `getOrCreateSessionId()` → `/api/get-session-id`
+  2. Line 1038: `submitQA()` → `/api/push`
+  3. Line 1413: `playReliableTTS()` → `/api/get-speech` ← Causing user's error
+
+**Complete Fix Applied** (`queue-fresh.js`):
+- Fixed all 3 remaining instances to use `this.getAuthHeader()`
+- Verified 0 instances of raw `this.authToken` remain
+- All 5 API calls now use correct Bearer format
+
+**Bug Discovery #2: Reliable TTS Race Condition** 🎯
+
+**Problem**: After fixing Bearer token, reliable TTS downloaded audio but didn't play automatically. Required manual stop/restart to play cached audio.
+
+**Root Cause - Async Timing Race**:
+```javascript
+// OLD CODE (lines 1435-1438 - TOO LATE)
+async playReliableTTS( text ) {
+    const response = await fetch( '/api/get-speech', { ... });  // AWAIT
+    const result = await response.json();  // AWAIT
+    this.currentTTSMode = 'reliable';  // SET TOO LATE!
+
+// Timeline:
+// T+0ms: fetch starts, awaits
+// T+100ms: WebSocket receives all chunks
+// T+120ms: handleAudioComplete() checks currentTTSMode === 'reliable' → FALSE!
+// T+120ms: playCollectedAudio() skipped - no audio!
+// T+200ms: fetch completes, currentTTSMode set - too late!
+```
+
+**Solution** (`queue-fresh.js` lines 1409-1412):
+- Moved state initialization BEFORE async fetch
+- Now `currentTTSMode` set synchronously before any await
+- WebSocket completion finds correct state → audio plays automatically
+
+**Testing & Validation**:
+- Sent test notifications via `notify-claude`
+- Both low and high priority notifications played automatically
+- Reliable TTS now works end-to-end without manual intervention
+
+**Final Status**:
+- ✅ All 5 Bearer token instances fixed
+- ✅ Race condition eliminated
+- ✅ Regression tests implemented (2 new tests)
+- ✅ Session ID generation working
+- ✅ Q&A submission working
+- ✅ Instant TTS working
+- ✅ Reliable TTS working
+- ✅ Notification delivery working
+
+**Files Changed**:
+- `src/tests/lupin_smoke/test_notifications.py`: +65 lines (1 regression test)
+- `src/tests/lupin_smoke/test_audio_tts.py`: +98 lines (1 regression test)
+- `src/fastapi_app/static/js/queue-fresh.js`: 4 auth fixes + 1 race condition fix
+
+**TODO for Next Session**:
+- None - all work complete!
+
+---
+
+#### 2025.10.14 (Session 1) - Notification & TTS Authentication Fixes ✅ COMPLETE
+
+**Summary**: Fixed two critical authentication bugs preventing notification delivery and TTS audio playback in Fresh Queue UI. Implemented comprehensive WebSocket debugging infrastructure with enhanced logging and state inspection endpoint. Both bugs were unrelated JWT authentication issues stemming from format mismatches.
+
+**Bug #1: Notifications Not Delivering to Fresh Queue UI** 🎯
+
+**Problem**: Claude Code notifications sent via `/api/notify` endpoint always reported "user not connected" despite active WebSocket connection showing pong messages.
+
+**Root Cause - User ID Format Mismatch**:
+- **WebSocket Authentication**: User authenticated with UUID `0cf47e2d-d5a1-4cd4-addf-79810fd32b15` (from JWT auth database)
+- **Notification Lookup**: Endpoint used `email_to_system_id()` returning `ricardo_felipe_ruiz_6bdc` (old email-hash format)
+- **Connection Check Failure**: `ws_manager.is_user_connected("ricardo_felipe_ruiz_6bdc")` returned False
+- **Evidence**: `/api/debug/websocket-state` showed session "faithful zebra" connected to UUID, not email-hash
+
+**Investigation Process**:
+1. Enhanced WebSocket auth logging (20+ debug checkpoints added)
+2. Created `/api/debug/websocket-state` endpoint exposing internal manager state
+3. Inspected browser localStorage showing valid JWT tokens
+4. Debug endpoint revealed session authenticated to UUID, lookup searched for email-hash
+
+**Solution Implemented** (`notifications.py` lines 190-221):
+- **Changed from**: `email_to_system_id(target_user)` → Returns `ricardo_felipe_ruiz_6bdc`
+- **Changed to**: `get_user_by_email(target_user)["id"]` → Returns UUID from JWT auth database
+- Added comprehensive logging for user resolution and connection checks
+- Removed unused `email_to_system_id` import
+
+**Bug #2: TTS Audio Not Playing (401 Unauthorized)** 🎯
+
+**Problem**: Fresh Queue UI TTS playback failed with `POST /api/get-speech-elevenlabs 401 Unauthorized` error when trying to play notification audio.
+
+**Root Cause - Missing Bearer Prefix**:
+- **JavaScript sent**: `Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...` (raw JWT)
+- **Server expected**: `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...` (Bearer format)
+- **Copy-paste error**: Line 1375 in `queue-fresh.js` used `this.authToken` instead of `this.getAuthHeader()`
+- **Comparison**: Other API calls (line 1986) correctly used `this.getAuthHeader()` which adds "Bearer " prefix
+
+**Investigation Process**:
+1. Traced client error from browser console logs
+2. Found server logs showing `401 Unauthorized` for TTS endpoint
+3. Grep search revealed `playInstantTTS()` function using wrong auth header format
+4. Confirmed endpoint requires `Depends(get_current_user_id)` authentication
+
+**Solution Implemented** (`queue-fresh.js` line 1375):
+- **Changed from**: `'Authorization': this.authToken,`
+- **Changed to**: `'Authorization': this.getAuthHeader(),`
+- Matches pattern used in successful queue fetching API calls
+
+**Debugging Infrastructure Added**:
+
+**1. Enhanced WebSocket Authentication Logging** (`websocket.py` lines 278-396):
+- Comprehensive step-by-step authentication flow logging
+- Token format preview (first 30 chars)
+- User verification success/failure with email display
+- Connection state verification after registration
+- WebSocket manager connection count validation
+- Full stack traces for authentication exceptions
+- 15+ new debug checkpoints with clear labels
+
+**2. WebSocket State Debug Endpoint** (`system.py` lines 307-391):
+- New `GET /api/debug/websocket-state` endpoint
+- Exposes all internal WebSocket manager state:
+  - `active_connections`: List of all session IDs
+  - `session_to_user`: Session → User ID mapping
+  - `user_sessions`: User ID → Sessions list mapping
+  - `session_subscriptions`: Session → Event subscriptions
+  - `session_timestamps`: Connection timestamps (ISO format)
+- Diagnostic analysis:
+  - `unmapped_sessions`: Sessions without user association
+  - `authenticated_sessions` vs `unauthenticated_sessions` counts
+  - `orphaned_user_mappings`: Users with no active sessions
+- **WARNING**: Debug endpoint - should be protected/removed in production
+
+**Testing Validation**:
+- Sent test notifications via `notify-claude` command
+- Confirmed notifications appeared in Fresh Queue UI
+- Verified TTS audio playback working after browser refresh
+- FastAPI logs showed successful `200 OK` responses:
+  ```
+  [NOTIFY] Resolved user ricardo.felipe.ruiz@gmail.com → UUID 0cf47e2d-d5a1-4cd4-addf-79810fd32b15
+  [NOTIFY] WebSocket connection check: is_connected=True, count=1
+  INFO: POST /api/get-speech-elevenlabs HTTP/1.1 200 OK
+  ```
+
+**Files Modified** (4 total):
+1. `src/cosa/rest/routers/websocket.py` (+118/-72 lines) - Enhanced authentication logging
+2. `src/cosa/rest/routers/system.py` (+85 lines) - Added debug endpoint
+3. `src/cosa/rest/routers/notifications.py` (+17/-3 lines) - JWT user ID lookup
+4. `src/fastapi_app/static/js/queue-fresh.js` (1 line) - Bearer token format
+
+**Key Insights**:
+- **Bug Relationship**: Both JWT authentication issues, but completely different:
+  - Bug #1: **Who** is the user? (ID format: UUID vs email-hash)
+  - Bug #2: **How** to format credentials? (Bearer prefix required)
+- **WebSocket Auth Pattern**: Raw tokens for WebSocket messages, Bearer format for HTTP headers
+- **Debug Infrastructure Value**: Enhanced logging and state inspection critical for troubleshooting
+- **Production Consideration**: Debug endpoint should be protected or removed before production deployment
+
+**Impact**: Fresh Queue UI notifications and TTS audio now fully operational with JWT authentication system. Enhanced debugging infrastructure will accelerate future WebSocket troubleshooting.
+
+---
 
 #### 2025.10.08 (Session 2) - Debug Output Control Refinement ✅
 

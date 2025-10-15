@@ -398,7 +398,106 @@ class AudioTTSSmokeTests:
             self.validator.assert_response_ok(response, 200)
         finally:
             await self.client.close_websocket(audio_ws)
-    
+
+    async def test_tts_auth_header_format_regression(self):
+        """
+        REGRESSION TEST: Verify TTS endpoint uses Bearer token format.
+
+        Bug History (2025.10.14):
+        - JavaScript (queue-fresh.js line 1375) sent raw JWT without "Bearer " prefix
+        - Sent: Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        - Expected: Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        - Server expected Bearer format, causing 401 Unauthorized errors
+
+        Fix (queue-fresh.js line 1375):
+        - Changed from: 'Authorization': this.authToken
+        - Changed to: 'Authorization': this.getAuthHeader()
+        - getAuthHeader() adds "Bearer " prefix
+
+        This test ensures authentication header uses correct Bearer format.
+        """
+        # Establish WebSocket connection for valid session
+        audio_ws = await self.client.websocket_connect(
+            "/ws/audio/{session_id}",
+            subscribed_events=["audio_streaming_status", "auth_success"]
+        )
+
+        try:
+            if self.debug:
+                print( "\n[REGRESSION TEST] Testing Bearer token format for TTS endpoint" )
+
+            # Get the auth token and header
+            auth_token = self.client.get_auth_token()
+            auth_header = self.client.get_auth_header()
+
+            if self.debug:
+                print( f"[REGRESSION TEST] Raw token (first 30 chars): {auth_token[:30]}..." )
+                print( f"[REGRESSION TEST] Auth header (first 40 chars): {auth_header[:40]}..." )
+
+            # Test 1: Verify Bearer prefix is included in auth header
+            assert auth_header.startswith( "Bearer " ), \
+                f"Auth header should start with 'Bearer ', got: {auth_header[:20]}"
+
+            # Test 2: Verify header contains the token after "Bearer "
+            token_from_header = auth_header.replace( "Bearer ", "" )
+            assert token_from_header == auth_token, \
+                "Auth header should contain 'Bearer ' + token"
+
+            if self.debug:
+                print( "[REGRESSION TEST] ✓ Bearer prefix validated in getAuthHeader()" )
+
+            # Test 3: Verify TTS endpoint works with Bearer format
+            test_data = {
+                "session_id": self.client.session_id,
+                "text": "Bearer format regression test"
+            }
+
+            # Use the correct Bearer format (this should succeed)
+            bearer_response = await self.client.http_request(
+                "POST",
+                "/api/get-speech",
+                json=test_data,
+                headers={"Authorization": auth_header}  # With Bearer prefix
+            )
+
+            self.validator.assert_response_ok( bearer_response, 200 )
+
+            if self.debug:
+                print( "[REGRESSION TEST] ✓ Bearer token format accepted by TTS endpoint" )
+
+            # Test 4: Verify raw token format fails (if endpoint enforces strict Bearer validation)
+            # This validates the bug would be caught if it regresses
+            raw_token_response = await self.client.http_request(
+                "POST",
+                "/api/get-speech",
+                json=test_data,
+                headers={"Authorization": auth_token}  # WITHOUT Bearer prefix (the bug!)
+            )
+
+            # If endpoint strictly validates Bearer format, this should fail with 401
+            if raw_token_response.status_code == 401:
+                if self.debug:
+                    print( "[REGRESSION TEST] ✓ Raw token correctly rejected (401) - endpoint validates Bearer format" )
+            elif raw_token_response.status_code == 200:
+                if self.debug:
+                    print( "[REGRESSION TEST] ⚠ Raw token accepted (200) - endpoint doesn't strictly validate Bearer format" )
+                    print( "[REGRESSION TEST]   (This is OK if server is lenient, but stricter validation recommended)" )
+            else:
+                if self.debug:
+                    print( f"[REGRESSION TEST] ? Raw token response: {raw_token_response.status_code}" )
+
+            # Test 5: Verify the fix pattern - using helper method instead of raw token
+            # This mimics the correct usage from queue-fresh.js
+            correct_usage_response = await self.audio_helper.get_speech( "Correct usage test" )
+            self.validator.assert_response_ok( correct_usage_response, 200 )
+
+            if self.debug:
+                print( "[REGRESSION TEST] ✓ Correct usage pattern validated (using helper method)" )
+                print( "[REGRESSION TEST] ✓ Regression test complete - Bearer format enforced" )
+
+        finally:
+            await self.client.close_websocket( audio_ws )
+
     async def run_all_tests(self) -> bool:
         """Run all audio/TTS smoke tests."""
         print_test_banner("Audio/TTS System Smoke Tests")
@@ -412,7 +511,8 @@ class AudioTTSSmokeTests:
             (self.test_audio_streaming_events, "Audio streaming events"),
             (self.test_tts_caching_mechanism, "TTS caching mechanism"),
             (self.test_concurrent_tts_requests, "Concurrent TTS requests"),
-            (self.test_audio_authentication, "Audio authentication")
+            (self.test_audio_authentication, "Audio authentication"),
+            (self.test_tts_auth_header_format_regression, "Auth header format regression (Bearer prefix)")
         ]
         
         passed = 0

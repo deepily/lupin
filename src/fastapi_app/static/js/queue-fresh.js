@@ -612,7 +612,7 @@ class FreshQueueUI {
             const response = await fetch( '/api/get-session-id', {
                 method: 'GET',
                 headers: {
-                    'Authorization': this.authToken
+                    'Authorization': this.getAuthHeader()
                 }
             });
             
@@ -1035,7 +1035,7 @@ class FreshQueueUI {
             const response = await fetch( url, {
                 method: 'POST',
                 headers: {
-                    'Authorization': this.authToken,
+                    'Authorization': this.getAuthHeader(),
                     'X-Session-ID': this.queueSessionId,
                     'Content-Type': 'application/json'
                 },
@@ -1372,7 +1372,7 @@ class FreshQueueUI {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': this.authToken,
+                    'Authorization': this.getAuthHeader(),
                     'X-Session-ID': this.audioSessionId
                 },
                 body: JSON.stringify({
@@ -1403,14 +1403,21 @@ class FreshQueueUI {
     
     async playReliableTTS( text ) {
         this.log( "Starting reliable TTS (OpenAI batch)..." );
-        
+
+        // Initialize state BEFORE async fetch to prevent race condition
+        // (WebSocket may complete before fetch response arrives)
+        this.currentTTSMode = 'reliable';
+        this.audioChunks = [];
+        this.audioSources = [];
+        this.startTime = Date.now(); // Track timing for reliable mode
+
         try {
             // Request TTS via OpenAI batch endpoint
             const response = await fetch( '/api/get-speech', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': this.authToken
+                    'Authorization': this.getAuthHeader()
                 },
                 body: JSON.stringify({
                     text: text,
@@ -1418,24 +1425,20 @@ class FreshQueueUI {
                     session_id: this.audioSessionId  // Add missing session_id
                 })
             });
-            
+
             if ( !response.ok ) {
                 throw new Error( `HTTP ${response.status}: ${response.statusText}` );
             }
-            
+
             // Parse JSON response (should confirm TTS generation started)
             const result = await response.json();
             this.log( "Reliable TTS request successful:", result );
-            
+
             if ( result.status !== 'success' ) {
                 throw new Error( `TTS generation failed: ${result.message || 'Unknown error'}` );
             }
-            
-            // Audio chunks will be received via WebSocket (same as instant mode)
-            this.currentTTSMode = 'reliable';
-            this.audioChunks = [];
-            this.audioSources = [];
-            this.startTime = Date.now(); // Track timing for reliable mode
+
+            // Audio chunks will be received via WebSocket and played by handleAudioComplete()
             
         } catch ( error ) {
             this.error( "Reliable TTS request failed:", error );
