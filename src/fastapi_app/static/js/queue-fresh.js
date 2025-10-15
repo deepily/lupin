@@ -9,7 +9,12 @@ class FreshQueueUI {
         // Configuration
         this.debug = true;
         this.verbose = true;
-        
+
+        // TTS Mode Constants
+        this.TTS_MODE_INSTANT = 'instant';
+        this.TTS_MODE_RELIABLE = 'reliable';
+        this.TTS_MODE_DEFAULT = this.TTS_MODE_RELIABLE;  // Default to reliable for better browser compatibility
+
         // WebSocket connections
         this.queueWS = null;
         this.audioWS = null;
@@ -173,7 +178,7 @@ class FreshQueueUI {
             const ttsMode = document.getElementById( 'tts-mode' );
             if ( ttsMode ) {
                 // Force reliable mode
-                ttsMode.value = 'reliable';
+                ttsMode.value = this.TTS_MODE_RELIABLE;
                 
                 // Optional: Disable instant mode option to prevent manual switching
                 const instantOption = ttsMode.querySelector( 'option[value="instant"]' );
@@ -347,6 +352,60 @@ class FreshQueueUI {
         } catch ( error ) {
             this.error( "Failed to check token expiration:", error );
             return true; // Consider expired on error
+        }
+    }
+
+    async ensureValidToken() {
+        /**
+         * Ensure authentication token is valid before making API calls.
+         * Automatically refreshes token if expired.
+         *
+         * Requires:
+         *     - refreshAccessToken() method available
+         *     - localStorage contains refresh token
+         *
+         * Ensures:
+         *     - this.authToken contains valid, non-expired token
+         *     - Token is refreshed if expired
+         *
+         * Raises:
+         *     - Error if token refresh fails
+         *
+         * Performance:
+         *     - Fast path (valid token): ~1-2ms (local check)
+         *     - Slow path (expired token): ~50-200ms (network refresh)
+         */
+        const startTime = performance.now();
+
+        // Check if token exists and is valid
+        if ( !this.authToken || this.isTokenExpired( this.authToken ) ) {
+            const wasExpired = this.authToken && this.isTokenExpired( this.authToken );
+
+            if ( wasExpired ) {
+                this.log( "⚠️ Token expired - refreshing before API call..." );
+            } else {
+                this.log( "⚠️ Token missing - refreshing before API call..." );
+            }
+
+            // Attempt to refresh token
+            const refreshed = await this.refreshAccessToken();
+
+            if ( !refreshed ) {
+                const error = "Token refresh failed - cannot proceed with API call";
+                this.error( error );
+                this.handleAuthFailure();
+                throw new Error( error );
+            }
+
+            // Update token reference with fresh token
+            const tokens = this.getStoredTokens();
+            this.authToken = tokens.accessToken;
+
+            const elapsed = ( performance.now() - startTime ).toFixed( 1 );
+            this.log( `✓ Token refreshed successfully (${elapsed}ms)` );
+        } else {
+            const elapsed = ( performance.now() - startTime ).toFixed( 1 );
+            this.log( `✓ Token valid (checked in ${elapsed}ms)` );
         }
     }
 
@@ -560,11 +619,11 @@ class FreshQueueUI {
         
         // Test buttons
         document.getElementById( 'test-instant-tts' ).addEventListener( 'click', () => {
-            this.testTTS( 'instant' );
+            this.testTTS( this.TTS_MODE_INSTANT );
         });
         
         document.getElementById( 'test-reliable-tts' ).addEventListener( 'click', () => {
-            this.testTTS( 'reliable' );
+            this.testTTS( this.TTS_MODE_RELIABLE );
         });
         
         document.getElementById( 'stop-audio' ).addEventListener( 'click', () => {
@@ -609,6 +668,9 @@ class FreshQueueUI {
         
         // Generate new session ID
         try {
+            // Ensure token is valid before API call (auto-refresh if expired)
+            await this.ensureValidToken();
+
             const response = await fetch( '/api/get-session-id', {
                 method: 'GET',
                 headers: {
@@ -1029,7 +1091,10 @@ class FreshQueueUI {
             // Track for job completion debugging
             this.lastQASubmissionTime = Date.now();
             this.lastQASubmissionText = text;
-            
+
+            // Ensure token is valid before API call (auto-refresh if expired)
+            await this.ensureValidToken();
+
             // Submit to /api/push endpoint (POST request with JSON body)
             const url = `/api/push`;
             const response = await fetch( url, {
@@ -1249,7 +1314,7 @@ class FreshQueueUI {
                     originalQuestion: questionText,
                     submissionTime: this.lastQASubmissionTime,
                     envelope: envelope, // Store full envelope for debugging
-                    ttsMode: document.getElementById( 'tts-mode' )?.value || 'instant'
+                    ttsMode: document.getElementById( 'tts-mode' )?.value || this.TTS_MODE_DEFAULT
                 }
             );
             
@@ -1293,7 +1358,28 @@ class FreshQueueUI {
         // Clear input after successful test
         inputElement.value = '';
     }
-    
+
+    getCurrentTTSMode() {
+        // Get current TTS mode from UI selector with proper fallback to default
+        const modeSelector = document.getElementById( 'tts-mode' );
+        return modeSelector?.value || this.TTS_MODE_DEFAULT;
+    }
+
+    formatNotificationTTSMessage( notification ) {
+        // Format notification message for TTS with priority prefix
+        // Single source of truth for notification TTS message formatting
+        let ttsMessage = `${notification.type} notification: ${notification.message}`;
+
+        // Add priority prefix for urgent/high priority notifications
+        if ( notification.priority === "urgent" ) {
+            ttsMessage = `Urgent! ${ttsMessage}`;
+        } else if ( notification.priority === "high" ) {
+            ttsMessage = `Important! ${ttsMessage}`;
+        }
+
+        return ttsMessage;
+    }
+
     async testTTS( mode ) {
         const testText = "This is a test of the text-to-speech system in " + mode + " mode.";
         this.log( `Testing TTS in ${mode} mode: ${testText}` );
@@ -1325,7 +1411,7 @@ class FreshQueueUI {
             this.currentTTSText = text;
             
             // Cache miss or cache not available - generate TTS as normal
-            if ( mode === 'instant' ) {
+            if ( mode === this.TTS_MODE_INSTANT ) {
                 await this.playInstantTTS( text );
             } else {
                 await this.playReliableTTS( text );
@@ -1365,8 +1451,11 @@ class FreshQueueUI {
     
     async playInstantTTS( text ) {
         this.log( "Starting instant TTS (11labs streaming)..." );
-        
+
         try {
+            // Ensure token is valid before API call (auto-refresh if expired)
+            await this.ensureValidToken();
+
             // Request TTS via 11labs streaming endpoint
             const response = await fetch( '/api/get-speech-elevenlabs', {
                 method: 'POST',
@@ -1388,9 +1477,9 @@ class FreshQueueUI {
             
             const result = await response.json();
             this.log( "Instant TTS request successful:", result );
-            
+
             // Audio chunks will be received via WebSocket
-            this.currentTTSMode = 'instant';
+            this.currentTTSMode = this.TTS_MODE_INSTANT;
             this.audioChunks = [];
             this.audioSources = [];
             this.startTime = Date.now(); // Track timing for both modes
@@ -1406,18 +1495,22 @@ class FreshQueueUI {
 
         // Initialize state BEFORE async fetch to prevent race condition
         // (WebSocket may complete before fetch response arrives)
-        this.currentTTSMode = 'reliable';
+        this.currentTTSMode = this.TTS_MODE_RELIABLE;
         this.audioChunks = [];
         this.audioSources = [];
         this.startTime = Date.now(); // Track timing for reliable mode
 
         try {
+            // Ensure token is valid before API call (auto-refresh if expired)
+            await this.ensureValidToken();
+
             // Request TTS via OpenAI batch endpoint
             const response = await fetch( '/api/get-speech', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': this.getAuthHeader()
+                    'Authorization': this.getAuthHeader(),
+                    'X-Session-ID': this.audioSessionId
                 },
                 body: JSON.stringify({
                     text: text,
@@ -1457,8 +1550,8 @@ class FreshQueueUI {
         // Always collect chunks for caching (both instant and reliable modes)
         this.audioChunks = this.audioChunks || [];
         this.audioChunks.push( blobData );
-        
-        if ( this.currentTTSMode === 'instant' ) {
+
+        if ( this.currentTTSMode === this.TTS_MODE_INSTANT ) {
             // Use sequential queue for Chrome compatibility AND collect for caching
             this.playChunkSequential( blobData );
         }
@@ -1469,8 +1562,8 @@ class FreshQueueUI {
         const collectedChunks = this.audioChunks ? this.audioChunks.length : 0;
         const processedChunks = this.processedChunks || 0;
         const sequentialPlayed = this.sequentialChunksPlayed || 0;
-        
-        if ( this.currentTTSMode === 'instant' ) {
+
+        if ( this.currentTTSMode === this.TTS_MODE_INSTANT ) {
             // For instant mode, show sequential chunks played
             this.log( `Audio streaming complete: ${data.chunks || 0} server chunks, ${sequentialPlayed} sequential chunks played, ${data.duration || 0}s` );
         } else {
@@ -1483,8 +1576,8 @@ class FreshQueueUI {
             const audioBlob = new Blob( this.audioChunks, { type: 'audio/mpeg' } );
             await this.cacheGeneratedAudio( audioBlob );
         }
-        
-        if ( this.currentTTSMode === 'reliable' && this.audioChunks && this.audioChunks.length > 0 ) {
+
+        if ( this.currentTTSMode === this.TTS_MODE_RELIABLE && this.audioChunks && this.audioChunks.length > 0 ) {
             // Use proven reliable mode playback (adapted from original HybridTTS)
             this.playCollectedAudio();
         }
@@ -1604,15 +1697,15 @@ class FreshQueueUI {
         
         // Start playback with timing measurement
         this.currentSequentialAudio.play().then( () => {
-            if ( !this.firstChunkPlayed && this.firstChunkStartTime ) {
-                const timeToPlayback = ( Date.now() - this.firstChunkStartTime ) / 1000;
-                this.log( `Instant mode: First chunk playing! (${timeToPlayback.toFixed(3)}s from arrival to playback start)` );
+            if ( !this.firstChunkPlayed && this.startTime ) {
+                const timeToFirstPlayback = Date.now() - this.startTime;
+                this.log( `⚡ Time to first playback (instant): ${timeToFirstPlayback}ms` );
                 this.firstChunkPlayed = true;
             }
         }).catch( e => {
-            if ( !this.firstChunkPlayed && this.firstChunkStartTime ) {
-                const timeToPlayback = ( Date.now() - this.firstChunkStartTime ) / 1000;
-                this.log( `Instant mode: First chunk play failed (${timeToPlayback.toFixed(3)}s from arrival to attempt): ${e.message}` );
+            if ( !this.firstChunkPlayed && this.startTime ) {
+                const timeToFirstPlayback = Date.now() - this.startTime;
+                this.log( `⚡ Time to first playback attempt (instant): ${timeToFirstPlayback}ms - Play failed: ${e.message}` );
                 this.firstChunkPlayed = true; // Mark as attempted even on failure
             }
             this.playNextSequentialChunk(); // Continue on play failure
@@ -1707,20 +1800,19 @@ class FreshQueueUI {
 
         // Set up and play audio using HTML audio element
         this.audioElement.src = audioUrl;
-        
-        // Track time to begin playback
-        const playbackStartTime = Date.now();
-        
+
         try {
             await this.audioElement.play();
-            const timeToPlayback = ( Date.now() - playbackStartTime ) / 1000;
-            this.log( `Reliable mode: Audio playing! (${totalTime.toFixed(1)}s total collection time, ${timeToPlayback.toFixed(3)}s to begin playback)` );
+            const timeToFirstPlayback = Date.now() - this.startTime;
+            this.log( `⚡ Time to first playback (reliable): ${timeToFirstPlayback}ms` );
+            this.log( `Reliable mode: Audio playing! (${totalTime.toFixed(1)}s total collection time)` );
             this.isPlaying = true;
             this.currentAudio = this.audioElement;
         } catch ( playError ) {
             // Handle autoplay prevention gracefully (like original)
-            const timeToPlayback = ( Date.now() - playbackStartTime ) / 1000;
-            this.log( `Reliable mode: Audio ready (${totalTime.toFixed(1)}s total collection time, ${timeToPlayback.toFixed(3)}s to ready) - autoplay prevented:`, playError.message );
+            const timeToFirstPlayback = Date.now() - this.startTime;
+            this.log( `⚡ Time to first playback attempt (reliable): ${timeToFirstPlayback}ms - Autoplay prevented:`, playError.message );
+            this.log( `Reliable mode: Audio ready (${totalTime.toFixed(1)}s total collection time) - autoplay prevented` );
         }
 
         // Clean up when ended (like original HybridTTS)
@@ -1887,21 +1979,14 @@ class FreshQueueUI {
         
         // 3. Optional TTS for high/urgent priority notifications (like old queue.js)
         if ( notification.priority === "high" || notification.priority === "urgent" ) {
-            // Create formatted notification message for TTS
-            let ttsMessage = `${notification.type} notification: ${notification.message}`;
-            
-            // Add priority prefix for urgent/high priority notifications
-            if ( notification.priority === "urgent" ) {
-                ttsMessage = `Urgent! ${ttsMessage}`;
-            } else if ( notification.priority === "high" ) {
-                ttsMessage = `Important! ${ttsMessage}`;
-            }
-            
+            // Format notification message for TTS using helper method
+            const ttsMessage = this.formatNotificationTTSMessage( notification );
+
             this.log( `Queuing high priority notification for TTS playback: "${ttsMessage}"` );
-            
+
             // Add slight delay to let notification sound finish (like old queue.js)
             setTimeout( () => {
-                this.playTTS( ttsMessage, 'instant' ).catch( error => {
+                this.playTTS( ttsMessage, this.getCurrentTTSMode() ).catch( error => {
                     this.error( 'TTS failed for high priority notification:', error );
                 });
             }, 300 );
@@ -2416,9 +2501,9 @@ class FreshQueueUI {
             }
             
             this.log( `🔊 Replaying job audio: "${replayText.substring( 0, 50 )}..." (cached: ${jobMetadata.has_audio_cache})` );
-            
+
             // Use current TTS mode from UI
-            const currentMode = document.getElementById( 'tts-mode' )?.value || 'instant';
+            const currentMode = document.getElementById( 'tts-mode' )?.value || this.TTS_MODE_DEFAULT;
             
             // Play using existing TTS infrastructure
             await this.playTTS( replayText, currentMode );
@@ -2590,8 +2675,8 @@ class FreshQueueUI {
             priority: priority,
             source: source,
             timestamp: timestamp,
-            // Simple verbatim message without dressing up
-            ttsMessage: message
+            // Format TTS message with priority prefix for consistent cache key
+            ttsMessage: this.formatNotificationTTSMessage( data )
         };
         
         // Add event listeners for audio control panel and delete button
@@ -2846,9 +2931,9 @@ class FreshQueueUI {
             listItem.style.backgroundColor = "#e3f2fd"; // Light blue highlight
             
             this.log( `${restart ? 'Restarting' : 'Playing'} notification audio: "${ttsMessage}"` );
-            
+
             // Use the current TTS mode (instant/reliable) from the UI
-            const currentMode = document.getElementById( 'tts-mode' )?.value || 'instant';
+            const currentMode = document.getElementById( 'tts-mode' )?.value || this.TTS_MODE_DEFAULT;
             
             // Use playTTS() to ensure cache checking and proper currentTTSText handling
             await this.playTTS( ttsMessage, currentMode );
@@ -2981,7 +3066,7 @@ class FreshQueueUI {
             
             // **IMPROVEMENT**: Direct integration with our TTS system instead of external queue
             // Use the current TTS mode (instant/reliable) from the UI
-            const currentMode = document.getElementById( 'tts-mode' )?.value || 'instant';
+            const currentMode = document.getElementById( 'tts-mode' )?.value || this.TTS_MODE_DEFAULT;
             
             // Use playTTS() to ensure cache checking and proper currentTTSText handling
             await this.playTTS( ttsMessage, currentMode );
