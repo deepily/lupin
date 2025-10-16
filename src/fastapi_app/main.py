@@ -39,8 +39,6 @@ from transformers import pipeline
 
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.memory.input_and_output_table import InputAndOutputTable
-# from cosa.memory.solution_snapshot_mgr import SolutionSnapshotManager
-# from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
 from cosa.memory.solution_manager_factory import SolutionSnapshotManagerFactory
 from cosa.rest.todo_fifo_queue import TodoFifoQueue
 from cosa.rest.fifo_queue import FifoQueue
@@ -522,8 +520,8 @@ async def lifespan( app: FastAPI ):
     # Add any other cleanup code here if needed
 
 app = FastAPI(
-    title="Genie-in-the-Box FastAPI",
-    description="A FastAPI migration of the Genie-in-the-Box agent system",
+    title="Lupin FastAPI",
+    description="A FastAPI migration of the Lupin agent system",
     version="0.6.0",
     lifespan=lifespan
 )
