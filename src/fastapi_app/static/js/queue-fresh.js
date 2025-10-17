@@ -26,7 +26,22 @@ class FreshQueueUI {
         // Authentication
         this.currentUser = null;
         this.authToken = null;
-        
+
+        // ========================================
+        // TOKEN REFRESH CONFIGURATION
+        // ========================================
+
+        // Configuration constants (populated from /api/config/client)
+        // These values come from server on startup - NO hardcoded defaults here
+        this.TOKEN_REFRESH_CHECK_INTERVAL_MS = null;    // How often to check (periodic monitor)
+        this.TOKEN_EXPIRY_THRESHOLD_SECS = null;        // When to trigger refresh (< N secs to expiry)
+        this.TOKEN_REFRESH_DEDUP_WINDOW_MS = null;      // Prevent duplicate refreshes (within N ms)
+        this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = null;  // For reference/logging only
+
+        // Token refresh state tracking
+        this.tokenRefreshIntervalHandle = null;         // setInterval handle (for cleanup)
+        this.lastTokenRefresh_ms = null;                // Timestamp of last refresh (for deduplication)
+
         // Audio management
         this.audioContext = null;
         this.currentAudio = null;
@@ -275,7 +290,16 @@ class FreshQueueUI {
         // Update UI
         this.updateElement( "user-display", this.currentUser );
         this.updateStatus( "auth-status", "Authenticated", "success" );
-        this.log( `Authentication setup complete for user: ${this.currentUser} (admin: ${this.isAdmin})` );
+
+        // NEW: Fetch client config (requires valid token)
+        // Must be called AFTER token validation (endpoint requires JWT auth)
+        await this.fetchClientConfig();
+
+        // NEW: Start token refresh monitor
+        // Now that we have config values, start monitoring token freshness
+        this.startTokenRefreshMonitor();
+
+        this.log( `✓ Authentication setup complete for user: ${this.currentUser} (admin: ${this.isAdmin}, config fetched, monitor started)` );
     }
 
     getStoredTokens() {
@@ -352,6 +376,188 @@ class FreshQueueUI {
         } catch ( error ) {
             this.error( "Failed to check token expiration:", error );
             return true; // Consider expired on error
+        }
+    }
+
+    async fetchClientConfig() {
+        /**
+         * Fetch client configuration from authenticated server endpoint.
+         * Populates timing constants for token refresh monitoring.
+         *
+         * Requires:
+         *     - this.authToken is valid (called AFTER setupAuthentication)
+         *     - Server /api/config/client endpoint available
+         *
+         * Ensures:
+         *     - All TOKEN_* constants populated with server values
+         *     - Falls back to hardcoded defaults if fetch fails
+         *     - Logs configuration values for debugging
+         *     - Sends JWT authentication header (endpoint protected)
+         *
+         * Raises:
+         *     - None (handles errors gracefully with fallback defaults)
+         */
+        try {
+            // Authenticated API call (requires valid JWT token)
+            const response = await fetch( '/api/config/client', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': this.getAuthHeader()  // JWT authentication required
+                }
+            });
+
+            if ( response.ok ) {
+                const config = await response.json();
+
+                // Populate constants from server configuration
+                this.TOKEN_REFRESH_CHECK_INTERVAL_MS = config.token_refresh_check_interval_ms;
+                this.TOKEN_EXPIRY_THRESHOLD_SECS = config.token_expiry_threshold_secs;
+                this.TOKEN_REFRESH_DEDUP_WINDOW_MS = config.token_refresh_dedup_window_ms;
+                this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = config.websocket_heartbeat_interval_secs;
+
+                // Log configuration for debugging
+                this.log( "✓ Client config loaded from server:", {
+                    refresh_check_interval: `${config.token_refresh_check_interval_ms / 60000} mins`,
+                    expiry_threshold: `${config.token_expiry_threshold_secs / 60} mins`,
+                    dedup_window: `${config.token_refresh_dedup_window_ms / 1000} secs`,
+                    heartbeat_interval: `${config.websocket_heartbeat_interval_secs} secs`
+                });
+
+            } else if ( response.status === 401 ) {
+                // Authentication failed (shouldn't happen after setupAuthentication)
+                this.error( "Config fetch failed: 401 Unauthorized (token invalid?)" );
+                throw new Error( "Unauthorized" );
+
+            } else {
+                throw new Error( `Config endpoint returned ${response.status}` );
+            }
+
+        } catch ( error ) {
+            // Fallback to hardcoded defaults if config fetch fails
+            this.error( "Failed to fetch client config, using defaults:", error );
+
+            // Conservative defaults (same as baseline config)
+            this.TOKEN_REFRESH_CHECK_INTERVAL_MS = 10 * 60 * 1000;  // 10 minutes
+            this.TOKEN_EXPIRY_THRESHOLD_SECS = 5 * 60;              // 5 minutes
+            this.TOKEN_REFRESH_DEDUP_WINDOW_MS = 60 * 1000;         // 60 seconds
+            this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = 30;            // 30 seconds
+
+            this.log( "⚠️ Using default client config (server fetch failed)" );
+        }
+    }
+
+    async checkAndRefreshToken( source = "manual" ) {
+        /**
+         * Check token expiration and refresh proactively if needed.
+         * Uses explicit unit suffixes to prevent conversion errors.
+         * Implements deduplication to prevent rapid-fire refreshes.
+         *
+         * Requires:
+         *     - this.authToken exists and is valid
+         *     - TOKEN_* constants initialized via fetchClientConfig()
+         *
+         * Ensures:
+         *     - Refreshes token if < threshold seconds to expiry
+         *     - Skips refresh if refreshed within dedup window
+         *     - Updates lastTokenRefresh_ms on successful refresh
+         *     - Logs all refresh decisions for debugging
+         *
+         * Args:
+         *     source: String describing trigger source for logging:
+         *         - "periodic": Triggered by setInterval periodic monitor
+         *         - "heartbeat": Triggered by WebSocket sys_ping handler
+         *         - "manual": Manually triggered (testing/debugging)
+         */
+
+        // Skip if no auth token
+        if ( !this.authToken ) {
+            return;
+        }
+
+        // Deduplication: Skip if recently refreshed
+        if ( this.lastTokenRefresh_ms ) {
+            const timeSinceRefresh_ms = Date.now() - this.lastTokenRefresh_ms;
+
+            if ( timeSinceRefresh_ms < this.TOKEN_REFRESH_DEDUP_WINDOW_MS ) {
+                const timeSinceRefresh_secs = Math.round( timeSinceRefresh_ms / 1000 );
+                this.log( `Token refresh skipped (${source}): refreshed ${timeSinceRefresh_secs}s ago` );
+                return;
+            }
+        }
+
+        // Parse token to get expiration claim
+        const payload = this.parseJWTPayload( this.authToken );
+        if ( !payload.exp ) {
+            this.error( "Token has no expiration claim - cannot check freshness" );
+            return;
+        }
+
+        // Calculate time until expiry (both in seconds for comparison)
+        const now_secs = Math.floor( Date.now() / 1000 );
+        const timeUntilExpiry_secs = payload.exp - now_secs;
+
+        // Refresh if below threshold (comparing seconds to seconds - units match ✅)
+        if ( timeUntilExpiry_secs < this.TOKEN_EXPIRY_THRESHOLD_SECS ) {
+            const timeUntilExpiry_mins = Math.round( timeUntilExpiry_secs / 60 );
+            this.log( `⏰ Proactive token refresh (${source}): ${timeUntilExpiry_mins} minutes until expiry` );
+
+            const refreshed = await this.refreshAccessToken();
+
+            if ( refreshed ) {
+                // Update timestamp and token reference
+                this.lastTokenRefresh_ms = Date.now();
+                this.authToken = this.getStoredTokens().accessToken;
+                this.log( `✓ Token proactively refreshed (${source})` );
+            } else {
+                this.error( `✗ Token refresh failed (${source})` );
+            }
+        } else {
+            const timeUntilExpiry_mins = Math.round( timeUntilExpiry_secs / 60 );
+            this.log( `Token fresh (${source}): ${timeUntilExpiry_mins} minutes remaining` );
+        }
+    }
+
+    startTokenRefreshMonitor() {
+        /**
+         * Start periodic token refresh monitoring using setInterval.
+         *
+         * Requires:
+         *     - TOKEN_REFRESH_CHECK_INTERVAL_MS initialized via fetchClientConfig()
+         *
+         * Ensures:
+         *     - Clears any existing interval before starting new one (prevents duplicates)
+         *     - Sets up periodic checkAndRefreshToken() calls
+         *     - Logs monitor status for debugging
+         */
+
+        // Clear any existing interval (prevents duplicate monitors)
+        this.stopTokenRefreshMonitor();
+
+        // Start periodic token check
+        this.tokenRefreshIntervalHandle = setInterval(
+            () => this.checkAndRefreshToken( "periodic" ),
+            this.TOKEN_REFRESH_CHECK_INTERVAL_MS
+        );
+
+        const interval_mins = this.TOKEN_REFRESH_CHECK_INTERVAL_MS / 60000;
+        this.log( `✓ Token refresh monitor started (${interval_mins}-minute interval)` );
+    }
+
+    stopTokenRefreshMonitor() {
+        /**
+         * Stop periodic token refresh monitoring.
+         *
+         * Ensures:
+         *     - Clears setInterval if active
+         *     - Resets interval handle to null
+         *     - Logs monitor status for debugging
+         */
+
+        if ( this.tokenRefreshIntervalHandle ) {
+            clearInterval( this.tokenRefreshIntervalHandle );
+            this.tokenRefreshIntervalHandle = null;
+            this.log( "Token refresh monitor stopped" );
         }
     }
 
@@ -462,6 +668,9 @@ class FreshQueueUI {
          */
         this.log( "Handling authentication failure" );
 
+        // NEW: Stop token refresh monitor
+        this.stopTokenRefreshMonitor();
+
         // Clear tokens
         localStorage.removeItem( 'lupin_access_token' );
         localStorage.removeItem( 'lupin_refresh_token' );
@@ -485,6 +694,9 @@ class FreshQueueUI {
          * Called by logout button in UI.
          */
         this.log( "User logout initiated" );
+
+        // NEW: Stop token refresh monitor
+        this.stopTokenRefreshMonitor();
 
         // Clear tokens
         localStorage.removeItem( 'lupin_access_token' );
@@ -647,6 +859,11 @@ class FreshQueueUI {
             filterAllBtn.addEventListener( 'click', () => this.setFilterMode( 'all' ) );
             this.log( "Filter button event listeners added" );
         }
+
+        // NEW: Window beforeunload - cleanup on page close/reload
+        window.addEventListener( 'beforeunload', () => {
+            this.stopTokenRefreshMonitor();
+        });
 
         this.log( "Event listeners setup complete" );
     }
@@ -1052,15 +1269,23 @@ class FreshQueueUI {
         }
     }
     
-    handlePing( connectionType ) {
+    async handlePing( connectionType ) {
         const ws = connectionType === "queue" ? this.queueWS : this.audioWS;
-        
+
+        // Send pong response (existing behavior)
         if ( ws && ws.readyState === WebSocket.OPEN ) {
             const pongMessage = {
                 type: "sys_pong",
                 timestamp: new Date().toISOString()
             };
             ws.send( JSON.stringify( pongMessage ) );
+        }
+
+        // NEW: Piggyback token freshness check on heartbeat
+        // Only check on queue heartbeat to avoid duplicate checks
+        // (We have TWO WebSockets: queue + audio, but only need one check)
+        if ( connectionType === "queue" ) {
+            await this.checkAndRefreshToken( "heartbeat" );
         }
     }
     
