@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2025.10.16 - JWT Token Proactive Refresh
+- **Authentication Enhancement**: [2025.10.16-jwt-token-proactive-refresh.md](2025.10.16-jwt-token-proactive-refresh.md) - **📋 READY TO IMPLEMENT** - Hybrid proactive token refresh system eliminating 401 errors during idle periods. Implements dual-mechanism refresh (periodic monitor + heartbeat-triggered), server-driven configuration with explicit unit naming, comprehensive testing strategy (unit + smoke + integration). Solves high-priority notification playback after >1 hour inactivity. Estimated 6-8 hours implementation.
+
 ### 2025.10.04 - Admin User Management Implementation
 - **Admin Interface**: [2025.10.04-admin-user-management-implementation-plan.md](2025.10.04-admin-user-management-implementation-plan.md) - **📋 READY TO IMPLEMENT** - Complete MVP plan for administrative user management interface. Includes user listing/search, role management, account status control, and admin password reset. Backend (admin_service.py, routers/admin.py), Frontend (admin/users.html, admin-users.js, admin.css), comprehensive API specs, security requirements, and integration testing strategy. Estimated 6-8 hours implementation.
 
