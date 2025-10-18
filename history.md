@@ -1,6 +1,8 @@
 # Lupin Project History
 
-> **✅ CURRENT**: 2025.10.17 (Session 2) - JWT Token Proactive Refresh COMPLETE! All 5 phases validated: server config endpoint, client dual-mechanism refresh (periodic + heartbeat), comprehensive test suite (17/17 tests passing), production deployment, manual validation confirmed. User validated: "background heartbeat ping from the server will force a token refresh after 25 minutes - Quite nice!" Zero 401 errors during idle, seamless UX after extended inactivity. Feature ready for long-term production use! 🎉
+> **🚧 CURRENT**: 2025.10.17 (Session 3) - SSE Phase 2 Interactive Design Session (Day 1 of 2)! Completed 3/9 design areas through systematic Q&A: Database schema (persistent storage, title/message split, JSON responses), response types (yes/no with LLM interpretation, open-ended mic+text), timeout behavior (MM:SS + progress bar + color coding). Created comprehensive 1000+ line design decisions document. Resume point: Area 3 Q3.2 (Timeout handling). Multi-modal UX principles established (voice-first, keyboard accessible, mouse fallback). Tomorrow: Complete remaining 6 areas + generate implementation plan. 📋
+
+> **✅ PREVIOUS**: 2025.10.17 (Session 2) - JWT Token Proactive Refresh COMPLETE! All 5 phases validated: server config endpoint, client dual-mechanism refresh (periodic + heartbeat), comprehensive test suite (17/17 tests passing), production deployment, manual validation confirmed. User validated: "background heartbeat ping from the server will force a token refresh after 25 minutes - Quite nice!" Zero 401 errors during idle, seamless UX after extended inactivity. Feature ready for long-term production use! 🎉
 
 > **✅ PREVIOUS**: 2025.10.16 (Session 2) - JWT Token Proactive Refresh Planning COMPLETE! Analyzed JWT token freshness gap during idle periods (>1 hour), designed hybrid proactive refresh system with dual mechanisms (periodic 10-min monitor + heartbeat-triggered checks every 30s). Created comprehensive 800+ line implementation document covering architecture, configuration management (server-driven with explicit unit naming _ms/_secs/_mins), testing strategy (unit/smoke/integration), deployment plan. Eliminates 401 errors after idle, enables high-priority notifications to play immediately after >90 min inactivity. Ready to implement! 📋
 
@@ -37,6 +39,133 @@
 ## Recent Activity (Last 7 Days)
 
 ### 🎯 October 2025 - Recent Sessions
+
+#### 2025.10.17 (Session 3) - SSE Phase 2 Interactive Design Session (Day 1 of 2) 📋
+
+**Summary**: Systematic interactive Q&A design session for SSE Phase 2 response-required notifications. Completed 3/9 architectural areas (database schema, response types, timeout behavior) documenting 13 major decisions. Created comprehensive 1000+ line design decisions document capturing all rationale. Established multi-modal UX principles (voice-first, keyboard accessible, mouse fallback). Resume point: Area 3 Q3.2. Tomorrow: Complete remaining 6 areas + generate implementation plan.
+
+**Session Approach**:
+- Interactive question-by-question discussion (not batch/strawman)
+- User chose Option A approach: "Interactive Q&A" with one question at a time
+- All decisions documented with full rationale and examples
+- Design session paused when user felt tired - excellent stopping point
+
+**Area 1: Database Schema & Persistence** ✅ COMPLETE (4 questions):
+
+**Decision Summary**:
+1. **Unique ID**: UUID primary key (keep simple, no composite keys)
+2. **Lifecycle States**: 5-state model (created, delivered, responded, expired, deleted)
+3. **Schema Fields**: Comprehensive 20+ field design with key innovations:
+   - **Source split**: `source_context` + `source_sender` (internal/external + specific sender ID)
+   - **Title/message split**: Title (terse, technical) vs Message (prose, TTS-friendly)
+   - **Response as JSON**: Structured metadata from day 1
+   - **Per-notification timeout**: Configurable with server-side max validation
+   - **Default answer support**: Pre-select Yes/No for keyboard accessibility
+4. **Deletion**: Hybrid soft delete + 30-day auto-cleanup (nightly job)
+
+**Key Schema Decisions**:
+```sql
+-- Major innovations
+title                   TEXT NOT NULL,     -- Terse/technical (e.g., "JWT Token Refresh Failed")
+message                 TEXT NOT NULL,     -- Prose, no acronyms, TTS-friendly
+source_context          TEXT,              -- internal, external, claude_code, system
+source_sender           TEXT,              -- claude.code.cosa@deepily.ai
+response_value          TEXT,              -- JSON object with answer + metadata
+timeout_seconds         INTEGER,           -- Per-notification override (nullable)
+default_answer          TEXT,              -- 'yes', 'no', NULL (for keyboard Enter shortcut)
+```
+
+**User Management CLI**: Deferred to Phase 3
+
+**Area 2: Response Types & UI Affordances** ✅ COMPLETE (2 questions):
+
+**Q2.1: Yes/No Button Layout**:
+- **Design**: `[🎤 Mic] [Yes] [No]` + Escape key (no Dismiss button)
+- **Interaction Modes**:
+  - Voice: Press-to-talk mic (never always-on)
+  - Keyboard: Tab navigation, Enter/Space to activate, Escape to dismiss
+  - Mouse/Touch: Click buttons
+- **Default Answer**: Sender can pre-select Yes/No, user hits Enter to accept
+- **LLM-Based Interpretation**: Use `ConfirmationDialogue` pattern for natural language
+  - User says "sure, why not?" → LLM interprets → "yes"
+  - Server-side classification via existing confirmation_dialog.py
+  - **STATUS**: ⚠️ NEEDS CLARIFICATION - Design LLM endpoint before implementation
+
+**Q2.2: Open-Ended Layout**:
+- **Design**: `[🎤 Mic]` + text input field (no Dismiss button)
+- **Accessibility**: Voice OR keyboard input, can edit STT results
+- **Use Cases**: "Why delete files?" → "They're duplicates from backup"
+
+**Future Response Types**: Designed for extensibility (multiple choice, ratings, sliders) - Phase 3+
+
+**User Quote**:
+> "I like the multiple signal options you provided in your recommended option D, that is brilliant. This is precisely what I'm looking for: multiple ways of inputting and outputting information because different people have different perception strengths, weaknesses, and preferences."
+
+**Area 3: Timeout & Expiration Behavior** (PARTIAL - 1/4 questions):
+
+**Q3.1: Visual Countdown Timer** ✅ COMPLETE:
+- **Format**: Hybrid multi-modal display (MM:SS + progress bar + color coding)
+- **Components**:
+  - Numeric timer: `2:00` → `1:59` → ... → `0:00`
+  - Progress bar: Depletes left-to-right
+  - Color coding: Green (>50%), Yellow (20-50%), Red (<20%)
+  - Audio alert: Optional at T-minus 10 seconds (TBD in Q3.3)
+- **Rationale**: Multiple perception modes (visual, numeric, color) = accessibility for all users
+
+**Q3.2-Q3.4**: PENDING FOR TOMORROW
+- Timeout handling (when does server mark expired?)
+- Visual/audio alerts
+- Grace period (accept late responses?)
+
+**Remaining Areas** (6 areas pending for tomorrow):
+- **Area 4**: SSE vs WebSocket Architecture (4 questions)
+- **Area 5**: Return Value Propagation (4 questions)
+- **Area 6**: Client UI/UX Design (4 questions)
+- **Area 7**: Existing System Integration (4 questions)
+- **Area 8**: MVP Scope & Phasing (1 major question)
+- **Area 9**: Conceptual Questions (4 questions)
+- **Area 10**: Complete Notification Flow Sequence Diagram
+- **Area 11**: Documentation & Decisions Log
+
+**Design Principles Established**:
+1. **Voice-First**: Microphone icon is primary, leftmost button
+2. **Keyboard Accessible**: Tab navigation, Enter/Space/Escape shortcuts, default answer support
+3. **Mouse Fallback**: Click buttons works too
+4. **Multi-Modal Perception**: Visual + numeric + color + audio = accessibility
+5. **Natural Language**: LLM interprets any user response, not just "yes"/"no"
+6. **Configuration-Driven**: Server controls all timing values, per-notification overrides
+
+**Files Created**:
+- `src/rnd/sse-notifications/05-phase2-design-decisions.md` (1000+ lines)
+  - Complete record of interactive Q&A session
+  - All 13 decisions documented with rationale
+  - Resume point clearly marked: Area 3, Q3.2
+  - Remaining 6 areas outlined with placeholder questions
+
+**Files Modified**:
+- `src/rnd/sse-notifications/98-notification-design-draft.md` (added cross-reference header)
+- `src/rnd/README.md` (added SSE Phase 2 entry under Recent Additions)
+- `history.md` (this entry)
+
+**Tomorrow's Session Plan**:
+1. Read `src/rnd/sse-notifications/05-phase2-design-decisions.md` to resume context
+2. Continue Area 3 (Q3.2-Q3.4): Timeout handling, alerts, grace period
+3. Complete Areas 4-9: Architecture, return values, UI/UX, integration, MVP scoping
+4. Create Area 10: Complete notification flow sequence diagram
+5. Generate Phase 2 implementation plan with task breakdown
+
+**Estimated Remaining Time**: 2-3 hours to complete design session tomorrow
+
+**Session Statistics**:
+- Duration: ~90 minutes
+- Progress: 3/9 areas (33%)
+- Questions Answered: 8/36 (22%)
+- Major Decisions: 13
+- Documentation: 1000+ lines
+
+**Key Insight**: Interactive Q&A approach worked excellently - user had time to think through each decision, provide detailed preferences, and raise clarifying points. Comprehensive documentation ensures tomorrow's session can resume seamlessly at exact stopping point.
+
+---
 
 #### 2025.10.17 (Session 2) - JWT Token Proactive Refresh COMPLETE 🎉
 

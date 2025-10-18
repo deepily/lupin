@@ -7,6 +7,20 @@
 
 ---
 
+## 📌 **DESIGN SESSION IN PROGRESS**
+
+**Answers Being Documented In**: [05-phase2-design-decisions.md](05-phase2-design-decisions.md)
+
+**Progress**: 3/9 areas complete (Database Schema, Response Types, Timeout partial)
+
+**Resume Point**: Area 3, Question 3.2 (Timeout Handling)
+
+**Next Session**: Read 05-phase2-design-decisions.md to resume context, then continue answering questions below
+
+---
+
+---
+
 ## Context
 
 This document captures clarifying questions raised during the transition from Phase 1 (SSE PoC) to Phase 2 (production integration). The user identified critical gaps:
