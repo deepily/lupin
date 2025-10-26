@@ -1,6 +1,8 @@
 # Lupin Project History
 
-> **🚧 CURRENT**: 2025.10.17 (Session 3) - SSE Phase 2 Interactive Design Session (Day 1 of 2)! Completed 3/9 design areas through systematic Q&A: Database schema (persistent storage, title/message split, JSON responses), response types (yes/no with LLM interpretation, open-ended mic+text), timeout behavior (MM:SS + progress bar + color coding). Created comprehensive 1000+ line design decisions document. Resume point: Area 3 Q3.2 (Timeout handling). Multi-modal UX principles established (voice-first, keyboard accessible, mouse fallback). Tomorrow: Complete remaining 6 areas + generate implementation plan. 📋
+> **🚧 CURRENT**: 2025.10.26 - Planning-is-Prompting Workflow Installation COMPLETE! Installed 10 new standardized workflows (plan-about, plan-session-end, plan-history-management, plan-test-baseline/remediation/harness-update, p-is-p-00/01/02, plan-workflow-audit) with v1.0 deterministic wrapper pattern. Updated plan-session-start to v1.0 (added MUST language, explicit DO NOT constraints, removed anti-pattern embedded task list). All commands now thin reference pointers to canonical workflows. Preserved 8 legacy commands (lupin-*, smoke-test-*, design-planning-docs) for gradual migration. Ready for systematic workflow-driven development! 🎯
+
+> **✅ PREVIOUS**: 2025.10.17 (Session 3) - SSE Phase 2 Interactive Design Session (Day 1 of 2)! Completed 3/9 design areas through systematic Q&A: Database schema (persistent storage, title/message split, JSON responses), response types (yes/no with LLM interpretation, open-ended mic+text), timeout behavior (MM:SS + progress bar + color coding). Created comprehensive 1000+ line design decisions document. Resume point: Area 3 Q3.2 (Timeout handling). Multi-modal UX principles established (voice-first, keyboard accessible, mouse fallback). Tomorrow: Complete remaining 6 areas + generate implementation plan. 📋
 
 > **✅ PREVIOUS**: 2025.10.17 (Session 2) - JWT Token Proactive Refresh COMPLETE! All 5 phases validated: server config endpoint, client dual-mechanism refresh (periodic + heartbeat), comprehensive test suite (17/17 tests passing), production deployment, manual validation confirmed. User validated: "background heartbeat ping from the server will force a token refresh after 25 minutes - Quite nice!" Zero 401 errors during idle, seamless UX after extended inactivity. Feature ready for long-term production use! 🎉
 
@@ -39,6 +41,55 @@
 ## Recent Activity (Last 7 Days)
 
 ### 🎯 October 2025 - Recent Sessions
+
+#### 2025.10.26 - Planning-is-Prompting Workflow Installation 🎯
+
+**Summary**: Comprehensive installation of planning-is-prompting workflow infrastructure. Installed 10 new standardized commands with v1.0 deterministic wrapper pattern, updated existing plan-session-start to eliminate anti-patterns. All commands now thin reference pointers to canonical workflows ensuring automatic updates when canonical documents improve.
+
+**Workflows Installed (10 new commands)**:
+1. **Installation Management**: `/plan-about` - View installed workflows with version tracking
+2. **Core Workflows**: `/plan-session-end`, `/plan-history-management` (new versions alongside legacy)
+3. **Testing Workflows**: `/plan-test-baseline`, `/plan-test-remediation`, `/plan-test-harness-update` (standardized versions)
+4. **Planning-is-Prompting Core**: `/p-is-p-00-start-here` (entry point), `/p-is-p-01-planning` (work planning), `/p-is-p-02-documentation` (implementation docs)
+5. **Meta-Tools**: `/plan-workflow-audit` - Audit workflows for execution protocol compliance
+
+**Updated Workflows (1)**:
+- `/plan-session-start` - Upgraded to v1.0 deterministic wrapper pattern
+  - Added MUST language for mandatory steps
+  - Added explicit DO NOT constraints (prevents shortcuts)
+  - Removed anti-pattern embedded task list
+  - Backup created: `.claude/commands/plan-session-start.md.backup-20251026`
+
+**Preserved Legacy Workflows (8)**: Kept all existing commands untouched for gradual migration
+- `/lupin-session-end`, `/history-management`, `/smoke-test-baseline`, `/smoke-test-remediation`, `/lupin-test-harness-update`, `/design-planning-docs`, `/plan-backup`, original `/plan-session-start`
+
+**Key Changes**:
+- All new commands use standardized `/plan-*` or `/p-is-p-*` naming (source repository prefix)
+- Thin wrapper pattern ensures canonical workflows always control execution
+- No embedded task lists - pure reference pointers only
+- Version tracking enabled (all v1.0)
+- Legacy commands remain for backward compatibility
+
+**Next Steps**:
+- Test new commands in upcoming sessions
+- Gradually migrate to new command names
+- Remove legacy commands once confident with new versions
+- Use `/plan-about` to track installation status
+
+**Files Modified**:
+- `.claude/commands/plan-about.md` (new)
+- `.claude/commands/plan-session-end.md` (new)
+- `.claude/commands/plan-history-management.md` (new)
+- `.claude/commands/plan-test-baseline.md` (new)
+- `.claude/commands/plan-test-remediation.md` (new)
+- `.claude/commands/plan-test-harness-update.md` (new)
+- `.claude/commands/p-is-p-00-start-here.md` (new)
+- `.claude/commands/p-is-p-01-planning.md` (new)
+- `.claude/commands/p-is-p-02-documentation.md` (new)
+- `.claude/commands/plan-workflow-audit.md` (new)
+- `.claude/commands/plan-session-start.md` (updated to v1.0)
+
+---
 
 #### 2025.10.17 (Session 3) - SSE Phase 2 Interactive Design Session (Day 1 of 2) 📋
 
