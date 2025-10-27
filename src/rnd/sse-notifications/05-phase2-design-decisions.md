@@ -3,9 +3,10 @@
 **Document Purpose**: Record all architectural decisions from interactive design session for Phase 2 SSE notification system implementation
 
 **Created**: 2025.10.17
-**Status**: 🚧 IN PROGRESS (Session 1 of Design Q&A)
-**Resume Point**: Area 3, Question 3.2 (Timeout Handling)
-**Progress**: 3/9 areas completed, 1 partial
+**Updated**: 2025.10.26 (Session 2 - Day 2)
+**Status**: 🚧 IN PROGRESS (Session 2 of Design Q&A - Day 2)
+**Resume Point**: Area 6, Question 6.3 (After Response Submitted)
+**Progress**: 6/9 areas completed (Areas 1-5 complete, Area 6 partial - 2/4 questions)
 
 ---
 
@@ -19,8 +20,8 @@
 
 **Next Session**:
 1. Read this document to resume context
-2. Continue with Area 3, Q3.2: "When does server mark notification as expired?"
-3. Complete Areas 3-9 (6 remaining areas)
+2. Continue with Area 6, Q6.3: "What happens after response submitted?"
+3. Complete Areas 6-9 (3.5 remaining areas)
 4. Generate implementation plan and task breakdown
 
 ---
@@ -29,20 +30,24 @@
 
 **Goal**: Design persistent, response-required notification system for Claude Code → User synchronous communication
 
-**Key Decisions Made (Areas 1-3)**:
-- ✅ Database schema with persistent storage (notifications survive server restart)
+**Key Decisions Made (Areas 1-6, partial)**:
+- ✅ Database schema with persistent storage (response_requested, response_default fields)
 - ✅ Title/message split for voice-first UX (title: terse/technical, message: prose/TTS-friendly)
 - ✅ LLM-based natural language response interpretation (user says "sure, why not?" → "yes")
 - ✅ Multi-modal UX (voice, keyboard, mouse - accessibility first)
 - ✅ Hybrid countdown timer (MM:SS + progress bar + color coding)
+- ✅ Hybrid lazy server + active client expiration (asyncio.Event for single-worker)
+- ✅ Intent-based grace period (30s if user started before expiration)
+- ✅ Dual protocol architecture (WebSocket for delivery, SSE for blocking/waiting)
+- ✅ In-memory event system with scaling documentation for future Redis migration
+- ✅ Server-side interpretation, simple stdout output (exit 0=success, 1=error)
+- ✅ Separate "Action Required" section in UI, buttons inline with timer + progress bar paired
 
-**Still To Decide (Areas 4-9)**:
-- Timeout expiration logic, grace periods, audio alerts
-- SSE vs WebSocket architecture and dual connection model
-- Return value propagation to bash/Claude Code
-- UI placement and behavior
-- Existing system integration strategy
-- MVP scope and phasing
+**Still To Decide (Areas 6-9, partial)**:
+- After response submitted (Q6.3-Q6.4)
+- Existing system integration strategy (Area 7)
+- MVP scope and phasing (Area 8)
+- Conceptual questions: security, offline, multi-device (Area 9)
 
 ---
 
@@ -139,12 +144,12 @@ CREATE TABLE notifications (
     expires_at              TEXT,              -- NULL for fire-and-forget, set for response-required
 
     -- Response-Required Fields
-    response_required       INTEGER DEFAULT 0, -- Boolean: 0 = no, 1 = yes
+    response_requested      INTEGER DEFAULT 0, -- Boolean: 0 = no, 1 = yes
     response_type           TEXT,              -- NULL, 'yes_no', 'open_ended'
     response_value          TEXT,              -- JSON object (e.g., {"answer": "yes", "raw_utterance": "sure!", "confidence": "high"})
     responded_at            TEXT,              -- When user responded (NULL until responded)
     timeout_seconds         INTEGER,           -- Per-notification timeout (nullable, falls back to config max)
-    default_answer          TEXT,              -- 'yes', 'no', NULL (for pre-selecting button, accepting default with Enter)
+    response_default        TEXT,              -- 'yes', 'no', NULL (for pre-selecting button, accepting default with Enter)
 
     -- State Management
     state                   TEXT NOT NULL DEFAULT 'created',  -- created, delivered, responded, expired, deleted
@@ -200,9 +205,9 @@ CREATE INDEX idx_expires_at ON notifications(expires_at) WHERE expires_at IS NOT
 - **Example**: "Delete production database?" → 30s timeout (safety)
 
 **5. Default Answer Support**:
-- **Field**: `default_answer TEXT` (values: 'yes', 'no', NULL)
+- **Field**: `response_default TEXT` (values: 'yes', 'no', NULL)
 - **Why**: Keyboard accessibility - user can hit Enter to accept pre-selected default
-- **UI**: If `default_answer = "yes"`, Yes button is pre-focused/highlighted
+- **UI**: If `response_default = "yes"`, Yes button is pre-focused/highlighted
 - **Example**: "Delete these 5 files?" → default="no" (safety first)
 
 **Fields NOT Included** (and why):
@@ -334,7 +339,7 @@ lupin-admin create-sender --email claude.code.cosa@deepily.ai \
 - Click any button
 
 **Default Answer Support**:
-- Sender can specify `default_answer` field: `"yes"`, `"no"`, or `null`
+- Sender can specify `response_default` field: `"yes"`, `"no"`, or `null`
 - If set, corresponding button is pre-focused/highlighted
 - User just hits `Enter` to accept default
 - **Example Use Case**: "Delete these 5 files?" → default="no" (safety)
@@ -494,13 +499,13 @@ The `response_type` field and `response_value` JSON structure support future typ
 
 ---
 
-## ⏱️ AREA 3: TIMEOUT & EXPIRATION BEHAVIOR (PARTIAL - 1/4 questions)
+## ⏱️ AREA 3: TIMEOUT & EXPIRATION BEHAVIOR ✅ COMPLETE
 
 ### Overview
 
 **Goal**: Clear visual countdown and predictable timeout behavior
 
-**Progress**: Q3.1 ✅ complete, Q3.2-Q3.4 pending for tomorrow
+**Progress**: All 4 questions complete (Q3.1-Q3.4)
 
 ---
 
@@ -561,118 +566,908 @@ T=0s   (0:00) → EXPIRED
 
 ---
 
-### Q3.2: Timeout Handling ⏸️ NEXT SESSION
+### Q3.2: Server-Side Timeout Handling ✅ COMPLETE
 
 **Question**: When does server mark notification as `expired`?
 
-**Options to Discuss Tomorrow**:
-- At exact timeout moment (server-side timer)?
-- When client polling detects timeout (SSE keepalive)?
-- Hybrid (server marks expired, client shows UI immediately)?
+**Decision**: ✅ **Option C: Hybrid (Lazy Server + Active Client)**
 
-**What happens to UI when expired?**:
-- Fade out and remove?
-- Stay visible but disabled (grayed out)?
-- Move to "Expired Notifications" section?
+**Implementation**:
 
----
+**Client Behavior**:
+1. Receives notification with `expires_at` timestamp
+2. Shows countdown timer (MM:SS + progress bar + color coding)
+3. At T=0, sends: `POST /api/notifications/{id}/expire`
+4. Disables interactive elements (see UI behavior below)
 
-### Q3.3: Visual & Audio Alerts ⏸️ PENDING
+**Server Behavior**:
+1. Stores `expires_at` when notification created
+2. Does NOT spawn active timer (no `asyncio.sleep()` tasks)
+3. On client expire request: validates `expires_at < NOW()` and marks `state='expired'`
+4. On all read queries: lazy expiration check
+   ```sql
+   SELECT * FROM notifications
+   WHERE recipient_id = ?
+     AND state != 'deleted'
+     AND (state != 'delivered' OR expires_at > datetime('now'))
+   ```
+5. Optional: Periodic cleanup job (every 5 minutes) to catch orphaned notifications if client disconnects
 
-**Questions for Tomorrow**:
-- Audio chime at T-minus 10 seconds? (optional, configurable)
-- Visual flash/pulse when <10s remaining?
-- User preference settings: "Never play audio alerts" vs "Always alert me"
-- Different alert sounds for different priorities? (urgent = loud chime, low = soft beep)
+**UI Behavior on Expiration**:
+- ✅ **Disable interactive elements**: Mic button, Yes/No buttons (or text input) become grayed out/disabled
+- ✅ **Visual indication**: Entire notification card gets subtle visual treatment (reduced opacity, grayed text)
+- ✅ **Tooltip**: Hovering over disabled buttons shows: "This notification has expired and cannot be responded to"
+- ✅ **Stay in place**: Notification remains in list at same position (no removal, no moving to different section)
+- ✅ **Countdown stopped**: Timer shows "EXPIRED" (or "0:00") in red, progress bar empty/red
 
----
+**Example Visual State**:
+```
+┌─────────────────────────────────────────────┐
+│ 🚫 JWT Token Refresh Failed                 │  ← Subtle opacity/strikethrough
+│ Message: The authentication token could...  │
+│                                              │
+│ [🎤 Mic] [Yes] [No]           EXPIRED ⚠️    │  ← Buttons disabled (grayed)
+│ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░        │  ← Empty progress bar (red)
+└─────────────────────────────────────────────┘
+      ↑ Tooltip on hover: "This notification has expired and cannot be responded to"
+```
 
-### Q3.4: Grace Period ⏸️ PENDING
-
-**Question for Tomorrow**:
-If user starts typing/speaking at T-minus 2 seconds but finishes at T+5 seconds, do we:
-- Accept it (grace period)?
-- Strict cutoff at 0 seconds?
-- Show "Expired, but we'll accept your late response" message?
-
----
-
-## 📋 AREA 4: SSE VS WEBSOCKET ARCHITECTURE ⏸️ PENDING
-
-**Questions for Tomorrow's Session**:
-
-### Q4.1: Dual Connection Model
-- WebSocket for fire-and-forget notifications (existing)
-- SSE for response-required notifications (new)
-- OR: Use SSE for everything?
-- OR: Use WebSocket for everything?
-
-### Q4.2: Delivery Mechanism
-- How does response-required notification get delivered?
-- Server pushes via WebSocket → client opens SSE?
-- Client long-polls SSE endpoint?
-- Hybrid push/pull?
-
-### Q4.3: SSE Endpoint Design
-- `/sse/notification/{notification_id}` - one stream per notification?
-- `/sse/user/{user_id}` - one stream per user for all notifications?
-- Which makes more sense for our architecture?
-
-### Q4.4: Complete Notification Flow
-- Walk through end-to-end: Claude Code sends → Server persists → User sees → User responds → Response returns to Claude Code
-- Sequence diagram needed (Area 11)
+**Rationale**:
+- ✅ Client drives immediate UI feedback (no waiting for server round-trip)
+- ✅ Server validates to prevent spoofing (client can't fake expiration before timeout)
+- ✅ Lazy expiration catches edge cases (client offline, disconnected, crashed)
+- ✅ No resource overhead of N active timers for N notifications
+- ✅ Expired notifications remain visible for context (user can see what they missed)
+- ✅ Disabled state prevents accidental interaction with expired notifications
 
 ---
 
-## 📡 AREA 5: RETURN VALUE PROPAGATION ⏸️ PENDING
+### Q3.3: Audio & Visual Alerts ✅ COMPLETE
 
-**Questions for Tomorrow's Session**:
+**Question**: Should we add audio/visual alerts as the timeout approaches?
 
-### Q5.1: notify-claude Script Return Values
-- Exit code 0 + stdout = response text (success)?
-- Exit code 1 = timeout?
-- Exit code 2 = dismissed?
-- Exit code 3 = error?
+**Decision**:
+- ✅ **Audio Alerts**: Option C (No audio alerts during countdown)
+- ✅ **Visual Alerts**: Option E (No additional visual alerts - color coding + timer sufficient)
+- ✅ **Priority-Based Differentiation**: YES (already exists in system)
+- ✅ **User Preference Settings**: YES (already tracking TTS preferences)
 
-### Q5.2: Response Encoding
-- Stdout prints: "YES" or "NO"?
-- JSON: `{"status": "responded", "value": "yes"}`?
-- Which is more bash-friendly?
+**Implementation**:
 
-### Q5.3: Claude Code Integration
-- How does Claude Code consume the response?
-- Blocking behavior acceptable? (freeze for 120s waiting for response)
-- Or async notification support?
+**Audio Behavior**:
+- **On Receipt**: Priority-based audio alert (urgent = different beep, already implemented)
+- **During Countdown**: No audio alerts at T-30s, T-10s, etc.
+- **On Expiration**: No audio alert
+- **Rationale**: Visual countdown (green → yellow → red) provides sufficient urgency cues
 
-### Q5.4: Timeout Behavior
-- What happens in bash script when timeout occurs?
-- Return default value?
-- Return error and let Claude Code decide?
+**Visual Behavior**:
+- **Only**: Color-coded countdown timer + progress bar (already designed in Q3.1)
+- **No**: Pulse/flash animations, shake effects, browser tab updates, desktop notifications
+- **Rationale**: Keep UI calm and professional - color transition provides gradual psychological pressure without being annoying
+
+**Priority-Based Differentiation** (existing system integration):
+- **Receipt Alert**: Urgent/high priority already gets distinct audio beep (existing)
+- **TTS Playback**: Currently only urgent/high priority notifications use TTS (existing user preference)
+- **Response-Required Notifications**: Inherit same priority-based behavior
+
+**User Preference Settings** (leverage existing):
+- Current setting: "TTS for urgent/high priority only"
+- Applies to response-required notifications same as fire-and-forget
+- No new settings needed for MVP
+
+**Rationale**:
+- ✅ Consistent with existing notification system behavior
+- ✅ Respects user's established TTS preferences
+- ✅ Visual countdown is sufficient - no audio bombardment
+- ✅ Simple, clean UX - not overwhelming
+- ✅ Can add more alerts in Phase 3 if user feedback requests it
 
 ---
 
-## 🎨 AREA 6: CLIENT UI/UX DESIGN ⏸️ PENDING
+### Q3.4: Grace Period for Late Responses ✅ COMPLETE
 
-**Questions for Tomorrow's Session**:
+**Question**: What happens if a user starts responding just before timeout but finishes after?
 
-### Q6.1: Notification Display Location
-- Response-required in same list as fire-and-forget?
-- Separate "Action Required" section?
-- Pinned to top of notification list?
+**Decision**: ✅ **Option C: Intent-Based Grace (Started Before Expiration)** with pragmatic server implementation
 
-### Q6.2: Interactive Elements Placement
-- Buttons inline in notification card?
-- Countdown timer: top-right corner? Bottom? Separate row?
-- Microphone icon: where exactly?
+**Philosophy**: "Did the user genuinely try to respond before timeout?" → Accept it. This isn't high-frequency trading!
 
-### Q6.3: After Response Submitted
-- Notification disappears immediately?
-- Shows "Response sent ✓" confirmation for 2 seconds?
-- Stays in list with checkmark/status?
+**Client-Side Intent Tracking**:
 
-### Q6.4: Multiple Simultaneous Notifications
-- Can user have 3 response-required active at once?
-- How does UI handle: stack, queue, show all?
+Track user interaction timestamps:
+- **Mic button pressed**: `mic_pressed_at` timestamp
+- **Text field focused**: `text_focused_at` timestamp
+- **Text input started**: `first_keystroke_at` timestamp
+
+**Client sends with response**:
+```json
+{
+  "answer": "yes",
+  "method": "stt_override",
+  "raw_utterance": "sure, go ahead",
+  "started_at": "2025-10-26T10:15:58Z",    // User clicked mic at T-2s
+  "submitted_at": "2025-10-26T10:16:03Z",  // Response submitted at T+3s
+  "timestamp": "2025-10-26T10:16:03Z"
+}
+```
+
+**Server-Side Validation** (simple lazy check):
+
+```python
+# When response arrives via POST /api/notifications/{id}/respond
+notification = get_notification(id)
+
+# Check 1: Was intent shown before expiration?
+if response['started_at'] < notification.expires_at:
+    # User started responding before timeout - accept it
+    accept_response(notification, response)
+else:
+    # User started responding AFTER timeout - reject it
+    reject_response("Response started after notification expired")
+
+# Check 2: Is response reasonably fresh? (optional safety check)
+time_since_expiration = submitted_at - expires_at
+if time_since_expiration > 30_seconds:
+    # User took >30s after expiration - too stale, reject
+    reject_response("Response submitted too long after expiration")
+```
+
+**Grace Period Window**: ~30 seconds after expiration (configurable)
+- Covers STT processing latency (1-5 seconds)
+- Allows slow typers to finish thought (10-20 seconds)
+- Prevents abuse (can't respond 5 minutes later)
+
+**Edge Case Handling**:
+
+| Scenario | Started At | Submitted At | Accept? | Reason |
+|----------|-----------|--------------|---------|--------|
+| User clicks mic at T-2s, STT completes at T+3s | T-2s | T+3s | ✅ Accept | Intent before expiration, quick response |
+| User typing at T-5s, submits at T+10s | T-5s | T+10s | ✅ Accept | Intent before expiration, reasonable delay |
+| User hovers at T-1s, clicks at T+2s | T+2s | T+2s | ❌ Reject | No intent signal before expiration (hover ≠ click) |
+| User clicks mic at T-2s, submits at T+45s | T-2s | T+45s | ❌ Reject | Too stale (>30s grace period) |
+| User starts typing at T+5s (after expiration) | T+5s | T+10s | ❌ Reject | No intent before expiration |
+
+**Client UX During Grace Period**:
+- At T=0 (expiration), countdown shows "EXPIRED"
+- If user has active interaction (mic recording, text field focused):
+  - **Don't** disable buttons immediately
+  - **Do** show warning banner: "⚠️ Notification expired, but you can still submit (started before timeout)"
+  - **Allow** completion of current interaction
+  - **Disable** after submission OR after 30s of inactivity
+
+**Rationale**:
+- ✅ User-friendly: Accepts genuine attempts to respond
+- ✅ Simple server logic: Just compare `started_at < expires_at`
+- ✅ Lazy validation fits our architecture (no active timers needed)
+- ✅ SSE/WebSocket connection still open, response can arrive late
+- ✅ Not time-critical (as you said - not stock trading!)
+- ✅ 30-second grace window is generous but not abusable
+- ✅ Prevents frustration from STT latency or slow typing
+
+**Configuration** (lupin-app.ini):
+```ini
+# Grace period for late responses (if intent shown before expiration)
+notification_grace_period_seconds = 30
+```
+
+---
+
+## 📋 AREA 4: SSE VS WEBSOCKET ARCHITECTURE ✅ COMPLETE
+
+### Overview
+
+**Goal**: Define delivery architecture for response-required notifications
+
+**Progress**: All 4 questions complete (Q4.1-Q4.4)
+
+---
+
+### Q4.1: Dual Connection Model vs Unified Approach ✅ COMPLETE
+
+**Question**: Should we use SSE for response-required notifications, or leverage the existing WebSocket infrastructure?
+
+**Decision**: ✅ **Option A: Dual Protocol (WebSocket + SSE)**
+
+**Architecture**:
+
+**Fire-and-Forget Notifications** (existing, unchanged):
+- Command: `notify-claude-async` (renamed from `notify-claude`)
+- Flow: POST `/api/notify` → WebSocket delivers to client → done
+- No blocking, no response needed
+- Uses existing WebSocket: `/ws/queue/{session_id}`
+
+**Response-Required Notifications** (new):
+- Command: `notify-claude-sync` (new SSE-based version)
+- Flow: POST `/api/notify` with `response_requested=true` → SSE stream blocks → returns response
+- Blocking behavior (script waits for user response or timeout)
+- Uses SSE endpoint: POST returns SSE stream directly
+
+**Unified Backend**:
+- **Same POST endpoint**: `/api/notify` (add `response_requested` parameter)
+- **Same database table**: `notifications` (with `response_requested` field)
+- **Same WebSocket delivery**: Both notification types delivered to UI via WebSocket
+- **SSE addition**: Only used for blocking/waiting behavior in notify-claude-sync
+
+**Implementation Summary**:
+```bash
+# Fire-and-forget (existing behavior)
+notify-claude-async "Task complete!" --type=task --priority=low
+# → POST /api/notify (response_requested=false)
+# → WebSocket pushes to client
+# → Script exits immediately
+
+# Response-required (new behavior)
+notify-claude-sync "Delete 5 files?" --response-required yes_no --timeout 120
+# → POST /api/notify (response_requested=true)
+# → WebSocket pushes to client (shows UI with buttons)
+# → SSE stream blocks until response
+# → Script returns response and exits
+```
+
+**Rationale**:
+- ✅ Keep existing fire-and-forget working (no changes needed)
+- ✅ SSE only for blocking/waiting behavior (natural fit)
+- ✅ WebSocket continues handling real-time delivery to UI
+- ✅ Clear naming: async vs sync behavior explicit in command name
+- ✅ Simple: One POST endpoint, different protocols for different use cases
+
+---
+
+### Q4.2: Notification Delivery Flow ✅ COMPLETE
+
+**Question**: How does the complete notification flow work from POST to response?
+
+**Decision**: ✅ **POST request returns SSE stream directly** (single connection model)
+
+**Complete Flow**:
+
+1. **notify-claude-sync script** → `POST /api/notify` with `Accept: text/event-stream`:
+   ```json
+   {
+     "message": "Approve changes?",
+     "response_requested": true,
+     "response_type": "yes_no",
+     "timeout_seconds": 120
+   }
+   ```
+
+2. **Server** (POST handler):
+   - Creates notification in database (UUID, state='created', expires_at, etc.)
+   - Creates in-memory `asyncio.Event()` in global dict: `pending_responses[notification_id] = event`
+   - Pushes notification via **WebSocket** to client UI
+   - **Returns SSE stream** in POST response (connection stays open)
+   - SSE stream awaits: `await event.wait()` (blocks until response arrives)
+
+3. **Client** receives WebSocket event:
+   - Renders notification UI (buttons, countdown timer)
+
+4. **notify-claude-sync script** is blocked:
+   - Reading SSE stream from original POST connection
+   - Waiting for event
+
+5. **User responds** (clicks Yes button):
+   - Client → `POST /api/notifications/{notification_id}/respond` with `{"answer": "yes"}`
+
+6. **Server** (respond handler):
+   - Updates database: `state='responded'`, `response_value={"answer":"yes"}`
+   - Looks up in-memory event: `pending_responses[notification_id]`
+   - Stores response data: `pending_responses[notification_id]["response_data"] = response`
+   - **Signals event**: `event.set()` ← **This wakes up the waiting SSE stream!**
+
+7. **Server** (SSE stream from step 2):
+   - Event is set, `await event.wait()` completes
+   - Retrieves response data from `pending_responses[notification_id]["response_data"]`
+   - Sends SSE event: `data: {"status": "responded", "answer": "yes"}\n\n`
+   - Cleans up: `del pending_responses[notification_id]`
+   - Closes SSE connection
+
+8. **notify-claude-sync script** receives SSE event:
+   - Closes connection
+   - Prints to stdout: `yes`
+   - Exits with code 0
+
+9. **Claude Code** reads stdout and continues
+
+**Inter-Request Communication**: In-Memory Event System (asyncio.Event)
+
+```python
+# Global state for pending responses
+pending_responses = {}  # {notification_id: {"event": asyncio.Event(), "response_data": None}}
+
+@app.post("/api/notify")
+async def create_notification(data: NotificationCreate):
+    # Create in database
+    notification_id = str(uuid.uuid4())
+    # ... insert into DB ...
+
+    # Create in-memory event
+    response_event = asyncio.Event()
+    pending_responses[notification_id] = {
+        "event": response_event,
+        "response_data": None
+    }
+
+    # Push via WebSocket to client UI
+    await websocket_manager.broadcast_to_user(user_id, notification)
+
+    # SSE stream generator
+    async def event_generator():
+        try:
+            # Wait for response (with timeout)
+            await asyncio.wait_for(response_event.wait(), timeout=data.timeout_seconds)
+
+            # Response received!
+            response = pending_responses[notification_id]["response_data"]
+            yield f"data: {json.dumps(response)}\n\n"
+
+        except asyncio.TimeoutError:
+            # Timeout occurred
+            yield f"data: {json.dumps({'status': 'expired'})}\n\n"
+
+        finally:
+            # Cleanup
+            if notification_id in pending_responses:
+                del pending_responses[notification_id]
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@app.post("/api/notifications/{notification_id}/respond")
+async def respond_to_notification(notification_id: str, response: ResponseData):
+    # Update database
+    update_notification_response(notification_id, response)
+
+    # Signal waiting SSE stream (if it exists)
+    if notification_id in pending_responses:
+        pending_responses[notification_id]["response_data"] = response
+        pending_responses[notification_id]["event"].set()  # Wake up SSE stream!
+
+    return {"status": "ok"}
+```
+
+**⚠️ SCALING LIMITATION - IMPORTANT DOCUMENTATION**
+
+**Current Design Constraint**: Single-worker FastAPI only
+
+**Why it works now**:
+- Both POST requests (create notification, respond to notification) hit the same worker process
+- In-memory `pending_responses` dict is shared within the single process
+- `asyncio.Event()` signals work within the same event loop
+
+**What breaks with multiple workers** (`uvicorn --workers 4`):
+- Request A (create notification) might hit Worker 1
+- Request B (respond to notification) might hit Worker 2
+- Worker 2's `pending_responses` dict doesn't have Worker 1's event
+- SSE stream in Worker 1 never receives signal
+- notify-claude-sync times out even though user responded
+
+**Migration Path for Scaling** (Phase 3+):
+
+When scaling to multiple workers, choose one:
+
+1. **Redis Pub/Sub** (recommended):
+   - Replace `asyncio.Event()` with Redis pub/sub channels
+   - Workers communicate via Redis: `PUBLISH notification:{id}:response`
+   - Fast, production-grade, commonly used pattern
+
+2. **Database Polling with Notifications**:
+   - PostgreSQL: Use `LISTEN/NOTIFY` for real-time updates
+   - SQLite: Fall back to polling (check DB every 500ms)
+
+3. **Sticky Sessions** (workaround):
+   - Load balancer ensures same user always hits same worker
+   - Fragile, not recommended for production
+
+**Documentation Location**: Add to `src/rnd/sse-notifications/02-architecture.md`
+
+**Configuration Flag** (future):
+```ini
+# lupin-app.ini
+notification_response_backend = inmemory  # or: redis, postgres_notify
+```
+
+**Rationale**:
+- ✅ Simple for MVP (single worker deployment)
+- ✅ Clear upgrade path documented
+- ✅ asyncio.Event is fast and reliable for single-process
+- ✅ Scaling decisions deferred until needed
+
+---
+
+### Q4.3: SSE Endpoint Design ✅ COMPLETE
+
+**Question**: Should we have a separate SSE endpoint, or return SSE stream from POST?
+
+**Decision**: ✅ **Option A: Single Endpoint (POST returns SSE stream directly)**
+
+**Endpoint**:
+- `POST /api/notify` with `Accept: text/event-stream` header
+- Returns SSE stream immediately in the POST response
+- No separate GET `/sse/notification/{id}` endpoint needed
+
+**Implementation**:
+```bash
+# notify-claude-sync (simplified)
+curl -X POST /api/notify \
+  -H "Accept: text/event-stream" \
+  -H "Authorization: Bearer $token" \
+  -d '{
+    "message": "Approve changes?",
+    "response_requested": true,
+    "response_type": "yes_no",
+    "timeout_seconds": 120
+  }'
+# → SSE stream opens, blocks until response or timeout
+# → Returns: data: {"status": "responded", "answer": "yes"}
+```
+
+**Rationale**:
+- ✅ Simpler (one request instead of two)
+- ✅ Atomic operation (create + wait in single call)
+- ✅ Matches Phase 1 PoC implementation
+- ✅ No race condition (notification exists before SSE stream opens)
+
+---
+
+### Q4.4: WebSocket Events for Response-Required Notifications ✅ COMPLETE
+
+**Question**: Should we add new WebSocket event types to distinguish response-required notifications from fire-and-forget?
+
+**Decision**: ✅ **Option A: Unified Event (reuse existing `notification_queue_update`)**
+
+**WebSocket Event Structure**:
+
+```javascript
+{
+  "event": "notification_queue_update",
+  "notification": {
+    // Identity
+    "id": "uuid-123",
+    "sender_id": "claude.code@deepily.ai",
+    "recipient_id": "user-uuid",
+
+    // Content
+    "title": "Approve Changes?",
+    "message": "Claude Code wants to modify 5 files. Do you approve?",
+    "type": "task",
+    "priority": "high",
+
+    // Response-Required Fields (NEW)
+    "response_requested": true,        // ← Client checks this to render response UI
+    "response_type": "yes_no",         // "yes_no" or "open_ended"
+    "response_default": "yes",         // ← Pre-selected answer ("yes", "no", or null)
+    "timeout_seconds": 120,            // Client uses this for countdown timer
+    "expires_at": "2025-10-26T10:18:00Z",
+
+    // Timestamps
+    "created_at": "2025-10-26T10:16:00Z",
+    "delivered_at": "2025-10-26T10:16:00Z",
+
+    // State
+    "state": "delivered"
+  }
+}
+```
+
+**Field Mapping** (Database → WebSocket):
+- ✅ **Identical field names** - no translation needed
+- DB: `response_requested` → WebSocket: `response_requested`
+- DB: `response_default` → WebSocket: `response_default`
+- All other fields: Same name everywhere
+
+**Client Behavior**:
+
+```javascript
+// Client WebSocket handler
+if (notification.response_requested) {
+  // Render response UI with buttons/input
+  renderResponseRequiredUI(notification);
+
+  // Pre-select default if specified
+  if (notification.response_default === "yes") {
+    highlightYesButton();  // Focus Yes button, user can press Enter
+  } else if (notification.response_default === "no") {
+    highlightNoButton();   // Focus No button, user can press Enter
+  }
+
+  // Start countdown timer
+  startCountdown(notification.timeout_seconds, notification.expires_at);
+} else {
+  // Fire-and-forget notification
+  renderStandardNotification(notification);
+}
+```
+
+**Rationale**:
+- ✅ Backward compatible (existing clients ignore new fields)
+- ✅ Single event type (simpler client logic)
+- ✅ `response_default` enables keyboard accessibility (Enter = accept default)
+- ✅ Client has all info needed to render appropriate UI
+- ✅ Consistency across stack (database, API, WebSocket, client)
+
+---
+
+## 📡 AREA 5: RETURN VALUE PROPAGATION ✅ COMPLETE
+
+### Overview
+
+**Goal**: Define how not ify-claude-sync returns responses to Claude Code
+
+**Progress**: All 3 questions complete (Q5.1-Q5.3)
+
+---
+
+### Q5.1: Script Exit Codes and Output Format ✅ COMPLETE
+
+**Question**: How should notify-claude-sync communicate the response back to the calling bash/Claude Code?
+
+**Decision**: ✅ **Option 1: Server Interprets, Returns Simple Value**
+
+**Implementation**:
+
+**Server-Side Logic** (SSE stream response):
+```python
+# When user responds
+if user_clicked_yes:
+    return {"answer": "yes"}
+elif user_clicked_no:
+    return {"answer": "no"}
+
+# When timeout occurs
+elif timeout_occurred:
+    if response_default is not None:
+        # Apply default answer
+        return {"answer": response_default}  # "yes" or "no"
+    else:
+        # No default specified
+        return {"answer": None}
+
+# When user dismisses (Escape key)
+elif user_dismissed:
+    return {"answer": None}
+```
+
+**notify-claude-sync Script Output**:
+```bash
+# Server returned: {"answer": "yes"}
+echo "yes"
+exit 0
+
+# Server returned: {"answer": "no"}
+echo "no"
+exit 0
+
+# Server returned: {"answer": null} (timeout or dismissed)
+echo ""
+exit 0
+
+# Infrastructure error (auth, network, server down)
+echo "error: Connection failed" >&2
+exit 1
+```
+
+**Claude Code Usage Pattern**:
+```bash
+# Example: Ask for approval with default=yes
+answer=$(notify-claude-sync "Delete 5 files?" \
+    --response-required yes_no \
+    --default yes \
+    --timeout 120)
+
+if [ $? -ne 0 ]; then
+    # Infrastructure error (exit 1)
+    echo "Failed to send notification"
+    exit 1
+fi
+
+if [ "$answer" = "yes" ]; then
+    # User clicked Yes OR timeout with default=yes
+    delete_files
+elif [ "$answer" = "no" ]; then
+    # User clicked No
+    echo "User declined"
+elif [ -z "$answer" ]; then
+    # Empty string: timeout with no default OR user dismissed
+    echo "No response received, skipping"
+fi
+```
+
+**Exit Code Semantics**:
+- `0` = Success (response received, timeout, or dismissed)
+- `1` = Infrastructure error (auth failure, network error, server unavailable)
+
+**Stdout Values**:
+- `"yes"` = User approved OR timeout with default=yes
+- `"no"` = User declined OR timeout with default=no
+- `""` (empty) = Timeout with no default OR user dismissed
+
+**Rationale**:
+- ✅ Simple bash script (minimal interpretation logic)
+- ✅ Server applies business logic (default_answer handling)
+- ✅ Easy for Claude Code to consume
+- ✅ Sufficient for MVP use cases
+- ✅ Can add exit codes in Phase 3 if needed
+
+---
+
+### Q5.2: Open-Ended Response Handling ✅ COMPLETE
+
+**Question**: For `response_type = "open_ended"`, what does notify-claude-sync output?
+
+**Decision**: ✅ **Option A: Multi-line stdout (simple text output)**
+
+**Implementation**:
+
+**Server SSE Response**:
+```python
+# For open-ended responses
+{
+    "answer": "They're duplicates from the backup"  # User's text response
+}
+```
+
+**notify-claude-sync Script Output**:
+```bash
+# Single-line response
+echo "They're duplicates from the backup"
+exit 0
+
+# Multi-line response (newlines preserved)
+echo "These files are duplicates.
+They came from the backup restore.
+Safe to delete."
+exit 0
+
+# Empty response (timeout or dismissed)
+echo ""
+exit 0
+```
+
+**Claude Code Usage**:
+```bash
+# Ask open-ended question
+reason=$(notify-claude-sync "Why are you deleting these files?" \
+    --response-required open_ended \
+    --timeout 300)
+
+if [ -n "$reason" ]; then
+    echo "User provided reason: $reason"
+    log_deletion_reason "$reason"
+    delete_files
+else
+    echo "No reason provided"
+fi
+```
+
+**Edge Cases**:
+- **Multi-line text**: Preserved as-is (newlines included in stdout)
+- **Special characters**: Output as-is (quotes, apostrophes, etc.)
+- **Empty response**: Empty string (same as yes/no timeout/dismiss)
+- **Very long text**: No truncation (full response returned)
+
+**Rationale**:
+- ✅ Simplest possible output format
+- ✅ No parsing required in Claude Code
+- ✅ Bash naturally handles multi-line strings
+- ✅ Consistent with yes/no output format
+- ✅ Metadata (method, timestamp) stored in DB but not needed by caller
+
+---
+
+### Q5.3: Command-Line Interface Design ✅ COMPLETE
+
+**Question**: What should the notify-claude-sync command-line interface look like?
+
+**Decision**: ✅ **Flag-based syntax with --response-required**
+
+**Command Syntax**:
+```bash
+notify-claude-sync MESSAGE [OPTIONS]
+```
+
+**Options**:
+```
+--response-required TYPE    Response type: "yes_no" or "open_ended" (required)
+--default ANSWER           Default answer: "yes" or "no" (optional, yes_no only)
+--timeout SECONDS          Timeout in seconds (optional, default: 120)
+--type TYPE                Notification type (optional, default: "task")
+--priority PRIORITY        Priority level (optional, default: "medium")
+--title TITLE              Short title (optional, defaults to MESSAGE)
+```
+
+**Usage Examples**:
+
+```bash
+# Yes/No with default and custom timeout
+notify-claude-sync "Delete 5 files?" \
+    --response-required yes_no \
+    --default no \
+    --timeout 60
+
+# Open-ended question with longer timeout
+notify-claude-sync "Why are you deleting these files?" \
+    --response-required open_ended \
+    --timeout 300
+
+# Urgent approval request
+notify-claude-sync "Approve production database migration?" \
+    --response-required yes_no \
+    --priority urgent \
+    --type alert \
+    --timeout 30
+
+# With explicit title and message
+notify-claude-sync "This will drop the users table and recreate it. Proceed?" \
+    --response-required yes_no \
+    --title "Database Migration Approval" \
+    --default no \
+    --timeout 120
+```
+
+**Validation Rules**:
+- `--response-required` is mandatory (distinguishes from notify-claude-async)
+- `--default` only valid with `--response-required yes_no`
+- `--timeout` must be positive integer (server enforces max, e.g., 300s)
+- `--type` validates against: task, progress, alert, custom
+- `--priority` validates against: urgent, high, medium, low
+
+**Error Handling**:
+```bash
+# Missing required flag
+$ notify-claude-sync "Delete files?"
+Error: --response-required is required
+Usage: notify-claude-sync MESSAGE --response-required TYPE [OPTIONS]
+
+# Invalid default with open_ended
+$ notify-claude-sync "Why?" --response-required open_ended --default yes
+Error: --default is only valid with --response-required yes_no
+```
+
+**Rationale**:
+- ✅ Explicit and self-documenting
+- ✅ Consistent with notify-claude-async flag style
+- ✅ Easy to extend with new options
+- ✅ Clear error messages for misuse
+
+---
+
+## 🎨 AREA 6: CLIENT UI/UX DESIGN (PARTIAL - 2/4 questions)
+
+### Overview
+
+**Goal**: Design how response-required notifications appear and behave in Fresh Queue UI
+
+**Progress**: Q6.1-Q6.2 ✅ complete, Q6.3-Q6.4 pending for next session
+
+---
+
+### Q6.1: Notification Display Location ✅ COMPLETE
+
+**Question**: Where in the Fresh Queue UI should response-required notifications appear?
+
+**Decision**: ✅ **Option B: Separate "Action Required" Section**
+
+**UI Layout**:
+
+```
+┌─────────────────────────────────────────────────┐
+│  Fresh Queue                                    │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  ⚡ ACTION REQUIRED                             │
+│  ┌───────────────────────────────────────────┐ │
+│  │ 🔔 Approve Database Migration?            │ │
+│  │ This will drop the users table...         │ │
+│  │ [🎤] [Yes] [No]              0:45 ⏱️      │ │
+│  │ ████████████████░░░░░░░░░░░░              │ │
+│  └───────────────────────────────────────────┘ │
+│                                                 │
+│  ┌───────────────────────────────────────────┐ │
+│  │ 🔔 Delete 5 files?                        │ │
+│  │ These files are duplicates...             │ │
+│  │ [🎤] [Yes] [No]              1:30 ⏱️      │ │
+│  │ ██████████████████████████░░░░            │ │
+│  └───────────────────────────────────────────┘ │
+│                                                 │
+├─────────────────────────────────────────────────┤
+│  📋 RECENT NOTIFICATIONS                        │
+│  ┌───────────────────────────────────────────┐ │
+│  │ ✓ Task complete                           │ │
+│  │ 2 minutes ago                             │ │
+│  └───────────────────────────────────────────┘ │
+│                                                 │
+│  ┌───────────────────────────────────────────┐ │
+│  │ ℹ️ Build finished successfully            │ │
+│  │ 5 minutes ago                             │ │
+│  └───────────────────────────────────────────┘ │
+│                                                 │
+└─────────────────────────────────────────────────┘
+```
+
+**Section Behavior**:
+
+**"Action Required" Section** (top):
+- Only shows notifications with `response_requested = true`
+- Sorted by priority (urgent first), then by expiration (soonest first)
+- Always visible at top (doesn't scroll with recent notifications)
+- Section header shows count: "⚡ ACTION REQUIRED (2)"
+- When empty, section collapses or shows: "No actions required ✓"
+
+**"Recent Notifications" Section** (bottom):
+- Fire-and-forget notifications (existing behavior)
+- Sorted by timestamp (newest first)
+- Includes expired/responded notifications (moved down after completion)
+- Scrollable if list is long
+
+**Visual Distinction**:
+- Action Required cards: Highlighted border, larger, interactive elements
+- Recent Notifications: Standard card styling, non-interactive
+
+**Expired Notification Behavior**:
+- Once notification expires or user responds, moves from "Action Required" to "Recent Notifications"
+- Shows status: "✓ Responded: Yes" or "⏱️ Expired (no response)"
+
+**Rationale**:
+- ✅ Clear separation: "Needs attention" vs "FYI"
+- ✅ High visibility: Action items always at top
+- ✅ Not blocking: User can still browse recent notifications
+- ✅ Organized: Easy to see what requires action at a glance
+- ✅ Clean: Expired items move out of action section
+
+---
+
+### Q6.2: Interactive Elements Layout ✅ COMPLETE
+
+**Question**: Within a response-required notification card, how should the interactive elements be arranged?
+
+**Decision**: ✅ **Modified Option B: Buttons inline, Timer + Progress Bar paired horizontally**
+
+**Final Layout**:
+```
+┌─────────────────────────────────────────────┐
+│ Title: Delete 5 files?                      │
+│ Message: These files are duplicates...      │
+│                                             │
+│ [🎤] [Yes] [No]                             │
+│                                             │
+│ 1:30 ⏱️  ████████████████████░░░░░░░░      │
+└─────────────────────────────────────────────┘
+```
+
+**Element Positioning**:
+- **Row 1**: Title (bold, terse)
+- **Row 2**: Message (prose, expandable on hover/click)
+- **Row 3**: Interactive buttons (Mic, Yes, No OR Mic + text input)
+- **Row 4**: Timer + Progress bar (horizontally aligned, visually paired)
+
+**Rationale**:
+- ✅ Timer and progress bar on same level (reinforces their relationship)
+- ✅ Buttons separate from countdown (clear action vs status separation)
+- ✅ Compact layout (4 rows total)
+- ✅ Progress bar spans most of width (high visibility)
+
+---
+
+### Q6.3: After Response Submitted ⏸️ NEXT SESSION
+
+**Question**: What happens to the notification after user responds?
+
+**Options to Discuss**:
+- Disappears immediately?
+- Shows "Response sent ✓" confirmation for 2-3 seconds, then moves to Recent?
+- Stays in Action Required with disabled state and checkmark?
+- Immediately moves to Recent Notifications with status indicator?
+
+---
+
+### Q6.4: Multiple Simultaneous Notifications ⏸️ PENDING
+
+**Question**: How does the UI handle multiple response-required notifications at once?
+
+**Options to Discuss**:
+- Show all in Action Required section (scrollable if many)?
+- Limit to showing 3 at a time, queue the rest?
+- Priority-based display (show urgent first, collapse lower priority)?
+- Visual indication of "3 more pending" if many active?
 
 ---
 
@@ -853,12 +1648,12 @@ CREATE TABLE notifications (
     deleted_at              TEXT,
 
     -- Response-Required
-    response_required       INTEGER DEFAULT 0,
+    response_requested      INTEGER DEFAULT 0,
     response_type           TEXT,
     response_value          TEXT,
     responded_at            TEXT,
     timeout_seconds         INTEGER,
-    default_answer          TEXT,
+    response_default        TEXT,
 
     -- State
     state                   TEXT NOT NULL DEFAULT 'created',
@@ -927,4 +1722,40 @@ CREATED → DELIVERED → RESPONDED → DELETED
 
 ---
 
-**End of Document** - Resume tomorrow at Area 3, Q3.2
+## Design Session Statistics
+
+**Session 1 (2025.10.17)**:
+- Duration: ~90 minutes
+- Areas Completed: 2.25 / 9 (25%)
+- Questions Answered: 8 / ~36 (22%)
+- Key Decisions: 13 major architectural choices
+- Lines Written: ~1000
+
+**Session 2 (2025.10.26)**:
+- Duration: ~2 hours
+- Areas Completed: 3.75 / 9 (42% of remaining work)
+- Questions Answered: 15 / ~36 (42% cumulative)
+- Key Decisions: 19 additional architectural choices
+- Lines Written: ~1400 (cumulative: ~2400)
+
+**Cumulative Progress**:
+- ✅ **Area 1**: Database schema complete (5 questions) - CORRECTED field names
+- ✅ **Area 2**: Response types complete (3 questions)
+- ✅ **Area 3**: Timeout behavior complete (4 questions - NEW)
+- ✅ **Area 4**: SSE vs WebSocket complete (4 questions - NEW)
+- ✅ **Area 5**: Return value propagation complete (3 questions - NEW)
+- ⏸️ **Area 6**: Client UI/UX partial (2/4 questions - NEW)
+- ⏸️ **Areas 7-9**: Pending (3 areas remaining)
+
+**Key Milestones Session 2**:
+- Clarified inter-request communication (asyncio.Event for single-worker)
+- Documented scaling limitations and migration path
+- Unified field naming (response_requested, response_default)
+- Complete notify-claude-sync CLI specification
+- Separate "Action Required" UI section design
+
+**Status**: 🟢 Excellent progress - 6/9 areas complete (67%), well-defined architecture, ready for Area 6 completion + Areas 7-9
+
+---
+
+**End of Document** - Resume next session at Area 6, Q6.3 (After Response Submitted)

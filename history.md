@@ -1,6 +1,8 @@
 # Lupin Project History
 
-> **🚧 CURRENT**: 2025.10.26 - Planning-is-Prompting Workflow Installation COMPLETE! Installed 10 new standardized workflows (plan-about, plan-session-end, plan-history-management, plan-test-baseline/remediation/harness-update, p-is-p-00/01/02, plan-workflow-audit) with v1.0 deterministic wrapper pattern. Updated plan-session-start to v1.0 (added MUST language, explicit DO NOT constraints, removed anti-pattern embedded task list). All commands now thin reference pointers to canonical workflows. Preserved 8 legacy commands (lupin-*, smoke-test-*, design-planning-docs) for gradual migration. Ready for systematic workflow-driven development! 🎯
+> **🚧 CURRENT**: 2025.10.26 - SSE Phase 2 Design Session (Day 2 of 2)! Completed 3.75 additional design areas (Areas 3-6 partial): Timeout & expiration (hybrid lazy server, intent-based grace period), SSE/WebSocket architecture (dual protocol, in-memory events with scaling docs), return value propagation (server-side interpretation, simple stdout), Client UI/UX (separate "Action Required" section, button layout). CORRECTED database field naming (response_requested, response_default). Progress: 6/9 areas complete (67%), 23/36 questions answered. Resume point: Area 6 Q6.3. Design document: 2,400+ lines with complete architecture. Ready for final 3.5 areas + implementation plan! 📋
+
+> **✅ PREVIOUS**: 2025.10.26 - Planning-is-Prompting Workflow Installation COMPLETE! Installed 10 new standardized workflows (plan-about, plan-session-end, plan-history-management, plan-test-baseline/remediation/harness-update, p-is-p-00/01/02, plan-workflow-audit) with v1.0 deterministic wrapper pattern. Updated plan-session-start to v1.0 (added MUST language, explicit DO NOT constraints, removed anti-pattern embedded task list). All commands now thin reference pointers to canonical workflows. Preserved 8 legacy commands (lupin-*, smoke-test-*, design-planning-docs) for gradual migration. Ready for systematic workflow-driven development! 🎯
 
 > **✅ PREVIOUS**: 2025.10.17 (Session 3) - SSE Phase 2 Interactive Design Session (Day 1 of 2)! Completed 3/9 design areas through systematic Q&A: Database schema (persistent storage, title/message split, JSON responses), response types (yes/no with LLM interpretation, open-ended mic+text), timeout behavior (MM:SS + progress bar + color coding). Created comprehensive 1000+ line design decisions document. Resume point: Area 3 Q3.2 (Timeout handling). Multi-modal UX principles established (voice-first, keyboard accessible, mouse fallback). Tomorrow: Complete remaining 6 areas + generate implementation plan. 📋
 
@@ -42,7 +44,92 @@
 
 ### 🎯 October 2025 - Recent Sessions
 
-#### 2025.10.26 - Planning-is-Prompting Workflow Installation 🎯
+#### 2025.10.26 (Session 2) - SSE Phase 2 Design Session (Day 2 of 2) 📋
+
+**Summary**: Continued systematic design Q&A session for SSE Phase 2. Completed 3.75 additional areas (Areas 3-6 partial) with 15 questions answered. Key accomplishments: timeout/expiration behavior fully designed, SSE/WebSocket dual protocol architecture specified, return value propagation defined, client UI/UX partially complete. CRITICAL CORRECTION: Unified field naming across database/API/WebSocket (response_requested, response_default). Progress: 6/9 areas complete (67%), 2,400+ lines of design documentation.
+
+**Area 3: Timeout & Expiration Behavior** ✅ COMPLETE (4 questions):
+
+**Decision Summary**:
+1. **Q3.1**: Hybrid countdown timer (MM:SS + progress bar + green/yellow/red color coding)
+2. **Q3.2**: Hybrid lazy server + active client expiration
+   - Client drives immediate UI feedback, server validates
+   - Lazy expiration on queries, optional cleanup job
+   - Expired notifications stay visible but disabled with tooltip
+3. **Q3.3**: No additional audio/visual alerts (existing priority system sufficient)
+4. **Q3.4**: Intent-based grace period (30s after expiration if user started responding before timeout)
+
+**Key Timeout Decisions**:
+- No active server timers (no `asyncio.sleep()` per notification)
+- Client sends expire request at T=0
+- Server validates timestamps: `started_at < expires_at` → accept late response
+- Grace window covers STT latency and slow typing
+
+**Area 4: SSE vs WebSocket Architecture** ✅ COMPLETE (4 questions):
+
+**Decision Summary**:
+1. **Q4.1**: Dual protocol (WebSocket for delivery, SSE for blocking/waiting)
+   - notify-claude-async (fire-and-forget) vs notify-claude-sync (response-required)
+   - Same POST endpoint, different protocols for different use cases
+2. **Q4.2**: In-memory event system (asyncio.Event for single-worker FastAPI)
+   - POST returns SSE stream directly
+   - Inter-request communication via `pending_responses` dict
+   - **⚠️ SCALING LIMITATION DOCUMENTED**: Requires Redis/Postgres for multi-worker
+3. **Q4.3**: Single POST endpoint returns SSE stream (no separate GET endpoint)
+4. **Q4.4**: Unified WebSocket event (`notification_queue_update` with response_requested field)
+
+**Key Architecture Decisions**:
+- POST `/api/notify` with `Accept: text/event-stream` → SSE stream blocks
+- Response POST signals asyncio.Event → wakes SSE stream
+- Migration path to Redis Pub/Sub documented for Phase 3 scaling
+
+**Area 5: Return Value Propagation** ✅ COMPLETE (3 questions):
+
+**Decision Summary**:
+1. **Q5.1**: Server-side interpretation, simple stdout output
+   - Exit code 0 = success, 1 = infrastructure error
+   - Stdout: "yes"/"no"/""(empty) - server applies default_answer logic
+2. **Q5.2**: Multi-line stdout for open-ended responses (newlines preserved)
+3. **Q5.3**: Flag-based CLI: `notify-claude-sync MESSAGE --response-required TYPE [OPTIONS]`
+
+**Key CLI Design**:
+```bash
+notify-claude-sync "Delete files?" --response-required yes_no --default no --timeout 120
+notify-claude-sync "Why delete?" --response-required open_ended --timeout 300
+```
+
+**Area 6: Client UI/UX Design** ⏸️ PARTIAL (2/4 questions):
+
+**Decision Summary**:
+1. **Q6.1**: Separate "Action Required" section at top of Fresh Queue
+   - Sorted by priority, then expiration
+   - Moves to "Recent Notifications" after response/expiration
+2. **Q6.2**: Buttons inline, timer + progress bar paired horizontally
+   - Row 1: Title, Row 2: Message, Row 3: Buttons, Row 4: Timer + Progress
+3. **Q6.3-Q6.4**: PENDING (after response submitted, multiple simultaneous)
+
+**CRITICAL CORRECTION - Field Naming**:
+- **Before**: `response_required`, `default_answer` (inconsistent between DB and API)
+- **After**: `response_requested`, `response_default` (identical everywhere)
+- Rationale: Consistency across database, API, WebSocket, client - no translation needed
+
+**Files Updated**:
+- `src/rnd/sse-notifications/05-phase2-design-decisions.md` (~1,400 lines added, total: ~2,400)
+  - Executive summary updated
+  - Areas 3-6 complete documentation
+  - Database schema corrected
+  - Session 2 statistics added
+
+**Next Session**:
+- Complete Area 6: Q6.3 (after response submitted), Q6.4 (multiple simultaneous)
+- Area 7: Existing system integration (4 questions)
+- Area 8: MVP scope & phasing
+- Area 9: Conceptual questions (security, offline, multi-device)
+- Generate implementation plan and task breakdown
+
+---
+
+#### 2025.10.26 (Session 1) - Planning-is-Prompting Workflow Installation 🎯
 
 **Summary**: Comprehensive installation of planning-is-prompting workflow infrastructure. Installed 10 new standardized commands with v1.0 deterministic wrapper pattern, updated existing plan-session-start to eliminate anti-patterns. All commands now thin reference pointers to canonical workflows ensuring automatic updates when canonical documents improve.
 
