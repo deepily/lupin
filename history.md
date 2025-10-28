@@ -1,6 +1,8 @@
 # Lupin Project History
 
-> **🚧 CURRENT**: 2025.10.26 - SSE Phase 2 Design Session (Day 2 of 2)! Completed 3.75 additional design areas (Areas 3-6 partial): Timeout & expiration (hybrid lazy server, intent-based grace period), SSE/WebSocket architecture (dual protocol, in-memory events with scaling docs), return value propagation (server-side interpretation, simple stdout), Client UI/UX (separate "Action Required" section, button layout). CORRECTED database field naming (response_requested, response_default). Progress: 6/9 areas complete (67%), 23/36 questions answered. Resume point: Area 6 Q6.3. Design document: 2,400+ lines with complete architecture. Ready for final 3.5 areas + implementation plan! 📋
+> **🚧 CURRENT**: 2025.10.27 - SSE Phase 2 Design Session (Day 3 of 3)! Completed 2 additional design areas (Areas 6-7 complete): Client UI/UX finalized (confirmation flash + smart sorting), Existing System Integration (extend `/api/notify` endpoint, fresh schema migration, extended WebSocket events, full backward compatibility). Progress: 7/9 areas complete (78%), 27/40 questions answered. Resume point: Area 8 (MVP Scope & Phasing). Design document: 2,633 lines. Final 2 areas + implementation plan remain! 📋
+
+> **✅ PREVIOUS**: 2025.10.26 - SSE Phase 2 Design Session (Day 2 of 2)! Completed 3.75 additional design areas (Areas 3-6 partial): Timeout & expiration (hybrid lazy server, intent-based grace period), SSE/WebSocket architecture (dual protocol, in-memory events with scaling docs), return value propagation (server-side interpretation, simple stdout), Client UI/UX (separate "Action Required" section, button layout). CORRECTED database field naming (response_requested, response_default). Progress: 6/9 areas complete (67%), 23/36 questions answered. Resume point: Area 6 Q6.3. Design document: 2,400+ lines with complete architecture. Ready for final 3.5 areas + implementation plan! 📋
 
 > **✅ PREVIOUS**: 2025.10.26 - Planning-is-Prompting Workflow Installation COMPLETE! Installed 10 new standardized workflows (plan-about, plan-session-end, plan-history-management, plan-test-baseline/remediation/harness-update, p-is-p-00/01/02, plan-workflow-audit) with v1.0 deterministic wrapper pattern. Updated plan-session-start to v1.0 (added MUST language, explicit DO NOT constraints, removed anti-pattern embedded task list). All commands now thin reference pointers to canonical workflows. Preserved 8 legacy commands (lupin-*, smoke-test-*, design-planning-docs) for gradual migration. Ready for systematic workflow-driven development! 🎯
 
@@ -43,6 +45,67 @@
 ## Recent Activity (Last 7 Days)
 
 ### 🎯 October 2025 - Recent Sessions
+
+#### 2025.10.27 - SSE Phase 2 Design Session (Day 3 of 3) 📋
+
+**Summary**: Completed 2 additional design areas (Areas 6-7) with 4 questions answered. Key accomplishments: Client UI/UX fully designed (confirmation flash with 2.5s transition, smart sorting by priority→expiration), Existing System Integration architecture complete (extend `/api/notify` endpoint with backward compatibility, fresh schema migration strategy, extended WebSocket events). Progress: 7/9 areas complete (78%), design document now 2,633 lines.
+
+**Area 6: Client UI/UX Design** ✅ COMPLETE (Q6.3-Q6.4):
+
+**Q6.3: After Response Submitted**:
+- User responds → Show confirmation state immediately (green checkmark, "Response sent ✓")
+- Wait 2.5 seconds (configurable)
+- Fade out from "Action Required" section
+- Fade into "Recent Notifications" section with status indicator
+- Multi-device sync via `notification_responded` WebSocket event
+
+**Q6.4: Multiple Simultaneous Notifications**:
+- Show all notifications with count badge: "⚠️ Action Required (5)"
+- Smart sorting: Priority (urgent→high→medium→low), then expiration (soonest first)
+- Badge color: red (urgent present), orange (high only), white (medium/low)
+- Auto-scroll to new notifications
+- Scrollable container for >5 notifications
+
+**Area 7: Existing System Integration** ✅ COMPLETE (Q7.1-Q7.4):
+
+**Q7.1: API Endpoint Changes**:
+- Extend existing `/api/notify` endpoint (backward compatible)
+- Accept header determines response type: `text/event-stream` (SSE blocking) vs `application/json` (non-blocking)
+- `response_requested` field controls behavior
+
+**Q7.2: Database Migration**:
+- Fresh schema with soft migration
+- Migration script provided: `src/scripts/migrate_notifications_phase2.py`
+- No data to migrate (fire-and-forget notifications are ephemeral)
+- Dual-write period during rollout
+
+**Q7.3: WebSocket Events**:
+- Extended `notification_queue_update` event (add `response_requested` field)
+- New `notification_responded` event (multi-device sync)
+- New `notification_expired` event (timeout handling)
+- Backward compatible (old clients ignore new fields)
+
+**Q7.4: Backward Compatibility**:
+- Full backward compatibility guaranteed
+- No API versioning needed
+- Old clients: fire-and-forget works unchanged, response-required renders as fire-and-forget
+- New clients: both types work fully
+
+**Files Updated**:
+- `src/rnd/sse-notifications/05-phase2-design-decisions.md` (~233 lines added, total: 2,633)
+  - Executive summary reorganized by area
+  - Area 6 complete (Q6.3-Q6.4 with full implementation details)
+  - Area 7 complete (Q7.1-Q7.4 with migration scripts, test cases)
+  - Progress: 7/9 areas (78%)
+- `history.md` (status line updated, new session entry)
+
+**Next Session**:
+- [ ] Complete Area 8: MVP Scope & Phasing
+- [ ] Complete Area 9: Conceptual Questions (security, offline, multi-device)
+- [ ] Generate implementation plan and task breakdown
+- [ ] Estimated: 30-45 minutes to complete final 2 areas + implementation plan
+
+---
 
 #### 2025.10.26 (Session 2) - SSE Phase 2 Design Session (Day 2 of 2) 📋
 

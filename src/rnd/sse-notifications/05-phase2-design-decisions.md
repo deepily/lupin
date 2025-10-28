@@ -3,10 +3,10 @@
 **Document Purpose**: Record all architectural decisions from interactive design session for Phase 2 SSE notification system implementation
 
 **Created**: 2025.10.17
-**Updated**: 2025.10.26 (Session 2 - Day 2)
-**Status**: 🚧 IN PROGRESS (Session 2 of Design Q&A - Day 2)
-**Resume Point**: Area 6, Question 6.3 (After Response Submitted)
-**Progress**: 6/9 areas completed (Areas 1-5 complete, Area 6 partial - 2/4 questions)
+**Updated**: 2025.10.27 (Session 3 - Day 3)
+**Status**: 🚧 IN PROGRESS (Session 3 of Design Q&A - Day 3)
+**Resume Point**: Area 8 (MVP Scope & Phasing)
+**Progress**: 7/9 areas completed (Areas 1-7 complete, Area 8-9 remaining)
 
 ---
 
@@ -20,8 +20,8 @@
 
 **Next Session**:
 1. Read this document to resume context
-2. Continue with Area 6, Q6.3: "What happens after response submitted?"
-3. Complete Areas 6-9 (3.5 remaining areas)
+2. Continue with Area 8: "MVP Scope & Phasing"
+3. Complete Areas 8-9 (2 remaining areas)
 4. Generate implementation plan and task breakdown
 
 ---
@@ -30,22 +30,32 @@
 
 **Goal**: Design persistent, response-required notification system for Claude Code → User synchronous communication
 
-**Key Decisions Made (Areas 1-6, partial)**:
+**Key Decisions Made (Areas 1-7 complete)**:
+
+**Database & Architecture** (Areas 1, 4, 7):
 - ✅ Database schema with persistent storage (response_requested, response_default fields)
-- ✅ Title/message split for voice-first UX (title: terse/technical, message: prose/TTS-friendly)
+- ✅ Dual protocol architecture (WebSocket for delivery, SSE for blocking/waiting)
+- ✅ In-memory event system with scaling documentation for future Redis migration
+- ✅ Extend existing `/api/notify` endpoint (backward compatible, Accept header determines response type)
+- ✅ Fresh schema with soft migration (no data loss, ephemeral fire-and-forget notifications)
+- ✅ Extended `notification_queue_update` event + new `notification_responded` and `notification_expired` events
+- ✅ Full backward compatibility (no API versioning needed)
+
+**Response Types & Behavior** (Areas 2, 3, 5):
 - ✅ LLM-based natural language response interpretation (user says "sure, why not?" → "yes")
 - ✅ Multi-modal UX (voice, keyboard, mouse - accessibility first)
 - ✅ Hybrid countdown timer (MM:SS + progress bar + color coding)
 - ✅ Hybrid lazy server + active client expiration (asyncio.Event for single-worker)
 - ✅ Intent-based grace period (30s if user started before expiration)
-- ✅ Dual protocol architecture (WebSocket for delivery, SSE for blocking/waiting)
-- ✅ In-memory event system with scaling documentation for future Redis migration
 - ✅ Server-side interpretation, simple stdout output (exit 0=success, 1=error)
-- ✅ Separate "Action Required" section in UI, buttons inline with timer + progress bar paired
 
-**Still To Decide (Areas 6-9, partial)**:
-- After response submitted (Q6.3-Q6.4)
-- Existing system integration strategy (Area 7)
+**Client UI/UX** (Area 6):
+- ✅ Title/message split for voice-first UX (title: terse/technical, message: prose/TTS-friendly)
+- ✅ Separate "Action Required" section in UI, buttons inline with timer + progress bar paired
+- ✅ Confirmation flash (2.5s) + move to Recent Notifications after response
+- ✅ Show all notifications with smart sorting (priority → expiration)
+
+**Still To Decide (Areas 8-9)**:
 - MVP scope and phasing (Area 8)
 - Conceptual questions: security, offline, multi-device (Area 9)
 
@@ -1447,51 +1457,913 @@ Error: --default is only valid with --response-required yes_no
 
 ---
 
-### Q6.3: After Response Submitted ⏸️ NEXT SESSION
+### Q6.3: After Response Submitted ✅ COMPLETE
 
 **Question**: What happens to the notification after user responds?
 
-**Options to Discuss**:
-- Disappears immediately?
-- Shows "Response sent ✓" confirmation for 2-3 seconds, then moves to Recent?
-- Stays in Action Required with disabled state and checkmark?
-- Immediately moves to Recent Notifications with status indicator?
+**Decision**: ✅ **Option B: Confirmation Flash + Move to Recent**
+
+**Implementation**:
+
+**Step-by-Step Behavior**:
+1. User clicks Yes/No button (or submits voice/text response)
+2. Notification shows confirmation state immediately:
+   - Green checkmark icon appears
+   - Text overlay: "Response sent ✓"
+   - Buttons become disabled (grayed out)
+   - Timer stops (if still counting down)
+3. After 2-3 second delay (configurable, default: 2.5s):
+   - Notification fades out from "Action Required" section
+   - Simultaneously fades into "Recent Notifications" section
+   - Shows status in Recent: "✓ Answered: Yes" (or "No")
+4. State update:
+   - Database: `state = "responded"`
+   - `responded_at` timestamp recorded
+   - `response_value` JSON stored
+
+**Visual Design**:
+```
+┌─────────────────────────────────────────────┐
+│ ✅ Approve File Changes?                    │ ← Green checkmark replaces priority icon
+│ Response sent ✓                             │ ← Confirmation text
+│ [Yes ✓] [No]                                │ ← Selected button highlighted, both disabled
+│ 🟢 ▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░ 01:45                 │ ← Timer frozen at response time
+└─────────────────────────────────────────────┘
+       ↓ (2.5 second fade transition)
+┌─────────────────────────────────────────────┐
+│ Recent Notifications                         │
+│ ┌───────────────────────────────────────┐   │
+│ │ ✓ Approve File Changes?               │   │
+│ │ Answered: Yes • 10:47 AM              │   │
+│ └───────────────────────────────────────┘   │
+└─────────────────────────────────────────────┘
+```
+
+**Technical Details**:
+
+**Client-Side Transition**:
+```javascript
+async function handleResponseSubmit( notificationId, answer ) {
+  // 1. Send response to server
+  await fetch( `/api/notifications/${notificationId}/respond`, {
+    method: "POST",
+    body: JSON.stringify( { answer } )
+  } );
+
+  // 2. Update UI immediately (optimistic update)
+  const notification = document.getElementById( `notif-${notificationId}` );
+  notification.classList.add( "response-confirmed" );  // Show checkmark + "Response sent ✓"
+  disableButtons( notification );
+  stopTimer( notification );
+
+  // 3. Wait 2.5 seconds
+  await sleep( 2500 );
+
+  // 4. Fade out from Action Required, fade into Recent
+  notification.classList.add( "fade-out" );
+  await sleep( 300 );  // CSS transition duration
+
+  // 5. Move DOM element
+  moveToRecentNotifications( notificationId, answer );
+}
+```
+
+**Server-Side WebSocket Event** (broadcast to all user's devices):
+```javascript
+{
+  "event": "notification_responded",
+  "notification_id": "uuid-123",
+  "answer": "yes",
+  "responded_at": "2025-10-26T10:47:23Z"
+}
+```
+
+**Multi-Device Sync**:
+- When user responds in Tab 1, Tab 2 receives `notification_responded` event
+- Tab 2 performs same UI transition (confirmation → Recent)
+- All devices stay in sync
+
+**Rationale**:
+- ✅ Immediate feedback (user knows response was received)
+- ✅ Clears Action Required quickly for next notification
+- ✅ Preserves audit trail in Recent Notifications
+- ✅ 2.5 second delay is enough for confirmation without being disruptive
+- ✅ Mirrors common UX patterns (toast notifications, Gmail's "Message sent" confirmation)
+- ✅ Multi-device synchronization ensures consistent state
+
+**Edge Cases**:
+- **Network error during response**: Show error state, keep in Action Required with retry button
+- **Timeout occurs during 2.5s confirmation window**: Cancel transition, move to expired state instead
+- **User switches tabs during confirmation**: Transition completes in background, user sees final state in Recent
 
 ---
 
-### Q6.4: Multiple Simultaneous Notifications ⏸️ PENDING
+### Q6.4: Multiple Simultaneous Notifications ✅ COMPLETE
 
 **Question**: How does the UI handle multiple response-required notifications at once?
 
-**Options to Discuss**:
-- Show all in Action Required section (scrollable if many)?
-- Limit to showing 3 at a time, queue the rest?
-- Priority-based display (show urgent first, collapse lower priority)?
-- Visual indication of "3 more pending" if many active?
+**Decision**: ✅ **Option D: Show All with Count Badge + Smart Sorting**
+
+**Implementation**:
+
+**UI Layout**:
+```
+┌─────────────────────────────────────────────┐
+│ ⚠️ Action Required (5)                      │ ← Count badge shows total
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━│
+│                                             │
+│ ┌─────────────────────────────────────┐   │ ← Urgent, expires in 30s
+│ │ 🔴 Approve Deletion?                │   │
+│ │ Delete 5 production files           │   │
+│ │ [Yes] [No]                          │   │
+│ │ 🔴 ▓▓▓▓▓▓▓░░░░░░░░░░ 00:30          │   │
+│ └─────────────────────────────────────┘   │
+│                                             │
+│ ┌─────────────────────────────────────┐   │ ← High, expires in 2:15
+│ │ 🟠 Approve File Changes?            │   │
+│ │ Claude Code wants to modify 5 files │   │
+│ │ [Yes] [No]                          │   │
+│ │ 🟢 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 02:15           │   │
+│ └─────────────────────────────────────┘   │
+│                                             │
+│ ┌─────────────────────────────────────┐   │ ← High, expires in 2:45
+│ │ 🟠 Install Dependencies?            │   │
+│ │ npm install required packages       │   │
+│ │ [Yes] [No]                          │   │
+│ │ 🟢 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 02:45           │   │
+│ └─────────────────────────────────────┘   │
+│                                             │
+│ ┌─────────────────────────────────────┐   │ ← Medium, expires in 5:00
+│ │ ⚪ Provide Feedback?                │   │
+│ │ How should we handle this error?    │   │
+│ │ [Yes] [No] 🎤                       │   │
+│ │ 🟢 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 05:00          │   │
+│ └─────────────────────────────────────┘   │
+│                                             │
+│ ┌─────────────────────────────────────┐   │ ← Medium, expires in 5:30
+│ │ ⚪ Review Changes?                  │   │
+│ │ Please review the updated code      │   │
+│ │ [Yes] [No]                          │   │
+│ │ 🟢 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 05:30          │   │
+│ └─────────────────────────────────────┘   │
+│                                             │
+│ ↓ Scroll for more                          │ ← Scroll indicator if >5
+└─────────────────────────────────────────────┘
+```
+
+**Sorting Algorithm**:
+
+**Priority 1: Priority Level** (urgent → high → medium → low)
+**Priority 2: Expiration Time** (soonest first within same priority)
+
+```python
+def sort_action_required( notifications ):
+    """
+    Sort response-required notifications for display in Action Required section.
+
+    Sorting logic:
+    1. Priority (urgent > high > medium > low)
+    2. Expiration time (soonest first within same priority)
+    """
+    priority_order = { "urgent": 0, "high": 1, "medium": 2, "low": 3 }
+
+    return sorted( notifications, key=lambda n: (
+        priority_order.get( n["priority"], 99 ),  # Primary: priority
+        n["expires_at"]                            # Secondary: soonest expiration
+    ) )
+```
+
+**Example Sorting**:
+```
+Input (arrival order):
+1. medium, expires 5:30
+2. urgent, expires 0:30
+3. high, expires 2:45
+4. high, expires 2:15
+5. medium, expires 5:00
+
+Output (display order):
+1. urgent, expires 0:30    ← Top (highest priority, soonest)
+2. high, expires 2:15      ← High priority, expires sooner
+3. high, expires 2:45      ← High priority, expires later
+4. medium, expires 5:00    ← Medium priority, expires sooner
+5. medium, expires 5:30    ← Medium priority, expires later
+```
+
+**Count Badge Behavior**:
+- Shows total count: "⚠️ Action Required (5)"
+- Updates dynamically as user responds
+- Color coded:
+  - Red badge if any urgent notifications present
+  - Orange badge if high priority only
+  - White badge if medium/low only
+
+**Auto-Scroll Behavior**:
+- New notification arrives → scroll to top (so user sees it)
+- User responds → focus moves to next notification in list
+- Expired notification → auto-removed, no scroll jump
+
+**Visual Density Options**:
+
+**Default Mode** (full expansion):
+- All notifications fully visible as shown above
+- Recommended for ≤5 notifications
+
+**Compact Mode** (optional for Phase 3):
+- Title + timer only, buttons hidden until hover
+- Activates automatically when >5 notifications
+- User can toggle back to full mode
+
+**Technical Implementation**:
+
+**Client-Side Rendering**:
+```javascript
+function renderActionRequiredSection( notifications ) {
+  const sorted = sortActionRequired( notifications );
+  const count = sorted.length;
+
+  // Update section header with count
+  const header = document.getElementById( "action-required-header" );
+  header.innerHTML = `⚠️ Action Required (${count})`;
+  header.className = getBadgeColor( sorted );  // red/orange/white
+
+  // Render sorted notifications
+  const container = document.getElementById( "action-required-container" );
+  container.innerHTML = "";
+  sorted.forEach( notification => {
+    container.appendChild( renderNotification( notification ) );
+  } );
+
+  // Show scroll indicator if >5 notifications
+  if ( count > 5 ) {
+    showScrollIndicator();
+  }
+}
+
+function getBadgeColor( notifications ) {
+  if ( notifications.some( n => n.priority === "urgent" ) ) return "badge-red";
+  if ( notifications.some( n => n.priority === "high" ) ) return "badge-orange";
+  return "badge-white";
+}
+```
+
+**Rationale**:
+- ✅ Full transparency (user sees complete picture of pending work)
+- ✅ Smart sorting ensures urgent items always at top
+- ✅ Count badge provides at-a-glance status
+- ✅ Simple implementation (no queueing/state management complexity)
+- ✅ Scalable (handles 2-10 notifications gracefully)
+- ✅ If >10 notifications becomes common, can add compact mode in Phase 3
+- ✅ Auto-scroll to new notifications prevents "missed" items
+
+**Edge Cases**:
+- **0 notifications**: Hide "Action Required" section entirely, show "Recent Notifications" only
+- **1 notification**: Show without scrollbar, singular label: "⚠️ Action Required (1)"
+- **>10 notifications**: Consider this a product smell (too many approvals), but UI still handles it
+- **All same priority**: Sort purely by expiration time (soonest first)
+
+**Phase 3 Enhancement Ideas** (not for MVP):
+- Collapsible priority groups: "▼ Medium Priority (3)" to hide lower priority items
+- Keyboard navigation: Tab/Shift+Tab to move between notifications
+- Bulk actions: "Approve all low priority" button
 
 ---
 
-## 🔌 AREA 7: EXISTING SYSTEM INTEGRATION ⏸️ PENDING
+## 🔌 AREA 7: EXISTING SYSTEM INTEGRATION ✅ COMPLETE
 
-**Questions for Tomorrow's Session**:
+### Overview
 
-### Q7.1: Current notify-claude Flow Changes
-- What changes in existing `/api/notify` endpoint?
-- New endpoint for response-required?
-- Backward compatibility?
+**Goal**: Integrate Phase 2 response-required notifications with existing fire-and-forget system
 
-### Q7.2: Database Migration
-- Migrate existing `NotificationItem` to new schema?
-- Create migration script?
-- How to handle in-flight notifications during deployment?
+**Progress**: All 4 questions complete (Q7.1-Q7.4)
 
-### Q7.3: WebSocket Events
-- New events: `notification:response_required`, `notification:responded`, `notification:expired`?
-- Update existing `notification_queue_update` event?
+---
 
-### Q7.4: Backward Compatibility
-- Do fire-and-forget notifications keep working exactly as before?
-- Version the API? (`/v1/notifications` vs `/v2/notifications`)
+### Q7.1: Current notify-claude Flow Changes ✅ COMPLETE
+
+**Question**: What changes to existing `/api/notify` endpoint? New endpoint for response-required? Backward compatibility?
+
+**Decision**: ✅ **Extend Existing `/api/notify` Endpoint (Backward Compatible)**
+
+**Implementation**:
+
+**Server-Side Endpoint**:
+```python
+@router.post( "/api/notify" )
+async def notify_user( request: Request ):
+    """
+    Universal notification endpoint - handles both fire-and-forget and response-required.
+
+    Behavior based on `response_requested` field:
+    - response_requested=False (or omitted) → Returns 201 immediately (fire-and-forget)
+    - response_requested=True + Accept: text/event-stream → Returns SSE stream, blocks until response
+    - response_requested=True + Accept: application/json → Returns 201 with notification_id (non-blocking)
+
+    Backward compatibility: Requests without `response_requested` field default to fire-and-forget.
+    """
+    data = await request.json()
+
+    # Check Accept header to determine response type
+    accept_header = request.headers.get( "Accept", "application/json" )
+
+    if data.get( "response_requested", False ):
+        # Response-required notification
+        if "text/event-stream" in accept_header:
+            # SSE stream (blocking, waits for response)
+            return await handle_response_required_sse( data )
+        else:
+            # Regular POST (non-blocking, return notification ID for polling)
+            notification_id = await create_response_required_notification( data )
+            return JSONResponse(
+                status_code=201,
+                content={ "status": "created", "notification_id": notification_id }
+            )
+    else:
+        # Fire-and-forget notification (existing behavior)
+        notification_id = await send_fire_and_forget_notification( data )
+        return JSONResponse(
+            status_code=201,
+            content={ "status": "sent", "notification_id": notification_id }
+        )
+```
+
+**Client Behavior**:
+```bash
+# Fire-and-forget (existing behavior - unchanged)
+notify-claude "Task complete" --type=progress --priority=low
+# → POST /api/notify with response_requested=False (default)
+# → Returns 201 immediately
+
+# Response-required with SSE (new, blocking)
+answer=$(notify-claude-sync "Approve?" --response-required yes_no --timeout 120)
+# → POST /api/notify with response_requested=True, Accept: text/event-stream
+# → Blocks until user responds, returns answer via SSE stream
+
+# Response-required with polling (alternative, non-blocking)
+notify-claude "Approve?" --response-required yes_no --timeout 120 --async
+# → POST /api/notify with response_requested=True, Accept: application/json
+# → Returns notification_id immediately for status polling
+```
+
+**Request/Response Examples**:
+
+**Fire-and-Forget (Existing Behavior)**:
+```http
+POST /api/notify
+Content-Type: application/json
+
+{
+  "title": "Task complete",
+  "message": "Processing finished",
+  "type": "progress",
+  "priority": "low"
+  // NOTE: No response_requested field
+}
+
+Response: 201 Created
+{
+  "status": "sent",
+  "notification_id": "uuid-123"
+}
+```
+
+**Response-Required (SSE Stream)**:
+```http
+POST /api/notify
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "title": "Approve Changes?",
+  "message": "Claude Code wants to modify 5 files",
+  "type": "task",
+  "priority": "high",
+  "response_requested": true,
+  "response_type": "yes_no",
+  "response_default": "yes",
+  "timeout_seconds": 120
+}
+
+Response: 200 OK
+Content-Type: text/event-stream
+
+data: {"status": "delivered", "notification_id": "uuid-456"}
+
+data: {"status": "responded", "answer": "yes", "responded_at": "2025-10-27T10:47:23Z"}
+```
+
+**Rationale**:
+- ✅ Single endpoint (simpler client logic, no routing decisions)
+- ✅ Backward compatible (existing calls work unchanged)
+- ✅ Accept header determines response type (SSE vs JSON)
+- ✅ No API versioning needed for MVP
+- ✅ Optional async mode for non-blocking response-required notifications
+
+---
+
+### Q7.2: Database Migration ✅ COMPLETE
+
+**Question**: Migrate existing notifications to new schema? Create migration script? Handle in-flight notifications during deployment?
+
+**Decision**: ✅ **Fresh Schema with Soft Migration**
+
+**Migration Strategy**:
+
+**Phase 1: Create New Table**
+1. Create new `notifications` table with full Phase 2 schema
+2. Leave old in-memory `NotificationItem` system running temporarily
+3. New code writes to new database table
+4. Old fire-and-forget notifications in memory can be discarded (ephemeral by design)
+
+**Phase 2: Dual-Write Period** (1-2 weeks)
+- New notifications → database table
+- Old notifications → still delivered via existing WebSocket
+- Gradual client migration
+
+**Phase 3: Remove Old System**
+- Once all clients upgraded, remove in-memory notification code
+- Single source of truth: database
+
+**Migration Script**:
+```python
+# src/scripts/migrate_notifications_phase2.py
+
+"""
+Phase 2 Notifications Migration Script
+
+Creates new notifications table with full schema for response-required notifications.
+Does NOT migrate old in-memory notifications (they're ephemeral by design).
+"""
+
+import asyncio
+from cosa.rest.database import get_db
+
+async def migrate_to_phase2_schema():
+    """
+    Create Phase 2 notifications table.
+
+    NOTE: Does NOT migrate old in-memory notifications (they're ephemeral).
+    Old fire-and-forget notifications are delivered once and discarded.
+    """
+    db = await get_db()
+
+    print( "Creating Phase 2 notifications table..." )
+
+    # Create new table with full schema
+    await db.execute( """
+        CREATE TABLE IF NOT EXISTS notifications (
+            -- Identity
+            id                      TEXT PRIMARY KEY,
+
+            -- Routing
+            sender_id               TEXT NOT NULL,
+            recipient_id            TEXT NOT NULL,
+
+            -- Source Context
+            source_context          TEXT DEFAULT 'internal',
+            source_sender           TEXT DEFAULT 'claude.code@deepily.ai',
+
+            -- Content
+            title                   TEXT NOT NULL,
+            message                 TEXT NOT NULL,
+            type                    TEXT NOT NULL,
+            priority                TEXT NOT NULL,
+
+            -- Timestamps
+            created_at              TEXT NOT NULL,
+            delivered_at            TEXT,
+            expires_at              TEXT,
+
+            -- Response-Required Fields
+            response_requested      INTEGER DEFAULT 0,
+            response_type           TEXT,
+            response_value          TEXT,
+            responded_at            TEXT,
+            timeout_seconds         INTEGER,
+            response_default        TEXT,
+
+            -- State Management
+            state                   TEXT NOT NULL DEFAULT 'created',
+
+            -- Legacy Compatibility (for fire-and-forget)
+            played                  INTEGER DEFAULT 0,
+            play_count              INTEGER DEFAULT 0,
+            last_played             TEXT
+        )
+    """ )
+
+    # Create indexes for common queries
+    await db.execute( """
+        CREATE INDEX IF NOT EXISTS idx_recipient_state
+        ON notifications(recipient_id, state)
+    """ )
+
+    await db.execute( """
+        CREATE INDEX IF NOT EXISTS idx_recipient_created
+        ON notifications(recipient_id, created_at)
+    """ )
+
+    await db.execute( """
+        CREATE INDEX IF NOT EXISTS idx_expires_at
+        ON notifications(expires_at)
+        WHERE expires_at IS NOT NULL
+    """ )
+
+    await db.commit()
+
+    print( "✓ Phase 2 notifications table created" )
+    print( "✓ Indexes created: idx_recipient_state, idx_recipient_created, idx_expires_at" )
+
+if __name__ == "__main__":
+    asyncio.run( migrate_to_phase2_schema() )
+```
+
+**Running Migration**:
+```bash
+# Run migration script
+python src/scripts/migrate_notifications_phase2.py
+
+# Verify table created
+sqlite3 src/conf/lupin.db "SELECT name FROM sqlite_master WHERE type='table' AND name='notifications';"
+```
+
+**In-Flight Notifications During Deployment**:
+
+**Scenario**: Server restart during deployment
+
+**Before Restart**:
+- Old fire-and-forget notifications in memory: Delivered via WebSocket
+- Response-required notifications in database: Persistent, survive restart
+
+**During Restart** (10-30 seconds downtime):
+- Old in-memory notifications: Lost (acceptable for ephemeral fire-and-forget)
+- Response-required notifications: Safe in database
+- WebSocket connections: Dropped, clients auto-reconnect
+
+**After Restart**:
+- Clients reconnect to WebSocket
+- Response-required notifications re-delivered from database
+- Fire-and-forget notifications: New ones work normally
+
+**Mitigation Strategy**:
+- Deploy during low-traffic window (late evening/weekend)
+- Use rolling deployment if multiple servers (Phase 3)
+- Monitor for dropped WebSocket connections
+- Fire-and-forget notifications are ephemeral by design (acceptable loss)
+
+**Rationale**:
+- ✅ Clean schema (no legacy baggage)
+- ✅ Simple migration (no data to migrate from old system)
+- ✅ Old system can run temporarily during rollout
+- ✅ Fire-and-forget notifications are ephemeral anyway (acceptable to lose in-flight)
+- ✅ Response-required notifications persisted from day 1 (no data loss)
+
+---
+
+### Q7.3: WebSocket Events ✅ COMPLETE
+
+**Question**: New events? Update existing `notification_queue_update`?
+
+**Decision**: ✅ **Extend Existing Event + Add New Events**
+
+**Event Types**:
+
+**1. `notification_queue_update` (EXTENDED)**
+
+**Purpose**: Notify client of new notification (fire-and-forget OR response-required)
+
+**Fire-and-Forget Notification (Existing Behavior)**:
+```javascript
+{
+  "event": "notification_queue_update",
+  "notification": {
+    "id": "uuid-123",
+    "sender_id": "claude.code@deepily.ai",
+    "recipient_id": "user-uuid",
+    "title": "Task complete",
+    "message": "Processing finished",
+    "type": "progress",
+    "priority": "low",
+    "created_at": "2025-10-27T10:45:00Z",
+    "delivered_at": "2025-10-27T10:45:00Z",
+    "state": "delivered",
+    "response_requested": false,  // ← NEW field (defaults to false)
+    // ... other fields
+  }
+}
+```
+
+**Response-Required Notification (NEW)**:
+```javascript
+{
+  "event": "notification_queue_update",
+  "notification": {
+    "id": "uuid-456",
+    "sender_id": "claude.code@deepily.ai",
+    "recipient_id": "user-uuid",
+    "title": "Approve Changes?",
+    "message": "Claude Code wants to modify 5 files",
+    "type": "task",
+    "priority": "high",
+    "created_at": "2025-10-27T10:46:00Z",
+    "delivered_at": "2025-10-27T10:46:00Z",
+    "expires_at": "2025-10-27T10:48:00Z",
+    "state": "delivered",
+
+    // Response-Required Fields (NEW)
+    "response_requested": true,        // ← Client checks this to render response UI
+    "response_type": "yes_no",         // "yes_no" or "open_ended"
+    "response_default": "yes",         // ← Pre-selected answer ("yes", "no", or null)
+    "timeout_seconds": 120,            // Client uses this for countdown timer
+
+    // ... other fields
+  }
+}
+```
+
+**Client Rendering Logic**:
+```javascript
+// Client WebSocket handler
+socket.on( "notification_queue_update", ( data ) => {
+  const notification = data.notification;
+
+  if ( notification.response_requested ) {
+    // Render response-required UI
+    renderActionRequired( notification );
+
+    // Pre-select default if specified
+    if ( notification.response_default ) {
+      preselectButton( notification.response_default );
+    }
+
+    // Start countdown timer
+    startCountdown( notification.timeout_seconds, notification.expires_at );
+  } else {
+    // Fire-and-forget notification (existing behavior)
+    renderStandardNotification( notification );
+  }
+} );
+```
+
+---
+
+**2. `notification_responded` (NEW)**
+
+**Purpose**: Notify all user's devices that response was submitted
+
+**Event Structure**:
+```javascript
+{
+  "event": "notification_responded",
+  "notification_id": "uuid-456",
+  "answer": "yes",                           // "yes", "no", or custom text
+  "responded_at": "2025-10-27T10:47:23Z",
+  "method": "button_click"                   // "button_click", "keyboard", "voice", "default_accepted"
+}
+```
+
+**Client Behavior**:
+```javascript
+socket.on( "notification_responded", ( data ) => {
+  // Find notification in UI
+  const notification = findNotification( data.notification_id );
+
+  // Show confirmation state
+  notification.showConfirmation( data.answer );
+
+  // After 2.5s, move to Recent Notifications
+  setTimeout( () => {
+    moveToRecentNotifications( notification, data.answer );
+  }, 2500 );
+} );
+```
+
+**Multi-Device Sync**:
+- User responds in Tab 1 → `notification_responded` event sent to Tab 2
+- Tab 2 performs same UI transition (confirmation → Recent)
+- All devices stay synchronized
+
+---
+
+**3. `notification_expired` (NEW)**
+
+**Purpose**: Notify all user's devices that notification timed out
+
+**Event Structure**:
+```javascript
+{
+  "event": "notification_expired",
+  "notification_id": "uuid-456",
+  "expired_at": "2025-10-27T10:49:00Z",
+  "default_answer": "yes"                    // or null if no default specified
+}
+```
+
+**Client Behavior**:
+```javascript
+socket.on( "notification_expired", ( data ) => {
+  // Find notification in UI
+  const notification = findNotification( data.notification_id );
+
+  if ( data.default_answer ) {
+    // Show "Timeout - default applied: Yes"
+    notification.showTimeoutWithDefault( data.default_answer );
+  } else {
+    // Show "Timeout - no response recorded"
+    notification.showTimeoutNoDefault();
+  }
+
+  // Move to Recent Notifications after 2.5s
+  setTimeout( () => {
+    moveToRecentNotifications( notification, "expired" );
+  }, 2500 );
+} );
+```
+
+---
+
+**Backward Compatibility**:
+
+**Old Clients** (pre-Phase 2):
+- Receive `notification_queue_update` events as before
+- Ignore new fields (`response_requested`, `response_type`, etc.)
+- Render as fire-and-forget notification (missing UI for response buttons)
+- **Impact**: Old clients can't respond to response-required notifications, but don't crash
+
+**New Clients** (Phase 2+):
+- Check `response_requested` field to determine rendering
+- Render fire-and-forget exactly as before
+- Render response-required with new UI components
+
+**Migration Path**:
+- Deploy server with new fields (backward compatible)
+- Deploy new client with response-required UI
+- Old clients continue working until upgraded
+
+**Rationale**:
+- ✅ Backward compatible (`response_requested` defaults to false)
+- ✅ Old clients ignore new fields without breaking
+- ✅ New events enable multi-device sync
+- ✅ Single `notification_queue_update` event simplifies client logic
+- ✅ `notification_responded` and `notification_expired` events keep all devices in sync
+
+---
+
+### Q7.4: Backward Compatibility ✅ COMPLETE
+
+**Question**: Do fire-and-forget notifications keep working exactly as before? Version the API?
+
+**Decision**: ✅ **Full Backward Compatibility, No API Versioning**
+
+**Guarantee**:
+- Fire-and-forget notifications work **exactly** as before
+- Existing clients see no breaking changes
+- New fields are optional and ignored by old clients
+- No API versioning needed (`/v1` vs `/v2`)
+
+**Backward Compatibility Matrix**:
+
+| Client Version | Fire-and-Forget | Response-Required |
+|----------------|-----------------|-------------------|
+| Old client     | ✅ Works        | ⚠️ Renders as fire-and-forget (no response UI) |
+| New client     | ✅ Works        | ✅ Works          |
+
+**API Contract**:
+
+**Existing Behavior (Unchanged)**:
+```bash
+# Old clients POST without response_requested field
+curl -X POST http://localhost:7999/api/notify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Task complete",
+    "message": "Processing finished",
+    "type": "progress",
+    "priority": "low"
+  }'
+
+# Response: 201 Created
+# {"status": "sent", "notification_id": "uuid-123"}
+
+# Delivered via WebSocket as before
+```
+
+**New Behavior (Additive)**:
+```bash
+# New clients POST with response_requested=true
+curl -X POST http://localhost:7999/api/notify \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{
+    "title": "Approve Changes?",
+    "message": "Claude Code wants to modify 5 files",
+    "type": "task",
+    "priority": "high",
+    "response_requested": true,
+    "response_type": "yes_no",
+    "response_default": "yes",
+    "timeout_seconds": 120
+  }'
+
+# Response: 200 OK (SSE stream, blocks until response)
+# data: {"status": "delivered", "notification_id": "uuid-456"}
+# data: {"status": "responded", "answer": "yes"}
+```
+
+**Testing Strategy**:
+
+**Integration Tests**:
+```python
+# Test 1: Fire-and-forget unchanged
+async def test_fire_and_forget_unchanged():
+    """Verify old fire-and-forget behavior unchanged."""
+    response = await client.post( "/api/notify", json={
+        "title": "Task complete",
+        "message": "Processing finished",
+        "type": "progress",
+        "priority": "low"
+        # NOTE: No response_requested field (old behavior)
+    } )
+
+    assert response.status_code == 201
+    assert response.json()["status"] == "sent"
+    assert "notification_id" in response.json()
+    # Should NOT block, should NOT create SSE stream
+
+# Test 2: Old client receives response-required as fire-and-forget
+async def test_old_client_receives_response_required():
+    """Verify old clients can receive (but not respond to) response-required notifications."""
+    # Send response-required notification
+    await client.post( "/api/notify", json={
+        "title": "Approve Changes?",
+        "message": "Claude Code wants to modify 5 files",
+        "type": "task",
+        "priority": "high",
+        "response_requested": true,
+        "response_type": "yes_no",
+        "timeout_seconds": 120
+    } )
+
+    # Old client receives via WebSocket
+    ws_message = await websocket.receive_json()
+    assert ws_message["event"] == "notification_queue_update"
+    notification = ws_message["notification"]
+
+    # Old client ignores new fields (renders as fire-and-forget)
+    assert "response_requested" in notification  # Field exists
+    # Old client doesn't render response UI (acceptable degradation)
+
+# Test 3: New client handles both types
+async def test_new_client_handles_both_types():
+    """Verify new clients handle fire-and-forget and response-required."""
+    # Fire-and-forget
+    response1 = await client.post( "/api/notify", json={
+        "title": "Task complete",
+        "type": "progress",
+        "priority": "low"
+    } )
+    assert response1.status_code == 201
+
+    # Response-required
+    response2 = await client.post( "/api/notify", json={
+        "title": "Approve?",
+        "type": "task",
+        "priority": "high",
+        "response_requested": true,
+        "response_type": "yes_no"
+    }, headers={"Accept": "text/event-stream"} )
+    assert response2.status_code == 200
+    assert response2.headers["content-type"] == "text/event-stream"
+```
+
+**No API Versioning Needed**:
+
+**Why No Versioning**:
+- All new fields are optional (default values provided)
+- Behavior determined by request content, not URL path
+- `/api/notify` handles both old and new requests intelligently
+- Accept header determines response type (JSON vs SSE)
+
+**Alternative Considered (Rejected)**:
+```
+/v1/notifications → Old fire-and-forget only
+/v2/notifications → New response-required + fire-and-forget
+```
+
+**Why Rejected**:
+- ❌ Adds complexity (two endpoints to maintain)
+- ❌ Forces clients to choose endpoint (more decision logic)
+- ❌ Requires routing configuration
+- ❌ Version management overhead
+- ✅ Single endpoint with optional fields is simpler
+
+**Rationale**:
+- ✅ Zero breaking changes to existing clients
+- ✅ Gradual adoption (clients upgrade when ready)
+- ✅ No version management overhead
+- ✅ Simple deployment (single endpoint)
+- ✅ Old clients continue working indefinitely
+- ✅ Comprehensive test coverage for both old and new behavior
 
 ---
 
