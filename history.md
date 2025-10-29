@@ -1,6 +1,8 @@
 # Lupin Project History
 
-> **🚧 CURRENT**: 2025.10.27 - SSE Phase 2 Design Session (Day 3 of 3)! Completed 2 additional design areas (Areas 6-7 complete): Client UI/UX finalized (confirmation flash + smart sorting), Existing System Integration (extend `/api/notify` endpoint, fresh schema migration, extended WebSocket events, full backward compatibility). Progress: 7/9 areas complete (78%), 27/40 questions answered. Resume point: Area 8 (MVP Scope & Phasing). Design document: 2,633 lines. Final 2 areas + implementation plan remain! 📋
+> **🎉 CURRENT**: 2025.10.27 - SSE Phase 2 Design Session COMPLETE! All 9 design areas finished (100%), 40 questions answered, 42 architectural decisions made. Final areas: MVP scope (both response types in Phase 2), comprehensive testing (40-50 tests), 4-week phased rollout, security model (no auth Phase 2, add Phase 3), offline behavior (immediate default), multi-device sync (WebSocket real-time). Generated complete implementation plan with 4 phases, task breakdown, testing strategy, risk analysis. Design document: 3,326 lines. Ready for Phase 2.0 implementation! 📋✅
+
+> **✅ PREVIOUS**: 2025.10.27 - SSE Phase 2 Design Session (Day 3 of 3 partial)! Completed 2 additional design areas (Areas 6-7 complete): Client UI/UX finalized (confirmation flash + smart sorting), Existing System Integration (extend `/api/notify` endpoint, fresh schema migration, extended WebSocket events, full backward compatibility). Progress: 7/9 areas complete (78%), 27/40 questions answered. Design document: 2,633 lines.
 
 > **✅ PREVIOUS**: 2025.10.26 - SSE Phase 2 Design Session (Day 2 of 2)! Completed 3.75 additional design areas (Areas 3-6 partial): Timeout & expiration (hybrid lazy server, intent-based grace period), SSE/WebSocket architecture (dual protocol, in-memory events with scaling docs), return value propagation (server-side interpretation, simple stdout), Client UI/UX (separate "Action Required" section, button layout). CORRECTED database field naming (response_requested, response_default). Progress: 6/9 areas complete (67%), 23/36 questions answered. Resume point: Area 6 Q6.3. Design document: 2,400+ lines with complete architecture. Ready for final 3.5 areas + implementation plan! 📋
 
@@ -46,9 +48,83 @@
 
 ### 🎯 October 2025 - Recent Sessions
 
-#### 2025.10.27 - SSE Phase 2 Design Session (Day 3 of 3) 📋
+#### 2025.10.27 (Session 2) - SSE Phase 2 Design Session COMPLETE! 🎉📋
 
-**Summary**: Completed 2 additional design areas (Areas 6-7) with 4 questions answered. Key accomplishments: Client UI/UX fully designed (confirmation flash with 2.5s transition, smart sorting by priority→expiration), Existing System Integration architecture complete (extend `/api/notify` endpoint with backward compatibility, fresh schema migration strategy, extended WebSocket events). Progress: 7/9 areas complete (78%), design document now 2,633 lines.
+**Summary**: Finished final 2 design areas (Areas 8-9) with 8 questions answered, plus generated comprehensive implementation plan. Session accomplishments: MVP scope defined (both response types in Phase 2), comprehensive testing strategy (40-50 tests across 3 tiers), 4-week phased rollout plan, security model clarified (localhost-only Phase 2, auth in Phase 3), offline behavior optimized (immediate default return), multi-device sync specified (real-time WebSocket). Design document grew from 2,633 → 3,326 lines. All 9 areas complete (100%), 40 questions answered, 42 architectural decisions made. Ready for Phase 2.0 implementation!
+
+**Area 8: MVP Scope & Phasing** ✅ COMPLETE (Q8.1-Q8.4):
+
+**Q8.1: Core MVP Features**:
+- Both response types in Phase 2 MVP (yes/no + open-ended)
+- Persistent notifications table, dual protocol, in-memory events
+- Timeout/expiration, grace period, multi-modal UX
+- Defer to Phase 3: authentication, rate limiting, Redis scaling
+
+**Q8.2: Testing Strategy**:
+- All three tiers: unit + smoke + integration
+- Unit tests: DB CRUD, timeout calculations, grace period
+- Smoke tests: basic workflows, LLM interpretation
+- Integration tests: full end-to-end flows, multi-device sync, offline detection
+- Total: ~40-50 tests
+
+**Q8.3: Deployment Strategy**:
+- 4-week phased rollout: Foundation → Backend → Client UI → CLI
+- Feature flags: `enable response required notifications`, `enable sse blocking`
+- Gradual rollout with clear completion criteria per phase
+
+**Q8.4: Documentation**:
+- Developer docs: architecture update, testing guide, API reference
+- User docs: CLI usage guide, best practices, troubleshooting
+- In-app help: tooltips, visual cues
+- Removed: database migration guide (not needed)
+
+**Area 9: Conceptual Questions** ✅ COMPLETE (Q9.1-Q9.4):
+
+**Q9.1: Sender Authorization**:
+- Claude Code → Human only (Phase 2)
+- Agent-to-agent deferred to Phase 4+
+
+**Q9.2: Security Model**:
+- Phase 2: No authentication (localhost trust model)
+- Phase 3: JWT tokens + API keys
+- Security warning: localhost-only deployment required
+
+**Q9.3: Offline Behavior**:
+- Detect offline → return default immediately (don't wait 120s)
+- When user returns online → show expired notifications with audit trail
+
+**Q9.4: Multi-Device Sync**:
+- Real-time sync via `notification_responded` WebSocket event
+- All tabs/devices update immediately when response submitted
+- Prevents duplicate responses
+
+**Implementation Plan Generated**:
+- 4 phases with detailed task breakdowns (Foundation, Backend, Client UI, CLI)
+- Testing summary (~40-50 tests organized by tier)
+- Risk analysis (high/medium/low with mitigations)
+- Success criteria (10 checkpoints for Phase 2 completion)
+- Future phases roadmap (Phases 3-6)
+
+**Files Updated**:
+- `src/rnd/sse-notifications/05-phase2-design-decisions.md` (~693 lines added, total: 3,326)
+  - Area 8 complete (Q8.1-Q8.4: MVP scope, testing, deployment, docs)
+  - Area 9 complete (Q9.1-Q9.4: security, offline, multi-device)
+  - Complete implementation plan (4 phases, task breakdown, testing, risks)
+  - Updated statistics (3 sessions, 9/9 areas, 40 questions, 42 decisions)
+  - Updated header (status: DESIGN COMPLETE, ready for implementation)
+- `history.md` (status line updated, new session entry)
+
+**Next Session**:
+- [ ] Begin Phase 2.0 implementation (Foundation - Week 1)
+- [ ] Database schema migration
+- [ ] Configuration keys setup
+- [ ] Test infrastructure setup
+
+---
+
+#### 2025.10.27 (Session 1) - SSE Phase 2 Design Session (Day 3 partial) 📋
+
+**Summary**: Completed 2 additional design areas (Areas 6-7) with 4 questions answered. Key accomplishments: Client UI/UX fully designed (confirmation flash with 2.5s transition, smart sorting by priority→expiration), Existing System Integration architecture complete (extend `/api/notify` endpoint with backward compatibility, fresh schema migration strategy, extended WebSocket events). Progress: 7/9 areas complete (78%), design document: 2,633 lines.
 
 **Area 6: Client UI/UX Design** ✅ COMPLETE (Q6.3-Q6.4):
 
