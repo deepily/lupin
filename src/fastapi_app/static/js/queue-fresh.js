@@ -117,7 +117,12 @@ class FreshQueueUI {
         this.userRoles = [];  // NEW: User's roles from JWT
         this.isAdmin = false;  // NEW: Quick admin check
         this.queueFilterMode = 'own';  // NEW: 'own' or 'all' (admin only)
-        
+
+        // Phase 2.2 SSE - Action Required notifications state
+        this.actionRequiredNotifications = new Map();  // notification_id → notification data + UI state
+        this.countdownTimers = new Map();  // notification_id → setInterval handle
+        this.keyboardListenerActive = false;  // Track if keyboard listener is attached
+
         // Initialize
         this.init();
     }
@@ -1062,15 +1067,17 @@ class FreshQueueUI {
             session_id: this.queueSessionId,
             subscribed_events: [
                 "queue_todo_update",
-                "queue_running_update", 
+                "queue_running_update",
                 "queue_done_update",
                 "queue_dead_update",
                 "tts_job_request",
                 "sys_time_update",
                 "notification_play_sound",
                 "notification_queue_update",
+                "notification_responded",  // Phase 2.2 SSE - multi-device sync
+                "notification_expired",    // Phase 2.2 SSE - timeout handling
                 "auth_success",
-                "auth_error", 
+                "auth_error",
                 "connect",
                 "sys_ping"
             ]
@@ -1182,7 +1189,17 @@ class FreshQueueUI {
                 case "notification_queue_update":
                     this.handleNotificationUpdate( envelope );
                     break;
-                    
+
+                case "notification_responded":
+                    // Phase 2.2 SSE - Multi-device sync when response submitted
+                    this.handleNotificationResponded( envelope );
+                    break;
+
+                case "notification_expired":
+                    // Phase 2.2 SSE - Notification timeout/expiration
+                    this.handleNotificationExpired( envelope );
+                    break;
+
                 case "sys_time_update":
                     // Update clock display with server time
                     if ( envelope.date ) {
@@ -2195,13 +2212,24 @@ class FreshQueueUI {
         // New notification - add to local cache
         this.notificationState.notifications.push( notification );
         this.log( `Processing new notification: ${notification.type}/${notification.priority} - ${notification.message}` );
-        
+
+        // Phase 2.2 SSE - Check if this is a response-required notification
+        if ( notification.response_requested === true ) {
+            this.log( `Response-required notification detected: ${notification.id}` );
+            // Route to Action Required section
+            this.addActionRequiredNotification( notification );
+            // Still play sound
+            await this.playNotificationSoundByPriority( notification.priority );
+            return;  // Don't add to regular notifications list
+        }
+
+        // Regular fire-and-forget notification handling
         // 1. ALWAYS play notification sound first based on priority
         await this.playNotificationSoundByPriority( notification.priority );
-        
+
         // 2. Add to visual list
         this.addNotificationToList( notification );
-        
+
         // 3. Optional TTS for high/urgent priority notifications (like old queue.js)
         if ( notification.priority === "high" || notification.priority === "urgent" ) {
             // Format notification message for TTS using helper method
@@ -3411,6 +3439,439 @@ class FreshQueueUI {
             element.textContent = status;
             element.className = `status-${type}`;
         }
+    }
+
+    // ========================================
+    // PHASE 2.2 SSE - ACTION REQUIRED NOTIFICATIONS
+    // ========================================
+
+    addActionRequiredNotification( notification ) {
+        this.log( `Adding action-required notification: ${notification.id}` );
+
+        // Store in action-required map
+        this.actionRequiredNotifications.set( notification.id, {
+            notification: notification,
+            expiresAt: Date.now() + ( notification.timeout_seconds * 1000 ),
+            timeoutSeconds: notification.timeout_seconds,
+            isExpired: false,
+            isResponded: false
+        } );
+
+        // Show the Action Required section
+        const section = document.getElementById( 'action-required-section' );
+        if ( section ) {
+            section.style.display = 'block';
+        }
+
+        // Render the notification UI
+        this.renderActionRequiredNotification( notification );
+
+        // Update count
+        this.updateActionRequiredCount();
+
+        // Start countdown timer
+        this.startCountdownTimer( notification.id );
+
+        // Attach keyboard listener if not already active
+        if ( !this.keyboardListenerActive ) {
+            this.attachKeyboardListener();
+        }
+    }
+
+    renderActionRequiredNotification( notification ) {
+        const container = document.getElementById( 'action-required-list' );
+        if ( !container ) {
+            this.error( "Action required list container not found" );
+            return;
+        }
+
+        // Create notification card
+        const card = document.createElement( 'div' );
+        card.id = `action-required-${notification.id}`;
+        card.className = 'action-required-notification';
+
+        // Build HTML based on response type
+        let responseUI = '';
+
+        if ( notification.response_type === 'yes_no' ) {
+            responseUI = `
+                <div class="response-buttons">
+                    <button class="response-button yes" data-notification-id="${notification.id}" data-response="yes">
+                        ✓ Yes <span class="keyboard-hint">(Y)</span>
+                    </button>
+                    <button class="response-button no" data-notification-id="${notification.id}" data-response="no">
+                        ✗ No <span class="keyboard-hint">(N)</span>
+                    </button>
+                </div>
+            `;
+        } else if ( notification.response_type === 'open_ended' ) {
+            responseUI = `
+                <div class="response-open-ended">
+                    <div class="response-input-container">
+                        <input type="text" class="response-text-input" id="response-input-${notification.id}" placeholder="Type your response...">
+                        <button class="response-mic-button" data-notification-id="${notification.id}">
+                            🎤
+                        </button>
+                        <button class="response-submit-button" data-notification-id="${notification.id}">
+                            Submit
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        card.innerHTML = `
+            <div class="action-required-header">
+                <div class="action-required-title">${notification.title || notification.message}</div>
+                <div class="action-required-timer" id="timer-${notification.id}">--:--</div>
+            </div>
+            <div class="action-required-message">${notification.message}</div>
+            <div class="action-required-progress-bar">
+                <div class="action-required-progress-fill" id="progress-${notification.id}" style="width: 100%;"></div>
+            </div>
+            ${responseUI}
+        `;
+
+        container.appendChild( card );
+
+        // Attach event listeners
+        if ( notification.response_type === 'yes_no' ) {
+            card.querySelectorAll( '.response-button' ).forEach( button => {
+                button.addEventListener( 'click', ( e ) => {
+                    const response = e.target.dataset.response;
+                    this.submitResponse( notification.id, response );
+                } );
+            } );
+        } else if ( notification.response_type === 'open_ended' ) {
+            const submitButton = card.querySelector( '.response-submit-button' );
+            const input = card.querySelector( '.response-text-input' );
+            const micButton = card.querySelector( '.response-mic-button' );
+
+            submitButton.addEventListener( 'click', () => {
+                const response = input.value.trim();
+                if ( response ) {
+                    this.submitResponse( notification.id, response );
+                }
+            } );
+
+            input.addEventListener( 'keypress', ( e ) => {
+                if ( e.key === 'Enter' ) {
+                    const response = input.value.trim();
+                    if ( response ) {
+                        this.submitResponse( notification.id, response );
+                    }
+                }
+            } );
+
+            micButton.addEventListener( 'click', () => {
+                this.startVoiceInput( notification.id );
+            } );
+        }
+    }
+
+    startCountdownTimer( notificationId ) {
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state ) return;
+
+        const timerElement = document.getElementById( `timer-${notificationId}` );
+        const progressElement = document.getElementById( `progress-${notificationId}` );
+
+        // Update every second
+        const intervalHandle = setInterval( () => {
+            const remaining = state.expiresAt - Date.now();
+
+            if ( remaining <= 0 ) {
+                // Timeout expired
+                clearInterval( intervalHandle );
+                this.handleLocalTimeout( notificationId );
+                return;
+            }
+
+            // Calculate MM:SS
+            const totalSeconds = Math.floor( remaining / 1000 );
+            const minutes = Math.floor( totalSeconds / 60 );
+            const seconds = totalSeconds % 60;
+            const timeString = `${String( minutes ).padStart( 2, '0' )}:${String( seconds ).padStart( 2, '0' )}`;
+
+            // Update timer display
+            if ( timerElement ) {
+                timerElement.textContent = timeString;
+
+                // Color coding
+                const percentRemaining = remaining / ( state.timeoutSeconds * 1000 );
+                timerElement.classList.remove( 'warning', 'danger' );
+                if ( percentRemaining <= 0.25 ) {
+                    timerElement.classList.add( 'danger' );
+                } else if ( percentRemaining <= 0.5 ) {
+                    timerElement.classList.add( 'warning' );
+                }
+            }
+
+            // Update progress bar
+            if ( progressElement ) {
+                const percentRemaining = ( remaining / ( state.timeoutSeconds * 1000 ) ) * 100;
+                progressElement.style.width = `${percentRemaining}%`;
+
+                progressElement.classList.remove( 'warning', 'danger' );
+                if ( percentRemaining <= 25 ) {
+                    progressElement.classList.add( 'danger' );
+                } else if ( percentRemaining <= 50 ) {
+                    progressElement.classList.add( 'warning' );
+                }
+            }
+        }, 1000 );
+
+        this.countdownTimers.set( notificationId, intervalHandle );
+    }
+
+    async submitResponse( notificationId, response ) {
+        this.log( `Submitting response for ${notificationId}: ${response}` );
+
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state || state.isResponded ) {
+            this.log( "Already responded or notification not found" );
+            return;
+        }
+
+        // Mark as responded
+        state.isResponded = true;
+
+        // Disable buttons to prevent double-submit
+        const card = document.getElementById( `action-required-${notificationId}` );
+        if ( card ) {
+            card.querySelectorAll( 'button, input' ).forEach( el => el.disabled = true );
+        }
+
+        try {
+            // Submit to server
+            const payload = {
+                notification_id: notificationId,
+                response_value: response
+            };
+
+            const apiResponse = await fetch( '/api/notify/response', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': this.getAuthHeader()
+                },
+                body: JSON.stringify( payload )
+            } );
+
+            if ( !apiResponse.ok ) {
+                const errorData = await apiResponse.json();
+                throw new Error( errorData.detail || `HTTP ${apiResponse.status}` );
+            }
+
+            const result = await apiResponse.json();
+            this.log( "Response submitted successfully:", result );
+
+            // Show confirmation
+            this.showConfirmation( notificationId, response );
+
+            // Stop countdown
+            this.stopCountdownTimer( notificationId );
+
+        } catch ( error ) {
+            this.error( "Failed to submit response:", error );
+            state.isResponded = false;  // Allow retry
+            // Re-enable buttons
+            if ( card ) {
+                card.querySelectorAll( 'button, input' ).forEach( el => el.disabled = false );
+            }
+            alert( `Failed to submit response: ${error.message}` );
+        }
+    }
+
+    showConfirmation( notificationId, response ) {
+        const card = document.getElementById( `action-required-${notificationId}` );
+        if ( !card ) return;
+
+        // Add confirmation class for animation
+        card.classList.add( 'confirmed' );
+
+        // Show confirmation message
+        const confirmationDiv = document.createElement( 'div' );
+        confirmationDiv.className = 'confirmation-message';
+        confirmationDiv.textContent = `✓ Response sent: ${response}`;
+        card.appendChild( confirmationDiv );
+
+        // Transition to regular notifications after 2 seconds
+        setTimeout( () => {
+            this.moveToRegularNotifications( notificationId );
+        }, 2000 );
+    }
+
+    moveToRegularNotifications( notificationId ) {
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state ) return;
+
+        // Remove from action required
+        const card = document.getElementById( `action-required-${notificationId}` );
+        if ( card ) {
+            card.remove();
+        }
+
+        this.actionRequiredNotifications.delete( notificationId );
+        this.updateActionRequiredCount();
+
+        // Add to regular notifications (already has response info from server)
+        this.addNotificationToList( state.notification );
+    }
+
+    handleLocalTimeout( notificationId ) {
+        this.log( `Local timeout for notification ${notificationId}` );
+
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state || state.isResponded ) return;
+
+        state.isExpired = true;
+
+        const card = document.getElementById( `action-required-${notificationId}` );
+        if ( card ) {
+            card.classList.add( 'expired' );
+            card.querySelectorAll( 'button, input' ).forEach( el => el.disabled = true );
+
+            // Show grace period indicator
+            const gracePeriod = document.createElement( 'div' );
+            gracePeriod.className = 'grace-period-indicator';
+            gracePeriod.textContent = '⏰ Time expired - using default response';
+            card.appendChild( gracePeriod );
+        }
+
+        // Server should have already handled timeout and used default
+        // Just clean up UI after 3 seconds
+        setTimeout( () => {
+            if ( card ) card.remove();
+            this.actionRequiredNotifications.delete( notificationId );
+            this.updateActionRequiredCount();
+        }, 3000 );
+    }
+
+    handleNotificationResponded( envelope ) {
+        this.log( "Notification responded event (multi-device sync):", envelope );
+
+        const notificationId = envelope.notification_id;
+        const response = envelope.response_value;
+
+        // Check if we have this in our action-required list
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state ) {
+            this.log( "Not in action-required list (already handled or different device)" );
+            return;
+        }
+
+        if ( state.isResponded ) {
+            this.log( "Already marked as responded locally" );
+            return;
+        }
+
+        // Another device/tab responded
+        this.log( `Response from another session: ${response}` );
+
+        // Mark as responded
+        state.isResponded = true;
+
+        // Show confirmation (different message for multi-device)
+        const card = document.getElementById( `action-required-${notificationId}` );
+        if ( card ) {
+            card.classList.add( 'confirmed' );
+            card.querySelectorAll( 'button, input' ).forEach( el => el.disabled = true );
+
+            const confirmationDiv = document.createElement( 'div' );
+            confirmationDiv.className = 'confirmation-message';
+            confirmationDiv.textContent = `✓ Responded in another session: ${response}`;
+            card.appendChild( confirmationDiv );
+        }
+
+        // Stop countdown
+        this.stopCountdownTimer( notificationId );
+
+        // Transition to regular notifications
+        setTimeout( () => {
+            this.moveToRegularNotifications( notificationId );
+        }, 2000 );
+    }
+
+    handleNotificationExpired( envelope ) {
+        this.log( "Notification expired event:", envelope );
+
+        const notificationId = envelope.notification_id;
+
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state ) {
+            this.log( "Not in action-required list" );
+            return;
+        }
+
+        // Server timeout occurred
+        this.handleLocalTimeout( notificationId );
+    }
+
+    stopCountdownTimer( notificationId ) {
+        const intervalHandle = this.countdownTimers.get( notificationId );
+        if ( intervalHandle ) {
+            clearInterval( intervalHandle );
+            this.countdownTimers.delete( notificationId );
+        }
+    }
+
+    updateActionRequiredCount() {
+        const count = this.actionRequiredNotifications.size;
+        const countElement = document.getElementById( 'action-required-count' );
+        if ( countElement ) {
+            countElement.textContent = count;
+        }
+
+        // Hide section if no action-required notifications
+        if ( count === 0 ) {
+            const section = document.getElementById( 'action-required-section' );
+            if ( section ) {
+                section.style.display = 'none';
+            }
+        }
+    }
+
+    attachKeyboardListener() {
+        if ( this.keyboardListenerActive ) return;
+
+        document.addEventListener( 'keypress', ( e ) => {
+            // Only respond if there's an active action-required notification
+            if ( this.actionRequiredNotifications.size === 0 ) return;
+
+            // Get first (oldest) notification
+            const firstId = this.actionRequiredNotifications.keys().next().value;
+            const state = this.actionRequiredNotifications.get( firstId );
+            if ( !state || state.isResponded ) return;
+
+            // Only for yes/no type
+            if ( state.notification.response_type !== 'yes_no' ) return;
+
+            // Check key
+            if ( e.key.toLowerCase() === 'y' ) {
+                this.submitResponse( firstId, 'yes' );
+            } else if ( e.key.toLowerCase() === 'n' ) {
+                this.submitResponse( firstId, 'no' );
+            }
+        } );
+
+        this.keyboardListenerActive = true;
+        this.log( "Keyboard listener attached for Yes/No shortcuts" );
+    }
+
+    async startVoiceInput( notificationId ) {
+        this.log( `Starting voice input for ${notificationId}` );
+
+        // TODO: Implement STT voice input
+        // For now, show placeholder
+        alert( "Voice input not yet implemented (Phase 2.3)" );
+
+        // Future implementation:
+        // 1. Check browser support for Web Speech API
+        // 2. Request microphone permission
+        // 3. Start recording
+        // 4. Send audio to STT endpoint
+        // 5. Fill text input with transcription
     }
 }
 
