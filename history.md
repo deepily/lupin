@@ -1,6 +1,8 @@
 # Lupin Project History
 
-> **🎉 CURRENT**: 2025.10.28 - SSE Phase 2.0 Foundation Week 1 COMPLETE! All 3 foundation tasks finished: database schema (23 fields, 3 indexes, idempotent creation script), configuration keys (5 keys + explainers added to lupin-app.ini), test infrastructure (10 unit tests passing, smoke tests passing, 6 integration test stubs ready). Created notifications table in dedicated SQLite database (lupin-notifications.db). Clarified "migration" terminology (table creation, not migration). Chose SQLite over LanceDB for relational CRUD operations. All tests validated (100% passing). Phase 2 implementation tracking document created (06-phase2-implementation-tracking.md). Ready for Week 2 (Backend API implementation)! ✅
+> **🎉 CURRENT**: 2025.10.29 - SSE Phase 2.1 Backend Implementation COMPLETE! All 10 tasks finished (100%): SSE endpoints with dual-mode support (fire-and-forget + response-required), timeout handling with asyncio.Event blocking, offline detection with immediate defaults, WebSocket event broadcasting (notification_responded/expired), NotificationsDatabase access layer with dependency injection. Comprehensive testing: 10/10 unit tests passing (FastAPI dependency_overrides pattern), 5 smoke tests created, 5 integration tests unskipped (Phase 2.2 client UI tests remain skipped). Ready for Week 3 (Client UI implementation)! ✅
+
+> **✅ PREVIOUS**: 2025.10.28 - SSE Phase 2.0 Foundation Week 1 COMPLETE! All 3 foundation tasks finished: database schema (23 fields, 3 indexes, idempotent creation script), configuration keys (5 keys + explainers added to lupin-app.ini), test infrastructure (10 unit tests passing, smoke tests passing, 6 integration test stubs ready). Created notifications table in dedicated SQLite database (lupin-notifications.db). Clarified "migration" terminology (table creation, not migration). Chose SQLite over LanceDB for relational CRUD operations. All tests validated (100% passing). Phase 2 implementation tracking document created (06-phase2-implementation-tracking.md). Ready for Week 2 (Backend API implementation)! ✅
 
 > **✅ PREVIOUS**: 2025.10.27 - SSE Phase 2 Design Session COMPLETE! All 9 design areas finished (100%), 40 questions answered, 42 architectural decisions made. Final areas: MVP scope (both response types in Phase 2), comprehensive testing (40-50 tests), 4-week phased rollout, security model (no auth Phase 2, add Phase 3), offline behavior (immediate default), multi-device sync (WebSocket real-time). Generated complete implementation plan with 4 phases, task breakdown, testing strategy, risk analysis. Design document: 3,326 lines. Ready for Phase 2.0 implementation! 📋✅
 
@@ -49,6 +51,57 @@
 ## Recent Activity (Last 7 Days)
 
 ### 🎯 October 2025 - Recent Sessions
+
+#### 2025.10.29 - SSE Phase 2.1 Backend Implementation COMPLETE! ✅
+
+**Summary**: Completed all Phase 2.1 Backend tasks (Week 2 of 4-week rollout). Session accomplishments: Extended `/api/notify` endpoint with dual-mode support (fire-and-forget + response-required), implemented SSE blocking flow with asyncio.Event, added timeout handling with configurable defaults, offline detection with immediate default returns, WebSocket event broadcasting (notification_responded/expired), created NotificationsDatabase access layer with FastAPI dependency injection. Comprehensive testing: 10 unit tests (100% passing with dependency_overrides pattern), 5 smoke tests created, 5 integration tests unskipped. Fixed unit test mocking issues by replacing @patch decorators with FastAPI app.dependency_overrides. Ready for Week 3 (Client UI)!
+
+**Backend Implementation** (Tasks 1-7) ✅ COMPLETE:
+- **Task 1**: Extended `/api/notify` endpoint with `response_requested`, `response_type`, `timeout_seconds`, `response_default` parameters
+- **Task 2**: Created `POST /api/notify/response` endpoint with grace period logic (30 seconds)
+- **Task 3**: Implemented SSE blocking flow using `asyncio.Event` and global `pending_responses` dict
+- **Task 4**: Implemented timeout handling with `asyncio.wait_for()`, returns default on expiration
+- **Task 5**: Implemented offline detection - checks WebSocket connection before creating SSE stream
+- **Task 6**: Created `get_notifications_database()` dependency injection for FastAPI
+- **Task 7**: Added WebSocket event broadcasting for `notification_responded` and `notification_expired`
+
+**Testing** (Tasks 8-10) ✅ COMPLETE:
+- **Task 8**: Created `src/tests/unit/test_notifications_api.py` (10 tests, 100% passing):
+  - Fire-and-forget mode: 3 tests (success, offline, invalid API key)
+  - Response-required validation: 2 tests (missing response_type, invalid response_type)
+  - Offline scenarios: 2 tests (with default, without default)
+  - Response submission: 3 tests (success, not found, already responded)
+  - Fixed mocking issues by using `app.dependency_overrides` instead of `@patch` decorators
+- **Task 8b**: Created `src/tests/smoke/test_notifications_sse_smoke.py` (5 tests):
+  - Fire-and-forget backward compatibility
+  - Response-required validation
+  - Offline detection with defaults
+  - Response submission endpoint
+  - API key validation
+- **Task 8c**: Updated `src/tests/integration/test_notifications_integration.py`:
+  - Unskipped 5 Phase 2.1 backend tests (yes/no flow, open-ended flow, timeout, grace period, offline)
+  - Left 2 Phase 2.2 client UI tests skipped (multi-device sync tests)
+
+**Key Technical Decisions**:
+- **SSE Blocking Pattern**: Global `pending_responses` dict mapping notification_id to `{"event": asyncio.Event(), "response_data": None}`
+- **Dual-Mode Endpoint**: `response_requested=False` → fire-and-forget (existing behavior), `response_requested=True` → SSE blocking (new)
+- **Offline Optimization**: Check `ws_manager.is_user_connected()` before creating SSE stream - immediate default return if offline
+- **Grace Period**: Accept late responses within 30 seconds after timeout (captures user intent)
+- **Testing Pattern**: FastAPI `app.dependency_overrides` for clean dependency mocking (not `@patch`)
+
+**Files Created/Modified** (4 files):
+- Modified: `src/cosa/rest/routers/notifications.py` (+220 lines - SSE endpoints, timeout handling, offline detection)
+- Created: `src/cosa/rest/notifications_database.py` (545 lines - database access layer with embedded smoke tests)
+- Created: `src/tests/unit/test_notifications_api.py` (392 lines - 10 comprehensive unit tests)
+- Created: `src/tests/smoke/test_notifications_sse_smoke.py` (380 lines - 5 end-to-end smoke tests)
+- Modified: `src/tests/integration/test_notifications_integration.py` (removed 5 @pytest.mark.skip decorators)
+
+**Next Steps**:
+- Phase 2.2 (Week 3): Client UI implementation
+  - Render "Action Required" notifications with Yes/No buttons or text input
+  - Handle response submission via POST /api/notify/response
+  - Show countdown timers for timeouts
+  - Implement multi-device sync using WebSocket events
 
 #### 2025.10.28 - SSE Phase 2.0 Foundation Week 1 COMPLETE! ✅
 

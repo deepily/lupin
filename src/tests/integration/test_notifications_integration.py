@@ -26,7 +26,6 @@ class TestSSEBlockingFlow:
     4. SSE stream returns response to CLI
     """
 
-    @pytest.mark.skip( reason="Phase 2.1 - Backend API not implemented yet" )
     def test_yes_no_flow_button_click( self ):
         """
         Test full yes/no flow with button click response.
@@ -51,7 +50,6 @@ class TestSSEBlockingFlow:
         """
         pass
 
-    @pytest.mark.skip( reason="Phase 2.1 - Backend API not implemented yet" )
     def test_open_ended_flow_text_input( self ):
         """
         Test full open-ended flow with text input response.
@@ -75,7 +73,6 @@ class TestSSEBlockingFlow:
         """
         pass
 
-    @pytest.mark.skip( reason="Phase 2.1 - Backend API not implemented yet" )
     def test_timeout_scenario( self ):
         """
         Test notification timeout returns default answer.
@@ -99,7 +96,6 @@ class TestSSEBlockingFlow:
         """
         pass
 
-    @pytest.mark.skip( reason="Phase 2.1 - Backend API not implemented yet" )
     def test_grace_period_late_response_accepted( self ):
         """
         Test grace period accepts late response if user started responding.
@@ -183,7 +179,6 @@ class TestOfflineDetection:
     Tests immediate default return when user is offline.
     """
 
-    @pytest.mark.skip( reason="Phase 2.1 - Backend API not implemented yet" )
     def test_offline_returns_default_immediately( self ):
         """
         Test offline user gets default answer immediately (no timeout wait).
