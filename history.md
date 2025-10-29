@@ -1,6 +1,8 @@
 # Lupin Project History
 
-> **🎉 CURRENT**: 2025.10.27 - SSE Phase 2 Design Session COMPLETE! All 9 design areas finished (100%), 40 questions answered, 42 architectural decisions made. Final areas: MVP scope (both response types in Phase 2), comprehensive testing (40-50 tests), 4-week phased rollout, security model (no auth Phase 2, add Phase 3), offline behavior (immediate default), multi-device sync (WebSocket real-time). Generated complete implementation plan with 4 phases, task breakdown, testing strategy, risk analysis. Design document: 3,326 lines. Ready for Phase 2.0 implementation! 📋✅
+> **🎉 CURRENT**: 2025.10.28 - SSE Phase 2.0 Foundation Week 1 COMPLETE! All 3 foundation tasks finished: database schema (23 fields, 3 indexes, idempotent creation script), configuration keys (5 keys + explainers added to lupin-app.ini), test infrastructure (10 unit tests passing, smoke tests passing, 6 integration test stubs ready). Created notifications table in dedicated SQLite database (lupin-notifications.db). Clarified "migration" terminology (table creation, not migration). Chose SQLite over LanceDB for relational CRUD operations. All tests validated (100% passing). Phase 2 implementation tracking document created (06-phase2-implementation-tracking.md). Ready for Week 2 (Backend API implementation)! ✅
+
+> **✅ PREVIOUS**: 2025.10.27 - SSE Phase 2 Design Session COMPLETE! All 9 design areas finished (100%), 40 questions answered, 42 architectural decisions made. Final areas: MVP scope (both response types in Phase 2), comprehensive testing (40-50 tests), 4-week phased rollout, security model (no auth Phase 2, add Phase 3), offline behavior (immediate default), multi-device sync (WebSocket real-time). Generated complete implementation plan with 4 phases, task breakdown, testing strategy, risk analysis. Design document: 3,326 lines. Ready for Phase 2.0 implementation! 📋✅
 
 > **✅ PREVIOUS**: 2025.10.27 - SSE Phase 2 Design Session (Day 3 of 3 partial)! Completed 2 additional design areas (Areas 6-7 complete): Client UI/UX finalized (confirmation flash + smart sorting), Existing System Integration (extend `/api/notify` endpoint, fresh schema migration, extended WebSocket events, full backward compatibility). Progress: 7/9 areas complete (78%), 27/40 questions answered. Design document: 2,633 lines.
 
@@ -47,6 +49,73 @@
 ## Recent Activity (Last 7 Days)
 
 ### 🎯 October 2025 - Recent Sessions
+
+#### 2025.10.28 - SSE Phase 2.0 Foundation Week 1 COMPLETE! ✅
+
+**Summary**: Completed all Phase 2.0 Foundation tasks (Week 1 of 4-week rollout). Session accomplishments: database schema created (23 fields, 3 indexes), configuration keys setup (5 keys + explainers), comprehensive test infrastructure (10 unit tests passing, smoke tests passing, 6 integration test stubs ready). Clarified "migration" vs "table creation" terminology confusion. Selected SQLite over LanceDB for relational CRUD operations. Created dedicated notifications database (lupin-notifications.db). All tests validated (100% passing). Implementation tracking document created. Ready for Week 2 (Backend API)!
+
+**Task 1: Database Schema** ✅ COMPLETE:
+- Created `src/scripts/create_notifications_table.py` (idempotent creation script)
+- Schema: 23 fields (identity, routing, source, content, timestamps, response, state, legacy)
+- Indexes: 3 (idx_recipient_state, idx_recipient_created, idx_expires_at)
+- Database: `src/conf/long-term-memory/lupin-notifications.db` (24KB)
+- Validation: ✓ 23 fields verified, ✓ 3 indexes verified
+- Uses canonical path pattern (`cu.get_project_root()`)
+- Bootstrap pattern for standalone execution (LUPIN_ROOT)
+- Added to `.gitignore` to prevent tracking user data
+
+**Design Clarifications**:
+- **"Migration" Terminology**: Design doc uses "migration" to describe architectural transition (in-memory → database), not database schema migration. This is table CREATION, not migration. No existing table to migrate.
+- **SQLite vs LanceDB**: Chose SQLite for notifications (relational CRUD operations, state transitions, queries). LanceDB used for vector embeddings (conversation history). Different use cases.
+- **Database Location**: New dedicated `lupin-notifications.db` (not in lupin-auth.db)
+
+**Task 2: Configuration Keys** ✅ COMPLETE:
+- Added 5 configuration keys to `src/conf/lupin-app.ini`:
+  - `enable response required notifications = false` (Phase 2.1+ feature flag)
+  - `enable sse blocking = false` (Phase 2.1+ feature flag)
+  - `notification timeout default seconds = 120` (2 minutes default)
+  - `notification grace period seconds = 30` (accept late responses)
+  - `notification offline immediate default = true` (return default if offline)
+- Added 5 explainer entries to `src/conf/lupin-app-splainer.ini`
+- ConfigurationManager loads keys dynamically (no code changes needed)
+
+**Task 3: Test Infrastructure** ✅ COMPLETE:
+- **Unit Tests**: `src/tests/unit/test_notifications_database.py` (10 tests, 100% passing in 0.12s)
+  - TestNotificationCRUD: 4 tests (create, read, update, soft delete)
+  - TestNotificationQueries: 3 tests (by recipient, by state, expired)
+  - TestStateTransitions: 3 tests (created→delivered, delivered→responded, delivered→expired)
+- **Smoke Tests**: `src/tests/smoke/test_notifications_smoke.py` (all passing)
+  - Database verification, CRUD workflow, state transitions
+  - LLM interpretation helper placeholder (Phase 2.1)
+  - Professional output with `cu.print_banner()` formatting
+- **Integration Tests**: `src/tests/integration/test_notifications_integration.py` (6 test stubs)
+  - TestSSEBlockingFlow: 5 tests (yes/no, open-ended, timeout, grace period, offline)
+  - TestMultiDeviceSync: 2 tests (Tab A → Tab B sync, duplicate prevention)
+  - All marked `@pytest.mark.skip` until Phase 2.1 backend ready
+  - Fixtures defined (test_database, websocket_test_client, sse_test_client)
+
+**Files Created/Modified** (8 files):
+- Created: `src/scripts/create_notifications_table.py`
+- Created: `src/conf/long-term-memory/lupin-notifications.db`
+- Created: `src/tests/unit/test_notifications_database.py`
+- Created: `src/tests/smoke/test_notifications_smoke.py`
+- Created: `src/tests/integration/test_notifications_integration.py`
+- Created: `src/rnd/sse-notifications/06-phase2-implementation-tracking.md`
+- Modified: `.gitignore`
+- Modified: `src/conf/lupin-app.ini` + `src/conf/lupin-app-splainer.ini`
+
+**User Review Requested**:
+- Review smoke test module: `src/tests/smoke/test_notifications_smoke.py`
+
+**Next Session (Week 2 - Phase 2.1: Backend Complete)**:
+- [ ] Extend `/api/notify` endpoint for response-required notifications
+- [ ] Create response submission endpoint `POST /api/notify/response`
+- [ ] Implement SSE blocking flow with asyncio.Event
+- [ ] Implement timeout and grace period handling
+- [ ] Implement offline detection
+- [ ] Extend WebSocket events (notification_responded, notification_expired)
+
+---
 
 #### 2025.10.27 (Session 2) - SSE Phase 2 Design Session COMPLETE! 🎉📋
 
