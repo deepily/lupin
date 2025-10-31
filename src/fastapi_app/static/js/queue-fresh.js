@@ -3485,21 +3485,32 @@ class FreshQueueUI {
             return;
         }
 
+        // Hide empty state when adding first notification
+        const emptyState = document.getElementById( 'action-required-empty' );
+        if ( emptyState ) {
+            emptyState.style.display = 'none';
+        }
+
         // Create notification card
         const card = document.createElement( 'div' );
         card.id = `action-required-${notification.id}`;
-        card.className = 'action-required-notification';
+        card.className = 'action-required-notification active';  // Phase 2.2: Add 'active' class
 
         // Build HTML based on response type
         let responseUI = '';
 
         if ( notification.response_type === 'yes_no' ) {
+            // Phase 2.2: Highlight default button
+            const defaultValue = notification.response_default;
+            const yesClass = defaultValue === 'yes' ? 'default-value' : '';
+            const noClass = defaultValue === 'no' ? 'default-value' : '';
+
             responseUI = `
                 <div class="response-buttons">
-                    <button class="response-button yes" data-notification-id="${notification.id}" data-response="yes">
+                    <button class="response-button yes ${yesClass}" data-notification-id="${notification.id}" data-response="yes">
                         ✓ Yes <span class="keyboard-hint">(Y)</span>
                     </button>
-                    <button class="response-button no" data-notification-id="${notification.id}" data-response="no">
+                    <button class="response-button no ${noClass}" data-notification-id="${notification.id}" data-response="no">
                         ✗ No <span class="keyboard-hint">(N)</span>
                     </button>
                 </div>
@@ -3547,19 +3558,40 @@ class FreshQueueUI {
             const input = card.querySelector( '.response-text-input' );
             const micButton = card.querySelector( '.response-mic-button' );
 
+            // Phase 2.4.1: Real-time validation for open-ended input
+            const validateInput = () => {
+                const value = input.value.trim();
+                const isValid = value.length > 0 && value.length <= 500;
+
+                submitButton.disabled = !isValid;
+
+                // Visual feedback
+                if ( input.value.length > 0 ) {
+                    if ( value.length > 500 ) {
+                        input.classList.add( 'invalid' );
+                    } else {
+                        input.classList.remove( 'invalid' );
+                    }
+                }
+
+                return isValid;
+            };
+
+            // Initial validation state
+            submitButton.disabled = true;
+
+            // Validate on input
+            input.addEventListener( 'input', validateInput );
+
             submitButton.addEventListener( 'click', () => {
-                const response = input.value.trim();
-                if ( response ) {
-                    this.submitResponse( notification.id, response );
+                if ( validateInput() ) {
+                    this.submitResponse( notification.id, input.value.trim() );
                 }
             } );
 
             input.addEventListener( 'keypress', ( e ) => {
-                if ( e.key === 'Enter' ) {
-                    const response = input.value.trim();
-                    if ( response ) {
-                        this.submitResponse( notification.id, response );
-                    }
+                if ( e.key === 'Enter' && validateInput() ) {
+                    this.submitResponse( notification.id, input.value.trim() );
                 }
             } );
 
@@ -3687,19 +3719,25 @@ class FreshQueueUI {
         const card = document.getElementById( `action-required-${notificationId}` );
         if ( !card ) return;
 
-        // Add confirmation class for animation
-        card.classList.add( 'confirmed' );
+        // Phase 2.2: Change to 'responded' state (stay in-place, no movement)
+        card.classList.remove( 'active' );
+        card.classList.add( 'responded' );
 
-        // Show confirmation message
-        const confirmationDiv = document.createElement( 'div' );
-        confirmationDiv.className = 'confirmation-message';
-        confirmationDiv.textContent = `✓ Response sent: ${response}`;
-        card.appendChild( confirmationDiv );
+        // Remove progress bar and timer (no longer needed)
+        const progress = document.getElementById( `progress-${notificationId}` );
+        const timer = document.getElementById( `timer-${notificationId}` );
+        if ( progress && progress.parentElement ) progress.parentElement.remove();
+        if ( timer ) timer.textContent = '✓ Responded';
 
-        // Transition to regular notifications after 2 seconds
-        setTimeout( () => {
-            this.moveToRegularNotifications( notificationId );
-        }, 2000 );
+        // Replace buttons with status badge
+        const buttonsContainer = card.querySelector( '.response-buttons, .response-open-ended' );
+        if ( buttonsContainer ) {
+            buttonsContainer.innerHTML = `
+                <div class="notification-status-badge responded">
+                    ✓ You responded: ${response}
+                </div>
+            `;
+        }
     }
 
     moveToRegularNotifications( notificationId ) {
@@ -3728,24 +3766,31 @@ class FreshQueueUI {
         state.isExpired = true;
 
         const card = document.getElementById( `action-required-${notificationId}` );
-        if ( card ) {
-            card.classList.add( 'expired' );
-            card.querySelectorAll( 'button, input' ).forEach( el => el.disabled = true );
+        if ( !card ) return;
 
-            // Show grace period indicator
-            const gracePeriod = document.createElement( 'div' );
-            gracePeriod.className = 'grace-period-indicator';
-            gracePeriod.textContent = '⏰ Time expired - using default response';
-            card.appendChild( gracePeriod );
+        // Phase 2.2: Change to 'expired' state (stay in-place, no movement)
+        card.classList.remove( 'active' );
+        card.classList.add( 'expired' );
+
+        // Remove progress bar and update timer
+        const progress = document.getElementById( `progress-${notificationId}` );
+        const timer = document.getElementById( `timer-${notificationId}` );
+        if ( progress && progress.parentElement ) progress.parentElement.remove();
+        if ( timer ) timer.textContent = '⏰ Expired';
+
+        // Replace buttons with status badge showing default was used
+        const defaultValue = state.notification.response_default || 'none';
+        const buttonsContainer = card.querySelector( '.response-buttons, .response-open-ended' );
+        if ( buttonsContainer ) {
+            buttonsContainer.innerHTML = `
+                <div class="notification-status-badge expired">
+                    ⏰ Expired - Default used: ${defaultValue}
+                </div>
+            `;
         }
 
-        // Server should have already handled timeout and used default
-        // Just clean up UI after 3 seconds
-        setTimeout( () => {
-            if ( card ) card.remove();
-            this.actionRequiredNotifications.delete( notificationId );
-            this.updateActionRequiredCount();
-        }, 3000 );
+        // Keep notification in list (no removal, no timeout)
+        // User can manually dismiss later if needed
     }
 
     handleNotificationResponded( envelope ) {
@@ -3772,25 +3817,31 @@ class FreshQueueUI {
         // Mark as responded
         state.isResponded = true;
 
-        // Show confirmation (different message for multi-device)
-        const card = document.getElementById( `action-required-${notificationId}` );
-        if ( card ) {
-            card.classList.add( 'confirmed' );
-            card.querySelectorAll( 'button, input' ).forEach( el => el.disabled = true );
-
-            const confirmationDiv = document.createElement( 'div' );
-            confirmationDiv.className = 'confirmation-message';
-            confirmationDiv.textContent = `✓ Responded in another session: ${response}`;
-            card.appendChild( confirmationDiv );
-        }
-
         // Stop countdown
         this.stopCountdownTimer( notificationId );
 
-        // Transition to regular notifications
-        setTimeout( () => {
-            this.moveToRegularNotifications( notificationId );
-        }, 2000 );
+        // Phase 2.2: Show responded state in-place (different message for multi-device)
+        const card = document.getElementById( `action-required-${notificationId}` );
+        if ( card ) {
+            card.classList.remove( 'active' );
+            card.classList.add( 'responded' );
+
+            // Remove progress bar and update timer
+            const progress = document.getElementById( `progress-${notificationId}` );
+            const timer = document.getElementById( `timer-${notificationId}` );
+            if ( progress && progress.parentElement ) progress.parentElement.remove();
+            if ( timer ) timer.textContent = '✓ Responded (other device)';
+
+            // Replace buttons with status badge
+            const buttonsContainer = card.querySelector( '.response-buttons, .response-open-ended' );
+            if ( buttonsContainer ) {
+                buttonsContainer.innerHTML = `
+                    <div class="notification-status-badge responded">
+                        ✓ Responded in another session: ${response}
+                    </div>
+                `;
+            }
+        }
     }
 
     handleNotificationExpired( envelope ) {
@@ -3817,19 +3868,30 @@ class FreshQueueUI {
     }
 
     updateActionRequiredCount() {
-        const count = this.actionRequiredNotifications.size;
+        // Phase 2.2: Count only ACTIVE notifications (not responded/expired)
+        const activeCount = Array.from( this.actionRequiredNotifications.values() )
+            .filter( state => !state.isResponded && !state.isExpired ).length;
+
         const countElement = document.getElementById( 'action-required-count' );
         if ( countElement ) {
-            countElement.textContent = count;
+            countElement.textContent = activeCount;
         }
 
-        // Hide section if no action-required notifications
-        if ( count === 0 ) {
-            const section = document.getElementById( 'action-required-section' );
-            if ( section ) {
-                section.style.display = 'none';
+        // Phase 2.2: Show empty state if no active notifications, but keep section visible
+        const emptyState = document.getElementById( 'action-required-empty' );
+        const container = document.getElementById( 'action-required-list' );
+
+        if ( activeCount === 0 && container ) {
+            // Check if there are any notification cards at all
+            const cards = container.querySelectorAll( '.action-required-notification' );
+            if ( cards.length === 0 && emptyState ) {
+                emptyState.style.display = 'block';  // Show empty state
             }
+        } else if ( emptyState ) {
+            emptyState.style.display = 'none';  // Hide empty state when active notifications exist
         }
+
+        // Section stays visible always (Phase 2.2 change)
     }
 
     attachKeyboardListener() {

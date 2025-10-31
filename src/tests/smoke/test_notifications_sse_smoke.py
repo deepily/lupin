@@ -189,7 +189,8 @@ def test_offline_with_default():
                 data = response.json()
                 print( f"Response (offline): {json.dumps(data, indent=2)}" )
                 assert data["status"] == "offline", f"Expected 'offline', got '{data['status']}'"
-                assert data["default_used"] == "no", f"Expected default 'no', got '{data['default_used']}'"
+                assert data["response"] == "no", f"Expected response 'no', got '{data.get('response', 'MISSING')}'"
+                assert data["default_used"] == "no", f"Expected default_used 'no' (value, not boolean for offline path), got '{data['default_used']}'"
                 print( "✓ Offline detection works - returned default immediately" )
 
             elif 'text/event-stream' in content_type:

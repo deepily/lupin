@@ -1,6 +1,8 @@
 # Lupin Project History
 
-> **🎉 CURRENT**: 2025.10.29 - SSE Phase 2.2 Client UI Implementation COMPLETE! Built complete "Action Required" section with dual response types (Yes/No buttons + open-ended text input), countdown timer (MM:SS format with color coding green→yellow→red), progress bar (percentage-based with matching colors), keyboard shortcuts (Y/N), multi-device sync via WebSocket events (notification_responded/expired), post-response confirmation (2s fade), grace period handling. Files: queue-fresh.html (+11 lines), queue-fresh.css (+251 lines), queue-fresh.js (+437 lines). All 8 Phase 2.2 requirements implemented. Completed in 1 day vs estimated 5-6 days. **Pending**: Manual testing + integration test validation (next session). Ready for Phase 2.3 (CLI Integration)! 🎨✅
+> **🎉 CURRENT**: 2025.10.30 - SSE Phase 2.4.1 Text Validation COMPLETE + Phase 2.2 UX Improvements! Fixed serialization bug (NotificationItem missing Phase 2.2 fields), SSE format inconsistency (added consistent response/default_used fields), implemented 5 UX improvements (30s timeout, always-visible header, in-place notifications, status badges, default button highlighting). Phase 2.4.1 complete: XSS protection (regex HTML stripping), length validation (500 char max), real-time frontend validation, red border visual feedback. User confirmed: "I just tested it, so far so good." Files modified: notifications.py (+19 validation), queue-fresh.js (+44 validation), queue-fresh.css (+10 invalid styling), 2 planning docs created. **Next**: Phase 2.4.2 (default value pre-fill) ready to implement! 🎨✅
+
+> **✅ PREVIOUS**: 2025.10.29 - SSE Phase 2.2 Client UI Implementation COMPLETE! Built complete "Action Required" section with dual response types (Yes/No buttons + open-ended text input), countdown timer (MM:SS format with color coding green→yellow→red), progress bar (percentage-based with matching colors), keyboard shortcuts (Y/N), multi-device sync via WebSocket events (notification_responded/expired), post-response confirmation (2s fade), grace period handling. Files: queue-fresh.html (+11 lines), queue-fresh.css (+251 lines), queue-fresh.js (+437 lines). All 8 Phase 2.2 requirements implemented. Completed in 1 day vs estimated 5-6 days. **Pending**: Manual testing + integration test validation (next session). Ready for Phase 2.3 (CLI Integration)! 🎨✅
 
 > **✅ PREVIOUS**: 2025.10.29 - SSE Phase 2.1 Backend Implementation COMPLETE! All 10 tasks finished (100%): SSE endpoints with dual-mode support (fire-and-forget + response-required), timeout handling with asyncio.Event blocking, offline detection with immediate defaults, WebSocket event broadcasting (notification_responded/expired), NotificationsDatabase access layer with dependency injection. Comprehensive testing: 10/10 unit tests passing (FastAPI dependency_overrides pattern), 5 smoke tests created, 5 integration tests unskipped (Phase 2.2 client UI tests remain skipped). Ready for Week 3 (Client UI implementation)! ✅
 
@@ -53,6 +55,95 @@
 ## Recent Activity (Last 7 Days)
 
 ### 🎯 October 2025 - Recent Sessions
+
+#### 2025.10.30 - SSE Phase 2.2 Manual Testing + Phase 2.4.1 Text Validation COMPLETE! 🧪✅
+
+**Summary**: Fixed critical Phase 2.2 serialization bug preventing Action Required section from appearing, implemented SSE format consistency, added 5 UX improvements based on manual testing feedback, and completed Phase 2.4.1 text validation with XSS protection. End-to-end Yes/No flow working, open-ended validation tested successfully. **Status**: Phase 2.4.1 complete, Phase 2.4.2 (default pre-fill) ready for next session.
+
+**Phase 2.2 Bug Fixes and Testing**:
+- **Serialization Bug Fixed**: `NotificationItem` class was missing Phase 2.2 fields in `__init__()` and `to_dict()`
+  - Root cause: Database stored full data, but WebSocket transmission stripped `response_requested`, `response_type`, `response_default`, `timeout_seconds`
+  - Frontend couldn't route notifications to Action Required section (missing `response_requested=true`)
+  - **Fix**: Updated `src/cosa/rest/notification_fifo_queue.py:15-103`
+    * Added Phase 2.2 fields to `__init__()` parameters
+    * Updated `to_dict()` to serialize all fields
+    * Updated `push_notification()` method signature
+  - **Fix**: Updated `src/cosa/rest/routers/notifications.py:364-377` to pass database fields to WebSocket
+
+- **422 Response Endpoint Error Fixed**: Backend expected `notification_id` as Query param, frontend sent in JSON body
+  - **Fix**: Changed endpoint signature to accept `request_body: Dict[str, Any] = Body(...)` (line 461)
+  - Extract fields from request body with `request_body.get()` (lines 498-499)
+
+- **WebSocket Broadcast Method Fixed**: Code called `broadcast_to_user()` but method is `emit_to_user()`
+  - **Fix**: Changed two occurrences to `emit_to_user(event_name, data)` (lines 405-414)
+
+- **SSE Format Inconsistency Fixed**: Response/timeout cases had different field structures
+  - User feedback: "I noticed that the third example doesn't have a 'response' field... 'default_used' should be set to true in this last/3rd case."
+  - **Fix**: Made both cases consistent
+    * Response case: Added `"default_used": False` (line 395)
+    * Timeout case: Added `"response": response_default`, changed `"default_used"` to `True` (boolean) (lines 419-424)
+  - Updated smoke test assertions (line 193)
+
+**Phase 2.2 UX Improvements** (Based on User Feedback):
+1. **30-Second Timeout**: Changed default from 120s to 30s for easier testing (`notifications.py:140`)
+2. **Always-Visible Action Required Header**: Section never hides, shows "✓ No pending actions" when empty
+   - Updated `queue-fresh.html:36-50` - removed auto-hide behavior
+   - Added empty state div with green checkmark message
+3. **In-Place Notifications**: Expired/responded notifications stay in Action Required section (no movement)
+   - **CSS Changes** (`queue-fresh.css:307-490`):
+     * `.active` state: Orange border, white background
+     * `.responded` state: Green border, light green background, 0.9 opacity
+     * `.expired` state: Gray border, light gray background, 0.85 opacity
+     * Status badges: Green "✓ You responded: [value]", Red "⏰ Expired - Default used: [value]"
+   - **JavaScript Changes** (`queue-fresh.js:3697-3773`):
+     * `showConfirmation()`: Adds `.responded` class, replaces buttons with green badge
+     * `handleLocalTimeout()`: Adds `.expired` class, replaces buttons with red badge
+     * Removed `moveToRegularNotifications()` calls - notifications stay in-place
+4. **Visual Status Badges**: Show response outcome directly on notification card
+5. **Default Button Highlighting**: Golden border + "⭐ Default" badge on default choice
+   - **CSS** (`queue-fresh.css:436-455`): 3px golden border, shadow, positioned badge
+   - **JavaScript** (`queue-fresh.js:3502-3517`): Conditionally apply `.default-value` class
+
+**Phase 2.4.1: Text Validation & Sanitization COMPLETE**:
+- **Backend Validation** (`src/cosa/rest/routers/notifications.py:513-531`):
+  - XSS protection: `re.sub(r'<[^>]+>', '', response_value)` strips HTML/script tags
+  - Length validation: Max 500 characters, returns HTTP 400 if exceeded
+  - Empty check: Rejects whitespace-only responses after trim
+  - Clear error messages for each validation failure
+
+- **Frontend Validation** (`src/fastapi_app/static/js/queue-fresh.js:3561-3600`):
+  - Real-time validation on `input` event
+  - Submit button disabled when invalid (empty or >500 chars)
+  - Red border visual feedback when >500 chars (`.invalid` class)
+  - Enter key only works when input is valid
+  - Initial state: Submit button disabled until user types
+
+- **CSS Invalid State** (`src/fastapi_app/static/css/queue-fresh.css:517-526`):
+  - `.invalid` class: Red border (#dc3545), light red background
+  - Focus state: Red glow effect with box-shadow
+
+**Testing**:
+- End-to-end Yes/No flow: Curl completed successfully with `{"status": "responded", "response": "yes", "default_used": false}`
+- Open-ended validation: User confirmed "I just tested it, so far so good"
+- Submit button enables/disables correctly
+- Visual feedback works (red border at >500 chars)
+
+**Documentation**:
+- Created `src/rnd/2025.10.30-sse-phase-2.2-ux-improvements.md` (comprehensive UX changes doc)
+- Created `src/rnd/2025.10.30-sse-phase-2.4-open-ended-response.md` (Phase 2.4 planning doc)
+- Created `src/rnd/2025.10.30-sse-phase-2.4-progress-tracker.md` (real-time progress tracking)
+
+**Next Steps**:
+- Phase 2.4.2: Implement default value pre-fill for open-ended responses
+- Phase 2.4.3: Implement voice input (Web Speech API)
+- Phase 2.4.4: Add character counter (visual polish, optional)
+
+**User Feedback Highlights**:
+- "I just tested it, so far so good" (Phase 2.4.1 validation)
+- Requested consistent SSE response format with `response` field always present
+- Preferred in-place notifications over moving to regular section: "it might be simpler and better to leave the expired AND responded messages within the list"
+
+---
 
 #### 2025.10.29 - SSE Phase 2.2 Client UI Implementation COMPLETE! 🎨✅
 

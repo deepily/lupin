@@ -33,8 +33,8 @@
             </div>
         </div>
 
-        <!-- Action Required Section (Response-Required Notifications) -->
-        <div class="collapsible-section" id="action-required-section" style="display: none;">
+        <!-- Action Required Section (Response-Required Notifications) - Phase 2.2 always visible -->
+        <div class="collapsible-section" id="action-required-section">
             <div class="section-header" onclick="toggleSection('action-required-content')">
                 <h3>⚠️ Action Required: <span id="action-required-count">0</span></h3>
                 <button class="toggle-button" id="action-required-toggle">▼</button>
@@ -42,6 +42,9 @@
             <div class="section-content" id="action-required-content">
                 <div id="action-required-list">
                     <!-- Response-required notifications will be populated here -->
+                    <div id="action-required-empty" class="action-required-empty-state">
+                        ✓ No pending actions
+                    </div>
                 </div>
             </div>
         </div>
