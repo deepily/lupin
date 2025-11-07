@@ -548,6 +548,18 @@
             animation: pulse 1s ease-in-out infinite;
         }
 
+        .response-mic-button.processing {
+            background-color: #ffc107;
+            border-color: #ffc107;
+            color: white;
+            cursor: wait;
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        .response-mic-button.processing:hover {
+            background-color: #ffc107;  /* No hover change during processing */
+        }
+
         .response-submit-button {
             padding: 10px 20px;
             border: none;

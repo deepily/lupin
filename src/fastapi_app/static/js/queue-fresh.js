@@ -2193,10 +2193,23 @@ class FreshQueueUI {
     
     async handleNotificationUpdate( envelope ) {
         this.log( "Notification queue update received:", envelope );
-        
+
+        // DEBUG: Log the raw envelope structure
+        console.log( '[DEBUG] WebSocket envelope:', envelope );
+        console.log( '[DEBUG] envelope.notification:', envelope.notification );
+        console.log( '[DEBUG] envelope.data:', envelope.data );
+
         // Handle real-time notification updates from NotificationFifoQueue
         const notification = envelope.notification || envelope.data?.notification;
-        
+
+        // DEBUG: Log extracted notification and its response_default field
+        console.log( '[DEBUG] Extracted notification:', notification );
+        if ( notification ) {
+            console.log( '[DEBUG] notification.response_default:', notification.response_default );
+            console.log( '[DEBUG] notification.response_requested:', notification.response_requested );
+            console.log( '[DEBUG] notification.response_type:', notification.response_type );
+        }
+
         if ( !notification ) {
             this.log( "No notification data in WebSocket event" );
             return;
@@ -3516,11 +3529,16 @@ class FreshQueueUI {
                 </div>
             `;
         } else if ( notification.response_type === 'open_ended' ) {
+            // DEBUG: Log notification object and response_default value
+            console.log( '[DEBUG] Open-ended notification object:', notification );
+            console.log( '[DEBUG] response_default value:', notification.response_default );
+            console.log( '[DEBUG] response_default type:', typeof notification.response_default );
+
             responseUI = `
                 <div class="response-open-ended">
                     <div class="response-input-container">
-                        <input type="text" class="response-text-input" id="response-input-${notification.id}" placeholder="Type your response...">
-                        <button class="response-mic-button" data-notification-id="${notification.id}">
+                        <input type="text" class="response-text-input" id="response-input-${notification.id}" value="${notification.response_default || ''}" placeholder="Type your response...">
+                        <button class="response-mic-button" data-notification-id="${notification.id}" title="Click to start recording (30s max, ESC to cancel)">
                             🎤
                         </button>
                         <button class="response-submit-button" data-notification-id="${notification.id}">
@@ -3558,6 +3576,11 @@ class FreshQueueUI {
             const input = card.querySelector( '.response-text-input' );
             const micButton = card.querySelector( '.response-mic-button' );
 
+            // DEBUG: Verify input element and its value attribute
+            console.log( '[DEBUG] Input element found:', input );
+            console.log( '[DEBUG] Input value attribute:', input ? input.value : 'INPUT NOT FOUND' );
+            console.log( '[DEBUG] Input getAttribute("value"):', input ? input.getAttribute( 'value' ) : 'N/A' );
+
             // Phase 2.4.1: Real-time validation for open-ended input
             const validateInput = () => {
                 const value = input.value.trim();
@@ -3577,8 +3600,14 @@ class FreshQueueUI {
                 return isValid;
             };
 
-            // Initial validation state
-            submitButton.disabled = true;
+            // Phase 2.4.2: Run initial validation (enables button if default value exists)
+            validateInput();
+
+            // Phase 2.4.2: Auto-focus and select all text for fastest keyboard response
+            input.focus();
+            if ( notification.response_default ) {
+                input.select();  // Select all text - typing replaces, arrows enter insert mode
+            }
 
             // Validate on input
             input.addEventListener( 'input', validateInput );
@@ -3779,7 +3808,18 @@ class FreshQueueUI {
         if ( timer ) timer.textContent = '⏰ Expired';
 
         // Replace buttons with status badge showing default was used
-        const defaultValue = state.notification.response_default || 'none';
+        let defaultValue = state.notification.response_default || 'none';
+
+        // Phase 2.4.2: For open-ended responses, submit the current input value
+        if ( state.notification.response_type === 'open_ended' ) {
+            const input = card.querySelector( '.response-text-input' );
+            if ( input && input.value.trim() ) {
+                defaultValue = input.value.trim();
+                // Submit the current input value to backend
+                this.submitResponse( notificationId, defaultValue );
+            }
+        }
+
         const buttonsContainer = card.querySelector( '.response-buttons, .response-open-ended' );
         if ( buttonsContainer ) {
             buttonsContainer.innerHTML = `
@@ -3924,16 +3964,221 @@ class FreshQueueUI {
     async startVoiceInput( notificationId ) {
         this.log( `Starting voice input for ${notificationId}` );
 
-        // TODO: Implement STT voice input
-        // For now, show placeholder
-        alert( "Voice input not yet implemented (Phase 2.3)" );
+        const micButton = document.querySelector( `[data-notification-id="${notificationId}"].response-mic-button` );
+        const textInput = document.getElementById( `response-input-${notificationId}` );
 
-        // Future implementation:
-        // 1. Check browser support for Web Speech API
-        // 2. Request microphone permission
-        // 3. Start recording
-        // 4. Send audio to STT endpoint
-        // 5. Fill text input with transcription
+        if ( !micButton || !textInput ) {
+            this.error( `Voice input: Could not find UI elements for ${notificationId}` );
+            return;
+        }
+
+        // Toggle recording state
+        if ( this.audioRecorder && this.audioRecorder.isRecording ) {
+            // Stop recording
+            this.log( 'Stopping audio recording...' );
+            await this.audioRecorder.stopRecording();
+        } else {
+            // Start recording
+            const token = localStorage.getItem( 'lupin_access_token' );
+
+            if ( !token ) {
+                this.error( 'No authentication token found' );
+                alert( 'Authentication required. Please log in.' );
+                return;
+            }
+
+            this.audioRecorder = new AudioRecorder({
+                uploadEndpoint: '/api/upload-and-transcribe-mp3',
+                authToken: token,
+                onRecordingStart: () => {
+                    this.log( 'Audio recording started' );
+                    micButton.classList.add( 'recording' );
+                    micButton.textContent = '🔴';
+                    micButton.title = 'Click to stop recording (ESC to cancel)';
+
+                    // Start duration counter
+                    this._startDurationCounter( notificationId, micButton );
+
+                    // Attach ESC key listener
+                    this._attachRecordingCancelListener( notificationId, micButton );
+                },
+                onRecordingStop: ( audioBlob ) => {
+                    this.log( `Audio recording stopped: ${audioBlob.size} bytes` );
+
+                    // Stop duration counter
+                    this._stopDurationCounter( notificationId );
+
+                    // Remove ESC key listener (upload starting)
+                    this._detachRecordingCancelListener();
+
+                    // Show processing state
+                    micButton.classList.remove( 'recording' );
+                    micButton.classList.add( 'processing' );
+                    micButton.textContent = '⏳';
+                    micButton.title = 'Transcribing audio...';
+                    micButton.disabled = true;
+                },
+                onTranscription: ( text ) => {
+                    this.log( `Transcription received: "${text}"` );
+
+                    // Fill text input with transcription
+                    textInput.value = text;
+                    textInput.focus();
+                    textInput.select();
+
+                    // Trigger validation
+                    textInput.dispatchEvent( new Event( 'input', { bubbles: true } ) );
+
+                    // Reset button UI
+                    micButton.classList.remove( 'processing' );
+                    micButton.textContent = '🎤';
+                    micButton.title = 'Click to start recording (30s max, ESC to cancel)';
+                    micButton.disabled = false;
+
+                    // Remove ESC key listener (completed successfully)
+                    this._detachRecordingCancelListener();
+                },
+                onError: ( error ) => {
+                    this.error( `Audio recording error: ${error.type} - ${error.message}` );
+
+                    // Stop duration counter
+                    this._stopDurationCounter( notificationId );
+
+                    // Remove ESC key listener (error occurred)
+                    this._detachRecordingCancelListener();
+
+                    // Show error to user
+                    alert( error.message );
+
+                    // Reset button UI
+                    micButton.classList.remove( 'recording', 'processing' );
+                    micButton.textContent = '🎤';
+                    micButton.title = 'Click to start recording (30s max, ESC to cancel)';
+                    micButton.disabled = false;
+                },
+                debug: this.debug
+            });
+
+            try {
+                await this.audioRecorder.startRecording();
+            } catch ( error ) {
+                // Error already handled by onError callback
+                this.error( `Failed to start recording: ${error}` );
+            }
+        }
+    }
+
+    _startDurationCounter( notificationId, micButton ) {
+        // Clear any existing counter
+        this._stopDurationCounter( notificationId );
+
+        const startTime = Date.now();
+
+        this.audioRecording = this.audioRecording || {};
+        this.audioRecording[notificationId] = {
+            startTime: startTime,
+            interval: setInterval( () => {
+                const elapsed = Math.floor( (Date.now() - startTime) / 1000 );
+                const MAX_DURATION_SECONDS = 30;  // Whisper API limit
+
+                // Yellow warning at 25+ seconds, red icon before that
+                const icon = elapsed >= 25 ? '🟡' : '🔴';
+                micButton.textContent = `${icon} ${elapsed}/${MAX_DURATION_SECONDS}s`;
+                micButton.title = `Recording: ${elapsed}/${MAX_DURATION_SECONDS}s (ESC to cancel)`;
+            }, 1000 )
+        };
+    }
+
+    _stopDurationCounter( notificationId ) {
+        if ( this.audioRecording && this.audioRecording[notificationId] ) {
+            clearInterval( this.audioRecording[notificationId].interval );
+            delete this.audioRecording[notificationId];
+        }
+    }
+
+    /**
+     * Attach keyboard listener for ESC key to cancel recording
+     *
+     * Requires:
+     *   - notificationId is valid
+     *   - micButton element exists
+     *
+     * Ensures:
+     *   - ESC key listener attached to document
+     *   - Only one listener active at a time
+     *   - Listener stored for cleanup
+     */
+    _attachRecordingCancelListener( notificationId, micButton ) {
+        // Remove any existing listener first
+        this._detachRecordingCancelListener();
+
+        // Create and store the listener
+        this._recordingCancelListener = ( event ) => {
+            if ( event.key === 'Escape' ) {
+                this.log( `ESC key pressed - cancelling recording for ${notificationId}` );
+                event.preventDefault();
+                event.stopPropagation();
+                this._cancelRecording( notificationId, micButton );
+            }
+        };
+
+        // Attach to document
+        document.addEventListener( 'keydown', this._recordingCancelListener );
+        this.log( `ESC key listener attached for ${notificationId}` );
+    }
+
+    /**
+     * Detach keyboard listener for ESC key
+     *
+     * Ensures:
+     *   - ESC key listener removed from document
+     *   - Listener reference cleared
+     */
+    _detachRecordingCancelListener() {
+        if ( this._recordingCancelListener ) {
+            document.removeEventListener( 'keydown', this._recordingCancelListener );
+            this._recordingCancelListener = null;
+            this.log( 'ESC key listener detached' );
+        }
+    }
+
+    /**
+     * Cancel recording without uploading
+     *
+     * Requires:
+     *   - notificationId is valid
+     *   - micButton element exists
+     *
+     * Ensures:
+     *   - Recording stopped
+     *   - Audio discarded (no upload)
+     *   - UI reset to idle state
+     *   - Duration counter stopped
+     *   - ESC listener removed
+     */
+    _cancelRecording( notificationId, micButton ) {
+        this.log( `Cancelling recording for ${notificationId}` );
+
+        // Stop duration counter
+        this._stopDurationCounter( notificationId );
+
+        // Destroy audio recorder without uploading
+        if ( this.audioRecorder ) {
+            this.audioRecorder._cancelling = true;  // Signal cancellation to prevent upload
+            this.audioRecorder.destroy();
+            this.audioRecorder = null;
+        }
+
+        // Reset UI
+        micButton.classList.remove( 'recording', 'processing' );
+        micButton.textContent = '🎤';
+        micButton.title = 'Click to start recording (30s max, ESC to cancel)';
+        micButton.disabled = false;
+
+        // Remove ESC listener
+        this._detachRecordingCancelListener();
+
+        this.log( 'Recording cancelled successfully' );
     }
 }
 
