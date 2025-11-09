@@ -729,13 +729,13 @@ I'll read the appropriate templates for your chosen pattern and customize them.
 
 I'll send notifications at these milestones:
 
-1. **Structure creation started**: `notify-claude "[LUPIN] Starting structure generation for {PROJECT_ID}" --type=progress --priority=medium`
+1. **Structure creation started**: `notify-claude-async "[LUPIN] Starting structure generation for {PROJECT_ID}" --type=progress --priority=medium`
 
 2. **Directory creation complete**: After `mkdir` commands succeed
 
 3. **Halfway point**: After creating ~50% of files
 
-4. **Structure creation complete**: `notify-claude "[LUPIN] Structure generation complete for {PROJECT_ID} - {N} files created" --type=progress --priority=medium`
+4. **Structure creation complete**: `notify-claude-async "[LUPIN] Structure generation complete for {PROJECT_ID} - {N} files created" --type=progress --priority=medium`
 
 5. **Validation complete**: After verifying all files and cross-references
 
@@ -1055,7 +1055,7 @@ After validation passes, I'll:
 
 1. **Send completion notification**:
    ```bash
-   notify-claude "[LUPIN] Documentation reorganization complete: {PROJECT_ID} - {N} files created, {X} tokens redistributed" --type=progress --priority=medium
+   notify-claude-async "[LUPIN] Documentation reorganization complete: {PROJECT_ID} - {N} files created, {X} tokens redistributed" --type=progress --priority=medium
    ```
 
 2. **Provide navigation guide**: Show you how to use the new structure
@@ -1329,7 +1329,7 @@ Structure generation complete! Ready to begin documentation.
 I'll send final notification:
 
 ```bash
-notify-claude "[LUPIN] Design documentation structure complete: {PROJECT_ID} using Pattern {X} - {N} files created, ready for content" --type=progress --priority=medium
+notify-claude-async "[LUPIN] Design documentation structure complete: {PROJECT_ID} using Pattern {X} - {N} files created, ready for content" --type=progress --priority=medium
 ```
 
 ### Handoff to User

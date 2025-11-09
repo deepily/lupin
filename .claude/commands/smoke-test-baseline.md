@@ -51,9 +51,9 @@ Send notification that baseline collection is starting:
 ```bash
 SCOPE_TEXT="${1:-full}"
 if [ "$SCOPE_TEXT" = "full" ]; then
-    notify-claude "[LUPIN] 🔍 Baseline smoke test collection STARTED (FULL SUITE) - Establishing pre-change Lupin + COSA system health metrics" --type=progress --priority=medium
+    notify-claude-async "[LUPIN] 🔍 Baseline smoke test collection STARTED (FULL SUITE) - Establishing pre-change Lupin + COSA system health metrics" --type=progress --priority=medium
 else
-    notify-claude "[LUPIN] 🔍 Baseline smoke test collection STARTED (LUPIN-ONLY) - Establishing pre-change Lupin system health metrics" --type=progress --priority=medium
+    notify-claude-async "[LUPIN] 🔍 Baseline smoke test collection STARTED (LUPIN-ONLY) - Establishing pre-change Lupin system health metrics" --type=progress --priority=medium
 fi
 ```
 
@@ -223,9 +223,9 @@ Send notification that baseline is complete:
 ```bash
 SCOPE_TEXT="${1:-full}"
 if [ "$SCOPE_TEXT" = "full" ]; then
-    notify-claude "[LUPIN] ✅ Baseline smoke test collection COMPLETE (FULL SUITE) - [XX.X%] overall pass rate established, Lupin + COSA ready for changes" --type=progress --priority=medium
+    notify-claude-async "[LUPIN] ✅ Baseline smoke test collection COMPLETE (FULL SUITE) - [XX.X%] overall pass rate established, Lupin + COSA ready for changes" --type=progress --priority=medium
 else
-    notify-claude "[LUPIN] ✅ Baseline smoke test collection COMPLETE (LUPIN-ONLY) - [XX.X%] Lupin pass rate established, ready for changes" --type=progress --priority=medium
+    notify-claude-async "[LUPIN] ✅ Baseline smoke test collection COMPLETE (LUPIN-ONLY) - [XX.X%] Lupin pass rate established, ready for changes" --type=progress --priority=medium
 fi
 ```
 

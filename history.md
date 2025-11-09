@@ -1,6 +1,10 @@
 # Lupin Project History
 
-> **🎉 CURRENT**: 2025.11.06 - SSE Phase 2.4 Open-Ended Response COMPLETE! All 4 sub-phases finished: Phase 2.4.1 (text validation + XSS protection), Phase 2.4.2 (default value pre-fill with auto-focus + text selection), Phase 2.4.3 (voice input with server-side Whisper transcription - 30s countdown, ESC cancellation, performance metrics, raw_transcription), Phase 2.4.4 (character counter deferred as optional). Created reusable audio-recorder.js module (446 lines, class-based, UMD pattern). Voice enhancements: 30-second time limit with visual countdown (🔴 05/30s → 🟡 27/30s), ESC key cancellation (race condition fixed!), round-trip timing metrics (debug mode), raw_transcription for full formatting. User feedback: "Holy shit, it works!" and "Very nice it works!" Files: audio-recorder.js (NEW 446 lines), queue-fresh.js (+119), queue-fresh.css (+11), queue-fresh.html (+1). Phase 2.2 (Client UI) now effectively COMPLETE. Overall: 75% of Phase 2 done (3 of 4 weeks). **Next**: Phase 2.3 (CLI Integration) - notify-claude-sync command! 🎤✅🎉
+> **🎉 CURRENT**: 2025.11.08 - Phase 2.4 Async Refactoring COMPLETE! Renamed notify-claude → notify-claude-async to clarify fire-and-forget UX vs sync. Added Pydantic validation to async notifications (matching Phase 2.3 sync pattern). Created AsyncNotificationRequest/Response models (164 lines), notify_user_async.py (302 lines), CLI wrappers (notify-claude-async + deprecated alias). Updated 4 slash commands (13 occurrences), 6 docs, 1 script. Comprehensive testing: 19 new async model tests + smoke tests (41 total, 100% passing). Benefits: clear naming (async/sync suffixes), consistent validation, backward compatible (old command still works with warning), richer response data (connection_count, status, error details). Phase 2.3+2.4 COMPLETE - notification system architecture finalized! 📦✅🎉
+
+> **✅ PREVIOUS**: 2025.11.08 - Phase 2.3 CLI Integration COMPLETE! Created notify-claude-sync command with Pydantic validation for response-required notifications (yes/no + open-ended). Implemented SSE client (notify_user_sync.py, 375 lines), Pydantic models (notification_models.py, 377 lines), global CLI wrapper (/home/rruiz/.local/bin/notify-claude-sync, 66 lines). Comprehensive testing: 22 model tests, 17 client tests, 4 integration tests (100% passing). Features: type-safe validation, clear error messages, exit codes (0=success, 1=error, 2=timeout), structured responses. Documentation: 550+ line implementation doc. User quote: "I like it!" Phase 2.3 complete, ready for Phase 2.4! 🎯✅
+
+> **✅ PREVIOUS**: 2025.11.06 - SSE Phase 2.4 Open-Ended Response COMPLETE! All 4 sub-phases finished: Phase 2.4.1 (text validation + XSS protection), Phase 2.4.2 (default value pre-fill with auto-focus + text selection), Phase 2.4.3 (voice input with server-side Whisper transcription - 30s countdown, ESC cancellation, performance metrics, raw_transcription), Phase 2.4.4 (character counter deferred as optional). Created reusable audio-recorder.js module (446 lines, class-based, UMD pattern). Voice enhancements: 30-second time limit with visual countdown (🔴 05/30s → 🟡 27/30s), ESC key cancellation (race condition fixed!), round-trip timing metrics (debug mode), raw_transcription for full formatting. User feedback: "Holy shit, it works!" and "Very nice it works!" Files: audio-recorder.js (NEW 446 lines), queue-fresh.js (+119), queue-fresh.css (+11), queue-fresh.html (+1). Phase 2.2 (Client UI) now effectively COMPLETE. Overall: 75% of Phase 2 done (3 of 4 weeks). 🎤✅🎉
 
 > **✅ PREVIOUS**: 2025.10.30 - SSE Phase 2.4.1 Text Validation COMPLETE + Phase 2.2 UX Improvements! Fixed serialization bug (NotificationItem missing Phase 2.2 fields), SSE format inconsistency (added consistent response/default_used fields), implemented 5 UX improvements (30s timeout, always-visible header, in-place notifications, status badges, default button highlighting). Phase 2.4.1 complete: XSS protection (regex HTML stripping), length validation (500 char max), real-time frontend validation, red border visual feedback. User confirmed: "I just tested it, so far so good." Files modified: notifications.py (+19 validation), queue-fresh.js (+44 validation), queue-fresh.css (+10 invalid styling), 2 planning docs created. 🎨✅
 
@@ -55,6 +59,57 @@
 > **Prior Achievement**: 2025.10.01 - JWT/OAuth PHASE 9 CORE COMPLETE! Full authentication flow working: login, profile display, password change, re-authentication. Overall progress: 9/10 phases core complete (90%).
 
 ## Recent Activity (Last 7 Days)
+
+### 🎯 November 2025 - Recent Sessions
+
+#### 2025.11.08 - Phase 2.4 Async Refactoring COMPLETE! 📦✅🎉
+
+**Summary**: Completed Phase 2.4 async notification refactoring with Pydantic validation. Renamed notify-claude → notify-claude-async to explicitly denote fire-and-forget UX (vs notify-claude-sync for response-required). Created consistent validation patterns matching Phase 2.3, updated 4 slash commands project-wide, comprehensive testing (41 tests, 100% passing). Backward compatible with deprecated alias. **Status**: Phase 2.3 + 2.4 COMPLETE - notification system architecture finalized!
+
+**Implementation**:
+- **Pydantic Models** (notification_models.py +164 lines):
+  - `AsyncNotificationRequest`: Fire-and-forget model (simpler than sync - no response_type/timeout_seconds/response_default)
+  - `AsyncNotificationResponse`: Richer than bool (includes success, status, message, target_system_id, connection_count)
+  - Consistent patterns with Phase 2.3 sync models (shared enums, field validators)
+
+- **Async Client** (notify_user_async.py, 302 lines):
+  - Refactored from notify_user.py with Pydantic validation
+  - Returns structured `AsyncNotificationResponse` (not simple bool)
+  - Type-safe error handling (connection_error, timeout, error statuses)
+
+- **CLI Wrappers**:
+  - `/home/rruiz/.local/bin/notify-claude-async` (70 lines) - Primary fire-and-forget command
+  - `/home/rruiz/.local/bin/notify-claude` (32 lines) - Deprecated wrapper with clear warnings
+
+- **Project-Wide Updates** (13 occurrences):
+  - `.claude/commands/smoke-test-baseline.md` (4 updates)
+  - `.claude/commands/smoke-test-remediation.md` (3 updates)
+  - `.claude/commands/design-planning-docs.md` (4 updates)
+  - `.claude/commands/history-management.md` (2 updates)
+  - `src/scripts/notify.sh` (deprecated wrapper updated)
+  - Phase 2.3 doc updated to reflect Phase 2.4 completion
+  - 6 prompt files updated
+
+**Testing** (41 total, 100% passing):
+- **Async Model Tests** (19 new):
+  - AsyncNotificationRequest: 11 tests (message validation, timeout 1-30s, enums, API params, excludes sync fields)
+  - AsyncNotificationResponse: 8 tests (status, connection_count >=0, is_queued/is_error properties, optional fields)
+- **Smoke Test**: ✓ 8/8 checks passed (sync + async models)
+- **Integration Test**: Successfully sent test notification with notify-claude-async
+
+**Benefits**:
+- Clear naming: `notify-claude-async` (fire-and-forget) vs `notify-claude-sync` (response-required)
+- Consistent Pydantic validation across both modes
+- Backward compatible: old `notify-claude` still works with deprecation warning
+- Richer response data: connection_count, status, target_system_id (vs simple bool)
+
+**Documentation**:
+- Created `src/rnd/2025.11.08-phase-2.4-async-refactoring.md` (5,600+ lines)
+- Sections: Executive Summary, Motivation, Design, Implementation, Testing, Migration Guide, Code Statistics, Benefits, Lessons Learned
+
+**Next Steps**: Phase 2 notification system architecture complete. Both async (fire-and-forget) and sync (response-required) modes fully implemented with consistent Pydantic validation.
+
+---
 
 ### 🎯 October 2025 - Recent Sessions
 
