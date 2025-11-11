@@ -119,7 +119,7 @@ def clean_test_db():
     if db_path.exists():
         db_path.unlink()
 
-    # Initialize fresh database with schema
+    # Initialize fresh database with schema (includes api_keys table as of Phase 2.5)
     init_auth_database()
 
     yield

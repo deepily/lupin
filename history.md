@@ -1,6 +1,8 @@
 # Lupin Project History
 
-> **🎉 CURRENT**: 2025.11.08 - Phase 2.4 Async Refactoring COMPLETE! Renamed notify-claude → notify-claude-async to clarify fire-and-forget UX vs sync. Added Pydantic validation to async notifications (matching Phase 2.3 sync pattern). Created AsyncNotificationRequest/Response models (164 lines), notify_user_async.py (302 lines), CLI wrappers (notify-claude-async + deprecated alias). Updated 4 slash commands (13 occurrences), 6 docs, 1 script. Comprehensive testing: 19 new async model tests + smoke tests (41 total, 100% passing). Benefits: clear naming (async/sync suffixes), consistent validation, backward compatible (old command still works with warning), richer response data (connection_count, status, error details). Phase 2.3+2.4 COMPLETE - notification system architecture finalized! 📦✅🎉
+> **🔧 CURRENT**: 2025.11.10 - Phase 2.5.4 Integration Testing (IN PROGRESS) - Created comprehensive integration test suite (10 tests) for notification API key authentication. Fixed critical schema bug (api_keys.user_id INTEGER→TEXT to match users.id UUID). Moved api_keys table creation into init_auth_database() for proper server startup. Discovered root cause of 404 errors: hardcoded user email lookup in notification endpoint doesn't match test database users. **Status**: 6/10 tests passing (auth working correctly!), 4/10 blocked by user lookup logic. API key authentication middleware validated successfully. **Resume point**: Fix notification endpoint to handle test service account users (currently expects production user email). Files: test_notification_auth.py (10 tests, 362 lines), auth_database.py (api_keys schema +28 lines), conftest.py (updated clean_test_db fixture). Ready to fix user lookup logic next session! 🧪🔄
+
+> **🎉 PREVIOUS**: 2025.11.08 - Phase 2.4 Async Refactoring COMPLETE! Renamed notify-claude → notify-claude-async to clarify fire-and-forget UX vs sync. Added Pydantic validation to async notifications (matching Phase 2.3 sync pattern). Created AsyncNotificationRequest/Response models (164 lines), notify_user_async.py (302 lines), CLI wrappers (notify-claude-async + deprecated alias). Updated 4 slash commands (13 occurrences), 6 docs, 1 script. Comprehensive testing: 19 new async model tests + smoke tests (41 total, 100% passing). Benefits: clear naming (async/sync suffixes), consistent validation, backward compatible (old command still works with warning), richer response data (connection_count, status, error details). Phase 2.3+2.4 COMPLETE - notification system architecture finalized! 📦✅🎉
 
 > **✅ PREVIOUS**: 2025.11.08 - Phase 2.3 CLI Integration COMPLETE! Created notify-claude-sync command with Pydantic validation for response-required notifications (yes/no + open-ended). Implemented SSE client (notify_user_sync.py, 375 lines), Pydantic models (notification_models.py, 377 lines), global CLI wrapper (/home/rruiz/.local/bin/notify-claude-sync, 66 lines). Comprehensive testing: 22 model tests, 17 client tests, 4 integration tests (100% passing). Features: type-safe validation, clear error messages, exit codes (0=success, 1=error, 2=timeout), structured responses. Documentation: 550+ line implementation doc. User quote: "I like it!" Phase 2.3 complete, ready for Phase 2.4! 🎯✅
 
@@ -61,6 +63,84 @@
 ## Recent Activity (Last 7 Days)
 
 ### 🎯 November 2025 - Recent Sessions
+
+#### 2025.11.10 - Phase 2.5.4 Integration Testing (IN PROGRESS) 🧪🔄
+
+**Summary**: Created comprehensive integration test suite for notification API key authentication (10 tests, 362 lines). Fixed critical database schema bug (api_keys.user_id type mismatch). Moved api_keys table creation into auth_database.py for proper server initialization. Discovered root cause of 404 test failures: notification endpoint expects hardcoded production user email, but test database uses UUID-based service account users. **Status**: 6/10 tests passing (auth middleware working correctly!), 4/10 blocked by user lookup logic. Ready to fix notification endpoint for test compatibility next session.
+
+**Implementation Progress**:
+- **Integration Test Suite Created** (`src/tests/integration/test_notification_auth.py`, 362 lines):
+  - 3 test classes: `TestNotificationAuthentication` (7 tests), `TestMultipleAPIKeys` (1 test), `TestSecurityHeaders` (2 tests)
+  - Test coverage: valid/invalid/missing API keys, inactive keys, timestamp updates, WWW-Authenticate headers, multiple keys per user, case-insensitive headers, security (no key leakage)
+  - Fixture: `test_api_key` - Creates test service account with hashed API key in test database
+  - All tests use correct endpoint path: `/api/notify` (router has `/api` prefix)
+
+**Schema Fixes**:
+- **Critical Bug Fixed** (`src/scripts/create_api_keys_table.py`):
+  - Changed `api_keys.user_id` from `INTEGER NOT NULL` to `TEXT NOT NULL`
+  - Root cause: `users.id` is TEXT (UUID format like `"abc-123-def"`), causing foreign key constraint failures
+  - Impact: Prevents INSERT errors when creating API keys for users
+
+- **Database Initialization Updated** (`src/cosa/rest/auth_database.py`):
+  - Moved api_keys table creation into `init_auth_database()` function (after line 250)
+  - Added 4 indexes: `idx_api_keys_key_hash`, `idx_api_keys_user_id`, `idx_api_keys_is_active`, `idx_api_keys_user_active`
+  - Ensures table exists when server starts (prevents "no such table: api_keys" errors during authentication)
+  - Updated `quick_smoke_test()` to expect api_keys in table list
+
+**Test Fixture Updates**:
+- **Updated** `src/tests/integration/conftest.py`:
+  - Modified `clean_test_db` fixture to call `init_auth_database()` (creates all tables including api_keys)
+  - Removed manual api_keys table creation from test_api_key fixture (now redundant)
+  - Docstring updated: "includes api_keys table as of Phase 2.5"
+
+**Test Results** (6 passing, 4 failing):
+- ✅ **Passing Tests** (tests WITHOUT test_api_key fixture - auth validation working correctly):
+  1. `test_invalid_api_key_returns_401` - Invalid key → 401
+  2. `test_missing_api_key_returns_401` - No header → 401
+  3. `test_invalid_format_returns_401` - Wrong format → 401
+  4. `test_inactive_api_key_returns_401` - Deactivated key → 401
+  5. `test_www_authenticate_header_present` - Correct WWW-Authenticate header
+  6. `test_no_api_key_leakage_in_errors` - Keys not leaked in error messages
+
+- ❌ **Failing Tests** (tests WITH test_api_key fixture - 404 errors from notification endpoint):
+  1. `test_valid_api_key_allows_access` - Expected 200, got 404
+  2. `test_last_used_timestamp_updated` - Expected 200, got 404
+  3. `test_multiple_keys_for_same_user` - Expected 200, got 404
+  4. `test_case_sensitive_header_name` - Expected 200, got 404
+
+**Root Cause Analysis**:
+- **API Key Authentication Middleware**: ✅ Working correctly! (Invalid keys get 401 as expected)
+- **Notification Endpoint Logic**: ❌ Blocking on user lookup
+  - Server log shows: `[NOTIFY] ❌ User not found in auth database: ricardo.felipe.ruiz@gmail.com`
+  - Endpoint hardcodes lookup for production user email `ricardo.felipe.ruiz@gmail.com`
+  - Test database only has service account users with UUID-based emails like `test-{uuid}@test.com`
+  - Result: Endpoint returns 404 "User not found" instead of processing notification
+
+**Server Validation**:
+- Confirmed test server running correctly (not development server)
+- Test database mode confirmed: `[AUTH_DB] Mode: TEST (config=True)`
+- Endpoint path verified: `/api/notify` (router prefix `/api`)
+- api_keys table exists at server startup (no "no such table" errors)
+
+**Files Modified**:
+1. `src/tests/integration/test_notification_auth.py` - CREATED (362 lines)
+2. `src/scripts/create_api_keys_table.py` - Fixed user_id type (1 line change)
+3. `src/cosa/rest/auth_database.py` - Added api_keys table + indexes to init_auth_database() (+28 lines)
+4. `src/tests/integration/conftest.py` - Updated clean_test_db docstring (1 line)
+5. `src/scripts/init_test_database.py` - CREATED (script to initialize test DB with all tables, 85 lines)
+
+**Next Steps**:
+1. Fix notification endpoint to handle test service account users
+2. Options:
+   - Make user email lookup optional for service accounts
+   - Use API key's user_id directly instead of hardcoded email
+   - Add test user `ricardo.felipe.ruiz@gmail.com` to test database fixtures
+3. Validate all 10 integration tests pass
+4. Continue with Phase 2.5.4 remaining tasks (E2E CLI testing, manual QA)
+
+**Phase 2.5 Progress**: Task 25 of 33 (76%) - Integration tests framework complete, endpoint fix needed for full validation
+
+---
 
 #### 2025.11.08 - Phase 2.4 Async Refactoring COMPLETE! 📦✅🎉
 
