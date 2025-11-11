@@ -35,6 +35,7 @@ def test_api_key( clean_test_db ):
     import uuid
     import json
     user_id = str( uuid.uuid4() )
+    email = f"test-{user_id}@test.com"
 
     cursor.execute(
         """
@@ -43,7 +44,7 @@ def test_api_key( clean_test_db ):
         """,
         (
             user_id,
-            f"test-{user_id}@test.com",
+            email,
             "dummy_hash",
             datetime.utcnow().isoformat(),
             json.dumps( ['service_account'] ),
@@ -74,7 +75,8 @@ def test_api_key( clean_test_db ):
     yield {
         'api_key': api_key,
         'user_id': user_id,
-        'key_id': key_id
+        'key_id': key_id,
+        'email': email
     }
 
     # Cleanup
@@ -98,7 +100,8 @@ class TestNotificationAuthentication:
             params={
                 'message': 'Integration test notification',
                 'type': 'task',
-                'priority': 'low'
+                'priority': 'low',
+                'target_user': test_api_key['email']
             },
             headers={
                 'X-API-Key': test_api_key['api_key']
@@ -228,7 +231,8 @@ class TestNotificationAuthentication:
             params={
                 'message': 'Timestamp test',
                 'type': 'task',
-                'priority': 'low'
+                'priority': 'low',
+                'target_user': test_api_key['email']
             },
             headers={
                 'X-API-Key': test_api_key['api_key']
@@ -303,13 +307,13 @@ class TestMultipleAPIKeys:
             # Both keys should work
             response1 = requests.post(
                 f"{self.BASE_URL}/api/notify",
-                params={'message': 'Key 1 test', 'type': 'task', 'priority': 'low'},
+                params={'message': 'Key 1 test', 'type': 'task', 'priority': 'low', 'target_user': test_api_key['email']},
                 headers={'X-API-Key': test_api_key['api_key']}
             )
 
             response2 = requests.post(
                 f"{self.BASE_URL}/api/notify",
-                params={'message': 'Key 2 test', 'type': 'task', 'priority': 'low'},
+                params={'message': 'Key 2 test', 'type': 'task', 'priority': 'low', 'target_user': test_api_key['email']},
                 headers={'X-API-Key': api_key2}
             )
 
@@ -353,7 +357,7 @@ class TestSecurityHeaders:
         # FastAPI/Starlette handles header case-insensitivity
         response = requests.post(
             f"{self.BASE_URL}/api/notify",
-            params={'message': 'Test', 'type': 'task', 'priority': 'low'},
+            params={'message': 'Test', 'type': 'task', 'priority': 'low', 'target_user': test_api_key['email']},
             headers={'x-api-key': test_api_key['api_key']}  # lowercase
         )
 
