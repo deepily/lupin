@@ -614,10 +614,15 @@ async def load_stt_model():
     return pipe
 
 if __name__ == "__main__":
+    import os
+    # Read PORT from environment (Cloud Run sets this), default to 7999 for local development
+    port = int( os.environ.get( "PORT", 7999 ) )
+    print( f"[LUPIN] Starting FastAPI server on 0.0.0.0:{port}" )
+
     uvicorn.run(
         "fastapi_app.main:app",
         host="0.0.0.0",
-        port=7999,
+        port=port,
         reload=True,
         log_level="info"
     )
