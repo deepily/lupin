@@ -83,7 +83,7 @@ gcloud run deploy $SERVICE_NAME \
     --cpu=$CPU \
     --timeout=$TIMEOUT \
     --set-secrets="/secrets/notification-api-key=$SECRET_NAME:latest" \
-    --set-env-vars="LUPIN_ROOT=/app,LUPIN_ENV=production,PORT=$PORT"
+    --set-env-vars="LUPIN_ROOT=/app,LUPIN_ENV=production"
 
 echo ""
 echo "✓ Deployment complete"

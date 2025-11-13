@@ -125,6 +125,9 @@ RUN pip install --no-cache-dir PyJWT==2.10.1 passlib==1.7.4 bcrypt==3.2.2 cffi==
 env LUPIN_ROOT=/var/lupin
 env LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development" \
 
+# Copy application code
+COPY src /var/lupin/src
+
 WORKDIR=/var/lupin/src
 RUN mkdir -p /var/io
 
