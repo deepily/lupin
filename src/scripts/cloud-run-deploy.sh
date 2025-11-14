@@ -82,6 +82,8 @@ gcloud run deploy $SERVICE_NAME \
     --memory=$MEMORY \
     --cpu=$CPU \
     --timeout=$TIMEOUT \
+    --min-instances=1 \
+    --max-instances=1 \
     --set-secrets="/secrets/notification-api-key=$SECRET_NAME:latest" \
     --set-env-vars="LUPIN_ROOT=/app,LUPIN_ENV=production"
 

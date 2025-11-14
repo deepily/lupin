@@ -98,6 +98,13 @@ ERROR: Development Server Running
 Port 7999 is already in use (likely the development FastAPI server).
 ```
 
+**⚠️ SNEAKY SYMPTOM**: If the test runner somehow bypasses the port check, tests will mysteriously fail:
+- Authentication tests get **401 Unauthorized** errors (should be 200)
+- API key validation appears broken (it's not - wrong database!)
+- Tests hit dev server with production database
+- Test fixtures create data in test database but requests query production database
+- **Solution**: Always stop dev server BEFORE running tests, don't try to work around it
+
 **Solution**:
 ```bash
 # Find process on port 7999

@@ -619,10 +619,15 @@ if __name__ == "__main__":
     port = int( os.environ.get( "PORT", 7999 ) )
     print( f"[LUPIN] Starting FastAPI server on 0.0.0.0:{port}" )
 
+    # Detect environment: disable reload for test and production, enable for local dev
+    lupin_env = os.environ.get( "LUPIN_ENV", "" ).lower()
+    is_production_or_test = lupin_env in ["production", "test"]
+
     uvicorn.run(
         "fastapi_app.main:app",
         host="0.0.0.0",
         port=port,
-        reload=True,
+        workers=1,  # Single worker required for in-memory notification state (pending_responses dict)
+        reload=not is_production_or_test,
         log_level="info"
     )
