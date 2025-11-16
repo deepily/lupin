@@ -2,11 +2,18 @@
 #################################################################
 # cloud-run-build.sh
 #
-# Purpose: Build and push Docker image to Google Container Registry
+# Purpose: Build and push multi-environment Docker image to GCR
 # Usage: ./src/scripts/cloud-run-build.sh [version]
 #
 # Arguments:
 #   version - Image version tag (default: latest)
+#
+# This build produces a MULTI-ENVIRONMENT CAPABLE image. The same
+# image can be deployed to development, testing, or production by
+# overriding the LUPIN_CONFIG_MGR_CLI_ARGS environment variable
+# at runtime (see cloud-run-deploy.sh).
+#
+# No environment-specific configuration is baked into the image!
 #
 # Example:
 #   ./src/scripts/cloud-run-build.sh latest
@@ -110,5 +117,9 @@ echo "  Image: $IMAGE_NAME"
 echo "  Tag: $VERSION"
 echo "  Full path: gcr.io/$PROJECT_ID/$IMAGE_NAME:$VERSION"
 echo ""
-echo "Next step: Run ./src/scripts/cloud-run-deploy.sh $VERSION"
+echo "This image is MULTI-ENVIRONMENT CAPABLE and can be deployed to:"
+echo "  • Testing: ./src/scripts/cloud-run-deploy.sh $VERSION 8080 testing"
+echo "  • Production: ./src/scripts/cloud-run-deploy.sh $VERSION 8080 production"
+echo ""
+echo "Configuration is selected at runtime via environment variables."
 echo ""

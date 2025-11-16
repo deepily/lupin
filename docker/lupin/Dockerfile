@@ -122,6 +122,36 @@ RUN pip install --no-cache-dir pylance==0.36.0
 RUN pip install --no-cache-dir PyJWT==2.10.1 passlib==1.7.4 bcrypt==3.2.2 cffi==2.0.0 pycparser==2.23
 
 
+# ============================================================================
+# RUNTIME CONFIGURATION (Can be overridden via docker run -e or Cloud Run)
+# ============================================================================
+# This Docker image is multi-environment capable. The ENV values below are
+# DEFAULTS for local development. Override at runtime for test/prod deployments.
+#
+# EXAMPLES:
+#
+# Local Development (uses defaults):
+#   docker run -p 7999:7999 lupin:latest
+#
+# Testing Deployment (override at runtime):
+#   docker run -p 7999:7999 \
+#     -e LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing-GCS" \
+#     lupin:latest
+#
+# Cloud Run Testing Deployment:
+#   gcloud run deploy lupin-test \
+#     --image gcr.io/PROJECT/lupin:latest \
+#     --set-env-vars="LUPIN_ROOT=/app,LUPIN_CONFIG_MGR_CLI_ARGS=config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing-GCS"
+#
+# Cloud Run Production Deployment:
+#   gcloud run deploy lupin-prod \
+#     --image gcr.io/PROJECT/lupin:latest \
+#     --set-env-vars="LUPIN_ROOT=/app,LUPIN_CONFIG_MGR_CLI_ARGS=config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Production"
+#
+# Available config blocks: Lupin:+Development, Lupin:+Testing, Lupin:+Testing-GCS, Lupin:+Production
+# Note: '+' is URL encoding for space - becomes "Lupin: Development" internally
+# ============================================================================
+
 env LUPIN_ROOT=/var/lupin
 env LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
 
