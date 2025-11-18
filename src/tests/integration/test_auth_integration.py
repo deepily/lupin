@@ -390,7 +390,7 @@ def test_email_verification_flow( create_test_user ):
     assert request_response.status_code == 200, f"Verification request failed: {request_response.text}"
 
     # Step 4: Extract token from database (mock email retrieval)
-    from cosa.rest.auth_database import get_auth_db_connection
+    from cosa.rest.sqlite_database import get_auth_db_connection
 
     conn = get_auth_db_connection()
     cursor = conn.cursor()
@@ -453,7 +453,7 @@ def test_password_reset_flow( create_test_user ):
     assert reset_request_response.status_code == 200
 
     # Step 2: Extract token from database (mock email retrieval)
-    from cosa.rest.auth_database import get_auth_db_connection
+    from cosa.rest.sqlite_database import get_auth_db_connection
 
     conn = get_auth_db_connection()
     cursor = conn.cursor()

@@ -184,7 +184,7 @@ Integration tests use `[Lupin: Testing]` config block for critical safety:
 
 1. **ConfigurationManager loads Testing block** (via environment variable)
 2. **`app_testing=true` enables test mode**
-3. **`auth_database_path` points to test database** (`test-lupin-auth.db`)
+3. **`sqlite_database_path` points to test database** (`test-lupin-auth.db`)
 4. **Both checks validated on EVERY database operation**
 
 **Configuration Comparison**:
@@ -192,11 +192,11 @@ Integration tests use `[Lupin: Testing]` config block for critical safety:
 ```ini
 [Lupin: Development]
 app_testing = false
-auth_database_path = /src/conf/long-term-memory/lupin-auth.db  # ⚠️ PRODUCTION
+sqlite_database_path = /src/conf/long-term-memory/lupin-auth.db  # ⚠️ PRODUCTION
 
 [Lupin: Testing]
 app_testing = true
-auth_database_path = /src/conf/long-term-memory/test-lupin-auth.db  # ✅ TEST
+sqlite_database_path = /src/conf/long-term-memory/test-lupin-auth.db  # ✅ TEST
 ```
 
 **What could go wrong without this safety**:
@@ -215,7 +215,7 @@ export LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_p
 python -m fastapi_app.main
 ```
 
-**Safety Verification** (`src/cosa/rest/auth_database.py:18-79`):
+**Safety Verification** (`src/cosa/rest/sqlite_database.py:18-79`):
 
 ```python
 def get_auth_db_path():
@@ -272,7 +272,7 @@ pytest src/tests/integration/test_auth_integration.py::test_complete_registratio
 - `verify_test_environment` - One-time validation that server is running with Testing config block (runs automatically)
 
 **Database Fixtures** (function-level):
-- `clean_test_db` - Reinitializes test database by calling `init_auth_database()` directly before each test
+- `clean_test_db` - Reinitializes test database by calling `init_sqlite_database()` directly before each test
 
 **User Fixtures**:
 - `test_user_credentials` - Standard test user credentials
@@ -294,7 +294,7 @@ pytest src/tests/integration/test_auth_integration.py::test_complete_registratio
 ### Test Isolation
 
 Each test runs in complete isolation:
-- **Fresh database** reinitialized by direct function calls (`init_auth_database()`) before each test
+- **Fresh database** reinitialized by direct function calls (`init_sqlite_database()`) before each test
 - **Automatic cleanup** - database deleted after each test
 - **No state sharing** between tests
 - **Can run in any order** (no dependencies)

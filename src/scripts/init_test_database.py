@@ -29,7 +29,7 @@ if src_path not in sys.path:
     sys.path.insert( 0, src_path )
 
 # Import after bootstrap
-from cosa.rest.auth_database import init_auth_database, get_auth_db_path
+from cosa.rest.sqlite_database import init_auth_database, get_auth_db_path
 from cosa.config.configuration_manager import ConfigurationManager
 
 

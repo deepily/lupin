@@ -110,7 +110,7 @@ def clean_test_db():
         - Dual safety prevents accidental production DB modification
     """
     # Import database functions directly
-    from cosa.rest.auth_database import get_auth_db_path, init_auth_database
+    from cosa.rest.sqlite_database import get_auth_db_path, init_auth_database
 
     # Get test database path (dual safety checks happen here)
     db_path = get_auth_db_path()
@@ -226,7 +226,7 @@ def create_test_admin( clean_test_db, test_admin_credentials ):
 
     # Manually add admin role (direct database access since we can't bootstrap admin via API)
     from cosa.rest.user_service import get_user_by_email
-    from cosa.rest.auth_database import get_auth_db_connection
+    from cosa.rest.sqlite_database import get_auth_db_connection
     import json
 
     conn = get_auth_db_connection()

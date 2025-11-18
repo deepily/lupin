@@ -428,7 +428,7 @@ async def lifespan( app: FastAPI ):
 
     # Initialize authentication database
     print( "[AUTH] Initializing authentication database..." )
-    from cosa.rest.auth_database import init_auth_database
+    from cosa.rest.sqlite_database import init_auth_database
     init_auth_database()
     print( "[AUTH] Authentication database initialized" )
 

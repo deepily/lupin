@@ -33,7 +33,7 @@ if src_path not in sys.path:
 
 # Now cosa is importable
 import cosa.utils.util as cu
-from cosa.rest.auth_database import get_auth_db_connection, get_auth_db_path
+from cosa.rest.sqlite_database import get_auth_db_connection, get_auth_db_path
 
 
 # SQL schema from design doc (lines 439-448)

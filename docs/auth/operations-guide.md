@@ -83,7 +83,7 @@ pip install -r requirements-auth.txt  # Auth-specific packages
 ```bash
 # Currently auto-initialized on startup
 # Future: Use Alembic for migrations
-python -m src.cosa.rest.auth_database  # Verify tables
+python -m src.cosa.rest.sqlite_database  # Verify tables
 ```
 
 **6. Start Service**:

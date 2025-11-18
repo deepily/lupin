@@ -13,7 +13,7 @@ import bcrypt
 import secrets
 from datetime import datetime
 
-from cosa.rest.auth_database import get_auth_db_connection
+from cosa.rest.sqlite_database import get_auth_db_connection
 
 
 @pytest.fixture
