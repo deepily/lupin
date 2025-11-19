@@ -53,6 +53,12 @@
         <div class="collapsible-section">
             <div class="section-header" onclick="toggleSection('notifications-section')">
                 <h3>Claude Code Notifications: <span id="notifications-count">0</span></h3>
+                <button id="clear-all-notifications" type="button"
+                        class="clear-notifications-button"
+                        style="margin-left: auto; margin-right: 10px;"
+                        disabled>
+                    🗑️ Clear All
+                </button>
                 <button class="toggle-button" id="notifications-toggle">▼</button>
             </div>
             <div class="section-content" id="notifications-section">
@@ -123,6 +129,10 @@
                 <div class="status-item">
                     <strong>Sessions:</strong>
                     Queue: <span id="queue-session">-</span>, Audio: <span id="audio-session">-</span>
+                </div>
+                <div class="status-item">
+                    <strong>Health Monitor:</strong>
+                    <span id="ws-health-status" class="status-info">Initializing...</span>
                 </div>
             </div>
         </div>

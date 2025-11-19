@@ -271,6 +271,31 @@
             cursor: not-allowed;
         }
 
+        /* Clear Notifications Button */
+        .clear-notifications-button {
+            padding: 6px 12px;
+            border: 2px solid #dc3545;
+            border-radius: 4px;
+            background-color: white;
+            color: #dc3545;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .clear-notifications-button:hover:not(:disabled) {
+            background-color: #dc3545;
+            color: white;
+        }
+
+        .clear-notifications-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            border-color: #6c757d;
+            color: #6c757d;
+        }
+
         /* Action Required Section Styles (Phase 2.2 SSE Notifications) */
         #action-required-section {
             border: 3px solid #fd7e14;

@@ -123,6 +123,12 @@ class FreshQueueUI {
         this.countdownTimers = new Map();  // notification_id → setInterval handle
         this.keyboardListenerActive = false;  // Track if keyboard listener is attached
 
+        // WebSocket Health Monitor - Periodic reconnection during work hours
+        this.healthCheckIntervalHandle = null;  // Timer reference for health check interval
+        this.HEALTH_CHECK_INTERVAL_MS = 90000;  // 90 seconds (1.5 minutes)
+        this.WORK_HOURS_START = 8;              // 8 AM
+        this.WORK_HOURS_END = 24;               // Midnight (12 AM next day)
+
         // Initialize
         this.init();
     }
@@ -304,7 +310,11 @@ class FreshQueueUI {
         // Now that we have config values, start monitoring token freshness
         this.startTokenRefreshMonitor();
 
-        this.log( `✓ Authentication setup complete for user: ${this.currentUser} (admin: ${this.isAdmin}, config fetched, monitor started)` );
+        // NEW: Start WebSocket health monitor
+        // Periodic health checking during work hours for automatic reconnection
+        this.startWebSocketHealthMonitor();
+
+        this.log( `✓ Authentication setup complete for user: ${this.currentUser} (admin: ${this.isAdmin}, config fetched, monitors started)` );
     }
 
     getStoredTokens() {
@@ -563,6 +573,120 @@ class FreshQueueUI {
             clearInterval( this.tokenRefreshIntervalHandle );
             this.tokenRefreshIntervalHandle = null;
             this.log( "Token refresh monitor stopped" );
+        }
+    }
+
+    startWebSocketHealthMonitor() {
+        /**
+         * Start periodic WebSocket health monitoring during work hours.
+         *
+         * Purpose:
+         *     - Automatically detect and reconnect disconnected WebSockets
+         *     - Only active during work hours (8 AM - Midnight)
+         *     - Handles overnight server restarts gracefully
+         *
+         * Ensures:
+         *     - Clears any existing interval first
+         *     - Sets up 90-second periodic health checks
+         *     - Updates UI status indicator
+         */
+
+        this.stopWebSocketHealthMonitor();  // Clear existing interval if any
+
+        this.healthCheckIntervalHandle = setInterval(
+            () => this.checkWebSocketHealth(),
+            this.HEALTH_CHECK_INTERVAL_MS
+        );
+
+        this.updateHealthStatus( "Monitoring (90s interval)", "status-info" );
+        this.log( "WebSocket health monitor started (90-second interval, work hours 8 AM - Midnight)" );
+    }
+
+    stopWebSocketHealthMonitor() {
+        /**
+         * Stop WebSocket health monitoring.
+         *
+         * Ensures:
+         *     - Clears setInterval if active
+         *     - Resets interval handle to null
+         *     - Updates UI status
+         */
+
+        if ( this.healthCheckIntervalHandle ) {
+            clearInterval( this.healthCheckIntervalHandle );
+            this.healthCheckIntervalHandle = null;
+            this.updateHealthStatus( "Stopped", "status-warning" );
+            this.log( "WebSocket health monitor stopped" );
+        }
+    }
+
+    checkWebSocketHealth() {
+        /**
+         * Periodic health check for WebSocket connections.
+         *
+         * Behavior:
+         *     1. Check if current time is within work hours (8 AM - Midnight)
+         *     2. If outside work hours: Skip check, update UI to show "Off-hours"
+         *     3. If inside work hours: Check both WebSocket states
+         *     4. If disconnected: Reset retry counter and trigger reconnection
+         *     5. If connected: Update UI to show "Healthy"
+         *
+         * Ensures:
+         *     - No reconnection attempts during off-hours (Midnight - 8 AM)
+         *     - Automatic recovery from server restarts
+         *     - Visual feedback in UI status indicator
+         */
+
+        // Check if we're in work hours (8 AM - Midnight)
+        const now = new Date();
+        const hour = now.getHours();
+
+        if ( hour < this.WORK_HOURS_START || hour >= this.WORK_HOURS_END ) {
+            // Outside work hours - skip check
+            this.updateHealthStatus( "Off-hours (Midnight - 8 AM)", "status-info" );
+            return;
+        }
+
+        // Check queue WebSocket state
+        const queueNeedsReconnect = !this.queueWS || this.queueWS.readyState !== WebSocket.OPEN;
+
+        // Check audio WebSocket state
+        const audioNeedsReconnect = !this.audioWS || this.audioWS.readyState !== WebSocket.OPEN;
+
+        if ( queueNeedsReconnect || audioNeedsReconnect ) {
+            // Disconnection detected
+            this.log( `Health check: Disconnected WebSockets detected (queue=${queueNeedsReconnect}, audio=${audioNeedsReconnect})` );
+            this.updateHealthStatus( "Reconnecting...", "status-warning" );
+
+            // Reset retry counter to give reconnection a fresh start
+            // (scheduleReconnect gives up after 5 attempts, but health monitor provides unlimited retries)
+            this.connectionRetries = 0;
+
+            // Trigger existing reconnection logic
+            this.scheduleReconnect();
+        } else {
+            // Both WebSockets healthy
+            this.updateHealthStatus( `✓ Healthy (checked ${now.toLocaleTimeString()})`, "status-success" );
+        }
+    }
+
+    updateHealthStatus( text, statusClass ) {
+        /**
+         * Update WebSocket health monitor status in UI.
+         *
+         * Requires:
+         *     - text: Status message to display
+         *     - statusClass: CSS class for styling (status-success, status-warning, status-info)
+         *
+         * Ensures:
+         *     - Updates #ws-health-status element text and class
+         *     - Handles missing element gracefully (no error thrown)
+         */
+
+        const element = document.getElementById( "ws-health-status" );
+        if ( element ) {
+            element.textContent = text;
+            element.className = statusClass;
         }
     }
 
@@ -863,6 +987,16 @@ class FreshQueueUI {
             filterOwnBtn.addEventListener( 'click', () => this.setFilterMode( 'own' ) );
             filterAllBtn.addEventListener( 'click', () => this.setFilterMode( 'all' ) );
             this.log( "Filter button event listeners added" );
+        }
+
+        // Clear all notifications button
+        const clearAllNotificationsBtn = document.getElementById( 'clear-all-notifications' );
+        if ( clearAllNotificationsBtn ) {
+            clearAllNotificationsBtn.addEventListener( 'click', ( e ) => {
+                e.stopPropagation(); // Prevent section toggle when clicking button
+                this.clearAllNotifications();
+            });
+            this.log( "Clear all notifications button event listener added" );
         }
 
         // NEW: Window beforeunload - cleanup on page close/reload
@@ -2999,7 +3133,10 @@ class FreshQueueUI {
         if ( notificationsCounter ) {
             notificationsCounter.textContent = currentCount;
         }
-        
+
+        // Update clear button state (enable/disable based on count)
+        this.updateClearButtonState( currentCount );
+
         this.log( `Added ${type}/${priority} notification to list: "${displayMessage}"` );
     }
     
@@ -3288,17 +3425,89 @@ class FreshQueueUI {
             if ( notificationsList && notificationsCounter ) {
                 const currentCount = notificationsList.children.length;
                 notificationsCounter.textContent = currentCount;
+
+                // Update clear button state (enable/disable based on count)
+                this.updateClearButtonState( currentCount );
             }
-            
+
             this.log( `Notification ${notificationId} removed from UI` );
         }
         
         // Remove from local cache
-        this.notificationState.notifications = this.notificationState.notifications.filter( 
-            n => n.id_hash !== notificationId 
+        this.notificationState.notifications = this.notificationState.notifications.filter(
+            n => n.id_hash !== notificationId
         );
     }
-    
+
+    async clearAllNotifications() {
+        /**
+         * Clear all notifications from the UI and server.
+         *
+         * Purpose:
+         *     - Bulk delete all notifications with user confirmation
+         *     - Handles both UI cleanup and server-side deletion
+         *
+         * Behavior:
+         *     1. Check if there are any notifications to clear
+         *     2. Show confirmation dialog with count
+         *     3. If confirmed: Loop through all notifications and delete each one
+         *     4. Update UI and local cache
+         *
+         * Ensures:
+         *     - User confirmation before destructive action
+         *     - All notifications removed from server (via DELETE API)
+         *     - UI updated properly (counter, list cleared)
+         *     - Local cache cleared
+         */
+
+        const notificationsList = document.getElementById( "notifications-list" );
+        const notificationsCounter = document.getElementById( "notifications-count" );
+
+        if ( !notificationsList || notificationsList.children.length === 0 ) {
+            this.log( "No notifications to clear" );
+            return;
+        }
+
+        const count = notificationsList.children.length;
+
+        // Confirm before clearing (destructive action)
+        if ( !confirm( `Clear all ${count} notification${count !== 1 ? 's' : ''}? This cannot be undone.` ) ) {
+            this.log( "Clear all notifications cancelled by user" );
+            return;
+        }
+
+        this.log( `Clearing ${count} notifications...` );
+
+        // Collect all notification IDs before deletion (array changes during loop)
+        const notificationIds = Array.from( notificationsList.children ).map( li => li.id );
+
+        // Delete each notification (calls existing deleteNotification method)
+        for ( const notificationId of notificationIds ) {
+            await this.deleteNotification( notificationId );
+        }
+
+        this.log( `✓ Cleared ${count} notification${count !== 1 ? 's' : ''}` );
+    }
+
+    updateClearButtonState( count ) {
+        /**
+         * Update the Clear All button enabled/disabled state based on notification count.
+         *
+         * Requires:
+         *     - count: Number of notifications currently in the list
+         *
+         * Ensures:
+         *     - Button disabled when count = 0 (nothing to clear)
+         *     - Button enabled when count > 0 (notifications available to clear)
+         *     - Handles missing button gracefully (no error thrown)
+         */
+
+        const clearButton = document.getElementById( 'clear-all-notifications' );
+        if ( clearButton ) {
+            clearButton.disabled = ( count === 0 );
+        }
+    }
+
     async replayNotificationAudio( notificationId ) {
         this.log( `Replay button clicked for notification: ${notificationId}` );
         

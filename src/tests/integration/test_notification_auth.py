@@ -11,9 +11,12 @@ import pytest
 import requests
 import bcrypt
 import secrets
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 
-from cosa.rest.sqlite_database import get_auth_db_connection
+from cosa.rest.db.database import get_db
+from cosa.rest.db.repositories import UserRepository, ApiKeyRepository
+
 
 
 @pytest.fixture
@@ -27,50 +30,32 @@ def test_api_key( clean_test_db ):
     salt = bcrypt.gensalt( rounds=12 )
     key_hash = bcrypt.hashpw( key_bytes, salt ).decode( 'utf-8' )
 
-    # Create test service account (api_keys table created by clean_test_db)
-    conn = get_auth_db_connection()
-    cursor = conn.cursor()
+    # Create test service account using PostgreSQL repositories
+    user_id_obj = uuid.uuid4()
+    email = f"test-{user_id_obj}@test.com"
 
-    # Create user
-    import uuid
-    import json
-    user_id = str( uuid.uuid4() )
-    email = f"test-{user_id}@test.com"
-
-    cursor.execute(
-        """
-        INSERT INTO users ( id, email, password_hash, created_at, roles, is_active, email_verified )
-        VALUES ( ?, ?, ?, ?, ?, ?, ? )
-        """,
-        (
-            user_id,
-            email,
-            "dummy_hash",
-            datetime.utcnow().isoformat(),
-            json.dumps( ['service_account'] ),
-            1,
-            1
+    with get_db() as session:
+        # Create user
+        user_repo = UserRepository( session )
+        user = user_repo.create_user(
+            email=email,
+            password_hash="dummy_hash",
+            roles=['service_account']
         )
-    )
+        user.email_verified = True
+        user.is_active = True
 
-    # Create API key
-    cursor.execute(
-        """
-        INSERT INTO api_keys ( user_id, key_hash, description, created_at, is_active )
-        VALUES ( ?, ?, ?, ?, ? )
-        """,
-        (
-            user_id,
-            key_hash,
-            "Integration test key",
-            datetime.utcnow().isoformat(),
-            1
+        # Create API key
+        api_key_repo = ApiKeyRepository( session )
+        api_key_obj = api_key_repo.create_key(
+            user_id=user.id,
+            key_hash=key_hash,
+            description="Integration test key"
         )
-    )
 
-    conn.commit()
-    key_id = cursor.lastrowid
-    conn.close()
+        # session.commit() happens automatically on context exit
+        key_id = str( api_key_obj.id )
+        user_id = str( user.id )
 
     yield {
         'api_key': api_key,
@@ -79,13 +64,17 @@ def test_api_key( clean_test_db ):
         'email': email
     }
 
-    # Cleanup
-    conn = get_auth_db_connection()
-    cursor = conn.cursor()
-    cursor.execute( "DELETE FROM api_keys WHERE id = ?", ( key_id, ) )
-    cursor.execute( "DELETE FROM users WHERE id = ?", ( user_id, ) )
-    conn.commit()
-    conn.close()
+    # Cleanup (note: clean_test_db fixture already drops all tables after each test)
+    # This explicit cleanup is redundant but kept for clarity
+    with get_db() as session:
+        api_key_repo = ApiKeyRepository( session )
+        user_repo = UserRepository( session )
+
+        # Delete API key
+        api_key_repo.delete( uuid.UUID( key_id ) )
+
+        # Delete user
+        user_repo.delete( uuid.UUID( user_id ) )
 
 
 class TestNotificationAuthentication:
@@ -177,14 +166,13 @@ class TestNotificationAuthentication:
     def test_inactive_api_key_returns_401( self, test_api_key ):
         """Test that inactive API key returns 401."""
         # Deactivate the test key
-        conn = get_auth_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE api_keys SET is_active = 0 WHERE id = ?",
-            ( test_api_key['key_id'], )
-        )
-        conn.commit()
-        conn.close()
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories import ApiKeyRepository
+        import uuid
+
+        with get_db() as session:
+            api_key_repo = ApiKeyRepository( session )
+            api_key_repo.deactivate( uuid.UUID( test_api_key['key_id'] ) )
 
         # Try to use inactive key
         response = requests.post(
@@ -204,26 +192,26 @@ class TestNotificationAuthentication:
         assert 'Invalid or inactive API key' in data['detail']
 
         # Reactivate for cleanup
-        conn = get_auth_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE api_keys SET is_active = 1 WHERE id = ?",
-            ( test_api_key['key_id'], )
-        )
-        conn.commit()
-        conn.close()
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories import ApiKeyRepository
+        import uuid
+
+        with get_db() as session:
+            api_key_repo = ApiKeyRepository( session )
+            api_key_obj = api_key_repo.get_by_id( uuid.UUID( test_api_key['key_id'] ) )
+            api_key_obj.is_active = True
 
     def test_last_used_timestamp_updated( self, test_api_key ):
         """Test that last_used_at timestamp is updated on successful auth."""
         # Get initial timestamp
-        conn = get_auth_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT last_used_at FROM api_keys WHERE id = ?",
-            ( test_api_key['key_id'], )
-        )
-        initial_timestamp = cursor.fetchone()['last_used_at']
-        conn.close()
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories import ApiKeyRepository
+        import uuid
+
+        with get_db() as session:
+            api_key_repo = ApiKeyRepository( session )
+            api_key_obj = api_key_repo.get_by_id( uuid.UUID( test_api_key['key_id'] ) )
+            initial_timestamp = api_key_obj.last_used_at
 
         # Use the API key
         response = requests.post(
@@ -242,14 +230,10 @@ class TestNotificationAuthentication:
         assert response.status_code == 200
 
         # Check updated timestamp
-        conn = get_auth_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT last_used_at FROM api_keys WHERE id = ?",
-            ( test_api_key['key_id'], )
-        )
-        updated_timestamp = cursor.fetchone()['last_used_at']
-        conn.close()
+        with get_db() as session:
+            api_key_repo = ApiKeyRepository( session )
+            api_key_obj = api_key_repo.get_by_id( uuid.UUID( test_api_key['key_id'] ) )
+            updated_timestamp = api_key_obj.last_used_at
 
         # Timestamp should be updated
         assert updated_timestamp != initial_timestamp
@@ -284,24 +268,14 @@ class TestMultipleAPIKeys:
         salt = bcrypt.gensalt( rounds=12 )
         key_hash2 = bcrypt.hashpw( key_bytes, salt ).decode( 'utf-8' )
 
-        conn = get_auth_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO api_keys ( user_id, key_hash, description, created_at, is_active )
-            VALUES ( ?, ?, ?, ?, ? )
-            """,
-            (
-                test_api_key['user_id'],
-                key_hash2,
-                "Second test key",
-                datetime.utcnow().isoformat(),
-                1
+        with get_db() as session:
+            api_key_repo = ApiKeyRepository( session )
+            api_key_obj2 = api_key_repo.create_key(
+                user_id=uuid.UUID( test_api_key['user_id'] ),
+                key_hash=key_hash2,
+                description="Second test key"
             )
-        )
-        conn.commit()
-        key_id2 = cursor.lastrowid
-        conn.close()
+            key_id2 = str( api_key_obj2.id )
 
         try:
             # Both keys should work
@@ -322,11 +296,9 @@ class TestMultipleAPIKeys:
 
         finally:
             # Cleanup second key
-            conn = get_auth_db_connection()
-            cursor = conn.cursor()
-            cursor.execute( "DELETE FROM api_keys WHERE id = ?", ( key_id2, ) )
-            conn.commit()
-            conn.close()
+            with get_db() as session:
+                api_key_repo = ApiKeyRepository( session )
+                api_key_repo.delete( uuid.UUID( key_id2 ) )
 
 
 class TestSecurityHeaders:

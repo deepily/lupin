@@ -426,11 +426,12 @@ async def lifespan( app: FastAPI ):
     # Initialize input/output table
     io_tbl = InputAndOutputTable( debug=app_debug, verbose=app_verbose )
 
-    # Initialize authentication database
-    print( "[AUTH] Initializing authentication database..." )
-    from cosa.rest.sqlite_database import init_auth_database
-    init_auth_database()
-    print( "[AUTH] Authentication database initialized" )
+    # Authentication database initialization
+    # PostgreSQL database selected via LUPIN_ENV environment variable:
+    #   - development: lupin_auth (automatic schema creation via Alembic migrations)
+    #   - testing: lupin_auth_test (automatic schema creation in tests)
+    #   - production: Cloud SQL (automatic schema creation via Alembic migrations)
+    print( "[AUTH] Using PostgreSQL authentication database" )
 
     # Load STT model on startup
     global whisper_pipeline

@@ -21,7 +21,7 @@ set -e  # Exit on error
 
 # Configuration
 PORT=7999
-PROJECT_ROOT="/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box"
+PROJECT_ROOT="${LUPIN_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box}"
 SERVER_PID=""
 MAX_WAIT=30  # Maximum seconds to wait for server startup
 
@@ -62,6 +62,18 @@ echo "  → Your dev server is probably still running"
 echo "  → Stop it first: kill \$(lsof -ti:$PORT)"
 echo ""
 echo "================================================================"
+echo ""
+
+# Ensure PostgreSQL is running and test database exists
+echo -e "${YELLOW}[POSTGRES] Ensuring PostgreSQL is ready...${NC}"
+
+if ! "$PROJECT_ROOT/src/scripts/run-postgresql-dev.sh"; then
+    echo ""
+    echo -e "${RED}[ERROR] Failed to start/verify PostgreSQL${NC}"
+    echo ""
+    exit 1
+fi
+
 echo ""
 
 # Check if port 7999 is already in use
@@ -105,6 +117,7 @@ echo -e "${YELLOW}[SERVER] Starting FastAPI server with Testing config block...$
 cd "$PROJECT_ROOT/src"
 
 export LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
+export LUPIN_ENV="testing"
 
 # Start server in background
 "$PROJECT_ROOT/src/cosa/.venv/bin/python3" -m fastapi_app.main > /tmp/lupin-test-server.log 2>&1 &

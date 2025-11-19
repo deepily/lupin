@@ -390,19 +390,17 @@ def test_email_verification_flow( create_test_user ):
     assert request_response.status_code == 200, f"Verification request failed: {request_response.text}"
 
     # Step 4: Extract token from database (mock email retrieval)
-    from cosa.rest.sqlite_database import get_auth_db_connection
+    from cosa.rest.db.database import get_db
+    from cosa.rest.postgres_models import EmailVerificationToken
+    import uuid
 
-    conn = get_auth_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT token FROM email_verification_tokens WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
-        ( create_test_user["user_id"], )
-    )
-    row = cursor.fetchone()
-    conn.close()
+    with get_db() as session:
+        token_obj = session.query( EmailVerificationToken ).filter(
+            EmailVerificationToken.user_id == uuid.UUID( create_test_user["user_id"] )
+        ).order_by( EmailVerificationToken.created_at.desc() ).first()
 
-    assert row is not None, "Verification token should exist in database"
-    verification_token = row[0]
+        assert token_obj is not None, "Verification token should exist in database"
+        verification_token = token_obj.token
 
     # Step 5: Verify email with token
     verify_response = requests.post( f"{BASE_URL}/auth/verify-email",
@@ -453,19 +451,17 @@ def test_password_reset_flow( create_test_user ):
     assert reset_request_response.status_code == 200
 
     # Step 2: Extract token from database (mock email retrieval)
-    from cosa.rest.sqlite_database import get_auth_db_connection
+    from cosa.rest.db.database import get_db
+    from cosa.rest.postgres_models import PasswordResetToken
+    import uuid
 
-    conn = get_auth_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT token FROM password_reset_tokens WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
-        ( create_test_user["user_id"], )
-    )
-    row = cursor.fetchone()
-    conn.close()
+    with get_db() as session:
+        token_obj = session.query( PasswordResetToken ).filter(
+            PasswordResetToken.user_id == uuid.UUID( create_test_user["user_id"] )
+        ).order_by( PasswordResetToken.created_at.desc() ).first()
 
-    assert row is not None, "Reset token should exist in database"
-    reset_token = row[0]
+        assert token_obj is not None, "Reset token should exist in database"
+        reset_token = token_obj.token
 
     # Step 3: Reset password with token
     reset_response = requests.post( f"{BASE_URL}/auth/reset-password",
