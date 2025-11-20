@@ -50,4 +50,4 @@ volumes:
 
 networks:
   lupin-dev-network:
-    driver: bridge
+    external: true

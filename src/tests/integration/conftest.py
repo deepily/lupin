@@ -20,6 +20,10 @@ import os
 # This ensures config_mgr singleton initializes with Testing block
 os.environ["LUPIN_CONFIG_MGR_CLI_ARGS"] = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
 
+# Set GCS environment variables for LanceDB GCS integration tests
+os.environ["GOOGLE_CLOUD_PROJECT"] = "hello-world-foo-423219"
+os.environ["GOOGLE_CLOUD_LOCATION"] = "us-central1"
+
 import pytest
 import requests
 from pathlib import Path

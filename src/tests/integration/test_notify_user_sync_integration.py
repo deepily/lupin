@@ -42,7 +42,7 @@ def server_check():
 # CLI Integration Tests (Marked as manual for now)
 # ============================================================================
 
-@pytest.mark.skip( reason="Requires manual user interaction for response" )
+@pytest.mark.manual
 class TestNotifyClaudeSyncCLI:
     """Test notify-claude-sync CLI with live server (manual)."""
 
@@ -106,7 +106,7 @@ class TestSSENotificationAPI:
         # Should return error (user not found) or offline with default
         assert response.exit_code in (0, 1)
 
-    @pytest.mark.skip( reason="Requires manual response or timeout wait" )
+    @pytest.mark.manual
     def test_timeout_with_default( self, server_check ):
         """Test notification timeout returns default."""
         import cosa.cli.notify_user_sync as sync_module

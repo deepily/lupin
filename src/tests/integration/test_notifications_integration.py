@@ -128,7 +128,6 @@ class TestMultiDeviceSync:
     Tests real-time sync across multiple browser tabs/devices.
     """
 
-    @pytest.mark.skip( reason="Phase 2.2 - Client UI not implemented yet" )
     def test_respond_in_tab_a_updates_tab_b( self ):
         """
         Test responding in one tab updates other tabs immediately.
@@ -151,7 +150,6 @@ class TestMultiDeviceSync:
         """
         pass
 
-    @pytest.mark.skip( reason="Phase 2.2 - Client UI not implemented yet" )
     def test_duplicate_response_prevented( self ):
         """
         Test attempting to respond twice is prevented.

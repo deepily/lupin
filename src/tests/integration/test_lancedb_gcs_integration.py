@@ -181,9 +181,6 @@ class TestLanceDBGCSIntegration:
         """
         Test that manager can be initialized from [Lupin: Testing-GCS] config block.
         """
-        # Reset singleton to allow fresh initialization with GCS block
-        ConfigurationManager.reset_for_testing()
-
         # Set up ConfigurationManager environment variable
         # ConfigurationManager internally prepends cu.get_project_root(), so use relative paths
         config_path = "/src/conf/lupin-app.ini"
@@ -195,8 +192,12 @@ class TestLanceDBGCSIntegration:
         os.environ["LUPIN_CONFIG_MGR_CLI_ARGS_TEST"] = cli_args_str
 
         try:
-            # Initialize ConfigurationManager
-            config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS_TEST" )
+            # Initialize ConfigurationManager with atomic singleton reset
+            # Using _reset_singleton=True ensures clean state before loading Testing-GCS block
+            config_mgr = ConfigurationManager(
+                env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS_TEST",
+                _reset_singleton=True
+            )
 
             # Verify backend configuration
             backend = config_mgr.get( "storage_backend", default="local" )
