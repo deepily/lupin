@@ -96,11 +96,11 @@ check_container_running() {
 start_postgres_container() {
     log_info "Starting PostgreSQL container via docker-compose..."
 
-    # Change to LUPIN_ROOT so docker-compose finds its config
+    # Change to LUPIN_ROOT so docker compose finds its config
     cd "$LUPIN_ROOT"
 
     # Start postgres service in detached mode
-    docker-compose up -d postgres
+    docker compose up -d postgres
 
     log_success "Container started"
 }
@@ -236,7 +236,7 @@ display_connection_info() {
     echo "  $LUPIN_ROOT/src/conf/long-term-memory/postgresql-dev-data/"
     echo ""
     echo "Management:"
-    echo "  • Stop:   docker-compose down"
+    echo "  • Stop:   docker compose down"
     echo "  • Logs:   docker logs $CONTAINER_NAME"
     echo "  • pgAdmin: http://localhost:5050 (dev@lupin.local / admin)"
     echo ""
@@ -246,6 +246,17 @@ display_connection_info() {
 # Main Function
 # ============================================================
 main() {
+    # Parse command-line flags
+    FOLLOW_LOGS=true
+    for arg in "$@"; do
+        case $arg in
+            --no-follow-logs)
+                FOLLOW_LOGS=false
+                shift
+                ;;
+        esac
+    done
+
     echo "================================================================"
     echo "  Lupin PostgreSQL Development Server"
     echo "================================================================"
@@ -268,6 +279,18 @@ main() {
 
     # Display connection information
     display_connection_info
+
+    # Follow container logs (unless --no-follow-logs flag is set)
+    if [ "$FOLLOW_LOGS" = true ]; then
+        echo "================================================================"
+        echo "  Following PostgreSQL Container Logs"
+        echo "================================================================"
+        echo ""
+        log_info "Press Ctrl+C to stop following logs"
+        echo ""
+
+        docker logs -f "$CONTAINER_NAME"
+    fi
 }
 
 # ============================================================

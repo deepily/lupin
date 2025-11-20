@@ -309,3 +309,70 @@ def get_auth_header( access_token ):
         dict: Headers with Authorization
     """
     return {"Authorization": f"Bearer {access_token}"}
+
+
+# GCS Credential Validation Fixture
+
+@pytest.fixture( scope="session" )
+def gcs_credentials_available():
+    """
+    Session-scoped fixture that validates GCS credentials once.
+
+    Validates Google Cloud Storage credentials at test session start.
+    If credentials are missing, expired, or invalid, all GCS-dependent
+    tests are skipped gracefully with clear remediation instructions.
+
+    This prevents cryptic test failures when developers haven't authenticated
+    or when CI/CD environments don't have GCS configured.
+
+    Scope:
+        session - Validates once per test run (not per test)
+
+    Requires:
+        - google-auth library (installed as LanceDB dependency)
+        - Either:
+          - GOOGLE_APPLICATION_CREDENTIALS env var set, OR
+          - gcloud auth application-default login completed
+
+    Ensures:
+        - Returns True if credentials valid
+        - Raises pytest.skip() if credentials invalid/missing/expired
+        - Skip message includes clear remediation steps
+
+    Usage:
+        Inject into GCS-dependent fixtures:
+
+        @pytest.fixture
+        def gcs_manager(gcs_credentials_available):
+            # gcs_credentials_available validates before this runs
+            manager = LanceDBSolutionManager( gcs_config )
+            manager.initialize()  # Won't fail due to auth
+            return manager
+
+    Returns:
+        bool: True if credentials valid (otherwise skips)
+
+    Raises:
+        pytest.skip: If credentials invalid, with detailed message
+    """
+    from .gcs_utils import check_gcs_credentials
+
+    is_valid, message = check_gcs_credentials()
+
+    if not is_valid:
+        pytest.skip(
+            f"\n{'='*70}\n"
+            f"GCS Integration Tests Skipped\n"
+            f"{'='*70}\n\n"
+            f"{message}\n\n"
+            f"To enable GCS tests:\n"
+            f"  1. gcloud auth application-default login\n"
+            f"  2. Re-run tests\n"
+            f"\n"
+            f"Note: All non-GCS tests will still run normally.\n"
+            f"{'='*70}\n"
+        )
+
+    # Credentials valid - print success message
+    print( f"\n✓ GCS credentials validated: {message}" )
+    return True

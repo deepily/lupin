@@ -55,11 +55,15 @@ class TestLanceDBGCSIntegration:
         }
 
     @pytest.fixture(scope="class")
-    def gcs_manager(self, gcs_config):
+    def gcs_manager(self, gcs_config, gcs_credentials_available):
         """
         Create LanceDB manager with GCS backend for testing.
         Uses a timestamped database to avoid conflicts between test runs.
+
+        Requires:
+            gcs_credentials_available: Ensures GCS auth validated before initialization
         """
+        # gcs_credentials_available fixture already validated or skipped all tests
         manager = LanceDBSolutionManager( gcs_config, debug=True, verbose=False )
         manager.initialize()
 
@@ -177,19 +181,18 @@ class TestLanceDBGCSIntegration:
         """
         Test that manager can be initialized from [Lupin: Testing-GCS] config block.
         """
-        # Set up ConfigurationManager environment variable
-        config_path = os.path.join( lupin_root, "src", "conf", "lupin-app.ini" )
-        splainer_path = os.path.join( lupin_root, "src", "conf", "lupin-app-splainer.ini" )
+        # Reset singleton to allow fresh initialization with GCS block
+        ConfigurationManager.reset_for_testing()
 
-        cli_args = {
-            "config_path": config_path,
-            "splainer_path": splainer_path,
-            "config_block_id": "Lupin: Testing-GCS"
-        }
+        # Set up ConfigurationManager environment variable
+        # ConfigurationManager internally prepends cu.get_project_root(), so use relative paths
+        config_path = "/src/conf/lupin-app.ini"
+        splainer_path = "/src/conf/lupin-app-splainer.ini"
 
         # Temporarily set environment variable
-        import json
-        os.environ["LUPIN_CONFIG_MGR_CLI_ARGS_TEST"] = json.dumps( cli_args )
+        # ConfigurationManager expects space-delimited format: key=value key=value
+        cli_args_str = f"config_path={config_path} splainer_path={splainer_path} config_block_id=Lupin:+Testing-GCS"
+        os.environ["LUPIN_CONFIG_MGR_CLI_ARGS_TEST"] = cli_args_str
 
         try:
             # Initialize ConfigurationManager

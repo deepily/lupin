@@ -24,7 +24,7 @@ services:
       retries: 5
       start_period: 10s
     networks:
-      - lupin_dev
+      - lupin-dev-network
 
   # Optional: pgAdmin for database management
   pgadmin:
@@ -40,7 +40,7 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     networks:
-      - lupin_dev
+      - lupin-dev-network
     depends_on:
       - postgres
 
@@ -49,5 +49,5 @@ volumes:
     driver: local
 
 networks:
-  lupin_dev:
+  lupin-dev-network:
     driver: bridge

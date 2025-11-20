@@ -121,6 +121,8 @@ RUN pip install --no-cache-dir pylance==0.36.0
 
 RUN pip install --no-cache-dir PyJWT==2.10.1 passlib==1.7.4 bcrypt==3.2.2 cffi==2.0.0 pycparser==2.23
 
+RUN pip install --no-cache-dir sqlalchemy==2.0.40 psycopg2-binary==2.9.11
+
 
 # ============================================================================
 # RUNTIME CONFIGURATION (Can be overridden via docker run -e or Cloud Run)

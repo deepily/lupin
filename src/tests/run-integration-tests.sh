@@ -67,7 +67,7 @@ echo ""
 # Ensure PostgreSQL is running and test database exists
 echo -e "${YELLOW}[POSTGRES] Ensuring PostgreSQL is ready...${NC}"
 
-if ! "$PROJECT_ROOT/src/scripts/run-postgresql-dev.sh"; then
+if ! "$PROJECT_ROOT/src/scripts/run-postgresql-dev.sh" --no-follow-logs; then
     echo ""
     echo -e "${RED}[ERROR] Failed to start/verify PostgreSQL${NC}"
     echo ""
