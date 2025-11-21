@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2025.11.20 - Math Agent XML Schema Mismatch Investigation
+- **XML Pipeline Debugging**: [2025.11.20-math-agent-xml-schema-mismatch.md](2025.11.20-math-agent-xml-schema-mismatch.md) - **🔍 INVESTIGATION IN PROGRESS** - Comprehensive analysis of pydantic_ai integration revealing two-stage XML pipeline schema mismatch. Math agent uses CodeBrainstormResponse (7 required fields) for code generation, but formatter's simple RephraseResponse (`<rephrased-answer>`) is being validated against wrong schema. Includes complete pipeline flow analysis, 4 hypotheses, investigation checklist, and debugging roadmap. Follows successful pydantic_ai 0.6.2 API migration (ModelSettings, `.output`). Ready for next session's debugging.
+
 ### 2025.10.17 - SSE Phase 2 Design Session
 - **Notification System**: [sse-notifications/05-phase2-design-decisions.md](sse-notifications/05-phase2-design-decisions.md) - **🚧 DESIGN IN PROGRESS** - Interactive design session for Phase 2 SSE notification system (response-required notifications). Completed: Database schema (persistent storage), response types (yes/no with LLM interpretation, open-ended), timeout behavior (multi-modal countdown). Pending: SSE architecture, return value propagation, UI/UX, MVP scoping. Resume point: Area 3 Q3.2 (Timeout handling). Session 1 of design Q&A complete (3/9 areas).
 - **Design Questions**: [sse-notifications/98-notification-design-draft.md](sse-notifications/98-notification-design-draft.md) - Original design questions document (answers being captured in 05-phase2-design-decisions.md)

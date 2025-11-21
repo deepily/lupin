@@ -1,0 +1,52 @@
+# PostgreSQL data directories (Docker volumes - should not be in image)
+src/conf/long-term-memory/postgresql-dev-data
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+.venv
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Logs
+*.log
+logs/
+
+# Local development files
+.env
+.env.local
+*.local
+
+# Documentation builds
+docs/_build/
+
+# OS files
+.DS_Store
+Thumbs.db

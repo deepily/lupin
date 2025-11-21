@@ -157,11 +157,36 @@ RUN pip install --no-cache-dir sqlalchemy==2.0.40 psycopg2-binary==2.9.11
 env LUPIN_ROOT=/var/lupin
 env LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
 
-# Copy application code
-COPY src /var/lupin/src
+# Copy application code selectively (excluding postgresql-dev-data, test artifacts, and separate repos)
+
+# Core application directories
+COPY src/cosa /var/lupin/src/cosa
+COPY src/fastapi_app /var/lupin/src/fastapi_app
+COPY src/lib /var/lupin/src/lib
+COPY src/scripts /var/lupin/src/scripts
+COPY src/migrations /var/lupin/src/migrations
+COPY src/docs /var/lupin/src/docs
+COPY src/resources /var/lupin/src/resources
+COPY src/templates /var/lupin/src/templates
+
+# Configuration files and directories
+COPY src/conf/*.ini /var/lupin/src/conf/
+COPY src/conf/*.map /var/lupin/src/conf/
+COPY src/conf/*.json /var/lupin/src/conf/
+COPY src/conf/*.js /var/lupin/src/conf/
+COPY src/conf/auth /var/lupin/src/conf/auth
+COPY src/conf/keys /var/lupin/src/conf/keys
+COPY src/conf/prompts /var/lupin/src/conf/prompts
+COPY src/conf/tools /var/lupin/src/conf/tools
+
+# Long-term-memory files (explicitly excluding postgresql-dev-data directory)
+COPY src/conf/long-term-memory/*.csv /var/lupin/src/conf/long-term-memory/
+COPY src/conf/long-term-memory/*.jsonl /var/lupin/src/conf/long-term-memory/
+COPY src/conf/long-term-memory/*.db /var/lupin/src/conf/long-term-memory/
+COPY src/conf/long-term-memory/lupin.lancedb /var/lupin/src/conf/long-term-memory/lupin.lancedb
 
 WORKDIR /var/lupin/src
-RUN mkdir -p /var/io
+RUN mkdir -p /var/lupin/io
 
 # CMD ["/bin/bash", "-c", "echo '-- OR -- Run `python3 -m fastapi_app.main` to spin up FastAPI server' && exec /bin/bash"]
 # Run the script: /var/lupin/src/scripts/run-fastapi-lupin.sh
