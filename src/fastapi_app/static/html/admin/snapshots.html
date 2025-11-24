@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Solution Snapshots</title>
+    <link rel="stylesheet" href="/static/css/queue-fresh.css">
+    <link rel="stylesheet" href="/static/html/admin/css/admin-snapshots.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="page-header">
+            <div class="breadcrumb">
+                <a href="/static/html/queue-fresh.html">Home</a>
+                <span class="separator">></span>
+                <a href="/static/html/admin/dashboard.html">Admin</a>
+                <span class="separator">></span>
+                <span class="current">Solution Snapshots</span>
+            </div>
+            <div class="user-info">
+                <span id="user-email"></span>
+                <button id="logout-btn" class="btn-secondary">Logout</button>
+            </div>
+        </header>
+
+        <h1>Solution Snapshots</h1>
+
+        <!-- Search Section -->
+        <div class="search-section">
+            <div class="search-bar">
+                <input
+                    type="text"
+                    id="search-input"
+                    placeholder="Search snapshots by question..."
+                    autocomplete="off"
+                >
+                <button id="search-btn" class="btn-primary">Search</button>
+            </div>
+            <div id="search-info" class="search-info">
+                <span id="results-count"></span>
+            </div>
+            <div id="search-error" class="error-message" style="display: none;"></div>
+        </div>
+
+        <!-- Results Table -->
+        <div class="results-section">
+            <table id="results-table" class="data-table">
+                <thead>
+                    <tr>
+                        <th>Question Preview</th>
+                        <th>Gist</th>
+                        <th>Created Date</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="results-tbody">
+                    <!-- Populated dynamically -->
+                </tbody>
+            </table>
+
+            <!-- Empty State -->
+            <div id="empty-state" class="empty-state" style="display: none;">
+                <p>No snapshots found. Try a different search query.</p>
+            </div>
+
+            <!-- Loading State -->
+            <div id="loading-state" class="loading-state" style="display: none;">
+                <p>Searching...</p>
+            </div>
+        </div>
+
+        <!-- Detail Modal -->
+        <div id="detail-modal" class="modal" style="display: none;">
+            <div class="modal-overlay"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Snapshot Details</h2>
+                    <button class="close-btn" id="close-detail-btn">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="detail-field">
+                        <label>Question:</label>
+                        <div id="detail-question" class="detail-value"></div>
+                    </div>
+                    <div class="detail-field">
+                        <label>Question (Normalized):</label>
+                        <div id="detail-question-normalized" class="detail-value"></div>
+                    </div>
+                    <div class="detail-field">
+                        <label>Question Gist:</label>
+                        <div id="detail-question-gist" class="detail-value"></div>
+                    </div>
+                    <div class="detail-field">
+                        <label>Answer:</label>
+                        <div id="detail-answer" class="detail-value"></div>
+                    </div>
+                    <div class="detail-field">
+                        <label>Answer (Conversational):</label>
+                        <div id="detail-answer-conversational" class="detail-value"></div>
+                    </div>
+                    <div class="detail-field">
+                        <label>ID Hash:</label>
+                        <div id="detail-id-hash" class="detail-value"></div>
+                    </div>
+                    <div class="detail-field">
+                        <label>User ID:</label>
+                        <div id="detail-user-id" class="detail-value"></div>
+                    </div>
+                    <div class="detail-field">
+                        <label>Created Date:</label>
+                        <div id="detail-created-date" class="detail-value"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Delete Confirmation Modal -->
+        <div id="delete-modal" class="modal" style="display: none;">
+            <div class="modal-overlay"></div>
+            <div class="modal-content modal-small">
+                <div class="modal-header">
+                    <h2>Confirm Delete</h2>
+                    <button class="close-btn" id="close-delete-btn">×</button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete this snapshot?</p>
+                    <p class="warning-text">This action cannot be undone.</p>
+                    <div id="delete-preview" class="delete-preview"></div>
+                </div>
+                <div class="modal-footer">
+                    <button id="confirm-delete-btn" class="btn-danger">Delete</button>
+                    <button id="cancel-delete-btn" class="btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/html/auth/js/auth.js"></script>
+    <script src="/static/html/admin/js/admin-snapshots.js"></script>
+</body>
+</html>

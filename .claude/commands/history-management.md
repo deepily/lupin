@@ -173,8 +173,8 @@ Show user proposed split with:
 
 ### Step 5: Notify Completion
 ```bash
-notify-claude "[LUPIN] ✅ History archived: ${ARCHIVE_FILENAME} created" \
-    --type=progress --priority=low
+notify-claude-async "[LUPIN] ✅ History archived: ${ARCHIVE_FILENAME} created" \
+    --type=progress --priority=low --target-user=ricardo.felipe.ruiz@gmail.com
 ```
 
 ---

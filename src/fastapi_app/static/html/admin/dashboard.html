@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Lupin</title>
+
+    <!-- Base styles -->
+    <link rel="stylesheet" href="/static/css/queue-fresh.css">
+
+    <!-- Admin dashboard styles -->
+    <link rel="stylesheet" href="/static/html/admin/css/admin-dashboard.css">
+</head>
+<body>
+    <div class="admin-dashboard-container">
+        <!-- Page Header -->
+        <header class="page-header">
+            <div class="breadcrumb">
+                <a href="/static/html/queue-fresh.html">Home</a>
+                <span class="separator">></span>
+                <span class="current">Admin</span>
+            </div>
+            <div class="user-info">
+                <span class="user-email" id="userEmail">Loading...</span>
+                <button id="logoutBtn" class="btn-secondary">Logout</button>
+            </div>
+        </header>
+
+        <!-- Dashboard Title -->
+        <div class="dashboard-header">
+            <h1>Admin Dashboard</h1>
+            <p class="subtitle">Management tools for system administrators</p>
+        </div>
+
+        <!-- Admin Tools Grid -->
+        <div class="admin-tools-grid">
+            <!-- User Management Card -->
+            <div class="admin-card">
+                <div class="card-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="9" cy="7" r="4"></circle>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                    </svg>
+                </div>
+                <h2 class="card-title">User Management</h2>
+                <p class="card-description">View, edit, and manage user accounts, roles, and permissions</p>
+                <a href="/static/html/auth/admin/users.html" class="card-link">
+                    <button class="btn-primary">Open User Management</button>
+                </a>
+            </div>
+
+            <!-- Solution Snapshots Card -->
+            <div class="admin-card">
+                <div class="card-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                        <path d="M11 8v6"></path>
+                        <path d="M8 11h6"></path>
+                    </svg>
+                </div>
+                <h2 class="card-title">Solution Snapshots</h2>
+                <p class="card-description">Search, view, and manage solution snapshot database entries</p>
+                <a href="/static/html/admin/snapshots.html" class="card-link">
+                    <button class="btn-primary">Open Snapshots</button>
+                </a>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="dashboard-footer">
+            <p>Lupin Admin Dashboard v0.1.0</p>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/html/auth/js/auth.js"></script>
+    <script src="/static/html/admin/js/admin-dashboard.js"></script>
+</body>
+</html>
