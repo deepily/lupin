@@ -241,12 +241,27 @@ class AdminSnapshotsDashboard {
         try {
             const snapshot = await this.apiCall( `/admin/snapshots/${idHash}` );
 
-            // Populate modal
-            document.getElementById( 'detail-question' ).textContent = snapshot.question;
+            // Set modal title with verbatim question
+            const modalTitle = document.getElementById( 'detail-modal-title' );
+            modalTitle.textContent = `Snapshot Details: ${snapshot.question}`;
+            modalTitle.title = snapshot.question;  // Full text on hover
+
+            // Populate modal fields
             document.getElementById( 'detail-question-normalized' ).textContent = snapshot.question_normalized;
             document.getElementById( 'detail-question-gist' ).textContent = snapshot.question_gist;
             document.getElementById( 'detail-answer' ).textContent = snapshot.answer || 'No answer';
             document.getElementById( 'detail-answer-conversational' ).textContent = snapshot.answer_conversational || 'No conversational answer';
+
+            // Format runtime statistics as pretty JSON
+            const runtimeStats = snapshot.runtime_stats || {};
+            const statsFormatted = JSON.stringify( runtimeStats, null, 2 );
+            document.getElementById( 'detail-runtime-stats' ).textContent = statsFormatted;
+
+            // Format executable code as multi-line string
+            const code = snapshot.code || [];
+            const codeFormatted = code.length > 0 ? code.join( '\n' ) : 'N/A';
+            document.getElementById( 'detail-code' ).textContent = codeFormatted;
+
             document.getElementById( 'detail-id-hash' ).textContent = snapshot.id_hash;
             document.getElementById( 'detail-user-id' ).textContent = snapshot.user_id || 'N/A';
             document.getElementById( 'detail-created-date' ).textContent = this.formatDate( snapshot.created_date );

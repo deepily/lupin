@@ -75,29 +75,43 @@
             <div class="modal-overlay"></div>
             <div class="modal-content">
                 <div class="modal-header">
-                    <h2>Snapshot Details</h2>
+                    <h2 id="detail-modal-title">Snapshot Details</h2>
                     <button class="close-btn" id="close-detail-btn">×</button>
                 </div>
                 <div class="modal-body">
-                    <div class="detail-field">
-                        <label>Question:</label>
-                        <div id="detail-question" class="detail-value"></div>
+                    <!-- Two-column layout for primary fields -->
+                    <div class="detail-columns">
+                        <!-- Left column -->
+                        <div class="detail-column-left">
+                            <div class="detail-field">
+                                <label>Question (Normalized):</label>
+                                <div id="detail-question-normalized" class="detail-value"></div>
+                            </div>
+                            <div class="detail-field">
+                                <label>Question Gist:</label>
+                                <div id="detail-question-gist" class="detail-value"></div>
+                            </div>
+                        </div>
+
+                        <!-- Right column -->
+                        <div class="detail-column-right">
+                            <div class="detail-field">
+                                <label>Answer:</label>
+                                <div id="detail-answer" class="detail-value"></div>
+                            </div>
+                            <div class="detail-field">
+                                <label>Answer (Conversational):</label>
+                                <div id="detail-answer-conversational" class="detail-value"></div>
+                            </div>
+                        </div>
                     </div>
                     <div class="detail-field">
-                        <label>Question (Normalized):</label>
-                        <div id="detail-question-normalized" class="detail-value"></div>
+                        <label>Runtime Statistics:</label>
+                        <pre id="detail-runtime-stats" class="code-block"></pre>
                     </div>
                     <div class="detail-field">
-                        <label>Question Gist:</label>
-                        <div id="detail-question-gist" class="detail-value"></div>
-                    </div>
-                    <div class="detail-field">
-                        <label>Answer:</label>
-                        <div id="detail-answer" class="detail-value"></div>
-                    </div>
-                    <div class="detail-field">
-                        <label>Answer (Conversational):</label>
-                        <div id="detail-answer-conversational" class="detail-value"></div>
+                        <label>Executable Code:</label>
+                        <pre id="detail-code" class="code-block"></pre>
                     </div>
                     <div class="detail-field">
                         <label>ID Hash:</label>

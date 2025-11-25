@@ -365,15 +365,37 @@ async def lifespan( app: FastAPI ):
     global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task
     
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-    
-    # Initialize the ID generator singleton
-    id_generator = TwoWordIdGenerator()
-    
-    # Get configuration flags
+
+    # Get configuration flags (needed for debug output below)
     app_debug   = config_mgr.get( "app_debug",   default=False, return_type="boolean" )
     app_verbose = config_mgr.get( "app_verbose", default=False, return_type="boolean" )
     app_silent  = config_mgr.get( "app_silent",  default=True,  return_type="boolean" )
-    
+
+    # Suppress LanceDB cosmetic warnings if configured
+    # These warnings are non-functional - queries execute correctly regardless
+    # Warnings occur when using .search() for metadata filtering (not vector similarity)
+    if config_mgr.get( "suppress lancedb warnings", default=True, return_type="boolean" ):
+        import logging
+        import warnings
+
+        # Suppress via warnings module (catches Rust layer warnings)
+        warnings.filterwarnings( "ignore", message=".*nprobes is not set.*" )
+        warnings.filterwarnings( "ignore", message=".*nearest has not been called.*" )
+
+        # Set LanceDB loggers to ERROR level only (suppress WARN, INFO, DEBUG)
+        logging.getLogger( "lance" ).setLevel( logging.ERROR )
+        logging.getLogger( "lance.dataset" ).setLevel( logging.ERROR )
+        logging.getLogger( "lance.dataset.scanner" ).setLevel( logging.ERROR )
+
+        if app_debug:
+            print( "✓ LanceDB warning suppression enabled (cosmetic warnings hidden)" )
+    else:
+        if app_debug:
+            print( "⚠ LanceDB warning suppression disabled (all warnings visible)" )
+
+    # Initialize the ID generator singleton
+    id_generator = TwoWordIdGenerator()
+
     # Initialize solution snapshot manager using factory pattern
     manager_type = config_mgr.get( "solution snapshots manager type", default="file_based" )
     
