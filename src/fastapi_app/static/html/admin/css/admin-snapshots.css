@@ -383,3 +383,92 @@
         color: #f5f5f5;
     }
 }
+
+/* ============================================================================
+   Collapsible Synonyms Section
+   ============================================================================ */
+
+.synonyms-section {
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    margin-top: 10px;
+}
+
+.synonyms-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: #f8f9fa;
+    cursor: pointer;
+    border-radius: 4px 4px 0 0;
+}
+
+.synonyms-header:hover {
+    background: #e9ecef;
+}
+
+.synonyms-header label {
+    margin: 0;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.toggle-btn {
+    background: none;
+    border: none;
+    font-size: 14px;
+    cursor: pointer;
+    color: #6c757d;
+    padding: 2px 6px;
+}
+
+.synonyms-content {
+    padding: 12px;
+    max-height: 400px;
+    overflow-y: auto;
+    transition: all 0.3s ease;
+}
+
+.synonyms-content.collapsed {
+    display: none;
+}
+
+/* Paired synonym display (question + gist grouped) */
+.synonym-pair {
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    background: #fff;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    border-left: 3px solid #007bff;
+}
+
+.synonym-pair:last-child {
+    margin-bottom: 0;
+}
+
+.synonym-question {
+    font-size: 13px;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.synonym-gist {
+    font-size: 12px;
+    color: #6c757d;
+    font-style: italic;
+}
+
+.synonym-score {
+    font-size: 11px;
+    color: #28a745;
+    float: right;
+}
+
+.no-synonyms {
+    color: #6c757d;
+    font-style: italic;
+    text-align: center;
+    padding: 20px;
+}

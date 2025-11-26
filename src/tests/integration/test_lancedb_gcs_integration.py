@@ -93,7 +93,7 @@ class TestLanceDBGCSIntegration:
         )
 
         # Add snapshot to GCS
-        result = gcs_manager.add_snapshot( snapshot )
+        result = gcs_manager.save_snapshot( snapshot )
 
         assert result is True
 
@@ -111,7 +111,7 @@ class TestLanceDBGCSIntegration:
             code=["sorted_list = sorted(my_list)"],
             debug=False
         )
-        gcs_manager.add_snapshot( snapshot )
+        gcs_manager.save_snapshot( snapshot )
 
         time.sleep( 2 )
 
@@ -135,7 +135,7 @@ class TestLanceDBGCSIntegration:
             debug=False
         )
 
-        manager1.add_snapshot( snapshot )
+        manager1.save_snapshot( snapshot )
 
         del manager1  # Destroy first manager
 
@@ -168,7 +168,7 @@ class TestLanceDBGCSIntegration:
                 answer=f"Answer to {q}",
                 debug=False
             )
-            gcs_manager.add_snapshot( snapshot )
+            gcs_manager.save_snapshot( snapshot )
 
         time.sleep( 2 )
 
@@ -225,7 +225,7 @@ class TestLanceDBGCSIntegration:
             debug=False
         )
 
-        gcs_manager.add_snapshot( original_snapshot )
+        gcs_manager.save_snapshot( original_snapshot )
         time.sleep( 2 )
 
         # Update with same question but different answer
@@ -236,7 +236,7 @@ class TestLanceDBGCSIntegration:
             debug=False
         )
 
-        result = gcs_manager.add_snapshot( updated_snapshot )
+        result = gcs_manager.save_snapshot( updated_snapshot )
         assert result is True
 
         time.sleep( 2 )
@@ -255,7 +255,7 @@ class TestLanceDBGCSIntegration:
             debug=False
         )
 
-        result = gcs_manager.add_snapshot( snapshot )
+        result = gcs_manager.save_snapshot( snapshot )
         assert result is True
 
         time.sleep( 2 )

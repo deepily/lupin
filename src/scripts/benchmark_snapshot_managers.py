@@ -104,7 +104,7 @@ def benchmark_manager(manager, manager_name: str) -> Dict[str, float]:
     start = time.time()
     for i in range(5):
         snapshot = create_test_snapshot(f"{int(time.time())}_{i}")
-        success = manager.add_snapshot(snapshot)
+        success = manager.save_snapshot(snapshot)
         if success:
             test_snapshots.append(snapshot.question)
     results['add_snapshots'] = (time.time() - start) * 1000

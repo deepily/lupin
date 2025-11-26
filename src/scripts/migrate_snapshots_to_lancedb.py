@@ -154,7 +154,7 @@ def migrate_snapshots( source_path: str,
                     
                     try:
                         # Add to target database
-                        success = target_manager.add_snapshot( snapshot )
+                        success = target_manager.save_snapshot( snapshot )
                         
                         if success:
                             snapshots_migrated += 1
@@ -197,7 +197,7 @@ def migrate_snapshots( source_path: str,
                 for similarity, snapshot in snapshots:
                     if snapshot.question not in migrated_questions:
                         try:
-                            success = target_manager.add_snapshot( snapshot )
+                            success = target_manager.save_snapshot( snapshot )
                             
                             if success:
                                 snapshots_migrated += 1

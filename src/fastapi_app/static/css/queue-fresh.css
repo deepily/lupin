@@ -644,3 +644,30 @@
             font-size: 12px;
             margin-top: 8px;
         }
+
+        /* Q&A Timing Metrics Display */
+        .qa-metrics {
+            display: flex;
+            gap: 16px;
+            margin: 8px 0;
+            padding: 6px 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: monospace;
+        }
+
+        .qa-metrics .metric {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .qa-metrics .metric-label {
+            color: #6c757d;
+            font-weight: 500;
+        }
+
+        .qa-metrics #metric-ttt { color: #28a745; }   /* Green for text */
+        .qa-metrics #metric-ttfa { color: #007bff; }  /* Blue for audio */
+        .qa-metrics #metric-rtt { color: #6f42c1; }   /* Purple for total */

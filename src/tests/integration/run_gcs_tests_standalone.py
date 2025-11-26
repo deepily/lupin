@@ -67,7 +67,7 @@ def run_gcs_tests():
         )
 
         print( f"Adding snapshot: '{snapshot1.question}'" )
-        result = manager.add_snapshot( snapshot1 )
+        result = manager.save_snapshot( snapshot1 )
         print( f"Add result: {result}" )
 
         time.sleep( 2 )  # GCS consistency delay
@@ -99,7 +99,7 @@ def run_gcs_tests():
         )
 
         print( f"Adding snapshot: '{snapshot2.question}'" )
-        result = manager.add_snapshot( snapshot2 )
+        result = manager.save_snapshot( snapshot2 )
         print( f"Add result: {result}" )
 
         time.sleep( 2 )
@@ -137,7 +137,7 @@ def run_gcs_tests():
                 debug=False
             )
             print( f"Adding: '{q}'" )
-            manager.add_snapshot( snapshot )
+            manager.save_snapshot( snapshot )
 
         time.sleep( 2 )
 

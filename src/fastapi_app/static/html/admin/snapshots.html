@@ -105,6 +105,16 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Collapsible Synonyms Section (ABOVE Runtime Statistics) -->
+                    <div class="detail-field synonyms-section">
+                        <div class="synonyms-header" onclick="toggleSynonyms()">
+                            <label>Synonyms (<span id="synonyms-count">0</span>):</label>
+                            <button class="toggle-btn" id="synonyms-toggle">▶</button>
+                        </div>
+                        <div id="synonyms-content" class="synonyms-content collapsed">
+                            <div id="synonyms-list"></div>
+                        </div>
+                    </div>
                     <div class="detail-field">
                         <label>Runtime Statistics:</label>
                         <pre id="detail-runtime-stats" class="code-block"></pre>

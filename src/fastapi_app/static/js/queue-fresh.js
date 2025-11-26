@@ -70,6 +70,12 @@ class FreshQueueUI {
         // Job completion debugging
         this.lastQASubmissionTime = null;
         this.lastQASubmissionText = null;
+
+        // Timing metrics for UI display
+        this.metricsSubmitTime = null;      // When user clicks submit
+        this.metricsTextTime = null;        // When text response received
+        this.metricsTTSStartTime = null;    // When TTS request begins
+        this.metricsFirstAudioTime = null;  // When first audio plays
         
         // Notification state management
         this.notificationState = {
@@ -1468,6 +1474,13 @@ class FreshQueueUI {
             this.lastQASubmissionTime = Date.now();
             this.lastQASubmissionText = text;
 
+            // Reset and capture timing metrics for UI display
+            this.metricsSubmitTime = Date.now();
+            this.metricsTextTime = null;
+            this.metricsTTSStartTime = null;
+            this.metricsFirstAudioTime = null;
+            this.resetMetricsDisplay();
+
             // Ensure token is valid before API call (auto-refresh if expired)
             await this.ensureValidToken();
 
@@ -1643,7 +1656,11 @@ class FreshQueueUI {
         
         // Update response area with job completion
         this.updateElement( "response-text", `Job completed: ${actualText || 'No text provided'}` );
-        
+
+        // Capture TTT (Time to Text) metric
+        this.metricsTextTime = Date.now();
+        this.updateMetricsTTT();
+
         // Store job completion data in cache for replay functionality
         this.storeJobCompletionForReplay( envelope, actualText );
         
@@ -1859,7 +1876,8 @@ class FreshQueueUI {
             this.audioChunks = [];
             this.audioSources = [];
             this.startTime = Date.now(); // Track timing for both modes
-            
+            this.metricsTTSStartTime = Date.now(); // Capture TTS start for TTFA metric
+
         } catch ( error ) {
             this.error( "Instant TTS request failed:", error );
             throw error;
@@ -1875,6 +1893,7 @@ class FreshQueueUI {
         this.audioChunks = [];
         this.audioSources = [];
         this.startTime = Date.now(); // Track timing for reliable mode
+        this.metricsTTSStartTime = Date.now(); // Capture TTS start for TTFA metric
 
         try {
             // Ensure token is valid before API call (auto-refresh if expired)
@@ -2077,12 +2096,22 @@ class FreshQueueUI {
                 const timeToFirstPlayback = Date.now() - this.startTime;
                 this.log( `⚡ Time to first playback (instant): ${timeToFirstPlayback}ms` );
                 this.firstChunkPlayed = true;
+
+                // Capture TTFA and RTT metrics for UI display
+                this.metricsFirstAudioTime = Date.now();
+                this.updateMetricsTTFA();
+                this.updateMetricsRTT();
             }
         }).catch( e => {
             if ( !this.firstChunkPlayed && this.startTime ) {
                 const timeToFirstPlayback = Date.now() - this.startTime;
                 this.log( `⚡ Time to first playback attempt (instant): ${timeToFirstPlayback}ms - Play failed: ${e.message}` );
                 this.firstChunkPlayed = true; // Mark as attempted even on failure
+
+                // Still capture metrics even on failure (shows attempt timing)
+                this.metricsFirstAudioTime = Date.now();
+                this.updateMetricsTTFA();
+                this.updateMetricsRTT();
             }
             this.playNextSequentialChunk(); // Continue on play failure
         });
@@ -2184,11 +2213,21 @@ class FreshQueueUI {
             this.log( `Reliable mode: Audio playing! (${totalTime.toFixed(1)}s total collection time)` );
             this.isPlaying = true;
             this.currentAudio = this.audioElement;
+
+            // Capture TTFA and RTT metrics for UI display
+            this.metricsFirstAudioTime = Date.now();
+            this.updateMetricsTTFA();
+            this.updateMetricsRTT();
         } catch ( playError ) {
             // Handle autoplay prevention gracefully (like original)
             const timeToFirstPlayback = Date.now() - this.startTime;
             this.log( `⚡ Time to first playback attempt (reliable): ${timeToFirstPlayback}ms - Autoplay prevented:`, playError.message );
             this.log( `Reliable mode: Audio ready (${totalTime.toFixed(1)}s total collection time) - autoplay prevented` );
+
+            // Still capture metrics even on autoplay prevention (shows attempt timing)
+            this.metricsFirstAudioTime = Date.now();
+            this.updateMetricsTTFA();
+            this.updateMetricsRTT();
         }
 
         // Clean up when ended (like original HybridTTS)
@@ -2396,9 +2435,48 @@ class FreshQueueUI {
     }
     
     // ========================================
+    // TIMING METRICS DISPLAY
+    // ========================================
+
+    resetMetricsDisplay() {
+        const metricsDiv = document.getElementById( 'qa-metrics' );
+        if ( metricsDiv ) {
+            metricsDiv.style.display = 'none';
+            document.getElementById( 'metric-ttt' ).textContent = '--';
+            document.getElementById( 'metric-ttfa' ).textContent = '--';
+            document.getElementById( 'metric-rtt' ).textContent = '--';
+        }
+    }
+
+    updateMetricsTTT() {
+        if ( this.metricsSubmitTime && this.metricsTextTime ) {
+            const ttt = this.metricsTextTime - this.metricsSubmitTime;
+            document.getElementById( 'metric-ttt' ).textContent = `${ttt}ms`;
+            document.getElementById( 'qa-metrics' ).style.display = 'flex';
+        }
+    }
+
+    updateMetricsTTFA() {
+        // TTFA = TTS request start → first audio plays (audio generation only)
+        if ( this.metricsTTSStartTime && this.metricsFirstAudioTime ) {
+            const ttfa = this.metricsFirstAudioTime - this.metricsTTSStartTime;
+            document.getElementById( 'metric-ttfa' ).textContent = `${ttfa}ms`;
+            document.getElementById( 'qa-metrics' ).style.display = 'flex';
+        }
+    }
+
+    updateMetricsRTT() {
+        // RTT = Submit → first audio plays (full round-trip ≈ TTT + TTFA)
+        if ( this.metricsSubmitTime && this.metricsFirstAudioTime ) {
+            const rtt = this.metricsFirstAudioTime - this.metricsSubmitTime;
+            document.getElementById( 'metric-rtt' ).textContent = `${rtt}ms`;
+        }
+    }
+
+    // ========================================
     // CONNECTION MANAGEMENT
     // ========================================
-    
+
     scheduleReconnect() {
         if ( this.isConnecting ) {
             return; // Already attempting to reconnect

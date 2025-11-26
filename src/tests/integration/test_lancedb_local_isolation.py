@@ -102,7 +102,7 @@ class TestLanceDBLocalIsolation:
         )
 
         print( f"Inserting snapshot: '{snapshot.question}'" )
-        result = local_manager.add_snapshot( snapshot )
+        result = local_manager.save_snapshot( snapshot )
         print( f"Insert result: {result}" )
 
         # Small delay (same as GCS tests)
@@ -147,7 +147,7 @@ class TestLanceDBLocalIsolation:
         )
 
         print( f"Inserting snapshot: '{snapshot.question}'" )
-        manager1.add_snapshot( snapshot )
+        manager1.save_snapshot( snapshot )
 
         print( "Deleting first manager..." )
         del manager1
@@ -196,7 +196,7 @@ class TestLanceDBLocalIsolation:
         )
 
         print( f"Inserting snapshot: '{snapshot.question}'" )
-        result = local_manager.add_snapshot( snapshot )
+        result = local_manager.save_snapshot( snapshot )
         print( f"Insert result: {result}" )
 
         time.sleep( 2 )
@@ -237,7 +237,7 @@ class TestLanceDBLocalIsolation:
                 debug=False
             )
             print( f"Inserting: '{q}'" )
-            local_manager.add_snapshot( snapshot )
+            local_manager.save_snapshot( snapshot )
 
         time.sleep( 2 )
 
@@ -331,7 +331,7 @@ def run_standalone_tests():
         )
 
         print( f"Inserting snapshot: '{snapshot1.question}'" )
-        result1 = manager.add_snapshot( snapshot1 )
+        result1 = manager.save_snapshot( snapshot1 )
         print( f"Insert result: {result1}" )
 
         time.sleep( 2 )
@@ -357,7 +357,7 @@ def run_standalone_tests():
         )
 
         print( f"Inserting snapshot: '{snapshot2.question}'" )
-        result2 = manager.add_snapshot( snapshot2 )
+        result2 = manager.save_snapshot( snapshot2 )
         print( f"Insert result: {result2}" )
 
         time.sleep( 2 )
@@ -390,7 +390,7 @@ def run_standalone_tests():
                 debug=False
             )
             print( f"Inserting: '{q}'" )
-            manager.add_snapshot( snapshot )
+            manager.save_snapshot( snapshot )
 
         time.sleep( 2 )
 

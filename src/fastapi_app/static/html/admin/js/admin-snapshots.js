@@ -252,6 +252,53 @@ class AdminSnapshotsDashboard {
             document.getElementById( 'detail-answer' ).textContent = snapshot.answer || 'No answer';
             document.getElementById( 'detail-answer-conversational' ).textContent = snapshot.answer_conversational || 'No conversational answer';
 
+            // Populate synonyms section (BEFORE runtime stats in display)
+            // Note: Both dicts are { text: score } - questions and gists are KEYS, scores are VALUES
+            const synonymQuestions = snapshot.synonymous_questions || {};
+            const synonymGists = snapshot.synonymous_question_gists || {};
+            const questionKeys = Object.keys( synonymQuestions );
+            const gistKeys = Object.keys( synonymGists );
+
+            // Total count is max of questions and gists (they're typically paired by index)
+            const totalCount = Math.max( questionKeys.length, gistKeys.length );
+            document.getElementById( 'synonyms-count' ).textContent = totalCount;
+
+            const synonymsList = document.getElementById( 'synonyms-list' );
+            if ( totalCount === 0 ) {
+                synonymsList.innerHTML = '<div class="no-synonyms">No synonyms recorded</div>';
+            } else {
+                // Pair questions with gists by index (they're added together)
+                const pairs = [];
+                for ( let i = 0; i < totalCount; i++ ) {
+                    const question = questionKeys[i] || null;
+                    const gist = gistKeys[i] || null;
+                    const score = question ? synonymQuestions[question] : ( gist ? synonymGists[gist] : 0 );
+                    pairs.push( { question, gist, score } );
+                }
+
+                synonymsList.innerHTML = pairs.map( pair => {
+                    // Scores are already 0-100 percentages, no need to multiply
+                    const scorePercent = pair.score.toFixed( 1 );
+                    const questionHtml = pair.question
+                        ? `<div class="synonym-question">${escapeHtml( pair.question )}</div>`
+                        : '';
+                    const gistHtml = pair.gist
+                        ? `<div class="synonym-gist">${escapeHtml( pair.gist )}</div>`
+                        : '';
+                    return `
+                        <div class="synonym-pair">
+                            <span class="synonym-score">${scorePercent}%</span>
+                            ${questionHtml}
+                            ${gistHtml}
+                        </div>
+                    `;
+                }).join( '' );
+            }
+
+            // Reset to collapsed state when opening new detail
+            document.getElementById( 'synonyms-content' ).classList.add( 'collapsed' );
+            document.getElementById( 'synonyms-toggle' ).textContent = '▶';
+
             // Format runtime statistics as pretty JSON
             const runtimeStats = snapshot.runtime_stats || {};
             const statsFormatted = JSON.stringify( runtimeStats, null, 2 );
@@ -336,6 +383,32 @@ class AdminSnapshotsDashboard {
     hideError() {
         document.getElementById( 'search-error' ).style.display = 'none';
     }
+}
+
+// ============================================================================
+// Synonyms Toggle Function (global for onclick handler)
+// ============================================================================
+
+function toggleSynonyms() {
+    const content = document.getElementById( 'synonyms-content' );
+    const toggle = document.getElementById( 'synonyms-toggle' );
+
+    if ( content.classList.contains( 'collapsed' ) ) {
+        content.classList.remove( 'collapsed' );
+        toggle.textContent = '▼';
+    } else {
+        content.classList.add( 'collapsed' );
+        toggle.textContent = '▶';
+    }
+}
+
+/**
+ * Escape HTML entities to prevent XSS.
+ */
+function escapeHtml( text ) {
+    const div = document.createElement( 'div' );
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // Initialize on page load
