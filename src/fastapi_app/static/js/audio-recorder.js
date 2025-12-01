@@ -270,8 +270,8 @@ class AudioRecorder {
             this._metrics.uploadCompleteTime = performance.now();
             this.log( 'Transcription response:', result );
 
-            // Extract transcription text (prefer raw_transcription for full punctuation/capitalization)
-            const transcription = result.raw_transcription || result.transcription || result.text || '';
+            // Extract transcription text (prefer processed transcription over raw)
+            const transcription = result.transcription || result.text || '';
 
             if ( !transcription ) {
                 throw new Error( 'No transcription returned from server' );

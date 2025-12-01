@@ -671,3 +671,44 @@
         .qa-metrics #metric-ttt { color: #28a745; }   /* Green for text */
         .qa-metrics #metric-ttfa { color: #007bff; }  /* Blue for audio */
         .qa-metrics #metric-rtt { color: #6f42c1; }   /* Purple for total */
+
+        /* STT Recording Button for Q&A Input */
+        .qa-stt-button {
+            padding: 8px 16px;
+            border: 2px solid #007bff;
+            border-radius: 4px;
+            background-color: white;
+            color: #007bff;
+            cursor: pointer;
+            font-size: 18px;
+            line-height: 1;
+            transition: all 0.2s;
+            white-space: nowrap;
+            min-width: 60px;
+            text-align: center;
+        }
+
+        .qa-stt-button:hover:not(:disabled) {
+            background-color: #f0f8ff;
+            border-color: #0056b3;
+        }
+
+        .qa-stt-button.recording {
+            background-color: #dc3545;
+            border-color: #dc3545;
+            color: white;
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        .qa-stt-button.processing {
+            background-color: #ffc107;
+            border-color: #ffc107;
+            color: white;
+            cursor: wait;
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        .qa-stt-button:disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+        }

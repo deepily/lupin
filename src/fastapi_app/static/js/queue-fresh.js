@@ -135,6 +135,11 @@ class FreshQueueUI {
         this.WORK_HOURS_START = 8;              // 8 AM
         this.WORK_HOURS_END = 24;               // Midnight (12 AM next day)
 
+        // STT for Q&A input
+        this.qaAudioRecorder = null;
+        this.qaRecordingInterval = null;
+        this.qaRecordingCancelListener = null;
+
         // Initialize
         this.init();
     }
@@ -179,9 +184,12 @@ class FreshQueueUI {
             
             // Connect WebSockets
             await this.connectWebSockets();
-            
+
+            // Auto-focus STT button for spacebar activation
+            document.getElementById( 'qa-stt-button' ).focus();
+
             this.log( "FreshQueueUI initialization complete" );
-            
+
         } catch ( error ) {
             this.error( "Initialization failed:", error );
             this.updateStatus( "auth-status", "Initialization failed", "error" );
@@ -963,7 +971,20 @@ class FreshQueueUI {
         document.getElementById( 'submit-qa' ).addEventListener( 'click', () => {
             this.submitQA();
         });
-        
+
+        // Q&A STT button click
+        document.getElementById( 'qa-stt-button' ).addEventListener( 'click', () => {
+            this.handleQASTTButtonClick();
+        });
+
+        // Ctrl+R shortcut for Q&A STT recording
+        document.addEventListener( 'keydown', ( e ) => {
+            if ( e.ctrlKey && e.key === 'r' ) {
+                e.preventDefault();  // Prevent browser refresh
+                this.handleQASTTButtonClick();
+            }
+        });
+
         // Test buttons
         document.getElementById( 'test-instant-tts' ).addEventListener( 'click', () => {
             this.testTTS( this.TTS_MODE_INSTANT );
@@ -1583,7 +1604,153 @@ class FreshQueueUI {
         // Call existing notification handler (reuse all existing logic)
         this.handleNotificationUpdate( envelope );
     }
-    
+
+    // ========================================
+    // Q&A STT (Speech-to-Text) FUNCTIONALITY
+    // ========================================
+
+    async handleQASTTButtonClick() {
+        const button = document.getElementById( 'qa-stt-button' );
+
+        // If already recording, stop it
+        if ( this.qaAudioRecorder && this.qaAudioRecorder.isRecording ) {
+            await this.qaAudioRecorder.stopRecording();
+            return;
+        }
+
+        // If processing, ignore click
+        if ( this.qaAudioRecorder && this.qaAudioRecorder.isProcessing ) {
+            return;
+        }
+
+        // Start new recording
+        await this.startQAVoiceInput();
+    }
+
+    async startQAVoiceInput() {
+        const button = document.getElementById( 'qa-stt-button' );
+        const textInput = document.getElementById( 'qa-input' );
+
+        if ( !this.authToken ) {
+            alert( 'Please log in to use voice input' );
+            return;
+        }
+
+        try {
+            // Create new AudioRecorder instance
+            this.qaAudioRecorder = new AudioRecorder( {
+                uploadEndpoint: '/api/upload-and-transcribe-mp3',
+                authToken: this.authToken,
+
+                onRecordingStart: () => {
+                    button.classList.add( 'recording' );
+                    button.textContent = '🔴';
+                    this._startQADurationCounter( button );
+                    this._attachQARecordingCancelListener( button );
+                },
+
+                onRecordingStop: ( audioBlob ) => {
+                    this._stopQADurationCounter();
+                    this._detachQARecordingCancelListener();
+                    button.classList.remove( 'recording' );
+                    button.classList.add( 'processing' );
+                    button.textContent = '⏳';
+                    button.disabled = true;
+                },
+
+                onTranscription: ( text ) => {
+                    // Fill text input with transcription
+                    textInput.value = text;
+                    textInput.focus();
+                    textInput.select();
+
+                    // Reset button UI
+                    button.classList.remove( 'processing' );
+                    button.textContent = '🎤';
+                    button.disabled = false;
+                    this._detachQARecordingCancelListener();
+                },
+
+                onError: ( error ) => {
+                    alert( `Recording error: ${error.message}` );
+
+                    // Reset button UI
+                    button.classList.remove( 'recording', 'processing' );
+                    button.textContent = '🎤';
+                    button.disabled = false;
+                    this._detachQARecordingCancelListener();
+                },
+
+                debug: this.debug
+            } );
+
+            await this.qaAudioRecorder.startRecording();
+
+        } catch ( error ) {
+            console.error( 'Failed to start Q&A voice input:', error );
+            alert( `Failed to start recording: ${error.message}` );
+
+            // Reset UI
+            button.classList.remove( 'recording', 'processing' );
+            button.textContent = '🎤';
+            button.disabled = false;
+        }
+    }
+
+    _startQADurationCounter( button ) {
+        const startTime = Date.now();
+        const MAX_DURATION_SECONDS = 30;
+
+        this.qaRecordingInterval = setInterval( () => {
+            const elapsed = Math.floor( ( Date.now() - startTime ) / 1000 );
+            const icon = elapsed >= 25 ? '🟡' : '🔴';
+            button.textContent = `${icon} ${elapsed}/${MAX_DURATION_SECONDS}s`;
+        }, 1000 );
+    }
+
+    _stopQADurationCounter() {
+        if ( this.qaRecordingInterval ) {
+            clearInterval( this.qaRecordingInterval );
+            this.qaRecordingInterval = null;
+        }
+    }
+
+    _attachQARecordingCancelListener( button ) {
+        this.qaRecordingCancelListener = ( event ) => {
+            if ( event.key === 'Escape' ) {
+                event.preventDefault();
+                event.stopPropagation();
+                this._cancelQARecording( button );
+            }
+        };
+        document.addEventListener( 'keydown', this.qaRecordingCancelListener );
+    }
+
+    _detachQARecordingCancelListener() {
+        if ( this.qaRecordingCancelListener ) {
+            document.removeEventListener( 'keydown', this.qaRecordingCancelListener );
+            this.qaRecordingCancelListener = null;
+        }
+    }
+
+    _cancelQARecording( button ) {
+        // Stop duration counter
+        this._stopQADurationCounter();
+
+        // Destroy recorder without uploading
+        if ( this.qaAudioRecorder ) {
+            this.qaAudioRecorder._cancelling = true;  // Signal cancellation
+            this.qaAudioRecorder.destroy();
+            this.qaAudioRecorder = null;
+        }
+
+        // Reset UI
+        button.classList.remove( 'recording', 'processing' );
+        button.textContent = '🎤';
+        button.disabled = false;
+        this._detachQARecordingCancelListener();
+    }
+
     handleJobCompletion( envelope ) {
         // Add event deduplication to prevent duplicate processing
         const eventId = `${envelope.type}_${envelope.timestamp}`;

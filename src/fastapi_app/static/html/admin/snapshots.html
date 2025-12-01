@@ -29,6 +29,7 @@
         <!-- Search Section -->
         <div class="search-section">
             <div class="search-bar">
+                <button id="search-stt-button" type="button" class="search-stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
                 <input
                     type="text"
                     id="search-input"
@@ -48,6 +49,7 @@
             <table id="results-table" class="data-table">
                 <thead>
                     <tr>
+                        <th>Match %</th>
                         <th>Question Preview</th>
                         <th>Gist</th>
                         <th>Created Date</th>
@@ -161,6 +163,7 @@
     </div>
 
     <script src="/static/html/auth/js/auth.js"></script>
+    <script src="/static/js/audio-recorder.js"></script>
     <script src="/static/html/admin/js/admin-snapshots.js"></script>
 </body>
 </html>

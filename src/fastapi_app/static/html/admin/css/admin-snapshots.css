@@ -472,3 +472,81 @@
     text-align: center;
     padding: 20px;
 }
+
+/* Match score column */
+.match-score {
+    font-weight: 600;
+    text-align: center;
+    white-space: nowrap;
+    width: 80px;
+}
+
+.match-score.exact-match {
+    color: #28a745;  /* Green - exact match */
+}
+
+.match-score.high-match {
+    color: #17a2b8;  /* Blue - high similarity */
+}
+
+.match-score.medium-match {
+    color: #ffc107;  /* Yellow/amber - medium */
+}
+
+.match-score.low-match {
+    color: #dc3545;  /* Red - low similarity */
+}
+
+/* ============================================================================
+   STT (Speech-to-Text) Button Styles
+   ============================================================================ */
+
+.search-stt-button {
+    padding: 8px 16px;
+    border: 2px solid #007bff;
+    border-radius: 4px;
+    background-color: white;
+    color: #007bff;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    transition: all 0.2s;
+    white-space: nowrap;
+    min-width: 60px;
+    text-align: center;
+}
+
+.search-stt-button:hover:not(:disabled) {
+    background-color: #f0f8ff;
+    border-color: #0056b3;
+}
+
+.search-stt-button:focus {
+    outline: 2px solid #007bff;
+    outline-offset: 2px;
+}
+
+.search-stt-button.recording {
+    background-color: #dc3545;
+    border-color: #dc3545;
+    color: white;
+    animation: pulse 1s ease-in-out infinite;
+}
+
+.search-stt-button.processing {
+    background-color: #ffc107;
+    border-color: #ffc107;
+    color: white;
+    cursor: wait;
+    animation: pulse 1s ease-in-out infinite;
+}
+
+.search-stt-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}

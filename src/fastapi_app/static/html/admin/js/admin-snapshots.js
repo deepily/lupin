@@ -16,6 +16,11 @@ class AdminSnapshotsDashboard {
         this.isAdmin = false;
         this.searchResults = [];
         this.selectedSnapshotId = null;
+
+        // STT for search input
+        this.searchAudioRecorder = null;
+        this.searchRecordingInterval = null;
+        this.searchRecordingCancelListener = null;
     }
 
     async init() {
@@ -27,6 +32,9 @@ class AdminSnapshotsDashboard {
 
         // Display user info
         this.displayUserInfo();
+
+        // Auto-focus STT button for spacebar activation
+        document.getElementById( 'search-stt-button' ).focus();
     }
 
     async setupAuthentication() {
@@ -62,6 +70,19 @@ class AdminSnapshotsDashboard {
     }
 
     setupEventListeners() {
+        // Search STT button click
+        document.getElementById( 'search-stt-button' ).addEventListener( 'click', () => {
+            this.handleSearchSTTButtonClick();
+        });
+
+        // Ctrl+R shortcut for search STT recording
+        document.addEventListener( 'keydown', ( e ) => {
+            if ( e.ctrlKey && e.key === 'r' ) {
+                e.preventDefault();  // Prevent browser refresh
+                this.handleSearchSTTButtonClick();
+            }
+        });
+
         // Search button
         document.getElementById( 'search-btn' ).addEventListener( 'click', () => {
             this.performSearch();
@@ -187,6 +208,24 @@ class AdminSnapshotsDashboard {
 
     createResultRow( result ) {
         const row = document.createElement( 'tr' );
+
+        // Match percentage (first column)
+        const scoreCell = document.createElement( 'td' );
+        scoreCell.className = 'match-score';
+        const score = result.score || 0;
+        scoreCell.textContent = `${score.toFixed( 1 )}%`;
+
+        // Color-code based on match quality
+        if ( score >= 100 ) {
+            scoreCell.classList.add( 'exact-match' );
+        } else if ( score >= 90 ) {
+            scoreCell.classList.add( 'high-match' );
+        } else if ( score >= 75 ) {
+            scoreCell.classList.add( 'medium-match' );
+        } else {
+            scoreCell.classList.add( 'low-match' );
+        }
+        row.appendChild( scoreCell );
 
         // Question preview
         const questionCell = document.createElement( 'td' );
@@ -382,6 +421,156 @@ class AdminSnapshotsDashboard {
 
     hideError() {
         document.getElementById( 'search-error' ).style.display = 'none';
+    }
+
+    // ============================================================================
+    // STT (Speech-to-Text) Methods for Search Input
+    // ============================================================================
+
+    async handleSearchSTTButtonClick() {
+        const button = document.getElementById( 'search-stt-button' );
+
+        // If already recording, stop it
+        if ( this.searchAudioRecorder && this.searchAudioRecorder.isRecording ) {
+            await this.searchAudioRecorder.stopRecording();
+            return;
+        }
+
+        // If processing, ignore click
+        if ( this.searchAudioRecorder && this.searchAudioRecorder.isProcessing ) {
+            return;
+        }
+
+        // Start new recording
+        await this.startSearchVoiceInput();
+    }
+
+    async startSearchVoiceInput() {
+        const button = document.getElementById( 'search-stt-button' );
+        const textInput = document.getElementById( 'search-input' );
+        const authToken = getAccessToken();
+
+        if ( !authToken ) {
+            alert( 'Please log in to use voice input' );
+            return;
+        }
+
+        try {
+            // Create new AudioRecorder instance
+            this.searchAudioRecorder = new AudioRecorder( {
+                uploadEndpoint: '/api/upload-and-transcribe-mp3',
+                authToken: authToken,
+
+                onRecordingStart: () => {
+                    button.classList.add( 'recording' );
+                    button.textContent = '🔴';
+                    this._startSearchDurationCounter( button );
+                    this._attachSearchRecordingCancelListener( button );
+                },
+
+                onRecordingStop: ( audioBlob ) => {
+                    this._stopSearchDurationCounter();
+                    this._detachSearchRecordingCancelListener();
+                    button.classList.remove( 'recording' );
+                    button.classList.add( 'processing' );
+                    button.textContent = '⏳';
+                    button.disabled = true;
+                },
+
+                onTranscription: ( text ) => {
+                    // Fill text input with transcription
+                    textInput.value = text;
+                    textInput.focus();
+                    textInput.select();
+
+                    // Reset button UI
+                    button.classList.remove( 'processing' );
+                    button.textContent = '🎤';
+                    button.disabled = false;
+                    this._detachSearchRecordingCancelListener();
+
+                    // Auto-trigger search after transcription
+                    this.performSearch();
+                },
+
+                onError: ( error ) => {
+                    alert( `Recording error: ${error.message}` );
+
+                    // Reset button UI
+                    button.classList.remove( 'recording', 'processing' );
+                    button.textContent = '🎤';
+                    button.disabled = false;
+                    this._detachSearchRecordingCancelListener();
+                },
+
+                debug: false
+            } );
+
+            await this.searchAudioRecorder.startRecording();
+
+        } catch ( error ) {
+            console.error( 'Failed to start search voice input:', error );
+            alert( `Failed to start recording: ${error.message}` );
+
+            // Reset UI
+            button.classList.remove( 'recording', 'processing' );
+            button.textContent = '🎤';
+            button.disabled = false;
+        }
+    }
+
+    _startSearchDurationCounter( button ) {
+        const startTime = Date.now();
+        const MAX_DURATION_SECONDS = 30;
+
+        this.searchRecordingInterval = setInterval( () => {
+            const elapsed = Math.floor( ( Date.now() - startTime ) / 1000 );
+            const icon = elapsed >= 25 ? '🟡' : '🔴';
+            button.textContent = `${icon} ${elapsed}/${MAX_DURATION_SECONDS}s`;
+        }, 1000 );
+    }
+
+    _stopSearchDurationCounter() {
+        if ( this.searchRecordingInterval ) {
+            clearInterval( this.searchRecordingInterval );
+            this.searchRecordingInterval = null;
+        }
+    }
+
+    _attachSearchRecordingCancelListener( button ) {
+        this.searchRecordingCancelListener = ( event ) => {
+            if ( event.key === 'Escape' ) {
+                event.preventDefault();
+                event.stopPropagation();
+                this._cancelSearchRecording( button );
+            }
+        };
+        document.addEventListener( 'keydown', this.searchRecordingCancelListener );
+    }
+
+    _detachSearchRecordingCancelListener() {
+        if ( this.searchRecordingCancelListener ) {
+            document.removeEventListener( 'keydown', this.searchRecordingCancelListener );
+            this.searchRecordingCancelListener = null;
+        }
+    }
+
+    _cancelSearchRecording( button ) {
+        // Stop duration counter
+        this._stopSearchDurationCounter();
+
+        // Destroy recorder without uploading
+        if ( this.searchAudioRecorder ) {
+            this.searchAudioRecorder._cancelling = true;  // Signal cancellation
+            this.searchAudioRecorder.destroy();
+            this.searchAudioRecorder = null;
+        }
+
+        // Reset UI
+        button.classList.remove( 'recording', 'processing' );
+        button.textContent = '🎤';
+        button.disabled = false;
+        this._detachSearchRecordingCancelListener();
     }
 }
 
