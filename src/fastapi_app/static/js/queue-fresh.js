@@ -1475,14 +1475,23 @@ class FreshQueueUI {
         const inputElement = document.getElementById( 'qa-input' );
         const submitButton = document.getElementById( 'submit-qa' );
         const loadingSpinner = document.getElementById( 'submit-loading' );
-        
+
         const text = inputElement.value.trim();
-        
+
         if ( !text ) {
             this.error( "Please enter some text to submit" );
             return;
         }
-        
+
+        // DEBOUNCE: Prevent rapid-fire double submissions
+        const now = Date.now();
+        const debounceMs = 2000;  // 2 second cooldown between submissions
+        if ( this._lastSubmitTime && ( now - this._lastSubmitTime ) < debounceMs ) {
+            this.log( `[DEBOUNCE] Ignoring rapid submission (${now - this._lastSubmitTime}ms since last)` );
+            return;
+        }
+        this._lastSubmitTime = now;
+
         try {
             // Update UI
             submitButton.disabled = true;

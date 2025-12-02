@@ -21,6 +21,9 @@ class AdminSnapshotsDashboard {
         this.searchAudioRecorder = null;
         this.searchRecordingInterval = null;
         this.searchRecordingCancelListener = null;
+
+        // Detail modal ESC key listener
+        this.detailModalEscListener = null;
     }
 
     async init() {
@@ -140,8 +143,12 @@ class AdminSnapshotsDashboard {
         this.hideError();
         this.showLoading();
 
+        // Read filter values
+        const threshold = document.getElementById( 'threshold-select' ).value;
+        const limit = document.getElementById( 'limit-select' ).value;
+
         try {
-            const response = await this.apiCall( `/admin/snapshots/search?q=${encodeURIComponent( query )}` );
+            const response = await this.apiCall( `/admin/snapshots/search?q=${encodeURIComponent( query )}&threshold=${threshold}&limit=${limit}` );
 
             this.searchResults = response.results;
             this.displayResults();
@@ -242,6 +249,13 @@ class AdminSnapshotsDashboard {
         const dateCell = document.createElement( 'td' );
         dateCell.textContent = this.formatDate( result.created_date );
         row.appendChild( dateCell );
+
+        // ID hash (first 8 chars for compact display)
+        const idCell = document.createElement( 'td' );
+        idCell.className = 'id-hash';
+        idCell.textContent = result.id_hash ? result.id_hash.substring( 0, 8 ) : '?';
+        idCell.title = result.id_hash;  // Full hash on hover
+        row.appendChild( idCell );
 
         // Actions
         const actionsCell = document.createElement( 'td' );
@@ -352,7 +366,8 @@ class AdminSnapshotsDashboard {
             document.getElementById( 'detail-user-id' ).textContent = snapshot.user_id || 'N/A';
             document.getElementById( 'detail-created-date' ).textContent = this.formatDate( snapshot.created_date );
 
-            // Show modal
+            // Attach ESC key listener and show modal
+            this._attachDetailModalEscListener();
             document.getElementById( 'detail-modal' ).style.display = 'flex';
 
         } catch ( error ) {
@@ -361,6 +376,7 @@ class AdminSnapshotsDashboard {
     }
 
     closeDetailModal() {
+        this._detachDetailModalEscListener();
         document.getElementById( 'detail-modal' ).style.display = 'none';
     }
 
@@ -571,6 +587,28 @@ class AdminSnapshotsDashboard {
         button.textContent = '🎤';
         button.disabled = false;
         this._detachSearchRecordingCancelListener();
+    }
+
+    // ============================================================================
+    // Detail Modal ESC Key Handler
+    // ============================================================================
+
+    _attachDetailModalEscListener() {
+        this.detailModalEscListener = ( event ) => {
+            if ( event.key === 'Escape' ) {
+                event.preventDefault();
+                event.stopPropagation();
+                this.closeDetailModal();
+            }
+        };
+        document.addEventListener( 'keydown', this.detailModalEscListener );
+    }
+
+    _detachDetailModalEscListener() {
+        if ( this.detailModalEscListener ) {
+            document.removeEventListener( 'keydown', this.detailModalEscListener );
+            this.detailModalEscListener = null;
+        }
     }
 }
 
