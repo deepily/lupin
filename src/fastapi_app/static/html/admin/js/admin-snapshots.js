@@ -24,6 +24,10 @@ class AdminSnapshotsDashboard {
 
         // Detail modal ESC key listener
         this.detailModalEscListener = null;
+
+        // Similarity modal state
+        this.similarityModalEscListener = null;
+        this.currentDetailIdHash = null;  // Track which snapshot's detail modal is open
     }
 
     async init() {
@@ -129,6 +133,22 @@ class AdminSnapshotsDashboard {
         // Confirm delete button
         document.getElementById( 'confirm-delete-btn' ).addEventListener( 'click', () => {
             this.deleteSnapshot();
+        });
+
+        // Find Similar button (in detail modal)
+        document.getElementById( 'find-similar-btn' ).addEventListener( 'click', () => {
+            if ( this.currentDetailIdHash ) {
+                this.showSimilarSnapshots( this.currentDetailIdHash );
+            }
+        });
+
+        // Similarity modal close buttons
+        document.getElementById( 'close-similarity-btn' ).addEventListener( 'click', () => {
+            this.closeSimilarityModal();
+        });
+
+        document.querySelector( '#similarity-modal .modal-overlay' ).addEventListener( 'click', () => {
+            this.closeSimilarityModal();
         });
     }
 
@@ -245,6 +265,36 @@ class AdminSnapshotsDashboard {
         gistCell.textContent = result.question_gist;
         row.appendChild( gistCell );
 
+        // Preview icons (code explanation + code)
+        const previewCell = document.createElement( 'td' );
+        previewCell.className = 'preview-icons';
+
+        // Code explanation icon (📝)
+        const gistIcon = document.createElement( 'span' );
+        gistIcon.className = 'preview-icon';
+        gistIcon.textContent = '📝';
+        gistIcon.title = 'View code explanation';
+        gistIcon.setAttribute( 'data-id', result.id_hash );
+        gistIcon.onclick = ( e ) => {
+            e.stopPropagation();
+            this.showPreviewPopover( result.id_hash, 'gist', e.target );
+        };
+        previewCell.appendChild( gistIcon );
+
+        // Code preview icon (💻)
+        const codeIcon = document.createElement( 'span' );
+        codeIcon.className = 'preview-icon';
+        codeIcon.textContent = '💻';
+        codeIcon.title = 'View code preview';
+        codeIcon.setAttribute( 'data-id', result.id_hash );
+        codeIcon.onclick = ( e ) => {
+            e.stopPropagation();
+            this.showPreviewPopover( result.id_hash, 'code', e.target );
+        };
+        previewCell.appendChild( codeIcon );
+
+        row.appendChild( previewCell );
+
         // Created date
         const dateCell = document.createElement( 'td' );
         dateCell.textContent = this.formatDate( result.created_date );
@@ -293,6 +343,9 @@ class AdminSnapshotsDashboard {
     async viewDetails( idHash ) {
         try {
             const snapshot = await this.apiCall( `/admin/snapshots/${idHash}` );
+
+            // Store current ID hash for "Find Similar" button
+            this.currentDetailIdHash = idHash;
 
             // Set modal title with verbatim question
             const modalTitle = document.getElementById( 'detail-modal-title' );
@@ -362,6 +415,10 @@ class AdminSnapshotsDashboard {
             const codeFormatted = code.length > 0 ? code.join( '\n' ) : 'N/A';
             document.getElementById( 'detail-code' ).textContent = codeFormatted;
 
+            // Code explanation (verbose) and code gist (concise)
+            document.getElementById( 'detail-solution-summary' ).textContent = snapshot.solution_summary || 'N/A';
+            document.getElementById( 'detail-code-gist' ).textContent = snapshot.code_gist || 'N/A';
+
             document.getElementById( 'detail-id-hash' ).textContent = snapshot.id_hash;
             document.getElementById( 'detail-user-id' ).textContent = snapshot.user_id || 'N/A';
             document.getElementById( 'detail-created-date' ).textContent = this.formatDate( snapshot.created_date );
@@ -378,6 +435,7 @@ class AdminSnapshotsDashboard {
     closeDetailModal() {
         this._detachDetailModalEscListener();
         document.getElementById( 'detail-modal' ).style.display = 'none';
+        this.currentDetailIdHash = null;
     }
 
     confirmDelete( idHash, questionPreview ) {
@@ -608,6 +666,346 @@ class AdminSnapshotsDashboard {
         if ( this.detailModalEscListener ) {
             document.removeEventListener( 'keydown', this.detailModalEscListener );
             this.detailModalEscListener = null;
+        }
+    }
+
+    // ============================================================================
+    // Preview Popover (Phase 3: Code Similarity Visualization)
+    // ============================================================================
+
+    /**
+     * Show preview popover for code or explanation.
+     *
+     * @param {string} idHash - Snapshot ID hash
+     * @param {string} type - 'code' or 'gist'
+     * @param {HTMLElement} anchorElement - Element to position popover near
+     */
+    async showPreviewPopover( idHash, type, anchorElement ) {
+        // Close any existing popover
+        this.closePreviewPopover();
+
+        // Mark icon as loading
+        anchorElement.classList.add( 'loading' );
+
+        try {
+            // Fetch preview data from API
+            const preview = await this.apiCall( `/admin/snapshots/${idHash}/preview` );
+
+            // Create popover
+            const popover = this.createPreviewPopover( preview, type );
+
+            // Position popover near anchor element
+            this.positionPopover( popover, anchorElement );
+
+            // Add to document
+            document.body.appendChild( popover );
+
+            // Add overlay to close on outside click
+            const overlay = document.createElement( 'div' );
+            overlay.className = 'preview-popover-overlay';
+            overlay.onclick = () => this.closePreviewPopover();
+            document.body.appendChild( overlay );
+
+            // Store references for cleanup
+            this._currentPopover = popover;
+            this._currentPopoverOverlay = overlay;
+
+            // Add ESC key listener
+            this._popoverEscListener = ( event ) => {
+                if ( event.key === 'Escape' ) {
+                    this.closePreviewPopover();
+                }
+            };
+            document.addEventListener( 'keydown', this._popoverEscListener );
+
+        } catch ( error ) {
+            console.error( 'Failed to fetch preview:', error );
+            // Show error tooltip briefly
+            anchorElement.title = 'Failed to load preview';
+        } finally {
+            anchorElement.classList.remove( 'loading' );
+        }
+    }
+
+    /**
+     * Create the popover DOM element.
+     */
+    createPreviewPopover( preview, type ) {
+        const popover = document.createElement( 'div' );
+        popover.className = 'preview-popover';
+
+        const header = document.createElement( 'div' );
+        header.className = 'preview-popover-header';
+
+        const title = document.createElement( 'h4' );
+        title.textContent = type === 'code' ? '💻 Code Preview' : '📝 Code Explanation';
+        header.appendChild( title );
+
+        const closeBtn = document.createElement( 'button' );
+        closeBtn.className = 'preview-popover-close';
+        closeBtn.textContent = '×';
+        closeBtn.onclick = () => this.closePreviewPopover();
+        header.appendChild( closeBtn );
+
+        popover.appendChild( header );
+
+        const body = document.createElement( 'div' );
+        body.className = 'preview-popover-body';
+
+        if ( type === 'code' ) {
+            // Show code preview
+            if ( preview.code_preview && preview.code_preview.trim() ) {
+                const label = document.createElement( 'span' );
+                label.className = 'preview-popover-label';
+                label.textContent = 'Executable Code';
+                body.appendChild( label );
+
+                const codeBlock = document.createElement( 'div' );
+                codeBlock.className = 'preview-popover-code';
+                codeBlock.textContent = preview.code_preview;
+                body.appendChild( codeBlock );
+            } else {
+                const empty = document.createElement( 'div' );
+                empty.className = 'preview-popover-empty';
+                empty.textContent = 'No code available for this snapshot';
+                body.appendChild( empty );
+            }
+        } else {
+            // Show code explanation (gist)
+            if ( preview.code_gist && preview.code_gist.trim() ) {
+                const label = document.createElement( 'span' );
+                label.className = 'preview-popover-label';
+                label.textContent = 'What the code does';
+                body.appendChild( label );
+
+                const gistBlock = document.createElement( 'div' );
+                gistBlock.className = 'preview-popover-gist';
+                gistBlock.textContent = preview.code_gist;
+                body.appendChild( gistBlock );
+            } else {
+                const empty = document.createElement( 'div' );
+                empty.className = 'preview-popover-empty';
+                empty.textContent = 'No explanation available for this snapshot';
+                body.appendChild( empty );
+            }
+        }
+
+        popover.appendChild( body );
+        return popover;
+    }
+
+    /**
+     * Position popover near the anchor element.
+     */
+    positionPopover( popover, anchorElement ) {
+        const rect = anchorElement.getBoundingClientRect();
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+
+        // Initial position below the anchor
+        let top = rect.bottom + 8;
+        let left = rect.left;
+
+        // Add to DOM temporarily to get dimensions
+        popover.style.visibility = 'hidden';
+        document.body.appendChild( popover );
+        const popoverRect = popover.getBoundingClientRect();
+        document.body.removeChild( popover );
+        popover.style.visibility = 'visible';
+
+        // Adjust if would go off right edge
+        if ( left + popoverRect.width > viewportWidth - 20 ) {
+            left = viewportWidth - popoverRect.width - 20;
+        }
+
+        // Adjust if would go off left edge
+        if ( left < 20 ) {
+            left = 20;
+        }
+
+        // Adjust if would go off bottom edge - show above instead
+        if ( top + popoverRect.height > viewportHeight - 20 ) {
+            top = rect.top - popoverRect.height - 8;
+        }
+
+        // Ensure not off top
+        if ( top < 20 ) {
+            top = 20;
+        }
+
+        popover.style.top = `${top}px`;
+        popover.style.left = `${left}px`;
+    }
+
+    /**
+     * Close and cleanup preview popover.
+     */
+    closePreviewPopover() {
+        if ( this._currentPopover ) {
+            this._currentPopover.remove();
+            this._currentPopover = null;
+        }
+        if ( this._currentPopoverOverlay ) {
+            this._currentPopoverOverlay.remove();
+            this._currentPopoverOverlay = null;
+        }
+        if ( this._popoverEscListener ) {
+            document.removeEventListener( 'keydown', this._popoverEscListener );
+            this._popoverEscListener = null;
+        }
+    }
+
+    // ============================================================================
+    // Similarity Modal (Phase 4: Code Similarity Drill-Down)
+    // ============================================================================
+
+    /**
+     * Show the similarity modal with snapshots similar to the given one.
+     *
+     * @param {string} idHash - The source snapshot's ID hash
+     */
+    async showSimilarSnapshots( idHash ) {
+        // Show loading state
+        document.getElementById( 'similarity-loading' ).style.display = 'block';
+        document.getElementById( 'similarity-content' ).style.display = 'none';
+        document.getElementById( 'similarity-error' ).style.display = 'none';
+
+        // Update modal title
+        document.getElementById( 'similarity-modal-title' ).textContent =
+            `Similar Snapshots for: ${idHash.substring( 0, 8 )}...`;
+
+        // Show modal
+        this._attachSimilarityModalEscListener();
+        document.getElementById( 'similarity-modal' ).style.display = 'flex';
+
+        try {
+            // Fetch similar snapshots from API
+            const response = await this.apiCall( `/admin/snapshots/${idHash}/similar` );
+
+            // Update modal title with source question
+            if ( response.source_snapshot ) {
+                const truncatedSource = response.source_snapshot.length > 60
+                    ? response.source_snapshot.substring( 0, 60 ) + '...'
+                    : response.source_snapshot;
+                document.getElementById( 'similarity-modal-title' ).textContent =
+                    `Similar Snapshots: "${truncatedSource}"`;
+            }
+
+            // Populate code similarity column
+            const codeList = document.getElementById( 'code-similar-list' );
+            const codeCount = document.getElementById( 'code-similar-count' );
+            codeCount.textContent = `Found ${response.total_code_matches} match${response.total_code_matches !== 1 ? 'es' : ''}`;
+
+            if ( response.code_similar.length === 0 ) {
+                codeList.innerHTML = '<div class="similarity-empty">No similar code found</div>';
+            } else {
+                codeList.innerHTML = response.code_similar.map( result =>
+                    this.createSimilarResultItem( result, 'code' )
+                ).join( '' );
+            }
+
+            // Populate explanation similarity column
+            const explList = document.getElementById( 'explanation-similar-list' );
+            const explCount = document.getElementById( 'explanation-similar-count' );
+            explCount.textContent = `Found ${response.total_explanation_matches} match${response.total_explanation_matches !== 1 ? 'es' : ''}`;
+
+            if ( response.explanation_similar.length === 0 ) {
+                explList.innerHTML = '<div class="similarity-empty">No similar explanations found</div>';
+            } else {
+                explList.innerHTML = response.explanation_similar.map( result =>
+                    this.createSimilarResultItem( result, 'explanation' )
+                ).join( '' );
+            }
+
+            // Hide loading, show content
+            document.getElementById( 'similarity-loading' ).style.display = 'none';
+            document.getElementById( 'similarity-content' ).style.display = 'block';
+
+        } catch ( error ) {
+            console.error( 'Failed to fetch similar snapshots:', error );
+            document.getElementById( 'similarity-loading' ).style.display = 'none';
+            document.getElementById( 'similarity-error' ).textContent =
+                `Failed to find similar snapshots: ${error.message}`;
+            document.getElementById( 'similarity-error' ).style.display = 'block';
+        }
+    }
+
+    /**
+     * Create HTML for a single similar result item.
+     *
+     * @param {object} result - The similarity result object
+     * @param {string} type - 'code' or 'explanation'
+     * @returns {string} HTML string
+     */
+    createSimilarResultItem( result, type ) {
+        // Get the similarity score (same field for both types)
+        const score = result.similarity || 0;
+        const scorePercent = score.toFixed( 1 );
+
+        // Determine score class
+        let scoreClass = 'low-match';
+        if ( score >= 100 ) {
+            scoreClass = 'exact-match';
+        } else if ( score >= 90 ) {
+            scoreClass = 'high-match';
+        } else if ( score >= 75 ) {
+            scoreClass = 'medium-match';
+        }
+
+        // Truncate question preview if needed
+        const questionPreview = result.question_preview.length > 80
+            ? result.question_preview.substring( 0, 80 ) + '...'
+            : result.question_preview;
+
+        // Truncate code_gist if present and long
+        const codeGist = result.code_gist
+            ? ( result.code_gist.length > 100
+                ? result.code_gist.substring( 0, 100 ) + '...'
+                : result.code_gist )
+            : '';
+
+        return `
+            <div class="similar-result-item ${scoreClass}" onclick="dashboard.viewDetails('${result.id_hash}'); dashboard.closeSimilarityModal();">
+                <div class="similar-result-header">
+                    <span class="similar-result-score ${scoreClass}">${scorePercent}%</span>
+                    <span class="similar-result-id">${result.id_hash.substring( 0, 8 )}</span>
+                </div>
+                <div class="similar-result-question">${escapeHtml( questionPreview )}</div>
+                ${codeGist ? `<div class="similar-result-gist">${escapeHtml( codeGist )}</div>` : ''}
+                <div class="similar-result-date">${this.formatDate( result.created_date )}</div>
+            </div>
+        `;
+    }
+
+    /**
+     * Close the similarity modal.
+     */
+    closeSimilarityModal() {
+        this._detachSimilarityModalEscListener();
+        document.getElementById( 'similarity-modal' ).style.display = 'none';
+    }
+
+    /**
+     * Attach ESC key listener for similarity modal.
+     */
+    _attachSimilarityModalEscListener() {
+        this.similarityModalEscListener = ( event ) => {
+            if ( event.key === 'Escape' ) {
+                event.preventDefault();
+                event.stopPropagation();
+                this.closeSimilarityModal();
+            }
+        };
+        document.addEventListener( 'keydown', this.similarityModalEscListener );
+    }
+
+    /**
+     * Detach ESC key listener for similarity modal.
+     */
+    _detachSimilarityModalEscListener() {
+        if ( this.similarityModalEscListener ) {
+            document.removeEventListener( 'keydown', this.similarityModalEscListener );
+            this.similarityModalEscListener = null;
         }
     }
 }

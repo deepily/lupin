@@ -76,6 +76,7 @@
                         <th>Match %</th>
                         <th>Question Preview</th>
                         <th>Gist</th>
+                        <th>Preview</th>
                         <th>Created Date</th>
                         <th>ID</th>
                         <th>Actions</th>
@@ -151,6 +152,14 @@
                         <pre id="detail-code" class="code-block"></pre>
                     </div>
                     <div class="detail-field">
+                        <label>Code Explanation:</label>
+                        <div id="detail-solution-summary" class="detail-value"></div>
+                    </div>
+                    <div class="detail-field">
+                        <label>Code Gist:</label>
+                        <div id="detail-code-gist" class="detail-value"></div>
+                    </div>
+                    <div class="detail-field">
                         <label>ID Hash:</label>
                         <div id="detail-id-hash" class="detail-value"></div>
                     </div>
@@ -162,6 +171,45 @@
                         <label>Created Date:</label>
                         <div id="detail-created-date" class="detail-value"></div>
                     </div>
+                    <!-- Find Similar Button -->
+                    <div class="detail-field" style="margin-top: 20px; text-align: center;">
+                        <button id="find-similar-btn" class="btn-primary">🔍 Find Similar Snapshots</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Similarity Modal -->
+        <div id="similarity-modal" class="modal" style="display: none;">
+            <div class="modal-overlay"></div>
+            <div class="modal-content modal-large">
+                <div class="modal-header">
+                    <h2 id="similarity-modal-title">Similar Snapshots</h2>
+                    <button class="close-btn" id="close-similarity-btn">×</button>
+                </div>
+                <div class="modal-body">
+                    <div id="similarity-loading" class="loading-state">
+                        <p>Finding similar snapshots...</p>
+                    </div>
+                    <div id="similarity-content" style="display: none;">
+                        <div class="similarity-columns">
+                            <!-- Left column: Similar by Code -->
+                            <div class="similarity-column">
+                                <h3>💻 Similar by Code</h3>
+                                <p class="similarity-description">Snapshots with similar executable code</p>
+                                <div id="code-similar-count" class="similarity-count"></div>
+                                <div id="code-similar-list" class="similarity-list"></div>
+                            </div>
+                            <!-- Right column: Similar by Explanation -->
+                            <div class="similarity-column">
+                                <h3>📝 Similar by Explanation</h3>
+                                <p class="similarity-description">Snapshots with similar solution explanations</p>
+                                <div id="explanation-similar-count" class="similarity-count"></div>
+                                <div id="explanation-similar-list" class="similarity-list"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="similarity-error" class="error-message" style="display: none;"></div>
                 </div>
             </div>
         </div>

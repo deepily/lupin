@@ -578,3 +578,302 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.7; }
 }
+
+/* ============================================================================
+   PREVIEW ICONS & POPOVER (Phase 3: Code Similarity Visualization)
+   ============================================================================ */
+
+/* Preview Icons Column */
+.preview-icons {
+    white-space: nowrap;
+    text-align: center;
+}
+
+.preview-icon {
+    cursor: pointer;
+    font-size: 18px;
+    padding: 4px 6px;
+    margin: 0 2px;
+    border-radius: 4px;
+    transition: background-color 0.2s, transform 0.1s;
+    display: inline-block;
+    user-select: none;
+}
+
+.preview-icon:hover {
+    background-color: #e9ecef;
+    transform: scale( 1.1 );
+}
+
+.preview-icon:active {
+    transform: scale( 0.95 );
+}
+
+.preview-icon.loading {
+    opacity: 0.5;
+    cursor: wait;
+}
+
+/* Preview Popover */
+.preview-popover {
+    position: fixed;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba( 0, 0, 0, 0.15 );
+    padding: 0;
+    max-width: 450px;
+    min-width: 300px;
+    z-index: 2000;
+    overflow: hidden;
+    animation: popoverFadeIn 0.15s ease-out;
+}
+
+@keyframes popoverFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY( -5px );
+    }
+    to {
+        opacity: 1;
+        transform: translateY( 0 );
+    }
+}
+
+.preview-popover-header {
+    background: #f8f9fa;
+    padding: 10px 15px;
+    border-bottom: 1px solid #dee2e6;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.preview-popover-header h4 {
+    margin: 0;
+    font-size: 14px;
+    color: #495057;
+}
+
+.preview-popover-close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    color: #6c757d;
+    padding: 0;
+    line-height: 1;
+}
+
+.preview-popover-close:hover {
+    color: #dc3545;
+}
+
+.preview-popover-body {
+    padding: 15px;
+    max-height: 350px;
+    overflow-y: auto;
+}
+
+.preview-popover-code {
+    font-family: "SF Mono", "Monaco", "Inconsolata", "Fira Mono", "Courier New", monospace;
+    font-size: 12px;
+    background: #f5f5f5;
+    padding: 12px;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.4;
+    color: #333;
+    border: 1px solid #e9ecef;
+}
+
+.preview-popover-gist {
+    font-size: 13px;
+    color: #333;
+    line-height: 1.5;
+}
+
+.preview-popover-label {
+    font-size: 11px;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+    display: block;
+}
+
+.preview-popover-empty {
+    color: #6c757d;
+    font-style: italic;
+    text-align: center;
+    padding: 20px;
+}
+
+/* Overlay to close popover when clicking outside */
+.preview-popover-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1999;
+}
+
+/* ============================================================================
+   SIMILARITY MODAL (Phase 4: Code Similarity Drill-Down)
+   ============================================================================ */
+
+.modal-large {
+    max-width: 1100px;
+}
+
+.similarity-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+}
+
+.similarity-column {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 20px;
+    border: 1px solid #dee2e6;
+}
+
+.similarity-column h3 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    color: #333;
+}
+
+.similarity-description {
+    font-size: 13px;
+    color: #6c757d;
+    margin: 0 0 15px 0;
+}
+
+.similarity-count {
+    font-size: 14px;
+    color: #495057;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.similarity-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* Individual similar result item */
+.similar-result-item {
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-left: 4px solid #dee2e6;
+}
+
+.similar-result-item:hover {
+    background: #fff;
+    box-shadow: 0 2px 8px rgba( 0, 0, 0, 0.1 );
+    transform: translateY( -1px );
+}
+
+.similar-result-item:last-child {
+    margin-bottom: 0;
+}
+
+/* Score-based border colors */
+.similar-result-item.exact-match {
+    border-left-color: #28a745;  /* Green */
+}
+
+.similar-result-item.high-match {
+    border-left-color: #17a2b8;  /* Blue */
+}
+
+.similar-result-item.medium-match {
+    border-left-color: #ffc107;  /* Yellow */
+}
+
+.similar-result-item.low-match {
+    border-left-color: #dc3545;  /* Red */
+}
+
+.similar-result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.similar-result-score {
+    font-weight: 700;
+    font-size: 14px;
+}
+
+.similar-result-score.exact-match {
+    color: #28a745;
+}
+
+.similar-result-score.high-match {
+    color: #17a2b8;
+}
+
+.similar-result-score.medium-match {
+    color: #e0a800;
+}
+
+.similar-result-score.low-match {
+    color: #dc3545;
+}
+
+.similar-result-id {
+    font-family: "SF Mono", "Monaco", "Inconsolata", "Fira Mono", monospace;
+    font-size: 11px;
+    color: #6c757d;
+}
+
+.similar-result-question {
+    font-size: 13px;
+    color: #333;
+    margin-bottom: 6px;
+    line-height: 1.4;
+}
+
+.similar-result-gist {
+    font-size: 12px;
+    color: #6c757d;
+    font-style: italic;
+    line-height: 1.3;
+}
+
+.similar-result-date {
+    font-size: 11px;
+    color: #adb5bd;
+    margin-top: 6px;
+}
+
+/* Empty state for similarity results */
+.similarity-empty {
+    text-align: center;
+    padding: 30px;
+    color: #6c757d;
+    font-style: italic;
+}
+
+/* Responsive: Stack columns on smaller screens */
+@media ( max-width: 900px ) {
+    .similarity-columns {
+        grid-template-columns: 1fr;
+    }
+
+    .modal-large {
+        max-width: 95%;
+    }
+}
