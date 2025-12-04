@@ -415,9 +415,9 @@ class AdminSnapshotsDashboard {
             const codeFormatted = code.length > 0 ? code.join( '\n' ) : 'N/A';
             document.getElementById( 'detail-code' ).textContent = codeFormatted;
 
-            // Code explanation (verbose) and code gist (concise)
+            // Solution summary (verbose) and solution summary gist (concise)
             document.getElementById( 'detail-solution-summary' ).textContent = snapshot.solution_summary || 'N/A';
-            document.getElementById( 'detail-code-gist' ).textContent = snapshot.code_gist || 'N/A';
+            document.getElementById( 'detail-solution-summary-gist' ).textContent = snapshot.solution_summary_gist || 'N/A';
 
             document.getElementById( 'detail-id-hash' ).textContent = snapshot.id_hash;
             document.getElementById( 'detail-user-id' ).textContent = snapshot.user_id || 'N/A';
@@ -771,8 +771,8 @@ class AdminSnapshotsDashboard {
                 body.appendChild( empty );
             }
         } else {
-            // Show code explanation (gist)
-            if ( preview.code_gist && preview.code_gist.trim() ) {
+            // Show solution summary gist
+            if ( preview.solution_summary_gist && preview.solution_summary_gist.trim() ) {
                 const label = document.createElement( 'span' );
                 label.className = 'preview-popover-label';
                 label.textContent = 'What the code does';
@@ -780,7 +780,7 @@ class AdminSnapshotsDashboard {
 
                 const gistBlock = document.createElement( 'div' );
                 gistBlock.className = 'preview-popover-gist';
-                gistBlock.textContent = preview.code_gist;
+                gistBlock.textContent = preview.solution_summary_gist;
                 body.appendChild( gistBlock );
             } else {
                 const empty = document.createElement( 'div' );
@@ -917,6 +917,19 @@ class AdminSnapshotsDashboard {
                 ).join( '' );
             }
 
+            // Populate gist similarity column
+            const gistList = document.getElementById( 'solution-gist-similar-list' );
+            const gistCount = document.getElementById( 'solution-gist-similar-count' );
+            gistCount.textContent = `Found ${response.total_solution_gist_matches} match${response.total_solution_gist_matches !== 1 ? 'es' : ''}`;
+
+            if ( response.solution_gist_similar.length === 0 ) {
+                gistList.innerHTML = '<div class="similarity-empty">No similar gists found</div>';
+            } else {
+                gistList.innerHTML = response.solution_gist_similar.map( result =>
+                    this.createSimilarResultItem( result, 'gist' )
+                ).join( '' );
+            }
+
             // Hide loading, show content
             document.getElementById( 'similarity-loading' ).style.display = 'none';
             document.getElementById( 'similarity-content' ).style.display = 'block';
@@ -934,11 +947,11 @@ class AdminSnapshotsDashboard {
      * Create HTML for a single similar result item.
      *
      * @param {object} result - The similarity result object
-     * @param {string} type - 'code' or 'explanation'
+     * @param {string} type - 'code', 'explanation', or 'gist'
      * @returns {string} HTML string
      */
     createSimilarResultItem( result, type ) {
-        // Get the similarity score (same field for both types)
+        // Get the similarity score
         const score = result.similarity || 0;
         const scorePercent = score.toFixed( 1 );
 
@@ -957,12 +970,34 @@ class AdminSnapshotsDashboard {
             ? result.question_preview.substring( 0, 80 ) + '...'
             : result.question_preview;
 
-        // Truncate code_gist if present and long
-        const codeGist = result.code_gist
-            ? ( result.code_gist.length > 100
-                ? result.code_gist.substring( 0, 100 ) + '...'
-                : result.code_gist )
-            : '';
+        // Select content and CSS class based on similarity type
+        let contentText = '';
+        let contentClass = 'similar-result-gist';
+        let maxLength = 150;
+
+        switch ( type ) {
+            case 'code':
+                contentText = result.code_preview || '';
+                contentClass = 'similar-result-code';
+                maxLength = 400;  // Show more code
+                break;
+            case 'explanation':
+                contentText = result.solution_summary_preview || '';
+                contentClass = 'similar-result-gist';
+                maxLength = 200;
+                break;
+            case 'gist':
+            default:
+                contentText = result.solution_summary_gist || '';
+                contentClass = 'similar-result-gist';
+                maxLength = 150;
+                break;
+        }
+
+        // Truncate display content if needed
+        const displayContent = contentText.length > maxLength
+            ? contentText.substring( 0, maxLength ) + '...'
+            : contentText;
 
         return `
             <div class="similar-result-item ${scoreClass}" onclick="dashboard.viewDetails('${result.id_hash}'); dashboard.closeSimilarityModal();">
@@ -971,7 +1006,7 @@ class AdminSnapshotsDashboard {
                     <span class="similar-result-id">${result.id_hash.substring( 0, 8 )}</span>
                 </div>
                 <div class="similar-result-question">${escapeHtml( questionPreview )}</div>
-                ${codeGist ? `<div class="similar-result-gist">${escapeHtml( codeGist )}</div>` : ''}
+                ${displayContent ? `<div class="${contentClass}">${escapeHtml( displayContent )}</div>` : ''}
                 <div class="similar-result-date">${this.formatDate( result.created_date )}</div>
             </div>
         `;

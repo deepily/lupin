@@ -156,8 +156,8 @@
                         <div id="detail-solution-summary" class="detail-value"></div>
                     </div>
                     <div class="detail-field">
-                        <label>Code Gist:</label>
-                        <div id="detail-code-gist" class="detail-value"></div>
+                        <label>Solution Summary Gist:</label>
+                        <div id="detail-solution-summary-gist" class="detail-value"></div>
                     </div>
                     <div class="detail-field">
                         <label>ID Hash:</label>
@@ -193,19 +193,26 @@
                     </div>
                     <div id="similarity-content" style="display: none;">
                         <div class="similarity-columns">
-                            <!-- Left column: Similar by Code -->
+                            <!-- Column 1: Similar by Code -->
                             <div class="similarity-column">
                                 <h3>💻 Similar by Code</h3>
                                 <p class="similarity-description">Snapshots with similar executable code</p>
                                 <div id="code-similar-count" class="similarity-count"></div>
                                 <div id="code-similar-list" class="similarity-list"></div>
                             </div>
-                            <!-- Right column: Similar by Explanation -->
+                            <!-- Column 2: Similar by Explanation -->
                             <div class="similarity-column">
                                 <h3>📝 Similar by Explanation</h3>
                                 <p class="similarity-description">Snapshots with similar solution explanations</p>
                                 <div id="explanation-similar-count" class="similarity-count"></div>
                                 <div id="explanation-similar-list" class="similarity-list"></div>
+                            </div>
+                            <!-- Column 3: Similar by Gist -->
+                            <div class="similarity-column">
+                                <h3>✨ Similar by Gist</h3>
+                                <p class="similarity-description">Snapshots with similar concise summaries</p>
+                                <div id="solution-gist-similar-count" class="similarity-count"></div>
+                                <div id="solution-gist-similar-list" class="similarity-list"></div>
                             </div>
                         </div>
                     </div>
