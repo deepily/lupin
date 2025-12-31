@@ -3445,8 +3445,8 @@ class FreshQueueUI {
             <span class="message-text" title="${displayMessage}">${truncatedMessage}</span>
         `;
 
-        // Add to container (CSS column-reverse handles display order)
-        container.appendChild( messageDiv );
+        // Prepend to container so newest messages always appear at top
+        container.insertBefore( messageDiv, container.firstChild );
     }
 
     /**
@@ -4165,8 +4165,8 @@ class FreshQueueUI {
             // Clear existing sender groups and populate with server data
             this.clearSenderGroups();
 
-            // Add each notification to sender cards (oldest first for chronological order)
-            serverNotifications.reverse().forEach( notification => {
+            // Add each notification to sender cards (newest first - server returns DESC order)
+            serverNotifications.forEach( notification => {
                 const isResponse = notification.state === 'responded' && notification.responded_at;
                 this.addNotificationToSenderGroup( notification, isResponse );
             });

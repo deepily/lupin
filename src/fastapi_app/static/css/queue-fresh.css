@@ -790,7 +790,7 @@
 
         .sender-card-messages {
             display: flex;
-            flex-direction: column-reverse;
+            flex-direction: column;
             max-height: 300px;
             overflow-y: auto;
             padding: 8px 12px;
