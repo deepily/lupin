@@ -1,6 +1,6 @@
 -- Sample development data for PostgreSQL
 -- Created: 2025-11-17
--- Database: lupin_auth
+-- Database: lupin_db
 
 -- Insert test users
 -- Password for all test users: "TestPassword123!"

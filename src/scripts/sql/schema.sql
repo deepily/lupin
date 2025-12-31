@@ -1,6 +1,6 @@
--- PostgreSQL schema for Lupin authentication database
+-- PostgreSQL schema for Lupin database
 -- Created: 2025-11-17
--- Database: lupin_auth
+-- Database: lupin_db
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -90,6 +90,35 @@ CREATE TABLE IF NOT EXISTS failed_login_attempts (
 
 CREATE INDEX IF NOT EXISTS idx_failed_login_email ON failed_login_attempts(email);
 CREATE INDEX IF NOT EXISTS idx_failed_login_attempt_time ON failed_login_attempts(attempt_time);
+
+-- Table: notifications (sender-aware notification system)
+CREATE TABLE IF NOT EXISTS notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    sender_id VARCHAR(255) NOT NULL,
+    recipient_id UUID NOT NULL,
+    title VARCHAR(255),
+    message TEXT NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    priority VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    delivered_at TIMESTAMP WITH TIME ZONE,
+    responded_at TIMESTAMP WITH TIME ZONE,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    response_requested BOOLEAN DEFAULT FALSE,
+    response_type VARCHAR(50),
+    response_value JSONB,
+    response_default VARCHAR(255),
+    timeout_seconds BIGINT,
+    state VARCHAR(50) NOT NULL DEFAULT 'created',
+    FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_sender_id ON notifications(sender_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_recipient_id ON notifications(recipient_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_state ON notifications(state);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_sender_recipient ON notifications(sender_id, recipient_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(type);
 
 -- Table: auth_audit_log
 CREATE TABLE IF NOT EXISTS auth_audit_log (

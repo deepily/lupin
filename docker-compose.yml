@@ -7,7 +7,7 @@ services:
     container_name: lupin-postgres-dev
     restart: unless-stopped
     environment:
-      POSTGRES_DB: lupin_auth
+      POSTGRES_DB: lupin_db
       POSTGRES_USER: lupin_dev
       POSTGRES_PASSWORD: dev_password
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
@@ -18,7 +18,7 @@ services:
       - ./src/scripts/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
       - ./src/scripts/sql/seed_dev_data.sql:/docker-entrypoint-initdb.d/02-seed.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U lupin_dev -d lupin_auth"]
+      test: ["CMD-SHELL", "pg_isready -U lupin_dev -d lupin_db"]
       interval: 5s
       timeout: 5s
       retries: 5

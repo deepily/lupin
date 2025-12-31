@@ -5,7 +5,7 @@
 # Features:
 # - Validates LUPIN_ROOT environment variable
 # - Starts PostgreSQL container via docker-compose if not running
-# - Creates test database (lupin_auth_test) if missing
+# - Creates test database (lupin_db_test) if missing
 # - Applies schema to test database
 # - Idempotent (safe to run multiple times)
 # - Works from any directory (aliasable)
@@ -31,8 +31,8 @@ set -e  # Exit on error
 CONTAINER_NAME="lupin-postgres-dev"
 DB_USER="lupin_dev"
 DB_PASSWORD="dev_password"
-DB_NAME="lupin_auth"
-TEST_DB_NAME="lupin_auth_test"
+DB_NAME="lupin_db"
+TEST_DB_NAME="lupin_db_test"
 MAX_WAIT=30  # Maximum seconds to wait for PostgreSQL startup
 
 # Colors for output

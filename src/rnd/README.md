@@ -4,6 +4,10 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2025.12.30 - Sender-Aware Notification System
+- **Implementation Tracker**: [2025.12.30-sender-aware-notification-tracker.md](2025.12.30-sender-aware-notification-tracker.md) - **🔄 IN PROGRESS** - Execution tracker for 8-phase sender-aware notification system implementation. Adds sender identification (`claude.code@{project}.deepily.ai`) enabling multi-project notification grouping, chat-style UI with collapsible sender cards, and conversation history persistence.
+- **Design Document**: [2025.12.29-sender-aware-notification-system-design.md](2025.12.29-sender-aware-notification-system-design.md) - **📋 DESIGN COMPLETE** - Comprehensive 513-line implementation plan covering Queue Layer, CLI Layer, API Layer, PostgreSQL persistence, Frontend JS/CSS, and testing strategy.
+
 ### 2025.11.20 - Admin Solution Snapshots Dashboard
 - **Admin Interface Planning**: [2025.11.20-admin-snapshots-dashboard.md](2025.11.20-admin-snapshots-dashboard.md) - **📋 READY TO IMPLEMENT** - Comprehensive implementation plan for admin solution snapshots search dashboard. Features: Simple text search (Question/Normalized/Gist), table display with view details modal, delete with confirmation, JWT admin role enforcement. Architecture: 3 new admin.py endpoints (search/details/delete), vanilla HTML/JS/CSS following Fresh Queue patterns. Developed through interactive requirements elicitation (7 questions), includes 5 implementation phases, testing checklists, 7-11 hour timeline. Foundation for future admin tools.
 

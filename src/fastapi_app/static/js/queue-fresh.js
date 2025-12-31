@@ -129,6 +129,27 @@ class FreshQueueUI {
         this.countdownTimers = new Map();  // notification_id → setInterval handle
         this.keyboardListenerActive = false;  // Track if keyboard listener is attached
 
+        // ========================================
+        // SENDER-AWARE NOTIFICATION GROUPING (Phase 5)
+        // ========================================
+
+        // Sender groups: Map<sender_id, { notifications: [], collapsed: boolean, lastActivity: Date }>
+        this.senderGroups = new Map();
+
+        // Default sender for notifications without sender_id
+        this.UNKNOWN_SENDER = "claude.code@unknown.deepily.ai";
+
+        // History window configuration (activity-anchored loading)
+        this.HISTORY_WINDOW_KEY = 'fresh_queue_history_window';
+        this.historyWindowHours = parseInt( localStorage.getItem( this.HISTORY_WINDOW_KEY ) ) || 24;
+        this.WINDOW_OPTIONS = [
+            { label: 'Last 24 hours', hours: 24 },
+            { label: 'Last 2 days',   hours: 48 },
+            { label: 'Last week',     hours: 168 },
+            { label: 'Last month',    hours: 720 },
+            { label: 'All time',      hours: null }
+        ];
+
         // WebSocket Health Monitor - Periodic reconnection during work hours
         this.healthCheckIntervalHandle = null;  // Timer reference for health check interval
         this.HEALTH_CHECK_INTERVAL_MS = 90000;  // 90 seconds (1.5 minutes)
@@ -178,12 +199,18 @@ class FreshQueueUI {
             
             // Setup event listeners
             this.setupEventListeners();
-            
+
             // Apply Firefox compatibility hack
             this.applyFirefoxCompatibilityHack();
-            
+
+            // Initialize history dropdown UI
+            this.initializeHistoryDropdown();
+
             // Connect WebSockets
             await this.connectWebSockets();
+
+            // Load conversation history (after auth is complete)
+            await this.loadConversationHistory();
 
             // Auto-focus STT button for spacebar activation
             document.getElementById( 'qa-stt-button' ).focus();
@@ -2589,8 +2616,11 @@ class FreshQueueUI {
         // 1. ALWAYS play notification sound first based on priority
         await this.playNotificationSoundByPriority( notification.priority );
 
-        // 2. Add to visual list
-        this.addNotificationToList( notification );
+        // 2. Add to sender-grouped visual list (Phase 5)
+        const senderId = this.resolveSenderId( notification );
+        this.log( `Routing notification to sender: ${senderId}` );
+        this.addNotificationToSenderGroup( notification, false );  // false = incoming message
+        this.updateTotalNotificationsCount();
 
         // 3. Optional TTS for high/urgent priority notifications (like old queue.js)
         if ( notification.priority === "high" || notification.priority === "urgent" ) {
@@ -3200,9 +3230,505 @@ class FreshQueueUI {
     }
     
     // ========================================
+    // SENDER-AWARE NOTIFICATION HELPERS (Phase 5)
+    // ========================================
+
+    /**
+     * Extract sender ID from message prefix like [LUPIN] or [COSA].
+     * @param {string} message - Notification message text
+     * @returns {string|null} - Sender ID in email format, or null if no prefix
+     */
+    extractSenderFromMessage( message ) {
+        const match = message.match( /^\[([A-Z]+)\]/ );
+        if ( match ) {
+            const project = match[1].toLowerCase();
+            return `claude.code@${project}.deepily.ai`;
+        }
+        return null;
+    }
+
+    /**
+     * Resolve sender ID using precedence: explicit > extracted from message > fallback.
+     * @param {object} notification - Notification object with optional sender_id and message
+     * @returns {string} - Resolved sender ID
+     */
+    resolveSenderId( notification ) {
+        // 1. Explicit sender_id from notification
+        if ( notification.sender_id ) {
+            return notification.sender_id;
+        }
+        // 2. Extract from [PREFIX] in message
+        const extracted = this.extractSenderFromMessage( notification.message || '' );
+        if ( extracted ) {
+            return extracted;
+        }
+        // 3. Fallback to unknown
+        return this.UNKNOWN_SENDER;
+    }
+
+    /**
+     * Extract project name from sender ID for display.
+     * @param {string} senderId - Sender ID (e.g., claude.code@lupin.deepily.ai)
+     * @returns {string} - Project name in uppercase (e.g., "LUPIN")
+     */
+    getProjectFromSenderId( senderId ) {
+        const match = senderId.match( /^claude\.code@([a-z]+)\.deepily\.ai$/ );
+        if ( match ) {
+            return match[1].toUpperCase();
+        }
+        return 'UNKNOWN';
+    }
+
+    /**
+     * Get sender status indicator based on activity.
+     * @param {Date} lastActivity - Last activity timestamp
+     * @returns {string} - Status emoji (🟢 active, 🟡 recent, ⚪ inactive)
+     */
+    getSenderStatusIndicator( lastActivity ) {
+        if ( !lastActivity ) return '⚪';
+        const now = new Date();
+        const hoursSinceActivity = ( now - lastActivity ) / ( 1000 * 60 * 60 );
+        if ( hoursSinceActivity < 1 ) return '🟢';   // Active within last hour
+        if ( hoursSinceActivity < 24 ) return '🟡';  // Recent within last day
+        return '⚪';  // Inactive
+    }
+
+    /**
+     * Format relative time for display.
+     * @param {Date} date - Timestamp
+     * @returns {string} - Relative time string (e.g., "5 min ago", "2 hours ago")
+     */
+    formatRelativeTime( date ) {
+        if ( !date ) return 'Never';
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor( diffMs / 60000 );
+        const diffHours = Math.floor( diffMs / 3600000 );
+        const diffDays = Math.floor( diffMs / 86400000 );
+
+        if ( diffMins < 1 ) return 'Just now';
+        if ( diffMins < 60 ) return `${diffMins} min ago`;
+        if ( diffHours < 24 ) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+        return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+    }
+
+    // ========================================
+    // SENDER CARD MANAGEMENT (Phase 5)
+    // ========================================
+
+    /**
+     * Add notification to appropriate sender group.
+     * Creates sender card if it doesn't exist.
+     * @param {object} notification - Notification data
+     * @param {boolean} isResponse - True if this is a user response (right-aligned)
+     */
+    addNotificationToSenderGroup( notification, isResponse = false ) {
+        const senderId = this.resolveSenderId( notification );
+        const timestamp = new Date( notification.timestamp || Date.now() );
+
+        // Get or create sender group
+        let group = this.senderGroups.get( senderId );
+        if ( !group ) {
+            group = {
+                notifications : [],
+                collapsed     : false,
+                lastActivity  : timestamp
+            };
+            this.senderGroups.set( senderId, group );
+            this.createSenderCard( senderId );
+        }
+
+        // Update last activity
+        if ( timestamp > group.lastActivity ) {
+            group.lastActivity = timestamp;
+        }
+
+        // Add to notifications array
+        group.notifications.push( { ...notification, isResponse } );
+
+        // Update UI
+        this.addMessageToSenderCard( senderId, notification, isResponse );
+        this.updateSenderCardHeader( senderId );
+    }
+
+    /**
+     * Create a new sender card in the UI.
+     * @param {string} senderId - Sender ID
+     */
+    createSenderCard( senderId ) {
+        const container = document.getElementById( 'notifications-list' );
+        if ( !container ) {
+            this.error( 'Notifications list container not found' );
+            return;
+        }
+
+        const projectName = this.getProjectFromSenderId( senderId );
+        const group = this.senderGroups.get( senderId );
+        const statusIndicator = this.getSenderStatusIndicator( group?.lastActivity );
+
+        const card = document.createElement( 'div' );
+        card.id = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        card.className = 'sender-card';
+        card.innerHTML = `
+            <div class="sender-card-header" onclick="window.freshQueueUI.toggleSenderCard('${senderId}')">
+                <span class="sender-status">${statusIndicator}</span>
+                <span class="sender-project-name">${projectName}</span>
+                <span class="sender-message-count">(0)</span>
+                <span class="sender-last-activity">Last: --</span>
+                <button class="sender-delete-btn" onclick="event.stopPropagation(); window.freshQueueUI.deleteSenderConversation('${senderId}')" title="Delete conversation">×</button>
+                <span class="sender-toggle">▼</span>
+            </div>
+            <div class="sender-card-messages" id="sender-messages-${senderId.replace( /[@.]/g, '-' )}">
+                <!-- Messages will be added here -->
+            </div>
+        `;
+
+        // Insert at top (most recent sender first)
+        container.insertBefore( card, container.firstChild );
+        this.log( `Created sender card for ${projectName} (${senderId})` );
+    }
+
+    /**
+     * Toggle sender card collapse state.
+     * @param {string} senderId - Sender ID
+     */
+    toggleSenderCard( senderId ) {
+        const group = this.senderGroups.get( senderId );
+        if ( !group ) return;
+
+        group.collapsed = !group.collapsed;
+
+        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const card = document.getElementById( cardId );
+        if ( card ) {
+            const messages = card.querySelector( '.sender-card-messages' );
+            const toggle = card.querySelector( '.sender-toggle' );
+            if ( messages ) {
+                messages.style.display = group.collapsed ? 'none' : 'block';
+            }
+            if ( toggle ) {
+                toggle.textContent = group.collapsed ? '▶' : '▼';
+            }
+        }
+    }
+
+    /**
+     * Add a message to a sender card.
+     * @param {string} senderId - Sender ID
+     * @param {object} notification - Notification data
+     * @param {boolean} isResponse - True if user response (right-aligned)
+     */
+    addMessageToSenderCard( senderId, notification, isResponse = false ) {
+        const containerId = `sender-messages-${senderId.replace( /[@.]/g, '-' )}`;
+        const container = document.getElementById( containerId );
+        if ( !container ) return;
+
+        const timestamp = new Date( notification.timestamp || Date.now() );
+        const time = timestamp.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit' } );
+
+        // Process message (remove [PREFIX] since we already show project name)
+        let displayMessage = notification.message || '';
+        const prefixMatch = displayMessage.match( /^\[([A-Z]+)\]\s*(.*)$/ );
+        if ( prefixMatch ) {
+            displayMessage = prefixMatch[2];  // Remove prefix
+        }
+
+        // Truncate long messages
+        const truncatedMessage = displayMessage.length > 120
+            ? displayMessage.substring( 0, 117 ) + '...'
+            : displayMessage;
+
+        const messageDiv = document.createElement( 'div' );
+        messageDiv.className = `sender-message ${isResponse ? 'outgoing' : 'incoming'}`;
+        messageDiv.innerHTML = `
+            <span class="message-time">${time}${isResponse ? ' →' : ''}</span>
+            <span class="message-text" title="${displayMessage}">${truncatedMessage}</span>
+        `;
+
+        // Add to container (CSS column-reverse handles display order)
+        container.appendChild( messageDiv );
+    }
+
+    /**
+     * Update sender card header with current stats.
+     * @param {string} senderId - Sender ID
+     */
+    updateSenderCardHeader( senderId ) {
+        const group = this.senderGroups.get( senderId );
+        if ( !group ) return;
+
+        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const card = document.getElementById( cardId );
+        if ( !card ) return;
+
+        // Update count
+        const countEl = card.querySelector( '.sender-message-count' );
+        if ( countEl ) {
+            countEl.textContent = `(${group.notifications.length})`;
+        }
+
+        // Update status indicator
+        const statusEl = card.querySelector( '.sender-status' );
+        if ( statusEl ) {
+            statusEl.textContent = this.getSenderStatusIndicator( group.lastActivity );
+        }
+
+        // Update last activity
+        const activityEl = card.querySelector( '.sender-last-activity' );
+        if ( activityEl ) {
+            activityEl.textContent = `Last: ${this.formatRelativeTime( group.lastActivity )}`;
+        }
+
+        // Move card to top if it has new activity
+        const container = document.getElementById( 'notifications-list' );
+        if ( container && container.firstChild !== card ) {
+            container.insertBefore( card, container.firstChild );
+        }
+    }
+
+    /**
+     * Update total notifications count display and Clear All button state.
+     */
+    updateTotalNotificationsCount() {
+        let total = 0;
+        for ( const group of this.senderGroups.values() ) {
+            total += group.notifications.length;
+        }
+        const countEl = document.getElementById( 'notifications-count' );
+        if ( countEl ) {
+            countEl.textContent = total;
+        }
+        // Keep Clear All button state in sync with notification count
+        this.updateClearButtonState( total );
+    }
+
+    // ========================================
+    // HISTORY LOADING (Phase 5/6)
+    // ========================================
+
+    /**
+     * Load conversation history for all senders from the API.
+     * Uses activity-anchored window loading based on historyWindowHours.
+     */
+    async loadConversationHistory() {
+        if ( !this.currentUser ) {
+            this.log( 'Cannot load history: no user email' );
+            return;
+        }
+
+        this.log( `Loading conversation history (window: ${this.historyWindowHours}h)...` );
+
+        try {
+            // First, get list of senders with recent activity
+            const sendersUrl = `/api/notifications/senders/${encodeURIComponent( this.currentUser )}`;
+            const params = this.historyWindowHours ? `?hours=${this.historyWindowHours}` : '';
+
+            const sendersResponse = await fetch( sendersUrl + params, {
+                headers: this.getAuthHeaders()
+            } );
+
+            if ( !sendersResponse.ok ) {
+                if ( sendersResponse.status === 404 ) {
+                    this.log( 'No notification history found' );
+                    return;
+                }
+                throw new Error( `Failed to fetch senders: ${sendersResponse.status}` );
+            }
+
+            const senders = await sendersResponse.json();
+            this.log( `Found ${senders.length} senders with history` );
+
+            // Load conversation for each sender
+            for ( const senderInfo of senders ) {
+                await this.loadSenderConversation( senderInfo.sender_id, senderInfo.last_activity );
+            }
+
+            this.updateTotalNotificationsCount();
+
+        } catch ( error ) {
+            this.error( `Failed to load conversation history: ${error.message}` );
+        }
+    }
+
+    /**
+     * Load conversation history for a specific sender.
+     * @param {string} senderId - Sender ID
+     * @param {string} anchorTime - ISO timestamp to anchor the window around
+     */
+    async loadSenderConversation( senderId, anchorTime = null ) {
+        try {
+            const baseUrl = `/api/notifications/conversation/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUser )}`;
+            const params = new URLSearchParams();
+
+            if ( this.historyWindowHours ) {
+                params.append( 'hours', this.historyWindowHours );
+            }
+            if ( anchorTime ) {
+                params.append( 'anchor', anchorTime );
+            }
+
+            const url = params.toString() ? `${baseUrl}?${params}` : baseUrl;
+
+            const response = await fetch( url, {
+                headers: this.getAuthHeaders()
+            } );
+
+            if ( !response.ok ) {
+                if ( response.status === 404 ) {
+                    this.log( `No history for sender: ${senderId}` );
+                    return;
+                }
+                throw new Error( `Failed to fetch conversation: ${response.status}` );
+            }
+
+            const notifications = await response.json();
+            this.log( `Loaded ${notifications.length} notifications for ${senderId}` );
+
+            // Add each notification to the sender group
+            for ( const notification of notifications ) {
+                const isResponse = notification.state === 'responded' && notification.responded_at;
+                this.addNotificationToSenderGroup( notification, isResponse );
+            }
+
+        } catch ( error ) {
+            this.error( `Failed to load conversation for ${senderId}: ${error.message}` );
+        }
+    }
+
+    /**
+     * Set the history window and reload conversations.
+     * @param {number|null} hours - Hours to look back, or null for all time
+     */
+    async setHistoryWindow( hours ) {
+        this.historyWindowHours = hours;
+        localStorage.setItem( this.HISTORY_WINDOW_KEY, hours === null ? '' : hours.toString() );
+
+        this.log( `History window set to: ${hours === null ? 'all time' : hours + ' hours'}` );
+
+        // Update dropdown display
+        this.updateHistoryWindowDisplay( hours );
+
+        // Clear existing sender groups and reload
+        this.clearSenderGroups();
+        await this.loadConversationHistory();
+    }
+
+    /**
+     * Clear all sender groups and their UI elements.
+     */
+    clearSenderGroups() {
+        // Clear the Map
+        this.senderGroups.clear();
+
+        // Remove all sender cards from the DOM
+        const container = document.getElementById( 'notifications-list' );
+        if ( container ) {
+            const cards = container.querySelectorAll( '.sender-card' );
+            cards.forEach( card => card.remove() );
+        }
+
+        this.updateTotalNotificationsCount();
+    }
+
+    /**
+     * Update the history window dropdown display.
+     * @param {number|null} hours - Current window in hours
+     */
+    updateHistoryWindowDisplay( hours ) {
+        const dropdown = document.getElementById( 'history-window-dropdown' );
+        if ( !dropdown ) return;
+
+        const option = this.WINDOW_OPTIONS.find( opt => opt.hours === hours );
+        const display = dropdown.querySelector( '.dropdown-display' );
+        if ( display && option ) {
+            display.textContent = option.label;
+        }
+    }
+
+    /**
+     * Create the history window dropdown UI element.
+     * @returns {HTMLElement} The dropdown element
+     */
+    createHistoryWindowDropdown() {
+        const dropdown = document.createElement( 'div' );
+        dropdown.id = 'history-window-dropdown';
+        dropdown.className = 'history-window-dropdown';
+
+        // Find current selection
+        const currentOption = this.WINDOW_OPTIONS.find( opt => opt.hours === this.historyWindowHours )
+            || this.WINDOW_OPTIONS[0];
+
+        dropdown.innerHTML = `
+            <span class="dropdown-label">History:</span>
+            <button class="dropdown-display" onclick="window.freshQueueUI.toggleHistoryDropdown()">
+                ${currentOption.label}
+                <span class="dropdown-arrow">▼</span>
+            </button>
+            <div class="dropdown-menu" id="history-dropdown-menu">
+                ${this.WINDOW_OPTIONS.map( opt => `
+                    <div class="dropdown-item ${opt.hours === this.historyWindowHours ? 'selected' : ''}"
+                         onclick="window.freshQueueUI.setHistoryWindow(${opt.hours})">
+                        ${opt.label}
+                    </div>
+                ` ).join( '' )}
+            </div>
+        `;
+
+        return dropdown;
+    }
+
+    /**
+     * Toggle the history window dropdown menu visibility.
+     */
+    toggleHistoryDropdown() {
+        const menu = document.getElementById( 'history-dropdown-menu' );
+        if ( menu ) {
+            menu.classList.toggle( 'show' );
+        }
+    }
+
+    /**
+     * Initialize the history window dropdown in the notifications header.
+     */
+    initializeHistoryDropdown() {
+        const container = document.getElementById( 'history-dropdown-container' );
+        if ( !container ) {
+            this.log( 'History dropdown container not found' );
+            return;
+        }
+
+        const dropdown = this.createHistoryWindowDropdown();
+        container.appendChild( dropdown );
+
+        // Close dropdown when clicking outside
+        document.addEventListener( 'click', ( event ) => {
+            const dropdownEl = document.getElementById( 'history-window-dropdown' );
+            if ( dropdownEl && !dropdownEl.contains( event.target ) ) {
+                const menu = document.getElementById( 'history-dropdown-menu' );
+                if ( menu ) {
+                    menu.classList.remove( 'show' );
+                }
+            }
+        } );
+
+        this.log( 'History dropdown initialized' );
+    }
+
+    /**
+     * Get authentication headers for API requests.
+     * @returns {Object} Headers object with authorization
+     */
+    getAuthHeaders() {
+        return {
+            'Authorization': `Bearer ${this.authToken}`,
+            'Content-Type': 'application/json'
+        };
+    }
+
+    // ========================================
     // NOTIFICATIONS MANAGEMENT (from original queue.js)
     // ========================================
-    
+
     addNotificationToList( data ) {
         const { message, type, priority, source, timestamp } = data;
         const notificationsList = document.getElementById( "notifications-list" );
@@ -3636,16 +4162,16 @@ class FreshQueueUI {
             
             this.log( `Loaded ${serverNotifications.length} initial notifications` );
             
-            // Clear existing notifications and populate with server data
-            const notificationsList = document.getElementById( "notifications-list" );
-            if ( notificationsList ) {
-                notificationsList.innerHTML = "";
-            }
-            
-            // Add each notification to the list (newest first)
+            // Clear existing sender groups and populate with server data
+            this.clearSenderGroups();
+
+            // Add each notification to sender cards (oldest first for chronological order)
             serverNotifications.reverse().forEach( notification => {
-                this.addNotificationToList( notification );
+                const isResponse = notification.state === 'responded' && notification.responded_at;
+                this.addNotificationToSenderGroup( notification, isResponse );
             });
+
+            this.updateTotalNotificationsCount();
             
         } catch ( error ) {
             this.error( "Error loading initial notifications:", error );
@@ -3691,6 +4217,78 @@ class FreshQueueUI {
         this.notificationState.notifications = this.notificationState.notifications.filter(
             n => n.id_hash !== notificationId
         );
+    }
+
+    async deleteSenderConversation( senderId ) {
+        /**
+         * Delete all notifications for a specific sender (entire conversation).
+         *
+         * Requires:
+         *     - senderId: Sender identifier (e.g., claude.code@lupin.deepily.ai)
+         *     - User authenticated (this.currentUser set)
+         *
+         * Ensures:
+         *     - User confirmation before destructive action
+         *     - All notifications from sender deleted from server
+         *     - Sender card removed from UI
+         *     - Sender group removed from local state
+         *     - Total count updated
+         */
+
+        const projectName = this.getProjectFromSenderId( senderId );
+        const group = this.senderGroups.get( senderId );
+
+        if ( !group ) {
+            this.error( `No sender group found for: ${senderId}` );
+            return;
+        }
+
+        const count = group.notifications.length;
+
+        // Confirm before clearing (destructive action)
+        if ( !confirm( `Delete all ${count} message${count !== 1 ? 's' : ''} from ${projectName}? This cannot be undone.` ) ) {
+            this.log( "Delete conversation cancelled by user" );
+            return;
+        }
+
+        this.log( `Deleting conversation with ${projectName} (${count} messages)...` );
+
+        try {
+            const response = await fetch(
+                `/api/notifications/conversation/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUser )}`,
+                {
+                    method  : 'DELETE',
+                    headers : this.getAuthHeaders()
+                }
+            );
+
+            if ( !response.ok ) {
+                this.error( `Server error (${response.status}) deleting conversation` );
+                // Continue with UI cleanup anyway
+            } else {
+                const result = await response.json();
+                this.log( `Server deleted ${result.deleted_count} notifications` );
+            }
+
+        } catch ( error ) {
+            this.error( "Network error deleting conversation:", error );
+            // Continue with UI cleanup anyway
+        }
+
+        // Remove sender card from UI
+        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const card = document.getElementById( cardId );
+        if ( card ) {
+            card.remove();
+        }
+
+        // Remove from local state
+        this.senderGroups.delete( senderId );
+
+        // Update total count
+        this.updateTotalNotificationsCount();
+
+        this.log( `✓ Deleted conversation with ${projectName}` );
     }
 
     async clearAllNotifications() {
@@ -4322,6 +4920,18 @@ class FreshQueueUI {
 
         // Stop countdown
         this.stopCountdownTimer( notificationId );
+
+        // Phase 5: Add response to sender card as outgoing message
+        if ( state.notification ) {
+            const responseNotification = {
+                ...state.notification,
+                message       : `Response: ${response}`,
+                timestamp     : new Date().toISOString(),
+                response_value: response
+            };
+            this.addNotificationToSenderGroup( responseNotification, true );  // true = outgoing/response
+            this.updateTotalNotificationsCount();
+        }
 
         // Phase 2.2: Show responded state in-place (different message for multi-device)
         const card = document.getElementById( `action-required-${notificationId}` );

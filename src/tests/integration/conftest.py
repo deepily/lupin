@@ -96,11 +96,11 @@ def clean_test_db():
     Clean PostgreSQL test database before each test.
 
     Uses LUPIN_ENV=testing environment variable (set by run-integration-tests.sh)
-    to automatically select the lupin_auth_test database.
+    to automatically select the lupin_db_test database.
 
     Safety Mechanism:
-        - LUPIN_ENV=testing ensures test database (lupin_auth_test) is used
-        - Separate from development database (lupin_auth)
+        - LUPIN_ENV=testing ensures test database (lupin_db_test) is used
+        - Separate from development database (lupin_db)
         - DROP/CREATE provides complete isolation between tests
 
     Requires:

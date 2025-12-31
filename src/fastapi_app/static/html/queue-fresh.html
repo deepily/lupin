@@ -59,18 +59,19 @@
         <div class="collapsible-section">
             <div class="section-header" onclick="toggleSection('notifications-section')">
                 <h3>Claude Code Notifications: <span id="notifications-count">0</span></h3>
+                <div id="history-dropdown-container" style="margin-left: auto;"></div>
                 <button id="clear-all-notifications" type="button"
                         class="clear-notifications-button"
-                        style="margin-left: auto; margin-right: 10px;"
+                        style="margin-right: 10px;"
                         disabled>
                     🗑️ Clear All
                 </button>
                 <button class="toggle-button" id="notifications-toggle">▼</button>
             </div>
             <div class="section-content" id="notifications-section">
-                <ol id="notifications-list" reversed style="margin: 0; padding-left: 20px;">
-                    <!-- Notifications will be populated here -->
-                </ol>
+                <div id="notifications-list">
+                    <!-- Sender cards will be populated here -->
+                </div>
             </div>
         </div>
 
