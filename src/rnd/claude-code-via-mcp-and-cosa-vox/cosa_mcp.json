@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "cosa": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["/opt/cosa/mcp/cosa_voice_mcp.py"],
+      "env": {
+        "COSA_PROJECT": "${COSA_PROJECT}",
+        "LUPIN_ENV": "local"
+      }
+    }
+  }
+}
