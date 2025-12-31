@@ -177,8 +177,8 @@ def migrate_all_snapshots( source_path: str,
                         print( f"    ⏭️ Skipping duplicate: {du.truncate_string( snapshot.question, 50 )}" )
                     continue
 
-                # Add to target database
-                success = target_manager.add_snapshot( snapshot )
+                # Save to target database
+                success = target_manager.save_snapshot( snapshot )
 
                 if success:
                     snapshots_migrated += 1

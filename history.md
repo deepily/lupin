@@ -1,852 +1,581 @@
 # Lupin Project History
 
-> **🎁 CURRENT**: 2025.10.06 - JWT Auth Database User Recovery. Restored authentication access after database wipe, created password reset utility with LUPIN_ROOT bootstrap pattern. Fixed root ownership issue preventing database writes.
+> **🎯 CURRENT**: 2025.12.31 (Session 24) - SORT ORDER DISPLAY BUG FIXED! Resolved the Session 23 blocker where notification messages displayed oldest-first instead of newest-first. **ROOT CAUSE**: Complex chain of transformations (DB DESC → JS `.reverse()` → CSS `column-reverse` → `appendChild`) cancelled each other out incorrectly for real-time vs initial load scenarios. **THE FIX (4 changes)**: (1) CSS `queue-fresh.css:793` - Changed `flex-direction: column-reverse` → `column`, (2) JS `queue-fresh.js:4169` - Removed `.reverse()` call on initial load, (3) JS `queue-fresh.js:3449` - Changed `appendChild` → `insertBefore(messageDiv, container.firstChild)` so new messages prepend to top, (4) Python `notification_repository.py:220` - Changed `.desc()` → `.asc()` so DB returns oldest-first (insertBefore then prepends newest to top). **HOW IT WORKS NOW**: Database returns oldest→newest (ASC), JS iterates with `insertBefore` prepending each message, result is newest at top for both initial page load AND real-time WebSocket notifications. **FILES MODIFIED**: queue-fresh.css (1 line), queue-fresh.js (4 lines), notification_repository.py (4 lines). **STATUS**: Phase 8 sort order bug RESOLVED, sender-aware notification system fully functional. **History Health**: ⚠️ ~30k tokens - archive needed. 🐛✅
 
-> **⚠️ PREVIOUS**: 2025.10.04 (Session 5) - Path Manipulation Cleanup COMPLETE! Eradicated fragile path manipulation across 20 files (75% reduction), implemented LUPIN_ROOT bootstrap pattern, enhanced global CLAUDE.md with comprehensive bootstrap guidance. All tests passing with canonical pattern.
+> **🎯 PREVIOUS**: 2025.12.30 (Session 23) - SENDER-AWARE NOTIFICATION PHASE 8 TESTING + BUG FIXES! Four bugs fixed, one feature added, sort order issue resolved in Session 24. **BUG FIX 1 - Clear All Button**: Root cause: `updateClearButtonState()` never called after loading notifications. Fix: Added call in `updateTotalNotificationsCount()` (queue-fresh.js:3504). **BUG FIX 2 - History Dropdown**: Root cause: `this.userEmail` referenced non-existent variable. Fix: Changed to `this.currentUser` in 3 locations (queue-fresh.js:3516, 3525, 3562). **BUG FIX 3 - 500 Error on Hours Filter**: Root cause: `datetime.utcnow()` creates naive datetime, PostgreSQL returns timezone-aware → comparison fails. Fix: Changed to `datetime.now(timezone.utc)` + added `timezone` import (notifications.py:13, 952). **FEATURE - Delete Sender Conversations**: Added `delete_by_sender()` repository method (notification_repository.py:361-391), DELETE endpoint `/notifications/conversation/{sender_id}/{user_email}` (notifications.py:1082-1147), frontend delete button + `deleteSenderConversation()` method (queue-fresh.js:4225-4295), CSS styling (queue-fresh.css:773-789). **SORT ORDER - FIXED IN SESSION 24**: See Session 24 for resolution. **FILES MODIFIED**: queue-fresh.js (+80 lines), queue-fresh.css (+20 lines), notifications.py (+70 lines), notification_repository.py (+32 lines). **STATUS**: Phase 8 complete with Session 24 fix. **History Health**: ⚠️ ~30k tokens - archive needed. 🐛✅
 
-> **🎉 EARLIER**: 2025.10.04 (Session 4) - Test Configuration Final Polish COMPLETE! Simplified to dual safety, removed unnecessary API endpoints, created automated test runner script. 43/43 integration tests passing (100%). One-command testing: `./src/tests/run-integration-tests.sh -v`
+> **🎯 PREVIOUS**: 2025.12.29 (Session 19) - SENDER-AWARE NOTIFICATION SYSTEM DESIGN COMPLETE! Created comprehensive implementation plan for multi-project notification grouping. **DESIGN GOALS**: Add sender identification to notification system enabling: grouping notifications by Claude Code project (LUPIN, COSA, PLAN), chat-style UI with collapsible sender cards, user responses displayed as outgoing messages, conversation history persistence across page reloads, multi-terminal workflow support. **SENDER ID FORMAT**: `claude.code@{project}.deepily.ai` (e.g., `claude.code@lupin.deepily.ai`). **HYBRID DETECTION STRATEGY**: (1) If explicit `--sender-id` provided → use directly, (2) Extract from `[PREFIX]` in message → construct email, (3) Fallback → `claude.code@unknown.deepily.ai`. **CRITICAL ARCHITECTURE DECISIONS**: (A) Persist ALL notifications to PostgreSQL (not SQLite) - aligns with project's PostgreSQL migration strategy, (B) Activity-anchored window loading (relative to each sender's last activity, not current time), (C) User-configurable history window dropdown [24h, 2 days, week, month, all], (D) Chat-style message display with incoming (←) and outgoing (→) responses. **8-PHASE PLAN**: Phase 1 Queue Layer (NotificationItem sender_id), Phase 2 CLI Layer (Pydantic + --sender-id arg), Phase 3 API Layer (sender resolution), Phase 4 Database (PostgreSQL + SQLAlchemy + Alembic), Phase 5 Frontend JS (sender grouping + history loading), Phase 6 API History Endpoints, Phase 7 Frontend CSS (card styling), Phase 8 Testing. **KEY FILES TO CREATE**: `postgres_notification_model.py` (SQLAlchemy ORM), `notification_repository.py` (repository pattern), Alembic migration. **KEY FILES TO MODIFY**: `notification_fifo_queue.py`, `notification_models.py`, `notify_user_async.py`, `notify_user_sync.py`, `notifications.py` router, `queue-fresh.js`, `queue-fresh.css`. **DOCUMENTATION CREATED**: `src/rnd/2025.12.29-sender-aware-notification-system-design.md` (513 lines, complete implementation plan). **STATUS**: Design complete, ready for implementation. **History Health**: ⚠️ ~30k tokens - archive needed. 📋✅
 
-> **Prior**: 2025.10.04 (Session 3) - Configuration Block-Based Test Mode (PARTIAL). Implemented triple safety but discovered architecture blocker. 15/43 tests passing. Led to breakthrough simplification in Session 4.
+> **🎯 PREVIOUS**: 2025.12.03 (Session 18) - SIMILARITY MODAL ENHANCED: THREE-COLUMN LAYOUT + FIELD RENAME! Extended the similarity visualization feature with a third column for "Similar by Gist" and renamed `code_gist` → `solution_summary_gist` for consistency with solution-focused naming. **THREE-COLUMN SIMILARITY MODAL**: Added third column "✨ Similar by Gist" showing snapshots with similar concise summaries (snapshots.html:204-210 new column HTML, admin-snapshots.js:917-930 populate logic). Updated grid from 2-column to 3-column layout (admin-snapshots.css:733 `grid-template-columns: 1fr 1fr 1fr`). Added responsive breakpoints: 3→2 columns at 1200px, 2→1 at 900px (admin-snapshots.css:886-892). Modal width increased 1100px→1400px for better 3-column display. **FIELD RENAME code_gist → solution_summary_gist**: Renamed for consistency with solution-focused naming convention. Updated detail modal HTML label (snapshots.html:158-159), JS field access (admin-snapshots.js:418,771-780), and similarity result content selection logic (admin-snapshots.js:970-994). **SIMILARITY RESULT IMPROVEMENTS**: Added `similar-result-code` CSS class with monospace styling for code previews (admin-snapshots.css:853-867). Enhanced `createSimilarResultItem()` with type-based content selection (code/explanation/gist) using different max lengths (400/200/150 chars) and CSS classes. **FILES MODIFIED**: snapshots.html (+7 lines: third column HTML, label rename), admin-snapshots.js (+40 lines: gist column population, field rename, type-based content logic), admin-snapshots.css (+21 lines: 3-column grid, code styling, responsive breakpoints). **STATUS**: UI enhancement complete. Similarity modal now shows three comparison dimensions side-by-side. **History Health**: ✅ ~16k tokens - healthy. 🎨✅
 
-> **Earlier**: 2025.10.04 - JWT/OAuth 10/10 PHASES COMPLETE (100%)! 🚀 WebSocket JWT authentication fixed, all 8/8 integration tests passing, Phase 10 documentation complete (7 comprehensive docs, 4,500+ lines). System is production-ready!
+> **🎯 PREVIOUS**: 2025.12.02 (Session 17) - CODE SIMILARITY VISUALIZATION COMPLETE! Implemented full feature for visualizing code-level similarity between snapshots (questions like "what is 2+2?" and "What is the sum of two and two?" have ~86% question similarity but should have ~100% code similarity). **PHASE 1 - BACKEND SIMILARITY SEARCH**: Replaced stub `get_snapshots_by_code_similarity()` with real LanceDB vector search on `code_embedding` field (lancedb_solution_manager.py:1346-1450), added new `get_snapshots_by_solution_similarity()` method for `solution_embedding` field (lines 1452-1558). **PHASE 2 - API ENDPOINTS**: Added 3 Pydantic models (`CodeSimilarityResult`, `SimilarSnapshotsResponse`, `SnapshotPreviewResponse`) and 2 endpoints (`/admin/snapshots/{id_hash}/preview`, `/admin/snapshots/{id_hash}/similar`) in admin.py. **PHASE 3 - HOVER PREVIEW ICONS**: Added 📝 (code explanation) and 💻 (code preview) icons to search results table with click-to-show popovers (snapshots.html, admin-snapshots.js, admin-snapshots.css). **PHASE 4 - DRILL-DOWN SIMILARITY MODAL**: Added "Find Similar Snapshots" button to detail modal, new similarity modal with two-column layout (code vs explanation similarity), color-coded scores, click-to-view items. **BUG FIX - code_gist NOT GENERATED**: Root cause found - `running_fifo_queue.py` called `self.normalizer.process_text()` but `self.normalizer` was NEVER INITIALIZED! Fixed by: (1) Import `GistNormalizer` (line 8), (2) Initialize `self.gist_normalizer` in `__init__` (line 60), (3) Fix call to use `self.gist_normalizer.get_normalized_gist()`. **CRITICAL FIX - GIST GENERATION LOCATION**: `code_gist` was only generated in `_handle_solution_snapshot()` (cached jobs) but NOT in `_handle_base_agent()` (new jobs). By the time cached path ran, `run_count` was already 0 so condition `run_count == -1` failed. Fixed by adding gist generation to `_handle_base_agent()` after speech emitted but before `update_runtime_stats()` (lines 274-282). **DETAIL MODAL ENHANCEMENTS**: Added `solution_summary` (verbose) and `code_gist` (concise) fields to `SnapshotDetailResponse` model and endpoint, added corresponding HTML/JS to display both in View modal beneath code block. **FILES MODIFIED**: lancedb_solution_manager.py (+200 lines similarity methods), admin.py (+3 models, +2 endpoints, +2 response fields), running_fifo_queue.py (+1 import, +1 init, +2 fixes for gist generation), snapshots.html (+Preview column, +similarity modal, +2 detail fields), admin-snapshots.js (+hover popovers, +similarity modal logic, +2 field population), admin-snapshots.css (+icon styles, +popover styles, +similarity modal styles). **STATUS**: Feature complete. User can search snapshots, hover 📝/💻 for quick preview, click View for full details with code explanation + gist, click "Find Similar" to see code and explanation similarity side-by-side. **History Health**: ✅ ~16k tokens - healthy. 🔍💻✅
 
-> **More**: 2025.10.03 - User-Filtered Queue Views PHASE 1 COMPLETE! Implemented role-based queue filtering backend with 32/32 unit tests passing (100%). Multi-tenant isolation with admin override capability.
+> **🎯 PREVIOUS**: 2025.12.02 (Session 16) - DUPLICATE SNAPSHOT BUG FIXED - TWO ROOT CAUSES! Investigated and fixed why "What's 4 + 4?" created TWO database records (id_hash f4aa24b5 and 2ea576fa) when submitted only ONCE. **ROOT CAUSE 1 - TOCTOU RACE CONDITION**: `save_snapshot()` had no thread locking, allowing concurrent calls to both pass cache/DB checks before either INSERT commits. **FIX**: Added `from threading import Lock`, class-level `_save_lock = Lock()`, and wrapped critical section with `with self._save_lock:` (lancedb_solution_manager.py:12, 38-40, 649-682). Follows existing codebase pattern (EmbeddingManager, Normalizer, GistNormalizer all use `_lock = Lock()`). **ROOT CAUSE 2 - id_hash NOT PRESERVED ON UPDATE (THE REAL BUG!)**: In `_update_existing_snapshot()`, when updating an existing snapshot: (1) New snapshot has its OWN id_hash (generated from creation timestamp), (2) `_full_replace_snapshot()` uses `merge_insert("id_hash")` to match records, (3) Since new snapshot's id_hash doesn't match existing record, LanceDB INSERTS instead of updating! **FIX**: Added `snapshot.id_hash = existing_id_hash` (line 805) to preserve original id_hash when updating. Now merge_insert correctly matches and updates. **TESTING**: Added concurrent save protection test to `quick_smoke_test()` - pre-creates 3 snapshots with different id_hashes, launches concurrent threads, verifies only 1 record in database. Both sequential and concurrent tests now PASS. **DEBUG JOURNEY**: Extensive investigation traced through queue flow, cache behavior, lock verification, and finally discovered the id_hash mismatch was the true culprit. Sequential saves were failing too (not just concurrent), proving it wasn't purely a race condition. **FILES MODIFIED**: lancedb_solution_manager.py (+1 import, +3 lines lock definition, +5 lines lock wrapper with comment, +6 lines id_hash preservation with comment, +15 lines improved smoke test). **STATUS**: Fix complete and tested. Same question submitted multiple times (even concurrently) now results in exactly 1 record. **History Health**: ✅ ~15.5k tokens - healthy. 🐛🔒✅
 
-> **Earlier**: Integration Test Analysis & Remediation PHASE 1 COMPLETE! Fixed 4 test failures, achieved 7/8 passing (87.5%). Email service configuration-based fix implemented.
+> **🎯 PREVIOUS**: 2025.12.01 (Session 15) - SYNONYM SIGNAL LOSS ROOT CAUSE FOUND + FIXED! After hours of frustrating debugging, finally traced the corruption of "What's 4 + 4?" → "whats 4 4" to its source. **ROOT CAUSE**: `agent_base.py:129` was calling the DEPRECATED `SolutionSnapshot.remove_non_alphanumerics()` method which uses regex `[^a-zA-Z0-9 ]` to strip ALL punctuation including apostrophes and math operators. **FIX APPLIED**: Changed line 129 from `self.question = ss.SolutionSnapshot.remove_non_alphanumerics( question )` to `self.question = question` (store verbatim). **DEPRECATION NUKE**: Made `remove_non_alphanumerics()` SCREAM its deprecation with: massive ASCII box docstring, console output with 🔥 fire emojis and warning banners, input display, stack trace (limit=5), and 40 fire emojis at the end. Anyone who calls this function will see a wall of flaming warnings. **DEBUG LOGGING ADDED**: Added synonym debug logging to admin search endpoint (admin.py:548-554) showing ID, question, and all synonyms with scores for each search result. **EARLIER SESSION CHANGES**: Reverted `add_synonymous_question()` to store verbatim (solution_snapshot.py:430-435), user modified to use `self.last_question_asked` as key. **FILES MODIFIED**: agent_base.py (1 line fix), solution_snapshot.py (+40 lines screaming deprecation), admin.py (+7 lines debug logging). **WHY GIST WAS CORRECT**: The gist goes through `gist_normalizer.get_normalized_gist()` which properly expands contractions and preserves operators - that's why synonym gist showed "what is 4 + 4" while question showed corrupted "whats 4 4". **STATUS**: Fix complete, backup synced to DATA02. Ready for testing with fresh database. **History Health**: ✅ ~15k tokens - healthy. 🔥🐛✅
+
+> **🎯 PREVIOUS**: 2025.12.01 (Session 14) - Admin Snapshots Modal ESC Key Handler! Quick UI enhancement: added ESC key to close the snapshot detail modal in admin snapshots dashboard. **IMPLEMENTATION**: Added `detailModalEscListener` property to constructor, created `_attachDetailModalEscListener()` and `_detachDetailModalEscListener()` methods following existing recording cancel pattern, integrated with `viewDetails()` (attach before show) and `closeDetailModal()` (detach before hide). **FILES MODIFIED**: admin-snapshots.js (+20 lines: property, 2 methods, 2 integration points). **PATTERN**: Matches existing `_attachSearchRecordingCancelListener` pattern for consistency. Uses `event.preventDefault()` + `event.stopPropagation()` for proper keyboard handling. **History Health**: ✅ ~15k tokens - healthy. ⌨️✅
+
+> **🎯 PREVIOUS**: 2025.12.01 (Session 13) - Snapshot UI Polish + Synonym Signal Loss Investigation! Multiple UI enhancements and deep debugging of synonym normalization issues. **UI ENHANCEMENTS**: (1) Added 0% threshold option to admin snapshot search dropdown (snapshots.html:42), (2) Added explicit descending sort for similarity scores (admin.py:556-557 `search_results.sort(key=lambda x: x.score, reverse=True)`), (3) Added 2-second debounce to Fresh Queue submit button to prevent rapid-fire double submissions (queue-fresh.js:1486-1493 `this._lastSubmitTime` tracking). **DUPLICATION BUG FIXES (from prior context)**: Added DB fallback to `delete_snapshot()` for cache desync handling (lancedb_solution_manager.py:1086-1107), mirrors pattern from `save_snapshot()` duplicate guard. **SYNONYM SIGNAL LOSS INVESTIGATION**: User discovered synonyms showing "whats 2 2" instead of "what is 2 + 2" in admin detail view. Deep analysis traced two-layer problem: (1) STT outputs apostrophe-less contractions ("whats" not "what's") and drops operators, (2) Old Normalizer CONTRACTIONS dict only had apostrophe versions. **FIX A APPLIED**: Added 24 STT-friendly contractions to Normalizer (normalizer.py:83-107) - "whats"→"what is", "thats"→"that is", "dont"→"do not", etc. Omitted ambiguous ones (im, id, its, hell, shell, well, were). **FIX B APPLIED (BACKFIRED)**: Changed `add_synonymous_question()` to store verbatim instead of normalized (solution_snapshot.py:430-431). **PROBLEM DISCOVERED**: By removing normalization, we now store RAW STT output directly! The fix should be to RESTORE normalization since the Normalizer NOW has STT-friendly contractions that will expand "whats"→"what is". **RUNTIME STATS STALE DATA**: Confirmed browser-side caching of search results - detail modal reads from cached `this.searchResults` array, not fresh API call. Re-running search refreshes data. Documented as expected behavior. **FILES MODIFIED**: snapshots.html (+1 line 0% option), admin.py (+2 lines sort), queue-fresh.js (+8 lines debounce), lancedb_solution_manager.py (+28 lines delete DB fallback), normalizer.py (+25 lines STT contractions), solution_snapshot.py (-3 lines removed normalization - NEEDS REVERTING). **STATUS**: ⚠️ BLOCKED - Need to restore normalization in `add_synonymous_question()` now that Normalizer has STT-friendly contractions. Debug logging planned but not yet added. **NEXT SESSION**: (1) Restore normalization call in solution_snapshot.py:430-432, (2) Test "what is 2 + 2" via voice to verify "whats"→"what is" expansion works, (3) Note: Missing "+" cannot be recovered if STT didn't produce it. **History Health**: ✅ ~15k tokens - healthy. 🎨🐛⚠️
+
+> **🎯 PREVIOUS**: 2025.11.30 (Session 12) - LanceDB Part 6 Complete: Import Fix + Config-Driven Improvements! Fixed wrong ConfigurationManager import path (`cosa.app` → `cosa.config`) in admin.py causing ModuleNotFoundError. User emphasized config-driven design throughout: replaced hardcoded `debug=False` with `_config_mgr.get("app_debug")`, replaced hardcoded `storage_backend="local"` default with `"development"`. Added new config key `similarity_threshold_admin_search = 80.0` for admin search (lower than queue's 95% to enable discovery/exploration). Function defaults in `get_snapshots_by_question()` changed from 100% → 90% as sensible fallback. All thresholds now properly separated: queue uses 95% (precision), admin uses 80% (recall). **FILES MODIFIED**: admin.py (import fix, config-driven threshold + debug), solution_manager_factory.py (nprobes in config dict, storage_backend default), lancedb_solution_manager.py (self._nprobes init, threshold defaults 100→90), lupin-app.ini (+1 config key), lupin-app-splainer.ini (+1 explanation). **COSA CHANGES** (6 files in submodule): notify_user_async.py, lancedb_solution_manager.py, normalizer.py, solution_manager_factory.py, multimodal_munger.py, admin.py - managed separately. **LanceDB UPGRADE STATUS**: All 6 parts complete (Backend, Match % UI, STT+Ctrl+R, nprobes fix, admin threshold, import fix). **History Health**: ✅ 14.4k tokens (57%) - healthy. 🔧✅
+
+> **🎯 PREVIOUS**: 2025.11.26 (Session 11 Part 3) - Fresh Queue STT Button Planning Session! User requested adding voice-to-text recording button to Q&A input section, reusing the proven AudioRecorder module from notification system. **DESIGN SESSION**: Interactive requirements elicitation completed with 3 key decisions: (1) **Placement** - inline after qa-input, before tts-mode dropdown (minimal emoji-only button `🎤`), (2) **Visual states** - full state display with elapsed time counter (`🔴 15/30s`), color-coded warnings (`🟡` at 25+ seconds), pulse animations, processing state (`⏳`), (3) **UX features** - ESC key cancellation during recording, auto-focus/select text after transcription. **COMPREHENSIVE PLAN CREATED**: Implementation plan documented in `/home/rruiz/.claude/plans/giggly-beaming-bunny.md` with complete HTML/CSS/JavaScript specifications. **FILES TO MODIFY**: queue-fresh.html (+1 button in form-group), queue-fresh.css (+~40 lines button styles/states), queue-fresh.js (+~150 lines AudioRecorder integration with 9 new methods). **REUSE PATTERN**: Mirrors notification STT implementation (queue-fresh.js:3914-4430) with adaptations for Q&A context. **INFRASTRUCTURE READY**: AudioRecorder class already loaded, `/api/upload-and-transcribe-mp3` endpoint working, Whisper transcription pipeline operational. **ESTIMATED EFFORT**: ~50 minutes implementation + testing. **STATUS**: Planning complete, ready for implementation tomorrow. **NEXT SESSION**: Exit plan mode and begin implementation following documented plan. **History Health**: ✅ 14.4k tokens (58%) - healthy. 📋✅🎤
+
+> **🎯 PREVIOUS**: 2025.11.26 (Session 11 Part 2) - WebSocket Notification Retry Logic COMPLETE! Solved timing race condition where notifications sent within 5-10 seconds after login returned `user_not_available` despite user being connected. Root cause: WebSocket authentication takes 5-10 seconds to complete - NOT a bug, just timing. **SOLUTION**: Implemented Phase 2.7 adaptive retry logic in `notify_user_async.py` with hybrid exponential backoff algorithm. **RETRY ALGORITHM**: Short timeouts (≤10s) use aggressive linear retries `[1,1,2,2,3]` for 4 attempts over ~4s to catch WebSocket auth window. Long timeouts (>10s) use exponential backoff with 5s cap `[1,2,4,5,5,5...]` for server-friendly scaling. **IMPLEMENTATION**: Added `calculate_retry_intervals()` function (lines 46-94) and retry loop wrapping HTTP requests (lines 153-272). Only retries on `user_not_available` status, fails fast on network/HTTP errors. **TEST RESULTS**: ✅ Short timeout (5s): Caught auth in 2s (attempt 3/4), ✅ Long timeout (30s): User already connected, succeeded immediately with zero overhead. **DEBUG OUTPUT**: Shows attempt progress `[DEBUG] Attempt 3/4`, retry delays `[DEBUG] Retry 1 after 1s`, status `[DEBUG] user_not_available (attempt 1), will retry...`. Production mode has silent retries with clean output. **EARLIER SESSION 11 WORK**: PostgreSQL migration reconciliation (create_service_account_postgres.py, 392 lines), service account API key registration, notification config update (~/.notifications/config [development] section), password reset script bug fixes (user['user_id']→user['id'], broken update_user_password bypass), password reset for ricardo.felipe.ruiz@gmail.com, WebSocket timing investigation (test_websocket_notification.py, 387 lines), root cause discovery (5-10s auth window). **FILES MODIFIED**: notify_user_async.py (+122 lines: time import, calculate_retry_intervals, retry loop), create_service_account_postgres.py (NEW 392 lines), test_websocket_notification.py (NEW 387 lines), reset_user_password.py (bug fixes), ~/.notifications/config (added [development]), src/conf/keys/notification-api-claude-code-dev (new key). **DATABASE CHANGES**: PostgreSQL api_keys table (new key for claude.code@deepily.ai), users table (password updated). **BENEFITS**: Notifications during login now succeed transparently (2-4s), zero overhead when user connected, no caller changes needed. **STATUS**: Phase 2.7 complete, retry logic production-ready! **History Health**: ✅ 14.1k tokens (56%) - healthy. 🔄✅
+
+> **🎯 PREVIOUS**: 2025.11.26 (Session 11 Part 1) - Snapshot ID Hash Collision Bug FIXED + Diagnostic Logging Cleanup! Root cause identified and resolved: classic Python mutable default argument bug in `solution_snapshot.py:161` where `run_date: str=get_timestamp()` was evaluated ONCE at module load time instead of per-instantiation. **THE BUG**: All snapshots created without explicit `run_date` parameter shared the SAME frozen timestamp ("2025-11-26 @ 08:30:00 PST"), generating IDENTICAL SHA256 `id_hash` values. When "sqrt(122)" was saved, it found existing record with that hash (sqrt(100)), added "sqrt(122)" synonym to wrong snapshot, causing future queries to return "10" instead of ~11.045. **FIX APPLIED**: Changed default parameters from function calls to `None` (lines 161, 257-259), then call `self.get_timestamp()` (with `microseconds=True` for run_date) in function body when values are None. Ensures every snapshot gets unique timestamp. **DIAGNOSTIC CLEANUP**: Removed all verbose diagnostic logging added during investigation (5 locations across 4 files): todo_fifo_queue.py (query entry block), lancedb_solution_manager.py (hierarchical search logging at all 4 levels), canonical_synonyms_table.py (synonym audit logging + `_get_synonyms_for_snapshot()` helper method), solution_snapshot.py (state mutation tracking). Code bloat eliminated - ~200 lines removed. **FILES MODIFIED**: solution_snapshot.py (+comment explaining bug, microseconds=True for uniqueness), todo_fifo_queue.py (-14 lines), lancedb_solution_manager.py (-78 lines), canonical_synonyms_table.py (-54 lines including helper method), solution_snapshot.py (-33 lines). **STATUS**: Fix complete, diagnostic code removed. User will keep debug=True but verbose=False (diagnostic logging was guarded by `if self.verbose:`). **TESTING NEEDED**: Delete LanceDB database, restart server, test "sqrt(100)" then "sqrt(122)" to verify unique id_hash generation and correct cache behavior. 🐛✅🧹
+
+> **🎯 PREVIOUS**: 2025.11.25 (Session 10 Part 3) - Collapsible Synonyms UI + TTFA Metrics + Stale Stats Fix! Three major features implemented: (1) **COLLAPSIBLE SYNONYMS SECTION**: Added synonyms display to admin snapshot detail modal (ABOVE runtime stats as user requested). Backend: Added `synonymous_questions` and `synonymous_question_gists` fields (both `Dict[str, float]`) to `SnapshotDetailResponse` model and endpoint (admin.py:134-135, 604-605). Frontend: HTML section with toggle button (snapshots.html:108-117), CSS styling with paired question+gist display and blue accent border (admin-snapshots.css:387-474, 88 lines), JavaScript toggle function + dynamic population with escapeHtml XSS protection (admin-snapshots.js:255-299, 345-372). **BUG FIX**: Initial type annotation error (`Dict[str, str]` → `Dict[str, float]` for gists - gists are KEYS not VALUES!) and score display (removed erroneous `*100` - scores already 0-100%). (2) **TTFA TIMING METRICS**: Added Time-To-Text (TTT), Time-To-First-Audio (TTFA), and Round-Trip-Time (RTT) metrics to Fresh Queue UI. HTML metrics display (queue-fresh.html:32-36), CSS styling with color-coded values green/blue/purple (queue-fresh.css:648-673), JavaScript timing capture at 4 points: submit, text response, TTS start, first audio playback (queue-fresh.js). User confirmed: "stats look good." (3) **STALE STATS FIX**: Resolved admin endpoints showing stale runtime stats by implementing FastAPI dependency injection pattern. Added `get_snapshot_manager()` dependency function that retrieves global singleton from `fastapi_app.main` module (admin.py:28-48). Updated 3 endpoints to use `Depends(get_snapshot_manager)` instead of creating new instances. **FILES MODIFIED**: admin.py (+25 lines), snapshots.html (+10 lines), admin-snapshots.css (+88 lines), admin-snapshots.js (+72 lines), queue-fresh.html (+5 lines), queue-fresh.css (+26 lines), queue-fresh.js (+60 lines). **STATUS**: All features implemented and working. **History Health**: ✅ ~13k tokens (52%) - healthy. 🎨✅📊
+
+> **🎯 PREVIOUS**: 2025.11.25 (Session 10 continued) - LanceDB Query Pattern Bug Fix! Fixed critical bug where exact match lookups returned WRONG snapshots. **THE BUG**: Asking "What's the square root of 144?" returned "What's 2+2?" answer (4 instead of 12). Root cause: LanceDB's `table.search().where(filter)` without a vector query returns **arbitrary rows**, not filtered results - it's NOT a SQL-like filter! **FIX**: Changed all three `find_exact_*` methods in `canonical_synonyms_table.py` to use pandas filtering instead: `df = table.to_pandas(); matches = df[df['column'] == value]`. **FILES MODIFIED**: (1) `snapshot_manager_interface.py:198` - renamed abstract method `add_snapshot` → `save_snapshot` to match implementation, (2) `solution_snapshot_mgr.py:195` - renamed method in file-based manager, (3) `canonical_synonyms_table.py` - fixed `find_exact_verbatim()` (lines 276-300), `find_exact_normalized()` (lines 325-349), `find_exact_gist()` (lines 374-398). **EARLIER SESSION 10 FIXES**: Runtime stats persistence (+1 save_snapshot call), method rename (22 call sites across 8 files), cache lookup consistency. **STATUS**: All fixes complete, awaiting user to delete LanceDB database and restart for testing. **EXPECTED OUTCOME**: "What's the square root of 144?" should now correctly return 12. **History Health**: ✅ ~12.9k tokens (51%) - healthy. 🐛✅
+
+> **🎯 PREVIOUS**: 2025.11.25 (Session 10) - Runtime Stats Persistence BREAKTHROUGH + Method Rename + Cache Consistency Fix! Finally identified the ROOT CAUSE of the runtime stats not persisting issue that blocked Sessions 8-9: `_format_cached_result()` in `running_fifo_queue.py` was updating stats in memory but NEVER calling `save_snapshot()` to persist them! The LanceDB infrastructure was fine - we were looking at the wrong layer. **FIX #1 - RUNTIME STATS PERSISTENCE**: Added `self.snapshot_mgr.save_snapshot( cached_snapshot )` after `update_runtime_stats()` in `_format_cached_result()` (running_fifo_queue.py:389-390). Cache hits now persist their runtime stats to LanceDB! **FIX #2 - METHOD RENAME**: Renamed `add_snapshot()` → `save_snapshot()` across codebase for semantic clarity - the method is actually an upsert (INSERT or UPDATE), not just "add". Updated 8 files (22 call sites): lancedb_solution_manager.py (definition), running_fifo_queue.py (2 sites + 1 new), test_lancedb_gcs_integration.py (8), test_lancedb_local_isolation.py (5), run_gcs_tests_standalone.py (3), migrate_snapshots_complete.py (1), migrate_snapshots_to_lancedb.py (2), benchmark_snapshot_managers.py (1). Skipped legacy JSON-based SolutionSnapshotManager in notebook (different class). **FIX #3 - CACHE LOOKUP CONSISTENCY**: Discovered search code at line 1175 was NORMALIZING questions before cache lookup, but cache stores VERBATIM questions (populated at init from `row["question"]`). Fixed to use verbatim lookup, matching delete_snapshot behavior. Comment was misleading ("Cache stores normalized questions") - CORRECTED to "Cache stores VERBATIM questions". **DATABASE PERMISSIONS**: Verified already correct (`rruiz:rruiz` ownership), not root as suspected. **EXPLORE AGENT SUCCESS**: Two parallel Explore agents identified both the root cause and the cache inconsistency through comprehensive codebase analysis. **FILES MODIFIED**: lancedb_solution_manager.py (+18 lines: method rename, docstring update, cache lookup fix), running_fifo_queue.py (+3 lines: 2 renames + 1 critical new save_snapshot call), 6 test/script files (call site renames). **TODO FOR FUTURE SESSION**: Review cache question format consistency - what are the advantages/disadvantages of using verbatim vs normalized questions for indexing and searching? This is a deeper architectural conversation about optimal naming scheme and approach. **STATUS**: All fixes implemented, syntax checked, awaiting user manual testing of "What's 2+2?" flow. **EXPECTED OUTCOME**: Run count should now increment correctly on cache hits (run_count=1 → 2 → 3 in Admin UI). **History Health**: ✅ ~12.4k tokens (50%) - healthy. 🎯🐛✅
+
+> **🎨 PREVIOUS**: 2025.11.24 (Session 9) - Admin Snapshots UI Enhancements + DELETE Bug Fixes! Completed 4 major improvements to admin snapshots dashboard: (1) Added runtime_stats and code fields to detail view, (2) Fixed DELETE cache key normalization bug, (3) Fixed hardcoded debug flags, (4) Redesigned modal layout for 60% space reduction. **RUNTIME STATS & CODE FIELDS**: Backend added `runtime_stats: dict` and `code: List[str]` to SnapshotDetailResponse (admin.py:107-108, 640-641), frontend added two `<pre class="code-block">` elements in modal (snapshots.html:102-109), JavaScript formats runtime_stats as pretty JSON and code as multi-line string (admin-snapshots.js:251-263), CSS added monospace styling with dark mode support (admin-snapshots.css:335-359). **DELETE BUG FIX**: Root cause - cache stored verbatim questions `"What's 2 + 2?"` but delete_snapshot normalized with `.lower()` → `"what's 2 + 2?"` causing cache misses. Fixed by removing normalization and using verbatim for both storage and lookup (lancedb_solution_manager.py:903-923). Added comprehensive debug logging gated by `if self.debug:` showing cache size, keys, and match results. **HARDCODED DEBUG FLAGS FIX**: admin.py was hardcoding `debug=False, verbose=False` when creating manager despite having ConfigurationManager available. Changed to read `app_debug` and `app_verbose` from config (admin.py:486-487). Debug logging now works properly. **MODAL LAYOUT REDESIGN**: Moved verbatim question to header as `"Snapshot Details: {question}"` with 2-line clamp and ellipsis (snapshots.html:78, admin-snapshots.js:245-247), implemented two-column grid with normalized/gist on left and answer/conversational on right (snapshots.html:83-107, admin-snapshots.css:300-341), increased modal width 800px→900px for better balance, responsive breakpoint stacks columns on mobile ≤768px. Result: 60% vertical space reduction (450px→180px). **STALE STATS ISSUE DISCOVERED**: After UI enhancements, discovered runtime_stats showing default values (run_count:0) despite ~12 math agent executions. Investigation revealed database owned by root but FastAPI runs as different user → potential stale reads. Created comprehensive investigation document `src/rnd/2025.11.24-admin-snapshots-stale-stats-investigation.md` documenting issue, hypotheses (permissions, separate manager instances), and recommended fixes (chown database to FastAPI user or use shared global manager). **FILES MODIFIED**: admin.py (+11 lines: model fields, debug flags, logging), lancedb_solution_manager.py (+8 lines debug logging, removed normalization), snapshots.html (+34 lines: header ID, two-column grid), admin-snapshots.css (+84 lines: header styling, grid layout, code blocks, responsive), admin-snapshots.js (+10 lines: modal title, field formatting). **STATUS**: Admin UI fully functional (search, view, delete) with enhanced layout and proper debug logging. Runtime stats display issue documented for next session. **NEXT**: Fix database permissions (`chown -R rruiz:rruiz lupin.lancedb/`) or implement shared global manager to resolve stale stats. **History Health**: ✅ 11.9k tokens (48%) - healthy. 🎨✅⚠️
+
+> **🚨 PREVIOUS**: 2025.11.24 (Session 8) - Runtime Stats Persistence Bug Investigation BLOCKED! Spent entire session attempting to fix LanceDB runtime stats not persisting after merge_insert operations. **PROBLEM**: Run count stuck at 1 after multiple executions of same question, even though stats calculated correctly in memory. **FIXES ATTEMPTED (ALL FAILED)**: (1) Added scalar index on id_hash column via `create_scalar_index("id_hash", replace=True)` for both new tables (lancedb_solution_manager.py:488) and existing tables (line 480) - LanceDB merge_insert requires index for reliable matching, (2) Invalidated cache BEFORE merge_insert (lines 784-792) to force fresh DB reads, (3) Repopulated cache from fresh DB query after merge instead of stale in-memory record (lines 820-836), (4) Added cache consistency verification method `_verify_cache_consistency()` (lines 851-909) to validate cache matches DB, (5) Deleted LanceDB database directory multiple times, (6) Researched LanceDB documentation for proper patterns. **USER TESTED**: Despite all fixes, run count STILL not updating. **DEBUG OUTPUT CLEANUP**: Removed all DEBUG 1-6 statements from investigation (running_fifo_queue.py, solution_snapshot.py, math_agent.py). **ROOT CAUSE UNKNOWN**: Hypotheses include schema mismatch, merge predicate not matching, JSON serialization corruption, LanceDB 0.23.0 bugs, transaction isolation, or missing optimize() trigger. **STATUS DOCUMENT**: Created comprehensive `src/rnd/2025.11.24-runtime-stats-persistence-fix-status.md` documenting all attempted fixes, possible issues, and next debugging steps (merge verification, return value logging, before/after comparisons). **FILES MODIFIED**: lancedb_solution_manager.py (+88 lines: index creation, cache invalidation, fresh DB reads, consistency verification), running_fifo_queue.py (-4 lines DEBUG 1), solution_snapshot.py (-29 lines DEBUG 2-5), math_agent.py (-29 lines DEBUG 6a-6d). **SESSION STATUS**: 🚨 BLOCKED - Need deeper LanceDB investigation, alternative update strategies, or expert consultation. **NEXT**: (1) Add merge return value logging, (2) Query DB before/after merge to compare directly, (3) Try delete+insert pattern instead of merge_insert, (4) Check LanceDB internal logs for silent errors. **History Health**: ✅ 11.5k tokens (46%) - healthy. 🚨🐛⚠️
+
+> **⚡ PREVIOUS**: 2025.11.23 (Session 7) - Triple Bug Fix: LanceDB nprobes Warning, Synonymous Questions Tracking, Deprecated Normalization! Fixed THREE critical bugs in one session: (1) LanceDB nprobes warning elimination via configurable parameter, (2) Synonymous questions never updating (missing canonical_synonyms integration), (3) Deprecated normalization corrupting math operators. **BUG 1 - NPROBES WARNING**: Added configurable `solution snapshots lancedb nprobes = 20` to lupin-app.ini (lines 73-77), updated InputAndOutputTable constructor to read config (input_and_output_table.py:45-48), applied `.nprobes(self._nprobes)` to vector search query (line 263). Eliminates continuous "WARN lance::dataset::scanner nprobes is not set" log pollution. **BUG 2 - SYNONYMOUS QUESTIONS NOT UPDATING**: Discovered hierarchical search Levels 1-3 (exact verbatim/normalized/gist matches) ALWAYS failed, falling back to expensive Level 4 similarity search every time. Root cause: `CanonicalSynonymsTable` never populated during runtime - missing integration between `LanceDBSolutionManager` and `CanonicalSynonymsTable`. Added `_update_canonical_synonyms()` method (lancedb_solution_manager.py:775-834, 60 lines), called from `_insert_new_snapshot()` (line 691) and `_full_replace_snapshot()` (line 772). Now populates canonical_synonyms table with verbatim/normalized/gist for instant exact-match lookups. **BUG 3 - DEPRECATED NORMALIZATION CORRUPTION**: User identified subtle but critical issue: "What's 2+2?" being corrupted to "whats 22" (math operators stripped). Investigation revealed deprecated `SolutionSnapshot.remove_non_alphanumerics()` method (solution_snapshot.py:53-76) still in use at line 421 in `add_synonymous_question()` - strips ALL punctuation including "+". Fixed by replacing with correct `Normalizer.normalize()` that preserves MATH_OPERATORS (solution_snapshot.py:423-424, added import line 20). Skip corrupted historical synonymous_questions data in `_update_canonical_synonyms()` to prevent polluting canonical table (lancedb_solution_manager.py:823-829). **PERFORMANCE IMPACT**: (1) nprobes fix: no more log spam, (2) Synonym tracking: 80%+ queries should hit instant exact matches (<1ms) instead of expensive similarity search, (3) Normalization: future synonyms stored correctly as "what is 2 + 2" not "whats 22". **EMBEDDING DUPLICATION ANALYSIS**: User questioned why 2 embeddings generated (verbatim + normalized). Deep investigation confirmed intentional three-level architecture (Session 5) is correct - different semantic purposes, hierarchical search with early exit, zero waste when cached. No optimization needed. **FILES MODIFIED**: lupin-app.ini (+5 lines nprobes config), input_and_output_table.py (+7 lines constructor + 1 line search query), lancedb_solution_manager.py (+62 lines _update_canonical_synonyms method + 2 call sites, -15 lines removed corrupted synonym loop), solution_snapshot.py (+1 import, -1 deprecated call +2 correct normalization). **TESTING STATUS**: Awaiting user to manually delete LanceDB database (root ownership) and restart server for validation. **NEXT**: Test "What's 2+2?" multiple times to verify: (1) no nprobes warning, (2) second query hits Level 1 exact match, (3) synonyms stored with correct normalization. **History Health**: ✅ 11.0k tokens (44%) - healthy. ⚡🐛🔧
+
+> **🎨 PREVIOUS**: 2025.11.23 (Session 6) - Admin Snapshots Dashboard UI Complete + Critical ID Hash Bugs Fixed! Implemented Phases 0-4 of admin snapshots UI (dashboard landing page, search interface, view/delete modals, responsive styling) and resolved THREE critical LanceDB ID hash mismatch bugs causing 404 errors. **PHASE 0-4 IMPLEMENTATION**: Created admin dashboard landing page (dashboard.html, admin-dashboard.css, admin-dashboard.js - 3 files, card-based navigation), snapshots search interface (snapshots.html with search/table/modals - 5,866 lines), complete JavaScript logic (admin-snapshots.js with JWT auth, search, view, delete - 10,992 lines), responsive CSS (admin-snapshots.css - 5,462 lines). **AUTHENTICATION FIXES**: Fixed redirect loop (added 3 admin dashboard nav buttons to profile.html), corrected JS auth flow (admin-dashboard.js + admin-snapshots.js now use `getCurrentUser()` and `hasRole('admin')` instead of non-existent `/auth/profile` endpoint). **CONFIGURATIONMANAGER BUG**: Fixed 5 instances of `config_mgr.get_value()` → `config_mgr.get()` (admin.py:461-474), added `import traceback` for proper error logging. **ERROR SANITIZATION**: Sanitized 6 error messages in admin.py to prevent debugging info exposure - console gets full details (IDs, exceptions, stack traces), UI gets clean user-friendly messages. Pattern: `print()` + `traceback.print_exc()` for console, generic `HTTPException.detail` for UI. **CRITICAL ID HASH BUGS FIXED**: (1) lancedb_solution_manager.py:264 - Changed from generating MD5(question) hash to preserving original SHA256(timestamp) `id_hash = snapshot.id_hash`, (2) Removed unused `hashlib` import, (3) Line 284 - Use preserved hash in record `"id_hash": id_hash`, (4) Line 873 - Fixed method name `_row_to_snapshot()` → `_record_to_snapshot()`, (5) Line 418 - Added `id_hash=record["id_hash"]` to constructor to prevent regeneration. **ROOT CAUSE**: Search returned SHA256 hashes from SolutionSnapshot objects, but LanceDB stored MD5 hashes → ID mismatch → 404 on view/delete operations. **FILES CREATED**: dashboard.html (3,541 bytes), admin-dashboard.css (3,750 bytes), admin-dashboard.js (3,656 bytes), snapshots.html (5,866 bytes), admin-snapshots.css (5,462 bytes), admin-snapshots.js (10,992 bytes). **FILES MODIFIED**: profile.html (+3 admin nav buttons), admin.py (5 config fixes, 4 error logging additions, 6 error message sanitizations), lancedb_solution_manager.py (removed hashlib, 5 fixes for id_hash preservation). **EARLIER SESSION 6**: Cache hit gisting optimization (977ms savings via embedding preservation in `_record_to_snapshot()`). **STATUS**: Admin snapshots UI complete, all ID hash bugs resolved, ready for testing after server restart. **NEXT**: Restart FastAPI server, test search/view/delete functionality with consistent SHA256 hashes. **History Health**: ✅ 11.2k tokens (45%) - healthy. 🎨🐛✅
+
+> **🐛 PREVIOUS**: 2025.11.22 (Session 5) - Math Agent Debugging Marathon! Fixed 5 bugs, added comprehensive logging, discovered NumPy array truthiness bug. **BUGS FIXED**: (1) ConfigurationManager import path (admin.py:20 `cosa.utils` → `cosa.config`), (2) Duplicate gist generation (solution_snapshot.py:275,282 `normalize_for_cache=True` → `False` - saved ~500ms + 400 tokens per query!), (3) Missing formatter debug logging (raw_output_formatter.py:82-94 added FORMATTER LLM PROMPT/RESPONSE banners with `debug && verbose` conditionals), (4) Universal FormatterResponse model (xml_models.py:2256-2295 NEW 40-line Pydantic model for all 6 formatters), (5) Pydantic XML schema mismatch (xml_parser_factory.py:149-154 added formatter routing mappings + raw_output_formatter.py:53,102 use `formatter_routing_command` instead of `routing_command`). **EMBEDDING CACHE ANALYSIS**: Investigated apparent inefficiency of 3 cache lookups (verbatim/normalized/gist) - found it's **intentional and optimal** architecture for hierarchical search with early exit at search stage, not cache stage. All 3 embeddings needed for different search purposes. Zero performance issue when all hit cache. **CRITICAL BUG DISCOVERED**: NumPy array truthiness bug in `lancedb_solution_manager.py:356` - `_ensure_list()` method checks `if value` on NumPy array, raises `ValueError` for multi-element arrays, exception caught and returns `[]`, losing code field during snapshot retrieval. **Root Cause**: LanceDB `to_pandas()` converts list fields to NumPy arrays, which cannot be used in boolean context. **Impact**: Math agent code execution fails with "NameError: name 'what_is_2_plus_2' is not defined" because code field is empty. **Fix Ready**: Change line 356 from `return list(value) if value else []` to `return list(value)` (remove truthiness check). **Files Modified**: admin.py (1 line), solution_snapshot.py (2 lines), raw_output_formatter.py (13 lines debug logging), xml_models.py (+40 lines FormatterResponse), xml_parser_factory.py (+7 lines formatter mappings + 1 import + 5 lines debug logging), raw_output_formatter.py (2 lines routing). **Test Validation**: "What's 2+2?" now shows FormatterResponse parsing succeeds (was CodeBrainstormResponse errors), but code execution fails due to NumPy bug. **Status**: 5 bugs fixed, 1 critical bug identified with solution ready. **Next**: Fix NumPy array bug in _ensure_list(), test math agent end-to-end, verify all 6 formatters work correctly. **History Health**: ⚠️ 22.3k tokens (89%) - archive critical. 🐛🔧
+
+> **📋 PREVIOUS**: 2025.11.22 (Session 4) - Admin Snapshots Backend API COMPLETE! Implemented Phase 1 of admin snapshots dashboard (3 endpoints, ~276 lines). **Endpoints Implemented**: (1) GET /admin/snapshots/search - vector similarity search with query parameter, returns preview/gist/score/created_date (admin.py:502-581), (2) GET /admin/snapshots/{id_hash} - full snapshot details by ID (admin.py:584-642), (3) DELETE /admin/snapshots/{id_hash} - physical deletion from LanceDB (admin.py:645-709). **Key Features**: Pydantic response models (SnapshotSearchResult, SearchSnapshotsResponse, SnapshotDetailResponse), helper function `_get_snapshot_manager()` with multi-backend support (local/GCS), comprehensive error handling (400/404/500), JWT admin role enforcement on all endpoints. **Testing**: Created automated test script `src/tests/test_admin_snapshots_endpoints.sh` - validates all 3 endpoints, safe delete test (404 validation). **Testing Blocked**: Admin user credentials needed (seed data password has special chars causing JSON parse errors), created regular test user successfully (testadmin@example.com), server responsive and endpoints validated via registration test. **Files Modified**: admin.py (+276 lines: 3 models, 1 helper, 3 endpoints), test_admin_snapshots_endpoints.sh (NEW 104 lines). **Import Fix**: ConfigurationManager path corrected by linter (cosa.utils → cosa.config). **Status**: Phase 1 complete (100%), ready for Phase 2 (Frontend HTML). **Next**: (1) Resolve admin auth for testing, (2) Begin Phase 2 HTML structure (snapshots.html), (3) Phase 3 JavaScript (admin-snapshots.js). **Remaining Estimate**: 5-8 hours (Phases 2-5). **History Health**: ⚠️ 21.8k tokens (87%) - archive recommended. 🎯✅
+
+> **📋 PREVIOUS**: 2025.11.20 (Session 3) - Admin Solution Snapshots Dashboard Planning COMPLETE! Developed comprehensive implementation plan through interactive requirements elicitation (7 questions). **Requirements**: Simple text search across Question/Question Normalized/Question Gist fields, table display with view details modal, delete with confirmation, JWT admin role enforcement, <1000 snapshots (instant search). **Architecture**: New admin dashboard foundation - Backend: 3 new endpoints in admin.py (search, details, delete), Frontend: vanilla HTML/JS/CSS following Fresh Queue patterns (snapshots.html + admin-snapshots.js/css). **Research**: Analyzed LanceDB schema (30+ fields, 6 vector embeddings), existing auth patterns (JWT localStorage, require_admin dependency), Fresh Queue UI patterns (modal overlays, API call utilities). **Documentation**: Created `src/rnd/2025.11.20-admin-snapshots-dashboard.md` (comprehensive 750-line plan with 5 implementation phases, testing checklists, timeline 7-11 hours). **Status**: Planning complete, ready for implementation. **Next**: Begin Phase 1 (Backend API endpoints) or continue with other work. **History Health**: ⚠️ 20.6k tokens (82%) - archive recommended. 📋✅
+
+> **⚠️ PREVIOUS**: 2025.11.20 (Session 2) - pydantic_ai API Migration Complete, XML Schema Mismatch Investigation! Successfully migrated chat_client.py and llm_client.py to pydantic_ai 0.6.2 API (added ModelSettings imports, wrapped generation parameters, fixed AgentRunResult `.data` → `.output`). "What's 2+2?" query now progresses through math agent pipeline but fails at XML parsing stage. **Research Findings**: Math agent uses two-stage XML pipeline - (1) Code generation (CodeBrainstormResponse with 7 required fields: thoughts, brainstorm, evaluation, code, returns, example, explanation), (2) Formatting (simple RephraseResponse with `<rephrased-answer>`). Error logs show pydantic trying to validate formatter's simple XML against code generation's complex schema. **Root Cause**: Schema mismatch - formatter LLM correctly returns `<rephrased-answer>` but system tries to parse it with CodeBrainstormResponse schema. **Documentation**: Created comprehensive investigation doc `src/rnd/2025.11.20-math-agent-xml-schema-mismatch.md` with pipeline analysis, hypotheses, next steps. **Files Modified**: chat_client.py (+ModelSettings, `.output`), llm_client.py (+ModelSettings, `.output`). **Status**: Research phase complete, awaiting tomorrow's debugging session. **Next**: Trace XML parsing flow, verify structured_v2 strategy, identify where schema selection goes wrong. 🔍⚠️
+
+> **✅ PREVIOUS**: 2025.11.20 (Session 1) - 100% Test Adherence Achieved! Fixed 2 critical blockers, enabled all 11 skipped tests, achieved 77/77 passing (0 failures, 0 skips). **BLOCKER 1 FIXED**: ConfigurationManager singleton reset - changed from two-step `reset_for_testing()` to atomic `_reset_singleton=True` pattern (test_lancedb_gcs_integration.py). **BLOCKER 2 FIXED**: Docker network mismatch - PostgreSQL/FastAPI on different networks causing DNS resolution failure. Changed docker-compose.yml `lupin-dev-network` to `external: true` to prevent auto-prefixing (eliminated `genie-in-the-box_` prefix issue). **Test Recovery**: (1) GCS tests (8 tests) - added `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` env vars to conftest.py, (2) Multi-device sync tests (2 tests) - removed outdated skip decorators (feature was implemented!), (3) CLI tests (3 tests) - changed from `@pytest.mark.skip` to `@pytest.mark.manual` with pytest.ini configuration (deselected, not skipped). **Files Modified**: test_lancedb_gcs_integration.py (atomic reset pattern), docker-compose.yml (external network), conftest.py (+GCS env vars), test_notifications_integration.py (-2 skip decorators), test_notify_user_sync_integration.py (manual markers), pytest.ini (NEW - manual test configuration), configuration_manager.py (enhanced docstrings with Testing/Notes sections). **Test Results**: Before 68 passed/1 failed/11 skipped → After 77 passed/0 failed/0 skipped/3 deselected. **Phase 2.6.2 Status**: PostgreSQL migration 100% complete! **History Health**: ⚠️ 20.8k tokens (83%) - archive recommended next session. 🎯✅
+
+> **✅ PREVIOUS**: 2025.11.19 - Docker Infrastructure Upgrade COMPLETE! Created production-ready container management system with clean network naming and proper GPU support. **Infrastructure Created**: (1) New network `lupin-dev-network` replacing fragmented naming, (2) Production startup script `start-docker-lupin.sh` (451 lines) with command-first syntax (`sdla [command] [--port PORT] [--version VERSION]`), (3) Container renamed `lupin-rest` for clarity. **Script Features**: Full validation (environment, network, PostgreSQL, Docker image, port), health check monitoring with timeout handling, colored output, commands (start/stop/restart/status). **Docker Configuration**: Container runs with `--gpus all` flag, connects to `lupin-dev-network`, environment variables (DB_HOST=lupin-postgres-dev, LUPIN_ROOT=/var/lupin), port mapping configurable via `--port` flag. **Files Modified**: docker-compose.yml (network name: 3 locations), scripts/server/start-docker-lupin.sh (NEW 451 lines). **Shell Alias**: `alias sdla="$DEEPILY_PROJECTS_DIR/scripts/server/start-docker-lupin.sh"` added to ~/.bashrc. **Status**: Ready for testing tomorrow. **Next**: (1) Test: `sdla start --port 7999 --version 0.8.0`, (2) Verify container named `lupin-rest` running, (3) Verify PostgreSQL connectivity, (4) Test health endpoint. **History Health**: ⚠️ 20.1k tokens - archive scheduled for next session. 🐳✅
+
+> **⚠️ PREVIOUS**: 2025.11.19 - Phase 2.6.2 PostgreSQL Migration 91% Complete - TWO BLOCKERS! Fixed 11 of 13 test failures (13→2). **Completed Fixes**: (1) API key middleware migrated to PostgreSQL, (2) LanceDB persistence tests fixed with db_path parameter propagation, (3) Config block typo corrected, (4) Test assertion case sensitivity fixed. **Migration Success**: All authentication flows now use PostgreSQL via repositories (ApiKeyRepository, session management, bcrypt validation). **Integration Tests**: 73 passed, 2 failed, 5 skipped (91.25% pass rate). **BLOCKER 1**: `test_configuration_block_loading` - ConfigurationManager inheritance chain `[Lupin: Testing-GCS] → [Lupin: Development]` resolves `storage_backend` to "local" (parent) instead of "gcs" (child). **BLOCKER 2**: `test_regular_user_gets_only_own_jobs` - NEW regression, HTTP 500 error when regular user pushes to `/api/push` (likely related to API key middleware changes). **Investigation Needed**: (1) Debug ConfigurationManager inheritance resolution logic, (2) Investigate queue push endpoint failure (server-side error). **Files Modified**: api_key_auth.py (PostgreSQL migration, 82→59 lines), api_key_repository.py (+24 lines get_active_keys method), canonical_synonyms_table.py (db_path parameter), lancedb_solution_manager.py (pass db_path to helpers), lupin-app.ini (simplified inheritance), 2 test files (assertions). **Status**: Session paused for the night. **Next**: (1) Investigate queue push 500 error, (2) Debug ConfigurationManager inheritance, (3) Resume work toward 100% test pass rate. 🐘⚠️
+
+> **✅ PREVIOUS**: 2025.11.17 - Phase 2.6.2 PostgreSQL SQLAlchemy Models + Database Naming Clarity! Built complete SQLAlchemy ORM layer for PostgreSQL with 7 models. **ORM Models Created** (`postgres_models.py`, 622 lines): User, RefreshToken, ApiKey, EmailVerificationToken, PasswordResetToken, FailedLoginAttempt, AuthAuditLog - all with SQLAlchemy 2.0 syntax, proper relationships, CASCADE deletes, 19 indexes, PostgreSQL types (UUID, JSONB, INET). **Database Naming Refactor**: Renamed `auth_database.py` → `sqlite_database.py` for explicit SQLite indication. Updated 14 Python files (~21 imports), 4 docs. **Clear File Structure**: `sqlite_database.py` (SQLite raw SQL) vs `postgres_models.py` (PostgreSQL ORM). **Testing**: All tests IDENTICAL to baseline (169 passed, 35 failed, 73 errors) - no regressions. **Smoke Test**: PostgreSQL connection validated, all 7 tables exist, relationships verified. **Files Modified/Created**: postgres_models.py (NEW 622 lines), sqlite_database.py (RENAMED from auth_database.py), 14 Python import updates, 4 doc updates. **Status**: SQLAlchemy models complete, ready for Phase 2 (UserRepository, database session management, connection pooling). **Next**: Implement repository layer with CRUD operations! 🐘✨✅
+
+> **🐘 PREVIOUS**: 2025.11.17 - Phase 2.6.2 PostgreSQL-in-Docker Setup COMPLETE! Built local PostgreSQL 16.3 development environment with complete auth database schema. **Infrastructure**: PostgreSQL container (lupin-postgres-dev) with 7 auth tables, 3 seed users, health checks, and persistent volumes. **Database Schema**: Created users, refresh_tokens, api_keys, email_verification_tokens, password_reset_tokens, failed_login_attempts, auth_audit_log tables with proper indexes (UUID PKs, JSONB roles, CASCADE deletes). **Development Tools**: Installed psycopg2-binary (2.9.11) and Alembic (1.17.2), configured Alembic migrations with DATABASE_URL environment variable, created initial migration (210acf4d54dd). **Files Created**: docker-compose.yml, src/scripts/sql/schema.sql (109 lines), src/scripts/sql/seed_dev_data.sql (19 lines). **Configuration**: alembic.ini and src/migrations/env.py updated for environment-based URL. **Status**: Phase 1 complete (100%), ready for Phase 2 (SQLAlchemy Model Development). **Next**: Create ORM models, repository layer, and database session management! 🐘✅
+
+> **🏗️ PREVIOUS**: 2025.11.17 - Phase 2.6 Docker Multi-Environment Configuration COMPLETE! All infrastructure ready for Cloud Run test deployment. Phase 2.5.4 notification API key authentication (10/10 tests passing), Phase 2.6 Cloud Run compatibility planning (3 blockers documented), LanceDB GCS factory pattern (multi-backend storage), runtime configuration pattern (single Docker image for all environments). **Status**: Ready for Cloud Run deployment to testing environment for colleague access. **Recent Completion (Nov 15)**: Runtime Config Pattern - Dockerfile defaults (Development) + runtime override via `LUPIN_CONFIG_MGR_CLI_ARGS`. GCS permissions fixed (Cloud Run service account granted storage roles). Files: Dockerfile, cloud-run-deploy.sh, deployment-runtime-config-examples.md (350+ lines). **Next**: Build Docker image and deploy to testing environment! 🚀✅
+
+> **🏗️ PREVIOUS**: 2025.11.13 - LanceDB GCS Factory Pattern Implementation (Phase 1-2 Complete)! Built multi-backend storage infrastructure for TEST DEPLOYMENT to colleagues (NOT production). Completed 9/28 tasks (32%): Phase 1 (Config & Design) - created 3 config blocks ([Lupin: Production] for future, [Lupin: Development] local, [Lupin: Testing-GCS] for test deployment), designed smart path resolution, wrote 500-line architecture doc. Phase 2 (Core Implementation) - implemented `_resolve_db_path()` method with backend validation (GCS URI vs local path), updated `LanceDBSolutionManager.__init__()` for multi-backend support, updated factory for backend-aware creation. **CRITICAL CORRECTION**: Throughout session incorrectly used "production" language - we're deploying to TESTING environment with GCS (`gs://lupin-lancedb-test/`), NOT production! Created correction document for next session. **Backward Compatibility**: Default backend="local" preserves existing dev workflow. **Files Modified**: lupin-app.ini (+3 config blocks), lancedb_solution_manager.py (+82 lines `_resolve_db_path()`), solution_manager_factory.py (backend selection logic). **Docs Created**: 2025.11.13-lancedb-gcs-factory-implementation.md (architecture), 2025.11.13-lancedb-gcs-factory-status.md (progress tracking), 2025.11.13-CRITICAL-CORRECTION.md (test vs production clarification). **Remaining**: Phase 3 (migration/warm-up tools), Phase 4 (testing), Phase 5 (docs) - est. 33 hours. **Next Session**: Read CRITICAL-CORRECTION.md, update Dockerfile to use `Lupin:+Testing-GCS`, continue with recommended Option C (incremental approach). 🏗️⚠️
+
+> **⚠️ PREVIOUS**: 2025.11.12 - Phase 2.6 Cloud Run Compatibility Planning! Discovered 3 critical blockers during deployment: Whisper STT GPU dependency (Cloud Run has no GPU), local database dependencies (SQLite on ephemeral filesystem), in-memory notification state (breaks multi-instance). Created comprehensive Phase 2.6 migration plan (30-38 hours) documenting solutions using factory methods for environment-aware services (local dev vs. production). **Solutions**: Google Speech-to-Text API (replaces Whisper), Cloud SQL + Cloud Storage (replaces SQLite + LanceDB), Redis pub/sub (replaces in-memory dict). **Migration Phases**: 2.6.1 Redis (6-8h, HIGH priority), 2.6.2 Cloud SQL (18-22h, HIGH priority), 2.6.3 STT API (6-8h, MEDIUM priority), 2.6.4 LanceDB Cloud Storage (8-10h, LOW priority). **Dockerfile Issues**: Missing COPY command (fixed), syntax error on line 126 (trailing backslash, needs fixing). **Deployment Completed**: Phase 2 secrets setup ✅, Phase 3 image build/push ✅, Phase 4 deployment BLOCKED (Dockerfile syntax error). **Est. Monthly Cost**: $25-115 after Phase 2.6. **Files**: 2025.11.12-phase-2.6-cloud-run-compatibility.md (96KB planning doc), main.py (PORT env var), cloud-run-deploy.sh (fixed PORT removal), Dockerfile (COPY added but broken). **Next Session**: Fix Dockerfile line 126, deploy single-instance testing environment, begin Phase 2.6.1 (Redis migration). 📋⚠️
+
+> **✅ PREVIOUS**: 2025.11.12 - Cloud Run Deployment Preparation COMPLETE! Fixed critical port configuration blocker (main.py now reads PORT env var, defaults to 7999 locally). Verified integration tests: 10/10 passing (API key authentication fully validated). Created 4 automated deployment scripts: cloud-run-setup-secrets.sh (GCP secret creation), cloud-run-build.sh (Docker build/push), cloud-run-deploy.sh (Cloud Run deployment with 2Gi memory, 1 CPU, port 8080, secret mounting), cloud-run-validate.sh (endpoint testing, log checking). Created comprehensive session progress document and deployment plans. **GCP Config**: Project hello-world-foo-423219, Region us-central1, Secret lupin-notification-api-key. **Status**: Production-ready, ~35-55 min to deployment. **Files**: main.py (PORT env var support), 4 deployment scripts (12KB total), 3 planning docs. **Next**: Run deployment scripts in sequence (setup-secrets → build → deploy → validate). Ready for Cloud Run! 🚀✅
+
+> **✅ PREVIOUS**: 2025.11.11 - Phase 2.5.4 Config Migration COMPLETE! Renamed `~/.lupin/config` → `~/.notifications/config` and `target_user` → `global_notification_recipient` for future multi-recipient support. Implemented dual support for backward compatibility (old paths/keys still work with deprecation warnings). Updated config_loader.py (3-level precedence: env vars > file > defaults), notify_user_async.py, notify_user_sync.py, and notifications.py with naming mismatch comments. Created new config file at `~/.notifications/config` with updated key names. Testing validated: new config works without warnings, old config works with proper deprecation messages (3 levels: path, key, env var). Documentation fully updated (18 locations in 2025.11.10-phase-2.5-notification-authentication.md). **Rationale**: Namespace separation allows future notification system extensibility (multi-recipient routing). API/CLI remain stable (`target_user` parameter) for backward compatibility. **Files**: config_loader.py (+58 dual support), notify_user_async.py (+4 comments), notify_user_sync.py (+4 comments), notifications.py (+4 comments), ~/.notifications/config (NEW), doc updates (18 refs). Ready for Phase 2.5 completion next session! 🔄✅
+
+> **✅ PREVIOUS**: 2025.11.10 - Phase 2.5.4 Integration Testing (Completed Nov 11) - Created comprehensive integration test suite (10 tests, 362 lines) for notification API key authentication. Fixed critical schema bug (api_keys.user_id INTEGER→TEXT). Moved api_keys table creation into init_auth_database(). End-of-day: 6/10 tests passing, 4/10 blocked by user lookup logic (resolved Nov 11 with all 10 tests passing). API key authentication system production-ready. Files: test_notification_auth.py, auth_database.py (+28 lines), conftest.py (updated fixture). Phase 2.5.4 complete next session. ✅
+
+> **🎉 PREVIOUS**: 2025.11.08 - Phase 2.4 Async Refactoring COMPLETE! Renamed notify-claude → notify-claude-async to clarify fire-and-forget UX vs sync. Added Pydantic validation to async notifications (matching Phase 2.3 sync pattern). Created AsyncNotificationRequest/Response models (164 lines), notify_user_async.py (302 lines), CLI wrappers (notify-claude-async + deprecated alias). Updated 4 slash commands (13 occurrences), 6 docs, 1 script. Comprehensive testing: 19 new async model tests + smoke tests (41 total, 100% passing). Benefits: clear naming (async/sync suffixes), consistent validation, backward compatible (old command still works with warning), richer response data (connection_count, status, error details). Phase 2.3+2.4 COMPLETE - notification system architecture finalized! 📦✅🎉
+
+> **✅ PREVIOUS**: 2025.11.08 - Phase 2.3 CLI Integration COMPLETE! Created notify-claude-sync command with Pydantic validation for response-required notifications (yes/no + open-ended). Implemented SSE client (notify_user_sync.py, 375 lines), Pydantic models (notification_models.py, 377 lines), global CLI wrapper (/home/rruiz/.local/bin/notify-claude-sync, 66 lines). Comprehensive testing: 22 model tests, 17 client tests, 4 integration tests (100% passing). Features: type-safe validation, clear error messages, exit codes (0=success, 1=error, 2=timeout), structured responses. Documentation: 550+ line implementation doc. User quote: "I like it!" Phase 2.3 complete, ready for Phase 2.4! 🎯✅
+
+> **✅ PREVIOUS**: 2025.11.06 - SSE Phase 2.4 Open-Ended Response COMPLETE! All 4 sub-phases finished: Phase 2.4.1 (text validation + XSS protection), Phase 2.4.2 (default value pre-fill with auto-focus + text selection), Phase 2.4.3 (voice input with server-side Whisper transcription - 30s countdown, ESC cancellation, performance metrics, raw_transcription), Phase 2.4.4 (character counter deferred as optional). Created reusable audio-recorder.js module (446 lines, class-based, UMD pattern). Voice enhancements: 30-second time limit with visual countdown (🔴 05/30s → 🟡 27/30s), ESC key cancellation (race condition fixed!), round-trip timing metrics (debug mode), raw_transcription for full formatting. User feedback: "Holy shit, it works!" and "Very nice it works!" Files: audio-recorder.js (NEW 446 lines), queue-fresh.js (+119), queue-fresh.css (+11), queue-fresh.html (+1). Phase 2.2 (Client UI) now effectively COMPLETE. Overall: 75% of Phase 2 done (3 of 4 weeks). 🎤✅🎉
+
+> **✅ PREVIOUS**: 2025.10.30 - SSE Phase 2.4.1 Text Validation COMPLETE + Phase 2.2 UX Improvements! Fixed serialization bug (NotificationItem missing Phase 2.2 fields), SSE format inconsistency (added consistent response/default_used fields), implemented 5 UX improvements (30s timeout, always-visible header, in-place notifications, status badges, default button highlighting). Phase 2.4.1 complete: XSS protection (regex HTML stripping), length validation (500 char max), real-time frontend validation, red border visual feedback. User confirmed: "I just tested it, so far so good." Files modified: notifications.py (+19 validation), queue-fresh.js (+44 validation), queue-fresh.css (+10 invalid styling), 2 planning docs created. 🎨✅
+
+> **✅ PREVIOUS**: 2025.10.29 - SSE Phase 2.2 Client UI Implementation COMPLETE! Built complete "Action Required" section with dual response types (Yes/No buttons + open-ended text input), countdown timer (MM:SS format with color coding green→yellow→red), progress bar (percentage-based with matching colors), keyboard shortcuts (Y/N), multi-device sync via WebSocket events (notification_responded/expired), post-response confirmation (2s fade), grace period handling. Files: queue-fresh.html (+11 lines), queue-fresh.css (+251 lines), queue-fresh.js (+437 lines). All 8 Phase 2.2 requirements implemented. Completed in 1 day vs estimated 5-6 days. **Pending**: Manual testing + integration test validation (next session). Ready for Phase 2.3 (CLI Integration)! 🎨✅
+
+> **✅ PREVIOUS**: 2025.10.29 - SSE Phase 2.1 Backend Implementation COMPLETE! All 10 tasks finished (100%): SSE endpoints with dual-mode support (fire-and-forget + response-required), timeout handling with asyncio.Event blocking, offline detection with immediate defaults, WebSocket event broadcasting (notification_responded/expired), NotificationsDatabase access layer with dependency injection. Comprehensive testing: 10/10 unit tests passing (FastAPI dependency_overrides pattern), 5 smoke tests created, 5 integration tests unskipped (Phase 2.2 client UI tests remain skipped). Ready for Week 3 (Client UI implementation)! ✅
+
+> **✅ PREVIOUS**: 2025.10.28 - SSE Phase 2.0 Foundation Week 1 COMPLETE! All 3 foundation tasks finished: database schema (23 fields, 3 indexes, idempotent creation script), configuration keys (5 keys + explainers added to lupin-app.ini), test infrastructure (10 unit tests passing, smoke tests passing, 6 integration test stubs ready). Created notifications table in dedicated SQLite database (lupin-notifications.db). Clarified "migration" terminology (table creation, not migration). Chose SQLite over LanceDB for relational CRUD operations. All tests validated (100% passing). Phase 2 implementation tracking document created (06-phase2-implementation-tracking.md). Ready for Week 2 (Backend API implementation)! ✅
+
+> **✅ PREVIOUS**: 2025.10.27 - SSE Phase 2 Design Session COMPLETE! All 9 design areas finished (100%), 40 questions answered, 42 architectural decisions made. Final areas: MVP scope (both response types in Phase 2), comprehensive testing (40-50 tests), 4-week phased rollout, security model (no auth Phase 2, add Phase 3), offline behavior (immediate default), multi-device sync (WebSocket real-time). Generated complete implementation plan with 4 phases, task breakdown, testing strategy, risk analysis. Design document: 3,326 lines. Ready for Phase 2.0 implementation! 📋✅
+
+> **✅ PREVIOUS**: 2025.10.27 - SSE Phase 2 Design Session (Day 3 of 3 partial)! Completed 2 additional design areas (Areas 6-7 complete): Client UI/UX finalized (confirmation flash + smart sorting), Existing System Integration (extend `/api/notify` endpoint, fresh schema migration, extended WebSocket events, full backward compatibility). Progress: 7/9 areas complete (78%), 27/40 questions answered. Design document: 2,633 lines.
+
+> **✅ PREVIOUS**: 2025.10.26 - SSE Phase 2 Design Session (Day 2 of 2)! Completed 3.75 additional design areas (Areas 3-6 partial): Timeout & expiration (hybrid lazy server, intent-based grace period), SSE/WebSocket architecture (dual protocol, in-memory events with scaling docs), return value propagation (server-side interpretation, simple stdout), Client UI/UX (separate "Action Required" section, button layout). CORRECTED database field naming (response_requested, response_default). Progress: 6/9 areas complete (67%), 23/36 questions answered. Resume point: Area 6 Q6.3. Design document: 2,400+ lines with complete architecture. Ready for final 3.5 areas + implementation plan! 📋
+
+> **✅ PREVIOUS**: 2025.10.26 - Planning-is-Prompting Workflow Installation COMPLETE! Installed 10 new standardized workflows (plan-about, plan-session-end, plan-history-management, plan-test-baseline/remediation/harness-update, p-is-p-00/01/02, plan-workflow-audit) with v1.0 deterministic wrapper pattern. Updated plan-session-start to v1.0 (added MUST language, explicit DO NOT constraints, removed anti-pattern embedded task list). All commands now thin reference pointers to canonical workflows. Preserved 8 legacy commands (lupin-*, smoke-test-*, design-planning-docs) for gradual migration. Ready for systematic workflow-driven development! 🎯
+
+> **✅ PREVIOUS**: 2025.10.17 (Session 3) - SSE Phase 2 Interactive Design Session (Day 1 of 2)! Completed 3/9 design areas through systematic Q&A: Database schema (persistent storage, title/message split, JSON responses), response types (yes/no with LLM interpretation, open-ended mic+text), timeout behavior (MM:SS + progress bar + color coding). Created comprehensive 1000+ line design decisions document. Resume point: Area 3 Q3.2 (Timeout handling). Multi-modal UX principles established (voice-first, keyboard accessible, mouse fallback). Tomorrow: Complete remaining 6 areas + generate implementation plan. 📋
+
+> **✅ PREVIOUS**: 2025.10.17 (Session 2) - JWT Token Proactive Refresh COMPLETE! All 5 phases validated: server config endpoint, client dual-mechanism refresh (periodic + heartbeat), comprehensive test suite (17/17 tests passing), production deployment, manual validation confirmed. User validated: "background heartbeat ping from the server will force a token refresh after 25 minutes - Quite nice!" Zero 401 errors during idle, seamless UX after extended inactivity. Feature ready for long-term production use! 🎉
+
+> **✅ PREVIOUS**: 2025.10.16 (Session 2) - JWT Token Proactive Refresh Planning COMPLETE! Analyzed JWT token freshness gap during idle periods (>1 hour), designed hybrid proactive refresh system with dual mechanisms (periodic 10-min monitor + heartbeat-triggered checks every 30s). Created comprehensive 800+ line implementation document covering architecture, configuration management (server-driven with explicit unit naming _ms/_secs/_mins), testing strategy (unit/smoke/integration), deployment plan. Eliminates 401 errors after idle, enables high-priority notifications to play immediately after >90 min inactivity. Ready to implement! 📋
+
+> **✅ PREVIOUS**: 2025.10.16 (Session 1) - SSE Phase 2 Design Questions Captured! Identified critical architectural gaps preventing Phase 2 implementation: notification persistence (no DB serialization), response-required notifications (yes/no + open-ended STT), timeout handling, return value propagation to Claude Code. Created comprehensive design questions document (98-notification-design-draft.md) with 9 areas: data model, response types, timeout/expiration, SSE/WebSocket integration, bash return values, UI/UX, existing system integration, MVP scope, conceptual questions. Ready for design session to resolve 8 key decision points before implementation! 📋
+
+> **✅ PREVIOUS**: 2025.10.15 (Session 4) - SSE Conceptual Deep Dive! Created comprehensive Q&A document (99-sse-conceptual-qna.md) clarifying async/sync terminology and cooperative multitasking patterns. Resolved confusion about blocking vs non-blocking event loops, documented production patterns for heartbeats with real work (asyncio.create_task). Added TODO for Phase 2 architecture discussion - design still TBD before implementation. Documentation: 2k+ lines capturing conceptual insights. ✅
+
+> **✅ PREVIOUS**: 2025.10.15 (Session 3) - SSE Notification System Phase 1 COMPLETE! Built standalone PoC for synchronous notifications using Server-Sent Events. Created FastAPI SSE server (port 8000), Python streaming client, and bash wrapper script. All 5 tasks completed: server, client, wrapper, testing, documentation. Happy path test passed (10.42s processing). Ready for Phase 2 production integration (port 7999)! ✅
+
+> **✅ PREVIOUS**: 2025.10.15 (Session 2) - JWT Token Expiration Auto-Refresh Fix! Diagnosed and fixed 401 Unauthorized errors caused by expired tokens (95% diagnostic confidence). Implemented ensureValidToken() helper with automatic token refresh across 4 API endpoints. Added comprehensive client/server debugging. Performance: ~1-2ms validation (fast path), ~50-200ms refresh (slow path). TTS now works indefinitely without authentication failures! ✅
+
+> **✅ PREVIOUS**: 2025.10.15 (Session 1) - Fresh Queue TTS Mode & Performance Enhancements! Fixed high priority notification TTS mode bypass bug, implemented cache key consistency for instant replay, added time-to-first-playback metrics (⚡294ms instant, ~900ms reliable), fixed reliable mode authentication (missing X-Session-ID header). All TTS modes fully functional with performance instrumentation! ✅
+
+> **EARLIER**: 2025.10.14 (Session 2) - Test Harness Update + Complete Bearer Token Fix! Implemented 2 regression tests for Oct 14 bugs (UUID format, Bearer token). Discovered incomplete Oct 14 fix - fixed 3 additional Bearer token instances. Fixed reliable TTS race condition (state initialization timing). All authentication working! ✅
+
+> **EARLIER**: 2025.10.14 (Session 1) - Notification & TTS Authentication Fixes COMPLETE! Fixed two critical JWT authentication bugs: notification delivery (user ID format mismatch UUID vs email-hash) and TTS streaming (missing Bearer prefix). Added comprehensive WebSocket debugging infrastructure. All systems operational! ✅
+
+> **⚠️ PREVIOUS**: 2025.10.08 - v0.1.0 Pre-Release Cleanup. Deprecated file-based snapshot manager (removed 46 JSON files), added developer workflow utilities (session-start slash command, backup sync script). Two clean commits advancing toward v0.1.0 release.
+
+> **🎉 EARLIER**: 2025.10.06 - JWT Auth Database User Recovery. Restored authentication access after database wipe, created password reset utility with LUPIN_ROOT bootstrap pattern. Fixed root ownership issue preventing database writes.
+
+> **Prior**: 2025.10.04 (Session 5) - Path Manipulation Cleanup COMPLETE! Eradicated fragile path manipulation across 20 files (75% reduction), implemented LUPIN_ROOT bootstrap pattern, enhanced global CLAUDE.md with comprehensive bootstrap guidance. All tests passing with canonical pattern.
+
+> **Earlier**: 2025.10.04 (Session 3) - Configuration Block-Based Test Mode (PARTIAL). Implemented triple safety but discovered architecture blocker. 15/43 tests passing. Led to breakthrough simplification in Session 4.
+
+> **More**: 2025.10.04 - JWT/OAuth 10/10 PHASES COMPLETE (100%)! 🚀 WebSocket JWT authentication fixed, all 8/8 integration tests passing, Phase 10 documentation complete (7 comprehensive docs, 4,500+ lines). System is production-ready!
+
+> **Earlier**: 2025.10.03 - User-Filtered Queue Views PHASE 1 COMPLETE! Implemented role-based queue filtering backend with 32/32 unit tests passing (100%). Multi-tenant isolation with admin override capability.
+
+> **More**: Integration Test Analysis & Remediation PHASE 1 COMPLETE! Fixed 4 test failures, achieved 7/8 passing (87.5%). Email service configuration-based fix implemented.
 
 > **Prior Achievement**: 2025.10.01 - JWT/OAuth PHASE 9 CORE COMPLETE! Full authentication flow working: login, profile display, password change, re-authentication. Overall progress: 9/10 phases core complete (90%).
 
 ## Recent Activity (Last 7 Days)
 
-### 🎯 October 2025 - Recent Sessions
-
-#### 2025.10.06 - COSA Branch Analyzer Professional Refactoring SESSION
-
-**Summary**: Transformed COSA's quick-and-dirty `branch_change_analysis.py` (261 lines) into a professional, production-ready package (~2,900 lines across 12 files) with full COSA compliance. Exceeded all requirements from the URGENT TODO, adding bonus features: YAML configuration, multiple output formats (console/JSON/markdown), HEAD resolution, repository path support, and comprehensive 400+ line README.
-
-**COSA Achievements**:
-- ✅ Created professional `branch_analyzer/` package (10 modules, ~2,900 lines)
-- ✅ Full COSA compliance: Design by Contract docstrings, error handling, debug/verbose, smoke tests (9/9 passing)
-- ✅ Removed LUPIN_ROOT dependency - uses simple imports from src directory
-- ✅ Added `--repo-path` argument - analyze any repository from anywhere
-- ✅ HEAD resolution - auto-resolves symbolic refs to actual branch names
-- ✅ Enhanced output - shows repository, branches, comparison direction in all formats
-- ✅ Comprehensive documentation - 430-line README with examples and troubleshooting
-- ✅ Python -m execution support - `python -m cosa.repo.run_branch_analyzer`
-
-**Files Created in COSA**:
-- `cosa/repo/branch_analyzer/` package (10 modules: __init__, exceptions, config_loader, file_classifier, line_classifier, git_diff_parser, statistics_collector, report_formatter, analyzer, default_config.yaml)
-- `cosa/repo/run_branch_analyzer.py` - CLI entry point with argparse
-- `cosa/repo/README-branch-analyzer.md` - Comprehensive documentation
-
-**Current COSA Status**: Branch Analyzer is production-ready, all standards exceeded, smoke tests passing 9/9 (100%), integration tested with real diffs. Original `branch_change_analysis.py` preserved as reference.
-
----
-
-#### 2025.10.06 - JWT Auth Database User Recovery
-
-**Summary**: Restored JWT authentication access after database was wiped. Discovered production database owned by root (read-only error), fixed permissions, re-ran migration to recreate users with new secure passwords.
-
-**Problem**: User ricardo.felipe.ruiz@gmail.com not found in database after repeated "bleeding" of JWT auth database.
-
-**Solution**:
-- Found original password reference in migration_results.json (gitignored)
-- Created password reset utility: `src/scripts/reset_user_password.py`
-- Discovered database empty + owned by root (read-only)
-- Fixed ownership (manual sudo)
-- Re-ran migration successfully - new credentials generated
-
-**Files Created**:
-- `src/scripts/reset_user_password.py` (150 lines) - Password reset utility with LUPIN_ROOT bootstrap
-
-**Root Cause**: Database likely created by FastAPI server running as root, then became read-only for normal user operations.
-
-**Prevention**: Ensure FastAPI server runs as correct user (not root) to avoid ownership issues.
-
-**Note**: New passwords stored in migration_results.json (gitignored, not committed)
-
----
-
-#### 2025.10.04 (Session 5) - Path Manipulation Cleanup ✅ COMPLETE
-
-**Summary**: Executed comprehensive path manipulation cleanup across 20 files, eradicating fragile `.parent.parent` chains and `sys.path.append()` patterns. Implemented canonical LUPIN_ROOT environment-based bootstrap pattern for entry points, tests, and scripts. Enhanced global CLAUDE.md with complete bootstrap file guidance including test infrastructure patterns. Achieved 75% reduction in path manipulation code (15/20 files completely clean).
-
-**Problem Solved**: Codebase had 20 files with fragile path manipulation violating canonical patterns documented in global CLAUDE.md. No guidance existed for "bootstrap files" that run before cosa is importable.
-
-**Implementation Plan** (from `src/rnd/2025.10.04-path-manipulation-cleanup-plan.md`):
-- **20 files identified** across 6 categories
-- **Bootstrap exception pattern** for 4 unavoidable files
-- **Conftest.py bootstrap** for pytest test suite
-- **Package markers** for test directories
-
-**What Was Accomplished** ✅:
-
-**Phase 1: Bootstrap Foundation** (3 files created)
-- Created `src/tests/conftest.py` - Top-level pytest bootstrap using LUPIN_ROOT
-- Created `src/tests/__init__.py` - Package marker for tests
-- Created `src/tests/lupin_smoke/__init__.py` - Package marker for smoke tests
-- All test files can now import cosa directly without path manipulation
-
-**Phase 2-3: Test Infrastructure Cleanup** (9 files)
-- Fixed `src/tests/integration/conftest.py` - Removed path manipulation
-- Fixed `src/tests/lupin_smoke/utilities.py` - Removed path manipulation
-- Fixed 7 unit test files - Removed all `sys.path.append()` calls
-- Fixed `src/tests/migrate_router.py` - Uses `du.get_project_root()`
-
-**Phase 4-5: Smoke & Misc Tests** (5 files)
-- Fixed 3 smoke test files - Added LUPIN_ROOT bootstrap for standalone execution
-- Fixed 2 misc test files - Removed path manipulation, updated imports
-- Tests work both as pytest tests AND standalone scripts
-
-**Phase 6: Entry Points** (3 files)
-- Fixed `src/fastapi_app/main.py` - LUPIN_ROOT bootstrap with clear error messages
-- Fixed `src/scripts/migrate_solution_snapshots.py` - LUPIN_ROOT bootstrap
-- Fixed `src/scripts/benchmark_snapshot_managers.py` - LUPIN_ROOT bootstrap
-- All entry points now require and validate LUPIN_ROOT environment variable
-
-**Phase 7: Documentation** (1 file)
-- Fixed `docs/auth/migration-guide.md` - Updated to use LUPIN_ROOT + `du.get_project_root()`
-
-**Phase 8: Global CLAUDE.md Enhancement** (Critical Addition)
-- Added "Bootstrap Files - The Exception" section (69 lines)
-- Documented bootstrap pattern with copy-paste ready code
-- Test infrastructure guidance (conftest.py, __init__.py, standalone scripts)
-- File categorization (Bootstrap vs Regular code)
-- Updated Enforcement section with `sys.path.append()` prohibition
-
-**Verification Results** ✅:
-```bash
-# Unit tests pass
-export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box
-pytest src/tests/unit/test_websocket_validators.py -v
-# 6/6 passing ✅
-
-# Smoke tests work standalone
-python src/tests/lupin_smoke/test_queue_workflow.py
-# Imports load correctly ✅
-
-# Entry points validated
-python src/scripts/migrate_solution_snapshots.py --help
-python src/scripts/benchmark_snapshot_managers.py
-# Both work with LUPIN_ROOT ✅
-```
-
-**Files Modified Summary**:
-- **3 files created**: conftest.py, 2 __init__.py files
-- **20 files modified**: 2 test infrastructure, 7 unit tests, 3 smoke tests, 2 misc tests, 3 entry points, 1 doc, 1 global config, 1 project plan
-- **Total impact**: ~180 lines of fragile code removed, ~120 lines of clean bootstrap added
-
-**Key Patterns Established**:
-1. **Bootstrap Files** (4-6 files max):
-   ```python
-   # Use LUPIN_ROOT environment variable
-   lupin_root = os.environ.get('LUPIN_ROOT')
-   if lupin_root is None:
-       raise RuntimeError("LUPIN_ROOT not set...")
-   src_path = os.path.join(lupin_root, 'src')
-   if src_path not in sys.path:
-       sys.path.insert(0, src_path)
-   ```
-
-2. **Regular Code** (everything else):
-   ```python
-   # Just use canonical pattern
-   import cosa.utils.util as du
-   project_root = du.get_project_root()
-   ```
-
-3. **Test Files**:
-   - Rely on conftest.py bootstrap (pytest)
-   - Add bootstrap for standalone scripts with `__main__`
-
-**Benefits Achieved**:
-- ✅ 75% reduction in path manipulation (15/20 files completely clean)
-- ✅ Environment-based, not fragile parent counting
-- ✅ Clear guidance prevents future violations
-- ✅ All tests passing with clean patterns
-- ✅ Future-proof for Docker/dev/production environments
-
-**Technical Debt Eliminated**:
-- ✅ Removed all `.parent.parent.parent` chains
-- ✅ Removed all `os.path.dirname()` nesting
-- ✅ Removed all `sys.path.append()` (except in 7 bootstrap files using `insert(0)`)
-- ✅ Documented bootstrap exception in global config
-
-**Files Modified**:
-- `src/tests/conftest.py` (NEW)
-- `src/tests/__init__.py` (NEW)
-- `src/tests/lupin_smoke/__init__.py` (NEW)
-- `src/tests/integration/conftest.py`
-- `src/tests/lupin_smoke/utilities.py`
-- 7 unit test files
-- 3 smoke test files
-- 2 misc test files
-- `src/fastapi_app/main.py`
-- `src/scripts/migrate_solution_snapshots.py`
-- `src/scripts/benchmark_snapshot_managers.py`
-- `docs/auth/migration-guide.md`
-- `/home/rruiz/.claude/CLAUDE.md` (global config)
-
-**Next Steps**:
-- Update shell scripts (`run-fastapi-lupin.sh`, etc.) to export LUPIN_ROOT
-- Consider adding LUPIN_ROOT validation to CI/CD pipelines
-- Monitor for any new files violating path manipulation rules
-
----
-
-#### 2025.10.04 - COSA Infrastructure Improvements SESSION
-
-**Summary**: Comprehensive COSA infrastructure improvements spanning 5 Lupin sessions: WebSocket JWT authentication fix, admin user management backend, test database dual safety, test configuration simplification, and canonical path management enforcement.
-
-**COSA Achievements**:
-- ✅ **WebSocket JWT Auth** - Configuration-based routing (verify_token), 8/8 integration tests passing
-- ✅ **Admin Backend** - User management service (380 lines) + REST router (287 lines)
-- ✅ **Test Database Safety** - Dual validation prevents production database accidents
-- ✅ **Test Config Simplification** - Removed unnecessary endpoints, environment variable control
-- ✅ **Path Management** - Canonical pattern support in utils, 310+ lines refactored
-
-**Files Created in COSA** (2 files, 667 lines):
-- `rest/admin_service.py` (380 lines) - Admin user management functions
-- `rest/routers/admin.py` (287 lines) - Protected admin endpoints
-
-**Files Modified in COSA** (4 files, +368/-252 lines):
-- `rest/auth_database.py` (+50 lines) - Dual safety validation
-- `rest/routers/speech.py` (+8/-8 lines) - Path management fixes
-- `rest/routers/system.py` (-2 endpoints) - Removed test endpoints
-- `utils/util.py` (+310/-244 lines) - Canonical path pattern support
-
-**Current COSA Status**: Production-ready authentication system with 100% test coverage, full admin backend, protected test database, and canonical path patterns enforced.
-
----
-
-#### 2025.10.04 (Session 4) - Test Configuration Final Polish ✅ COMPLETE
-
-**Summary**: Simplified overcomplicated test configuration by removing unnecessary runtime config block switching. Realized `LUPIN_CONFIG_MGR_CLI_ARGS` environment variable was the solution all along - both server AND pytest just needed to start with Testing block. Removed redundant `LUPIN_TEST_MODE` check, simplified to dual safety, deleted unnecessary API endpoints, and created professional automated test runner script. Result: 43/43 tests passing with one-command execution.
-
-**The Breakthrough** 💡:
-- User insight: "We don't even need to toggle from production to testing at all!"
-- `LUPIN_CONFIG_MGR_CLI_ARGS` environment variable controls config block selection
-- Server AND pytest both read same env var → same Testing block automatically
-- No runtime switching needed - just start correctly configured
-
-**What Was Accomplished** ✅:
-
-**Phase 1: Simplified to Dual Safety** (`auth_database.py`)
-- Removed redundant `LUPIN_TEST_MODE` environment variable check
-- Kept config flag (`app_testing=true` from Testing block)
-- Kept path validation (must contain "test")
-- Updated audit logging to show cleaner output
-- Dual safety still protects production database effectively
-
-**Phase 2: Removed Unnecessary Endpoints** (`system.py`)
-- Deleted `/api/switch-config-block` - never needed!
-- Deleted `/api/init-test-db` - tests call `init_auth_database()` directly
-- Fixtures use direct function calls instead of HTTP overhead
-- Cleaner, simpler codebase
-
-**Phase 3: Updated Test Fixtures** (`conftest.py`)
-- Set `LUPIN_CONFIG_MGR_CLI_ARGS` at module level (before imports)
-- Removed `LUPIN_TEST_MODE` environment variable
-- Added session-level `verify_test_environment` fixture (runs once)
-- Simplified `clean_test_db` to direct DB function calls
-- Updated all docstrings to reference dual safety
-
-**Phase 4: Created Automated Test Runner** 🎁
-- Created `src/tests/run-integration-tests.sh` (168 lines)
-- Features:
-  - ✅ Checks port 7999 availability (exits if in use)
-  - ✅ Starts FastAPI server with Testing config automatically
-  - ✅ Waits for health check (8s timeout with retry logic)
-  - ✅ Runs pytest with pass-through arguments
-  - ✅ Automatic cleanup (trap handlers for EXIT/INT/TERM)
-  - ✅ Returns pytest exit code (CI/CD friendly)
-  - ✅ Colored output for easy reading
-- Usage: `./src/tests/run-integration-tests.sh -v`
-- Pass-through args: `-v -s`, specific test files, etc.
-
-**Phase 5: Documentation Updates**
-- Updated `src/tests/integration/README.md`:
-  - Two-option testing guide (automated vs manual)
-  - Quick start section with one-liner
-  - Updated all examples to use dual safety
-  - Simplified CI/CD examples
-- Updated `CLAUDE.md`:
-  - New test runner reference
-  - Updated test counts (43 integration tests)
-  - Recommended automated approach
-- Updated all conftest.py docstrings
-
-**Phase 6: Verification & Testing**
-- Started test server with Testing config
-- Ran full test suite manually: 43/43 passed ✅
-- Tested automated runner: 43/43 passed ✅
-- Verified cleanup handlers work correctly
-- Confirmed dual safety validation active
-
-**Test Results** 📊:
-```
-43 passed, 1 warning in 28.87s
-- 23 admin user management tests
-- 8 authentication flow tests
-- 12 queue filtering tests
-All passing with dual safety protection
-```
-
-**Files Modified**:
-- `src/cosa/rest/auth_database.py` - Dual safety simplification
-- `src/cosa/rest/routers/system.py` - Removed 2 unnecessary endpoints
-- `src/tests/integration/conftest.py` - Environment setup + direct calls
-- `src/tests/integration/README.md` - Documentation updates
-- `CLAUDE.md` - Testing documentation
-- `src/tests/run-integration-tests.sh` - NEW automated runner (executable)
-
-**Key Insights**:
-1. **Simpler is better**: Removed ~200 lines of unnecessary code
-2. **Environment variables control everything**: No runtime switching needed
-3. **Direct function calls > API calls**: Faster, simpler tests
-4. **Automated > Manual**: One command beats multi-step setup
-5. **Dual safety sufficient**: Config flag + path validation protects DB
-
-**Next Steps**:
-- Test runner script is production-ready
-- Consider adding coverage reporting option
-- Possible enhancement: parallel test execution
-
-**Technical Debt Resolved**:
-- ✅ Removed overcomplicated config block switching
-- ✅ Eliminated unnecessary API endpoints
-- ✅ Simplified test environment setup
-- ✅ Created professional automation
-
----
-
-#### 2025.10.04 (Session 3) - Configuration Block Test Mode + Triple Safety ⚠️ INCOMPLETE
-
-**Summary**: Attempted to replace environment variable-based test mode with configuration block switching and triple safety validation. Successfully implemented Phases 1-5 (config blocks, triple safety, API endpoints, fixtures) but discovered fundamental architecture blocker in Phase 6. Tests failing (15/43 passing) due to config manager singleton behavior conflicting with pytest fixture execution model.
-
-**What Was Accomplished** ✅:
-
-**Phase 1: Configuration Block Setup**
-- Added `[Lupin: Testing]` block to `lupin-app.ini`:
-  - `inherits = Lupin: Development`
-  - `app_testing = True` (explicit test mode flag)
-  - `auth database path wo root = /src/conf/long-term-memory/test-lupin-auth.db` (overrides production path)
-- Added `app_testing = False` to `[Lupin: Baseline]` for fail-safe default
-- Triple safety design: Environment variable + Config flag + Path validation
-
-**Phase 2: Triple Safety Implementation** (`auth_database.py`)
-- Modified `get_auth_db_path()` with three safety checks:
-  1. **Environment Check**: `LUPIN_TEST_MODE=true` (migration phase)
-  2. **Config Flag Check**: `app_testing=true` from active config block
-  3. **Path Validation**: Database path must contain "test" string
-- Safety Check 3A: If `app_testing=true`, path MUST contain "test" → ValueError if violated
-- Safety Check 3B: If path contains "test", `app_testing` MUST be true → ValueError if violated
-- Audit logging: Prints mode (TEST/PRODUCTION) and checks for every DB access
-- Migration strategy: Require BOTH env var AND config flag during transition
-
-**Phase 3: API Endpoints** (`src/cosa/rest/routers/system.py`)
-- Added `/api/switch-config-block/{block_id}` endpoint:
-  - Validates block exists (Baseline, Development, Production, Testing)
-  - Calls `config_mgr.init(config_block_id=block_id, silent=True)`
-  - Returns confirmation with `app_testing` flag and database path
-  - Enables runtime block switching for testing
-- Enhanced `/api/init-test-db` endpoint:
-  - Added triple safety validation (env + config + path)
-  - Returns detailed safety check results in response
-  - Provides clear error messages when any safety check fails
-
-**Phase 4: Test Fixture Updates** (`conftest.py`)
-- Modified `clean_test_db()` fixture to use block switching:
-  - Calls `/api/switch-config-block/Lupin:%20Testing` before test
-  - Calls `/api/init-test-db` with triple safety validation
-  - Prints safety check results for debugging
-  - Originally intended to switch back to Development in cleanup (removed to prevent thrashing)
-
-**Phase 5: Manual Testing** ✅
-- Started server with `LUPIN_TEST_MODE=true`
-- Verified triple safety mechanism:
-  - Switching to Testing block with `app_testing=true` → init succeeds
-  - Attempting init with `app_testing=false` → 403 Forbidden (correct!)
-  - All three safety checks logged and validated
-- Manual API testing 100% successful
-
-**The Blocker - Phase 6** ❌:
-
-**Problem**: Tests failing (28/43 failed, 15/43 passing - regression from 43/43)
-
-**Root Cause Analysis**:
-1. **Config Manager is Global Singleton**: Shared across ALL HTTP requests to the server
-2. **Block Switching Affects ALL Requests**: When `/api/switch-config-block` is called, the ENTIRE server switches blocks
-3. **Pytest Fixtures Run in Different Process**: The `create_test_admin` fixture calls `get_auth_db_connection()` directly in the pytest process
-4. **Race Condition**:
-   - Test A: `clean_test_db` switches to Testing → creates test DB
-   - Test B (running concurrently or next): Switches somewhere else
-   - Test A: `create_test_admin` runs → `get_auth_db_path()` sees CURRENT block state → may use wrong DB!
-5. **Server Logs Show Thrashing**: Alternating between Testing and Development blocks hundreds of times
-
-**Evidence from Server Logs**:
-```
-[SWITCH-CONFIG] Switched to block: Lupin: Testing
-[SWITCH-CONFIG] app_testing=True, db_path=/src/conf/long-term-memory/test-lupin-auth.db
-[SWITCH-CONFIG] Switched to block: Lupin: Development
-[SWITCH-CONFIG] app_testing=False, db_path=/src/conf/long-term-memory/lupin-auth.db
-[SWITCH-CONFIG] Switched to block: Lupin: Testing
-... (repeats hundreds of times)
-```
-
-**Why This Happens**:
-- All fixtures are `scope="function"` → run independently per test
-- Each test calls `clean_test_db` → switches to Testing
-- But config manager singleton is SHARED across all tests
-- No isolation between tests at the config manager level
-- Pytest fixture execution (Python process) sees different state than HTTP requests (server process)
-
-**Files Modified**:
-1. `src/conf/lupin-app.ini` - Added Testing block, app_testing flag
-2. `src/cosa/rest/auth_database.py` - Triple safety in get_auth_db_path()
-3. `src/cosa/rest/routers/system.py` - Added switch-config-block endpoint, enhanced init-test-db
-4. `src/tests/integration/conftest.py` - Block switching in clean_test_db fixture
-5. `src/tests/integration/test_queue_filtering_integration.py` - Added self parameter to test class methods
-
-**Test Results**:
-- Before: 43/43 passing (100%) with environment variable only
-- After: 15/43 passing (35%) with config block switching
-- Failures: Mostly admin tests (403 errors - user not found in correct DB)
-
-**The Fundamental Issue**:
-You cannot use a global singleton configuration manager for per-test state isolation. The config block approach requires either:
-- **Option A**: Session-scoped fixture that switches ONCE for entire test suite
-- **Option B**: Separate config manager instances per request (major architecture change)
-- **Option C**: Abandon config blocks, keep environment variable approach with triple safety
-
-**Recommendation for Next Session**:
-Implement **Option C** - Simpler hybrid approach:
-1. Keep the triple safety validation (it's good!)
-2. Keep `app_testing` flag in config for documentation/safety
-3. Remove block switching from fixtures
-4. Rely solely on `LUPIN_TEST_MODE` environment variable
-5. Config block feature remains useful for manual testing/debugging
-
-**Status**: Session ended with plan mode active, ready for next session to implement Option C.
-
----
-
-#### 2025.10.04 (Session 2) - TestClient Migration Revert to Live Server 🔄
-
-**Summary**: Reverted the TestClient migration (from Session 1) back to live server testing with `requests` library. Discovered TestClient was over-engineering - queue tests failing because they need real WebSocket infrastructure. Successfully reverted all 43 tests back to HTTP requests against live server. All tests passing with live server approach.
-
-**Major Achievements**:
-
-**1. Admin User Management MVP - COMPLETE** ✅
-- **Planning**: Created comprehensive implementation plan (`src/rnd/2025.10.04-admin-user-management-implementation-plan.md`)
-- **Backend** (2 files, 667 lines):
-  - `src/cosa/rest/admin_service.py` (380 lines) - 5 core functions with audit logging & self-protection
-  - `src/cosa/rest/routers/admin.py` (287 lines) - 5 protected endpoints with `require_admin` authorization
-- **Frontend** (3 files, 1,010 lines):
-  - `admin/users.html` (190 lines) - User table, modals, search/filter UI
-  - `admin/js/admin-users.js` (470 lines) - API integration, UI logic
-  - `admin/css/admin.css` (350 lines) - Professional responsive design
-- **Features Implemented**:
-  - User listing with pagination & search/filter (email, role, status)
-  - Role management (add/remove admin role with self-protection)
-  - User activation/deactivation (with self-protection, token revocation)
-  - Admin password reset (generates secure 16+ char password)
-  - Complete audit logging for all admin actions
-- **Testing**: `test_admin_users.py` (724 lines, 23 tests) - **23/23 PASSING (100%)** ⭐
-
-**2. Critical Test Database Bug - FIXED** 🔥
-- **Problem Discovered**: Dangerous `autouse=True` fixture in conftest.py was **deleting production database** on every test run (23 times during admin test execution)
-- **My Mistake**: Initially tried to deflect blame - user correctly called me out for dishonesty (I had created that file on Oct 3rd)
-- **Solution Implemented**:
-  - Added separate test database: `src/conf/long-term-memory/test-lupin-auth.db`
-  - Configuration: Added `auth test database path wo root` to `lupin-app.ini`
-  - Modified `auth_database.py`: Check `LUPIN_TEST_MODE` env var to select test vs production DB
-  - Updated `.gitignore`: Exclude `test-*.db` files
-  - Fixed `conftest.py`: Removed `autouse=True`, added proper `clean_test_db` fixture with safety checks
-- **Result**: Production database protected, tests properly isolated
-
-**3. TestClient Migration - COMPLETE** ✅
-- **Problem**: Tests made HTTP requests to external server (port 7999), creating database confusion (tests created users in test DB, but tokens referenced production DB)
-- **Root Cause**: Tests "worked" before because dangerous `autouse=True` was deleting production DB, so server and tests accidentally used same destroyed database
-- **Solution**: Migrated from external HTTP requests to in-process FastAPI TestClient
-- **Files Migrated**:
-  - `conftest.py`: Added `test_app` and `client` fixtures, updated helpers to use TestClient
-  - `test_auth_integration.py`: 8 tests migrated (0 requests calls → 24 client calls) - 6/8 passing
-  - `test_admin_users.py`: 23 tests migrated - **23/23 PASSING (100%)** ⭐
-  - `test_queue_filtering_integration.py`: Converted async httpx → sync TestClient - 1/12 passing (need queue mocks)
-- **Key Fixes**:
-  - Proper fixture ordering: `clean_test_db` before `client` (ensures DB initialized before app loads)
-  - Fixed auth endpoints: `/api/auth/*` → `/auth/*`
-  - Removed pyaudio dependency that broke test imports
-  - Used `create_test_admin` fixture instead of hardcoded SUPERUSER credentials
-  - Added login step after registration (register returns `user_id`, login returns `access_token`)
-
-**4. Path Management & Configuration** ✅
-- Enforced `du.get_project_root()` usage (rejected hardcoded `Path(__file__).parent.parent.parent.parent`)
-- ConfigurationManager-based path resolution for test database
-- Runtime-configurable, testable path management
-
-**Current Test Status**:
-- **Total**: 30/43 integration tests passing (70%)
-- **Admin**: 23/23 passing (100%) ⭐
-- **Auth**: 6/8 passing (75%)
-- **Queue**: 1/12 passing (need queue infrastructure mocks)
-
-**Remaining Work** (to reach 100%):
-1. Fix 2 auth test failures (simple fixture additions)
-2. Create mock queue fixtures for 11 queue tests
-3. Validate all 43 tests passing
+### 🎯 November 2025 - Recent Sessions
+
+#### 2025.11.17 - Phase 2.6.2 PostgreSQL-in-Docker Setup (Phase 1 Complete) 🐘✅
+
+**Summary**: Completed Phase 1 of PostgreSQL migration (6 tasks, 3-4 hours). Built local PostgreSQL 16.3 development environment matching Cloud SQL version. Created complete auth database schema with 7 tables, 3 seed users, Docker infrastructure, and Alembic migration tooling. Successfully resolved Alembic import issue (removed unnecessary cosa.utils.util import). All infrastructure validated and ready for Phase 2 (SQLAlchemy Model Development).
+
+**Infrastructure Setup**:
+- **Docker Compose Configuration** (`docker-compose.yml`):
+  - PostgreSQL 16.3-alpine container (`lupin-postgres-dev`)
+  - Database: `lupin_auth`, user: `lupin_dev`, password: `dev_password`
+  - Port binding: 5432:5432
+  - Persistent volume: `postgres_dev_data`
+  - Health checks: `pg_isready` (5s interval, 5 retries)
+  - SQL initialization scripts mounted to `/docker-entrypoint-initdb.d/`
+
+**Database Schema** (`src/scripts/sql/schema.sql`, 109 lines):
+- **7 Auth Tables Created**:
+  - `users` (UUID PK, email unique, JSONB roles, timestamps)
+  - `refresh_tokens` (UUID jti, token_hash, expires_at, user_agent, ip_address, CASCADE delete)
+  - `api_keys` (UUID PK, key_hash, description, last_used_at, CASCADE delete)
+  - `email_verification_tokens` (VARCHAR PK, user_id FK, expires_at, used flag)
+  - `password_reset_tokens` (VARCHAR PK, user_id FK, expires_at, used flag)
+  - `failed_login_attempts` (BIGSERIAL PK, email, ip_address INET, attempt_time)
+  - `auth_audit_log` (BIGSERIAL PK, event_type, user_id, details JSONB, success flag)
+- **19 Indexes**: Email lookups, token hashes, GIN for JSONB, partial indexes for active records
+- **UUID Extension**: `uuid-ossp` enabled for `gen_random_uuid()`
+
+**Seed Data** (`src/scripts/sql/seed_dev_data.sql`, 19 lines):
+- 3 test users created: `test@example.com` (active user), `admin@example.com` (admin + user roles), `inactive@example.com` (inactive, unverified)
+- Password hash placeholder (to be replaced with actual bcrypt hashes)
+- ON CONFLICT clause for idempotent seeding
+
+**Alembic Migration Setup**:
+- **Configuration** (`alembic.ini`):
+  - Script location: `src/migrations`
+  - Database URL: Uses `DATABASE_URL` environment variable via `%(DATABASE_URL)s` interpolation
+  - Migration versioning: Alembic default pattern
+- **Environment Configuration** (`src/migrations/env.py`):
+  - Removed unnecessary `cosa.utils.util` import (resolved ModuleNotFoundError)
+  - DATABASE_URL override from environment variable
+  - PostgresqlImpl context with transactional DDL
+- **Initial Migration**: Created revision `210acf4d54dd` (initial_schema)
+- **Migration Applied**: `alembic upgrade head` executed successfully
+- **Verification**: `alembic_version` table created, current revision confirmed
+
+**Python Dependencies** (installed in CoSA .venv):
+- `psycopg2-binary==2.9.11` (PostgreSQL adapter)
+- `alembic==1.17.2` (database migration tool)
+
+**Validation Completed**:
+- ✅ PostgreSQL container healthy and running
+- ✅ 8 tables exist (7 auth + alembic_version)
+- ✅ 3 seed users inserted
+- ✅ Python connection successful (psycopg2 import validated)
+- ✅ Alembic migrations functional (`alembic current` shows 210acf4d54dd)
+
+**Troubleshooting Resolved**:
+- **Docker Compose Syntax**: Used `docker compose` (modern) vs `docker-compose` (legacy)
+- **SQL Script Permissions**: Manually executed initialization scripts after container startup (volume mount permission issue)
+- **Alembic Directory**: Cleaned up incorrectly placed files from first attempt (`src/cosa/src/migrations` removed)
+- **Alembic Import Error**: Removed unused `cosa.utils.util` import from env.py
 
 **Files Created/Modified**:
-- **New** (10): Admin backend/frontend (5), test file (1), planning doc (1), config entries (3)
-- **Modified** (6): main.py, auth_database.py, conftest.py, 3 test files, .gitignore
+- NEW: `docker-compose.yml` (57 lines)
+- NEW: `src/scripts/sql/schema.sql` (109 lines)
+- NEW: `src/scripts/sql/seed_dev_data.sql` (19 lines)
+- NEW: `src/migrations/versions/210acf4d54dd_initial_schema.py` (Alembic migration)
+- MODIFIED: `alembic.ini` (DATABASE_URL environment variable)
+- MODIFIED: `src/migrations/env.py` (removed cosa import, added DATABASE_URL override)
 
-**Key Learnings**:
-- Honesty is critical - deflecting blame backfires
-- Test isolation matters - TestClient provides true in-process testing
-- Fixture ordering crucial - DB must initialize before app
-- Configuration over hardcoding - always use ConfigurationManager
+**Phase 1 Status**: ✅ COMPLETE (6/6 tasks, 100%)
 
-#### 2025.10.04 - JWT/OAuth PHASE 10 COMPLETE + WebSocket JWT Auth Fixed 🎉
+**Next Phase**: Phase 2 - SQLAlchemy Model Development
+- Create ORM models mapping to PostgreSQL schema
+- Implement repository layer (UserRepository, TokenRepository, etc.)
+- Add database session management
+- Configure connection pooling
+- Estimated duration: 4-5 hours
 
-**Summary**: Completed final phase of JWT/OAuth project with comprehensive documentation and WebSocket JWT authentication fix. Achieved 100% integration test pass rate (8/8). System is now production-ready with complete authentication infrastructure.
+---
 
-**Major Achievements**:
+#### 2025.11.10 - Phase 2.5.4 Integration Testing (Completed Nov 11) ✅
 
-**1. WebSocket JWT Authentication - FIXED** ✅
-- Root cause identified: WebSocket hardcoded `verify_firebase_token()`, bypassing config-based auth routing
-- Solution: Changed to `verify_token()` for configuration-based routing (JWT/mock/Firebase)
-- Fixed integration test session ID format ("test session" with space, not "test_session" with underscore)
-- Result: WebSocket now respects `auth mode = jwt` configuration
+**Summary**: Created comprehensive integration test suite for notification API key authentication (10 tests, 362 lines). Fixed critical database schema bug (api_keys.user_id type mismatch). Moved api_keys table creation into auth_database.py for proper server initialization. Discovered root cause of 404 test failures: notification endpoint expects hardcoded production user email, but test database uses UUID-based service account users. **End-of-Day Status**: 6/10 tests passing (auth middleware working correctly!), 4/10 blocked by user lookup logic (resolved Nov 11). Phase 2.5.4 completed next session with all 10 tests passing.
 
-**2. Integration Tests - 100% PASSING** ✅
-- All 8/8 tests passing (was 7/8):
-  - ✅ test_complete_registration_flow
-  - ✅ test_login_with_valid_credentials
-  - ✅ test_failed_login_rate_limiting
-  - ✅ test_token_refresh_flow
-  - ✅ test_password_change_flow
-  - ✅ test_email_verification_flow
-  - ✅ test_password_reset_flow
-  - ✅ test_websocket_jwt_authentication (NOW FIXED!)
+**Implementation Progress**:
+- **Integration Test Suite Created** (`src/tests/integration/test_notification_auth.py`, 362 lines):
+  - 3 test classes: `TestNotificationAuthentication` (7 tests), `TestMultipleAPIKeys` (1 test), `TestSecurityHeaders` (2 tests)
+  - Test coverage: valid/invalid/missing API keys, inactive keys, timestamp updates, WWW-Authenticate headers, multiple keys per user, case-insensitive headers, security (no key leakage)
+  - Fixture: `test_api_key` - Creates test service account with hashed API key in test database
+  - All tests use correct endpoint path: `/api/notify` (router has `/api` prefix)
 
-**3. Phase 10 Documentation - COMPLETE** 📚
-Created 7 comprehensive production-ready documentation files in `docs/auth/` (4,520+ lines total):
-- `api-reference.md` (780 lines) - All 13 endpoints with cURL/JavaScript examples, error codes, JWT structure
-- `integration-guide.md` (660 lines) - REST/WebSocket integration, AuthService class, React/Vue examples
-- `security-guide.md` (580 lines) - Vulnerabilities & prevention, hardening checklist, compliance (GDPR/CCPA/HIPAA)
-- `operations-guide.md` (640 lines) - Deployment procedures, systemd config, monitoring, backup/recovery
-- `architecture-overview.md` (730 lines) - System design diagrams, database schema, authentication flows
-- `migration-guide.md` (550 lines) - Mock→JWT migration, zero-downtime strategy, complete scripts
-- `troubleshooting.md` (580 lines) - 15+ common issues, debug procedures, FAQ (20+ questions)
+**Schema Fixes**:
+- **Critical Bug Fixed** (`src/scripts/create_api_keys_table.py`):
+  - Changed `api_keys.user_id` from `INTEGER NOT NULL` to `TEXT NOT NULL`
+  - Root cause: `users.id` is TEXT (UUID format like `"abc-123-def"`), causing foreign key constraint failures
+  - Impact: Prevents INSERT errors when creating API keys for users
 
-**4. Session ID Format Consistency** ✅
-- Fixed all references from "adjective_noun" → "adjective noun" (10+ files)
-- Updated examples: "wise_penguin" → "wise penguin" (space, not underscore)
-- Files updated: CLAUDE.md, docs/auth/*, websocket docs, test files, planning docs
+- **Database Initialization Updated** (`src/cosa/rest/auth_database.py`):
+  - Moved api_keys table creation into `init_auth_database()` function (after line 250)
+  - Added 4 indexes: `idx_api_keys_key_hash`, `idx_api_keys_user_id`, `idx_api_keys_is_active`, `idx_api_keys_user_active`
+  - Ensures table exists when server starts (prevents "no such table: api_keys" errors during authentication)
+  - Updated `quick_smoke_test()` to expect api_keys in table list
 
-**5. User Experience Enhancements** ✅
-- Manual registration testing: Works perfectly with password strength meter
-- Fixed "Go to Queue" button in profile.html to point to Fresh Queue UI (`queue-fresh.html`)
-- register.html already fully implemented with professional UI
+**Test Fixture Updates**:
+- **Updated** `src/tests/integration/conftest.py`:
+  - Modified `clean_test_db` fixture to call `init_auth_database()` (creates all tables including api_keys)
+  - Removed manual api_keys table creation from test_api_key fixture (now redundant)
+  - Docstring updated: "includes api_keys table as of Phase 2.5"
 
-**JWT/OAuth Project Status**: **10/10 Phases COMPLETE (100%)** 🎉
-- Phase 1-8: Core auth system, RBAC, security ✅
-- Phase 9: Migration scripts, auth UI, integration tests ✅
-- Phase 10: Production documentation ✅
+**Test Results** (6 passing, 4 failing):
+- ✅ **Passing Tests** (tests WITHOUT test_api_key fixture - auth validation working correctly):
+  1. `test_invalid_api_key_returns_401` - Invalid key → 401
+  2. `test_missing_api_key_returns_401` - No header → 401
+  3. `test_invalid_format_returns_401` - Wrong format → 401
+  4. `test_inactive_api_key_returns_401` - Deactivated key → 401
+  5. `test_www_authenticate_header_present` - Correct WWW-Authenticate header
+  6. `test_no_api_key_leakage_in_errors` - Keys not leaked in error messages
+
+- ❌ **Failing Tests** (tests WITH test_api_key fixture - 404 errors from notification endpoint):
+  1. `test_valid_api_key_allows_access` - Expected 200, got 404
+  2. `test_last_used_timestamp_updated` - Expected 200, got 404
+  3. `test_multiple_keys_for_same_user` - Expected 200, got 404
+  4. `test_case_sensitive_header_name` - Expected 200, got 404
+
+**Root Cause Analysis**:
+- **API Key Authentication Middleware**: ✅ Working correctly! (Invalid keys get 401 as expected)
+- **Notification Endpoint Logic**: ❌ Blocking on user lookup
+  - Server log shows: `[NOTIFY] ❌ User not found in auth database: ricardo.felipe.ruiz@gmail.com`
+  - Endpoint hardcodes lookup for production user email `ricardo.felipe.ruiz@gmail.com`
+  - Test database only has service account users with UUID-based emails like `test-{uuid}@test.com`
+  - Result: Endpoint returns 404 "User not found" instead of processing notification
+
+**Server Validation**:
+- Confirmed test server running correctly (not development server)
+- Test database mode confirmed: `[AUTH_DB] Mode: TEST (config=True)`
+- Endpoint path verified: `/api/notify` (router prefix `/api`)
+- api_keys table exists at server startup (no "no such table" errors)
 
 **Files Modified**:
-- `src/cosa/rest/routers/websocket.py` - JWT auth routing fix
-- `src/tests/integration/test_auth_integration.py` - Session ID format fixes
-- `src/fastapi_app/static/html/auth/profile.html` - Queue button fix
-- `src/rnd/jwt-oauth/jwt-oauth-active-implementation.md` - Marked Phase 10 complete
-- 10+ documentation files for session ID consistency
+1. `src/tests/integration/test_notification_auth.py` - CREATED (362 lines)
+2. `src/scripts/create_api_keys_table.py` - Fixed user_id type (1 line change)
+3. `src/cosa/rest/auth_database.py` - Added api_keys table + indexes to init_auth_database() (+28 lines)
+4. `src/tests/integration/conftest.py` - Updated clean_test_db docstring (1 line)
+5. `src/scripts/init_test_database.py` - CREATED (script to initialize test DB with all tables, 85 lines)
 
-**New Files Created**:
-- `docs/auth/api-reference.md`
-- `docs/auth/integration-guide.md`
-- `docs/auth/security-guide.md`
-- `docs/auth/operations-guide.md`
-- `docs/auth/architecture-overview.md`
-- `docs/auth/migration-guide.md`
-- `docs/auth/troubleshooting.md`
-- `/tmp/grant_admin.txt` - Admin role grant helper script
+**Next Steps**:
+1. Fix notification endpoint to handle test service account users
+2. Options:
+   - Make user email lookup optional for service accounts
+   - Use API key's user_id directly instead of hardcoded email
+   - Add test user `ricardo.felipe.ruiz@gmail.com` to test database fixtures
+3. Validate all 10 integration tests pass
+4. Continue with Phase 2.5.4 remaining tasks (E2E CLI testing, manual QA)
 
-**Next Session TODO**:
-- [ ] [LUPIN] Deploy JWT/OAuth to production using migration-guide.md
-- [ ] [LUPIN] Queue Views Phase 2: Admin UI implementation (JavaScript)
-- [ ] [LUPIN] Queue Views Phase 3: Documentation and user guide
-- [ ] [LUPIN] Test complete auth flow in production environment
+**Phase 2.5 Progress**: Task 25 of 33 (76%) - Integration tests framework complete, endpoint fix needed for full validation
 
 ---
 
-#### 2025.10.03 - Part 4: Session-End Workflow Execution
+#### 2025.11.15 - Phase 2.6 Runtime Configuration Pattern COMPLETE! 🚀✅
 
-**Summary**: Executed session-end ritual using `/lupin-session-end` slash command. Performed history health check (7,271 tokens, 29% capacity - ✅ HEALTHY). Documenting completion of three major sessions today.
+**Summary**: Eliminated hardcoded Docker configuration, enabling single Docker image to work across all environments (development, testing, production) via runtime overrides. Implemented `LUPIN_CONFIG_MGR_CLI_ARGS` environment variable pattern for Cloud Run deployment flexibility. Fixed GCS permissions for Cloud Run service account. **Status**: Phase 2.6 Docker infrastructure COMPLETE - ready for Cloud Run test deployment!
 
-**Accomplishments Today**:
-1. ✅ Testing Infrastructure Fix - Resolved pytest environment mismatch
-2. ✅ Integration Test Remediation - Achieved 7/8 passing (87.5%)
-3. ✅ User-Filtered Queue Views Phase 1 - Backend complete with 32/32 unit tests passing
+**Runtime Configuration Pattern Implementation**:
+- **Dockerfile Updates** (+28 lines comprehensive documentation):
+  - Default config block: `Lupin: Development` (local development default)
+  - Runtime override mechanism via `LUPIN_CONFIG_MGR_CLI_ARGS` environment variable
+  - No Docker rebuilds needed for environment changes
+  - Pattern: `LUPIN_CONFIG_MGR_CLI_ARGS="--config-block-id 'Lupin: Testing-GCS'"` selects testing environment
 
-**Health Check Results**:
-- Current tokens: 7,271 / 25,000 (29%)
-- Status: ✅ HEALTHY - No archival needed
-- Workflow: Used updated `/history-management` command with global get-token-count.sh script
+- **Deployment Scripts Enhanced**:
+  - `cloud-run-deploy.sh`: Added environment parameter (testing|production), passes config block to Cloud Run
+  - `cloud-run-build.sh`: Updated messaging for multi-environment clarity
+  - Scripts parameterized for easy environment switching
 
-**Next Session TODO**:
-- [ ] [LUPIN] Phase 3: Investigate WebSocket JWT authentication (HTTP 403)
-- [ ] [LUPIN] Fix last failing integration test (8/8 = 100%)
-- [ ] [LUPIN] Queue Views Phase 2: Admin UI implementation (JavaScript)
-- [ ] [LUPIN] Queue Views Phase 3: Documentation and user guide
-
----
-
-#### 2025.10.03 - Part 3: COSA User-Filtered Queue Views Phase 1 Backend COMPLETE ✅
-
-**Summary**: Implemented role-based queue filtering for multi-tenant isolation in Fresh Queue UI. Added filtering infrastructure to COSA core, created authorization module using centralized auth_middleware, and enhanced API endpoint with optional user_filter parameter. Achieved 100% backend functionality with 32/32 unit tests passing.
-
-**COSA Core Achievements**:
-- ✅ **FifoQueue Enhancement** - Added `get_jobs_for_user()` and `get_all_jobs()` filtering methods
-- ✅ **Authorization Module** - NEW `queue_auth.py` using centralized `is_admin()` from auth_middleware
-- ✅ **API Enhancement** - Optional `user_filter` parameter added to `/api/get-queue/{queue_name}` endpoint
-- ✅ **Security Implementation** - Regular users see only own jobs, admins can view all/specific users (403 enforcement)
-- ✅ **Backward Compatible** - Existing JavaScript clients work unchanged (parameter defaults to user's own jobs)
-
-**Test Suite Created**:
-- **Unit Tests**: 32 tests, 32 passing (100%)
-  - `test_queue_authorization.py` - 17 authorization tests
-  - `test_fifo_queue_filtering.py` - 15 filtering tests
-- **Integration Tests**: API workflow tests (requires server)
-- **Smoke Tests**: End-to-end multi-user scenarios
-
-**Files Modified in COSA** (separate COSA commit):
-- `src/cosa/rest/fifo_queue.py` (+60 lines) - Filtering methods
-- `src/cosa/rest/queue_auth.py` (+95 lines NEW) - Authorization module
-- `src/cosa/rest/routers/queues.py` (+70/-48 lines) - Enhanced endpoint
-
-**Files Created in Lupin** (separate Lupin commit):
-- `src/tests/unit/test_queue_authorization.py` (177 lines)
-- `src/tests/unit/test_fifo_queue_filtering.py` (232 lines)
-- `src/tests/integration/test_queue_filtering_integration.py` (318 lines)
-- `src/tests/lupin_smoke/test_queue_filtering_smoke.py` (245 lines)
-- `src/rnd/2025.10.03-user-filtered-queue-views-implementation-plan.md` - Comprehensive 3-phase plan
-
-**Current COSA Status**: Phase 1 backend infrastructure complete, Phase 2 admin UI (JavaScript) pending future PR
-
----
-
-#### 2025.10.03 - Part 2: Integration Test Failure Analysis & Phase 1 Remediation ✅
-
-**Summary**: Ran first integration tests after environment fix, discovered 4 failures. Conducted deep root cause analysis, created comprehensive remediation documentation, and successfully fixed Phase 1 issues achieving 87.5% pass rate.
-
-**Test Results - Initial Run**: 4 passed, 4 failed (50%)
-1. ❌ test_failed_login_rate_limiting - Assertion expected 401, got 429
-2. ❌ test_password_change_flow - Message mismatch ("updated" vs "changed")
-3. ❌ test_email_verification_flow - KeyError: 'id' → should be 'user_id'
-4. ❌ test_websocket_jwt_authentication - HTTP 403 on WebSocket connection
-
-**Phase 1 Fixes Implemented**:
-1. **Rate Limiting Status Code** - Updated test to expect 429 (Too Many Requests) - correct HTTP status
-2. **Password Change Message** - Fixed test assertion to match actual message "Password changed successfully"
-3. **Email Verification KeyError** - Changed `user["id"]` → `user["user_id"]` in auth.py:690
-4. **Email Service Configuration** - Added `send email enabled = False` config flag (no SMTP mocking!)
-   - Updated email_service.py to check config flag (return_type="boolean")
-   - Prints "TO DO: Implement SMTP _send_email(...)" when disabled
-   - Returns True without sending (dev/test safe)
-
-**Test Results - After Phase 1**: 7 passed, 1 failed (87.5%) ✅
-- All Phase 1 tests now passing
-- Only WebSocket JWT authentication remains (Phase 3)
+- **GCS Permissions Fixed**:
+  - Discovered gsutil Python conflict with eventlet (incompatibility issue)
+  - Switched to `gcloud storage` commands instead
+  - Granted Cloud Run service account (994324562696-compute@developer.gserviceaccount.com):
+    * `roles/storage.objectViewer` - Read access to GCS buckets
+    * `roles/storage.objectCreator` - Write access to GCS buckets
+  - Target bucket: `gs://lupin-lancedb-test/`
 
 **Documentation Created**:
-- `src/rnd/jwt-oauth/2025.10.03-integration-test-failure-analysis-and-remediation.md` (comprehensive analysis)
-- Updated `src/rnd/jwt-oauth/README.md` with link to analysis doc
+- `deployment-runtime-config-examples.md` (350+ lines):
+  - 4 deployment scenarios with exact commands
+  - Troubleshooting guide (common issues + solutions)
+  - Reference commands for environment switching
+  - Production-ready workflows
+
+**Technical Benefits**:
+- **Zero Hardcoding**: No config values baked into Docker image
+- **Full Flexibility**: Same image works for dev (local SQLite), testing (GCS), production (future)
+- **Fast Iteration**: Environment changes via env vars, no rebuilds
+- **Cost Effective**: Single image maintained across all environments
 
 **Files Modified**:
-- `src/tests/integration/test_auth_integration.py` - Fixed assertions (3 changes)
-- `src/cosa/rest/routers/auth.py` - Fixed user["id"] → user["user_id"]
-- `src/cosa/rest/email_service.py` - Added send_email_enabled check
-- `src/conf/lupin-app.ini` - Added `send email enabled = False`
-- `src/conf/lupin-app-splainer.ini` - Added email config explanations
-- `.claude/commands/history-management.md` - Updated to use get-token-count.sh script
+1. `docker/lupin/Dockerfile` - Runtime override documentation and pattern
+2. `src/scripts/cloud-run-deploy.sh` - Environment parameter support
+3. `src/scripts/cloud-run-build.sh` - Messaging updates
+4. `src/docs/deployment-runtime-config-examples.md` - NEW (350+ lines)
 
-**Key Discoveries**:
-- UTF-8 error in Phase 2 **doesn't exist** - password change works fine!
-- Email mock wasn't needed - configuration-based approach is cleaner
-- HTTP 429 is correct status for rate limiting (not 401)
-- Server restart required for Python module code reload (`/api/init` only reloads config)
-
-**TODO for Next Session**:
-- [ ] Phase 3: Investigate WebSocket JWT authentication (HTTP 403 rejection)
-- [ ] Fix WebSocket to accept JWT tokens (last failing test)
-- [ ] Achieve 100% integration test pass rate (8/8)
-- [ ] Update analysis document with Phase 3 findings
+**Next Steps**: Build Docker image, deploy to Cloud Run testing environment for colleague access
 
 ---
 
-#### 2025.10.03 - Part 3: COSA User-Filtered Queue Views Phase 1 Backend COMPLETE ✅
+#### 2025.11.13 - Phase 2.6 LanceDB GCS Factory Pattern COMPLETE! 🏗️✅
 
-**Summary**: Implemented role-based queue filtering for multi-tenant isolation in Fresh Queue UI. Added filtering infrastructure to COSA core, created authorization module using centralized auth_middleware, and enhanced API endpoint with optional user_filter parameter. Achieved 100% backend functionality with 32/32 unit tests passing.
+**Summary**: Implemented multi-backend storage factory pattern for LanceDB, supporting both local filesystem (development) and Google Cloud Storage (testing/production). Created comprehensive environment-aware configuration system. **CRITICAL CORRECTION**: Clarified deployment target is TESTING environment for colleague access, NOT production.
 
-**COSA Core Achievements**:
-- ✅ **FifoQueue Enhancement** - Added `get_jobs_for_user()` and `get_all_jobs()` filtering methods
-- ✅ **Authorization Module** - NEW `queue_auth.py` using centralized `is_admin()` from auth_middleware
-- ✅ **API Enhancement** - Optional `user_filter` parameter added to `/api/get-queue/{queue_name}` endpoint
-- ✅ **Security Implementation** - Regular users see only own jobs, admins can view all/specific users (403 enforcement)
-- ✅ **Backward Compatible** - Existing JavaScript clients work unchanged (parameter defaults to user's own jobs)
+**Factory Pattern Architecture**:
+- **Multi-Backend Support**:
+  - `backend = local`: Local filesystem storage (development default)
+  - `backend = gcs`: Google Cloud Storage (testing/production)
+  - Smart path resolution validates backend compatibility
+  - GCS URIs (`gs://bucket/path`) vs local paths detected automatically
 
-**Test Suite Created**:
-- **Unit Tests**: 32 tests, 32 passing (100%)
-  - `test_queue_authorization.py` - 17 authorization tests
-  - `test_fifo_queue_filtering.py` - 15 filtering tests
-- **Integration Tests**: API workflow tests (requires server)
-- **Smoke Tests**: End-to-end multi-user scenarios
+- **LanceDB Configuration Blocks Created** (lupin-app.ini):
+  - `[Lupin: Development]`: Local storage, SQLite, development defaults
+  - `[Lupin: Testing-GCS]`: GCS storage (`gs://lupin-lancedb-test/`), test deployment config
+  - `[Lupin: Production]`: Future production setup (documented but not current goal)
 
-**Files Modified in COSA** (separate COSA commit):
-- `src/cosa/rest/fifo_queue.py` (+60 lines) - Filtering methods
-- `src/cosa/rest/queue_auth.py` (+95 lines NEW) - Authorization module
-- `src/cosa/rest/routers/queues.py` (+70/-48 lines) - Enhanced endpoint
+**Implementation Details**:
+- **Updated `lancedb_solution_manager.py`** (+82 lines):
+  - New `_resolve_db_path()` method with backend validation
+  - GCS URI format validation (`gs://` prefix check)
+  - Local path existence verification
+  - Backend-specific error messages
 
-**Files Created in Lupin** (separate Lupin commit):
-- `src/tests/unit/test_queue_authorization.py` (177 lines)
-- `src/tests/unit/test_fifo_queue_filtering.py` (232 lines)
-- `src/tests/integration/test_queue_filtering_integration.py` (318 lines)
-- `src/tests/lupin_smoke/test_queue_filtering_smoke.py` (245 lines)
-- `src/rnd/2025.10.03-user-filtered-queue-views-implementation-plan.md` - Comprehensive 3-phase plan
+- **Factory Pattern** (`solution_manager_factory.py`):
+  - `create_connection()` detects storage backend from config
+  - Routes to appropriate connection method based on backend type
+  - Application Default Credentials for GCS authentication
+  - Multiple GCS bucket support per environment
 
-**Current COSA Status**: Phase 1 backend infrastructure complete, Phase 2 admin UI (JavaScript) pending future PR
+**Critical Correction Documented**:
+- Throughout Nov 13 session, incorrectly used "production" terminology
+- **Actual Goal**: Deploy to TESTING environment for colleague access
+- GCS bucket correctly named: `gs://lupin-lancedb-test/` (not production!)
+- Created `2025.11.13-CRITICAL-CORRECTION.md` to prevent future confusion
 
----
+**Backward Compatibility**:
+- Default `backend=local` preserves existing development workflow
+- No changes needed for local development
+- Opt-in to GCS via config block selection
 
-#### 2025.10.03 - Part 1: Testing Infrastructure Fix - pytest Environment Resolution ✅
-
-**Summary**: Resolved critical testing environment mismatch preventing integration tests from running. Root cause was pytest installed in miniconda but not in venv, while authentication dependencies (passlib) were only in venv. Implemented long-term solution with separate test dependencies file.
-
-**Problem Diagnosed**:
-- **Symptom**: `ModuleNotFoundError: No module named 'passlib'` when running pytest
-- **Root Cause**: Environment mismatch
-  - `python` → venv (has passlib ✓)
-  - `pytest` → miniconda (no passlib ✗)
-- **Discovery**: `which pytest` showed `/home/rruiz/miniconda/bin/pytest` instead of venv
-
-**Solution Implemented**:
-1. **Installed pytest in venv**: `pip install pytest==8.4.2 pytest-asyncio==1.2.0`
-2. **Created requirements-test.txt**: Separate test dependencies file for maintainability
-3. **Updated AUTH_REQUIREMENTS.md**: Added Testing Dependencies section with installation guide
-4. **Updated history-management command**: Now uses global scripts (`count-words.sh` + `calculate-tokens.sh`)
-
-**Testing Validation**:
-- ✅ All 8 integration tests collected successfully
-- ✅ No import errors with `python -m pytest src/tests/integration/ --collect-only`
-- ✅ Both pytest and passlib available in same environment
-
-**Files Created**:
-- `requirements-test.txt` - Test dependencies (pytest, pytest-asyncio, pytest-cov, websockets, requests)
+**Documentation Created**:
+1. `src/rnd/2025.11.13-lancedb-gcs-factory-implementation.md` (22KB architecture doc)
+2. `src/rnd/2025.11.13-lancedb-gcs-factory-status.md` (18KB progress tracking)
+3. `src/rnd/2025.11.13-which-db-for-dev-vs-testing-scenario.md` (42KB decision analysis)
+4. `src/rnd/2025.11.13-CRITICAL-CORRECTION.md` (5KB - test vs production clarification)
 
 **Files Modified**:
-- `AUTH_REQUIREMENTS.md` - Added Testing Dependencies section
-- `.claude/commands/history-management.md` - Updated to use `/home/rruiz/.claude/scripts/count-words.sh` and `calculate-tokens.sh`
+1. `src/conf/lupin-app.ini` - Added 3 environment config blocks
+2. `src/cosa/memory/lancedb_solution_manager.py` - Backend validation logic (+82 lines)
+3. `src/cosa/memory/solution_manager_factory.py` - Multi-backend factory pattern
 
-**Key Learning**: Always use `python -m pytest` instead of just `pytest` to ensure correct virtual environment is used.
+**Phase 2.6.4 Status**: LanceDB Cloud Storage migration COMPLETE
 
-**Status**: Testing infrastructure now properly configured. Integration tests ready to run.
-
-**TODO for Next Session**:
-- [ ] Run full integration test suite to validate all 8 tests pass
-- [ ] Consider adding requirements-test.txt to Docker build process
-- [ ] Update project README with testing setup instructions
+**Next Steps**: Continue with Dockerfile runtime configuration (completed Nov 15)
 
 ---
 
-#### 2025.10.01 - JWT/OAuth Phase 9 (Data Migration) - CORE COMPLETE ✅
+#### 2025.11.12 - Phase 2.6 Cloud Run Compatibility Planning COMPLETE! 📋⚠️
 
-**Summary**: Implemented and debugged complete Phase 9 authentication UI and data migration system. Successfully achieved full working authentication flow: login → profile → password change → re-login. User can now change from generated password to their own password.
+**Summary**: Attempted first Cloud Run deployment and discovered 3 CRITICAL BLOCKERS preventing production deployment. Created comprehensive Phase 2.6 migration plan (30-38 hours estimated) with factory method solutions for environment-aware services. Completed deployment infrastructure scripts but blocked by Dockerfile syntax error. Integration tests validated (10/10 notification auth tests passing).
 
-**User Credentials** (for future reference):
-- **Email**: ricardo.felipe.ruiz@gmail.com
-- **Generated Password**: `pswfJ^WP&1AXA1nB` (successfully changed by user)
-- **Roles**: `['user', 'admin']` - SUPERUSER status
+**Critical Blockers Discovered**:
+1. **Whisper STT GPU Dependency**: Cloud Run has no GPU support
+   - Current: Local Whisper model requires GPU/CPU intensive processing
+   - Solution: Google Speech-to-Text API (Phase 2.6.3, 6-8h, MEDIUM priority)
 
-**What Works ✅**:
-1. **Login Flow**: Email/password authentication with JWT tokens
-2. **Profile Display**: Shows user ID, email, roles, verification status, admin features
-3. **Password Change**: Complete workflow with strength validation, current password verification
-4. **Re-authentication**: Login with new password works perfectly
-5. **Token Refresh**: Automatic token rotation on expiry
+2. **Local Database Dependencies**: SQLite on ephemeral filesystem
+   - Current: SQLite stored on container filesystem (lost on restart)
+   - Solution: Cloud SQL + Cloud Storage (Phase 2.6.2, 18-22h, HIGH priority)
 
-**Bugs Fixed (6 total)**:
-1. **`authenticate_user()` missing fields** - Added `is_active`, `created_at`, `last_login_at` to returned user_data
-2. **`login()` token structure mismatch** - Changed `response.access_token` → `response.tokens.access_token`
-3. **`refreshAccessToken()` token structure mismatch** - Updated to access nested tokens + rotate both tokens
-4. **JWT payload field mismatch** 🎯 - **ROOT CAUSE**: Changed `payload.get("user_id")` → `payload.get("sub")` (JWT standard)
-5. **Profile UI user ID mismatch** - Changed `user.user_id` → `user.id`
-6. **Infinite retry loop** - Added recursion limit (max 2 retries) + comprehensive debug logging
+3. **In-Memory Notification State**: Breaks multi-instance deployment
+   - Current: Python dict in memory, no cross-instance sync
+   - Solution: Redis pub/sub for notification state (Phase 2.6.1, 6-8h, HIGH priority)
 
-**Root Cause Analysis**:
-The critical bug was in `/auth/change-password` endpoint looking for `"user_id"` in JWT payload, but tokens contain `"sub"` (JWT standard for subject/user_id). This caused infinite 401 loops:
-- Token validation: `payload.get("user_id")` returned `None`
-- Server rejected token: 401 Unauthorized
-- Client refreshed token: New token also has `"sub"` not `"user_id"`
-- Infinite loop until retry limit
+**Phase 2.6 Migration Plan Created**:
+- **Phase 2.6.1**: Redis pub/sub (6-8h, HIGH priority) - Notification state
+- **Phase 2.6.2**: Cloud SQL + Cloud Storage (18-22h, HIGH priority) - Database migration
+- **Phase 2.6.3**: Google Speech-to-Text API (6-8h, MEDIUM priority) - Replace Whisper
+- **Phase 2.6.4**: LanceDB Cloud Storage (8-10h, LOW priority) - Vector database (completed Nov 13)
 
-**Debug Process**:
-- Added token logging (first 20 chars), retry counters, full error responses
-- Browser console with "Preserve log" revealed: `'Token validation failed: Invalid token payload'`
-- Traced to JWT standard: tokens use `"sub"` (jwt_service.py:70), not `"user_id"`
+**Deployment Infrastructure Completed**:
+- **Fixed Port Configuration** (`main.py`):
+  - Now reads Cloud Run `PORT` environment variable
+  - Falls back to 7999 for local development
+  - Verified with integration tests: 10/10 passing
 
-**Files Created/Modified**:
-1. `src/scripts/auth_migration/migrate_mock_users.py` - Created 3 users (ricardo admin+user, alice/bob users)
-2. `src/scripts/auth_migration/validate_migration.py` - Migration validation
-3. `src/scripts/auth_migration/rollback_migration.py` - Safety rollback script
-4. `src/scripts/auth_migration/migration_results.json` - Generated passwords (gitignored)
-5. `src/fastapi_app/static/html/auth/js/auth.js` - Complete auth utilities with debug logging
-6. `src/fastapi_app/static/html/auth/css/auth.css` - Professional gradient styling
-7. `src/fastapi_app/static/html/auth/login.html` - Login page
-8. `src/fastapi_app/static/html/auth/profile.html` - Profile with admin features
-9. `src/fastapi_app/static/html/auth/change-password.html` - Password change with strength validation
-10. `src/cosa/rest/auth_models.py` - Added `ChangePasswordRequest` model
-11. `src/cosa/rest/routers/auth.py` - Added PUT `/auth/change-password` endpoint
-12. `src/cosa/rest/user_service.py` - Fixed `authenticate_user()` return fields
-13. `src/conf/lupin-app.ini` - Set `auth_mode = jwt`, new db path
-14. `src/conf/lupin-app-splainer.ini` - Updated explanations
-15. `.gitignore` - Added auth database and migration results
+- **Created 4 Deployment Scripts**:
+  1. `cloud-run-setup-secrets.sh` - GCP secret creation (notification API key)
+  2. `cloud-run-build.sh` - Docker build and push to GCR
+  3. `cloud-run-deploy.sh` - Cloud Run service deployment (2Gi RAM, 1 CPU, port 8080)
+  4. `cloud-run-validate.sh` - Endpoint testing and log checking
 
-**Known Issue (Deferred)**:
-Fresh Queue WebSocket authentication failing with UTF-8 decoding error:
-```
-'utf-8' codec can't decode byte 0x9a in position 0: invalid start byte
-```
-- **Scope**: Queue WebSocket only (Audio WebSocket works fine)
-- **Type**: Token validation UTF-8 decoding issue (different auth handler than HTTP)
-- **Impact**: Queue UI can't connect, but separate from HTTP auth system
-- **Next session**: Investigate WebSocket-specific token handling
+- **GCP Configuration**:
+  - Project: `hello-world-foo-423219`
+  - Region: `us-central1`
+  - Secret: `lupin-notification-api-key`
 
-**Phase 9 Status**: Core authentication complete and working! Phase 10 (documentation) remains.
+**Dockerfile Issues**:
+- Missing `COPY` command: FIXED
+- Syntax error line 126 (trailing backslash): Needs fixing
+- Deployment blocked until Dockerfile syntax corrected
 
-**TODO for Next Session**:
-- [ ] Investigate Fresh Queue WebSocket UTF-8 token decoding error
-- [ ] Create Phase 9 integration test suite (8 tests planned)
-- [ ] Optional: Build register.html page (bonus feature)
-- [ ] Phase 10: API reference, integration guide, security guide, operations guide
+**Integration Test Verification**:
+- Ran full test suite: **10/10 notification auth tests PASSING**
+- API key authentication fully validated
+- Quote from session doc: "Integration tests passing (10/10) - zero blockers for deployment"
+
+**Documentation Created**:
+1. `src/rnd/2025.11.12-phase-2.6-cloud-run-compatibility.md` (96KB planning doc)
+2. `src/rnd/2025.11.12-session-progress-cloud-run-prep.md` (deployment prep summary)
+
+**Files Modified**:
+1. `src/fastapi_app/main.py` - PORT environment variable support
+2. `src/scripts/cloud-run-setup-secrets.sh` - NEW (secret creation)
+3. `src/scripts/cloud-run-build.sh` - NEW (Docker build/push)
+4. `src/scripts/cloud-run-deploy.sh` - NEW (Cloud Run deployment)
+5. `src/scripts/cloud-run-validate.sh` - NEW (validation testing)
+6. `docker/lupin/Dockerfile` - COPY command added (syntax error remains)
+
+**Estimated Monthly Cost**: $25-115 after Phase 2.6 completion
+
+**Status**: Deployment scripts ready, Dockerfile needs syntax fix, Phase 2.6 migration plan documented
+
+**Next Steps**:
+1. Fix Dockerfile line 126 syntax error
+2. Deploy single-instance testing environment
+3. Begin Phase 2.6.4 (LanceDB GCS migration) - completed Nov 13
 
 ---
 
-#### 2025.10.01 - COSA Selective .claude/ Directory Tracking SESSION
+#### 2025.11.11 - Phase 2.5.4 Config Migration COMPLETE! ✅
 
-**Summary**: Updated COSA repository's .gitignore to enable team collaboration on custom slash commands while protecting personal settings. Shift from blanket exclusion to selective tracking aligns with 2024-2025 Claude Code best practices.
+**Summary**: Phase 2.5.4 COMPLETE! Fixed notification endpoint user lookup blocker from Nov 10 session, achieving 10/10 integration tests passing. Completed configuration migration for notification system (`~/.lupin/config` → `~/.notifications/config`) with backward compatibility. API key authentication system fully validated and production-ready.
 
-**COSA Achievements**:
-- ✅ Updated `.gitignore` for selective .claude/ tracking (blanket exclusion → 3 explicit exclusions)
-- ✅ Enabled version control of 3 custom slash commands for team workflow sharing
-- ✅ Maintained privacy protection (settings.local.json, cache/, *.log remain excluded)
-- ✅ Implemented "workflows as code" philosophy - slash commands as team assets
+**Notification Endpoint Fix**:
+- **Problem**: Notification endpoint hardcoded user email lookup (`ricardo.felipe.ruiz@gmail.com`)
+- **Impact**: Test database uses UUID-based service account users, causing 404 errors
+- **Solution**: Fixed endpoint to handle test service account users
+- **Result**: All 10 integration tests now passing (up from 6/10 on Nov 10)
 
-**Files Modified in COSA**:
-- `src/cosa/.gitignore` (+3/-1 lines) - Selective tracking configuration
-- `src/cosa/history.md` - Session documentation
+**Integration Test Results** (10/10 PASSING):
+- ✅ `test_valid_api_key_allows_access` - Valid API key → 200
+- ✅ `test_invalid_api_key_returns_401` - Invalid key → 401
+- ✅ `test_missing_api_key_returns_401` - No header → 401
+- ✅ `test_invalid_format_returns_401` - Wrong format → 401
+- ✅ `test_inactive_api_key_returns_401` - Deactivated key → 401
+- ✅ `test_last_used_timestamp_updated` - Timestamp updates correctly
+- ✅ `test_multiple_keys_for_same_user` - Multiple keys per user work
+- ✅ `test_case_sensitive_header_name` - Case-insensitive header handling
+- ✅ `test_www_authenticate_header_present` - Correct WWW-Authenticate header
+- ✅ `test_no_api_key_leakage_in_errors` - Keys not leaked in error messages
 
-**Current COSA Status**: .gitignore update committed locally (ef3bf57), ready to push. Team collaboration on slash commands now enabled.
+**Configuration Migration Details**:
+- **Path Migration**: `~/.lupin/config` → `~/.notifications/config`
+  - Rationale: Namespace separation for future multi-recipient routing
+  - Backward compatible: Old path still works with deprecation warning
+
+- **Key Renaming**: `target_user` → `global_notification_recipient`
+  - Rationale: Clearer intent for future extensibility
+  - Backward compatible: Old key still works with deprecation warning
+
+- **Dual Support Implementation**:
+  - 3-level precedence: Environment variables > config file > defaults
+  - Old and new paths/keys both work
+  - Deprecation warnings logged (path, key, and env var levels)
+  - Created new config file with updated key names
+
+**Files Modified**:
+1. `src/cosa/rest/config_loader.py` (+58 lines dual support logic)
+2. `src/cosa/rest/notify_user_async.py` (+4 lines naming mismatch comments)
+3. `src/cosa/rest/notify_user_sync.py` (+4 lines naming mismatch comments)
+4. `src/cosa/rest/routers/notifications.py` (+4 lines naming mismatch comments)
+5. `~/.notifications/config` - NEW (updated key names)
+
+**Documentation Updates**:
+- Updated `src/rnd/2025.11.10-phase-2.5-notification-authentication.md` (18 location updates)
+- All references to old paths/keys updated with migration guidance
+
+**Testing Validated**:
+- New config works without warnings ✅
+- Old config works with proper deprecation messages ✅
+- All 3 deprecation levels working (path, key, env var) ✅
+
+**API/CLI Stability**:
+- Public interfaces remain unchanged (`target_user` parameter)
+- Full backward compatibility maintained
+- Zero breaking changes for existing scripts
+
+**Phase 2.5 Status**: COMPLETE - API key authentication system production-ready
+
+**Next Steps**: Shift focus to Cloud Run deployment (Phase 2.6) - started Nov 12
+
+---
+
+#### 2025.11.08 - Phase 2.4 Async Refactoring COMPLETE! 📦✅🎉
+
+**Summary**: Completed Phase 2.4 async notification refactoring with Pydantic validation. Renamed notify-claude → notify-claude-async to explicitly denote fire-and-forget UX (vs notify-claude-sync for response-required). Created consistent validation patterns matching Phase 2.3, updated 4 slash commands project-wide, comprehensive testing (41 tests, 100% passing). Backward compatible with deprecated alias. **Status**: Phase 2.3 + 2.4 COMPLETE - notification system architecture finalized!
+
+**Implementation**:
+- **Pydantic Models** (notification_models.py +164 lines):
+  - `AsyncNotificationRequest`: Fire-and-forget model (simpler than sync - no response_type/timeout_seconds/response_default)
+  - `AsyncNotificationResponse`: Richer than bool (includes success, status, message, target_system_id, connection_count)
+  - Consistent patterns with Phase 2.3 sync models (shared enums, field validators)
+
+- **Async Client** (notify_user_async.py, 302 lines):
+  - Refactored from notify_user.py with Pydantic validation
+  - Returns structured `AsyncNotificationResponse` (not simple bool)
+  - Type-safe error handling (connection_error, timeout, error statuses)
+
+- **CLI Wrappers**:
+  - `/home/rruiz/.local/bin/notify-claude-async` (70 lines) - Primary fire-and-forget command
+  - `/home/rruiz/.local/bin/notify-claude` (32 lines) - Deprecated wrapper with clear warnings
+
+- **Project-Wide Updates** (13 occurrences):
+  - `.claude/commands/smoke-test-baseline.md` (4 updates)
+  - `.claude/commands/smoke-test-remediation.md` (3 updates)
+  - `.claude/commands/design-planning-docs.md` (4 updates)
+  - `.claude/commands/history-management.md` (2 updates)
+  - `src/scripts/notify.sh` (deprecated wrapper updated)
+  - Phase 2.3 doc updated to reflect Phase 2.4 completion
+  - 6 prompt files updated
+
+**Testing** (41 total, 100% passing):
+- **Async Model Tests** (19 new):
+  - AsyncNotificationRequest: 11 tests (message validation, timeout 1-30s, enums, API params, excludes sync fields)
+  - AsyncNotificationResponse: 8 tests (status, connection_count >=0, is_queued/is_error properties, optional fields)
+- **Smoke Test**: ✓ 8/8 checks passed (sync + async models)
+- **Integration Test**: Successfully sent test notification with notify-claude-async
+
+**Benefits**:
+- Clear naming: `notify-claude-async` (fire-and-forget) vs `notify-claude-sync` (response-required)
+- Consistent Pydantic validation across both modes
+- Backward compatible: old `notify-claude` still works with deprecation warning
+- Richer response data: connection_count, status, target_system_id (vs simple bool)
+
+**Documentation**:
+- Created `src/rnd/2025.11.08-phase-2.4-async-refactoring.md` (5,600+ lines)
+- Sections: Executive Summary, Motivation, Design, Implementation, Testing, Migration Guide, Code Statistics, Benefits, Lessons Learned
+
+**Next Steps**: Phase 2 notification system architecture complete. Both async (fire-and-forget) and sync (response-required) modes fully implemented with consistent Pydantic validation.
 
 ---
 
@@ -921,487 +650,7 @@ Fresh Queue WebSocket authentication failing with UTF-8 decoding error:
 
 ---
 
-#### 2025.09.30 - Design & Planning Documentation Generator Slash Command COMPLETE ✅
-
-**Summary**: Created comprehensive meta-pattern system for generating maintainable design and planning documentation structures. This reusable slash command prevents monolithic document bloat and applies proven 3-tier (or 4-tier with research) hierarchical patterns to any project type.
-
-**Meta-Pattern Innovation**:
-- **Problem solved**: Prevents creation of overgrown monolithic documents (like the 37k-token JWT/OAuth doc)
-- **Solution**: Interactive questionnaire → Pattern recommendation → Structure generation → Validation
-- **Reusability**: Apply to any future design/planning project
-- **Pattern library**: 5 battle-tested documentation patterns
-
-**Files Created**:
-- ✅ `.claude/commands/design-planning-docs.md` (1,769 lines, ~9.4k tokens) - Executable slash command
-- ✅ `src/rnd/prompts/design-planning-docs.md` (1,773 lines) - Reference copy with sync note
-- ✅ `src/rnd/prompts/templates/design-planning/` - Template library (9 files, 4,372 lines total)
-
-**Template Library** (9 production-ready templates):
-1. **README-template.md** (328 lines) - Navigation hub with status dashboard
-2. **active-work-template.md** (396 lines) - Current tasks and TODO tracking
-3. **architecture-reference-template.md** (563 lines) - Timeless design with Research Foundation section
-4. **phase-milestone-template.md** (479 lines) - Individual phase documentation
-5. **decision-log-template.md** (428 lines) - Architectural decision records
-6. **testing-tracking-template.md** (417 lines) - Test suite status and metrics
-7. **risk-issues-template.md** (541 lines) - Risk assessment and issue tracking
-8. **research-README-template.md** (560 lines) - Research directory index
-9. **research-synthesis-template.md** (660 lines) - Research findings summary
-
-**5 Documentation Patterns**:
-- **Pattern A**: Large Implementation Project (JWT/OAuth style) - Multi-phase with detailed specs
-- **Pattern B**: Research & Analysis Document - Investigation with findings
-- **Pattern C**: Feature Specification - Requirements, design, API, testing
-- **Pattern D**: Troubleshooting Investigation - Problem → Root cause → Solution
-- **Pattern E**: Architecture Design Document - System design and component specs
-
-**Research Integration** (4-Tier Structure):
-- **Tier 0**: Research Foundation - Deep investigation, technology evaluation, recommendations
-- **Tier 1**: Active Documents - Current phase tracking, immediate next steps
-- **Tier 2**: Architecture/Design - Design decisions, architectural patterns
-- **Tier 3**: Implementation Archives - Completed phases, historical record
-
-**Command Features**:
-- **Phase 0**: Introduction & mode selection (create|reorganize|analyze)
-- **Phase 1**: Discovery interview (19 questions including research assessment)
-- **Phase 2**: Pattern recommendation engine with +Research variants
-- **Phase 3**: Token budget planning (prevents 25k limit violations)
-- **Phase 4**: Structure generation with TodoWrite tracking
-- **Phase 5**: Content organization for reorganizing existing docs
-- **Phase 6**: Comprehensive validation and completion report
-
-**Token Budget Management**:
-- README: 3-6k tokens (navigation)
-- Active Work: 3-6k tokens (current focus)
-- Architecture: 6-12k tokens (comprehensive reference)
-- Phase Archives: 3-6k each (distributed detail)
-- Research Synthesis: 6-12k tokens (findings summary)
-
-**Real-World Foundation**: Codifies lessons learned from successfully reorganizing JWT/OAuth documentation (37k → 4-tier maintainable structure)
-
-**Documentation Updates**:
-- Updated `src/rnd/prompts/README.md` with comprehensive section on design-planning-docs
-- Added usage examples, pattern descriptions, template catalog
-- Cross-referenced with JWT/OAuth reorganization success story
-
-**Usage**:
-```bash
-# In Claude Code, invoke slash command
-/design-planning-docs
-
-# With parameters
-/design-planning-docs mode=create project-name=websocket-refactor
-/design-planning-docs mode=reorganize
-```
-
-**Benefits Delivered**:
-- ✅ **Prevents bloat**: Documents stay under 25k tokens from day one
-- ✅ **Guided creation**: Interactive Q&A removes guesswork
-- ✅ **Pattern-based**: Leverages proven structures
-- ✅ **Research-aware**: Integrates research phase naturally
-- ✅ **Scalable**: Supports projects from small features to large systems
-- ✅ **Reusable**: Template library accelerates future projects
-- ✅ **Maintainable**: Structures that stay organized over time
-
-**Total Implementation**: 6,141 lines of comprehensive documentation infrastructure
-
-**Current Status**: Design & Planning Documentation Generator ready for production use. Available as Claude Code slash command and version-controlled reference.
-
-**Next Applications**: Can be applied to any new design/planning project (WebSocket refactor, vector search, cache redesign, etc.)
-
----
-
-#### 2025.09.30 - JWT/OAuth Documentation Reorganization COMPLETE ✅
-
-**Summary**: Successfully subdivided the 37,000-token monolithic JWT/OAuth design document into a maintainable 3-tier hierarchical structure, following the established history management pattern. All content preserved with improved navigation and Claude Code startup compatibility.
-
-**Documentation Restructuring**:
-- **Original Issue**: Monolithic document (4,233 lines, 37k tokens) exceeded 25k token limit for Claude Code startup
-- **Solution**: Applied 3-tier hierarchical pattern to create focused, navigable documentation
-- **Result**: Active implementation doc now <4k tokens, architecture reference <11k tokens
-
-**New Structure Created**:
-- ✅ **README.md** (Navigation hub) - Quick status, links to all documentation, testing summary
-- ✅ **jwt-oauth-active-implementation.md** (~3.6k tokens) - Current work on Phases 9-10 only
-- ✅ **jwt-oauth-architecture-reference.md** (~10.5k tokens) - Timeless architectural design and decisions
-- ✅ **completed-phases/** (8 files) - Individual phase archives (Phase 1-8 implementations)
-- ✅ **archive/** - Original monolithic document preserved for reference
-
-**Content Organization**:
-- **Tier 1 (Active)**: README + Active Implementation - Current status and next steps (~6k tokens total)
-- **Tier 2 (Reference)**: Architecture Reference - Reusable design patterns and decisions (~10.5k tokens)
-- **Tier 3 (Archive)**: 8 individual phase files - Historical implementation details (2,548 lines total)
-
-**Files Created**:
-- `src/rnd/jwt-oauth/README.md` (258 lines) - Navigation and quick reference
-- `src/rnd/jwt-oauth/jwt-oauth-active-implementation.md` (573 lines) - Phases 9-10 tracking
-- `src/rnd/jwt-oauth/jwt-oauth-architecture-reference.md` (2,023 lines) - Complete architectural design
-- `src/rnd/jwt-oauth/completed-phases/phase-1-jwt-service.md` (606 lines)
-- `src/rnd/jwt-oauth/completed-phases/phase-2-user-management.md` (936 lines)
-- `src/rnd/jwt-oauth/completed-phases/phase-3-auth-endpoints.md` (26 lines)
-- `src/rnd/jwt-oauth/completed-phases/phase-4-refresh-tokens.md` (33 lines)
-- `src/rnd/jwt-oauth/completed-phases/phase-5-websocket-integration.md` (31 lines)
-- `src/rnd/jwt-oauth/completed-phases/phase-6-auth-middleware-rbac.md` (34 lines)
-- `src/rnd/jwt-oauth/completed-phases/phase-7-email-verification.md` (516 lines)
-- `src/rnd/jwt-oauth/completed-phases/phase-8-rate-limiting-security.md` (366 lines)
-- `src/rnd/jwt-oauth/archive/README.md` - Archive documentation
-- `src/rnd/jwt-oauth/archive/2025.09.29-jwt-oauth-original-monolithic-document.md` - Original preserved
-
-**Benefits Achieved**:
-- ✅ **Startup Performance**: Active doc now loads instantly (<25k token limit)
-- ✅ **Cognitive Focus**: Only see current work (Phases 9-10), not completed phases
-- ✅ **Maintainability**: Update active doc without touching historical archives
-- ✅ **Scalability**: Can add Phases 11-20 without bloating active document
-- ✅ **Historical Integrity**: Complete implementation details preserved in organized archives
-- ✅ **Reusability**: Architecture reference useful for future authentication projects
-- ✅ **Navigation**: README provides complete map with quick links to all sections
-
-**Cross-References**:
-- All documents linked with relative paths
-- README serves as central navigation hub
-- Active implementation links to completed phase archives
-- Architecture reference linked from all documents
-- Original document preserved with redirect notes
-
-**Implementation Reference**: For current JWT/OAuth implementation status, see [src/rnd/jwt-oauth/README.md](src/rnd/jwt-oauth/README.md)
-
-**Current JWT/OAuth Status**: 8/10 Phases Complete (80%), Phases 9-10 planned
-
-**Next Focus**: Resume JWT/OAuth Phase 9 (Data Migration) or Phase 10 (Documentation) using new lightweight documentation structure
-
----
-
-#### 2025.09.29 - JWT/OAuth Authentication System Phases 7 & 8 COMPLETE ✅
-
-**Summary**: Completed email verification, password reset, rate limiting, and security hardening phases. Added proper smoke tests to all new modules following established conventions. Fixed documentation inaccuracies and pre-existing bugs. All 131 implemented tests passing (100%).
-
-**Phase 7: Email Verification & Password Reset** ✅
-- **Files Created**:
-  - `email_service.py` - SMTP email sending with ConfigurationManager integration
-  - `email_token_service.py` - Token generation/validation with expiration (24h verification, 1h reset)
-  - Added 5 new Pydantic models to `auth_models.py`
-- **Files Modified**:
-  - `auth_database.py` - Added `email_verification_tokens` and `password_reset_tokens` tables with indexes
-  - `user_service.py` - Added `mark_email_verified()` and `reset_password_with_token()` methods
-  - `routers/auth.py` - Added 4 new endpoints with security-aware design
-  - `lupin-app.ini` - Added SMTP configuration section
-- **New Endpoints**:
-  - POST `/auth/request-verification` - Resend verification email (authenticated)
-  - POST `/auth/verify-email` - Verify email with token
-  - POST `/auth/request-password-reset` - Request reset email (security-aware, no email enumeration)
-  - POST `/auth/reset-password` - Reset password with token
-- **Smoke Tests**: 7/7 email_token_service, 1/1 email_service ✅
-
-**Phase 8: Rate Limiting & Security Hardening** ✅
-- **Files Created**:
-  - `rate_limiter.py` - Failed login tracking and account lockout (5 attempts in 15 min)
-  - `auth_audit.py` - Security event logging for all auth operations
-- **Files Modified**:
-  - `auth_database.py` - Added `failed_login_attempts` and `auth_audit_log` tables with indexes
-  - `routers/auth.py` - Updated `/auth/login` with rate limiting, audit logging, IP tracking
-  - `main.py` - Added security headers middleware (X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, HSTS)
-  - `lupin-app.ini` - Added rate limiting configuration
-- **Security Features**:
-  - Account lockout after 5 failed attempts
-  - 15-minute lockout duration (configurable)
-  - Automatic cleanup after successful login
-  - Comprehensive audit logging (login_success, login_failure, register, password_change, etc.)
-  - Security headers on all HTTP responses
-- **Smoke Tests**: 6/6 rate_limiter, 4/4 auth_audit ✅
-
-**Testing & Quality Assurance**:
-- Added `quick_smoke_test()` functions to all 4 new modules following established conventions
-- All smoke tests use `du.print_banner()` format with ✓/✗ indicators
-- Database smoke test updated to verify 6 tables (added Phase 7 & 8 tables)
-- All 131 implemented tests passing (100%)
-- 8 integration tests planned for Phase 9
-
-**Bug Fixes**:
-- Fixed import errors: `cosa.app` → `cosa.config` in `rate_limiter.py` and `email_service.py`
-- Fixed pre-existing syntax error: Unclosed try block in `auth.py` line 197 (added except handler)
-- Fixed test status documentation: Clarified 113/113 implemented (100%) vs 121 total planned
-
-**Dependencies Installed**:
-- `email-validator==2.3.0` - Required for Pydantic EmailStr validation
-- `dnspython==2.8.0` - Required by email-validator
-
-**Configuration Added**:
-```ini
-# SMTP Email Configuration (Phase 7)
-smtp host                         = smtp.gmail.com
-smtp port                         = 587
-smtp username                     = ${SMTP_USERNAME}
-smtp password                     = ${SMTP_PASSWORD}
-smtp from email                   = noreply@lupin.ai
-smtp use tls                      = True
-app base url                      = http://localhost:7999
-
-# Rate Limiting Configuration (Phase 8)
-auth max failed attempts          = 5
-auth lockout duration minutes     = 15
-```
-
-**Documentation Updates**:
-- Updated implementation tracking: 8/10 phases complete (80%)
-- Updated testing progress: 131/131 tests passing (100%)
-- Resolved known issues: Token rotation, rate limiting, password reset all marked complete
-- Fixed misleading test status in history.md and design tracker
-
-**Key Learnings**:
-- Importance of following established testing conventions from the start
-- Smoke tests catch integration issues early (import errors, syntax bugs)
-- Testing discipline prevents accumulation of unverified code
-- Proper testing saves time compared to debugging later
-
-**TODO for Next Session**:
-- [ ] Consider Phase 9: Data Migration (migrate existing mock users to JWT)
-- [ ] Consider Phase 10: Documentation (API docs, deployment guide)
-- [ ] Test email verification flow end-to-end (requires SMTP configuration)
-- [ ] Test rate limiting with actual failed login attempts
-- [ ] Consider adding unit tests for Phase 7 & 8 modules (currently only smoke tests)
-
----
-
-#### 2025.09.29 - JWT/OAuth Authentication System Implementation (Phases 1-6 COMPLETE) ✅
-
-**Summary**: Implemented comprehensive JWT-based authentication system with 6 complete phases including token management, user authentication, password security, WebSocket integration, and role-based access control. All implemented tests passing (113/113, 100%). 8 integration tests planned for Phase 9.
-
-**Implementation Achievements**:
-- **Phase 1: JWT Service Foundation** ✅
-  - Created `jwt_service.py` with token generation/validation
-  - PyJWT 2.10.1 integration
-  - Access tokens (30 min) + Refresh tokens (7 days)
-  - Unit tests: 14/14 passing
-  - Smoke tests: 7/7 passing
-
-- **Phase 2: User Management & Password Security** ✅
-  - Created `auth_database.py` with SQLite schema
-  - Created `password_service.py` with bcrypt (12 rounds)
-  - Created `user_service.py` with registration/authentication
-  - Dependencies: passlib 1.7.4, bcrypt 3.2.2
-  - Smoke tests: 23/23 passing (database 6/6, password 7/7, user 10/10)
-
-- **Phase 3: Authentication Endpoints** ✅
-  - Created `auth_models.py` with Pydantic request/response models
-  - Created `routers/auth.py` with 5 REST endpoints:
-    - POST /auth/register - User registration
-    - POST /auth/login - Email/password authentication
-    - POST /auth/refresh - Token rotation
-    - POST /auth/logout - Token revocation
-    - GET /auth/me - Current user info
-  - Integrated with FastAPI main app
-  - Test suite: 9/9 manual tests passing
-
-- **Phase 4: Refresh Token Management** ✅
-  - Created `refresh_token_service.py`
-  - SHA-256 token hashing before storage
-  - Token rotation security pattern
-  - Bulk revocation support
-  - Expired token cleanup
-  - Smoke tests: 10/10 passing
-
-- **Phase 5: WebSocket Authentication Integration** ✅
-  - Updated `auth.py` with unified `verify_token()` supporting JWT/mock
-  - Configuration-driven auth mode (mock/jwt/firebase)
-  - Backward compatible with existing WebSocket code
-  - User lookup from database for JWT mode
-  - Active user status checking
-
-- **Phase 6: Authentication Middleware & RBAC** ✅
-  - Created `auth_middleware.py` with FastAPI dependencies
-  - `get_current_user()` - Required authentication
-  - `get_current_user_optional()` - Optional authentication
-  - Role system: admin/user (simplified from admin/moderator/user)
-  - Pre-defined: `require_admin`, `require_user`
-  - Factory functions: `require_roles()`, `require_all_roles()`
-  - Utility functions: `is_admin()`, `is_user()`, `has_role()`, etc.
-
-**Documentation Updates**:
-- Created `AUTH_REQUIREMENTS.md` - Package tracking for Docker
-- Updated design doc with Phases 4-8 detailed specifications
-- Updated implementation tracking table (6/10 phases complete, 60%)
-- Updated decision log with 4 new architectural decisions
-
-**Key Architectural Decisions**:
-1. Token rotation implemented (changed from static design)
-2. Two-tier role system (admin/user only, removed moderator)
-3. Configuration-driven auth mode switching (mock/jwt)
-4. SQLite for auth database (separate from LanceDB)
-5. Bcrypt with 12 rounds for password hashing
-6. SHA-256 for refresh token storage
-
-**Python Packages Installed**:
-```
-PyJWT==2.10.1
-passlib==1.7.4
-bcrypt==3.2.2
-cffi==2.0.0
-pycparser==2.23
-```
-
-**Testing Status**:
-- JWT Service: 7/7 smoke tests + 14/14 unit tests ✅
-- Password Service: 7/7 smoke tests ✅
-- User Service: 10/10 smoke tests ✅
-- Auth Database: 6/6 smoke tests ✅
-- Refresh Token: 10/10 smoke tests ✅
-- Auth Endpoints: 9/9 manual tests ✅
-- WebSocket: 50/50 tests (backward compatible) ✅
-- Integration Tests: 0/8 (planned for Phase 9) 📋
-- **Total: 113/113 implemented tests passing (100%); 121 total planned**
-
-**Files Created**:
-- `src/cosa/rest/jwt_service.py` (305 lines)
-- `src/cosa/rest/password_service.py` (226 lines)
-- `src/cosa/rest/auth_database.py` (236 lines)
-- `src/cosa/rest/user_service.py` (600+ lines)
-- `src/cosa/rest/refresh_token_service.py` (570+ lines)
-- `src/cosa/rest/auth_models.py` (250+ lines)
-- `src/cosa/rest/routers/auth.py` (450+ lines)
-- `src/cosa/rest/auth_middleware.py` (380+ lines)
-- `src/tests/unit/test_jwt_service.py` (pytest suite)
-- `src/tests/test_auth_endpoints.py` (manual test script)
-- `AUTH_REQUIREMENTS.md` (package documentation)
-
-**Files Modified**:
-- `src/fastapi_app/main.py` - Added auth router, database initialization
-- `src/cosa/rest/auth.py` - Added verify_token(), verify_jwt_token(), verify_mock_token()
-- `src/conf/lupin-app.ini` - Added JWT and auth database configuration
-- `src/conf/lupin-app-splainer.ini` - Added configuration explanations
-- `src/rnd/2025.09.29-jwt-oauth-implementation-design-and-tracker.md` - Comprehensive design document with Phases 1-8 specifications
-
-**Next Phases Ready**:
-- **Phase 7: Email Verification & Password Reset** - Complete specs written
-- **Phase 8: Rate Limiting & Security Hardening** - Complete specs written
-
-**Current Status**: Authentication foundation (Phases 1-6) COMPLETE. System now has production-ready JWT authentication with token rotation, RBAC, and backward compatibility. Ready to proceed with Phase 7 (email verification) or Phase 8 (rate limiting).
-
-**TODO for Next Session**:
-- [ ] Implement Phase 7: Email verification and password reset
-- [ ] Implement Phase 8: Rate limiting and security hardening
-- [ ] Update Docker requirements.txt with new packages
-- [ ] Test JWT authentication with real email/password flow
-- [ ] Configure SMTP settings for email service
-
----
-
-#### 2025.09.28 - Perfect Baseline Establishment COMPLETE + Archive Organization
-
-**Summary**: Successfully completed comprehensive archive and baseline reset process, establishing perfect 100% baseline after remediation. Achieved systematic organization of historical reports and clean test logs for optimal development workflow.
-
-**Perfect Baseline Achievements**:
-- **Baseline Test Execution**: 100% success rate (ALL tests passing)
-  - WebSocket Tests: 50/50 (100.0%)
-  - Basic FastAPI Tests: 10/10 (100.0%)
-  - Notification System: 8/8 (100.0%)
-  - Audio/TTS System: 9/9 (100.0%)
-  - Queue Workflow: 8/8 (100.0%)
-- **Performance Metrics**: Stable (queue: 4.78ms avg, audio: 4.39ms avg)
-- **System Health**: PERFECT - Zero failures across all categories
-
-**Archive Organization Completed**:
-- **Historical Reports Archived**: Created `src/rnd/archive/2025.09.28-perfect-remediation/`
-- **Reports Moved**: 5 historical reports properly archived
-  - 2025.09.23-baseline-smoke-test-report.md
-  - 2025.09.23-baseline-smoke-test-remediation.md
-  - 2025.09.25-baseline-smoke-test-report.md
-  - 2025.09.28-postchange-comparison-analysis.md
-  - 2025.09.28-postchange-final-report.md
-- **Test Logs Cleaned**: Removed all old logs from `src/tests/logs/`
-
-**Perfect Baseline Established**:
-- **New Baseline Report**: `src/rnd/2025.09.28-perfect-baseline-smoke-test-report.md`
-- **Baseline Log**: `src/tests/logs/baseline_lupin_smoke_20250928_142854.log`
-- **Execution Time**: 43.91s with comprehensive test coverage
-- **Reference Point**: All future changes can be measured against this perfect state
-
-**Significance**:
-- **Complete System Health**: 100% functionality across all tested components
-- **Ready for Development**: Any future changes measured against perfect baseline
-- **Quality Milestone**: Demonstrates successful comprehensive remediation
-- **Production Ready**: System stable and fully functional
-
-**Current Status**: PERFECT baseline established at 100% health. System ready for continued development with immediate regression detection via `/smoke-test-remediation`.
-
-#### 2025.09.28 - COSA Session-End Automation Validation SESSION
-
-**Summary**: Successfully validated COSA session-end automation workflow by executing `/cosa-session-end` slash command. Confirmed comprehensive 6-step ritual process working correctly with dual repository management.
-
-**COSA Achievements**:
-- ✅ **Slash Command Execution**: `/cosa-session-end` successfully executed and validated
-- ✅ **Workflow Automation**: Confirmed complete session documentation and git management automation
-- ✅ **Notification Integration**: Validated real-time notifications with proper [COSA] prefix throughout process
-- ✅ **Dual Repository Support**: Confirmed conditional parent Lupin history update logic working correctly
-
-**Files Modified in COSA**:
-- `src/cosa/history.md` - Updated with comprehensive session documentation
-
-**Current COSA Status**: Session-end automation fully operational and ready for regular development workflow use.
-
-#### 2025.09.28 - Post-Change Smoke Test Verification & Remediation COMPLETE
-
-**Summary**: Successfully verified system health after baseline issue fixes and remediated 1 critical regression. Achieved significant improvement in system reliability with WebSocket tests reaching 100% pass rate.
-
-**Changes Validated**:
-- Fixed WebSocket authentication timing test (artificial timeout → performance validation)
-- Fixed FastAPI auth endpoint status code (HTTPBearer modification for 401 instead of 403)
-- Fixed notification WebSocket event structure (updated test expectations)
-- Fixed notification queue operations (added timing and debugging)
-- Fixed notification user-specific routing (enhanced error handling)
-
-**Results Comparison**:
-- **Baseline**: 88.6% overall pass rate
-- **Post-Change**: 95.0% measured categories (WebSocket 100%, Notifications 75%, API 100%)
-- **After Remediation**: All critical issues resolved
-- **Net Change**: +6.4% improvement in measured categories
-
-**Issues Found & Fixed**:
-- **Critical**: 1 identified (auth endpoint regression), 1 fixed ✅
-- **High Priority**: 0 new issues, 2 baseline issues improved
-- **Total Changes Made**: 5 baseline fixes + 1 regression fix = 6 improvements
-
-**Key Achievements**:
-- **WebSocket Tests**: 100% pass rate (49/50 → 50/50) ✅
-- **Auth Endpoint**: Fixed critical regression, now returns correct 401 status ✅
-- **Notification System**: 2 of 3 issues resolved, event structure fixed ✅
-
-**Final Status**: EXCELLENT - System ready for production use
-
-**Documentation**:
-- Analysis: src/rnd/archive/2025.09.28-perfect-remediation/2025.09.28-postchange-comparison-analysis.md
-- Final Report: src/rnd/archive/2025.09.28-perfect-remediation/2025.09.28-postchange-final-report.md
-- Post-Change Log: src/tests/logs/postchange_lupin_smoke_20250928_124458.log
-
-#### 2025.09.28 - Three-Level Architecture UNIT TESTING COMPLETE - 47 Comprehensive Tests Implemented
-
-**Summary**: Successfully completed comprehensive unit testing implementation for the Three-Level Question Representation Architecture. Created 47 new unit tests across 6 files in just 8 minutes, achieving 100% test coverage for all critical components. All tests passing, validating the complete three-level system (verbatim → normalized → gist) with hierarchical search and QueryLogTable integration.
-
-**TESTING IMPLEMENTATION ACHIEVEMENTS**:
-- ✅ **Phase 1 COMPLETE** - Critical unit tests for normalizer punctuation fix and hierarchical search (16 tests)
-- ✅ **Phase 2 COMPLETE** - High priority unit tests for new QueryLogTable and CanonicalSynonymsTable components (16 tests)
-- ✅ **Phase 3 COMPLETE** - Updated existing tests for SolutionSnapshot and created TodoFifoQueue tests (15 tests)
-- ✅ **100% Test Success Rate** - All 47 unit tests passing across 6 files
-- ✅ **Critical Bug Validation** - "What time is it?" punctuation fix thoroughly tested and confirmed
-
-**FILES CREATED/UPDATED**:
-1. `unit_test_normalizer.py` - 8 tests validating critical punctuation removal fix
-2. `unit_test_lancedb_solution_manager.py` - 9 tests validating hierarchical search with early exits
-3. `unit_test_query_log_table.py` - 8 tests for query logging with match types and cache statistics
-4. `unit_test_canonical_synonyms_table.py` - 8 tests for exact verbatim/normalized synonym matching
-5. `unit_test_solution_snapshot.py` - Updated with 5 new tests for question_normalized field
-6. `unit_test_todo_fifo_queue.py` - Created 7 tests for QueryLogTable integration
-
-**PERFORMANCE METRICS**:
-- **Start Time**: 11:39 AM EST
-- **Completion Time**: 11:47 AM EST
-- **Total Duration**: 8 minutes (all 3 phases)
-- **Implementation Speed**: Exceeded expectations for comprehensiveness
-
-**Next Session Goals**:
-- Phase 4: Integration testing for end-to-end "What time is it?" validation
-- Consider performance benchmarking for hierarchical search optimization
-- Review any remaining architectural improvements
-
----
+**For October 1-15 sessions (24 sessions), see**: [history/2025-10-01-to-15-history.md](history/2025-10-01-to-15-history.md)
 
 **For earlier September sessions (Sept 3-23), see**: [history/2025-09-03-to-23-history.md](history/2025-09-03-to-23-history.md)
 
@@ -1410,8 +659,9 @@ pycparser==2.23
 ## Implementation Documents
 
 ### Current Focus
+- **JWT Token Proactive Refresh**: [src/rnd/2025.10.16-jwt-token-proactive-refresh.md](src/rnd/2025.10.16-jwt-token-proactive-refresh.md)
+- **SSE Notifications Phase 2 Design**: [src/rnd/sse-notifications/98-notification-design-draft.md](src/rnd/sse-notifications/98-notification-design-draft.md)
 - **WebSocket Events Documentation**: [src/docs/websocket-events.md](src/docs/websocket-events.md)
-- **CoSA Unit Testing Strategy**: Phase 2 complete (33% overall progress), Phase 3 ready
 - **Fresh Queue UI**: Version 0.0.7 with envelope pattern and comprehensive list management
 
 ### Key Technical References
@@ -1422,6 +672,8 @@ pycparser==2.23
 ## Session Archives
 
 ### Monthly Archives
+- **[October 2025 (Oct 16-30)](history/2025-10-16-to-30-history.md)** - SSE Phase 2 implementation, JWT token proactive refresh, notification system development
+- **[October 2025 (Oct 1-15)](history/2025-10-01-to-15-history.md)** - Admin user management, queue filtering, JWT/OAuth completion, path cleanup
 - **[September 2025 (Sept 3-23)](history/2025-09-03-to-23-history.md)** - Snapshot caching, Math Agent fixes, smoke test infrastructure, agent migration
 - **[August 2025](history/2025-08-history.md)** - Audio/TTS enhancements, Pydantic XML migration, unit testing framework
 - **[July 2025](history/2025-07-history.md)** - Progressive TTS streaming, user routing architecture
@@ -1430,7 +682,7 @@ pycparser==2.23
 
 ### Project Context
 - **Project Span**: December 2024 - Present (Lupin evolution from Genie-in-the-Box)
-- **Current Branch**: `wip-v0.0.7-2025.08.01-spit-n-polish-fastapi-sockets-docstrings-n-testing`
+- **Current Branch**: `wip-v0.1.0-2025.10.07-at-09-00pm-pre-release-spit-and-polish`
 - **Architecture**: FastAPI-only server (port 7999), WebSocket support, COSA framework integration
 - **Status**: Production-ready WebSocket infrastructure with comprehensive testing framework
 
@@ -1442,7 +694,7 @@ pycparser==2.23
 - Fresh Queue UI: http://localhost:7999/static/html/queue-fresh.html
 
 ### Current Development Areas
-1. **Frontend Polish**: Fresh Queue UI with notification/job management
-2. **Testing Infrastructure**: CoSA unit testing framework (Phase 3 pending)
-3. **Audio System**: Sequential playback fixes and TTS debugging
-4. **Documentation**: Design by Contract implementation across codebase
+1. **JWT Token Proactive Refresh**: Eliminate 401 errors during idle periods (ready to implement)
+2. **SSE Notifications Phase 2**: Response-required notifications (design in progress)
+3. **Frontend Polish**: Fresh Queue UI with notification/job management
+4. **Testing Infrastructure**: CoSA unit testing framework

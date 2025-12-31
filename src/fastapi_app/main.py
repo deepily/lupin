@@ -39,8 +39,6 @@ from transformers import pipeline
 
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.memory.input_and_output_table import InputAndOutputTable
-# from cosa.memory.solution_snapshot_mgr import SolutionSnapshotManager
-# from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
 from cosa.memory.solution_manager_factory import SolutionSnapshotManagerFactory
 from cosa.rest.todo_fifo_queue import TodoFifoQueue
 from cosa.rest.fifo_queue import FifoQueue
@@ -367,15 +365,37 @@ async def lifespan( app: FastAPI ):
     global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task
     
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-    
-    # Initialize the ID generator singleton
-    id_generator = TwoWordIdGenerator()
-    
-    # Get configuration flags
+
+    # Get configuration flags (needed for debug output below)
     app_debug   = config_mgr.get( "app_debug",   default=False, return_type="boolean" )
     app_verbose = config_mgr.get( "app_verbose", default=False, return_type="boolean" )
     app_silent  = config_mgr.get( "app_silent",  default=True,  return_type="boolean" )
-    
+
+    # Suppress LanceDB cosmetic warnings if configured
+    # These warnings are non-functional - queries execute correctly regardless
+    # Warnings occur when using .search() for metadata filtering (not vector similarity)
+    if config_mgr.get( "suppress lancedb warnings", default=True, return_type="boolean" ):
+        import logging
+        import warnings
+
+        # Suppress via warnings module (catches Rust layer warnings)
+        warnings.filterwarnings( "ignore", message=".*nprobes is not set.*" )
+        warnings.filterwarnings( "ignore", message=".*nearest has not been called.*" )
+
+        # Set LanceDB loggers to ERROR level only (suppress WARN, INFO, DEBUG)
+        logging.getLogger( "lance" ).setLevel( logging.ERROR )
+        logging.getLogger( "lance.dataset" ).setLevel( logging.ERROR )
+        logging.getLogger( "lance.dataset.scanner" ).setLevel( logging.ERROR )
+
+        if app_debug:
+            print( "✓ LanceDB warning suppression enabled (cosmetic warnings hidden)" )
+    else:
+        if app_debug:
+            print( "⚠ LanceDB warning suppression disabled (all warnings visible)" )
+
+    # Initialize the ID generator singleton
+    id_generator = TwoWordIdGenerator()
+
     # Initialize solution snapshot manager using factory pattern
     manager_type = config_mgr.get( "solution snapshots manager type", default="file_based" )
     
@@ -397,14 +417,16 @@ async def lifespan( app: FastAPI ):
             print( f"Using LanceDB solution snapshot manager: {lancedb_path}" )
             
     else:
-        # Use file-based backend (default)
-        path_to_snapshots_dir_wo_root = config_mgr.get( "path_to_snapshots_dir_wo_root" )
-        path_to_snapshots = du.get_project_root() + path_to_snapshots_dir_wo_root
-        
-        config = {"path": path_to_snapshots}
-        
-        if app_debug:
-            print( f"Using file-based solution snapshot manager: {path_to_snapshots}" )
+        # # Use file-based backend (default)
+        # path_to_snapshots_dir_wo_root = config_mgr.get( "path_to_snapshots_dir_wo_root" )
+        # path_to_snapshots = du.get_project_root() + path_to_snapshots_dir_wo_root
+        #
+        # config = {"path": path_to_snapshots}
+        #
+        # if app_debug:
+        #     print( f"Using file-based solution snapshot manager: {path_to_snapshots}" )
+        # throw value error
+        raise ValueError( "As of v0.1.0, only lancedb solution snapshot type supported" )
     
     # Create manager using factory pattern for true swappability
     snapshot_mgr = SolutionSnapshotManagerFactory.create_manager(
@@ -426,11 +448,12 @@ async def lifespan( app: FastAPI ):
     # Initialize input/output table
     io_tbl = InputAndOutputTable( debug=app_debug, verbose=app_verbose )
 
-    # Initialize authentication database
-    print( "[AUTH] Initializing authentication database..." )
-    from cosa.rest.auth_database import init_auth_database
-    init_auth_database()
-    print( "[AUTH] Authentication database initialized" )
+    # Database initialization
+    # PostgreSQL database selected via LUPIN_ENV environment variable:
+    #   - development: lupin_db (automatic schema creation via Alembic migrations)
+    #   - testing: lupin_db_test (automatic schema creation in tests)
+    #   - production: Cloud SQL (automatic schema creation via Alembic migrations)
+    print( "[AUTH] Using PostgreSQL authentication database" )
 
     # Load STT model on startup
     global whisper_pipeline
@@ -520,8 +543,8 @@ async def lifespan( app: FastAPI ):
     # Add any other cleanup code here if needed
 
 app = FastAPI(
-    title="Genie-in-the-Box FastAPI",
-    description="A FastAPI migration of the Genie-in-the-Box agent system",
+    title="Lupin FastAPI",
+    description="A FastAPI migration of the Lupin agent system",
     version="0.6.0",
     lifespan=lifespan
 )
@@ -614,10 +637,20 @@ async def load_stt_model():
     return pipe
 
 if __name__ == "__main__":
+    import os
+    # Read PORT from environment (Cloud Run sets this), default to 7999 for local development
+    port = int( os.environ.get( "PORT", 7999 ) )
+    print( f"[LUPIN] Starting FastAPI server on 0.0.0.0:{port}" )
+
+    # Detect environment: disable reload for test and production, enable for local dev
+    lupin_env = os.environ.get( "LUPIN_ENV", "" ).lower()
+    is_production_or_test = lupin_env in ["production", "test"]
+
     uvicorn.run(
         "fastapi_app.main:app",
         host="0.0.0.0",
-        port=7999,
-        reload=True,
+        port=port,
+        workers=1,  # Single worker required for in-memory notification state (pending_responses dict)
+        reload=not is_production_or_test,
         log_level="info"
     )

@@ -77,10 +77,6 @@ cd /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box
 # Create logs directory structure
 mkdir -p src/tests/logs
 
-# Generate timestamp for unique log files
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-echo "Baseline collection timestamp: ${TIMESTAMP}"
-
 # Check if FastAPI server is running
 echo "=== FastAPI Server Health Check ==="
 curl -s http://localhost:7999/health || echo "❌ FastAPI server unreachable on port 7999"
@@ -91,6 +87,10 @@ curl -s http://localhost:7999/health || echo "❌ FastAPI server unreachable on 
 Run comprehensive Lupin smoke tests with full logging:
 
 ```bash
+# Generate timestamp for unique log files
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+echo "Baseline collection timestamp: ${TIMESTAMP}"
+
 LOG_FILE="src/tests/logs/baseline_lupin_smoke_${TIMESTAMP}.log"
 echo "Starting Lupin baseline smoke test collection at $(date)" | tee "${LOG_FILE}"
 echo "===========================================" | tee -a "${LOG_FILE}"
@@ -112,12 +112,16 @@ echo "Log file: ${LOG_FILE}"
 Run comprehensive CoSA framework tests with full logging:
 
 ```bash
-LOG_FILE="src/tests/logs/baseline_cosa_smoke_${TIMESTAMP}.log"
-echo "Starting CoSA baseline smoke test collection at $(date)" | tee "${LOG_FILE}"
-echo "===========================================" | tee -a "${LOG_FILE}"
+# Generate timestamp for CoSA logs
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
 # Set up CoSA environment
 export PYTHONPATH="/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src:$PYTHONPATH"
+
+# Create CoSA log file
+LOG_FILE="src/tests/logs/baseline_cosa_smoke_${TIMESTAMP}.log"
+echo "Starting CoSA baseline smoke test collection at $(date)" | tee "${LOG_FILE}"
+echo "===========================================" | tee -a "${LOG_FILE}"
 
 # Execute full CoSA test suite
 ./src/cosa/tests/smoke/scripts/run-cosa-smoke-tests.sh 2>&1 | tee -a "${LOG_FILE}"

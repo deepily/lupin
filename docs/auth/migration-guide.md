@@ -174,7 +174,7 @@ for user_data in MOCK_USERS:
 
         # If admin role needed, update database directly
         if "admin" in user_data["roles"]:
-            from cosa.rest.auth_database import get_auth_db_connection
+            from cosa.rest.sqlite_database import get_auth_db_connection
             conn = get_auth_db_connection()
             cursor = conn.cursor()
             cursor.execute(
@@ -346,7 +346,7 @@ if src_path not in sys.path:
 import cosa.utils.util as du
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.user_service import register_user, get_user_by_email
-from cosa.rest.auth_database import get_auth_db_connection
+from cosa.rest.sqlite_database import get_auth_db_connection
 
 # For any other paths, use du.get_project_root()
 project_root = du.get_project_root()

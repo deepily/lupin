@@ -20,6 +20,10 @@ import os
 # This ensures config_mgr singleton initializes with Testing block
 os.environ["LUPIN_CONFIG_MGR_CLI_ARGS"] = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
 
+# Set GCS environment variables for LanceDB GCS integration tests
+os.environ["GOOGLE_CLOUD_PROJECT"] = "hello-world-foo-423219"
+os.environ["GOOGLE_CLOUD_LOCATION"] = "us-central1"
+
 import pytest
 import requests
 from pathlib import Path
@@ -89,44 +93,41 @@ def verify_test_environment():
 @pytest.fixture( scope="function" )
 def clean_test_db():
     """
-    Clean test database before each test using direct function calls.
+    Clean PostgreSQL test database before each test.
 
-    Simple approach - no API calls, no config switching needed.
-    Server was started with Testing block, so get_auth_db_path()
-    returns test DB automatically.
+    Uses LUPIN_ENV=testing environment variable (set by run-integration-tests.sh)
+    to automatically select the lupin_db_test database.
 
-    Dual Safety Mechanism (in get_auth_db_path):
-        - Configuration: app_testing=true (from Testing block)
-        - Path validation: path must contain "test"
+    Safety Mechanism:
+        - LUPIN_ENV=testing ensures test database (lupin_db_test) is used
+        - Separate from development database (lupin_db)
+        - DROP/CREATE provides complete isolation between tests
 
     Requires:
+        - PostgreSQL Docker container running (lupin-postgres-dev)
+        - LUPIN_ENV=testing environment variable set
         - FastAPI server running with Testing config block
-        - pytest process config_mgr initialized with Testing block
 
     Ensures:
-        - Fresh database before each test
-        - Database cleaned up after test
-        - Tests run in complete isolation
-        - Dual safety prevents accidental production DB modification
+        - Fresh database schema before each test
+        - Complete isolation between tests
+        - Tests never affect development database
     """
-    # Import database functions directly
-    from cosa.rest.auth_database import get_auth_db_path, init_auth_database
+    # Import PostgreSQL database engine and models
+    from cosa.rest.db.database import engine
+    from cosa.rest.postgres_models import Base
 
-    # Get test database path (dual safety checks happen here)
-    db_path = get_auth_db_path()
+    # Drop all tables (complete cleanup)
+    Base.metadata.drop_all( bind=engine )
 
-    # Remove existing database if it exists
-    if db_path.exists():
-        db_path.unlink()
-
-    # Initialize fresh database with schema
-    init_auth_database()
+    # Recreate all tables with fresh schema
+    Base.metadata.create_all( bind=engine )
 
     yield
 
-    # Cleanup after test - remove test database
-    if db_path.exists():
-        db_path.unlink()
+    # Optional: Cleanup after test
+    # (Next test will drop/create anyway, so this is redundant)
+    # Base.metadata.drop_all(bind=engine)
 
 
 @pytest.fixture( scope="function" )
@@ -225,18 +226,15 @@ def create_test_admin( clean_test_db, test_admin_credentials ):
     user_data = register_response.json()["user"]
 
     # Manually add admin role (direct database access since we can't bootstrap admin via API)
-    from cosa.rest.user_service import get_user_by_email
-    from cosa.rest.auth_database import get_auth_db_connection
-    import json
+    from cosa.rest.db.database import get_db
+    from cosa.rest.db.repositories import UserRepository
 
-    conn = get_auth_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE users SET roles = ? WHERE email = ?",
-        (json.dumps( ["user", "admin"] ), email)
-    )
-    conn.commit()
-    conn.close()
+    with get_db() as session:
+        user_repo = UserRepository( session )
+        user = user_repo.get_by_email( email )
+        if user:
+            user.roles = ["user", "admin"]
+            # session.commit() happens automatically on context exit
 
     # Login to get tokens
     login_response = requests.post(
@@ -315,3 +313,70 @@ def get_auth_header( access_token ):
         dict: Headers with Authorization
     """
     return {"Authorization": f"Bearer {access_token}"}
+
+
+# GCS Credential Validation Fixture
+
+@pytest.fixture( scope="session" )
+def gcs_credentials_available():
+    """
+    Session-scoped fixture that validates GCS credentials once.
+
+    Validates Google Cloud Storage credentials at test session start.
+    If credentials are missing, expired, or invalid, all GCS-dependent
+    tests are skipped gracefully with clear remediation instructions.
+
+    This prevents cryptic test failures when developers haven't authenticated
+    or when CI/CD environments don't have GCS configured.
+
+    Scope:
+        session - Validates once per test run (not per test)
+
+    Requires:
+        - google-auth library (installed as LanceDB dependency)
+        - Either:
+          - GOOGLE_APPLICATION_CREDENTIALS env var set, OR
+          - gcloud auth application-default login completed
+
+    Ensures:
+        - Returns True if credentials valid
+        - Raises pytest.skip() if credentials invalid/missing/expired
+        - Skip message includes clear remediation steps
+
+    Usage:
+        Inject into GCS-dependent fixtures:
+
+        @pytest.fixture
+        def gcs_manager(gcs_credentials_available):
+            # gcs_credentials_available validates before this runs
+            manager = LanceDBSolutionManager( gcs_config )
+            manager.initialize()  # Won't fail due to auth
+            return manager
+
+    Returns:
+        bool: True if credentials valid (otherwise skips)
+
+    Raises:
+        pytest.skip: If credentials invalid, with detailed message
+    """
+    from .gcs_utils import check_gcs_credentials
+
+    is_valid, message = check_gcs_credentials()
+
+    if not is_valid:
+        pytest.skip(
+            f"\n{'='*70}\n"
+            f"GCS Integration Tests Skipped\n"
+            f"{'='*70}\n\n"
+            f"{message}\n\n"
+            f"To enable GCS tests:\n"
+            f"  1. gcloud auth application-default login\n"
+            f"  2. Re-run tests\n"
+            f"\n"
+            f"Note: All non-GCS tests will still run normally.\n"
+            f"{'='*70}\n"
+        )
+
+    # Credentials valid - print success message
+    print( f"\n✓ GCS credentials validated: {message}" )
+    return True

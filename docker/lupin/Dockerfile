@@ -121,12 +121,72 @@ RUN pip install --no-cache-dir pylance==0.36.0
 
 RUN pip install --no-cache-dir PyJWT==2.10.1 passlib==1.7.4 bcrypt==3.2.2 cffi==2.0.0 pycparser==2.23
 
+RUN pip install --no-cache-dir sqlalchemy==2.0.40 psycopg2-binary==2.9.11
+
+
+# ============================================================================
+# RUNTIME CONFIGURATION (Can be overridden via docker run -e or Cloud Run)
+# ============================================================================
+# This Docker image is multi-environment capable. The ENV values below are
+# DEFAULTS for local development. Override at runtime for test/prod deployments.
+#
+# EXAMPLES:
+#
+# Local Development (uses defaults):
+#   docker run -p 7999:7999 lupin:latest
+#
+# Testing Deployment (override at runtime):
+#   docker run -p 7999:7999 \
+#     -e LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing-GCS" \
+#     lupin:latest
+#
+# Cloud Run Testing Deployment:
+#   gcloud run deploy lupin-test \
+#     --image gcr.io/PROJECT/lupin:latest \
+#     --set-env-vars="LUPIN_ROOT=/app,LUPIN_CONFIG_MGR_CLI_ARGS=config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing-GCS"
+#
+# Cloud Run Production Deployment:
+#   gcloud run deploy lupin-prod \
+#     --image gcr.io/PROJECT/lupin:latest \
+#     --set-env-vars="LUPIN_ROOT=/app,LUPIN_CONFIG_MGR_CLI_ARGS=config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Production"
+#
+# Available config blocks: Lupin:+Development, Lupin:+Testing, Lupin:+Testing-GCS, Lupin:+Production
+# Note: '+' is URL encoding for space - becomes "Lupin: Development" internally
+# ============================================================================
 
 env LUPIN_ROOT=/var/lupin
-env LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development" \
+env LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
 
-WORKDIR=/var/lupin/src
-RUN mkdir -p /var/io
+# Copy application code selectively (excluding postgresql-dev-data, test artifacts, and separate repos)
+
+# Core application directories
+COPY src/cosa /var/lupin/src/cosa
+COPY src/fastapi_app /var/lupin/src/fastapi_app
+COPY src/lib /var/lupin/src/lib
+COPY src/scripts /var/lupin/src/scripts
+COPY src/migrations /var/lupin/src/migrations
+COPY src/docs /var/lupin/src/docs
+COPY src/resources /var/lupin/src/resources
+COPY src/templates /var/lupin/src/templates
+
+# Configuration files and directories
+COPY src/conf/*.ini /var/lupin/src/conf/
+COPY src/conf/*.map /var/lupin/src/conf/
+COPY src/conf/*.json /var/lupin/src/conf/
+COPY src/conf/*.js /var/lupin/src/conf/
+COPY src/conf/auth /var/lupin/src/conf/auth
+COPY src/conf/keys /var/lupin/src/conf/keys
+COPY src/conf/prompts /var/lupin/src/conf/prompts
+COPY src/conf/tools /var/lupin/src/conf/tools
+
+# Long-term-memory files (explicitly excluding postgresql-dev-data directory)
+COPY src/conf/long-term-memory/*.csv /var/lupin/src/conf/long-term-memory/
+COPY src/conf/long-term-memory/*.jsonl /var/lupin/src/conf/long-term-memory/
+COPY src/conf/long-term-memory/*.db /var/lupin/src/conf/long-term-memory/
+COPY src/conf/long-term-memory/lupin.lancedb /var/lupin/src/conf/long-term-memory/lupin.lancedb
+
+WORKDIR /var/lupin/src
+RUN mkdir -p /var/lupin/io
 
 # CMD ["/bin/bash", "-c", "echo '-- OR -- Run `python3 -m fastapi_app.main` to spin up FastAPI server' && exec /bin/bash"]
 # Run the script: /var/lupin/src/scripts/run-fastapi-lupin.sh

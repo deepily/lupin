@@ -80,6 +80,49 @@ Install with pip:
 pip install pytest pytest-asyncio websockets requests
 ```
 
+### ⚠️ Common Pitfall: Running Tests with Dev Server Active
+
+**CRITICAL**: Stop development FastAPI server before running integration tests!
+
+**Why this is required**:
+- Integration tests manage their own server instance on port 7999
+- Development server also uses port 7999
+- Port conflict causes test runner to fail immediately
+- Tests require `[Lupin: Testing]` config block (test database)
+- Dev server uses `[Lupin: Development]` config block (production database)
+
+**Symptoms of this issue**:
+```
+ERROR: Development Server Running
+
+Port 7999 is already in use (likely the development FastAPI server).
+```
+
+**⚠️ SNEAKY SYMPTOM**: If the test runner somehow bypasses the port check, tests will mysteriously fail:
+- Authentication tests get **401 Unauthorized** errors (should be 200)
+- API key validation appears broken (it's not - wrong database!)
+- Tests hit dev server with production database
+- Test fixtures create data in test database but requests query production database
+- **Solution**: Always stop dev server BEFORE running tests, don't try to work around it
+
+**Solution**:
+```bash
+# Find process on port 7999
+lsof -Pi :7999 -sTCP:LISTEN
+
+# Kill the development server
+kill <PID>
+
+# Then run tests (automated runner handles server)
+./src/tests/run-integration-tests.sh -v
+```
+
+**Why the automated runner is strongly recommended**:
+- ✅ Checks port availability and gives clear error message
+- ✅ Starts server with correct Testing config automatically
+- ✅ Cleans up server on exit (even if tests fail)
+- ✅ Prevents accidental production database access
+
 ### Running Tests - Two Options
 
 #### Option 1: Automated Test Runner (Recommended)
@@ -133,6 +176,68 @@ pytest src/tests/integration/ -v
 
 Both checks must pass or operations fail with safety violation error.
 
+### 🔒 Configuration Safety: Why Testing Config Block Matters
+
+Integration tests use `[Lupin: Testing]` config block for critical safety:
+
+**Dual Safety Mechanism Explained**:
+
+1. **ConfigurationManager loads Testing block** (via environment variable)
+2. **`app_testing=true` enables test mode**
+3. **`sqlite_database_path` points to test database** (`test-lupin-auth.db`)
+4. **Both checks validated on EVERY database operation**
+
+**Configuration Comparison**:
+
+```ini
+[Lupin: Development]
+app_testing = false
+sqlite_database_path = /src/conf/long-term-memory/lupin-auth.db  # ⚠️ PRODUCTION
+
+[Lupin: Testing]
+app_testing = true
+sqlite_database_path = /src/conf/long-term-memory/test-lupin-auth.db  # ✅ TEST
+```
+
+**What could go wrong without this safety**:
+- ❌ Tests might access production database
+- ❌ `clean_test_db` fixture could wipe production user accounts
+- ❌ Integration test failures could corrupt real data
+- ❌ Multiple test runs could interfere with active users
+
+**How automated runner prevents this** (`src/tests/run-integration-tests.sh:72`):
+
+```bash
+# Sets environment variable BEFORE Python starts
+export LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
+
+# Then starts server - ConfigurationManager singleton locks in Testing config
+python -m fastapi_app.main
+```
+
+**Safety Verification** (`src/cosa/rest/sqlite_database.py:18-79`):
+
+```python
+def get_auth_db_path():
+    # Safety Check #1: app_testing flag must be True
+    if config_mgr.get( "app_testing" ):
+        # Safety Check #2A: If test mode, path MUST contain "test"
+        if "test" not in db_path:
+            raise ValueError( "SAFETY VIOLATION: app_testing=true but path missing 'test'" )
+    else:
+        # Safety Check #2B: If path contains "test", MUST be in test mode
+        if "test" in db_path:
+            raise ValueError( "SAFETY VIOLATION: app_testing=false but path contains 'test'" )
+```
+
+**Result**: IMPOSSIBLE to accidentally access production database during tests.
+
+**Timing is critical**:
+- Environment variable set BEFORE Python starts
+- ConfigurationManager singleton created on first import
+- Once created, configuration CANNOT change
+- All subsequent database operations use locked-in config
+
 ### Configuration
 
 Ensure `lupin-app.ini` has:
@@ -167,7 +272,7 @@ pytest src/tests/integration/test_auth_integration.py::test_complete_registratio
 - `verify_test_environment` - One-time validation that server is running with Testing config block (runs automatically)
 
 **Database Fixtures** (function-level):
-- `clean_test_db` - Reinitializes test database by calling `init_auth_database()` directly before each test
+- `clean_test_db` - Reinitializes test database by calling `init_sqlite_database()` directly before each test
 
 **User Fixtures**:
 - `test_user_credentials` - Standard test user credentials
@@ -189,7 +294,7 @@ pytest src/tests/integration/test_auth_integration.py::test_complete_registratio
 ### Test Isolation
 
 Each test runs in complete isolation:
-- **Fresh database** reinitialized by direct function calls (`init_auth_database()`) before each test
+- **Fresh database** reinitialized by direct function calls (`init_sqlite_database()`) before each test
 - **Automatic cleanup** - database deleted after each test
 - **No state sharing** between tests
 - **Can run in any order** (no dependencies)

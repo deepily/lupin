@@ -1,0 +1,48 @@
+#!/bin/bash
+#
+# send-notification-from-claude-sync
+#
+# Synchronous notification script for Claude Code using Server-Sent Events (SSE).
+# Blocks and waits for response from server (unlike async notify-claude).
+#
+# Usage:
+#   send-notification-from-claude-sync "message" [heartbeat_interval] [timeout]
+#
+# Arguments:
+#   message             : Notification message to send (required)
+#   heartbeat_interval  : Heartbeat interval in seconds (default: 5)
+#   timeout             : Timeout in seconds (default: 120)
+#
+# Exit Codes:
+#   0 : Success - result received
+#   1 : Failure - timeout, error, or no result
+#
+# Examples:
+#   send-notification-from-claude-sync "Test notification" 5 120
+#   send-notification-from-claude-sync "Quick test" 5 30
+#
+
+# Configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_CLIENT="${SCRIPT_DIR}/client.py"
+MESSAGE="${1:-Default message}"
+HEARTBEAT_INTERVAL="${2:-5}"
+TIMEOUT="${3:-120}"
+
+# Validate Python client exists
+if [[ ! -f "$PYTHON_CLIENT" ]]; then
+    echo "ERROR: Python client not found at $PYTHON_CLIENT" >&2
+    exit 1
+fi
+
+# Execute Python client and capture result
+result=$(python3 "$PYTHON_CLIENT" "$MESSAGE" "$HEARTBEAT_INTERVAL" "$TIMEOUT")
+exit_code=$?
+
+if [[ $exit_code -eq 0 ]] && [[ -n "$result" ]]; then
+    echo "SUCCESS: $result"
+    exit 0
+else
+    echo "FAILED: No result received or error occurred" >&2
+    exit 1
+fi

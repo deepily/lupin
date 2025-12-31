@@ -1,0 +1,392 @@
+"""
+Unit tests for Notifications API Endpoints (Phase 2.1).
+
+Tests POST /api/notify and POST /api/notify/response endpoints with both
+fire-and-forget and response-required modes.
+"""
+
+import pytest
+import json
+import asyncio
+from unittest.mock import Mock, MagicMock, AsyncMock
+from fastapi.testclient import TestClient
+from datetime import datetime, timedelta
+
+# Bootstrap imports
+import sys
+import os
+
+# Add src to path for imports
+lupin_root = os.environ.get( 'LUPIN_ROOT' )
+if lupin_root:
+    src_path = os.path.join( lupin_root, 'src' )
+    if src_path not in sys.path:
+        sys.path.insert( 0, src_path )
+
+# Import dependencies and router
+from cosa.rest.routers.notifications import (
+    router,
+    get_notification_queue,
+    get_websocket_manager,
+    get_notifications_database
+)
+from cosa.rest import user_service
+from fastapi import FastAPI
+
+
+@pytest.fixture
+def app():
+    """Create FastAPI app with notifications router."""
+    app = FastAPI()
+    app.include_router( router )
+    yield app
+    # Clear dependency overrides after each test
+    app.dependency_overrides.clear()
+
+
+class TestNotifyFireAndForget:
+    """Test suite for POST /api/notify in fire-and-forget mode (existing behavior)."""
+
+    def test_notify_fire_and_forget_success(self, app):
+        """Test fire-and-forget notification succeeds when user is online."""
+        # Setup mocks
+        mock_user_service = Mock()
+        mock_user_service.get_user_by_email = Mock( return_value={"id": "user-uuid-123", "email": "test@example.com"} )
+
+        mock_ws_instance = Mock()
+        mock_ws_instance.is_user_connected.return_value = True
+        mock_ws_instance.get_user_connection_count.return_value = 1
+
+        mock_queue_instance = Mock()
+        mock_queue_instance.push_notification.return_value = {"id": "notif-123"}
+
+        mock_db_instance = Mock()
+
+        # Override FastAPI dependencies
+        app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
+        app.dependency_overrides[get_notification_queue] = lambda: mock_queue_instance
+        app.dependency_overrides[get_notifications_database] = lambda: mock_db_instance
+
+        # Mock user_service module-level function
+        original_get_user = user_service.get_user_by_email
+        user_service.get_user_by_email = mock_user_service.get_user_by_email
+
+        try:
+            client = TestClient( app )
+
+            # Make request
+            response = client.post(
+                "/api/notify",
+                params={
+                    "message"     : "Test notification",
+                    "type"        : "task",
+                    "priority"    : "medium",
+                    "target_user" : "test@example.com",
+                    "api_key"     : "claude_code_simple_key"
+                }
+            )
+
+            # Assertions
+            assert response.status_code == 200
+            assert response.json()["status"] == "queued"
+            assert "test@example.com" in response.json()["message"]
+            mock_queue_instance.push_notification.assert_called_once()
+
+        finally:
+            # Restore original function
+            user_service.get_user_by_email = original_get_user
+
+    def test_notify_fire_and_forget_user_offline(self, app):
+        """Test fire-and-forget notification when user is offline."""
+        # Setup mocks
+        mock_user_service = Mock()
+        mock_user_service.get_user_by_email = Mock( return_value={"id": "user-uuid-123", "email": "test@example.com"} )
+
+        mock_ws_instance = Mock()
+        mock_ws_instance.is_user_connected.return_value = False
+        mock_ws_instance.get_user_connection_count.return_value = 0
+
+        mock_queue_instance = Mock()
+        mock_queue_instance.push_notification.return_value = {"id": "notif-123"}
+
+        mock_db_instance = Mock()
+
+        # Override FastAPI dependencies
+        app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
+        app.dependency_overrides[get_notification_queue] = lambda: mock_queue_instance
+        app.dependency_overrides[get_notifications_database] = lambda: mock_db_instance
+
+        # Mock user_service module-level function
+        original_get_user = user_service.get_user_by_email
+        user_service.get_user_by_email = mock_user_service.get_user_by_email
+
+        try:
+            client = TestClient( app )
+
+            response = client.post(
+                "/api/notify",
+                params={
+                    "message"     : "Test notification",
+                    "type"        : "task",
+                    "priority"    : "medium",
+                    "target_user" : "test@example.com",
+                    "api_key"     : "claude_code_simple_key"
+                }
+            )
+
+            assert response.status_code == 200
+            assert response.json()["status"] == "user_not_available"
+            assert response.json()["connection_count"] == 0
+
+        finally:
+            # Restore original function
+            user_service.get_user_by_email = original_get_user
+
+    def test_notify_invalid_api_key(self, app):
+        """Test notification with invalid API key returns 401."""
+        client = TestClient( app )
+
+        response = client.post(
+            "/api/notify",
+            params={
+                "message"     : "Test notification",
+                "type"        : "task",
+                "priority"    : "medium",
+                "target_user" : "test@example.com",
+                "api_key"     : "wrong_key"
+            }
+        )
+
+        assert response.status_code == 401
+        assert "Invalid API key" in response.json()["detail"]
+
+
+class TestNotifyResponseRequired:
+    """Test suite for POST /api/notify in response-required mode (Phase 2.1)."""
+
+    def test_notify_response_required_validation(self, app):
+        """Test response-required mode requires response_type parameter."""
+        client = TestClient( app )
+
+        response = client.post(
+            "/api/notify",
+            params={
+                "message"           : "Test notification",
+                "type"              : "task",
+                "priority"          : "high",
+                "target_user"       : "test@example.com",
+                "api_key"           : "claude_code_simple_key",
+                "response_requested": True
+                # Missing response_type
+            }
+        )
+
+        assert response.status_code == 400
+        assert "response_type is required" in response.json()["detail"]
+
+    def test_notify_response_required_invalid_response_type(self, app):
+        """Test response-required mode validates response_type values."""
+        client = TestClient( app )
+
+        response = client.post(
+            "/api/notify",
+            params={
+                "message"           : "Test notification",
+                "type"              : "task",
+                "priority"          : "high",
+                "target_user"       : "test@example.com",
+                "api_key"           : "claude_code_simple_key",
+                "response_requested": True,
+                "response_type"     : "invalid_type"
+            }
+        )
+
+        assert response.status_code == 400
+        assert "Invalid response_type" in response.json()["detail"]
+
+    def test_notify_response_required_offline_with_default(self, app):
+        """Test response-required mode returns default immediately when user offline."""
+        # Setup mocks
+        mock_user_service = Mock()
+        mock_user_service.get_user_by_email = Mock( return_value={"id": "user-uuid-123", "email": "test@example.com"} )
+
+        mock_ws_instance = Mock()
+        mock_ws_instance.is_user_connected.return_value = False
+
+        mock_db_instance = Mock()
+        mock_db_instance.create_notification.return_value = "notif-uuid-123"
+        mock_db_instance.update_state.return_value = True
+
+        mock_queue_instance = Mock()
+
+        # Override FastAPI dependencies
+        app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
+        app.dependency_overrides[get_notifications_database] = lambda: mock_db_instance
+        app.dependency_overrides[get_notification_queue] = lambda: mock_queue_instance
+
+        # Mock user_service module-level function
+        original_get_user = user_service.get_user_by_email
+        user_service.get_user_by_email = mock_user_service.get_user_by_email
+
+        try:
+            client = TestClient( app )
+
+            response = client.post(
+                "/api/notify",
+                params={
+                    "message"           : "Test notification",
+                    "type"              : "task",
+                    "priority"          : "high",
+                    "target_user"       : "test@example.com",
+                    "api_key"           : "claude_code_simple_key",
+                    "response_requested": True,
+                    "response_type"     : "yes_no",
+                    "response_default"  : "no"
+                }
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "offline"
+            assert data["default_used"] == "no"
+            assert "notification_id" in data
+
+        finally:
+            # Restore original function
+            user_service.get_user_by_email = original_get_user
+
+    def test_notify_response_required_offline_no_default(self, app):
+        """Test response-required mode returns 503 when user offline and no default provided."""
+        # Setup mocks
+        mock_user_service = Mock()
+        mock_user_service.get_user_by_email = Mock( return_value={"id": "user-uuid-123", "email": "test@example.com"} )
+
+        mock_ws_instance = Mock()
+        mock_ws_instance.is_user_connected.return_value = False
+
+        mock_db_instance = Mock()
+        mock_queue_instance = Mock()
+
+        # Override FastAPI dependencies
+        app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
+        app.dependency_overrides[get_notifications_database] = lambda: mock_db_instance
+        app.dependency_overrides[get_notification_queue] = lambda: mock_queue_instance
+
+        # Mock user_service module-level function
+        original_get_user = user_service.get_user_by_email
+        user_service.get_user_by_email = mock_user_service.get_user_by_email
+
+        try:
+            client = TestClient( app )
+
+            response = client.post(
+                "/api/notify",
+                params={
+                    "message"           : "Test notification",
+                    "type"              : "task",
+                    "priority"          : "high",
+                    "target_user"       : "test@example.com",
+                    "api_key"           : "claude_code_simple_key",
+                    "response_requested": True,
+                    "response_type"     : "yes_no"
+                    # No response_default provided
+                }
+            )
+
+            assert response.status_code == 503
+            assert "offline" in response.json()["detail"].lower()
+
+        finally:
+            # Restore original function
+            user_service.get_user_by_email = original_get_user
+
+
+class TestSubmitNotificationResponse:
+    """Test suite for POST /api/notify/response endpoint."""
+
+    def test_submit_response_success(self, app):
+        """Test successful response submission."""
+        # Setup mocks
+        mock_db_instance = Mock()
+        mock_db_instance.get_notification.return_value = {
+            "id"           : "notif-123",
+            "state"        : "delivered",
+            "recipient_id" : "user-123"
+        }
+        mock_db_instance.update_response.return_value = True
+
+        mock_ws_instance = AsyncMock()
+
+        mock_queue_instance = Mock()
+
+        # Override FastAPI dependencies
+        app.dependency_overrides[get_notifications_database] = lambda: mock_db_instance
+        app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
+        app.dependency_overrides[get_notification_queue] = lambda: mock_queue_instance
+
+        client = TestClient( app )
+
+        response = client.post(
+            "/api/notify/response",
+            params={"notification_id": "notif-123"},
+            json={"answer": "yes"}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+        assert response.json()["notification_id"] == "notif-123"
+        mock_db_instance.update_response.assert_called_once()
+
+    def test_submit_response_notification_not_found(self, app):
+        """Test response submission for non-existent notification returns 404."""
+        mock_db_instance = Mock()
+        mock_db_instance.get_notification.return_value = None
+
+        mock_ws_instance = AsyncMock()
+        mock_queue_instance = Mock()
+
+        # Override FastAPI dependencies
+        app.dependency_overrides[get_notifications_database] = lambda: mock_db_instance
+        app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
+        app.dependency_overrides[get_notification_queue] = lambda: mock_queue_instance
+
+        client = TestClient( app )
+
+        response = client.post(
+            "/api/notify/response",
+            params={"notification_id": "nonexistent"},
+            json={"answer": "yes"}
+        )
+
+        assert response.status_code == 404
+
+    def test_submit_response_already_responded(self, app):
+        """Test response submission for already-responded notification returns 400."""
+        mock_db_instance = Mock()
+        mock_db_instance.get_notification.return_value = {
+            "id"    : "notif-123",
+            "state" : "responded"
+        }
+
+        mock_ws_instance = AsyncMock()
+        mock_queue_instance = Mock()
+
+        # Override FastAPI dependencies
+        app.dependency_overrides[get_notifications_database] = lambda: mock_db_instance
+        app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
+        app.dependency_overrides[get_notification_queue] = lambda: mock_queue_instance
+
+        client = TestClient( app )
+
+        response = client.post(
+            "/api/notify/response",
+            params={"notification_id": "notif-123"},
+            json={"answer": "yes"}
+        )
+
+        assert response.status_code == 400
+        assert "already responded" in response.json()["detail"]
+
+
+if __name__ == "__main__":
+    print( "Run with: pytest src/tests/unit/test_notifications_api.py -v" )

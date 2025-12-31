@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database for local development
+  postgres:
+    image: postgres:16.3-alpine
+    container_name: lupin-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: lupin_db
+      POSTGRES_USER: lupin_dev
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./src/conf/long-term-memory/postgresql-dev-data:/var/lib/postgresql/data
+      - ./src/scripts/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./src/scripts/sql/seed_dev_data.sql:/docker-entrypoint-initdb.d/02-seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lupin_dev -d lupin_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - lupin-dev-network
+
+  # Optional: pgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: lupin-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: dev@lupin.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - lupin-dev-network
+    depends_on:
+      - postgres
+
+volumes:
+  pgadmin_data:
+    driver: local
+
+networks:
+  lupin-dev-network:
+    external: true

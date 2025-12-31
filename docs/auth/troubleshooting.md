@@ -302,7 +302,7 @@ print(f"Payload: {payload}")
 
 **3. Test Database Connection**
 ```python
-from cosa.rest.auth_database import get_auth_db_connection
+from cosa.rest.sqlite_database import get_auth_db_connection
 
 conn = get_auth_db_connection()
 cursor = conn.cursor()

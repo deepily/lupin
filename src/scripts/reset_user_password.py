@@ -88,7 +88,7 @@ def reset_password( email, new_password=None, use_original=False, debug=True ):
             return False
 
         print( f"✓ Found user: {email}" )
-        print( f"  User ID: {user['user_id']}" )
+        print( f"  User ID: {user['id']}" )
         print( f"  Roles: {user.get('roles', [])}" )
         print()
 
@@ -99,22 +99,33 @@ def reset_password( email, new_password=None, use_original=False, debug=True ):
     # Update password
     try:
         print( f"Updating password for {email}..." )
+        print()
 
         # Hash the new password
         password_hash = hash_password( new_password )
 
-        # Update in database
-        success = update_user_password( email, password_hash )
+        # Update in database using repository (bypass broken update_user_password function)
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories import UserRepository
+        import uuid
 
-        if success:
+        with get_db() as session:
+            user_repo = UserRepository( session )
+            user_obj = user_repo.get_by_id( uuid.UUID( user['id'] ) )
+
+            if not user_obj:
+                print( f"❌ User not found in database" )
+                return False
+
+            # Update password hash directly
+            user_obj.password_hash = password_hash
+            session.commit()
+
             print( f"✅ Password reset successful for {email}" )
             print()
             print( f"New password: {new_password}" )
             print()
             return True
-        else:
-            print( f"❌ Password reset failed" )
-            return False
 
     except Exception as e:
         print( f"❌ Error resetting password: {e}" )

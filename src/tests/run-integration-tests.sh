@@ -21,7 +21,7 @@ set -e  # Exit on error
 
 # Configuration
 PORT=7999
-PROJECT_ROOT="/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box"
+PROJECT_ROOT="${LUPIN_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box}"
 SERVER_PID=""
 MAX_WAIT=30  # Maximum seconds to wait for server startup
 
@@ -50,14 +50,61 @@ echo "================================================================"
 echo "  Lupin Integration Test Runner"
 echo "================================================================"
 echo ""
+echo -e "${YELLOW}⚠️  IMPORTANT: This script requires the development server to be stopped!${NC}"
+echo ""
+echo "These tests will:"
+echo "  • Start their own test server on port $PORT"
+echo "  • Use [Lupin: Testing] config block (test database)"
+echo "  • Run in complete isolation from production"
+echo ""
+echo "If you see authentication or 401 errors:"
+echo "  → Your dev server is probably still running"
+echo "  → Stop it first: kill \$(lsof -ti:$PORT)"
+echo ""
+echo "================================================================"
+echo ""
+
+# Ensure PostgreSQL is running and test database exists
+echo -e "${YELLOW}[POSTGRES] Ensuring PostgreSQL is ready...${NC}"
+
+if ! "$PROJECT_ROOT/src/scripts/run-postgresql-dev.sh" --no-follow-logs; then
+    echo ""
+    echo -e "${RED}[ERROR] Failed to start/verify PostgreSQL${NC}"
+    echo ""
+    exit 1
+fi
+
+echo ""
 
 # Check if port 7999 is already in use
 if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null 2>&1 ; then
-    echo -e "${RED}[ERROR] Port $PORT is already in use!${NC}"
     echo ""
-    echo "Please stop the existing server or process using port $PORT:"
-    echo "  lsof -Pi :$PORT -sTCP:LISTEN"
-    echo "  kill <PID>"
+    echo "========================================================================"
+    echo -e "${RED}  ERROR: Development Server Running${NC}"
+    echo "========================================================================"
+    echo ""
+    echo "Port $PORT is already in use (likely the development FastAPI server)."
+    echo ""
+    echo -e "${YELLOW}IMPORTANT: Integration tests REQUIRE the development server to be stopped.${NC}"
+    echo ""
+    echo "Why this is required:"
+    echo "  • Integration tests manage their own FastAPI server instance"
+    echo "  • Tests use [Lupin: Testing] config block (test database)"
+    echo "  • Development server uses [Lupin: Development] config block (production database)"
+    echo "  • Both try to use port $PORT → port conflict"
+    echo ""
+    echo "To fix this issue:"
+    echo ""
+    echo "  1. Find the running server:"
+    echo -e "     ${GREEN}lsof -Pi :$PORT -sTCP:LISTEN${NC}"
+    echo ""
+    echo "  2. Stop the development server:"
+    echo -e "     ${GREEN}kill <PID>${NC}"
+    echo ""
+    echo "  3. Re-run the integration tests:"
+    echo -e "     ${GREEN}./src/tests/run-integration-tests.sh -v${NC}"
+    echo ""
+    echo "========================================================================"
     echo ""
     exit 1
 fi
@@ -70,6 +117,7 @@ echo -e "${YELLOW}[SERVER] Starting FastAPI server with Testing config block...$
 cd "$PROJECT_ROOT/src"
 
 export LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
+export LUPIN_ENV="testing"
 
 # Start server in background
 "$PROJECT_ROOT/src/cosa/.venv/bin/python3" -m fastapi_app.main > /tmp/lupin-test-server.log 2>&1 &

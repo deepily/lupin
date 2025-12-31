@@ -47,6 +47,7 @@
   - **CRITICAL FOR CLAUDE**: Never attempt to manage the git state of the CoSA repository when working
     within the Lupin project. Do not offer to stage, commit, or push changes to the CoSA
     repository. Only manage git operations for the parent Lupin repository.
+  - **Note**: See "GIT REPOSITORY MANAGEMENT" section for complete nested repository handling
 - `/src/cosa/agents/`: Agent implementations (math, calendar, etc.)
 - `/src/cosa/app/`: Core application components
 - `/src/cosa/memory/`: Data persistence and memory management
@@ -98,6 +99,87 @@
 
 ## RUNNING/TESTING FASTAPI APPLICATIONS
 - Please assume that there is a Fast API server instance bound to port 7999. I will start and stop it if needed. You never need to spin up another instance unless it's for a ephemeral use on port 8000.
+
+## GIT REPOSITORY MANAGEMENT
+
+**CRITICAL**: This project contains multiple nested Git repositories that must be managed separately.
+
+### Repository Structure
+
+**Parent Repository** (Manage with /plan-session-end):
+- **Name**: Lupin (evolved from Genie-in-the-Box)
+- **Location**: `/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/`
+- **Prefix**: [LUPIN]
+- **Git Operations**: Managed normally via `/plan-session-end` workflow
+
+**Nested Repositories** (DO NOT manage from parent context):
+
+1. **CoSA Framework**
+   - **Location**: `/src/cosa/`
+   - **Remote**: git@github.com:deepily/cosa.git
+   - **Pattern**: Git submodule/subtree
+   - **Docs**: Has own README.md and CLAUDE.md
+   - **Management**: Must commit to CoSA repo separately when working in CoSA context
+
+2. **Firefox Plugin**
+   - **Location**: `/src/lupin-plugin-firefox/`
+   - **Management**: Separate repository, managed independently
+   - **History**: Has own history.md (DO NOT read from Lupin context)
+
+3. **Mobile App**
+   - **Location**: `/src/lupin-mobile/`
+   - **Management**: Separate repository, managed independently
+   - **History**: Has own history.md (DO NOT read from Lupin context)
+
+### How /plan-session-end Handles Nested Repos
+
+The `/plan-session-end` workflow has been configured with nested repository awareness:
+
+**During session-end workflow**:
+1. Wrapper passes nested repo paths to canonical workflow
+2. Canonical workflow detects changes in nested repos
+3. Nested repo changes are acknowledged but NOT committed
+4. Only parent Lupin repo changes are staged/committed
+5. User is reminded to manage nested repos separately
+
+**What you'll see**:
+```
+⚠️ Detected changes in nested repositories:
+• /src/cosa/ (3 modified files)
+• /src/lupin-mobile/ (1 new file)
+
+These are separate Git repositories and will not be included in this commit.
+Reminder: Manage nested repositories in their own sessions/contexts.
+```
+
+**Git Safety Rules**:
+- ✅ Stage/commit/push changes in parent Lupin repo
+- ❌ Never run git commands in nested repo directories from parent context
+- ✅ Nested repos must be managed when working directly in their contexts
+- ✅ `/plan-session-end` automatically filters nested paths from git operations
+
+### Detection Command
+
+If you need to verify nested repositories:
+```bash
+# Find all nested .git directories
+find . -name ".git" -type d | grep -v "^./.git$"
+```
+
+### Working in Nested Repositories
+
+**When working in CoSA** (`cd src/cosa/`):
+- Read `/src/cosa/CLAUDE.md` for CoSA-specific guidance
+- Use CoSA's own session management
+- Commit to CoSA repository separately
+
+**When working in Firefox Plugin** (`cd src/lupin-plugin-firefox/`):
+- Manage as independent project
+- Has own git history and workflows
+
+**When working in Mobile App** (`cd src/lupin-mobile/`):
+- Manage as independent project
+- Has own git history and workflows
 
 ## TESTING
 

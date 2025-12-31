@@ -17,10 +17,11 @@
             </div>
             <div class="section-content" id="qa-section">
                 <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
+                    <button id="qa-stt-button" type="button" class="qa-stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
                     <input type="text" id="qa-input" placeholder="Type your question here..." style="flex: 1; line-height: 1;" />
                     <select id="tts-mode" style="width: auto; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
                         <option value="instant">Instant (11labs Streaming)</option>
-                        <option value="reliable">Reliable (OpenAI Batch)</option>
+                        <option value="reliable" selected>Reliable (OpenAI Batch)</option>
                     </select>
                     <button id="submit-qa" type="button" style="white-space: nowrap;">
                         Submit Q&A
@@ -29,7 +30,28 @@
                         </span>
                     </button>
                 </div>
+                <div id="qa-metrics" class="qa-metrics" style="display: none;">
+                    <span class="metric"><span class="metric-label">TTT:</span> <span id="metric-ttt">--</span></span>
+                    <span class="metric"><span class="metric-label">TTFA:</span> <span id="metric-ttfa">--</span></span>
+                    <span class="metric"><span class="metric-label">RTT:</span> <span id="metric-rtt">--</span></span>
+                </div>
                 <div id="response-text">No response yet...</div>
+            </div>
+        </div>
+
+        <!-- Action Required Section (Response-Required Notifications) - Phase 2.2 always visible -->
+        <div class="collapsible-section" id="action-required-section">
+            <div class="section-header" onclick="toggleSection('action-required-content')">
+                <h3>⚠️ Action Required: <span id="action-required-count">0</span></h3>
+                <button class="toggle-button" id="action-required-toggle">▼</button>
+            </div>
+            <div class="section-content" id="action-required-content">
+                <div id="action-required-list">
+                    <!-- Response-required notifications will be populated here -->
+                    <div id="action-required-empty" class="action-required-empty-state">
+                        ✓ No pending actions
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -37,12 +59,19 @@
         <div class="collapsible-section">
             <div class="section-header" onclick="toggleSection('notifications-section')">
                 <h3>Claude Code Notifications: <span id="notifications-count">0</span></h3>
+                <div id="history-dropdown-container" style="margin-left: auto;"></div>
+                <button id="clear-all-notifications" type="button"
+                        class="clear-notifications-button"
+                        style="margin-right: 10px;"
+                        disabled>
+                    🗑️ Clear All
+                </button>
                 <button class="toggle-button" id="notifications-toggle">▼</button>
             </div>
             <div class="section-content" id="notifications-section">
-                <ol id="notifications-list" reversed style="margin: 0; padding-left: 20px;">
-                    <!-- Notifications will be populated here -->
-                </ol>
+                <div id="notifications-list">
+                    <!-- Sender cards will be populated here -->
+                </div>
             </div>
         </div>
 
@@ -108,6 +137,10 @@
                     <strong>Sessions:</strong>
                     Queue: <span id="queue-session">-</span>, Audio: <span id="audio-session">-</span>
                 </div>
+                <div class="status-item">
+                    <strong>Health Monitor:</strong>
+                    <span id="ws-health-status" class="status-info">Initializing...</span>
+                </div>
             </div>
         </div>
 
@@ -171,6 +204,7 @@
     <!-- JavaScript Modules -->
     <script src="/static/js/tts-audio-cache.js"></script>
     <script src="/static/js/job-completion-cache.js"></script>
+    <script src="/static/js/audio-recorder.js"></script>
     <script src="/static/js/queue-fresh.js"></script>
     <script>
         function toggleSection(sectionId) {

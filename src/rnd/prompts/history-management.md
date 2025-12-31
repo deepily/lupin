@@ -16,7 +16,7 @@ The history-management workflow prevents history.md from exceeding 25,000 token 
 
 - **Real-time monitoring**: Token count + velocity forecasting
 - **Adaptive archival**: Smart boundary detection at milestones/week/day breaks
-- **Dual notifications**: CLI display + notify-claude alerts
+- **Dual notifications**: CLI display + notify-claude-async alerts
 - **Four modes**: check, archive, analyze, dry-run
 - **Session-end integration**: Automatic health check before updating history
 

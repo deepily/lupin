@@ -95,7 +95,7 @@ Send notification that post-change verification is starting:
 
 ```bash
 SCOPE_TEXT="${2:-FULL}"
-notify-claude "[LUPIN] 🔍 Post-change smoke test verification STARTED (${SCOPE_TEXT}) - Comparing against baseline and preparing remediation" --type=progress --priority=medium
+notify-claude-async "[LUPIN] 🔍 Post-change smoke test verification STARTED (${SCOPE_TEXT}) - Comparing against baseline and preparing remediation" --type=progress --priority=medium
 ```
 
 ### 4. Execute Post-Change Lupin Smoke Tests
@@ -343,7 +343,7 @@ Send notification with final results:
 
 ```bash
 SCOPE_TEXT="${2:-FULL}"
-notify-claude "[LUPIN] ✅ Post-change verification COMPLETE (${SCOPE_TEXT}) - [XX.X%] final pass rate, [NUMBER] issues fixed, system [STATUS]" --type=progress --priority=medium
+notify-claude-async "[LUPIN] ✅ Post-change verification COMPLETE (${SCOPE_TEXT}) - [XX.X%] final pass rate, [NUMBER] issues fixed, system [STATUS]" --type=progress --priority=medium
 ```
 
 ### 12. Final Todo List Update
@@ -378,7 +378,7 @@ If critical issues cannot be resolved:
 
 1. **Send urgent notification**:
 ```bash
-notify-claude "[LUPIN] 🚨 URGENT: Critical post-change issues require immediate attention - [BRIEF DESCRIPTION]" --type=alert --priority=urgent
+notify-claude-async "[LUPIN] 🚨 URGENT: Critical post-change issues require immediate attention - [BRIEF DESCRIPTION]" --type=alert --priority=urgent
 ```
 
 2. **Document the problem clearly**

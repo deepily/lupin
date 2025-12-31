@@ -218,7 +218,72 @@ class NotificationSmokeTests:
                 test_notification["id_hash"]
             )
             self.validator.assert_response_ok(played_response, 200)
-    
+
+    async def test_notification_user_id_format_regression(self):
+        """
+        REGRESSION TEST: Verify notification uses UUID not email-hash.
+
+        Bug History (2025.10.14):
+        - Notifications used email_to_system_id() returning email-hash format (e.g., "ricardo_felipe_ruiz_6bdc")
+        - WebSocket auth used UUID from JWT database (e.g., "0cf47e2d-d5a1-4cd4-addf-79810fd32b15")
+        - Mismatch caused "user not connected" errors despite active WebSocket connections
+
+        Fix (notifications.py line 221):
+        - Changed from: email_to_system_id(target_user) → Returns email-hash
+        - Changed to: get_user_by_email(target_user)["id"] → Returns UUID
+
+        This test ensures we always use UUID format for user lookups in notifications.
+        """
+        test_email = "uuid_regression_test@example.com"
+
+        if self.debug:
+            print( f"\n[REGRESSION TEST] Testing UUID format for: {test_email}" )
+
+        # Send notification to specific user
+        response = await self.notification_helper.send_notification(
+            message="UUID format regression test - verifying correct user ID format",
+            target_user=test_email,
+            priority="medium"
+        )
+
+        self.validator.assert_response_ok( response, 200 )
+        data = response.json()
+
+        # Verify response contains target_system_id
+        self.validator.assert_json_contains( data, ["target_user", "target_system_id"] )
+
+        target_id = data["target_system_id"]
+
+        if self.debug:
+            print( f"[REGRESSION TEST] Received target_system_id: {target_id}" )
+
+        # UUID format validation: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars with dashes)
+        # Email-hash format: firstname_lastname_hash (no dashes, uses underscores)
+
+        assert "-" in target_id, \
+            f"target_system_id should be UUID format (with dashes), got: {target_id}"
+
+        assert len( target_id ) == 36, \
+            f"target_system_id should be 36 chars (UUID length), got {len(target_id)}: {target_id}"
+
+        # Count dashes - UUID has exactly 4 dashes
+        dash_count = target_id.count( "-" )
+        assert dash_count == 4, \
+            f"UUID should have exactly 4 dashes, got {dash_count}: {target_id}"
+
+        # Verify it's NOT the old email-hash format
+        email_hash = email_to_system_id( test_email )
+        assert target_id != email_hash, \
+            f"BUG REGRESSION: target_system_id using OLD email-hash format!\n" \
+            f"  Got: {target_id}\n" \
+            f"  Old email-hash: {email_hash}\n" \
+            f"  Should use UUID from JWT database instead"
+
+        if self.debug:
+            print( f"[REGRESSION TEST] ✓ UUID format validated" )
+            print( f"[REGRESSION TEST]   UUID: {target_id}" )
+            print( f"[REGRESSION TEST]   Old email-hash (rejected): {email_hash}" )
+
     async def test_websocket_notification_delivery(self):
         """Test notification delivery via WebSocket events."""
         # Connect to queue WebSocket with notification events
@@ -300,6 +365,7 @@ class NotificationSmokeTests:
             (self.test_notify_endpoint_validation, "Input validation"),
             (self.test_user_notification_routing, "User-specific routing"),
             (self.test_notification_queue_operations, "Queue operations"),
+            (self.test_notification_user_id_format_regression, "User ID format regression (UUID vs email-hash)"),
             (self.test_websocket_notification_delivery, "WebSocket delivery"),
             (self.test_api_authentication, "API authentication")
         ]

@@ -30,7 +30,7 @@ arguments:
 ## Quick Reference
 
 ### Modes
-- **check** (default): Health check with dual notification (CLI + notify-claude)
+- **check** (default): Health check with dual notification (CLI + notify-claude-async)
 - **archive**: Execute adaptive archival split with user confirmation
 - **analyze**: Deep trend analysis and optimization recommendations
 - **dry-run**: Simulation mode showing what would happen without executing
@@ -103,7 +103,7 @@ Status: {SEVERITY}
 ### Step 5: Send Notification (if needed)
 ```bash
 if [ severity != "HEALTHY" ]; then
-    notify-claude "[LUPIN] ${severity} History.md at ${CURRENT_TOKENS} tokens" \
+    notify-claude-async "[LUPIN] ${severity} History.md at ${CURRENT_TOKENS} tokens" \
         --type=alert --priority=${notify_priority}
 fi
 ```
@@ -173,8 +173,8 @@ Show user proposed split with:
 
 ### Step 5: Notify Completion
 ```bash
-notify-claude "[LUPIN] ✅ History archived: ${ARCHIVE_FILENAME} created" \
-    --type=progress --priority=low
+notify-claude-async "[LUPIN] ✅ History archived: ${ARCHIVE_FILENAME} created" \
+    --type=progress --priority=low --target-user=ricardo.felipe.ruiz@gmail.com
 ```
 
 ---
