@@ -1100,3 +1100,120 @@
         .date-accordion-messages::-webkit-scrollbar-thumb:hover {
             background: #a1a1a1;
         }
+
+        /* ========================================
+         * GENIE ANIMATION STYLES
+         * ======================================== */
+
+        /* Genie shrink keyframes - creates the "warping" effect */
+        @keyframes genieShrink {
+            0% {
+                transform: scale( 1 ) perspective( 500px ) rotateX( 0deg );
+                transform-origin: center bottom;
+                opacity: 1;
+            }
+            40% {
+                transform: scale( 0.6, 0.8 ) perspective( 500px ) rotateX( 5deg );
+                transform-origin: center bottom;
+                opacity: 0.9;
+            }
+            100% {
+                transform: scale( 0.1, 0.3 ) perspective( 500px ) rotateX( 15deg );
+                transform-origin: center bottom;
+                opacity: 0;
+            }
+        }
+
+        /* Simple fade out for mobile/reduced motion */
+        @keyframes simpleFadeOut {
+            0% {
+                opacity: 1;
+                transform: scale( 1 );
+            }
+            100% {
+                opacity: 0;
+                transform: scale( 0.8 );
+            }
+        }
+
+        /* Fade in for destination appearance */
+        @keyframes fadeInSlide {
+            0% {
+                opacity: 0;
+                transform: translateY( -10px );
+            }
+            100% {
+                opacity: 1;
+                transform: translateY( 0 );
+            }
+        }
+
+        /* Animation state for action-required notifications */
+        .action-required-notification.animating {
+            animation: genieShrink 0.6s ease-in-out forwards;
+            pointer-events: none;
+        }
+
+        /* Flying state - fixed positioning for movement */
+        .action-required-notification.flying {
+            position: fixed;
+            z-index: 9999;
+            pointer-events: none;
+        }
+
+        /* Conversation message fade-in after animation */
+        .sender-message.animated-in {
+            animation: fadeInSlide 0.3s ease-out forwards;
+        }
+
+        /* Mobile responsiveness - simpler animation */
+        @media ( max-width: 768px ) {
+            .action-required-notification.animating {
+                animation: simpleFadeOut 0.4s ease-out forwards;
+            }
+        }
+
+        /* Accessibility - respect reduced motion preference */
+        @media ( prefers-reduced-motion: reduce ) {
+            .action-required-notification.animating {
+                animation: simpleFadeOut 0.2s ease-out forwards;
+            }
+
+            .sender-message.animated-in {
+                animation: none;
+                opacity: 1;
+            }
+        }
+
+        /* ========================================
+         * EXPIRED RESPONSE STYLING
+         * ======================================== */
+
+        /* Expired response message in conversation */
+        .date-accordion-messages .sender-message.outgoing.expired-response {
+            background-color: #868e96;
+            border-left: 3px solid #dc3545;
+            opacity: 0.9;
+        }
+
+        .date-accordion-messages .sender-message.outgoing.expired-response .message-time {
+            color: rgba( 255, 255, 255, 0.7 );
+        }
+
+        /* Expired badge */
+        .expired-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            background-color: #f8d7da;
+            color: #721c24;
+            font-size: 10px;
+            font-weight: 600;
+            border-radius: 3px;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+
+        /* Clock icon before expired message */
+        .sender-message.expired-response .message-text::before {
+            content: "⏰ ";
+        }

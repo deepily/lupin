@@ -66,6 +66,7 @@ class NotificationsUI {
         this.connectionRetries = 0;
         this.maxRetries = 5;
         this.authRefreshAttempted = false; // Track refresh attempts to prevent loops
+        this.isInitialLoad = false;        // Track initial load vs runtime for card ordering
         
         // Job completion debugging
         this.lastQASubmissionTime = null;
@@ -128,6 +129,13 @@ class NotificationsUI {
         this.actionRequiredNotifications = new Map();  // notification_id → notification data + UI state
         this.countdownTimers = new Map();  // notification_id → setInterval handle
         this.keyboardListenerActive = false;  // Track if keyboard listener is attached
+
+        // ========================================
+        // GENIE ANIMATION STATE
+        // ========================================
+        this.activeAnimations = new Map();  // notificationId → { element, animation, destination }
+        this.ANIMATION_DURATION_MS = 600;   // Total animation time in milliseconds
+        this.ANIMATION_EASING = 'cubic-bezier(0.25, 0.1, 0.25, 1)';  // Smooth ease-out
 
         // ========================================
         // SENDER-AWARE NOTIFICATION GROUPING WITH DATE ACCORDIONS
@@ -1062,9 +1070,26 @@ class NotificationsUI {
         // NEW: Window beforeunload - cleanup on page close/reload
         window.addEventListener( 'beforeunload', () => {
             this.stopTokenRefreshMonitor();
+            this.cancelActiveAnimations();
         });
 
         this.log( "Event listeners setup complete" );
+    }
+
+    /**
+     * Cancel all active genie animations.
+     * Called on page unload to ensure clean state.
+     */
+    cancelActiveAnimations() {
+        if ( this.activeAnimations.size > 0 ) {
+            this.log( `Cancelling ${this.activeAnimations.size} active animations` );
+            this.activeAnimations.forEach( ( state, notificationId ) => {
+                if ( state.element && state.element.parentNode ) {
+                    state.element.remove();
+                }
+            } );
+            this.activeAnimations.clear();
+        }
     }
     
     // ========================================
@@ -3346,7 +3371,8 @@ class NotificationsUI {
                 newCount     : 0
             };
             this.senderGroups.set( senderId, group );
-            this.createSenderCard( senderId );
+            // During initial load, append to preserve API order; at runtime, prepend to show new activity first
+            this.createSenderCard( senderId, !this.isInitialLoad );
         }
 
         // Get or create date group within sender
@@ -3414,8 +3440,9 @@ class NotificationsUI {
     /**
      * Create a new sender card in the UI with date accordion container.
      * @param {string} senderId - Sender ID
+     * @param {boolean} insertAtTop - If true, prepend to top; if false, append (preserves API order during initial load)
      */
-    createSenderCard( senderId ) {
+    createSenderCard( senderId, insertAtTop = true ) {
         const container = document.getElementById( 'notifications-list' );
         if ( !container ) {
             this.error( 'Notifications list container not found' );
@@ -3445,8 +3472,12 @@ class NotificationsUI {
             </div>
         `;
 
-        // Insert at top (most recent sender first)
-        container.insertBefore( card, container.firstChild );
+        // Insert at top for runtime updates, append for initial load (preserves API sort order)
+        if ( insertAtTop ) {
+            container.insertBefore( card, container.firstChild );
+        } else {
+            container.appendChild( card );
+        }
         this.log( `Created sender card for ${projectName} (${senderId})` );
     }
 
@@ -3541,11 +3572,21 @@ class NotificationsUI {
             ? cleanMessage.substring( 0, maxLength ) + '...'
             : cleanMessage;
 
+        // Build CSS class - add expired-response if notification was expired
+        const isExpired = notification.was_expired === true;
+        let cssClass = `sender-message ${isResponse ? 'outgoing' : 'incoming'}`;
+        if ( isExpired ) {
+            cssClass += ' expired-response';
+        }
+
+        // Add expired badge if applicable
+        const expiredBadge = isExpired ? '<span class="expired-badge">EXPIRED</span>' : '';
+
         const messageDiv = document.createElement( 'div' );
-        messageDiv.className = `sender-message ${isResponse ? 'outgoing' : 'incoming'}`;
+        messageDiv.className = cssClass;
         messageDiv.innerHTML = `
-            <span class="message-time">${timeStr}${isResponse ? ' →' : ''}</span>
-            <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}</span>
+            <span class="message-time">${timeStr}</span>
+            <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}${expiredBadge}</span>
         `;
 
         // Add to top (newest first)
@@ -3808,9 +3849,12 @@ class NotificationsUI {
             this.log( `Found ${senders.length} senders with visible history` );
 
             // Load date-grouped conversation for each sender
+            // Set flag so createSenderCard() appends (preserving API sort order) instead of prepending
+            this.isInitialLoad = true;
             for ( const senderInfo of senders ) {
                 await this.loadSenderConversation( senderInfo.sender_id, senderInfo.last_activity );
             }
+            this.isInitialLoad = false;
 
             this.updateTotalNotificationsCount();
 
@@ -5085,24 +5129,45 @@ class NotificationsUI {
         const card = document.getElementById( `action-required-${notificationId}` );
         if ( !card ) return;
 
-        // Phase 2.2: Change to 'responded' state (stay in-place, no movement)
-        card.classList.remove( 'active' );
-        card.classList.add( 'responded' );
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state ) return;
 
-        // Remove progress bar and timer (no longer needed)
-        const progress = document.getElementById( `progress-${notificationId}` );
-        const timer = document.getElementById( `timer-${notificationId}` );
-        if ( progress && progress.parentElement ) progress.parentElement.remove();
-        if ( timer ) timer.textContent = '✓ Responded';
+        // Get sender ID from notification
+        const senderId = state.notification?.sender_id || this.UNKNOWN_SENDER;
 
-        // Replace buttons with status badge
-        const buttonsContainer = card.querySelector( '.response-buttons, .response-open-ended' );
-        if ( buttonsContainer ) {
-            buttonsContainer.innerHTML = `
-                <div class="notification-status-badge responded">
-                    ✓ You responded: ${response}
-                </div>
-            `;
+        // Calculate destination for animation
+        const destination = this.calculateDestination( senderId );
+
+        if ( destination ) {
+            // Start genie animation
+            this.startGenieAnimation( notificationId, card, destination, () => {
+                // On animation complete: add conversation pair
+                this.addConversationPair( senderId, state.notification, response, false );
+
+                // Cleanup action-required state
+                this.actionRequiredNotifications.delete( notificationId );
+                this.updateActionRequiredCount();
+            } );
+        } else {
+            // Fallback: no animation, just show responded state
+            this.log( 'No destination found, using fallback display' );
+
+            card.classList.remove( 'active' );
+            card.classList.add( 'responded' );
+
+            const progress = document.getElementById( `progress-${notificationId}` );
+            const timer = document.getElementById( `timer-${notificationId}` );
+            if ( progress && progress.parentElement ) progress.parentElement.remove();
+            if ( timer ) timer.textContent = '✓ Responded';
+
+            const buttonsContainer = card.querySelector( '.response-buttons, .response-open-ended' );
+            if ( buttonsContainer ) {
+                buttonsContainer.innerHTML = `
+                    <div class="notification-status-badge responded">
+                        ✓ You responded: ${response}
+                    </div>
+                `;
+            }
         }
     }
 
@@ -5134,17 +5199,7 @@ class NotificationsUI {
         const card = document.getElementById( `action-required-${notificationId}` );
         if ( !card ) return;
 
-        // Phase 2.2: Change to 'expired' state (stay in-place, no movement)
-        card.classList.remove( 'active' );
-        card.classList.add( 'expired' );
-
-        // Remove progress bar and update timer
-        const progress = document.getElementById( `progress-${notificationId}` );
-        const timer = document.getElementById( `timer-${notificationId}` );
-        if ( progress && progress.parentElement ) progress.parentElement.remove();
-        if ( timer ) timer.textContent = '⏰ Expired';
-
-        // Replace buttons with status badge showing default was used
+        // Determine the default value used
         let defaultValue = state.notification.response_default || 'none';
 
         // Phase 2.4.2: For open-ended responses, submit the current input value
@@ -5157,17 +5212,43 @@ class NotificationsUI {
             }
         }
 
-        const buttonsContainer = card.querySelector( '.response-buttons, .response-open-ended' );
-        if ( buttonsContainer ) {
-            buttonsContainer.innerHTML = `
-                <div class="notification-status-badge expired">
-                    ⏰ Expired - Default used: ${defaultValue}
-                </div>
-            `;
-        }
+        // Get sender ID from notification
+        const senderId = state.notification?.sender_id || this.UNKNOWN_SENDER;
 
-        // Keep notification in list (no removal, no timeout)
-        // User can manually dismiss later if needed
+        // Calculate destination for animation
+        const destination = this.calculateDestination( senderId );
+
+        if ( destination ) {
+            // Start genie animation for expired notification
+            this.startGenieAnimation( notificationId, card, destination, () => {
+                // On animation complete: add conversation pair (marked as expired)
+                this.addConversationPair( senderId, state.notification, defaultValue, true );
+
+                // Cleanup action-required state
+                this.actionRequiredNotifications.delete( notificationId );
+                this.updateActionRequiredCount();
+            } );
+        } else {
+            // Fallback: no animation, just show expired state in place
+            this.log( 'No destination found, using fallback display for expired' );
+
+            card.classList.remove( 'active' );
+            card.classList.add( 'expired' );
+
+            const progress = document.getElementById( `progress-${notificationId}` );
+            const timer = document.getElementById( `timer-${notificationId}` );
+            if ( progress && progress.parentElement ) progress.parentElement.remove();
+            if ( timer ) timer.textContent = '⏰ Expired';
+
+            const buttonsContainer = card.querySelector( '.response-buttons, .response-open-ended' );
+            if ( buttonsContainer ) {
+                buttonsContainer.innerHTML = `
+                    <div class="notification-status-badge expired">
+                        ⏰ Expired - Default used: ${defaultValue}
+                    </div>
+                `;
+            }
+        }
     }
 
     handleNotificationResponded( envelope ) {
@@ -5281,6 +5362,402 @@ class NotificationsUI {
         }
 
         // Section stays visible always (Phase 2.2 change)
+    }
+
+    // ========================================
+    // GENIE ANIMATION METHODS
+    // ========================================
+
+    /**
+     * Calculate destination position for genie fly animation.
+     * @param {string} senderId - Sender ID to fly to
+     * @returns {object} - { x, y, cardId, isCollapsed } or null if can't find
+     */
+    calculateDestination( senderId ) {
+        // Ensure sender ID is valid
+        if ( !senderId ) {
+            senderId = this.UNKNOWN_SENDER;
+        }
+
+        // Find or create the sender card
+        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        let senderCard = document.getElementById( cardId );
+
+        // If sender card doesn't exist, create it
+        if ( !senderCard ) {
+            this.log( `Creating sender card for animation destination: ${senderId}` );
+            // Initialize sender group if needed
+            if ( !this.senderGroups.has( senderId ) ) {
+                this.senderGroups.set( senderId, {
+                    dateGroups   : new Map(),
+                    collapsed    : false,
+                    lastActivity : new Date(),
+                    totalCount   : 0,
+                    newCount     : 0
+                } );
+            }
+            this.createSenderCard( senderId );
+            senderCard = document.getElementById( cardId );
+        }
+
+        if ( !senderCard ) {
+            this.error( `Failed to create sender card: ${cardId}` );
+            return null;
+        }
+
+        // Get the header element for positioning
+        const header = senderCard.querySelector( '.sender-card-header' );
+        if ( !header ) {
+            this.error( `Sender card header not found: ${cardId}` );
+            return null;
+        }
+
+        const rect = header.getBoundingClientRect();
+        const group = this.senderGroups.get( senderId );
+
+        return {
+            x          : rect.left + ( rect.width / 2 ),
+            y          : rect.top + ( rect.height / 2 ),
+            cardId     : cardId,
+            isCollapsed: group?.collapsed || false,
+            senderId   : senderId
+        };
+    }
+
+    /**
+     * Ensure a date accordion exists for the given sender and date.
+     * Creates sender card and date accordion if needed.
+     * @param {string} senderId - Sender ID
+     * @param {string} dateString - ISO date string (YYYY-MM-DD)
+     * @returns {boolean} - True if accordion exists or was created
+     */
+    ensureDateAccordionExists( senderId, dateString ) {
+        // Ensure sender group exists
+        if ( !this.senderGroups.has( senderId ) ) {
+            this.senderGroups.set( senderId, {
+                dateGroups   : new Map(),
+                collapsed    : false,
+                lastActivity : new Date(),
+                totalCount   : 0,
+                newCount     : 0
+            } );
+        }
+
+        const group = this.senderGroups.get( senderId );
+
+        // Ensure sender card exists
+        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        if ( !document.getElementById( cardId ) ) {
+            this.createSenderCard( senderId );
+        }
+
+        // Ensure date group exists in data structure
+        if ( !group.dateGroups.has( dateString ) ) {
+            group.dateGroups.set( dateString, [] );
+        }
+
+        // Ensure date accordion exists in DOM
+        const accordionId = `date-accordion-${senderId.replace( /[@.]/g, '-' )}-${dateString}`;
+        if ( !document.getElementById( accordionId ) ) {
+            this.createDateAccordion( senderId, dateString );
+        }
+
+        return true;
+    }
+
+    /**
+     * Expand a sender card if it's collapsed.
+     * @param {string} senderId - Sender ID
+     */
+    expandSenderCard( senderId ) {
+        const group = this.senderGroups.get( senderId );
+        if ( !group || !group.collapsed ) return;
+
+        // Toggle to expand
+        this.toggleSenderCard( senderId );
+        this.log( `Auto-expanded sender card for ${senderId}` );
+    }
+
+    /**
+     * Scroll an element into view if it's not visible.
+     * @param {HTMLElement} element - Element to scroll into view
+     * @returns {Promise} - Resolves when scroll is complete
+     */
+    scrollIntoViewIfNeeded( element ) {
+        return new Promise( ( resolve ) => {
+            if ( !element ) {
+                resolve();
+                return;
+            }
+
+            const rect = element.getBoundingClientRect();
+            const isVisible = (
+                rect.top >= 0 &&
+                rect.bottom <= window.innerHeight
+            );
+
+            if ( !isVisible ) {
+                element.scrollIntoView( { behavior: 'smooth', block: 'center' } );
+                // Wait for scroll to complete (approximate)
+                setTimeout( resolve, 300 );
+            } else {
+                resolve();
+            }
+        } );
+    }
+
+    /**
+     * Get today's date string in YYYY-MM-DD format.
+     * @returns {string} - ISO date string
+     */
+    getTodayDateString() {
+        const now = new Date();
+        return now.toISOString().split( 'T' )[ 0 ];
+    }
+
+    /**
+     * Start the genie fly-to-destination animation.
+     * @param {string} notificationId - The notification ID being animated
+     * @param {HTMLElement} element - The action-required card element to animate
+     * @param {object} destination - Destination position from calculateDestination()
+     * @param {function} onComplete - Callback when animation completes
+     */
+    async startGenieAnimation( notificationId, element, destination, onComplete ) {
+        if ( !element || !destination ) {
+            this.error( 'startGenieAnimation: Missing element or destination' );
+            if ( onComplete ) onComplete();
+            return;
+        }
+
+        this.log( `Starting genie animation for ${notificationId}` );
+
+        // Track this animation
+        this.activeAnimations.set( notificationId, {
+            element     : element,
+            destination : destination,
+            startTime   : Date.now()
+        } );
+
+        try {
+            // Step 1: Scroll destination into view if needed
+            const destCard = document.getElementById( destination.cardId );
+            if ( destCard ) {
+                await this.scrollIntoViewIfNeeded( destCard );
+            }
+
+            // Step 2: Auto-expand collapsed sender card
+            if ( destination.isCollapsed ) {
+                this.expandSenderCard( destination.senderId );
+                // Small delay to let expansion animation complete
+                await new Promise( r => setTimeout( r, 100 ) );
+            }
+
+            // Step 3: Get current position of the element
+            const sourceRect = element.getBoundingClientRect();
+            const sourceX = sourceRect.left + ( sourceRect.width / 2 );
+            const sourceY = sourceRect.top + ( sourceRect.height / 2 );
+
+            // Recalculate destination after potential scroll/expansion
+            const updatedDest = this.calculateDestination( destination.senderId );
+            const endX = updatedDest ? updatedDest.x : destination.x;
+            const endY = updatedDest ? updatedDest.y : destination.y;
+
+            // Step 4: Calculate bezier curve control point (arc upward)
+            const controlX = ( sourceX + endX ) / 2;
+            const controlY = Math.min( sourceY, endY ) - 100;  // Arc 100px above midpoint
+
+            // Step 5: Fix element position for animation
+            const width = element.offsetWidth;
+            const height = element.offsetHeight;
+
+            element.style.width = `${width}px`;
+            element.style.height = `${height}px`;
+            element.style.left = `${sourceRect.left}px`;
+            element.style.top = `${sourceRect.top}px`;
+            element.classList.add( 'flying' );
+
+            // Step 6: Animate using Web Animations API with bezier curve approximation
+            // We'll use multiple keyframes to approximate a quadratic bezier curve
+            const keyframes = this.generateBezierKeyframes(
+                sourceX, sourceY,
+                controlX, controlY,
+                endX, endY,
+                width, height
+            );
+
+            const animation = element.animate( keyframes, {
+                duration : this.ANIMATION_DURATION_MS,
+                easing   : this.ANIMATION_EASING,
+                fill     : 'forwards'
+            } );
+
+            // Step 7: Wait for animation to complete with fallback timeout
+            const fallbackTimeout = this.ANIMATION_DURATION_MS + 200;  // Extra 200ms buffer
+            await Promise.race( [
+                animation.finished,
+                new Promise( resolve => setTimeout( resolve, fallbackTimeout ) )
+            ] );
+
+            this.log( `Genie animation completed for ${notificationId}` );
+
+        } catch ( error ) {
+            this.error( `Genie animation error: ${error.message}` );
+        } finally {
+            // Cleanup
+            this.activeAnimations.delete( notificationId );
+
+            // Remove from DOM (it will be added to sender card as conversation)
+            if ( element.parentNode ) {
+                element.remove();
+            }
+
+            // Call completion callback
+            if ( onComplete ) {
+                onComplete();
+            }
+        }
+    }
+
+    /**
+     * Generate keyframes for a quadratic bezier curve animation.
+     * Approximates the curve with multiple intermediate points.
+     * @param {number} x0 - Start X
+     * @param {number} y0 - Start Y
+     * @param {number} x1 - Control point X
+     * @param {number} y1 - Control point Y
+     * @param {number} x2 - End X
+     * @param {number} y2 - End Y
+     * @param {number} width - Element width
+     * @param {number} height - Element height
+     * @returns {array} - Keyframes array for Web Animations API
+     */
+    generateBezierKeyframes( x0, y0, x1, y1, x2, y2, width, height ) {
+        const keyframes = [];
+        const steps = 10;  // Number of intermediate points
+
+        for ( let i = 0; i <= steps; i++ ) {
+            const t = i / steps;
+
+            // Quadratic bezier formula: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
+            const oneMinusT = 1 - t;
+            const x = oneMinusT * oneMinusT * x0 + 2 * oneMinusT * t * x1 + t * t * x2;
+            const y = oneMinusT * oneMinusT * y0 + 2 * oneMinusT * t * y1 + t * t * y2;
+
+            // Calculate offset from starting position (element is positioned at start)
+            const offsetX = x - x0;
+            const offsetY = y - y0;
+
+            // Scale decreases from 1 to 0.1 along the path
+            const scale = 1 - ( t * 0.9 );
+
+            // Opacity decreases from 1 to 0 along the path
+            const opacity = 1 - t;
+
+            // Rotation increases slightly for genie effect
+            const rotation = t * 15;
+
+            keyframes.push( {
+                transform: `translate( ${offsetX}px, ${offsetY}px ) scale( ${scale} ) perspective( 500px ) rotateX( ${rotation}deg )`,
+                opacity  : opacity,
+                offset   : t
+            } );
+        }
+
+        return keyframes;
+    }
+
+    /**
+     * Add a conversation pair (notification + response) to the sender card.
+     * @param {string} senderId - Sender ID
+     * @param {object} notification - Original notification data
+     * @param {string} response - User's response text
+     * @param {boolean} wasExpired - True if notification expired (used default)
+     */
+    addConversationPair( senderId, notification, response, wasExpired = false ) {
+        const dateString = this.getTodayDateString();
+
+        // Ensure sender card and date accordion exist
+        this.ensureDateAccordionExists( senderId, dateString );
+
+        // Get the group and add to data structure
+        const group = this.senderGroups.get( senderId );
+        if ( !group ) {
+            this.error( `Sender group not found: ${senderId}` );
+            return;
+        }
+
+        // 1. Add original notification (incoming/left-aligned)
+        const incomingNotification = {
+            ...notification,
+            timestamp: notification.timestamp || new Date().toISOString(),
+            state    : 'delivered'
+        };
+
+        // Add to data structure
+        const dateGroup = group.dateGroups.get( dateString );
+        if ( dateGroup ) {
+            dateGroup.unshift( incomingNotification );
+            group.totalCount++;
+        }
+
+        // Add to UI
+        this.addMessageToDateAccordion( senderId, dateString, incomingNotification, false );
+
+        // 2. Add user response (outgoing/right-aligned)
+        const responseMessage = wasExpired
+            ? `[Default: ${response}]`
+            : response;
+
+        const outgoingNotification = {
+            id        : `${notification.id || 'unknown'}-response`,
+            sender_id : senderId,
+            message   : responseMessage,
+            timestamp : new Date().toISOString(),
+            state     : 'responded',
+            was_expired: wasExpired
+        };
+
+        // Add to data structure
+        if ( dateGroup ) {
+            dateGroup.unshift( outgoingNotification );
+            group.totalCount++;
+        }
+
+        // Add to UI with animated-in class
+        this.addMessageToDateAccordion( senderId, dateString, outgoingNotification, true );
+
+        // Mark new messages with animation class
+        const containerId = `date-messages-${senderId.replace( /[@.]/g, '-' )}-${dateString}`;
+        const container = document.getElementById( containerId );
+        if ( container ) {
+            const messages = container.querySelectorAll( '.sender-message' );
+            // Add animation to the two newest messages
+            if ( messages.length >= 1 ) messages[ 0 ].classList.add( 'animated-in' );
+            if ( messages.length >= 2 ) messages[ 1 ].classList.add( 'animated-in' );
+        }
+
+        // Update sender card header
+        this.updateSenderCardHeader( senderId );
+        this.updateTotalNotificationsCount();
+
+        // Move sender card to top (most recent activity)
+        this.moveSenderCardToTop( senderId );
+
+        this.log( `Added conversation pair for ${senderId}: "${notification.message?.substring( 0, 30 )}..." → "${response}"` );
+    }
+
+    /**
+     * Move a sender card to the top of the notifications list.
+     * @param {string} senderId - Sender ID
+     */
+    moveSenderCardToTop( senderId ) {
+        const container = document.getElementById( 'notifications-list' );
+        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const card = document.getElementById( cardId );
+
+        if ( container && card && container.firstChild !== card ) {
+            container.insertBefore( card, container.firstChild );
+        }
     }
 
     attachKeyboardListener() {
