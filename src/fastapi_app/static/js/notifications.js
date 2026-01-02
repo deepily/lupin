@@ -3323,42 +3323,96 @@ class NotificationsUI {
     // ========================================
 
     /**
-     * Add notification to appropriate sender group.
-     * Creates sender card if it doesn't exist.
+     * Add notification to appropriate sender group with date-based sub-grouping.
+     * Creates sender card and date accordion if they don't exist.
      * @param {object} notification - Notification data
      * @param {boolean} isResponse - True if this is a user response (right-aligned)
      */
     addNotificationToSenderGroup( notification, isResponse = false ) {
         const senderId = this.resolveSenderId( notification );
         const timestamp = new Date( notification.timestamp || Date.now() );
+        const dateString = this.getDateString( timestamp );
 
         // Get or create sender group
         let group = this.senderGroups.get( senderId );
+        const isNewSender = !group;
+
         if ( !group ) {
             group = {
-                notifications : [],
-                collapsed     : false,
-                lastActivity  : timestamp
+                dateGroups   : new Map(),
+                collapsed    : false,
+                lastActivity : timestamp,
+                totalCount   : 0,
+                newCount     : 0
             };
             this.senderGroups.set( senderId, group );
             this.createSenderCard( senderId );
         }
 
-        // Update last activity
-        if ( timestamp > group.lastActivity ) {
-            group.lastActivity = timestamp;
+        // Get or create date group within sender
+        let dateGroup = group.dateGroups.get( dateString );
+        const isNewDate = !dateGroup;
+
+        if ( !dateGroup ) {
+            dateGroup = [];
+            group.dateGroups.set( dateString, dateGroup );
+            this.createDateAccordion( senderId, dateString );
         }
 
-        // Add to notifications array
-        group.notifications.push( { ...notification, isResponse } );
+        // Add notification to date group
+        dateGroup.push( { ...notification, isResponse } );
+        group.totalCount++;
+
+        // Count as "new" if not delivered/responded
+        if ( !notification.state || notification.state === 'created' || notification.state === 'queued' ) {
+            group.newCount++;
+        }
+
+        // Update last activity and move card to top
+        if ( timestamp > group.lastActivity ) {
+            group.lastActivity = timestamp;
+            if ( !isNewSender ) {
+                this.moveSenderCardToTop( senderId );
+            }
+        }
 
         // Update UI
-        this.addMessageToSenderCard( senderId, notification, isResponse );
+        this.addMessageToDateAccordion( senderId, dateString, notification, isResponse );
         this.updateSenderCardHeader( senderId );
     }
 
     /**
-     * Create a new sender card in the UI.
+     * Get ISO date string (YYYY-MM-DD) from timestamp.
+     * Uses configured timezone.
+     * @param {Date} timestamp - Date to convert
+     * @returns {string} ISO date string
+     */
+    getDateString( timestamp ) {
+        // Use local timezone (which should match server's app_timezone)
+        const year = timestamp.getFullYear();
+        const month = String( timestamp.getMonth() + 1 ).padStart( 2, '0' );
+        const day = String( timestamp.getDate() ).padStart( 2, '0' );
+        return `${year}-${month}-${day}`;
+    }
+
+    /**
+     * Move sender card to top of notifications list.
+     * Called when a sender receives new activity.
+     * @param {string} senderId - Sender ID
+     */
+    moveSenderCardToTop( senderId ) {
+        const container = document.getElementById( 'notifications-list' );
+        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const card = document.getElementById( cardId );
+
+        if ( container && card && container.firstChild !== card ) {
+            container.insertBefore( card, container.firstChild );
+            this.log( `Moved ${senderId} card to top` );
+        }
+    }
+
+    /**
+     * Create a new sender card in the UI with date accordion container.
      * @param {string} senderId - Sender ID
      */
     createSenderCard( senderId ) {
@@ -3371,21 +3425,23 @@ class NotificationsUI {
         const projectName = this.getProjectFromSenderId( senderId );
         const group = this.senderGroups.get( senderId );
         const statusIndicator = this.getSenderStatusIndicator( group?.lastActivity );
+        const escapedSenderId = senderId.replace( /'/g, "\\'" );
 
         const card = document.createElement( 'div' );
         card.id = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
         card.className = 'sender-card';
         card.innerHTML = `
-            <div class="sender-card-header" onclick="window.freshQueueUI.toggleSenderCard('${senderId}')">
+            <div class="sender-card-header" onclick="window.notificationsUI.toggleSenderCard('${escapedSenderId}')">
                 <span class="sender-status">${statusIndicator}</span>
                 <span class="sender-project-name">${projectName}</span>
+                <span class="sender-new-count"></span>
                 <span class="sender-message-count">(0)</span>
                 <span class="sender-last-activity">Last: --</span>
-                <button class="sender-delete-btn" onclick="event.stopPropagation(); window.freshQueueUI.deleteSenderConversation('${senderId}')" title="Delete conversation">×</button>
+                <button class="sender-delete-btn" onclick="event.stopPropagation(); window.notificationsUI.deleteSenderConversation('${escapedSenderId}')" title="Delete all">×</button>
                 <span class="sender-toggle">▼</span>
             </div>
-            <div class="sender-card-messages" id="sender-messages-${senderId.replace( /[@.]/g, '-' )}">
-                <!-- Messages will be added here -->
+            <div class="sender-card-dates" id="sender-dates-${senderId.replace( /[@.]/g, '-' )}">
+                <!-- Date accordions will be added here -->
             </div>
         `;
 
@@ -3395,7 +3451,204 @@ class NotificationsUI {
     }
 
     /**
+     * Create a date accordion within a sender card.
+     * @param {string} senderId - Sender ID
+     * @param {string} dateString - ISO date string (YYYY-MM-DD)
+     */
+    createDateAccordion( senderId, dateString ) {
+        const containerId = `sender-dates-${senderId.replace( /[@.]/g, '-' )}`;
+        const container = document.getElementById( containerId );
+        if ( !container ) {
+            this.error( `Date container not found: ${containerId}` );
+            return;
+        }
+
+        const accordionId = `date-accordion-${senderId.replace( /[@.]/g, '-' )}-${dateString}`;
+        const escapedSenderId = senderId.replace( /'/g, "\\'" );
+
+        const accordion = document.createElement( 'div' );
+        accordion.id = accordionId;
+        accordion.className = 'date-accordion';
+        accordion.innerHTML = `
+            <div class="date-accordion-header" onclick="window.notificationsUI.toggleDateAccordion('${escapedSenderId}', '${dateString}')">
+                <span class="date-text">${dateString}</span>
+                <span class="date-count">(0)</span>
+                <button class="date-delete-btn" onclick="event.stopPropagation(); window.notificationsUI.softDeleteByDate('${escapedSenderId}', '${dateString}')" title="Hide this day">🗑️</button>
+                <span class="date-toggle">▼</span>
+            </div>
+            <div class="date-accordion-messages" id="date-messages-${senderId.replace( /[@.]/g, '-' )}-${dateString}">
+                <!-- Messages for this date will be added here -->
+            </div>
+        `;
+
+        // Append in order (dates are pre-sorted descending in loadSenderConversation)
+        container.appendChild( accordion );
+        this.log( `Created date accordion for ${senderId} on ${dateString}` );
+    }
+
+    /**
+     * Toggle date accordion collapse state.
+     * @param {string} senderId - Sender ID
+     * @param {string} dateString - ISO date string
+     */
+    toggleDateAccordion( senderId, dateString ) {
+        const accordionId = `date-accordion-${senderId.replace( /[@.]/g, '-' )}-${dateString}`;
+        const accordion = document.getElementById( accordionId );
+        if ( !accordion ) return;
+
+        const messages = accordion.querySelector( '.date-accordion-messages' );
+        const toggle = accordion.querySelector( '.date-toggle' );
+
+        if ( messages.classList.contains( 'collapsed' ) ) {
+            messages.classList.remove( 'collapsed' );
+            toggle.textContent = '▼';
+        } else {
+            messages.classList.add( 'collapsed' );
+            toggle.textContent = '▶';
+        }
+    }
+
+    /**
+     * Add message to a date accordion.
+     * @param {string} senderId - Sender ID
+     * @param {string} dateString - ISO date string
+     * @param {object} notification - Notification data
+     * @param {boolean} isResponse - True if this is a user response
+     */
+    addMessageToDateAccordion( senderId, dateString, notification, isResponse ) {
+        const containerId = `date-messages-${senderId.replace( /[@.]/g, '-' )}-${dateString}`;
+        const container = document.getElementById( containerId );
+        if ( !container ) {
+            this.error( `Date messages container not found: ${containerId}` );
+            return;
+        }
+
+        // Format timestamp for display (time only since date is in header)
+        const timestamp = new Date( notification.timestamp || Date.now() );
+        const timeStr = timestamp.toLocaleTimeString( 'en-US', {
+            hour   : '2-digit',
+            minute : '2-digit',
+            hour12 : false
+        });
+
+        // Clean message (remove [PREFIX] since it's already shown in card header)
+        let cleanMessage = notification.message || '';
+        cleanMessage = cleanMessage.replace( /^\[[A-Z]+\]\s*/, '' );
+
+        // Truncate long messages
+        const maxLength = 120;
+        const displayMessage = cleanMessage.length > maxLength
+            ? cleanMessage.substring( 0, maxLength ) + '...'
+            : cleanMessage;
+
+        const messageDiv = document.createElement( 'div' );
+        messageDiv.className = `sender-message ${isResponse ? 'outgoing' : 'incoming'}`;
+        messageDiv.innerHTML = `
+            <span class="message-time">${timeStr}${isResponse ? ' →' : ''}</span>
+            <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}</span>
+        `;
+
+        // Add to top (newest first)
+        container.insertBefore( messageDiv, container.firstChild );
+
+        // Update date accordion count
+        this.updateDateAccordionCount( senderId, dateString );
+    }
+
+    /**
+     * Update the count display on a date accordion.
+     * @param {string} senderId - Sender ID
+     * @param {string} dateString - ISO date string
+     */
+    updateDateAccordionCount( senderId, dateString ) {
+        const group = this.senderGroups.get( senderId );
+        if ( !group ) return;
+
+        const dateGroup = group.dateGroups.get( dateString );
+        if ( !dateGroup ) return;
+
+        const accordionId = `date-accordion-${senderId.replace( /[@.]/g, '-' )}-${dateString}`;
+        const accordion = document.getElementById( accordionId );
+        if ( !accordion ) return;
+
+        const countSpan = accordion.querySelector( '.date-count' );
+        if ( countSpan ) {
+            countSpan.textContent = `(${dateGroup.length})`;
+        }
+    }
+
+    /**
+     * Soft delete (hide) all notifications for a sender on a specific date.
+     * @param {string} senderId - Sender ID
+     * @param {string} dateString - ISO date string
+     */
+    async softDeleteByDate( senderId, dateString ) {
+        if ( !confirm( `Hide all notifications from ${dateString}?` ) ) {
+            return;
+        }
+
+        try {
+            const response = await fetch(
+                `/api/notifications/date/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUser )}/${dateString}`,
+                {
+                    method  : 'DELETE',
+                    headers : this.getAuthHeaders()
+                }
+            );
+
+            if ( response.ok ) {
+                const result = await response.json();
+                this.log( `Hidden ${result.hidden_count} notifications for ${dateString}` );
+
+                // Remove from local data structure
+                const group = this.senderGroups.get( senderId );
+                if ( group && group.dateGroups.has( dateString ) ) {
+                    const dateGroup = group.dateGroups.get( dateString );
+                    group.totalCount -= dateGroup.length;
+                    group.dateGroups.delete( dateString );
+
+                    // Remove accordion from UI
+                    const accordionId = `date-accordion-${senderId.replace( /[@.]/g, '-' )}-${dateString}`;
+                    const accordion = document.getElementById( accordionId );
+                    if ( accordion ) {
+                        accordion.remove();
+                    }
+
+                    // Update sender card header
+                    this.updateSenderCardHeader( senderId );
+
+                    // If no more dates, remove sender card
+                    if ( group.dateGroups.size === 0 ) {
+                        this.removeSenderCard( senderId );
+                    }
+                }
+            } else {
+                const errorData = await response.json();
+                this.error( `Failed to hide notifications: ${errorData.detail}` );
+            }
+        } catch ( error ) {
+            this.error( `Error hiding notifications: ${error.message}` );
+        }
+    }
+
+    /**
+     * Remove a sender card from the UI and data structure.
+     * @param {string} senderId - Sender ID
+     */
+    removeSenderCard( senderId ) {
+        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const card = document.getElementById( cardId );
+        if ( card ) {
+            card.remove();
+        }
+        this.senderGroups.delete( senderId );
+        this.updateNotificationCount();
+        this.log( `Removed sender card for ${senderId}` );
+    }
+
+    /**
      * Toggle sender card collapse state.
+     * Shows/hides the date accordions container.
      * @param {string} senderId - Sender ID
      */
     toggleSenderCard( senderId ) {
@@ -3407,10 +3660,10 @@ class NotificationsUI {
         const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
         const card = document.getElementById( cardId );
         if ( card ) {
-            const messages = card.querySelector( '.sender-card-messages' );
+            const datesContainer = card.querySelector( '.sender-card-dates' );
             const toggle = card.querySelector( '.sender-toggle' );
-            if ( messages ) {
-                messages.style.display = group.collapsed ? 'none' : 'block';
+            if ( datesContainer ) {
+                datesContainer.style.display = group.collapsed ? 'none' : 'block';
             }
             if ( toggle ) {
                 toggle.textContent = group.collapsed ? '▶' : '▼';
@@ -3457,6 +3710,7 @@ class NotificationsUI {
 
     /**
      * Update sender card header with current stats.
+     * Uses new data structure with dateGroups, totalCount, and newCount.
      * @param {string} senderId - Sender ID
      */
     updateSenderCardHeader( senderId ) {
@@ -3467,10 +3721,21 @@ class NotificationsUI {
         const card = document.getElementById( cardId );
         if ( !card ) return;
 
-        // Update count
+        // Update total count
         const countEl = card.querySelector( '.sender-message-count' );
         if ( countEl ) {
-            countEl.textContent = `(${group.notifications.length})`;
+            countEl.textContent = `(${group.totalCount})`;
+        }
+
+        // Update new count badge
+        const newCountEl = card.querySelector( '.sender-new-count' );
+        if ( newCountEl ) {
+            if ( group.newCount > 0 ) {
+                newCountEl.textContent = `${group.newCount} new`;
+                newCountEl.style.display = 'inline-block';
+            } else {
+                newCountEl.style.display = 'none';
+            }
         }
 
         // Update status indicator
@@ -3485,20 +3750,17 @@ class NotificationsUI {
             activityEl.textContent = `Last: ${this.formatRelativeTime( group.lastActivity )}`;
         }
 
-        // Move card to top if it has new activity
-        const container = document.getElementById( 'notifications-list' );
-        if ( container && container.firstChild !== card ) {
-            container.insertBefore( card, container.firstChild );
-        }
+        // Move card to top if it has new activity (handled by moveSenderCardToTop)
     }
 
     /**
      * Update total notifications count display and Clear All button state.
+     * Uses new data structure with totalCount per sender group.
      */
     updateTotalNotificationsCount() {
         let total = 0;
         for ( const group of this.senderGroups.values() ) {
-            total += group.notifications.length;
+            total += group.totalCount;
         }
         const countEl = document.getElementById( 'notifications-count' );
         if ( countEl ) {
@@ -3514,6 +3776,7 @@ class NotificationsUI {
 
     /**
      * Load conversation history for all senders from the API.
+     * Uses the senders-visible endpoint that excludes hidden notifications.
      * Uses activity-anchored window loading based on historyWindowHours.
      */
     async loadConversationHistory() {
@@ -3525,8 +3788,8 @@ class NotificationsUI {
         this.log( `Loading conversation history (window: ${this.historyWindowHours}h)...` );
 
         try {
-            // First, get list of senders with recent activity
-            const sendersUrl = `/api/notifications/senders/${encodeURIComponent( this.currentUser )}`;
+            // Get list of senders with visible (non-hidden) notifications
+            const sendersUrl = `/api/notifications/senders-visible/${encodeURIComponent( this.currentUser )}`;
             const params = this.historyWindowHours ? `?hours=${this.historyWindowHours}` : '';
 
             const sendersResponse = await fetch( sendersUrl + params, {
@@ -3542,9 +3805,9 @@ class NotificationsUI {
             }
 
             const senders = await sendersResponse.json();
-            this.log( `Found ${senders.length} senders with history` );
+            this.log( `Found ${senders.length} senders with visible history` );
 
-            // Load conversation for each sender
+            // Load date-grouped conversation for each sender
             for ( const senderInfo of senders ) {
                 await this.loadSenderConversation( senderInfo.sender_id, senderInfo.last_activity );
             }
@@ -3558,12 +3821,13 @@ class NotificationsUI {
 
     /**
      * Load conversation history for a specific sender.
+     * Uses the conversation-by-date endpoint that returns date-grouped notifications.
      * @param {string} senderId - Sender ID
      * @param {string} anchorTime - ISO timestamp to anchor the window around
      */
     async loadSenderConversation( senderId, anchorTime = null ) {
         try {
-            const baseUrl = `/api/notifications/conversation/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUser )}`;
+            const baseUrl = `/api/notifications/conversation-by-date/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUser )}`;
             const params = new URLSearchParams();
 
             if ( this.historyWindowHours ) {
@@ -3587,13 +3851,19 @@ class NotificationsUI {
                 throw new Error( `Failed to fetch conversation: ${response.status}` );
             }
 
-            const notifications = await response.json();
-            this.log( `Loaded ${notifications.length} notifications for ${senderId}` );
+            const dateGroupedData = await response.json();
+            this.log( `Loaded date-grouped notifications for ${senderId}: ${Object.keys( dateGroupedData ).length} dates` );
 
-            // Add each notification to the sender group
-            for ( const notification of notifications ) {
-                const isResponse = notification.state === 'responded' && notification.responded_at;
-                this.addNotificationToSenderGroup( notification, isResponse );
+            // Sort dates descending (newest first) for consistent UI ordering
+            const sortedDates = Object.keys( dateGroupedData ).sort().reverse();
+
+            // Process each date group in sorted order
+            for ( const dateString of sortedDates ) {
+                const notifications = dateGroupedData[ dateString ];
+                for ( const notification of notifications ) {
+                    const isResponse = notification.state === 'responded' && notification.responded_at;
+                    this.addNotificationToSenderGroup( notification, isResponse );
+                }
             }
 
         } catch ( error ) {
@@ -3666,14 +3936,14 @@ class NotificationsUI {
 
         dropdown.innerHTML = `
             <span class="dropdown-label">History:</span>
-            <button class="dropdown-display" onclick="window.freshQueueUI.toggleHistoryDropdown()">
+            <button class="dropdown-display" onclick="window.notificationsUI.toggleHistoryDropdown()">
                 ${currentOption.label}
                 <span class="dropdown-arrow">▼</span>
             </button>
             <div class="dropdown-menu" id="history-dropdown-menu">
                 ${this.WINDOW_OPTIONS.map( opt => `
                     <div class="dropdown-item ${opt.hours === this.historyWindowHours ? 'selected' : ''}"
-                         onclick="window.freshQueueUI.setHistoryWindow(${opt.hours})">
+                         onclick="window.notificationsUI.setHistoryWindow(${opt.hours})">
                         ${opt.label}
                     </div>
                 ` ).join( '' )}
@@ -4478,13 +4748,13 @@ class NotificationsUI {
     
     log( message, ...args ) {
         if ( this.debug ) {
-            console.log( `[FreshQueue] ${message}`, ...args );
+            console.log( `[Notifications] ${message}`, ...args );
             this.addDebugMessage( message );
         }
     }
     
     error( message, ...args ) {
-        console.error( `[FreshQueue ERROR] ${message}`, ...args );
+        console.error( `[Notifications ERROR] ${message}`, ...args );
         this.addDebugMessage( `ERROR: ${message}`, 'error' );
     }
     
@@ -5268,11 +5538,11 @@ class NotificationsUI {
 // Initialize when DOM is ready
 if ( document.readyState === 'loading' ) {
     document.addEventListener( 'DOMContentLoaded', () => {
-        window.freshQueueUI = new FreshQueueUI();
+        window.notificationsUI = new NotificationsUI();
     });
 } else {
-    window.freshQueueUI = new FreshQueueUI();
+    window.notificationsUI = new NotificationsUI();
 }
 
 // Make available globally for debugging
-window.FreshQueueUI = FreshQueueUI;
+window.NotificationsUI = NotificationsUI;
