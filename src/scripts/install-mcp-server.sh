@@ -100,8 +100,9 @@ echo ""
 
 # Build the claude mcp add command
 # Note: We use the venv python and set env vars
+# MCP_PROJECT is not needed - server auto-detects from working directory
 claude mcp add cosa-voice \
-    --env "MCP_PROJECT=lupin" \
+    --transport stdio \
     --env "LUPIN_APP_SERVER_URL=http://localhost:7999" \
     --env "PYTHONPATH=$LUPIN_ROOT/src" \
     -- "$VENV_PYTHON" "$MCP_SERVER"

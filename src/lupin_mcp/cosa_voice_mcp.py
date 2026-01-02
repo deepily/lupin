@@ -10,13 +10,21 @@ Provides four tools:
 
 Session ID Format: claude.code@{project}.deepily.ai
 
-Configuration (set by MCP JSON config, not manually):
-    MCP_PROJECT: Project name (required, will be lowercased)
+Project Detection (automatic):
+    1. Auto-detects from current working directory:
+       - genie-in-the-box, lupin → "lupin"
+       - planning-is-prompting → "plan"
+       - cosa (standalone) → "cosa"
+    2. Falls back to MCP_PROJECT env var if cwd detection fails
+    3. Falls back to "unknown" with console warning if neither works
+
+Environment Variables:
+    MCP_PROJECT: Fallback project name (optional, auto-detection preferred)
     LUPIN_APP_SERVER_URL: Server URL (default: http://localhost:7999)
     MCP_DEBUG: Enable debug logging (optional)
 
 Usage:
-    # MCP_PROJECT is set by your MCP JSON config's env section
+    # One MCP registration works for all projects via auto-detection
     claude mcp add cosa-voice -- python /path/to/cosa_voice_mcp.py
 """
 
@@ -68,19 +76,83 @@ def _get_server_url() -> str:
     return os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
 
 
-def _get_project() -> str:
-    """Get project name from environment, lowercased.
+def _detect_project_from_cwd() -> Optional[ str ]:
+    """Attempt to detect project name from current working directory.
 
-    Note: MCP_PROJECT is set by the MCP JSON config, not manually by the user.
-    Each project's MCP config specifies its project name in the env section.
+    Requires:
+        - Current working directory is accessible
+
+    Ensures:
+        - Returns lowercase project name if detected
+        - Returns None if no known project pattern found
+
+    Known project patterns:
+        - genie-in-the-box, lupin → "lupin"
+        - planning-is-prompting → "plan"
+        - cosa (standalone, not as subdir) → "cosa"
     """
+    try:
+        cwd = os.getcwd().lower()
+
+        # Lupin project detection (main repo)
+        if "genie-in-the-box" in cwd or "/lupin" in cwd:
+            return "lupin"
+
+        # Planning-is-Prompting project detection
+        if "planning-is-prompting" in cwd:
+            return "plan"
+
+        # CoSA standalone (not as submodule within genie-in-the-box)
+        # Check it's not inside genie-in-the-box first
+        if "/cosa" in cwd and "genie-in-the-box" not in cwd:
+            return "cosa"
+
+        return None
+
+    except Exception as e:
+        logger.debug( f"Could not detect project from cwd: {e}" )
+        return None
+
+
+def _get_project() -> str:
+    """Get project name with dynamic detection and fallback.
+
+    Detection priority:
+        1. Auto-detect from current working directory
+        2. MCP_PROJECT environment variable
+        3. Fallback to "unknown" (with warning)
+
+    Note: MCP_PROJECT can be set in MCP JSON config's env section as a default,
+    but dynamic detection from cwd takes precedence for multi-project support.
+    """
+    # Priority 1: Try dynamic detection from working directory
+    detected = _detect_project_from_cwd()
+    if detected:
+        logger.info( f"Project auto-detected from cwd: {detected}" )
+        return detected
+
+    # Priority 2: Check environment variable
     project = os.getenv( "MCP_PROJECT", "" ).strip()
-    if not project:
-        logger.error( "MCP_PROJECT environment variable required" )
-        logger.error( "This should be set in your MCP JSON config's env section:" )
-        logger.error( '  "env": { "MCP_PROJECT": "lupin" }' )
-        sys.exit( 1 )
-    return project.lower()
+    if project:
+        logger.info( f"Project from MCP_PROJECT env var: {project.lower()}" )
+        return project.lower()
+
+    # Priority 3: Fallback to unknown with prominent warning
+    logger.warning( "=" * 60 )
+    logger.warning( "⚠️  PROJECT DETECTION FAILED - USING 'unknown'" )
+    logger.warning( "=" * 60 )
+    logger.warning( f"Current working directory: {os.getcwd()}" )
+    logger.warning( "Could not detect project from path, and MCP_PROJECT env var not set." )
+    logger.warning( "" )
+    logger.warning( "Notifications will appear as: claude.code@unknown.deepily.ai" )
+    logger.warning( "" )
+    logger.warning( "To fix, either:" )
+    logger.warning( "  1. Run Claude Code from within a known project directory" )
+    logger.warning( "  2. Set MCP_PROJECT in your MCP config's env section:" )
+    logger.warning( '     "env": { "MCP_PROJECT": "your-project-name" }' )
+    logger.warning( "=" * 60 )
+
+    return "unknown"
 
 
 def _get_sender_id( project: str ) -> str:
