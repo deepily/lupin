@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "cosa-voice": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.py"],
+      "env": {
+        "MCP_PROJECT": "lupin",
+        "LUPIN_APP_SERVER_URL": "http://localhost:7999",
+        "PYTHONPATH": "${LUPIN_ROOT}/src:${PYTHONPATH}"
+      }
+    }
+  }
+}

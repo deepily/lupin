@@ -1,10 +1,10 @@
 /**
- * Fresh Queue UI - Unified JavaScript Module
+ * Notifications UI - Unified JavaScript Module
  * Single-file implementation to replace complex multi-file architecture
  * Handles WebSocket connections, authentication, Q&A, and TTS functionality
  */
 
-class FreshQueueUI {
+class NotificationsUI {
     constructor() {
         // Configuration
         this.debug = true;
@@ -112,12 +112,12 @@ class FreshQueueUI {
         this.jobCompletionCacheInitialized = false;
         
         // Storage keys
-        this.QUEUE_SESSION_KEY = 'fresh_queue_session_id';
-        this.AUDIO_SESSION_KEY = 'fresh_audio_session_id';
-        this.USER_EMAIL_KEY = 'fresh_user_email';
-        this.VERSION_KEY = 'fresh_queue_version';
-        this.QUEUE_FILTER_PREF_KEY = 'fresh_queue_filter_preference';  // NEW: Filter mode storage
-        this.CURRENT_VERSION = '1.1.1'; // Increment to invalidate old cache
+        this.QUEUE_SESSION_KEY = 'notifications_queue_session_id';
+        this.AUDIO_SESSION_KEY = 'notifications_audio_session_id';
+        this.USER_EMAIL_KEY = 'notifications_user_email';
+        this.VERSION_KEY = 'notifications_version';
+        this.QUEUE_FILTER_PREF_KEY = 'notifications_filter_preference';  // Filter mode storage
+        this.CURRENT_VERSION = '2.0.0'; // Increment to invalidate old cache - date grouping release
 
         // User role and filter state
         this.userRoles = [];  // NEW: User's roles from JWT
@@ -130,18 +130,24 @@ class FreshQueueUI {
         this.keyboardListenerActive = false;  // Track if keyboard listener is attached
 
         // ========================================
-        // SENDER-AWARE NOTIFICATION GROUPING (Phase 5)
+        // SENDER-AWARE NOTIFICATION GROUPING WITH DATE ACCORDIONS
         // ========================================
 
-        // Sender groups: Map<sender_id, { notifications: [], collapsed: boolean, lastActivity: Date }>
+        // Sender groups: Map<sender_id, {
+        //   dateGroups: Map<dateString, notifications[]>,
+        //   collapsed: boolean,
+        //   lastActivity: Date,
+        //   totalCount: number,
+        //   newCount: number
+        // }>
         this.senderGroups = new Map();
 
         // Default sender for notifications without sender_id
         this.UNKNOWN_SENDER = "claude.code@unknown.deepily.ai";
 
         // History window configuration (activity-anchored loading)
-        this.HISTORY_WINDOW_KEY = 'fresh_queue_history_window';
-        this.historyWindowHours = parseInt( localStorage.getItem( this.HISTORY_WINDOW_KEY ) ) || 24;
+        this.HISTORY_WINDOW_KEY = 'notifications_history_window';
+        this.historyWindowHours = parseInt( localStorage.getItem( this.HISTORY_WINDOW_KEY ) ) || 168; // Default to 7 days for date grouping
         this.WINDOW_OPTIONS = [
             { label: 'Last 24 hours', hours: 24 },
             { label: 'Last 2 days',   hours: 48 },
@@ -170,7 +176,7 @@ class FreshQueueUI {
     // ========================================
     
     async init() {
-        this.log( "FreshQueueUI initializing..." );
+        this.log( "NotificationsUI initializing..." );
         
         try {
             // Check and clear old cache if needed
@@ -215,7 +221,7 @@ class FreshQueueUI {
             // Auto-focus STT button for spacebar activation
             document.getElementById( 'qa-stt-button' ).focus();
 
-            this.log( "FreshQueueUI initialization complete" );
+            this.log( "NotificationsUI initialization complete" );
 
         } catch ( error ) {
             this.error( "Initialization failed:", error );

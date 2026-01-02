@@ -2,32 +2,34 @@
 """
 CoSA Voice MCP Server - Voice I/O bridge for Claude Code.
 
-Provides three tools:
+Provides four tools:
   - converse(): Speak to user, wait for voice/text response (blocking)
   - notify(): Announce to user without waiting (fire-and-forget)
   - ask_yes_no(): Quick yes/no decision (convenience wrapper)
+  - get_session_info(): Get current session identification
 
 Session ID Format: claude.code@{project}.deepily.ai
 
-Configuration:
-    MCP_PROJECT: Project name (set by MCP config, will be lowercased)
+Configuration (set by MCP JSON config, not manually):
+    MCP_PROJECT: Project name (required, will be lowercased)
+    LUPIN_APP_SERVER_URL: Server URL (default: http://localhost:7999)
+    MCP_DEBUG: Enable debug logging (optional)
 
 Usage:
-    # MCP_PROJECT is set by your MCP JSON config, not manually
+    # MCP_PROJECT is set by your MCP JSON config's env section
     claude mcp add cosa-voice -- python /path/to/cosa_voice_mcp.py
-
-Works with both:
-    - Option A: Print mode (bounded tasks)
-    - Option B: SDK Client (interactive sessions)
 """
 
+import logging
 import os
+import signal
 import sys
 from typing import Optional
+
 from pydantic import ValidationError
 from fastmcp import FastMCP
 
-# Import from cosa.cli (the updated notification library)
+# Import from cosa.cli (the notification library)
 from cosa.cli.notification_models import (
     NotificationRequest,
     AsyncNotificationRequest,
@@ -40,10 +42,31 @@ from cosa.cli.notification_models import (
 from cosa.cli.notify_user_sync import notify_user_sync
 from cosa.cli.notify_user_async import notify_user_async
 
+# ============================================================================
+# Logging Configuration
+# ============================================================================
+
+logging.basicConfig(
+    level=logging.DEBUG if os.getenv( "MCP_DEBUG" ) else logging.INFO,
+    format="[%(asctime)s] %(levelname)s: %(message)s",
+    stream=sys.stderr
+)
+logger = logging.getLogger( __name__ )
 
 # ============================================================================
-# Session Configuration
+# Version
 # ============================================================================
+
+__version__ = "0.1.0"
+
+# ============================================================================
+# Configuration
+# ============================================================================
+
+def _get_server_url() -> str:
+    """Get Lupin server URL from environment."""
+    return os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
+
 
 def _get_project() -> str:
     """Get project name from environment, lowercased.
@@ -53,22 +76,41 @@ def _get_project() -> str:
     """
     project = os.getenv( "MCP_PROJECT", "" ).strip()
     if not project:
-        print( "Error: MCP_PROJECT environment variable required", file=sys.stderr )
-        print( "This should be set in your MCP JSON config's env section:", file=sys.stderr )
-        print( '  "env": { "MCP_PROJECT": "lupin" }', file=sys.stderr )
+        logger.error( "MCP_PROJECT environment variable required" )
+        logger.error( "This should be set in your MCP JSON config's env section:" )
+        logger.error( '  "env": { "MCP_PROJECT": "lupin" }' )
         sys.exit( 1 )
     return project.lower()
 
 
-def _get_sender_id(project: str) -> str:
+def _get_sender_id( project: str ) -> str:
     """Generate sender_id in format: claude.code@{project}.deepily.ai"""
     return f"claude.code@{project}.deepily.ai"
 
 
-# Initialize at module load
-PROJECT = _get_project()
-SENDER_ID = _get_sender_id(PROJECT)
+# ============================================================================
+# Signal Handlers
+# ============================================================================
 
+def _handle_sigterm( signum, frame ):
+    """Handle SIGTERM for graceful shutdown."""
+    logger.info( "Received SIGTERM, shutting down gracefully" )
+    sys.exit( 0 )
+
+
+signal.signal( signal.SIGTERM, _handle_sigterm )
+
+# ============================================================================
+# Initialize at module load
+# ============================================================================
+
+PROJECT    = _get_project()
+SENDER_ID  = _get_sender_id( PROJECT )
+SERVER_URL = _get_server_url()
+
+logger.info( f"Project: {PROJECT}" )
+logger.info( f"Sender ID: {SENDER_ID}" )
+logger.info( f"Server URL: {SERVER_URL}" )
 
 # ============================================================================
 # MCP Server
@@ -85,17 +127,17 @@ def converse(
     message: str,
     response_type: str = "open_ended",
     timeout_seconds: int = 120,
-    response_default: Optional[str] = None,
+    response_default: Optional[ str ] = None,
     priority: str = "medium",
-    title: Optional[str] = None
+    title: Optional[ str ] = None
 ) -> str:
     """
     Speak to the user and wait for their voice/text response.
-    
+
     Use this when you need input, clarification, or a decision from the user.
     The message will be converted to speech (TTS) and played to the user.
     Their response (via voice or text) will be returned to you.
-    
+
     Args:
         message: What to say to the user
         response_type: "yes_no" for binary choices, "open_ended" for free-form
@@ -103,30 +145,33 @@ def converse(
         response_default: Fallback if timeout or user offline
         priority: "low", "medium", "high", or "urgent"
         title: Optional short title for the notification
-    
+
     Returns:
         User's response as text, or error/timeout message
-    
+
     Examples:
         converse("Should I proceed with the refactor?", response_type="yes_no")
         converse("What naming convention should I use for the new module?")
         converse("The tests are failing. Should I continue?", response_default="yes")
     """
+    logger.debug( f"converse() called: {message[:50]}..." )
+
     try:
         request = NotificationRequest(
             message=message,
-            response_type=ResponseType(response_type),
+            response_type=ResponseType( response_type ),
             notification_type=NotificationType.CUSTOM,
-            priority=NotificationPriority(priority),
+            priority=NotificationPriority( priority ),
             timeout_seconds=timeout_seconds,
             response_default=response_default,
             title=title,
-            sender_id=SENDER_ID  # Native field in updated library
+            sender_id=SENDER_ID
         )
-    except (ValidationError, ValueError) as e:
+    except ( ValidationError, ValueError ) as e:
+        logger.error( f"Validation error: {e}" )
         return f"[validation error: {e}]"
 
-    response: NotificationResponse = notify_user_sync(request=request, debug=False)
+    response: NotificationResponse = notify_user_sync( request=request, debug=False )
 
     if response.exit_code == 0:
         prefix = "[default used] " if response.default_used else ""
@@ -147,35 +192,38 @@ def notify(
 ) -> str:
     """
     Announce something to the user without waiting for response.
-    
+
     Use this for status updates, progress reports, or FYI messages.
     The message will be converted to speech (TTS) and played to the user.
     This call returns immediately - it does not wait for acknowledgment.
-    
+
     Args:
         message: What to announce to the user
         notification_type: "task", "progress", "alert", or "custom"
         priority: "low", "medium", "high", or "urgent"
-    
+
     Returns:
         Delivery status message
-    
+
     Examples:
         notify("Starting code analysis...", notification_type="progress")
         notify("Build completed successfully", notification_type="task")
         notify("Warning: deprecated API detected", notification_type="alert", priority="high")
     """
+    logger.debug( f"notify() called: {message[:50]}..." )
+
     try:
         request = AsyncNotificationRequest(
             message=message,
-            notification_type=NotificationType(notification_type),
-            priority=NotificationPriority(priority),
-            sender_id=SENDER_ID  # Native field in updated library
+            notification_type=NotificationType( notification_type ),
+            priority=NotificationPriority( priority ),
+            sender_id=SENDER_ID
         )
-    except (ValidationError, ValueError) as e:
+    except ( ValidationError, ValueError ) as e:
+        logger.error( f"Validation error: {e}" )
         return f"[validation error: {e}]"
 
-    response: AsyncNotificationResponse = notify_user_async(request=request, debug=False)
+    response: AsyncNotificationResponse = notify_user_async( request=request, debug=False )
 
     if response.success:
         return f"Notification sent ({response.status})"
@@ -191,23 +239,25 @@ def ask_yes_no(
 ) -> bool:
     """
     Ask a yes/no question and get a boolean result.
-    
+
     Convenience wrapper for quick binary decisions.
-    
+
     Args:
         question: The yes/no question to ask
         default: Default answer if timeout ("yes" or "no")
         timeout_seconds: How long to wait (default 60)
-    
+
     Returns:
         True if user said yes, False otherwise
-    
+
     Examples:
         if ask_yes_no("Delete the old backups?"):
             # User said yes
         if ask_yes_no("Continue despite warnings?", default="no"):
             # User said yes (or default was overridden)
     """
+    logger.debug( f"ask_yes_no() called: {question[:50]}..." )
+
     try:
         request = NotificationRequest(
             message=question,
@@ -218,10 +268,10 @@ def ask_yes_no(
             response_default=default,
             sender_id=SENDER_ID
         )
-    except (ValidationError, ValueError):
+    except ( ValidationError, ValueError ):
         return default == "yes"
 
-    response: NotificationResponse = notify_user_sync(request=request, debug=False)
+    response: NotificationResponse = notify_user_sync( request=request, debug=False )
 
     if response.exit_code == 0 and response.response_value:
         return response.response_value.lower().strip() == "yes"
@@ -232,18 +282,18 @@ def ask_yes_no(
 @mcp.tool
 def get_session_info() -> dict:
     """
-    Get current session identification.
-    
+    Get current session identification and server info.
+
     Returns:
-        dict with project name and sender_id
+        dict with project name, sender_id, server_url, and version
     """
     return {
-        "project": PROJECT,
-        "sender_id": SENDER_ID
+        "project"    : PROJECT,
+        "sender_id"  : SENDER_ID,
+        "server_url" : SERVER_URL,
+        "version"    : __version__
     }
 
 
 if __name__ == "__main__":
-    print(f"Project: {PROJECT}", file=sys.stderr)
-    print(f"Sender ID: {SENDER_ID}", file=sys.stderr)
     mcp.run()
