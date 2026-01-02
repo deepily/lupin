@@ -3905,8 +3905,20 @@ class NotificationsUI {
             for ( const dateString of sortedDates ) {
                 const notifications = dateGroupedData[ dateString ];
                 for ( const notification of notifications ) {
-                    const isResponse = notification.state === 'responded' && notification.responded_at;
-                    this.addNotificationToSenderGroup( notification, isResponse );
+                    // Always render original notification as incoming (left-aligned)
+                    this.addNotificationToSenderGroup( notification, false );
+
+                    // If user responded, render their response as a separate outgoing message
+                    if ( notification.response_value && notification.response_value.value ) {
+                        const responseNotification = {
+                            ...notification,
+                            id              : `${notification.id}-response`,
+                            message         : notification.response_value.value,
+                            created_at      : notification.responded_at,
+                            response_value  : null  // Prevent infinite recursion
+                        };
+                        this.addNotificationToSenderGroup( responseNotification, true );
+                    }
                 }
             }
 
@@ -4915,13 +4927,14 @@ class NotificationsUI {
             console.log( '[DEBUG] response_default value:', notification.response_default );
             console.log( '[DEBUG] response_default type:', typeof notification.response_default );
 
+            // Voice-first layout: mic button first for immediate keyboard activation
             responseUI = `
                 <div class="response-open-ended">
                     <div class="response-input-container">
-                        <input type="text" class="response-text-input" id="response-input-${notification.id}" value="${notification.response_default || ''}" placeholder="Type your response...">
-                        <button class="response-mic-button" data-notification-id="${notification.id}" title="Click to start recording (30s max, ESC to cancel)">
+                        <button class="response-mic-button" data-notification-id="${notification.id}" title="Press Enter or Space to record (30s max, ESC to cancel)">
                             🎤
                         </button>
+                        <input type="text" class="response-text-input" id="response-input-${notification.id}" value="${notification.response_default || ''}" placeholder="Type your response...">
                         <button class="response-submit-button" data-notification-id="${notification.id}">
                             Submit
                         </button>
@@ -4943,6 +4956,14 @@ class NotificationsUI {
         `;
 
         container.appendChild( card );
+
+        // Scroll the action required section into view (delay ensures DOM is settled)
+        setTimeout( () => {
+            const section = document.getElementById( 'action-required-section' );
+            if ( section ) {
+                section.scrollIntoView( { behavior: 'smooth', block: 'start' } );
+            }
+        }, 50 );
 
         // Attach event listeners
         if ( notification.response_type === 'yes_no' ) {
@@ -4984,11 +5005,8 @@ class NotificationsUI {
             // Phase 2.4.2: Run initial validation (enables button if default value exists)
             validateInput();
 
-            // Phase 2.4.2: Auto-focus and select all text for fastest keyboard response
-            input.focus();
-            if ( notification.response_default ) {
-                input.select();  // Select all text - typing replaces, arrows enter insert mode
-            }
+            // Voice-first: focus mic button for immediate Enter/Space activation
+            micButton.focus( { preventScroll: true } );
 
             // Validate on input
             input.addEventListener( 'input', validateInput );
@@ -5007,6 +5025,14 @@ class NotificationsUI {
 
             micButton.addEventListener( 'click', () => {
                 this.startVoiceInput( notification.id );
+            } );
+
+            // Voice-first: Enter/Space activates voice recording when mic button is focused
+            micButton.addEventListener( 'keydown', ( e ) => {
+                if ( e.key === 'Enter' || e.key === ' ' ) {
+                    e.preventDefault();  // Prevent space from scrolling page
+                    this.startVoiceInput( notification.id );
+                }
             } );
         }
     }
@@ -5147,6 +5173,12 @@ class NotificationsUI {
                 // Cleanup action-required state
                 this.actionRequiredNotifications.delete( notificationId );
                 this.updateActionRequiredCount();
+
+                // Scroll sender card into view after DOM changes (moveSenderCardToTop shifts layout)
+                const senderCard = document.getElementById( destination.cardId );
+                if ( senderCard ) {
+                    senderCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
+                }
             } );
         } else {
             // Fallback: no animation, just show responded state
@@ -5227,6 +5259,12 @@ class NotificationsUI {
                 // Cleanup action-required state
                 this.actionRequiredNotifications.delete( notificationId );
                 this.updateActionRequiredCount();
+
+                // Scroll sender card into view after DOM changes (moveSenderCardToTop shifts layout)
+                const senderCard = document.getElementById( destination.cardId );
+                if ( senderCard ) {
+                    senderCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
+                }
             } );
         } else {
             // Fallback: no animation, just show expired state in place
@@ -5497,7 +5535,8 @@ class NotificationsUI {
             );
 
             if ( !isVisible ) {
-                element.scrollIntoView( { behavior: 'smooth', block: 'center' } );
+                // Scroll to top of element - new messages appear at top of sender card
+                element.scrollIntoView( { behavior: 'smooth', block: 'start' } );
                 // Wait for scroll to complete (approximate)
                 setTimeout( resolve, 300 );
             } else {
@@ -5539,13 +5578,7 @@ class NotificationsUI {
         } );
 
         try {
-            // Step 1: Scroll destination into view if needed
-            const destCard = document.getElementById( destination.cardId );
-            if ( destCard ) {
-                await this.scrollIntoViewIfNeeded( destCard );
-            }
-
-            // Step 2: Auto-expand collapsed sender card
+            // Step 1: Auto-expand collapsed sender card (scroll happens after animation callback)
             if ( destination.isCollapsed ) {
                 this.expandSenderCard( destination.senderId );
                 // Small delay to let expansion animation complete
@@ -5650,8 +5683,8 @@ class NotificationsUI {
             // Scale decreases from 1 to 0.1 along the path
             const scale = 1 - ( t * 0.9 );
 
-            // Opacity decreases from 1 to 0 along the path
-            const opacity = 1 - t;
+            // Opacity decreases from 1 to 0.5 along the path (50% visible at end for debugging)
+            const opacity = 1 - ( t * 0.5 );
 
             // Rotation increases slightly for genie effect
             const rotation = t * 15;

@@ -561,6 +561,13 @@
             transition: all 0.2s;
         }
 
+        /* Voice-first focus styling - matches Q&A pattern */
+        .response-mic-button:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.4);
+            border-color: #0056b3;
+        }
+
         .response-mic-button:hover {
             background-color: #007bff;
             color: white;
@@ -1120,7 +1127,7 @@
             100% {
                 transform: scale( 0.1, 0.3 ) perspective( 500px ) rotateX( 15deg );
                 transform-origin: center bottom;
-                opacity: 0;
+                opacity: 0.5;  /* 50% visible at end for debugging */
             }
         }
 
@@ -1131,7 +1138,7 @@
                 transform: scale( 1 );
             }
             100% {
-                opacity: 0;
+                opacity: 0.5;  /* 50% visible at end for debugging */
                 transform: scale( 0.8 );
             }
         }
