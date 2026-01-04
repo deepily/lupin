@@ -298,12 +298,12 @@
 
         /* Action Required Section Styles (Phase 2.2 SSE Notifications) */
         #action-required-section {
-            border: 3px solid #fd7e14;
-            background-color: #fff3cd;
+            border: 3px solid #0d6efd;
+            background-color: #e7f1ff;
         }
 
         #action-required-section .section-header {
-            background-color: #fd7e14;
+            background-color: #0d6efd;
             color: white;
         }
 
@@ -312,7 +312,7 @@
         }
 
         .action-required-empty-state {
-            padding: 20px;
+            padding: 10px;
             text-align: center;
             color: #6c757d;
             font-size: 14px;
@@ -322,16 +322,16 @@
         .action-required-notification {
             margin-bottom: 20px;
             padding: 15px;
-            border: 2px solid #fd7e14;
+            border: 2px solid #0d6efd;
             border-radius: 6px;
             background-color: white;
-            box-shadow: 0 2px 8px rgba(253, 126, 20, 0.2);
+            box-shadow: 0 2px 8px rgba(13, 110, 253, 0.2);
             transition: all 0.3s ease;
         }
 
         /* Active state (default - can still respond) */
         .action-required-notification.active {
-            border-color: #fd7e14;
+            border-color: #0d6efd;
             background-color: white;
         }
 
@@ -1120,26 +1120,26 @@
                 opacity: 1;
             }
             40% {
-                transform: scale( 0.6, 0.8 ) perspective( 500px ) rotateX( 5deg );
+                transform: scale( 0.8, 0.85 ) perspective( 500px ) rotateX( 5deg );
                 transform-origin: center bottom;
                 opacity: 0.9;
             }
             100% {
-                transform: scale( 0.1, 0.3 ) perspective( 500px ) rotateX( 15deg );
+                transform: scale( 0.5, 0.55 ) perspective( 500px ) rotateX( 15deg );
                 transform-origin: center bottom;
-                opacity: 0.5;  /* 50% visible at end for debugging */
+                opacity: 0.5;  /* 50% visible at end */
             }
         }
 
-        /* Simple fade out for mobile/reduced motion */
-        @keyframes simpleFadeOut {
+        /* Shrink and fade out in place (no flying) */
+        @keyframes shrinkFadeOut {
             0% {
                 opacity: 1;
                 transform: scale( 1 );
             }
             100% {
-                opacity: 0.5;  /* 50% visible at end for debugging */
-                transform: scale( 0.8 );
+                opacity: 0;
+                transform: scale( 0.5 );
             }
         }
 
@@ -1155,16 +1155,26 @@
             }
         }
 
-        /* Animation state for action-required notifications */
-        .action-required-notification.animating {
-            animation: genieShrink 0.6s ease-in-out forwards;
-            pointer-events: none;
+        /* Pulsing gold glow for response highlight (visible against white container background) */
+        @keyframes responsePulseGlow {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba( 255, 193, 7, 0 );
+                outline: 3px solid transparent;
+            }
+            50% {
+                box-shadow: 0 0 25px 12px rgba( 255, 193, 7, 1 );
+                outline: 3px solid #ffc107;
+            }
         }
 
-        /* Flying state - fixed positioning for movement */
-        .action-required-notification.flying {
-            position: fixed;
-            z-index: 9999;
+        .sender-message.response-highlight {
+            animation: responsePulseGlow 0.6s ease-in-out 3 !important;
+            border-radius: 8px;
+        }
+
+        /* Shrink-fade animation state for action-required notifications */
+        .action-required-notification.shrink-fade {
+            animation: shrinkFadeOut 0.5s ease-out forwards;
             pointer-events: none;
         }
 

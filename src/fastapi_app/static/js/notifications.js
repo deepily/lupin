@@ -3397,7 +3397,9 @@ class NotificationsUI {
         // Update last activity and move card to top
         if ( timestamp > group.lastActivity ) {
             group.lastActivity = timestamp;
-            if ( !isNewSender ) {
+            // Only move card during runtime updates, not during initial page load
+            // (initial load relies on API sort order preserved via appendChild)
+            if ( !isNewSender && !this.isInitialLoad ) {
                 this.moveSenderCardToTop( senderId );
             }
         }
@@ -5161,26 +5163,50 @@ class NotificationsUI {
         // Get sender ID from notification
         const senderId = state.notification?.sender_id || this.UNKNOWN_SENDER;
 
-        // Calculate destination for animation
-        const destination = this.calculateDestination( senderId );
+        // Ensure sender card exists for the conversation
+        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        let senderCard = document.getElementById( cardId );
+        if ( !senderCard ) {
+            this.createSenderCard( senderId );
+            senderCard = document.getElementById( cardId );
+        }
 
-        if ( destination ) {
-            // Start genie animation
-            this.startGenieAnimation( notificationId, card, destination, () => {
-                // On animation complete: add conversation pair
+        // Simple shrink-fade animation in place (no flying)
+        card.classList.add( 'shrink-fade' );
+
+        // On animation complete: remove card, add conversation pair with highlight
+        card.addEventListener( 'animationend', () => {
+            // Remove the action-required card from DOM
+            card.remove();
+
+            // Add conversation pair to sender card (with pulsing highlight)
+            this.addConversationPair( senderId, state.notification, response, false );
+
+            // Cleanup action-required state
+            this.actionRequiredNotifications.delete( notificationId );
+            this.updateActionRequiredCount();
+
+            // Scroll sender card into view
+            if ( senderCard ) {
+                senderCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
+            }
+        }, { once: true } );
+
+        // Fallback in case animationend doesn't fire (shouldn't happen, but safety net)
+        setTimeout( () => {
+            if ( card.parentElement ) {
+                card.remove();
                 this.addConversationPair( senderId, state.notification, response, false );
-
-                // Cleanup action-required state
                 this.actionRequiredNotifications.delete( notificationId );
                 this.updateActionRequiredCount();
+            }
+        }, 600 );
 
-                // Scroll sender card into view after DOM changes (moveSenderCardToTop shifts layout)
-                const senderCard = document.getElementById( destination.cardId );
-                if ( senderCard ) {
-                    senderCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
-                }
-            } );
-        } else {
+        // Early return - we've handled the animation
+        return;
+
+        // Fallback code below only runs if we somehow get past the return (shouldn't happen)
+        if ( false ) {
             // Fallback: no animation, just show responded state
             this.log( 'No destination found, using fallback display' );
 
@@ -5680,8 +5706,8 @@ class NotificationsUI {
             const offsetX = x - x0;
             const offsetY = y - y0;
 
-            // Scale decreases from 1 to 0.1 along the path
-            const scale = 1 - ( t * 0.9 );
+            // Scale decreases from 1 to 0.5 along the path (50% end size)
+            const scale = 1 - ( t * 0.5 );
 
             // Opacity decreases from 1 to 0.5 along the path (50% visible at end for debugging)
             const opacity = 1 - ( t * 0.5 );
@@ -5767,6 +5793,16 @@ class NotificationsUI {
             // Add animation to the two newest messages
             if ( messages.length >= 1 ) messages[ 0 ].classList.add( 'animated-in' );
             if ( messages.length >= 2 ) messages[ 1 ].classList.add( 'animated-in' );
+
+            // Add pulsing highlight to the response (first message = most recent)
+            // This draws attention to where the response now "lives" in the conversation
+            if ( messages.length >= 1 ) {
+                messages[ 0 ].classList.add( 'response-highlight' );
+                // Remove highlight class after animation completes (3 pulses * 0.6s = 1.8s)
+                setTimeout( () => {
+                    messages[ 0 ].classList.remove( 'response-highlight' );
+                }, 1800 );
+            }
         }
 
         // Update sender card header

@@ -36,7 +36,7 @@ from unittest import mock
 
 # Path bootstrapped by src/tests/conftest.py - cosa now importable
 import cosa.utils.util as cu
-from cosa.orchestration import CosaDispatcher, Task, TaskType, TaskResult
+from cosa.orchestration import ClaudeCodeDispatcher, Task, TaskType, TaskResult
 
 
 # ============================================================================
@@ -57,12 +57,12 @@ def project_root():
 @pytest.fixture( scope="module" )
 def dispatcher():
     """
-    Create a CosaDispatcher instance for testing.
+    Create a ClaudeCodeDispatcher instance for testing.
 
     Returns:
-        CosaDispatcher: Configured dispatcher instance
+        ClaudeCodeDispatcher: Configured dispatcher instance
     """
-    return CosaDispatcher()
+    return ClaudeCodeDispatcher()
 
 
 @pytest.fixture( scope="module" )
@@ -128,7 +128,7 @@ class TestDispatcherUnit:
 
     def test_import_dispatcher( self ):
         """Test that dispatcher module can be imported."""
-        assert CosaDispatcher is not None
+        assert ClaudeCodeDispatcher is not None
         assert Task is not None
         assert TaskType is not None
         assert TaskResult is not None
@@ -190,7 +190,7 @@ class TestDispatcherUnit:
         assert result.exit_code == -1
 
     def test_dispatcher_creation( self, dispatcher ):
-        """Test CosaDispatcher instantiation."""
+        """Test ClaudeCodeDispatcher instantiation."""
         assert dispatcher is not None
         assert dispatcher.mcp_config_path.endswith( "cosa_mcp.json" )
         assert dispatcher.mcp_server_path.endswith( "cosa_voice_mcp.py" )
