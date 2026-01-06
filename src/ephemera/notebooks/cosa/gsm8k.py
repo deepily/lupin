@@ -277,13 +277,13 @@ if __name__ == "__main__":
         env_value = os.environ[ "LUPIN_ROOT" ]
         print( f"Using env.LUPIN_ROOT [{env_value}]" )
         
-    if "GENIE_IN_THE_BOX_TGI_SERVER" not in os.environ:
+    if "LUPIN_TGI_SERVER" not in os.environ:
         default = "http://127.0.0.1:3000/v1"
-        print( f"GENIE_IN_THE_BOX_TGI_SERVER not set, using default [{default}]..." )
-        os.environ[ "GENIE_IN_THE_BOX_TGI_SERVER" ] = default
+        print( f"LUPIN_TGI_SERVER not set, using default [{default}]..." )
+        os.environ[ "LUPIN_TGI_SERVER" ] = default
     else:
-        env_value = os.environ[ "GENIE_IN_THE_BOX_TGI_SERVER" ]
-        print( f"Using env.GENIE_IN_THE_BOX_TGI_SERVER [{env_value}]" )
+        env_value = os.environ[ "LUPIN_TGI_SERVER" ]
+        print( f"Using env.LUPIN_TGI_SERVER [{env_value}]" )
         
     if "LUPIN_CONFIG_MGR_CLI_ARGS" not in os.environ:
         default = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
