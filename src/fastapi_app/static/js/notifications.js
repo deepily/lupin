@@ -3514,8 +3514,28 @@ class NotificationsUI {
             </div>
         `;
 
-        // Append in order (dates are pre-sorted descending in loadSenderConversation)
-        container.appendChild( accordion );
+        // Insert in descending chronological order (newest dates at top)
+        // Date strings are ISO format (YYYY-MM-DD), lexicographically comparable
+        const existingAccordions = container.querySelectorAll( '.date-accordion' );
+        let insertBefore = null;
+
+        for ( const existing of existingAccordions ) {
+            // Extract date from accordion id: "date-accordion-{senderId}-{dateString}"
+            const existingDate = existing.id.split( '-' ).slice( -3 ).join( '-' );
+            if ( dateString > existingDate ) {
+                // New date is newer, insert before this one
+                insertBefore = existing;
+                break;
+            }
+        }
+
+        if ( insertBefore ) {
+            container.insertBefore( accordion, insertBefore );
+        } else {
+            // New date is oldest, append to end
+            container.appendChild( accordion );
+        }
+
         this.log( `Created date accordion for ${senderId} on ${dateString}` );
     }
 
