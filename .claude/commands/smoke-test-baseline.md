@@ -62,7 +62,7 @@ fi
 Execute the following commands to prepare for data collection:
 
 ```bash
-cd /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box
+cd /mnt/DATA01/include/www.deepily.ai/projects/lupin
 
 # Create logs directory structure
 mkdir -p src/tests/logs
@@ -108,7 +108,7 @@ if [ "$SCOPE" = "full" ]; then
     TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
     # Set up CoSA environment
-    export PYTHONPATH="/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src:$PYTHONPATH"
+    export PYTHONPATH="/mnt/DATA01/include/www.deepily.ai/projects/lupin/src:$PYTHONPATH"
 
     # Create CoSA log file
     LOG_FILE="src/tests/logs/baseline_cosa_smoke_${TIMESTAMP}.log"

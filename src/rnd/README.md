@@ -5,7 +5,7 @@ This directory contains research and development documents for the Lupin project
 ## Recent Additions
 
 ### 2026.01.05 - Directory Rename Planning
-- **Directory Rename Plan**: [2026.01.05-directory-rename-genie-to-lupin-plan.md](2026.01.05-directory-rename-genie-to-lupin-plan.md) - **⏳ PENDING** - Comprehensive plan for renaming project directory from `genie-in-the-box` to `lupin`. Covers 76+ internal files, 6 external configs, 2 virtual environments, backup directories. 100% removal of "genie" naming (except legacy Jupyter notebooks). Estimated ~90 minutes execution time. 24-step checklist with rollback plan.
+- **Directory Rename Plan**: [2026.01.05-directory-rename-genie-to-lupin-plan.md](2026.01.05-directory-rename-genie-to-lupin-plan.md) - **⏳ PENDING** - Comprehensive plan for renaming project directory from `lupin` to `lupin`. Covers 76+ internal files, 6 external configs, 2 virtual environments, backup directories. 100% removal of "genie" naming (except legacy Jupyter notebooks). Estimated ~90 minutes execution time. 24-step checklist with rollback plan.
 
 ### 2026.01.02 - Claude Code Voice MCP Integration
 - **Design Document**: [2025.12.31-claude-code-via-mcp-and-cosa-vox/2025.12.30-claude_code_voice_mcp_guide.md](2025.12.31-claude-code-via-mcp-and-cosa-vox/2025.12.30-claude_code_voice_mcp_guide.md) - **📋 DESIGN COMPLETE** - Comprehensive 935-line architecture guide for voice-enabled MCP server. Covers two operational modes: Option A (Print Mode for bounded tasks) and Option B (SDK Client for interactive sessions), plus Cold Call voice-initiated sessions.

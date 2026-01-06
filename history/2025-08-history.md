@@ -131,15 +131,15 @@ Successfully resolved critical FastAPI startup failures caused by corrupted JSON
 
 #### History Management Implementation
 - **Updated**: `/home/rruiz/.claude/CLAUDE.md` - Added comprehensive history management patterns
-- **Updated**: `/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/CLAUDE.md` - New structure references
-- **Optimized**: `/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md` - Reduced to 600 tokens
-- **Organized**: `/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history/2025-08-history.md` - Complete August details
-- **Organized**: `/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history/2025-07-history.md` - Complete July details
-- **Consolidated**: `/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history/2025-06-history.md` - ALL June content
-- **Cleaned**: `/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history/2025-05-and-earlier-history.md` - ONLY May and earlier
+- **Updated**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin/CLAUDE.md` - New structure references
+- **Optimized**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md` - Reduced to 600 tokens
+- **Organized**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin/history/2025-08-history.md` - Complete August details
+- **Organized**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin/history/2025-07-history.md` - Complete July details
+- **Consolidated**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin/history/2025-06-history.md` - ALL June content
+- **Cleaned**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin/history/2025-05-and-earlier-history.md` - ONLY May and earlier
 
 #### Solution Snapshot Recovery
-- **Deleted**: `/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src/conf/long-term-memory/solutions/whats-two-plus-two-0.json` - Corrupted 0-byte file
+- **Deleted**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/conf/long-term-memory/solutions/whats-two-plus-two-0.json` - Corrupted 0-byte file
 
 ### 🔧 Technical Implementation Details
 

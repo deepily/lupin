@@ -584,7 +584,7 @@ Documentation files created in `docs/auth/`:
 
 - **Architecture**: [jwt-oauth-architecture-reference.md](jwt-oauth-architecture-reference.md)
 - **Completed Phases**: [completed-phases/](completed-phases/)
-- **Source Document**: `/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src/rnd/2025.09.29-jwt-oauth-implementation-design-and-tracker.md`
+- **Source Document**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/rnd/2025.09.29-jwt-oauth-implementation-design-and-tracker.md`
 - **Configuration**: `src/conf/lupin-app.ini`
 - **Auth Code**: `src/cosa/rest/` (auth.py, jwt_service.py, user_service.py, etc.)
 - **Tests**: `src/tests/` (smoke tests, unit tests, integration tests)

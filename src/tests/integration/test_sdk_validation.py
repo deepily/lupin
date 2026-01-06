@@ -13,7 +13,7 @@ PREREQUISITES:
        npm install -g @anthropic-ai/claude-code
 
     3. LUPIN_ROOT environment variable set
-       export LUPIN_ROOT=/path/to/genie-in-the-box
+       export LUPIN_ROOT=/path/to/lupin
 
 RUNNING TESTS:
     # Run SDK validation tests

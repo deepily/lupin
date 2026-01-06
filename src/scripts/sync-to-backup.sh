@@ -18,8 +18,8 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Paths
-SOURCE_DIR="/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/"
-DEST_DIR="/mnt/DATA02/include/www.deepily.ai/projects/genie-in-the-box/"
+SOURCE_DIR="/mnt/DATA01/include/www.deepily.ai/projects/lupin/"
+DEST_DIR="/mnt/DATA02/include/www.deepily.ai/projects/lupin/"
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 EXCLUDE_FILE="$SCRIPT_DIR/conf/rsync-exclude.txt"
 

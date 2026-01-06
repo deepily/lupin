@@ -15,7 +15,7 @@ PREREQUISITES:
        pip install claude-agent-sdk
 
     4. LUPIN_ROOT environment variable set
-       export LUPIN_ROOT=/path/to/genie-in-the-box
+       export LUPIN_ROOT=/path/to/lupin
 
 RUNNING TESTS:
     # Run bidirectional tests

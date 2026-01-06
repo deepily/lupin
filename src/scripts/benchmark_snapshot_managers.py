@@ -15,7 +15,7 @@ if lupin_root is None:
     raise RuntimeError(
         "LUPIN_ROOT environment variable not set.\n"
         "Set it before running benchmark:\n"
-        "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box\n"
+        "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin\n"
         "  python src/scripts/benchmark_snapshot_managers.py"
     )
 

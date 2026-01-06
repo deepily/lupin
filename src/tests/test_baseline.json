@@ -9,7 +9,7 @@
         "content-length": "116",
         "content-type": "application/json"
       },
-      "body": "{\"status\":\"healthy\",\"service\":\"genie-in-the-box-fastapi\",\"timestamp\":\"2025-06-24T01:45:41.942996\",\"version\":\"0.1.0\"}",
+      "body": "{\"status\":\"healthy\",\"service\":\"lupin-fastapi\",\"timestamp\":\"2025-06-24T01:45:41.942996\",\"version\":\"0.1.0\"}",
       "success": true
     },
     "GET /health": {

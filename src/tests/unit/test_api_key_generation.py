@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 
 # Bootstrap: Add src to path for imports
-lupin_root = os.environ.get( 'LUPIN_ROOT', '/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box' )
+lupin_root = os.environ.get( 'LUPIN_ROOT', '/mnt/DATA01/include/www.deepily.ai/projects/lupin' )
 src_path = os.path.join( lupin_root, 'src' )
 if src_path not in sys.path:
     sys.path.insert( 0, src_path )

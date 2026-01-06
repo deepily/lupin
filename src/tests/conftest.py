@@ -13,7 +13,7 @@ if lupin_root is None:
     raise RuntimeError(
         "LUPIN_ROOT environment variable not set.\n"
         "Set it before running tests:\n"
-        "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box\n"
+        "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin\n"
         "  pytest src/tests/"
     )
 

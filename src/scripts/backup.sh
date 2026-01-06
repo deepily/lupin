@@ -12,8 +12,8 @@
 
 # === CONFIG START ===
 # CUSTOMIZE these paths for your project
-SOURCE_DIR="/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/"
-DEST_DIR="/mnt/DATA02/include/www.deepily.ai/projects/genie-in-the-box/"
+SOURCE_DIR="/mnt/DATA01/include/www.deepily.ai/projects/lupin/"
+DEST_DIR="/mnt/DATA02/include/www.deepily.ai/projects/lupin/"
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 EXCLUDE_FILE="$SCRIPT_DIR/conf/rsync-exclude.txt"
 PROJECT_NAME="Lupin"

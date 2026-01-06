@@ -16,7 +16,7 @@ PREREQUISITES:
        npm install -g @anthropic-ai/claude-code
 
     3. LUPIN_ROOT environment variable set
-       export LUPIN_ROOT=/path/to/genie-in-the-box
+       export LUPIN_ROOT=/path/to/lupin
 
 RUNNING:
     PYTHONPATH="$PWD/src:$PYTHONPATH" LUPIN_ROOT="$PWD" MCP_PROJECT="lupin" \
@@ -35,7 +35,7 @@ from datetime import datetime
 lupin_root = os.environ.get( "LUPIN_ROOT" )
 if not lupin_root:
     print( "ERROR: LUPIN_ROOT environment variable not set" )
-    print( "Run: export LUPIN_ROOT=/path/to/genie-in-the-box" )
+    print( "Run: export LUPIN_ROOT=/path/to/lupin" )
     sys.exit( 1 )
 
 src_path = os.path.join( lupin_root, "src" )

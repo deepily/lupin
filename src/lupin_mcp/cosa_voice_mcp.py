@@ -13,7 +13,7 @@ Session ID Format: claude.code@{project}.deepily.ai
 
 Project Detection (automatic):
     1. Auto-detects from current working directory:
-       - genie-in-the-box, lupin → "lupin"
+       - lupin → "lupin"
        - planning-is-prompting → "plan"
        - cosa (standalone) → "cosa"
     2. Falls back to MCP_PROJECT env var if cwd detection fails
@@ -88,7 +88,7 @@ def _detect_project_from_cwd() -> Optional[ str ]:
         - Returns None if no known project pattern found
 
     Known project patterns:
-        - genie-in-the-box, lupin → "lupin"
+        - lupin → "lupin"
         - planning-is-prompting → "plan"
         - cosa (standalone, not as subdir) → "cosa"
     """
@@ -96,16 +96,16 @@ def _detect_project_from_cwd() -> Optional[ str ]:
         cwd = os.getcwd().lower()
 
         # Lupin project detection (main repo)
-        if "genie-in-the-box" in cwd or "/lupin" in cwd:
+        if "/lupin" in cwd:
             return "lupin"
 
         # Planning-is-Prompting project detection
         if "planning-is-prompting" in cwd:
             return "plan"
 
-        # CoSA standalone (not as submodule within genie-in-the-box)
-        # Check it's not inside genie-in-the-box first
-        if "/cosa" in cwd and "genie-in-the-box" not in cwd:
+        # CoSA standalone (not as submodule within lupin)
+        # Check it's not inside lupin first
+        if "/cosa" in cwd and "/lupin" not in cwd:
             return "cosa"
 
         return None

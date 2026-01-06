@@ -26,7 +26,7 @@ if lupin_root is None:
     raise RuntimeError(
         "LUPIN_ROOT environment variable not set.\n"
         "Set it before starting FastAPI server:\n"
-        "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box\n"
+        "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin\n"
         "  python src/fastapi_app/main.py"
     )
 

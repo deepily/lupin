@@ -33,7 +33,7 @@ if [ -z "$LUPIN_ROOT" ]; then
     echo "Error: LUPIN_ROOT environment variable is not set."
     echo ""
     echo "Add this to your ~/.bashrc or ~/.zshrc:"
-    echo "  export LUPIN_ROOT=\"/path/to/genie-in-the-box\""
+    echo "  export LUPIN_ROOT=\"/path/to/lupin\""
     echo ""
     exit 1
 fi

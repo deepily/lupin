@@ -27,7 +27,7 @@ I have completed significant changes to the system and need you to verify the sy
 First, validate prerequisites and setup the remediation environment:
 
 ```bash
-cd /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box
+cd /mnt/DATA01/include/www.deepily.ai/projects/lupin
 
 # Auto-detect baseline report if not provided
 if [ "${1}" = "auto" ] || [ -z "${1}" ]; then
@@ -134,7 +134,7 @@ else
     echo "===========================================" | tee -a "${LOG_FILE}"
 
     # Set up CoSA environment
-    export PYTHONPATH="/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src:$PYTHONPATH"
+    export PYTHONPATH="/mnt/DATA01/include/www.deepily.ai/projects/lupin/src:$PYTHONPATH"
 
     # Execute full CoSA test suite
     ./src/cosa/tests/smoke/scripts/run-cosa-smoke-tests.sh 2>&1 | tee -a "${LOG_FILE}"

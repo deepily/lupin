@@ -19,7 +19,7 @@
 #   - docker-compose.yml in LUPIN_ROOT directory
 #
 # Example alias:
-#   export LUPIN_ROOT="/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box"
+#   export LUPIN_ROOT="/mnt/DATA01/include/www.deepily.ai/projects/lupin"
 #   alias lupin-db="$LUPIN_ROOT/src/scripts/run-postgresql-dev.sh"
 #
 
@@ -59,10 +59,10 @@ validate_lupin_root() {
         log_error "LUPIN_ROOT environment variable not set"
         echo ""
         echo "Please set LUPIN_ROOT before running this script:"
-        echo "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box"
+        echo "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin"
         echo ""
         echo "Add to your ~/.bashrc or ~/.zshrc for persistence:"
-        echo "  echo 'export LUPIN_ROOT=/path/to/genie-in-the-box' >> ~/.bashrc"
+        echo "  echo 'export LUPIN_ROOT=/path/to/lupin' >> ~/.bashrc"
         echo "  source ~/.bashrc"
         echo ""
         exit 1

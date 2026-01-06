@@ -12,9 +12,9 @@
 
 1. **MUST use the following project-specific configuration**:
    - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
-   - **History file**: /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md
-   - **Planning documents**: /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src/rnd/
-   - **Archive directory**: /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history/
+   - **History file**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md
+   - **Planning documents**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/rnd/
+   - **Archive directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/history/
    - **Nested repositories**: /src/cosa/, /src/lupin-plugin-firefox/, /src/lupin-mobile/
    - **Nested repository descriptions**:
      * `/src/cosa/` - CoSA framework (git@github.com:deepily/cosa.git)
