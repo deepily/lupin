@@ -1018,13 +1018,20 @@ class NotificationsUI {
             this.handleQASTTButtonClick();
         });
 
-        // Ctrl+R shortcut for Q&A STT recording
+        // Ctrl+R shortcut for STT recording (Q&A or multiple-choice Other field)
         document.addEventListener( 'keydown', ( e ) => {
             if ( e.ctrlKey && e.key === 'r' ) {
                 e.preventDefault();  // Prevent browser refresh
-                this.handleQASTTButtonClick();
+
+                // Check if there's an active multiple-choice notification first
+                if ( this.activeMultipleChoiceNotificationId ) {
+                    this.startMultipleChoiceVoiceInput( this.activeMultipleChoiceNotificationId );
+                } else {
+                    // Default to Q&A STT
+                    this.handleQASTTButtonClick();
+                }
             }
-        });
+        } );
 
         // Test buttons
         document.getElementById( 'test-instant-tts' ).addEventListener( 'click', () => {
@@ -3355,8 +3362,10 @@ class NotificationsUI {
      */
     addNotificationToSenderGroup( notification, isResponse = false ) {
         const senderId = this.resolveSenderId( notification );
+        // Extract date directly from ISO timestamp to preserve server timezone
+        // (avoids browser timezone conversion issues)
+        const dateString = this.extractDateFromTimestamp( notification.timestamp );
         const timestamp = new Date( notification.timestamp || Date.now() );
-        const dateString = this.getDateString( timestamp );
 
         // Get or create sender group
         let group = this.senderGroups.get( senderId );
@@ -3421,6 +3430,20 @@ class NotificationsUI {
         const month = String( timestamp.getMonth() + 1 ).padStart( 2, '0' );
         const day = String( timestamp.getDate() ).padStart( 2, '0' );
         return `${year}-${month}-${day}`;
+    }
+
+    /**
+     * Extract date string from ISO timestamp, preserving server timezone.
+     * Falls back to local date if timestamp is missing or invalid.
+     * @param {string|null} isoTimestamp - ISO 8601 timestamp (e.g., "2026-01-06T02:30:00-05:00")
+     * @returns {string} ISO date string (YYYY-MM-DD)
+     */
+    extractDateFromTimestamp( isoTimestamp ) {
+        if ( isoTimestamp && typeof isoTimestamp === 'string' && isoTimestamp.includes( 'T' ) ) {
+            return isoTimestamp.split( 'T' )[ 0 ];
+        }
+        // Fallback: use local date (existing behavior for edge cases)
+        return this.getDateString( new Date() );
     }
 
     /**
@@ -3587,6 +3610,11 @@ class NotificationsUI {
         // Clean message (remove [PREFIX] since it's already shown in card header)
         let cleanMessage = notification.message || '';
         cleanMessage = cleanMessage.replace( /^\[[A-Z]+\]\s*/, '' );
+
+        // Format multiple_choice JSON responses for display
+        if ( isResponse && cleanMessage.startsWith( '{"answers":' ) ) {
+            cleanMessage = this.formatMultipleChoiceResponse( cleanMessage );
+        }
 
         // Truncate long messages
         const maxLength = 120;
@@ -4877,13 +4905,21 @@ class NotificationsUI {
         this.log( `Adding action-required notification: ${notification.id}` );
 
         // Store in action-required map
-        this.actionRequiredNotifications.set( notification.id, {
-            notification: notification,
-            expiresAt: Date.now() + ( notification.timeout_seconds * 1000 ),
-            timeoutSeconds: notification.timeout_seconds,
-            isExpired: false,
-            isResponded: false
-        } );
+        const state = {
+            notification        : notification,
+            expiresAt           : Date.now() + ( notification.timeout_seconds * 1000 ),
+            timeoutSeconds      : notification.timeout_seconds,
+            isExpired           : false,
+            isResponded         : false
+        };
+
+        // Add multi-question state for multiple_choice notifications
+        if ( notification.response_type === 'multiple_choice' ) {
+            state.currentQuestionIndex = 0;
+            state.collectedAnswers     = {};  // { header: value/[values] }
+        }
+
+        this.actionRequiredNotifications.set( notification.id, state );
 
         // Show the Action Required section
         const section = document.getElementById( 'action-required-section' );
@@ -4963,6 +4999,8 @@ class NotificationsUI {
                     </div>
                 </div>
             `;
+        } else if ( notification.response_type === 'multiple_choice' ) {
+            responseUI = this.renderMultipleChoiceUI( notification );
         }
 
         card.innerHTML = `
@@ -5056,6 +5094,419 @@ class NotificationsUI {
                     this.startVoiceInput( notification.id );
                 }
             } );
+        } else if ( notification.response_type === 'multiple_choice' ) {
+            // Use centralized event handler attachment (supports multi-question navigation)
+            this.attachMultipleChoiceEventHandlers( notification.id, card );
+        }
+    }
+
+    /**
+     * Renders the UI for a multiple-choice question notification.
+     * Supports multi-question flows with Back/Next/Submit navigation.
+     *
+     * Requires:
+     *   - notification.response_options.questions is a non-empty array
+     *   - Each question has: question (string), header (string), multi_select (bool), options (array)
+     *   - State has currentQuestionIndex and collectedAnswers
+     *
+     * Ensures:
+     *   - Returns HTML string with radio buttons (single-select) or checkboxes (multi-select)
+     *   - Always includes "Other" option with text input and voice recording
+     *   - Shows "Question N of X" indicator
+     *   - Shows appropriate navigation buttons based on position
+     */
+    renderMultipleChoiceUI( notification, questionIndex = 0 ) {
+        const questions = notification.response_options?.questions || [];
+        if ( questions.length === 0 ) return '';
+
+        const totalQuestions = questions.length;
+        const question       = questions[ questionIndex ];
+        const inputType      = question.multi_select ? 'checkbox' : 'radio';
+        const questionId     = `mc-${notification.id}-q${questionIndex}`;
+
+        // Check for previously saved answer for this question
+        const state       = this.actionRequiredNotifications.get( notification.id );
+        const savedAnswer = state?.collectedAnswers?.[ question.header ];
+
+        let optionsHTML = question.options.map( ( opt, idx ) => {
+            // Check if this option was previously selected
+            let isChecked = false;
+            if ( savedAnswer ) {
+                if ( Array.isArray( savedAnswer ) ) {
+                    isChecked = savedAnswer.includes( opt.label );
+                } else {
+                    isChecked = savedAnswer === opt.label;
+                }
+            }
+
+            return `
+                <label class="mc-option">
+                    <input type="${inputType}" name="${questionId}" value="${opt.label}"
+                           class="mc-input" data-idx="${idx}" ${isChecked ? 'checked' : ''}>
+                    <div class="mc-option-content">
+                        <span class="mc-option-label">${opt.label}</span>
+                        <span class="mc-option-desc">${opt.description || ''}</span>
+                    </div>
+                </label>
+            `;
+        } ).join( '' );
+
+        // Check if "Other" was previously selected and get its text
+        let otherChecked = false;
+        let otherText    = '';
+        if ( savedAnswer ) {
+            const allLabels = question.options.map( o => o.label );
+            if ( Array.isArray( savedAnswer ) ) {
+                // Multi-select: find any value not in options
+                const customAnswers = savedAnswer.filter( v => !allLabels.includes( v ) );
+                if ( customAnswers.length > 0 ) {
+                    otherChecked = true;
+                    otherText    = customAnswers.join( ', ' );
+                }
+            } else if ( !allLabels.includes( savedAnswer ) ) {
+                // Single-select: answer not in options means it's custom
+                otherChecked = true;
+                otherText    = savedAnswer;
+            }
+        }
+
+        // Always add "Other" option with voice input support
+        optionsHTML += `
+            <label class="mc-option mc-option-other">
+                <input type="${inputType}" name="${questionId}" value="__other__"
+                       class="mc-input mc-other-radio" ${otherChecked ? 'checked' : ''}>
+                <div class="mc-option-content">
+                    <span class="mc-option-label">Other</span>
+                    <div class="mc-other-input-container">
+                        <button type="button" class="response-mic-button mc-other-mic"
+                                data-notification-id="${notification.id}"
+                                title="Press Enter or Space to record (30s max, ESC to cancel)">🎤</button>
+                        <input type="text" class="mc-other-input" id="mc-other-input-${notification.id}"
+                               placeholder="Type or speak custom answer..." value="${otherText}">
+                    </div>
+                </div>
+            </label>
+        `;
+
+        // Build navigation buttons
+        const isFirstQuestion = questionIndex === 0;
+        const isLastQuestion  = questionIndex === totalQuestions - 1;
+
+        let actionsHTML = '<div class="mc-actions">';
+
+        if ( !isFirstQuestion ) {
+            actionsHTML += `
+                <button class="response-submit-button mc-back" data-notification-id="${notification.id}">
+                    ← Back
+                </button>
+            `;
+        }
+
+        if ( isLastQuestion ) {
+            actionsHTML += `
+                <button class="response-submit-button mc-submit" data-notification-id="${notification.id}">
+                    ${totalQuestions === 1 ? 'Submit' : 'Submit All ✓'}
+                </button>
+            `;
+        } else {
+            actionsHTML += `
+                <button class="response-submit-button mc-next" data-notification-id="${notification.id}">
+                    Next Question →
+                </button>
+            `;
+        }
+
+        actionsHTML += '</div>';
+
+        return `
+            <div class="response-multiple-choice" data-notification-id="${notification.id}" data-question-index="${questionIndex}">
+                <div class="mc-question-header">
+                    <span class="mc-question-indicator">Question ${questionIndex + 1} of ${totalQuestions}</span>
+                </div>
+                <div class="mc-question-text">${question.question}</div>
+                ${question.multi_select ? '<div class="mc-multi-hint">(Select all that apply)</div>' : ''}
+                <div class="mc-options">
+                    ${optionsHTML}
+                </div>
+                ${actionsHTML}
+            </div>
+        `;
+    }
+
+    /**
+     * Gets the current question's answer from the UI.
+     *
+     * Requires:
+     *   - notificationId corresponds to an active multiple_choice notification
+     *
+     * Ensures:
+     *   - Returns { header, value } for the current question
+     *   - Returns null and shows validation error if no selection
+     */
+    getCurrentQuestionAnswer( notificationId ) {
+        const card      = document.getElementById( `action-required-${notificationId}` );
+        const container = card?.querySelector( '.response-multiple-choice' );
+        if ( !container ) return null;
+
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state ) return null;
+
+        const questionIndex = state.currentQuestionIndex || 0;
+        const questions     = state.notification.response_options?.questions || [];
+        const question      = questions[ questionIndex ];
+        if ( !question ) return null;
+
+        const checked = container.querySelectorAll( '.mc-input:checked' );
+        if ( checked.length === 0 ) {
+            container.classList.add( 'invalid' );
+            return null;
+        }
+
+        const answers = [];
+        checked.forEach( input => {
+            if ( input.value === '__other__' ) {
+                const otherText = container.querySelector( '.mc-other-input' )?.value.trim();
+                if ( otherText ) answers.push( otherText );
+            } else {
+                answers.push( input.value );
+            }
+        } );
+
+        // Handle case where "Other" was selected but no text entered
+        if ( answers.length === 0 ) {
+            container.classList.add( 'invalid' );
+            return null;
+        }
+
+        return {
+            header: question.header,
+            value : question.multi_select ? answers : answers[ 0 ]
+        };
+    }
+
+    /**
+     * Saves the current question's answer to collectedAnswers.
+     *
+     * Requires:
+     *   - notificationId corresponds to an active multiple_choice notification
+     *
+     * Ensures:
+     *   - Current answer is saved to state.collectedAnswers
+     *   - Returns true if saved successfully, false if validation failed
+     */
+    saveCurrentQuestionAnswer( notificationId ) {
+        const answer = this.getCurrentQuestionAnswer( notificationId );
+        if ( !answer ) return false;
+
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state ) return false;
+
+        state.collectedAnswers[ answer.header ] = answer.value;
+        this.log( `Saved answer for "${answer.header}":`, answer.value );
+        return true;
+    }
+
+    /**
+     * Navigates to a different question in a multi-question notification.
+     *
+     * Requires:
+     *   - notificationId corresponds to an active multiple_choice notification
+     *   - direction is 'next' or 'back'
+     *
+     * Ensures:
+     *   - For 'next': saves current answer, advances to next question
+     *   - For 'back': goes to previous question (answer already saved)
+     *   - Re-renders the question UI with event handlers
+     */
+    navigateMultipleChoice( notificationId, direction ) {
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state ) return;
+
+        const questions    = state.notification.response_options?.questions || [];
+        const currentIndex = state.currentQuestionIndex || 0;
+
+        if ( direction === 'next' ) {
+            // Save current answer before moving forward
+            if ( !this.saveCurrentQuestionAnswer( notificationId ) ) {
+                return;  // Validation failed
+            }
+
+            if ( currentIndex < questions.length - 1 ) {
+                state.currentQuestionIndex = currentIndex + 1;
+            }
+        } else if ( direction === 'back' ) {
+            // Save current answer when going back (optional but nice)
+            this.saveCurrentQuestionAnswer( notificationId );
+
+            if ( currentIndex > 0 ) {
+                state.currentQuestionIndex = currentIndex - 1;
+            }
+        }
+
+        // Re-render the question UI
+        this.rerenderMultipleChoiceUI( notificationId );
+    }
+
+    /**
+     * Re-renders the multiple choice UI after navigation.
+     * Replaces the question content and re-attaches event handlers.
+     */
+    rerenderMultipleChoiceUI( notificationId ) {
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state ) return;
+
+        const card      = document.getElementById( `action-required-${notificationId}` );
+        const container = card?.querySelector( '.response-multiple-choice' );
+        if ( !container ) return;
+
+        // Generate new HTML for current question
+        const newHTML = this.renderMultipleChoiceUI(
+            state.notification,
+            state.currentQuestionIndex || 0
+        );
+
+        // Replace container content
+        container.outerHTML = newHTML;
+
+        // Re-attach event handlers
+        this.attachMultipleChoiceEventHandlers( notificationId, card );
+    }
+
+    /**
+     * Attaches event handlers to multiple choice UI elements.
+     * Called after initial render and after navigation re-renders.
+     */
+    attachMultipleChoiceEventHandlers( notificationId, card ) {
+        const container   = card.querySelector( '.response-multiple-choice' );
+        const submitBtn   = card.querySelector( '.mc-submit' );
+        const nextBtn     = card.querySelector( '.mc-next' );
+        const backBtn     = card.querySelector( '.mc-back' );
+        const otherInput  = card.querySelector( '.mc-other-input' );
+        const otherRadio  = card.querySelector( '.mc-other-radio' );
+        const otherMicBtn = card.querySelector( '.mc-other-mic' );
+
+        // Clear validation state when user makes a selection
+        container?.querySelectorAll( '.mc-input' ).forEach( input => {
+            input.addEventListener( 'change', () => {
+                container.classList.remove( 'invalid' );
+            } );
+        } );
+
+        // Enable Other text input when Other is selected
+        otherInput?.addEventListener( 'focus', () => {
+            if ( otherRadio ) otherRadio.checked = true;
+        } );
+
+        // Next button - save answer and go to next question
+        nextBtn?.addEventListener( 'click', () => {
+            this.navigateMultipleChoice( notificationId, 'next' );
+        } );
+
+        // Back button - go to previous question
+        backBtn?.addEventListener( 'click', () => {
+            this.navigateMultipleChoice( notificationId, 'back' );
+        } );
+
+        // Submit button - save final answer and submit all
+        submitBtn?.addEventListener( 'click', () => {
+            this.submitAllMultipleChoiceAnswers( notificationId );
+        } );
+
+        // Enter key in Other text input triggers next/submit
+        otherInput?.addEventListener( 'keydown', ( e ) => {
+            if ( e.key === 'Enter' ) {
+                e.preventDefault();
+                if ( nextBtn ) {
+                    this.navigateMultipleChoice( notificationId, 'next' );
+                } else if ( submitBtn ) {
+                    this.submitAllMultipleChoiceAnswers( notificationId );
+                }
+            }
+        } );
+
+        // Mic button click - start voice input for Other field
+        otherMicBtn?.addEventListener( 'click', ( e ) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.startMultipleChoiceVoiceInput( notificationId );
+        } );
+
+        // Mic button keyboard activation (Enter/Space)
+        otherMicBtn?.addEventListener( 'keydown', ( e ) => {
+            if ( e.key === 'Enter' || e.key === ' ' ) {
+                e.preventDefault();
+                e.stopPropagation();
+                this.startMultipleChoiceVoiceInput( notificationId );
+            }
+        } );
+
+        // Store notification ID for Ctrl+R shortcut
+        this.activeMultipleChoiceNotificationId = notificationId;
+    }
+
+    /**
+     * Submits all collected answers for a multi-question notification.
+     */
+    submitAllMultipleChoiceAnswers( notificationId ) {
+        // Save the final question's answer
+        if ( !this.saveCurrentQuestionAnswer( notificationId ) ) {
+            return;  // Validation failed
+        }
+
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state ) return;
+
+        // Build final response with all collected answers
+        const response = {
+            answers: state.collectedAnswers
+        };
+
+        this.log( 'Submitting all answers:', response );
+        this.submitResponse( notificationId, JSON.stringify( response ) );
+    }
+
+    /**
+     * Legacy method - gets selection for single-question notifications.
+     * For multi-question, use submitAllMultipleChoiceAnswers instead.
+     */
+    getMultipleChoiceSelection( notificationId ) {
+        const answer = this.getCurrentQuestionAnswer( notificationId );
+        if ( !answer ) return null;
+
+        return {
+            answers: {
+                [ answer.header ]: answer.value
+            }
+        };
+    }
+
+    /**
+     * Formats a multiple-choice response JSON into human-readable text.
+     *
+     * Requires:
+     *   - responseJson is a JSON string or object with {answers: {...}} structure
+     *
+     * Ensures:
+     *   - Returns formatted string like "Option1, Option2" for multi-select
+     *   - Returns single value for single-select
+     *   - Returns raw input if parsing fails
+     */
+    formatMultipleChoiceResponse( responseJson ) {
+        try {
+            const parsed = typeof responseJson === 'string' ? JSON.parse( responseJson ) : responseJson;
+            const answers = parsed.answers || {};
+
+            const parts = [];
+            for ( const [ header, value ] of Object.entries( answers ) ) {
+                if ( Array.isArray( value ) ) {
+                    parts.push( value.join( ', ' ) );
+                } else {
+                    parts.push( value );
+                }
+            }
+            return parts.join( ' • ' ) || responseJson;
+        } catch ( e ) {
+            return responseJson;  // Return raw if parsing fails
         }
     }
 
@@ -5161,6 +5612,11 @@ class NotificationsUI {
 
             // Stop countdown
             this.stopCountdownTimer( notificationId );
+
+            // Clear active multiple-choice notification if this was it
+            if ( this.activeMultipleChoiceNotificationId === notificationId ) {
+                this.activeMultipleChoiceNotificationId = null;
+            }
 
         } catch ( error ) {
             this.error( "Failed to submit response:", error );
@@ -5783,9 +6239,14 @@ class NotificationsUI {
         this.addMessageToDateAccordion( senderId, dateString, incomingNotification, false );
 
         // 2. Add user response (outgoing/right-aligned)
-        const responseMessage = wasExpired
-            ? `[Default: ${response}]`
-            : response;
+        let responseMessage;
+        if ( wasExpired ) {
+            responseMessage = `[Default: ${response}]`;
+        } else if ( notification.response_type === 'multiple_choice' ) {
+            responseMessage = this.formatMultipleChoiceResponse( response );
+        } else {
+            responseMessage = response;
+        }
 
         const outgoingNotification = {
             id        : `${notification.id || 'unknown'}-response`,
@@ -5908,8 +6369,8 @@ class NotificationsUI {
                 onRecordingStart: () => {
                     this.log( 'Audio recording started' );
                     micButton.classList.add( 'recording' );
-                    micButton.textContent = '🔴';
-                    micButton.title = 'Click to stop recording (ESC to cancel)';
+                    micButton.textContent = '🔴 0/30s';
+                    micButton.title = 'Recording: 0/30s (ESC to cancel)';
 
                     // Start duration counter
                     this._startDurationCounter( notificationId, micButton );
@@ -5973,6 +6434,135 @@ class NotificationsUI {
                 },
                 debug: this.debug
             });
+
+            try {
+                await this.audioRecorder.startRecording();
+            } catch ( error ) {
+                // Error already handled by onError callback
+                this.error( `Failed to start recording: ${error}` );
+            }
+        }
+    }
+
+    /**
+     * Starts voice input for the "Other" field in a multiple-choice notification.
+     * Similar to startVoiceInput() but targets the mc-other-mic button and mc-other-input field.
+     *
+     * Requires:
+     *   - notificationId corresponds to an active multiple-choice notification
+     *   - AudioRecorder class is available
+     *   - User is authenticated
+     *
+     * Ensures:
+     *   - Toggles recording state (start/stop)
+     *   - Updates mic button UI during recording and processing
+     *   - Fills Other text input with transcription result
+     *   - Auto-selects the "Other" radio/checkbox option
+     */
+    async startMultipleChoiceVoiceInput( notificationId ) {
+        this.log( `Starting voice input for multiple choice Other field: ${notificationId}` );
+
+        const card = document.getElementById( `action-required-${notificationId}` );
+        const micButton = card?.querySelector( '.mc-other-mic' );
+        const textInput = card?.querySelector( '.mc-other-input' );
+        const otherRadio = card?.querySelector( '.mc-other-radio' );
+
+        if ( !micButton || !textInput ) {
+            this.error( `Voice input: Could not find Other field UI elements for ${notificationId}` );
+            return;
+        }
+
+        // Toggle recording state
+        if ( this.audioRecorder && this.audioRecorder.isRecording ) {
+            // Stop recording
+            this.log( 'Stopping audio recording...' );
+            await this.audioRecorder.stopRecording();
+        } else {
+            // Start recording
+            const token = localStorage.getItem( 'lupin_access_token' );
+
+            if ( !token ) {
+                this.error( 'No authentication token found' );
+                alert( 'Authentication required. Please log in.' );
+                return;
+            }
+
+            // Auto-select the "Other" option when user starts recording
+            if ( otherRadio ) otherRadio.checked = true;
+
+            this.audioRecorder = new AudioRecorder( {
+                uploadEndpoint: '/api/upload-and-transcribe-mp3',
+                authToken       : token,
+                onRecordingStart: () => {
+                    this.log( 'Audio recording started for Other field' );
+                    micButton.classList.add( 'recording' );
+                    micButton.textContent = '🔴 0/30s';
+                    micButton.title = 'Recording: 0/30s (ESC to cancel)';
+
+                    // Start duration counter (reuse existing helper with unique key)
+                    this._startDurationCounter( `mc-${notificationId}`, micButton );
+
+                    // Attach ESC key listener
+                    this._attachRecordingCancelListener( `mc-${notificationId}`, micButton );
+                },
+                onRecordingStop: ( audioBlob ) => {
+                    this.log( `Audio recording stopped: ${audioBlob.size} bytes` );
+
+                    // Stop duration counter
+                    this._stopDurationCounter( `mc-${notificationId}` );
+
+                    // Remove ESC key listener (upload starting)
+                    this._detachRecordingCancelListener();
+
+                    // Show processing state
+                    micButton.classList.remove( 'recording' );
+                    micButton.classList.add( 'processing' );
+                    micButton.textContent = '⏳';
+                    micButton.title = 'Transcribing audio...';
+                    micButton.disabled = true;
+                },
+                onTranscription: ( text ) => {
+                    this.log( `Transcription received for Other field: "${text}"` );
+
+                    // Fill text input with transcription
+                    textInput.value = text;
+                    textInput.focus();
+                    textInput.select();
+
+                    // Trigger validation / clear invalid state
+                    textInput.dispatchEvent( new Event( 'input', { bubbles: true } ) );
+                    const container = card?.querySelector( '.response-multiple-choice' );
+                    if ( container ) container.classList.remove( 'invalid' );
+
+                    // Reset button UI
+                    micButton.classList.remove( 'processing' );
+                    micButton.textContent = '🎤';
+                    micButton.title = 'Press Enter or Space to record (30s max, ESC to cancel)';
+                    micButton.disabled = false;
+
+                    // Remove ESC key listener (completed successfully)
+                    this._detachRecordingCancelListener();
+                },
+                onError: ( error ) => {
+                    this.error( `Audio recording error: ${error.type} - ${error.message}` );
+
+                    // Stop duration counter
+                    this._stopDurationCounter( `mc-${notificationId}` );
+
+                    // Remove ESC key listener (error occurred)
+                    this._detachRecordingCancelListener();
+
+                    // Show error to user
+                    alert( error.message );
+
+                    // Reset button UI
+                    micButton.classList.remove( 'recording', 'processing' );
+                    micButton.textContent = '🎤';
+                    micButton.title = 'Press Enter or Space to record (30s max, ESC to cancel)';
+                    micButton.disabled = false;
+                },
+                debug: this.debug
+            } );
 
             try {
                 await this.audioRecorder.startRecording();

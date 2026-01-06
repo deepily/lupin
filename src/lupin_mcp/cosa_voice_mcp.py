@@ -2,10 +2,11 @@
 """
 CoSA Voice MCP Server - Voice I/O bridge for Claude Code.
 
-Provides four tools:
+Provides five tools:
   - converse(): Speak to user, wait for voice/text response (blocking)
   - notify(): Announce to user without waiting (fire-and-forget)
   - ask_yes_no(): Quick yes/no decision (convenience wrapper)
+  - ask_multiple_choice(): Present options and get user's selection(s)
   - get_session_info(): Get current session identification
 
 Session ID Format: claude.code@{project}.deepily.ai
@@ -65,7 +66,7 @@ logger = logging.getLogger( __name__ )
 # Version
 # ============================================================================
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # ============================================================================
 # Configuration
@@ -349,6 +350,225 @@ def ask_yes_no(
         return response.response_value.lower().strip() == "yes"
 
     return default == "yes"
+
+
+@mcp.tool
+def ask_multiple_choice(
+    questions: list,
+    timeout_seconds: int = 120,
+    priority: str = "medium",
+    title: Optional[ str ] = None
+) -> dict:
+    """
+    Ask multiple-choice questions and get user's selection(s).
+
+    Presents questions with options via TTS and UI. Supports both single-select
+    (radio buttons) and multi-select (checkboxes) questions. Users can select
+    from predefined options or provide custom "Other" answers.
+
+    Args:
+        questions: List of question objects matching Claude Code's AskUserQuestion format:
+            [
+                {
+                    "question": "Which auth method?",
+                    "header": "Auth method",
+                    "multiSelect": false,
+                    "options": [
+                        {"label": "OAuth", "description": "Use OAuth2 flow"},
+                        {"label": "JWT", "description": "Use JWT tokens"}
+                    ]
+                }
+            ]
+        timeout_seconds: How long to wait for response (1-600, default 120)
+        priority: "low", "medium", "high", or "urgent"
+        title: Optional short title for the notification
+
+    Returns:
+        dict with answers keyed by header:
+        {
+            "answers": {
+                "Auth method": "OAuth",
+                "Features": ["Dark mode", "Notifications"]
+            }
+        }
+
+    Examples:
+        # Single question, single select
+        result = ask_multiple_choice([{
+            "question": "Which database should we use?",
+            "header": "Database",
+            "multiSelect": False,
+            "options": [
+                {"label": "PostgreSQL", "description": "Relational database"},
+                {"label": "MongoDB", "description": "Document database"}
+            ]
+        }])
+        # Returns: {"answers": {"Database": "PostgreSQL"}}
+
+        # Multiple questions
+        result = ask_multiple_choice([
+            {"question": "Which framework?", "header": "Framework", "multiSelect": False,
+             "options": [{"label": "FastAPI"}, {"label": "Flask"}]},
+            {"question": "Which features?", "header": "Features", "multiSelect": True,
+             "options": [{"label": "Auth"}, {"label": "Caching"}]}
+        ])
+    """
+    logger.debug( f"ask_multiple_choice() called with {len( questions )} questions" )
+
+    if not questions or not isinstance( questions, list ):
+        return { "error": "questions must be a non-empty list" }
+
+    # Build TTS-friendly message from questions
+    tts_message = _format_questions_for_tts( questions )
+
+    # Convert questions to response_options format (camelCase → snake_case)
+    response_options = _convert_questions_format( questions )
+
+    try:
+        request = NotificationRequest(
+            message=tts_message,
+            response_type=ResponseType.MULTIPLE_CHOICE,
+            notification_type=NotificationType.CUSTOM,
+            priority=NotificationPriority( priority ),
+            timeout_seconds=timeout_seconds,
+            title=title,
+            sender_id=SENDER_ID,
+            response_options=response_options
+        )
+    except ( ValidationError, ValueError ) as e:
+        logger.error( f"Validation error: {e}" )
+        return { "error": f"validation error: {e}" }
+
+    response: NotificationResponse = notify_user_sync( request=request, debug=False )
+
+    if response.exit_code == 0:
+        return _parse_multiple_choice_response( response.response_value )
+    elif response.exit_code == 2:
+        return { "error": "timeout - no response received", "timeout": True }
+    else:
+        return { "error": f"error: {response.status}" }
+
+
+def _format_questions_for_tts( questions: list ) -> str:
+    """
+    Format questions for TTS playback.
+
+    Creates a natural language representation suitable for text-to-speech.
+    Includes "Question N of X" prefix for context.
+
+    Requires:
+        - questions is a non-empty list of question dicts
+        - Each question has 'question' and 'options' fields
+
+    Ensures:
+        - Returns a string suitable for TTS
+        - Includes question number context (Question 1 of 3)
+        - Lists options with numbers
+
+    Args:
+        questions: List of question dicts
+
+    Returns:
+        str: TTS-friendly message
+    """
+    total = len( questions )
+    parts = []
+
+    for i, q in enumerate( questions, 1 ):
+        question_text = q.get( 'question', 'Please select an option' )
+        options = q.get( 'options', [] )
+        multi_select = q.get( 'multiSelect', False )
+
+        # Build question intro
+        if total > 1:
+            part = f"Question {i} of {total}: {question_text}"
+        else:
+            part = question_text
+
+        # Add multi-select hint
+        if multi_select:
+            part += " You can select multiple options."
+
+        # List options
+        option_texts = []
+        for j, opt in enumerate( options, 1 ):
+            label = opt.get( 'label', f'Option {j}' )
+            desc  = opt.get( 'description', '' )
+            if desc:
+                option_texts.append( f"Option {j}: {label} - {desc}" )
+            else:
+                option_texts.append( f"Option {j}: {label}" )
+
+        part += " " + ". ".join( option_texts ) + "."
+        parts.append( part )
+
+    return " ".join( parts )
+
+
+def _convert_questions_format( questions: list ) -> dict:
+    """
+    Convert Claude Code's camelCase format to API's snake_case format.
+
+    Claude Code uses: multiSelect, options
+    API expects: multi_select, options (same)
+
+    Requires:
+        - questions is a list of question dicts
+
+    Ensures:
+        - Returns dict with 'questions' array
+        - multiSelect converted to multi_select
+        - Other fields preserved
+
+    Args:
+        questions: List of question dicts in Claude Code format
+
+    Returns:
+        dict: API-compatible response_options
+    """
+    converted = []
+    for q in questions:
+        converted_q = {
+            "question"     : q.get( 'question', '' ),
+            "header"       : q.get( 'header', 'Selection' ),
+            "multi_select" : q.get( 'multiSelect', False ),
+            "options"      : q.get( 'options', [] )
+        }
+        converted.append( converted_q )
+
+    return { "questions": converted }
+
+
+def _parse_multiple_choice_response( response_value: Optional[ str ] ) -> dict:
+    """
+    Parse the response from multiple choice notification.
+
+    Expects JSON string like: {"answers": {"Header": "value"}}
+
+    Requires:
+        - response_value is None or a JSON string
+
+    Ensures:
+        - Returns parsed dict if valid JSON
+        - Returns error dict if parsing fails
+
+    Args:
+        response_value: JSON string from notification response
+
+    Returns:
+        dict: Parsed answers or error
+    """
+    if not response_value:
+        return { "answers": {} }
+
+    try:
+        import json
+        parsed = json.loads( response_value )
+        return parsed if isinstance( parsed, dict ) else { "answers": parsed }
+    except ( json.JSONDecodeError, TypeError ) as e:
+        logger.warning( f"Could not parse multiple choice response: {e}" )
+        # Return raw value wrapped in answers
+        return { "answers": { "response": response_value } }
 
 
 @mcp.tool
