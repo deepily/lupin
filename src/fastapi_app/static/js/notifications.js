@@ -934,9 +934,11 @@ class NotificationsUI {
     async initializeNotificationSounds() {
         try {
             // Pre-load and cache notification sounds for instant playback
+            // Pattern: notification-{priority}-priority-v2.mp3 (no sound for low priority)
             this.notificationSounds = {
-                lowPriority: new Audio( '/static/audio/notification-low-priority.mp3' ),
-                highPriority: new Audio( '/static/audio/notification-high-priority.mp3' ),
+                urgent: new Audio( '/static/audio/notification-urgent-priority-v2.mp3' ),
+                high: new Audio( '/static/audio/notification-high-priority-v2.mp3' ),
+                medium: new Audio( '/static/audio/notification-medium-priority-v2.mp3' ),
                 error: new Audio( '/static/audio/notification-error.mp3' )
             };
             
@@ -968,23 +970,29 @@ class NotificationsUI {
             // Map priority to appropriate sound
             switch ( priority ) {
                 case "urgent":
+                    audio = this.notificationSounds.urgent;
+                    this.log( `Playing urgent priority notification sound` );
+                    break;
                 case "high":
-                    audio = this.notificationSounds.highPriority;
-                    this.log( `Playing high priority notification sound for ${priority} priority` );
+                    audio = this.notificationSounds.high;
+                    this.log( `Playing high priority notification sound` );
                     break;
                 case "medium":
-                case "low":
-                    audio = this.notificationSounds.lowPriority;
-                    this.log( `Playing low priority notification sound for ${priority} priority` );
+                    audio = this.notificationSounds.medium;
+                    this.log( `Playing medium priority notification sound` );
                     break;
+                case "low":
+                    // No sound for low priority notifications
+                    this.log( `Skipping sound for low priority notification` );
+                    return;
                 case "error":
                     audio = this.notificationSounds.error;
                     this.log( `Playing error notification sound` );
                     break;
                 default:
-                    // Default to low priority sound for unknown priorities
-                    audio = this.notificationSounds.lowPriority;
-                    this.log( `Playing default (low priority) notification sound for unknown priority: ${priority}` );
+                    // Default to medium priority sound for unknown priorities
+                    audio = this.notificationSounds.medium;
+                    this.log( `Playing default (medium) notification sound for unknown priority: ${priority}` );
                     break;
             }
             
@@ -2647,6 +2655,32 @@ class NotificationsUI {
             this.addActionRequiredNotification( notification );
             // Still play sound
             await this.playNotificationSoundByPriority( notification.priority );
+
+            // Read question aloud via TTS for high/urgent priority action-required notifications
+            if ( notification.priority === "high" || notification.priority === "urgent" ) {
+                let ttsText = null;
+
+                // Different field per response type:
+                // - Multiple-choice: Read the question field from response_options
+                // - Open-ended / Yes-No: Read the message field
+                if ( notification.response_type === "multiple_choice" &&
+                     notification.response_options?.questions?.[0]?.question ) {
+                    ttsText = notification.response_options.questions[0].question;
+                } else {
+                    ttsText = notification.message;
+                }
+
+                if ( ttsText ) {
+                    this.log( `Queuing action-required question for TTS playback: "${ttsText}"` );
+                    // Add slight delay to let notification sound finish
+                    setTimeout( () => {
+                        this.playTTS( ttsText, this.getCurrentTTSMode() ).catch( error => {
+                            this.error( 'TTS failed for action-required notification:', error );
+                        });
+                    }, 500 );
+                }
+            }
+
             return;  // Don't add to regular notifications list
         }
 
