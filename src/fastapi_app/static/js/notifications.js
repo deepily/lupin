@@ -5853,11 +5853,12 @@ class NotificationsUI {
         this.stopCountdownTimer( notificationId );
 
         // Phase 5: Add response to sender card as outgoing message
+        // Note: We inherit timestamp from original notification so response appears
+        // in the same date card as the question (keeps conversation together)
         if ( state.notification ) {
             const responseNotification = {
                 ...state.notification,
                 message       : `Response: ${response}`,
-                timestamp     : new Date().toISOString(),
                 response_value: response
             };
             this.addNotificationToSenderGroup( responseNotification, true );  // true = outgoing/response
