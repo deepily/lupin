@@ -387,7 +387,7 @@ class TestDispatcherInteractive:
 
         Phase 2: Validates _run_interactive() runs to completion.
         """
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
@@ -422,7 +422,7 @@ class TestDispatcherInteractive:
 
         Phase 2: Validates message streaming works.
         """
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
@@ -466,7 +466,7 @@ class TestDispatcherInteractive:
 
         Phase 2: Validates session lifecycle tracking.
         """
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
@@ -485,7 +485,7 @@ class TestDispatcherInteractive:
 
         Phase 3: E2E test with actual MCP voice tool usage.
         """
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
@@ -522,7 +522,7 @@ class TestDispatcherInteractive:
 
         Run with: pytest ... -m "manual" -s
         """
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
@@ -563,7 +563,7 @@ class TestDispatcherInteractive:
 
         Phase 3: Validates graceful failure handling.
         """
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )

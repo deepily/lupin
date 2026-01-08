@@ -85,7 +85,7 @@ class TestSDKImports:
     def test_sdk_imports_available( self ):
         """All required SDK classes should import without error."""
         # Import the dispatcher's SDK_AVAILABLE flag
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
@@ -113,7 +113,7 @@ class TestSDKImports:
 
     def test_sdk_available_flag( self ):
         """SDK_AVAILABLE flag should be True when SDK is installed."""
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         # The flag should be True in our environment
         assert SDK_AVAILABLE is True, (
@@ -125,13 +125,13 @@ class TestSDKImports:
 
     def test_dispatcher_sdk_imports( self ):
         """Dispatcher should successfully import SDK classes."""
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
 
         # The dispatcher imports these at the top - verify they're accessible
-        from cosa.orchestration.claude_code_dispatcher import (
+        from cosa.orchestration.claude_code.dispatcher import (
             ClaudeSDKClient,
             ClaudeAgentOptions,
             AssistantMessage,
@@ -155,7 +155,7 @@ class TestSDKOptions:
 
     def test_claude_agent_options_basic( self ):
         """ClaudeAgentOptions should construct with minimal parameters."""
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
@@ -170,7 +170,7 @@ class TestSDKOptions:
 
     def test_claude_agent_options_with_model( self ):
         """ClaudeAgentOptions should accept model parameter."""
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
@@ -184,7 +184,7 @@ class TestSDKOptions:
 
     def test_claude_agent_options_with_cwd( self, project_root ):
         """ClaudeAgentOptions should accept cwd parameter."""
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
@@ -198,7 +198,7 @@ class TestSDKOptions:
 
     def test_claude_agent_options_with_mcp_servers( self, project_root ):
         """ClaudeAgentOptions should accept mcp_servers parameter."""
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
@@ -225,7 +225,7 @@ class TestSDKOptions:
 
     def test_claude_agent_options_full_config( self, project_root ):
         """ClaudeAgentOptions should accept full production config."""
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
@@ -263,7 +263,7 @@ class TestSDKClient:
     @pytest.mark.asyncio
     async def test_client_instantiation( self, verify_claude_cli, project_root ):
         """ClaudeSDKClient should instantiate without error."""
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
@@ -280,7 +280,7 @@ class TestSDKClient:
     @pytest.mark.asyncio
     async def test_client_context_manager( self, verify_claude_cli, project_root ):
         """ClaudeSDKClient should work as async context manager."""
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
@@ -298,7 +298,7 @@ class TestSDKClient:
     @pytest.mark.asyncio
     async def test_get_server_info( self, verify_claude_cli, project_root ):
         """get_server_info() should return valid data."""
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
         if not SDK_AVAILABLE:
             pytest.skip( "claude-agent-sdk not installed" )
@@ -333,7 +333,7 @@ def quick_smoke_test():
     try:
         # Test 1: SDK imports
         print( "Testing SDK imports..." )
-        from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+        from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
         if not SDK_AVAILABLE:
             print( "✗ SDK not available - claude-agent-sdk not installed" )
             return

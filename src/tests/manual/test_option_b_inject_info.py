@@ -103,6 +103,13 @@ class MessageTracker:
             self.tool_uses.append( message )
             tool_name = getattr( message, "name", "unknown" )
             print( f"  [{elapsed:6.1f}s] TOOL: {tool_name}" )
+            # Display notify() message content for visibility
+            if "notify" in tool_name.lower():
+                tool_input = getattr( message, "input", {} )
+                notify_msg = tool_input.get( "message", "" )
+                if notify_msg:
+                    preview = notify_msg[:80] + "..." if len( notify_msg ) > 80 else notify_msg
+                    print( f"             → message: \"{preview}\"" )
 
         elif msg_type == "ToolResultBlock":
             self.tool_results.append( message )
@@ -129,6 +136,13 @@ class MessageTracker:
                     self.tool_uses.append( block )
                     tool_name = getattr( block, "name", "unknown" )
                     print( f"             TOOL: {tool_name}" )
+                    # Display notify() message content for visibility
+                    if "notify" in tool_name.lower():
+                        tool_input = getattr( block, "input", {} )
+                        notify_msg = tool_input.get( "message", "" )
+                        if notify_msg:
+                            preview = notify_msg[:80] + "..." if len( notify_msg ) > 80 else notify_msg
+                            print( f"                  → message: \"{preview}\"" )
                 else:
                     print( f"             {block_type}" )
 
@@ -168,6 +182,32 @@ class MessageTracker:
         for keyword in keywords:
             if keyword.lower() in text_lower:
                 return True
+        return False
+
+    def contains_notify_with( self, *keywords ):
+        """
+        Check if any notify() tool call contains the keywords.
+
+        Requires:
+            - keywords are strings to search for (case-insensitive)
+
+        Ensures:
+            - Returns True if a notify() tool call was made AND its 'message'
+              parameter contains at least one of the provided keywords
+            - Returns False if no matching notify() call found
+
+        This provides stronger verification than contains() because it checks
+        the tool call parameters, not just text output.
+        """
+        for tool_use in self.tool_uses:
+            tool_name = getattr( tool_use, "name", "" )
+            if "notify" in tool_name.lower():
+                # Get the 'input' dict containing tool parameters
+                tool_input = getattr( tool_use, "input", {} )
+                message = tool_input.get( "message", "" ).lower()
+                for keyword in keywords:
+                    if keyword.lower() in message:
+                        return True
         return False
 
 
@@ -235,10 +275,15 @@ async def test_calculation_injection():
     injection_message = """
     Here's the price: $12.50 per item.
 
-    Now please:
-    1. Calculate the total cost (5 items × $12.50)
-    2. Use notify() to announce the result
-    3. Show your calculation work
+    BEFORE you calculate, use notify() to summarize what you remember from our
+    earlier conversation:
+    - How many items did I ask about?
+    - What information was I going to provide later?
+
+    Example: "Session 1 context: User asked about [X] items and said they
+    would provide the [missing info]"
+
+    THEN calculate the total cost and use notify() to announce the result.
     """
 
     inject_success = await dispatcher.inject( task.id, injection_message )
@@ -259,11 +304,18 @@ async def test_calculation_injection():
     has_correct_answer = tracker.contains( "62.50", "62.5", "$62.50" )
     has_price = tracker.contains( "12.50", "$12.50" )
 
+    # Verify Session 1 context via notify() call (stronger than text matching)
+    # Claude should call notify() with BOTH: "5 items" AND "price" was missing
+    remembers_quantity = tracker.contains_notify_with( "5 item", "five item", "5" )
+    remembers_missing  = tracker.contains_notify_with( "price" )
+
     print( f"\n  ✓ Injection delivered: {inject_success}" )
     print( f"  ✓ Price ($12.50) mentioned: {has_price}" )
     print( f"  ✓ Correct answer ($62.50) calculated: {has_correct_answer}" )
+    print( f"  ✓ Session 1 memory - quantity (notify with '5 items'): {remembers_quantity}" )
+    print( f"  ✓ Session 1 memory - missing info (notify with 'price'): {remembers_missing}" )
 
-    return inject_success and has_correct_answer
+    return inject_success and has_correct_answer and remembers_quantity and remembers_missing
 
 
 async def test_direction_change():
@@ -319,10 +371,14 @@ async def test_direction_change():
     injection_message = """
     STOP talking about dogs!
 
-    Instead, please:
-    1. Use notify() to say "Switching to cats!"
-    2. Tell me 3 interesting facts about CATS (not dogs)
-    3. Then say "Direction change complete" and finish
+    FIRST: Use notify() to summarize what you remember from our earlier conversation:
+    - What animal did I originally ask about?
+    - What type of information did I want? (e.g., facts, history, care tips)
+
+    Example: "Session 1 context: User asked for [type of info] about [animal]"
+
+    THEN: Tell me 3 interesting facts about CATS instead.
+    When done, use notify() to say "Direction change complete".
     """
 
     inject_success = await dispatcher.inject( task.id, injection_message )
@@ -342,10 +398,17 @@ async def test_direction_change():
     # Verify direction change was followed
     has_cats = tracker.contains( "cat", "cats", "feline" )
 
+    # Verify Session 1 context via notify() call (stronger than text matching)
+    # Claude should call notify() with BOTH: "dogs" AND "facts" (the info type)
+    remembers_animal   = tracker.contains_notify_with( "dog", "dogs", "canine" )
+    remembers_request  = tracker.contains_notify_with( "fact", "facts", "interesting" )
+
     print( f"\n  ✓ Injection delivered: {inject_success}" )
     print( f"  ✓ Cats mentioned after injection: {has_cats}" )
+    print( f"  ✓ Session 1 memory - animal (notify with 'dogs'): {remembers_animal}" )
+    print( f"  ✓ Session 1 memory - request type (notify with 'facts'): {remembers_request}" )
 
-    return inject_success and has_cats
+    return inject_success and has_cats and remembers_animal and remembers_request
 
 
 async def test_correction_injection():
@@ -403,13 +466,15 @@ async def test_correction_injection():
     injection_message = """
     WAIT! I made a mistake!
 
-    The capital of France is NOT Berlin. Berlin is the capital of Germany.
-    The capital of France is PARIS.
+    FIRST: Use notify() to summarize what you remember from our earlier conversation:
+    - What INCORRECT city did I claim was the capital?
+    - What country was I asking about?
 
-    Please:
-    1. Use notify() to acknowledge the correction
-    2. Correct your mnemonic to help me remember Paris is the capital of France
-    3. Finish with the correct information
+    Example: "Session 1 context: User incorrectly said [city] was the capital of [country]"
+
+    THEN: Correct me - the capital of France is PARIS, not what I said before.
+    Create a new mnemonic to help me remember Paris is the correct capital.
+    When done, use notify() to say "Correction complete".
     """
 
     inject_success = await dispatcher.inject( task.id, injection_message )
@@ -430,11 +495,18 @@ async def test_correction_injection():
     has_paris = tracker.contains( "paris" )
     has_correction = tracker.contains( "correct", "mistake", "actually", "sorry" )
 
+    # Verify Session 1 context via notify() call (stronger than text matching)
+    # Claude should call notify() with BOTH: "Berlin" AND "France"
+    remembers_wrong_city = tracker.contains_notify_with( "berlin" )
+    remembers_country    = tracker.contains_notify_with( "france" )
+
     print( f"\n  ✓ Injection delivered: {inject_success}" )
     print( f"  ✓ Paris mentioned: {has_paris}" )
     print( f"  ✓ Correction acknowledged: {has_correction}" )
+    print( f"  ✓ Session 1 memory - wrong city (notify with 'Berlin'): {remembers_wrong_city}" )
+    print( f"  ✓ Session 1 memory - country (notify with 'France'): {remembers_country}" )
 
-    return inject_success and has_paris
+    return inject_success and has_paris and remembers_wrong_city and remembers_country
 
 
 # ============================================================================

@@ -103,7 +103,7 @@ def verify_claude_cli():
 @pytest.fixture( scope="module" )
 def verify_sdk():
     """Verify claude-agent-sdk is installed."""
-    from cosa.orchestration.claude_code_dispatcher import SDK_AVAILABLE
+    from cosa.orchestration.claude_code.dispatcher import SDK_AVAILABLE
 
     if not SDK_AVAILABLE:
         pytest.skip(
