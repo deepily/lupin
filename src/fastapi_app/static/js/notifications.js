@@ -18,7 +18,11 @@ class NotificationsUI {
         // WebSocket connections
         this.queueWS = null;
         this.audioWS = null;
-        
+        this.claudeCodeWs = null;  // Claude Code Dispatcher WebSocket
+
+        // Claude Code Dispatcher state
+        this.currentClaudeCodeTaskId = null;
+
         // Session management
         this.queueSessionId = null;
         this.audioSessionId = null;
@@ -62,6 +66,8 @@ class NotificationsUI {
         // Web Audio API with precise scheduling for smooth playback
         this.pcmAudioContext = null;
         this.pcmNextStartTime = 0;
+        this.pcmStreamComplete = false;  // True when all chunks received (but playback may continue)
+        this.lastPCMSource = null;       // Reference to last scheduled AudioBufferSourceNode
 
         // First chunk timing for instant mode
         this.firstChunkStartTime = null;
@@ -124,6 +130,7 @@ class NotificationsUI {
         this.USER_EMAIL_KEY = 'notifications_user_email';
         this.VERSION_KEY = 'notifications_version';
         this.QUEUE_FILTER_PREF_KEY = 'notifications_filter_preference';  // Filter mode storage
+        this.ACTION_REQUIRED_KEY = 'notifications_action_required';  // Persist action-required notifications
         this.CURRENT_VERSION = '2.0.0'; // Increment to invalidate old cache - date grouping release
 
         // User role and filter state
@@ -220,6 +227,9 @@ class NotificationsUI {
             // Setup event listeners
             this.setupEventListeners();
 
+            // Initialize unified recording manager
+            this.initRecordingManager();
+
             // Apply Firefox compatibility hack
             this.applyFirefoxCompatibilityHack();
 
@@ -231,6 +241,9 @@ class NotificationsUI {
 
             // Load conversation history (after auth is complete)
             await this.loadConversationHistory();
+
+            // Restore action-required notifications from localStorage (refresh survival)
+            this.restoreActionRequiredState();
 
             // Auto-focus STT button for spacebar activation
             document.getElementById( 'qa-stt-button' ).focus();
@@ -1032,20 +1045,8 @@ class NotificationsUI {
             this.handleQASTTButtonClick();
         });
 
-        // Ctrl+R shortcut for STT recording (Q&A or multiple-choice Other field)
-        document.addEventListener( 'keydown', ( e ) => {
-            if ( e.ctrlKey && e.key === 'r' ) {
-                e.preventDefault();  // Prevent browser refresh
-
-                // Check if there's an active multiple-choice notification first
-                if ( this.activeMultipleChoiceNotificationId ) {
-                    this.startMultipleChoiceVoiceInput( this.activeMultipleChoiceNotificationId );
-                } else {
-                    // Default to Q&A STT
-                    this.handleQASTTButtonClick();
-                }
-            }
-        } );
+        // NOTE: Ctrl+R shortcut removed - multiple recording contexts in same window
+        // make keyboard shortcut ambiguous. Use mic buttons directly.
 
         // Test buttons
         document.getElementById( 'test-instant-tts' ).addEventListener( 'click', () => {
@@ -1094,7 +1095,86 @@ class NotificationsUI {
             this.cancelActiveAnimations();
         });
 
+        // Claude Code Dispatcher event listeners
+        this.setupClaudeCodeEventListeners();
+
         this.log( "Event listeners setup complete" );
+    }
+
+    setupClaudeCodeEventListeners() {
+        // Submit button
+        const submitBtn = document.getElementById( 'cc-submit' );
+        if ( submitBtn ) {
+            submitBtn.addEventListener( 'click', () => {
+                this.submitClaudeCode();
+            });
+        }
+
+        // Claude Code Dispatcher STT button (voice input for task prompt)
+        const ccSttBtn = document.getElementById( 'cc-stt-button' );
+        if ( ccSttBtn ) {
+            ccSttBtn.addEventListener( 'click', () => {
+                this.handleCCSTTButtonClick();
+            });
+        }
+
+        // Inject button (Option B)
+        const injectBtn = document.getElementById( 'cc-inject-btn' );
+        if ( injectBtn ) {
+            injectBtn.addEventListener( 'click', () => {
+                this.injectClaudeCode();
+            });
+        }
+
+        // Interrupt button (Option B)
+        const interruptBtn = document.getElementById( 'cc-interrupt-btn' );
+        if ( interruptBtn ) {
+            interruptBtn.addEventListener( 'click', () => {
+                this.interruptClaudeCode();
+            });
+        }
+
+        // End Session button (Option B)
+        const endBtn = document.getElementById( 'cc-end-btn' );
+        if ( endBtn ) {
+            endBtn.addEventListener( 'click', () => {
+                this.endClaudeCodeSession();
+            });
+        }
+
+        // Show/hide Option B controls based on task type selection
+        document.querySelectorAll( 'input[name="cc-task-type"]' ).forEach( radio => {
+            radio.addEventListener( 'change', ( e ) => {
+                const optionBControls = document.getElementById( 'cc-option-b-controls' );
+                if ( optionBControls ) {
+                    optionBControls.style.display = e.target.value === 'INTERACTIVE' ? 'block' : 'none';
+                }
+            });
+        });
+
+        // Enter key in inject input
+        const injectInput = document.getElementById( 'cc-inject-input' );
+        if ( injectInput ) {
+            injectInput.addEventListener( 'keydown', ( e ) => {
+                if ( e.key === 'Enter' ) {
+                    e.preventDefault();
+                    this.injectClaudeCode();
+                }
+            });
+        }
+
+        // Ctrl+Enter in prompt to submit
+        const promptInput = document.getElementById( 'cc-prompt' );
+        if ( promptInput ) {
+            promptInput.addEventListener( 'keydown', ( e ) => {
+                if ( e.ctrlKey && e.key === 'Enter' ) {
+                    e.preventDefault();
+                    this.submitClaudeCode();
+                }
+            });
+        }
+
+        this.log( "Claude Code Dispatcher event listeners setup complete" );
     }
 
     /**
@@ -1694,149 +1774,252 @@ class NotificationsUI {
     }
 
     // ========================================
+    // RECORDING MANAGER - Unified STT Recording
+    // ========================================
+
+    /**
+     * Unified recording manager for all STT (Speech-to-Text) contexts.
+     * Handles Q&A input, notification responses, multiple-choice "Other", and Claude Code Dispatcher.
+     *
+     * Design decisions:
+     * - Single AudioRecorder instance (auto-cancels previous recording when new one starts)
+     * - Timer starts at "0/30s" to prevent button width change
+     * - ESC key cancels recording without uploading
+     */
+    initRecordingManager() {
+        this.recordingManager = {
+            ui                   : this,
+            audioRecorder        : null,
+            activeRecording      : null,  // { contextId, button, inputElement, options }
+            cancelListener       : null,
+            durationInterval     : null,
+            MAX_DURATION_SECONDS : 30,
+
+            /**
+             * Start recording for a given context.
+             * Auto-cancels any active recording before starting.
+             *
+             * @param {string} contextId - Unique identifier for this recording context
+             * @param {HTMLElement} button - The mic button element
+             * @param {HTMLElement} inputElement - The text input to fill with transcription
+             * @param {object} options - Optional callbacks and settings
+             *   - onTranscriptionComplete: Called after filling input (for context-specific logic)
+             *   - autoSelectElement: Element to auto-select (e.g., "Other" radio button)
+             */
+            startRecording: async function( contextId, button, inputElement, options = {} ) {
+                const self = this;
+
+                // Auto-cancel any active recording
+                if ( this.activeRecording ) {
+                    this.ui.log( `Auto-cancelling previous recording: ${this.activeRecording.contextId}` );
+                    this.cancelRecording();
+                }
+
+                // Get auth token
+                const token = localStorage.getItem( 'lupin_access_token' ) || this.ui.authToken;
+                if ( !token ) {
+                    alert( 'Please log in to use voice input' );
+                    return;
+                }
+
+                // Auto-select element if provided (e.g., "Other" radio for MC)
+                if ( options.autoSelectElement ) {
+                    options.autoSelectElement.checked = true;
+                }
+
+                // Track active recording
+                this.activeRecording = { contextId, button, inputElement, options };
+
+                try {
+                    this.audioRecorder = new AudioRecorder( {
+                        uploadEndpoint : '/api/upload-and-transcribe-mp3',
+                        authToken      : token,
+
+                        onRecordingStart: () => {
+                            self.ui.log( `Recording started: ${contextId}` );
+                            button.classList.add( 'recording' );
+                            button.textContent = `🔴 0/${self.MAX_DURATION_SECONDS}s`;
+                            button.title = `Recording: 0/${self.MAX_DURATION_SECONDS}s (ESC to cancel)`;
+                            self._startDurationCounter( button );
+                            self._attachCancelListener( button );
+                        },
+
+                        onRecordingStop: ( audioBlob ) => {
+                            self.ui.log( `Recording stopped: ${contextId}, ${audioBlob.size} bytes` );
+                            self._stopDurationCounter();
+                            self._detachCancelListener();
+                            button.classList.remove( 'recording' );
+                            button.classList.add( 'processing' );
+                            button.textContent = '⏳';
+                            button.title = 'Transcribing audio...';
+                            button.disabled = true;
+                        },
+
+                        onTranscription: ( text ) => {
+                            self.ui.log( `Transcription received for ${contextId}: "${text}"` );
+
+                            // Fill text input
+                            inputElement.value = text;
+                            inputElement.focus();
+                            inputElement.select();
+
+                            // Trigger input event for validation
+                            inputElement.dispatchEvent( new Event( 'input', { bubbles: true } ) );
+
+                            // Reset button UI
+                            self._resetButton( button );
+
+                            // Call context-specific completion handler
+                            if ( options.onTranscriptionComplete ) {
+                                options.onTranscriptionComplete( text );
+                            }
+
+                            // Clear active recording
+                            self.activeRecording = null;
+                        },
+
+                        onError: ( error ) => {
+                            self.ui.error( `Recording error for ${contextId}: ${error.type} - ${error.message}` );
+                            self._stopDurationCounter();
+                            self._detachCancelListener();
+                            alert( error.message );
+                            self._resetButton( button );
+                            self.activeRecording = null;
+                        },
+
+                        debug: self.ui.debug
+                    } );
+
+                    await this.audioRecorder.startRecording();
+
+                } catch ( error ) {
+                    this.ui.error( `Failed to start recording for ${contextId}: ${error}` );
+                    alert( `Failed to start recording: ${error.message}` );
+                    this._resetButton( button );
+                    this.activeRecording = null;
+                }
+            },
+
+            /**
+             * Stop recording (user clicked mic button while recording).
+             */
+            stopRecording: async function() {
+                if ( this.audioRecorder && this.audioRecorder.isRecording ) {
+                    this.ui.log( 'Stopping recording via user action...' );
+                    await this.audioRecorder.stopRecording();
+                }
+            },
+
+            /**
+             * Cancel recording without uploading (ESC key or auto-cancel).
+             */
+            cancelRecording: function() {
+                if ( !this.activeRecording ) return;
+
+                const { contextId, button } = this.activeRecording;
+                this.ui.log( `Cancelling recording: ${contextId}` );
+
+                this._stopDurationCounter();
+                this._detachCancelListener();
+
+                if ( this.audioRecorder ) {
+                    this.audioRecorder._cancelling = true;
+                    this.audioRecorder.destroy();
+                    this.audioRecorder = null;
+                }
+
+                this._resetButton( button );
+                this.activeRecording = null;
+            },
+
+            /**
+             * Check if currently recording.
+             */
+            isRecording: function() {
+                return this.audioRecorder && this.audioRecorder.isRecording;
+            },
+
+            /**
+             * Check if currently processing (uploading/transcribing).
+             */
+            isProcessing: function() {
+                return this.audioRecorder && this.audioRecorder.isProcessing;
+            },
+
+            // --- Private helpers ---
+
+            _startDurationCounter: function( button ) {
+                const self = this;
+                const startTime = Date.now();
+
+                // Immediately show 0/30s (already set in onRecordingStart)
+                this.durationInterval = setInterval( () => {
+                    const elapsed = Math.floor( ( Date.now() - startTime ) / 1000 );
+                    const icon = elapsed >= 25 ? '🟡' : '🔴';
+                    button.textContent = `${icon} ${elapsed}/${self.MAX_DURATION_SECONDS}s`;
+                    button.title = `Recording: ${elapsed}/${self.MAX_DURATION_SECONDS}s (ESC to cancel)`;
+                }, 1000 );
+            },
+
+            _stopDurationCounter: function() {
+                if ( this.durationInterval ) {
+                    clearInterval( this.durationInterval );
+                    this.durationInterval = null;
+                }
+            },
+
+            _attachCancelListener: function( button ) {
+                const self = this;
+                this.cancelListener = ( event ) => {
+                    if ( event.key === 'Escape' ) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        self.cancelRecording();
+                    }
+                };
+                document.addEventListener( 'keydown', this.cancelListener );
+            },
+
+            _detachCancelListener: function() {
+                if ( this.cancelListener ) {
+                    document.removeEventListener( 'keydown', this.cancelListener );
+                    this.cancelListener = null;
+                }
+            },
+
+            _resetButton: function( button ) {
+                button.classList.remove( 'recording', 'processing' );
+                button.textContent = '🎤';
+                button.title = 'Click to record (30s max, ESC to cancel)';
+                button.disabled = false;
+            }
+        };
+
+        this.log( 'RecordingManager initialized' );
+    }
+
+    // ========================================
     // Q&A STT (Speech-to-Text) FUNCTIONALITY
+    // Now uses unified RecordingManager
     // ========================================
 
     async handleQASTTButtonClick() {
         const button = document.getElementById( 'qa-stt-button' );
+        const textInput = document.getElementById( 'qa-input' );
 
         // If already recording, stop it
-        if ( this.qaAudioRecorder && this.qaAudioRecorder.isRecording ) {
-            await this.qaAudioRecorder.stopRecording();
+        if ( this.recordingManager.isRecording() ) {
+            await this.recordingManager.stopRecording();
             return;
         }
 
         // If processing, ignore click
-        if ( this.qaAudioRecorder && this.qaAudioRecorder.isProcessing ) {
+        if ( this.recordingManager.isProcessing() ) {
             return;
         }
 
-        // Start new recording
-        await this.startQAVoiceInput();
-    }
-
-    async startQAVoiceInput() {
-        const button = document.getElementById( 'qa-stt-button' );
-        const textInput = document.getElementById( 'qa-input' );
-
-        if ( !this.authToken ) {
-            alert( 'Please log in to use voice input' );
-            return;
-        }
-
-        try {
-            // Create new AudioRecorder instance
-            this.qaAudioRecorder = new AudioRecorder( {
-                uploadEndpoint: '/api/upload-and-transcribe-mp3',
-                authToken: this.authToken,
-
-                onRecordingStart: () => {
-                    button.classList.add( 'recording' );
-                    button.textContent = '🔴';
-                    this._startQADurationCounter( button );
-                    this._attachQARecordingCancelListener( button );
-                },
-
-                onRecordingStop: ( audioBlob ) => {
-                    this._stopQADurationCounter();
-                    this._detachQARecordingCancelListener();
-                    button.classList.remove( 'recording' );
-                    button.classList.add( 'processing' );
-                    button.textContent = '⏳';
-                    button.disabled = true;
-                },
-
-                onTranscription: ( text ) => {
-                    // Fill text input with transcription
-                    textInput.value = text;
-                    textInput.focus();
-                    textInput.select();
-
-                    // Reset button UI
-                    button.classList.remove( 'processing' );
-                    button.textContent = '🎤';
-                    button.disabled = false;
-                    this._detachQARecordingCancelListener();
-                },
-
-                onError: ( error ) => {
-                    alert( `Recording error: ${error.message}` );
-
-                    // Reset button UI
-                    button.classList.remove( 'recording', 'processing' );
-                    button.textContent = '🎤';
-                    button.disabled = false;
-                    this._detachQARecordingCancelListener();
-                },
-
-                debug: this.debug
-            } );
-
-            await this.qaAudioRecorder.startRecording();
-
-        } catch ( error ) {
-            console.error( 'Failed to start Q&A voice input:', error );
-            alert( `Failed to start recording: ${error.message}` );
-
-            // Reset UI
-            button.classList.remove( 'recording', 'processing' );
-            button.textContent = '🎤';
-            button.disabled = false;
-        }
-    }
-
-    _startQADurationCounter( button ) {
-        const startTime = Date.now();
-        const MAX_DURATION_SECONDS = 30;
-
-        this.qaRecordingInterval = setInterval( () => {
-            const elapsed = Math.floor( ( Date.now() - startTime ) / 1000 );
-            const icon = elapsed >= 25 ? '🟡' : '🔴';
-            button.textContent = `${icon} ${elapsed}/${MAX_DURATION_SECONDS}s`;
-        }, 1000 );
-    }
-
-    _stopQADurationCounter() {
-        if ( this.qaRecordingInterval ) {
-            clearInterval( this.qaRecordingInterval );
-            this.qaRecordingInterval = null;
-        }
-    }
-
-    _attachQARecordingCancelListener( button ) {
-        this.qaRecordingCancelListener = ( event ) => {
-            if ( event.key === 'Escape' ) {
-                event.preventDefault();
-                event.stopPropagation();
-                this._cancelQARecording( button );
-            }
-        };
-        document.addEventListener( 'keydown', this.qaRecordingCancelListener );
-    }
-
-    _detachQARecordingCancelListener() {
-        if ( this.qaRecordingCancelListener ) {
-            document.removeEventListener( 'keydown', this.qaRecordingCancelListener );
-            this.qaRecordingCancelListener = null;
-        }
-    }
-
-    _cancelQARecording( button ) {
-        // Stop duration counter
-        this._stopQADurationCounter();
-
-        // Destroy recorder without uploading
-        if ( this.qaAudioRecorder ) {
-            this.qaAudioRecorder._cancelling = true;  // Signal cancellation
-            this.qaAudioRecorder.destroy();
-            this.qaAudioRecorder = null;
-        }
-
-        // Reset UI
-        button.classList.remove( 'recording', 'processing' );
-        button.textContent = '🎤';
-        button.disabled = false;
-        this._detachQARecordingCancelListener();
+        // Start new recording using unified RecordingManager
+        await this.recordingManager.startRecording( 'qa', button, textInput );
     }
 
     handleJobCompletion( envelope ) {
@@ -1977,7 +2160,275 @@ class NotificationsUI {
             // Continue execution - cache storage failure shouldn't break TTS
         }
     }
-    
+
+    // ========================================
+    // CLAUDE CODE DISPATCHER
+    // ========================================
+
+    /**
+     * Handle click on Claude Code Dispatcher STT button.
+     * Uses unified RecordingManager for voice input.
+     */
+    async handleCCSTTButtonClick() {
+        const button = document.getElementById( 'cc-stt-button' );
+        const textInput = document.getElementById( 'cc-prompt' );
+
+        // Toggle recording state using unified RecordingManager
+        if ( this.recordingManager.isRecording() ) {
+            await this.recordingManager.stopRecording();
+        } else if ( !this.recordingManager.isProcessing() ) {
+            await this.recordingManager.startRecording( 'cc-prompt', button, textInput );
+        }
+    }
+
+    async submitClaudeCode() {
+        const project = document.getElementById( 'cc-project' ).value;
+        const prompt = document.getElementById( 'cc-prompt' ).value;
+        const taskType = document.querySelector( 'input[name="cc-task-type"]:checked' ).value;
+
+        if ( !prompt.trim() ) {
+            alert( 'Please enter a task prompt' );
+            return;
+        }
+
+        // Show loading state
+        const loadingEl = document.getElementById( 'cc-loading' );
+        const submitBtn = document.getElementById( 'cc-submit' );
+        const responseEl = document.getElementById( 'cc-response' );
+
+        if ( loadingEl ) loadingEl.style.display = 'inline-block';
+        if ( submitBtn ) submitBtn.disabled = true;
+        if ( responseEl ) responseEl.textContent = 'Dispatching task...';
+
+        this.log( `Claude Code dispatch: project=${project}, type=${taskType}` );
+
+        try {
+            const response = await fetch( '/api/claude-code/dispatch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify( { project, prompt, task_type: taskType } )
+            });
+
+            if ( !response.ok ) {
+                const errorData = await response.json();
+                throw new Error( errorData.detail || 'Dispatch failed' );
+            }
+
+            const data = await response.json();
+            this.currentClaudeCodeTaskId = data.task_id;
+
+            this.log( `Claude Code task dispatched: ${data.task_id}` );
+
+            // Update UI
+            document.getElementById( 'cc-task-id' ).textContent = data.task_id;
+            document.getElementById( 'cc-status' ).textContent = 'Dispatched';
+            document.getElementById( 'cc-session-info' ).style.display = 'flex';
+
+            // Clear response area
+            if ( responseEl ) responseEl.textContent = '';
+
+            // Connect to WebSocket for streaming
+            this.connectClaudeCodeWebSocket( data.task_id );
+
+        } catch ( error ) {
+            this.error( 'Claude Code dispatch failed:', error );
+            if ( responseEl ) responseEl.textContent = `Error: ${error.message}`;
+        } finally {
+            if ( loadingEl ) loadingEl.style.display = 'none';
+            if ( submitBtn ) submitBtn.disabled = false;
+        }
+    }
+
+    connectClaudeCodeWebSocket( taskId ) {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/api/claude-code/ws/${taskId}`;
+
+        this.log( `Connecting to Claude Code WebSocket: ${wsUrl}` );
+
+        this.claudeCodeWs = new WebSocket( wsUrl );
+
+        this.claudeCodeWs.onopen = () => {
+            this.log( 'Claude Code WebSocket connected' );
+            document.getElementById( 'cc-status' ).textContent = 'Connected';
+        };
+
+        this.claudeCodeWs.onmessage = ( event ) => {
+            try {
+                const data = JSON.parse( event.data );
+                this.handleClaudeCodeMessage( data );
+            } catch ( e ) {
+                this.error( 'Failed to parse Claude Code message:', e );
+            }
+        };
+
+        this.claudeCodeWs.onclose = ( event ) => {
+            this.log( `Claude Code WebSocket closed: code=${event.code}` );
+            const statusEl = document.getElementById( 'cc-status' );
+            if ( statusEl && statusEl.textContent === 'Running' ) {
+                statusEl.textContent = 'Disconnected';
+            }
+        };
+
+        this.claudeCodeWs.onerror = ( error ) => {
+            this.error( 'Claude Code WebSocket error:', error );
+        };
+    }
+
+    handleClaudeCodeMessage( data ) {
+        const responseArea = document.getElementById( 'cc-response' );
+        if ( !responseArea ) return;
+
+        switch ( data.type ) {
+            case 'connected':
+                this.log( `Claude Code connected: task=${data.task_id}` );
+                break;
+
+            case 'status':
+                document.getElementById( 'cc-status' ).textContent = data.state || 'Unknown';
+                break;
+
+            case 'text':
+                responseArea.textContent += data.content;
+                break;
+
+            case 'tool_use':
+                responseArea.textContent += `\n[TOOL: ${data.name}]\n`;
+                break;
+
+            case 'tool_result':
+                const content = typeof data.content === 'string' ? data.content : JSON.stringify( data.content );
+                responseArea.textContent += `${content}\n`;
+                break;
+
+            case 'complete':
+                document.getElementById( 'cc-status' ).textContent = data.success ? 'Complete' : 'Failed';
+                if ( data.cost_usd ) {
+                    document.getElementById( 'cc-cost' ).textContent = `$${data.cost_usd.toFixed( 4 )}`;
+                }
+                if ( data.error ) {
+                    responseArea.textContent += `\n[ERROR: ${data.error}]\n`;
+                }
+                break;
+
+            case 'error':
+                responseArea.textContent += `\n[ERROR: ${data.message}]\n`;
+                document.getElementById( 'cc-status' ).textContent = 'Error';
+                break;
+
+            case 'info':
+                responseArea.textContent += `[INFO: ${data.content}]\n`;
+                break;
+
+            case 'keepalive':
+                // Ignore keepalive messages
+                break;
+
+            default:
+                this.log( `Unknown Claude Code message type: ${data.type}` );
+        }
+
+        // Auto-scroll
+        responseArea.scrollTop = responseArea.scrollHeight;
+    }
+
+    async injectClaudeCode() {
+        const injectInput = document.getElementById( 'cc-inject-input' );
+        const message = injectInput ? injectInput.value.trim() : '';
+
+        if ( !message || !this.currentClaudeCodeTaskId ) {
+            if ( !message ) alert( 'Please enter a follow-up message' );
+            return;
+        }
+
+        this.log( `Injecting message: ${message.substring( 0, 50 )}...` );
+
+        try {
+            const response = await fetch( `/api/claude-code/${this.currentClaudeCodeTaskId}/inject`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify( { message } )
+            });
+
+            if ( !response.ok ) {
+                const errorData = await response.json();
+                throw new Error( errorData.detail || 'Inject failed' );
+            }
+
+            // Clear input and show in response
+            if ( injectInput ) injectInput.value = '';
+            const responseEl = document.getElementById( 'cc-response' );
+            if ( responseEl ) {
+                responseEl.textContent += `\n[YOU: ${message}]\n`;
+                responseEl.scrollTop = responseEl.scrollHeight;
+            }
+
+            this.log( 'Message injected successfully' );
+
+        } catch ( error ) {
+            this.error( 'Inject failed:', error );
+            alert( `Inject failed: ${error.message}` );
+        }
+    }
+
+    async interruptClaudeCode() {
+        if ( !this.currentClaudeCodeTaskId ) return;
+
+        this.log( 'Interrupting Claude Code session' );
+
+        try {
+            const response = await fetch( `/api/claude-code/${this.currentClaudeCodeTaskId}/interrupt`, {
+                method: 'POST'
+            });
+
+            if ( !response.ok ) {
+                const errorData = await response.json();
+                throw new Error( errorData.detail || 'Interrupt failed' );
+            }
+
+            const responseEl = document.getElementById( 'cc-response' );
+            if ( responseEl ) {
+                responseEl.textContent += '\n[INTERRUPTED]\n';
+            }
+
+            this.log( 'Session interrupted' );
+
+        } catch ( error ) {
+            this.error( 'Interrupt failed:', error );
+            alert( `Interrupt failed: ${error.message}` );
+        }
+    }
+
+    async endClaudeCodeSession() {
+        if ( !this.currentClaudeCodeTaskId ) return;
+
+        this.log( 'Ending Claude Code session' );
+
+        try {
+            const response = await fetch( `/api/claude-code/${this.currentClaudeCodeTaskId}/end`, {
+                method: 'POST'
+            });
+
+            if ( !response.ok ) {
+                const errorData = await response.json();
+                throw new Error( errorData.detail || 'End session failed' );
+            }
+
+            document.getElementById( 'cc-status' ).textContent = 'Ended';
+            this.currentClaudeCodeTaskId = null;
+
+            if ( this.claudeCodeWs ) {
+                this.claudeCodeWs.close();
+                this.claudeCodeWs = null;
+            }
+
+            this.log( 'Session ended' );
+
+        } catch ( error ) {
+            this.error( 'End session failed:', error );
+            alert( `End session failed: ${error.message}` );
+        }
+    }
+
     // ========================================
     // TTS FUNCTIONALITY
     // ========================================
@@ -2229,8 +2680,16 @@ class NotificationsUI {
     }
     
     async handleAudioComplete( data ) {
-        // Stop pulsing indicator on notification card
-        this.stopTTSPlayingIndicator( this.currentNotificationId );
+        // Handle pulsing indicator based on TTS mode
+        if ( this.currentTTSMode === this.TTS_MODE_INSTANT ) {
+            // For instant mode: defer indicator stop until last chunk finishes playing
+            // The onended handler in playPCMChunk() will stop the indicator
+            this.pcmStreamComplete = true;
+        } else {
+            // For reliable mode: stop immediately (playback hasn't started yet)
+            // playCollectedAudio() has its own onended handler for actual playback end
+            this.stopTTSPlayingIndicator( this.currentNotificationId );
+        }
 
         const collectedChunks = this.audioChunks ? this.audioChunks.length : 0;
         const processedChunks = this.processedChunks || 0;
@@ -2367,6 +2826,25 @@ class NotificationsUI {
         const currentTime = this.pcmAudioContext.currentTime;
         const startTime = Math.max( this.pcmNextStartTime, currentTime );
         source.start( startTime );
+
+        // Track this source for end-of-playback detection and manual stop
+        this.lastPCMSource = source;
+        this.audioSources = this.audioSources || [];
+        this.audioSources.push( source );
+        const notificationId = this.currentNotificationId;  // Capture for closure
+
+        // Attach onended handler to detect when audio playback actually finishes
+        source.onended = () => {
+            // Only stop pulsing indicator if:
+            // 1. Stream download is complete (all chunks received)
+            // 2. This is the last scheduled source (no new chunks came after)
+            if ( this.pcmStreamComplete && source === this.lastPCMSource ) {
+                if ( this.debug ) this.log( "PCM playback complete - stopping TTS indicator" );
+                this.stopTTSPlayingIndicator( notificationId );
+                this.pcmStreamComplete = false;
+                this.lastPCMSource = null;
+            }
+        };
 
         // Update next start time for seamless sequential playback
         this.pcmNextStartTime = startTime + buffer.duration;
@@ -2729,6 +3207,8 @@ class NotificationsUI {
             this.pcmNextStartTime = this.pcmAudioContext.currentTime;
         }
         this.firstChunkPlayed = false;
+        this.pcmStreamComplete = false;
+        this.lastPCMSource = null;
         
         // Reset first chunk timing
         this.firstChunkStartTime = null;
@@ -3804,12 +4284,19 @@ class NotificationsUI {
         }
 
         // Format timestamp for display (time only since date is in header)
-        const timestamp = new Date( notification.timestamp || Date.now() );
-        const timeStr = timestamp.toLocaleTimeString( 'en-US', {
-            hour   : '2-digit',
-            minute : '2-digit',
-            hour12 : false
-        });
+        // Prefer backend-provided time_display (includes timezone abbreviation: "23:10 EST")
+        // Fall back to JavaScript formatting for legacy data
+        let timeStr;
+        if ( notification.time_display ) {
+            timeStr = notification.time_display;
+        } else {
+            const timestamp = new Date( notification.timestamp || Date.now() );
+            timeStr = timestamp.toLocaleTimeString( 'en-US', {
+                hour   : '2-digit',
+                minute : '2-digit',
+                hour12 : false
+            });
+        }
 
         // Clean message (remove [PREFIX] since it's already shown in card header)
         let cleanMessage = notification.message || '';
@@ -3842,6 +4329,7 @@ class NotificationsUI {
         messageDiv.innerHTML = `
             <span class="message-time">${timeStr}</span>
             <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}${expiredBadge}</span>
+            <button class="tts-stop-btn" onclick="window.notificationsUI.stopAudio(); event.stopPropagation();" title="Stop audio">⏹</button>
         `;
 
         // Add to top (newest first)
@@ -3978,8 +4466,15 @@ class NotificationsUI {
         const container = document.getElementById( containerId );
         if ( !container ) return;
 
-        const timestamp = new Date( notification.timestamp || Date.now() );
-        const time = timestamp.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit' } );
+        // Prefer backend-provided time_display (includes timezone abbreviation: "23:10 EST")
+        // Fall back to JavaScript formatting for legacy data
+        let time;
+        if ( notification.time_display ) {
+            time = notification.time_display;
+        } else {
+            const timestamp = new Date( notification.timestamp || Date.now() );
+            time = timestamp.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit' } );
+        }
 
         // Process message (remove [PREFIX] since we already show project name)
         let displayMessage = notification.message || '';
@@ -5106,6 +5601,127 @@ class NotificationsUI {
     // PHASE 2.2 SSE - ACTION REQUIRED NOTIFICATIONS
     // ========================================
 
+    /**
+     * Save action-required notifications to localStorage for persistence across refresh.
+     * Only saves notifications that haven't expired and haven't been responded to.
+     */
+    saveActionRequiredState() {
+        try {
+            const stateArray = [];
+            const now = Date.now();
+
+            for ( const [ id, state ] of this.actionRequiredNotifications.entries() ) {
+                // Only persist non-expired, non-responded notifications
+                if ( !state.isExpired && !state.isResponded && state.expiresAt > now ) {
+                    stateArray.push( {
+                        id                   : id,
+                        notification         : state.notification,
+                        expiresAt            : state.expiresAt,
+                        timeoutSeconds       : state.timeoutSeconds,
+                        currentQuestionIndex : state.currentQuestionIndex || 0,
+                        collectedAnswers     : state.collectedAnswers || {}
+                    } );
+                }
+            }
+
+            if ( stateArray.length > 0 ) {
+                localStorage.setItem( this.ACTION_REQUIRED_KEY, JSON.stringify( stateArray ) );
+                this.log( `Saved ${stateArray.length} action-required notification(s) to localStorage` );
+            } else {
+                localStorage.removeItem( this.ACTION_REQUIRED_KEY );
+                this.log( 'Cleared action-required localStorage (no active notifications)' );
+            }
+        } catch ( error ) {
+            this.error( 'Failed to save action-required state:', error );
+        }
+    }
+
+    /**
+     * Restore action-required notifications from localStorage after page refresh.
+     * Filters out expired notifications and recalculates remaining timeout.
+     */
+    restoreActionRequiredState() {
+        try {
+            const stored = localStorage.getItem( this.ACTION_REQUIRED_KEY );
+            if ( !stored ) {
+                this.log( 'No action-required notifications to restore from localStorage' );
+                return;
+            }
+
+            const stateArray = JSON.parse( stored );
+            const now = Date.now();
+            let restoredCount = 0;
+
+            for ( const saved of stateArray ) {
+                // Skip if already expired
+                if ( saved.expiresAt <= now ) {
+                    this.log( `Skipping expired notification: ${saved.id}` );
+                    continue;
+                }
+
+                // Skip if already in our Map (duplicate)
+                if ( this.actionRequiredNotifications.has( saved.id ) ) {
+                    this.log( `Skipping duplicate notification: ${saved.id}` );
+                    continue;
+                }
+
+                // Recalculate remaining timeout
+                const remainingMs = saved.expiresAt - now;
+                const remainingSeconds = Math.ceil( remainingMs / 1000 );
+
+                // Update notification with remaining time for UI
+                const notification = saved.notification;
+                notification.timeout_seconds = remainingSeconds;
+
+                // Recreate state object
+                const state = {
+                    notification         : notification,
+                    expiresAt            : saved.expiresAt,
+                    timeoutSeconds       : remainingSeconds,
+                    isExpired            : false,
+                    isResponded          : false,
+                    currentQuestionIndex : saved.currentQuestionIndex || 0,
+                    collectedAnswers     : saved.collectedAnswers || {}
+                };
+
+                this.actionRequiredNotifications.set( saved.id, state );
+
+                // Show the Action Required section
+                const section = document.getElementById( 'action-required-section' );
+                if ( section ) {
+                    section.style.display = 'block';
+                }
+
+                // Render the notification UI
+                this.renderActionRequiredNotification( notification );
+
+                // Start countdown timer with remaining time
+                this.startCountdownTimer( saved.id );
+
+                restoredCount++;
+            }
+
+            if ( restoredCount > 0 ) {
+                this.updateActionRequiredCount();
+
+                // Attach keyboard listener if not already active
+                if ( !this.keyboardListenerActive ) {
+                    this.attachKeyboardListener();
+                }
+
+                this.log( `Restored ${restoredCount} action-required notification(s) from localStorage` );
+            }
+
+            // Clean up localStorage after restore (remove expired entries)
+            this.saveActionRequiredState();
+
+        } catch ( error ) {
+            this.error( 'Failed to restore action-required state:', error );
+            // Clear corrupted data
+            localStorage.removeItem( this.ACTION_REQUIRED_KEY );
+        }
+    }
+
     addActionRequiredNotification( notification ) {
         this.log( `Adding action-required notification: ${notification.id}` );
 
@@ -5145,6 +5761,9 @@ class NotificationsUI {
         if ( !this.keyboardListenerActive ) {
             this.attachKeyboardListener();
         }
+
+        // Persist to localStorage for refresh survival
+        this.saveActionRequiredState();
     }
 
     renderActionRequiredNotification( notification ) {
@@ -5866,6 +6485,7 @@ class NotificationsUI {
             // Cleanup action-required state
             this.actionRequiredNotifications.delete( notificationId );
             this.updateActionRequiredCount();
+            this.saveActionRequiredState();  // Persist removal
 
             // Scroll sender card into view
             if ( senderCard ) {
@@ -5880,6 +6500,7 @@ class NotificationsUI {
                 this.addConversationPair( senderId, state.notification, response, false );
                 this.actionRequiredNotifications.delete( notificationId );
                 this.updateActionRequiredCount();
+                this.saveActionRequiredState();  // Persist removal
             }
         }, 600 );
 
@@ -5922,6 +6543,7 @@ class NotificationsUI {
 
         this.actionRequiredNotifications.delete( notificationId );
         this.updateActionRequiredCount();
+        this.saveActionRequiredState();  // Persist removal
 
         // Add to regular notifications (already has response info from server)
         this.addNotificationToList( state.notification );
@@ -5966,6 +6588,7 @@ class NotificationsUI {
                 // Cleanup action-required state
                 this.actionRequiredNotifications.delete( notificationId );
                 this.updateActionRequiredCount();
+                this.saveActionRequiredState();  // Persist removal
 
                 // Scroll sender card into view after DOM changes (moveSenderCardToTop shifts layout)
                 const senderCard = document.getElementById( destination.cardId );
@@ -6543,6 +7166,10 @@ class NotificationsUI {
         this.log( "Keyboard listener attached for Yes/No shortcuts" );
     }
 
+    /**
+     * Starts voice input for an open-ended notification response.
+     * Now uses unified RecordingManager.
+     */
     async startVoiceInput( notificationId ) {
         this.log( `Starting voice input for ${notificationId}` );
 
@@ -6554,116 +7181,17 @@ class NotificationsUI {
             return;
         }
 
-        // Toggle recording state
-        if ( this.audioRecorder && this.audioRecorder.isRecording ) {
-            // Stop recording
-            this.log( 'Stopping audio recording...' );
-            await this.audioRecorder.stopRecording();
-        } else {
-            // Start recording
-            const token = localStorage.getItem( 'lupin_access_token' );
-
-            if ( !token ) {
-                this.error( 'No authentication token found' );
-                alert( 'Authentication required. Please log in.' );
-                return;
-            }
-
-            this.audioRecorder = new AudioRecorder({
-                uploadEndpoint: '/api/upload-and-transcribe-mp3',
-                authToken: token,
-                onRecordingStart: () => {
-                    this.log( 'Audio recording started' );
-                    micButton.classList.add( 'recording' );
-                    micButton.textContent = '🔴 0/30s';
-                    micButton.title = 'Recording: 0/30s (ESC to cancel)';
-
-                    // Start duration counter
-                    this._startDurationCounter( notificationId, micButton );
-
-                    // Attach ESC key listener
-                    this._attachRecordingCancelListener( notificationId, micButton );
-                },
-                onRecordingStop: ( audioBlob ) => {
-                    this.log( `Audio recording stopped: ${audioBlob.size} bytes` );
-
-                    // Stop duration counter
-                    this._stopDurationCounter( notificationId );
-
-                    // Remove ESC key listener (upload starting)
-                    this._detachRecordingCancelListener();
-
-                    // Show processing state
-                    micButton.classList.remove( 'recording' );
-                    micButton.classList.add( 'processing' );
-                    micButton.textContent = '⏳';
-                    micButton.title = 'Transcribing audio...';
-                    micButton.disabled = true;
-                },
-                onTranscription: ( text ) => {
-                    this.log( `Transcription received: "${text}"` );
-
-                    // Fill text input with transcription
-                    textInput.value = text;
-                    textInput.focus();
-                    textInput.select();
-
-                    // Trigger validation
-                    textInput.dispatchEvent( new Event( 'input', { bubbles: true } ) );
-
-                    // Reset button UI
-                    micButton.classList.remove( 'processing' );
-                    micButton.textContent = '🎤';
-                    micButton.title = 'Click to start recording (30s max, ESC to cancel)';
-                    micButton.disabled = false;
-
-                    // Remove ESC key listener (completed successfully)
-                    this._detachRecordingCancelListener();
-                },
-                onError: ( error ) => {
-                    this.error( `Audio recording error: ${error.type} - ${error.message}` );
-
-                    // Stop duration counter
-                    this._stopDurationCounter( notificationId );
-
-                    // Remove ESC key listener (error occurred)
-                    this._detachRecordingCancelListener();
-
-                    // Show error to user
-                    alert( error.message );
-
-                    // Reset button UI
-                    micButton.classList.remove( 'recording', 'processing' );
-                    micButton.textContent = '🎤';
-                    micButton.title = 'Click to start recording (30s max, ESC to cancel)';
-                    micButton.disabled = false;
-                },
-                debug: this.debug
-            });
-
-            try {
-                await this.audioRecorder.startRecording();
-            } catch ( error ) {
-                // Error already handled by onError callback
-                this.error( `Failed to start recording: ${error}` );
-            }
+        // Toggle recording state using unified RecordingManager
+        if ( this.recordingManager.isRecording() ) {
+            await this.recordingManager.stopRecording();
+        } else if ( !this.recordingManager.isProcessing() ) {
+            await this.recordingManager.startRecording( `response-${notificationId}`, micButton, textInput );
         }
     }
 
     /**
      * Starts voice input for the "Other" field in a multiple-choice notification.
-     * Similar to startVoiceInput() but targets the mc-other-mic button and mc-other-input field.
-     *
-     * Requires:
-     *   - notificationId corresponds to an active multiple-choice notification
-     *   - AudioRecorder class is available
-     *   - User is authenticated
-     *
-     * Ensures:
-     *   - Toggles recording state (start/stop)
-     *   - Updates mic button UI during recording and processing
-     *   - Fills Other text input with transcription result
-     *   - Auto-selects the "Other" radio/checkbox option
+     * Now uses unified RecordingManager with auto-select and validation options.
      */
     async startMultipleChoiceVoiceInput( notificationId ) {
         this.log( `Starting voice input for multiple choice Other field: ${notificationId}` );
@@ -6678,219 +7206,27 @@ class NotificationsUI {
             return;
         }
 
-        // Toggle recording state
-        if ( this.audioRecorder && this.audioRecorder.isRecording ) {
-            // Stop recording
-            this.log( 'Stopping audio recording...' );
-            await this.audioRecorder.stopRecording();
-        } else {
-            // Start recording
-            const token = localStorage.getItem( 'lupin_access_token' );
-
-            if ( !token ) {
-                this.error( 'No authentication token found' );
-                alert( 'Authentication required. Please log in.' );
-                return;
-            }
-
-            // Auto-select the "Other" option when user starts recording
-            if ( otherRadio ) otherRadio.checked = true;
-
-            this.audioRecorder = new AudioRecorder( {
-                uploadEndpoint: '/api/upload-and-transcribe-mp3',
-                authToken       : token,
-                onRecordingStart: () => {
-                    this.log( 'Audio recording started for Other field' );
-                    micButton.classList.add( 'recording' );
-                    micButton.textContent = '🔴 0/30s';
-                    micButton.title = 'Recording: 0/30s (ESC to cancel)';
-
-                    // Start duration counter (reuse existing helper with unique key)
-                    this._startDurationCounter( `mc-${notificationId}`, micButton );
-
-                    // Attach ESC key listener
-                    this._attachRecordingCancelListener( `mc-${notificationId}`, micButton );
-                },
-                onRecordingStop: ( audioBlob ) => {
-                    this.log( `Audio recording stopped: ${audioBlob.size} bytes` );
-
-                    // Stop duration counter
-                    this._stopDurationCounter( `mc-${notificationId}` );
-
-                    // Remove ESC key listener (upload starting)
-                    this._detachRecordingCancelListener();
-
-                    // Show processing state
-                    micButton.classList.remove( 'recording' );
-                    micButton.classList.add( 'processing' );
-                    micButton.textContent = '⏳';
-                    micButton.title = 'Transcribing audio...';
-                    micButton.disabled = true;
-                },
-                onTranscription: ( text ) => {
-                    this.log( `Transcription received for Other field: "${text}"` );
-
-                    // Fill text input with transcription
-                    textInput.value = text;
-                    textInput.focus();
-                    textInput.select();
-
-                    // Trigger validation / clear invalid state
-                    textInput.dispatchEvent( new Event( 'input', { bubbles: true } ) );
+        // Toggle recording state using unified RecordingManager
+        if ( this.recordingManager.isRecording() ) {
+            await this.recordingManager.stopRecording();
+        } else if ( !this.recordingManager.isProcessing() ) {
+            await this.recordingManager.startRecording( `mc-${notificationId}`, micButton, textInput, {
+                autoSelectElement: otherRadio,
+                onTranscriptionComplete: () => {
+                    // Clear invalid state on successful transcription
                     const container = card?.querySelector( '.response-multiple-choice' );
                     if ( container ) container.classList.remove( 'invalid' );
-
-                    // Reset button UI
-                    micButton.classList.remove( 'processing' );
-                    micButton.textContent = '🎤';
-                    micButton.title = 'Press Enter or Space to record (30s max, ESC to cancel)';
-                    micButton.disabled = false;
-
-                    // Remove ESC key listener (completed successfully)
-                    this._detachRecordingCancelListener();
-                },
-                onError: ( error ) => {
-                    this.error( `Audio recording error: ${error.type} - ${error.message}` );
-
-                    // Stop duration counter
-                    this._stopDurationCounter( `mc-${notificationId}` );
-
-                    // Remove ESC key listener (error occurred)
-                    this._detachRecordingCancelListener();
-
-                    // Show error to user
-                    alert( error.message );
-
-                    // Reset button UI
-                    micButton.classList.remove( 'recording', 'processing' );
-                    micButton.textContent = '🎤';
-                    micButton.title = 'Press Enter or Space to record (30s max, ESC to cancel)';
-                    micButton.disabled = false;
-                },
-                debug: this.debug
+                }
             } );
-
-            try {
-                await this.audioRecorder.startRecording();
-            } catch ( error ) {
-                // Error already handled by onError callback
-                this.error( `Failed to start recording: ${error}` );
-            }
         }
     }
 
-    _startDurationCounter( notificationId, micButton ) {
-        // Clear any existing counter
-        this._stopDurationCounter( notificationId );
-
-        const startTime = Date.now();
-
-        this.audioRecording = this.audioRecording || {};
-        this.audioRecording[notificationId] = {
-            startTime: startTime,
-            interval: setInterval( () => {
-                const elapsed = Math.floor( (Date.now() - startTime) / 1000 );
-                const MAX_DURATION_SECONDS = 30;  // Whisper API limit
-
-                // Yellow warning at 25+ seconds, red icon before that
-                const icon = elapsed >= 25 ? '🟡' : '🔴';
-                micButton.textContent = `${icon} ${elapsed}/${MAX_DURATION_SECONDS}s`;
-                micButton.title = `Recording: ${elapsed}/${MAX_DURATION_SECONDS}s (ESC to cancel)`;
-            }, 1000 )
-        };
-    }
-
-    _stopDurationCounter( notificationId ) {
-        if ( this.audioRecording && this.audioRecording[notificationId] ) {
-            clearInterval( this.audioRecording[notificationId].interval );
-            delete this.audioRecording[notificationId];
-        }
-    }
-
-    /**
-     * Attach keyboard listener for ESC key to cancel recording
-     *
-     * Requires:
-     *   - notificationId is valid
-     *   - micButton element exists
-     *
-     * Ensures:
-     *   - ESC key listener attached to document
-     *   - Only one listener active at a time
-     *   - Listener stored for cleanup
-     */
-    _attachRecordingCancelListener( notificationId, micButton ) {
-        // Remove any existing listener first
-        this._detachRecordingCancelListener();
-
-        // Create and store the listener
-        this._recordingCancelListener = ( event ) => {
-            if ( event.key === 'Escape' ) {
-                this.log( `ESC key pressed - cancelling recording for ${notificationId}` );
-                event.preventDefault();
-                event.stopPropagation();
-                this._cancelRecording( notificationId, micButton );
-            }
-        };
-
-        // Attach to document
-        document.addEventListener( 'keydown', this._recordingCancelListener );
-        this.log( `ESC key listener attached for ${notificationId}` );
-    }
-
-    /**
-     * Detach keyboard listener for ESC key
-     *
-     * Ensures:
-     *   - ESC key listener removed from document
-     *   - Listener reference cleared
-     */
-    _detachRecordingCancelListener() {
-        if ( this._recordingCancelListener ) {
-            document.removeEventListener( 'keydown', this._recordingCancelListener );
-            this._recordingCancelListener = null;
-            this.log( 'ESC key listener detached' );
-        }
-    }
-
-    /**
-     * Cancel recording without uploading
-     *
-     * Requires:
-     *   - notificationId is valid
-     *   - micButton element exists
-     *
-     * Ensures:
-     *   - Recording stopped
-     *   - Audio discarded (no upload)
-     *   - UI reset to idle state
-     *   - Duration counter stopped
-     *   - ESC listener removed
-     */
-    _cancelRecording( notificationId, micButton ) {
-        this.log( `Cancelling recording for ${notificationId}` );
-
-        // Stop duration counter
-        this._stopDurationCounter( notificationId );
-
-        // Destroy audio recorder without uploading
-        if ( this.audioRecorder ) {
-            this.audioRecorder._cancelling = true;  // Signal cancellation to prevent upload
-            this.audioRecorder.destroy();
-            this.audioRecorder = null;
-        }
-
-        // Reset UI
-        micButton.classList.remove( 'recording', 'processing' );
-        micButton.textContent = '🎤';
-        micButton.title = 'Click to start recording (30s max, ESC to cancel)';
-        micButton.disabled = false;
-
-        // Remove ESC listener
-        this._detachRecordingCancelListener();
-
-        this.log( 'Recording cancelled successfully' );
-    }
+    // NOTE: The following deprecated helper methods have been removed and consolidated
+    // into the RecordingManager (initialized in initRecordingManager):
+    // - _startDurationCounter, _stopDurationCounter
+    // - _attachRecordingCancelListener, _detachRecordingCancelListener
+    // - _cancelRecording
+    // - this.audioRecorder, this.audioRecording, this._recordingCancelListener
 }
 
 // ========================================

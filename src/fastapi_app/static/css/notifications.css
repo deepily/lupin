@@ -592,6 +592,71 @@
             background-color: #ffc107;  /* No hover change during processing */
         }
 
+        /* ========================================
+           UNIFIED STT BUTTON STYLES
+           Used by: Q&A, Notification Response, MC Other, Claude Code Dispatcher
+           ======================================== */
+
+        .stt-button {
+            padding: 8px 12px;
+            border: 2px solid #007bff;
+            border-radius: 8px;
+            background: white;
+            color: #007bff;
+            cursor: pointer;
+            font-size: 16px;
+            min-width: 70px;  /* Prevent width change when timer shows */
+            transition: all 0.2s ease;
+        }
+
+        .stt-button:hover:not(:disabled) {
+            background-color: #e7f3ff;
+        }
+
+        .stt-button:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba( 0, 123, 255, 0.4 );
+        }
+
+        .stt-button.recording {
+            background-color: #dc3545;
+            border-color: #dc3545;
+            color: white;
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        .stt-button.processing {
+            background-color: #ffc107;
+            border-color: #ffc107;
+            color: white;
+            cursor: wait;
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        .stt-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* Claude Code Dispatcher prompt container */
+        .cc-prompt-container {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+        }
+
+        .cc-prompt-container textarea {
+            flex: 1;
+        }
+
+        .cc-prompt-container .stt-button {
+            /* Fixed size to match project selector - don't stretch with textarea */
+            align-self: flex-start;
+            height: 38px;
+            min-width: 50px;
+            flex-shrink: 0;
+        }
+
         .response-submit-button {
             padding: 10px 20px;
             border: none;
@@ -1187,6 +1252,31 @@
         .tts-playing {
             animation: ttsPulseGlow 1s ease-in-out infinite !important;
             border-radius: 8px;
+        }
+
+        /* Stop playback button - only visible during TTS playback */
+        .tts-stop-btn {
+            background: none;
+            border: none;
+            font-size: 14px;
+            color: #ffc107;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: auto;
+            flex-shrink: 0;
+            display: none;  /* Hidden by default */
+            transition: all 0.2s ease;
+        }
+
+        /* Only visible when message is playing */
+        .sender-message.tts-playing .tts-stop-btn {
+            display: block;
+        }
+
+        .tts-stop-btn:hover {
+            background-color: rgba( 255, 193, 7, 0.3 );
+            transform: scale( 1.1 );
         }
 
         /* Shrink-fade animation state for action-required notifications */
