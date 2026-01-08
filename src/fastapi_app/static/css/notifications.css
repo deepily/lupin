@@ -1172,6 +1172,23 @@
             border-radius: 8px;
         }
 
+        /* Pulsing gold border for TTS playback indicator (infinite until stopped) */
+        @keyframes ttsPulseGlow {
+            0%, 100% {
+                box-shadow: 0 0 5px 2px rgba( 255, 193, 7, 0.4 );
+                outline: 2px solid rgba( 255, 193, 7, 0.6 );
+            }
+            50% {
+                box-shadow: 0 0 15px 5px rgba( 255, 193, 7, 0.9 );
+                outline: 2px solid #ffc107;
+            }
+        }
+
+        .tts-playing {
+            animation: ttsPulseGlow 1s ease-in-out infinite !important;
+            border-radius: 8px;
+        }
+
         /* Shrink-fade animation state for action-required notifications */
         .action-required-notification.shrink-fade {
             animation: shrinkFadeOut 0.5s ease-out forwards;

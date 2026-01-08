@@ -13,7 +13,7 @@ class NotificationsUI {
         // TTS Mode Constants
         this.TTS_MODE_INSTANT = 'instant';
         this.TTS_MODE_RELIABLE = 'reliable';
-        this.TTS_MODE_DEFAULT = this.TTS_MODE_RELIABLE;  // Default to reliable for better browser compatibility
+        this.TTS_MODE_DEFAULT = this.TTS_MODE_INSTANT;  // Default to instant (PCM 24000 streaming)
 
         // WebSocket connections
         this.queueWS = null;
@@ -52,11 +52,17 @@ class NotificationsUI {
         this.audioElement = this.createAudioElement();
         
         // Sequential playback for instant mode (Chrome fix)
+        // OLD: HTML Audio sequential chain (commented out - choppy)
         this.sequentialQueue = [];
         this.isSequentialPlaying = false;
         this.currentSequentialAudio = null;
         this.sequentialChunksPlayed = 0;
-        
+
+        // NEW: PCM 24000 playback state (ElevenLabs instant mode)
+        // Web Audio API with precise scheduling for smooth playback
+        this.pcmAudioContext = null;
+        this.pcmNextStartTime = 0;
+
         // First chunk timing for instant mode
         this.firstChunkStartTime = null;
         this.firstChunkPlayed = false;
@@ -2094,9 +2100,16 @@ class NotificationsUI {
     async playInstantTTS( text ) {
         this.log( "Starting instant TTS (11labs streaming)..." );
 
+        // Start pulsing indicator on notification card
+        this.startTTSPlayingIndicator( this.currentNotificationId );
+
         try {
             // Ensure token is valid before API call (auto-refresh if expired)
             await this.ensureValidToken();
+
+            // Start timing BEFORE the fetch for accurate TTFA measurement
+            this.startTime = Date.now();
+            this.metricsTTSStartTime = Date.now();
 
             // Request TTS via 11labs streaming endpoint
             const response = await fetch( '/api/get-speech-elevenlabs', {
@@ -2124,8 +2137,12 @@ class NotificationsUI {
             this.currentTTSMode = this.TTS_MODE_INSTANT;
             this.audioChunks = [];
             this.audioSources = [];
-            this.startTime = Date.now(); // Track timing for both modes
-            this.metricsTTSStartTime = Date.now(); // Capture TTS start for TTFA metric
+
+            // Reset PCM playback timing for new stream
+            if ( this.pcmAudioContext ) {
+                this.pcmNextStartTime = this.pcmAudioContext.currentTime;
+            }
+            this.firstChunkPlayed = false;
 
         } catch ( error ) {
             this.error( "Instant TTS request failed:", error );
@@ -2135,6 +2152,9 @@ class NotificationsUI {
     
     async playReliableTTS( text ) {
         this.log( "Starting reliable TTS (OpenAI batch)..." );
+
+        // Start pulsing indicator on notification card
+        this.startTTSPlayingIndicator( this.currentNotificationId );
 
         // Initialize state BEFORE async fetch to prevent race condition
         // (WebSocket may complete before fetch response arrives)
@@ -2190,19 +2210,28 @@ class NotificationsUI {
     
     handleAudioChunk( blobData ) {
         if ( this.debug ) this.log( `Received audio chunk: ${blobData.size} bytes` );
-        
-        // Always collect chunks for caching (both instant and reliable modes)
-        this.audioChunks = this.audioChunks || [];
-        this.audioChunks.push( blobData );
+
+        // TEMPORARY: Only collect chunks for reliable mode (MP3)
+        // PCM caching disabled until quality validated
+        if ( this.currentTTSMode === this.TTS_MODE_RELIABLE ) {
+            this.audioChunks = this.audioChunks || [];
+            this.audioChunks.push( blobData );
+        }
 
         if ( this.currentTTSMode === this.TTS_MODE_INSTANT ) {
-            // Use sequential queue for Chrome compatibility AND collect for caching
-            this.playChunkSequential( blobData );
+            // OLD: HTML Audio sequential playback (commented out - choppy)
+            // this.playChunkSequential( blobData );
+
+            // NEW: Web Audio API with PCM 24000 precise scheduling
+            this.playPCMChunk( blobData );
         }
         // For reliable mode, chunks are just collected and played later in playCollectedAudio()
     }
     
     async handleAudioComplete( data ) {
+        // Stop pulsing indicator on notification card
+        this.stopTTSPlayingIndicator( this.currentNotificationId );
+
         const collectedChunks = this.audioChunks ? this.audioChunks.length : 0;
         const processedChunks = this.processedChunks || 0;
         const sequentialPlayed = this.sequentialChunksPlayed || 0;
@@ -2215,11 +2244,13 @@ class NotificationsUI {
         }
         
         // Cache the audio BEFORE clearing currentTTSText to avoid race condition
-        if ( this.audioChunks && this.audioChunks.length > 0 ) {
+        // TEMPORARY: Only cache for reliable mode (MP3) until PCM caching validated
+        if ( this.currentTTSMode === this.TTS_MODE_RELIABLE && this.audioChunks && this.audioChunks.length > 0 ) {
             // Create audio blob for caching
             const audioBlob = new Blob( this.audioChunks, { type: 'audio/mpeg' } );
             await this.cacheGeneratedAudio( audioBlob );
         }
+        // NOTE: PCM caching disabled for now - chunks are raw Int16 and can't be cached as MP3
 
         if ( this.currentTTSMode === this.TTS_MODE_RELIABLE && this.audioChunks && this.audioChunks.length > 0 ) {
             // Use proven reliable mode playback (adapted from original HybridTTS)
@@ -2271,9 +2302,96 @@ class NotificationsUI {
     }
     
     // ========================================
-    // SEQUENTIAL PLAYBACK FOR INSTANT MODE (Chrome fix)
+    // PCM 24000 PLAYBACK FOR INSTANT MODE (NEW)
+    // Web Audio API with precise scheduling - replaces choppy sequential playback
     // ========================================
-    
+
+    initPCMAudioContext() {
+        if ( !this.pcmAudioContext ) {
+            this.pcmAudioContext = new ( window.AudioContext || window.webkitAudioContext )( {
+                sampleRate: 24000  // Match ElevenLabs PCM 24000 format
+            } );
+            this.pcmNextStartTime = this.pcmAudioContext.currentTime;
+            this.log( "PCM AudioContext initialized at 24kHz" );
+        }
+    }
+
+    async playPCMChunk( blobData ) {
+        // Capture TTFA state BEFORE any awaits to avoid race condition
+        // (handleAudioComplete may reset firstChunkPlayed while we're awaiting)
+        const isFirstChunk = !this.firstChunkPlayed && this.startTime;
+        const ttfaStartTime = this.startTime;
+        if ( isFirstChunk ) {
+            this.firstChunkPlayed = true;  // Mark immediately to prevent duplicates
+        }
+
+        // Initialize context if needed
+        if ( !this.pcmAudioContext ) {
+            this.initPCMAudioContext();
+        }
+
+        // Resume if suspended (browser autoplay policy)
+        if ( this.pcmAudioContext.state === 'suspended' ) {
+            await this.pcmAudioContext.resume();
+        }
+
+        // Skip small chunks (likely metadata)
+        if ( blobData.size < 100 ) {
+            if ( this.debug ) this.log( `Skipping small PCM chunk: ${blobData.size} bytes` );
+            return;
+        }
+
+        // Convert blob to ArrayBuffer
+        const arrayBuffer = await blobData.arrayBuffer();
+
+        // Convert PCM16 (Int16Array, signed 16-bit little-endian) to Float32Array
+        // This is the same approach as Gemini Live
+        const pcm16 = new Int16Array( arrayBuffer );
+        const float32 = new Float32Array( pcm16.length );
+        for ( let i = 0; i < pcm16.length; i++ ) {
+            // Convert from signed 16-bit [-32768, 32767] to float [-1.0, 1.0]
+            float32[ i ] = pcm16[ i ] / 32768.0;
+        }
+
+        // Create audio buffer at 24kHz (mono)
+        const buffer = this.pcmAudioContext.createBuffer( 1, float32.length, 24000 );
+        buffer.copyToChannel( float32, 0, 0 );
+
+        // Create buffer source
+        const source = this.pcmAudioContext.createBufferSource();
+        source.buffer = buffer;
+        source.connect( this.pcmAudioContext.destination );
+
+        // Schedule playback with PRECISE timing
+        // This is the key difference from HTML5 Audio onended chain
+        const currentTime = this.pcmAudioContext.currentTime;
+        const startTime = Math.max( this.pcmNextStartTime, currentTime );
+        source.start( startTime );
+
+        // Update next start time for seamless sequential playback
+        this.pcmNextStartTime = startTime + buffer.duration;
+
+        // Track first chunk for TTFA metrics (using captured state from before awaits)
+        if ( isFirstChunk ) {
+            const ttfa = Date.now() - ttfaStartTime;
+            this.log( `⚡ Time to first audio (PCM): ${ttfa}ms` );
+            this.metricsFirstAudioTime = Date.now();
+            this.updateMetricsTTFA();
+            this.updateMetricsRTT();
+        }
+
+        if ( this.debug ) {
+            this.log( `PCM chunk: ${blobData.size} bytes, scheduled at ${startTime.toFixed( 3 )}s, duration ${buffer.duration.toFixed( 3 )}s` );
+        }
+    }
+
+    // ========================================
+    // SEQUENTIAL PLAYBACK FOR INSTANT MODE (OLD - COMMENTED OUT)
+    // HTML Audio with onended chain - causes choppy audio
+    // Replaced by PCM 24000 Web Audio API playback above
+    // ========================================
+
+    /* COMMENTED OUT - OLD CHOPPY IMPLEMENTATION
     playChunkSequential( blobData ) {
         // Skip chunks that are too small (likely metadata/headers)
         if ( blobData.size < 100 ) {
@@ -2365,7 +2483,8 @@ class NotificationsUI {
             this.playNextSequentialChunk(); // Continue on play failure
         });
     }
-    
+    END COMMENTED OUT - OLD CHOPPY IMPLEMENTATION */
+
     async playAudioChunkProgressive( blobData ) {
         try {
             if ( !this.audioContext ) {
@@ -2556,7 +2675,10 @@ class NotificationsUI {
     
     stopAudio() {
         this.log( "Stopping all audio playback" );
-        
+
+        // Stop pulsing indicator on notification card
+        this.stopTTSPlayingIndicator( this.currentNotificationId );
+
         // Stop HTML audio (currentAudio, audioElement, and sequential)
         if ( this.currentAudio ) {
             this.currentAudio.pause();
@@ -2597,10 +2719,16 @@ class NotificationsUI {
         this.audioChunks = [];
         this.processedChunks = 0;
         
-        // Reset sequential playback
+        // Reset sequential playback (legacy - commented out code)
         this.sequentialQueue = [];
         this.isSequentialPlaying = false;
         this.sequentialChunksPlayed = 0;
+
+        // Reset PCM playback state
+        if ( this.pcmAudioContext ) {
+            this.pcmNextStartTime = this.pcmAudioContext.currentTime;
+        }
+        this.firstChunkPlayed = false;
         
         // Reset first chunk timing
         this.firstChunkStartTime = null;
@@ -2608,7 +2736,40 @@ class NotificationsUI {
         
         this.log( "Audio playback stopped" );
     }
-    
+
+    // ========================================
+    // TTS PLAYBACK VISUAL INDICATOR
+    // ========================================
+
+    /**
+     * Add pulsing gold border to notification card during TTS playback.
+     * Called when TTS request starts (before fetch to TTS server).
+     */
+    startTTSPlayingIndicator( notificationId ) {
+        if ( !notificationId ) return;
+
+        // Find the notification list item by ID
+        const notificationElement = document.getElementById( notificationId );
+        if ( notificationElement ) {
+            notificationElement.classList.add( 'tts-playing' );
+            if ( this.debug ) this.log( `Started TTS indicator for: ${notificationId}` );
+        }
+    }
+
+    /**
+     * Remove pulsing gold border when TTS playback completes.
+     * Called when all audio chunks have been received.
+     */
+    stopTTSPlayingIndicator( notificationId ) {
+        if ( !notificationId ) return;
+
+        const notificationElement = document.getElementById( notificationId );
+        if ( notificationElement ) {
+            notificationElement.classList.remove( 'tts-playing' );
+            if ( this.debug ) this.log( `Stopped TTS indicator for: ${notificationId}` );
+        }
+    }
+
     // ========================================
     // NOTIFICATION HANDLERS (from original queue.js)
     // ========================================
@@ -2671,11 +2832,16 @@ class NotificationsUI {
                 }
 
                 if ( ttsText ) {
+                    const notificationId = notification.id || notification.id_hash;
                     this.log( `Queuing action-required question for TTS playback: "${ttsText}"` );
                     // Add slight delay to let notification sound finish
                     setTimeout( () => {
+                        // Set currentNotificationId for TTS indicator (pulsing border)
+                        // Action-required cards use "action-required-{id}" as their DOM ID
+                        this.currentNotificationId = `action-required-${notificationId}`;
                         this.playTTS( ttsText, this.getCurrentTTSMode() ).catch( error => {
                             this.error( 'TTS failed for action-required notification:', error );
+                            this.currentNotificationId = null;  // Clear on error
                         });
                     }, 500 );
                 }
@@ -2698,13 +2864,17 @@ class NotificationsUI {
         if ( notification.priority === "high" || notification.priority === "urgent" ) {
             // Format notification message for TTS using helper method
             const ttsMessage = this.formatNotificationTTSMessage( notification );
+            const notificationId = notification.id || notification.id_hash;
 
             this.log( `Queuing high priority notification for TTS playback: "${ttsMessage}"` );
 
             // Add slight delay to let notification sound finish (like old queue.js)
             setTimeout( () => {
+                // Set currentNotificationId for TTS indicator (pulsing border)
+                this.currentNotificationId = notificationId;
                 this.playTTS( ttsMessage, this.getCurrentTTSMode() ).catch( error => {
                     this.error( 'TTS failed for high priority notification:', error );
+                    this.currentNotificationId = null;  // Clear on error
                 });
             }, 300 );
         } else {
@@ -3668,6 +3838,7 @@ class NotificationsUI {
 
         const messageDiv = document.createElement( 'div' );
         messageDiv.className = cssClass;
+        messageDiv.id = notification.id || notification.id_hash || '';  // Set ID for TTS indicator
         messageDiv.innerHTML = `
             <span class="message-time">${timeStr}</span>
             <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}${expiredBadge}</span>
