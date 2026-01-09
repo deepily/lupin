@@ -131,6 +131,7 @@ class NotificationsUI {
         this.VERSION_KEY = 'notifications_version';
         this.QUEUE_FILTER_PREF_KEY = 'notifications_filter_preference';  // Filter mode storage
         this.ACTION_REQUIRED_KEY = 'notifications_action_required';  // Persist action-required notifications
+        this.TTS_QUEUE_KEY = 'notifications_tts_queue';  // Persist TTS queue across refresh
         this.CURRENT_VERSION = '2.0.0'; // Increment to invalidate old cache - date grouping release
 
         // User role and filter state
@@ -151,6 +152,19 @@ class NotificationsUI {
         // Timers only start when a notification becomes active.
         this.actionRequiredQueue = [];           // Ordered array of notification IDs (FIFO)
         this.activeActionRequiredId = null;      // Currently active notification ID (or null)
+
+        // ========================================
+        // UNIFIED TTS QUEUE SYSTEM
+        // ========================================
+        // Single queue for ALL notification types (action-required + fire-and-forget)
+        // Priority insertion: action-required at FRONT, fire-and-forget at BACK
+        // One TTS plays at a time - prevents audio collisions
+        this.ttsQueue = [];                      // FIFO array of {id, type, notification, ttsText, addedAt}
+        this.activeTTSItem = null;               // Currently playing TTS item (or null)
+
+        // Focus Mode: Pause TTS queue while responding to action-required notification
+        this.ttsFocusModeActive = false;         // True when queue is paused for response
+        this.focusModeNotificationId = null;     // Which action-required triggered focus mode
 
         // ========================================
         // GENIE ANIMATION STATE
@@ -253,6 +267,9 @@ class NotificationsUI {
 
             // Restore action-required notifications from localStorage (refresh survival)
             this.restoreActionRequiredState();
+
+            // Restore TTS queue from localStorage (refresh survival)
+            this.restoreTTSQueueState();
 
             // Auto-focus STT button for spacebar activation
             document.getElementById( 'qa-stt-button' ).focus();
@@ -513,13 +530,15 @@ class NotificationsUI {
                 this.TOKEN_EXPIRY_THRESHOLD_SECS = config.token_expiry_threshold_secs;
                 this.TOKEN_REFRESH_DEDUP_WINDOW_MS = config.token_refresh_dedup_window_ms;
                 this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = config.websocket_heartbeat_interval_secs;
+                this.appTimezone = config.app_timezone;
 
                 // Log configuration for debugging
                 this.log( "✓ Client config loaded from server:", {
-                    refresh_check_interval: `${config.token_refresh_check_interval_ms / 60000} mins`,
-                    expiry_threshold: `${config.token_expiry_threshold_secs / 60} mins`,
-                    dedup_window: `${config.token_refresh_dedup_window_ms / 1000} secs`,
-                    heartbeat_interval: `${config.websocket_heartbeat_interval_secs} secs`
+                    refresh_check_interval : `${config.token_refresh_check_interval_ms / 60000} mins`,
+                    expiry_threshold       : `${config.token_expiry_threshold_secs / 60} mins`,
+                    dedup_window           : `${config.token_refresh_dedup_window_ms / 1000} secs`,
+                    heartbeat_interval     : `${config.websocket_heartbeat_interval_secs} secs`,
+                    app_timezone           : config.app_timezone
                 });
 
             } else if ( response.status === 401 ) {
@@ -540,6 +559,7 @@ class NotificationsUI {
             this.TOKEN_EXPIRY_THRESHOLD_SECS = 5 * 60;              // 5 minutes
             this.TOKEN_REFRESH_DEDUP_WINDOW_MS = 60 * 1000;         // 60 seconds
             this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = 30;            // 30 seconds
+            this.appTimezone = 'America/New_York';                  // Default timezone
 
             this.log( "⚠️ Using default client config (server fetch failed)" );
         }
@@ -2539,11 +2559,15 @@ class NotificationsUI {
             
             audio.onended = () => {
                 this.log( "Cached audio playback completed" );
+                // Notify TTS queue that playback is complete
+                this.onTTSPlaybackComplete();
                 resolve();
             };
-            
+
             audio.onerror = ( error ) => {
                 this.error( "Cached audio playback failed:", error );
+                // Notify TTS queue even on error (to advance queue)
+                this.onTTSPlaybackComplete();
                 reject( error );
             };
             
@@ -2844,14 +2868,15 @@ class NotificationsUI {
 
         // Attach onended handler to detect when audio playback actually finishes
         source.onended = () => {
-            // Only stop pulsing indicator if:
+            // Only signal completion if:
             // 1. Stream download is complete (all chunks received)
             // 2. This is the last scheduled source (no new chunks came after)
             if ( this.pcmStreamComplete && source === this.lastPCMSource ) {
-                if ( this.debug ) this.log( "PCM playback complete - stopping TTS indicator" );
-                this.stopTTSPlayingIndicator( notificationId );
+                if ( this.debug ) this.log( "PCM playback complete - notifying TTS queue" );
                 this.pcmStreamComplete = false;
                 this.lastPCMSource = null;
+                // Notify TTS queue that playback is complete
+                this.onTTSPlaybackComplete();
             }
         };
 
@@ -3092,7 +3117,9 @@ class NotificationsUI {
             this.isPlaying = false;
             this.currentAudio = null;
             this.audioChunks = []; // Clean up chunks
-        }, { once: true });
+            // Notify TTS queue that playback is complete
+            this.onTTSPlaybackComplete();
+        }, { once: true } );
     }
     
     async playAudioBlob( audioBlob ) {
@@ -3132,12 +3159,13 @@ class NotificationsUI {
                     // Reset UI to stopped state
                     if ( this.currentNotificationId ) {
                         this.updateAudioControlStates( this.currentNotificationId, 'stopped' );
-                        this.currentNotificationId = null;
                     }
                     URL.revokeObjectURL( audioUrl );
+                    // Notify TTS queue that playback is complete
+                    this.onTTSPlaybackComplete();
                     resolve();
                 };
-                
+
                 audio.onerror = ( error ) => {
                     this.error( "Audio playback error:", error );
                     this.isPlaying = false;
@@ -3145,9 +3173,10 @@ class NotificationsUI {
                     // Reset UI to stopped state on error
                     if ( this.currentNotificationId ) {
                         this.updateAudioControlStates( this.currentNotificationId, 'stopped' );
-                        this.currentNotificationId = null;
                     }
                     URL.revokeObjectURL( audioUrl );
+                    // Notify TTS queue even on error (to advance queue)
+                    this.onTTSPlaybackComplete();
                     reject( error );
                 };
                 
@@ -3248,6 +3277,10 @@ class NotificationsUI {
     /**
      * Remove pulsing gold border when TTS playback completes.
      * Called when all audio chunks have been received.
+     *
+     * Note: Uses animation-play-state toggle instead of class removal to prevent
+     * compositor layer demotion which causes layout collapse. See:
+     * src/rnd/2026.01.09-debugging-css-layout-collapse.md
      */
     stopTTSPlayingIndicator( notificationId ) {
         if ( !notificationId ) return;
@@ -3317,31 +3350,31 @@ class NotificationsUI {
         // 1. ALWAYS play notification sound first based on priority
         await this.playNotificationSoundByPriority( notification.priority );
 
-        // 2. Add to sender-grouped visual list (Phase 5)
-        const senderId = this.resolveSenderId( notification );
-        this.log( `Routing notification to sender: ${senderId}` );
-        this.addNotificationToSenderGroup( notification, false );  // false = incoming message
-        this.updateTotalNotificationsCount();
-
-        // 3. Optional TTS for high/urgent priority notifications (like old queue.js)
+        // 2. High/urgent priority: Queue for TTS, add to project card when playback starts
+        //    Low/medium priority: Add to project card immediately (no TTS)
         if ( notification.priority === "high" || notification.priority === "urgent" ) {
-            // Format notification message for TTS using helper method
             const ttsMessage = this.formatNotificationTTSMessage( notification );
             const notificationId = notification.id || notification.id_hash;
 
-            this.log( `Queuing high priority notification for TTS playback: "${ttsMessage}"` );
+            this.log( `Queuing high priority notification for TTS (will add to project card on playback): "${ttsMessage}"` );
 
-            // Add slight delay to let notification sound finish (like old queue.js)
+            // Add slight delay to let notification sound finish
             setTimeout( () => {
-                // Set currentNotificationId for TTS indicator (pulsing border)
-                this.currentNotificationId = notificationId;
-                this.playTTS( ttsMessage, this.getCurrentTTSMode() ).catch( error => {
-                    this.error( 'TTS failed for high priority notification:', error );
-                    this.currentNotificationId = null;  // Clear on error
-                });
+                this.addToTTSQueue( {
+                    id           : notificationId,
+                    type         : 'fire-and-forget',
+                    notification : notification,
+                    ttsText      : ttsMessage,
+                    addedAt      : Date.now()
+                } );
             }, 300 );
+            // NOTE: addNotificationToSenderGroup() is called from activateNextTTS() when playback starts
         } else {
-            this.log( `Skipping TTS for ${notification.priority} priority notification` );
+            // Low/medium priority: Add to project card immediately (no TTS)
+            const senderId = this.resolveSenderId( notification );
+            this.log( `Routing ${notification.priority} priority notification to sender: ${senderId}` );
+            this.addNotificationToSenderGroup( notification, false );
+            this.updateTotalNotificationsCount();
         }
     }
     
@@ -4117,6 +4150,7 @@ class NotificationsUI {
      * Get formatted time display with timezone abbreviation.
      * Used when server-provided time_display is not available (e.g., timeout case).
      * Format matches server's get_formatted_time_display(): "HH:MM TZ" (e.g., "16:26 EST")
+     * Uses timezone from server config (this.appTimezone), set via fetchClientConfig().
      * @returns {string} Formatted time string with timezone
      */
     getLocalTimeDisplay() {
@@ -4125,12 +4159,12 @@ class NotificationsUI {
             hour     : '2-digit',
             minute   : '2-digit',
             hour12   : false,
-            timeZone : 'America/New_York'
+            timeZone : this.appTimezone
         } );
         // Extract timezone abbreviation (e.g., "EST" or "EDT")
         const tzAbbrev = now.toLocaleTimeString( 'en-US', {
             timeZoneName : 'short',
-            timeZone     : 'America/New_York'
+            timeZone     : this.appTimezone
         } ).split( ' ' ).pop();
         return `${time} ${tzAbbrev}`;
     }
@@ -4139,14 +4173,14 @@ class NotificationsUI {
      * Get formatted date display in ISO format (YYYY-MM-DD).
      * Used when server-provided date_display is not available (e.g., timeout case).
      * Format matches server's get_formatted_date_display(): "YYYY-MM-DD"
-     * Uses configured timezone to ensure correct date near midnight.
+     * Uses timezone from server config (this.appTimezone), set via fetchClientConfig().
      * @returns {string} Formatted date string
      */
     getLocalDateDisplay() {
         const now = new Date();
         // Use en-CA locale which returns ISO format (YYYY-MM-DD)
         return now.toLocaleDateString( 'en-CA', {
-            timeZone : 'America/New_York',
+            timeZone : this.appTimezone,
             year     : 'numeric',
             month    : '2-digit',
             day      : '2-digit'
@@ -5847,11 +5881,20 @@ class NotificationsUI {
             emptyState.style.display = 'none';
         }
 
-        // Decision: activate immediately or add to queue?
+        // Decision: activate immediately or defer until current TTS finishes?
         if ( this.activeActionRequiredId === null ) {
-            // No active notification - add to queue and activate this one
             this.actionRequiredQueue.push( notification.id );
-            this.activateNextNotification();
+
+            // Only activate if nothing is currently playing TTS
+            // Otherwise, defer entire activation until current TTS finishes
+            if ( !this.activeTTSItem ) {
+                this.activateNextNotification();
+            } else {
+                // TTS is playing - defer activation and show minimal waiting indicator
+                state.queuePosition = 1;  // Will be first when current TTS ends
+                this.renderMinimizedNotificationDOM( notification, state.queuePosition );
+                this.log( `Action-required deferred: waiting for current TTS to complete` );
+            }
         } else {
             // Already have active - add to pending queue as minimized
             this.actionRequiredQueue.push( notification.id );
@@ -6026,6 +6069,450 @@ class NotificationsUI {
         setTimeout( () => tooltip.remove(), 2000 );
     }
 
+    // ========================================
+    // UNIFIED TTS QUEUE METHODS
+    // ========================================
+
+    /**
+     * Adds an item to the unified TTS queue with priority insertion.
+     * Action-required notifications insert at FRONT (after other action-required items).
+     * Fire-and-forget notifications insert at BACK.
+     *
+     * @param {object} item - TTS queue item: {id, type, notification, ttsText, addedAt}
+     */
+    addToTTSQueue( item ) {
+        if ( item.type === 'action-required' ) {
+            // Priority: Insert at front (but after other action-required items)
+            const insertIndex = this.ttsQueue.findIndex( q => q.type !== 'action-required' );
+            if ( insertIndex === -1 ) {
+                this.ttsQueue.push( item );  // All are action-required, add to end
+            } else {
+                this.ttsQueue.splice( insertIndex, 0, item );  // Insert before first non-priority
+            }
+            this.log( `TTS queue: Added action-required item at priority position, queue length: ${this.ttsQueue.length}` );
+        } else {
+            // Fire-and-forget: Add to back
+            this.ttsQueue.push( item );
+            this.log( `TTS queue: Added fire-and-forget item at back, queue length: ${this.ttsQueue.length}` );
+        }
+
+        // Update UI
+        this.updateTTSQueueSection();
+
+        // If nothing is currently playing AND not in focus mode, start playback
+        if ( !this.activeTTSItem && !this.ttsFocusModeActive ) {
+            this.activateNextTTS();
+        } else if ( this.ttsFocusModeActive ) {
+            // In focus mode: just render the minimized card, don't auto-play
+            this.renderMinimizedTTSCard( item );
+            this.log( 'TTS queue: In focus mode, item queued but not auto-playing' );
+        } else {
+            // Something is playing: render minimized card for the queued item
+            this.renderMinimizedTTSCard( item );
+        }
+
+        // Persist queue state
+        this.saveTTSQueueState();
+    }
+
+    /**
+     * Activates the next item in the TTS queue for playback.
+     * Called when nothing is playing or when current playback completes.
+     *
+     * Behavior differs by type:
+     * - Fire-and-forget: Add to project card now (was waiting in queue), no TTS active card
+     * - Action-required: Show in TTS active slot (response UI is in action-required section)
+     */
+    activateNextTTS() {
+        if ( this.ttsQueue.length === 0 ) {
+            this.log( 'TTS queue empty, nothing to activate' );
+            this.activeTTSItem = null;
+            this.updateTTSQueueSection();
+            return;
+        }
+
+        // Get next item from queue
+        const item = this.ttsQueue.shift();
+        this.activeTTSItem = item;
+
+        this.log( `TTS queue: Activating item ${item.id} (${item.type})` );
+
+        // Remove minimized card from TTS queue UI
+        const minimized = document.getElementById( `tts-minimized-${item.id}` );
+        if ( minimized ) {
+            minimized.remove();
+        }
+
+        // Handle differently based on type
+        if ( item.type === 'action-required' ) {
+            // Action-required: Show active card in TTS queue (response UI is elsewhere)
+            this.renderActiveTTSCard( item );
+            this.currentNotificationId = `action-required-${item.id}`;
+        } else {
+            // Fire-and-forget: NOW add to project card (was waiting in TTS queue)
+            this.log( `Moving fire-and-forget to project card: ${item.id}` );
+            this.addNotificationToSenderGroup( item.notification, false );
+            this.updateTotalNotificationsCount();
+            // No active card in TTS queue - message now visible in project card
+            this.currentNotificationId = item.id;
+        }
+
+        // Recalculate queue positions for remaining items
+        this.updateTTSQueuePositions();
+
+        // Update TTS queue section display
+        this.updateTTSQueueSection();
+
+        // Persist queue state (item was removed from queue)
+        this.saveTTSQueueState();
+
+        // Start TTS playback
+        this.playTTS( item.ttsText, this.getCurrentTTSMode() ).catch( error => {
+            this.error( 'TTS queue: Playback failed:', error );
+            this.onTTSPlaybackComplete();  // Move to next item even on error
+        } );
+    }
+
+    /**
+     * Renders the currently playing TTS item in the active slot.
+     */
+    renderActiveTTSCard( item ) {
+        const container = document.getElementById( 'tts-active-slot' );
+        if ( !container ) {
+            this.error( 'TTS active slot container not found' );
+            return;
+        }
+
+        const icon = item.type === 'action-required' ? '⚠️' : '🔔';
+        const truncatedText = item.ttsText.length > 80
+            ? item.ttsText.substring( 0, 77 ) + '...'
+            : item.ttsText;
+
+        // Build card using DOM methods for safe text insertion
+        const card = document.createElement( 'div' );
+        card.className = 'tts-active-card';
+
+        const iconDiv = document.createElement( 'div' );
+        iconDiv.className = 'tts-type-icon';
+        iconDiv.textContent = icon;
+
+        const messageDiv = document.createElement( 'div' );
+        messageDiv.className = 'tts-message';
+        messageDiv.textContent = truncatedText;
+
+        const stopBtn = document.createElement( 'button' );
+        stopBtn.className = 'tts-stop-button';
+        stopBtn.textContent = '⏹️ Stop';
+        stopBtn.onclick = () => this.stopTTSAndAdvance();
+
+        card.appendChild( iconDiv );
+        card.appendChild( messageDiv );
+        card.appendChild( stopBtn );
+
+        container.innerHTML = '';
+        container.appendChild( card );
+    }
+
+    /**
+     * Renders a minimized card for a queued TTS item.
+     */
+    renderMinimizedTTSCard( item ) {
+        const container = document.getElementById( 'tts-pending-queue' );
+        if ( !container ) {
+            this.error( 'TTS pending queue container not found' );
+            return;
+        }
+
+        // Calculate position (1-indexed)
+        const position = this.ttsQueue.indexOf( item ) + 1;
+        const icon = item.type === 'action-required' ? '⚠️' : '🔔';
+        const truncatedText = item.ttsText.length > 50
+            ? item.ttsText.substring( 0, 47 ) + '...'
+            : item.ttsText;
+
+        // Build card using DOM methods for safe text insertion
+        const card = document.createElement( 'div' );
+        card.className = `tts-minimized ${item.type === 'action-required' ? 'priority' : ''}`;
+        card.id = `tts-minimized-${item.id}`;
+        card.dataset.itemId = item.id;
+
+        const positionDiv = document.createElement( 'div' );
+        positionDiv.className = 'tts-position';
+        positionDiv.textContent = position;
+
+        const badgeDiv = document.createElement( 'div' );
+        badgeDiv.className = 'tts-type-badge';
+        badgeDiv.textContent = icon;
+
+        const textDiv = document.createElement( 'div' );
+        textDiv.className = 'tts-text';
+        textDiv.textContent = truncatedText;
+
+        card.appendChild( positionDiv );
+        card.appendChild( badgeDiv );
+        card.appendChild( textDiv );
+
+        container.appendChild( card );
+    }
+
+    /**
+     * Updates position badges for all minimized TTS cards.
+     */
+    updateTTSQueuePositions() {
+        this.ttsQueue.forEach( ( item, index ) => {
+            const badge = document.querySelector( `#tts-minimized-${item.id} .tts-position` );
+            if ( badge ) {
+                badge.textContent = `${index + 1}`;
+            }
+        } );
+    }
+
+    /**
+     * Updates the TTS queue section visibility and count.
+     * Shows paused state when in Focus Mode.
+     */
+    updateTTSQueueSection() {
+        const section = document.getElementById( 'tts-queue-section' );
+        const countSpan = document.getElementById( 'tts-queue-count' );
+        const activeSlot = document.getElementById( 'tts-active-slot' );
+        const header = section?.querySelector( 'h3' );
+        const resumeBtn = document.getElementById( 'tts-resume-btn' );
+
+        if ( !section ) return;
+
+        const totalCount = this.ttsQueue.length + ( this.activeTTSItem ? 1 : 0 );
+
+        // Show section only if items actually waiting in queue
+        // Focus mode with 0 items = nothing to show (no "Paused: 0 waiting")
+        const showSection = this.ttsQueue.length > 0;
+
+        if ( !showSection ) {
+            section.style.display = 'none';
+            section.classList.remove( 'focus-mode' );
+            if ( activeSlot ) activeSlot.innerHTML = '';
+            if ( resumeBtn ) resumeBtn.style.display = 'none';
+        } else {
+            section.style.display = 'block';
+
+            // Focus Mode: Update header and styling
+            if ( this.ttsFocusModeActive ) {
+                section.classList.add( 'focus-mode' );
+                if ( header ) {
+                    header.innerHTML = `Paused: <span id="tts-queue-count">${this.ttsQueue.length}</span> waiting`;
+                }
+                if ( resumeBtn ) resumeBtn.style.display = 'inline-block';
+            } else {
+                section.classList.remove( 'focus-mode' );
+                if ( header ) {
+                    header.innerHTML = `🔊 Playing: <span id="tts-queue-count">${totalCount}</span>`;
+                }
+                if ( resumeBtn ) resumeBtn.style.display = 'none';
+            }
+
+            if ( countSpan ) {
+                countSpan.textContent = this.ttsFocusModeActive ? this.ttsQueue.length : totalCount;
+            }
+        }
+    }
+
+    /**
+     * Called when TTS playback completes (success or error).
+     * Clears active item and activates next in queue.
+     * For action-required: enters Focus Mode to pause queue during response.
+     */
+    onTTSPlaybackComplete() {
+        this.log( 'TTS queue: Playback complete' );
+
+        // Capture item info BEFORE clearing (needed for focus mode check)
+        const justCompletedItem = this.activeTTSItem;
+        const wasActionRequired = justCompletedItem?.type === 'action-required';
+
+        // Clear pulsing border from current item
+        if ( this.currentNotificationId ) {
+            this.stopTTSPlayingIndicator( this.currentNotificationId );
+            this.currentNotificationId = null;
+        }
+
+        // Clear active slot
+        const activeSlot = document.getElementById( 'tts-active-slot' );
+        if ( activeSlot ) activeSlot.innerHTML = '';
+
+        // FOCUS MODE: If action-required just finished, pause queue for user response
+        // IMPORTANT: Enter focus mode BEFORE clearing activeTTSItem to prevent race condition
+        // where incoming notifications could trigger TTS between clearing and setting focus mode
+        if ( wasActionRequired && justCompletedItem?.id ) {
+            this.enterTTSFocusMode( justCompletedItem.id );
+            this.activeTTSItem = null;  // Now safe to clear
+            this.updateTTSQueueSection();
+            return;  // Exit early - don't activate next until response received
+        }
+
+        // Clear active item (only for non-action-required completions)
+        this.activeTTSItem = null;
+
+        // Check if there's a deferred action-required waiting to be activated
+        // This happens when action-required arrived while fire-and-forget was playing
+        if ( this.actionRequiredQueue.length > 0 && this.activeActionRequiredId === null ) {
+            this.log( 'TTS queue: Activating deferred action-required notification' );
+            this.activateNextNotification();
+            return;  // activateNextNotification() will handle TTS via playActivatedNotificationTTS()
+        }
+
+        // Don't advance queue if in focus mode (waiting for response)
+        if ( this.ttsFocusModeActive ) {
+            this.log( 'TTS queue: In focus mode, not advancing' );
+            this.updateTTSQueueSection();
+            return;
+        }
+
+        // Normal flow: activate next item if queue not empty
+        if ( this.ttsQueue.length > 0 ) {
+            this.activateNextTTS();
+        } else {
+            this.updateTTSQueueSection();
+        }
+    }
+
+    /**
+     * Stops current TTS playback and advances to next item in queue.
+     * Called from UI stop button.
+     */
+    stopTTSAndAdvance() {
+        this.log( 'TTS queue: User requested stop' );
+        this.stopAllAudio();
+        this.onTTSPlaybackComplete();
+    }
+
+    // =========================================================================
+    // TTS FOCUS MODE - Pause queue while responding to action-required
+    // =========================================================================
+
+    /**
+     * Enters TTS Focus Mode - pauses queue while user responds to action-required.
+     * Called after action-required TTS completes.
+     *
+     * Requires:
+     *     - notificationId is a valid action-required notification ID
+     *
+     * Ensures:
+     *     - ttsFocusModeActive is set to true
+     *     - focusModeNotificationId is stored
+     *     - UI updated to show paused state
+     */
+    enterTTSFocusMode( notificationId ) {
+        this.log( `TTS Focus Mode: ENTERING for notification ${notificationId}` );
+        this.ttsFocusModeActive = true;
+        this.focusModeNotificationId = notificationId;
+        this.updateTTSQueueSection();
+
+        // Persist focus mode state
+        this.saveTTSQueueState();
+    }
+
+    /**
+     * Exits TTS Focus Mode - resumes queue after action-required is resolved.
+     * Called when notification is responded, expired, or dismissed.
+     *
+     * Ensures:
+     *     - ttsFocusModeActive is set to false
+     *     - focusModeNotificationId is cleared
+     *     - Queue resumes if items are waiting
+     */
+    exitTTSFocusMode() {
+        if ( !this.ttsFocusModeActive ) {
+            return;  // Not in focus mode, nothing to do
+        }
+
+        this.log( `TTS Focus Mode: EXITING (was for ${this.focusModeNotificationId})` );
+        this.ttsFocusModeActive = false;
+        this.focusModeNotificationId = null;
+        this.updateTTSQueueSection();
+
+        // Persist focus mode state change
+        this.saveTTSQueueState();
+
+        // Resume queue if items waiting
+        if ( this.ttsQueue.length > 0 ) {
+            this.log( `TTS Focus Mode: Resuming queue with ${this.ttsQueue.length} items` );
+            setTimeout( () => this.activateNextTTS(), 100 );  // Small delay for UI to settle
+        }
+    }
+
+    /**
+     * Toggles TTS Focus Mode - manual Resume button handler.
+     * Allows user to resume queue early if they want to.
+     */
+    toggleTTSFocusMode() {
+        if ( this.ttsFocusModeActive ) {
+            this.log( 'TTS Focus Mode: Manual resume requested' );
+            this.exitTTSFocusMode();
+        }
+    }
+
+    // =========================================================================
+    // TTS QUEUE PERSISTENCE - Save/restore across page refresh
+    // =========================================================================
+
+    /**
+     * Save TTS queue state to localStorage for persistence across page refresh.
+     * Saves queue items and focus mode state.
+     */
+    saveTTSQueueState() {
+        try {
+            if ( this.ttsQueue.length === 0 && !this.ttsFocusModeActive ) {
+                localStorage.removeItem( this.TTS_QUEUE_KEY );
+                return;
+            }
+
+            const queueState = {
+                queue                   : this.ttsQueue,
+                focusModeActive         : this.ttsFocusModeActive,
+                focusModeNotificationId : this.focusModeNotificationId
+            };
+
+            localStorage.setItem( this.TTS_QUEUE_KEY, JSON.stringify( queueState ) );
+            this.log( `Saved ${this.ttsQueue.length} TTS queue item(s) to localStorage` );
+        } catch ( error ) {
+            this.error( 'Failed to save TTS queue state:', error );
+        }
+    }
+
+    /**
+     * Restore TTS queue state from localStorage after page refresh.
+     * Restores queue items and focus mode state.
+     */
+    restoreTTSQueueState() {
+        try {
+            const stored = localStorage.getItem( this.TTS_QUEUE_KEY );
+            if ( !stored ) {
+                this.log( 'No TTS queue to restore from localStorage' );
+                return;
+            }
+
+            const parsed = JSON.parse( stored );
+            this.ttsQueue = parsed.queue || [];
+            this.ttsFocusModeActive = parsed.focusModeActive || false;
+            this.focusModeNotificationId = parsed.focusModeNotificationId || null;
+
+            this.log( `Restored ${this.ttsQueue.length} TTS queue item(s), focusMode: ${this.ttsFocusModeActive}` );
+
+            // Re-render minimized cards for queued items
+            for ( const item of this.ttsQueue ) {
+                this.renderMinimizedTTSCard( item );
+            }
+
+            this.updateTTSQueueSection();
+
+            // If not in focus mode and queue has items, start playback
+            if ( !this.ttsFocusModeActive && this.ttsQueue.length > 0 ) {
+                this.activateNextTTS();
+            }
+        } catch ( error ) {
+            this.error( 'Failed to restore TTS queue state:', error );
+            localStorage.removeItem( this.TTS_QUEUE_KEY );
+        }
+    }
+
     /**
      * Recalculates and updates queue position badges for all pending notifications.
      */
@@ -6074,12 +6561,15 @@ class NotificationsUI {
         }
 
         if ( ttsText ) {
-            this.log( `Playing TTS for activated notification: "${ttsText}"` );
-            // Set currentNotificationId for TTS indicator (pulsing border)
-            this.currentNotificationId = `action-required-${notificationId}`;
-            this.playTTS( ttsText, this.getCurrentTTSMode() ).catch( error => {
-                this.error( 'TTS failed for activated notification:', error );
-                this.currentNotificationId = null;
+            this.log( `Adding action-required notification to TTS queue: "${ttsText}"` );
+
+            // Use unified TTS queue with priority insertion (action-required goes to front)
+            this.addToTTSQueue( {
+                id           : notificationId,
+                type         : 'action-required',
+                notification : notification,
+                ttsText      : ttsText,
+                addedAt      : Date.now()
             } );
         }
     }
@@ -6820,6 +7310,11 @@ class NotificationsUI {
                 // Small delay to let UI settle before promoting next
                 setTimeout( () => this.activateNextNotification(), 100 );
             }
+
+            // TTS FOCUS MODE: Exit if this notification triggered focus mode
+            if ( this.focusModeNotificationId === notificationId ) {
+                this.exitTTSFocusMode();
+            }
         }, { once: true } );
 
         // Fallback in case animationend doesn't fire (shouldn't happen, but safety net)
@@ -6835,6 +7330,11 @@ class NotificationsUI {
                 if ( this.activeActionRequiredId === notificationId ) {
                     this.activeActionRequiredId = null;
                     setTimeout( () => this.activateNextNotification(), 100 );
+                }
+
+                // TTS FOCUS MODE: Exit if this notification triggered focus mode (fallback path)
+                if ( this.focusModeNotificationId === notificationId ) {
+                    this.exitTTSFocusMode();
                 }
             }
         }, 600 );
@@ -6937,6 +7437,11 @@ class NotificationsUI {
                     this.activeActionRequiredId = null;
                     setTimeout( () => this.activateNextNotification(), 100 );
                 }
+
+                // TTS FOCUS MODE: Exit if this notification triggered focus mode
+                if ( this.focusModeNotificationId === notificationId ) {
+                    this.exitTTSFocusMode();
+                }
             } );
         } else {
             // Fallback: no animation, just show expired state in place
@@ -6968,6 +7473,11 @@ class NotificationsUI {
             if ( this.activeActionRequiredId === notificationId ) {
                 this.activeActionRequiredId = null;
                 setTimeout( () => this.activateNextNotification(), 100 );
+            }
+
+            // TTS FOCUS MODE: Exit if this notification triggered focus mode (fallback path)
+            if ( this.focusModeNotificationId === notificationId ) {
+                this.exitTTSFocusMode();
             }
         }
     }
@@ -7048,6 +7558,11 @@ class NotificationsUI {
                     this.activeActionRequiredId = null;
                     this.activateNextNotification();
                 }
+
+                // TTS FOCUS MODE: Exit if this notification triggered focus mode
+                if ( this.focusModeNotificationId === notificationId ) {
+                    this.exitTTSFocusMode();
+                }
             }, 1500 );  // 1.5 second delay to show "responded in another session"
         } else {
             // Card not found (might be minimized or already removed)
@@ -7070,6 +7585,11 @@ class NotificationsUI {
             if ( this.activeActionRequiredId === notificationId ) {
                 this.activeActionRequiredId = null;
                 this.activateNextNotification();
+            }
+
+            // TTS FOCUS MODE: Exit if this notification triggered focus mode
+            if ( this.focusModeNotificationId === notificationId ) {
+                this.exitTTSFocusMode();
             }
         }
     }

@@ -134,6 +134,25 @@
             </div>
         </div>
 
+        <!-- TTS Playback Queue - unified for all notification types -->
+        <div class="collapsible-section" id="tts-queue-section" style="display: none;">
+            <div class="section-header tts-queue-header" onclick="toggleSection('tts-queue-content')">
+                <h3>🔊 Playing: <span id="tts-queue-count">0</span></h3>
+                <button id="tts-resume-btn" class="tts-resume-button" style="display: none;"
+                        onclick="event.stopPropagation(); window.freshQueueUI.toggleTTSFocusMode()">
+                    ▶️ Resume
+                </button>
+                <button class="toggle-button" id="tts-queue-toggle">▼</button>
+            </div>
+            <div class="section-content" id="tts-queue-content">
+                <!-- Currently playing TTS -->
+                <div id="tts-active-slot"></div>
+
+                <!-- Pending queue (minimized cards waiting their turn) -->
+                <div id="tts-pending-queue"></div>
+            </div>
+        </div>
+
         <!-- Notifications Section -->
         <div class="collapsible-section">
             <div class="section-header" onclick="toggleSection('notifications-section')">

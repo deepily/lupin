@@ -320,13 +320,15 @@
         }
 
         .action-required-notification {
+            position: relative;  /* For pseudo-element positioning */
             margin-bottom: 20px;
             padding: 15px;
             border: 2px solid #0d6efd;
-            border-radius: 6px;
+            border-radius: 8px;
             background-color: white;
             box-shadow: 0 2px 8px rgba(13, 110, 253, 0.2);
-            transition: all 0.3s ease;
+            outline: 2px solid transparent;
+            transition: border-color 0.3s ease, background-color 0.3s ease, box-shadow 0.3s ease, outline-color 0.3s ease, opacity 0.3s ease;
         }
 
         /* Active state (default - can still respond) */
@@ -540,7 +542,7 @@
             100% {
                 opacity: 1;
                 transform: scaleY( 1 );
-                max-height: 400px;
+                max-height: none;  /* Allow content to determine height */
             }
         }
 
@@ -1005,6 +1007,7 @@
         }
 
         .sender-message {
+            position: relative;  /* For pseudo-element positioning */
             display: flex;
             align-items: flex-start;
             gap: 8px;
@@ -1384,9 +1387,22 @@
             }
         }
 
-        .tts-playing {
-            animation: ttsPulseGlow 1s ease-in-out infinite !important;
-            border-radius: 8px;
+        /* TTS pulsing border - isolated on pseudo-element to prevent layout shift */
+        /* The pseudo-element is absolutely positioned and doesn't affect parent layout */
+        .action-required-notification::before,
+        .sender-message::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            pointer-events: none;
+            box-shadow: none;
+            outline: none;
+            z-index: 1;
+        }
+
+        .tts-playing::before {
+            animation: ttsPulseGlow 1s ease-in-out infinite;
         }
 
         /* Stop playback button - only visible during TTS playback */
@@ -1412,6 +1428,148 @@
         .tts-stop-btn:hover {
             background-color: rgba( 255, 193, 7, 0.3 );
             transform: scale( 1.1 );
+        }
+
+        /* ========================================
+         * UNIFIED TTS QUEUE SECTION STYLES
+         * ======================================== */
+
+        /* TTS Queue Section Header */
+        #tts-queue-section {
+            margin-bottom: 16px;
+        }
+
+        #tts-queue-section .section-header.tts-queue-header {
+            background-color: #198754;
+            color: white;
+        }
+
+        #tts-queue-section .section-header.tts-queue-header h3 {
+            color: white;
+        }
+
+        /* Active TTS Card - currently playing */
+        .tts-active-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border: 2px solid #198754;
+            border-radius: 8px;
+            background-color: #d1e7dd;
+            margin-bottom: 8px;
+        }
+
+        .tts-active-card .tts-type-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .tts-active-card .tts-message {
+            flex: 1;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #0f5132;
+        }
+
+        .tts-active-card .tts-stop-button {
+            background: #dc3545;
+            border: none;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            flex-shrink: 0;
+            transition: background-color 0.2s ease;
+        }
+
+        .tts-active-card .tts-stop-button:hover {
+            background: #bb2d3b;
+        }
+
+        /* Minimized TTS Cards - waiting in queue */
+        .tts-minimized {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background-color: #f8f9fa;
+            margin-bottom: 6px;
+        }
+
+        .tts-minimized .tts-position {
+            min-width: 24px;
+            height: 24px;
+            font-size: 11px;
+            font-weight: 600;
+            color: white;
+            background-color: #6c757d;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .tts-minimized .tts-type-badge {
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .tts-minimized .tts-text {
+            flex: 1;
+            font-size: 13px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #495057;
+        }
+
+        /* Priority indicator for action-required items in queue */
+        .tts-minimized.priority {
+            border-left: 3px solid #0d6efd;
+            background-color: #e7f3ff;
+        }
+
+        .tts-minimized.priority .tts-position {
+            background-color: #0d6efd;
+        }
+
+        /* =========================================================================
+           TTS FOCUS MODE - Paused state while responding to action-required
+           ========================================================================= */
+
+        /* Focus Mode header - gray/paused state */
+        #tts-queue-section.focus-mode .section-header.tts-queue-header {
+            background-color: #6c757d;  /* Gray for paused */
+        }
+
+        /* Resume button (hidden by default, shown in focus mode) */
+        .tts-resume-button {
+            display: none;
+            background: #28a745;
+            border: none;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-right: 10px;
+            transition: background-color 0.2s ease;
+        }
+
+        .tts-resume-button:hover {
+            background: #218838;
+        }
+
+        /* Show resume button when in focus mode */
+        #tts-queue-section.focus-mode .tts-resume-button {
+            display: inline-block;
         }
 
         /* Shrink-fade animation state for action-required notifications */
