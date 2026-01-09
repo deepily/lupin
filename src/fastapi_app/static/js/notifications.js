@@ -144,6 +144,15 @@ class NotificationsUI {
         this.keyboardListenerActive = false;  // Track if keyboard listener is attached
 
         // ========================================
+        // ACTION-REQUIRED QUEUE SYSTEM
+        // ========================================
+        // Only ONE notification can be "active" (fully displayed) at a time.
+        // Additional notifications are queued and shown as minimized one-liners.
+        // Timers only start when a notification becomes active.
+        this.actionRequiredQueue = [];           // Ordered array of notification IDs (FIFO)
+        this.activeActionRequiredId = null;      // Currently active notification ID (or null)
+
+        // ========================================
         // GENIE ANIMATION STATE
         // ========================================
         this.activeAnimations = new Map();  // notificationId → { element, animation, destination }
@@ -3292,40 +3301,14 @@ class NotificationsUI {
         // Phase 2.2 SSE - Check if this is a response-required notification
         if ( notification.response_requested === true ) {
             this.log( `Response-required notification detected: ${notification.id}` );
-            // Route to Action Required section
+            // Route to Action Required section (queue system handles activation and TTS)
             this.addActionRequiredNotification( notification );
             // Still play sound
             await this.playNotificationSoundByPriority( notification.priority );
 
-            // Read question aloud via TTS for high/urgent priority action-required notifications
-            if ( notification.priority === "high" || notification.priority === "urgent" ) {
-                let ttsText = null;
-
-                // Different field per response type:
-                // - Multiple-choice: Read the question field from response_options
-                // - Open-ended / Yes-No: Read the message field
-                if ( notification.response_type === "multiple_choice" &&
-                     notification.response_options?.questions?.[0]?.question ) {
-                    ttsText = notification.response_options.questions[0].question;
-                } else {
-                    ttsText = notification.message;
-                }
-
-                if ( ttsText ) {
-                    const notificationId = notification.id || notification.id_hash;
-                    this.log( `Queuing action-required question for TTS playback: "${ttsText}"` );
-                    // Add slight delay to let notification sound finish
-                    setTimeout( () => {
-                        // Set currentNotificationId for TTS indicator (pulsing border)
-                        // Action-required cards use "action-required-{id}" as their DOM ID
-                        this.currentNotificationId = `action-required-${notificationId}`;
-                        this.playTTS( ttsText, this.getCurrentTTSMode() ).catch( error => {
-                            this.error( 'TTS failed for action-required notification:', error );
-                            this.currentNotificationId = null;  // Clear on error
-                        });
-                    }, 500 );
-                }
-            }
+            // NOTE: TTS is now handled by activateNextNotification() when the notification
+            // becomes active. This prevents simultaneous TTS playback when multiple
+            // notifications arrive at once.
 
             return;  // Don't add to regular notifications list
         }
@@ -4128,6 +4111,46 @@ class NotificationsUI {
         }
         // Fallback: use local date (existing behavior for edge cases)
         return this.getDateString( new Date() );
+    }
+
+    /**
+     * Get formatted time display with timezone abbreviation.
+     * Used when server-provided time_display is not available (e.g., timeout case).
+     * Format matches server's get_formatted_time_display(): "HH:MM TZ" (e.g., "16:26 EST")
+     * @returns {string} Formatted time string with timezone
+     */
+    getLocalTimeDisplay() {
+        const now = new Date();
+        const time = now.toLocaleTimeString( 'en-US', {
+            hour     : '2-digit',
+            minute   : '2-digit',
+            hour12   : false,
+            timeZone : 'America/New_York'
+        } );
+        // Extract timezone abbreviation (e.g., "EST" or "EDT")
+        const tzAbbrev = now.toLocaleTimeString( 'en-US', {
+            timeZoneName : 'short',
+            timeZone     : 'America/New_York'
+        } ).split( ' ' ).pop();
+        return `${time} ${tzAbbrev}`;
+    }
+
+    /**
+     * Get formatted date display in ISO format (YYYY-MM-DD).
+     * Used when server-provided date_display is not available (e.g., timeout case).
+     * Format matches server's get_formatted_date_display(): "YYYY-MM-DD"
+     * Uses configured timezone to ensure correct date near midnight.
+     * @returns {string} Formatted date string
+     */
+    getLocalDateDisplay() {
+        const now = new Date();
+        // Use en-CA locale which returns ISO format (YYYY-MM-DD)
+        return now.toLocaleDateString( 'en-CA', {
+            timeZone : 'America/New_York',
+            year     : 'numeric',
+            month    : '2-digit',
+            day      : '2-digit'
+        } );
     }
 
     /**
@@ -5603,7 +5626,7 @@ class NotificationsUI {
 
     /**
      * Save action-required notifications to localStorage for persistence across refresh.
-     * Only saves notifications that haven't expired and haven't been responded to.
+     * Saves queue order, active ID, and all pending/active notifications.
      */
     saveActionRequiredState() {
         try {
@@ -5611,21 +5634,35 @@ class NotificationsUI {
             const now = Date.now();
 
             for ( const [ id, state ] of this.actionRequiredNotifications.entries() ) {
-                // Only persist non-expired, non-responded notifications
-                if ( !state.isExpired && !state.isResponded && state.expiresAt > now ) {
-                    stateArray.push( {
-                        id                   : id,
-                        notification         : state.notification,
-                        expiresAt            : state.expiresAt,
-                        timeoutSeconds       : state.timeoutSeconds,
-                        currentQuestionIndex : state.currentQuestionIndex || 0,
-                        collectedAnswers     : state.collectedAnswers || {}
-                    } );
-                }
+                // Skip expired or responded notifications
+                if ( state.isExpired || state.isResponded ) continue;
+
+                // For active notification, check if it has expired
+                if ( state.isActive && state.expiresAt && state.expiresAt <= now ) continue;
+
+                // For pending notifications (expiresAt is null), always save
+                stateArray.push( {
+                    id                   : id,
+                    notification         : state.notification,
+                    expiresAt            : state.expiresAt,            // null for pending
+                    activatedAt          : state.activatedAt,          // null for pending
+                    timeoutSeconds       : state.timeoutSeconds,
+                    isActive             : state.isActive || false,
+                    queuePosition        : state.queuePosition,
+                    currentQuestionIndex : state.currentQuestionIndex || 0,
+                    collectedAnswers     : state.collectedAnswers || {}
+                } );
             }
 
+            // Save both notifications and queue state
+            const queueState = {
+                notifications : stateArray,
+                queue         : this.actionRequiredQueue,
+                activeId      : this.activeActionRequiredId
+            };
+
             if ( stateArray.length > 0 ) {
-                localStorage.setItem( this.ACTION_REQUIRED_KEY, JSON.stringify( stateArray ) );
+                localStorage.setItem( this.ACTION_REQUIRED_KEY, JSON.stringify( queueState ) );
                 this.log( `Saved ${stateArray.length} action-required notification(s) to localStorage` );
             } else {
                 localStorage.removeItem( this.ACTION_REQUIRED_KEY );
@@ -5638,7 +5675,7 @@ class NotificationsUI {
 
     /**
      * Restore action-required notifications from localStorage after page refresh.
-     * Filters out expired notifications and recalculates remaining timeout.
+     * Restores queue order, active notification, and pending notifications.
      */
     restoreActionRequiredState() {
         try {
@@ -5648,69 +5685,122 @@ class NotificationsUI {
                 return;
             }
 
-            const stateArray = JSON.parse( stored );
+            const parsed = JSON.parse( stored );
             const now = Date.now();
-            let restoredCount = 0;
 
+            // Handle both old format (array) and new format (object with queue)
+            const stateArray = Array.isArray( parsed ) ? parsed : parsed.notifications || [];
+            const savedQueue = parsed.queue || [];
+            const savedActiveId = parsed.activeId || null;
+
+            this.log( `Restoring: ${stateArray.length} notifications, queue: ${savedQueue.length}, active: ${savedActiveId}` );
+
+            // First pass: restore all notification states to the Map
             for ( const saved of stateArray ) {
-                // Skip if already expired
-                if ( saved.expiresAt <= now ) {
-                    this.log( `Skipping expired notification: ${saved.id}` );
-                    continue;
-                }
-
                 // Skip if already in our Map (duplicate)
                 if ( this.actionRequiredNotifications.has( saved.id ) ) {
                     this.log( `Skipping duplicate notification: ${saved.id}` );
                     continue;
                 }
 
-                // Recalculate remaining timeout
-                const remainingMs = saved.expiresAt - now;
-                const remainingSeconds = Math.ceil( remainingMs / 1000 );
-
-                // Update notification with remaining time for UI
                 const notification = saved.notification;
-                notification.timeout_seconds = remainingSeconds;
 
-                // Recreate state object
+                // Recreate state object with queue properties
                 const state = {
                     notification         : notification,
-                    expiresAt            : saved.expiresAt,
-                    timeoutSeconds       : remainingSeconds,
+                    expiresAt            : saved.expiresAt,       // null for pending
+                    activatedAt          : saved.activatedAt,     // null for pending
+                    timeoutSeconds       : saved.timeoutSeconds,
                     isExpired            : false,
                     isResponded          : false,
+                    isActive             : false,                 // Will be set during activation
+                    queuePosition        : saved.queuePosition,
                     currentQuestionIndex : saved.currentQuestionIndex || 0,
                     collectedAnswers     : saved.collectedAnswers || {}
                 };
 
                 this.actionRequiredNotifications.set( saved.id, state );
+            }
 
-                // Show the Action Required section
+            // Restore queue order (filter out IDs not in our Map)
+            this.actionRequiredQueue = savedQueue.filter( id =>
+                this.actionRequiredNotifications.has( id )
+            );
+
+            // Show the Action Required section if we have notifications
+            if ( this.actionRequiredNotifications.size > 0 ) {
                 const section = document.getElementById( 'action-required-section' );
                 if ( section ) {
                     section.style.display = 'block';
                 }
 
-                // Render the notification UI
-                this.renderActionRequiredNotification( notification );
-
-                // Start countdown timer with remaining time
-                this.startCountdownTimer( saved.id );
-
-                restoredCount++;
-            }
-
-            if ( restoredCount > 0 ) {
-                this.updateActionRequiredCount();
-
-                // Attach keyboard listener if not already active
-                if ( !this.keyboardListenerActive ) {
-                    this.attachKeyboardListener();
+                // Hide empty state
+                const emptyState = document.getElementById( 'action-required-empty' );
+                if ( emptyState ) {
+                    emptyState.style.display = 'none';
                 }
-
-                this.log( `Restored ${restoredCount} action-required notification(s) from localStorage` );
             }
+
+            // Check if the saved active notification is still valid
+            if ( savedActiveId && this.actionRequiredNotifications.has( savedActiveId ) ) {
+                const activeState = this.actionRequiredNotifications.get( savedActiveId );
+
+                // Check if active notification has expired
+                if ( activeState.expiresAt && activeState.expiresAt <= now ) {
+                    this.log( `Active notification ${savedActiveId} has expired, will activate next` );
+                    this.actionRequiredNotifications.delete( savedActiveId );
+                    // Remove from queue if present
+                    this.actionRequiredQueue = this.actionRequiredQueue.filter( id => id !== savedActiveId );
+                } else {
+                    // Recalculate remaining time for active notification
+                    if ( activeState.expiresAt ) {
+                        const remainingMs = activeState.expiresAt - now;
+                        const remainingSeconds = Math.ceil( remainingMs / 1000 );
+                        activeState.timeoutSeconds = remainingSeconds;
+                        activeState.notification.timeout_seconds = remainingSeconds;
+                    }
+
+                    // Mark as active and render
+                    activeState.isActive = true;
+                    this.activeActionRequiredId = savedActiveId;
+
+                    // Render the active notification in the active slot
+                    this.renderActionRequiredNotification( activeState.notification );
+
+                    // Start countdown timer with remaining time
+                    this.startCountdownTimer( savedActiveId );
+
+                    this.log( `Restored active notification: ${savedActiveId}` );
+                }
+            }
+
+            // Render pending notifications as minimized
+            let position = 1;
+            for ( const id of this.actionRequiredQueue ) {
+                // Skip the active one (already rendered)
+                if ( id === this.activeActionRequiredId ) continue;
+
+                const state = this.actionRequiredNotifications.get( id );
+                if ( state ) {
+                    state.queuePosition = position;
+                    this.renderMinimizedNotificationDOM( state.notification, position );
+                    position++;
+                }
+            }
+
+            // If no active notification but queue has items, activate first
+            if ( this.activeActionRequiredId === null && this.actionRequiredQueue.length > 0 ) {
+                this.log( 'No active notification, activating first in queue' );
+                this.activateNextNotification();
+            }
+
+            // Update count and keyboard listener
+            this.updateActionRequiredCount();
+            if ( this.actionRequiredNotifications.size > 0 && !this.keyboardListenerActive ) {
+                this.attachKeyboardListener();
+            }
+
+            this.log( `Restored ${this.actionRequiredNotifications.size} notification(s), queue: ${this.actionRequiredQueue.length}` );
 
             // Clean up localStorage after restore (remove expired entries)
             this.saveActionRequiredState();
@@ -5725,13 +5815,16 @@ class NotificationsUI {
     addActionRequiredNotification( notification ) {
         this.log( `Adding action-required notification: ${notification.id}` );
 
-        // Store in action-required map
+        // Store in action-required map with DEFERRED timer (expiresAt: null until activated)
         const state = {
             notification        : notification,
-            expiresAt           : Date.now() + ( notification.timeout_seconds * 1000 ),
+            expiresAt           : null,              // DEFERRED: set when activated, not on arrival
+            activatedAt         : null,              // Timestamp when promoted to active
             timeoutSeconds      : notification.timeout_seconds,
             isExpired           : false,
-            isResponded         : false
+            isResponded         : false,
+            isActive            : false,             // True only for the active notification
+            queuePosition       : null               // Position in queue (1-indexed), null when active
         };
 
         // Add multi-question state for multiple_choice notifications
@@ -5748,14 +5841,26 @@ class NotificationsUI {
             section.style.display = 'block';
         }
 
-        // Render the notification UI
-        this.renderActionRequiredNotification( notification );
+        // Hide empty state
+        const emptyState = document.getElementById( 'action-required-empty' );
+        if ( emptyState ) {
+            emptyState.style.display = 'none';
+        }
+
+        // Decision: activate immediately or add to queue?
+        if ( this.activeActionRequiredId === null ) {
+            // No active notification - add to queue and activate this one
+            this.actionRequiredQueue.push( notification.id );
+            this.activateNextNotification();
+        } else {
+            // Already have active - add to pending queue as minimized
+            this.actionRequiredQueue.push( notification.id );
+            state.queuePosition = this.actionRequiredQueue.length;
+            this.renderMinimizedNotificationDOM( notification, state.queuePosition );
+        }
 
         // Update count
         this.updateActionRequiredCount();
-
-        // Start countdown timer
-        this.startCountdownTimer( notification.id );
 
         // Attach keyboard listener if not already active
         if ( !this.keyboardListenerActive ) {
@@ -5766,14 +5871,231 @@ class NotificationsUI {
         this.saveActionRequiredState();
     }
 
-    renderActionRequiredNotification( notification ) {
-        const container = document.getElementById( 'action-required-list' );
-        if ( !container ) {
-            this.error( "Action required list container not found" );
+    // ========================================
+    // ACTION-REQUIRED QUEUE METHODS
+    // ========================================
+
+    /**
+     * Promotes the next pending notification in queue to active state.
+     * Only called when no notification is currently active.
+     */
+    activateNextNotification() {
+        if ( this.activeActionRequiredId !== null ) {
+            this.log( 'Cannot activate: another notification is already active' );
             return;
         }
 
-        // Hide empty state when adding first notification
+        if ( this.actionRequiredQueue.length === 0 ) {
+            this.log( 'Queue empty, nothing to activate' );
+            this.activeActionRequiredId = null;
+
+            // Show empty state if no notifications left
+            const emptyState = document.getElementById( 'action-required-empty' );
+            if ( emptyState && this.actionRequiredNotifications.size === 0 ) {
+                emptyState.style.display = 'block';
+            }
+            return;
+        }
+
+        // Get next notification ID from queue
+        const notificationId = this.actionRequiredQueue.shift();
+        const state = this.actionRequiredNotifications.get( notificationId );
+
+        if ( !state ) {
+            this.log( `Notification ${notificationId} not found in state map, trying next` );
+            this.activateNextNotification();  // Recursive call for next
+            return;
+        }
+
+        // Promote to active
+        this.activeActionRequiredId = notificationId;
+        state.isActive = true;
+        state.queuePosition = null;
+        state.activatedAt = Date.now();
+        state.expiresAt = Date.now() + ( state.timeoutSeconds * 1000 );
+
+        this.log( `Activating notification: ${notificationId}, timeout: ${state.timeoutSeconds}s` );
+
+        // Remove minimized version if it exists (for refresh recovery)
+        const minimized = document.getElementById( `action-required-minimized-${notificationId}` );
+        if ( minimized ) {
+            minimized.classList.add( 'minimized-to-active' );
+            setTimeout( () => minimized.remove(), 300 );
+        }
+
+        // Render full card in active slot
+        this.renderActionRequiredNotification( state.notification );
+
+        // Start timer (only now!)
+        this.startCountdownTimer( notificationId );
+
+        // Play TTS for this notification (if high/urgent)
+        this.playActivatedNotificationTTS( notificationId );
+
+        // Recalculate queue positions for remaining items
+        this.recalculateQueuePositions();
+
+        // Persist state
+        this.saveActionRequiredState();
+    }
+
+    /**
+     * Renders a minimized (collapsed) notification card for queue display.
+     */
+    renderMinimizedNotificationDOM( notification, queuePosition ) {
+        const container = document.getElementById( 'action-required-pending-queue' );
+        if ( !container ) {
+            this.error( 'Pending queue container not found' );
+            return;
+        }
+
+        const truncatedMessage = notification.message.length > 60
+            ? notification.message.substring( 0, 57 ) + '...'
+            : notification.message;
+
+        const typeIcon = {
+            'yes_no': '❓',
+            'open_ended': '💬',
+            'multiple_choice': '📋'
+        }[ notification.response_type ] || '📢';
+
+        const timeoutDisplay = this.formatTimeoutDisplay( notification.timeout_seconds );
+
+        const card = document.createElement( 'div' );
+        card.className = 'action-required-minimized';
+        card.id = `action-required-minimized-${notification.id}`;
+        card.dataset.notificationId = notification.id;
+
+        card.innerHTML = `
+            <div class="minimized-position">#${queuePosition}</div>
+            <div class="minimized-icon">${typeIcon}</div>
+            <div class="minimized-message">${truncatedMessage}</div>
+            <div class="minimized-timeout">${timeoutDisplay}</div>
+        `;
+
+        // Click handler shows tooltip (no jump-the-queue allowed)
+        card.addEventListener( 'click', () => {
+            this.showMinimizedTooltip( card );
+        } );
+
+        container.appendChild( card );
+    }
+
+    /**
+     * Formats timeout duration for display in minimized cards.
+     */
+    formatTimeoutDisplay( seconds ) {
+        if ( seconds >= 60 ) {
+            return `${Math.floor( seconds / 60 )}m`;
+        }
+        return `${seconds}s`;
+    }
+
+    /**
+     * Shows tooltip when user clicks on a minimized (pending) notification.
+     */
+    showMinimizedTooltip( card ) {
+        // Remove any existing tooltip
+        const existingTooltip = document.querySelector( '.minimized-tooltip' );
+        if ( existingTooltip ) {
+            existingTooltip.remove();
+        }
+
+        const tooltip = document.createElement( 'div' );
+        tooltip.className = 'minimized-tooltip';
+        tooltip.textContent = 'Please respond to the current notification first';
+        tooltip.style.cssText = `
+            position: absolute;
+            background: #333;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 1000;
+            white-space: nowrap;
+        `;
+
+        // Position near the card
+        const rect = card.getBoundingClientRect();
+        tooltip.style.left = `${rect.left}px`;
+        tooltip.style.top = `${rect.bottom + 5}px`;
+
+        document.body.appendChild( tooltip );
+
+        // Auto-remove after 2 seconds
+        setTimeout( () => tooltip.remove(), 2000 );
+    }
+
+    /**
+     * Recalculates and updates queue position badges for all pending notifications.
+     */
+    recalculateQueuePositions() {
+        this.actionRequiredQueue.forEach( ( notificationId, index ) => {
+            const state = this.actionRequiredNotifications.get( notificationId );
+            if ( state ) {
+                state.queuePosition = index + 1;  // 1-indexed
+            }
+
+            // Update DOM badge
+            const badge = document.querySelector(
+                `#action-required-minimized-${notificationId} .minimized-position`
+            );
+            if ( badge ) {
+                badge.textContent = `#${index + 1}`;
+            }
+        } );
+    }
+
+    /**
+     * Plays TTS for an activated notification (only if high/urgent priority).
+     */
+    playActivatedNotificationTTS( notificationId ) {
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state ) return;
+
+        const notification = state.notification;
+
+        // Only play TTS for high/urgent priority
+        if ( notification.priority !== 'high' && notification.priority !== 'urgent' ) {
+            this.log( `Skipping TTS for ${notification.priority} priority notification` );
+            return;
+        }
+
+        let ttsText = null;
+
+        // Different field per response type:
+        // - Multiple-choice: Read the question field from response_options
+        // - Open-ended / Yes-No: Read the message field
+        if ( notification.response_type === 'multiple_choice' &&
+             notification.response_options?.questions?.[0]?.question ) {
+            ttsText = notification.response_options.questions[0].question;
+        } else {
+            ttsText = notification.message;
+        }
+
+        if ( ttsText ) {
+            this.log( `Playing TTS for activated notification: "${ttsText}"` );
+            // Set currentNotificationId for TTS indicator (pulsing border)
+            this.currentNotificationId = `action-required-${notificationId}`;
+            this.playTTS( ttsText, this.getCurrentTTSMode() ).catch( error => {
+                this.error( 'TTS failed for activated notification:', error );
+                this.currentNotificationId = null;
+            } );
+        }
+    }
+
+    renderActionRequiredNotification( notification ) {
+        // Render to the active slot (only ONE notification fully displayed at a time)
+        const container = document.getElementById( 'action-required-active-slot' );
+        if ( !container ) {
+            this.error( "Action required active slot container not found" );
+            return;
+        }
+
+        // Clear any existing active notification from the slot
+        container.innerHTML = '';
+
+        // Hide empty state when adding notification
         const emptyState = document.getElementById( 'action-required-empty' );
         if ( emptyState ) {
             emptyState.style.display = 'none';
@@ -5782,7 +6104,7 @@ class NotificationsUI {
         // Create notification card
         const card = document.createElement( 'div' );
         card.id = `action-required-${notification.id}`;
-        card.className = 'action-required-notification active';  // Phase 2.2: Add 'active' class
+        card.className = 'action-required-notification active expand-in';  // Add expand animation
 
         // Build HTML based on response type
         let responseUI = '';
@@ -6432,7 +6754,7 @@ class NotificationsUI {
             this.log( "Response submitted successfully:", result );
 
             // Show confirmation
-            this.showConfirmation( notificationId, response );
+            this.showConfirmation( notificationId, response, result.time_display, result.date_display );
 
             // Stop countdown
             this.stopCountdownTimer( notificationId );
@@ -6453,7 +6775,7 @@ class NotificationsUI {
         }
     }
 
-    showConfirmation( notificationId, response ) {
+    showConfirmation( notificationId, response, serverTimeDisplay = null, serverDateDisplay = null ) {
         const card = document.getElementById( `action-required-${notificationId}` );
         if ( !card ) return;
 
@@ -6480,7 +6802,7 @@ class NotificationsUI {
             card.remove();
 
             // Add conversation pair to sender card (with pulsing highlight)
-            this.addConversationPair( senderId, state.notification, response, false );
+            this.addConversationPair( senderId, state.notification, response, false, serverTimeDisplay, serverDateDisplay );
 
             // Cleanup action-required state
             this.actionRequiredNotifications.delete( notificationId );
@@ -6491,16 +6813,29 @@ class NotificationsUI {
             if ( senderCard ) {
                 senderCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
             }
+
+            // QUEUE SYSTEM: Promote next pending notification
+            if ( this.activeActionRequiredId === notificationId ) {
+                this.activeActionRequiredId = null;
+                // Small delay to let UI settle before promoting next
+                setTimeout( () => this.activateNextNotification(), 100 );
+            }
         }, { once: true } );
 
         // Fallback in case animationend doesn't fire (shouldn't happen, but safety net)
         setTimeout( () => {
             if ( card.parentElement ) {
                 card.remove();
-                this.addConversationPair( senderId, state.notification, response, false );
+                this.addConversationPair( senderId, state.notification, response, false, serverTimeDisplay, serverDateDisplay );
                 this.actionRequiredNotifications.delete( notificationId );
                 this.updateActionRequiredCount();
                 this.saveActionRequiredState();  // Persist removal
+
+                // QUEUE SYSTEM: Promote next pending notification (fallback path)
+                if ( this.activeActionRequiredId === notificationId ) {
+                    this.activeActionRequiredId = null;
+                    setTimeout( () => this.activateNextNotification(), 100 );
+                }
             }
         }, 600 );
 
@@ -6583,7 +6918,8 @@ class NotificationsUI {
             // Start genie animation for expired notification
             this.startGenieAnimation( notificationId, card, destination, () => {
                 // On animation complete: add conversation pair (marked as expired)
-                this.addConversationPair( senderId, state.notification, defaultValue, true );
+                // Use client-generated time/date since there's no server call for timeout
+                this.addConversationPair( senderId, state.notification, defaultValue, true, this.getLocalTimeDisplay(), this.getLocalDateDisplay() );
 
                 // Cleanup action-required state
                 this.actionRequiredNotifications.delete( notificationId );
@@ -6594,6 +6930,12 @@ class NotificationsUI {
                 const senderCard = document.getElementById( destination.cardId );
                 if ( senderCard ) {
                     senderCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
+                }
+
+                // QUEUE SYSTEM: Promote next pending notification
+                if ( this.activeActionRequiredId === notificationId ) {
+                    this.activeActionRequiredId = null;
+                    setTimeout( () => this.activateNextNotification(), 100 );
                 }
             } );
         } else {
@@ -6615,6 +6957,17 @@ class NotificationsUI {
                         ⏰ Expired - Default used: ${defaultValue}
                     </div>
                 `;
+            }
+
+            // Cleanup and promote (fallback path)
+            this.actionRequiredNotifications.delete( notificationId );
+            this.updateActionRequiredCount();
+            this.saveActionRequiredState();
+
+            // QUEUE SYSTEM: Promote next pending notification (fallback path)
+            if ( this.activeActionRequiredId === notificationId ) {
+                this.activeActionRequiredId = null;
+                setTimeout( () => this.activateNextNotification(), 100 );
             }
         }
     }
@@ -6679,6 +7032,44 @@ class NotificationsUI {
                         ✓ Responded in another session: ${response}
                     </div>
                 `;
+            }
+
+            // Cleanup after a short delay to let user see the "responded" state
+            setTimeout( () => {
+                card.remove();
+
+                // Cleanup action-required state
+                this.actionRequiredNotifications.delete( notificationId );
+                this.updateActionRequiredCount();
+                this.saveActionRequiredState();
+
+                // QUEUE SYSTEM: Promote next pending notification
+                if ( this.activeActionRequiredId === notificationId ) {
+                    this.activeActionRequiredId = null;
+                    this.activateNextNotification();
+                }
+            }, 1500 );  // 1.5 second delay to show "responded in another session"
+        } else {
+            // Card not found (might be minimized or already removed)
+            // Still cleanup state and promote next
+            this.actionRequiredNotifications.delete( notificationId );
+            this.updateActionRequiredCount();
+            this.saveActionRequiredState();
+
+            // Remove from queue if it was pending
+            this.actionRequiredQueue = this.actionRequiredQueue.filter( id => id !== notificationId );
+            this.recalculateQueuePositions();
+
+            // Remove minimized card if exists
+            const minimized = document.getElementById( `action-required-minimized-${notificationId}` );
+            if ( minimized ) {
+                minimized.remove();
+            }
+
+            // QUEUE SYSTEM: Promote next if this was the active one
+            if ( this.activeActionRequiredId === notificationId ) {
+                this.activeActionRequiredId = null;
+                this.activateNextNotification();
             }
         }
     }
@@ -7036,9 +7427,12 @@ class NotificationsUI {
      * @param {object} notification - Original notification data
      * @param {string} response - User's response text
      * @param {boolean} wasExpired - True if notification expired (used default)
+     * @param {string} serverTimeDisplay - Optional server-provided formatted time (e.g., "16:26 EST")
+     * @param {string} serverDateDisplay - Optional server-provided formatted date (e.g., "2026-01-08")
      */
-    addConversationPair( senderId, notification, response, wasExpired = false ) {
-        const dateString = this.getTodayDateString();
+    addConversationPair( senderId, notification, response, wasExpired = false, serverTimeDisplay = null, serverDateDisplay = null ) {
+        // Use server-provided date (source of truth) or fall back to extracting from notification
+        const dateString = serverDateDisplay || this.extractDateFromTimestamp( notification.timestamp );
 
         // Ensure sender card and date accordion exist
         this.ensureDateAccordionExists( senderId, dateString );
@@ -7078,12 +7472,13 @@ class NotificationsUI {
         }
 
         const outgoingNotification = {
-            id        : `${notification.id || 'unknown'}-response`,
-            sender_id : senderId,
-            message   : responseMessage,
-            timestamp : new Date().toISOString(),
-            state     : 'responded',
-            was_expired: wasExpired
+            id           : `${notification.id || 'unknown'}-response`,
+            sender_id    : senderId,
+            message      : responseMessage,
+            timestamp    : new Date().toISOString(),
+            time_display : serverTimeDisplay || notification.time_display,
+            state        : 'responded',
+            was_expired  : wasExpired
         };
 
         // Add to data structure

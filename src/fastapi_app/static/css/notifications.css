@@ -413,6 +413,141 @@
             background-color: #dc3545;
         }
 
+        /* ========================================
+           ACTION-REQUIRED QUEUE SYSTEM STYLES
+           ======================================== */
+
+        /* Active slot container */
+        #action-required-active-slot {
+            margin-bottom: 4px;
+        }
+
+        #action-required-active-slot:empty {
+            display: none;
+        }
+
+        /* Pending queue container */
+        #action-required-pending-queue {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        #action-required-pending-queue:empty {
+            display: none;
+        }
+
+        /* Pending queue header (appears when queue has items) */
+        .pending-queue-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 0 4px 0;
+            font-size: 12px;
+            color: #6c757d;
+            border-top: 1px solid #e9ecef;
+            margin-top: 8px;
+        }
+
+        .pending-queue-header::before {
+            content: '⏳';
+        }
+
+        /* Minimized notification card (collapsed/pending state) */
+        .action-required-minimized {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background-color: #f8f9fa;
+            cursor: default;
+            transition: all 0.2s ease;
+        }
+
+        .action-required-minimized:hover {
+            background-color: #e9ecef;
+        }
+
+        /* Queue position badge (circular) */
+        .minimized-position {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 28px;
+            height: 28px;
+            font-size: 12px;
+            font-weight: 600;
+            color: white;
+            background-color: #6c757d;
+            border-radius: 50%;
+        }
+
+        /* Type icon (emoji) */
+        .minimized-icon {
+            font-size: 16px;
+        }
+
+        /* Truncated message */
+        .minimized-message {
+            flex: 1;
+            font-size: 14px;
+            color: #495057;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Timeout badge */
+        .minimized-timeout {
+            font-size: 12px;
+            font-weight: 500;
+            color: #6c757d;
+            padding: 2px 8px;
+            background-color: #e9ecef;
+            border-radius: 10px;
+        }
+
+        /* Animation: minimized to active expansion */
+        @keyframes minimizedToActive {
+            0% {
+                opacity: 1;
+                transform: scaleY( 1 );
+            }
+            50% {
+                opacity: 0.5;
+                transform: scaleY( 0.5 );
+            }
+            100% {
+                opacity: 0;
+                transform: scaleY( 0 );
+            }
+        }
+
+        .action-required-minimized.minimized-to-active {
+            animation: minimizedToActive 0.3s ease-out forwards;
+        }
+
+        /* Animation: expand in for newly activated card */
+        @keyframes expandIn {
+            0% {
+                opacity: 0;
+                transform: scaleY( 0.8 );
+                max-height: 0;
+            }
+            100% {
+                opacity: 1;
+                transform: scaleY( 1 );
+                max-height: 400px;
+            }
+        }
+
+        .action-required-notification.expand-in {
+            animation: expandIn 0.4s ease-out forwards;
+        }
+
         /* Yes/No Response Type */
         .response-buttons {
             display: flex;

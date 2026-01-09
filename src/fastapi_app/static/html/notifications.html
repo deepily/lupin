@@ -117,11 +117,19 @@
                 <button class="toggle-button" id="action-required-toggle">▼</button>
             </div>
             <div class="section-content" id="action-required-content">
-                <div id="action-required-list">
-                    <!-- Response-required notifications will be populated here -->
-                    <div id="action-required-empty" class="action-required-empty-state">
-                        ✓ No pending actions
-                    </div>
+                <!-- Active notification slot (only ONE notification fully displayed at a time) -->
+                <div id="action-required-active-slot">
+                    <!-- Full-size active notification renders here -->
+                </div>
+
+                <!-- Pending queue (minimized notifications waiting their turn) -->
+                <div id="action-required-pending-queue">
+                    <!-- Minimized notification one-liners render here -->
+                </div>
+
+                <!-- Empty state (shown when both active and queue are empty) -->
+                <div id="action-required-empty" class="action-required-empty-state">
+                    ✓ No pending actions
                 </div>
             </div>
         </div>
