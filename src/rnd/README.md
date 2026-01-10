@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.01.09 - Claude Code Dispatcher Docker Deployment
+- **Docker Deployment Analysis**: [2026.01.09-claude-code-dispatcher-docker-deployment.md](2026.01.09-claude-code-dispatcher-docker-deployment.md) - **📊 ANALYSIS COMPLETE** - Comprehensive analysis of deployment options for Claude Code Dispatcher feature. Documents 4 streaming fixes (output format, async subprocess, background task scheduling, CLI environment). Includes trade-off matrix for 4 deployment options: Install CLI in Docker (recommended), Run FastAPI locally, Use Anthropic SDK directly, Hybrid API proxy. Implementation checklist for Docker CLI installation.
+
 ### 2026.01.05 - Directory Rename Planning
 - **Directory Rename Plan**: [2026.01.05-directory-rename-genie-to-lupin-plan.md](2026.01.05-directory-rename-genie-to-lupin-plan.md) - **⏳ PENDING** - Comprehensive plan for renaming project directory from `lupin` to `lupin`. Covers 76+ internal files, 6 external configs, 2 virtual environments, backup directories. 100% removal of "genie" naming (except legacy Jupyter notebooks). Estimated ~90 minutes execution time. 24-step checklist with rollback plan.
 
