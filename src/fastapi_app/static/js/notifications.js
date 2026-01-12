@@ -415,6 +415,9 @@ class NotificationsUI {
         this.startWebSocketHealthMonitor();
 
         this.log( `✓ Authentication setup complete for user: ${this.currentUser} (admin: ${this.isAdmin}, config fetched, monitors started)` );
+
+        // Load user's current agent mode from server
+        await this.loadCurrentMode();
     }
 
     getStoredTokens() {
@@ -1204,6 +1207,33 @@ class NotificationsUI {
         }
 
         this.log( "Claude Code Dispatcher event listeners setup complete" );
+
+        // ========================================
+        // Agent Mode Selector
+        // ========================================
+
+        const agentModeSelect = document.getElementById( 'agent-mode' );
+        const modeBadge = document.getElementById( 'mode-badge' );
+        const modeStatus = document.getElementById( 'mode-status' );
+
+        if ( agentModeSelect ) {
+            agentModeSelect.addEventListener( 'change', async ( e ) => {
+                const mode = e.target.value === 'system' ? null : e.target.value;
+                await this.setAgentMode( mode );
+            });
+        }
+
+        if ( modeBadge ) {
+            modeBadge.addEventListener( 'click', async () => {
+                // Click badge to return to system mode
+                await this.setAgentMode( null );
+                if ( agentModeSelect ) {
+                    agentModeSelect.value = 'system';
+                }
+            });
+        }
+
+        this.log( "Agent mode selector event listeners setup complete" );
     }
 
     /**
@@ -1443,8 +1473,9 @@ class NotificationsUI {
             session_id: this.audioSessionId,
             subscribed_events: [
                 "audio_streaming_chunk",
-                "audio_streaming_status", 
+                "audio_streaming_status",
                 "audio_streaming_complete",
+                "tts_error",
                 "sys_ping",
                 "auth_success",
                 "auth_error",
@@ -1621,7 +1652,11 @@ class NotificationsUI {
                 case "audio_streaming_complete":
                     this.handleAudioComplete( envelope );
                     break;
-                    
+
+                case "tts_error":
+                    this.handleTTSError( envelope );
+                    break;
+
                 case "sys_ping":
                     this.handlePing( "audio" );
                     break;
@@ -2691,7 +2726,87 @@ class NotificationsUI {
         this.log( `Audio status: ${envelope.status || envelope.text}` );
         // Future: update UI with loading status
     }
-    
+
+    /**
+     * Handle TTS service errors with visual feedback.
+     *
+     * Requires:
+     *     - envelope contains type: "tts_error" with text, error_code, provider fields
+     *
+     * Ensures:
+     *     - Stops TTS playing indicator if active
+     *     - Shows brief red error indicator on notification card
+     *     - Logs error for debugging
+     *     - Cleans up TTS state
+     */
+    handleTTSError( envelope ) {
+        const errorCode = envelope.error_code || "unknown";
+        const errorText = envelope.text || "TTS service error";
+        const details = envelope.details || "";
+
+        this.error( `TTS Error [${errorCode}]: ${errorText}` );
+
+        // Stop playing indicator if we have a notification ID
+        if ( this.currentNotificationId ) {
+            this.stopTTSPlayingIndicator( this.currentNotificationId );
+        }
+
+        // Show error modal overlay (works regardless of TTS context)
+        this.showTTSErrorModal( errorCode, errorText, details );
+
+        // Clean up TTS state
+        this.currentTTSMode = null;
+        this.pcmStreamComplete = true;
+
+        // Notify TTS queue that playback failed
+        this.onTTSPlaybackComplete();
+    }
+
+    /**
+     * Show a semi-transparent modal overlay with TTS error message.
+     * Auto-dismisses after 5 seconds or on click.
+     */
+    showTTSErrorModal( errorCode, errorText, details ) {
+        // Remove any existing error modal
+        const existing = document.getElementById( 'tts-error-modal' );
+        if ( existing ) existing.remove();
+
+        // Create modal overlay
+        const modal = document.createElement( 'div' );
+        modal.id = 'tts-error-modal';
+        modal.className = 'tts-error-modal';
+
+        // Create modal content
+        modal.innerHTML = `
+            <div class="tts-error-modal-content">
+                <div class="tts-error-icon">⚠️</div>
+                <div class="tts-error-title">TTS Error</div>
+                <div class="tts-error-message">${errorText}</div>
+                <div class="tts-error-code">${errorCode}</div>
+                <div class="tts-error-dismiss">Click to dismiss (auto-closes in 5s)</div>
+            </div>
+        `;
+
+        // Click to dismiss
+        modal.addEventListener( 'click', () => {
+            modal.classList.add( 'tts-error-modal-fadeout' );
+            setTimeout( () => modal.remove(), 300 );
+        } );
+
+        // Add to DOM
+        document.body.appendChild( modal );
+
+        // Auto-dismiss after 5 seconds
+        setTimeout( () => {
+            if ( document.body.contains( modal ) ) {
+                modal.classList.add( 'tts-error-modal-fadeout' );
+                setTimeout( () => modal.remove(), 300 );
+            }
+        }, 5000 );
+
+        this.log( `Showing TTS error modal: ${errorCode} - ${errorText}` );
+    }
+
     handleAudioChunk( blobData ) {
         if ( this.debug ) this.log( `Received audio chunk: ${blobData.size} bytes` );
 
@@ -8142,6 +8257,146 @@ class NotificationsUI {
     // - _attachRecordingCancelListener, _detachRecordingCancelListener
     // - _cancelRecording
     // - this.audioRecorder, this.audioRecording, this._recordingCancelListener
+
+    // ========================================
+    // AGENT MODE MANAGEMENT
+    // ========================================
+
+    /**
+     * Set the agent mode for the current user.
+     * Mode determines whether questions bypass the LLM router.
+     *
+     * Args:
+     *     mode: String mode name (e.g., 'math', 'calendar') or null for system mode
+     *
+     * Returns:
+     *     Boolean indicating success
+     */
+    async setAgentMode( mode ) {
+        if ( !this.currentUser ) {
+            this.error( "Cannot set mode: No user logged in" );
+            return false;
+        }
+
+        try {
+            await this.ensureValidToken();
+
+            // Use /current endpoint - server extracts user from auth token
+            const response = await fetch( `/api/mode/current`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': this.getAuthHeader()
+                },
+                body: JSON.stringify( { mode: mode } )
+            } );
+
+            if ( !response.ok ) {
+                const errorData = await response.json();
+                this.error( `Failed to set mode: ${errorData.detail || response.statusText}` );
+                return false;
+            }
+
+            const data = await response.json();
+            this.log( `Mode changed: ${data.message}` );
+
+            // Update UI elements
+            this.updateModeUI( data.mode, data.display_name );
+
+            return true;
+
+        } catch ( e ) {
+            this.error( `Error setting mode: ${e.message}` );
+            return false;
+        }
+    }
+
+    /**
+     * Get the current agent mode for the user.
+     *
+     * Returns:
+     *     Object with mode info or null on error
+     */
+    async getAgentMode() {
+        if ( !this.currentUser ) {
+            this.error( "Cannot get mode: No user logged in" );
+            return null;
+        }
+
+        try {
+            await this.ensureValidToken();
+
+            // Use /current endpoint - server extracts user from auth token
+            const response = await fetch( `/api/mode/current`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': this.getAuthHeader()
+                }
+            } );
+
+            if ( !response.ok ) {
+                this.error( `Failed to get mode: ${response.statusText}` );
+                return null;
+            }
+
+            const data = await response.json();
+            return data;
+
+        } catch ( e ) {
+            this.error( `Error getting mode: ${e.message}` );
+            return null;
+        }
+    }
+
+    /**
+     * Update the mode selector UI to reflect current mode.
+     *
+     * Args:
+     *     mode: String mode name or null for system mode
+     *     displayName: Human-readable mode name
+     */
+    updateModeUI( mode, displayName ) {
+        const agentModeSelect = document.getElementById( 'agent-mode' );
+        const modeBadge = document.getElementById( 'mode-badge' );
+        const modeStatus = document.getElementById( 'mode-status' );
+
+        // Update dropdown selection
+        if ( agentModeSelect ) {
+            agentModeSelect.value = mode || 'system';
+        }
+
+        // Update badge visibility and content
+        if ( modeBadge ) {
+            if ( mode && mode !== 'system' ) {
+                modeBadge.textContent = displayName;
+                modeBadge.style.display = 'inline-block';
+            } else {
+                modeBadge.style.display = 'none';
+            }
+        }
+
+        // Update status text
+        if ( modeStatus ) {
+            if ( mode && mode !== 'system' ) {
+                modeStatus.textContent = `Direct routing to ${displayName}`;
+                modeStatus.style.color = '#0d6efd';
+            } else {
+                modeStatus.textContent = 'Auto-routing enabled';
+                modeStatus.style.color = '#6c757d';
+            }
+        }
+    }
+
+    /**
+     * Load current mode from server on page load.
+     * Called after authentication is complete.
+     */
+    async loadCurrentMode() {
+        const modeData = await this.getAgentMode();
+        if ( modeData ) {
+            this.updateModeUI( modeData.mode, modeData.display_name );
+        }
+    }
 }
 
 // ========================================

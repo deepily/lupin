@@ -1405,6 +1405,110 @@
             animation: ttsPulseGlow 1s ease-in-out infinite;
         }
 
+        /* TTS error indicator - brief red pulse (for notification cards) */
+        @keyframes ttsErrorPulse {
+            0%, 100% {
+                box-shadow: 0 0 5px 2px rgba( 220, 53, 69, 0.4 );
+                outline: 2px solid rgba( 220, 53, 69, 0.6 );
+            }
+            50% {
+                box-shadow: 0 0 15px 5px rgba( 220, 53, 69, 0.9 );
+                outline: 2px solid #dc3545;
+            }
+        }
+
+        .tts-error::before {
+            animation: ttsErrorPulse 1s ease-in-out 3;  /* 3 cycles only */
+        }
+
+        /* TTS Error Modal Overlay */
+        .tts-error-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba( 0, 0, 0, 0.7 );
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            animation: ttsErrorModalFadeIn 0.3s ease-out;
+            cursor: pointer;
+        }
+
+        @keyframes ttsErrorModalFadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        .tts-error-modal-fadeout {
+            animation: ttsErrorModalFadeOut 0.3s ease-out forwards;
+        }
+
+        @keyframes ttsErrorModalFadeOut {
+            from {
+                opacity: 1;
+            }
+            to {
+                opacity: 0;
+            }
+        }
+
+        .tts-error-modal-content {
+            background: linear-gradient( 135deg, #2d1f1f 0%, #1a1a2e 100% );
+            border: 2px solid #dc3545;
+            border-radius: 16px;
+            padding: 32px 48px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba( 220, 53, 69, 0.4 ),
+                        0 0 60px rgba( 220, 53, 69, 0.2 );
+            max-width: 480px;
+            margin: 20px;
+        }
+
+        .tts-error-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .tts-error-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #dc3545;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .tts-error-message {
+            font-size: 16px;
+            color: #f8f9fa;
+            margin-bottom: 12px;
+            line-height: 1.5;
+        }
+
+        .tts-error-code {
+            font-size: 12px;
+            color: #6c757d;
+            font-family: monospace;
+            background: rgba( 0, 0, 0, 0.3 );
+            padding: 4px 12px;
+            border-radius: 4px;
+            display: inline-block;
+            margin-bottom: 16px;
+        }
+
+        .tts-error-dismiss {
+            font-size: 12px;
+            color: #adb5bd;
+            margin-top: 8px;
+        }
+
         /* Stop playback button - only visible during TTS playback */
         .tts-stop-btn {
             background: none;

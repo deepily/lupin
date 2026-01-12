@@ -49,7 +49,7 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code, mode
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 
 # Global variables
@@ -600,6 +600,7 @@ app.include_router(jobs.router)
 app.include_router(websocket.router)
 app.include_router(websocket_admin.router)
 app.include_router(claude_code.router)
+app.include_router(mode.router)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
