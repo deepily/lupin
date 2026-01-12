@@ -123,6 +123,9 @@ RUN pip install --no-cache-dir PyJWT==2.10.1 passlib==1.7.4 bcrypt==3.2.2 cffi==
 
 RUN pip install --no-cache-dir sqlalchemy==2.0.40 psycopg2-binary==2.9.11
 
+# MCP server dependencies (for cosa-voice MCP server)
+RUN pip install --no-cache-dir fastmcp==2.14.2
+
 
 # ============================================================================
 # RUNTIME CONFIGURATION (Can be overridden via docker run -e or Cloud Run)
@@ -163,6 +166,7 @@ env LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path
 COPY src/cosa /var/lupin/src/cosa
 COPY src/fastapi_app /var/lupin/src/fastapi_app
 COPY src/lib /var/lupin/src/lib
+COPY src/lupin_mcp /var/lupin/src/lupin_mcp
 COPY src/scripts /var/lupin/src/scripts
 COPY src/migrations /var/lupin/src/migrations
 COPY src/docs /var/lupin/src/docs
@@ -176,6 +180,7 @@ COPY src/conf/*.json /var/lupin/src/conf/
 COPY src/conf/*.js /var/lupin/src/conf/
 COPY src/conf/auth /var/lupin/src/conf/auth
 COPY src/conf/keys /var/lupin/src/conf/keys
+COPY src/conf/mcp /var/lupin/src/conf/mcp
 COPY src/conf/prompts /var/lupin/src/conf/prompts
 COPY src/conf/tools /var/lupin/src/conf/tools
 
