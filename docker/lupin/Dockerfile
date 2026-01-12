@@ -188,6 +188,41 @@ COPY src/conf/long-term-memory/lupin.lancedb /var/lupin/src/conf/long-term-memor
 WORKDIR /var/lupin/src
 RUN mkdir -p /var/lupin/io
 
+# ============================================================================
+# CLAUDE CODE CLI INSTALLATION (Level 2: Functional MCP Support)
+# ============================================================================
+# Enables dispatching Claude Code tasks from the Lupin UI with voice tools.
+# API key is provided at RUNTIME via: docker run -e ANTHROPIC_API_KEY="..."
+# NO secrets are baked into this image.
+#
+# Usage with prompt-style key input (local dev):
+#   read -s -p "Anthropic API Key: " KEY && \
+#   docker run -e ANTHROPIC_API_KEY="$KEY" -p 7999:7999 lupin:latest
+#
+# Usage with GCP Secret Manager (production):
+#   gcloud run deploy lupin --set-secrets="ANTHROPIC_API_KEY=anthropic-api-key:latest"
+# ============================================================================
+
+# Install Node.js 20.x LTS (required for Claude Code CLI)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code CLI globally (gets latest version at build time)
+# To update: rebuild this image. Auto-update disabled for container immutability.
+RUN npm install -g @anthropic-ai/claude-code
+
+# Create Claude config directory and copy pre-configured settings
+RUN mkdir -p /root/.claude
+
+# Copy MCP configuration (cosa-voice with container paths) and settings
+COPY docker/lupin/claude-config/settings.json /root/.claude/settings.json
+COPY docker/lupin/claude-config/mcp.json /root/.claude/.mcp.json
+
+# ============================================================================
+# END CLAUDE CODE CLI INSTALLATION
+# ============================================================================
+
 # CMD ["/bin/bash", "-c", "echo '-- OR -- Run `python3 -m fastapi_app.main` to spin up FastAPI server' && exec /bin/bash"]
 # Run the script: /var/lupin/src/scripts/run-fastapi-lupin.sh
 CMD [ "/bin/bash", "/var/lupin/src/scripts/run-fastapi-lupin.sh" ]

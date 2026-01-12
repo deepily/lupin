@@ -4,6 +4,12 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.01.12 - User-Level Mode System
+- **Design Document**: [2026.01.12-user-level-mode-system-design.md](2026.01.12-user-level-mode-system-design.md) - **📋 READY TO IMPLEMENT** - Comprehensive design for user-level mode switching. Allows users to bypass LLM router and route directly to specific agents (math, calendar, weather, etc.). Features: in-memory state storage, 4 API endpoints, UI mode selector, session-only persistence. Includes architecture diagrams, API specification, UI mockups, and testing strategy.
+
+### 2026.01.12 - Claude Code CLI Docker Installation
+- **Docker Installation Guide**: [2026.01.12-claude-code-cli-docker-installation.md](2026.01.12-claude-code-cli-docker-installation.md) - **✅ IMPLEMENTED** - Level 2 implementation adding Claude Code CLI to Lupin Docker container. Enables Claude Code Dispatcher feature in containerized environments. Covers: Node.js 20.x + npm installation, cosa-voice MCP configuration with container paths, API key handling patterns (local dev prompt-style paste vs GCP Secret Manager), verification procedures. No secrets baked into image. ~200MB image size increase.
+
 ### 2026.01.09 - Claude Code Dispatcher Docker Deployment
 - **Docker Deployment Analysis**: [2026.01.09-claude-code-dispatcher-docker-deployment.md](2026.01.09-claude-code-dispatcher-docker-deployment.md) - **📊 ANALYSIS COMPLETE** - Comprehensive analysis of deployment options for Claude Code Dispatcher feature. Documents 4 streaming fixes (output format, async subprocess, background task scheduling, CLI environment). Includes trade-off matrix for 4 deployment options: Install CLI in Docker (recommended), Run FastAPI locally, Use Anthropic SDK directly, Hybrid API proxy. Implementation checklist for Docker CLI installation.
 

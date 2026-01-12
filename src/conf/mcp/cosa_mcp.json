@@ -2,7 +2,7 @@
   "mcpServers": {
     "cosa-voice": {
       "type": "stdio",
-      "command": "python",
+      "command": "python3",
       "args": ["${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.py"],
       "env": {
         "MCP_PROJECT": "lupin",
