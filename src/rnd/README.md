@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.01.12 - COSA Unified Agent Architecture
+- **Architecture Design**: [2026.01.12-cosa-unified-agent-architecture.md](2026.01.12-cosa-unified-agent-architecture.md) - **🔄 IN PROGRESS** - Comprehensive architecture document covering three areas: (1) **Agent Architecture Analysis** - Comparative analysis of COSA agents vs Claude Code Dispatchers with 5 commonalities, 5 differences, and "Parallel with Shared Contracts" recommendation; (2) **Integration Patterns** - Code generation failure escalation to Claude Code, queue integration options; (3) **Conversation Identity Architecture** - Process-centric model for multi-session tracking, active conversation routing, notification UI nested accordion design, AgentBase conversation history integration. Enables distinguishing parallel Claude Code sessions in same project.
+
 ### 2026.01.12 - User-Level Mode System
 - **Design Document**: [2026.01.12-user-level-mode-system-design.md](2026.01.12-user-level-mode-system-design.md) - **📋 READY TO IMPLEMENT** - Comprehensive design for user-level mode switching. Allows users to bypass LLM router and route directly to specific agents (math, calendar, weather, etc.). Features: in-memory state storage, 4 API endpoints, UI mode selector, session-only persistence. Includes architecture diagrams, API specification, UI mockups, and testing strategy.
 
