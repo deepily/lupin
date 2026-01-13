@@ -6875,6 +6875,12 @@ class NotificationsUI {
         const inputType      = question.multi_select ? 'checkbox' : 'radio';
         const questionId     = `mc-${notification.id}-q${questionIndex}`;
 
+        // Extract project for source indicator badge
+        const project      = this.getProjectFromSenderId( notification.sender_id );
+        const projectBadge = project && project !== 'UNKNOWN'
+            ? `<span class="mc-project-badge">[${project}]</span>`
+            : '';
+
         // Check for previously saved answer for this question
         const state       = this.actionRequiredNotifications.get( notification.id );
         const savedAnswer = state?.collectedAnswers?.[ question.header ];
@@ -6972,6 +6978,7 @@ class NotificationsUI {
         return `
             <div class="response-multiple-choice" data-notification-id="${notification.id}" data-question-index="${questionIndex}">
                 <div class="mc-question-header">
+                    ${projectBadge}
                     <span class="mc-question-indicator">Question ${questionIndex + 1} of ${totalQuestions}</span>
                 </div>
                 <div class="mc-question-text">${question.question}</div>
@@ -7137,9 +7144,16 @@ class NotificationsUI {
         const otherMicBtn = card.querySelector( '.mc-other-mic' );
 
         // Clear validation state when user makes a selection
+        // Also auto-focus the action button (Next or Submit) for keyboard accessibility
         container?.querySelectorAll( '.mc-input' ).forEach( input => {
             input.addEventListener( 'change', () => {
                 container.classList.remove( 'invalid' );
+                // Focus the primary action button so user can press Enter
+                // Next button exists for non-final questions, Submit for final
+                const actionBtn = nextBtn || submitBtn;
+                if ( actionBtn ) {
+                    actionBtn.focus( { preventScroll: true } );
+                }
             } );
         } );
 
