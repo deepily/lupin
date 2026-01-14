@@ -9,7 +9,8 @@ Provides five tools:
   - ask_multiple_choice(): Present options and get user's selection(s)
   - get_session_info(): Get current session identification
 
-Session ID Format: claude.code@{project}.deepily.ai
+Sender ID Format: claude.code@{project}.deepily.ai#{session_id}
+    - session_id is an 8-character hex string unique to each MCP server instance
 
 Project Detection (automatic):
     1. Auto-detects from current working directory:
@@ -33,6 +34,7 @@ import logging
 import os
 import signal
 import sys
+import uuid
 from typing import Optional
 
 from pydantic import ValidationError
@@ -156,9 +158,26 @@ def _get_project() -> str:
     return "unknown"
 
 
-def _get_sender_id( project: str ) -> str:
-    """Generate sender_id in format: claude.code@{project}.deepily.ai"""
-    return f"claude.code@{project}.deepily.ai"
+def _get_sender_id( project: str, session_id: str = None ) -> str:
+    """
+    Generate sender_id with optional session identifier.
+
+    Requires:
+        - project is a lowercase string
+        - session_id is an 8-char hex string or None
+
+    Ensures:
+        - Returns claude.code@{project}.deepily.ai#{session_id} if session_id provided
+        - Returns claude.code@{project}.deepily.ai if session_id is None (backward compatible)
+
+    Examples:
+        _get_sender_id( "lupin" ) -> "claude.code@lupin.deepily.ai"
+        _get_sender_id( "lupin", "a1b2c3d4" ) -> "claude.code@lupin.deepily.ai#a1b2c3d4"
+    """
+    base = f"claude.code@{project}.deepily.ai"
+    if session_id:
+        return f"{base}#{session_id}"
+    return base
 
 
 # ============================================================================
@@ -178,10 +197,12 @@ signal.signal( signal.SIGTERM, _handle_sigterm )
 # ============================================================================
 
 PROJECT    = _get_project()
-SENDER_ID  = _get_sender_id( PROJECT )
+SESSION_ID = uuid.uuid4().hex[:8]  # 8-char hex, e.g., "a1b2c3d4"
+SENDER_ID  = _get_sender_id( PROJECT, SESSION_ID )
 SERVER_URL = _get_server_url()
 
 logger.info( f"Project: {PROJECT}" )
+logger.info( f"Session ID: {SESSION_ID}" )
 logger.info( f"Sender ID: {SENDER_ID}" )
 logger.info( f"Server URL: {SERVER_URL}" )
 
@@ -577,10 +598,11 @@ def get_session_info() -> dict:
     Get current session identification and server info.
 
     Returns:
-        dict with project name, sender_id, server_url, and version
+        dict with project name, session_id, sender_id, server_url, and version
     """
     return {
         "project"    : PROJECT,
+        "session_id" : SESSION_ID,
         "sender_id"  : SENDER_ID,
         "server_url" : SERVER_URL,
         "version"    : __version__

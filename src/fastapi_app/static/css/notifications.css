@@ -997,6 +997,56 @@
             color: white;
         }
 
+        /* ========================================
+           SESSION IDENTITY STYLES (Conversation Identity Phase 3)
+           ======================================== */
+
+        /* Session ID display (monospace hash) */
+        .sender-session-id {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 11px;
+            color: #868e96;
+            margin-left: 4px;
+        }
+
+        /* Session name (auto-generated from first message) */
+        .sender-session-name {
+            font-style: italic;
+            font-size: 12px;
+            color: #6c757d;
+            margin-left: 2px;
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Active session indicator */
+        .sender-active-indicator {
+            font-size: 10px;
+            margin-right: 4px;
+            line-height: 1;
+        }
+
+        /* Active session - green indicator */
+        .sender-card-active .sender-active-indicator {
+            color: #28a745;
+        }
+
+        /* Inactive session - gray indicator */
+        .sender-card:not(.sender-card-active) .sender-active-indicator {
+            color: #adb5bd;
+        }
+
+        /* Active sender card - left border highlight */
+        .sender-card-active {
+            border-left: 3px solid #28a745;
+        }
+
+        .sender-card:not(.sender-card-active) {
+            border-left: 3px solid transparent;
+        }
+
         .sender-card-messages {
             display: flex;
             flex-direction: column;

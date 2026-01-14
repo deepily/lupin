@@ -1580,6 +1580,11 @@ class NotificationsUI {
                     this.handleNotificationExpired( envelope );
                     break;
 
+                case "active_conversation_changed":
+                    // Conversation Identity Phase 3 - Update active sender indicator
+                    this.handleActiveConversationChanged( envelope.data || envelope );
+                    break;
+
                 case "sys_time_update":
                     // Update clock display with server time
                     if ( envelope.date ) {
@@ -4125,11 +4130,65 @@ class NotificationsUI {
      * @returns {string} - Project name in uppercase (e.g., "LUPIN")
      */
     getProjectFromSenderId( senderId ) {
-        const match = senderId.match( /^claude\.code@([a-z]+)\.deepily\.ai$/ );
+        const match = senderId.match( /^claude\.code@([a-z]+)\.deepily\.ai/ );
         if ( match ) {
             return match[1].toUpperCase();
         }
         return 'UNKNOWN';
+    }
+
+    /**
+     * Parse sender_id into components (backward compatible).
+     * Supports new session-aware format: claude.code@project.deepily.ai#session_id
+     *
+     * @param {string} senderId - Full sender_id string
+     * @returns {Object} - { agentType, project, sessionId, fullSenderId, baseSenderId }
+     */
+    parseSenderId( senderId ) {
+        let base, sessionId;
+
+        // Handle new format with session_id
+        if ( senderId.includes( '#' ) ) {
+            const parts = senderId.split( '#' );
+            base = parts[ 0 ];
+            sessionId = parts[ 1 ];
+        } else {
+            base = senderId;
+            sessionId = null;
+        }
+
+        // Parse agent type and project
+        const match = base.match( /^([^@]+)@([a-z]+)\.deepily\.ai$/ );
+        const agentType = match ? match[ 1 ] : 'unknown';
+        const project = match ? match[ 2 ] : 'unknown';
+
+        return {
+            agentType     : agentType,
+            project       : project,
+            sessionId     : sessionId,
+            fullSenderId  : senderId,
+            baseSenderId  : base
+        };
+    }
+
+    /**
+     * Generate a human-readable session name from first message content.
+     *
+     * @param {string} firstMessage - First notification message from session
+     * @returns {string} - Short session name (max 30 chars)
+     */
+    generateSessionName( firstMessage ) {
+        if ( !firstMessage ) return 'Session';
+
+        // Remove common prefixes like "[LUPIN] "
+        const cleaned = firstMessage.replace( /^\[[A-Z]+\]\s*/, '' );
+
+        // Take first 4 words
+        const words = cleaned.split( /\s+/ ).slice( 0, 4 );
+        const name = words.join( ' ' );
+
+        // Truncate to 30 chars
+        return name.length > 30 ? name.substring( 0, 27 ) + '...' : name;
     }
 
     /**
@@ -4309,7 +4368,7 @@ class NotificationsUI {
      */
     moveSenderCardToTop( senderId ) {
         const container = document.getElementById( 'notifications-list' );
-        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         const card = document.getElementById( cardId );
 
         if ( container && card && container.firstChild !== card ) {
@@ -4330,25 +4389,48 @@ class NotificationsUI {
             return;
         }
 
-        const projectName = this.getProjectFromSenderId( senderId );
+        // Parse sender_id for session info (Conversation Identity Phase 3)
+        const parsed = this.parseSenderId( senderId );
+        const projectName = parsed.project.toUpperCase();
+        const sessionId = parsed.sessionId;
+
         const group = this.senderGroups.get( senderId );
         const statusIndicator = this.getSenderStatusIndicator( group?.lastActivity );
         const escapedSenderId = senderId.replace( /'/g, "\\'" );
 
+        // Generate session name from first message (if available)
+        const firstMsg = group?.notifications?.[ 0 ]?.message || '';
+        const sessionName = sessionId ? this.generateSessionName( firstMsg ) : null;
+
+        // Build session display string (only if session_id present)
+        const sessionDisplay = sessionId
+            ? `<span class="sender-session-id">#${sessionId}</span> <span class="sender-session-name">${sessionName || ''}</span>`
+            : '';
+
+        // Active indicator: filled circle for most recent sender, hollow for others
+        const activeIndicator = group?.isActive ? '●' : '○';
+        const activeClass = group?.isActive ? ' sender-card-active' : '';
+        const activeTitle = group?.isActive ? 'Active session' : 'Inactive session';
+
         const card = document.createElement( 'div' );
-        card.id = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
-        card.className = 'sender-card';
+        // Card ID must escape # character in addition to @ and .
+        card.id = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
+        card.className = `sender-card${activeClass}`;
+        card.setAttribute( 'data-project', parsed.project );
+        card.setAttribute( 'data-session-id', sessionId || '' );
         card.innerHTML = `
             <div class="sender-card-header" onclick="window.notificationsUI.toggleSenderCard('${escapedSenderId}')">
+                <span class="sender-active-indicator" title="${activeTitle}">${activeIndicator}</span>
                 <span class="sender-status">${statusIndicator}</span>
                 <span class="sender-project-name">${projectName}</span>
+                ${sessionDisplay}
                 <span class="sender-new-count"></span>
                 <span class="sender-message-count">(0)</span>
                 <span class="sender-last-activity">Last: --</span>
                 <button class="sender-delete-btn" onclick="event.stopPropagation(); window.notificationsUI.deleteSenderConversation('${escapedSenderId}')" title="Delete all">×</button>
                 <span class="sender-toggle">▼</span>
             </div>
-            <div class="sender-card-dates" id="sender-dates-${senderId.replace( /[@.]/g, '-' )}">
+            <div class="sender-card-dates" id="sender-dates-${senderId.replace( /[@.#]/g, '-' )}">
                 <!-- Date accordions will be added here -->
             </div>
         `;
@@ -4359,7 +4441,7 @@ class NotificationsUI {
         } else {
             container.appendChild( card );
         }
-        this.log( `Created sender card for ${projectName} (${senderId})` );
+        this.log( `Created sender card for ${projectName}${sessionId ? '#' + sessionId : ''} (${senderId})` );
     }
 
     /**
@@ -4368,14 +4450,14 @@ class NotificationsUI {
      * @param {string} dateString - ISO date string (YYYY-MM-DD)
      */
     createDateAccordion( senderId, dateString ) {
-        const containerId = `sender-dates-${senderId.replace( /[@.]/g, '-' )}`;
+        const containerId = `sender-dates-${senderId.replace( /[@.#]/g, '-' )}`;
         const container = document.getElementById( containerId );
         if ( !container ) {
             this.error( `Date container not found: ${containerId}` );
             return;
         }
 
-        const accordionId = `date-accordion-${senderId.replace( /[@.]/g, '-' )}-${dateString}`;
+        const accordionId = `date-accordion-${senderId.replace( /[@.#]/g, '-' )}-${dateString}`;
         const escapedSenderId = senderId.replace( /'/g, "\\'" );
 
         const accordion = document.createElement( 'div' );
@@ -4388,7 +4470,7 @@ class NotificationsUI {
                 <button class="date-delete-btn" onclick="event.stopPropagation(); window.notificationsUI.softDeleteByDate('${escapedSenderId}', '${dateString}')" title="Hide this day">🗑️</button>
                 <span class="date-toggle">▼</span>
             </div>
-            <div class="date-accordion-messages" id="date-messages-${senderId.replace( /[@.]/g, '-' )}-${dateString}">
+            <div class="date-accordion-messages" id="date-messages-${senderId.replace( /[@.#]/g, '-' )}-${dateString}">
                 <!-- Messages for this date will be added here -->
             </div>
         `;
@@ -4424,7 +4506,7 @@ class NotificationsUI {
      * @param {string} dateString - ISO date string
      */
     toggleDateAccordion( senderId, dateString ) {
-        const accordionId = `date-accordion-${senderId.replace( /[@.]/g, '-' )}-${dateString}`;
+        const accordionId = `date-accordion-${senderId.replace( /[@.#]/g, '-' )}-${dateString}`;
         const accordion = document.getElementById( accordionId );
         if ( !accordion ) return;
 
@@ -4448,7 +4530,7 @@ class NotificationsUI {
      * @param {boolean} isResponse - True if this is a user response
      */
     addMessageToDateAccordion( senderId, dateString, notification, isResponse ) {
-        const containerId = `date-messages-${senderId.replace( /[@.]/g, '-' )}-${dateString}`;
+        const containerId = `date-messages-${senderId.replace( /[@.#]/g, '-' )}-${dateString}`;
         const container = document.getElementById( containerId );
         if ( !container ) {
             this.error( `Date messages container not found: ${containerId}` );
@@ -4523,7 +4605,7 @@ class NotificationsUI {
         const dateGroup = group.dateGroups.get( dateString );
         if ( !dateGroup ) return;
 
-        const accordionId = `date-accordion-${senderId.replace( /[@.]/g, '-' )}-${dateString}`;
+        const accordionId = `date-accordion-${senderId.replace( /[@.#]/g, '-' )}-${dateString}`;
         const accordion = document.getElementById( accordionId );
         if ( !accordion ) return;
 
@@ -4564,7 +4646,7 @@ class NotificationsUI {
                     group.dateGroups.delete( dateString );
 
                     // Remove accordion from UI
-                    const accordionId = `date-accordion-${senderId.replace( /[@.]/g, '-' )}-${dateString}`;
+                    const accordionId = `date-accordion-${senderId.replace( /[@.#]/g, '-' )}-${dateString}`;
                     const accordion = document.getElementById( accordionId );
                     if ( accordion ) {
                         accordion.remove();
@@ -4592,7 +4674,7 @@ class NotificationsUI {
      * @param {string} senderId - Sender ID
      */
     removeSenderCard( senderId ) {
-        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         const card = document.getElementById( cardId );
         if ( card ) {
             card.remove();
@@ -4613,7 +4695,7 @@ class NotificationsUI {
 
         group.collapsed = !group.collapsed;
 
-        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         const card = document.getElementById( cardId );
         if ( card ) {
             const datesContainer = card.querySelector( '.sender-card-dates' );
@@ -4634,7 +4716,7 @@ class NotificationsUI {
      * @param {boolean} isResponse - True if user response (right-aligned)
      */
     addMessageToSenderCard( senderId, notification, isResponse = false ) {
-        const containerId = `sender-messages-${senderId.replace( /[@.]/g, '-' )}`;
+        const containerId = `sender-messages-${senderId.replace( /[@.#]/g, '-' )}`;
         const container = document.getElementById( containerId );
         if ( !container ) return;
 
@@ -4680,7 +4762,7 @@ class NotificationsUI {
         const group = this.senderGroups.get( senderId );
         if ( !group ) return;
 
-        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         const card = document.getElementById( cardId );
         if ( !card ) return;
 
@@ -5530,7 +5612,7 @@ class NotificationsUI {
         }
 
         // Remove sender card from UI
-        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         const card = document.getElementById( cardId );
         if ( card ) {
             card.remove();
@@ -7405,7 +7487,7 @@ class NotificationsUI {
         const senderId = state.notification?.sender_id || this.UNKNOWN_SENDER;
 
         // Ensure sender card exists for the conversation
-        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         let senderCard = document.getElementById( cardId );
         if ( !senderCard ) {
             this.createSenderCard( senderId );
@@ -7738,6 +7820,57 @@ class NotificationsUI {
         this.handleLocalTimeout( notificationId );
     }
 
+    /**
+     * Handle active_conversation_changed WebSocket event.
+     * Updates the active indicator on sender cards.
+     * (Conversation Identity Phase 3)
+     *
+     * @param {Object} data - { active_sender_id, timestamp }
+     */
+    handleActiveConversationChanged( data ) {
+        const activeSenderId = data.active_sender_id;
+        this.log( `Active conversation changed to: ${activeSenderId}` );
+
+        // Update all sender groups
+        for ( const [ senderId, group ] of this.senderGroups ) {
+            const wasActive = group.isActive;
+            group.isActive = ( senderId === activeSenderId );
+
+            // Update UI if state changed
+            if ( wasActive !== group.isActive ) {
+                this.updateSenderActiveIndicator( senderId, group.isActive );
+            }
+        }
+    }
+
+    /**
+     * Update the active indicator on a sender card.
+     * (Conversation Identity Phase 3)
+     *
+     * @param {string} senderId - Sender ID
+     * @param {boolean} isActive - Whether this sender is now active
+     */
+    updateSenderActiveIndicator( senderId, isActive ) {
+        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
+        const card = document.getElementById( cardId );
+        if ( !card ) return;
+
+        const indicator = card.querySelector( '.sender-active-indicator' );
+        if ( indicator ) {
+            indicator.textContent = isActive ? '●' : '○';
+            indicator.title = isActive ? 'Active session' : 'Inactive session';
+        }
+
+        // Add/remove CSS class for styling
+        if ( isActive ) {
+            card.classList.add( 'sender-card-active' );
+        } else {
+            card.classList.remove( 'sender-card-active' );
+        }
+
+        this.log( `Updated active indicator for ${senderId}: ${isActive ? 'active' : 'inactive'}` );
+    }
+
     stopCountdownTimer( notificationId ) {
         const intervalHandle = this.countdownTimers.get( notificationId );
         if ( intervalHandle ) {
@@ -7789,7 +7922,7 @@ class NotificationsUI {
         }
 
         // Find or create the sender card
-        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         let senderCard = document.getElementById( cardId );
 
         // If sender card doesn't exist, create it
@@ -7855,7 +7988,7 @@ class NotificationsUI {
         const group = this.senderGroups.get( senderId );
 
         // Ensure sender card exists
-        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         if ( !document.getElementById( cardId ) ) {
             this.createSenderCard( senderId );
         }
@@ -7866,7 +7999,7 @@ class NotificationsUI {
         }
 
         // Ensure date accordion exists in DOM
-        const accordionId = `date-accordion-${senderId.replace( /[@.]/g, '-' )}-${dateString}`;
+        const accordionId = `date-accordion-${senderId.replace( /[@.#]/g, '-' )}-${dateString}`;
         if ( !document.getElementById( accordionId ) ) {
             this.createDateAccordion( senderId, dateString );
         }
@@ -8140,7 +8273,7 @@ class NotificationsUI {
         this.addMessageToDateAccordion( senderId, dateString, outgoingNotification, true );
 
         // Mark new messages with animation class
-        const containerId = `date-messages-${senderId.replace( /[@.]/g, '-' )}-${dateString}`;
+        const containerId = `date-messages-${senderId.replace( /[@.#]/g, '-' )}-${dateString}`;
         const container = document.getElementById( containerId );
         if ( container ) {
             const messages = container.querySelectorAll( '.sender-message' );
@@ -8175,7 +8308,7 @@ class NotificationsUI {
      */
     moveSenderCardToTop( senderId ) {
         const container = document.getElementById( 'notifications-list' );
-        const cardId = `sender-card-${senderId.replace( /[@.]/g, '-' )}`;
+        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         const card = document.getElementById( cardId );
 
         if ( container && card && container.firstChild !== card ) {
