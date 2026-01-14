@@ -1,13 +1,13 @@
 # Lupin Project History
 
 > **📋 TODO FOR NEXT SESSION (Session 58)**:
-> 1. **Gist Button UX**: Disable ✨ button and show "working" indicator while generating gist in background; re-enable when 4-5 word summary returns
-> 2. **Gist Debug Output**: Add console logging/insight into how Gister creates summaries for debugging
-> 3. **Recording Button Styling**: Fix voice-first session name edit modal - mic button is currently round; should match canonical notification UI recording button styling and use standard `recordingManager` patterns
-> 4. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 4 = AgentBase History Integration (ConversationContext class), Phase 5 = Conversation Lifecycle management. See architecture doc: `src/rnd/2026.01.12-cosa-unified-agent-architecture.md`
-> 5. Voice discovery/configuration for notification TTS UI still pending
-> 6. Deep Research Agent implementation location defined: `src/cosa/agents/deep_research/`
-> 7. **Job Queue Progressive Disclosure UI (FUTURE)**: See design doc: `src/rnd/2026.01.13-job-queue-progressive-disclosure-design.md`
+> 1. **⏰ Job Queue Progressive Disclosure UI - MANUAL TESTING**: Implementation complete (Session 57), awaiting browser testing. Test: expand queue categories, job cards, interaction history. See plan: `/home/rruiz/.claude/plans/cheeky-leaping-scone.md`
+> 2. **Gist Button UX**: Disable ✨ button and show "working" indicator while generating gist in background; re-enable when 4-5 word summary returns
+> 3. **Gist Debug Output**: Add console logging/insight into how Gister creates summaries for debugging
+> 4. **Recording Button Styling**: Fix voice-first session name edit modal - mic button is currently round; should match canonical notification UI recording button styling and use standard `recordingManager` patterns
+> 5. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 4 = AgentBase History Integration (ConversationContext class), Phase 5 = Conversation Lifecycle management. See architecture doc: `src/rnd/2026.01.12-cosa-unified-agent-architecture.md`
+> 6. Voice discovery/configuration for notification TTS UI still pending
+> 7. Deep Research Agent implementation location defined: `src/cosa/agents/deep_research/`
 >
 > **✅ SESSION 57 COMPLETE**: Semantic Session Names feature implemented with bug fixes. See details below.
 >
