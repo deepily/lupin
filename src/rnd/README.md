@@ -4,6 +4,12 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.01.14 - Semantic Session Names Design
+- **Design Document**: [2026.01.14-semantic-session-names-design.md](2026.01.14-semantic-session-names-design.md) - **📋 READY TO IMPLEMENT** - Comprehensive design for enhancing notification UI session identification. Features: smarter auto-naming algorithm (action verbs + key nouns extraction instead of first 4 words), localStorage persistence for session names, inline edit capability (click to rename), and "Generate Gist" button calling backend Gister for LLM-powered summarization. Solves the problem of generic session names like "Hello, I need help" by extracting meaningful terms like "Fix Authentication Bug". Includes design space exploration, algorithm implementation, and verification steps.
+
+### 2026.01.14 - Deep Research Agent Implementation Status
+- **Design Document**: [cosa-deep-research-agents.md](cosa-deep-research-agents.md) - **🔄 PHASE 1 COMPLETE, PHASE 2 IN PROGRESS** - Voice-driven deep research agent integrating COSA, async orchestration, and Claude API for multi-agent research. Phase 1 complete: ResearchOrchestratorAgent skeleton, OrchestratorState enum (13 states), Pydantic models (SubQuery, ResearchPlan, SubagentFinding), cosa_interface.py async wrappers, all smoke tests passing. Phase 2 (Direct Anthropic API): Architecture chosen after analysis showed Claude Code CLI lacks web search/model selection. Will implement api_client.py with web search tool, cost_tracker.py for exact per-request cost tracking, and prompt templates. Located at `src/cosa/agents/deep_research/`.
+
 ### 2026.01.13 - Conversation Identity Architecture Implementation
 - **Implementation Spec**: [2026.01.13-conversation-identity-phases-1-3.md](2026.01.13-conversation-identity-phases-1-3.md) - **✅ IMPLEMENTED** - Full specification and implementation of Phases 1-3 of Conversation Identity Architecture. Enables parallel Claude Code sessions to be distinguished in notification UI. Phase 1: Session Identity (SESSION_ID generation at MCP startup, new sender_id format `claude.code@{project}.deepily.ai#{session_id}`). Phase 2: Active Conversation Routing (get_active_conversation() repository method, API endpoints, WebSocket broadcast). Phase 3: Notification UI Updates (parseSenderId() JS helper, sender card session display, active indicators ●/○). All code implemented and tested, ready for live UI verification.
 

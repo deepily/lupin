@@ -132,12 +132,29 @@ class NotificationsUI {
         this.QUEUE_FILTER_PREF_KEY = 'notifications_filter_preference';  // Filter mode storage
         this.ACTION_REQUIRED_KEY = 'notifications_action_required';  // Persist action-required notifications
         this.TTS_QUEUE_KEY = 'notifications_tts_queue';  // Persist TTS queue across refresh
+        this.SESSION_NAMES_KEY = 'notifications_session_names';  // Persist user-edited session names
         this.CURRENT_VERSION = '2.0.0'; // Increment to invalidate old cache - date grouping release
+
+        // Session names cache (loaded from localStorage)
+        this.sessionNames = JSON.parse( localStorage.getItem( this.SESSION_NAMES_KEY ) ) || {};
 
         // User role and filter state
         this.userRoles = [];  // NEW: User's roles from JWT
         this.isAdmin = false;  // NEW: Quick admin check
         this.queueFilterMode = 'own';  // NEW: 'own' or 'all' (admin only)
+
+        // ========================================
+        // PROGRESSIVE DISCLOSURE QUEUE UI STATE
+        // ========================================
+        // State management for expandable queue categories and job cards
+        this.queueCategoryState = {
+            todo : { expanded: false, loaded: false, jobs: [] },
+            run  : { expanded: false, loaded: false, jobs: [] },
+            done : { expanded: false, loaded: false, jobs: [] },
+            dead : { expanded: false, loaded: false, jobs: [] }
+        };
+        this.expandedJobCards = new Set();         // Track which job cards are expanded
+        this.jobInteractionsCache = new Map();     // Cache loaded interactions: job_id → interactions[]
 
         // Phase 2.2 SSE - Action Required notifications state
         this.actionRequiredNotifications = new Map();  // notification_id → notification data + UI state
@@ -191,7 +208,7 @@ class NotificationsUI {
 
         // History window configuration (activity-anchored loading)
         this.HISTORY_WINDOW_KEY = 'notifications_history_window';
-        this.historyWindowHours = parseInt( localStorage.getItem( this.HISTORY_WINDOW_KEY ) ) || 168; // Default to 7 days for date grouping
+        this.historyWindowHours = parseInt( localStorage.getItem( this.HISTORY_WINDOW_KEY ) ) || 48; // Default to 2 days
         this.WINDOW_OPTIONS = [
             { label: 'Last 24 hours', hours: 24 },
             { label: 'Last 2 days',   hours: 48 },
@@ -3386,6 +3403,9 @@ class NotificationsUI {
     startTTSPlayingIndicator( notificationId ) {
         if ( !notificationId ) return;
 
+        // Auto-expand accordions so user can see the pulsing border
+        this.expandAccordionsForNotification( notificationId );
+
         // Find the notification list item by ID
         const notificationElement = document.getElementById( notificationId );
         if ( notificationElement ) {
@@ -3625,25 +3645,29 @@ class NotificationsUI {
             this.log( `Data received for ${queueName}:`, data );
             
             // Update the appropriate list based on queue name
+            // Also update the new progressive disclosure count badges
             if ( queueName === "todo" ) {
-                document.getElementById( "todo-list" ).innerHTML = data.todo_jobs.join( "" );
-                document.getElementById( "todo-count" ).textContent = data.todo_jobs.length;
+                // Update count badge for progressive disclosure UI
+                const countBadge = document.getElementById( "todo-count-badge" );
+                if ( countBadge ) countBadge.textContent = data.todo_jobs.length;
+                // Also refresh job cards if category is expanded
+                this.updateQueueCategoryIfExpanded( "todo", data.todo_jobs.length );
             } else if ( queueName === "run" ) {
-                document.getElementById( "run-list" ).innerHTML = data.run_jobs.join( "" );
-                document.getElementById( "run-count" ).textContent = data.run_jobs.length;
+                const countBadge = document.getElementById( "run-count-badge" );
+                if ( countBadge ) countBadge.textContent = data.run_jobs.length;
+                this.updateQueueCategoryIfExpanded( "run", data.run_jobs.length );
             } else if ( queueName === "done" ) {
                 // Enhanced done queue handling with structured job metadata for replay functionality
                 await this.handleDoneQueueUpdate( data );
-                
-                // Keep original HTML rendering for backward compatibility
-                document.getElementById( "done-list" ).innerHTML = this.enhancedDoneListHtml;
-                document.getElementById( "done-count" ).textContent = data.done_jobs.length;
-                
-                // Add event listeners for the new icons
-                this.addDoneListEventListeners();
+                const countBadge = document.getElementById( "done-count-badge" );
+                if ( countBadge ) countBadge.textContent = data.done_jobs.length;
+                // Store metadata for progressive disclosure job cards
+                this.queueCategoryState.done.jobs = data.done_jobs_metadata || [];
+                this.updateQueueCategoryIfExpanded( "done", data.done_jobs.length );
             } else if ( queueName === "dead" ) {
-                document.getElementById( "dead-list" ).innerHTML = data.dead_jobs.join( "" );
-                document.getElementById( "dead-count" ).textContent = data.dead_jobs.length;
+                const countBadge = document.getElementById( "dead-count-badge" );
+                if ( countBadge ) countBadge.textContent = data.dead_jobs.length;
+                this.updateQueueCategoryIfExpanded( "dead", data.dead_jobs.length );
             } else {
                 this.error( "Unknown queue name:", queueName );
             }
@@ -3757,6 +3781,378 @@ class NotificationsUI {
         } catch ( error ) {
             this.error( 'Error refreshing queues:', error );
         }
+    }
+
+    // ========================================
+    // PROGRESSIVE DISCLOSURE QUEUE UI METHODS
+    // ========================================
+
+    toggleQueueCategory( queueName ) {
+        /**
+         * Toggle expand/collapse for a queue category.
+         *
+         * Requires:
+         *     - queueName is 'todo', 'run', 'done', or 'dead'
+         *
+         * Ensures:
+         *     - Category container visibility toggles
+         *     - First expansion triggers lazy load of job cards
+         *     - Expand button icon updates (▶ / ▼)
+         */
+        const state = this.queueCategoryState[ queueName ];
+        const container = document.getElementById( `${queueName}-jobs-container` );
+        const expandBtn = document.getElementById( `${queueName}-expand` );
+
+        if ( !container || !expandBtn ) {
+            this.error( `Queue category elements not found for: ${queueName}` );
+            return;
+        }
+
+        state.expanded = !state.expanded;
+
+        if ( state.expanded ) {
+            container.classList.remove( 'collapsed' );
+            expandBtn.textContent = '▼';
+
+            // Lazy load job cards on first expansion
+            if ( !state.loaded ) {
+                this.loadQueueJobCards( queueName );
+            }
+        } else {
+            container.classList.add( 'collapsed' );
+            expandBtn.textContent = '▶';
+        }
+
+        this.log( `Queue category ${queueName} ${state.expanded ? 'expanded' : 'collapsed'}` );
+    }
+
+    updateQueueCategoryIfExpanded( queueName, count ) {
+        /**
+         * Refresh job cards if queue category is currently expanded.
+         *
+         * Called from updateQueueLists() when WebSocket update arrives.
+         */
+        const state = this.queueCategoryState[ queueName ];
+
+        // Update count in state
+        // If expanded, reload job cards to reflect changes
+        if ( state.expanded ) {
+            state.loaded = false;  // Force reload
+            this.loadQueueJobCards( queueName );
+        }
+    }
+
+    async loadQueueJobCards( queueName ) {
+        /**
+         * Fetch and render job cards for a queue category.
+         *
+         * Requires:
+         *     - queueName is valid queue identifier
+         *     - Authentication is established
+         *
+         * Ensures:
+         *     - Fetches queue data with metadata
+         *     - Renders job cards with progressive disclosure
+         *     - Updates count badge
+         */
+        this.log( `Loading job cards for: ${queueName}` );
+        const container = document.getElementById( `${queueName}-jobs-container` );
+        const countBadge = document.getElementById( `${queueName}-count-badge` );
+
+        if ( !container ) {
+            this.error( `Jobs container not found for: ${queueName}` );
+            return;
+        }
+
+        try {
+            let url = `/api/get-queue/${queueName}`;
+            if ( this.isAdmin && this.queueFilterMode === 'all' ) {
+                url += '?user_filter=*';
+            }
+
+            const response = await fetch( url, {
+                headers: { 'Authorization': this.getAuthHeader() }
+            } );
+
+            if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
+
+            const data = await response.json();
+
+            // Get jobs array based on queue name
+            const jobsKey = `${queueName}_jobs`;
+            const metadataKey = `${queueName}_jobs_metadata`;
+            const jobsHtml = data[ jobsKey ] || [];
+            const jobsMetadata = data[ metadataKey ] || [];
+
+            // Store in state
+            this.queueCategoryState[ queueName ].jobs = jobsMetadata.length > 0 ? jobsMetadata : jobsHtml;
+            this.queueCategoryState[ queueName ].loaded = true;
+
+            // Update count badge
+            if ( countBadge ) countBadge.textContent = jobsHtml.length;
+
+            // Render job cards
+            if ( jobsHtml.length === 0 ) {
+                container.innerHTML = '<div class="queue-empty-message">No jobs in this queue</div>';
+            } else {
+                // Use metadata if available (done queue), otherwise create minimal metadata from HTML
+                const jobsToRender = jobsMetadata.length > 0 ? jobsMetadata : jobsHtml.map( ( html, idx ) => ( {
+                    job_id          : `job-${queueName}-${idx}`,
+                    question_text   : this.extractQuestionFromHtml( html ),
+                    timestamp       : '',
+                    agent_type      : '',
+                    has_interactions: false
+                } ) );
+
+                container.innerHTML = jobsToRender.map( job => this.renderJobCard( job, queueName ) ).join( '' );
+            }
+
+        } catch ( error ) {
+            this.error( `Error loading ${queueName} job cards:`, error );
+            container.innerHTML = '<div class="queue-error-message">Error loading jobs</div>';
+        }
+    }
+
+    extractQuestionFromHtml( html ) {
+        /**
+         * Extract question text from job HTML string.
+         * HTML format: "<li id='hash'>...Q: question text...</li>"
+         */
+        const match = html.match( /Q:\s*([^<]+)/ );
+        return match ? match[ 1 ].trim() : 'Unknown question';
+    }
+
+    renderJobCard( job, queueName ) {
+        /**
+         * Generate HTML for a single job card.
+         *
+         * Requires:
+         *     - job object with job_id, question_text, timestamp, agent_type
+         *     - queueName for styling context
+         *
+         * Ensures:
+         *     - Returns HTML string for collapsible job card
+         *     - Includes agent badge, truncated question, timestamp
+         *     - Done queue cards include interaction toggle
+         */
+        const statusClass = `status-${queueName}`;
+        const truncatedQuestion = this.truncateText( job.question_text || 'No question', 60 );
+        const agentBadge = job.agent_type ? `<span class="agent-badge">${( job.agent_type || '' ).replace( 'Agent', '' )}</span>` : '';
+        const timestamp = this.formatJobTimestamp( job.timestamp );
+
+        // Interaction indicator for done queue
+        let interactionIndicator = '';
+        if ( queueName === 'done' && job.has_interactions ) {
+            interactionIndicator = '<span class="interaction-indicator" title="Has interaction history">💬</span>';
+        }
+
+        const jobId = job.job_id || `job-${Date.now()}`;
+
+        return `
+            <div class="job-card ${statusClass}" id="job-card-${jobId}" data-job-id="${jobId}">
+                <div class="job-card-header" onclick="window.notificationsUI.toggleJobCard('${jobId}', '${queueName}')">
+                    ${agentBadge}
+                    <span class="job-question">${this.escapeHtml( truncatedQuestion )}</span>
+                    ${interactionIndicator}
+                    <span class="job-timestamp">${timestamp}</span>
+                    <button class="job-expand-btn">▶</button>
+                </div>
+                <div class="job-card-details collapsed" id="job-details-${jobId}">
+                    <div class="job-full-question">
+                        <strong>Question:</strong> ${this.escapeHtml( job.question_text || '' )}
+                    </div>
+                    <div class="job-response">
+                        <strong>Response:</strong> ${this.escapeHtml( job.response_text || 'Processing...' )}
+                    </div>
+                    <div class="job-metadata">
+                        <span>Agent: ${job.agent_type || 'Unknown'}</span>
+                        <span>Time: ${timestamp}</span>
+                    </div>
+                    ${queueName === 'done' ? `
+                    <div class="job-interactions-section" id="job-interactions-${jobId}">
+                        <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${jobId}', event)">
+                            <span>📋 Notification Conversation</span>
+                            <button class="interactions-expand-btn">▶</button>
+                        </div>
+                        <div class="interactions-content collapsed" id="interactions-content-${jobId}">
+                            <div class="interactions-loading">Loading...</div>
+                        </div>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    toggleJobCard( jobId, queueName ) {
+        /**
+         * Toggle expand/collapse for individual job card.
+         */
+        const details = document.getElementById( `job-details-${jobId}` );
+        const card = document.getElementById( `job-card-${jobId}` );
+
+        if ( !details || !card ) {
+            this.error( `Job card elements not found: ${jobId}` );
+            return;
+        }
+
+        const expandBtn = card.querySelector( '.job-expand-btn' );
+
+        if ( this.expandedJobCards.has( jobId ) ) {
+            details.classList.add( 'collapsed' );
+            if ( expandBtn ) expandBtn.textContent = '▶';
+            this.expandedJobCards.delete( jobId );
+        } else {
+            details.classList.remove( 'collapsed' );
+            if ( expandBtn ) expandBtn.textContent = '▼';
+            this.expandedJobCards.add( jobId );
+        }
+    }
+
+    async toggleJobInteractions( jobId, event ) {
+        /**
+         * Toggle and lazy-load interaction history for a job.
+         *
+         * THE KEY FEATURE: Shows notification conversation history
+         * associated with a completed job.
+         */
+        event.stopPropagation();  // Don't toggle parent card
+
+        const contentEl = document.getElementById( `interactions-content-${jobId}` );
+        if ( !contentEl ) {
+            this.error( `Interactions content not found: ${jobId}` );
+            return;
+        }
+
+        const headerEl = contentEl.previousElementSibling;
+        const expandBtn = headerEl ? headerEl.querySelector( '.interactions-expand-btn' ) : null;
+
+        const isExpanded = !contentEl.classList.contains( 'collapsed' );
+
+        if ( isExpanded ) {
+            contentEl.classList.add( 'collapsed' );
+            if ( expandBtn ) expandBtn.textContent = '▶';
+        } else {
+            contentEl.classList.remove( 'collapsed' );
+            if ( expandBtn ) expandBtn.textContent = '▼';
+
+            // Lazy load interactions if not cached
+            if ( !this.jobInteractionsCache.has( jobId ) ) {
+                await this.loadJobInteractions( jobId );
+            }
+        }
+    }
+
+    async loadJobInteractions( jobId ) {
+        /**
+         * Fetch notification interactions for a job from API.
+         */
+        const contentEl = document.getElementById( `interactions-content-${jobId}` );
+        if ( !contentEl ) return;
+
+        try {
+            const response = await fetch( `/api/get-job-interactions/${jobId}`, {
+                headers: { 'Authorization': this.getAuthHeader() }
+            } );
+
+            if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
+
+            const data = await response.json();
+            this.jobInteractionsCache.set( jobId, data.interactions );
+
+            if ( data.interactions.length === 0 ) {
+                contentEl.innerHTML = '<div class="no-interactions">No interactions recorded for this job</div>';
+            } else {
+                contentEl.innerHTML = data.interactions.map( i => this.renderInteractionItem( i ) ).join( '' );
+            }
+
+        } catch ( error ) {
+            this.error( `Error loading interactions for job ${jobId}:`, error );
+            contentEl.innerHTML = '<div class="interactions-error">Error loading interactions</div>';
+        }
+    }
+
+    renderInteractionItem( interaction ) {
+        /**
+         * Render a single notification interaction.
+         */
+        const typeIcons = {
+            'task'    : '📋',
+            'progress': '⏳',
+            'alert'   : '⚠️',
+            'custom'  : '💬'
+        };
+        const typeIcon = typeIcons[ interaction.type ] || '📋';
+
+        let timestamp = '';
+        try {
+            timestamp = new Date( interaction.timestamp ).toLocaleTimeString();
+        } catch ( e ) {
+            timestamp = interaction.timestamp || '';
+        }
+
+        let responseHtml = '';
+        if ( interaction.response_requested && interaction.response_value ) {
+            const responseStr = typeof interaction.response_value === 'object'
+                ? JSON.stringify( interaction.response_value )
+                : String( interaction.response_value );
+            responseHtml = `
+                <div class="interaction-response">
+                    <span class="response-label">Your response:</span>
+                    <span class="response-value">${this.escapeHtml( responseStr )}</span>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="interaction-item priority-${interaction.priority || 'medium'}">
+                <div class="interaction-header">
+                    <span class="interaction-type">${typeIcon} ${interaction.type}</span>
+                    <span class="interaction-time">${timestamp}</span>
+                </div>
+                <div class="interaction-message">${this.escapeHtml( interaction.message || '' )}</div>
+                ${responseHtml}
+            </div>
+        `;
+    }
+
+    truncateText( text, maxLength ) {
+        /**
+         * Truncate text with ellipsis if it exceeds maxLength.
+         */
+        if ( !text ) return '';
+        if ( text.length <= maxLength ) return text;
+        return text.substring( 0, maxLength - 3 ) + '...';
+    }
+
+    formatJobTimestamp( timestamp ) {
+        /**
+         * Format job timestamp for display.
+         */
+        if ( !timestamp ) return '';
+        try {
+            // Handle "2026-01-14 @ 10:30:45 EST" format
+            const cleaned = timestamp.replace( ' @ ', 'T' ).replace( ' EST', '' ).replace( ' EDT', '' );
+            const date = new Date( cleaned );
+            return date.toLocaleString( 'en-US', {
+                month  : 'short',
+                day    : 'numeric',
+                hour   : 'numeric',
+                minute : '2-digit'
+            } );
+        } catch ( e ) {
+            return timestamp;
+        }
+    }
+
+    escapeHtml( text ) {
+        /**
+         * Escape HTML special characters to prevent XSS.
+         */
+        if ( !text ) return '';
+        const div = document.createElement( 'div' );
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     async handleDoneQueueUpdate( data ) {
@@ -4172,7 +4568,34 @@ class NotificationsUI {
     }
 
     /**
+     * Save a session name to localStorage.
+     * @param {string} sessionId - Session ID (hex string)
+     * @param {string} name - Session name to save
+     */
+    saveSessionName( sessionId, name ) {
+        this.sessionNames[ sessionId ] = name;
+        localStorage.setItem( this.SESSION_NAMES_KEY, JSON.stringify( this.sessionNames ) );
+        this.log( `Saved session name for ${sessionId}: ${name}` );
+    }
+
+    /**
+     * Get session name, checking localStorage first then falling back to auto-generation.
+     * @param {string} sessionId - Session ID (hex string)
+     * @param {string} firstMessage - First notification message (for auto-generation)
+     * @returns {string} - Session name
+     */
+    getSessionName( sessionId, firstMessage ) {
+        // Check for user-provided/generated name first
+        if ( this.sessionNames[ sessionId ] ) {
+            return this.sessionNames[ sessionId ];
+        }
+        // Fall back to auto-generation from first message
+        return this.generateSessionName( firstMessage );
+    }
+
+    /**
      * Generate a human-readable session name from first message content.
+     * Uses smarter algorithm to extract action verbs + key nouns instead of first 4 words.
      *
      * @param {string} firstMessage - First notification message from session
      * @returns {string} - Short session name (max 30 chars)
@@ -4183,12 +4606,264 @@ class NotificationsUI {
         // Remove common prefixes like "[LUPIN] "
         const cleaned = firstMessage.replace( /^\[[A-Z]+\]\s*/, '' );
 
-        // Take first 4 words
-        const words = cleaned.split( /\s+/ ).slice( 0, 4 );
-        const name = words.join( ' ' );
+        // Skip words: pronouns, articles, common verbs, filler words
+        const skipWords = new Set( [
+            // Pronouns
+            'i', 'you', 'we', 'they', 'it', 'me', 'my', 'your', 'our',
+            // Articles
+            'a', 'an', 'the',
+            // Common verbs (non-action)
+            'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+            'have', 'has', 'had', 'do', 'does', 'did', 'can', 'could',
+            'would', 'should', 'will', 'shall', 'may', 'might', 'must',
+            // Filler words
+            'please', 'just', 'really', 'very', 'actually', 'basically',
+            'need', 'want', 'like', 'know', 'think', 'help', 'trying',
+            'hello', 'hi', 'hey', 'sure', 'okay', 'ok', 'yes', 'no',
+            'going', 'gonna', 'wanna', 'let', 'lets', 'get', 'got',
+            'make', 'made', 'take', 'took', 'see', 'saw', 'look', 'looked',
+            'some', 'any', 'this', 'that', 'these', 'those', 'with', 'for',
+            'about', 'into', 'from', 'up', 'down', 'out', 'in', 'on', 'off',
+            'over', 'under', 'again', 'then', 'once', 'here', 'there', 'when',
+            'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few',
+            'more', 'most', 'other', 'such', 'only', 'own', 'same', 'so',
+            'than', 'too', 'also', 'now', 'well', 'way', 'even', 'new',
+            'first', 'last', 'long', 'little', 'great', 'good', 'right',
+            'still', 'after', 'before', 'being', 'while', 'through', 'during'
+        ] );
 
-        // Truncate to 30 chars
-        return name.length > 30 ? name.substring( 0, 27 ) + '...' : name;
+        // Action verbs to prioritize (keep these!)
+        const actionVerbs = new Set( [
+            'add', 'fix', 'update', 'create', 'delete', 'remove', 'change',
+            'implement', 'refactor', 'debug', 'test', 'deploy', 'configure',
+            'migrate', 'upgrade', 'install', 'build', 'run', 'check', 'verify',
+            'enable', 'disable', 'optimize', 'improve', 'review', 'merge',
+            'search', 'find', 'replace', 'rename', 'move', 'copy', 'edit',
+            'write', 'read', 'load', 'save', 'export', 'import', 'convert',
+            'parse', 'format', 'validate', 'authenticate', 'authorize',
+            'connect', 'disconnect', 'start', 'stop', 'restart', 'reset',
+            'send', 'receive', 'fetch', 'push', 'pull', 'sync', 'upload',
+            'download', 'backup', 'restore', 'clean', 'clear', 'flush'
+        ] );
+
+        const words = cleaned.toLowerCase().split( /\s+/ );
+        const meaningful = [];
+
+        for ( const word of words ) {
+            // Clean punctuation
+            const clean = word.replace( /[^a-z0-9]/g, '' );
+            if ( !clean ) continue;
+
+            // Always include action verbs
+            if ( actionVerbs.has( clean ) ) {
+                meaningful.push( clean );
+                continue;
+            }
+
+            // Skip filler words
+            if ( skipWords.has( clean ) ) continue;
+
+            // Include remaining words (likely nouns/subjects)
+            meaningful.push( clean );
+
+            // Stop at 4 meaningful words
+            if ( meaningful.length >= 4 ) break;
+        }
+
+        // Capitalize first letter of each word
+        const name = meaningful
+            .map( w => w.charAt( 0 ).toUpperCase() + w.slice( 1 ) )
+            .join( ' ' );
+
+        // Truncate to 30 chars if needed
+        const result = name || 'Session';
+        return result.length > 30 ? result.substring( 0, 27 ) + '...' : result;
+    }
+
+    /**
+     * Allow user to edit a session name inline via prompt dialog.
+     * @param {string} sessionId - Session ID (hex string)
+     */
+    editSessionName( sessionId ) {
+        const currentName = this.sessionNames[ sessionId ] || '';
+        // Create voice-first edit modal instead of browser prompt
+        this.showSessionNameEditModal( sessionId, currentName );
+    }
+
+    /**
+     * Show the voice-first session name edit modal.
+     * Modal auto-starts recording for audio-first UX.
+     * @param {string} sessionId - Session ID (hex string)
+     * @param {string} currentName - Current session name
+     */
+    showSessionNameEditModal( sessionId, currentName ) {
+        // Remove any existing modal
+        const existingModal = document.getElementById( 'session-name-edit-modal' );
+        if ( existingModal ) existingModal.remove();
+
+        // Create modal overlay
+        const modal = document.createElement( 'div' );
+        modal.id = 'session-name-edit-modal';
+        modal.className = 'session-name-edit-modal';
+        modal.innerHTML = `
+            <div class="session-name-edit-content">
+                <div class="session-name-edit-header">
+                    <span>Rename Session</span>
+                    <button class="session-name-edit-close" onclick="window.notificationsUI.closeSessionNameEditModal()">&times;</button>
+                </div>
+                <div class="session-name-edit-body">
+                    <div class="session-name-input-row">
+                        <button id="session-name-mic-btn" class="session-name-mic-btn" title="Voice input (click to record)">🎤</button>
+                        <input type="text" id="session-name-input" class="session-name-input"
+                               value="${this.escapeHtml( currentName )}"
+                               placeholder="Enter session name..."
+                               autocomplete="off" />
+                    </div>
+                    <div class="session-name-edit-hint">Click mic to speak, or type directly</div>
+                </div>
+                <div class="session-name-edit-footer">
+                    <button class="session-name-cancel-btn" onclick="window.notificationsUI.closeSessionNameEditModal()">Cancel</button>
+                    <button class="session-name-save-btn" onclick="window.notificationsUI.saveSessionNameFromModal('${sessionId}')">Save</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild( modal );
+
+        // Auto-focus input
+        const input = document.getElementById( 'session-name-input' );
+        input.focus();
+        input.select();
+
+        // Wire up mic button using existing recordingManager
+        const micBtn = document.getElementById( 'session-name-mic-btn' );
+        const self = this;
+        micBtn.addEventListener( 'click', async () => {
+            await self.recordingManager.startRecording(
+                `session-name-${sessionId}`,
+                micBtn,
+                input,
+                {
+                    onTranscriptionComplete: ( text ) => {
+                        self.log( `Session name voice input: "${text}"` );
+                    }
+                }
+            );
+        } );
+
+        // Handle Enter key to save, Escape to cancel
+        input.addEventListener( 'keydown', ( e ) => {
+            if ( e.key === 'Enter' ) {
+                self.saveSessionNameFromModal( sessionId );
+            } else if ( e.key === 'Escape' ) {
+                self.closeSessionNameEditModal();
+            }
+        } );
+
+        // Auto-start recording for voice-first UX
+        setTimeout( () => {
+            micBtn.click();
+        }, 100 );
+    }
+
+    /**
+     * Close the session name edit modal.
+     */
+    closeSessionNameEditModal() {
+        const modal = document.getElementById( 'session-name-edit-modal' );
+        if ( modal ) modal.remove();
+    }
+
+    /**
+     * Save session name from the edit modal.
+     * @param {string} sessionId - Session ID (hex string)
+     */
+    saveSessionNameFromModal( sessionId ) {
+        const input = document.getElementById( 'session-name-input' );
+        const newName = input?.value?.trim() || '';
+
+        if ( newName ) {
+            this.saveSessionName( sessionId, newName );
+            this.refreshSessionNameDisplay( sessionId, newName );
+            this.log( `Session ${sessionId} renamed to: ${newName}` );
+        }
+
+        this.closeSessionNameEditModal();
+    }
+
+    /**
+     * Refresh the session name display across all sender cards with this session ID.
+     * @param {string} sessionId - Session ID (hex string)
+     * @param {string} newName - New session name to display
+     */
+    refreshSessionNameDisplay( sessionId, newName ) {
+        // Find all sender cards with this session ID and update the name span
+        const cards = document.querySelectorAll( `[data-session-id="${sessionId}"]` );
+        cards.forEach( card => {
+            const nameSpan = card.querySelector( '.sender-session-name' );
+            if ( nameSpan ) nameSpan.textContent = newName;
+        } );
+    }
+
+    /**
+     * Generate a smart gist (3-4 word summary) for a session using backend LLM.
+     * Collects messages from the session and calls the gist API endpoint.
+     * @param {string} senderId - Full sender ID to generate gist for
+     */
+    async generateSessionGist( senderId ) {
+        const parsed = this.parseSenderId( senderId );
+        const sessionId = parsed.sessionId;
+        if ( !sessionId ) {
+            this.log( 'No session ID found for gist generation' );
+            return;
+        }
+
+        const group = this.senderGroups.get( senderId );
+        if ( !group?.dateGroups?.size ) {
+            this.log( 'No notifications to generate gist from' );
+            return;
+        }
+
+        // Flatten all notifications from all date groups
+        const allNotifications = Array.from( group.dateGroups.values() ).flat();
+        if ( !allNotifications.length ) {
+            this.log( 'No notifications to generate gist from' );
+            return;
+        }
+
+        // Collect all messages for this session
+        const messages = allNotifications.map( n => n.message ).filter( Boolean );
+        if ( messages.length === 0 ) {
+            this.log( 'No messages with content for gist generation' );
+            return;
+        }
+
+        this.log( `Generating gist for session ${sessionId} from ${messages.length} messages...` );
+
+        try {
+            // Call backend API to generate gist
+            const response = await fetch( '/api/notifications/generate-gist', {
+                method  : 'POST',
+                headers : { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
+                body    : JSON.stringify( { messages } )
+            } );
+
+            if ( !response.ok ) {
+                throw new Error( `API error: ${response.status}` );
+            }
+
+            const data = await response.json();
+            const gist = data.gist;
+
+            // Save and display the generated gist
+            this.saveSessionName( sessionId, gist );
+            this.refreshSessionNameDisplay( sessionId, gist );
+            this.log( `Generated gist for ${sessionId}: ${gist}` );
+
+        } catch ( error ) {
+            this.error( 'Failed to generate gist:', error );
+            // Could show a toast/notification to user
+        }
     }
 
     /**
@@ -4398,13 +5073,29 @@ class NotificationsUI {
         const statusIndicator = this.getSenderStatusIndicator( group?.lastActivity );
         const escapedSenderId = senderId.replace( /'/g, "\\'" );
 
-        // Generate session name from first message (if available)
-        const firstMsg = group?.notifications?.[ 0 ]?.message || '';
-        const sessionName = sessionId ? this.generateSessionName( firstMsg ) : null;
+        // Get session name: check localStorage first, then auto-generate from first message
+        // Extract first message from nested dateGroups structure
+        // dateGroups is a Map of { dateString → notificationArray }
+        let firstMsg = '';
+        if ( group?.dateGroups?.size > 0 ) {
+            // Get all notifications from all date groups and flatten
+            const allNotifications = Array.from( group.dateGroups.values() ).flat();
+            // Sort by timestamp to get chronologically first
+            allNotifications.sort( ( a, b ) => new Date( a.timestamp ) - new Date( b.timestamp ) );
+            firstMsg = allNotifications[ 0 ]?.message || '';
+        }
+        const sessionName = sessionId ? this.getSessionName( sessionId, firstMsg ) : null;
 
         // Build session display string (only if session_id present)
+        // Session name is clickable for inline editing, gist button triggers LLM summary
         const sessionDisplay = sessionId
-            ? `<span class="sender-session-id">#${sessionId}</span> <span class="sender-session-name">${sessionName || ''}</span>`
+            ? `<span class="sender-session-id">#${sessionId}</span>
+               <span class="sender-session-name"
+                     onclick="event.stopPropagation(); window.notificationsUI.editSessionName('${sessionId}')"
+                     title="Click to rename">${sessionName || ''}</span>
+               <button class="sender-gist-btn"
+                       onclick="event.stopPropagation(); window.notificationsUI.generateSessionGist('${escapedSenderId}')"
+                       title="Generate smart gist from conversation">✨</button>`
             : '';
 
         // Active indicator: filled circle for most recent sender, hollow for others
@@ -4519,6 +5210,27 @@ class NotificationsUI {
         } else {
             messages.classList.add( 'collapsed' );
             toggle.textContent = '▶';
+        }
+    }
+
+    /**
+     * Expand a date accordion if it's collapsed.
+     * @param {string} senderId - Sender ID
+     * @param {string} dateString - ISO date string
+     */
+    expandDateAccordion( senderId, dateString ) {
+        const accordionId = `date-accordion-${senderId.replace( /[@.#]/g, '-' )}-${dateString}`;
+        const accordion = document.getElementById( accordionId );
+        if ( !accordion ) return;
+
+        const messages = accordion.querySelector( '.date-accordion-messages' );
+        const toggle = accordion.querySelector( '.date-toggle' );
+
+        // Only expand if currently collapsed
+        if ( messages && messages.classList.contains( 'collapsed' ) ) {
+            messages.classList.remove( 'collapsed' );
+            if ( toggle ) toggle.textContent = '▼';
+            this.log( `Auto-expanded date accordion: ${dateString}` );
         }
     }
 
@@ -8018,6 +8730,58 @@ class NotificationsUI {
         // Toggle to expand
         this.toggleSenderCard( senderId );
         this.log( `Auto-expanded sender card for ${senderId}` );
+    }
+
+    /**
+     * Expand all accordions containing a notification to make it visible.
+     * Used when TTS playback starts so user can see the pulsing border.
+     * @param {string} notificationId - Notification element ID
+     */
+    expandAccordionsForNotification( notificationId ) {
+        const notificationElement = document.getElementById( notificationId );
+        if ( !notificationElement ) return;
+
+        // Find containing sender card via DOM traversal
+        const senderCard = notificationElement.closest( '.sender-card' );
+        if ( !senderCard ) return;
+
+        // Find containing date accordion
+        const dateAccordion = notificationElement.closest( '.date-accordion' );
+
+        // Extract senderId by matching against senderGroups
+        const cardId = senderCard.id; // "sender-card-{ESCAPED_SENDER_ID}"
+        let foundSenderId = null;
+
+        for ( const senderId of this.senderGroups.keys() ) {
+            const testCardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
+            if ( testCardId === cardId ) {
+                foundSenderId = senderId;
+                break;
+            }
+        }
+
+        if ( !foundSenderId ) {
+            this.log( `Could not find senderId for card: ${cardId}` );
+            return;
+        }
+
+        // Expand sender card if collapsed
+        this.expandSenderCard( foundSenderId );
+
+        // Extract dateString from accordion ID and expand date accordion
+        if ( dateAccordion ) {
+            // ID format: "date-accordion-{ESCAPED_SENDER_ID}-{DATE_STRING}"
+            const accordionId = dateAccordion.id;
+            const escapedSenderId = foundSenderId.replace( /[@.#]/g, '-' );
+            const prefix = `date-accordion-${escapedSenderId}-`;
+            if ( accordionId.startsWith( prefix ) ) {
+                const dateString = accordionId.substring( prefix.length );
+                this.expandDateAccordion( foundSenderId, dateString );
+            }
+        }
+
+        // Scroll notification into view
+        this.scrollIntoViewIfNeeded( notificationElement );
     }
 
     /**

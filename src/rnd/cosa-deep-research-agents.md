@@ -4011,6 +4011,156 @@ python -m cosa_deep_research.main
 
 ---
 
+## Implementation Status
+
+> **Last Updated**: January 2026 (Session 57)
+
+### Phase 1: Foundation ✅ COMPLETE
+
+Phase 1 established the skeleton implementation with all core data structures and async orchestration framework.
+
+**Files Created** (all in `src/cosa/agents/deep_research/`):
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `__init__.py` | 104 | Package exports (17 public symbols) |
+| `config.py` | 95 | ResearchConfig dataclass |
+| `state.py` | 250 | Pydantic models + OrchestratorState enum (13 states) |
+| `cosa_interface.py` | 280 | Async wrappers for cosa-voice MCP |
+| `orchestrator.py` | 560 | ResearchOrchestratorAgent skeleton |
+| `prompts/__init__.py` | 27 | Stub with Phase 2 roadmap |
+| `nodes/__init__.py` | 42 | Stub with Phase 2 roadmap |
+| `tools/__init__.py` | 18 | Stub with Phase 2 roadmap |
+
+**Key Classes**:
+- `ResearchOrchestratorAgent` - Top-level async orchestrator (standalone, not inheriting from AgentBase)
+- `OrchestratorState` - 13-state enum (CLARIFYING, PLANNING, RESEARCHING, etc.)
+- `ResearchPlan`, `SubQuery`, `SubagentFinding` - Pydantic models for structured outputs
+
+**Smoke Tests**: All 4 modules pass (`config.py`, `state.py`, `cosa_interface.py`, `orchestrator.py`)
+
+---
+
+### Phase 2: Direct Anthropic API (In Progress)
+
+**Architecture Decision**: After deep analysis, Claude Code CLI was determined NOT suitable for the research execution layer due to:
+- ❌ No web search capability
+- ❌ No model selection (can't use Opus for lead, Sonnet for subagents)
+- ❌ No extended thinking access
+- ❌ No WebFetch for live source retrieval
+
+**Chosen Architecture**: Direct Anthropic API via `anthropic` SDK
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              Deep Research Agent (Production)                │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌──────────────────┐     ┌──────────────────┐              │
+│  │  Orchestrator    │────▶│  Anthropic API    │              │
+│  │  (async Python)  │     │  (Direct SDK)     │              │
+│  └──────────────────┘     └──────────────────┘              │
+│          │                        │                          │
+│          │                        ▼                          │
+│          │               ┌──────────────────┐               │
+│          │               │  Claude Models    │               │
+│          │               │  Opus + Sonnet    │               │
+│          │               └──────────────────┘               │
+│          │                        │                          │
+│          ▼                        ▼                          │
+│  ┌──────────────────┐     ┌──────────────────┐              │
+│  │  cosa-voice MCP  │     │  Web Search Tool  │              │
+│  │  (notifications) │     │  (web_search_*)   │              │
+│  └──────────────────┘     └──────────────────┘              │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Features Enabled**:
+
+| Feature | Implementation |
+|---------|----------------|
+| Web search | `web_search_20250305` tool via API |
+| Model selection | `model="claude-opus-4-5"` / `"claude-sonnet-4-5"` |
+| Extended thinking | `thinking` parameter in API |
+| Structured output | JSON mode with schema validation |
+| Parallel subagents | `asyncio.gather()` with API calls |
+| **Exact cost tracking** | `response.usage` per request |
+
+**API Cost Tracking**:
+
+The Anthropic API returns exact per-request usage data:
+
+```python
+response = await client.messages.create(...)
+usage = response.usage
+# {
+#     "input_tokens": 1523,
+#     "output_tokens": 847,
+#     "cache_creation_input_tokens": 0,
+#     "cache_read_input_tokens": 0
+# }
+```
+
+Current pricing (per 1M tokens):
+
+| Model | Input | Output |
+|-------|-------|--------|
+| Opus 4.5 | $5.00 | $25.00 |
+| Sonnet 4.5 | $3.00 | $15.00 |
+| Haiku 4.5 | $1.00 | $5.00 |
+
+**Phase 2 Files to Create**:
+
+| File | Est. Lines | Purpose |
+|------|------------|---------|
+| `api_client.py` | ~200 | Direct Anthropic API wrapper |
+| `cost_tracker.py` | ~100 | Usage and cost aggregation |
+| `prompts/clarification.py` | ~100 | Query clarification prompt |
+| `prompts/planning.py` | ~100 | Research planning prompt |
+| `prompts/subagent.py` | ~100 | Subquery execution prompt |
+| `prompts/synthesis.py` | ~100 | Report synthesis prompt |
+| `cli.py` | ~150 | Command-line interface |
+
+**Setup Requirements**:
+
+1. API Key: Create at console.anthropic.com
+2. Storage: Save to `src/conf/keys/anthropic-api-key-firewalled`
+3. Credits: Add $10-20 for testing
+
+**API Key Configuration (Firewalled Pattern)**:
+
+IMPORTANT: NEVER use `ANTHROPIC_API_KEY` - that is reserved for Claude Code CLI.
+
+For development (local key file):
+```bash
+# Create/use: src/conf/keys/anthropic-api-key-firewalled
+# The API client will automatically find and use this file
+```
+
+For testing/production (environment variable):
+```bash
+export ANTHROPIC_API_KEY_FIREWALLED=your-api-key
+python -m cosa.agents.deep_research.cli --query "..."
+```
+
+---
+
+### Billing Architecture Note
+
+**Claude Max vs API are completely separate billing systems**:
+
+| Aspect | Claude Max Subscription | Anthropic API |
+|--------|------------------------|---------------|
+| Billing | $100-200/month flat | Pay-per-token |
+| Account | claude.ai account | console.anthropic.com |
+| Usage | Web, Desktop, Claude Code | Direct API calls |
+| Authentication | OAuth via `claude login` | `ANTHROPIC_API_KEY_FIREWALLED` (Deep Research Agent) |
+
+**CRITICAL GOTCHA**: If `ANTHROPIC_API_KEY` environment variable is set, Claude Code will use API credits INSTEAD of Max subscription quota. This is why Deep Research Agent uses `ANTHROPIC_API_KEY_FIREWALLED` instead - to prevent any billing confusion.
+
+---
+
 ## Appendix: Key Sources
 
 ### Anthropic Cookbook
