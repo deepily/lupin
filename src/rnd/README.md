@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.01.13 - Conversation Identity Architecture Implementation
+- **Implementation Spec**: [2026.01.13-conversation-identity-phases-1-3.md](2026.01.13-conversation-identity-phases-1-3.md) - **✅ IMPLEMENTED** - Full specification and implementation of Phases 1-3 of Conversation Identity Architecture. Enables parallel Claude Code sessions to be distinguished in notification UI. Phase 1: Session Identity (SESSION_ID generation at MCP startup, new sender_id format `claude.code@{project}.deepily.ai#{session_id}`). Phase 2: Active Conversation Routing (get_active_conversation() repository method, API endpoints, WebSocket broadcast). Phase 3: Notification UI Updates (parseSenderId() JS helper, sender card session display, active indicators ●/○). All code implemented and tested, ready for live UI verification.
+
 ### 2026.01.12 - COSA Unified Agent Architecture
 - **Architecture Design**: [2026.01.12-cosa-unified-agent-architecture.md](2026.01.12-cosa-unified-agent-architecture.md) - **🔄 IN PROGRESS** - Comprehensive architecture document covering three areas: (1) **Agent Architecture Analysis** - Comparative analysis of COSA agents vs Claude Code Dispatchers with 5 commonalities, 5 differences, and "Parallel with Shared Contracts" recommendation; (2) **Integration Patterns** - Code generation failure escalation to Claude Code, queue integration options; (3) **Conversation Identity Architecture** - Process-centric model for multi-session tracking, active conversation routing, notification UI nested accordion design, AgentBase conversation history integration. Enables distinguishing parallel Claude Code sessions in same project.
 

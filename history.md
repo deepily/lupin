@@ -1,6 +1,12 @@
 # Lupin Project History
 
-> **📋 TODO FOR NEXT SESSION**: Test Conversation Identity in live UI - verify session_id appears in notification sender cards, active conversation indicator (●/○) updates via WebSocket. Voice discovery/configuration for notification TTS UI still pending. Deep Research Agent implementation location defined: `src/cosa/agents/deep_research/`.
+> **📋 TODO FOR NEXT SESSION**:
+> 1. **Live UI Testing for Conversation Identity Phases 1-3**: Restart MCP server (to generate new SESSION_ID), send notifications, verify: (a) sender cards display `LUPIN #a1b2c3d4` format, (b) active indicator (●/○) updates via WebSocket when new notifications arrive, (c) session name auto-generates from first message content
+> 2. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 4 = AgentBase History Integration (ConversationContext class), Phase 5 = Conversation Lifecycle management. See architecture doc: `src/rnd/2026.01.12-cosa-unified-agent-architecture.md`
+> 3. Voice discovery/configuration for notification TTS UI still pending
+> 4. Deep Research Agent implementation location defined: `src/cosa/agents/deep_research/`
+>
+> **⚠️ SESSION 56 STATUS**: Code complete for Phases 1-3, all syntax/unit tests passing. Awaiting manual live UI verification before committing.
 >
 > **✅ COMPLETED**: Conversation Identity Architecture Phases 1-3 (Session 56) - parallel Claude Code sessions now distinguishable in notification UI. New sender_id format: `claude.code@{project}.deepily.ai#{session_id}`.
 >
