@@ -1,0 +1,24 @@
+### Instruction:
+
+Generate a 3-5 word session title from the messages below.
+
+### Task:
+
+Create a commit-style title that:
+- Is exactly 3-5 words
+- Starts with action verb (Fix, Add, Update, Implement, Debug, Refactor, Test)
+- Does NOT end with articles (the, a, an) or prepositions (of, for, to)
+- Reads like a commit message subject
+
+Good: "Fix Authentication Token Bug", "Add Dark Mode Toggle"
+Bad: "Review and test the", "Working on fixing bugs"
+
+### Input:
+
+Respond in this exact XML format:
+{{PYDANTIC_XML_EXAMPLE}}
+
+Messages: `{utterance}`
+
+### Response:
+

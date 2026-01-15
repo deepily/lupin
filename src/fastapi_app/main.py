@@ -52,6 +52,10 @@ from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code, mode
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 
+# Suppress noisy LanceDB warnings
+import logging
+logging.getLogger( "lance" ).setLevel( logging.ERROR )
+
 # Global variables
 config_mgr = None
 app_debug = False

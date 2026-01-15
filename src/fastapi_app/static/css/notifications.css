@@ -8,6 +8,60 @@
             background-color: #f8f9fa;
         }
 
+        /* ========================================
+           FLOATING SECTION VISIBILITY TOOLBAR
+           ======================================== */
+        .section-toolbar {
+            position: fixed;
+            /* Position just left of container (800px max-width, centered) */
+            /* Container center = 50%, half container = 400px, plus toolbar width + gap */
+            left: calc( 50% - 400px - 60px );
+            top: 80px;  /* Below header, aligned with container top */
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            background: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 8px 4px;
+            box-shadow: 0 2px 8px rgba( 0, 0, 0, 0.15 );
+            z-index: 1000;
+        }
+
+        .toolbar-btn {
+            width: 36px;
+            height: 36px;
+            border: none;
+            border-radius: 6px;
+            background: #f8f9fa;
+            cursor: pointer;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            opacity: 0.4;
+        }
+
+        .toolbar-btn.active {
+            opacity: 1;
+            background: #e7f1ff;
+        }
+
+        .toolbar-btn:hover {
+            background: #dee2e6;
+            transform: scale( 1.1 );
+        }
+
+        .toolbar-btn:hover:not(.active) {
+            opacity: 0.7;
+        }
+
+        /* Hidden section styling */
+        .collapsible-section.section-hidden {
+            display: none !important;
+        }
+
         .container {
             max-width: 800px;
             margin: 0 auto;
@@ -1056,6 +1110,18 @@
             transform: scale( 0.95 );
         }
 
+        /* Working/disabled state for gist button during LLM generation */
+        .sender-gist-btn.working {
+            cursor: wait;
+            opacity: 0.6;
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        .sender-gist-btn:disabled {
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
         /* ========================================
            SESSION NAME EDIT MODAL (Voice-First)
            ======================================== */
@@ -1113,34 +1179,8 @@
             align-items: center;
         }
 
-        .session-name-mic-btn {
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            border: 2px solid #007bff;
-            background: #e7f1ff;
-            cursor: pointer;
-            font-size: 1.2rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
-        }
-
-        .session-name-mic-btn:hover {
-            background: #cce5ff;
-        }
-
-        .session-name-mic-btn.recording {
-            background: #dc3545;
-            border-color: #dc3545;
-            animation: pulse-recording 1s infinite;
-        }
-
-        @keyframes pulse-recording {
-            0%, 100% { transform: scale( 1 ); }
-            50% { transform: scale( 1.05 ); }
-        }
+        /* Mic button uses unified .stt-button class (defined above) */
+        /* Removed duplicate .session-name-mic-btn styles - Session 58 */
 
         .session-name-input {
             flex: 1;

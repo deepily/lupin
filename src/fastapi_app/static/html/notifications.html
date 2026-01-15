@@ -6,11 +6,25 @@
     <link rel="stylesheet" href="/static/css/notifications.css">
 </head>
 <body>
+    <!-- Floating Section Visibility Toolbar -->
+    <div class="section-toolbar" id="section-toolbar">
+        <button class="toolbar-btn active" data-section="section-qa" title="Q&A Interface">❓</button>
+        <button class="toolbar-btn active" data-section="section-claude-code" title="Claude Code Dispatcher">🤖</button>
+        <button class="toolbar-btn active" data-section="action-required-section" title="Action Required">⚠️</button>
+        <button class="toolbar-btn active" data-section="tts-queue-section" title="TTS Queue">🔊</button>
+        <button class="toolbar-btn active" data-section="section-notifications" title="Notifications">💬</button>
+        <button class="toolbar-btn active" data-section="section-queues" title="Job Queues">📋</button>
+        <button class="toolbar-btn active" data-section="section-status" title="System Status">📊</button>
+        <button class="toolbar-btn active" data-section="filter-settings-section" title="Filter Settings (Admin)">⚙️</button>
+        <button class="toolbar-btn active" data-section="section-direct-tts" title="Direct TTS Test">🔧</button>
+        <button class="toolbar-btn active" data-section="section-debug" title="Debug Info">🐛</button>
+    </div>
+
     <div class="container">
         <h2>Notifications <span id="clock"></span></h2>
         
         <!-- Q&A Section -->
-        <div class="collapsible-section">
+        <div class="collapsible-section" id="section-qa">
             <div class="section-header" onclick="toggleSection('qa-section')">
                 <h3>Q&A Interface</h3>
                 <button class="toggle-button" id="qa-toggle">▼</button>
@@ -60,7 +74,7 @@
         </div>
 
         <!-- Claude Code Dispatcher Section -->
-        <div class="collapsible-section">
+        <div class="collapsible-section" id="section-claude-code">
             <div class="section-header" onclick="toggleSection('claude-code-section')">
                 <h3>Claude Code Dispatcher</h3>
                 <button class="toggle-button" id="claude-code-toggle">▼</button>
@@ -174,7 +188,7 @@
         </div>
 
         <!-- Notifications Section -->
-        <div class="collapsible-section">
+        <div class="collapsible-section" id="section-notifications">
             <div class="section-header" onclick="toggleSection('notifications-section')">
                 <h3>Claude Code Notifications: <span id="notifications-count">0</span></h3>
                 <div id="history-dropdown-container" style="margin-left: auto;"></div>
@@ -194,7 +208,7 @@
         </div>
 
         <!-- Job Queues Section - Progressive Disclosure -->
-        <div class="collapsible-section">
+        <div class="collapsible-section" id="section-queues">
             <div class="section-header" onclick="toggleSection('queues-section')">
                 <h3>Job Queues</h3>
                 <button class="toggle-button" id="queues-toggle">▼</button>
@@ -257,7 +271,7 @@
         </div>
 
         <!-- Status Section -->
-        <div class="collapsible-section">
+        <div class="collapsible-section" id="section-status">
             <div class="section-header" onclick="toggleSection('status-section')">
                 <h3>System Status</h3>
                 <button class="toggle-button" id="status-toggle">▼</button>
@@ -318,7 +332,7 @@
         </div>
 
         <!-- Direct TTS Test Section -->
-        <div class="collapsible-section">
+        <div class="collapsible-section" id="section-direct-tts">
             <div class="section-header" onclick="toggleSection('direct-tts-section')">
                 <h3>🔧 Direct TTS Test (Bypass Q&A)</h3>
                 <button class="toggle-button" id="direct-tts-toggle">▼</button>
@@ -335,7 +349,7 @@
         </div>
 
         <!-- Debug Section -->
-        <div class="collapsible-section">
+        <div class="collapsible-section" id="section-debug">
             <div class="section-header" onclick="toggleSection('debug-section')">
                 <h3>Debug Information</h3>
                 <button class="toggle-button" id="debug-toggle">▼</button>

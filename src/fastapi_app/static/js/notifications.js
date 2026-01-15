@@ -228,6 +228,12 @@ class NotificationsUI {
         this.qaRecordingInterval = null;
         this.qaRecordingCancelListener = null;
 
+        // ========================================
+        // SECTION VISIBILITY TOOLBAR STATE
+        // ========================================
+        this.SECTION_VISIBILITY_KEY = 'lupin_section_visibility';
+        this.sectionVisibility = this.loadSectionVisibility();
+
         // Initialize
         this.init();
     }
@@ -266,6 +272,9 @@ class NotificationsUI {
             
             // Setup event listeners
             this.setupEventListeners();
+
+            // Initialize section visibility toolbar
+            this.initToolbar();
 
             // Initialize unified recording manager
             this.initRecordingManager();
@@ -4155,6 +4164,133 @@ class NotificationsUI {
         return div.innerHTML;
     }
 
+    // ========================================
+    // SECTION VISIBILITY TOOLBAR METHODS
+    // ========================================
+
+    initToolbar() {
+        /**
+         * Initialize section visibility toolbar click handlers.
+         *
+         * Requires:
+         *     - Toolbar HTML exists in DOM
+         *
+         * Ensures:
+         *     - Click handlers attached to all toolbar buttons
+         *     - Saved visibility state applied from localStorage
+         */
+        const toolbar = document.getElementById( 'section-toolbar' );
+        if ( !toolbar ) {
+            this.log( 'Section toolbar not found - skipping initialization' );
+            return;
+        }
+
+        toolbar.querySelectorAll( '.toolbar-btn' ).forEach( btn => {
+            btn.addEventListener( 'click', () => this.toggleSectionVisibility( btn.dataset.section ) );
+        } );
+
+        // Apply saved visibility state
+        this.applySectionVisibility();
+        this.log( 'Section visibility toolbar initialized' );
+    }
+
+    toggleSectionVisibility( sectionId ) {
+        /**
+         * Toggle a section's visibility.
+         *
+         * Requires:
+         *     - sectionId matches a valid section wrapper ID
+         *
+         * Ensures:
+         *     - Section visibility toggled (show/hide entire section including header)
+         *     - Toolbar button state updated (active/dimmed)
+         *     - State saved to localStorage for persistence
+         */
+        const section = document.getElementById( sectionId );
+        const btn = document.querySelector( `.toolbar-btn[data-section="${sectionId}"]` );
+
+        if ( !section ) {
+            this.error( `Section not found: ${sectionId}` );
+            return;
+        }
+
+        const isVisible = !section.classList.contains( 'section-hidden' );
+
+        if ( isVisible ) {
+            section.classList.add( 'section-hidden' );
+            btn?.classList.remove( 'active' );
+            this.log( `Section hidden: ${sectionId}` );
+        } else {
+            section.classList.remove( 'section-hidden' );
+            btn?.classList.add( 'active' );
+            this.log( `Section shown: ${sectionId}` );
+        }
+
+        this.saveSectionVisibility();
+    }
+
+    saveSectionVisibility() {
+        /**
+         * Save visibility state to localStorage.
+         *
+         * Ensures:
+         *     - All section visibility states saved as JSON
+         *     - Persists across page refreshes and browser restarts
+         */
+        const visibility = {};
+        document.querySelectorAll( '.toolbar-btn' ).forEach( btn => {
+            visibility[ btn.dataset.section ] = btn.classList.contains( 'active' );
+        } );
+        localStorage.setItem( this.SECTION_VISIBILITY_KEY, JSON.stringify( visibility ) );
+        this.log( 'Section visibility state saved to localStorage' );
+    }
+
+    loadSectionVisibility() {
+        /**
+         * Load visibility state from localStorage.
+         *
+         * Ensures:
+         *     - Returns saved state object or null if not found
+         *     - Handles JSON parse errors gracefully
+         */
+        try {
+            const saved = localStorage.getItem( this.SECTION_VISIBILITY_KEY );
+            return saved ? JSON.parse( saved ) : null;
+        } catch ( e ) {
+            this.error( 'Error loading section visibility state:', e );
+            return null;
+        }
+    }
+
+    applySectionVisibility() {
+        /**
+         * Apply saved visibility state on page load.
+         *
+         * Requires:
+         *     - this.sectionVisibility loaded from localStorage
+         *
+         * Ensures:
+         *     - All sections restored to their saved visibility state
+         *     - Toolbar buttons updated to match section visibility
+         */
+        if ( !this.sectionVisibility ) {
+            this.log( 'No saved section visibility state - showing all sections' );
+            return;
+        }
+
+        Object.entries( this.sectionVisibility ).forEach( ( [ sectionId, isVisible ] ) => {
+            const section = document.getElementById( sectionId );
+            const btn = document.querySelector( `.toolbar-btn[data-section="${sectionId}"]` );
+
+            if ( section && !isVisible ) {
+                section.classList.add( 'section-hidden' );
+                btn?.classList.remove( 'active' );
+            }
+        } );
+
+        this.log( 'Section visibility state restored from localStorage' );
+    }
+
     async handleDoneQueueUpdate( data ) {
         /**
          * Handle done queue update with enhanced structured job metadata.
@@ -4713,7 +4849,7 @@ class NotificationsUI {
                 </div>
                 <div class="session-name-edit-body">
                     <div class="session-name-input-row">
-                        <button id="session-name-mic-btn" class="session-name-mic-btn" title="Voice input (click to record)">🎤</button>
+                        <button id="session-name-mic-btn" class="stt-button" title="Voice input (click to record)">🎤</button>
                         <input type="text" id="session-name-input" class="session-name-input"
                                value="${this.escapeHtml( currentName )}"
                                placeholder="Enter session name..."
@@ -4735,10 +4871,22 @@ class NotificationsUI {
         input.focus();
         input.select();
 
-        // Wire up mic button using existing recordingManager
+        // Wire up mic button using existing recordingManager with toggle logic
         const micBtn = document.getElementById( 'session-name-mic-btn' );
         const self = this;
         micBtn.addEventListener( 'click', async () => {
+            // If already recording, stop it (toggle behavior)
+            if ( self.recordingManager.isRecording() ) {
+                await self.recordingManager.stopRecording();
+                return;
+            }
+
+            // If processing, ignore click
+            if ( self.recordingManager.isProcessing() ) {
+                return;
+            }
+
+            // Start new recording
             await self.recordingManager.startRecording(
                 `session-name-${sessionId}`,
                 micBtn,
@@ -4751,7 +4899,15 @@ class NotificationsUI {
             );
         } );
 
-        // Handle Enter key to save, Escape to cancel
+        // Handle spacebar on mic button to stop recording (voice-first UX)
+        micBtn.addEventListener( 'keydown', async ( e ) => {
+            if ( e.key === ' ' || e.key === 'Enter' ) {
+                e.preventDefault();
+                micBtn.click();
+            }
+        } );
+
+        // Handle Enter key to save, Escape to cancel (on input field)
         input.addEventListener( 'keydown', ( e ) => {
             if ( e.key === 'Enter' ) {
                 self.saveSessionNameFromModal( sessionId );
@@ -4760,9 +4916,13 @@ class NotificationsUI {
             }
         } );
 
-        // Auto-start recording for voice-first UX
-        setTimeout( () => {
+        // Auto-start recording for voice-first UX, then focus mic button for spacebar
+        setTimeout( async () => {
             micBtn.click();
+            // Focus mic button after recording starts so spacebar can stop it
+            setTimeout( () => {
+                micBtn.focus( { preventScroll: true } );
+            }, 100 );
         }, 100 );
     }
 
@@ -4838,6 +4998,14 @@ class NotificationsUI {
             return;
         }
 
+        // Find and disable the gist button to prevent duplicate clicks
+        const gistBtn = document.querySelector( `[data-session-id="${sessionId}"] .sender-gist-btn` );
+        if ( gistBtn ) {
+            gistBtn.disabled = true;
+            gistBtn.classList.add( 'working' );
+            gistBtn.innerHTML = '⏳';
+        }
+
         this.log( `Generating gist for session ${sessionId} from ${messages.length} messages...` );
 
         try {
@@ -4862,7 +5030,13 @@ class NotificationsUI {
 
         } catch ( error ) {
             this.error( 'Failed to generate gist:', error );
-            // Could show a toast/notification to user
+        } finally {
+            // Restore button state (always runs, even on error)
+            if ( gistBtn ) {
+                gistBtn.disabled = false;
+                gistBtn.classList.remove( 'working' );
+                gistBtn.innerHTML = '✨';
+            }
         }
     }
 
