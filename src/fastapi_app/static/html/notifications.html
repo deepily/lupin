@@ -13,9 +13,10 @@
         <button class="toolbar-btn active" data-section="action-required-section" title="Action Required">⚠️</button>
         <button class="toolbar-btn active" data-section="tts-queue-section" title="TTS Queue">🔊</button>
         <button class="toolbar-btn active" data-section="section-notifications" title="Notifications">💬</button>
-        <button class="toolbar-btn active" data-section="section-queues" title="Job Queues">📋</button>
-        <button class="toolbar-btn active" data-section="section-status" title="System Status">📊</button>
         <button class="toolbar-btn active" data-section="filter-settings-section" title="Filter Settings (Admin)">⚙️</button>
+        <button class="toolbar-btn active" data-section="section-queues" title="Job Queues">📋</button>
+        <button class="toolbar-btn active" data-section="section-time-saved" title="Time Saved">⏱️</button>
+        <button class="toolbar-btn active" data-section="section-status" title="System Status">📊</button>
         <button class="toolbar-btn active" data-section="section-direct-tts" title="Direct TTS Test">🔧</button>
         <button class="toolbar-btn active" data-section="section-debug" title="Debug Info">🐛</button>
     </div>
@@ -172,10 +173,23 @@
         <div class="collapsible-section" id="tts-queue-section" style="display: none;">
             <div class="section-header tts-queue-header" onclick="toggleSection('tts-queue-content')">
                 <h3>🔊 Playing: <span id="tts-queue-count">0</span></h3>
+
+                <!-- Keep existing resume button for Focus Mode -->
                 <button id="tts-resume-btn" class="tts-resume-button" style="display: none;"
                         onclick="event.stopPropagation(); window.freshQueueUI.toggleTTSFocusMode()">
                     ▶️ Resume
                 </button>
+
+                <!-- Pause/Play Controls - RIGHT of title, before toggle arrow -->
+                <div class="tts-playback-controls" onclick="event.stopPropagation();">
+                    <button id="tts-pause-btn" class="tts-control-button disabled"
+                            title="Pause playback"
+                            onclick="window.notificationsUI.pauseTTS()">⏸️</button>
+                    <button id="tts-play-btn" class="tts-control-button disabled"
+                            title="Resume playback"
+                            onclick="window.notificationsUI.resumeTTS()">▶️</button>
+                </div>
+
                 <button class="toggle-button" id="tts-queue-toggle">▼</button>
             </div>
             <div class="section-content" id="tts-queue-content">
@@ -197,8 +211,16 @@
             <div class="section-header" onclick="toggleSection('notifications-section')">
                 <h3>Claude Code Notifications: <span id="notifications-count">0</span></h3>
                 <div id="history-dropdown-container" style="margin-left: auto;"></div>
+                <!-- Refresh button commented out - filter dropdown now works correctly
+                <button id="refresh-notifications" type="button"
+                        class="notifications-control-button"
+                        onclick="event.stopPropagation(); window.location.reload();"
+                        title="Refresh page">
+                    ↻
+                </button>
+                -->
                 <button id="clear-all-notifications" type="button"
-                        class="clear-notifications-button"
+                        class="clear-notifications-button notifications-control-button"
                         style="margin-right: 10px;"
                         disabled>
                     🗑️ Clear All
@@ -208,6 +230,32 @@
             <div class="section-content" id="notifications-section">
                 <div id="notifications-list">
                     <!-- Sender cards will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Queue Filter Settings (Admin Only) -->
+        <div class="collapsible-section" id="filter-settings-section" style="display: none;">
+            <div class="section-header" onclick="toggleSection('filter-section')">
+                <h3>⚙️ Queue Filter Settings</h3>
+                <button class="toggle-button" id="filter-toggle">▼</button>
+            </div>
+            <div class="section-content" id="filter-section">
+                <div class="filter-controls">
+                    <label style="display: block; margin-bottom: 10px;">
+                        <strong>View Mode:</strong>
+                    </label>
+                    <div style="display: flex; gap: 10px;">
+                        <button id="filter-own-jobs" class="filter-button active" type="button">
+                            👤 My Jobs Only
+                        </button>
+                        <button id="filter-all-jobs" class="filter-button" type="button">
+                            👥 All Users' Jobs
+                        </button>
+                    </div>
+                    <div id="filter-status" style="margin-top: 15px; padding: 10px; background: #e7f3ff; border-radius: 4px; font-size: 13px;">
+                        Currently viewing: <strong id="filter-mode-display">Your jobs only</strong>
+                    </div>
                 </div>
             </div>
         </div>
@@ -275,6 +323,39 @@
             </div>
         </div>
 
+        <!-- Time Saved Dashboard -->
+        <div class="collapsible-section" id="section-time-saved">
+            <div class="section-header" onclick="toggleSection('time-saved-section')">
+                <h3>⏱️ Time Saved Dashboard</h3>
+                <button class="refresh-btn" onclick="event.stopPropagation(); window.notificationsUI.refreshTimeSavedStats()">🔄</button>
+                <button class="toggle-button" id="time-saved-toggle">▼</button>
+            </div>
+            <div class="section-content" id="time-saved-section">
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <span class="stat-value" id="time-saved-total">--</span>
+                        <span class="stat-label">Time Saved (You)</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="time-saved-others">--</span>
+                        <span class="stat-label">Time Saved for Others</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="solutions-created">--</span>
+                        <span class="stat-label">Solutions Created</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="replays-benefited">--</span>
+                        <span class="stat-label">Cache Hits (You)</span>
+                    </div>
+                </div>
+                <div class="top-solutions" id="top-solutions-container">
+                    <h4>🏆 Most Helpful Solutions</h4>
+                    <div id="top-solutions-list">Loading...</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Status Section -->
         <div class="collapsible-section" id="section-status">
             <div class="section-header" onclick="toggleSection('status-section')">
@@ -315,32 +396,6 @@
                         ↻ Reload
                     </button>
                     <span id="config-status" style="margin-left: 8px; font-size: 12px;"></span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Queue Filter Settings (Admin Only) -->
-        <div class="collapsible-section" id="filter-settings-section" style="display: none;">
-            <div class="section-header" onclick="toggleSection('filter-section')">
-                <h3>⚙️ Queue Filter Settings</h3>
-                <button class="toggle-button" id="filter-toggle">▼</button>
-            </div>
-            <div class="section-content" id="filter-section">
-                <div class="filter-controls">
-                    <label style="display: block; margin-bottom: 10px;">
-                        <strong>View Mode:</strong>
-                    </label>
-                    <div style="display: flex; gap: 10px;">
-                        <button id="filter-own-jobs" class="filter-button active" type="button">
-                            👤 My Jobs Only
-                        </button>
-                        <button id="filter-all-jobs" class="filter-button" type="button">
-                            👥 All Users' Jobs
-                        </button>
-                    </div>
-                    <div id="filter-status" style="margin-top: 15px; padding: 10px; background: #e7f3ff; border-radius: 4px; font-size: 13px;">
-                        Currently viewing: <strong id="filter-mode-display">Your jobs only</strong>
-                    </div>
                 </div>
             </div>
         </div>

@@ -183,6 +183,9 @@ class NotificationsUI {
         this.ttsFocusModeActive = false;         // True when queue is paused for response
         this.focusModeNotificationId = null;     // Which action-required triggered focus mode
 
+        // Manual Pause: User-controlled pause of TTS playback (via pause button)
+        this.isTTSPaused = false;                // True when user clicks pause button
+
         // ========================================
         // GENIE ANIMATION STATE
         // ========================================
@@ -208,7 +211,9 @@ class NotificationsUI {
 
         // History window configuration (activity-anchored loading)
         this.HISTORY_WINDOW_KEY = 'notifications_history_window';
-        this.historyWindowHours = parseInt( localStorage.getItem( this.HISTORY_WINDOW_KEY ) ) || 48; // Default to 2 days
+        const storedWindow = localStorage.getItem( this.HISTORY_WINDOW_KEY );
+        // Handle 'all' sentinel AND legacy empty string (migration from pre-fix code)
+        this.historyWindowHours = ( storedWindow === 'all' || storedWindow === '' ) ? null : ( parseInt( storedWindow ) || 48 ); // Default to 2 days
         this.WINDOW_OPTIONS = [
             { label: 'Last 24 hours', hours: 24 },
             { label: 'Last 2 days',   hours: 48 },
@@ -304,6 +309,9 @@ class NotificationsUI {
 
             // Restore TTS queue from localStorage (refresh survival)
             this.restoreTTSQueueState();
+
+            // Load Time Saved Dashboard stats
+            this.refreshTimeSavedStats();
 
             // Auto-focus STT button for spacebar activation
             document.getElementById( 'qa-stt-button' ).focus();
@@ -4019,6 +4027,7 @@ class NotificationsUI {
         const statusClass = `status-${queueName}`;
         const truncatedQuestion = this.truncateText( job.question_text || 'No question', 60 );
         const agentBadge = job.agent_type ? `<span class="agent-badge">${( job.agent_type || '' ).replace( 'Agent', '' )}</span>` : '';
+        const cacheHitBadge = job.is_cache_hit ? '<span class="cache-hit-badge" title="Result from cache">⚡ Cached</span>' : '';
         const timestamp = this.formatJobTimestamp( job.timestamp );
 
         // Interaction indicator for done queue
@@ -4032,7 +4041,7 @@ class NotificationsUI {
         return `
             <div class="job-card ${statusClass}" id="job-card-${jobId}" data-job-id="${jobId}">
                 <div class="job-card-header" onclick="window.notificationsUI.toggleJobCard('${jobId}', '${queueName}')">
-                    ${agentBadge}
+                    ${agentBadge}${cacheHitBadge}
                     <span class="job-question">${this.escapeHtml( truncatedQuestion )}</span>
                     ${interactionIndicator}
                     <span class="job-timestamp">${timestamp}</span>
@@ -4234,6 +4243,95 @@ class NotificationsUI {
         const div = document.createElement( 'div' );
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    // ========================================
+    // TIME SAVED DASHBOARD METHODS
+    // ========================================
+
+    async refreshTimeSavedStats() {
+        /**
+         * Fetch and display time saved statistics from the API.
+         *
+         * Requires:
+         *     - User is authenticated with valid accessToken
+         *     - /api/stats/time-saved and /api/stats/time-saved/global endpoints available
+         *
+         * Ensures:
+         *     - Updates dashboard stat elements with current values
+         *     - Renders top solutions leaderboard
+         *     - Handles errors gracefully
+         */
+        this.log( 'Refreshing Time Saved Dashboard stats...' );
+
+        try {
+            // Fetch user-specific stats
+            const response = await fetch( '/api/stats/time-saved', {
+                headers: { 'Authorization': `Bearer ${this.accessToken}` }
+            } );
+
+            if ( response.ok ) {
+                const stats = await response.json();
+                this.log( `Time saved stats received: ${JSON.stringify( stats )}` );
+
+                // Update stat elements
+                const timeSavedTotal = document.getElementById( 'time-saved-total' );
+                const timeSavedOthers = document.getElementById( 'time-saved-others' );
+                const solutionsCreated = document.getElementById( 'solutions-created' );
+                const replaysBenefited = document.getElementById( 'replays-benefited' );
+
+                if ( timeSavedTotal ) timeSavedTotal.textContent = stats.total_time_saved_formatted || '--';
+                if ( timeSavedOthers ) timeSavedOthers.textContent = stats.time_saved_for_others_formatted || '--';
+                if ( solutionsCreated ) solutionsCreated.textContent = stats.solutions_created || 0;
+                if ( replaysBenefited ) replaysBenefited.textContent = stats.total_replays_benefited || 0;
+            } else {
+                this.log( `Failed to fetch time saved stats: ${response.status}`, 'error' );
+            }
+
+            // Also fetch global stats for top solutions
+            const globalResponse = await fetch( '/api/stats/time-saved/global', {
+                headers: { 'Authorization': `Bearer ${this.accessToken}` }
+            } );
+
+            if ( globalResponse.ok ) {
+                const globalStats = await globalResponse.json();
+                this.log( `Global stats received: ${globalStats.total_solutions} solutions, ${globalStats.total_replays} replays` );
+                this.renderTopSolutions( globalStats.top_solutions );
+            } else {
+                this.log( `Failed to fetch global stats: ${globalResponse.status}`, 'error' );
+            }
+        } catch ( error ) {
+            this.log( `Error fetching time saved stats: ${error}`, 'error' );
+        }
+    }
+
+    renderTopSolutions( solutions ) {
+        /**
+         * Render the top solutions leaderboard.
+         *
+         * Requires:
+         *     - solutions is an array of solution objects with question, replays, time_saved_formatted
+         *
+         * Ensures:
+         *     - Renders ranked list of top solutions
+         *     - Shows "no data" message if empty
+         *     - Escapes HTML in question text
+         */
+        const container = document.getElementById( 'top-solutions-list' );
+        if ( !container ) return;
+
+        if ( !solutions || solutions.length === 0 ) {
+            container.innerHTML = '<p class="no-data">No replayed solutions yet</p>';
+            return;
+        }
+
+        container.innerHTML = solutions.map( ( sol, idx ) => `
+            <div class="top-solution-item">
+                <span class="rank">#${idx + 1}</span>
+                <span class="question">${this.escapeHtml( sol.question )}</span>
+                <span class="stats">${sol.replays} replays · ${sol.time_saved_formatted} saved</span>
+            </div>
+        ` ).join( '' );
     }
 
     // ========================================
@@ -5614,7 +5712,6 @@ class NotificationsUI {
         messageDiv.innerHTML = `
             <span class="message-time">${timeStr}</span>
             <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}${expiredBadge}</span>
-            <button class="tts-stop-btn" onclick="window.notificationsUI.stopAudio(); event.stopPropagation();" title="Stop audio">⏹</button>
         `;
 
         // Add to top (newest first)
@@ -5967,8 +6064,21 @@ class NotificationsUI {
      * @param {number|null} hours - Hours to look back, or null for all time
      */
     async setHistoryWindow( hours ) {
+        // Close dropdown menu first
+        const menu = document.getElementById( 'history-dropdown-menu' );
+        if ( menu ) {
+            menu.classList.remove( 'show' );
+        }
+
+        // Skip reload if value hasn't changed - no point re-running the same query
+        if ( hours === this.historyWindowHours ) {
+            this.log( `History window unchanged (${hours}h), skipping reload` );
+            return;
+        }
+
+        const storageValue = hours === null ? 'all' : hours.toString();
         this.historyWindowHours = hours;
-        localStorage.setItem( this.HISTORY_WINDOW_KEY, hours === null ? '' : hours.toString() );
+        localStorage.setItem( this.HISTORY_WINDOW_KEY, storageValue );
 
         this.log( `History window set to: ${hours === null ? 'all time' : hours + ' hours'}` );
 
@@ -6003,7 +6113,9 @@ class NotificationsUI {
      */
     updateHistoryWindowDisplay( hours ) {
         const dropdown = document.getElementById( 'history-window-dropdown' );
-        if ( !dropdown ) return;
+        if ( !dropdown ) {
+            return;
+        }
 
         const option = this.WINDOW_OPTIONS.find( opt => opt.hours === hours );
         const display = dropdown.querySelector( '.dropdown-display' );
@@ -6027,14 +6139,14 @@ class NotificationsUI {
 
         dropdown.innerHTML = `
             <span class="dropdown-label">History:</span>
-            <button class="dropdown-display" onclick="window.notificationsUI.toggleHistoryDropdown()">
+            <button class="dropdown-display" onclick="event.stopPropagation(); window.notificationsUI.toggleHistoryDropdown()">
                 ${currentOption.label}
                 <span class="dropdown-arrow">▼</span>
             </button>
             <div class="dropdown-menu" id="history-dropdown-menu">
                 ${this.WINDOW_OPTIONS.map( opt => `
                     <div class="dropdown-item ${opt.hours === this.historyWindowHours ? 'selected' : ''}"
-                         onclick="window.notificationsUI.setHistoryWindow(${opt.hours})">
+                         onclick="event.stopPropagation(); window.notificationsUI.setHistoryWindow(${opt.hours})">
                         ${opt.label}
                     </div>
                 ` ).join( '' )}
@@ -6824,13 +6936,9 @@ class NotificationsUI {
             this.error( "Error loading initial queue lists:", error );
         }
         
-        // Load initial notifications
-        try {
-            await this.loadInitialNotifications();
-            this.log( "Initial notifications loaded successfully" );
-        } catch ( error ) {
-            this.error( "Error loading initial notifications:", error );
-        }
+        // NOTE: loadInitialNotifications() removed - loadConversationHistory() now handles this
+        // during init(). Calling it here caused a race condition where auth_success would
+        // clear notifications that were already loaded by loadConversationHistory().
     }
     
     // ========================================
@@ -7395,6 +7503,12 @@ class NotificationsUI {
      * - Action-required: Show in TTS active slot (response UI is in action-required section)
      */
     activateNextTTS() {
+        // Don't activate if manually paused
+        if ( this.isTTSPaused ) {
+            this.log( 'TTS queue: Manually paused - not activating next' );
+            return;
+        }
+
         if ( this.ttsQueue.length === 0 ) {
             this.log( 'TTS queue empty, nothing to activate' );
             this.activeTTSItem = null;
@@ -7555,35 +7669,55 @@ class NotificationsUI {
         if ( !section ) return;
 
         const totalCount = this.ttsQueue.length + ( this.activeTTSItem ? 1 : 0 );
-        const hasItems = this.ttsQueue.length > 0;
+        const hasActiveOrQueued = this.ttsQueue.length > 0 || this.activeTTSItem !== null;
         const toolbarWantsVisible = toolbarBtn?.classList.contains( 'active' );
 
-        // Show section if: items in queue OR toolbar says show it
-        const showSection = hasItems || toolbarWantsVisible;
+        // Show section if: items in queue OR active item OR toolbar says show it
+        const showSection = hasActiveOrQueued || toolbarWantsVisible;
 
         if ( !showSection ) {
             section.style.display = 'none';
             section.classList.remove( 'focus-mode' );
-            if ( activeSlot ) activeSlot.innerHTML = '';
+            section.classList.remove( 'paused' );
+            // DON'T clear activeSlot - preserve paused item state for re-show
             if ( resumeBtn ) resumeBtn.style.display = 'none';
             if ( emptyState ) emptyState.style.display = 'none';
         } else {
             section.style.display = 'block';
 
-            // Show/hide empty state based on whether queue has items
-            if ( emptyState ) {
-                emptyState.style.display = hasItems ? 'none' : 'block';
+            // Re-render active card if we have a paused/playing item but DOM was cleared
+            if ( this.activeTTSItem && activeSlot ) {
+                const existingCard = activeSlot.querySelector( '.tts-active-card' );
+                if ( !existingCard ) {
+                    this.renderActiveTTSCard( this.activeTTSItem );
+                }
             }
 
-            // Focus Mode: Update header and styling
-            if ( this.ttsFocusModeActive ) {
+            // Show/hide empty state based on whether we have active or queued items
+            if ( emptyState ) {
+                emptyState.style.display = hasActiveOrQueued ? 'none' : 'block';
+            }
+
+            // Manual Pause: User clicked pause button (has priority for header display)
+            if ( this.isTTSPaused && this.activeTTSItem ) {
+                section.classList.add( 'paused' );
+                section.classList.remove( 'focus-mode' );
+                if ( header ) {
+                    header.innerHTML = `Paused: <span id="tts-queue-count">${totalCount}</span>`;
+                }
+                if ( resumeBtn ) resumeBtn.style.display = 'none';
+            }
+            // Focus Mode: Waiting for action-required response
+            else if ( this.ttsFocusModeActive ) {
                 section.classList.add( 'focus-mode' );
+                section.classList.remove( 'paused' );
                 if ( header ) {
                     header.innerHTML = `Paused: <span id="tts-queue-count">${this.ttsQueue.length}</span> waiting`;
                 }
                 if ( resumeBtn ) resumeBtn.style.display = 'inline-block';
             } else {
                 section.classList.remove( 'focus-mode' );
+                section.classList.remove( 'paused' );
                 if ( header ) {
                     header.innerHTML = `🔊 Playing: <span id="tts-queue-count">${totalCount}</span>`;
                 }
@@ -7594,6 +7728,9 @@ class NotificationsUI {
                 countSpan.textContent = this.ttsFocusModeActive ? this.ttsQueue.length : totalCount;
             }
         }
+
+        // Update pause/play button states
+        this.updateTTSPausePlayButtons();
     }
 
     /**
@@ -7602,6 +7739,12 @@ class NotificationsUI {
      * For action-required: enters Focus Mode to pause queue during response.
      */
     onTTSPlaybackComplete() {
+        // Don't advance if manually paused
+        if ( this.isTTSPaused ) {
+            this.log( 'TTS queue: Playback complete callback fired, but manually paused - not advancing' );
+            return;
+        }
+
         this.log( 'TTS queue: Playback complete' );
 
         // Capture item info BEFORE clearing (needed for focus mode check)
@@ -7712,10 +7855,12 @@ class NotificationsUI {
         // Persist focus mode state change
         this.saveTTSQueueState();
 
-        // Resume queue if items waiting
-        if ( this.ttsQueue.length > 0 ) {
+        // Resume queue if items waiting AND not manually paused
+        if ( this.ttsQueue.length > 0 && !this.isTTSPaused ) {
             this.log( `TTS Focus Mode: Resuming queue with ${this.ttsQueue.length} items` );
             setTimeout( () => this.activateNextTTS(), 100 );  // Small delay for UI to settle
+        } else if ( this.isTTSPaused ) {
+            this.log( `TTS Focus Mode: Exited but manual pause active - not resuming` );
         }
     }
 
@@ -7731,6 +7876,114 @@ class NotificationsUI {
     }
 
     // =========================================================================
+    // TTS MANUAL PAUSE/PLAY - User-controlled pause like a music player
+    // =========================================================================
+
+    /**
+     * Pauses TTS audio mid-stream (like a music player pause button).
+     * Works with both instant mode (Web Audio) and reliable mode (HTML Audio).
+     *
+     * Ensures:
+     *     - Audio is suspended at current position
+     *     - Queue does not advance while paused
+     *     - UI shows paused state with amber header
+     */
+    pauseTTS() {
+        if ( this.isTTSPaused || !this.activeTTSItem ) {
+            this.log( 'TTS Pause: Already paused or nothing playing' );
+            return;
+        }
+
+        this.log( 'TTS Pause: User pausing playback' );
+
+        // Pause Web Audio (instant mode)
+        if ( this.pcmAudioContext && this.pcmAudioContext.state === 'running' ) {
+            this.pcmAudioContext.suspend();
+            this.log( 'TTS Pause: Suspended Web Audio context' );
+        }
+
+        // Pause HTML Audio (reliable mode)
+        if ( this.audioElement && !this.audioElement.paused ) {
+            this.audioElement.pause();
+            this.log( 'TTS Pause: Paused HTML audio element' );
+        }
+
+        this.isTTSPaused = true;
+        this.updateTTSPausePlayButtons();
+        this.updateTTSQueueSection();
+        this.saveTTSQueueState();
+    }
+
+    /**
+     * Resumes TTS audio from the paused position.
+     * Works with both instant mode (Web Audio) and reliable mode (HTML Audio).
+     *
+     * Ensures:
+     *     - Audio resumes from where it was paused
+     *     - Queue continues normally after current item finishes
+     */
+    resumeTTS() {
+        if ( !this.isTTSPaused ) {
+            this.log( 'TTS Resume: Not paused' );
+            return;
+        }
+
+        this.log( 'TTS Resume: User resuming playback' );
+
+        // Resume Web Audio (instant mode)
+        if ( this.pcmAudioContext && this.pcmAudioContext.state === 'suspended' ) {
+            this.pcmAudioContext.resume();
+            this.log( 'TTS Resume: Resumed Web Audio context' );
+        }
+
+        // Resume HTML Audio (reliable mode)
+        if ( this.audioElement && this.audioElement.paused && this.audioElement.src ) {
+            this.audioElement.play().catch( e => this.error( 'TTS Resume failed:', e ) );
+            this.log( 'TTS Resume: Resumed HTML audio element' );
+        }
+
+        this.isTTSPaused = false;
+        this.updateTTSPausePlayButtons();
+        this.updateTTSQueueSection();
+        this.saveTTSQueueState();
+    }
+
+    /**
+     * Updates pause/play button enabled states based on current playback status.
+     *
+     * Button states:
+     *     - Nothing playing: both disabled
+     *     - Playing: pause enabled, play disabled
+     *     - Paused: pause disabled, play enabled
+     */
+    updateTTSPausePlayButtons() {
+        const pauseBtn = document.getElementById( 'tts-pause-btn' );
+        const playBtn = document.getElementById( 'tts-play-btn' );
+        const section = document.getElementById( 'tts-queue-section' );
+
+        if ( !pauseBtn || !playBtn ) return;
+
+        const hasActiveItem = this.activeTTSItem !== null;
+
+        if ( !hasActiveItem ) {
+            // Nothing playing - both disabled
+            pauseBtn.classList.add( 'disabled' );
+            playBtn.classList.add( 'disabled' );
+            section?.classList.remove( 'paused' );
+        } else if ( this.isTTSPaused ) {
+            // Paused - pause disabled, play enabled
+            pauseBtn.classList.add( 'disabled' );
+            playBtn.classList.remove( 'disabled' );
+            section?.classList.add( 'paused' );
+        } else {
+            // Playing - pause enabled, play disabled
+            pauseBtn.classList.remove( 'disabled' );
+            playBtn.classList.add( 'disabled' );
+            section?.classList.remove( 'paused' );
+        }
+    }
+
+    // =========================================================================
     // TTS QUEUE PERSISTENCE - Save/restore across page refresh
     // =========================================================================
 
@@ -7740,7 +7993,7 @@ class NotificationsUI {
      */
     saveTTSQueueState() {
         try {
-            if ( this.ttsQueue.length === 0 && !this.ttsFocusModeActive ) {
+            if ( this.ttsQueue.length === 0 && !this.ttsFocusModeActive && !this.isTTSPaused ) {
                 localStorage.removeItem( this.TTS_QUEUE_KEY );
                 return;
             }
@@ -7748,11 +8001,12 @@ class NotificationsUI {
             const queueState = {
                 queue                   : this.ttsQueue,
                 focusModeActive         : this.ttsFocusModeActive,
-                focusModeNotificationId : this.focusModeNotificationId
+                focusModeNotificationId : this.focusModeNotificationId,
+                isTTSPaused             : this.isTTSPaused
             };
 
             localStorage.setItem( this.TTS_QUEUE_KEY, JSON.stringify( queueState ) );
-            this.log( `Saved ${this.ttsQueue.length} TTS queue item(s) to localStorage` );
+            this.log( `Saved ${this.ttsQueue.length} TTS queue item(s) to localStorage (paused: ${this.isTTSPaused})` );
         } catch ( error ) {
             this.error( 'Failed to save TTS queue state:', error );
         }
@@ -7774,8 +8028,11 @@ class NotificationsUI {
             this.ttsQueue = parsed.queue || [];
             this.ttsFocusModeActive = parsed.focusModeActive || false;
             this.focusModeNotificationId = parsed.focusModeNotificationId || null;
+            // NOTE: Don't restore isTTSPaused - page refresh resets audio context,
+            // so we should auto-resume playback. User can pause again if needed.
+            this.isTTSPaused = false;
 
-            this.log( `Restored ${this.ttsQueue.length} TTS queue item(s), focusMode: ${this.ttsFocusModeActive}` );
+            this.log( `Restored ${this.ttsQueue.length} TTS queue item(s), focusMode: ${this.ttsFocusModeActive} (paused state reset on refresh)` );
 
             // Re-render minimized cards for queued items
             for ( const item of this.ttsQueue ) {
@@ -7785,6 +8042,7 @@ class NotificationsUI {
             this.updateTTSQueueSection();
 
             // If not in focus mode and queue has items, start playback
+            // (isTTSPaused is always false after restore - refresh resets pause state)
             if ( !this.ttsFocusModeActive && this.ttsQueue.length > 0 ) {
                 this.activateNextTTS();
             }
