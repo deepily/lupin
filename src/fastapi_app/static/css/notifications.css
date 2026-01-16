@@ -373,6 +373,14 @@
             font-style: italic;
         }
 
+        .tts-queue-empty-state {
+            padding: 10px;
+            text-align: center;
+            color: #6c757d;
+            font-size: 14px;
+            font-style: italic;
+        }
+
         .action-required-notification {
             position: relative;  /* For pseudo-element positioning */
             margin-bottom: 20px;

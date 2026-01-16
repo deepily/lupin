@@ -234,6 +234,11 @@ class NotificationsUI {
         this.SECTION_VISIBILITY_KEY = 'lupin_section_visibility';
         this.sectionVisibility = this.loadSectionVisibility();
 
+        // ========================================
+        // QUEUE CATEGORY EXPAND/COLLAPSE STATE
+        // ========================================
+        this.QUEUE_EXPAND_STATE_KEY = 'lupin_queue_expand_state';
+
         // Initialize
         this.init();
     }
@@ -275,6 +280,9 @@ class NotificationsUI {
 
             // Initialize section visibility toolbar
             this.initToolbar();
+
+            // Apply saved queue expand/collapse state
+            this.applyQueueExpandState();
 
             // Initialize unified recording manager
             this.initRecordingManager();
@@ -979,7 +987,68 @@ class NotificationsUI {
         // Redirect to login page (no redirect param - go to profile after login)
         window.location.href = '/static/html/auth/login.html';
     }
-    
+
+    async reinitializeConfig() {
+        /**
+         * Reinitialize Lupin configuration by calling /api/init endpoint.
+         * Refreshes configuration and reloads solution snapshots without server restart.
+         *
+         * Requires:
+         *     - Server is running and responsive
+         *     - /api/init endpoint is available
+         *
+         * Ensures:
+         *     - Calls /api/init endpoint
+         *     - Updates config-status span with result
+         *     - Logs success or failure
+         */
+        const statusSpan = document.getElementById( 'config-status' );
+        const button = document.getElementById( 'reinit-config-btn' );
+
+        try {
+            // Disable button during request
+            if ( button ) {
+                button.disabled = true;
+                button.style.opacity = '0.6';
+            }
+            // Clear any previous error message
+            if ( statusSpan ) {
+                statusSpan.textContent = '';
+            }
+
+            this.log( 'Reinitializing configuration...' );
+
+            const response = await fetch( '/api/init' );
+            const data = await response.json();
+
+            if ( data.status === 'success' ) {
+                this.log( `Config reinitialized: ${data.message}` );
+                if ( statusSpan ) {
+                    statusSpan.textContent = '✓';
+                    statusSpan.style.color = '#28a745';
+                }
+            } else {
+                this.error( `Config reinit failed: ${data.message}` );
+                if ( statusSpan ) {
+                    statusSpan.textContent = `✗ ${data.message}`;
+                    statusSpan.style.color = '#dc3545';
+                }
+            }
+        } catch ( error ) {
+            this.error( 'Config reinit error:', error );
+            if ( statusSpan ) {
+                statusSpan.textContent = `✗ ${error.message || 'Network error'}`;
+                statusSpan.style.color = '#dc3545';
+            }
+        } finally {
+            // Re-enable button
+            if ( button ) {
+                button.disabled = false;
+                button.style.opacity = '1';
+            }
+        }
+    }
+
     createAudioElement() {
         const audio = document.createElement( 'audio' );
         audio.controls = false; // Hidden for UI cleanliness
@@ -3833,6 +3902,9 @@ class NotificationsUI {
         }
 
         this.log( `Queue category ${queueName} ${state.expanded ? 'expanded' : 'collapsed'}` );
+
+        // Persist expand/collapse state to localStorage
+        this.saveQueueExpandState();
     }
 
     updateQueueCategoryIfExpanded( queueName, count ) {
@@ -4227,6 +4299,11 @@ class NotificationsUI {
         }
 
         this.saveSectionVisibility();
+
+        // Update TTS queue section to show/hide empty state when toggled
+        if ( sectionId === 'tts-queue-section' ) {
+            this.updateTTSQueueSection();
+        }
     }
 
     saveSectionVisibility() {
@@ -4288,7 +4365,75 @@ class NotificationsUI {
             }
         } );
 
+        // Update TTS queue section to show/hide empty state based on restored visibility
+        this.updateTTSQueueSection();
+
         this.log( 'Section visibility state restored from localStorage' );
+    }
+
+    // ========================================
+    // QUEUE CATEGORY EXPAND/COLLAPSE PERSISTENCE
+    // ========================================
+
+    saveQueueExpandState() {
+        /**
+         * Save queue category expand/collapse state to localStorage.
+         *
+         * Ensures:
+         *     - All queue category expanded states saved as JSON
+         *     - Persists across page refreshes and browser restarts
+         */
+        const state = {};
+        Object.keys( this.queueCategoryState ).forEach( queueName => {
+            state[ queueName ] = this.queueCategoryState[ queueName ].expanded;
+        } );
+        localStorage.setItem( this.QUEUE_EXPAND_STATE_KEY, JSON.stringify( state ) );
+        this.log( 'Queue expand state saved to localStorage' );
+    }
+
+    loadQueueExpandState() {
+        /**
+         * Load queue expand state from localStorage.
+         *
+         * Ensures:
+         *     - Returns saved state object or null if not found
+         *     - Handles JSON parse errors gracefully
+         */
+        try {
+            const saved = localStorage.getItem( this.QUEUE_EXPAND_STATE_KEY );
+            return saved ? JSON.parse( saved ) : null;
+        } catch ( e ) {
+            this.error( 'Error loading queue expand state:', e );
+            return null;
+        }
+    }
+
+    applyQueueExpandState() {
+        /**
+         * Apply saved queue expand state on page load.
+         *
+         * Requires:
+         *     - Queue categories have been rendered
+         *     - queueCategoryState is initialized
+         *
+         * Ensures:
+         *     - All queue categories restored to their saved expand/collapse state
+         *     - Only expanded queues trigger lazy loading of job cards
+         */
+        const savedState = this.loadQueueExpandState();
+        if ( !savedState ) {
+            this.log( 'No saved queue expand state - using defaults (all collapsed)' );
+            return;
+        }
+
+        Object.keys( savedState ).forEach( queueName => {
+            if ( savedState[ queueName ] === true && this.queueCategoryState[ queueName ] ) {
+                // Queue was expanded - restore that state
+                this.toggleQueueCategory( queueName );
+            }
+        } );
+
+        this.log( 'Queue expand state restored from localStorage' );
     }
 
     async handleDoneQueueUpdate( data ) {
@@ -6929,6 +7074,46 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Ensure the action-required section is visible and expanded.
+     * Called when a new action-required notification arrives to make it visible.
+     *
+     * Handles two separate visibility mechanisms:
+     *     1. Section visibility (toolbar button) - removes 'section-hidden' class
+     *     2. Section collapse (header click) - removes 'collapsed' class from content
+     *
+     * Ensures:
+     *     - action-required-section has 'section-hidden' class removed if present
+     *     - Toolbar button shows active state
+     *     - action-required-content has 'collapsed' class removed if present
+     *     - Toggle button shows expanded state (▼)
+     */
+    ensureActionRequiredExpanded() {
+        const section = document.getElementById( 'action-required-section' );
+        const content = document.getElementById( 'action-required-content' );
+        const toggle = document.getElementById( 'action-required-toggle' );
+        const toolbarBtn = document.querySelector( '.toolbar-btn[data-section="action-required-section"]' );
+
+        // Handle toolbar visibility (section-hidden class on parent section)
+        if ( section && section.classList.contains( 'section-hidden' ) ) {
+            section.classList.remove( 'section-hidden' );
+            if ( toolbarBtn ) {
+                toolbarBtn.classList.add( 'active' );
+            }
+            this.saveSectionVisibility();
+            this.log( 'Auto-showed action-required section (was hidden via toolbar)' );
+        }
+
+        // Handle header collapse (collapsed class on content div)
+        if ( content && content.classList.contains( 'collapsed' ) ) {
+            content.classList.remove( 'collapsed' );
+            if ( toggle ) {
+                toggle.textContent = '▼';
+            }
+            this.log( 'Auto-expanded action-required section (was collapsed via header)' );
+        }
+    }
+
     addActionRequiredNotification( notification ) {
         this.log( `Adding action-required notification: ${notification.id}` );
 
@@ -6957,6 +7142,9 @@ class NotificationsUI {
         if ( section ) {
             section.style.display = 'block';
         }
+
+        // Auto-expand the section content if collapsed
+        this.ensureActionRequiredExpanded();
 
         // Hide empty state
         const emptyState = document.getElementById( 'action-required-empty' );
@@ -7353,6 +7541,7 @@ class NotificationsUI {
     /**
      * Updates the TTS queue section visibility and count.
      * Shows paused state when in Focus Mode.
+     * Shows empty state when section is visible but queue is empty.
      */
     updateTTSQueueSection() {
         const section = document.getElementById( 'tts-queue-section' );
@@ -7360,22 +7549,31 @@ class NotificationsUI {
         const activeSlot = document.getElementById( 'tts-active-slot' );
         const header = section?.querySelector( 'h3' );
         const resumeBtn = document.getElementById( 'tts-resume-btn' );
+        const emptyState = document.getElementById( 'tts-queue-empty' );
+        const toolbarBtn = document.querySelector( '.toolbar-btn[data-section="tts-queue-section"]' );
 
         if ( !section ) return;
 
         const totalCount = this.ttsQueue.length + ( this.activeTTSItem ? 1 : 0 );
+        const hasItems = this.ttsQueue.length > 0;
+        const toolbarWantsVisible = toolbarBtn?.classList.contains( 'active' );
 
-        // Show section only if items actually waiting in queue
-        // Focus mode with 0 items = nothing to show (no "Paused: 0 waiting")
-        const showSection = this.ttsQueue.length > 0;
+        // Show section if: items in queue OR toolbar says show it
+        const showSection = hasItems || toolbarWantsVisible;
 
         if ( !showSection ) {
             section.style.display = 'none';
             section.classList.remove( 'focus-mode' );
             if ( activeSlot ) activeSlot.innerHTML = '';
             if ( resumeBtn ) resumeBtn.style.display = 'none';
+            if ( emptyState ) emptyState.style.display = 'none';
         } else {
             section.style.display = 'block';
+
+            // Show/hide empty state based on whether queue has items
+            if ( emptyState ) {
+                emptyState.style.display = hasItems ? 'none' : 'block';
+            }
 
             // Focus Mode: Update header and styling
             if ( this.ttsFocusModeActive ) {
