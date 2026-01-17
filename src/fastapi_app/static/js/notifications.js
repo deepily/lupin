@@ -4389,7 +4389,8 @@ class NotificationsUI {
                 e.stopPropagation();
                 const abstract = decodeURIComponent( indicator.dataset.abstract );
                 const content = tooltip.querySelector( '.abstract-tooltip-content' );
-                content.textContent = abstract;
+                // Render markdown with XSS protection (was: content.textContent = abstract)
+                content.innerHTML = this.renderMarkdown( abstract );
 
                 // Position near the indicator
                 const rect = indicator.getBoundingClientRect();
@@ -7065,17 +7066,113 @@ class NotificationsUI {
             const debugDiv = document.createElement( 'div' );
             debugDiv.className = `debug-info ${type}`;
             debugDiv.textContent = `[${timestamp}] ${message}`;
-            
+
             // Prepend to show newest messages first
             debugLog.insertBefore( debugDiv, debugLog.firstChild );
-            
+
             // Limit to last 20 messages
             while ( debugLog.children.length > 20 ) {
                 debugLog.removeChild( debugLog.lastChild );
             }
         }
     }
-    
+
+    /**
+     * Render markdown text to sanitized HTML.
+     * Uses marked.js for parsing and DOMPurify for XSS protection.
+     *
+     * Requires:
+     *     - marked.js loaded globally (window.marked)
+     *     - DOMPurify loaded globally (window.DOMPurify)
+     *     - text is a string (can be empty/null)
+     *
+     * Ensures:
+     *     - Returns sanitized HTML string safe for innerHTML
+     *     - Returns empty string if text is null/undefined/empty
+     *     - Common markdown elements rendered: bold, italic, lists, links, code
+     *     - All potentially dangerous HTML/JS removed by DOMPurify
+     *
+     * @param {string} text - Raw markdown text to render
+     * @returns {string} - Sanitized HTML string
+     */
+    renderMarkdown( text ) {
+        if ( !text ) return '';
+
+        // Check if libraries are available
+        if ( typeof marked === 'undefined' ) {
+            this.error( 'marked.js not loaded - falling back to plain text with HTML escaping' );
+            return this.escapeHtml( text );
+        }
+        if ( typeof DOMPurify === 'undefined' ) {
+            this.error( 'DOMPurify not loaded - falling back to plain text with HTML escaping' );
+            return this.escapeHtml( text );
+        }
+
+        try {
+            // Configure marked for safe rendering
+            marked.setOptions( {
+                gfm: true,           // GitHub Flavored Markdown
+                breaks: true,        // Convert \n to <br>
+                headerIds: false,    // Disable header IDs (not needed, reduces attack surface)
+                mangle: false        // Don't mangle email addresses
+            } );
+
+            // Parse markdown to HTML
+            const rawHtml = marked.parse( text );
+
+            // Sanitize with DOMPurify - allow safe subset of HTML
+            const sanitizedHtml = DOMPurify.sanitize( rawHtml, {
+                ALLOWED_TAGS: [
+                    'p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'del',
+                    'ul', 'ol', 'li',
+                    'a', 'code', 'pre',
+                    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                    'blockquote', 'hr',
+                    'table', 'thead', 'tbody', 'tr', 'th', 'td'
+                ],
+                ALLOWED_ATTR: [
+                    'href', 'target', 'rel', 'title'
+                ],
+                // Force all links to open in new tab safely
+                ADD_ATTR: [ 'target', 'rel' ],
+                FORBID_TAGS: [ 'script', 'style', 'iframe', 'form', 'input', 'img' ],
+                FORBID_ATTR: [ 'onerror', 'onclick', 'onload', 'onmouseover' ]
+            } );
+
+            // Post-process: add target="_blank" and rel="noopener" to all links
+            const tempDiv = document.createElement( 'div' );
+            tempDiv.innerHTML = sanitizedHtml;
+            tempDiv.querySelectorAll( 'a' ).forEach( link => {
+                link.setAttribute( 'target', '_blank' );
+                link.setAttribute( 'rel', 'noopener noreferrer' );
+            } );
+
+            return tempDiv.innerHTML;
+        } catch ( error ) {
+            this.error( `Markdown rendering failed: ${error.message}` );
+            return this.escapeHtml( text );
+        }
+    }
+
+    /**
+     * Escape HTML special characters for safe display as plain text.
+     * Fallback when markdown libraries aren't available.
+     *
+     * @param {string} text - Raw text to escape
+     * @returns {string} - HTML-escaped text
+     */
+    escapeHtml( text ) {
+        if ( !text ) return '';
+        const escapeMap = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        return text.replace( /[&<>"']/g, char => escapeMap[ char ] );
+    }
+
     updateElement( elementId, content ) {
         const element = document.getElementById( elementId );
         if ( element ) {
@@ -8305,9 +8402,9 @@ class NotificationsUI {
             responseUI = this.renderMultipleChoiceUI( notification );
         }
 
-        // Build abstract section if present
+        // Build abstract section if present - render markdown with XSS protection
         const abstractSection = notification.abstract ? `
-            <div class="action-required-abstract">${notification.abstract}</div>
+            <div class="action-required-abstract">${this.renderMarkdown( notification.abstract )}</div>
         ` : '';
 
         card.innerHTML = `
