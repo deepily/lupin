@@ -169,6 +169,7 @@ class NotificationsUI {
         // Timers only start when a notification becomes active.
         this.actionRequiredQueue = [];           // Ordered array of notification IDs (FIFO)
         this.activeActionRequiredId = null;      // Currently active notification ID (or null)
+        this.isPaused = false;                   // True when active notification is paused (timer frozen)
 
         // ========================================
         // UNIFIED TTS QUEUE SYSTEM
@@ -282,6 +283,9 @@ class NotificationsUI {
             
             // Setup event listeners
             this.setupEventListeners();
+
+            // Initialize abstract tooltip for notifications history
+            this.initAbstractTooltip();
 
             // Initialize section visibility toolbar
             this.initToolbar();
@@ -4335,6 +4339,97 @@ class NotificationsUI {
     }
 
     // ========================================
+    // ABSTRACT TOOLTIP FOR NOTIFICATIONS HISTORY
+    // ========================================
+
+    initAbstractTooltip() {
+        /**
+         * Initialize abstract tooltip container and click handler.
+         *
+         * Purpose: Allow users to view abstract details from notifications
+         * in the history section by clicking a 📋 indicator.
+         *
+         * Requires:
+         *     - DOM is ready
+         *
+         * Ensures:
+         *     - Single tooltip container created in body
+         *     - Click delegation handles indicator clicks
+         *     - Click outside closes tooltip
+         */
+
+        // Create tooltip container (once)
+        if ( !document.getElementById( 'abstract-tooltip' ) ) {
+            const tooltip = document.createElement( 'div' );
+            tooltip.id = 'abstract-tooltip';
+            tooltip.className = 'abstract-tooltip';
+            tooltip.innerHTML = `
+                <div class="abstract-tooltip-header">
+                    <span>📋 Details</span>
+                    <button class="abstract-tooltip-close" title="Close">&times;</button>
+                </div>
+                <div class="abstract-tooltip-content"></div>
+            `;
+            document.body.appendChild( tooltip );
+
+            // Close button handler
+            tooltip.querySelector( '.abstract-tooltip-close' ).addEventListener( 'click', () => {
+                tooltip.classList.remove( 'visible' );
+            } );
+
+            this.log( 'Abstract tooltip container initialized' );
+        }
+
+        // Event delegation for abstract indicator clicks
+        document.addEventListener( 'click', ( e ) => {
+            const indicator = e.target.closest( '.abstract-indicator' );
+            const tooltip = document.getElementById( 'abstract-tooltip' );
+
+            if ( indicator ) {
+                e.stopPropagation();
+                const abstract = decodeURIComponent( indicator.dataset.abstract );
+                const content = tooltip.querySelector( '.abstract-tooltip-content' );
+                content.textContent = abstract;
+
+                // Position near the indicator
+                const rect = indicator.getBoundingClientRect();
+                const tooltipHeight = 200; // Approximate initial height
+                const viewportHeight = window.innerHeight;
+
+                // Position below indicator, but flip above if near bottom
+                let top = rect.bottom + 8;
+                if ( top + tooltipHeight > viewportHeight ) {
+                    top = rect.top - tooltipHeight - 8;
+                }
+
+                // Keep within horizontal bounds
+                let left = Math.max( 10, rect.left - 100 );
+                left = Math.min( left, window.innerWidth - 420 );
+
+                tooltip.style.top = `${top}px`;
+                tooltip.style.left = `${left}px`;
+                tooltip.classList.add( 'visible' );
+
+            } else if ( !e.target.closest( '.abstract-tooltip' ) ) {
+                // Click outside closes tooltip
+                if ( tooltip ) {
+                    tooltip.classList.remove( 'visible' );
+                }
+            }
+        } );
+
+        // Close on Escape key
+        document.addEventListener( 'keydown', ( e ) => {
+            if ( e.key === 'Escape' ) {
+                const tooltip = document.getElementById( 'abstract-tooltip' );
+                if ( tooltip ) {
+                    tooltip.classList.remove( 'visible' );
+                }
+            }
+        } );
+    }
+
+    // ========================================
     // SECTION VISIBILITY TOOLBAR METHODS
     // ========================================
 
@@ -5706,12 +5801,18 @@ class NotificationsUI {
         // Add expired badge if applicable
         const expiredBadge = isExpired ? '<span class="expired-badge">EXPIRED</span>' : '';
 
+        // Build abstract indicator if present and non-empty (for incoming messages only)
+        const hasAbstract = !isResponse && notification.abstract && notification.abstract.trim().length > 0;
+        const abstractIndicator = hasAbstract
+            ? `<span class="abstract-indicator" data-abstract="${encodeURIComponent( notification.abstract )}" title="View details">📋</span>`
+            : '';
+
         const messageDiv = document.createElement( 'div' );
         messageDiv.className = cssClass;
         messageDiv.id = notification.id || notification.id_hash || '';  // Set ID for TTS indicator
         messageDiv.innerHTML = `
             <span class="message-time">${timeStr}</span>
-            <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}${expiredBadge}</span>
+            <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}${expiredBadge}${abstractIndicator}</span>
         `;
 
         // Add to top (newest first)
@@ -7020,7 +7121,12 @@ class NotificationsUI {
                     isActive             : state.isActive || false,
                     queuePosition        : state.queuePosition,
                     currentQuestionIndex : state.currentQuestionIndex || 0,
-                    collectedAnswers     : state.collectedAnswers || {}
+                    collectedAnswers     : state.collectedAnswers || {},
+                    // Pause state fields
+                    isPaused             : state.isPaused || false,
+                    pausedAt             : state.pausedAt,
+                    totalPausedDuration  : state.totalPausedDuration || 0,
+                    serverExpiryEstimate : state.serverExpiryEstimate
                 } );
             }
 
@@ -7028,7 +7134,8 @@ class NotificationsUI {
             const queueState = {
                 notifications : stateArray,
                 queue         : this.actionRequiredQueue,
-                activeId      : this.activeActionRequiredId
+                activeId      : this.activeActionRequiredId,
+                isPaused      : this.isPaused
             };
 
             if ( stateArray.length > 0 ) {
@@ -7086,7 +7193,12 @@ class NotificationsUI {
                     isActive             : false,                 // Will be set during activation
                     queuePosition        : saved.queuePosition,
                     currentQuestionIndex : saved.currentQuestionIndex || 0,
-                    collectedAnswers     : saved.collectedAnswers || {}
+                    collectedAnswers     : saved.collectedAnswers || {},
+                    // Pause state fields
+                    isPaused             : saved.isPaused || false,
+                    pausedAt             : saved.pausedAt || null,
+                    totalPausedDuration  : saved.totalPausedDuration || 0,
+                    serverExpiryEstimate : saved.serverExpiryEstimate || null
                 };
 
                 this.actionRequiredNotifications.set( saved.id, state );
@@ -7137,10 +7249,19 @@ class NotificationsUI {
                     // Render the active notification in the active slot
                     this.renderActionRequiredNotification( activeState.notification );
 
-                    // Start countdown timer with remaining time
-                    this.startCountdownTimer( savedActiveId );
-
-                    this.log( `Restored active notification: ${savedActiveId}` );
+                    // Handle pause state restoration
+                    if ( activeState.isPaused ) {
+                        // Restore paused state - don't start timer
+                        this.isPaused = true;
+                        this.updatePauseButtonUI( savedActiveId, true );
+                        this.updatePausedTimerDisplay( savedActiveId, true );
+                        this.showGracePeriodMessage( savedActiveId, true );
+                        this.log( `Restored notification ${savedActiveId} in PAUSED state` );
+                    } else {
+                        // Start countdown timer with remaining time
+                        this.startCountdownTimer( savedActiveId );
+                        this.log( `Restored active notification: ${savedActiveId}` );
+                    }
                 }
             }
 
@@ -7227,14 +7348,19 @@ class NotificationsUI {
 
         // Store in action-required map with DEFERRED timer (expiresAt: null until activated)
         const state = {
-            notification        : notification,
-            expiresAt           : null,              // DEFERRED: set when activated, not on arrival
-            activatedAt         : null,              // Timestamp when promoted to active
-            timeoutSeconds      : notification.timeout_seconds,
-            isExpired           : false,
-            isResponded         : false,
-            isActive            : false,             // True only for the active notification
-            queuePosition       : null               // Position in queue (1-indexed), null when active
+            notification          : notification,
+            expiresAt             : null,              // DEFERRED: set when activated, not on arrival
+            activatedAt           : null,              // Timestamp when promoted to active
+            timeoutSeconds        : notification.timeout_seconds,
+            isExpired             : false,
+            isResponded           : false,
+            isActive              : false,             // True only for the active notification
+            queuePosition         : null,              // Position in queue (1-indexed), null when active
+            // Pause state fields
+            isPaused              : false,             // True when paused
+            pausedAt              : null,              // Timestamp when pause started
+            totalPausedDuration   : 0,                 // Cumulative pause time in ms
+            serverExpiryEstimate  : null               // Original server expiry (for grace period warning)
         };
 
         // Add multi-question state for multiple_choice notifications
@@ -7335,6 +7461,7 @@ class NotificationsUI {
         state.queuePosition = null;
         state.activatedAt = Date.now();
         state.expiresAt = Date.now() + ( state.timeoutSeconds * 1000 );
+        state.serverExpiryEstimate = state.expiresAt;  // Track original expiry for grace period reference
 
         this.log( `Activating notification: ${notificationId}, timeout: ${state.timeoutSeconds}s` );
 
@@ -8178,12 +8305,23 @@ class NotificationsUI {
             responseUI = this.renderMultipleChoiceUI( notification );
         }
 
+        // Build abstract section if present
+        const abstractSection = notification.abstract ? `
+            <div class="action-required-abstract">${notification.abstract}</div>
+        ` : '';
+
         card.innerHTML = `
             <div class="action-required-header">
                 <div class="action-required-title">${notification.title || notification.message}</div>
-                <div class="action-required-timer" id="timer-${notification.id}">--:--</div>
+                <div class="action-required-timer-controls">
+                    <button class="action-required-pause-btn" id="pause-btn-${notification.id}" title="Pause timer and audio (P)">
+                        \u23F8\uFE0F
+                    </button>
+                    <div class="action-required-timer" id="timer-${notification.id}">--:--</div>
+                </div>
             </div>
             <div class="action-required-message">${notification.message}</div>
+            ${abstractSection}
             <div class="action-required-progress-bar">
                 <div class="action-required-progress-fill" id="progress-${notification.id}" style="width: 100%;"></div>
             </div>
@@ -8201,6 +8339,13 @@ class NotificationsUI {
         }, 50 );
 
         // Attach event listeners
+
+        // Pause button (applies to all response types)
+        const pauseBtn = card.querySelector( '.action-required-pause-btn' );
+        if ( pauseBtn ) {
+            pauseBtn.addEventListener( 'click', () => this.togglePause() );
+        }
+
         if ( notification.response_type === 'yes_no' ) {
             card.querySelectorAll( '.response-button' ).forEach( button => {
                 button.addEventListener( 'click', ( e ) => {
@@ -8790,6 +8935,13 @@ class NotificationsUI {
 
             if ( !apiResponse.ok ) {
                 const errorData = await apiResponse.json();
+
+                // Special handling for grace period exceeded (rare with 5-minute window)
+                if ( apiResponse.status === 400 && errorData.detail?.includes( 'grace period exceeded' ) ) {
+                    this.handleGracePeriodExceeded( notificationId, state );
+                    return;
+                }
+
                 throw new Error( errorData.detail || `HTTP ${apiResponse.status}` );
             }
 
@@ -8816,6 +8968,62 @@ class NotificationsUI {
             }
             alert( `Failed to submit response: ${error.message}` );
         }
+    }
+
+    /**
+     * Handles the case when response is submitted after grace period expired.
+     * This is rare with the 5-minute window but should be handled gracefully.
+     *
+     * Requires:
+     *     - notificationId is valid
+     *     - state is the notification state object
+     *
+     * Ensures:
+     *     - User is informed their response was too late
+     *     - Notification transitions to conversation history
+     *     - Default response indicator is shown
+     */
+    handleGracePeriodExceeded( notificationId, state ) {
+        this.log( `Grace period exceeded for ${notificationId}` );
+
+        const card = document.getElementById( `action-required-${notificationId}` );
+        if ( !card ) return;
+
+        // Show message in card
+        const msgDiv = document.createElement( 'div' );
+        msgDiv.className = 'grace-period-exceeded-message';
+        msgDiv.innerHTML = '\u23F0 Response window has closed. Default response was used.';
+        card.insertBefore( msgDiv, card.firstChild );
+
+        // Mark as expired and stop timer
+        state.isExpired = true;
+        this.stopCountdownTimer( notificationId );
+
+        // Transition to conversation history after delay
+        setTimeout( () => {
+            const senderId = state.notification?.sender_id || this.UNKNOWN_SENDER;
+
+            // Remove card with animation
+            card.classList.add( 'shrink-fade' );
+            card.addEventListener( 'animationend', () => {
+                card.remove();
+
+                // Add to conversation with default indicator
+                const defaultValue = state.notification.response_default || '(no response)';
+                this.addConversationPair( senderId, state.notification, `[Default] ${defaultValue}`, true );
+
+                // Cleanup
+                this.actionRequiredNotifications.delete( notificationId );
+                this.updateActionRequiredCount();
+                this.saveActionRequiredState();
+
+                // Promote next notification
+                if ( this.activeActionRequiredId === notificationId ) {
+                    this.activeActionRequiredId = null;
+                    setTimeout( () => this.activateNextNotification(), 100 );
+                }
+            }, { once: true } );
+        }, 2000 );  // Show message for 2 seconds before transitioning
     }
 
     showConfirmation( notificationId, response, serverTimeDisplay = null, serverDateDisplay = null ) {
@@ -9218,6 +9426,202 @@ class NotificationsUI {
         if ( intervalHandle ) {
             clearInterval( intervalHandle );
             this.countdownTimers.delete( notificationId );
+        }
+    }
+
+    // ========================================
+    // ACTION-REQUIRED PAUSE/RESUME METHODS
+    // ========================================
+
+    /**
+     * Pauses the active action-required notification.
+     * Freezes countdown timer and pauses TTS playback.
+     *
+     * Requires:
+     *     - Active notification exists
+     *     - Notification is not already paused
+     *
+     * Ensures:
+     *     - Timer is frozen at current remaining time
+     *     - TTS is paused
+     *     - UI shows paused state with amber styling
+     *     - Grace period message is displayed
+     *     - State is persisted to localStorage
+     */
+    pauseActionRequired() {
+        const notificationId = this.activeActionRequiredId;
+        if ( !notificationId ) {
+            this.log( 'Pause: No active notification' );
+            return;
+        }
+
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state || state.isPaused ) {
+            this.log( 'Pause: Already paused or state not found' );
+            return;
+        }
+
+        this.log( `Pause: Pausing notification ${notificationId}` );
+
+        // 1. Record pause start time
+        state.isPaused = true;
+        state.pausedAt = Date.now();
+        this.isPaused = true;
+
+        // 2. Stop countdown timer (preserve expiresAt for remaining time calculation)
+        this.stopCountdownTimer( notificationId );
+
+        // 3. Pause TTS if playing
+        this.pauseTTS();
+
+        // 4. Update UI: button icon, amber styling, grace period message
+        this.updatePauseButtonUI( notificationId, true );
+        this.updatePausedTimerDisplay( notificationId, true );
+        this.showGracePeriodMessage( notificationId, true );
+
+        // 5. Persist state
+        this.saveActionRequiredState();
+
+        this.log( `Pause: Notification ${notificationId} paused` );
+    }
+
+    /**
+     * Resumes the paused action-required notification.
+     * Restarts countdown timer and resumes TTS playback.
+     *
+     * Requires:
+     *     - Active notification exists and is paused
+     *
+     * Ensures:
+     *     - Timer resumes with extended time (pause duration added)
+     *     - TTS resumes from paused position
+     *     - UI returns to normal state
+     *     - State is persisted to localStorage
+     */
+    resumeActionRequired() {
+        const notificationId = this.activeActionRequiredId;
+        if ( !notificationId ) {
+            this.log( 'Resume: No active notification' );
+            return;
+        }
+
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state || !state.isPaused ) {
+            this.log( 'Resume: Not paused or state not found' );
+            return;
+        }
+
+        this.log( `Resume: Resuming notification ${notificationId}` );
+
+        // 1. Calculate pause duration and extend expiresAt
+        const pauseDuration = Date.now() - state.pausedAt;
+        state.totalPausedDuration += pauseDuration;
+        state.expiresAt += pauseDuration;
+
+        // 2. Clear pause state
+        state.isPaused = false;
+        state.pausedAt = null;
+        this.isPaused = false;
+
+        // 3. Restart countdown timer
+        this.startCountdownTimer( notificationId );
+
+        // 4. Resume TTS
+        this.resumeTTS();
+
+        // 5. Update UI: button icon, remove amber styling, hide grace period message
+        this.updatePauseButtonUI( notificationId, false );
+        this.updatePausedTimerDisplay( notificationId, false );
+        this.showGracePeriodMessage( notificationId, false );
+
+        // 6. Persist state
+        this.saveActionRequiredState();
+
+        this.log( `Resume: Notification ${notificationId} resumed, added ${pauseDuration}ms to timer` );
+    }
+
+    /**
+     * Toggles pause state of the active action-required notification.
+     */
+    togglePause() {
+        if ( this.isPaused ) {
+            this.resumeActionRequired();
+        } else {
+            this.pauseActionRequired();
+        }
+    }
+
+    /**
+     * Updates the pause button icon and title.
+     * @param {string} notificationId - Notification ID
+     * @param {boolean} isPaused - True if paused
+     */
+    updatePauseButtonUI( notificationId, isPaused ) {
+        const btn = document.getElementById( `pause-btn-${notificationId}` );
+        if ( !btn ) return;
+
+        if ( isPaused ) {
+            btn.textContent = '\u25B6\uFE0F';  // ▶️ Play icon
+            btn.title = 'Resume timer and audio (P)';
+            btn.classList.add( 'paused' );
+        } else {
+            btn.textContent = '\u23F8\uFE0F';  // ⏸️ Pause icon
+            btn.title = 'Pause timer and audio (P)';
+            btn.classList.remove( 'paused' );
+        }
+    }
+
+    /**
+     * Updates the timer display styling when paused.
+     * @param {string} notificationId - Notification ID
+     * @param {boolean} isPaused - True if paused
+     */
+    updatePausedTimerDisplay( notificationId, isPaused ) {
+        const timer = document.getElementById( `timer-${notificationId}` );
+        const progress = document.querySelector( `#action-required-card-${notificationId} .action-required-progress-fill` );
+        const card = document.getElementById( `action-required-card-${notificationId}` );
+
+        if ( isPaused ) {
+            if ( timer ) timer.classList.add( 'paused' );
+            if ( progress ) progress.classList.add( 'paused' );
+            if ( card ) card.classList.add( 'paused' );
+        } else {
+            if ( timer ) timer.classList.remove( 'paused' );
+            if ( progress ) progress.classList.remove( 'paused' );
+            if ( card ) card.classList.remove( 'paused' );
+        }
+    }
+
+    /**
+     * Shows or hides the grace period message.
+     * @param {string} notificationId - Notification ID
+     * @param {boolean} show - True to show, false to hide
+     */
+    showGracePeriodMessage( notificationId, show ) {
+        const msgId = `grace-period-msg-${notificationId}`;
+        let msg = document.getElementById( msgId );
+
+        if ( show ) {
+            // Create message if doesn't exist
+            if ( !msg ) {
+                const card = document.getElementById( `action-required-${notificationId}` );
+                if ( card ) {
+                    msg = document.createElement( 'div' );
+                    msg.id = msgId;
+                    msg.className = 'grace-period-message';
+                    msg.innerHTML = '\u23F8\uFE0F Paused \u2013 5-minute grace period added';
+                    // Insert after header
+                    const header = card.querySelector( '.action-required-header' );
+                    if ( header && header.nextSibling ) {
+                        card.insertBefore( msg, header.nextSibling );
+                    } else {
+                        card.appendChild( msg );
+                    }
+                }
+            }
+            if ( msg ) msg.style.display = 'block';
+        } else {
+            if ( msg ) msg.style.display = 'none';
         }
     }
 
@@ -9717,6 +10121,13 @@ class NotificationsUI {
             // Only respond if there's an active action-required notification
             if ( this.actionRequiredNotifications.size === 0 ) return;
 
+            // P key - toggle pause (works for all response types)
+            if ( e.key.toLowerCase() === 'p' && this.activeActionRequiredId ) {
+                e.preventDefault();
+                this.togglePause();
+                return;
+            }
+
             // Get first (oldest) notification
             const firstId = this.actionRequiredNotifications.keys().next().value;
             const state = this.actionRequiredNotifications.get( firstId );
@@ -9734,7 +10145,7 @@ class NotificationsUI {
         } );
 
         this.keyboardListenerActive = true;
-        this.log( "Keyboard listener attached for Yes/No shortcuts" );
+        this.log( "Keyboard listener attached for Yes/No/Pause shortcuts" );
     }
 
     /**

@@ -9,7 +9,17 @@ Voice I/O bridge for Claude Code - enables voice notifications and conversations
 | `converse()` | Speak to user, wait for response | Yes |
 | `notify()` | Announce without waiting | No |
 | `ask_yes_no()` | Quick yes/no decision | Yes |
+| `ask_multiple_choice()` | Menu selection (mirrors AskUserQuestion) | Yes |
 | `get_session_info()` | Get session identification | No |
+
+### Common Parameters
+
+All notification tools support these optional parameters:
+
+| Parameter | Description |
+|-----------|-------------|
+| `priority` | `"low"`, `"medium"` (default), `"high"`, or `"urgent"` |
+| `abstract` | Optional supplementary context (plan details, URLs, markdown) |
 
 ## Installation
 
@@ -56,15 +66,18 @@ Create or update your MCP config file (`~/.claude/cosa_mcp.json`):
 
 ```python
 # From Claude Code
-notify("Starting code analysis...", notification_type="progress")
-notify("Build completed!", notification_type="task", priority="high")
+notify( "Starting code analysis...", notification_type="progress" )
+notify( "Build completed!", notification_type="task", priority="high" )
+
+# With abstract context
+notify( "Deploying to staging", abstract="**Files**: api.py, models.py\n**Branch**: feature/auth" )
 ```
 
 ### Converse (blocking)
 
 ```python
 # Get user input
-response = converse("What naming convention should I use?")
+response = converse( "What naming convention should I use?" )
 
 # Yes/no with default
 response = converse(
@@ -72,21 +85,48 @@ response = converse(
     response_type="yes_no",
     response_default="no"
 )
+
+# With abstract context
+response = converse(
+    "Which migration approach?",
+    abstract="Option A: Incremental (safer)\nOption B: Full rebuild (faster)"
+)
 ```
 
 ### Ask Yes/No (convenience wrapper)
 
 ```python
-if ask_yes_no("Delete the old backups?"):
+if ask_yes_no( "Delete the old backups?" ):
     # User said yes
     pass
+
+# With abstract context
+if ask_yes_no( "Proceed with migration?", abstract="This will update 47 database records" ):
+    pass
+```
+
+### Ask Multiple Choice
+
+```python
+response = ask_multiple_choice( questions=[
+    {
+        "question": "Which database should we use?",
+        "header": "Database",
+        "multiSelect": False,
+        "options": [
+            { "label": "PostgreSQL", "description": "Relational database" },
+            { "label": "MongoDB", "description": "Document database" }
+        ]
+    }
+] )
+# Returns: { "answers": { "Database": "PostgreSQL" } }
 ```
 
 ### Get Session Info
 
 ```python
 info = get_session_info()
-# Returns: {"project": "lupin", "sender_id": "claude.code@lupin.deepily.ai", ...}
+# Returns: { "project": "lupin", "sender_id": "claude.code@lupin.deepily.ai", ... }
 ```
 
 ## Session ID Format

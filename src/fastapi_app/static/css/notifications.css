@@ -476,11 +476,118 @@
             50% { opacity: 0.6; }
         }
 
+        /* ========================================
+           PAUSE BUTTON & PAUSED STATE STYLES
+           ======================================== */
+
+        .action-required-timer-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .action-required-pause-btn {
+            width: 32px;
+            height: 32px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background: #f8f9fa;
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .action-required-pause-btn:hover {
+            background: #e9ecef;
+            border-color: #adb5bd;
+            transform: scale( 1.05 );
+        }
+
+        .action-required-pause-btn:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba( 13, 110, 253, 0.25 );
+        }
+
+        .action-required-pause-btn.paused {
+            background: #fff3cd;
+            border-color: #ffc107;
+            animation: pausePulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pausePulse {
+            0%, 100% {
+                background: #fff3cd;
+                box-shadow: 0 0 0 0 rgba( 255, 193, 7, 0.4 );
+            }
+            50% {
+                background: #ffe69c;
+                box-shadow: 0 0 0 4px rgba( 255, 193, 7, 0.2 );
+            }
+        }
+
+        /* Paused state - amber theme */
+        .action-required-timer.paused {
+            color: #ffc107;
+        }
+
+        .action-required-progress-fill.paused {
+            background: #ffc107;
+        }
+
+        .action-required-notification.paused {
+            border-color: #ffc107;
+            box-shadow: 0 2px 8px rgba( 255, 193, 7, 0.3 );
+        }
+
+        /* Grace period message (shown when paused) */
+        .grace-period-message {
+            background: rgba( 255, 193, 7, 0.1 );
+            border: 1px solid #ffc107;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-top: 8px;
+            margin-bottom: 8px;
+            font-size: 13px;
+            color: #856404;
+            text-align: center;
+        }
+
+        /* Grace period exceeded message (shown when too late) */
+        .grace-period-exceeded-message {
+            background: rgba( 220, 53, 69, 0.1 );
+            border: 1px solid #dc3545;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            font-size: 13px;
+            color: #721c24;
+            text-align: center;
+        }
+
         .action-required-message {
             margin-bottom: 12px;
             color: #495057;
             font-size: 14px;
             line-height: 1.5;
+        }
+
+        .action-required-abstract {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 8px;
+            margin-bottom: 12px;
+            padding: 10px 14px;
+            background: #f8f9fa;
+            border-left: 3px solid #6c757d;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: inherit;
+            line-height: 1.6;
+            max-height: 200px;
+            overflow-y: auto;
         }
 
         .action-required-progress-bar {
@@ -2697,4 +2804,79 @@
     font-weight: bold;
     border-radius: 3px;
     margin-left: 6px;
+}
+
+/* ========================================
+   ABSTRACT INDICATOR & TOOLTIP (History)
+   ======================================== */
+
+/* Abstract indicator emoji - clickable to show details */
+.abstract-indicator {
+    cursor: pointer;
+    margin-left: 6px;
+    font-size: 14px;
+    opacity: 0.7;
+    transition: opacity 0.2s, transform 0.2s;
+    vertical-align: middle;
+}
+
+.abstract-indicator:hover {
+    opacity: 1;
+    transform: scale( 1.1 );
+}
+
+/* Abstract tooltip/popup - floating container */
+.abstract-tooltip {
+    position: fixed;
+    z-index: 10001;
+    max-width: 400px;
+    min-width: 200px;
+    padding: 0;
+    background: #ffffff;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba( 0, 0, 0, 0.15 );
+    font-size: 13px;
+    line-height: 1.5;
+    color: #333;
+    /* Hidden by default */
+    display: none;
+}
+
+.abstract-tooltip.visible {
+    display: block;
+}
+
+.abstract-tooltip-header {
+    font-weight: 600;
+    color: #495057;
+    padding: 10px 14px;
+    border-bottom: 1px solid #e9ecef;
+    background: #f8f9fa;
+    border-radius: 8px 8px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.abstract-tooltip-close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: #6c757d;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.abstract-tooltip-close:hover {
+    color: #333;
+}
+
+.abstract-tooltip-content {
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 12px 14px;
+    white-space: pre-wrap;
+    font-family: inherit;
 }

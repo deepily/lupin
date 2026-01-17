@@ -223,7 +223,8 @@ def converse(
     timeout_seconds: int = 120,
     response_default: Optional[ str ] = None,
     priority: str = "medium",
-    title: Optional[ str ] = None
+    title: Optional[ str ] = None,
+    abstract: Optional[ str ] = None
 ) -> str:
     """
     Speak to the user and wait for their voice/text response.
@@ -239,6 +240,7 @@ def converse(
         response_default: Fallback if timeout or user offline
         priority: "low", "medium", "high", or "urgent"
         title: Optional short title for the notification
+        abstract: Optional supplementary context (plan details, URLs, markdown)
 
     Returns:
         User's response as text, or error/timeout message
@@ -259,7 +261,8 @@ def converse(
             timeout_seconds=timeout_seconds,
             response_default=response_default,
             title=title,
-            sender_id=SENDER_ID
+            sender_id=SENDER_ID,
+            abstract=abstract
         )
     except ( ValidationError, ValueError ) as e:
         logger.error( f"Validation error: {e}" )
@@ -282,7 +285,8 @@ def converse(
 def notify(
     message: str,
     notification_type: str = "progress",
-    priority: str = "medium"
+    priority: str = "medium",
+    abstract: Optional[ str ] = None
 ) -> str:
     """
     Announce something to the user without waiting for response.
@@ -295,6 +299,7 @@ def notify(
         message: What to announce to the user
         notification_type: "task", "progress", "alert", or "custom"
         priority: "low", "medium", "high", or "urgent"
+        abstract: Optional supplementary context (plan details, URLs, markdown)
 
     Returns:
         Delivery status message
@@ -311,7 +316,8 @@ def notify(
             message=message,
             notification_type=NotificationType( notification_type ),
             priority=NotificationPriority( priority ),
-            sender_id=SENDER_ID
+            sender_id=SENDER_ID,
+            abstract=abstract
         )
     except ( ValidationError, ValueError ) as e:
         logger.error( f"Validation error: {e}" )
@@ -329,7 +335,8 @@ def notify(
 def ask_yes_no(
     question: str,
     default: str = "no",
-    timeout_seconds: int = 60
+    timeout_seconds: int = 60,
+    abstract: Optional[ str ] = None
 ) -> bool:
     """
     Ask a yes/no question and get a boolean result.
@@ -340,6 +347,7 @@ def ask_yes_no(
         question: The yes/no question to ask
         default: Default answer if timeout ("yes" or "no")
         timeout_seconds: How long to wait (default 60)
+        abstract: Optional supplementary context (plan details, URLs, markdown)
 
     Returns:
         True if user said yes, False otherwise
@@ -360,7 +368,8 @@ def ask_yes_no(
             priority=NotificationPriority.MEDIUM,
             timeout_seconds=timeout_seconds,
             response_default=default,
-            sender_id=SENDER_ID
+            sender_id=SENDER_ID,
+            abstract=abstract
         )
     except ( ValidationError, ValueError ):
         return default == "yes"
@@ -378,7 +387,8 @@ def ask_multiple_choice(
     questions: list,
     timeout_seconds: int = 120,
     priority: str = "medium",
-    title: Optional[ str ] = None
+    title: Optional[ str ] = None,
+    abstract: Optional[ str ] = None
 ) -> dict:
     """
     Ask multiple-choice questions and get user's selection(s).
@@ -403,6 +413,7 @@ def ask_multiple_choice(
         timeout_seconds: How long to wait for response (1-600, default 120)
         priority: "low", "medium", "high", or "urgent"
         title: Optional short title for the notification
+        abstract: Optional supplementary context (plan details, URLs, markdown)
 
     Returns:
         dict with answers keyed by header:
@@ -454,7 +465,8 @@ def ask_multiple_choice(
             timeout_seconds=timeout_seconds,
             title=title,
             sender_id=SENDER_ID,
-            response_options=response_options
+            response_options=response_options,
+            abstract=abstract
         )
     except ( ValidationError, ValueError ) as e:
         logger.error( f"Validation error: {e}" )
