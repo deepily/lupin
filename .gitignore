@@ -55,8 +55,8 @@ src/conf/memory/**
 #skip the keys directory
 src/conf/keys/**
 
-# Skip the io/logs directory
-io/**
+# Skip the io directory (logs, outputs, etc.)
+io/
 
 # Omit Mail Map
 .mailmap
