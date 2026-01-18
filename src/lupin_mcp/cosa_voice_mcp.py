@@ -53,6 +53,23 @@ from cosa.cli.notification_models import (
 from cosa.cli.notify_user_sync import notify_user_sync
 from cosa.cli.notify_user_async import notify_user_async
 
+
+def _normalize_abstract( abstract: Optional[ str ] ) -> Optional[ str ]:
+    """
+    Convert literal \\n to actual newlines in abstract text.
+
+    Requires:
+        - abstract is None or a string
+
+    Ensures:
+        - returns None if input is None
+        - returns string with literal \\n converted to newlines
+    """
+    if abstract is None:
+        return None
+    return abstract.replace( '\\n', '\n' )
+
+
 # ============================================================================
 # Logging Configuration
 # ============================================================================
@@ -262,7 +279,7 @@ def converse(
             response_default=response_default,
             title=title,
             sender_id=SENDER_ID,
-            abstract=abstract
+            abstract=_normalize_abstract( abstract )
         )
     except ( ValidationError, ValueError ) as e:
         logger.error( f"Validation error: {e}" )
@@ -317,7 +334,7 @@ def notify(
             notification_type=NotificationType( notification_type ),
             priority=NotificationPriority( priority ),
             sender_id=SENDER_ID,
-            abstract=abstract
+            abstract=_normalize_abstract( abstract )
         )
     except ( ValidationError, ValueError ) as e:
         logger.error( f"Validation error: {e}" )
@@ -369,7 +386,7 @@ def ask_yes_no(
             timeout_seconds=timeout_seconds,
             response_default=default,
             sender_id=SENDER_ID,
-            abstract=abstract
+            abstract=_normalize_abstract( abstract )
         )
     except ( ValidationError, ValueError ):
         return default == "yes"
@@ -466,7 +483,7 @@ def ask_multiple_choice(
             title=title,
             sender_id=SENDER_ID,
             response_options=response_options,
-            abstract=abstract
+            abstract=_normalize_abstract( abstract )
         )
     except ( ValidationError, ValueError ) as e:
         logger.error( f"Validation error: {e}" )

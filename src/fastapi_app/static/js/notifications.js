@@ -7098,6 +7098,10 @@ class NotificationsUI {
     renderMarkdown( text ) {
         if ( !text ) return '';
 
+        // Normalize escaped newlines to actual newlines
+        // Handles literal \n from MCP/JSON transport
+        text = text.replace( /\\n/g, '\n' );
+
         // Check if libraries are available
         if ( typeof marked === 'undefined' ) {
             this.error( 'marked.js not loaded - falling back to plain text with HTML escaping' );
