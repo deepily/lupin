@@ -5637,9 +5637,11 @@ class NotificationsUI {
                 <span class="sender-status">${statusIndicator}</span>
                 <span class="sender-project-name">${projectName}</span>
                 ${sessionDisplay}
-                <span class="sender-new-count"></span>
-                <span class="sender-message-count">(0)</span>
-                <span class="sender-last-activity">Last: --</span>
+                <span class="sender-stats-group">
+                    <span class="sender-new-count"></span>
+                    <span class="sender-message-count">(0)</span>
+                    <span class="sender-last-activity">Last: --</span>
+                </span>
                 <button class="sender-delete-btn" onclick="event.stopPropagation(); window.notificationsUI.deleteSenderConversation('${escapedSenderId}')" title="Delete all">×</button>
                 <span class="sender-toggle">▼</span>
             </div>

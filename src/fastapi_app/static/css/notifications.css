@@ -1244,6 +1244,13 @@
             color: #495057;
         }
 
+        .sender-stats-group {
+            display: flex;
+            align-items: center;
+            margin-left: auto;  /* Pushes entire group to right */
+            gap: 6px;           /* Consistent spacing between stats */
+        }
+
         .sender-message-count {
             font-size: 12px;
             color: #6c757d;
@@ -1252,7 +1259,6 @@
         .sender-last-activity {
             font-size: 11px;
             color: #868e96;
-            margin-left: auto;
             font-style: italic;
         }
 

@@ -503,53 +503,42 @@ def _format_questions_for_tts( questions: list ) -> str:
     """
     Format questions for TTS playback.
 
-    Creates a natural language representation suitable for text-to-speech.
-    Includes "Question N of X" prefix for context.
+    Returns ONLY the question text. Options are displayed in the UI
+    and should NOT be included in the spoken TTS message.
 
     Requires:
         - questions is a non-empty list of question dicts
-        - Each question has 'question' and 'options' fields
 
     Ensures:
-        - Returns a string suitable for TTS
-        - Includes question number context (Question 1 of 3)
-        - Lists options with numbers
+        - Returns concise question text suitable for TTS
+        - Does NOT include option labels or descriptions
+        - Includes question number context for multi-question scenarios
+        - Adds multi-select hint when applicable
 
     Args:
         questions: List of question dicts
 
     Returns:
-        str: TTS-friendly message
+        str: TTS-friendly message (question text only)
     """
     total = len( questions )
     parts = []
 
     for i, q in enumerate( questions, 1 ):
         question_text = q.get( 'question', 'Please select an option' )
-        options = q.get( 'options', [] )
         multi_select = q.get( 'multiSelect', False )
 
-        # Build question intro
+        # Build question intro (question text ONLY)
         if total > 1:
             part = f"Question {i} of {total}: {question_text}"
         else:
             part = question_text
 
-        # Add multi-select hint
+        # Add multi-select hint if needed
         if multi_select:
             part += " You can select multiple options."
 
-        # List options
-        option_texts = []
-        for j, opt in enumerate( options, 1 ):
-            label = opt.get( 'label', f'Option {j}' )
-            desc  = opt.get( 'description', '' )
-            if desc:
-                option_texts.append( f"Option {j}: {label} - {desc}" )
-            else:
-                option_texts.append( f"Option {j}: {label}" )
-
-        part += " " + ". ".join( option_texts ) + "."
+        # NOTE: Options are displayed in UI, not spoken in TTS
         parts.append( part )
 
     return " ".join( parts )
