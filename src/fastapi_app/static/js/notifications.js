@@ -5424,6 +5424,15 @@ class NotificationsUI {
      */
     addNotificationToSenderGroup( notification, isResponse = false ) {
         const senderId = this.resolveSenderId( notification );
+
+        // Save server-provided session_name if present (takes priority over auto-generated)
+        if ( notification.session_name ) {
+            const parsed = this.parseSenderId( senderId );
+            if ( parsed.sessionId ) {
+                this.saveSessionName( parsed.sessionId, notification.session_name );
+            }
+        }
+
         // Extract date directly from ISO timestamp to preserve server timezone
         // (avoids browser timezone conversion issues)
         const dateString = this.extractDateFromTimestamp( notification.timestamp );
