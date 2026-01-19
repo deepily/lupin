@@ -9654,12 +9654,51 @@ class NotificationsUI {
 
     /**
      * Toggles pause state of the active action-required notification.
+     * Includes state recovery if activeActionRequiredId is null but a notification is visible.
      */
     togglePause() {
+        this.log( `togglePause called: isPaused=${this.isPaused}, activeId=${this.activeActionRequiredId}` );
+
+        // Defensive check: if no active ID but notification is visible, attempt recovery
+        if ( !this.activeActionRequiredId ) {
+            const activeSlot = document.getElementById( 'action-required-active-slot' );
+            const visibleCard = activeSlot?.querySelector( '.action-required-notification' );
+
+            if ( visibleCard ) {
+                // Extract notification ID from card ID (format: action-required-{id})
+                const cardId = visibleCard.id;
+                const notificationId = cardId.replace( 'action-required-', '' );
+
+                if ( notificationId && this.actionRequiredNotifications.has( notificationId ) ) {
+                    this.log( `togglePause: Recovering activeActionRequiredId from visible card: ${notificationId}` );
+                    this.activeActionRequiredId = notificationId;
+
+                    // Also mark state as active
+                    const state = this.actionRequiredNotifications.get( notificationId );
+                    if ( state ) {
+                        state.isActive = true;
+                    }
+                }
+            }
+        }
+
+        // Now proceed with pause toggle
         if ( this.isPaused ) {
             this.resumeActionRequired();
         } else {
             this.pauseActionRequired();
+        }
+
+        // Visual feedback if pause still didn't work (activeActionRequiredId still null)
+        if ( !this.activeActionRequiredId ) {
+            this.log( 'togglePause: Still no active notification after recovery attempt' );
+            // Brief shake animation on the pause button to indicate issue
+            const visibleCard = document.querySelector( '.action-required-notification.active' );
+            const pauseBtn = visibleCard?.querySelector( '.action-required-pause-btn' );
+            if ( pauseBtn ) {
+                pauseBtn.classList.add( 'shake' );
+                setTimeout( () => pauseBtn.classList.remove( 'shake' ), 300 );
+            }
         }
     }
 

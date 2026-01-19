@@ -542,6 +542,17 @@
             box-shadow: 0 2px 8px rgba( 255, 193, 7, 0.3 );
         }
 
+        /* Shake animation for pause button when it can't execute */
+        @keyframes pauseButtonShake {
+            0%, 100% { transform: translateX( 0 ); }
+            25% { transform: translateX( -3px ); }
+            75% { transform: translateX( 3px ); }
+        }
+
+        .action-required-pause-btn.shake {
+            animation: pauseButtonShake 0.3s ease-in-out;
+        }
+
         /* Grace period message (shown when paused) */
         .grace-period-message {
             background: rgba( 255, 193, 7, 0.1 );
