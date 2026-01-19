@@ -52,6 +52,7 @@ from cosa.cli.notification_models import (
 )
 from cosa.cli.notify_user_sync import notify_user_sync
 from cosa.cli.notify_user_async import notify_user_async
+from cosa.utils.notification_utils import format_questions_for_tts, convert_questions_for_api
 
 
 def _normalize_abstract( abstract: Optional[ str ] ) -> Optional[ str ]:
@@ -468,10 +469,10 @@ def ask_multiple_choice(
         return { "error": "questions must be a non-empty list" }
 
     # Build TTS-friendly message from questions
-    tts_message = _format_questions_for_tts( questions )
+    tts_message = format_questions_for_tts( questions )
 
-    # Convert questions to response_options format (camelCase → snake_case)
-    response_options = _convert_questions_format( questions )
+    # Convert questions to response_options format (camelCase -> snake_case)
+    response_options = convert_questions_for_api( questions )
 
     try:
         request = NotificationRequest(
@@ -497,85 +498,6 @@ def ask_multiple_choice(
         return { "error": "timeout - no response received", "timeout": True }
     else:
         return { "error": f"error: {response.status}" }
-
-
-def _format_questions_for_tts( questions: list ) -> str:
-    """
-    Format questions for TTS playback.
-
-    Returns ONLY the question text. Options are displayed in the UI
-    and should NOT be included in the spoken TTS message.
-
-    Requires:
-        - questions is a non-empty list of question dicts
-
-    Ensures:
-        - Returns concise question text suitable for TTS
-        - Does NOT include option labels or descriptions
-        - Includes question number context for multi-question scenarios
-        - Adds multi-select hint when applicable
-
-    Args:
-        questions: List of question dicts
-
-    Returns:
-        str: TTS-friendly message (question text only)
-    """
-    total = len( questions )
-    parts = []
-
-    for i, q in enumerate( questions, 1 ):
-        question_text = q.get( 'question', 'Please select an option' )
-        multi_select = q.get( 'multiSelect', False )
-
-        # Build question intro (question text ONLY)
-        if total > 1:
-            part = f"Question {i} of {total}: {question_text}"
-        else:
-            part = question_text
-
-        # Add multi-select hint if needed
-        if multi_select:
-            part += " You can select multiple options."
-
-        # NOTE: Options are displayed in UI, not spoken in TTS
-        parts.append( part )
-
-    return " ".join( parts )
-
-
-def _convert_questions_format( questions: list ) -> dict:
-    """
-    Convert Claude Code's camelCase format to API's snake_case format.
-
-    Claude Code uses: multiSelect, options
-    API expects: multi_select, options (same)
-
-    Requires:
-        - questions is a list of question dicts
-
-    Ensures:
-        - Returns dict with 'questions' array
-        - multiSelect converted to multi_select
-        - Other fields preserved
-
-    Args:
-        questions: List of question dicts in Claude Code format
-
-    Returns:
-        dict: API-compatible response_options
-    """
-    converted = []
-    for q in questions:
-        converted_q = {
-            "question"     : q.get( 'question', '' ),
-            "header"       : q.get( 'header', 'Selection' ),
-            "multi_select" : q.get( 'multiSelect', False ),
-            "options"      : q.get( 'options', [] )
-        }
-        converted.append( converted_q )
-
-    return { "questions": converted }
 
 
 def _parse_multiple_choice_response( response_value: Optional[ str ] ) -> dict:
