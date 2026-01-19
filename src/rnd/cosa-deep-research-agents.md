@@ -41,6 +41,10 @@
    - [Implementation Location](#implementation-location)
 6. [Integration Guide](#integration-guide)
 7. [Testing Strategy](#testing-strategy)
+8. [Progressive Narrowing Test Harness](#progressive-narrowing-test-harness) *(Added January 2026)*
+   - [Harness Overview](#harness-overview)
+   - [Mock Infrastructure](#mock-infrastructure)
+   - [CLI Interface](#cli-interface)
 
 ---
 
@@ -4182,6 +4186,97 @@ python -m cosa.agents.deep_research.cli --query "..."
 > "Token usage by itself explains 80% of the variance [in performance]."
 
 This validates the multi-agent architecture: parallel context windows enable more token throughput than a single agent.
+
+---
+
+## Progressive Narrowing Test Harness
+
+*(Added January 2026 - Session 74b)*
+
+The progressive narrowing phase is a critical part of the Deep Research workflow where subqueries are clustered into themes and the user selects which themes/topics to research. This isolated test harness enables testing this logic without running the full CLI or making API calls.
+
+### Harness Overview
+
+**Files**:
+- `src/cosa/agents/deep_research/narrowing_mocks.py` (~300 lines) - Mock responses and test data
+- `src/cosa/agents/deep_research/narrowing_harness.py` (~660 lines) - Core harness with CLI
+
+**Purpose**: Extract and isolate the progressive narrowing logic (originally in `cli.py` lines 309-434) into a standalone, testable module.
+
+**Phases**:
+1. **Theme Clustering**: Group subqueries into semantic themes via LLM
+2. **Theme Selection**: User selects which themes to research
+3. **Topic Refinement**: Within selected themes, user can refine topic selection
+4. **Final Filtering**: Produce final list of subqueries to research
+
+```python
+@dataclass
+class NarrowingResult:
+    """Result of the progressive narrowing process."""
+    selected_themes  : list[ dict ]
+    selected_topics  : list[ dict ]
+    final_subqueries : list[ dict ]
+    phase_reached    : str  # "themes", "topics", "complete", "cancelled"
+```
+
+### Mock Infrastructure
+
+**Canned Theme Responses**:
+- `MOCK_THEMES_3`: 3 themes for 5 subqueries (Core Concepts, Performance, Ecosystem)
+- `MOCK_THEMES_4`: 4 themes for 6-7 subqueries
+- `MOCK_THEMES_6`: 6 themes for 8+ subqueries
+- `MOCK_THEMES_1`: Single theme (forces auto-select path)
+- `MOCK_THEMES_EMPTY`: Empty response (triggers fallback path)
+
+**Sample Subquery Sets**:
+- `SAMPLE_SUBQUERIES_5`: React vs Vue comparison (5 topics)
+- `SAMPLE_SUBQUERIES_8`: Python vs Rust comparison (8 topics)
+
+**Mock API Client**:
+```python
+class MockResearchAPIClient:
+    """Simulates theme clustering API calls."""
+
+    async def call_with_json_output( ... ) -> dict:
+        # Returns appropriate mock based on subquery count
+        return get_mock_theme_response( num_subqueries, self.theme_variant )
+```
+
+### CLI Interface
+
+**Arguments**:
+| Flag | Description |
+|------|-------------|
+| `--input` | JSON file with subqueries |
+| `--output` | Output file for results |
+| `--mock` | Use mock API client (no real API calls) |
+| `--cli-mode` | Force CLI text mode (no voice) |
+| `--auto-approve` | Auto-select defaults |
+| `--verbose` | Verbose output with progress |
+| `--debug` | Debug output |
+| `--phase` | Stop at phase: `themes`, `topics`, or `full` |
+| `--sample` | Sample set size: `5` or `8` |
+
+**Usage Examples**:
+```bash
+# Run smoke test (no arguments)
+PYTHONPATH="src:$PYTHONPATH" python -m cosa.agents.deep_research.narrowing_harness
+
+# Mock mode with 8-topic sample
+PYTHONPATH="src:$PYTHONPATH" python -m cosa.agents.deep_research.narrowing_harness \
+    --mock --sample 8 --verbose
+
+# CLI mode (force text-only, no voice)
+PYTHONPATH="src:$PYTHONPATH" python -m cosa.agents.deep_research.narrowing_harness \
+    --cli-mode --mock --verbose
+
+# Real API with custom input
+PYTHONPATH="src:$PYTHONPATH" python -m cosa.agents.deep_research.narrowing_harness \
+    --input subqueries.json --verbose
+```
+
+**Key Design Decision - Dual Modality**:
+The harness does NOT create its own mode management. Instead, it delegates to the existing `voice_io.py` module for voice-first interaction with CLI fallback. Only when `--cli-mode` is explicitly passed does it call `voice_io.set_cli_mode(True)`.
 
 ---
 

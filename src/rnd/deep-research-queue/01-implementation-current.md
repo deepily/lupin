@@ -1,8 +1,49 @@
 # Implementation Status - Deep Research Queue
 
-> **Active Phase Tracking** | Last Updated: 2026-01-18 (Session 69b)
+> **Active Phase Tracking** | Last Updated: 2026-01-19 (Session 74b)
 
 ## Current Phase: 5 (cosa-voice MCP Enhancement)
+
+---
+
+## Session 74b: Progressive Narrowing Test Harness ✅ COMPLETE
+
+**Status**: ✅ Complete (Session 74b)
+
+**Purpose**: Isolated test harness for the "progressive narrowing" phase - theme clustering, theme selection, topic refinement, and final filtering. Enables testing without full CLI or API calls.
+
+**Files Created**:
+- `src/cosa/agents/deep_research/narrowing_mocks.py` (~300 lines)
+- `src/cosa/agents/deep_research/narrowing_harness.py` (~660 lines)
+
+**Key Features**:
+- Mock API client (`MockResearchAPIClient`) for testing without Anthropic API calls
+- Sample subquery sets: 5 topics (React vs Vue) and 8 topics (Python vs Rust)
+- Canned theme clustering responses (3/4/6/1/empty variants)
+- CLI flags: `--mock`, `--cli-mode`, `--sample 5|8`, `--phase`, `--auto-approve`, `--verbose`, `--debug`
+- Dual-modality support via existing `voice_io.py` (voice-first, CLI fallback)
+- `NarrowingResult` dataclass for phase tracking
+
+**CLI Usage**:
+```bash
+# Smoke test (no args)
+PYTHONPATH="src:$PYTHONPATH" python -m cosa.agents.deep_research.narrowing_harness
+
+# Mock mode with 8-topic sample
+PYTHONPATH="src:$PYTHONPATH" python -m cosa.agents.deep_research.narrowing_harness --mock --sample 8 --verbose
+
+# CLI mode (force text-only)
+PYTHONPATH="src:$PYTHONPATH" python -m cosa.agents.deep_research.narrowing_harness --cli-mode --mock --verbose
+```
+
+**Verification**:
+- [x] narrowing_mocks.py smoke test PASSED
+- [x] narrowing_harness.py smoke test PASSED
+- [x] Entry point correctly detects --verbose as CLI mode (not smoke test)
+- [x] Mock mode works with sample subqueries
+- [x] Voice-first modality delegates to voice_io.py
+
+---
 
 ### Session 69b Completed ✅
 1. ✅ Created AgenticJobBase foundation class
