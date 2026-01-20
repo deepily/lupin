@@ -305,8 +305,9 @@
             startTime = performance.now();
 
             // Connect to WebSocket with selected model and voice
+            // Note: Uses /api prefix because endpoint is in speech.py router
             const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const ws = new WebSocket( `${wsProtocol}//${location.host}/ws/pcm-tts?model_id=${modelId}&voice_id=${voiceId}` );
+            const ws = new WebSocket( `${wsProtocol}//${location.host}/api/ws/pcm-tts?model_id=${modelId}&voice_id=${voiceId}` );
             ws.binaryType = 'arraybuffer';
 
             ws.onopen = () => {
