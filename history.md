@@ -1,7 +1,7 @@
 # Lupin Project History
 
 > **📋 TODO FOR NEXT SESSION (Session 77)**:
-> 1. **🎙️ Podcast Generator - Manual Testing**: Session 76 fixes complete (save timing + version suffix). Awaiting manual test of full workflow. See plan: `/home/rruiz/.claude/plans/humble-dancing-beacon.md`
+> 1. ~~**🎙️ Podcast Generator - Manual Testing**: Session 76 fixes complete (save timing + version suffix).~~ ✅ **VERIFIED by user (Session 77)**
 > 2. **🔬 Deep Research Queue Integration - API Testing**: Test `POST /api/deep-research/submit` endpoint with proper JWT authentication (login first via `/auth/login`). Phases 1-4 backend implementation complete. See plan: `/home/rruiz/.claude/plans/tidy-doodling-pizza.md`
 > 3. **🎙️ Podcast Generator Phase 2 (FUTURE)**: Implement TTS audio generation and stitching (ElevenLabs multi-voice, pydub concatenation).
 > 4. **⏰ Job Queue Progressive Disclosure UI - MANUAL TESTING**: Full 6-phase implementation complete (Session 57 continuation), awaiting browser testing. See plan: `/home/rruiz/.claude/plans/cheeky-leaping-scone.md`
