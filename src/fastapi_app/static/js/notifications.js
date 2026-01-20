@@ -8424,6 +8424,9 @@ class NotificationsUI {
 
         card.innerHTML = `
             <div class="action-required-header">
+                <button class="action-required-cancel-btn" data-notification-id="${notification.id}" title="Cancel and use default (Esc)">
+                    ✕
+                </button>
                 <div class="action-required-title">${notification.title || notification.message}</div>
                 <div class="action-required-timer-controls">
                     <button class="action-required-pause-btn" id="pause-btn-${notification.id}" title="Pause timer and audio (P)">
@@ -8458,10 +8461,16 @@ class NotificationsUI {
             pauseBtn.addEventListener( 'click', () => this.togglePause() );
         }
 
+        // Cancel button in header (applies to all response types)
+        const cancelBtn = card.querySelector( '.action-required-cancel-btn' );
+        if ( cancelBtn ) {
+            cancelBtn.addEventListener( 'click', () => this.cancelActionRequired( notification.id ) );
+        }
+
         if ( notification.response_type === 'yes_no' ) {
             card.querySelectorAll( '.response-button' ).forEach( button => {
                 button.addEventListener( 'click', ( e ) => {
-                    const response = e.target.dataset.response;
+                    const response = e.target.closest( '.response-button' ).dataset.response;
                     this.submitResponse( notification.id, response );
                 } );
             } );
@@ -9703,6 +9712,50 @@ class NotificationsUI {
     }
 
     /**
+     * Cancels the active action-required notification by submitting the default value.
+     * Triggered by Cancel button click or Escape key.
+     *
+     * Requires:
+     *   - notificationId corresponds to an active action-required notification
+     *
+     * Ensures:
+     *   - Submits response_default value (or 'no' for yes_no, '' for others)
+     *   - Notification is dismissed same as a normal response
+     */
+    cancelActionRequired( notificationId ) {
+        const state = this.actionRequiredNotifications.get( notificationId );
+        if ( !state ) {
+            this.log( `cancelActionRequired: Notification ${notificationId} not found` );
+            return;
+        }
+
+        if ( state.isResponded ) {
+            this.log( `cancelActionRequired: Notification ${notificationId} already responded` );
+            return;
+        }
+
+        const notification = state.notification;
+        let defaultValue = notification.response_default;
+
+        // Fallback defaults based on response type
+        if ( defaultValue === undefined || defaultValue === null ) {
+            if ( notification.response_type === 'yes_no' ) {
+                defaultValue = 'no';
+            } else if ( notification.response_type === 'multiple_choice' ) {
+                // For multiple choice, return a cancelled/timeout response structure
+                defaultValue = JSON.stringify( { cancelled: true, answers: {} } );
+            } else {
+                defaultValue = '';
+            }
+        }
+
+        this.log( `cancelActionRequired: Cancelling ${notificationId} with default value: "${defaultValue}"` );
+
+        // Submit the default value
+        this.submitResponse( notificationId, defaultValue );
+    }
+
+    /**
      * Updates the pause button icon and title.
      * @param {string} notificationId - Notification ID
      * @param {boolean} isPaused - True if paused
@@ -10268,6 +10321,7 @@ class NotificationsUI {
     attachKeyboardListener() {
         if ( this.keyboardListenerActive ) return;
 
+        // keypress for Y/N/P shortcuts
         document.addEventListener( 'keypress', ( e ) => {
             // Only respond if there's an active action-required notification
             if ( this.actionRequiredNotifications.size === 0 ) return;
@@ -10295,8 +10349,21 @@ class NotificationsUI {
             }
         } );
 
+        // keydown for Escape (keypress doesn't fire for Escape in many browsers)
+        document.addEventListener( 'keydown', ( e ) => {
+            if ( e.key === 'Escape' && this.activeActionRequiredId ) {
+                // Don't cancel if user is in a text input (let them escape from recording instead)
+                const activeElement = document.activeElement;
+                const isInInput = activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA';
+                if ( isInInput ) return;
+
+                e.preventDefault();
+                this.cancelActionRequired( this.activeActionRequiredId );
+            }
+        } );
+
         this.keyboardListenerActive = true;
-        this.log( "Keyboard listener attached for Yes/No/Pause shortcuts" );
+        this.log( "Keyboard listener attached for Yes/No/Pause/Escape shortcuts" );
     }
 
     /**

@@ -447,6 +447,8 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 12px;
+            position: relative;
+            padding-left: 36px;  /* Make room for cancel button + buffer */
         }
 
         .action-required-title {
@@ -920,6 +922,32 @@
             font-size: 11px;
             color: #6c757d;
             margin-left: 5px;
+        }
+
+        /* Cancel button in upper-left corner of notification card */
+        .action-required-cancel-btn {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: 2px solid #6c757d;
+            border-radius: 4px;
+            background-color: white;
+            color: #6c757d;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            z-index: 10;
+        }
+
+        .action-required-cancel-btn:hover {
+            background-color: #6c757d;
+            color: white;
         }
 
         /* Status badge styles (Phase 2.2 - in-place notifications) */

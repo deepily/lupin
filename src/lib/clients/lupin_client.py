@@ -21,7 +21,7 @@ import cosa.utils.util_stopwatch as sw
 import cosa.utils.util as du
 
 wav_file     = "vox-to-be-transcribed.wav"
-docker_path  = "/var/io/{}"
+docker_path  = "/var/lupin/io/{}"
 local_path   = "/Volumes/projects/io/{}"
 write_method = "file" # "file" or "api"
 
@@ -34,7 +34,7 @@ class GenieClient:
     def __init__( self, calling_gui=None, startup_mode="transcribe_and_clean_prose",
                   prefix="multimodal text punctuation", copy_transx_to_clipboard=True, runtime_context="docker",
                   write_method="api", debug=False, recording_timeout=30, stt_address="127.0.0.1:7999",
-                  tts_address="127.0.0.1:5002", tts_output_path="/var/io/tts.wav"
+                  tts_address="127.0.0.1:5002", tts_output_path="/var/lupin/io/tts.wav"
                   ):
         """
         Initialize the GenieClient with configuration for audio recording, transcription, and AI processing.
@@ -61,7 +61,7 @@ class GenieClient:
             recording_timeout: Maximum recording duration in seconds (default: 30)
             stt_address: Speech-to-text service address (default: "127.0.0.1:7999")
             tts_address: Text-to-speech service address (default: "127.0.0.1:5002")
-            tts_output_path: Path for TTS output files (default: "/var/io/tts.wav")
+            tts_output_path: Path for TTS output files (default: "/var/lupin/io/tts.wav")
             
         Returns:
             None
@@ -107,7 +107,7 @@ class GenieClient:
         self.recording_timeout  = recording_timeout
         self.runtime_context    = runtime_context
         self.write_method       = write_method
-        self.input_path         = "/var/io/{}".format( wav_file )
+        self.input_path         = "/var/lupin/io/{}".format( wav_file )
         self.stt_address        = stt_address
         self.tts_address        = tts_address
         self.tts_wav_path       = tts_output_path
