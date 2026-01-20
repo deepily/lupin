@@ -5612,12 +5612,12 @@ class NotificationsUI {
         // Session name is clickable for inline editing, gist button triggers LLM summary
         const sessionDisplay = sessionId
             ? `<span class="sender-session-id">#${sessionId}</span>
-               <span class="sender-session-name"
-                     onclick="event.stopPropagation(); window.notificationsUI.editSessionName('${sessionId}')"
-                     title="Click to rename">${sessionName || ''}</span>
                <button class="sender-gist-btn"
                        onclick="event.stopPropagation(); window.notificationsUI.generateSessionGist('${escapedSenderId}')"
-                       title="Generate smart gist from conversation">✨</button>`
+                       title="Generate smart gist from conversation">✨</button>
+               <span class="sender-session-name"
+                     onclick="event.stopPropagation(); window.notificationsUI.editSessionName('${sessionId}')"
+                     title="Click to rename">${sessionName || ''}</span>`
             : '';
 
         // Active indicator: filled circle for most recent sender, hollow for others

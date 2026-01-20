@@ -12,6 +12,7 @@
 >
 > **Bug Fixes Completed**:
 > 1. ✅ **MP3 Recording Path Fix**: `upload_and_transcribe_mp3_file()` failed with `[Errno 2] No such file or directory: '/var/io/recording.mp3'`. **Root cause**: Hardcoded path missed during Session 78 Docker path updates. **Solution**: Added `audio_recording_file_path` config key to `lupin-app.ini`, updated `speech.py` to use `du.get_project_root() + config_mgr.get("audio_recording_file_path")`. **Files**: `lupin-app.ini`, `lupin-app-splainer.ini` (committed to Lupin), `speech.py` (COSA submodule - needs separate commit).
+> 2. ✅ **Gist Button Reorder**: Moved ✨ gist button from after session name to before it in sender card header. **New order**: `#sessionId ✨ Session Name` (was: `#sessionId Session Name ✨`). **Files**: `notifications.js` (reordered template elements), `notifications.css` (adjusted margin-left on `.sender-session-name` from 2px to 6px).
 >
 > **✅ SESSION 80 COMPLETE**: Podcast Generator Phase 2 Planning. See details below.
 >
