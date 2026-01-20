@@ -1,12 +1,17 @@
 # Lupin Project History
 
-> **📋 TODO FOR NEXT SESSION (Session 81)**:
+> **📋 TODO FOR NEXT SESSION (Session 82)**:
 > 1. **🎙️ Podcast Generator Phase 2 - TTS Audio Generation**: Implementation plan complete! Create `tts_client.py` (ElevenLabs batch generation), `audio_stitcher.py` (pydub concatenation), update `orchestrator.py` (Phases 5-6), add pydub to requirements. See plan: `/home/rruiz/.claude/plans/compressed-marinating-tarjan.md`
 > 2. **🔬 Deep Research Queue Integration - API Testing**: Test `POST /api/deep-research/submit` endpoint with proper JWT authentication. Phases 1-4 backend implementation complete. See plan: `/home/rruiz/.claude/plans/tidy-doodling-pizza.md`
 > 3. **⏰ Job Queue Progressive Disclosure UI - MANUAL TESTING**: Full 6-phase implementation complete (Session 57 continuation), awaiting browser testing. See plan: `/home/rruiz/.claude/plans/cheeky-leaping-scone.md`
 > 4. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 1 (Session Identity) complete. Remaining: Phase 4 = AgentBase History Integration, Phase 5 = Conversation Lifecycle.
 > 5. Voice discovery/configuration for notification TTS UI still pending
 > 6. **Ongoing notification UI tweaks and bug fixes (ONGOING)**: Incremental improvements to the cosa-voice notification system.
+>
+> **🔧 SESSION 81 IN PROGRESS**: Docker Path Bug Fixes - Running list of fixes for this session:
+>
+> **Bug Fixes Completed**:
+> 1. ✅ **MP3 Recording Path Fix**: `upload_and_transcribe_mp3_file()` failed with `[Errno 2] No such file or directory: '/var/io/recording.mp3'`. **Root cause**: Hardcoded path missed during Session 78 Docker path updates. **Solution**: Added `audio_recording_file_path` config key to `lupin-app.ini`, updated `speech.py` to use `du.get_project_root() + config_mgr.get("audio_recording_file_path")`. **Files**: `lupin-app.ini`, `lupin-app-splainer.ini` (committed to Lupin), `speech.py` (COSA submodule - needs separate commit).
 >
 > **✅ SESSION 80 COMPLETE**: Podcast Generator Phase 2 Planning. See details below.
 >
