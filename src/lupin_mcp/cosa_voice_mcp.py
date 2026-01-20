@@ -242,7 +242,8 @@ def converse(
     response_default: Optional[ str ] = None,
     priority: str = "medium",
     title: Optional[ str ] = None,
-    abstract: Optional[ str ] = None
+    abstract: Optional[ str ] = None,
+    job_id: Optional[ str ] = None
 ) -> str:
     """
     Speak to the user and wait for their voice/text response.
@@ -259,6 +260,7 @@ def converse(
         priority: "low", "medium", "high", or "urgent"
         title: Optional short title for the notification
         abstract: Optional supplementary context (plan details, URLs, markdown)
+        job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
 
     Returns:
         User's response as text, or error/timeout message
@@ -280,7 +282,8 @@ def converse(
             response_default=response_default,
             title=title,
             sender_id=SENDER_ID,
-            abstract=_normalize_abstract( abstract )
+            abstract=_normalize_abstract( abstract ),
+            job_id=job_id
         )
     except ( ValidationError, ValueError ) as e:
         logger.error( f"Validation error: {e}" )
@@ -304,7 +307,8 @@ def notify(
     message: str,
     notification_type: str = "progress",
     priority: str = "medium",
-    abstract: Optional[ str ] = None
+    abstract: Optional[ str ] = None,
+    job_id: Optional[ str ] = None
 ) -> str:
     """
     Announce something to the user without waiting for response.
@@ -318,6 +322,7 @@ def notify(
         notification_type: "task", "progress", "alert", or "custom"
         priority: "low", "medium", "high", or "urgent"
         abstract: Optional supplementary context (plan details, URLs, markdown)
+        job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
 
     Returns:
         Delivery status message
@@ -335,7 +340,8 @@ def notify(
             notification_type=NotificationType( notification_type ),
             priority=NotificationPriority( priority ),
             sender_id=SENDER_ID,
-            abstract=_normalize_abstract( abstract )
+            abstract=_normalize_abstract( abstract ),
+            job_id=job_id
         )
     except ( ValidationError, ValueError ) as e:
         logger.error( f"Validation error: {e}" )
@@ -354,7 +360,8 @@ def ask_yes_no(
     question: str,
     default: str = "no",
     timeout_seconds: int = 60,
-    abstract: Optional[ str ] = None
+    abstract: Optional[ str ] = None,
+    job_id: Optional[ str ] = None
 ) -> bool:
     """
     Ask a yes/no question and get a boolean result.
@@ -366,6 +373,7 @@ def ask_yes_no(
         default: Default answer if timeout ("yes" or "no")
         timeout_seconds: How long to wait (default 60)
         abstract: Optional supplementary context (plan details, URLs, markdown)
+        job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
 
     Returns:
         True if user said yes, False otherwise
@@ -387,7 +395,8 @@ def ask_yes_no(
             timeout_seconds=timeout_seconds,
             response_default=default,
             sender_id=SENDER_ID,
-            abstract=_normalize_abstract( abstract )
+            abstract=_normalize_abstract( abstract ),
+            job_id=job_id
         )
     except ( ValidationError, ValueError ):
         return default == "yes"
@@ -406,7 +415,8 @@ def ask_multiple_choice(
     timeout_seconds: int = 120,
     priority: str = "medium",
     title: Optional[ str ] = None,
-    abstract: Optional[ str ] = None
+    abstract: Optional[ str ] = None,
+    job_id: Optional[ str ] = None
 ) -> dict:
     """
     Ask multiple-choice questions and get user's selection(s).
@@ -432,6 +442,7 @@ def ask_multiple_choice(
         priority: "low", "medium", "high", or "urgent"
         title: Optional short title for the notification
         abstract: Optional supplementary context (plan details, URLs, markdown)
+        job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
 
     Returns:
         dict with answers keyed by header:
@@ -484,7 +495,8 @@ def ask_multiple_choice(
             title=title,
             sender_id=SENDER_ID,
             response_options=response_options,
-            abstract=_normalize_abstract( abstract )
+            abstract=_normalize_abstract( abstract ),
+            job_id=job_id
         )
     except ( ValidationError, ValueError ) as e:
         logger.error( f"Validation error: {e}" )

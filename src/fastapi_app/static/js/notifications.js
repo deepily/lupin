@@ -156,6 +156,13 @@ class NotificationsUI {
         this.expandedJobCards = new Set();         // Track which job cards are expanded
         this.jobInteractionsCache = new Map();     // Cache loaded interactions: job_id → interactions[]
 
+        // ========================================
+        // JOB-BASED NOTIFICATION ROUTING (Phase 6)
+        // ========================================
+        // Tracks active jobs (todo/running) for notification routing
+        // Notifications with job_id route to job card activity log instead of sender cards
+        this.registeredJobs = new Map();           // job_id → { queueName, metadata }
+
         // Phase 2.2 SSE - Action Required notifications state
         this.actionRequiredNotifications = new Map();  // notification_id → notification data + UI state
         this.countdownTimers = new Map();  // notification_id → setInterval handle
@@ -3576,6 +3583,23 @@ class NotificationsUI {
             return;  // Don't add to regular notifications list
         }
 
+        // ========================================
+        // Phase 6: Job-based notification routing
+        // ========================================
+        // If notification has job_id AND job is registered (active), route to job card
+        const jobId = notification.job_id;
+        if ( jobId && this.isJobRegistered( jobId ) ) {
+            this.log( `[Phase 6] Routing notification to job card: ${jobId}` );
+            this.appendNotificationToJobCard( jobId, notification );
+
+            // Still play notification sound for high/urgent priority
+            if ( notification.priority === "high" || notification.priority === "urgent" ) {
+                await this.playNotificationSoundByPriority( notification.priority );
+            }
+
+            return;  // Don't add to sender cards
+        }
+
         // Regular fire-and-forget notification handling
         // 1. ALWAYS play notification sound first based on priority
         await this.playNotificationSoundByPriority( notification.priority );
@@ -3981,6 +4005,9 @@ class NotificationsUI {
             this.queueCategoryState[ queueName ].jobs = jobsMetadata.length > 0 ? jobsMetadata : jobsHtml;
             this.queueCategoryState[ queueName ].loaded = true;
 
+            // Phase 6: Register/unregister jobs for notification routing
+            this.updateJobRegistration( queueName, jobsMetadata );
+
             // Update count badge
             if ( countBadge ) countBadge.textContent = jobsHtml.length;
 
@@ -4013,6 +4040,205 @@ class NotificationsUI {
          */
         const match = html.match( /Q:\s*([^<]+)/ );
         return match ? match[ 1 ].trim() : 'Unknown question';
+    }
+
+    // ========================================
+    // JOB REGISTRATION FOR NOTIFICATION ROUTING (Phase 6)
+    // ========================================
+
+    updateJobRegistration( queueName, jobsMetadata ) {
+        /**
+         * Register or unregister jobs based on queue state.
+         *
+         * Requires:
+         *     - queueName is 'todo', 'run', 'done', or 'dead'
+         *     - jobsMetadata is array of job metadata objects
+         *
+         * Ensures:
+         *     - Jobs in todo/run queues are registered for notification routing
+         *     - Jobs in done/dead queues are unregistered
+         *     - registeredJobs Map is updated
+         */
+        if ( !jobsMetadata || jobsMetadata.length === 0 ) return;
+
+        // Active queues: register jobs
+        if ( queueName === 'todo' || queueName === 'run' ) {
+            for ( const job of jobsMetadata ) {
+                const jobId = job.job_id || job.id_hash;
+                if ( jobId ) {
+                    this.registeredJobs.set( jobId, {
+                        queueName : queueName,
+                        metadata  : job
+                    } );
+                    this.log( `[Phase 6] Registered job: ${jobId} (${queueName})` );
+                }
+            }
+        }
+
+        // Completed queues: unregister jobs
+        if ( queueName === 'done' || queueName === 'dead' ) {
+            for ( const job of jobsMetadata ) {
+                const jobId = job.job_id || job.id_hash;
+                if ( jobId && this.registeredJobs.has( jobId ) ) {
+                    this.registeredJobs.delete( jobId );
+                    this.log( `[Phase 6] Unregistered job: ${jobId} (moved to ${queueName})` );
+                }
+            }
+        }
+    }
+
+    isJobRegistered( jobId ) {
+        /**
+         * Check if a job is registered for notification routing.
+         *
+         * Requires:
+         *     - jobId is a string (e.g., 'dr-a1b2c3d4')
+         *
+         * Ensures:
+         *     - Returns true if job is in todo or running queue
+         *     - Returns false otherwise
+         */
+        return this.registeredJobs.has( jobId );
+    }
+
+    getRegisteredJobInfo( jobId ) {
+        /**
+         * Get metadata for a registered job.
+         *
+         * Returns:
+         *     - { queueName, metadata } if job is registered
+         *     - null if job is not registered
+         */
+        return this.registeredJobs.get( jobId ) || null;
+    }
+
+    appendNotificationToJobCard( jobId, notification ) {
+        /**
+         * Append a notification to a job card's activity log.
+         *
+         * Requires:
+         *     - jobId is a registered job ID
+         *     - notification has message, priority, timestamp
+         *
+         * Ensures:
+         *     - Finds job card in DOM (todo or running queue)
+         *     - Creates activity log if not exists
+         *     - Appends notification entry with timestamp
+         *     - Auto-expands job card if collapsed
+         */
+        const jobInfo = this.getRegisteredJobInfo( jobId );
+        if ( !jobInfo ) {
+            this.log( `[Phase 6] Job not found for notification routing: ${jobId}` );
+            return;
+        }
+
+        // Find job card in the appropriate queue
+        const queueName = jobInfo.queueName;
+        const jobCard = document.querySelector( `#${queueName}-jobs-container .job-card[data-job-id="${jobId}"]` );
+
+        if ( !jobCard ) {
+            this.log( `[Phase 6] Job card DOM element not found: ${jobId}` );
+            // Cache the notification for when the job card is rendered
+            this.cacheJobNotification( jobId, notification );
+            return;
+        }
+
+        // Find or create activity log section
+        let activityLog = jobCard.querySelector( '.job-activity-log' );
+        if ( !activityLog ) {
+            activityLog = this.createJobActivityLog( jobCard );
+        }
+
+        // Create notification entry
+        const entry = this.createActivityLogEntry( notification );
+        activityLog.appendChild( entry );
+
+        // Auto-expand job card to show new notification
+        if ( !this.expandedJobCards.has( jobId ) ) {
+            this.expandJobCard( jobId );
+        }
+
+        // Scroll to show new entry
+        entry.scrollIntoView( { behavior: 'smooth', block: 'nearest' } );
+
+        this.log( `[Phase 6] Notification appended to job ${jobId}: ${notification.message.substring( 0, 50 )}...` );
+    }
+
+    createJobActivityLog( jobCard ) {
+        /**
+         * Create activity log section in job card.
+         *
+         * Returns:
+         *     - DOM element for activity log container
+         */
+        const detailsSection = jobCard.querySelector( '.job-card-details' );
+        if ( !detailsSection ) {
+            this.error( '[Phase 6] Job card details section not found' );
+            return null;
+        }
+
+        const activityLog = document.createElement( 'div' );
+        activityLog.className = 'job-activity-log';
+        activityLog.innerHTML = '<div class="activity-log-header">📋 Activity Log</div>';
+
+        detailsSection.appendChild( activityLog );
+        return activityLog;
+    }
+
+    createActivityLogEntry( notification ) {
+        /**
+         * Create a single activity log entry from a notification.
+         *
+         * Returns:
+         *     - DOM element for activity log entry
+         */
+        const entry = document.createElement( 'div' );
+        entry.className = `activity-log-entry priority-${notification.priority || 'low'}`;
+
+        const timestamp = notification.timestamp
+            ? new Date( notification.timestamp ).toLocaleTimeString()
+            : new Date().toLocaleTimeString();
+
+        entry.innerHTML = `
+            <span class="activity-timestamp">${timestamp}</span>
+            <span class="activity-message">${this.escapeHtml( notification.message )}</span>
+        `;
+
+        return entry;
+    }
+
+    cacheJobNotification( jobId, notification ) {
+        /**
+         * Cache notification for a job that isn't rendered yet.
+         * Will be applied when job card is created.
+         */
+        if ( !this.pendingJobNotifications ) {
+            this.pendingJobNotifications = new Map();
+        }
+
+        if ( !this.pendingJobNotifications.has( jobId ) ) {
+            this.pendingJobNotifications.set( jobId, [] );
+        }
+
+        this.pendingJobNotifications.get( jobId ).push( notification );
+        this.log( `[Phase 6] Cached notification for job ${jobId} (card not rendered yet)` );
+    }
+
+    expandJobCard( jobId ) {
+        /**
+         * Auto-expand a job card to show activity.
+         */
+        const jobCard = document.querySelector( `.job-card[data-job-id="${jobId}"]` );
+        if ( !jobCard ) return;
+
+        const details = jobCard.querySelector( '.job-card-details' );
+        const expandBtn = jobCard.querySelector( '.job-expand-btn' );
+
+        if ( details && !details.classList.contains( 'expanded' ) ) {
+            details.classList.add( 'expanded' );
+            if ( expandBtn ) expandBtn.textContent = '▼';
+            this.expandedJobCards.add( jobId );
+        }
     }
 
     renderJobCard( job, queueName ) {

@@ -1,8 +1,8 @@
 # Implementation Status - Deep Research Queue
 
-> **Active Phase Tracking** | Last Updated: 2026-01-19 (Session 74b)
+> **Active Phase Tracking** | Last Updated: 2026-01-20 (Session 83)
 
-## Current Phase: 5 (cosa-voice MCP Enhancement)
+## Current Phase: 7 (Unified Queue View - PENDING)
 
 ---
 
@@ -51,9 +51,17 @@ PYTHONPATH="src:$PYTHONPATH" python -m cosa.agents.deep_research.narrowing_harne
 3. ✅ Added FastAPI endpoint `POST /api/deep-research/submit`
 4. ✅ Integrated with RunningFifoQueue
 
-### Session 71 Goals (Next)
-1. Test API endpoint with proper JWT authentication
-2. Phase 5: cosa-voice MCP Enhancement (add `job_id` parameter)
+### Session 83 Completed ✅
+1. ✅ Created Auth Testing Quick-Reference Guide (`src/tests/AUTH-TESTING-GUIDE.md`)
+2. ✅ Created Deep Research submit smoke test (`src/tests/smoke/test_deep_research_submit_smoke.py`)
+3. ✅ Tested API endpoint with JWT auth - job `dr-c0ed19ef` queued successfully
+4. ✅ Phase 5: cosa-voice MCP Enhancement - added `job_id` parameter to all notification tools
+5. ✅ Phase 6: Notification Router (Frontend) - implemented job-based notification routing
+
+### Session 84 Goals (Next)
+1. Browser testing of Phase 6 notification routing
+2. Submit Deep Research job and verify notifications appear in job card activity log
+3. If Phase 6 verified, proceed to Phase 7 (Unified Queue View)
 
 ---
 
@@ -143,12 +151,11 @@ PYTHONPATH="src:$PYTHONPATH" python -m cosa.agents.deep_research.narrowing_harne
 **Verification**:
 - [x] Endpoint accessible at `/api/deep-research/submit`
 - [x] Python syntax valid
-- [ ] Returns 401 without auth token (NEEDS TESTING)
-- [ ] Returns 422 for invalid request body (NEEDS TESTING)
-- [ ] Creates DeepResearchJob and pushes to todo_queue (NEEDS TESTING)
-- [ ] Returns job_id in response (NEEDS TESTING)
+- [x] Returns 401 without auth token ✅ (Session 83)
+- [x] Creates DeepResearchJob and pushes to todo_queue ✅ (Session 83)
+- [x] Returns job_id in response ✅ (Session 83 - `dr-c0ed19ef`)
 
-**Testing Note**: Docker uses real JWT authentication. Must login via `/auth/login` first to get access_token, then use `Authorization: Bearer {token}` header.
+**Testing Note**: See `src/tests/AUTH-TESTING-GUIDE.md` for auth testing patterns and `src/tests/smoke/test_deep_research_submit_smoke.py` for automated testing.
 
 ---
 
@@ -176,6 +183,76 @@ PYTHONPATH="src:$PYTHONPATH" python -m cosa.agents.deep_research.narrowing_harne
 
 ---
 
+## Phase 5: cosa-voice MCP Enhancement ✅ COMPLETE
+
+**Status**: ✅ Complete (Session 83)
+
+**Files Modified**:
+- `src/cosa/cli/notification_models.py` (+20 lines)
+- `src/lupin_mcp/cosa_voice_mcp.py` (+15 lines)
+
+**Purpose**: Add `job_id` parameter to notification system for job-based routing
+
+**Changes Made**:
+- Added `job_id: Optional[str]` field to `NotificationRequest` and `AsyncNotificationRequest`
+- Regex validation: `^[a-z]+-[a-f0-9]{8}$` (e.g., `dr-a1b2c3d4`)
+- Added `job_id` parameter to all 4 MCP tools: `notify()`, `ask_yes_no()`, `converse()`, `ask_multiple_choice()`
+- Updated `to_api_params()` methods to include job_id in API calls
+
+**Backward Compatibility**: `job_id=None` (default) uses existing routing
+
+**Verification**:
+- [x] Module imports without error
+- [x] Valid job_id patterns accepted
+- [x] Invalid patterns rejected (validation works)
+- [x] Backward compatibility maintained (job_id=None works)
+
+---
+
+## Phase 6: Notification Router (Frontend) ✅ COMPLETE
+
+**Status**: ✅ Complete (Session 83) - Awaiting browser testing
+
+**Files Modified**:
+- `src/fastapi_app/static/js/notifications.js` (+150 lines)
+- `src/fastapi_app/static/css/notifications.css` (+45 lines)
+
+**Purpose**: Route notifications with `job_id` to job card activity logs instead of sender cards
+
+**JavaScript Changes**:
+- Added `registeredJobs` Map for tracking active jobs (todo/running queues)
+- `updateJobRegistration(queueName, jobsMetadata)` - registers jobs when queue loads
+- `isJobRegistered(jobId)` / `getRegisteredJobInfo(jobId)` - check job status
+- Modified `handleNotificationUpdate()` to check for `job_id` and route accordingly
+- `appendNotificationToJobCard(jobId, notification)` - adds notification to job card
+- `createJobActivityLog(jobCard)` - creates activity section if missing
+- `createActivityLogEntry(notification)` - formats notification with timestamp
+- `cacheJobNotification(jobId, notification)` - caches if job card not rendered yet
+- `expandJobCard(jobId)` - auto-expands job card when notification arrives
+
+**CSS Changes**:
+- `.job-activity-log` - container styling
+- `.activity-log-header` - header styling
+- `.activity-log-entry` - entry styling with priority-based border colors
+- `.activity-timestamp` / `.activity-message` - individual element styling
+
+**Routing Flow**:
+```
+Notification arrives
+    ├── response_requested=true → Action Required card (unchanged)
+    ├── job_id + registered → Job card activity log (NEW)
+    └── else → Sender card (unchanged)
+```
+
+**Verification**:
+- [x] JavaScript syntax valid
+- [x] CSS syntax valid
+- [ ] Job registration works in browser (NEEDS TESTING)
+- [ ] Notifications route to job cards (NEEDS TESTING)
+- [ ] Activity log displays correctly (NEEDS TESTING)
+
+---
+
 ## Blockers & Issues
 
 **JWT Authentication Required for Testing**:
@@ -198,18 +275,17 @@ PYTHONPATH="src:$PYTHONPATH" python -m cosa.agents.deep_research.narrowing_harne
 
 ---
 
-## Next Session (71)
+## Next Session (84)
 
-1. **API Testing with JWT Auth**:
-   - Login to get valid access token
-   - Test submit endpoint
-   - Verify job appears in queue
-   - Watch job execution
+1. **Browser Testing - Phase 6 Verification**:
+   - Submit Deep Research job via API
+   - Verify notifications route to job card activity log
+   - Test job registration/unregistration on queue updates
 
-2. **Phase 5: cosa-voice MCP Enhancement** (optional):
-   - Add `job_id` parameter to notification tools
-   - Enable job-specific notification routing
-   - Maintain backward compatibility (job_id=None → standard routing)
+2. **Phase 7: Unified Queue View** (if Phase 6 verified):
+   - Enhance expandable job cards
+   - Real-time progress updates
+   - Completed job details display
 
 ---
 
@@ -221,7 +297,7 @@ PYTHONPATH="src:$PYTHONPATH" python -m cosa.agents.deep_research.narrowing_harne
 | 2 | DeepResearchJob Implementation | ✅ Complete | 69b |
 | 3 | FastAPI Endpoint | ✅ Complete | 69b |
 | 4 | RunningFifoQueue Integration | ✅ Complete | 69b |
-| 5 | cosa-voice MCP Enhancement | 📋 Planned | 71 |
-| 6 | Notification Router (Frontend) | 📋 Planned | 72 |
-| 7 | Unified Queue View (Frontend) | 📋 Planned | 73 |
-| 8 | COSA Router Integration | 📋 Planned | 74 |
+| 5 | cosa-voice MCP Enhancement | ✅ Complete | 83 |
+| 6 | Notification Router (Frontend) | ✅ Complete | 83 |
+| 7 | Unified Queue View (Frontend) | ⏳ Pending | 84 |
+| 8 | COSA Router Integration | 📋 Planned | TBD |
