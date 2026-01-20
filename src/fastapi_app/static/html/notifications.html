@@ -360,7 +360,14 @@
         <div class="collapsible-section" id="section-status">
             <div class="section-header" onclick="toggleSection('status-section')">
                 <h3>System Status</h3>
-                <button class="toggle-button" id="status-toggle">▼</button>
+                <div class="section-header-actions">
+                    <button id="refresh-status-btn" type="button" class="refresh-link"
+                            onclick="event.stopPropagation(); window.notificationsUI.refreshAllStatus()"
+                            title="Refresh all status information">
+                        ↻
+                    </button>
+                    <button class="toggle-button" id="status-toggle">▼</button>
+                </div>
             </div>
             <div class="section-content" id="status-section">
                 <div class="status-item">

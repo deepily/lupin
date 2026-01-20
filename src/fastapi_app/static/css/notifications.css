@@ -118,6 +118,37 @@
             background-color: rgba(0,0,0,0.05);
         }
 
+        .section-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .refresh-link {
+            background: none;
+            border: none;
+            font-size: 16px;
+            cursor: pointer;
+            color: #6c757d;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .refresh-link:hover {
+            color: #0d6efd;
+            background-color: rgba( 13, 110, 253, 0.1 );
+        }
+
+        .refresh-link:disabled {
+            color: #adb5bd;
+            cursor: not-allowed;
+        }
+
+        .refresh-link.spinning {
+            animation: spin 1s linear infinite;
+        }
+
         .section-content {
             padding: 20px;
             transition: all 0.3s ease;

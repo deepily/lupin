@@ -1068,18 +1068,137 @@ class NotificationsUI {
         }
     }
 
+    async refreshAllStatus() {
+        /**
+         * Refresh all status information in the System Status section.
+         * Triggered by clicking the refresh button in the section header.
+         *
+         * Requires:
+         *     - WebSocket connections may or may not be active
+         *     - Auth token may or may not be valid
+         *
+         * Ensures:
+         *     - Button shows spinning animation during refresh
+         *     - All status fields are updated with current state
+         *     - Button re-enables after refresh completes
+         */
+        const button = document.getElementById( 'refresh-status-btn' );
+
+        try {
+            // Disable button and add spinning animation
+            if ( button ) {
+                button.disabled = true;
+                button.classList.add( 'spinning' );
+            }
+
+            this.log( "Refreshing all status information..." );
+
+            // Refresh each status category
+            this.refreshWebSocketStatus();
+            await this.refreshAuthStatus();
+            this.refreshSessionDisplay();
+            this.checkWebSocketHealth();
+
+            this.log( "✓ Status refresh complete" );
+
+        } catch ( error ) {
+            this.error( "Status refresh error:", error );
+        } finally {
+            // Re-enable button and remove spinning animation
+            if ( button ) {
+                button.disabled = false;
+                button.classList.remove( 'spinning' );
+            }
+        }
+    }
+
+    refreshWebSocketStatus() {
+        /**
+         * Update WebSocket connection status displays.
+         * Evaluates current readyState of both WebSocket connections.
+         *
+         * WebSocket readyState values:
+         *     0 = CONNECTING, 1 = OPEN, 2 = CLOSING, 3 = CLOSED
+         */
+        const stateNames = [ 'Connecting', 'Connected', 'Closing', 'Disconnected' ];
+        const stateTypes = [ 'warning', 'good', 'warning', 'error' ];
+
+        // Queue WebSocket status
+        if ( this.queueWS ) {
+            const state = this.queueWS.readyState;
+            this.updateStatus( 'queue-ws-status', stateNames[ state ], stateTypes[ state ] );
+        } else {
+            this.updateStatus( 'queue-ws-status', 'Not initialized', 'error' );
+        }
+
+        // Audio WebSocket status
+        if ( this.audioWS ) {
+            const state = this.audioWS.readyState;
+            this.updateStatus( 'audio-ws-status', stateNames[ state ], stateTypes[ state ] );
+        } else {
+            this.updateStatus( 'audio-ws-status', 'Not initialized', 'error' );
+        }
+    }
+
+    async refreshAuthStatus() {
+        /**
+         * Verify current authentication state and update display.
+         * Checks token validity and triggers refresh if needed.
+         *
+         * Ensures:
+         *     - Auth status element shows current authentication state
+         *     - User display shows current user email
+         *     - Triggers token refresh if access token is expired
+         */
+        const tokens = this.getStoredTokens();
+
+        if ( !tokens.accessToken ) {
+            this.updateStatus( 'auth-status', 'Not authenticated', 'warning' );
+            this.updateElement( 'user-display', 'Not logged in' );
+            return;
+        }
+
+        // Check if token is expired
+        if ( this.isTokenExpired( tokens.accessToken ) ) {
+            this.log( "Access token expired during status refresh - attempting refresh" );
+            const refreshed = await this.refreshAccessToken();
+
+            if ( !refreshed ) {
+                this.updateStatus( 'auth-status', 'Token expired', 'error' );
+                return;
+            }
+        }
+
+        // Token is valid - extract user info
+        const payload = this.parseJWTPayload( this.authToken || tokens.accessToken );
+        const email = payload.email || 'Unknown';
+        const roles = payload.roles || [];
+        const isAdmin = roles.includes( 'admin' );
+
+        this.updateElement( 'user-display', email );
+        this.updateStatus( 'auth-status', `Authenticated${isAdmin ? ' (admin)' : ''}`, 'good' );
+    }
+
+    refreshSessionDisplay() {
+        /**
+         * Update session ID displays with current values.
+         */
+        this.updateElement( 'queue-session', this.queueSessionId || '-' );
+        this.updateElement( 'audio-session', this.audioSessionId || '-' );
+    }
+
     createAudioElement() {
         const audio = document.createElement( 'audio' );
         audio.controls = false; // Hidden for UI cleanliness
         audio.style.display = 'none';
         document.body.appendChild( audio );
-        
+
         // Add error handler (adapted from original HybridTTS)
         audio.addEventListener( 'error', ( e ) => {
             this.error( "HTML audio element error:", e );
             this.isPlaying = false;
         });
-        
+
         return audio;
     }
     
