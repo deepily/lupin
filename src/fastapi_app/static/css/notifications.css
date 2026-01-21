@@ -2897,6 +2897,167 @@
 }
 
 /* ========================================
+   PHASE 7: ENHANCED JOB CARDS
+   ======================================== */
+
+/* Status Indicator (spinning for running jobs) */
+.status-indicator {
+    margin-left: 6px;
+    font-size: 14px;
+}
+
+.status-indicator.spinning {
+    display: inline-block;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate( 0deg ); }
+    to { transform: rotate( 360deg ); }
+}
+
+/* Completion Badge (success/failed) */
+.completion-badge {
+    margin-left: 6px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.completion-badge.success {
+    color: #28a745;
+}
+
+.completion-badge.failed {
+    color: #dc3545;
+}
+
+/* Duration Line (for running jobs) */
+.job-duration-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    background: #e3f2fd;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.duration-label {
+    color: #1565c0;
+    font-weight: 500;
+}
+
+.duration-value {
+    color: #0d47a1;
+    font-family: monospace;
+    font-weight: 600;
+}
+
+/* Abstract Section (for done jobs) */
+.job-abstract {
+    margin: 12px 0;
+    padding: 10px 12px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    border-left: 3px solid #28a745;
+}
+
+.abstract-header {
+    font-size: 12px;
+    font-weight: 600;
+    color: #28a745;
+    margin-bottom: 6px;
+}
+
+.abstract-content {
+    font-size: 13px;
+    line-height: 1.5;
+    color: #212529;
+}
+
+/* Report Link (for agentic jobs) */
+.job-report-link {
+    margin: 10px 0;
+}
+
+.report-link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: #007bff;
+    color: white;
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+
+.report-link-btn:hover {
+    background: #0056b3;
+    color: white;
+    text-decoration: none;
+}
+
+/* Cost Summary (for agentic jobs) */
+.job-cost-summary {
+    margin: 12px 0;
+    padding: 10px 12px;
+    background: #fff3cd;
+    border-radius: 4px;
+    border-left: 3px solid #ffc107;
+}
+
+.cost-header {
+    font-size: 12px;
+    font-weight: 600;
+    color: #856404;
+    margin-bottom: 8px;
+}
+
+.cost-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 12px;
+    font-size: 12px;
+}
+
+.cost-label {
+    color: #6c757d;
+}
+
+.cost-value {
+    color: #212529;
+    font-family: monospace;
+    font-weight: 500;
+}
+
+/* Error Section (for failed/dead jobs) */
+.job-error {
+    margin: 12px 0;
+    padding: 10px 12px;
+    background: #f8d7da;
+    border-radius: 4px;
+    border-left: 3px solid #dc3545;
+}
+
+.error-header {
+    font-size: 12px;
+    font-weight: 600;
+    color: #dc3545;
+    margin-bottom: 6px;
+}
+
+.error-content {
+    font-size: 13px;
+    line-height: 1.4;
+    color: #721c24;
+    word-break: break-word;
+}
+
+/* ========================================
    TIME SAVED DASHBOARD
    ======================================== */
 

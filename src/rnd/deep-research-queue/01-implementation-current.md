@@ -1,8 +1,8 @@
 # Implementation Status - Deep Research Queue
 
-> **Active Phase Tracking** | Last Updated: 2026-01-20 (Session 83)
+> **Active Phase Tracking** | Last Updated: 2026-01-20 (Session 85)
 
-## Current Phase: 7 (Unified Queue View - PENDING)
+## Current Phase: 7 (Unified Queue View - AWAITING BROWSER TESTING)
 
 ---
 
@@ -58,10 +58,20 @@ PYTHONPATH="src:$PYTHONPATH" python -m cosa.agents.deep_research.narrowing_harne
 4. ✅ Phase 5: cosa-voice MCP Enhancement - added `job_id` parameter to all notification tools
 5. ✅ Phase 6: Notification Router (Frontend) - implemented job-based notification routing
 
-### Session 84 Goals (Next)
-1. Browser testing of Phase 6 notification routing
-2. Submit Deep Research job and verify notifications appear in job card activity log
-3. If Phase 6 verified, proceed to Phase 7 (Unified Queue View)
+### Session 85 Completed ✅ (Code) / 🧪 (Testing)
+1. ✅ Created MockAgenticJob test harness for zero-cost queue testing
+2. ✅ Enhanced queue API to expose job artifacts (report_path, abstract, cost_summary, etc.)
+3. ✅ Fixed `voice_io.py` and `cosa_interface.py` to pass `job_id` parameter
+4. ✅ Enhanced `renderJobCard()` for running/done/dead queues
+5. ✅ Added duration timer functions (formatDuration, start/stopDurationTimer)
+6. ✅ Added CSS styling for new components
+7. 🧪 Browser testing pending
+
+### Session 86 Goals (Next)
+1. Browser testing of Phase 7 Unified Queue View
+2. Test MockAgenticJob via API - verify spinning indicator, duration timer
+3. Verify done job display - abstract, report link, cost summary
+4. Test failure path - dead queue error display
 
 ---
 
@@ -253,6 +263,86 @@ Notification arrives
 
 ---
 
+## Phase 7: Unified Queue View (Frontend) 🧪 AWAITING BROWSER TESTING
+
+**Status**: 🧪 Code complete (Session 85) - Awaiting browser testing
+
+**Files Created**:
+- `src/cosa/agents/test_harness/__init__.py` (~12 lines)
+- `src/cosa/agents/test_harness/mock_job.py` (~340 lines)
+- `src/cosa/agents/test_harness/README.md` (~180 lines)
+- `src/cosa/rest/routers/mock_job.py` (~130 lines)
+
+**Files Modified**:
+- `src/fastapi_app/main.py` (router registration)
+- `src/cosa/rest/routers/queues.py` (~80 lines) - Enhanced metadata for all queues
+- `src/cosa/agents/deep_research/voice_io.py` (+job_id parameter)
+- `src/cosa/agents/deep_research/cosa_interface.py` (+job_id parameter)
+- `src/fastapi_app/static/js/notifications.js` (~150 lines)
+- `src/fastapi_app/static/css/notifications.css` (~150 lines)
+
+**Part 1 - MockAgenticJob Test Harness**:
+- Zero-cost testing for queue system without inference calls
+- Configurable: iteration count, sleep duration, failure probability
+- Emits real notifications via cosa-voice MCP with job_id routing
+- Creates mock artifacts for UI testing
+- API: `POST /api/mock-job/submit`
+
+**Part 2 - Backend Queue API Enhancements**:
+- Done queue now includes: `report_path`, `abstract`, `cost_summary`, `started_at`, `completed_at`, `duration_seconds`, `status`, `error`
+- Todo/Run queues now return `*_jobs_metadata` arrays
+- Auto-detection of AgenticJobBase vs SolutionSnapshot objects
+
+**Part 3 - Frontend JavaScript Enhancements**:
+- Enhanced `renderJobCard()` for all queue types
+- Running jobs: spinning indicator, live duration timer
+- Done jobs: abstract section, report link button, cost summary grid
+- Dead jobs: error display section, failed badge
+- New functions: `formatDuration()`, `startDurationTimer()`, `stopDurationTimer()`, `stopAllDurationTimers()`
+
+**Part 4 - CSS Styling**:
+- `.status-indicator.spinning` with rotation animation
+- `.completion-badge.success/failed`
+- `.job-duration-line` with blue background
+- `.job-abstract` with green left border
+- `.report-link-btn` with hover state
+- `.job-cost-summary` with yellow grid layout
+- `.job-error` with red styling
+
+**Verification**:
+- [x] MockAgenticJob smoke test PASSED
+- [x] Python syntax valid for all files
+- [x] JavaScript syntax valid
+- [ ] Running job spinning indicator works (NEEDS BROWSER TESTING)
+- [ ] Duration timer updates in real-time (NEEDS BROWSER TESTING)
+- [ ] Done job abstract displays correctly (NEEDS BROWSER TESTING)
+- [ ] Report link button functional (NEEDS BROWSER TESTING)
+- [ ] Cost summary grid renders (NEEDS BROWSER TESTING)
+- [ ] Failed job error display works (NEEDS BROWSER TESTING)
+
+**Test Commands**:
+```bash
+# Get auth token
+TOKEN=$(curl -s -X POST "http://localhost:7999/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "your@email.com", "password": "PASSWORD"}' \
+  | python3 -c "import sys, json; print(json.load(sys.stdin)['tokens']['access_token'])")
+
+# Submit quick mock job (2 iterations, 1 second each)
+curl -X POST "http://localhost:7999/api/mock-job/submit" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"fixed_iterations": 2, "fixed_sleep": 1.0}'
+
+# Submit failing mock job (for testing dead queue)
+curl -X POST "http://localhost:7999/api/mock-job/submit" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"failure_probability": 1.0, "fixed_iterations": 3}'
+```
+
+---
+
 ## Blockers & Issues
 
 **JWT Authentication Required for Testing**:
@@ -275,17 +365,22 @@ Notification arrives
 
 ---
 
-## Next Session (84)
+## Next Session (86)
 
-1. **Browser Testing - Phase 6 Verification**:
+1. **Browser Testing - Phase 7 Verification**:
+   - Test MockAgenticJob via `/api/mock-job/submit`
+   - Verify running job UI: spinning indicator, live duration timer
+   - Verify done job UI: abstract, report link, cost summary
+   - Verify dead job UI: error display, failed badge
+
+2. **Browser Testing - Phase 6 Verification** (if not already done):
    - Submit Deep Research job via API
    - Verify notifications route to job card activity log
    - Test job registration/unregistration on queue updates
 
-2. **Phase 7: Unified Queue View** (if Phase 6 verified):
-   - Enhance expandable job cards
-   - Real-time progress updates
-   - Completed job details display
+3. **Phase 8: COSA Router Integration** (if Phases 6-7 verified):
+   - Add "deep research" as routable intent
+   - Natural language trigger: "Research {topic}"
 
 ---
 
@@ -299,5 +394,5 @@ Notification arrives
 | 4 | RunningFifoQueue Integration | ✅ Complete | 69b |
 | 5 | cosa-voice MCP Enhancement | ✅ Complete | 83 |
 | 6 | Notification Router (Frontend) | ✅ Complete | 83 |
-| 7 | Unified Queue View (Frontend) | ⏳ Pending | 84 |
+| 7 | Unified Queue View (Frontend) | 🧪 Testing | 85 |
 | 8 | COSA Router Integration | 📋 Planned | TBD |

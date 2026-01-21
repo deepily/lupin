@@ -163,6 +163,12 @@ class NotificationsUI {
         // Notifications with job_id route to job card activity log instead of sender cards
         this.registeredJobs = new Map();           // job_id → { queueName, metadata }
 
+        // ========================================
+        // RUNNING JOB DURATION TIMERS (Phase 7)
+        // ========================================
+        // Track setInterval handles for live duration updates on running jobs
+        this.durationTimers = new Map();           // job_id → setInterval handle
+
         // Phase 2.2 SSE - Action Required notifications state
         this.actionRequiredNotifications = new Map();  // notification_id → notification data + UI state
         this.countdownTimers = new Map();  // notification_id → setInterval handle
@@ -4371,13 +4377,41 @@ class NotificationsUI {
          * Ensures:
          *     - Returns HTML string for collapsible job card
          *     - Includes agent badge, truncated question, timestamp
-         *     - Done queue cards include interaction toggle
+         *     - Running jobs: status line, duration timer, activity log
+         *     - Done jobs: abstract, report link, cost summary, completion badge
          */
         const statusClass = `status-${queueName}`;
         const truncatedQuestion = this.truncateText( job.question_text || 'No question', 60 );
         const agentBadge = job.agent_type ? `<span class="agent-badge">${( job.agent_type || '' ).replace( 'Agent', '' )}</span>` : '';
         const cacheHitBadge = job.is_cache_hit ? '<span class="cache-hit-badge" title="Result from cache">⚡ Cached</span>' : '';
         const timestamp = this.formatJobTimestamp( job.timestamp );
+        const jobId = job.job_id || `job-${Date.now()}`;
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Phase 7: Enhanced indicators based on queue type
+        // ═══════════════════════════════════════════════════════════════════
+
+        // Running job: spinning status indicator
+        let statusIndicator = '';
+        if ( queueName === 'run' ) {
+            statusIndicator = '<span class="status-indicator spinning" title="Running">⟳</span>';
+        }
+
+        // Done job: completion badge
+        let completionBadge = '';
+        if ( queueName === 'done' ) {
+            const jobStatus = job.status || 'completed';
+            if ( jobStatus === 'completed' ) {
+                completionBadge = '<span class="completion-badge success" title="Completed">✓</span>';
+            } else if ( jobStatus === 'failed' ) {
+                completionBadge = '<span class="completion-badge failed" title="Failed">✗</span>';
+            }
+        }
+
+        // Dead job: error badge
+        if ( queueName === 'dead' ) {
+            completionBadge = '<span class="completion-badge failed" title="Failed">✗</span>';
+        }
 
         // Interaction indicator for done queue
         let interactionIndicator = '';
@@ -4385,24 +4419,116 @@ class NotificationsUI {
             interactionIndicator = '<span class="interaction-indicator" title="Has interaction history">💬</span>';
         }
 
-        const jobId = job.job_id || `job-${Date.now()}`;
+        // ═══════════════════════════════════════════════════════════════════
+        // Phase 7: Running job - duration timer
+        // ═══════════════════════════════════════════════════════════════════
+        let durationSection = '';
+        if ( queueName === 'run' && job.started_at ) {
+            const startTime = new Date( job.started_at ).getTime();
+            const elapsed = Math.floor( ( Date.now() - startTime ) / 1000 );
+            const formattedDuration = this.formatDuration( elapsed );
 
+            durationSection = `
+                <div class="job-duration-line">
+                    <span class="duration-label">Duration:</span>
+                    <span class="duration-value" id="duration-${jobId}" data-started-at="${job.started_at}">${formattedDuration}</span>
+                </div>
+            `;
+
+            // Schedule timer start after render (will be called after DOM insertion)
+            setTimeout( () => this.startDurationTimer( jobId, job.started_at ), 100 );
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Phase 7: Done job - abstract, report link, cost summary
+        // ═══════════════════════════════════════════════════════════════════
+        let abstractSection = '';
+        let reportLinkSection = '';
+        let costSummarySection = '';
+
+        if ( queueName === 'done' ) {
+            // Abstract display
+            if ( job.abstract ) {
+                abstractSection = `
+                    <div class="job-abstract">
+                        <div class="abstract-header">📄 Summary</div>
+                        <div class="abstract-content">${this.escapeHtml( job.abstract )}</div>
+                    </div>
+                `;
+            }
+
+            // Report link (for agentic jobs like Deep Research)
+            if ( job.report_path ) {
+                const encodedPath = encodeURIComponent( job.report_path );
+                reportLinkSection = `
+                    <div class="job-report-link">
+                        <a href="/api/deep-research/report?path=${encodedPath}"
+                           target="_blank" class="report-link-btn">
+                            📋 View Full Report
+                        </a>
+                    </div>
+                `;
+            }
+
+            // Cost summary (for agentic jobs)
+            if ( job.cost_summary ) {
+                const cost = job.cost_summary.total_cost_usd || 0;
+                const duration = job.duration_seconds ? this.formatDuration( job.duration_seconds ) : 'N/A';
+                const tokens = ( job.cost_summary.total_input_tokens || 0 ) + ( job.cost_summary.total_output_tokens || 0 );
+
+                costSummarySection = `
+                    <div class="job-cost-summary">
+                        <div class="cost-header">💰 Cost Breakdown</div>
+                        <div class="cost-grid">
+                            <span class="cost-label">Total Cost:</span>
+                            <span class="cost-value">$${cost.toFixed( 4 )}</span>
+                            <span class="cost-label">Duration:</span>
+                            <span class="cost-value">${duration}</span>
+                            <span class="cost-label">Tokens:</span>
+                            <span class="cost-value">${tokens.toLocaleString()}</span>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Phase 7: Error display for dead jobs
+        // ═══════════════════════════════════════════════════════════════════
+        let errorSection = '';
+        if ( ( queueName === 'dead' || job.status === 'failed' ) && job.error ) {
+            errorSection = `
+                <div class="job-error">
+                    <div class="error-header">❌ Error</div>
+                    <div class="error-content">${this.escapeHtml( job.error )}</div>
+                </div>
+            `;
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Build final HTML
+        // ═══════════════════════════════════════════════════════════════════
         return `
             <div class="job-card ${statusClass}" id="job-card-${jobId}" data-job-id="${jobId}">
                 <div class="job-card-header" onclick="window.notificationsUI.toggleJobCard('${jobId}', '${queueName}')">
-                    ${agentBadge}${cacheHitBadge}
+                    ${agentBadge}${cacheHitBadge}${completionBadge}
                     <span class="job-question">${this.escapeHtml( truncatedQuestion )}</span>
-                    ${interactionIndicator}
+                    ${statusIndicator}${interactionIndicator}
                     <span class="job-timestamp">${timestamp}</span>
                     <button class="job-expand-btn">▶</button>
                 </div>
                 <div class="job-card-details collapsed" id="job-details-${jobId}">
+                    ${durationSection}
                     <div class="job-full-question">
                         <strong>Question:</strong> ${this.escapeHtml( job.question_text || '' )}
                     </div>
                     <div class="job-response">
                         <strong>Response:</strong> ${this.escapeHtml( job.response_text || 'Processing...' )}
                     </div>
+                    ${abstractSection}
+                    ${reportLinkSection}
+                    ${costSummarySection}
+                    ${errorSection}
                     <div class="job-metadata">
                         <span>Agent: ${job.agent_type || 'Unknown'}</span>
                         <span>Time: ${timestamp}</span>
@@ -4446,6 +4572,112 @@ class NotificationsUI {
             if ( expandBtn ) expandBtn.textContent = '▼';
             this.expandedJobCards.add( jobId );
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Phase 7: Duration Timer Functions
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    formatDuration( seconds ) {
+        /**
+         * Format duration in seconds to human-readable "Xm Ys" or "Xh Ym" format.
+         *
+         * Requires:
+         *     - seconds is a number >= 0
+         *
+         * Ensures:
+         *     - Returns formatted string like "2m 34s" or "1h 5m"
+         */
+        if ( typeof seconds !== 'number' || isNaN( seconds ) || seconds < 0 ) {
+            return '0s';
+        }
+
+        const hours = Math.floor( seconds / 3600 );
+        const minutes = Math.floor( ( seconds % 3600 ) / 60 );
+        const secs = Math.floor( seconds % 60 );
+
+        if ( hours > 0 ) {
+            return `${hours}h ${minutes}m`;
+        } else if ( minutes > 0 ) {
+            return `${minutes}m ${secs}s`;
+        } else {
+            return `${secs}s`;
+        }
+    }
+
+    startDurationTimer( jobId, startedAt ) {
+        /**
+         * Start a live-updating duration timer for a running job.
+         *
+         * Requires:
+         *     - jobId is a valid job ID
+         *     - startedAt is an ISO timestamp string
+         *
+         * Ensures:
+         *     - Updates duration display every second
+         *     - Timer handle stored in durationTimers map
+         *     - Previous timer for same job is cleared
+         */
+        // Clear any existing timer for this job
+        this.stopDurationTimer( jobId );
+
+        const durationEl = document.getElementById( `duration-${jobId}` );
+        if ( !durationEl ) {
+            this.log( `[Phase 7] Duration element not found: ${jobId}` );
+            return;
+        }
+
+        const startTime = new Date( startedAt ).getTime();
+        if ( isNaN( startTime ) ) {
+            this.log( `[Phase 7] Invalid startedAt timestamp: ${startedAt}` );
+            return;
+        }
+
+        // Update function
+        const updateDuration = () => {
+            const elapsed = Math.floor( ( Date.now() - startTime ) / 1000 );
+            durationEl.textContent = this.formatDuration( elapsed );
+        };
+
+        // Initial update
+        updateDuration();
+
+        // Start interval (update every second)
+        const timerId = setInterval( updateDuration, 1000 );
+        this.durationTimers.set( jobId, timerId );
+
+        this.log( `[Phase 7] Started duration timer for job: ${jobId}` );
+    }
+
+    stopDurationTimer( jobId ) {
+        /**
+         * Stop and clean up duration timer for a job.
+         *
+         * Requires:
+         *     - jobId is a job ID
+         *
+         * Ensures:
+         *     - Timer interval is cleared
+         *     - Timer handle removed from map
+         */
+        if ( this.durationTimers.has( jobId ) ) {
+            clearInterval( this.durationTimers.get( jobId ) );
+            this.durationTimers.delete( jobId );
+            this.log( `[Phase 7] Stopped duration timer for job: ${jobId}` );
+        }
+    }
+
+    stopAllDurationTimers() {
+        /**
+         * Stop all active duration timers.
+         *
+         * Called when clearing queues or during cleanup.
+         */
+        for ( const [ jobId, timerId ] of this.durationTimers ) {
+            clearInterval( timerId );
+        }
+        this.durationTimers.clear();
+        this.log( '[Phase 7] Stopped all duration timers' );
     }
 
     async toggleJobInteractions( jobId, event ) {
