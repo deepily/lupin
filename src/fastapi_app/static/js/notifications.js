@@ -5907,10 +5907,12 @@ class NotificationsUI {
             return;
         }
 
-        // Collect all messages for this session
+        // Collect both messages and abstracts for richer gist generation
         const messages = allNotifications.map( n => n.message ).filter( Boolean );
-        if ( messages.length === 0 ) {
-            this.log( 'No messages with content for gist generation' );
+        const abstracts = allNotifications.map( n => n.abstract ).filter( Boolean );
+
+        if ( messages.length === 0 && abstracts.length === 0 ) {
+            this.log( 'No messages or abstracts for gist generation' );
             return;
         }
 
@@ -5922,14 +5924,14 @@ class NotificationsUI {
             gistBtn.innerHTML = '⏳';
         }
 
-        this.log( `Generating gist for session ${sessionId} from ${messages.length} messages...` );
+        this.log( `Generating gist for session ${sessionId} from ${messages.length} messages and ${abstracts.length} abstracts...` );
 
         try {
-            // Call backend API to generate gist
+            // Call backend API to generate gist (include abstracts for richer semantic signal)
             const response = await fetch( '/api/notifications/generate-gist', {
                 method  : 'POST',
                 headers : { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
-                body    : JSON.stringify( { messages } )
+                body    : JSON.stringify( { messages, abstracts } )
             } );
 
             if ( !response.ok ) {

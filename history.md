@@ -1,6 +1,6 @@
 # Lupin Project History
 
-> **📋 TODO FOR NEXT SESSION (Session 88)**:
+> **📋 TODO FOR NEXT SESSION (Session 89)**:
 > 1. **🧪 Phase 7 Browser Testing**: IN PROGRESS (Session 87) - CURL testing complete, browser UI testing ongoing. Verify: spinning indicator on running jobs, live duration timer, abstract/report link/cost summary on done jobs, error display on dead jobs.
 > 2. **🔬 Deep Research Queue Integration - BROWSER TESTING**: Test Phase 6 frontend notification routing in browser. Submit a Deep Research job, verify notifications appear in job card activity log instead of sender cards.
 > 3. **🎙️ Podcast Generator - FULL AUDIO GENERATION TEST**: All Phase 2 bugs fixed! Ready for full end-to-end test with all 20 segments (remove --max-segments). Verify clickable links work in notification UI.
@@ -14,26 +14,20 @@
 > 11. **Future TODO**: Evaluate moving config.py dataclasses to lupin-app.ini managed by ConfigurationManager
 > 12. **Future TODO**: Migrate `/api/deep-research/report` to use generic `/api/io/file` endpoint
 >
-> **🔧 SESSION 88 IN PROGRESS**: Bug Fix Day - Multiple notification/UI bugs fixed in single session.
+> **✅ SESSION 88 COMPLETE**: Bug Fix Day - Multiple notification/UI bugs fixed in single session.
+> - **Fix 1**: Clear-All-Notifications bulk delete endpoint (notifications.py, notification_repository.py, notifications.js)
+> - **Fix 2**: PostgreSQL Backup Integration via pg_dump (backup-postgres.sh, backup.sh, rsync-exclude.txt)
+> - **Status**: All fixes complete and tested.
 >
-> **Bug Fixes Completed:**
+> **🔧 SESSION 89 IN PROGRESS**: Bug Fix Mode (using /plan-bug-fix-mode workflow)
 >
-> **1. Clear-All-Notifications Bug** (Notifications UI):
-> - **SYMPTOM**: "Clear All" button temporarily removed notification cards visually but did not delete from database. On page refresh, all notifications returned.
-> - **ROOT CAUSE**: `clearAllNotifications()` iterated over DOM children (sender card IDs like `sender-card-claude-code-lupin-deepily-ai-session123`) and passed them to `deleteNotification()`. Server expected actual notification `id_hash` values (like `notif-a1b2c3d4`), returned 404 for every call. Code silently ignored 404s at line 7358, removed UI elements anyway giving false success impression.
-> - **ADDITIONAL BUG**: Notification counter in accordion header was not reset to zero.
-> - **FIX**: Implemented bulk delete endpoint instead of iterative approach. (1) Added `bulk_delete_by_user()` method to `notification_repository.py` - deletes all notifications matching recipient_id and optional hours filter in single query. (2) Added `DELETE /api/notifications/bulk/{user_email}?hours=N` endpoint to `notifications.py` router. (3) Replaced `clearAllNotifications()` in `notifications.js` to: count from `senderGroups` Map (actual data), call bulk endpoint with current `historyWindowHours` filter, clear both `senderGroups` and `notificationState.notifications`, properly reset counter to 0. (4) Added `getFilterLabel()` helper method for human-readable filter labels in confirmation dialog.
-> - **FILES MODIFIED**: `src/cosa/rest/db/repositories/notification_repository.py` (+54 lines), `src/cosa/rest/routers/notifications.py` (+78 lines), `src/fastapi_app/static/js/notifications.js` (~60 lines modified).
-> - **STATUS**: Code complete, awaiting browser testing at end of day.
->
-> **2. PostgreSQL Backup Integration** (/plan-backup workflow):
-> - **SYMPTOM**: rsync backup failed with "Permission denied" on `postgresql-dev-data/` directory. File-level backup of running PostgreSQL is also unreliable (WAL files constantly changing).
-> - **ROOT CAUSE**: PostgreSQL data directory owned by postgres user inside Docker container. Even with fixed permissions, file-level rsync of running database can create inconsistent backups.
-> - **SOLUTION**: Implemented proper pg_dump backup via Docker before rsync runs. (1) Created `backup-postgres.sh` script that runs `pg_dump` inside the `lupin-postgres-dev` container, outputs to `src/conf/long-term-memory/postgresql-backup.sql` (~988KB). (2) Updated `rsync-exclude.txt` to exclude raw `postgresql-dev-data/` directory (backed up via pg_dump instead). (3) Also excluded `*/_indices/fts/` (LanceDB FTS indices owned by root, regeneratable). (4) Modified `backup.sh` to call `backup-postgres.sh` before rsync.
-> - **FILES CREATED**: `src/scripts/backup-postgres.sh` (~55 lines).
-> - **FILES MODIFIED**: `src/scripts/conf/rsync-exclude.txt` (+6 lines), `src/scripts/backup.sh` (+8 lines).
-> - **RESTORE COMMAND**: `docker exec -i lupin-postgres-dev psql -U lupin_dev lupin_db < postgresql-backup.sql`
-> - **STATUS**: Complete and tested. Backup runs cleanly with no permission errors.
+> ### Fix 1: Enhance Session Gist Generation with Abstract Fields
+> - **Source**: ad-hoc (feature enhancement)
+> - **Problem**: Session gist generator only used notification `message` fields, missing rich semantic context in `abstract` fields
+> - **Solution**: Frontend now collects both messages and abstracts; backend prioritizes first 5 abstracts + first 5 messages for richer gist generation; CSS width increased from 180px to 225px
+> - **Files**: notifications.js, notifications.py, notifications.css
+> - **Test**: Browser verification PASS
+> - **Commit**: [pending]
 >
 > **🧪 SESSION 87 COMPLETE**: Phase 7 Browser Testing + Mock Job User Association Bug Fix. CURL testing complete, browser UI testing ongoing.
 >
