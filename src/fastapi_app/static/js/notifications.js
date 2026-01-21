@@ -7462,52 +7462,108 @@ class NotificationsUI {
 
     async clearAllNotifications() {
         /**
-         * Clear all notifications from the UI and server.
+         * Clear all notifications from the UI and server using bulk delete.
          *
          * Purpose:
          *     - Bulk delete all notifications with user confirmation
-         *     - Handles both UI cleanup and server-side deletion
+         *     - Respects current history window filter setting
+         *     - Uses single API call for efficient server-side deletion
          *
          * Behavior:
-         *     1. Check if there are any notifications to clear
-         *     2. Show confirmation dialog with count
-         *     3. If confirmed: Loop through all notifications and delete each one
-         *     4. Update UI and local cache
+         *     1. Count notifications from senderGroups (actual data, not DOM)
+         *     2. Build filter description for confirmation dialog
+         *     3. If confirmed: Call bulk delete endpoint with current filter
+         *     4. Clear local state and update UI
          *
          * Ensures:
          *     - User confirmation before destructive action
-         *     - All notifications removed from server (via DELETE API)
-         *     - UI updated properly (counter, list cleared)
+         *     - All notifications matching filter permanently deleted on server
+         *     - UI updated properly (counter reset to 0, list cleared)
          *     - Local cache cleared
          */
 
-        const notificationsList = document.getElementById( "notifications-list" );
-        const notificationsCounter = document.getElementById( "notifications-count" );
+        // 1. Count notifications from senderGroups (actual data, not DOM)
+        let totalCount = 0;
+        for ( const group of this.senderGroups.values() ) {
+            totalCount += group.notifications.length;
+        }
 
-        if ( !notificationsList || notificationsList.children.length === 0 ) {
+        if ( totalCount === 0 ) {
             this.log( "No notifications to clear" );
             return;
         }
 
-        const count = notificationsList.children.length;
+        // 2. Build filter description for confirmation
+        const filterLabel = this.getFilterLabel();
 
-        // Confirm before clearing (destructive action)
-        if ( !confirm( `Clear all ${count} notification${count !== 1 ? 's' : ''}? This cannot be undone.` ) ) {
+        // 3. Confirm with user
+        if ( !confirm( `Clear all ${totalCount} notification${totalCount !== 1 ? 's' : ''} (${filterLabel})? This cannot be undone.` ) ) {
             this.log( "Clear all notifications cancelled by user" );
             return;
         }
 
-        this.log( `Clearing ${count} notifications...` );
+        this.log( `Clearing ${totalCount} notifications (${filterLabel})...` );
 
-        // Collect all notification IDs before deletion (array changes during loop)
-        const notificationIds = Array.from( notificationsList.children ).map( li => li.id );
+        // 4. Call bulk delete endpoint with current filter
+        try {
+            const params = new URLSearchParams();
+            if ( this.historyWindowHours !== null ) {
+                params.append( 'hours', this.historyWindowHours );
+            }
 
-        // Delete each notification (calls existing deleteNotification method)
-        for ( const notificationId of notificationIds ) {
-            await this.deleteNotification( notificationId );
+            const url = `/api/notifications/bulk/${encodeURIComponent( this.currentUser )}?${params}`;
+            const response = await fetch( url, {
+                method: 'DELETE'
+            });
+
+            if ( !response.ok ) {
+                const errorData = await response.json().catch( () => ({ detail: 'Unknown error' }) );
+                throw new Error( errorData.detail || `Server returned ${response.status}` );
+            }
+
+            const result = await response.json();
+            this.log( `Server deleted ${result.deleted_count} notifications` );
+
+        } catch ( error ) {
+            this.error( "Failed to delete notifications:", error );
+            alert( "Failed to clear notifications. Please try again." );
+            return;
         }
 
-        this.log( `✓ Cleared ${count} notification${count !== 1 ? 's' : ''}` );
+        // 5. Clear local state
+        this.senderGroups.clear();
+        this.notificationState.notifications = [];
+
+        // 6. Clear UI - remove all sender cards
+        const notificationsList = document.getElementById( "notifications-list" );
+        if ( notificationsList ) {
+            notificationsList.innerHTML = '';
+        }
+
+        // 7. Update counter to zero
+        const counter = document.getElementById( "notifications-count" );
+        if ( counter ) {
+            counter.textContent = '0';
+        }
+
+        // 8. Disable clear button
+        this.updateClearButtonState( 0 );
+
+        this.log( `✓ Cleared ${totalCount} notification${totalCount !== 1 ? 's' : ''}` );
+    }
+
+    getFilterLabel() {
+        /**
+         * Get human-readable label for current history window filter.
+         *
+         * Returns:
+         *     String like "Last week", "All time", etc.
+         */
+        if ( this.historyWindowHours === null ) {
+            return 'All time';
+        }
+        const option = this.WINDOW_OPTIONS.find( o => o.hours === this.historyWindowHours );
+        return option ? option.label : `Last ${this.historyWindowHours} hours`;
     }
 
     updateClearButtonState( count ) {
