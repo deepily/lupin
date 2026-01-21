@@ -126,6 +126,8 @@ RUN pip install --no-cache-dir sqlalchemy==2.0.40 psycopg2-binary==2.9.11
 # MCP server dependencies (for cosa-voice MCP server)
 RUN pip install --no-cache-dir fastmcp==2.14.2
 
+# audio stitching
+RUN pip install --no-cache-dir pydub==0.25.1
 
 # ============================================================================
 # RUNTIME CONFIGURATION (Can be overridden via docker run -e or Cloud Run)
