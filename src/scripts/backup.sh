@@ -143,6 +143,14 @@ echo -e "${BLUE}Exclusion patterns:${NC}"
 grep -v '^#' "$EXCLUDE_FILE" | grep -v '^$' | sed 's/^/  - /'
 echo ""
 
+# Run PostgreSQL backup first (if script exists and container is running)
+POSTGRES_BACKUP_SCRIPT="$SCRIPT_DIR/backup-postgres.sh"
+if [[ -f "$POSTGRES_BACKUP_SCRIPT" ]]; then
+    echo -e "${BLUE}Running PostgreSQL backup...${NC}"
+    bash "$POSTGRES_BACKUP_SCRIPT"
+    echo ""
+fi
+
 # Run rsync
 echo -e "${MODE_COLOR}Running rsync...${NC}\n"
 

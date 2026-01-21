@@ -39,6 +39,7 @@ src/conf/long-term-memory/test-*.db
 
 # PostgreSQL development data - backed up via rsync, not in Git
 src/conf/long-term-memory/postgresql-dev-data/
+src/conf/long-term-memory/postgresql-backup.sql
 
 # Migration results - contains plaintext passwords for initial setup
 src/scripts/auth_migration/migration_results.json
