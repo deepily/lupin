@@ -1,33 +1,36 @@
 # Lupin Project History
 
-> **📋 TODO FOR NEXT SESSION (Session 89)**:
-> 1. **🧪 Phase 7 Browser Testing**: IN PROGRESS (Session 87) - CURL testing complete, browser UI testing ongoing. Verify: spinning indicator on running jobs, live duration timer, abstract/report link/cost summary on done jobs, error display on dead jobs.
-> 2. **🔬 Deep Research Queue Integration - BROWSER TESTING**: Test Phase 6 frontend notification routing in browser. Submit a Deep Research job, verify notifications appear in job card activity log instead of sender cards.
-> 3. **🎙️ Podcast Generator - FULL AUDIO GENERATION TEST**: All Phase 2 bugs fixed! Ready for full end-to-end test with all 20 segments (remove --max-segments). Verify clickable links work in notification UI.
-> 4. **⏰ Job Queue Progressive Disclosure UI - MANUAL TESTING**: Full 6-phase implementation complete (Session 57 continuation), awaiting browser testing. See plan: `/home/rruiz/.claude/plans/cheeky-leaping-scone.md`
-> 5. **Deep Research Phase 8 (PENDING)**: COSA Router Integration for natural language job submission
-> 6. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 1 (Session Identity) complete. Remaining: Phase 4 = AgentBase History Integration, Phase 5 = Conversation Lifecycle.
-> 7. Voice discovery/configuration for notification TTS UI still pending
-> 8. **Ongoing notification UI tweaks and bug fixes (ONGOING)**: Incremental improvements to the cosa-voice notification system.
-> 9. **Future TODO**: Add config mapping female/male to voice names (Nora/Quentin) in lupin-app.ini
-> 10. **Future TODO**: Consolidate voice_io.py for podcast_generator and deep_research into cosa/agents/utils/voice_io.py
-> 11. **Future TODO**: Evaluate moving config.py dataclasses to lupin-app.ini managed by ConfigurationManager
-> 12. **Future TODO**: Migrate `/api/deep-research/report` to use generic `/api/io/file` endpoint
+> **📋 TODO FOR NEXT SESSION (Session 91)**:
+> 1. **🎙️ Podcast Generator Notification Bug Fix (IN PROGRESS)**: Research link shows "edit-mode" in audio-only mode. Two issues: (a) `to_markdown()` doesn't persist `research_source` header, (b) relative paths don't match `io_base` for clickable link generation. Plan file: `/home/rruiz/.claude/plans/hidden-nibbling-knuth.md`
+> 2. **🧪 Phase 7 Browser Testing**: IN PROGRESS (Session 87) - CURL testing complete, browser UI testing ongoing. Verify: spinning indicator on running jobs, live duration timer, abstract/report link/cost summary on done jobs, error display on dead jobs.
+> 3. **🔬 Deep Research Queue Integration - BROWSER TESTING**: Test Phase 6 frontend notification routing in browser. Submit a Deep Research job, verify notifications appear in job card activity log instead of sender cards.
+> 4. **🎙️ Podcast Generator - FULL AUDIO GENERATION TEST**: All Phase 2 bugs fixed! Ready for full end-to-end test with all 20 segments (remove --max-segments). Verify clickable links work in notification UI.
+> 5. **⏰ Job Queue Progressive Disclosure UI - MANUAL TESTING**: Full 6-phase implementation complete (Session 57 continuation), awaiting browser testing. See plan: `/home/rruiz/.claude/plans/cheeky-leaping-scone.md`
+> 6. **Deep Research Phase 8 (PENDING)**: COSA Router Integration for natural language job submission
+> 7. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 1 (Session Identity) complete. Remaining: Phase 4 = AgentBase History Integration, Phase 5 = Conversation Lifecycle.
+> 8. Voice discovery/configuration for notification TTS UI still pending
+> 9. **Ongoing notification UI tweaks and bug fixes (ONGOING)**: Incremental improvements to the cosa-voice notification system.
+> 10. **Future TODO**: Add config mapping female/male to voice names (Nora/Quentin) in lupin-app.ini
+> 11. **Future TODO**: Consolidate voice_io.py for podcast_generator and deep_research into cosa/agents/utils/voice_io.py
+> 12. **Future TODO**: Evaluate moving config.py dataclasses to lupin-app.ini managed by ConfigurationManager
+> 13. **Future TODO**: Migrate `/api/deep-research/report` to use generic `/api/io/file` endpoint
+>
+> **✅ SESSION 90 COMPLETE**: Podcast Generator Notification Enhancements + Bug Discovery
+> - **Implemented**: Clickable links (script, audio, research) and audio cost tracking in all 3 notification methods
+> - **Changes**: Added `character_count` to `TTSSegmentResult`, `ELEVENLABS_COST_PER_1K_CHARS` constant, fixed `do_all_async`/`do_review_only_async`/`do_audio_only_async` notifications
+> - **Bug Found**: Research link shows "edit-mode" in audio-only mode - needs fix (see TODO #1)
+> - **Smoke Tests**: 10/10 PASSED
+> - **Files**: `tts_client.py` (+2 lines), `orchestrator.py` (+60 lines)
+>
+> **✅ SESSION 89 COMPLETE**: Bug Fix Mode - Gist Enhancement
+> - **Fix 1**: Enhance Session Gist Generation with Abstract Fields (commit: f24337f)
+> - **Details**: Frontend now collects both messages and abstracts; backend prioritizes first 5 abstracts + first 5 messages for richer gist generation; CSS width increased from 180px to 225px
+> - **Files**: notifications.js, notifications.py, notifications.css
 >
 > **✅ SESSION 88 COMPLETE**: Bug Fix Day - Multiple notification/UI bugs fixed in single session.
 > - **Fix 1**: Clear-All-Notifications bulk delete endpoint (notifications.py, notification_repository.py, notifications.js)
 > - **Fix 2**: PostgreSQL Backup Integration via pg_dump (backup-postgres.sh, backup.sh, rsync-exclude.txt)
 > - **Status**: All fixes complete and tested.
->
-> **🔧 SESSION 89 IN PROGRESS**: Bug Fix Mode (using /plan-bug-fix-mode workflow)
->
-> ### Fix 1: Enhance Session Gist Generation with Abstract Fields
-> - **Source**: ad-hoc (feature enhancement)
-> - **Problem**: Session gist generator only used notification `message` fields, missing rich semantic context in `abstract` fields
-> - **Solution**: Frontend now collects both messages and abstracts; backend prioritizes first 5 abstracts + first 5 messages for richer gist generation; CSS width increased from 180px to 225px
-> - **Files**: notifications.js, notifications.py, notifications.css
-> - **Test**: Browser verification PASS
-> - **Commit**: [pending]
 >
 > **🧪 SESSION 87 COMPLETE**: Phase 7 Browser Testing + Mock Job User Association Bug Fix. CURL testing complete, browser UI testing ongoing.
 >

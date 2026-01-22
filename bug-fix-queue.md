@@ -4,7 +4,7 @@
 **Owner**: claude.code@lupin.deepily.ai#4b8f3f60
 
 ### Queued
-- [ ] Verify gist enhancement with browser testing (from earlier in this session)
+(No bugs queued)
 
 ### Completed
-(Completed bugs will be moved here)
+- [x] Gist enhancement with abstract fields → commit: f24337f (ad-hoc)
