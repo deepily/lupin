@@ -1,19 +1,23 @@
 # Lupin Project History
 
-> **📋 TODO FOR NEXT SESSION (Session 91)**:
-> 1. **🎙️ Podcast Generator Notification Bug Fix (IN PROGRESS)**: Research link shows "edit-mode" in audio-only mode. Two issues: (a) `to_markdown()` doesn't persist `research_source` header, (b) relative paths don't match `io_base` for clickable link generation. Plan file: `/home/rruiz/.claude/plans/hidden-nibbling-knuth.md`
-> 2. **🧪 Phase 7 Browser Testing**: IN PROGRESS (Session 87) - CURL testing complete, browser UI testing ongoing. Verify: spinning indicator on running jobs, live duration timer, abstract/report link/cost summary on done jobs, error display on dead jobs.
-> 3. **🔬 Deep Research Queue Integration - BROWSER TESTING**: Test Phase 6 frontend notification routing in browser. Submit a Deep Research job, verify notifications appear in job card activity log instead of sender cards.
-> 4. **🎙️ Podcast Generator - FULL AUDIO GENERATION TEST**: All Phase 2 bugs fixed! Ready for full end-to-end test with all 20 segments (remove --max-segments). Verify clickable links work in notification UI.
-> 5. **⏰ Job Queue Progressive Disclosure UI - MANUAL TESTING**: Full 6-phase implementation complete (Session 57 continuation), awaiting browser testing. See plan: `/home/rruiz/.claude/plans/cheeky-leaping-scone.md`
-> 6. **Deep Research Phase 8 (PENDING)**: COSA Router Integration for natural language job submission
-> 7. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 1 (Session Identity) complete. Remaining: Phase 4 = AgentBase History Integration, Phase 5 = Conversation Lifecycle.
-> 8. Voice discovery/configuration for notification TTS UI still pending
-> 9. **Ongoing notification UI tweaks and bug fixes (ONGOING)**: Incremental improvements to the cosa-voice notification system.
-> 10. **Future TODO**: Add config mapping female/male to voice names (Nora/Quentin) in lupin-app.ini
-> 11. **Future TODO**: Consolidate voice_io.py for podcast_generator and deep_research into cosa/agents/utils/voice_io.py
-> 12. **Future TODO**: Evaluate moving config.py dataclasses to lupin-app.ini managed by ConfigurationManager
-> 13. **Future TODO**: Migrate `/api/deep-research/report` to use generic `/api/io/file` endpoint
+> **📋 TODO FOR NEXT SESSION (Session 92)**:
+> 1. **🏗️ DESIGN: Unify SolutionSnapshot/AgenticJobBase Interface**: Queue system mixes `SolutionSnapshot` (legacy COSA) and `AgenticJobBase` (new agentic jobs) without shared interface. Current `getattr()` hack in `queues.py:508-517` needs principled design. Options: Protocol/Interface, Adapter Pattern, Attribute Alignment.
+> 2. **🎙️ Podcast Generator Notification Bug Fix**: Research link shows "edit-mode" in audio-only mode. Plan file: `/home/rruiz/.claude/plans/hidden-nibbling-knuth.md`
+> 3. **🧪 Phase 7 Browser Testing**: Continue verification - spinning indicator, live duration timer, abstract/report link, cost summary, error display.
+> 4. **🔬 Deep Research Queue Integration - BROWSER TESTING**: Test Phase 6 frontend notification routing.
+> 5. **🎙️ Podcast Generator - FULL AUDIO GENERATION TEST**: Ready for full 20-segment test.
+> 6. **⏰ Job Queue Progressive Disclosure UI - MANUAL TESTING**: See plan: `/home/rruiz/.claude/plans/cheeky-leaping-scone.md`
+> 7. **Deep Research Phase 8 (PENDING)**: COSA Router Integration for natural language job submission
+> 8. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 1 complete. Remaining: Phase 4 = AgentBase History, Phase 5 = Lifecycle.
+> 9. Voice discovery/configuration for notification TTS UI still pending
+> 10. **Future TODO**: Config mapping female/male voices, consolidate voice_io.py, evaluate config.py dataclasses, migrate /api/deep-research/report
+>
+> **🔧 SESSION 91 COMPLETE**: Phase 7 Browser Testing - Bug Fixes in get_job_interactions Endpoint
+> - **BUG #1**: Wrong import path in `queues.py:484` - changed `cosa.rest.db.models.notification` to `cosa.rest.postgres_models`
+> - **BUG #2**: AttributeError - `MockAgenticJob` missing `agent_class_name`, `question`, `answer`, `created_date` attributes
+> - **TEMP FIX**: Used `getattr()` with safe defaults in `queues.py:508-517` (marked as needing proper design)
+> - **DESIGN TODO**: Need principled interface contract for queue items (SolutionSnapshot vs AgenticJobBase)
+> - **Files Modified**: `src/cosa/rest/routers/queues.py` (2 edits)
 >
 > **✅ SESSION 90 COMPLETE**: Podcast Generator Notification Enhancements + Bug Discovery
 > - **Implemented**: Clickable links (script, audio, research) and audio cost tracking in all 3 notification methods
