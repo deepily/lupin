@@ -13,10 +13,10 @@ Sender ID Format: claude.code@{project}.deepily.ai#{session_id}
     - session_id is an 8-character hex string unique to each MCP server instance
 
 Project Detection (automatic):
-    1. Auto-detects from current working directory:
+    1. Auto-detects from current working directory (checked in order):
+       - cosa → "cosa" (checked first - may be submodule of lupin)
        - lupin → "lupin"
        - planning-is-prompting → "plan"
-       - cosa (standalone) → "cosa"
     2. Falls back to MCP_PROJECT env var if cwd detection fails
     3. Falls back to "unknown" with console warning if neither works
 
@@ -107,26 +107,25 @@ def _detect_project_from_cwd() -> Optional[ str ]:
         - Returns lowercase project name if detected
         - Returns None if no known project pattern found
 
-    Known project patterns:
+    Known project patterns (checked in order):
+        - cosa → "cosa" (checked first - may be submodule of lupin)
         - lupin → "lupin"
         - planning-is-prompting → "plan"
-        - cosa (standalone, not as subdir) → "cosa"
     """
     try:
         cwd = os.getcwd().lower()
 
-        # Lupin project detection (main repo)
+        # CoSA detection (check FIRST - may be submodule of lupin)
+        if "/cosa" in cwd:
+            return "cosa"
+
+        # Lupin project detection (only if not in cosa subdirectory)
         if "/lupin" in cwd:
             return "lupin"
 
         # Planning-is-Prompting project detection
         if "planning-is-prompting" in cwd:
             return "plan"
-
-        # CoSA standalone (not as submodule within lupin)
-        # Check it's not inside lupin first
-        if "/cosa" in cwd and "/lupin" not in cwd:
-            return "cosa"
 
         return None
 
