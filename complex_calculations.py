@@ -1,154 +1,301 @@
 #!/usr/bin/env python3
 """
-Complex Calculations Library
-A comprehensive Python script implementing various numerical methods,
-statistical analysis, linear algebra operations, signal processing,
-and optimization algorithms.
+Complex Calculations Script
+============================
+A comprehensive Python script demonstrating various complex mathematical computations
+including linear algebra, statistics, numerical methods, signal processing, optimization,
+differential equations, and more.
 
-Author: Claude Code
-Version: 1.0.0
+Author: Claude AI Assistant
 """
 
 import math
+import cmath
 import random
-import time
-from typing import List, Tuple, Callable, Optional, Union, Dict, Any
-from functools import reduce, lru_cache
-from collections import defaultdict
 import itertools
+import functools
+from typing import List, Tuple, Callable, Optional, Union, Dict, Any
+from collections import defaultdict
+from dataclasses import dataclass
+import time
 
 
 # =============================================================================
-# SECTION 1: BASIC MATHEMATICAL UTILITIES
+# SECTION 1: MATRIX OPERATIONS AND LINEAR ALGEBRA
 # =============================================================================
 
-class MathUtils:
-    """Collection of basic mathematical utility functions."""
+class Matrix:
+    """A class for matrix operations without external dependencies."""
 
-    @staticmethod
-    def factorial(n: int) -> int:
-        """Calculate factorial of n using iterative approach."""
-        if n < 0:
-            raise ValueError("Factorial not defined for negative numbers")
-        result = 1
-        for i in range(2, n + 1):
-            result *= i
+    def __init__(self, data: List[List[float]]):
+        """Initialize matrix with 2D list of numbers."""
+        self.data = data
+        self.rows = len(data)
+        self.cols = len(data[0]) if data else 0
+        self._validate()
+
+    def _validate(self):
+        """Ensure all rows have the same length."""
+        for row in self.data:
+            if len(row) != self.cols:
+                raise ValueError("All rows must have the same length")
+
+    @classmethod
+    def identity(cls, n: int) -> 'Matrix':
+        """Create an n x n identity matrix."""
+        data = [[1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]
+        return cls(data)
+
+    @classmethod
+    def zeros(cls, rows: int, cols: int) -> 'Matrix':
+        """Create a matrix of zeros."""
+        return cls([[0.0 for _ in range(cols)] for _ in range(rows)])
+
+    @classmethod
+    def random(cls, rows: int, cols: int, low: float = 0, high: float = 1) -> 'Matrix':
+        """Create a matrix with random values."""
+        data = [[random.uniform(low, high) for _ in range(cols)] for _ in range(rows)]
+        return cls(data)
+
+    def __repr__(self) -> str:
+        """String representation of matrix."""
+        rows_str = []
+        for row in self.data:
+            row_str = "[" + ", ".join(f"{x:8.4f}" for x in row) + "]"
+            rows_str.append(row_str)
+        return "Matrix([\n  " + ",\n  ".join(rows_str) + "\n])"
+
+    def __add__(self, other: 'Matrix') -> 'Matrix':
+        """Matrix addition."""
+        if self.rows != other.rows or self.cols != other.cols:
+            raise ValueError("Matrices must have same dimensions for addition")
+        result = [
+            [self.data[i][j] + other.data[i][j] for j in range(self.cols)]
+            for i in range(self.rows)
+        ]
+        return Matrix(result)
+
+    def __sub__(self, other: 'Matrix') -> 'Matrix':
+        """Matrix subtraction."""
+        if self.rows != other.rows or self.cols != other.cols:
+            raise ValueError("Matrices must have same dimensions for subtraction")
+        result = [
+            [self.data[i][j] - other.data[i][j] for j in range(self.cols)]
+            for i in range(self.rows)
+        ]
+        return Matrix(result)
+
+    def __mul__(self, other: Union['Matrix', float]) -> 'Matrix':
+        """Matrix multiplication or scalar multiplication."""
+        if isinstance(other, (int, float)):
+            result = [[self.data[i][j] * other for j in range(self.cols)]
+                      for i in range(self.rows)]
+            return Matrix(result)
+
+        if self.cols != other.rows:
+            raise ValueError(f"Cannot multiply {self.rows}x{self.cols} by {other.rows}x{other.cols}")
+
+        result = Matrix.zeros(self.rows, other.cols)
+        for i in range(self.rows):
+            for j in range(other.cols):
+                total = 0.0
+                for k in range(self.cols):
+                    total += self.data[i][k] * other.data[k][j]
+                result.data[i][j] = total
         return result
 
-    @staticmethod
-    def fibonacci(n: int) -> int:
-        """Calculate nth Fibonacci number using matrix exponentiation."""
-        if n < 0:
-            raise ValueError("Fibonacci not defined for negative indices")
-        if n <= 1:
-            return n
+    def transpose(self) -> 'Matrix':
+        """Return the transpose of the matrix."""
+        result = [[self.data[j][i] for j in range(self.rows)] for i in range(self.cols)]
+        return Matrix(result)
 
-        def matrix_mult(a: List[List[int]], b: List[List[int]]) -> List[List[int]]:
-            return [
-                [a[0][0]*b[0][0] + a[0][1]*b[1][0], a[0][0]*b[0][1] + a[0][1]*b[1][1]],
-                [a[1][0]*b[0][0] + a[1][1]*b[1][0], a[1][0]*b[0][1] + a[1][1]*b[1][1]]
-            ]
+    def trace(self) -> float:
+        """Calculate the trace of a square matrix."""
+        if self.rows != self.cols:
+            raise ValueError("Trace is only defined for square matrices")
+        return sum(self.data[i][i] for i in range(self.rows))
 
-        def matrix_pow(matrix: List[List[int]], power: int) -> List[List[int]]:
-            result = [[1, 0], [0, 1]]
-            base = [row[:] for row in matrix]
-            while power > 0:
-                if power % 2 == 1:
-                    result = matrix_mult(result, base)
-                base = matrix_mult(base, base)
-                power //= 2
-            return result
+    def determinant(self) -> float:
+        """Calculate determinant using LU decomposition."""
+        if self.rows != self.cols:
+            raise ValueError("Determinant is only defined for square matrices")
 
-        fib_matrix = [[1, 1], [1, 0]]
-        result_matrix = matrix_pow(fib_matrix, n)
-        return result_matrix[0][1]
+        n = self.rows
+        if n == 1:
+            return self.data[0][0]
+        if n == 2:
+            return self.data[0][0] * self.data[1][1] - self.data[0][1] * self.data[1][0]
 
-    @staticmethod
-    def gcd(a: int, b: int) -> int:
-        """Calculate GCD using Euclidean algorithm."""
-        while b:
-            a, b = b, a % b
-        return abs(a)
+        # Create a copy for LU decomposition
+        lu = [[self.data[i][j] for j in range(n)] for i in range(n)]
+        det = 1.0
 
-    @staticmethod
-    def lcm(a: int, b: int) -> int:
-        """Calculate LCM using GCD."""
-        return abs(a * b) // MathUtils.gcd(a, b) if a and b else 0
+        for col in range(n):
+            # Find pivot
+            max_row = col
+            for row in range(col + 1, n):
+                if abs(lu[row][col]) > abs(lu[max_row][col]):
+                    max_row = row
 
-    @staticmethod
-    def is_prime(n: int) -> bool:
-        """Check if n is prime using Miller-Rabin primality test."""
-        if n < 2:
-            return False
-        if n == 2 or n == 3:
-            return True
-        if n % 2 == 0:
-            return False
+            if max_row != col:
+                lu[col], lu[max_row] = lu[max_row], lu[col]
+                det *= -1
 
-        r, d = 0, n - 1
-        while d % 2 == 0:
-            r += 1
-            d //= 2
+            if abs(lu[col][col]) < 1e-12:
+                return 0.0
 
-        witnesses = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37]
-        for a in witnesses:
-            if a >= n:
-                continue
-            x = pow(a, d, n)
-            if x == 1 or x == n - 1:
-                continue
-            for _ in range(r - 1):
-                x = pow(x, 2, n)
-                if x == n - 1:
-                    break
-            else:
-                return False
-        return True
+            det *= lu[col][col]
 
-    @staticmethod
-    def prime_factors(n: int) -> List[int]:
-        """Find all prime factors of n."""
-        factors = []
-        d = 2
-        while d * d <= n:
-            while n % d == 0:
-                factors.append(d)
-                n //= d
-            d += 1
-        if n > 1:
-            factors.append(n)
-        return factors
+            for row in range(col + 1, n):
+                factor = lu[row][col] / lu[col][col]
+                for j in range(col, n):
+                    lu[row][j] -= factor * lu[col][j]
 
-    @staticmethod
-    def sieve_of_eratosthenes(limit: int) -> List[int]:
-        """Generate all primes up to limit using Sieve of Eratosthenes."""
-        if limit < 2:
-            return []
-        is_prime = [True] * (limit + 1)
-        is_prime[0] = is_prime[1] = False
-        for i in range(2, int(limit**0.5) + 1):
-            if is_prime[i]:
-                for j in range(i*i, limit + 1, i):
-                    is_prime[j] = False
-        return [i for i in range(limit + 1) if is_prime[i]]
+        return det
+
+    def inverse(self) -> 'Matrix':
+        """Calculate matrix inverse using Gauss-Jordan elimination."""
+        if self.rows != self.cols:
+            raise ValueError("Only square matrices can be inverted")
+
+        n = self.rows
+        augmented = [self.data[i] + [1.0 if i == j else 0.0 for j in range(n)]
+                     for i in range(n)]
+
+        # Forward elimination
+        for col in range(n):
+            # Find pivot
+            max_row = col
+            for row in range(col + 1, n):
+                if abs(augmented[row][col]) > abs(augmented[max_row][col]):
+                    max_row = row
+
+            augmented[col], augmented[max_row] = augmented[max_row], augmented[col]
+
+            if abs(augmented[col][col]) < 1e-12:
+                raise ValueError("Matrix is singular and cannot be inverted")
+
+            # Scale pivot row
+            pivot = augmented[col][col]
+            for j in range(2 * n):
+                augmented[col][j] /= pivot
+
+            # Eliminate column
+            for row in range(n):
+                if row != col:
+                    factor = augmented[row][col]
+                    for j in range(2 * n):
+                        augmented[row][j] -= factor * augmented[col][j]
+
+        result = [row[n:] for row in augmented]
+        return Matrix(result)
+
+    def lu_decomposition(self) -> Tuple['Matrix', 'Matrix']:
+        """Perform LU decomposition with partial pivoting."""
+        if self.rows != self.cols:
+            raise ValueError("LU decomposition requires a square matrix")
+
+        n = self.rows
+        L = Matrix.identity(n)
+        U = [[self.data[i][j] for j in range(n)] for i in range(n)]
+
+        for col in range(n - 1):
+            for row in range(col + 1, n):
+                if abs(U[col][col]) < 1e-12:
+                    continue
+                factor = U[row][col] / U[col][col]
+                L.data[row][col] = factor
+                for j in range(col, n):
+                    U[row][j] -= factor * U[col][j]
+
+        return L, Matrix(U)
+
+    def qr_decomposition(self) -> Tuple['Matrix', 'Matrix']:
+        """Perform QR decomposition using Gram-Schmidt process."""
+        n = self.rows
+        m = self.cols
+
+        Q = Matrix.zeros(n, m)
+        R = Matrix.zeros(m, m)
+
+        for j in range(m):
+            # Start with column j
+            v = [self.data[i][j] for i in range(n)]
+
+            # Subtract projections onto previous columns
+            for i in range(j):
+                # Calculate dot product
+                dot = sum(Q.data[k][i] * self.data[k][j] for k in range(n))
+                R.data[i][j] = dot
+                for k in range(n):
+                    v[k] -= dot * Q.data[k][i]
+
+            # Normalize
+            norm = math.sqrt(sum(x * x for x in v))
+            R.data[j][j] = norm
+
+            if norm > 1e-12:
+                for i in range(n):
+                    Q.data[i][j] = v[i] / norm
+
+        return Q, R
+
+    def eigenvalues_power_method(self, num_iterations: int = 100) -> Tuple[float, List[float]]:
+        """Find dominant eigenvalue using power iteration."""
+        if self.rows != self.cols:
+            raise ValueError("Eigenvalues require a square matrix")
+
+        n = self.rows
+        v = [random.random() for _ in range(n)]
+        norm = math.sqrt(sum(x * x for x in v))
+        v = [x / norm for x in v]
+
+        eigenvalue = 0.0
+        for _ in range(num_iterations):
+            # Matrix-vector multiplication
+            new_v = [sum(self.data[i][j] * v[j] for j in range(n)) for i in range(n)]
+
+            # Find largest component for eigenvalue estimate
+            max_idx = max(range(n), key=lambda i: abs(new_v[i]))
+            if abs(v[max_idx]) > 1e-12:
+                eigenvalue = new_v[max_idx] / v[max_idx]
+
+            # Normalize
+            norm = math.sqrt(sum(x * x for x in new_v))
+            v = [x / norm for x in new_v]
+
+        return eigenvalue, v
+
+    def frobenius_norm(self) -> float:
+        """Calculate the Frobenius norm of the matrix."""
+        return math.sqrt(sum(self.data[i][j] ** 2
+                            for i in range(self.rows)
+                            for j in range(self.cols)))
+
+    def condition_number(self) -> float:
+        """Estimate condition number using power method."""
+        eigenval1, _ = self.eigenvalues_power_method()
+        inv = self.inverse()
+        eigenval2, _ = inv.eigenvalues_power_method()
+        return abs(eigenval1 * eigenval2)
 
 
 # =============================================================================
-# SECTION 2: NUMERICAL ANALYSIS AND CALCULUS
+# SECTION 2: NUMERICAL INTEGRATION AND DIFFERENTIATION
 # =============================================================================
 
-class NumericalAnalysis:
-    """Numerical methods for calculus and equation solving."""
+class NumericalMethods:
+    """Collection of numerical methods for integration and differentiation."""
 
     @staticmethod
     def derivative(f: Callable[[float], float], x: float, h: float = 1e-8) -> float:
-        """Calculate numerical derivative using central difference method."""
+        """Calculate derivative using central difference method."""
         return (f(x + h) - f(x - h)) / (2 * h)
 
     @staticmethod
     def second_derivative(f: Callable[[float], float], x: float, h: float = 1e-5) -> float:
         """Calculate second derivative using central difference."""
-        return (f(x + h) - 2*f(x) + f(x - h)) / (h * h)
+        return (f(x + h) - 2 * f(x) + f(x - h)) / (h * h)
 
     @staticmethod
     def partial_derivative(f: Callable[..., float], args: List[float],
@@ -163,12 +310,38 @@ class NumericalAnalysis:
     @staticmethod
     def gradient(f: Callable[..., float], args: List[float], h: float = 1e-8) -> List[float]:
         """Calculate gradient vector of a multivariable function."""
-        return [NumericalAnalysis.partial_derivative(f, args, i, h)
+        return [NumericalMethods.partial_derivative(f, args, i, h)
                 for i in range(len(args))]
 
     @staticmethod
-    def integrate_trapezoidal(f: Callable[[float], float], a: float,
-                             b: float, n: int = 1000) -> float:
+    def hessian(f: Callable[..., float], args: List[float], h: float = 1e-5) -> Matrix:
+        """Calculate Hessian matrix of a multivariable function."""
+        n = len(args)
+        H = Matrix.zeros(n, n)
+
+        for i in range(n):
+            for j in range(i, n):
+                args_pp = args.copy()
+                args_pm = args.copy()
+                args_mp = args.copy()
+                args_mm = args.copy()
+
+                args_pp[i] += h
+                args_pp[j] += h
+                args_pm[i] += h
+                args_pm[j] -= h
+                args_mp[i] -= h
+                args_mp[j] += h
+                args_mm[i] -= h
+                args_mm[j] -= h
+
+                H.data[i][j] = (f(*args_pp) - f(*args_pm) - f(*args_mp) + f(*args_mm)) / (4 * h * h)
+                H.data[j][i] = H.data[i][j]
+
+        return H
+
+    @staticmethod
+    def trapezoidal_rule(f: Callable[[float], float], a: float, b: float, n: int) -> float:
         """Numerical integration using trapezoidal rule."""
         h = (b - a) / n
         result = 0.5 * (f(a) + f(b))
@@ -177,956 +350,559 @@ class NumericalAnalysis:
         return result * h
 
     @staticmethod
-    def integrate_simpson(f: Callable[[float], float], a: float,
-                         b: float, n: int = 1000) -> float:
+    def simpsons_rule(f: Callable[[float], float], a: float, b: float, n: int) -> float:
         """Numerical integration using Simpson's rule."""
-        if n % 2 == 1:
+        if n % 2 != 0:
             n += 1
         h = (b - a) / n
         result = f(a) + f(b)
+
         for i in range(1, n):
-            coef = 4 if i % 2 == 1 else 2
-            result += coef * f(a + i * h)
+            x = a + i * h
+            if i % 2 == 0:
+                result += 2 * f(x)
+            else:
+                result += 4 * f(x)
+
         return result * h / 3
 
     @staticmethod
-    def integrate_romberg(f: Callable[[float], float], a: float,
-                         b: float, max_iter: int = 10, tol: float = 1e-10) -> float:
+    def gaussian_quadrature(f: Callable[[float], float], a: float, b: float,
+                           n: int = 5) -> float:
+        """Numerical integration using Gaussian quadrature."""
+        # Legendre-Gauss nodes and weights for n=5
+        nodes = [-0.9061798459, -0.5384693101, 0.0, 0.5384693101, 0.9061798459]
+        weights = [0.2369268851, 0.4786286705, 0.5688888889, 0.4786286705, 0.2369268851]
+
+        # Transform from [-1, 1] to [a, b]
+        mid = (b + a) / 2
+        half_length = (b - a) / 2
+
+        result = 0.0
+        for node, weight in zip(nodes, weights):
+            x = mid + half_length * node
+            result += weight * f(x)
+
+        return result * half_length
+
+    @staticmethod
+    def romberg_integration(f: Callable[[float], float], a: float, b: float,
+                           max_iter: int = 10, tol: float = 1e-10) -> float:
         """Romberg integration for higher accuracy."""
-        R = [[0.0] * (max_iter + 1) for _ in range(max_iter + 1)]
+        R = [[0.0] * max_iter for _ in range(max_iter)]
+
         h = b - a
         R[0][0] = 0.5 * h * (f(a) + f(b))
 
-        for i in range(1, max_iter + 1):
+        for i in range(1, max_iter):
             h /= 2
-            sum_val = sum(f(a + (2*k - 1) * h) for k in range(1, 2**(i-1) + 1))
-            R[i][0] = 0.5 * R[i-1][0] + h * sum_val
+            # Trapezoidal approximation
+            total = sum(f(a + (2 * k - 1) * h) for k in range(1, 2 ** (i - 1) + 1))
+            R[i][0] = 0.5 * R[i - 1][0] + h * total
 
+            # Richardson extrapolation
             for j in range(1, i + 1):
-                R[i][j] = R[i][j-1] + (R[i][j-1] - R[i-1][j-1]) / (4**j - 1)
+                factor = 4 ** j
+                R[i][j] = (factor * R[i][j - 1] - R[i - 1][j - 1]) / (factor - 1)
 
-            if i > 1 and abs(R[i][i] - R[i-1][i-1]) < tol:
+            if i > 0 and abs(R[i][i] - R[i - 1][i - 1]) < tol:
                 return R[i][i]
 
-        return R[max_iter][max_iter]
+        return R[max_iter - 1][max_iter - 1]
 
     @staticmethod
-    def newton_raphson(f: Callable[[float], float], x0: float,
-                      tol: float = 1e-10, max_iter: int = 100) -> float:
-        """Find root using Newton-Raphson method."""
-        x = x0
-        for _ in range(max_iter):
-            fx = f(x)
-            if abs(fx) < tol:
-                return x
-            dfx = NumericalAnalysis.derivative(f, x)
-            if abs(dfx) < 1e-15:
-                raise ValueError("Derivative too small")
-            x = x - fx / dfx
-        raise ValueError("Newton-Raphson did not converge")
+    def monte_carlo_integration(f: Callable[[float], float], a: float, b: float,
+                               n_samples: int = 10000) -> Tuple[float, float]:
+        """Monte Carlo integration with error estimate."""
+        samples = [f(random.uniform(a, b)) for _ in range(n_samples)]
+        mean = sum(samples) / n_samples
+        variance = sum((x - mean) ** 2 for x in samples) / (n_samples - 1)
+
+        integral = (b - a) * mean
+        error = (b - a) * math.sqrt(variance / n_samples)
+
+        return integral, error
+
+
+# =============================================================================
+# SECTION 3: ROOT FINDING ALGORITHMS
+# =============================================================================
+
+class RootFinding:
+    """Collection of root-finding algorithms."""
 
     @staticmethod
     def bisection(f: Callable[[float], float], a: float, b: float,
-                 tol: float = 1e-10, max_iter: int = 100) -> float:
+                 tol: float = 1e-10, max_iter: int = 100) -> Tuple[float, int]:
         """Find root using bisection method."""
         if f(a) * f(b) > 0:
-            raise ValueError("Function must have opposite signs at endpoints")
+            raise ValueError("Function must have different signs at endpoints")
 
-        for _ in range(max_iter):
+        for i in range(max_iter):
             c = (a + b) / 2
             if abs(f(c)) < tol or (b - a) / 2 < tol:
-                return c
+                return c, i + 1
+
             if f(c) * f(a) < 0:
                 b = c
             else:
                 a = c
-        return (a + b) / 2
+
+        return (a + b) / 2, max_iter
+
+    @staticmethod
+    def newton_raphson(f: Callable[[float], float], x0: float,
+                      tol: float = 1e-10, max_iter: int = 100) -> Tuple[float, int]:
+        """Find root using Newton-Raphson method."""
+        x = x0
+        for i in range(max_iter):
+            fx = f(x)
+            if abs(fx) < tol:
+                return x, i + 1
+
+            fpx = NumericalMethods.derivative(f, x)
+            if abs(fpx) < 1e-15:
+                raise ValueError("Derivative too small, method may not converge")
+
+            x_new = x - fx / fpx
+            if abs(x_new - x) < tol:
+                return x_new, i + 1
+            x = x_new
+
+        return x, max_iter
 
     @staticmethod
     def secant_method(f: Callable[[float], float], x0: float, x1: float,
-                     tol: float = 1e-10, max_iter: int = 100) -> float:
+                     tol: float = 1e-10, max_iter: int = 100) -> Tuple[float, int]:
         """Find root using secant method."""
-        for _ in range(max_iter):
-            fx0, fx1 = f(x0), f(x1)
-            if abs(fx1) < tol:
-                return x1
-            if abs(fx1 - fx0) < 1e-15:
-                raise ValueError("Division by zero in secant method")
-            x2 = x1 - fx1 * (x1 - x0) / (fx1 - fx0)
+        for i in range(max_iter):
+            f0, f1 = f(x0), f(x1)
+
+            if abs(f1) < tol:
+                return x1, i + 1
+
+            if abs(f1 - f0) < 1e-15:
+                raise ValueError("Function values too close, method may not converge")
+
+            x2 = x1 - f1 * (x1 - x0) / (f1 - f0)
+
+            if abs(x2 - x1) < tol:
+                return x2, i + 1
+
             x0, x1 = x1, x2
-        raise ValueError("Secant method did not converge")
+
+        return x1, max_iter
+
+    @staticmethod
+    def brent_method(f: Callable[[float], float], a: float, b: float,
+                    tol: float = 1e-10, max_iter: int = 100) -> Tuple[float, int]:
+        """Find root using Brent's method (combines bisection, secant, and inverse quadratic)."""
+        fa, fb = f(a), f(b)
+
+        if fa * fb > 0:
+            raise ValueError("Function must have different signs at endpoints")
+
+        if abs(fa) < abs(fb):
+            a, b = b, a
+            fa, fb = fb, fa
+
+        c, fc = a, fa
+        d = b - a
+        e = d
+
+        for i in range(max_iter):
+            if abs(fb) < tol:
+                return b, i + 1
+
+            if fa != fc and fb != fc:
+                # Inverse quadratic interpolation
+                s = (a * fb * fc / ((fa - fb) * (fa - fc)) +
+                     b * fa * fc / ((fb - fa) * (fb - fc)) +
+                     c * fa * fb / ((fc - fa) * (fc - fb)))
+            else:
+                # Secant method
+                s = b - fb * (b - a) / (fb - fa)
+
+            # Conditions for accepting s
+            cond1 = (s - (3 * a + b) / 4) * (s - b) >= 0
+            cond2 = abs(s - b) >= abs(d) / 2
+            cond3 = abs(d) < tol
+
+            if cond1 or cond2 or cond3:
+                # Bisection
+                s = (a + b) / 2
+                d = b - a
+                e = d
+            else:
+                d = e
+                e = b - s
+
+            a, fa = b, fb
+
+            if abs(e) > tol:
+                b = s
+            else:
+                b = b + tol if a < b else b - tol
+
+            fb = f(b)
+
+            if fb * fc > 0:
+                c, fc = a, fa
+
+        return b, max_iter
+
+    @staticmethod
+    def fixed_point_iteration(g: Callable[[float], float], x0: float,
+                             tol: float = 1e-10, max_iter: int = 100) -> Tuple[float, int]:
+        """Find fixed point where x = g(x)."""
+        x = x0
+        for i in range(max_iter):
+            x_new = g(x)
+            if abs(x_new - x) < tol:
+                return x_new, i + 1
+            x = x_new
+        return x, max_iter
 
 
 # =============================================================================
-# SECTION 3: LINEAR ALGEBRA
-# =============================================================================
-
-class Matrix:
-    """Matrix class with various linear algebra operations."""
-
-    def __init__(self, data: List[List[float]]):
-        """Initialize matrix from 2D list."""
-        self.data = [row[:] for row in data]
-        self.rows = len(data)
-        self.cols = len(data[0]) if data else 0
-
-    def __repr__(self) -> str:
-        return f"Matrix({self.data})"
-
-    def __str__(self) -> str:
-        return '\n'.join(['\t'.join(f'{x:.4f}' for x in row) for row in self.data])
-
-    def __getitem__(self, key: Tuple[int, int]) -> float:
-        return self.data[key[0]][key[1]]
-
-    def __setitem__(self, key: Tuple[int, int], value: float):
-        self.data[key[0]][key[1]] = value
-
-    def __add__(self, other: 'Matrix') -> 'Matrix':
-        if self.rows != other.rows or self.cols != other.cols:
-            raise ValueError("Matrix dimensions must match for addition")
-        result = [[self.data[i][j] + other.data[i][j]
-                  for j in range(self.cols)] for i in range(self.rows)]
-        return Matrix(result)
-
-    def __sub__(self, other: 'Matrix') -> 'Matrix':
-        if self.rows != other.rows or self.cols != other.cols:
-            raise ValueError("Matrix dimensions must match for subtraction")
-        result = [[self.data[i][j] - other.data[i][j]
-                  for j in range(self.cols)] for i in range(self.rows)]
-        return Matrix(result)
-
-    def __mul__(self, other: Union['Matrix', float]) -> 'Matrix':
-        if isinstance(other, (int, float)):
-            result = [[self.data[i][j] * other
-                      for j in range(self.cols)] for i in range(self.rows)]
-            return Matrix(result)
-        if self.cols != other.rows:
-            raise ValueError("Matrix dimensions incompatible for multiplication")
-        result = [[sum(self.data[i][k] * other.data[k][j] for k in range(self.cols))
-                  for j in range(other.cols)] for i in range(self.rows)]
-        return Matrix(result)
-
-    @staticmethod
-    def identity(n: int) -> 'Matrix':
-        """Create n x n identity matrix."""
-        return Matrix([[1.0 if i == j else 0.0 for j in range(n)] for i in range(n)])
-
-    @staticmethod
-    def zeros(rows: int, cols: int) -> 'Matrix':
-        """Create matrix of zeros."""
-        return Matrix([[0.0] * cols for _ in range(rows)])
-
-    @staticmethod
-    def random(rows: int, cols: int, low: float = 0, high: float = 1) -> 'Matrix':
-        """Create matrix with random values."""
-        return Matrix([[random.uniform(low, high) for _ in range(cols)]
-                      for _ in range(rows)])
-
-    def transpose(self) -> 'Matrix':
-        """Return transpose of matrix."""
-        result = [[self.data[j][i] for j in range(self.rows)] for i in range(self.cols)]
-        return Matrix(result)
-
-    def trace(self) -> float:
-        """Calculate trace of square matrix."""
-        if self.rows != self.cols:
-            raise ValueError("Trace only defined for square matrices")
-        return sum(self.data[i][i] for i in range(self.rows))
-
-    def determinant(self) -> float:
-        """Calculate determinant using LU decomposition."""
-        if self.rows != self.cols:
-            raise ValueError("Determinant only defined for square matrices")
-
-        n = self.rows
-        lu = [row[:] for row in self.data]
-        det = 1.0
-
-        for i in range(n):
-            max_row = max(range(i, n), key=lambda r: abs(lu[r][i]))
-            if abs(lu[max_row][i]) < 1e-15:
-                return 0.0
-            if max_row != i:
-                lu[i], lu[max_row] = lu[max_row], lu[i]
-                det *= -1
-
-            det *= lu[i][i]
-            for j in range(i + 1, n):
-                factor = lu[j][i] / lu[i][i]
-                for k in range(i, n):
-                    lu[j][k] -= factor * lu[i][k]
-
-        return det
-
-    def inverse(self) -> 'Matrix':
-        """Calculate inverse using Gauss-Jordan elimination."""
-        if self.rows != self.cols:
-            raise ValueError("Inverse only defined for square matrices")
-
-        n = self.rows
-        augmented = [self.data[i] + [1.0 if i == j else 0.0 for j in range(n)]
-                    for i in range(n)]
-
-        for i in range(n):
-            max_row = max(range(i, n), key=lambda r: abs(augmented[r][i]))
-            if abs(augmented[max_row][i]) < 1e-15:
-                raise ValueError("Matrix is singular")
-            augmented[i], augmented[max_row] = augmented[max_row], augmented[i]
-
-            pivot = augmented[i][i]
-            augmented[i] = [x / pivot for x in augmented[i]]
-
-            for j in range(n):
-                if i != j:
-                    factor = augmented[j][i]
-                    augmented[j] = [augmented[j][k] - factor * augmented[i][k]
-                                   for k in range(2 * n)]
-
-        return Matrix([row[n:] for row in augmented])
-
-    def lu_decomposition(self) -> Tuple['Matrix', 'Matrix']:
-        """Perform LU decomposition."""
-        if self.rows != self.cols:
-            raise ValueError("LU decomposition requires square matrix")
-
-        n = self.rows
-        L = Matrix.identity(n)
-        U = Matrix([row[:] for row in self.data])
-
-        for i in range(n):
-            for j in range(i + 1, n):
-                if abs(U[i, i]) < 1e-15:
-                    raise ValueError("Zero pivot encountered")
-                factor = U[j, i] / U[i, i]
-                L[j, i] = factor
-                for k in range(i, n):
-                    U[j, k] -= factor * U[i, k]
-
-        return L, U
-
-    def qr_decomposition(self) -> Tuple['Matrix', 'Matrix']:
-        """Perform QR decomposition using Gram-Schmidt process."""
-        n, m = self.rows, self.cols
-        Q = Matrix.zeros(n, m)
-        R = Matrix.zeros(m, m)
-
-        for j in range(m):
-            v = [self.data[i][j] for i in range(n)]
-
-            for i in range(j):
-                R[i, j] = sum(Q[k, i] * self.data[k][j] for k in range(n))
-                for k in range(n):
-                    v[k] -= R[i, j] * Q[k, i]
-
-            R[j, j] = math.sqrt(sum(x*x for x in v))
-            if R[j, j] > 1e-15:
-                for k in range(n):
-                    Q[k, j] = v[k] / R[j, j]
-
-        return Q, R
-
-    def eigenvalues_power_iteration(self, num_iterations: int = 1000,
-                                   tol: float = 1e-10) -> Tuple[float, List[float]]:
-        """Find dominant eigenvalue using power iteration."""
-        if self.rows != self.cols:
-            raise ValueError("Eigenvalues only for square matrices")
-
-        n = self.rows
-        b = [random.random() for _ in range(n)]
-        norm = math.sqrt(sum(x*x for x in b))
-        b = [x/norm for x in b]
-
-        eigenvalue = 0.0
-        for _ in range(num_iterations):
-            b_new = [sum(self.data[i][j] * b[j] for j in range(n)) for i in range(n)]
-            norm = math.sqrt(sum(x*x for x in b_new))
-            b_new = [x/norm for x in b_new]
-
-            new_eigenvalue = sum(sum(self.data[i][j] * b_new[j] for j in range(n)) * b_new[i]
-                                for i in range(n))
-
-            if abs(new_eigenvalue - eigenvalue) < tol:
-                return new_eigenvalue, b_new
-
-            eigenvalue = new_eigenvalue
-            b = b_new
-
-        return eigenvalue, b
-
-    def solve_linear_system(self, b: List[float]) -> List[float]:
-        """Solve Ax = b using Gaussian elimination with partial pivoting."""
-        if self.rows != self.cols or len(b) != self.rows:
-            raise ValueError("Invalid dimensions for linear system")
-
-        n = self.rows
-        augmented = [self.data[i] + [b[i]] for i in range(n)]
-
-        for i in range(n):
-            max_row = max(range(i, n), key=lambda r: abs(augmented[r][i]))
-            augmented[i], augmented[max_row] = augmented[max_row], augmented[i]
-
-            if abs(augmented[i][i]) < 1e-15:
-                raise ValueError("System has no unique solution")
-
-            for j in range(i + 1, n):
-                factor = augmented[j][i] / augmented[i][i]
-                for k in range(i, n + 1):
-                    augmented[j][k] -= factor * augmented[i][k]
-
-        x = [0.0] * n
-        for i in range(n - 1, -1, -1):
-            x[i] = (augmented[i][n] - sum(augmented[i][j] * x[j]
-                   for j in range(i + 1, n))) / augmented[i][i]
-
-        return x
-
-
-# =============================================================================
-# SECTION 4: STATISTICS AND PROBABILITY
-# =============================================================================
-
-class Statistics:
-    """Statistical analysis and probability functions."""
-
-    @staticmethod
-    def mean(data: List[float]) -> float:
-        """Calculate arithmetic mean."""
-        if not data:
-            raise ValueError("Cannot calculate mean of empty list")
-        return sum(data) / len(data)
-
-    @staticmethod
-    def geometric_mean(data: List[float]) -> float:
-        """Calculate geometric mean."""
-        if not data or any(x <= 0 for x in data):
-            raise ValueError("Geometric mean requires positive values")
-        return math.exp(sum(math.log(x) for x in data) / len(data))
-
-    @staticmethod
-    def harmonic_mean(data: List[float]) -> float:
-        """Calculate harmonic mean."""
-        if not data or any(x <= 0 for x in data):
-            raise ValueError("Harmonic mean requires positive values")
-        return len(data) / sum(1/x for x in data)
-
-    @staticmethod
-    def median(data: List[float]) -> float:
-        """Calculate median."""
-        if not data:
-            raise ValueError("Cannot calculate median of empty list")
-        sorted_data = sorted(data)
-        n = len(sorted_data)
-        mid = n // 2
-        if n % 2 == 0:
-            return (sorted_data[mid - 1] + sorted_data[mid]) / 2
-        return sorted_data[mid]
-
-    @staticmethod
-    def mode(data: List[float]) -> List[float]:
-        """Find mode(s) of data."""
-        if not data:
-            raise ValueError("Cannot find mode of empty list")
-        counts = defaultdict(int)
-        for x in data:
-            counts[x] += 1
-        max_count = max(counts.values())
-        return [x for x, count in counts.items() if count == max_count]
-
-    @staticmethod
-    def variance(data: List[float], sample: bool = True) -> float:
-        """Calculate variance (sample or population)."""
-        if len(data) < 2:
-            raise ValueError("Need at least 2 data points")
-        mean = Statistics.mean(data)
-        squared_diff = sum((x - mean) ** 2 for x in data)
-        return squared_diff / (len(data) - 1 if sample else len(data))
-
-    @staticmethod
-    def std_dev(data: List[float], sample: bool = True) -> float:
-        """Calculate standard deviation."""
-        return math.sqrt(Statistics.variance(data, sample))
-
-    @staticmethod
-    def covariance(x: List[float], y: List[float], sample: bool = True) -> float:
-        """Calculate covariance between two variables."""
-        if len(x) != len(y) or len(x) < 2:
-            raise ValueError("Invalid data for covariance")
-        mean_x, mean_y = Statistics.mean(x), Statistics.mean(y)
-        cov = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y))
-        return cov / (len(x) - 1 if sample else len(x))
-
-    @staticmethod
-    def correlation(x: List[float], y: List[float]) -> float:
-        """Calculate Pearson correlation coefficient."""
-        if len(x) != len(y) or len(x) < 2:
-            raise ValueError("Invalid data for correlation")
-        cov = Statistics.covariance(x, y)
-        std_x, std_y = Statistics.std_dev(x), Statistics.std_dev(y)
-        if std_x == 0 or std_y == 0:
-            return 0.0
-        return cov / (std_x * std_y)
-
-    @staticmethod
-    def percentile(data: List[float], p: float) -> float:
-        """Calculate p-th percentile (0-100)."""
-        if not data or not 0 <= p <= 100:
-            raise ValueError("Invalid data or percentile")
-        sorted_data = sorted(data)
-        k = (len(sorted_data) - 1) * p / 100
-        f = math.floor(k)
-        c = math.ceil(k)
-        if f == c:
-            return sorted_data[int(k)]
-        return sorted_data[f] * (c - k) + sorted_data[c] * (k - f)
-
-    @staticmethod
-    def quartiles(data: List[float]) -> Tuple[float, float, float]:
-        """Calculate Q1, Q2 (median), Q3."""
-        return (Statistics.percentile(data, 25),
-                Statistics.percentile(data, 50),
-                Statistics.percentile(data, 75))
-
-    @staticmethod
-    def iqr(data: List[float]) -> float:
-        """Calculate interquartile range."""
-        q1, _, q3 = Statistics.quartiles(data)
-        return q3 - q1
-
-    @staticmethod
-    def skewness(data: List[float]) -> float:
-        """Calculate skewness of distribution."""
-        n = len(data)
-        if n < 3:
-            raise ValueError("Need at least 3 data points")
-        mean = Statistics.mean(data)
-        std = Statistics.std_dev(data, sample=False)
-        if std == 0:
-            return 0.0
-        return sum(((x - mean) / std) ** 3 for x in data) * n / ((n-1) * (n-2))
-
-    @staticmethod
-    def kurtosis(data: List[float]) -> float:
-        """Calculate excess kurtosis."""
-        n = len(data)
-        if n < 4:
-            raise ValueError("Need at least 4 data points")
-        mean = Statistics.mean(data)
-        std = Statistics.std_dev(data, sample=False)
-        if std == 0:
-            return 0.0
-        m4 = sum((x - mean) ** 4 for x in data) / n
-        return m4 / (std ** 4) - 3
-
-    @staticmethod
-    def z_score(x: float, mean: float, std: float) -> float:
-        """Calculate z-score."""
-        if std == 0:
-            raise ValueError("Standard deviation cannot be zero")
-        return (x - mean) / std
-
-    @staticmethod
-    def linear_regression(x: List[float], y: List[float]) -> Tuple[float, float, float]:
-        """Perform simple linear regression. Returns (slope, intercept, r_squared)."""
-        if len(x) != len(y) or len(x) < 2:
-            raise ValueError("Invalid data for regression")
-
-        n = len(x)
-        sum_x = sum(x)
-        sum_y = sum(y)
-        sum_xy = sum(xi * yi for xi, yi in zip(x, y))
-        sum_x2 = sum(xi ** 2 for xi in x)
-
-        denom = n * sum_x2 - sum_x ** 2
-        if abs(denom) < 1e-15:
-            raise ValueError("Cannot perform regression on constant x")
-
-        slope = (n * sum_xy - sum_x * sum_y) / denom
-        intercept = (sum_y - slope * sum_x) / n
-
-        y_pred = [slope * xi + intercept for xi in x]
-        mean_y = sum_y / n
-        ss_tot = sum((yi - mean_y) ** 2 for yi in y)
-        ss_res = sum((yi - ypi) ** 2 for yi, ypi in zip(y, y_pred))
-        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-
-        return slope, intercept, r_squared
-
-
-# =============================================================================
-# SECTION 5: PROBABILITY DISTRIBUTIONS
-# =============================================================================
-
-class Distributions:
-    """Probability distribution functions."""
-
-    @staticmethod
-    def normal_pdf(x: float, mu: float = 0, sigma: float = 1) -> float:
-        """Normal distribution probability density function."""
-        coef = 1 / (sigma * math.sqrt(2 * math.pi))
-        exponent = -0.5 * ((x - mu) / sigma) ** 2
-        return coef * math.exp(exponent)
-
-    @staticmethod
-    def normal_cdf(x: float, mu: float = 0, sigma: float = 1) -> float:
-        """Normal distribution cumulative distribution function."""
-        return 0.5 * (1 + math.erf((x - mu) / (sigma * math.sqrt(2))))
-
-    @staticmethod
-    def binomial_pmf(k: int, n: int, p: float) -> float:
-        """Binomial distribution probability mass function."""
-        if not 0 <= p <= 1 or k < 0 or k > n:
-            return 0.0
-        coef = MathUtils.factorial(n) // (MathUtils.factorial(k) * MathUtils.factorial(n - k))
-        return coef * (p ** k) * ((1 - p) ** (n - k))
-
-    @staticmethod
-    def poisson_pmf(k: int, lambda_: float) -> float:
-        """Poisson distribution probability mass function."""
-        if k < 0 or lambda_ < 0:
-            return 0.0
-        return (lambda_ ** k) * math.exp(-lambda_) / MathUtils.factorial(k)
-
-    @staticmethod
-    def exponential_pdf(x: float, lambda_: float) -> float:
-        """Exponential distribution probability density function."""
-        if x < 0 or lambda_ <= 0:
-            return 0.0
-        return lambda_ * math.exp(-lambda_ * x)
-
-    @staticmethod
-    def exponential_cdf(x: float, lambda_: float) -> float:
-        """Exponential distribution cumulative distribution function."""
-        if x < 0:
-            return 0.0
-        return 1 - math.exp(-lambda_ * x)
-
-    @staticmethod
-    def uniform_pdf(x: float, a: float, b: float) -> float:
-        """Uniform distribution probability density function."""
-        if a >= b:
-            raise ValueError("Invalid interval")
-        return 1 / (b - a) if a <= x <= b else 0.0
-
-    @staticmethod
-    def gamma_function(z: float) -> float:
-        """Gamma function using Lanczos approximation."""
-        if z < 0.5:
-            return math.pi / (math.sin(math.pi * z) * Distributions.gamma_function(1 - z))
-
-        z -= 1
-        g = 7
-        c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028,
-             771.32342877765313, -176.61502916214059, 12.507343278686905,
-             -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7]
-
-        x = c[0]
-        for i in range(1, g + 2):
-            x += c[i] / (z + i)
-
-        t = z + g + 0.5
-        return math.sqrt(2 * math.pi) * (t ** (z + 0.5)) * math.exp(-t) * x
-
-    @staticmethod
-    def beta_function(a: float, b: float) -> float:
-        """Beta function."""
-        return (Distributions.gamma_function(a) * Distributions.gamma_function(b) /
-                Distributions.gamma_function(a + b))
-
-    @staticmethod
-    def chi_squared_pdf(x: float, k: int) -> float:
-        """Chi-squared distribution probability density function."""
-        if x < 0 or k < 1:
-            return 0.0
-        coef = 1 / (2 ** (k/2) * Distributions.gamma_function(k/2))
-        return coef * (x ** (k/2 - 1)) * math.exp(-x/2)
-
-    @staticmethod
-    def student_t_pdf(x: float, df: int) -> float:
-        """Student's t-distribution probability density function."""
-        coef = (Distributions.gamma_function((df + 1) / 2) /
-                (math.sqrt(df * math.pi) * Distributions.gamma_function(df / 2)))
-        return coef * (1 + x**2 / df) ** (-(df + 1) / 2)
-
-
-# =============================================================================
-# SECTION 6: SIGNAL PROCESSING
-# =============================================================================
-
-class SignalProcessing:
-    """Signal processing algorithms."""
-
-    @staticmethod
-    def dft(signal: List[complex]) -> List[complex]:
-        """Discrete Fourier Transform."""
-        n = len(signal)
-        result = []
-        for k in range(n):
-            total = 0j
-            for t in range(n):
-                angle = -2 * math.pi * k * t / n
-                total += signal[t] * complex(math.cos(angle), math.sin(angle))
-            result.append(total)
-        return result
-
-    @staticmethod
-    def idft(spectrum: List[complex]) -> List[complex]:
-        """Inverse Discrete Fourier Transform."""
-        n = len(spectrum)
-        result = []
-        for t in range(n):
-            total = 0j
-            for k in range(n):
-                angle = 2 * math.pi * k * t / n
-                total += spectrum[k] * complex(math.cos(angle), math.sin(angle))
-            result.append(total / n)
-        return result
-
-    @staticmethod
-    def fft(signal: List[complex]) -> List[complex]:
-        """Fast Fourier Transform using Cooley-Tukey algorithm."""
-        n = len(signal)
-        if n <= 1:
-            return signal
-        if n & (n - 1) != 0:
-            next_pow2 = 1 << (n - 1).bit_length()
-            signal = signal + [0j] * (next_pow2 - n)
-            n = next_pow2
-
-        if n <= 1:
-            return signal
-
-        even = SignalProcessing.fft(signal[0::2])
-        odd = SignalProcessing.fft(signal[1::2])
-
-        result = [0j] * n
-        for k in range(n // 2):
-            angle = -2 * math.pi * k / n
-            twiddle = complex(math.cos(angle), math.sin(angle)) * odd[k]
-            result[k] = even[k] + twiddle
-            result[k + n // 2] = even[k] - twiddle
-
-        return result
-
-    @staticmethod
-    def convolve(signal1: List[float], signal2: List[float]) -> List[float]:
-        """Linear convolution of two signals."""
-        n1, n2 = len(signal1), len(signal2)
-        result = [0.0] * (n1 + n2 - 1)
-        for i in range(n1):
-            for j in range(n2):
-                result[i + j] += signal1[i] * signal2[j]
-        return result
-
-    @staticmethod
-    def correlate(signal1: List[float], signal2: List[float]) -> List[float]:
-        """Cross-correlation of two signals."""
-        return SignalProcessing.convolve(signal1, signal2[::-1])
-
-    @staticmethod
-    def moving_average(signal: List[float], window_size: int) -> List[float]:
-        """Calculate moving average."""
-        if window_size < 1 or window_size > len(signal):
-            raise ValueError("Invalid window size")
-
-        result = []
-        window_sum = sum(signal[:window_size])
-        result.append(window_sum / window_size)
-
-        for i in range(window_size, len(signal)):
-            window_sum += signal[i] - signal[i - window_size]
-            result.append(window_sum / window_size)
-
-        return result
-
-    @staticmethod
-    def exponential_smoothing(signal: List[float], alpha: float) -> List[float]:
-        """Exponential smoothing filter."""
-        if not 0 < alpha <= 1:
-            raise ValueError("Alpha must be in (0, 1]")
-
-        result = [signal[0]]
-        for i in range(1, len(signal)):
-            result.append(alpha * signal[i] + (1 - alpha) * result[-1])
-        return result
-
-    @staticmethod
-    def low_pass_filter(signal: List[float], cutoff: float,
-                       sample_rate: float) -> List[float]:
-        """Simple low-pass filter using moving average approximation."""
-        window_size = max(1, int(sample_rate / (2 * cutoff)))
-        return SignalProcessing.moving_average(signal, window_size)
-
-    @staticmethod
-    def high_pass_filter(signal: List[float], cutoff: float,
-                        sample_rate: float) -> List[float]:
-        """High-pass filter (signal - low-pass)."""
-        low_passed = SignalProcessing.low_pass_filter(signal, cutoff, sample_rate)
-        offset = (len(signal) - len(low_passed)) // 2
-        result = []
-        for i, val in enumerate(low_passed):
-            result.append(signal[i + offset] - val)
-        return result
-
-    @staticmethod
-    def autocorrelation(signal: List[float]) -> List[float]:
-        """Calculate autocorrelation of signal."""
-        n = len(signal)
-        mean = sum(signal) / n
-        centered = [x - mean for x in signal]
-
-        result = []
-        for lag in range(n):
-            corr = sum(centered[i] * centered[i + lag] for i in range(n - lag))
-            result.append(corr / (n - lag))
-
-        return result
-
-    @staticmethod
-    def power_spectrum(signal: List[float]) -> List[float]:
-        """Calculate power spectrum of signal."""
-        fft_result = SignalProcessing.fft([complex(x) for x in signal])
-        return [abs(x) ** 2 for x in fft_result[:len(fft_result)//2 + 1]]
-
-
-# =============================================================================
-# SECTION 7: OPTIMIZATION ALGORITHMS
+# SECTION 4: OPTIMIZATION ALGORITHMS
 # =============================================================================
 
 class Optimization:
-    """Optimization algorithms for finding minima/maxima."""
+    """Collection of optimization algorithms."""
 
     @staticmethod
-    def gradient_descent(f: Callable[..., float], initial: List[float],
-                        learning_rate: float = 0.01, max_iter: int = 10000,
-                        tol: float = 1e-8) -> Tuple[List[float], float]:
-        """Gradient descent optimization."""
-        x = initial.copy()
+    def golden_section_search(f: Callable[[float], float], a: float, b: float,
+                             tol: float = 1e-10, maximize: bool = False) -> Tuple[float, float]:
+        """Find minimum (or maximum) using golden section search."""
+        phi = (1 + math.sqrt(5)) / 2
 
-        for _ in range(max_iter):
-            grad = NumericalAnalysis.gradient(f, x)
-            new_x = [xi - learning_rate * gi for xi, gi in zip(x, grad)]
+        if maximize:
+            f = lambda x, orig=f: -orig(x)
 
-            if math.sqrt(sum((a - b)**2 for a, b in zip(new_x, x))) < tol:
-                return new_x, f(*new_x)
+        c = b - (b - a) / phi
+        d = a + (b - a) / phi
 
-            x = new_x
+        while abs(b - a) > tol:
+            if f(c) < f(d):
+                b = d
+            else:
+                a = c
 
-        return x, f(*x)
+            c = b - (b - a) / phi
+            d = a + (b - a) / phi
+
+        x_opt = (a + b) / 2
+        return x_opt, f(x_opt) * (-1 if maximize else 1)
 
     @staticmethod
-    def adam_optimizer(f: Callable[..., float], initial: List[float],
-                      learning_rate: float = 0.001, beta1: float = 0.9,
-                      beta2: float = 0.999, epsilon: float = 1e-8,
-                      max_iter: int = 10000, tol: float = 1e-8) -> Tuple[List[float], float]:
-        """Adam optimization algorithm."""
-        x = initial.copy()
-        m = [0.0] * len(x)
+    def gradient_descent(f: Callable[..., float], x0: List[float],
+                        learning_rate: float = 0.01, tol: float = 1e-8,
+                        max_iter: int = 10000) -> Tuple[List[float], float, int]:
+        """Minimize function using gradient descent."""
+        x = x0.copy()
+
+        for i in range(max_iter):
+            grad = NumericalMethods.gradient(f, x)
+
+            # Check convergence
+            grad_norm = math.sqrt(sum(g * g for g in grad))
+            if grad_norm < tol:
+                return x, f(*x), i + 1
+
+            # Update
+            x = [x[j] - learning_rate * grad[j] for j in range(len(x))]
+
+        return x, f(*x), max_iter
+
+    @staticmethod
+    def momentum_gradient_descent(f: Callable[..., float], x0: List[float],
+                                  learning_rate: float = 0.01, momentum: float = 0.9,
+                                  tol: float = 1e-8, max_iter: int = 10000) -> Tuple[List[float], float, int]:
+        """Gradient descent with momentum."""
+        x = x0.copy()
         v = [0.0] * len(x)
 
-        for t in range(1, max_iter + 1):
-            grad = NumericalAnalysis.gradient(f, x)
+        for i in range(max_iter):
+            grad = NumericalMethods.gradient(f, x)
 
-            m = [beta1 * mi + (1 - beta1) * gi for mi, gi in zip(m, grad)]
-            v = [beta2 * vi + (1 - beta2) * gi**2 for vi, gi in zip(v, grad)]
+            grad_norm = math.sqrt(sum(g * g for g in grad))
+            if grad_norm < tol:
+                return x, f(*x), i + 1
 
-            m_hat = [mi / (1 - beta1**t) for mi in m]
-            v_hat = [vi / (1 - beta2**t) for vi in v]
+            # Update velocity and position
+            for j in range(len(x)):
+                v[j] = momentum * v[j] - learning_rate * grad[j]
+                x[j] += v[j]
 
-            new_x = [xi - learning_rate * mhi / (math.sqrt(vhi) + epsilon)
-                    for xi, mhi, vhi in zip(x, m_hat, v_hat)]
-
-            if math.sqrt(sum((a - b)**2 for a, b in zip(new_x, x))) < tol:
-                return new_x, f(*new_x)
-
-            x = new_x
-
-        return x, f(*x)
+        return x, f(*x), max_iter
 
     @staticmethod
-    def simulated_annealing(f: Callable[..., float], initial: List[float],
-                           temp_initial: float = 100, temp_final: float = 1e-8,
-                           cooling_rate: float = 0.995, max_iter: int = 10000,
-                           step_size: float = 1.0) -> Tuple[List[float], float]:
-        """Simulated annealing optimization."""
-        current = initial.copy()
-        current_energy = f(*current)
-        best = current.copy()
-        best_energy = current_energy
-        temp = temp_initial
+    def adam_optimizer(f: Callable[..., float], x0: List[float],
+                      learning_rate: float = 0.001, beta1: float = 0.9,
+                      beta2: float = 0.999, epsilon: float = 1e-8,
+                      tol: float = 1e-8, max_iter: int = 10000) -> Tuple[List[float], float, int]:
+        """Adam optimizer for gradient descent."""
+        x = x0.copy()
+        m = [0.0] * len(x)  # First moment
+        v = [0.0] * len(x)  # Second moment
 
-        for _ in range(max_iter):
-            if temp < temp_final:
-                break
+        for i in range(1, max_iter + 1):
+            grad = NumericalMethods.gradient(f, x)
 
-            neighbor = [x + random.gauss(0, step_size) for x in current]
-            neighbor_energy = f(*neighbor)
+            grad_norm = math.sqrt(sum(g * g for g in grad))
+            if grad_norm < tol:
+                return x, f(*x), i
 
-            delta = neighbor_energy - current_energy
+            for j in range(len(x)):
+                m[j] = beta1 * m[j] + (1 - beta1) * grad[j]
+                v[j] = beta2 * v[j] + (1 - beta2) * grad[j] ** 2
 
-            if delta < 0 or random.random() < math.exp(-delta / temp):
-                current = neighbor
-                current_energy = neighbor_energy
+                m_hat = m[j] / (1 - beta1 ** i)
+                v_hat = v[j] / (1 - beta2 ** i)
 
-                if current_energy < best_energy:
-                    best = current.copy()
-                    best_energy = current_energy
+                x[j] -= learning_rate * m_hat / (math.sqrt(v_hat) + epsilon)
 
-            temp *= cooling_rate
-
-        return best, best_energy
+        return x, f(*x), max_iter
 
     @staticmethod
-    def particle_swarm(f: Callable[..., float], bounds: List[Tuple[float, float]],
-                      n_particles: int = 30, max_iter: int = 100,
-                      w: float = 0.7, c1: float = 1.5, c2: float = 1.5) -> Tuple[List[float], float]:
-        """Particle Swarm Optimization."""
-        dim = len(bounds)
-
-        positions = [[random.uniform(bounds[d][0], bounds[d][1])
-                     for d in range(dim)] for _ in range(n_particles)]
-        velocities = [[random.uniform(-1, 1) for _ in range(dim)]
-                     for _ in range(n_particles)]
-
-        personal_best = [p.copy() for p in positions]
-        personal_best_scores = [f(*p) for p in positions]
-
-        global_best_idx = min(range(n_particles), key=lambda i: personal_best_scores[i])
-        global_best = personal_best[global_best_idx].copy()
-        global_best_score = personal_best_scores[global_best_idx]
-
-        for _ in range(max_iter):
-            for i in range(n_particles):
-                r1, r2 = random.random(), random.random()
-
-                for d in range(dim):
-                    velocities[i][d] = (w * velocities[i][d] +
-                                       c1 * r1 * (personal_best[i][d] - positions[i][d]) +
-                                       c2 * r2 * (global_best[d] - positions[i][d]))
-                    positions[i][d] += velocities[i][d]
-                    positions[i][d] = max(bounds[d][0], min(bounds[d][1], positions[i][d]))
-
-                score = f(*positions[i])
-                if score < personal_best_scores[i]:
-                    personal_best[i] = positions[i].copy()
-                    personal_best_scores[i] = score
-
-                    if score < global_best_score:
-                        global_best = positions[i].copy()
-                        global_best_score = score
-
-        return global_best, global_best_score
-
-    @staticmethod
-    def genetic_algorithm(fitness: Callable[[List[float]], float],
-                         bounds: List[Tuple[float, float]],
-                         pop_size: int = 50, generations: int = 100,
-                         mutation_rate: float = 0.1,
-                         crossover_rate: float = 0.8) -> Tuple[List[float], float]:
-        """Genetic algorithm optimization (minimization)."""
-        dim = len(bounds)
-
-        population = [[random.uniform(bounds[d][0], bounds[d][1])
-                      for d in range(dim)] for _ in range(pop_size)]
-
-        def evaluate(individual):
-            return fitness(individual)
-
-        for _ in range(generations):
-            scores = [evaluate(ind) for ind in population]
-
-            sorted_indices = sorted(range(pop_size), key=lambda i: scores[i])
-            population = [population[i] for i in sorted_indices]
-            scores = [scores[i] for i in sorted_indices]
-
-            new_population = population[:pop_size // 5]
-
-            while len(new_population) < pop_size:
-                if random.random() < crossover_rate:
-                    p1 = population[random.randint(0, pop_size // 3)]
-                    p2 = population[random.randint(0, pop_size // 3)]
-                    crossover_point = random.randint(1, dim - 1)
-                    child = p1[:crossover_point] + p2[crossover_point:]
-                else:
-                    child = random.choice(population[:pop_size // 3]).copy()
-
-                for d in range(dim):
-                    if random.random() < mutation_rate:
-                        child[d] = random.uniform(bounds[d][0], bounds[d][1])
-
-                new_population.append(child)
-
-            population = new_population
-
-        best_idx = min(range(pop_size), key=lambda i: evaluate(population[i]))
-        return population[best_idx], evaluate(population[best_idx])
-
-    @staticmethod
-    def nelder_mead(f: Callable[..., float], initial: List[float],
+    def nelder_mead(f: Callable[..., float], x0: List[float],
                    alpha: float = 1.0, gamma: float = 2.0,
                    rho: float = 0.5, sigma: float = 0.5,
-                   max_iter: int = 1000, tol: float = 1e-8) -> Tuple[List[float], float]:
+                   tol: float = 1e-8, max_iter: int = 10000) -> Tuple[List[float], float, int]:
         """Nelder-Mead simplex optimization."""
-        n = len(initial)
+        n = len(x0)
 
-        simplex = [initial.copy()]
+        # Initialize simplex
+        simplex = [x0.copy()]
         for i in range(n):
-            point = initial.copy()
+            point = x0.copy()
             point[i] += 1.0
             simplex.append(point)
 
-        for _ in range(max_iter):
+        for iteration in range(max_iter):
+            # Sort by function values
             simplex.sort(key=lambda x: f(*x))
 
-            centroid = [sum(simplex[i][j] for i in range(n)) / n for j in range(n)]
+            # Check convergence
+            values = [f(*p) for p in simplex]
+            if max(values) - min(values) < tol:
+                return simplex[0], f(*simplex[0]), iteration + 1
 
-            if math.sqrt(sum((f(*simplex[i]) - f(*simplex[0]))**2 for i in range(n+1))) < tol:
-                break
+            # Centroid (excluding worst point)
+            centroid = [sum(simplex[j][i] for j in range(n)) / n for i in range(n)]
 
-            reflected = [centroid[j] + alpha * (centroid[j] - simplex[-1][j])
-                        for j in range(n)]
-            fr = f(*reflected)
+            # Reflection
+            reflected = [centroid[i] + alpha * (centroid[i] - simplex[-1][i]) for i in range(n)]
+            f_reflected = f(*reflected)
 
-            if f(*simplex[0]) <= fr < f(*simplex[-2]):
+            if f(*simplex[0]) <= f_reflected < f(*simplex[-2]):
                 simplex[-1] = reflected
                 continue
 
-            if fr < f(*simplex[0]):
-                expanded = [centroid[j] + gamma * (reflected[j] - centroid[j])
-                           for j in range(n)]
-                if f(*expanded) < fr:
+            # Expansion
+            if f_reflected < f(*simplex[0]):
+                expanded = [centroid[i] + gamma * (reflected[i] - centroid[i]) for i in range(n)]
+                if f(*expanded) < f_reflected:
                     simplex[-1] = expanded
                 else:
                     simplex[-1] = reflected
                 continue
 
-            contracted = [centroid[j] + rho * (simplex[-1][j] - centroid[j])
-                         for j in range(n)]
+            # Contraction
+            contracted = [centroid[i] + rho * (simplex[-1][i] - centroid[i]) for i in range(n)]
             if f(*contracted) < f(*simplex[-1]):
                 simplex[-1] = contracted
                 continue
 
+            # Shrink
+            best = simplex[0]
             for i in range(1, n + 1):
-                simplex[i] = [simplex[0][j] + sigma * (simplex[i][j] - simplex[0][j])
-                             for j in range(n)]
+                simplex[i] = [best[j] + sigma * (simplex[i][j] - best[j]) for j in range(n)]
 
-        simplex.sort(key=lambda x: f(*x))
-        return simplex[0], f(*simplex[0])
+        return simplex[0], f(*simplex[0]), max_iter
+
+    @staticmethod
+    def simulated_annealing(f: Callable[..., float], x0: List[float],
+                           temp_initial: float = 100.0, temp_final: float = 0.01,
+                           cooling_rate: float = 0.99, max_iter: int = 10000) -> Tuple[List[float], float, int]:
+        """Simulated annealing optimization."""
+        x = x0.copy()
+        best_x = x.copy()
+        current_cost = f(*x)
+        best_cost = current_cost
+        temp = temp_initial
+
+        for i in range(max_iter):
+            if temp < temp_final:
+                break
+
+            # Generate neighbor
+            neighbor = [xi + random.gauss(0, temp * 0.1) for xi in x]
+            neighbor_cost = f(*neighbor)
+
+            # Accept or reject
+            delta = neighbor_cost - current_cost
+            if delta < 0 or random.random() < math.exp(-delta / temp):
+                x = neighbor
+                current_cost = neighbor_cost
+
+                if current_cost < best_cost:
+                    best_x = x.copy()
+                    best_cost = current_cost
+
+            temp *= cooling_rate
+
+        return best_x, best_cost, i + 1
 
 
 # =============================================================================
-# SECTION 8: INTERPOLATION AND APPROXIMATION
+# SECTION 5: DIFFERENTIAL EQUATIONS
+# =============================================================================
+
+class DifferentialEquations:
+    """Numerical methods for solving differential equations."""
+
+    @staticmethod
+    def euler_method(f: Callable[[float, float], float], y0: float,
+                    t_span: Tuple[float, float], n_steps: int) -> Tuple[List[float], List[float]]:
+        """Solve ODE using Euler's method."""
+        t0, tf = t_span
+        h = (tf - t0) / n_steps
+
+        t_values = [t0 + i * h for i in range(n_steps + 1)]
+        y_values = [y0]
+
+        y = y0
+        for i in range(n_steps):
+            y = y + h * f(t_values[i], y)
+            y_values.append(y)
+
+        return t_values, y_values
+
+    @staticmethod
+    def runge_kutta_4(f: Callable[[float, float], float], y0: float,
+                     t_span: Tuple[float, float], n_steps: int) -> Tuple[List[float], List[float]]:
+        """Solve ODE using 4th order Runge-Kutta method."""
+        t0, tf = t_span
+        h = (tf - t0) / n_steps
+
+        t_values = [t0 + i * h for i in range(n_steps + 1)]
+        y_values = [y0]
+
+        y = y0
+        for i in range(n_steps):
+            t = t_values[i]
+            k1 = h * f(t, y)
+            k2 = h * f(t + h/2, y + k1/2)
+            k3 = h * f(t + h/2, y + k2/2)
+            k4 = h * f(t + h, y + k3)
+
+            y = y + (k1 + 2*k2 + 2*k3 + k4) / 6
+            y_values.append(y)
+
+        return t_values, y_values
+
+    @staticmethod
+    def runge_kutta_fehlberg(f: Callable[[float, float], float], y0: float,
+                            t_span: Tuple[float, float], tol: float = 1e-6,
+                            h_init: float = 0.1) -> Tuple[List[float], List[float]]:
+        """Adaptive Runge-Kutta-Fehlberg method (RK45)."""
+        t0, tf = t_span
+        t_values = [t0]
+        y_values = [y0]
+
+        t = t0
+        y = y0
+        h = h_init
+
+        while t < tf:
+            if t + h > tf:
+                h = tf - t
+
+            k1 = h * f(t, y)
+            k2 = h * f(t + h/4, y + k1/4)
+            k3 = h * f(t + 3*h/8, y + 3*k1/32 + 9*k2/32)
+            k4 = h * f(t + 12*h/13, y + 1932*k1/2197 - 7200*k2/2197 + 7296*k3/2197)
+            k5 = h * f(t + h, y + 439*k1/216 - 8*k2 + 3680*k3/513 - 845*k4/4104)
+            k6 = h * f(t + h/2, y - 8*k1/27 + 2*k2 - 3544*k3/2565 + 1859*k4/4104 - 11*k5/40)
+
+            # 4th order solution
+            y4 = y + 25*k1/216 + 1408*k3/2565 + 2197*k4/4104 - k5/5
+
+            # 5th order solution
+            y5 = y + 16*k1/135 + 6656*k3/12825 + 28561*k4/56430 - 9*k5/50 + 2*k6/55
+
+            # Error estimate
+            error = abs(y5 - y4)
+
+            if error < tol or h < 1e-10:
+                t += h
+                y = y5
+                t_values.append(t)
+                y_values.append(y)
+
+            # Adjust step size
+            if error > 0:
+                h = 0.9 * h * (tol / error) ** 0.2
+            h = min(h, tf - t)
+
+        return t_values, y_values
+
+    @staticmethod
+    def solve_system_rk4(f: Callable[[float, List[float]], List[float]], y0: List[float],
+                        t_span: Tuple[float, float], n_steps: int) -> Tuple[List[float], List[List[float]]]:
+        """Solve system of ODEs using RK4."""
+        t0, tf = t_span
+        h = (tf - t0) / n_steps
+        n = len(y0)
+
+        t_values = [t0 + i * h for i in range(n_steps + 1)]
+        y_values = [y0]
+
+        y = y0.copy()
+        for i in range(n_steps):
+            t = t_values[i]
+
+            k1 = [h * fi for fi in f(t, y)]
+            k2 = [h * fi for fi in f(t + h/2, [y[j] + k1[j]/2 for j in range(n)])]
+            k3 = [h * fi for fi in f(t + h/2, [y[j] + k2[j]/2 for j in range(n)])]
+            k4 = [h * fi for fi in f(t + h, [y[j] + k3[j] for j in range(n)])]
+
+            y = [y[j] + (k1[j] + 2*k2[j] + 2*k3[j] + k4[j]) / 6 for j in range(n)]
+            y_values.append(y)
+
+        return t_values, y_values
+
+    @staticmethod
+    def boundary_value_shooting(f: Callable[[float, List[float]], List[float]],
+                               t_span: Tuple[float, float], ya: float, yb: float,
+                               n_steps: int = 100, tol: float = 1e-6) -> Tuple[List[float], List[float]]:
+        """Solve boundary value problem using shooting method."""
+        def residual(slope: float) -> float:
+            y0 = [ya, slope]
+            _, y_vals = DifferentialEquations.solve_system_rk4(f, y0, t_span, n_steps)
+            return y_vals[-1][0] - yb
+
+        # Find root of residual
+        slope, _ = RootFinding.brent_method(residual, -10.0, 10.0, tol)
+
+        y0 = [ya, slope]
+        t_vals, y_vals = DifferentialEquations.solve_system_rk4(f, y0, t_span, n_steps)
+
+        return t_vals, [y[0] for y in y_vals]
+
+
+# =============================================================================
+# SECTION 6: INTERPOLATION AND CURVE FITTING
 # =============================================================================
 
 class Interpolation:
-    """Interpolation and curve fitting methods."""
+    """Various interpolation methods."""
 
     @staticmethod
-    def lagrange(x_points: List[float], y_points: List[float], x: float) -> float:
+    def lagrange_interpolation(x_points: List[float], y_points: List[float], x: float) -> float:
         """Lagrange polynomial interpolation."""
-        if len(x_points) != len(y_points):
-            raise ValueError("x and y must have same length")
-
         n = len(x_points)
         result = 0.0
 
@@ -1140,769 +916,780 @@ class Interpolation:
         return result
 
     @staticmethod
-    def newton_divided_diff(x_points: List[float], y_points: List[float],
-                           x: float) -> float:
+    def newton_interpolation(x_points: List[float], y_points: List[float], x: float) -> float:
         """Newton's divided difference interpolation."""
         n = len(x_points)
-        coef = [[0.0] * n for _ in range(n)]
 
-        for i in range(n):
-            coef[i][0] = y_points[i]
-
+        # Calculate divided differences
+        coefs = y_points.copy()
         for j in range(1, n):
-            for i in range(n - j):
-                coef[i][j] = ((coef[i+1][j-1] - coef[i][j-1]) /
-                             (x_points[i+j] - x_points[i]))
+            for i in range(n - 1, j - 1, -1):
+                coefs[i] = (coefs[i] - coefs[i - 1]) / (x_points[i] - x_points[i - j])
 
-        result = coef[0][0]
-        product = 1.0
-        for i in range(1, n):
-            product *= (x - x_points[i-1])
-            result += coef[0][i] * product
+        # Evaluate polynomial
+        result = coefs[-1]
+        for i in range(n - 2, -1, -1):
+            result = result * (x - x_points[i]) + coefs[i]
 
         return result
 
     @staticmethod
-    def cubic_spline(x_points: List[float], y_points: List[float],
-                    x_new: List[float]) -> List[float]:
+    def cubic_spline(x_points: List[float], y_points: List[float]) -> Callable[[float], float]:
         """Natural cubic spline interpolation."""
         n = len(x_points)
-        if n < 2:
-            raise ValueError("Need at least 2 points")
 
-        h = [x_points[i+1] - x_points[i] for i in range(n-1)]
+        # Calculate second derivatives
+        h = [x_points[i + 1] - x_points[i] for i in range(n - 1)]
 
+        # Build tridiagonal system
         alpha = [0.0] * n
-        for i in range(1, n-1):
-            alpha[i] = (3/h[i] * (y_points[i+1] - y_points[i]) -
-                       3/h[i-1] * (y_points[i] - y_points[i-1]))
+        for i in range(1, n - 1):
+            alpha[i] = (3 * (y_points[i + 1] - y_points[i]) / h[i] -
+                       3 * (y_points[i] - y_points[i - 1]) / h[i - 1])
 
-        l = [1.0] + [0.0] * (n-1)
+        # Solve tridiagonal system
+        l = [1.0] + [0.0] * (n - 1)
         mu = [0.0] * n
         z = [0.0] * n
 
-        for i in range(1, n-1):
-            l[i] = 2 * (x_points[i+1] - x_points[i-1]) - h[i-1] * mu[i-1]
+        for i in range(1, n - 1):
+            l[i] = 2 * (x_points[i + 1] - x_points[i - 1]) - h[i - 1] * mu[i - 1]
             mu[i] = h[i] / l[i]
-            z[i] = (alpha[i] - h[i-1] * z[i-1]) / l[i]
+            z[i] = (alpha[i] - h[i - 1] * z[i - 1]) / l[i]
 
-        l[n-1] = 1.0
-        z[n-1] = 0.0
-
+        l[n - 1] = 1.0
         c = [0.0] * n
-        b = [0.0] * (n-1)
-        d = [0.0] * (n-1)
+        b = [0.0] * (n - 1)
+        d = [0.0] * (n - 1)
 
-        for j in range(n-2, -1, -1):
-            c[j] = z[j] - mu[j] * c[j+1]
-            b[j] = ((y_points[j+1] - y_points[j]) / h[j] -
-                   h[j] * (c[j+1] + 2*c[j]) / 3)
-            d[j] = (c[j+1] - c[j]) / (3 * h[j])
+        for j in range(n - 2, -1, -1):
+            c[j] = z[j] - mu[j] * c[j + 1]
+            b[j] = (y_points[j + 1] - y_points[j]) / h[j] - h[j] * (c[j + 1] + 2 * c[j]) / 3
+            d[j] = (c[j + 1] - c[j]) / (3 * h[j])
 
-        result = []
-        for x in x_new:
-            idx = 0
-            for i in range(n-1):
-                if x_points[i] <= x <= x_points[i+1]:
-                    idx = i
-                    break
+        def spline(x: float) -> float:
+            # Find interval
+            for i in range(n - 1):
+                if x_points[i] <= x <= x_points[i + 1]:
+                    dx = x - x_points[i]
+                    return y_points[i] + b[i] * dx + c[i] * dx**2 + d[i] * dx**3
 
-            dx = x - x_points[idx]
-            y = (y_points[idx] + b[idx]*dx + c[idx]*dx**2 + d[idx]*dx**3)
-            result.append(y)
+            # Extrapolation
+            if x < x_points[0]:
+                i = 0
+            else:
+                i = n - 2
+            dx = x - x_points[i]
+            return y_points[i] + b[i] * dx + c[i] * dx**2 + d[i] * dx**3
 
-        return result
+        return spline
 
     @staticmethod
-    def polynomial_fit(x_points: List[float], y_points: List[float],
-                      degree: int) -> List[float]:
-        """Polynomial least squares fitting. Returns coefficients."""
+    def least_squares_polynomial(x_points: List[float], y_points: List[float],
+                                degree: int) -> List[float]:
+        """Fit polynomial using least squares."""
         n = len(x_points)
-        if n <= degree:
-            raise ValueError("Need more points than polynomial degree")
+        m = degree + 1
 
-        X = [[x_points[i]**j for j in range(degree + 1)] for i in range(n)]
+        # Build Vandermonde matrix
+        A = Matrix([[x_points[i] ** j for j in range(m)] for i in range(n)])
+        b = [[y_points[i]] for i in range(n)]
+        b_matrix = Matrix(b)
 
-        XtX = [[sum(X[k][i] * X[k][j] for k in range(n))
-               for j in range(degree + 1)] for i in range(degree + 1)]
-        XtY = [sum(X[k][i] * y_points[k] for k in range(n))
-              for i in range(degree + 1)]
+        # Normal equations: A^T A c = A^T b
+        AtA = A.transpose() * A
+        Atb = A.transpose() * b_matrix
 
-        matrix = Matrix(XtX)
-        coefficients = matrix.solve_linear_system(XtY)
+        # Solve using inverse (for small systems)
+        coeffs = AtA.inverse() * Atb
 
-        return coefficients
+        return [coeffs.data[i][0] for i in range(m)]
 
     @staticmethod
-    def evaluate_polynomial(coefficients: List[float], x: float) -> float:
-        """Evaluate polynomial using Horner's method."""
-        result = 0.0
-        for coef in reversed(coefficients):
-            result = result * x + coef
-        return result
+    def exponential_fit(x_points: List[float], y_points: List[float]) -> Tuple[float, float]:
+        """Fit y = a * exp(b * x) using linearization."""
+        # Take log: ln(y) = ln(a) + b*x
+        ln_y = [math.log(y) if y > 0 else float('-inf') for y in y_points]
+
+        # Filter out invalid points
+        valid = [(x, ly) for x, ly in zip(x_points, ln_y) if math.isfinite(ly)]
+        x_valid = [p[0] for p in valid]
+        ln_y_valid = [p[1] for p in valid]
+
+        # Linear regression
+        n = len(x_valid)
+        sum_x = sum(x_valid)
+        sum_y = sum(ln_y_valid)
+        sum_xy = sum(x * y for x, y in zip(x_valid, ln_y_valid))
+        sum_x2 = sum(x * x for x in x_valid)
+
+        b = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x ** 2)
+        ln_a = (sum_y - b * sum_x) / n
+        a = math.exp(ln_a)
+
+        return a, b
 
 
 # =============================================================================
-# SECTION 9: DIFFERENTIAL EQUATIONS
+# SECTION 7: STATISTICS AND PROBABILITY
 # =============================================================================
 
-class DifferentialEquations:
-    """Numerical methods for solving differential equations."""
+class Statistics:
+    """Statistical functions and probability distributions."""
 
     @staticmethod
-    def euler_method(f: Callable[[float, float], float], y0: float,
-                    t_span: Tuple[float, float], n_steps: int) -> Tuple[List[float], List[float]]:
-        """Solve ODE using Euler's method. dy/dt = f(t, y)"""
-        t0, tf = t_span
-        h = (tf - t0) / n_steps
-
-        t_values = [t0]
-        y_values = [y0]
-
-        t, y = t0, y0
-        for _ in range(n_steps):
-            y = y + h * f(t, y)
-            t = t + h
-            t_values.append(t)
-            y_values.append(y)
-
-        return t_values, y_values
+    def mean(data: List[float]) -> float:
+        """Calculate arithmetic mean."""
+        return sum(data) / len(data)
 
     @staticmethod
-    def runge_kutta_4(f: Callable[[float, float], float], y0: float,
-                     t_span: Tuple[float, float], n_steps: int) -> Tuple[List[float], List[float]]:
-        """Solve ODE using 4th order Runge-Kutta method."""
-        t0, tf = t_span
-        h = (tf - t0) / n_steps
-
-        t_values = [t0]
-        y_values = [y0]
-
-        t, y = t0, y0
-        for _ in range(n_steps):
-            k1 = h * f(t, y)
-            k2 = h * f(t + h/2, y + k1/2)
-            k3 = h * f(t + h/2, y + k2/2)
-            k4 = h * f(t + h, y + k3)
-
-            y = y + (k1 + 2*k2 + 2*k3 + k4) / 6
-            t = t + h
-
-            t_values.append(t)
-            y_values.append(y)
-
-        return t_values, y_values
+    def geometric_mean(data: List[float]) -> float:
+        """Calculate geometric mean."""
+        product = functools.reduce(lambda x, y: x * y, data)
+        return product ** (1 / len(data))
 
     @staticmethod
-    def runge_kutta_system(f: Callable[[float, List[float]], List[float]],
-                          y0: List[float], t_span: Tuple[float, float],
-                          n_steps: int) -> Tuple[List[float], List[List[float]]]:
-        """Solve system of ODEs using RK4."""
-        t0, tf = t_span
-        h = (tf - t0) / n_steps
-        n = len(y0)
-
-        t_values = [t0]
-        y_values = [y0.copy()]
-
-        t = t0
-        y = y0.copy()
-
-        for _ in range(n_steps):
-            k1 = [h * fi for fi in f(t, y)]
-            k2 = [h * fi for fi in f(t + h/2, [y[i] + k1[i]/2 for i in range(n)])]
-            k3 = [h * fi for fi in f(t + h/2, [y[i] + k2[i]/2 for i in range(n)])]
-            k4 = [h * fi for fi in f(t + h, [y[i] + k3[i] for i in range(n)])]
-
-            y = [y[i] + (k1[i] + 2*k2[i] + 2*k3[i] + k4[i])/6 for i in range(n)]
-            t = t + h
-
-            t_values.append(t)
-            y_values.append(y.copy())
-
-        return t_values, y_values
+    def harmonic_mean(data: List[float]) -> float:
+        """Calculate harmonic mean."""
+        return len(data) / sum(1 / x for x in data)
 
     @staticmethod
-    def adams_bashforth_4(f: Callable[[float, float], float], y0: float,
-                         t_span: Tuple[float, float], n_steps: int) -> Tuple[List[float], List[float]]:
-        """Solve ODE using 4th order Adams-Bashforth method."""
-        t0, tf = t_span
-        h = (tf - t0) / n_steps
-
-        t_init, y_init = DifferentialEquations.runge_kutta_4(f, y0, (t0, t0 + 3*h), 3)
-
-        t_values = t_init.copy()
-        y_values = y_init.copy()
-
-        for i in range(3, n_steps):
-            t = t_values[-1] + h
-
-            f_n = f(t_values[-1], y_values[-1])
-            f_n1 = f(t_values[-2], y_values[-2])
-            f_n2 = f(t_values[-3], y_values[-3])
-            f_n3 = f(t_values[-4], y_values[-4])
-
-            y = y_values[-1] + h * (55*f_n - 59*f_n1 + 37*f_n2 - 9*f_n3) / 24
-
-            t_values.append(t)
-            y_values.append(y)
-
-        return t_values, y_values
+    def variance(data: List[float], ddof: int = 0) -> float:
+        """Calculate variance."""
+        m = Statistics.mean(data)
+        return sum((x - m) ** 2 for x in data) / (len(data) - ddof)
 
     @staticmethod
-    def finite_difference_bvp(p: Callable[[float], float],
-                             q: Callable[[float], float],
-                             r: Callable[[float], float],
-                             a: float, b: float, alpha: float, beta: float,
-                             n: int) -> Tuple[List[float], List[float]]:
-        """Solve boundary value problem y'' + p(x)y' + q(x)y = r(x)."""
-        h = (b - a) / (n + 1)
-        x_values = [a + i * h for i in range(n + 2)]
+    def std_dev(data: List[float], ddof: int = 0) -> float:
+        """Calculate standard deviation."""
+        return math.sqrt(Statistics.variance(data, ddof))
 
-        A = Matrix.zeros(n, n)
-        B = [0.0] * n
+    @staticmethod
+    def median(data: List[float]) -> float:
+        """Calculate median."""
+        sorted_data = sorted(data)
+        n = len(sorted_data)
+        if n % 2 == 0:
+            return (sorted_data[n // 2 - 1] + sorted_data[n // 2]) / 2
+        return sorted_data[n // 2]
 
-        for i in range(n):
-            xi = x_values[i + 1]
-            pi, qi, ri = p(xi), q(xi), r(xi)
+    @staticmethod
+    def percentile(data: List[float], p: float) -> float:
+        """Calculate percentile."""
+        sorted_data = sorted(data)
+        k = (len(sorted_data) - 1) * p / 100
+        f = math.floor(k)
+        c = math.ceil(k)
+        if f == c:
+            return sorted_data[int(k)]
+        return sorted_data[int(f)] * (c - k) + sorted_data[int(c)] * (k - f)
 
-            if i > 0:
-                A[i, i-1] = 1 - h * pi / 2
-            A[i, i] = -2 + h * h * qi
-            if i < n - 1:
-                A[i, i+1] = 1 + h * pi / 2
+    @staticmethod
+    def covariance(x: List[float], y: List[float]) -> float:
+        """Calculate covariance between two variables."""
+        if len(x) != len(y):
+            raise ValueError("Lists must have same length")
 
-            B[i] = h * h * ri
-            if i == 0:
-                B[i] -= (1 - h * pi / 2) * alpha
-            if i == n - 1:
-                B[i] -= (1 + h * pi / 2) * beta
+        mx, my = Statistics.mean(x), Statistics.mean(y)
+        return sum((xi - mx) * (yi - my) for xi, yi in zip(x, y)) / len(x)
 
-        y_interior = A.solve_linear_system(B)
-        y_values = [alpha] + y_interior + [beta]
+    @staticmethod
+    def correlation(x: List[float], y: List[float]) -> float:
+        """Calculate Pearson correlation coefficient."""
+        cov = Statistics.covariance(x, y)
+        sx, sy = Statistics.std_dev(x), Statistics.std_dev(y)
+        return cov / (sx * sy)
 
-        return x_values, y_values
+    @staticmethod
+    def linear_regression(x: List[float], y: List[float]) -> Tuple[float, float, float]:
+        """Simple linear regression returning slope, intercept, and R-squared."""
+        n = len(x)
+        sum_x = sum(x)
+        sum_y = sum(y)
+        sum_xy = sum(xi * yi for xi, yi in zip(x, y))
+        sum_x2 = sum(xi ** 2 for xi in x)
+
+        slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x ** 2)
+        intercept = (sum_y - slope * sum_x) / n
+
+        # Calculate R-squared
+        y_mean = sum_y / n
+        ss_tot = sum((yi - y_mean) ** 2 for yi in y)
+        ss_res = sum((yi - (slope * xi + intercept)) ** 2 for xi, yi in zip(x, y))
+        r_squared = 1 - ss_res / ss_tot if ss_tot > 0 else 0
+
+        return slope, intercept, r_squared
+
+    @staticmethod
+    def skewness(data: List[float]) -> float:
+        """Calculate skewness."""
+        n = len(data)
+        m = Statistics.mean(data)
+        s = Statistics.std_dev(data, ddof=1)
+        return sum(((x - m) / s) ** 3 for x in data) * n / ((n - 1) * (n - 2))
+
+    @staticmethod
+    def kurtosis(data: List[float]) -> float:
+        """Calculate excess kurtosis."""
+        n = len(data)
+        m = Statistics.mean(data)
+        s = Statistics.std_dev(data, ddof=1)
+        k = sum(((x - m) / s) ** 4 for x in data)
+        return k * n * (n + 1) / ((n - 1) * (n - 2) * (n - 3)) - 3 * (n - 1) ** 2 / ((n - 2) * (n - 3))
+
+    @staticmethod
+    def normal_pdf(x: float, mu: float = 0, sigma: float = 1) -> float:
+        """Normal probability density function."""
+        return math.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * math.sqrt(2 * math.pi))
+
+    @staticmethod
+    def normal_cdf(x: float, mu: float = 0, sigma: float = 1) -> float:
+        """Normal cumulative distribution function using error function."""
+        return 0.5 * (1 + math.erf((x - mu) / (sigma * math.sqrt(2))))
+
+    @staticmethod
+    def chi_squared_pdf(x: float, k: int) -> float:
+        """Chi-squared probability density function."""
+        if x < 0:
+            return 0.0
+        return (x ** (k / 2 - 1) * math.exp(-x / 2)) / (2 ** (k / 2) * math.gamma(k / 2))
 
 
 # =============================================================================
-# SECTION 10: COMPLEX NUMBER OPERATIONS
+# SECTION 8: SIGNAL PROCESSING
 # =============================================================================
 
-class ComplexAnalysis:
-    """Operations on complex numbers and complex analysis."""
+class SignalProcessing:
+    """Signal processing and Fourier analysis."""
 
     @staticmethod
-    def polar_to_rect(r: float, theta: float) -> complex:
-        """Convert polar to rectangular form."""
-        return complex(r * math.cos(theta), r * math.sin(theta))
-
-    @staticmethod
-    def rect_to_polar(z: complex) -> Tuple[float, float]:
-        """Convert rectangular to polar form."""
-        return abs(z), math.atan2(z.imag, z.real)
-
-    @staticmethod
-    def complex_exp(z: complex) -> complex:
-        """Complex exponential."""
-        return math.exp(z.real) * complex(math.cos(z.imag), math.sin(z.imag))
-
-    @staticmethod
-    def complex_log(z: complex) -> complex:
-        """Complex natural logarithm (principal branch)."""
-        r, theta = ComplexAnalysis.rect_to_polar(z)
-        return complex(math.log(r), theta)
-
-    @staticmethod
-    def complex_pow(base: complex, exp: complex) -> complex:
-        """Complex power: base^exp."""
-        if base == 0:
-            return 0 if exp.real > 0 else complex(float('inf'), 0)
-        return ComplexAnalysis.complex_exp(exp * ComplexAnalysis.complex_log(base))
-
-    @staticmethod
-    def complex_sin(z: complex) -> complex:
-        """Complex sine."""
-        return complex(math.sin(z.real) * math.cosh(z.imag),
-                      math.cos(z.real) * math.sinh(z.imag))
-
-    @staticmethod
-    def complex_cos(z: complex) -> complex:
-        """Complex cosine."""
-        return complex(math.cos(z.real) * math.cosh(z.imag),
-                      -math.sin(z.real) * math.sinh(z.imag))
-
-    @staticmethod
-    def nth_roots(z: complex, n: int) -> List[complex]:
-        """Find all n-th roots of complex number."""
-        r, theta = ComplexAnalysis.rect_to_polar(z)
-        r_root = r ** (1/n)
-
-        roots = []
-        for k in range(n):
-            angle = (theta + 2 * math.pi * k) / n
-            roots.append(ComplexAnalysis.polar_to_rect(r_root, angle))
-
-        return roots
-
-    @staticmethod
-    def contour_integral(f: Callable[[complex], complex],
-                        path: List[complex]) -> complex:
-        """Numerical contour integration along path."""
-        result = 0j
-        for i in range(len(path) - 1):
-            z1, z2 = path[i], path[i + 1]
-            dz = z2 - z1
-            z_mid = (z1 + z2) / 2
-            result += f(z_mid) * dz
-        return result
-
-    @staticmethod
-    def residue(f: Callable[[complex], complex], z0: complex,
-               radius: float = 0.01, n_points: int = 100) -> complex:
-        """Estimate residue at z0 using contour integration."""
-        path = [z0 + radius * ComplexAnalysis.polar_to_rect(1, 2*math.pi*k/n_points)
-               for k in range(n_points + 1)]
-        integral = ComplexAnalysis.contour_integral(f, path)
-        return integral / (2j * math.pi)
-
-
-# =============================================================================
-# SECTION 11: GRAPH AND COMBINATORICS
-# =============================================================================
-
-class GraphAlgorithms:
-    """Graph theory algorithms."""
-
-    @staticmethod
-    def dijkstra(graph: Dict[int, List[Tuple[int, float]]],
-                start: int) -> Dict[int, float]:
-        """Dijkstra's shortest path algorithm."""
-        distances = {start: 0}
-        visited = set()
-
-        while len(visited) < len(graph):
-            current = None
-            min_dist = float('inf')
-            for node, dist in distances.items():
-                if node not in visited and dist < min_dist:
-                    current = node
-                    min_dist = dist
-
-            if current is None:
-                break
-
-            visited.add(current)
-
-            if current in graph:
-                for neighbor, weight in graph[current]:
-                    new_dist = distances[current] + weight
-                    if neighbor not in distances or new_dist < distances[neighbor]:
-                        distances[neighbor] = new_dist
-
-        return distances
-
-    @staticmethod
-    def floyd_warshall(n: int, edges: List[Tuple[int, int, float]]) -> List[List[float]]:
-        """Floyd-Warshall all-pairs shortest path."""
-        INF = float('inf')
-        dist = [[INF if i != j else 0 for j in range(n)] for i in range(n)]
-
-        for u, v, w in edges:
-            dist[u][v] = w
-
-        for k in range(n):
-            for i in range(n):
-                for j in range(n):
-                    if dist[i][k] + dist[k][j] < dist[i][j]:
-                        dist[i][j] = dist[i][k] + dist[k][j]
-
-        return dist
-
-    @staticmethod
-    def bellman_ford(n: int, edges: List[Tuple[int, int, float]],
-                    start: int) -> Tuple[List[float], bool]:
-        """Bellman-Ford algorithm. Returns distances and whether negative cycle exists."""
-        INF = float('inf')
-        dist = [INF] * n
-        dist[start] = 0
-
-        for _ in range(n - 1):
-            for u, v, w in edges:
-                if dist[u] != INF and dist[u] + w < dist[v]:
-                    dist[v] = dist[u] + w
-
-        has_negative_cycle = False
-        for u, v, w in edges:
-            if dist[u] != INF and dist[u] + w < dist[v]:
-                has_negative_cycle = True
-                break
-
-        return dist, has_negative_cycle
-
-    @staticmethod
-    def topological_sort(graph: Dict[int, List[int]]) -> List[int]:
-        """Topological sort using DFS."""
-        visited = set()
+    def dft(signal: List[complex]) -> List[complex]:
+        """Discrete Fourier Transform."""
+        N = len(signal)
         result = []
-
-        def dfs(node):
-            if node in visited:
-                return
-            visited.add(node)
-            if node in graph:
-                for neighbor in graph[node]:
-                    dfs(neighbor)
-            result.append(node)
-
-        for node in graph:
-            dfs(node)
-
-        return result[::-1]
+        for k in range(N):
+            total = 0j
+            for n in range(N):
+                angle = -2 * math.pi * k * n / N
+                total += signal[n] * cmath.exp(1j * angle)
+            result.append(total)
+        return result
 
     @staticmethod
-    def kruskal_mst(n: int, edges: List[Tuple[int, int, float]]) -> List[Tuple[int, int, float]]:
-        """Kruskal's minimum spanning tree algorithm."""
-        parent = list(range(n))
-        rank = [0] * n
+    def idft(spectrum: List[complex]) -> List[complex]:
+        """Inverse Discrete Fourier Transform."""
+        N = len(spectrum)
+        result = []
+        for n in range(N):
+            total = 0j
+            for k in range(N):
+                angle = 2 * math.pi * k * n / N
+                total += spectrum[k] * cmath.exp(1j * angle)
+            result.append(total / N)
+        return result
 
-        def find(x):
-            if parent[x] != x:
-                parent[x] = find(parent[x])
-            return parent[x]
+    @staticmethod
+    def fft(signal: List[complex]) -> List[complex]:
+        """Fast Fourier Transform using Cooley-Tukey algorithm."""
+        N = len(signal)
 
-        def union(x, y):
-            px, py = find(x), find(y)
-            if px == py:
-                return False
-            if rank[px] < rank[py]:
-                px, py = py, px
-            parent[py] = px
-            if rank[px] == rank[py]:
-                rank[px] += 1
+        if N <= 1:
+            return signal
+
+        if N & (N - 1) != 0:
+            # Pad to next power of 2
+            next_pow2 = 1 << (N - 1).bit_length()
+            signal = signal + [0j] * (next_pow2 - N)
+            N = next_pow2
+
+        if N <= 1:
+            return signal
+
+        # Divide
+        even = SignalProcessing.fft(signal[0::2])
+        odd = SignalProcessing.fft(signal[1::2])
+
+        # Combine
+        result = [0j] * N
+        for k in range(N // 2):
+            t = cmath.exp(-2j * math.pi * k / N) * odd[k]
+            result[k] = even[k] + t
+            result[k + N // 2] = even[k] - t
+
+        return result
+
+    @staticmethod
+    def ifft(spectrum: List[complex]) -> List[complex]:
+        """Inverse Fast Fourier Transform."""
+        N = len(spectrum)
+
+        # Conjugate, apply FFT, conjugate again, and scale
+        conjugated = [x.conjugate() for x in spectrum]
+        transformed = SignalProcessing.fft(conjugated)
+        result = [x.conjugate() / N for x in transformed]
+
+        return result
+
+    @staticmethod
+    def power_spectrum(signal: List[complex]) -> List[float]:
+        """Calculate power spectrum of signal."""
+        spectrum = SignalProcessing.fft(signal)
+        return [abs(x) ** 2 for x in spectrum]
+
+    @staticmethod
+    def convolution(signal1: List[float], signal2: List[float]) -> List[float]:
+        """Convolve two signals using FFT."""
+        n = len(signal1) + len(signal2) - 1
+        # Pad to power of 2
+        fft_size = 1 << (n - 1).bit_length()
+
+        s1 = [complex(x) for x in signal1] + [0j] * (fft_size - len(signal1))
+        s2 = [complex(x) for x in signal2] + [0j] * (fft_size - len(signal2))
+
+        fft1 = SignalProcessing.fft(s1)
+        fft2 = SignalProcessing.fft(s2)
+
+        product = [a * b for a, b in zip(fft1, fft2)]
+        result = SignalProcessing.ifft(product)
+
+        return [x.real for x in result[:n]]
+
+    @staticmethod
+    def moving_average(signal: List[float], window_size: int) -> List[float]:
+        """Calculate moving average."""
+        result = []
+        for i in range(len(signal)):
+            start = max(0, i - window_size // 2)
+            end = min(len(signal), i + window_size // 2 + 1)
+            result.append(sum(signal[start:end]) / (end - start))
+        return result
+
+    @staticmethod
+    def low_pass_filter(signal: List[float], cutoff_ratio: float) -> List[float]:
+        """Apply low-pass filter in frequency domain."""
+        n = len(signal)
+        spectrum = SignalProcessing.fft([complex(x) for x in signal])
+
+        cutoff = int(n * cutoff_ratio)
+        for i in range(cutoff, n - cutoff):
+            spectrum[i] = 0j
+
+        filtered = SignalProcessing.ifft(spectrum)
+        return [x.real for x in filtered[:n]]
+
+    @staticmethod
+    def high_pass_filter(signal: List[float], cutoff_ratio: float) -> List[float]:
+        """Apply high-pass filter in frequency domain."""
+        n = len(signal)
+        spectrum = SignalProcessing.fft([complex(x) for x in signal])
+
+        cutoff = int(n * cutoff_ratio)
+        for i in range(cutoff):
+            spectrum[i] = 0j
+            spectrum[n - 1 - i] = 0j
+
+        filtered = SignalProcessing.ifft(spectrum)
+        return [x.real for x in filtered[:n]]
+
+
+# =============================================================================
+# SECTION 9: COMPLEX NUMBER OPERATIONS
+# =============================================================================
+
+class ComplexMath:
+    """Extended complex number operations."""
+
+    @staticmethod
+    def mandelbrot_iterations(c: complex, max_iter: int = 100) -> int:
+        """Count iterations for Mandelbrot set."""
+        z = 0j
+        for i in range(max_iter):
+            if abs(z) > 2:
+                return i
+            z = z * z + c
+        return max_iter
+
+    @staticmethod
+    def julia_iterations(z: complex, c: complex, max_iter: int = 100) -> int:
+        """Count iterations for Julia set."""
+        for i in range(max_iter):
+            if abs(z) > 2:
+                return i
+            z = z * z + c
+        return max_iter
+
+    @staticmethod
+    def complex_roots_of_unity(n: int) -> List[complex]:
+        """Calculate n-th roots of unity."""
+        return [cmath.exp(2j * math.pi * k / n) for k in range(n)]
+
+    @staticmethod
+    def complex_logarithm(z: complex, branch: int = 0) -> complex:
+        """Complex logarithm with branch selection."""
+        return cmath.log(abs(z)) + 1j * (cmath.phase(z) + 2 * math.pi * branch)
+
+    @staticmethod
+    def complex_power(base: complex, exponent: complex) -> complex:
+        """Calculate complex power using principal branch."""
+        if base == 0:
+            return 0 if exponent.real > 0 else complex(float('inf'))
+        return cmath.exp(exponent * cmath.log(base))
+
+    @staticmethod
+    def residue_at_pole(f: Callable[[complex], complex], pole: complex,
+                       radius: float = 0.01, n_points: int = 100) -> complex:
+        """Estimate residue using contour integration."""
+        result = 0j
+        for k in range(n_points):
+            angle = 2 * math.pi * k / n_points
+            z = pole + radius * cmath.exp(1j * angle)
+            dz = 1j * radius * cmath.exp(1j * angle) * 2 * math.pi / n_points
+            result += f(z) * dz
+        return result / (2j * math.pi)
+
+
+# =============================================================================
+# SECTION 10: NUMBER THEORY
+# =============================================================================
+
+class NumberTheory:
+    """Number theory functions."""
+
+    @staticmethod
+    def gcd(a: int, b: int) -> int:
+        """Greatest common divisor using Euclidean algorithm."""
+        while b:
+            a, b = b, a % b
+        return abs(a)
+
+    @staticmethod
+    def lcm(a: int, b: int) -> int:
+        """Least common multiple."""
+        return abs(a * b) // NumberTheory.gcd(a, b)
+
+    @staticmethod
+    def extended_gcd(a: int, b: int) -> Tuple[int, int, int]:
+        """Extended Euclidean algorithm returning (gcd, x, y) where ax + by = gcd."""
+        if a == 0:
+            return b, 0, 1
+
+        gcd, x1, y1 = NumberTheory.extended_gcd(b % a, a)
+        x = y1 - (b // a) * x1
+        y = x1
+
+        return gcd, x, y
+
+    @staticmethod
+    def mod_inverse(a: int, m: int) -> int:
+        """Modular multiplicative inverse."""
+        gcd, x, _ = NumberTheory.extended_gcd(a, m)
+        if gcd != 1:
+            raise ValueError(f"{a} has no inverse modulo {m}")
+        return x % m
+
+    @staticmethod
+    def is_prime(n: int) -> bool:
+        """Miller-Rabin primality test."""
+        if n < 2:
+            return False
+        if n == 2:
             return True
+        if n % 2 == 0:
+            return False
 
-        edges = sorted(edges, key=lambda e: e[2])
-        mst = []
+        # Write n-1 as 2^r * d
+        r, d = 0, n - 1
+        while d % 2 == 0:
+            r += 1
+            d //= 2
 
-        for u, v, w in edges:
-            if union(u, v):
-                mst.append((u, v, w))
-                if len(mst) == n - 1:
+        # Witnesses to test
+        witnesses = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37]
+
+        for a in witnesses:
+            if a >= n:
+                continue
+
+            x = pow(a, d, n)
+            if x == 1 or x == n - 1:
+                continue
+
+            for _ in range(r - 1):
+                x = pow(x, 2, n)
+                if x == n - 1:
                     break
+            else:
+                return False
 
-        return mst
+        return True
 
     @staticmethod
-    def strongly_connected_components(graph: Dict[int, List[int]]) -> List[List[int]]:
-        """Find SCCs using Kosaraju's algorithm."""
-        visited = set()
-        order = []
+    def prime_factors(n: int) -> List[Tuple[int, int]]:
+        """Return prime factorization as list of (prime, exponent) tuples."""
+        factors = []
+        d = 2
 
-        def dfs1(node):
-            if node in visited:
-                return
-            visited.add(node)
-            if node in graph:
-                for neighbor in graph[node]:
-                    dfs1(neighbor)
-            order.append(node)
+        while d * d <= n:
+            exp = 0
+            while n % d == 0:
+                exp += 1
+                n //= d
+            if exp > 0:
+                factors.append((d, exp))
+            d += 1
 
-        all_nodes = set(graph.keys())
-        for node in graph.values():
-            all_nodes.update(node)
+        if n > 1:
+            factors.append((n, 1))
 
-        for node in all_nodes:
-            dfs1(node)
+        return factors
 
-        reverse_graph = defaultdict(list)
-        for u in graph:
-            for v in graph[u]:
-                reverse_graph[v].append(u)
+    @staticmethod
+    def euler_phi(n: int) -> int:
+        """Euler's totient function."""
+        result = n
+        for prime, _ in NumberTheory.prime_factors(n):
+            result -= result // prime
+        return result
 
-        visited.clear()
-        sccs = []
+    @staticmethod
+    def chinese_remainder_theorem(remainders: List[int], moduli: List[int]) -> int:
+        """Solve system of congruences using CRT."""
+        if len(remainders) != len(moduli):
+            raise ValueError("Lists must have same length")
 
-        def dfs2(node, component):
-            if node in visited:
-                return
-            visited.add(node)
-            component.append(node)
-            for neighbor in reverse_graph[node]:
-                dfs2(neighbor, component)
+        M = functools.reduce(lambda x, y: x * y, moduli)
+        result = 0
 
-        for node in reversed(order):
-            if node not in visited:
-                component = []
-                dfs2(node, component)
-                sccs.append(component)
+        for r, m in zip(remainders, moduli):
+            Mi = M // m
+            yi = NumberTheory.mod_inverse(Mi, m)
+            result += r * Mi * yi
 
-        return sccs
+        return result % M
+
+    @staticmethod
+    def fibonacci(n: int) -> int:
+        """Calculate n-th Fibonacci number using matrix exponentiation."""
+        if n <= 0:
+            return 0
+        if n == 1:
+            return 1
+
+        def matrix_mult(A: List[List[int]], B: List[List[int]]) -> List[List[int]]:
+            return [
+                [A[0][0] * B[0][0] + A[0][1] * B[1][0],
+                 A[0][0] * B[0][1] + A[0][1] * B[1][1]],
+                [A[1][0] * B[0][0] + A[1][1] * B[1][0],
+                 A[1][0] * B[0][1] + A[1][1] * B[1][1]]
+            ]
+
+        def matrix_pow(M: List[List[int]], p: int) -> List[List[int]]:
+            if p == 1:
+                return M
+            if p % 2 == 0:
+                half = matrix_pow(M, p // 2)
+                return matrix_mult(half, half)
+            return matrix_mult(M, matrix_pow(M, p - 1))
+
+        F = [[1, 1], [1, 0]]
+        result = matrix_pow(F, n)
+        return result[0][1]
 
 
 # =============================================================================
-# SECTION 12: NUMERICAL UTILITIES AND SPECIAL FUNCTIONS
+# MAIN: DEMONSTRATION
 # =============================================================================
 
-class SpecialFunctions:
-    """Special mathematical functions."""
-
-    @staticmethod
-    def erf(x: float) -> float:
-        """Error function using series approximation."""
-        return math.erf(x)
-
-    @staticmethod
-    def erfc(x: float) -> float:
-        """Complementary error function."""
-        return 1 - SpecialFunctions.erf(x)
-
-    @staticmethod
-    def bessel_j0(x: float) -> float:
-        """Bessel function of the first kind, order 0."""
-        if abs(x) < 8:
-            y = x * x
-            return (57568490574.0 + y*(-13362590354.0 + y*(651619640.7 +
-                   y*(-11214424.18 + y*(77392.33017 + y*(-184.9052456)))))) / \
-                   (57568490411.0 + y*(1029532985.0 + y*(9494680.718 +
-                   y*(59272.64853 + y*(267.8532712 + y)))))
-
-        ax = abs(x)
-        z = 8.0 / ax
-        y = z * z
-        xx = ax - 0.785398164
-
-        p0 = 1.0 + y*(-0.1098628627e-2 + y*(0.2734510407e-4 +
-            y*(-0.2073370639e-5 + y*0.2093887211e-6)))
-        q0 = -0.1562499995e-1 + y*(0.1430488765e-3 + y*(-0.6911147651e-5 +
-            y*(0.7621095161e-6 - y*0.934945152e-7)))
-
-        return math.sqrt(0.636619772 / ax) * (math.cos(xx)*p0 - z*math.sin(xx)*q0)
-
-    @staticmethod
-    def bessel_j1(x: float) -> float:
-        """Bessel function of the first kind, order 1."""
-        if abs(x) < 8:
-            y = x * x
-            result = x * (72362614232.0 + y*(-7895059235.0 + y*(242396853.1 +
-                    y*(-2972611.439 + y*(15704.48260 + y*(-30.16036606)))))) / \
-                    (144725228442.0 + y*(2300535178.0 + y*(18583304.74 +
-                    y*(99447.43394 + y*(376.9991397 + y)))))
-            return result
-
-        ax = abs(x)
-        z = 8.0 / ax
-        y = z * z
-        xx = ax - 2.356194491
-
-        p1 = 1.0 + y*(0.183105e-2 + y*(-0.3516396496e-4 +
-            y*(0.2457520174e-5 - y*0.240337019e-6)))
-        q1 = 0.04687499995 + y*(-0.2002690873e-3 + y*(0.8449199096e-5 +
-            y*(-0.88228987e-6 + y*0.105787412e-6)))
-
-        result = math.sqrt(0.636619772 / ax) * (math.cos(xx)*p1 - z*math.sin(xx)*q1)
-        return result if x >= 0 else -result
-
-    @staticmethod
-    def legendre_p(n: int, x: float) -> float:
-        """Legendre polynomial P_n(x) using recurrence."""
-        if n == 0:
-            return 1.0
-        if n == 1:
-            return x
-
-        p_prev, p_curr = 1.0, x
-        for k in range(2, n + 1):
-            p_next = ((2*k - 1) * x * p_curr - (k - 1) * p_prev) / k
-            p_prev, p_curr = p_curr, p_next
-
-        return p_curr
-
-    @staticmethod
-    def chebyshev_t(n: int, x: float) -> float:
-        """Chebyshev polynomial of the first kind T_n(x)."""
-        if n == 0:
-            return 1.0
-        if n == 1:
-            return x
-
-        t_prev, t_curr = 1.0, x
-        for _ in range(2, n + 1):
-            t_next = 2 * x * t_curr - t_prev
-            t_prev, t_curr = t_curr, t_next
-
-        return t_curr
-
-    @staticmethod
-    def hermite_h(n: int, x: float) -> float:
-        """Hermite polynomial H_n(x) (physicist's convention)."""
-        if n == 0:
-            return 1.0
-        if n == 1:
-            return 2 * x
-
-        h_prev, h_curr = 1.0, 2 * x
-        for k in range(2, n + 1):
-            h_next = 2 * x * h_curr - 2 * (k - 1) * h_prev
-            h_prev, h_curr = h_curr, h_next
-
-        return h_curr
-
-    @staticmethod
-    def laguerre_l(n: int, x: float) -> float:
-        """Laguerre polynomial L_n(x)."""
-        if n == 0:
-            return 1.0
-        if n == 1:
-            return 1 - x
-
-        l_prev, l_curr = 1.0, 1 - x
-        for k in range(2, n + 1):
-            l_next = ((2*k - 1 - x) * l_curr - (k - 1) * l_prev) / k
-            l_prev, l_curr = l_curr, l_next
-
-        return l_curr
-
-
-# =============================================================================
-# DEMONSTRATION AND TESTING
-# =============================================================================
-
-def demonstrate_calculations():
-    """Demonstrate various calculations from the library."""
-    print("=" * 70)
-    print("COMPLEX CALCULATIONS LIBRARY DEMONSTRATION")
-    print("=" * 70)
-
-    # Math utilities
-    print("\n--- MATH UTILITIES ---")
-    print(f"Factorial(10) = {MathUtils.factorial(10)}")
-    print(f"Fibonacci(20) = {MathUtils.fibonacci(20)}")
-    print(f"GCD(48, 18) = {MathUtils.gcd(48, 18)}")
-    print(f"LCM(12, 18) = {MathUtils.lcm(12, 18)}")
-    print(f"Is 997 prime? {MathUtils.is_prime(997)}")
-    print(f"Prime factors of 84: {MathUtils.prime_factors(84)}")
-    print(f"Primes up to 50: {MathUtils.sieve_of_eratosthenes(50)}")
-
-    # Numerical analysis
-    print("\n--- NUMERICAL ANALYSIS ---")
-    f = lambda x: x**3 - 2*x - 5
-    print(f"Root of x^3-2x-5 (Newton): {NumericalAnalysis.newton_raphson(f, 2):.10f}")
-    print(f"Root of x^3-2x-5 (Bisection): {NumericalAnalysis.bisection(f, 2, 3):.10f}")
-
-    g = lambda x: math.sin(x)
-    print(f"Integral sin(x)dx from 0 to pi (Simpson): {NumericalAnalysis.integrate_simpson(g, 0, math.pi):.10f}")
-    print(f"Integral sin(x)dx from 0 to pi (Romberg): {NumericalAnalysis.integrate_romberg(g, 0, math.pi):.10f}")
-    print(f"d/dx(sin(x)) at x=0: {NumericalAnalysis.derivative(math.sin, 0):.10f}")
+def run_demonstrations():
+    """Run demonstrations of all calculation modules."""
+    print("=" * 80)
+    print("COMPLEX CALCULATIONS DEMONSTRATION")
+    print("=" * 80)
 
     # Matrix operations
-    print("\n--- LINEAR ALGEBRA ---")
-    A = Matrix([[4, 2, 1], [2, 5, 3], [1, 3, 6]])
-    print("Matrix A:")
-    print(A)
-    print(f"\nDeterminant: {A.determinant():.4f}")
-    print(f"Trace: {A.trace():.4f}")
+    print("\n" + "-" * 40)
+    print("1. MATRIX OPERATIONS")
+    print("-" * 40)
 
-    eigenval, eigenvec = A.eigenvalues_power_iteration()
-    print(f"Dominant eigenvalue: {eigenval:.4f}")
+    A = Matrix([[4, 7, 2], [3, 6, 1], [2, 5, 3]])
+    B = Matrix([[1, 0, 2], [0, 1, 1], [2, 1, 0]])
 
-    b = [1, 2, 3]
-    x = A.solve_linear_system(b)
-    print(f"Solution to Ax = [1,2,3]: {[f'{xi:.4f}' for xi in x]}")
+    print(f"Matrix A:\n{A}")
+    print(f"\nMatrix B:\n{B}")
+    print(f"\nA + B:\n{A + B}")
+    print(f"\nA * B:\n{A * B}")
+    print(f"\nDeterminant of A: {A.determinant():.6f}")
+    print(f"Trace of A: {A.trace():.6f}")
 
-    # Statistics
-    print("\n--- STATISTICS ---")
-    data = [2.5, 3.1, 2.8, 4.2, 3.6, 2.9, 3.8, 3.2, 4.0, 3.5]
-    print(f"Data: {data}")
-    print(f"Mean: {Statistics.mean(data):.4f}")
-    print(f"Median: {Statistics.median(data):.4f}")
-    print(f"Std Dev: {Statistics.std_dev(data):.4f}")
-    print(f"Variance: {Statistics.variance(data):.4f}")
-    print(f"Skewness: {Statistics.skewness(data):.4f}")
+    eigenval, eigenvec = A.eigenvalues_power_method()
+    print(f"Dominant eigenvalue of A: {eigenval:.6f}")
 
-    x_data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    y_data = [2.1, 4.2, 5.8, 8.1, 10.2, 11.9, 14.1, 16.0, 18.2, 20.1]
-    slope, intercept, r_sq = Statistics.linear_regression(x_data, y_data)
-    print(f"\nLinear regression: y = {slope:.4f}x + {intercept:.4f}, R^2 = {r_sq:.4f}")
+    # Numerical integration
+    print("\n" + "-" * 40)
+    print("2. NUMERICAL INTEGRATION")
+    print("-" * 40)
 
-    # Probability distributions
-    print("\n--- PROBABILITY DISTRIBUTIONS ---")
-    print(f"Normal PDF(0, mu=0, sigma=1): {Distributions.normal_pdf(0):.6f}")
-    print(f"Normal CDF(1.96, mu=0, sigma=1): {Distributions.normal_cdf(1.96):.6f}")
-    print(f"Binomial PMF(3, n=10, p=0.5): {Distributions.binomial_pmf(3, 10, 0.5):.6f}")
-    print(f"Poisson PMF(2, lambda=3): {Distributions.poisson_pmf(2, 3):.6f}")
-    print(f"Gamma(5): {Distributions.gamma_function(5):.6f}")
+    f = lambda x: math.sin(x) * math.exp(-x / 10)
+    a, b = 0, math.pi * 4
 
-    # Signal processing
-    print("\n--- SIGNAL PROCESSING ---")
-    signal = [math.sin(2 * math.pi * i / 16) for i in range(16)]
-    fft_result = SignalProcessing.fft([complex(x) for x in signal])
-    print(f"FFT of sine wave (first 5 magnitudes): {[f'{abs(x):.4f}' for x in fft_result[:5]]}")
+    trap = NumericalMethods.trapezoidal_rule(f, a, b, 1000)
+    simp = NumericalMethods.simpsons_rule(f, a, b, 1000)
+    gauss = NumericalMethods.gaussian_quadrature(f, a, b)
+    romb = NumericalMethods.romberg_integration(f, a, b)
+    mc, mc_err = NumericalMethods.monte_carlo_integration(f, a, b, 50000)
 
-    noisy_signal = [x + random.gauss(0, 0.1) for x in signal]
-    smoothed = SignalProcessing.moving_average(noisy_signal, 3)
-    print(f"Moving average (window=3) applied to noisy signal")
+    print(f"Integral of sin(x)*exp(-x/10) from 0 to 4π:")
+    print(f"  Trapezoidal rule: {trap:.10f}")
+    print(f"  Simpson's rule:   {simp:.10f}")
+    print(f"  Gaussian quad:    {gauss:.10f}")
+    print(f"  Romberg:          {romb:.10f}")
+    print(f"  Monte Carlo:      {mc:.10f} ± {mc_err:.10f}")
+
+    # Root finding
+    print("\n" + "-" * 40)
+    print("3. ROOT FINDING")
+    print("-" * 40)
+
+    g = lambda x: x**3 - 2*x - 5
+
+    root_bis, iter_bis = RootFinding.bisection(g, 2, 3)
+    root_nr, iter_nr = RootFinding.newton_raphson(g, 2.5)
+    root_sec, iter_sec = RootFinding.secant_method(g, 2, 3)
+    root_br, iter_br = RootFinding.brent_method(g, 2, 3)
+
+    print(f"Root of x³ - 2x - 5 = 0:")
+    print(f"  Bisection:      {root_bis:.12f} ({iter_bis} iterations)")
+    print(f"  Newton-Raphson: {root_nr:.12f} ({iter_nr} iterations)")
+    print(f"  Secant:         {root_sec:.12f} ({iter_sec} iterations)")
+    print(f"  Brent:          {root_br:.12f} ({iter_br} iterations)")
 
     # Optimization
-    print("\n--- OPTIMIZATION ---")
+    print("\n" + "-" * 40)
+    print("4. OPTIMIZATION")
+    print("-" * 40)
+
     rosenbrock = lambda x, y: (1 - x)**2 + 100 * (y - x**2)**2
 
-    result, value = Optimization.gradient_descent(rosenbrock, [0.0, 0.0],
-                                                  learning_rate=0.001, max_iter=50000)
-    print(f"Gradient descent on Rosenbrock: x={result[0]:.4f}, y={result[1]:.4f}, f(x,y)={value:.6f}")
+    x_gd, f_gd, i_gd = Optimization.gradient_descent(rosenbrock, [-1.0, -1.0],
+                                                      learning_rate=0.001, max_iter=50000)
+    x_adam, f_adam, i_adam = Optimization.adam_optimizer(rosenbrock, [-1.0, -1.0],
+                                                          max_iter=50000)
+    x_nm, f_nm, i_nm = Optimization.nelder_mead(rosenbrock, [-1.0, -1.0])
+    x_sa, f_sa, i_sa = Optimization.simulated_annealing(rosenbrock, [-1.0, -1.0])
 
-    result, value = Optimization.nelder_mead(rosenbrock, [0.0, 0.0])
-    print(f"Nelder-Mead on Rosenbrock: x={result[0]:.4f}, y={result[1]:.4f}, f(x,y)={value:.6f}")
-
-    # Interpolation
-    print("\n--- INTERPOLATION ---")
-    x_pts = [0, 1, 2, 3, 4]
-    y_pts = [1, 2.7, 7.4, 20.1, 54.6]  # approximately e^x
-    print(f"Lagrange interpolation at x=2.5: {Interpolation.lagrange(x_pts, y_pts, 2.5):.4f}")
-    print(f"Expected (e^2.5): {math.exp(2.5):.4f}")
+    print(f"Minimizing Rosenbrock function (minimum at (1, 1)):")
+    print(f"  Gradient descent: x=({x_gd[0]:.6f}, {x_gd[1]:.6f}), f={f_gd:.6e}")
+    print(f"  Adam optimizer:   x=({x_adam[0]:.6f}, {x_adam[1]:.6f}), f={f_adam:.6e}")
+    print(f"  Nelder-Mead:      x=({x_nm[0]:.6f}, {x_nm[1]:.6f}), f={f_nm:.6e}")
+    print(f"  Sim. annealing:   x=({x_sa[0]:.6f}, {x_sa[1]:.6f}), f={f_sa:.6e}")
 
     # Differential equations
-    print("\n--- DIFFERENTIAL EQUATIONS ---")
-    ode = lambda t, y: -2 * y  # dy/dt = -2y, solution: y = e^(-2t)
-    t_vals, y_vals = DifferentialEquations.runge_kutta_4(ode, 1.0, (0, 2), 100)
-    print(f"RK4 solution of dy/dt = -2y at t=2: {y_vals[-1]:.6f}")
-    print(f"Exact solution at t=2: {math.exp(-4):.6f}")
+    print("\n" + "-" * 40)
+    print("5. DIFFERENTIAL EQUATIONS")
+    print("-" * 40)
+
+    # dy/dt = -2y (solution: y = e^(-2t))
+    ode = lambda t, y: -2 * y
+    t_span = (0, 2)
+    y0 = 1.0
+
+    t_euler, y_euler = DifferentialEquations.euler_method(ode, y0, t_span, 100)
+    t_rk4, y_rk4 = DifferentialEquations.runge_kutta_4(ode, y0, t_span, 100)
+    t_rkf, y_rkf = DifferentialEquations.runge_kutta_fehlberg(ode, y0, t_span)
+
+    exact_final = math.exp(-4)
+    print(f"Solving dy/dt = -2y, y(0) = 1:")
+    print(f"  Exact y(2) = e^(-4) = {exact_final:.10f}")
+    print(f"  Euler:  y(2) = {y_euler[-1]:.10f}, error = {abs(y_euler[-1] - exact_final):.2e}")
+    print(f"  RK4:    y(2) = {y_rk4[-1]:.10f}, error = {abs(y_rk4[-1] - exact_final):.2e}")
+    print(f"  RK45:   y(2) = {y_rkf[-1]:.10f}, error = {abs(y_rkf[-1] - exact_final):.2e}")
+
+    # Statistics
+    print("\n" + "-" * 40)
+    print("6. STATISTICS")
+    print("-" * 40)
+
+    data = [random.gauss(50, 10) for _ in range(1000)]
+
+    print(f"Statistics of 1000 samples from N(50, 10):")
+    print(f"  Mean:     {Statistics.mean(data):.4f}")
+    print(f"  Median:   {Statistics.median(data):.4f}")
+    print(f"  Std Dev:  {Statistics.std_dev(data, ddof=1):.4f}")
+    print(f"  Skewness: {Statistics.skewness(data):.4f}")
+    print(f"  Kurtosis: {Statistics.kurtosis(data):.4f}")
+
+    # Signal processing
+    print("\n" + "-" * 40)
+    print("7. SIGNAL PROCESSING")
+    print("-" * 40)
+
+    signal = [math.sin(2 * math.pi * k / 16) + 0.5 * math.sin(6 * math.pi * k / 16)
+              for k in range(64)]
+    spectrum = SignalProcessing.fft([complex(x) for x in signal])
+    power = SignalProcessing.power_spectrum([complex(x) for x in signal])
+
+    print(f"FFT of composite sine wave (64 samples):")
+    print(f"  DC component: {abs(spectrum[0]):.4f}")
+    print(f"  Peak frequencies at bins: ", end="")
+    sorted_indices = sorted(range(len(power)), key=lambda i: power[i], reverse=True)[:4]
+    print(", ".join(str(i) for i in sorted_indices))
+
+    # Number theory
+    print("\n" + "-" * 40)
+    print("8. NUMBER THEORY")
+    print("-" * 40)
+
+    n = 123456789
+    print(f"Number theory for n = {n}:")
+    print(f"  Prime factorization: {NumberTheory.prime_factors(n)}")
+    print(f"  Euler's phi: {NumberTheory.euler_phi(n)}")
+    print(f"  Is prime: {NumberTheory.is_prime(n)}")
+    print(f"  Fibonacci(50): {NumberTheory.fibonacci(50)}")
+
+    # CRT example
+    remainders = [2, 3, 2]
+    moduli = [3, 5, 7]
+    crt_result = NumberTheory.chinese_remainder_theorem(remainders, moduli)
+    print(f"  CRT solution for x ≡ {remainders} (mod {moduli}): x = {crt_result}")
 
     # Complex analysis
-    print("\n--- COMPLEX ANALYSIS ---")
-    z = complex(1, 1)
-    print(f"z = 1+i")
-    print(f"Polar form: r={abs(z):.4f}, theta={math.atan2(z.imag, z.real):.4f}")
-    print(f"exp(z): {ComplexAnalysis.complex_exp(z)}")
-    print(f"Cube roots of 1+i: {[f'({r.real:.4f}+{r.imag:.4f}i)' for r in ComplexAnalysis.nth_roots(z, 3)]}")
+    print("\n" + "-" * 40)
+    print("9. COMPLEX ANALYSIS")
+    print("-" * 40)
 
-    # Graph algorithms
-    print("\n--- GRAPH ALGORITHMS ---")
-    graph = {
-        0: [(1, 4), (2, 1)],
-        1: [(3, 1)],
-        2: [(1, 2), (3, 5)],
-        3: []
-    }
-    distances = GraphAlgorithms.dijkstra(graph, 0)
-    print(f"Dijkstra shortest paths from node 0: {distances}")
+    roots = ComplexMath.complex_roots_of_unity(5)
+    print("5th roots of unity:")
+    for i, root in enumerate(roots):
+        print(f"  ω_{i} = {root.real:.6f} + {root.imag:.6f}i")
 
-    edges = [(0, 1, 4), (0, 2, 1), (1, 2, 2), (1, 3, 1), (2, 3, 5)]
-    mst = GraphAlgorithms.kruskal_mst(4, edges)
-    print(f"MST edges: {mst}")
+    # Mandelbrot
+    c = complex(-0.7, 0.27)
+    mandel_iters = ComplexMath.mandelbrot_iterations(c, 1000)
+    print(f"\nMandelbrot iterations for c = {c}: {mandel_iters}")
 
-    # Special functions
-    print("\n--- SPECIAL FUNCTIONS ---")
-    print(f"Bessel J0(1): {SpecialFunctions.bessel_j0(1):.6f}")
-    print(f"Bessel J1(1): {SpecialFunctions.bessel_j1(1):.6f}")
-    print(f"Legendre P3(0.5): {SpecialFunctions.legendre_p(3, 0.5):.6f}")
-    print(f"Chebyshev T4(0.5): {SpecialFunctions.chebyshev_t(4, 0.5):.6f}")
-    print(f"Hermite H3(1): {SpecialFunctions.hermite_h(3, 1):.6f}")
-    print(f"Laguerre L3(1): {SpecialFunctions.laguerre_l(3, 1):.6f}")
+    # Interpolation
+    print("\n" + "-" * 40)
+    print("10. INTERPOLATION")
+    print("-" * 40)
 
-    print("\n" + "=" * 70)
+    x_pts = [0, 1, 2, 3, 4]
+    y_pts = [1, 2.7, 7.4, 20.1, 54.6]  # Approximately e^x
+
+    x_test = 2.5
+    lagrange = Interpolation.lagrange_interpolation(x_pts, y_pts, x_test)
+    newton = Interpolation.newton_interpolation(x_pts, y_pts, x_test)
+    spline = Interpolation.cubic_spline(x_pts, y_pts)
+
+    print(f"Interpolating e^x at x = {x_test}:")
+    print(f"  Exact:    {math.exp(x_test):.6f}")
+    print(f"  Lagrange: {lagrange:.6f}")
+    print(f"  Newton:   {newton:.6f}")
+    print(f"  Spline:   {spline(x_test):.6f}")
+
+    print("\n" + "=" * 80)
     print("DEMONSTRATION COMPLETE")
-    print("=" * 70)
+    print("=" * 80)
 
 
 if __name__ == "__main__":
-    demonstrate_calculations()
+    run_demonstrations()
