@@ -2622,9 +2622,9 @@
 .queue-jobs-container {
     padding: 10px;
     background: white;
-    max-height: 400px;
-    overflow-y: auto;
-    transition: max-height 0.3s ease, padding 0.3s ease;
+    /* Removed max-height: 400px to allow full job card expansion */
+    overflow-y: visible;
+    transition: padding 0.3s ease;
 }
 
 .queue-jobs-container.collapsed {
@@ -2776,9 +2776,9 @@
 
 .interactions-content {
     padding: 10px;
-    max-height: 300px;
-    overflow-y: auto;
-    transition: max-height 0.3s ease, padding 0.3s ease;
+    /* Removed max-height: 300px to allow full conversation expansion */
+    overflow-y: visible;
+    transition: padding 0.3s ease;
 }
 
 .interactions-content.collapsed {
