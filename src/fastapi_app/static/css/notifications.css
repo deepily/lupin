@@ -3196,8 +3196,10 @@
 .abstract-tooltip {
     position: fixed;
     z-index: 10001;
-    max-width: 400px;
+    width: auto;               /* Content-driven width */
     min-width: 200px;
+    max-width: min( 450px, calc( 100vw - 40px ) );   /* Viewport-safe max */
+    max-height: min( 400px, calc( 100vh - 100px ) ); /* Prevent overflow */
     padding: 0;
     background: #ffffff;
     border: 1px solid #dee2e6;
@@ -3206,6 +3208,8 @@
     font-size: 13px;
     line-height: 1.5;
     color: #333;
+    resize: both;              /* Enable user resizing */
+    overflow: hidden;          /* Required for CSS resize */
     /* Hidden by default */
     display: none;
 }
@@ -3241,7 +3245,8 @@
 }
 
 .abstract-tooltip-content {
-    max-height: 300px;
+    height: auto;              /* Content-driven height */
+    max-height: 300px;         /* Cap with scroll for long content */
     overflow-y: auto;
     padding: 12px 14px;
     font-family: inherit;
