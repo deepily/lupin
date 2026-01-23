@@ -8,6 +8,9 @@
 
 ### Completed
 - [x] cosa-voice MCP project detection order bug - CoSA detected as Lupin (ad-hoc) - Fixed prior to session
+- [x] LanceDB/PostgreSQL permissions issue - database recreation blocked by wrong ownership/permissions (from Session 94 TODO)
+  - Fixed: `lupin.lancedb` ownership changed from root:root to rruiz:rruiz
+  - Fixed: `postgresql-dev-data` permissions changed from 700 to 750 (group r-x added)
 
 ---
 

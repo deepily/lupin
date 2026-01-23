@@ -5,6 +5,10 @@
 >
 > ### Fixes
 > - **Fix 1**: cosa-voice MCP project detection order bug (CoSA detected as Lupin) - Fixed prior to session start
+> - **Fix 2**: LanceDB/PostgreSQL permissions issue (from Session 94 TODO #1)
+>   - Root cause: `lupin.lancedb` owned by root, `postgresql-dev-data` had 700 permissions (no group access)
+>   - Fixed: Changed ownership and permissions via sudo chown/chmod
+>   - Impact: Database recreation and embedding cache errors in smoke tests now resolved
 >
 > ### Session Summary
 > (Will be completed at session close)
