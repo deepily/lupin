@@ -1,5 +1,32 @@
 # Lupin Project History
 
+> **✅ SESSION 94 COMPLETE**: Queue System Class Hierarchy Unification (2026.01.22)
+> - **Goal**: Unify naming conventions across AgentBase, SolutionSnapshot, and AgenticJobBase
+> - **Phase 1**: Cleared LanceDB database for schema-free refactoring (fresh start)
+> - **Phase 2**: Added unified properties to all three classes:
+>   - `AgenticJobBase`: Added `question`, `answer`, `job_type`, `created_date` properties
+>   - `SolutionSnapshot`: Added `job_type` property (maps to `agent_class_name`)
+>   - `AgentBase`: Added `job_type` (class name), `created_date` properties
+> - **Phase 3**: Created `QueueableJob` Protocol (`src/cosa/rest/queue_protocol.py`) documenting unified interface
+> - **Phase 4**: Simplified `queues.py` - replaced `getattr()` chains with direct attribute access using `job.job_type`
+> - **Files Created**: `src/cosa/rest/queue_protocol.py` (~180 lines)
+> - **Files Modified**: `agentic_job_base.py`, `agent_base.py`, `solution_snapshot.py`, `queues.py`
+> - **Smoke Tests**: All PASSED (AgenticJobBase, SolutionSnapshot, AgentBase, QueueableJob Protocol)
+> - **Benefit**: Clean code, type safety via Protocol, consistent `job_type` across all job types, IDE autocomplete works
+>
+> ---
+>
+> **📋 TODO FOR NEXT SESSION (Session 95)**:
+> 1. **🔧 Fix LanceDB Permissions**: Database recreation has permission issues (embedding cache errors during smoke tests)
+> 2. **🧪 Phase 7 Browser Testing**: Continue verification - spinning indicator, live duration timer, abstract/report link, cost summary, error display
+> 3. **🔬 Deep Research Queue Integration - BROWSER TESTING**: Test Phase 6 frontend notification routing
+> 4. **🎙️ Podcast Generator - FULL AUDIO GENERATION TEST**: Ready for full 20-segment test
+> 5. **⏰ Job Queue Progressive Disclosure UI - MANUAL TESTING**: See plan: `/home/rruiz/.claude/plans/cheeky-leaping-scone.md`
+> 6. **Deep Research Phase 8 (PENDING)**: COSA Router Integration for natural language job submission
+> 7. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 1 complete. Remaining: Phase 4 = AgentBase History, Phase 5 = Lifecycle
+> 8. Voice discovery/configuration for notification TTS UI still pending
+> 9. **Future TODO**: Config mapping female/male voices, consolidate voice_io.py, evaluate config.py dataclasses, migrate /api/deep-research/report
+>
 > **✅ SESSION 93 COMPLETE**: Podcast Generator Multi-Language Translation Support (2026.01.22)
 > - **Feature**: Added support for generating podcasts in multiple languages (English default, Spanish opt-in)
 > - **ISO Codes**: en, es, es-ES (Castilian), es-MX (Mexican), es-AR (Argentinian)
