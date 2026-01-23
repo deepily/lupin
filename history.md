@@ -1,6 +1,6 @@
 # Lupin Project History
 
-> **🔧 SESSION 95 ACTIVE**: Bug Fix Mode (2026.01.23)
+> **✅ SESSION 95 COMPLETE**: Bug Fix Mode (2026.01.23)
 > **Owner**: claude.code@lupin.deepily.ai#6fa77d02
 >
 > ### Fixes
@@ -9,9 +9,15 @@
 >   - Root cause: `lupin.lancedb` owned by root, `postgresql-dev-data` had 700 permissions (no group access)
 >   - Fixed: Changed ownership and permissions via sudo chown/chmod
 >   - Impact: Database recreation and embedding cache errors in smoke tests now resolved
+> - **Fix 3**: Podcast Generator - English audio generated when not requested
+>   - Root cause: `scripts_by_language` unconditionally initialized with English (`orchestrator.py:441-442`)
+>   - Fixed: Conditional English inclusion - only add to dict if `"en" in self.target_languages`
+>   - Updated notification message for non-English-only generation
+>   - File: `src/cosa/agents/podcast_generator/orchestrator.py` (lines 441-462)
+>   - Smoke Tests: 10/10 PASSED
 >
 > ### Session Summary
-> (Will be completed at session close)
+> Bug fix session addressing 3 issues: MCP project detection, database permissions, and podcast language filtering.
 >
 > ---
 
@@ -31,16 +37,15 @@
 >
 > ---
 >
-> **📋 TODO FOR NEXT SESSION (Session 95)**:
-> 1. **🔧 Fix LanceDB Permissions**: Database recreation has permission issues (embedding cache errors during smoke tests)
-> 2. **🧪 Phase 7 Browser Testing**: Continue verification - spinning indicator, live duration timer, abstract/report link, cost summary, error display
-> 3. **🔬 Deep Research Queue Integration - BROWSER TESTING**: Test Phase 6 frontend notification routing
-> 4. **🎙️ Podcast Generator - FULL AUDIO GENERATION TEST**: Ready for full 20-segment test
-> 5. **⏰ Job Queue Progressive Disclosure UI - MANUAL TESTING**: See plan: `/home/rruiz/.claude/plans/cheeky-leaping-scone.md`
-> 6. **Deep Research Phase 8 (PENDING)**: COSA Router Integration for natural language job submission
-> 7. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 1 complete. Remaining: Phase 4 = AgentBase History, Phase 5 = Lifecycle
-> 8. Voice discovery/configuration for notification TTS UI still pending
-> 9. **Future TODO**: Config mapping female/male voices, consolidate voice_io.py, evaluate config.py dataclasses, migrate /api/deep-research/report
+> **📋 TODO FOR NEXT SESSION (Session 96)**:
+> 1. **🧪 Phase 7 Browser Testing**: Continue verification - spinning indicator, live duration timer, abstract/report link, cost summary, error display
+> 2. **🔬 Deep Research Queue Integration - BROWSER TESTING**: Test Phase 6 frontend notification routing
+> 3. **🎙️ Podcast Generator - FULL AUDIO GENERATION TEST**: Ready for full 20-segment test (language filtering bug now fixed)
+> 4. **⏰ Job Queue Progressive Disclosure UI - MANUAL TESTING**: See plan: `/home/rruiz/.claude/plans/cheeky-leaping-scone.md`
+> 5. **Deep Research Phase 8 (PENDING)**: COSA Router Integration for natural language job submission
+> 6. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 1 complete. Remaining: Phase 4 = AgentBase History, Phase 5 = Lifecycle
+> 7. Voice discovery/configuration for notification TTS UI still pending
+> 8. **Future TODO**: Config mapping female/male voices, consolidate voice_io.py, evaluate config.py dataclasses, migrate /api/deep-research/report
 >
 > **✅ SESSION 93 COMPLETE**: Podcast Generator Multi-Language Translation Support (2026.01.22)
 > - **Feature**: Added support for generating podcasts in multiple languages (English default, Spanish opt-in)

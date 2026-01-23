@@ -11,6 +11,9 @@
 - [x] LanceDB/PostgreSQL permissions issue - database recreation blocked by wrong ownership/permissions (from Session 94 TODO)
   - Fixed: `lupin.lancedb` ownership changed from root:root to rruiz:rruiz
   - Fixed: `postgresql-dev-data` permissions changed from 700 to 750 (group r-x added)
+- [x] Podcast Generator - English audio generated when not requested (ad-hoc)
+  - Fixed: Conditional English inclusion in `orchestrator.py:441-462`
+  - Change in CoSA repo (needs separate commit)
 
 ---
 
