@@ -1,12 +1,15 @@
 # Lupin Project History
 
-> **✅ SESSION 93 COMPLETE**: History Archival + Documentation Improvements (2026.01.22)
-> - **History Archival**: Reduced history.md from ~22k tokens (89% of limit) to ~8.2k tokens (33%)
-> - **Archive Created**: `history/2026-01-13-to-19-history.md` (Sessions 56-74b, Jan 13-19)
-> - **README Index Created**: `history/README.md` - comprehensive index of all 10 archive files
-> - **Cross-Linking Fixed**: Updated navigation in main history, new archive, and previous archive
-> - **Explicit Links Added**: June, July, August 2025 archives now directly linked (not just directory browse)
-> - **Podcast Notification Bug**: Marked as resolved per user
+> **✅ SESSION 93 COMPLETE**: Podcast Generator Multi-Language Translation Support (2026.01.22)
+> - **Feature**: Added support for generating podcasts in multiple languages (English default, Spanish opt-in)
+> - **ISO Codes**: en, es, es-ES (Castilian), es-MX (Mexican), es-AR (Argentinian)
+> - **Native Generation**: Claude generates scripts directly in target language (not post-translation)
+> - **Phase 4b Loop**: After English approval, generates/reviews each additional language with full user approval flow
+> - **TTS Support**: Language-aware voice lookup with multilingual model fallback (eleven_multilingual_v2)
+> - **Prosody Validation**: Verifies prosody markers preserved across translations
+> - **CLI**: Added `--languages` / `-l` argument (e.g., `--languages en,es-MX`)
+> - **Files Created/Modified**: config.py, tts_client.py, prompts/script_generation.py, state.py, orchestrator.py, __main__.py, lupin-app.ini, lupin-app-splainer.ini
+> - **Smoke Tests**: 10/10 PASSED
 >
 > ---
 >
