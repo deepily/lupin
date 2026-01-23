@@ -121,7 +121,7 @@ RUN pip install --no-cache-dir pylance==0.36.0
 
 RUN pip install --no-cache-dir PyJWT==2.10.1 passlib==1.7.4 bcrypt==3.2.2 cffi==2.0.0 pycparser==2.23
 
-RUN pip install --no-cache-dir sqlalchemy==2.0.40 psycopg2-binary==2.9.11
+RUN pip install --no-cache-dir sqlalchemy==2.0.40 psycopg2-binary==2.9.11 alembic==1.18.1
 
 # MCP server dependencies (for cosa-voice MCP server)
 RUN pip install --no-cache-dir fastmcp==2.14.2

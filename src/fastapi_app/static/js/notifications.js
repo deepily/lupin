@@ -4462,7 +4462,7 @@ class NotificationsUI {
                 const encodedPath = encodeURIComponent( job.report_path );
                 reportLinkSection = `
                     <div class="job-report-link">
-                        <a href="/api/deep-research/report?path=${encodedPath}"
+                        <a href="/api/io/file?path=${encodedPath}"
                            target="_blank" class="report-link-btn">
                             📋 View Full Report
                         </a>
