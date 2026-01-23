@@ -1,13 +1,19 @@
 # Bug Fix Queue
 
-## Session: 2026.01.22 (Session 92)
-**Owner**: claude.code@lupin.deepily.ai#40d6e532
+## Session: 2026.01.23 (Session 95)
+**Owner**: claude.code@lupin.deepily.ai#6fa77d02
 
 ### Queued
-- [ ] cosa-voice MCP project detection order bug - CoSA detected as Lupin (ad-hoc)
+(No bugs currently queued)
 
 ### Completed
-(Empty for new session)
+- [x] cosa-voice MCP project detection order bug - CoSA detected as Lupin (ad-hoc) - Fixed prior to session
+
+---
+
+## Previous Session: 2026.01.22 (Session 92)
+**Owner**: claude.code@lupin.deepily.ai#40d6e532
+**Status**: Carried over 1 bug to next session
 
 ---
 

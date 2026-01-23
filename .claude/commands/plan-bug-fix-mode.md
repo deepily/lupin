@@ -6,6 +6,18 @@
 
 ---
 
+## Related Commands
+
+This command supports all three modes via arguments. For discoverability in the slash command menu, use the mode-specific variants:
+
+- `/plan-bug-fix-mode-start` - Initialize new bug fix session
+- `/plan-bug-fix-mode-continue` - Resume after context clear
+- `/plan-bug-fix-mode-close` - End bug fix session for the day
+
+**Note**: This command (`/plan-bug-fix-mode`) defaults to `start` mode for backward compatibility.
+
+---
+
 ## Instructions to Claude
 
 **On every invocation of this command:**
@@ -15,7 +27,6 @@
    - **History file**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md
    - **Bug fix queue file**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/bug-fix-queue.md
    - **Project root**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/
-   - **Nested repositories** (DO NOT commit changes in these): /src/cosa/, /src/lupin-plugin-firefox/, /src/lupin-mobile/
    - Do NOT proceed without these parameters
 
 2. **MUST read the canonical workflow document**:
@@ -95,13 +106,6 @@ End bug fix session for the day:
 - Include `Fixes #N` in commit message
 - Close issue: `gh issue close #N --comment "Fixed in [hash]"`
 
-**Nested Repository Awareness**: This project contains nested Git repositories:
-- `/src/cosa/` - CoSA framework (separate repo)
-- `/src/lupin-plugin-firefox/` - Firefox plugin (separate repo)
-- `/src/lupin-mobile/` - Mobile app (separate repo)
-
-When committing, NEVER include files from nested repositories. Only commit files in the parent Lupin repository.
-
 ---
 
 ## Notes
@@ -110,3 +114,4 @@ This slash command is a **reference wrapper** that reads the canonical workflow 
 - Always up-to-date implementation when canonical doc is improved
 - Single source of truth for bug fix mode
 - Demonstrates the workflow pattern for other projects
+- This file serves as a working example for other repos

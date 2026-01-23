@@ -1,7 +1,7 @@
 # Bug Fix Mode - Continue Session
 
-**Project**: Planning is Prompting
-**Prefix**: [PLAN]
+**Project**: Lupin
+**Prefix**: [LUPIN]
 **Version**: 1.0
 
 ---
@@ -25,10 +25,10 @@
 **On every invocation of this command:**
 
 1. **MUST use the following project-specific configuration**:
-   - **[SHORT_PROJECT_PREFIX]**: [PLAN]
-   - **History file**: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/history.md
-   - **Bug fix queue file**: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/bug-fix-queue.md
-   - **Project root**: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/
+   - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
+   - **History file**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md
+   - **Bug fix queue file**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/bug-fix-queue.md
+   - **Project root**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/
    - Do NOT proceed without these parameters
 
 2. **MUST read the canonical workflow document**:

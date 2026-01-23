@@ -1,5 +1,16 @@
 # Lupin Project History
 
+> **🔧 SESSION 95 ACTIVE**: Bug Fix Mode (2026.01.23)
+> **Owner**: claude.code@lupin.deepily.ai#6fa77d02
+>
+> ### Fixes
+> - **Fix 1**: cosa-voice MCP project detection order bug (CoSA detected as Lupin) - Fixed prior to session start
+>
+> ### Session Summary
+> (Will be completed at session close)
+>
+> ---
+
 > **✅ SESSION 94 COMPLETE**: Queue System Class Hierarchy Unification (2026.01.22)
 > - **Goal**: Unify naming conventions across AgentBase, SolutionSnapshot, and AgenticJobBase
 > - **Phase 1**: Cleared LanceDB database for schema-free refactoring (fresh start)
