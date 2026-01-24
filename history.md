@@ -1,5 +1,21 @@
 # Lupin Project History
 
+> **✅ SESSION 96 COMPLETE**: TODO Review + TTS Investigation Planning (2026.01.23)
+> **Owner**: claude.code@lupin.deepily.ai#2adf6d65
+>
+> ### Accomplishments
+> - Reviewed all outstanding TODO items from Session 95
+> - Marked as DONE: Podcast Generator Full Audio Test, Job Queue Progressive Disclosure UI
+> - Added new future TODO: TTS Consolidation Investigation
+> - Began TTS consolidation research - investigated `_emit_speech` (5 callers in queue code) vs notification service
+> - **Key user correction**: MCP is facade over notification service; latency assumptions need re-evaluation
+> - Created investigation plan: `/home/rruiz/.claude/plans/modular-wondering-fox.md`
+>
+> ### Session Summary
+> Light session focused on TODO management and initial TTS architecture investigation. Investigation deferred to tomorrow pending deeper analysis of notification service capabilities (not just MCP facade).
+>
+> ---
+
 > **✅ SESSION 95 COMPLETE**: Bug Fix Mode (2026.01.23)
 > **Owner**: claude.code@lupin.deepily.ai#6fa77d02
 >
@@ -37,15 +53,14 @@
 >
 > ---
 >
-> **📋 TODO FOR NEXT SESSION (Session 96)**:
-> 1. **🧪 Phase 7 Browser Testing**: Continue verification - spinning indicator, live duration timer, abstract/report link, cost summary, error display
-> 2. **🔬 Deep Research Queue Integration - BROWSER TESTING**: Test Phase 6 frontend notification routing
-> 3. **🎙️ Podcast Generator - FULL AUDIO GENERATION TEST**: Ready for full 20-segment test (language filtering bug now fixed)
-> 4. **⏰ Job Queue Progressive Disclosure UI - MANUAL TESTING**: See plan: `/home/rruiz/.claude/plans/cheeky-leaping-scone.md`
-> 5. **Deep Research Phase 8 (PENDING)**: COSA Router Integration for natural language job submission
-> 6. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 1 complete. Remaining: Phase 4 = AgentBase History, Phase 5 = Lifecycle
-> 7. Voice discovery/configuration for notification TTS UI still pending
-> 8. **Future TODO**: Config mapping female/male voices, consolidate voice_io.py, evaluate config.py dataclasses, migrate /api/deep-research/report
+> **📋 TODO FOR NEXT SESSION (Session 97)**:
+> 1. **🔊 TTS Consolidation Investigation - CONTINUE**: Resume with corrected assumptions - investigate notification service directly (not MCP facade), re-evaluate latency, assess job-context routing capabilities. Plan: `/home/rruiz/.claude/plans/modular-wondering-fox.md`
+> 2. **🧪 Phase 7 Browser Testing**: Continue verification - spinning indicator, live duration timer, abstract/report link, cost summary, error display
+> 3. **🔬 Deep Research Queue Integration - BROWSER TESTING**: Test Phase 6 frontend notification routing
+> 4. **Deep Research Phase 8 (PENDING)**: COSA Router Integration for natural language job submission
+> 5. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 1 complete. Remaining: Phase 4 = AgentBase History, Phase 5 = Lifecycle
+> 6. Voice discovery/configuration for notification TTS UI still pending
+> 7. **Future TODO**: Config mapping female/male voices, consolidate voice_io.py, evaluate config.py dataclasses, migrate /api/deep-research/report
 >
 > **✅ SESSION 93 COMPLETE**: Podcast Generator Multi-Language Translation Support (2026.01.22)
 > - **Feature**: Added support for generating podcasts in multiple languages (English default, Spanish opt-in)
