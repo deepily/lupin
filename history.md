@@ -31,9 +31,18 @@
 >   - Updated notification message for non-English-only generation
 >   - File: `src/cosa/agents/podcast_generator/orchestrator.py` (lines 441-462)
 >   - Smoke Tests: 10/10 PASSED
+> - **Fix 4**: Podcast Generator - English audio notifications missing language identifier
+>   - Root cause: `do_audio_only_async()` used generic messages without language specification
+>   - Fixed: Added "English" to notification messages (matching `do_all_async()` pattern)
+>   - File: `src/cosa/agents/podcast_generator/orchestrator.py` (lines 917-919, 943)
+>   - Commit: 329ad9b (COSA repo)
 >
 > ### Session Summary
-> Bug fix session addressing 3 issues: MCP project detection, database permissions, and podcast language filtering.
+> - **Total Fixes**: 4
+> - **Files Changed**: orchestrator.py, lupin.lancedb permissions, postgresql-dev-data permissions
+> - **Commits**: 9df9149 (Lupin), 329ad9b (COSA)
+>
+> **Status**: Session closed 2026.01.23
 >
 > ---
 

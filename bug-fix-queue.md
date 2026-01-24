@@ -14,6 +14,8 @@
 - [x] Podcast Generator - English audio generated when not requested (ad-hoc)
   - Fixed: Conditional English inclusion in `orchestrator.py:441-462`
   - Change in CoSA repo (needs separate commit)
+- [x] Podcast Generator - English audio notifications missing language identifier (ad-hoc)
+  - Fixed: Added "English" to `do_audio_only_async()` notifications → commit: 329ad9b (COSA)
 
 ---
 
