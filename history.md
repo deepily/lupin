@@ -1,6 +1,6 @@
 # Lupin Project History
 
-> **✅ SESSION 98 COMPLETE**: TTS Migration Completion + Cache Hit Bug Fix (2026.01.25)
+> **✅ SESSION 98 COMPLETE**: TTS Migration Completion + Phase 7 Browser Testing Done (2026.01.25)
 > **Owner**: claude.code@lupin.deepily.ai#194f142f
 >
 > ### Accomplishments
@@ -13,12 +13,21 @@
 >   - Line ~640: Unimplemented command case → `_notify()`
 >   - Line ~655: After agent creation → `_notify(msg, job=agent)`
 >   - Line ~772: Queue size announcement → `_notify(msg, job=job)`
+> - **Bug Fix: Phase 6 TTS Routing** (`notifications.js:3728-3745`)
+>   - Problem: Job-card routed notifications had no TTS playback (cached results silent)
+>   - Problem: Regular notifications used verbose "Important! task notification:" prefix
+>   - Fix: Added TTS queuing to Phase 6 with direct message (no prefix)
+>   - Result: Answers now play clean (e.g., "14" not "Important! task notification: 14")
+> - **✅ Phase 7 Browser Testing - COMPLETE**
+>   - Job Queue Progressive Disclosure UI verified working
+>   - Spinning indicator, duration timer, job cards all functional
+>   - TTS playback for both fresh and cached results confirmed
 > - **Smoke Tests**: All 4 passed (fifo_queue, running_fifo_queue, todo_fifo_queue, notification_models)
 >
 > ### Session Summary
-> Completed TTS migration from legacy `_emit_speech` WebSocket system to notification service. Fixed critical cache hit bug that prevented done queue jobs from appearing for users. All queue smoke tests pass.
+> Completed TTS migration from legacy `_emit_speech` WebSocket system to notification service. Fixed critical cache hit bug that prevented done queue jobs from appearing for users. Fixed Phase 6 TTS routing for clean answer playback. Phase 7 Browser Testing marked complete.
 >
-> **Note**: Changes are in CoSA submodule - require separate commit in CoSA context.
+> **Note**: Queue code changes are in CoSA submodule - require separate commit in CoSA context.
 >
 > ---
 
@@ -103,14 +112,16 @@
 >
 > ---
 >
-> **📋 TODO FOR NEXT SESSION (Session 97)**:
-> 1. **🔊 TTS Consolidation Investigation - CONTINUE**: Resume with corrected assumptions - investigate notification service directly (not MCP facade), re-evaluate latency, assess job-context routing capabilities. Plan: `/home/rruiz/.claude/plans/modular-wondering-fox.md`
-> 2. **🧪 Phase 7 Browser Testing**: Continue verification - spinning indicator, live duration timer, abstract/report link, cost summary, error display
-> 3. **🔬 Deep Research Queue Integration - BROWSER TESTING**: Test Phase 6 frontend notification routing
-> 4. **Deep Research Phase 8 (PENDING)**: COSA Router Integration for natural language job submission
-> 5. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 1 complete. Remaining: Phase 4 = AgentBase History, Phase 5 = Lifecycle
-> 6. Voice discovery/configuration for notification TTS UI still pending
-> 7. **Future TODO**: Config mapping female/male voices, consolidate voice_io.py, evaluate config.py dataclasses, migrate /api/deep-research/report
+> **📋 TODO FOR NEXT SESSION (Session 99)**:
+> 1. **Deep Research Phase 8 (PENDING)**: COSA Router Integration for natural language job submission
+> 2. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 1 complete. Remaining: Phase 4 = AgentBase History, Phase 5 = Lifecycle
+> 3. Voice discovery/configuration for notification TTS UI still pending
+> 4. **Future TODO**: Config mapping female/male voices, consolidate voice_io.py, evaluate config.py dataclasses, migrate /api/deep-research/report
+>
+> **✅ COMPLETED (Session 98)**:
+> - ~~🔊 TTS Consolidation Investigation~~ - Migrated to notification service
+> - ~~🧪 Phase 7 Browser Testing~~ - Job Queue Progressive Disclosure UI verified
+> - ~~🔬 Deep Research Queue Integration - BROWSER TESTING~~ - Phase 6 frontend notification routing working
 >
 > **✅ SESSION 93 COMPLETE**: Podcast Generator Multi-Language Translation Support (2026.01.22)
 > - **Feature**: Added support for generating podcasts in multiple languages (English default, Spanish opt-in)
