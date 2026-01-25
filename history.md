@@ -1,5 +1,29 @@
 # Lupin Project History
 
+> **✅ SESSION 99 COMPLETE**: Bug Fix Mode - LanceDB Corruption Recovery (2026.01.25)
+> **Owner**: claude.code@lupin.deepily.ai#454f9eca
+>
+> ### Fixes
+> - **Fix 1**: LanceDB embedding cache corruption auto-recovery (ad-hoc)
+>   - **Symptom**: `get_cached_embedding()` failed with "Not found" error when internal data fragment files missing
+>   - **Root Cause**: LanceDB stores data in UUID-named `.lance` fragments; manual deletion or crash leaves manifest referencing missing files
+>   - **Fix**: Added `_is_table_corrupted()` method that performs actual data scan (not just `count_rows()` which only reads metadata)
+>   - **Auto-Recovery**: On corruption detection, drops and recreates table with fresh schema (acceptable data loss - it's a cache)
+>   - **Files (CoSA)**: `src/cosa/memory/embedding_cache_table.py` - needs separate commit
+>   - **Files (Lupin)**: `src/tests/unit/test_embedding_cache_corruption.py` (313 lines, 9 tests)
+>   - **Tests**: 6 unit tests (mocked scenarios), 3 integration tests (real LanceDB corruption)
+>   - **Commit**: 77ab971 (Lupin unit tests only)
+>
+> ### Session Summary
+> - **Total Fixes**: 1
+> - **Files Changed**: embedding_cache_table.py (CoSA), test_embedding_cache_corruption.py (Lupin)
+> - **Commits**: 77ab971 (Lupin)
+> - **Note**: CoSA submodule changes require separate commit in CoSA context
+>
+> **Status**: Session closed 2026.01.25
+>
+> ---
+
 > **✅ SESSION 98 COMPLETE**: TTS Migration Completion + Phase 7 Browser Testing Done (2026.01.25)
 > **Owner**: claude.code@lupin.deepily.ai#194f142f
 >

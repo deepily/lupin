@@ -1,13 +1,17 @@
 # Bug Fix Queue
 
-## Session: 2026.01.25 (Session 97)
+## Session: 2026.01.25 (Session 99)
 **Owner**: claude.code@lupin.deepily.ai#454f9eca
 
 ### Queued
 - [ ] clearAllNotifications TypeError - Cannot read properties of undefined (reading 'length') at notifications.js:7490 (ad-hoc)
 
 ### Completed
-(Empty for new session)
+- [x] LanceDB embedding cache corruption recovery (ad-hoc) → commit: 77ab971 (Lupin unit tests)
+  - CoSA changes: `embedding_cache_table.py` needs separate commit in CoSA context
+  - Added `_is_table_corrupted()` method with data scan detection
+  - Auto-recovery: drops and recreates table when corruption detected
+  - Unit tests: 9 tests covering mocked and real corruption scenarios
 
 ---
 
