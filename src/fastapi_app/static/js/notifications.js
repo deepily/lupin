@@ -3698,8 +3698,10 @@ class NotificationsUI {
             this.log( `Response-required notification detected: ${notification.id}` );
             // Route to Action Required section (queue system handles activation and TTS)
             this.addActionRequiredNotification( notification );
-            // Still play sound
-            await this.playNotificationSoundByPriority( notification.priority );
+            // Play sound unless suppress_ding is set (conversational TTS from queue)
+            if ( notification.suppress_ding !== true ) {
+                await this.playNotificationSoundByPriority( notification.priority );
+            }
 
             // NOTE: TTS is now handled by activateNextNotification() when the notification
             // becomes active. This prevents simultaneous TTS playback when multiple
@@ -3717,17 +3719,21 @@ class NotificationsUI {
             this.log( `[Phase 6] Routing notification to job card: ${jobId}` );
             this.appendNotificationToJobCard( jobId, notification );
 
-            // Still play notification sound for high/urgent priority
+            // Play notification sound for high/urgent priority unless suppress_ding is set
             if ( notification.priority === "high" || notification.priority === "urgent" ) {
-                await this.playNotificationSoundByPriority( notification.priority );
+                if ( notification.suppress_ding !== true ) {
+                    await this.playNotificationSoundByPriority( notification.priority );
+                }
             }
 
             return;  // Don't add to sender cards
         }
 
         // Regular fire-and-forget notification handling
-        // 1. ALWAYS play notification sound first based on priority
-        await this.playNotificationSoundByPriority( notification.priority );
+        // 1. Play notification sound based on priority unless suppress_ding is set
+        if ( notification.suppress_ding !== true ) {
+            await this.playNotificationSoundByPriority( notification.priority );
+        }
 
         // 2. High/urgent priority: Queue for TTS, add to project card when playback starts
         //    Low/medium priority: Add to project card immediately (no TTS)

@@ -83,101 +83,112 @@ consumer_thread = None
 websocket_heartbeat_task = None
 websocket_cleanup_task = None
 
-async def emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", websocket_id: str = None ) -> None:
-    """
-    Generate TTS speech and emit via WebSocket to specific user or broadcast.
-    
-    Requires:
-        - websocket_manager must be initialized and running
-        - msg must be a non-empty string
-        - user_id or websocket_id must be valid if provided
-        
-    Ensures:
-        - TTS job request is emitted via WebSocket to target recipient
-        - No exceptions are propagated to caller (errors are logged)
-        - Speech data includes text and timestamp
-        
-    Args:
-        msg: The text message to be converted to speech
-        user_id: User ID for user-specific routing (preferred method)
-        websocket_id: Optional websocket identifier for backwards compatibility
-        
-    Returns:
-        None
-        
-    Raises:
-        No exceptions raised - all errors are caught and logged
-    """
-    print( f"[SPEECH] emit_speech called:" )
-    print( f"  - Message: '{msg}'" )
-    print( f"  - User ID: {user_id if user_id else 'none'}" )
-    print( f"  - WebSocket ID: {websocket_id if websocket_id else 'none'}" )
-    
-    try:
-        # Emit speech_update event to trigger TTS in browser
-        speech_data = {
-            "text": msg,
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        if user_id and user_id != "ricardo_felipe_ruiz_6bdc":
-            # Emit to specific user (preferred method)
-            await websocket_manager.emit_to_user( user_id, "tts_job_request", speech_data )
-            print( f"[SPEECH] Emitted tts_job_request to user {user_id}" )
-        elif user_id == "ricardo_felipe_ruiz_6bdc":
-            # Default user - still use user-based routing
-            await websocket_manager.emit_to_user( user_id, "tts_job_request", speech_data )
-            print( f"[SPEECH] Emitted tts_job_request to default user {user_id}" )
-        elif websocket_id:
-            # Backwards compatibility: Emit to specific session
-            await websocket_manager.emit_to_session( websocket_id, "tts_job_request", speech_data )
-            print( f"[SPEECH] Emitted tts_job_request to session {websocket_id} (backwards compatibility)" )
-        else:
-            # Fallback: Broadcast to all connected clients
-            await websocket_manager.async_emit( "tts_job_request", speech_data )
-            print( f"[SPEECH] Broadcasted tts_job_request to all connections (fallback)" )
-            
-    except Exception as e:
-        print( f"[SPEECH] Error emitting speech: {e}" )
-        # Don't raise - this shouldn't break the calling flow
-
-
-def create_emit_speech_callback():
-    """
-    Creates a sync wrapper for the async emit_speech function with user-based routing.
-    
-    Requires:
-        - No preconditions
-        
-    Ensures:
-        - Returns a callable synchronous wrapper function
-        - Wrapper function runs emit_speech in isolated thread with own event loop
-        - Thread execution is non-blocking and daemon-enabled
-        
-    Args:
-        None
-        
-    Returns:
-        function: Synchronous wrapper function that accepts (msg, user_id, websocket_id) parameters
-        
-    Raises:
-        No exceptions raised - wrapper function handles all errors internally
-    """
-    def sync_emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", websocket_id: str = None ):
-        import threading
-        
-        def run_in_thread():
-            try:
-                # Run async function in isolated thread with its own event loop
-                asyncio.run( emit_speech( msg, user_id=user_id, websocket_id=websocket_id ) )
-            except Exception as e:
-                print( f"[SPEECH] Error in speech thread: {e}" )
-        
-        # Always run in separate thread to avoid event loop conflicts
-        thread = threading.Thread( target=run_in_thread, daemon=True )
-        thread.start()
-        print( f"[SPEECH] Started speech emission thread for: '{msg}' (user: {user_id})" )
-    return sync_emit_speech
+# ============================================================================
+# DEPRECATED: Legacy emit_speech infrastructure (Session 97)
+# Queue classes now use notification service directly via _notify() method
+# Keeping commented for reference during migration verification
+# TODO: Remove after migration verified stable (target: Session 100+)
+# ============================================================================
+# async def emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", websocket_id: str = None ) -> None:
+#     """
+#     [DEPRECATED] Generate TTS speech and emit via WebSocket to specific user or broadcast.
+#
+#     Replaced by: Notification service with _notify() method in queue classes
+#     Reason: Migration to notification service for job_id routing, blocking queries, and suppress_ding
+#
+#     Requires:
+#         - websocket_manager must be initialized and running
+#         - msg must be a non-empty string
+#         - user_id or websocket_id must be valid if provided
+#
+#     Ensures:
+#         - TTS job request is emitted via WebSocket to target recipient
+#         - No exceptions are propagated to caller (errors are logged)
+#         - Speech data includes text and timestamp
+#
+#     Args:
+#         msg: The text message to be converted to speech
+#         user_id: User ID for user-specific routing (preferred method)
+#         websocket_id: Optional websocket identifier for backwards compatibility
+#
+#     Returns:
+#         None
+#
+#     Raises:
+#         No exceptions raised - all errors are caught and logged
+#     """
+#     print( f"[SPEECH] emit_speech called:" )
+#     print( f"  - Message: '{msg}'" )
+#     print( f"  - User ID: {user_id if user_id else 'none'}" )
+#     print( f"  - WebSocket ID: {websocket_id if websocket_id else 'none'}" )
+#
+#     try:
+#         # Emit speech_update event to trigger TTS in browser
+#         speech_data = {
+#             "text": msg,
+#             "timestamp": datetime.now().isoformat()
+#         }
+#
+#         if user_id and user_id != "ricardo_felipe_ruiz_6bdc":
+#             # Emit to specific user (preferred method)
+#             await websocket_manager.emit_to_user( user_id, "tts_job_request", speech_data )
+#             print( f"[SPEECH] Emitted tts_job_request to user {user_id}" )
+#         elif user_id == "ricardo_felipe_ruiz_6bdc":
+#             # Default user - still use user-based routing
+#             await websocket_manager.emit_to_user( user_id, "tts_job_request", speech_data )
+#             print( f"[SPEECH] Emitted tts_job_request to default user {user_id}" )
+#         elif websocket_id:
+#             # Backwards compatibility: Emit to specific session
+#             await websocket_manager.emit_to_session( websocket_id, "tts_job_request", speech_data )
+#             print( f"[SPEECH] Emitted tts_job_request to session {websocket_id} (backwards compatibility)" )
+#         else:
+#             # Fallback: Broadcast to all connected clients
+#             await websocket_manager.async_emit( "tts_job_request", speech_data )
+#             print( f"[SPEECH] Broadcasted tts_job_request to all connections (fallback)" )
+#
+#     except Exception as e:
+#         print( f"[SPEECH] Error emitting speech: {e}" )
+#         # Don't raise - this shouldn't break the calling flow
+#
+#
+# def create_emit_speech_callback():
+#     """
+#     [DEPRECATED] Creates a sync wrapper for the async emit_speech function with user-based routing.
+#
+#     Replaced by: Notification service - queue classes use _notify() directly
+#
+#     Requires:
+#         - No preconditions
+#
+#     Ensures:
+#         - Returns a callable synchronous wrapper function
+#         - Wrapper function runs emit_speech in isolated thread with own event loop
+#         - Thread execution is non-blocking and daemon-enabled
+#
+#     Args:
+#         None
+#
+#     Returns:
+#         function: Synchronous wrapper function that accepts (msg, user_id, websocket_id) parameters
+#
+#     Raises:
+#         No exceptions raised - wrapper function handles all errors internally
+#     """
+#     def sync_emit_speech( msg: str, user_id: str = "ricardo_felipe_ruiz_6bdc", websocket_id: str = None ):
+#         import threading
+#
+#         def run_in_thread():
+#             try:
+#                 # Run async function in isolated thread with its own event loop
+#                 asyncio.run( emit_speech( msg, user_id=user_id, websocket_id=websocket_id ) )
+#             except Exception as e:
+#                 print( f"[SPEECH] Error in speech thread: {e}" )
+#
+#         # Always run in separate thread to avoid event loop conflicts
+#         thread = threading.Thread( target=run_in_thread, daemon=True )
+#         thread.start()
+#         print( f"[SPEECH] Started speech emission thread for: '{msg}' (user: {user_id})" )
+#     return sync_emit_speech
 
 
 async def clock_loop():
@@ -440,11 +451,12 @@ async def lifespan( app: FastAPI ):
     # Initialize the manager (required for both backends)
     snapshot_mgr.initialize()
     
-    # Initialize queues with emit_speech callback and websocket manager
-    jobs_todo_queue = TodoFifoQueue( websocket_manager, snapshot_mgr, app, config_mgr, emit_speech_callback=create_emit_speech_callback(), debug=app_debug, verbose=app_verbose, silent=app_silent )
+    # Initialize queues with websocket manager
+    # NOTE (Session 97): emit_speech_callback is deprecated - queues now use notification service via _notify()
+    jobs_todo_queue = TodoFifoQueue( websocket_manager, snapshot_mgr, app, config_mgr, emit_speech_callback=None, debug=app_debug, verbose=app_verbose, silent=app_silent )
     jobs_done_queue = FifoQueue( websocket_mgr=websocket_manager, queue_name="done", emit_enabled=True )
     jobs_dead_queue = FifoQueue( websocket_mgr=websocket_manager, queue_name="dead", emit_enabled=True )
-    jobs_run_queue = RunningFifoQueue( app, websocket_manager, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, config_mgr=config_mgr, emit_speech_callback=create_emit_speech_callback() )
+    jobs_run_queue = RunningFifoQueue( app, websocket_manager, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, config_mgr=config_mgr, emit_speech_callback=None )
     
     # Initialize notification queue with io_tbl logging
     jobs_notification_queue = NotificationFifoQueue( websocket_mgr=websocket_manager, emit_enabled=True, debug=app_debug, verbose=app_verbose )
