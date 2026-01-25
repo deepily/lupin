@@ -7487,7 +7487,7 @@ class NotificationsUI {
         // 1. Count notifications from senderGroups (actual data, not DOM)
         let totalCount = 0;
         for ( const group of this.senderGroups.values() ) {
-            totalCount += group.notifications.length;
+            totalCount += group.totalCount;
         }
 
         if ( totalCount === 0 ) {
