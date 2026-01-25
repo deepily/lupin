@@ -1,5 +1,46 @@
 # Lupin Project History
 
+> **✅ SESSION 98 COMPLETE**: TTS Migration Completion + Cache Hit Bug Fix (2026.01.25)
+> **Owner**: claude.code@lupin.deepily.ai#194f142f
+>
+> ### Accomplishments
+> - **Bug Fix: Cache Hit ID Mismatch** (`running_fifo_queue.py:530-533`)
+>   - Root cause: When cache hit occurs, `for_current_user()` creates copy with cached snapshot's `id_hash`
+>   - But user association in `user_job_tracker` uses running job's `id_hash`
+>   - Result: `get_jobs_for_user()` returned 0 jobs for cache hits
+>   - Fix: Added `done_queue_entry.id_hash = original_job.id_hash` after copy creation
+> - **Migrated 3 remaining `emit_speech_callback` calls** in `todo_fifo_queue.py`
+>   - Line ~640: Unimplemented command case → `_notify()`
+>   - Line ~655: After agent creation → `_notify(msg, job=agent)`
+>   - Line ~772: Queue size announcement → `_notify(msg, job=job)`
+> - **Smoke Tests**: All 4 passed (fifo_queue, running_fifo_queue, todo_fifo_queue, notification_models)
+>
+> ### Session Summary
+> Completed TTS migration from legacy `_emit_speech` WebSocket system to notification service. Fixed critical cache hit bug that prevented done queue jobs from appearing for users. All queue smoke tests pass.
+>
+> **Note**: Changes are in CoSA submodule - require separate commit in CoSA context.
+>
+> ---
+
+> **✅ SESSION 97 COMPLETE**: TTS Migration Phase 0-3 (2026.01.25)
+> **Owner**: claude.code@lupin.deepily.ai#454f9eca
+>
+> ### Accomplishments
+> - **Phase 0**: Added `suppress_ding` field to NotificationRequest and AsyncNotificationRequest
+> - **Phase 0**: Added retry parameters (`retry_on_timeout`, `max_attempts`, `backoff_multiplier`) to `notify_user_sync()`
+> - **Phase 0**: Updated `job_id` pattern to accept SHA256 hashes: `^([a-z]+-[a-f0-9]{8}|[a-f0-9]{64})$`
+> - **Phase 1**: Added `_notify()`, `_get_notification_job_id()`, `_get_target_user_email()` to FifoQueue base class
+> - **Phase 1**: Added user_service lookup for email resolution in `_get_target_user_email()`
+> - **Phase 2**: Migrated all 7 `_emit_speech` calls in `running_fifo_queue.py` to `_notify()`
+> - **Phase 2**: Migrated blocking query (line 480) in `todo_fifo_queue.py` to `notify_user_sync()` with retry
+> - **Phase 3**: Commented out legacy `_emit_speech()` in `fifo_queue.py`
+> - **Phase 3**: Set `emit_speech_callback=None` in `main.py` queue initialization
+>
+> ### Session Summary
+> Major TTS migration implementing the plan from Session 96. Replaced legacy WebSocket-based `_emit_speech` with notification service. Added `suppress_ding=True` for conversational TTS without notification sounds. Job cards now receive TTS via job_id routing.
+>
+> ---
+
 > **✅ SESSION 96 COMPLETE**: TODO Review + TTS Investigation Planning (2026.01.23)
 > **Owner**: claude.code@lupin.deepily.ai#2adf6d65
 >

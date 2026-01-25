@@ -1,12 +1,20 @@
 # Bug Fix Queue
 
-## Session: 2026.01.23 (Session 95)
-**Owner**: claude.code@lupin.deepily.ai#6fa77d02
+## Session: 2026.01.25 (Session 97)
+**Owner**: claude.code@lupin.deepily.ai#454f9eca
 
 ### Queued
-(No bugs currently queued)
+- [ ] clearAllNotifications TypeError - Cannot read properties of undefined (reading 'length') at notifications.js:7490 (ad-hoc)
 
 ### Completed
+(Empty for new session)
+
+---
+
+## Previous Session: 2026.01.23 (Session 95)
+**Owner**: claude.code@lupin.deepily.ai#6fa77d02
+**Status**: Completed - 4 fixes
+
 - [x] cosa-voice MCP project detection order bug - CoSA detected as Lupin (ad-hoc) - Fixed prior to session
 - [x] LanceDB/PostgreSQL permissions issue - database recreation blocked by wrong ownership/permissions (from Session 94 TODO)
   - Fixed: `lupin.lancedb` ownership changed from root:root to rruiz:rruiz

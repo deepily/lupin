@@ -86,7 +86,7 @@ logger = logging.getLogger( __name__ )
 # Version
 # ============================================================================
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 # ============================================================================
 # Configuration
@@ -307,7 +307,8 @@ def notify(
     notification_type: str = "progress",
     priority: str = "medium",
     abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None
+    job_id: Optional[ str ] = None,
+    suppress_ding: bool = False
 ) -> str:
     """
     Announce something to the user without waiting for response.
@@ -322,6 +323,7 @@ def notify(
         priority: "low", "medium", "high", or "urgent"
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
+        suppress_ding: Suppress notification sound while still speaking via TTS (default False)
 
     Returns:
         Delivery status message
@@ -330,6 +332,7 @@ def notify(
         notify("Starting code analysis...", notification_type="progress")
         notify("Build completed successfully", notification_type="task")
         notify("Warning: deprecated API detected", notification_type="alert", priority="high")
+        notify("Task complete", suppress_ding=True)  # TTS only, no ding
     """
     logger.debug( f"notify() called: {message[:50]}..." )
 
@@ -340,7 +343,8 @@ def notify(
             priority=NotificationPriority( priority ),
             sender_id=SENDER_ID,
             abstract=_normalize_abstract( abstract ),
-            job_id=job_id
+            job_id=job_id,
+            suppress_ding=suppress_ding
         )
     except ( ValidationError, ValueError ) as e:
         logger.error( f"Validation error: {e}" )
