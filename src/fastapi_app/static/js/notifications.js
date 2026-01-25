@@ -3724,6 +3724,25 @@ class NotificationsUI {
                 if ( notification.suppress_ding !== true ) {
                     await this.playNotificationSoundByPriority( notification.priority );
                 }
+
+                // FIX (Session 98): Queue TTS for job-routed notifications
+                // Job card context provides clarity, so play the raw message WITHOUT
+                // the "Important! task notification:" prefix used for general notifications
+                const notificationId = notification.id || notification.id_hash;
+                const ttsMessage = notification.message;  // Direct message, no prefix
+                this.log( `[Phase 6] Queuing job notification for TTS: "${ttsMessage}"` );
+
+                // Add delay if notification sound played (to let it finish), otherwise queue immediately
+                const delay = notification.suppress_ding ? 0 : 300;
+                setTimeout( () => {
+                    this.addToTTSQueue( {
+                        id           : notificationId,
+                        type         : 'job-card',
+                        notification : notification,
+                        ttsText      : ttsMessage,
+                        addedAt      : Date.now()
+                    } );
+                }, delay );
             }
 
             return;  // Don't add to sender cards
