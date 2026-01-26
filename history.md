@@ -1,6 +1,6 @@
 # Lupin Project History
 
-> **🔧 SESSION 100 ACTIVE**: Agentic Job UI Cards - Phases 0-2 (2026.01.26)
+> **✅ SESSION 100 COMPLETE**: Agentic Job UI Cards - Phases 0-2 + Bug Fix 4 + Expertise Level (2026.01.26)
 > **Owner**: claude.code@lupin.deepily.ai#63cce923
 > **Plan**: `/home/rruiz/.claude/plans/federated-prancing-lagoon.md`
 >
@@ -8,22 +8,30 @@
 > **Phase 0 - Consolidated voice_io Modules** (CoSA):
 > - Created `agents/utils/voice_io.py` - unified implementation with all features
 > - Updated `agents/deep_research/voice_io.py` - thin wrapper using consolidated module
-> - Updated `agents/podcast_generator/voice_io.py` - thin wrapper with new features:
->   - Added `job_id` parameter to `notify()`
->   - Added `choose()`, `select_themes()`, `select_topics()` functions
+> - Updated `agents/podcast_generator/voice_io.py` - thin wrapper with new features
 >
 > **Phase 1 - DeepResearchToPodcastAgent Wrapper** (CoSA):
-> - Created `agents/deep_research_to_podcast/` package
-> - `agent.py` - orchestrates DR → PG chain with modality control
-> - `state.py` - `ChainedResult` dataclass and `PipelineState` enum
+> - Created `agents/deep_research_to_podcast/` package with `agent.py` and `state.py`
 >
 > **Phase 2 - CLI Entry Point** (CoSA):
 > - Created `agents/deep_research_to_podcast/__main__.py`
 > - Usage: `python -m cosa.agents.deep_research_to_podcast --query "..." --user-email ...`
-> - Supports: `--budget`, `--languages`, `--max-segments`, `--cli-mode`, `--dry-run`
-> - Voice-driven by default, CLI mode optional
 >
-> **All smoke tests passing** (8 files, +2150/-451 lines)
+> **Bug Fix 4 - run_research() Missing user_email**:
+> - Fixed wrapper agent to pass `user_email=self.user_email` to `run_research()`
+>
+> **Expertise Level / Target Audience Configuration** (NEW):
+> - Added `target_audience` (beginner/general/expert/academic) and `audience_context` to ResearchConfig
+> - Added config keys to `lupin-app.ini` and `lupin-app-splainer.ini` (Lupin commit: bcf386a)
+> - Added `--audience` and `--audience-context` CLI flags to Deep Research CLI
+> - Created AUDIENCE_GUIDELINES dictionaries in 3 prompt files:
+>   - `prompts/planning.py` - decomposition guidelines per audience level
+>   - `prompts/subagent.py` - source selection guidelines per audience level
+>   - `prompts/synthesis.py` - writing style guidelines per audience level
+> - Wired audience params through `cli.py` → all prompt functions
+> - Added `--audience` and `--audience-context` to wrapper agent CLI (`__main__.py`)
+> - Updated wrapper `agent.py` to pass audience config to ResearchConfig
+> - **All smoke tests passing**: config, planning, subagent, synthesis modules
 >
 > ### Remaining Work (Phases 3-6)
 > - Phase 3: PodcastGeneratorJob class for queue integration
@@ -31,7 +39,7 @@
 > - Phase 5: UI cards in notifications.html
 > - Phase 6: Router registration in main.py
 >
-> **Note**: Code changes are in CoSA submodule (commit 5c58b58)
+> **Note**: CoSA submodule changes need separate commit
 >
 > ---
 
