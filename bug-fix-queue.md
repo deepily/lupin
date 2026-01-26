@@ -1,10 +1,27 @@
 # Bug Fix Queue
 
-## Session: 2026.01.25 (Session 99)
-**Owner**: claude.code@lupin.deepily.ai#454f9eca
+## Session: 2026.01.26 (Session 100)
+**Owner**: claude.code@lupin.deepily.ai#514f7e7a
 
 ### Queued
-- [ ] clearAllNotifications TypeError - Cannot read properties of undefined (reading 'length') at notifications.js:7490 (ad-hoc)
+- [ ] LanceDB nprobes warning suppression
+  - **Error**: `[WARN lance::dataset::scanner] nprobes is not set because nearest has not been called yet`
+  - **Source**: LanceDB Rust library (repeated 8+ times in logs)
+  - **Impact**: Warning noise in logs
+  - **Potential fix**: Set nprobes parameter before search or suppress at logging level
+
+- [ ] LanceDB gist_cache.lance corruption - missing file
+  - **Error**: `⚠ Error in verbatim lookup: lance error: LanceError(IO): Object at location .../gist_cache.lance/data/<uuid>.lance not found: No such file or directory (os error 2)`
+  - **Source**: `gist_cache_table.py` - verbatim and normalized lookups (repeated 6+ times)
+  - **Severity**: HIGH - indicates gist_cache.lance table corruption
+  - **Impact**: Data corruption - cache file referenced but missing
+  - **Potential fix**: Add corruption detection and auto-recovery similar to embedding_cache_table.py
+
+### Completed
+- [x] clearAllNotifications TypeError - Cannot read properties of undefined (reading 'length') at notifications.js:7490 (ad-hoc) → marked fixed by user
+- [x] Boolean configuration parsing case-sensitive bug (ad-hoc)
+  - Fixed: `configuration_manager.py:817-822` - now handles `true`/`True`/`TRUE` variants
+  - CoSA change: needs separate commit in CoSA context
 
 ### Completed
 - [x] LanceDB embedding cache corruption recovery (ad-hoc) → commit: 77ab971 (Lupin unit tests)

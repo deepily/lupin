@@ -1,5 +1,40 @@
 # Lupin Project History
 
+> **🔧 SESSION 100 ACTIVE**: Agentic Job UI Cards - Phases 0-2 (2026.01.26)
+> **Owner**: claude.code@lupin.deepily.ai#63cce923
+> **Plan**: `/home/rruiz/.claude/plans/federated-prancing-lagoon.md`
+>
+> ### Accomplishments
+> **Phase 0 - Consolidated voice_io Modules** (CoSA):
+> - Created `agents/utils/voice_io.py` - unified implementation with all features
+> - Updated `agents/deep_research/voice_io.py` - thin wrapper using consolidated module
+> - Updated `agents/podcast_generator/voice_io.py` - thin wrapper with new features:
+>   - Added `job_id` parameter to `notify()`
+>   - Added `choose()`, `select_themes()`, `select_topics()` functions
+>
+> **Phase 1 - DeepResearchToPodcastAgent Wrapper** (CoSA):
+> - Created `agents/deep_research_to_podcast/` package
+> - `agent.py` - orchestrates DR → PG chain with modality control
+> - `state.py` - `ChainedResult` dataclass and `PipelineState` enum
+>
+> **Phase 2 - CLI Entry Point** (CoSA):
+> - Created `agents/deep_research_to_podcast/__main__.py`
+> - Usage: `python -m cosa.agents.deep_research_to_podcast --query "..." --user-email ...`
+> - Supports: `--budget`, `--languages`, `--max-segments`, `--cli-mode`, `--dry-run`
+> - Voice-driven by default, CLI mode optional
+>
+> **All smoke tests passing** (8 files, +2150/-451 lines)
+>
+> ### Remaining Work (Phases 3-6)
+> - Phase 3: PodcastGeneratorJob class for queue integration
+> - Phase 4: API endpoints (`/api/podcast-generator/submit`, `/api/chained-job/submit`)
+> - Phase 5: UI cards in notifications.html
+> - Phase 6: Router registration in main.py
+>
+> **Note**: Code changes are in CoSA submodule (commit 5c58b58)
+>
+> ---
+
 > **✅ SESSION 99 COMPLETE**: Bug Fix Mode - LanceDB Corruption Recovery (2026.01.25)
 > **Owner**: claude.code@lupin.deepily.ai#454f9eca
 >
@@ -136,11 +171,16 @@
 >
 > ---
 >
-> **📋 TODO FOR NEXT SESSION (Session 99)**:
-> 1. **Deep Research Phase 8 (PENDING)**: COSA Router Integration for natural language job submission
-> 2. **Conversation Identity Phases 4-5 (FUTURE)**: Phase 1 complete. Remaining: Phase 4 = AgentBase History, Phase 5 = Lifecycle
-> 3. Voice discovery/configuration for notification TTS UI still pending
-> 4. **Future TODO**: Config mapping female/male voices, consolidate voice_io.py, evaluate config.py dataclasses, migrate /api/deep-research/report
+> **📋 IMMEDIATE TODO**:
+> 1. **Deep Research UI Card**: Simple UI for creating new deep research tasks
+> 2. **Podcast Generator UI Card**: Simple UI for creating new podcast generation tasks
+>
+> **📋 FUTURE TODO**:
+> 1. **Deep Research Phase 8**: COSA Router Integration for natural language job submission
+> 2. **Podcast Generator Phase 3**: COSA Router Integration for natural language podcast generation
+>
+> **✅ Recently Completed**:
+> - Conversation Identity Phases 4-5 (Session 101)
 >
 > **✅ COMPLETED (Session 98)**:
 > - ~~🔊 TTS Consolidation Investigation~~ - Migrated to notification service
