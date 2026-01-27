@@ -15,6 +15,11 @@
   - **baseline_report**: Path to baseline report (auto-detects latest if not provided)
   - **scope**: `FULL|CRITICAL_ONLY|SELECTIVE|ANALYSIS_ONLY`, default: `FULL`
   - Compares against baseline, identifies regressions, performs systematic remediation
+- `/lupin-new-claude-agent-sdk-voice-workflow` - Create new agentic services with voice I/O
+  - Interactive workflow for building Claude Agent SDK background jobs
+  - Guides through phases: discovery, foundation, notifications, queue integration
+  - **Canonical doc**: `src/workflow/agentic-voice-workflow.md`
+  - **Reference agents**: `src/cosa/agents/deep_research/`, `podcast_generator/`
 
 ## CODE STYLE
 - **Imports**: Group by stdlib, third-party, local
