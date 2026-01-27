@@ -1369,6 +1369,9 @@ class NotificationsUI {
         // Claude Code Dispatcher event listeners
         this.setupClaudeCodeEventListeners();
 
+        // Job Submission (Research + Podcast) event listeners
+        this.setupJobSubmitEventListeners();
+
         this.log( "Event listeners setup complete" );
     }
 
@@ -1473,6 +1476,68 @@ class NotificationsUI {
         }
 
         this.log( "Agent mode selector event listeners setup complete" );
+    }
+
+    // ========================================
+    // JOB SUBMISSION EVENT LISTENERS
+    // ========================================
+
+    setupJobSubmitEventListeners() {
+        // Research submit button
+        const submitResearchBtn = document.getElementById( 'submit-research-job' );
+        if ( submitResearchBtn ) {
+            submitResearchBtn.addEventListener( 'click', () => {
+                this.submitResearchJob();
+            });
+        }
+
+        // Podcast submit button
+        const submitPodcastBtn = document.getElementById( 'submit-podcast-job' );
+        if ( submitPodcastBtn ) {
+            submitPodcastBtn.addEventListener( 'click', () => {
+                this.submitPodcastJob();
+            });
+        }
+
+        // Research STT button (voice input)
+        const researchSttBtn = document.getElementById( 'research-stt-button' );
+        if ( researchSttBtn ) {
+            researchSttBtn.addEventListener( 'click', () => {
+                this.handleSTTButtonClick( 'research-topic', researchSttBtn );
+            });
+        }
+
+        // Podcast STT button (voice input)
+        const podcastSttBtn = document.getElementById( 'podcast-stt-button' );
+        if ( podcastSttBtn ) {
+            podcastSttBtn.addEventListener( 'click', () => {
+                this.handleSTTButtonClick( 'podcast-source', podcastSttBtn );
+            });
+        }
+
+        // Enter key in research topic input
+        const researchInput = document.getElementById( 'research-topic' );
+        if ( researchInput ) {
+            researchInput.addEventListener( 'keydown', ( e ) => {
+                if ( e.key === 'Enter' ) {
+                    e.preventDefault();
+                    this.submitResearchJob();
+                }
+            });
+        }
+
+        // Enter key in podcast source input
+        const podcastInput = document.getElementById( 'podcast-source' );
+        if ( podcastInput ) {
+            podcastInput.addEventListener( 'keydown', ( e ) => {
+                if ( e.key === 'Enter' ) {
+                    e.preventDefault();
+                    this.submitPodcastJob();
+                }
+            });
+        }
+
+        this.log( "Job submission event listeners setup complete" );
     }
 
     /**
@@ -2079,6 +2144,191 @@ class NotificationsUI {
         
         // Call existing notification handler (reuse all existing logic)
         this.handleNotificationUpdate( envelope );
+    }
+
+    // ========================================
+    // JOB SUBMISSION HANDLERS
+    // ========================================
+
+    /**
+     * Submit a Deep Research job (with optional podcast generation).
+     *
+     * If "Also generate podcast" checkbox is checked, submits to
+     * /api/deep-research-to-podcast/submit endpoint.
+     * Otherwise, submits to /api/deep-research/submit endpoint.
+     */
+    async submitResearchJob() {
+        const topicInput = document.getElementById( 'research-topic' );
+        const budgetInput = document.getElementById( 'research-budget' );
+        const withPodcastCheckbox = document.getElementById( 'research-with-podcast' );
+        const submitButton = document.getElementById( 'submit-research-job' );
+        const loadingSpinner = document.getElementById( 'research-loading' );
+        const statusDiv = document.getElementById( 'research-submit-status' );
+
+        const topic = topicInput.value.trim();
+        const budget = parseFloat( budgetInput.value ) || 3.00;
+        const withPodcast = withPodcastCheckbox.checked;
+
+        if ( !topic ) {
+            statusDiv.textContent = '⚠️ Please enter a research topic.';
+            statusDiv.style.color = '#dc3545';
+            return;
+        }
+
+        try {
+            // Update UI
+            submitButton.disabled = true;
+            loadingSpinner.style.display = 'inline-block';
+            statusDiv.textContent = 'Submitting research job...';
+            statusDiv.style.color = '#666';
+
+            // Ensure token is valid before API call
+            await this.ensureValidToken();
+
+            // Choose endpoint based on checkbox
+            const endpoint = withPodcast
+                ? '/api/deep-research-to-podcast/submit'
+                : '/api/deep-research/submit';
+
+            const body = withPodcast
+                ? { query: topic, budget: budget, target_languages: [ 'en' ] }
+                : { query: topic, budget: budget };
+
+            this.log( `Submitting research job to ${endpoint}: ${topic.substring( 0, 50 )}...` );
+
+            const response = await fetch( endpoint, {
+                method: 'POST',
+                headers: {
+                    'Authorization': this.getAuthHeader(),
+                    'X-Session-ID': this.queueSessionId,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify( body )
+            });
+
+            if ( !response.ok ) {
+                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
+                throw new Error( errorData.detail || `HTTP ${response.status}` );
+            }
+
+            const result = await response.json();
+            this.log( "Research job submitted:", result );
+
+            // Success feedback
+            const jobType = withPodcast ? 'Research→Podcast' : 'Research';
+            statusDiv.textContent = `✓ ${jobType} job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
+            statusDiv.style.color = '#28a745';
+
+            // Clear input
+            topicInput.value = '';
+
+        } catch ( error ) {
+            this.error( "Research job submission failed:", error );
+            statusDiv.textContent = `✗ Error: ${error.message}`;
+            statusDiv.style.color = '#dc3545';
+        } finally {
+            submitButton.disabled = false;
+            loadingSpinner.style.display = 'none';
+        }
+    }
+
+    /**
+     * Submit a Podcast generation job.
+     *
+     * Uses smart input detection:
+     * - If input looks like a file path → direct job creation
+     * - If input looks like a description → fuzzy match + notification for confirmation
+     */
+    async submitPodcastJob() {
+        const sourceInput = document.getElementById( 'podcast-source' );
+        const submitButton = document.getElementById( 'submit-podcast-job' );
+        const loadingSpinner = document.getElementById( 'podcast-loading' );
+        const statusDiv = document.getElementById( 'podcast-submit-status' );
+
+        const source = sourceInput.value.trim();
+
+        if ( !source ) {
+            statusDiv.textContent = '⚠️ Please enter a research source (path or description).';
+            statusDiv.style.color = '#dc3545';
+            return;
+        }
+
+        try {
+            // Update UI
+            submitButton.disabled = true;
+            loadingSpinner.style.display = 'inline-block';
+            statusDiv.textContent = 'Processing...';
+            statusDiv.style.color = '#666';
+
+            // Ensure token is valid before API call
+            await this.ensureValidToken();
+
+            this.log( `Submitting podcast job: ${source.substring( 0, 50 )}...` );
+
+            const response = await fetch( '/api/podcast-generator/submit', {
+                method: 'POST',
+                headers: {
+                    'Authorization': this.getAuthHeader(),
+                    'X-Session-ID': this.queueSessionId,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    research_source: source,
+                    target_languages: [ 'en' ]
+                })
+            });
+
+            if ( !response.ok ) {
+                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
+                throw new Error( errorData.detail || `HTTP ${response.status}` );
+            }
+
+            const result = await response.json();
+            this.log( "Podcast job response:", result );
+
+            // Handle different response types
+            if ( result.status === 'queued' ) {
+                // Direct path mode - job created immediately
+                statusDiv.textContent = `✓ Podcast job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
+                statusDiv.style.color = '#28a745';
+                sourceInput.value = '';
+            } else if ( result.status === 'matching' ) {
+                // Description mode - fuzzy matching triggered
+                statusDiv.textContent = `🔍 ${result.message}`;
+                statusDiv.style.color = '#6f42c1';
+                // Don't clear input - user may want to modify and retry
+            } else if ( result.status === 'no_matches' ) {
+                statusDiv.textContent = `⚠️ ${result.message}`;
+                statusDiv.style.color = '#ffc107';
+            }
+
+        } catch ( error ) {
+            this.error( "Podcast job submission failed:", error );
+            statusDiv.textContent = `✗ Error: ${error.message}`;
+            statusDiv.style.color = '#dc3545';
+        } finally {
+            submitButton.disabled = false;
+            loadingSpinner.style.display = 'none';
+        }
+    }
+
+    /**
+     * Generic STT button click handler for job submission cards.
+     * Reuses the existing recording infrastructure.
+     *
+     * @param {string} inputId - ID of the input element to fill with transcription
+     * @param {HTMLElement} button - The STT button element
+     */
+    async handleSTTButtonClick( inputId, button ) {
+        // Delegate to the recording manager with appropriate context
+        const inputElement = document.getElementById( inputId );
+        if ( !inputElement ) {
+            this.error( `Input element not found: ${inputId}` );
+            return;
+        }
+
+        // Use the same recording flow as Q&A STT via recordingManager
+        await this.recordingManager.startRecording( inputId, button, inputElement );
     }
 
     // ========================================
@@ -3715,7 +3965,34 @@ class NotificationsUI {
         // ========================================
         // If notification has job_id AND job is registered (active), route to job card
         const jobId = notification.job_id;
-        if ( jobId && this.isJobRegistered( jobId ) ) {
+        if ( jobId ) {
+            if ( !this.isJobRegistered( jobId ) ) {
+                // Phase 6 FIX: Job not registered yet (race condition) - cache for replay
+                this.log( `[Phase 6] Job ${jobId} not registered yet - caching notification` );
+                this.cacheJobNotification( jobId, notification );
+
+                // Still queue TTS with raw message for high/urgent priority
+                if ( notification.priority === "high" || notification.priority === "urgent" ) {
+                    if ( notification.suppress_ding !== true ) {
+                        await this.playNotificationSoundByPriority( notification.priority );
+                    }
+                    const notificationId = notification.id || notification.id_hash;
+                    const ttsMessage = notification.message;
+                    this.log( `[Phase 6] Queuing cached job notification for TTS: "${ttsMessage}"` );
+                    setTimeout( () => {
+                        this.addToTTSQueue( {
+                            id           : notificationId,
+                            type         : 'job-card',
+                            notification : notification,
+                            ttsText      : ttsMessage,
+                            addedAt      : Date.now()
+                        } );
+                    }, notification.suppress_ding ? 0 : 300 );
+                }
+                return;  // Don't fall through to sender card
+            }
+
+            // Job is registered - route normally
             this.log( `[Phase 6] Routing notification to job card: ${jobId}` );
             this.appendNotificationToJobCard( jobId, notification );
 
@@ -3729,7 +4006,10 @@ class NotificationsUI {
                 // Job card context provides clarity, so play the raw message WITHOUT
                 // the "Important! task notification:" prefix used for general notifications
                 const notificationId = notification.id || notification.id_hash;
-                const ttsMessage = notification.message;  // Direct message, no prefix
+                // Phase 6 FIX: Job-card defaults to raw, but allow override via tts_raw: false
+                const ttsMessage = notification.tts_raw === false
+                    ? this.formatNotificationTTSMessage( notification )
+                    : notification.message;
                 this.log( `[Phase 6] Queuing job notification for TTS: "${ttsMessage}"` );
 
                 // Add delay if notification sound played (to let it finish), otherwise queue immediately
@@ -3757,7 +4037,10 @@ class NotificationsUI {
         // 2. High/urgent priority: Queue for TTS, add to project card when playback starts
         //    Low/medium priority: Add to project card immediately (no TTS)
         if ( notification.priority === "high" || notification.priority === "urgent" ) {
-            const ttsMessage = this.formatNotificationTTSMessage( notification );
+            // Phase 6 FIX: Check tts_raw flag - default to contextualized for backward compatibility
+            const ttsMessage = notification.tts_raw === true
+                ? notification.message
+                : this.formatNotificationTTSMessage( notification );
             const notificationId = notification.id || notification.id_hash;
 
             this.log( `Queuing high priority notification for TTS (will add to project card on playback): "${ttsMessage}"` );
@@ -3914,11 +4197,15 @@ class NotificationsUI {
                 // Update count badge for progressive disclosure UI
                 const countBadge = document.getElementById( "todo-count-badge" );
                 if ( countBadge ) countBadge.textContent = data.todo_jobs.length;
+                // Phase 6 FIX: Always register jobs, regardless of expand state
+                this.updateJobRegistration( "todo", data.todo_jobs_metadata || [] );
                 // Also refresh job cards if category is expanded
                 this.updateQueueCategoryIfExpanded( "todo", data.todo_jobs.length );
             } else if ( queueName === "run" ) {
                 const countBadge = document.getElementById( "run-count-badge" );
                 if ( countBadge ) countBadge.textContent = data.run_jobs.length;
+                // Phase 6 FIX: Always register jobs, regardless of expand state
+                this.updateJobRegistration( "run", data.run_jobs_metadata || [] );
                 this.updateQueueCategoryIfExpanded( "run", data.run_jobs.length );
             } else if ( queueName === "done" ) {
                 // Enhanced done queue handling with structured job metadata for replay functionality
@@ -4221,6 +4508,14 @@ class NotificationsUI {
                         metadata  : job
                     } );
                     this.log( `[Phase 6] Registered job: ${jobId} (${queueName})` );
+
+                    // Phase 6 FIX: Replay any cached notifications for this job
+                    if ( this.pendingJobNotifications && this.pendingJobNotifications.has( jobId ) ) {
+                        const cached = this.pendingJobNotifications.get( jobId );
+                        this.log( `[Phase 6] Replaying ${cached.length} cached notification(s) for job ${jobId}` );
+                        cached.forEach( n => this.appendNotificationToJobCard( jobId, n ) );
+                        this.pendingJobNotifications.delete( jobId );
+                    }
                 }
             }
         }

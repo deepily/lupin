@@ -1,5 +1,44 @@
 # Lupin Project History
 
+> **✅ SESSION 101 COMPLETE**: Agentic Job UI Cards - Phases 3-6 Implementation (2026.01.26)
+> **Owner**: claude.code@lupin.deepily.ai#63cce923
+>
+> ### Accomplishments
+> **Phase 3 - Job Classes** (CoSA):
+> - Created `agents/podcast_generator/job.py` - PodcastGeneratorJob wrapping PodcastOrchestratorAgent
+> - Created `agents/deep_research_to_podcast/job.py` - DeepResearchToPodcastJob wrapping chained workflow
+> - Both extend AgenticJobBase with JOB_TYPE/JOB_PREFIX for queue integration
+> - Smoke tests passing for both job classes
+>
+> **Phase 4 - API Routers** (Lupin - cosa/rest/routers/):
+> - Created `podcast_generator.py` with smart input detection:
+>   - Direct path mode: `/io/deep-research/user@email/file.md` → immediate job creation
+>   - Description mode: natural language → LLM fuzzy matching + ask_multiple_choice notification
+> - Created `deep_research_to_podcast.py` - standard query-based submission
+> - Endpoints: POST `/api/podcast-generator/submit`, POST `/api/deep-research-to-podcast/submit`
+> - Smoke tests passing for both routers
+>
+> **Phase 5 - UI Submission Cards** (Lupin):
+> - Added toolbar button (📝) for job submission section
+> - Added "Submit Research Job" card with voice input (🎤), budget field, podcast checkbox
+> - Added "Generate Podcast from Research" card with smart input + voice input
+> - Smart input hint: "Describe research → confirm selection | Paste path → generates immediately"
+>
+> **Phase 6 - Router Registration + JS Handlers** (Lupin):
+> - Updated `main.py` - imported and registered new routers (93 routes total)
+> - Updated `notifications.js` - added `setupJobSubmitEventListeners()` and submit handlers
+> - `submitResearchJob()`: Handles checkbox toggle between DR and DR→Podcast endpoints
+> - `submitPodcastJob()`: Handles smart input response (queued vs matching status)
+>
+> ### TODO for Next Session
+> - Test UI cards in browser with running server
+> - Verify fuzzy matching notification flow
+> - Test voice input (🎤) for job submission
+>
+> **Note**: CoSA submodule changes (Phase 3) need separate commit in CoSA context
+>
+> ---
+
 > **✅ SESSION 100 COMPLETE**: Agentic Job UI Cards - Phases 0-2 + Bug Fix 4 + Expertise Level (2026.01.26)
 > **Owner**: claude.code@lupin.deepily.ai#63cce923
 > **Plan**: `/home/rruiz/.claude/plans/federated-prancing-lagoon.md`
