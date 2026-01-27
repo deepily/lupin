@@ -28,7 +28,7 @@ class NotificationsUI {
         this.audioSessionId = null;
         
         // Authentication
-        this.currentUser = null;
+        this.currentUserEmail = null;
         this.authToken = null;
 
         // ========================================
@@ -453,12 +453,12 @@ class NotificationsUI {
 
         // Extract user info from JWT payload
         const payload = this.parseJWTPayload( this.authToken );
-        this.currentUser = payload.email;
+        this.currentUserEmail = payload.email;
         this.userRoles = payload.roles || [];  // Extract roles array
         this.isAdmin = this.userRoles.includes( 'admin' );  // Check admin status
 
         // Update UI
-        this.updateElement( "user-display", this.currentUser );
+        this.updateElement( "user-display", this.currentUserEmail );
         this.updateStatus( "auth-status", "Authenticated", "success" );
 
         // NEW: Fetch client config (requires valid token)
@@ -473,7 +473,7 @@ class NotificationsUI {
         // Periodic health checking during work hours for automatic reconnection
         this.startWebSocketHealthMonitor();
 
-        this.log( `✓ Authentication setup complete for user: ${this.currentUser} (admin: ${this.isAdmin}, config fetched, monitors started)` );
+        this.log( `✓ Authentication setup complete for user: ${this.currentUserEmail} (admin: ${this.isAdmin}, config fetched, monitors started)` );
 
         // Load user's current agent mode from server
         await this.loadCurrentMode();
@@ -2194,7 +2194,7 @@ class NotificationsUI {
 
             const body = withPodcast
                 ? { query: topic, budget: budget, target_languages: [ 'en' ], dry_run: dryRun }
-                : { query: topic, budget: budget, user_email: this.currentUser, dry_run: dryRun };
+                : { query: topic, budget: budget, dry_run: dryRun };
 
             this.log( `Submitting research job to ${endpoint}: ${topic.substring( 0, 50 )}...` );
 
@@ -2703,7 +2703,7 @@ class NotificationsUI {
                 jobId,
                 responseText, // Primary text for cache key generation
                 timestamp,
-                this.currentUser, // User context for filtering
+                this.currentUserEmail, // User context for filtering
                 {
                     originalQuestion: questionText,
                     submissionTime: this.lastQASubmissionTime,
@@ -5611,7 +5611,7 @@ class NotificationsUI {
             question_text: "Q&A submission",
             response_text: text,
             timestamp: new Date().toISOString(),
-            user_id: this.currentUser,
+            user_id: this.currentUserEmail,
             has_audio_cache: false
         };
     }
@@ -6775,7 +6775,7 @@ class NotificationsUI {
 
         try {
             const response = await fetch(
-                `/api/notifications/date/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUser )}/${dateString}`,
+                `/api/notifications/date/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUserEmail )}/${dateString}`,
                 {
                     method  : 'DELETE',
                     headers : this.getAuthHeaders()
@@ -6973,7 +6973,7 @@ class NotificationsUI {
      * Uses activity-anchored window loading based on historyWindowHours.
      */
     async loadConversationHistory() {
-        if ( !this.currentUser ) {
+        if ( !this.currentUserEmail ) {
             this.log( 'Cannot load history: no user email' );
             return;
         }
@@ -6982,7 +6982,7 @@ class NotificationsUI {
 
         try {
             // Get list of senders with visible (non-hidden) notifications
-            const sendersUrl = `/api/notifications/senders-visible/${encodeURIComponent( this.currentUser )}`;
+            const sendersUrl = `/api/notifications/senders-visible/${encodeURIComponent( this.currentUserEmail )}`;
             const params = this.historyWindowHours ? `?hours=${this.historyWindowHours}` : '';
 
             const sendersResponse = await fetch( sendersUrl + params, {
@@ -7023,7 +7023,7 @@ class NotificationsUI {
      */
     async loadSenderConversation( senderId, anchorTime = null ) {
         try {
-            const baseUrl = `/api/notifications/conversation-by-date/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUser )}`;
+            const baseUrl = `/api/notifications/conversation-by-date/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUserEmail )}`;
             const params = new URLSearchParams();
 
             if ( this.historyWindowHours ) {
@@ -7724,7 +7724,7 @@ class NotificationsUI {
          *
          * Requires:
          *     - senderId: Sender identifier (e.g., claude.code@lupin.deepily.ai)
-         *     - User authenticated (this.currentUser set)
+         *     - User authenticated (this.currentUserEmail set)
          *
          * Ensures:
          *     - User confirmation before destructive action
@@ -7754,7 +7754,7 @@ class NotificationsUI {
 
         try {
             const response = await fetch(
-                `/api/notifications/conversation/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUser )}`,
+                `/api/notifications/conversation/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUserEmail )}`,
                 {
                     method  : 'DELETE',
                     headers : this.getAuthHeaders()
@@ -7841,7 +7841,7 @@ class NotificationsUI {
                 params.append( 'hours', this.historyWindowHours );
             }
 
-            const url = `/api/notifications/bulk/${encodeURIComponent( this.currentUser )}?${params}`;
+            const url = `/api/notifications/bulk/${encodeURIComponent( this.currentUserEmail )}?${params}`;
             const response = await fetch( url, {
                 method: 'DELETE'
             });
@@ -11411,7 +11411,7 @@ class NotificationsUI {
      *     Boolean indicating success
      */
     async setAgentMode( mode ) {
-        if ( !this.currentUser ) {
+        if ( !this.currentUserEmail ) {
             this.error( "Cannot set mode: No user logged in" );
             return false;
         }
@@ -11456,7 +11456,7 @@ class NotificationsUI {
      *     Object with mode info or null on error
      */
     async getAgentMode() {
-        if ( !this.currentUser ) {
+        if ( !this.currentUserEmail ) {
             this.error( "Cannot get mode: No user logged in" );
             return null;
         }
