@@ -2194,7 +2194,7 @@ class NotificationsUI {
 
             const body = withPodcast
                 ? { query: topic, budget: budget, target_languages: [ 'en' ], dry_run: dryRun }
-                : { query: topic, budget: budget, dry_run: dryRun };
+                : { query: topic, budget: budget, user_email: this.currentUser, dry_run: dryRun };
 
             this.log( `Submitting research job to ${endpoint}: ${topic.substring( 0, 50 )}...` );
 
@@ -8732,6 +8732,11 @@ class NotificationsUI {
             // Action-required: Show active card in TTS queue (response UI is elsewhere)
             this.renderActiveTTSCard( item );
             this.currentNotificationId = `action-required-${item.id}`;
+        } else if ( item.type === 'job-card' ) {
+            // Job card notification - already displayed in job card during Phase 6 routing
+            // Just update tracking ID, don't add to project card (prevents duplication)
+            this.log( `TTS queue: Playing job notification (already in job card): ${item.id}` );
+            this.currentNotificationId = item.id;
         } else {
             // Fire-and-forget: NOW add to project card (was waiting in TTS queue)
             this.log( `Moving fire-and-forget to project card: ${item.id}` );
