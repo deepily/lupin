@@ -1,22 +1,28 @@
 # Bug Fix Queue
 
-## Session: 2026.01.26 (Session 100-101)
-**Owner**: claude.code@lupin.deepily.ai#514f7e7a
-**Status**: Closed - 4 fixes completed, 2 bugs carried over
+## Session: 2026.01.27 (Session 103)
+**Owner**: claude.code@lupin.deepily.ai#8cc66d0d
+**Status**: Active
 
-### Queued (Carried Over)
+### Queued
 - [ ] LanceDB nprobes warning suppression
   - **Error**: `[WARN lance::dataset::scanner] nprobes is not set because nearest has not been called yet`
   - **Source**: LanceDB Rust library (repeated 8+ times in logs)
   - **Impact**: Warning noise in logs
   - **Potential fix**: Set nprobes parameter before search or suppress at logging level
 
-- [ ] LanceDB gist_cache.lance corruption - missing file
-  - **Error**: `⚠ Error in verbatim lookup: lance error: LanceError(IO): Object at location .../gist_cache.lance/data/<uuid>.lance not found: No such file or directory (os error 2)`
-  - **Source**: `gist_cache_table.py` - verbatim and normalized lookups (repeated 6+ times)
-  - **Severity**: HIGH - indicates gist_cache.lance table corruption
-  - **Impact**: Data corruption - cache file referenced but missing
-  - **Potential fix**: Add corruption detection and auto-recovery similar to embedding_cache_table.py
+### Completed (Session 103)
+- [x] LanceDB gist_cache.lance corruption - missing file → commit: 0b8c915 (Lupin docs) + pending CoSA
+  - **Symptom**: `Object at location .../gist_cache.lance/data/<uuid>.lance not found`
+  - **Fix**: Added `_is_table_corrupted()` + auto-recovery in `__init__`
+  - **Files (CoSA)**: `src/cosa/memory/gist_cache_table.py`
+  - **Tests**: 8 smoke tests (including corruption detection + auto-recovery)
+
+---
+
+## Previous Session: 2026.01.26 (Session 100-101)
+**Owner**: claude.code@lupin.deepily.ai#514f7e7a
+**Status**: Closed - 4 fixes completed, 2 bugs carried over
 
 ### Completed
 - [x] clearAllNotifications TypeError - Cannot read properties of undefined (reading 'length') at notifications.js:7490 (ad-hoc) → marked fixed by user

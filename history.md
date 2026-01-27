@@ -1,5 +1,23 @@
 # Lupin Project History
 
+> **🔧 SESSION 103 IN PROGRESS**: Bug Fix Mode (2026.01.27)
+> **Owner**: claude.code@lupin.deepily.ai#8cc66d0d
+>
+> ### Fixes
+> - **Fix 1**: gist_cache.lance corruption auto-recovery (carried over from Session 100-101)
+>   - **Symptom**: `get_cached_gist()` failed with "Object at location .../gist_cache.lance/data/<uuid>.lance not found"
+>   - **Root Cause**: LanceDB stores data in UUID-named `.lance` fragments; manual deletion or crash leaves manifest referencing missing files
+>   - **Fix**: Added `_is_table_corrupted()` method that performs actual data scan (not just `count_rows()` which only reads metadata)
+>   - **Auto-Recovery**: On corruption detection, drops and recreates table with fresh schema (acceptable data loss - it's a cache)
+>   - **Files (CoSA)**: `src/cosa/memory/gist_cache_table.py` - needs separate commit in CoSA context
+>   - **Tests**: 8 smoke tests including corruption detection and auto-recovery verification
+>   - **Commit**: 0b8c915 (Lupin docs) + pending CoSA commit
+>
+> ### Session Summary
+> (Will be completed at session close)
+>
+> ---
+
 > **✅ SESSION 102 COMPLETE**: Bug Fix Mode Closure + Documentation (2026.01.26)
 > **Owner**: claude.code@lupin.deepily.ai#514f7e7a
 >
