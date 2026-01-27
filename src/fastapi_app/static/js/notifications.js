@@ -4393,10 +4393,13 @@ class NotificationsUI {
          */
         const state = this.queueCategoryState[ queueName ];
 
-        // Update count in state
-        // If expanded, reload job cards to reflect changes
+        // ALWAYS mark as needing reload when new data arrives
+        // This ensures collapsed sections re-render on next expansion
+        // (Bug fix: Session 105 - job cards not appearing after expand)
+        state.loaded = false;
+
+        // If expanded, immediately reload job cards to reflect changes
         if ( state.expanded ) {
-            state.loaded = false;  // Force reload
             this.loadQueueJobCards( queueName );
         }
     }
