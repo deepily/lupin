@@ -1,9 +1,10 @@
 # Bug Fix Queue
 
-## Session: 2026.01.26 (Session 100)
+## Session: 2026.01.26 (Session 100-101)
 **Owner**: claude.code@lupin.deepily.ai#514f7e7a
+**Status**: Closed - 4 fixes completed, 2 bugs carried over
 
-### Queued
+### Queued (Carried Over)
 - [ ] LanceDB nprobes warning suppression
   - **Error**: `[WARN lance::dataset::scanner] nprobes is not set because nearest has not been called yet`
   - **Source**: LanceDB Rust library (repeated 8+ times in logs)
