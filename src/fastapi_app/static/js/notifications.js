@@ -2161,6 +2161,7 @@ class NotificationsUI {
         const topicInput = document.getElementById( 'research-topic' );
         const budgetInput = document.getElementById( 'research-budget' );
         const withPodcastCheckbox = document.getElementById( 'research-with-podcast' );
+        const dryRunCheckbox = document.getElementById( 'research-dry-run' );
         const submitButton = document.getElementById( 'submit-research-job' );
         const loadingSpinner = document.getElementById( 'research-loading' );
         const statusDiv = document.getElementById( 'research-submit-status' );
@@ -2168,6 +2169,7 @@ class NotificationsUI {
         const topic = topicInput.value.trim();
         const budget = parseFloat( budgetInput.value ) || 3.00;
         const withPodcast = withPodcastCheckbox.checked;
+        const dryRun = dryRunCheckbox.checked;
 
         if ( !topic ) {
             statusDiv.textContent = '⚠️ Please enter a research topic.';
@@ -2191,8 +2193,8 @@ class NotificationsUI {
                 : '/api/deep-research/submit';
 
             const body = withPodcast
-                ? { query: topic, budget: budget, target_languages: [ 'en' ] }
-                : { query: topic, budget: budget };
+                ? { query: topic, budget: budget, target_languages: [ 'en' ], dry_run: dryRun }
+                : { query: topic, budget: budget, dry_run: dryRun };
 
             this.log( `Submitting research job to ${endpoint}: ${topic.substring( 0, 50 )}...` );
 
@@ -2241,11 +2243,13 @@ class NotificationsUI {
      */
     async submitPodcastJob() {
         const sourceInput = document.getElementById( 'podcast-source' );
+        const dryRunCheckbox = document.getElementById( 'podcast-dry-run' );
         const submitButton = document.getElementById( 'submit-podcast-job' );
         const loadingSpinner = document.getElementById( 'podcast-loading' );
         const statusDiv = document.getElementById( 'podcast-submit-status' );
 
         const source = sourceInput.value.trim();
+        const dryRun = dryRunCheckbox.checked;
 
         if ( !source ) {
             statusDiv.textContent = '⚠️ Please enter a research source (path or description).';
@@ -2274,7 +2278,8 @@ class NotificationsUI {
                 },
                 body: JSON.stringify({
                     research_source: source,
-                    target_languages: [ 'en' ]
+                    target_languages: [ 'en' ],
+                    dry_run: dryRun
                 })
             });
 
