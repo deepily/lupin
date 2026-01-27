@@ -2748,6 +2748,7 @@ class NotificationsUI {
         const project = document.getElementById( 'cc-project' ).value;
         const prompt = document.getElementById( 'cc-prompt' ).value;
         const taskType = document.querySelector( 'input[name="cc-task-type"]:checked' ).value;
+        const executionMode = document.querySelector( 'input[name="cc-execution-mode"]:checked' ).value;
 
         if ( !prompt.trim() ) {
             alert( 'Please enter a task prompt' );
@@ -2761,6 +2762,82 @@ class NotificationsUI {
 
         if ( loadingEl ) loadingEl.style.display = 'inline-block';
         if ( submitBtn ) submitBtn.disabled = true;
+
+        // Route to appropriate submission method based on execution mode
+        if ( executionMode === 'queue' ) {
+            await this.submitClaudeCodeToQueue( project, prompt, taskType, loadingEl, submitBtn, responseEl );
+        } else {
+            await this.submitClaudeCodeDirect( project, prompt, taskType, loadingEl, submitBtn, responseEl );
+        }
+    }
+
+    async submitClaudeCodeToQueue( project, prompt, taskType, loadingEl, submitBtn, responseEl ) {
+        /**
+         * Submit Claude Code task to CJF queue for background execution.
+         * Jobs appear in the queue section and are tracked via job cards.
+         */
+        if ( responseEl ) responseEl.textContent = 'Submitting to CJF queue...';
+
+        this.log( `Claude Code queue submit: project=${project}, type=${taskType}` );
+
+        try {
+            const response = await fetch( '/api/claude-code/queue/submit', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...this.getAuthHeaders()
+                },
+                body: JSON.stringify( {
+                    prompt: prompt,
+                    project: project,
+                    task_type: taskType,
+                    max_turns: taskType === 'INTERACTIVE' ? 200 : 50,
+                    websocket_id: this.sessionId
+                } )
+            } );
+
+            if ( !response.ok ) {
+                const errorData = await response.json();
+                throw new Error( errorData.detail || 'Queue submission failed' );
+            }
+
+            const data = await response.json();
+
+            this.log( `Claude Code job queued: ${data.job_id} at position ${data.queue_position}` );
+
+            // Update UI for queue mode
+            document.getElementById( 'cc-task-id' ).textContent = data.job_id;
+            document.getElementById( 'cc-status' ).textContent = 'Queued';
+            document.getElementById( 'cc-session-info' ).style.display = 'flex';
+
+            // Update response area with queue info
+            if ( responseEl ) {
+                responseEl.textContent = `Job ${data.job_id} queued at position ${data.queue_position}.\n\nThe job will appear in the CJF queue section and send notifications via the job card.\n\nNo WebSocket streaming in queue mode - check the queue section for progress.`;
+            }
+
+            // Clear cost display (not available until job completes)
+            document.getElementById( 'cc-cost' ).textContent = '$0.00 (pending)';
+
+            // Hide Option B controls in queue mode (handled via notifications)
+            document.getElementById( 'cc-option-b-controls' ).style.display = 'none';
+
+            // Refresh queues to show new job
+            this.loadUserQueues();
+
+        } catch ( error ) {
+            this.error( 'Claude Code queue submit failed:', error );
+            if ( responseEl ) responseEl.textContent = `Error: ${error.message}`;
+        } finally {
+            if ( loadingEl ) loadingEl.style.display = 'none';
+            if ( submitBtn ) submitBtn.disabled = false;
+        }
+    }
+
+    async submitClaudeCodeDirect( project, prompt, taskType, loadingEl, submitBtn, responseEl ) {
+        /**
+         * Submit Claude Code task for direct execution with WebSocket streaming.
+         * This is the original behavior - real-time output streaming.
+         */
         if ( responseEl ) responseEl.textContent = 'Dispatching task...';
 
         this.log( `Claude Code dispatch: project=${project}, type=${taskType}` );
@@ -3969,7 +4046,16 @@ class NotificationsUI {
         // Phase 6: Job-based notification routing
         // ========================================
         // If notification has job_id AND job is registered (active), route to job card
-        const jobId = notification.job_id;
+        // Session 105 FIX: Extract job_id from sender_id suffix if not explicitly provided
+        // Pattern: sender_id ends with #<prefix>-<8hex> (e.g., deep.research@lupin.deepily.ai#dr-77b330d8)
+        let jobId = notification.job_id;
+        if ( !jobId && notification.sender_id ) {
+            const senderIdMatch = notification.sender_id.match( /#([a-z]+-[a-f0-9]{8})$/ );
+            if ( senderIdMatch ) {
+                jobId = senderIdMatch[ 1 ];
+                this.log( `[Phase 6] Extracted job_id from sender_id suffix: ${jobId}` );
+            }
+        }
         if ( jobId ) {
             if ( !this.isJobRegistered( jobId ) ) {
                 // Phase 6 FIX: Job not registered yet (race condition) - cache for replay

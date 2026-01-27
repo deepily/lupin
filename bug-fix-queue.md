@@ -5,13 +5,31 @@
 **Status**: Active
 
 ### Queued
-- [ ] LanceDB nprobes warning suppression
-  - **Error**: `[WARN lance::dataset::scanner] nprobes is not set because nearest has not been called yet`
-  - **Source**: LanceDB Rust library (repeated 8+ times in logs)
-  - **Impact**: Warning noise in logs
-  - **Potential fix**: Set nprobes parameter before search or suppress at logging level
+(No bugs remaining)
+
+### Completed (Session 105)
+- [x] Job cards not rendering when queue collapsed → commit: f13a8f1 (Lupin)
+  - **Symptom**: Badge count updates but cards don't appear when expanding collapsed section
+  - **Fix**: Reset `state.loaded = false` when data arrives, not just when expanded
+  - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js`
+
+- [x] sender_id regex rejects job ID format → pending commit (CoSA)
+  - **Symptom**: `Failed to send progress notification: 1 validation error... String should match pattern`
+  - **Fix**: Added `[a-z]+-[a-f0-9]{8}` pattern for job IDs like `dr-a0ebba60`
+  - **Files (CoSA)**: `src/cosa/cli/notification_models.py`
+  - **Note**: CoSA submodule change - needs separate commit in CoSA context
+
+- [x] Agentic job progress notifications route to sender cards instead of job cards → pending commit (Lupin)
+  - **Symptom**: Progress notifications go to Claude Code sender card, not CJ Flow job card
+  - **Root cause**: job_id embedded in sender_id suffix, but not passed as separate job_id param
+  - **Fix**: Extract job_id from sender_id suffix in frontend routing logic
+  - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js`
 
 ### Completed (Session 103)
+- [x] LanceDB nprobes warning suppression → **Already fixed** (Session 7, commit 24b463b)
+  - Fix implemented Nov 2025: `warnings.filterwarnings()` + logger levels
+  - Configurable via `suppress lancedb warnings = true` (enabled by default)
+  - nprobes value configurable: `solution snapshots lancedb nprobes = 20`
 - [x] LanceDB gist_cache.lance corruption - missing file → commit: 0b8c915 (Lupin docs) + pending CoSA
   - **Symptom**: `Object at location .../gist_cache.lance/data/<uuid>.lance not found`
   - **Fix**: Added `_is_table_corrupted()` + auto-recovery in `__init__`

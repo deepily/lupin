@@ -49,7 +49,7 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code, mode, stats, deep_research, mock_job, io_files, podcast_generator, deep_research_to_podcast
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code, claude_code_queue, mode, stats, deep_research, mock_job, io_files, podcast_generator, deep_research_to_podcast
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 
 # Suppress noisy LanceDB warnings
@@ -616,6 +616,7 @@ app.include_router(jobs.router)
 app.include_router(websocket.router)
 app.include_router(websocket_admin.router)
 app.include_router(claude_code.router)
+app.include_router(claude_code_queue.router)
 app.include_router(mode.router)
 app.include_router(stats.router)
 app.include_router(deep_research.router)
