@@ -162,6 +162,7 @@ class NotificationsUI {
         // Tracks active jobs (todo/running) for notification routing
         // Notifications with job_id route to job card activity log instead of sender cards
         this.registeredJobs = new Map();           // job_id → { queueName, metadata }
+        this.completedJobs = new Set();            // Track jobs that have received completion notifications
 
         // ========================================
         // RUNNING JOB DURATION TIMERS (Phase 7)
@@ -4058,18 +4059,28 @@ class NotificationsUI {
         }
         if ( jobId ) {
             if ( !this.isJobRegistered( jobId ) ) {
-                // Phase 6 FIX: Job not registered yet (race condition) - cache for replay
-                this.log( `[Phase 6] Job ${jobId} not registered yet - caching notification` );
-                this.cacheJobNotification( jobId, notification );
+                // Phase 6 FIX: Job not registered yet (race condition)
+                // Use queue_name from backend (source of truth) for provisional registration
+                const queueName = notification.queue_name || "run";  // Fallback for backward compat
+                this.log( `[Phase 6] Job ${jobId} not registered - creating provisional registration (queue: ${queueName})` );
 
-                // Still queue TTS with raw message for high/urgent priority
+                // Create provisional registration so job card exists immediately
+                this.createProvisionalJobRegistration( jobId, notification, queueName );
+
+                // Route notification to the (now existing) job card
+                this.appendNotificationToJobCard( jobId, notification );
+
+                // Schedule deferred queue refresh to get full metadata
+                this.scheduleQueueRefreshForJob( jobId, queueName );
+
+                // Handle TTS for high/urgent priority
                 if ( notification.priority === "high" || notification.priority === "urgent" ) {
                     if ( notification.suppress_ding !== true ) {
                         await this.playNotificationSoundByPriority( notification.priority );
                     }
                     const notificationId = notification.id || notification.id_hash;
                     const ttsMessage = notification.message;
-                    this.log( `[Phase 6] Queuing cached job notification for TTS: "${ttsMessage}"` );
+                    this.log( `[Phase 6] Queuing job notification for TTS: "${ttsMessage}"` );
                     setTimeout( () => {
                         this.addToTTSQueue( {
                             id           : notificationId,
@@ -4544,6 +4555,13 @@ class NotificationsUI {
 
             // Render job cards
             if ( jobsHtml.length === 0 ) {
+                // Phase 6 FIX: Check if container has provisional cards that should be preserved
+                const provisionalCards = container.querySelectorAll( '.job-card[data-provisional="true"]' );
+                if ( provisionalCards.length > 0 ) {
+                    this.log( `[Phase 6] Preserving ${provisionalCards.length} provisional card(s) in ${queueName}` );
+                    // Don't replace - provisional cards exist and will get real data soon
+                    return;
+                }
                 container.innerHTML = '<div class="queue-empty-message">No jobs in this queue</div>';
             } else {
                 // Use metadata if available (done queue), otherwise create minimal metadata from HTML
@@ -4580,6 +4598,7 @@ class NotificationsUI {
     updateJobRegistration( queueName, jobsMetadata ) {
         /**
          * Register or unregister jobs based on queue state.
+         * Also upgrades provisional registrations to full registrations.
          *
          * Requires:
          *     - queueName is 'todo', 'run', 'done', or 'dead'
@@ -4588,6 +4607,8 @@ class NotificationsUI {
          * Ensures:
          *     - Jobs in todo/run queues are registered for notification routing
          *     - Jobs in done/dead queues are unregistered
+         *     - Provisional registrations are upgraded with full metadata
+         *     - Activity log content is preserved during upgrade
          *     - registeredJobs Map is updated
          */
         if ( !jobsMetadata || jobsMetadata.length === 0 ) return;
@@ -4597,11 +4618,25 @@ class NotificationsUI {
             for ( const job of jobsMetadata ) {
                 const jobId = job.job_id || job.id_hash;
                 if ( jobId ) {
+                    // Check if this is upgrading a provisional registration
+                    const existing = this.registeredJobs.get( jobId );
+                    const wasProvisional = existing && existing.provisional === true;
+
+                    if ( wasProvisional ) {
+                        this.log( `[Phase 6] Upgrading provisional registration: ${jobId}` );
+                        // Update job card with full metadata (preserving activity log)
+                        this.updateJobCardMetadata( jobId, job, queueName );
+                    }
+
+                    // Register/update with full metadata (no provisional flag)
                     this.registeredJobs.set( jobId, {
                         queueName : queueName,
                         metadata  : job
                     } );
-                    this.log( `[Phase 6] Registered job: ${jobId} (${queueName})` );
+
+                    if ( !wasProvisional ) {
+                        this.log( `[Phase 6] Registered job: ${jobId} (${queueName})` );
+                    }
 
                     // Phase 6 FIX: Replay any cached notifications for this job
                     if ( this.pendingJobNotifications && this.pendingJobNotifications.has( jobId ) ) {
@@ -4619,11 +4654,100 @@ class NotificationsUI {
             for ( const job of jobsMetadata ) {
                 const jobId = job.job_id || job.id_hash;
                 if ( jobId && this.registeredJobs.has( jobId ) ) {
+                    const oldReg = this.registeredJobs.get( jobId );
+
+                    // If job was in run queue, clean up its card and timer
+                    if ( oldReg && oldReg.queueName === 'run' ) {
+                        this.cleanupRunQueueCard( jobId );
+                    }
+
                     this.registeredJobs.delete( jobId );
                     this.log( `[Phase 6] Unregistered job: ${jobId} (moved to ${queueName})` );
                 }
             }
         }
+    }
+
+    cleanupRunQueueCard( jobId ) {
+        /**
+         * Remove a job card from the run queue and stop its timer.
+         * Called when job moves from run to done/dead queue.
+         *
+         * Requires:
+         *     - jobId is a valid job ID string
+         *
+         * Ensures:
+         *     - Job card is removed from run queue container
+         *     - Duration timer is stopped
+         *     - Empty message shown if container becomes empty
+         */
+        // Stop the duration timer
+        this.stopDurationTimer( jobId );
+
+        // Remove the card from run queue
+        const container = document.getElementById( 'run-jobs-container' );
+        if ( !container ) return;
+
+        const card = container.querySelector( `.job-card[data-job-id="${jobId}"]` );
+        if ( card ) {
+            card.remove();
+            this.log( `[Phase 6] Removed run queue card for completed job: ${jobId}` );
+
+            // If container is now empty, show empty message
+            if ( container.querySelectorAll( '.job-card' ).length === 0 ) {
+                container.innerHTML = '<div class="queue-empty-message">No jobs in this queue</div>';
+            }
+        }
+    }
+
+    updateJobCardMetadata( jobId, metadata, queueName ) {
+        /**
+         * Update a job card with full metadata while preserving activity log.
+         *
+         * Requires:
+         *     - jobId is a valid job ID string
+         *     - metadata is the full job metadata from server
+         *     - queueName is the queue containing the job
+         *
+         * Ensures:
+         *     - Job card is updated with full metadata (question, timestamp, etc.)
+         *     - Activity log entries are preserved
+         *     - Duration timer is started if in run queue
+         */
+        const container = document.getElementById( `${queueName}-jobs-container` );
+        if ( !container ) return;
+
+        const oldCard = container.querySelector( `.job-card[data-job-id="${jobId}"]` );
+        if ( !oldCard ) {
+            this.log( `[Phase 6] No existing card to update for ${jobId}` );
+            return;
+        }
+
+        // Preserve activity log content
+        const oldActivityLog = oldCard.querySelector( '.job-activity-log' );
+        const activityLogHtml = oldActivityLog ? oldActivityLog.innerHTML : null;
+
+        // Render new card with full metadata
+        const newCardHtml = this.renderJobCard( metadata, queueName );
+
+        // Replace old card
+        oldCard.outerHTML = newCardHtml;
+
+        // Restore activity log if it existed
+        if ( activityLogHtml ) {
+            const newCard = container.querySelector( `.job-card[data-job-id="${jobId}"]` );
+            if ( newCard ) {
+                let activityLog = newCard.querySelector( '.job-activity-log' );
+                if ( !activityLog ) {
+                    activityLog = this.createJobActivityLog( newCard );
+                }
+                if ( activityLog ) {
+                    activityLog.innerHTML = activityLogHtml;
+                }
+            }
+        }
+
+        this.log( `[Phase 6] Updated job card with full metadata: ${jobId}` );
     }
 
     isJobRegistered( jobId ) {
@@ -4761,6 +4885,157 @@ class NotificationsUI {
 
         this.pendingJobNotifications.get( jobId ).push( notification );
         this.log( `[Phase 6] Cached notification for job ${jobId} (card not rendered yet)` );
+    }
+
+    // ========================================
+    // PROVISIONAL JOB REGISTRATION (Race Condition Fix)
+    // ========================================
+
+    createProvisionalJobRegistration( jobId, notification, queueName ) {
+        /**
+         * Create provisional job registration when notification arrives before job is fetched.
+         *
+         * Requires:
+         *     - jobId is a valid job ID string (e.g., 'dr-a1b2c3d4')
+         *     - notification is the incoming notification object
+         *     - queueName is 'run', 'todo', 'done', or 'dead' (from backend)
+         *
+         * Ensures:
+         *     - Job is registered in registeredJobs Map with provisional: true flag
+         *     - Job card DOM element exists in the correct queue container
+         *     - Activity log is ready to receive notifications
+         */
+        const agentType = this.inferAgentTypeFromJobId( jobId );
+        const now = new Date().toISOString();
+
+        // Create minimal metadata for provisional registration
+        const provisionalMetadata = {
+            job_id        : jobId,
+            question_text : notification.message || 'Loading...',
+            timestamp     : now,
+            started_at    : now,
+            agent_type    : agentType,
+            provisional   : true  // Flag to indicate this is provisional
+        };
+
+        // Register in Map
+        this.registeredJobs.set( jobId, {
+            queueName   : queueName,
+            metadata    : provisionalMetadata,
+            provisional : true
+        } );
+        this.log( `[Phase 6] Created provisional registration: ${jobId} (${queueName})` );
+
+        // Ensure job card exists in DOM
+        this.ensureJobCardExists( jobId, queueName, provisionalMetadata );
+    }
+
+    ensureJobCardExists( jobId, queueName, metadata ) {
+        /**
+         * Ensure a job card exists in the DOM for the given queue.
+         * Creates a placeholder card if not exists.
+         *
+         * Requires:
+         *     - jobId is a valid job ID string
+         *     - queueName is a valid queue name
+         *     - metadata contains at least job_id and question_text
+         *
+         * Ensures:
+         *     - Job card DOM element exists in the queue container
+         *     - Card has data-job-id attribute for later lookup
+         */
+        const container = document.getElementById( `${queueName}-jobs-container` );
+        if ( !container ) {
+            this.error( `[Phase 6] Queue container not found: ${queueName}-jobs-container` );
+            return;
+        }
+
+        // Check if card already exists
+        const existingCard = container.querySelector( `.job-card[data-job-id="${jobId}"]` );
+        if ( existingCard ) {
+            this.log( `[Phase 6] Job card already exists: ${jobId}` );
+            return;
+        }
+
+        // Remove empty message if present
+        const emptyMessage = container.querySelector( '.queue-empty-message' );
+        if ( emptyMessage ) {
+            emptyMessage.remove();
+        }
+
+        // Render placeholder job card and insert at top
+        const cardHtml = this.renderJobCard( metadata, queueName );
+        container.insertAdjacentHTML( 'afterbegin', cardHtml );
+
+        // Phase 6 FIX: Expand the queue category visually WITHOUT fetching data
+        // (toggleQueueCategory triggers loadQueueJobCards which destroys provisional cards)
+        if ( !this.queueCategoryState[ queueName ].expanded ) {
+            const content = document.getElementById( `${queueName}-jobs-container` );
+            const expandBtn = document.getElementById( `${queueName}-expand` );
+            if ( content ) content.classList.remove( 'collapsed' );
+            if ( expandBtn ) expandBtn.textContent = '▼';
+            this.queueCategoryState[ queueName ].expanded = true;
+            this.saveQueueExpandState();
+        }
+
+        this.log( `[Phase 6] Created placeholder job card: ${jobId}` );
+    }
+
+    scheduleQueueRefreshForJob( jobId, queueName ) {
+        /**
+         * Schedule a deferred queue refresh to get full job metadata.
+         * Debounced to handle multiple rapid notifications.
+         *
+         * Requires:
+         *     - jobId is a valid job ID string
+         *     - queueName is a valid queue name
+         *
+         * Ensures:
+         *     - Queue is refreshed after 250ms delay (debounced)
+         *     - Full metadata replaces provisional registration
+         */
+        // Use a debounce key to prevent multiple rapid refreshes
+        const debounceKey = `queueRefresh_${queueName}`;
+
+        if ( this[ debounceKey ] ) {
+            clearTimeout( this[ debounceKey ] );
+        }
+
+        this[ debounceKey ] = setTimeout( async () => {
+            this.log( `[Phase 6] Executing deferred queue refresh for ${queueName}` );
+            try {
+                await this.loadQueueJobCards( queueName );
+            } catch ( error ) {
+                this.error( `[Phase 6] Queue refresh failed for ${queueName}:`, error );
+            }
+            delete this[ debounceKey ];
+        }, 250 );
+    }
+
+    inferAgentTypeFromJobId( jobId ) {
+        /**
+         * Infer agent type from job ID prefix.
+         *
+         * Requires:
+         *     - jobId is a string in format 'prefix-hexhash' (e.g., 'dr-a1b2c3d4')
+         *
+         * Ensures:
+         *     - Returns agent type string based on known prefixes
+         *     - Returns 'unknown' for unrecognized prefixes
+         */
+        if ( !jobId || typeof jobId !== 'string' ) {
+            return 'unknown';
+        }
+
+        const prefix = jobId.split( '-' )[ 0 ];
+        const prefixMap = {
+            'dr'   : 'Deep Research',
+            'pg'   : 'Podcast Generator',
+            'd2p'  : 'Deep Research → Podcast',
+            'mock' : 'Mock Agent'
+        };
+
+        return prefixMap[ prefix ] || 'unknown';
     }
 
     expandJobCard( jobId ) {
@@ -4922,8 +5197,11 @@ class NotificationsUI {
         // ═══════════════════════════════════════════════════════════════════
         // Build final HTML
         // ═══════════════════════════════════════════════════════════════════
+        // Phase 6: Add data-provisional attribute for provisional cards
+        const provisionalAttr = job.provisional ? ' data-provisional="true"' : '';
+
         return `
-            <div class="job-card ${statusClass}" id="job-card-${jobId}" data-job-id="${jobId}">
+            <div class="job-card ${statusClass}" id="job-card-${jobId}" data-job-id="${jobId}"${provisionalAttr}>
                 <div class="job-card-header" onclick="window.notificationsUI.toggleJobCard('${jobId}', '${queueName}')">
                     ${agentBadge}${cacheHitBadge}${completionBadge}
                     <span class="job-question">${this.escapeHtml( truncatedQuestion )}</span>
