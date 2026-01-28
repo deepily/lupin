@@ -1,6 +1,75 @@
 # Lupin Project History
 
-> **🔧 SESSION 103 IN PROGRESS**: Bug Fix Mode (2026.01.27)
+> **✅ SESSION 106 COMPLETE**: API Consistency + Job Notification Routing (2026.01.27)
+> **Owner**: claude.code@lupin.deepily.ai
+>
+> ### Accomplishments
+>
+> **API Consistency Fixes**:
+> - Removed redundant `user_email` from `DeepResearchSubmitRequest` - now derived from JWT token
+> - Renamed `currentUser` → `currentUserEmail` in notifications.js (16 occurrences) for clarity
+> - Consistent with Podcast Generator and Research→Podcast endpoints
+>
+> **Job Notification Routing Fix** (Phase 6 Improvements):
+> - Created provisional job registration system for race condition handling
+> - `createProvisionalJobRegistration()` - creates placeholder when notification arrives before job fetch
+> - `ensureJobCardExists()` - creates DOM card for provisional job
+> - `updateJobCardMetadata()` - upgrades provisional to full metadata preserving activity log
+> - `cleanupRunQueueCard()` - removes card and stops timer when job completes
+> - `scheduleQueueRefreshForJob()` - debounced refresh for full metadata
+> - `inferAgentTypeFromJobId()` - maps job ID prefix to agent type for badges
+>
+> **Bug Fix Mode Closure**:
+> - Marked LanceDB nprobes warning as already fixed (Session 7, commit 24b463b)
+> - Bug fix queue now empty
+>
+> **Infrastructure**:
+> - Created `TODO.md` for persistent task tracking across sessions
+> - Added `/plan-todo` slash command for TODO management
+>
+> ### Commits
+> - `3b45937` - Rename currentUser to currentUserEmail for clarity
+> - `893b8f0` - Session 105: Fix agentic job notification routing to job cards
+>
+> ### Pending (CoSA Submodule)
+> - `deep_research.py` - user_email derived from JWT (API consistency)
+> - `notification_models.py` - sender_id regex for job ID format
+> - `mock_clients.py` - new file for dry-run mode
+> - Dry-run mode additions to routers and job classes
+>
+> ---
+
+> **✅ SESSION 105 COMPLETE**: Job Card Rendering + Notification Routing Fixes (2026.01.27)
+> **Owner**: claude.code@lupin.deepily.ai
+>
+> ### Accomplishments
+> - **Fix 1**: Job cards not rendering when queue collapsed → commit: f13a8f1
+>   - Reset `state.loaded = false` when data arrives, not just when expanded
+> - **Fix 2**: sender_id regex rejects job ID format (CoSA - pending)
+>   - Added `[a-z]+-[a-f0-9]{8}` pattern for job IDs like `dr-a0ebba60`
+> - **Fix 3**: Agentic job progress notifications route to sender cards instead of job cards
+>   - Extract job_id from sender_id suffix in frontend routing logic
+>
+> ### Commits
+> - `f13a8f1` - Session 105: Fix job cards not rendering when queue collapsed
+> - `5ad2c78` - Session 105: Fix job notification routing + add Claude Code queue mode
+>
+> ---
+
+> **✅ SESSION 104 COMPLETE**: TTS Notification Duplication Fix (2026.01.27)
+> **Owner**: claude.code@lupin.deepily.ai
+>
+> ### Accomplishments
+> - Fixed TTS notification duplication in job cards
+> - Added dry-run checkboxes to agentic job submission UI
+>
+> ### Commits
+> - `5bb6c10` - Session 104: Fix TTS notification duplication in job cards
+> - `329e2af` - Add dry-run checkboxes to agentic job submission UI
+>
+> ---
+
+> **✅ SESSION 103 COMPLETE**: Bug Fix Mode - gist_cache.lance Corruption (2026.01.27)
 > **Owner**: claude.code@lupin.deepily.ai#8cc66d0d
 >
 > ### Fixes
@@ -13,8 +82,12 @@
 >   - **Tests**: 8 smoke tests including corruption detection and auto-recovery verification
 >   - **Commit**: 0b8c915 (Lupin docs) + pending CoSA commit
 >
+> - **Fix 2**: LanceDB nprobes warning → Already fixed (Session 7, commit 24b463b)
+>   - Verified existing fix: `warnings.filterwarnings()` + logger levels to ERROR
+>   - Configurable via `suppress lancedb warnings = true`
+>
 > ### Session Summary
-> (Will be completed at session close)
+> Bug fix mode session completed. Queue cleared - no remaining bugs.
 >
 > ---
 
