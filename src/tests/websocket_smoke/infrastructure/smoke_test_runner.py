@@ -20,14 +20,14 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 
-# Import our test utilities
-from test_utilities import WebSocketTestUtilities
+# Import our test utilities (absolute import)
+from tests.websocket_smoke.infrastructure.test_utilities import WebSocketTestUtilities
 
-# Use relative imports for test modules
-from ..core.test_connection_basic import ConnectionBasicTests
-from ..core.test_authentication_flow import AuthenticationFlowTests
-from ..core.test_session_management import SessionManagementTests
-from ..core.test_event_system import EventSystemTests
+# Use absolute imports for test modules
+from tests.websocket_smoke.core.test_connection_basic import ConnectionBasicTests
+from tests.websocket_smoke.core.test_authentication_flow import AuthenticationFlowTests
+from tests.websocket_smoke.core.test_session_management import SessionManagementTests
+from tests.websocket_smoke.core.test_event_system import EventSystemTests
 
 
 @dataclass

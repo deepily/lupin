@@ -194,22 +194,24 @@ run_smoke_tests() {
     log_info "Test Directory: $SMOKE_TEST_DIR"
     log_info "Configuration: $CONFIG_FILE"
     
-    # Change to the infrastructure directory so imports work correctly
-    cd "$SMOKE_TEST_DIR/infrastructure" || {
-        log_error "Failed to change to test directory"
-        return 1
-    }
-    
-    # Run the test suite
+    # Set up Python path for proper module imports
+    export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
+
+    # Run the test suite as a module from project root
     local python_cmd="python3"
     if ! command -v python3 >/dev/null 2>&1; then
         python_cmd="python"
     fi
-    
-    log_info "Executing: $python_cmd smoke_test_runner.py ${args[*]}"
-    
+
+    cd "$PROJECT_ROOT" || {
+        log_error "Failed to change to src directory"
+        return 1
+    }
+
+    log_info "Executing: $python_cmd -m tests.websocket_smoke.infrastructure.smoke_test_runner ${args[*]}"
+
     # Run with explicit error handling
-    if $python_cmd smoke_test_runner.py "${args[@]}"; then
+    if $python_cmd -m tests.websocket_smoke.infrastructure.smoke_test_runner "${args[@]}"; then
         log_success "Smoke tests completed successfully"
         return 0
     else
