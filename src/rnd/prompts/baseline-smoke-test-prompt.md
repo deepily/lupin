@@ -59,12 +59,12 @@ Send notification that baseline collection is starting:
 
 **If TEST_SCOPE="full":**
 ```bash
-/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src/scripts/notify.sh "[LUPIN] 🔍 Baseline smoke test collection STARTED (FULL SUITE) - Establishing pre-change Lupin + COSA system health metrics" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
+/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/notify.sh "[LUPIN] 🔍 Baseline smoke test collection STARTED (FULL SUITE) - Establishing pre-change Lupin + COSA system health metrics" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
 ```
 
 **If TEST_SCOPE="lupin":**
 ```bash
-/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src/scripts/notify.sh "[LUPIN] 🔍 Baseline smoke test collection STARTED (LUPIN-ONLY) - Establishing pre-change Lupin system health metrics" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
+/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/notify.sh "[LUPIN] 🔍 Baseline smoke test collection STARTED (LUPIN-ONLY) - Establishing pre-change Lupin system health metrics" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
 ```
 
 ### 3. Setup Data Collection Environment
@@ -72,7 +72,7 @@ Send notification that baseline collection is starting:
 Execute the following commands to prepare for data collection:
 
 ```bash
-cd /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box
+cd /mnt/DATA01/include/www.deepily.ai/projects/lupin
 
 # Create logs directory structure
 mkdir -p src/tests/logs
@@ -116,7 +116,7 @@ Run comprehensive CoSA framework tests with full logging:
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
 # Set up CoSA environment
-export PYTHONPATH="/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src:$PYTHONPATH"
+export PYTHONPATH="/mnt/DATA01/include/www.deepily.ai/projects/lupin/src:$PYTHONPATH"
 
 # Create CoSA log file
 LOG_FILE="src/tests/logs/baseline_cosa_smoke_${TIMESTAMP}.log"
@@ -273,12 +273,12 @@ Send notification that baseline is complete:
 
 **If TEST_SCOPE="full":**
 ```bash
-/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src/scripts/notify.sh "[LUPIN] ✅ Baseline smoke test collection COMPLETE (FULL SUITE) - [XX.X%] overall pass rate established, Lupin + COSA ready for changes" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
+/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/notify.sh "[LUPIN] ✅ Baseline smoke test collection COMPLETE (FULL SUITE) - [XX.X%] overall pass rate established, Lupin + COSA ready for changes" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
 ```
 
 **If TEST_SCOPE="lupin":**
 ```bash
-/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src/scripts/notify.sh "[LUPIN] ✅ Baseline smoke test collection COMPLETE (LUPIN-ONLY) - [XX.X%] Lupin pass rate established, ready for changes" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
+/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/notify.sh "[LUPIN] ✅ Baseline smoke test collection COMPLETE (LUPIN-ONLY) - [XX.X%] Lupin pass rate established, ready for changes" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
 ```
 
 ### 9. Final Todo List Update

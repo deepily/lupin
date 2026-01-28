@@ -12,7 +12,7 @@ if [ $# -eq 1 ]; then
 
   # download the model
   echo "Downloading [$1] from Huggingface..."
-  cd "$DEEPILY_PROJECTS_DIR"/genie-in-the-box/src
+  cd "$DEEPILY_PROJECTS_DIR"/lupin/src
   python -m cosa.training.hf_downloader "$1"
 
   # deactivate virtual environment

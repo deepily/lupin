@@ -15,6 +15,11 @@
   - **baseline_report**: Path to baseline report (auto-detects latest if not provided)
   - **scope**: `FULL|CRITICAL_ONLY|SELECTIVE|ANALYSIS_ONLY`, default: `FULL`
   - Compares against baseline, identifies regressions, performs systematic remediation
+- `/lupin-new-claude-agent-sdk-voice-workflow` - Create new agentic services with voice I/O
+  - Interactive workflow for building Claude Agent SDK background jobs
+  - Guides through phases: discovery, foundation, notifications, queue integration
+  - **Canonical doc**: `src/workflow/agentic-voice-workflow.md`
+  - **Reference agents**: `src/cosa/agents/deep_research/`, `podcast_generator/`
 
 ## CODE STYLE
 - **Imports**: Group by stdlib, third-party, local
@@ -82,7 +87,7 @@
 
 ## STARTUP PROCEDURE
 - The first thing you should do when you start a session is read the global Claude configuration file and follow its instructions.
-- **HISTORY FILE READING**: Read the main history file (`/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md`) which contains recent 30-day context and links to archived periods
+- **HISTORY FILE READING**: Read the main history file (`/mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md`) which contains recent 30-day context and links to archived periods
 - **IMPLEMENTATION DOCUMENT**: Read the current implementation document referenced at the top of history.md
 - **ARCHIVE ACCESS**: If deeper historical context needed, follow links to `history/YYYY-MM-history.md` files
 - **IGNORE SUB-REPO HISTORIES**: Do NOT read these sub-repository history files as they are managed separately:
@@ -108,7 +113,7 @@
 
 **Parent Repository** (Manage with /plan-session-end):
 - **Name**: Lupin (evolved from Genie-in-the-Box)
-- **Location**: `/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/`
+- **Location**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin/`
 - **Prefix**: [LUPIN]
 - **Git Operations**: Managed normally via `/plan-session-end` workflow
 

@@ -12,7 +12,7 @@
 
 1. **MUST use the following project-specific configuration**:
    - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
-   - **History file**: /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md
+   - **History file**: /mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md
    - Do NOT proceed without these parameters
 
 2. **MUST read the canonical workflow document**:

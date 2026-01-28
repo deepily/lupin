@@ -20,8 +20,8 @@ arguments:
 **Project Context**:
 - **Project**: Lupin (Genie-in-the-Box)
 - **Prefix**: [LUPIN]
-- **History File**: `/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md`
-- **Archive Directory**: `/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history/`
+- **History File**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md`
+- **Archive Directory**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin/history/`
 - **Notification Target**: ricardo.felipe.ruiz@gmail.com
 - **Session-End Command**: `/lupin-session-end`
 
@@ -62,7 +62,7 @@ When invoked with `mode=check` (or no mode parameter):
 ### Step 1: Count Current Tokens
 ```bash
 # Use global token counting script
-CURRENT_TOKENS=$(/home/rruiz/.claude/scripts/get-token-count.sh /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md)
+CURRENT_TOKENS=$(/home/rruiz/.claude/scripts/get-token-count.sh /mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md)
 ```
 
 ### Step 2: Calculate Velocity (7-day)
@@ -117,10 +117,10 @@ When invoked with `mode=archive`:
 ### Step 1: Read & Analyze Current History
 ```bash
 # Read the entire history.md file
-history_content=$(cat /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md)
+history_content=$(cat /mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md)
 
 # Count total lines
-total_lines=$(wc -l < /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md)
+total_lines=$(wc -l < /mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md)
 ```
 
 ### Step 2: Find Optimal Split Point

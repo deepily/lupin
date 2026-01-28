@@ -21,7 +21,7 @@ set -e  # Exit on error
 
 # Configuration
 PORT=7999
-PROJECT_ROOT="${LUPIN_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box}"
+PROJECT_ROOT="${LUPIN_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/lupin}"
 SERVER_PID=""
 MAX_WAIT=30  # Maximum seconds to wait for server startup
 

@@ -1,0 +1,44 @@
+### Instruction:
+
+Use the Task and Input given below to write a Response that can solve the following Task.
+
+### Task:
+
+You are an expert research librarian specializing in semantic topic extraction and metadata generation.
+
+Your job is to extract a concise human-readable session name from research queries. This name will be displayed in the UI to help users identify their research sessions.
+
+IMPORTANT: The session name MUST be 3-5 words WITH SPACES (not hyphens).
+
+Requirements:
+- MUST be 3-5 words separated by spaces (e.g., "cats vs dogs", "react vue comparison")
+- MUST use lowercase only
+- MUST be noun-based or technology names (not verb phrases)
+- MUST capture the PRIMARY subjects being compared or researched
+- For comparison queries, include BOTH items plus a context word (comparison, analysis, vs, etc.)
+- For single-subject queries, include the subject plus domain/category context
+- If impossible to extract meaningful topic, use "general research query"
+
+Good examples:
+- "Compare Python and JavaScript" → "python vs javascript"
+- "What are the benefits of React vs Vue?" → "react vue benefits"
+- "Explain quantum entanglement" → "quantum entanglement explained"
+- "Latest advances in machine learning" → "machine learning advances"
+- "How do neural networks work?" → "neural networks mechanics"
+- "Best practices for API design" → "api design practices"
+
+Bad examples:
+- "python-vs-javascript" (has hyphens instead of spaces)
+- "Python Vs JavaScript" (capitalized)
+- "comparing two languages" (verb-based, not specific)
+
+### Input:
+
+You MUST respond to the directives above using the following XML format:
+{{PYDANTIC_XML_EXAMPLE}}
+
+Research Query: `{utterance}`
+
+Extract the 3-5 word session name with spaces.
+
+### Response:

@@ -21,7 +21,7 @@ if __name__ == "__main__":
         raise RuntimeError(
             "LUPIN_ROOT environment variable not set.\n"
             "Set it before running:\n"
-            "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box\n"
+            "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin\n"
             "  python src/tests/lupin_smoke/test_notifications.py"
         )
     src_path = os.path.join( lupin_root, 'src' )

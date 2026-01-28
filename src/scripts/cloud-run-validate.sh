@@ -149,7 +149,7 @@ if [ "$TESTS_FAILED" -eq 0 ]; then
     echo "Next steps:"
     echo "  1. Update ~/.notifications/config with this URL"
     echo "  2. Test notifications: notify-claude-async \"Test from local to Cloud Run\""
-    echo "  3. Open Fresh Queue UI: $SERVICE_URL/queue-fresh.html"
+    echo "  3. Open Notifications UI: $SERVICE_URL/static/html/notifications.html"
 else
     echo "⚠️  Some validation tests failed"
     echo ""

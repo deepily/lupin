@@ -121,8 +121,13 @@ RUN pip install --no-cache-dir pylance==0.36.0
 
 RUN pip install --no-cache-dir PyJWT==2.10.1 passlib==1.7.4 bcrypt==3.2.2 cffi==2.0.0 pycparser==2.23
 
-RUN pip install --no-cache-dir sqlalchemy==2.0.40 psycopg2-binary==2.9.11
+RUN pip install --no-cache-dir sqlalchemy==2.0.40 psycopg2-binary==2.9.11 alembic==1.18.1
 
+# MCP server dependencies (for cosa-voice MCP server)
+RUN pip install --no-cache-dir fastmcp==2.14.2
+
+# audio stitching
+RUN pip install --no-cache-dir pydub==0.25.1
 
 # ============================================================================
 # RUNTIME CONFIGURATION (Can be overridden via docker run -e or Cloud Run)
@@ -163,6 +168,7 @@ env LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path
 COPY src/cosa /var/lupin/src/cosa
 COPY src/fastapi_app /var/lupin/src/fastapi_app
 COPY src/lib /var/lupin/src/lib
+COPY src/lupin_mcp /var/lupin/src/lupin_mcp
 COPY src/scripts /var/lupin/src/scripts
 COPY src/migrations /var/lupin/src/migrations
 COPY src/docs /var/lupin/src/docs
@@ -176,6 +182,7 @@ COPY src/conf/*.json /var/lupin/src/conf/
 COPY src/conf/*.js /var/lupin/src/conf/
 COPY src/conf/auth /var/lupin/src/conf/auth
 COPY src/conf/keys /var/lupin/src/conf/keys
+COPY src/conf/mcp /var/lupin/src/conf/mcp
 COPY src/conf/prompts /var/lupin/src/conf/prompts
 COPY src/conf/tools /var/lupin/src/conf/tools
 
@@ -187,6 +194,41 @@ COPY src/conf/long-term-memory/lupin.lancedb /var/lupin/src/conf/long-term-memor
 
 WORKDIR /var/lupin/src
 RUN mkdir -p /var/lupin/io
+
+# ============================================================================
+# CLAUDE CODE CLI INSTALLATION (Level 2: Functional MCP Support)
+# ============================================================================
+# Enables dispatching Claude Code tasks from the Lupin UI with voice tools.
+# API key is provided at RUNTIME via: docker run -e ANTHROPIC_API_KEY="..."
+# NO secrets are baked into this image.
+#
+# Usage with prompt-style key input (local dev):
+#   read -s -p "Anthropic API Key: " KEY && \
+#   docker run -e ANTHROPIC_API_KEY="$KEY" -p 7999:7999 lupin:latest
+#
+# Usage with GCP Secret Manager (production):
+#   gcloud run deploy lupin --set-secrets="ANTHROPIC_API_KEY=anthropic-api-key:latest"
+# ============================================================================
+
+# Install Node.js 20.x LTS (required for Claude Code CLI)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code CLI globally (gets latest version at build time)
+# To update: rebuild this image. Auto-update disabled for container immutability.
+RUN npm install -g @anthropic-ai/claude-code
+
+# Create Claude config directory and copy pre-configured settings
+RUN mkdir -p /root/.claude
+
+# Copy MCP configuration (cosa-voice with container paths) and settings
+COPY docker/lupin/claude-config/settings.json /root/.claude/settings.json
+COPY docker/lupin/claude-config/mcp.json /root/.claude/.mcp.json
+
+# ============================================================================
+# END CLAUDE CODE CLI INSTALLATION
+# ============================================================================
 
 # CMD ["/bin/bash", "-c", "echo '-- OR -- Run `python3 -m fastapi_app.main` to spin up FastAPI server' && exec /bin/bash"]
 # Run the script: /var/lupin/src/scripts/run-fastapi-lupin.sh

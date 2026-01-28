@@ -73,12 +73,12 @@ Send notification that post-change verification is starting:
 
 **If TEST_SCOPE="full":**
 ```bash
-/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src/scripts/notify.sh "[LUPIN] 🔍 Post-change smoke test verification STARTED (FULL SUITE) - Comparing Lupin + COSA against baseline and preparing remediation" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
+/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/notify.sh "[LUPIN] 🔍 Post-change smoke test verification STARTED (FULL SUITE) - Comparing Lupin + COSA against baseline and preparing remediation" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
 ```
 
 **If TEST_SCOPE="lupin":**
 ```bash
-/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src/scripts/notify.sh "[LUPIN] 🔍 Post-change smoke test verification STARTED (LUPIN-ONLY) - Comparing Lupin against baseline and preparing remediation" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
+/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/notify.sh "[LUPIN] 🔍 Post-change smoke test verification STARTED (LUPIN-ONLY) - Comparing Lupin against baseline and preparing remediation" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
 ```
 
 ### 3. Setup Post-Change Testing Environment
@@ -86,7 +86,7 @@ Send notification that post-change verification is starting:
 Execute the following commands to prepare for testing:
 
 ```bash
-cd /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box
+cd /mnt/DATA01/include/www.deepily.ai/projects/lupin
 
 # Create logs directory structure
 mkdir -p src/tests/logs
@@ -131,7 +131,7 @@ echo "Starting post-change CoSA smoke test verification at $(date)" | tee "${LOG
 echo "===========================================" | tee -a "${LOG_FILE}"
 
 # Set up CoSA environment
-export PYTHONPATH="/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src:$PYTHONPATH"
+export PYTHONPATH="/mnt/DATA01/include/www.deepily.ai/projects/lupin/src:$PYTHONPATH"
 
 # Execute full CoSA test suite
 ./src/cosa/tests/smoke/scripts/run-cosa-smoke-tests.sh 2>&1 | tee -a "${LOG_FILE}"
@@ -346,12 +346,12 @@ Send notification with final results:
 
 **If TEST_SCOPE="full":**
 ```bash
-/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src/scripts/notify.sh "[LUPIN] ✅ Post-change verification COMPLETE (FULL SUITE) - [XX.X%] final pass rate, [NUMBER] issues fixed, Lupin + COSA system [STATUS]" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
+/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/notify.sh "[LUPIN] ✅ Post-change verification COMPLETE (FULL SUITE) - [XX.X%] final pass rate, [NUMBER] issues fixed, Lupin + COSA system [STATUS]" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
 ```
 
 **If TEST_SCOPE="lupin":**
 ```bash
-/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src/scripts/notify.sh "[LUPIN] ✅ Post-change verification COMPLETE (LUPIN-ONLY) - [XX.X%] final pass rate, [NUMBER] issues fixed, Lupin system [STATUS]" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
+/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/notify.sh "[LUPIN] ✅ Post-change verification COMPLETE (LUPIN-ONLY) - [XX.X%] final pass rate, [NUMBER] issues fixed, Lupin system [STATUS]" --type=progress --priority=medium --target-user=ricardo.felipe.ruiz@gmail.com
 ```
 
 ### 12. Final Todo List Update
@@ -399,7 +399,7 @@ If critical issues cannot be resolved:
 
 1. **Send urgent notification**:
 ```bash
-/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src/scripts/notify.sh "[LUPIN] 🚨 URGENT: Critical post-change issues require immediate attention - [BRIEF DESCRIPTION]" --type=alert --priority=urgent --target-user=ricardo.felipe.ruiz@gmail.com
+/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/notify.sh "[LUPIN] 🚨 URGENT: Critical post-change issues require immediate attention - [BRIEF DESCRIPTION]" --type=alert --priority=urgent --target-user=ricardo.felipe.ruiz@gmail.com
 ```
 
 2. **Document the problem clearly**

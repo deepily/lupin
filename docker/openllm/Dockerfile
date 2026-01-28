@@ -1,4 +1,4 @@
-FROM riqui/genie-in-the-box:0.3.0
+FROM riqui/lupin:0.3.0
 
 RUN pip install git+https://github.com/huggingface/transformers.git@main accelerate
 RUN pip install torch

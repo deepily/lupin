@@ -10,11 +10,11 @@ Provides three tools:
 Session ID Format: claude.code@{project}.deepily.ai
 
 Configuration:
-    COSA_PROJECT: Project name (required, will be lowercased)
+    MCP_PROJECT: Project name (set by MCP config, will be lowercased)
 
 Usage:
-    export COSA_PROJECT="lupin"
-    claude mcp add cosa -- python /path/to/cosa_voice_mcp.py
+    # MCP_PROJECT is set by your MCP JSON config, not manually
+    claude mcp add cosa-voice -- python /path/to/cosa_voice_mcp.py
 
 Works with both:
     - Option A: Print mode (bounded tasks)
@@ -46,12 +46,17 @@ from cosa.cli.notify_user_async import notify_user_async
 # ============================================================================
 
 def _get_project() -> str:
-    """Get project name from environment, lowercased."""
-    project = os.getenv("COSA_PROJECT", "").strip()
+    """Get project name from environment, lowercased.
+
+    Note: MCP_PROJECT is set by the MCP JSON config, not manually by the user.
+    Each project's MCP config specifies its project name in the env section.
+    """
+    project = os.getenv( "MCP_PROJECT", "" ).strip()
     if not project:
-        print("Error: COSA_PROJECT environment variable required", file=sys.stderr)
-        print("Example: export COSA_PROJECT='lupin'", file=sys.stderr)
-        sys.exit(1)
+        print( "Error: MCP_PROJECT environment variable required", file=sys.stderr )
+        print( "This should be set in your MCP JSON config's env section:", file=sys.stderr )
+        print( '  "env": { "MCP_PROJECT": "lupin" }', file=sys.stderr )
+        sys.exit( 1 )
     return project.lower()
 
 
@@ -71,7 +76,7 @@ SENDER_ID = _get_sender_id(PROJECT)
 
 mcp = FastMCP(
     name="CoSA Voice Bridge",
-    description=f"Voice I/O for Claude Code [Session: {SENDER_ID}]"
+    instructions=f"Voice I/O for Claude Code [Session: {SENDER_ID}]"
 )
 
 

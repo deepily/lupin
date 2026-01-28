@@ -1204,7 +1204,7 @@ I'll update the main history.md file with a session entry:
 **Status**: Structure complete, ready for content population
 ```
 
-**Location**: `/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md`
+**Location**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md`
 
 I'll insert this entry at the top of the current month section.
 
@@ -1392,7 +1392,7 @@ When implementing this slash command:
 
 4. **Template locations**:
    ```
-   /mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/src/rnd/prompts/templates/design-planning/
+   /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/rnd/prompts/templates/design-planning/
    ```
 
 5. **Error handling**:

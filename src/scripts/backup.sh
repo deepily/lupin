@@ -12,8 +12,8 @@
 
 # === CONFIG START ===
 # CUSTOMIZE these paths for your project
-SOURCE_DIR="/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/"
-DEST_DIR="/mnt/DATA02/include/www.deepily.ai/projects/genie-in-the-box/"
+SOURCE_DIR="/mnt/DATA01/include/www.deepily.ai/projects/lupin/"
+DEST_DIR="/mnt/DATA02/include/www.deepily.ai/projects/lupin/"
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 EXCLUDE_FILE="$SCRIPT_DIR/conf/rsync-exclude.txt"
 PROJECT_NAME="Lupin"
@@ -142,6 +142,14 @@ fi
 echo -e "${BLUE}Exclusion patterns:${NC}"
 grep -v '^#' "$EXCLUDE_FILE" | grep -v '^$' | sed 's/^/  - /'
 echo ""
+
+# Run PostgreSQL backup first (if script exists and container is running)
+POSTGRES_BACKUP_SCRIPT="$SCRIPT_DIR/backup-postgres.sh"
+if [[ -f "$POSTGRES_BACKUP_SCRIPT" ]]; then
+    echo -e "${BLUE}Running PostgreSQL backup...${NC}"
+    bash "$POSTGRES_BACKUP_SCRIPT"
+    echo ""
+fi
 
 # Run rsync
 echo -e "${MODE_COLOR}Running rsync...${NC}\n"

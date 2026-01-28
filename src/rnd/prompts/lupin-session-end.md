@@ -135,7 +135,7 @@ At the end of every session when user says goodbye, verify completion of the man
 
 **Project**: Lupin (evolved from Genie-in-the-Box)
 **Prefix**: [LUPIN]
-**History Location**: `/mnt/DATA01/include/www.deepily.ai/projects/genie-in-the-box/history.md`
+**History Location**: `/mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md`
 **Current Implementation Document**: Referenced at top of history.md
 
 **Key Archived Periods**:

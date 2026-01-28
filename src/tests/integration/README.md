@@ -68,8 +68,29 @@ Integration tests differ from unit tests and smoke tests by testing the entire s
 - Multi-queue validation
 - Response format validation
 
+**Claude Code Dispatcher Tests** (42 tests across 3 files)
+
+*SDK Validation* (11 tests in `test_sdk_validation.py`)
+- SDK import verification
+- ClaudeAgentOptions construction
+- ClaudeSDKClient instantiation
+- SDK connection tests (E2E)
+
+*Dispatcher E2E* (23 tests in `test_dispatcher_e2e.py`)
+- Option A bounded tasks
+- Option B interactive sessions
+- MCP voice tool integration
+- Streaming message callbacks
+- Session lifecycle tracking
+
+*Bidirectional Control* (8 tests in `test_dispatcher_bidirectional.py`)
+- inject() message injection
+- interrupt() session control
+- Active session tracking
+- Error handling for non-existent sessions
+
 ### Total Runtime
-Expected: **~20-30 seconds** for all 43 tests
+Expected: **~30-60 seconds** for all 85+ tests (auth + queue + dispatcher)
 
 ## Prerequisites
 
