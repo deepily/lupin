@@ -1,8 +1,23 @@
 # TODO
 
-Last updated: 2026-01-27 (Session 106)
+Last updated: 2026-01-28 (Session 107)
 
 ## Pending
+
+### job_state_transition Implementation (Session 107 - In Progress)
+
+- [x] Phase 1: Add job_state_transition to config files
+- [x] Phase 2: Add _emit_job_state_transition method to FifoQueue
+- [x] Phase 3: Add server emissions (7 transition points)
+- [ ] Phase 4: Client subscription to job_state_transition
+- [ ] Phase 5: Client handler (handleJobStateTransition, insertJobMetadata)
+- [ ] Phase 6: Badge-only queue_*_update handlers
+- [ ] Phase 7: Placeholder DOM nodes in renderJobCard()
+- [ ] Phase 8: Remove cruft - data structures
+- [ ] Phase 9: Remove cruft - methods
+- [ ] Phase 10: Remove cruft - logic
+- [ ] WebSocket smoke tests after Phase 10
+- [ ] Manual browser verification of job transitions
 
 ### Implementation Plans
 
@@ -29,6 +44,10 @@ Last updated: 2026-01-27 (Session 106)
 - [ ] STT buttons work for voice input
 - [ ] Loading spinners show during submission
 - [ ] Error messages display correctly
+
+### Architecture Review
+
+- [ ] **Cache Hit Behavior**: Revisit cache hit logic in `running_fifo_queue.py:_format_cached_result()`. Currently propagates cached `answer_conversational` without re-running code. General rule should be: re-run the code instead of simply returning cached conversational answer. May need to distinguish between "answer cache" vs "computation cache". See Session 107 discussion.
 
 ### Carried Over from Session 102
 

@@ -1,5 +1,54 @@
 # Lupin Project History
 
+> **🔄 SESSION 107 IN PROGRESS**: job_state_transition WebSocket Event (2026.01.28)
+> **Owner**: claude.code@lupin.deepily.ai
+> **Branch**: `wip-v0.1.2-2026.01.28-job-state-change-refactoring`
+>
+> ### Accomplishments
+>
+> **Git Workflow**:
+> - Created PR #10 for v0.1.1 branch merge to main (156 files, +42k/-8k lines)
+> - Created new development branch `wip-v0.1.2-2026.01.28-job-state-change-refactoring`
+>
+> **Documentation Structure** (Pattern A):
+> - Created `src/rnd/job-state-transition/` documentation directory
+> - `00-index.md` - Master navigation with phase status
+> - `01-implementation-current.md` - Active phases (4-10)
+> - `02-architecture.md` - WebSocket event payload specs
+> - `03-decisions.md` - 5 design decisions with rationale
+> - `04-testing-validation.md` - Test plan and verification checklist
+> - `archive/phases-1-3-server.md` - Completed server work
+>
+> **Server-Side Implementation (Phases 1-3 Complete)**:
+> - Phase 1: Added `job_state_transition` to websocket events config
+> - Phase 2: Added `_emit_job_state_transition()` method to FifoQueue base class
+> - Phase 3: Added 7 emission calls at all transition points:
+>   - 4 in running_fifo_queue.py (agentic success/failure/crash, base agent)
+>   - 2 in running_fifo_queue.py (solution snapshot, cache hit)
+>   - 1 in queue_consumer.py (todo → run)
+>
+> **TODO Management**:
+> - Added Architecture Review item: Cache hit behavior (re-run code vs cached answer)
+>
+> ### Remaining Work (Phases 4-10)
+> - Phase 4: Client subscription to job_state_transition
+> - Phase 5: Client handler (handleJobStateTransition, insertJobMetadata)
+> - Phase 6: Badge-only queue_*_update handlers
+> - Phase 7: Placeholder DOM nodes in renderJobCard()
+> - Phases 8-10: Remove provisional registration cruft
+>
+> ### Files Modified (CoSA)
+> - `rest/fifo_queue.py` - _emit_job_state_transition method
+> - `rest/running_fifo_queue.py` - 6 emission calls
+> - `rest/queue_consumer.py` - 1 emission call
+>
+> ### Files Modified (Lupin)
+> - `src/conf/lupin-app.ini` - job_state_transition in events list
+> - `src/conf/lupin-app-splainer.ini` - explainer text
+> - `TODO.md` - Architecture Review section
+>
+> ---
+
 > **✅ SESSION 106 COMPLETE**: API Consistency + Job Notification Routing (2026.01.27)
 > **Owner**: claude.code@lupin.deepily.ai
 >
