@@ -13,6 +13,16 @@
 >   - **Debug Utility**: Added `window.notificationsUI.debugDumpJobCard(jobId)` for DOM comparison
 >   - **File**: `src/fastapi_app/static/js/notifications.js`
 >
+> ### Workflow Installation
+> - Ran `/plan-install-wizard` to check available workflows
+> - Installed `/plan-bug-fix-mode-wrap` slash command (was missing from Lupin)
+> - Completes the bug fix mode command suite:
+>   - `/plan-bug-fix-mode` - Main entry point
+>   - `/plan-bug-fix-mode-start` - Initialize session
+>   - `/plan-bug-fix-mode-continue` - Resume after context clear
+>   - `/plan-bug-fix-mode-wrap` - Wrap up fix (NEW)
+>   - `/plan-bug-fix-mode-close` - End session
+>
 > ### Session Summary
 > (Will be completed at session close)
 >
