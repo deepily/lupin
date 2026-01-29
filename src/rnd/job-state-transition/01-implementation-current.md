@@ -1,8 +1,35 @@
 # Current Implementation Status
 
-**Last Updated**: 2026-01-28 (Session 107) - End of session
+**Last Updated**: 2026-01-28 (Session 107) - Context clear checkpoint
 
-## Active Work: Phase 4 (Client Subscription)
+## Active Work: Phase 6 (Badge-Only Handlers)
+
+### Phases 4-5 COMPLETE
+
+**Phase 4** (Client Subscription):
+- Added `"job_state_transition"` to `subscribed_events` array in `authenticateQueueWebSocket()` (line ~1757)
+
+**Phase 5** (Client Handler):
+- Added `handleJobStateTransition()` method - handles DOM reparenting, timer start/stop
+- Added `insertJobMetadata()` method - populates placeholder nodes on completion
+- Added `updateQueueCountFromDOM()` method - counts cards in container
+- Added `updateQueueEmptyMessage()` method - shows/hides empty message
+- Added switch case for `job_state_transition` event (line ~1874)
+
+### Phase 6 IN PROGRESS
+
+**Done**:
+- Changed 4 `queue_*_update` handlers from `updateQueueLists()` to `updateQueueCountBadge()` (lines ~1855-1877)
+
+**BLOCKING - Need to implement**:
+- `updateQueueCountBadge( queueType, count )` method - updates badge with server-provided count
+- The handlers now call this method but it doesn't exist yet!
+
+**Next step when resuming**: Search for existing badge update logic or implement `updateQueueCountBadge()` method.
+
+---
+
+## Server-Side (Complete)
 
 **Phase 3 COMPLETE** - All 7 server emissions implemented and smoke tested.
 

@@ -9,9 +9,9 @@ Last updated: 2026-01-28 (Session 107)
 - [x] Phase 1: Add job_state_transition to config files
 - [x] Phase 2: Add _emit_job_state_transition method to FifoQueue
 - [x] Phase 3: Add server emissions (7 transition points)
-- [ ] Phase 4: Client subscription to job_state_transition
-- [ ] Phase 5: Client handler (handleJobStateTransition, insertJobMetadata)
-- [ ] Phase 6: Badge-only queue_*_update handlers
+- [x] Phase 4: Client subscription to job_state_transition
+- [x] Phase 5: Client handler (handleJobStateTransition, insertJobMetadata)
+- [ ] **Phase 6: Badge-only handlers** ← CURRENT (need `updateQueueCountBadge` method)
 - [ ] Phase 7: Placeholder DOM nodes in renderJobCard()
 - [ ] Phase 8: Remove cruft - data structures
 - [ ] Phase 9: Remove cruft - methods
