@@ -1,6 +1,20 @@
 # Bug Fix Queue
 
-## Session: 2026.01.28 (Session 107 - Bug Fix Mode)
+## Session: 2026.01.29 (Session 108 - Bug Fix Mode)
+**Owner**: claude.code@lupin.deepily.ai#21a62c05
+**Status**: Closed
+
+### Completed (Session 108)
+- [x] Job card styling inconsistency (WebSocket vs server-fetched) → this commit
+  - **Symptom**: Done queue job cards look different when dynamically inserted (WebSocket) vs fetched from server
+  - **Root Cause**: `insertJobMetadata()` used completely different HTML structure than `renderJobCard()`
+  - **Fix**: Extracted helper functions (`renderAbstractSection()`, `renderReportLinkSection()`) and unified rendering
+  - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js`
+  - **Debug Utility Added**: `window.notificationsUI.debugDumpJobCard(jobId)` for DOM comparison
+
+---
+
+## Previous Session: 2026.01.28 (Session 107 - Bug Fix Mode)
 **Owner**: claude.code@lupin.deepily.ai#b9faa342
 **Status**: Closed
 

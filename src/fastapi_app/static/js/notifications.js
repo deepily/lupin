@@ -4203,26 +4203,31 @@ class NotificationsUI {
             }
         }
 
+        // Session 108: Use helper functions for consistent rendering
         if ( metadata.abstract ) {
             const abstractEl = card.querySelector( '.job-abstract' );
             if ( abstractEl ) {
-                abstractEl.innerHTML = `<strong>Abstract:</strong> ${this.escapeHtml( metadata.abstract )}`;
+                abstractEl.innerHTML = this.renderAbstractSection( metadata.abstract );
                 abstractEl.style.display = 'block';
             }
         }
 
-        if ( metadata.report_link ) {
+        // Session 108: Use helper function for report link (handle both report_link URL and report_path)
+        const reportPath = metadata.report_link || metadata.report_path;
+        if ( reportPath ) {
             const reportEl = card.querySelector( '.job-report-link' );
             if ( reportEl ) {
-                reportEl.innerHTML = `<a href="${metadata.report_link}" target="_blank">📄 View Report</a>`;
+                reportEl.innerHTML = this.renderReportLinkSection( reportPath );
                 reportEl.style.display = 'block';
             }
         }
 
+        // Session 108: Use helper function for cost summary (handle object type)
         if ( metadata.cost_summary ) {
             const costEl = card.querySelector( '.job-cost-summary' );
             if ( costEl ) {
-                costEl.textContent = `Cost: ${metadata.cost_summary}`;
+                const durationSeconds = metadata.duration_seconds || null;
+                costEl.innerHTML = this.renderCostSummaryContent( metadata.cost_summary, durationSeconds );
                 costEl.style.display = 'block';
             }
         }
@@ -5094,6 +5099,57 @@ class NotificationsUI {
         `;
     }
 
+    /**
+     * Render abstract section HTML.
+     * Session 108: Helper for consistent rendering between WebSocket and server-fetched cards.
+     *
+     * @param {string} abstract - Abstract text to render
+     * @returns {string} HTML content for abstract section
+     */
+    renderAbstractSection( abstract ) {
+        if ( !abstract ) return '';
+        return `
+            <div class="abstract-header">📄 Summary</div>
+            <div class="abstract-content">${this.escapeHtml( abstract )}</div>
+        `;
+    }
+
+    /**
+     * Render report link section HTML.
+     * Session 108: Helper for consistent rendering between WebSocket and server-fetched cards.
+     *
+     * @param {string} reportPath - Path to the report file
+     * @returns {string} HTML content for report link section
+     */
+    renderReportLinkSection( reportPath ) {
+        if ( !reportPath ) return '';
+        return `<a href="/api/io/file?path=${encodeURIComponent( reportPath )}" target="_blank" class="report-link-btn">📋 View Full Report</a>`;
+    }
+
+    /**
+     * Debug utility to dump job card DOM for comparison.
+     * Session 108: Helps verify WebSocket vs server-fetched card consistency.
+     *
+     * Usage: window.notificationsUI.debugDumpJobCard( 'dr-a0ebba60' )
+     *
+     * @param {string} jobId - The job ID to inspect
+     */
+    debugDumpJobCard( jobId ) {
+        const card = document.querySelector( `.job-card[data-job-id="${jobId}"]` );
+        if ( !card ) {
+            console.warn( `Job card not found: ${jobId}` );
+            return;
+        }
+        const container = card.closest( '.queue-jobs-container' );
+        const queue = container?.id?.replace( '-jobs-container', '' ) || 'unknown';
+        console.group( `Job Card: ${jobId} (${queue} queue)` );
+        console.log( 'Outer HTML:' );
+        console.log( card.outerHTML );
+        console.log( 'Classes:', card.className );
+        console.log( 'Data attributes:', { ...card.dataset } );
+        console.groupEnd();
+    }
+
     renderJobCard( job, queueName ) {
         /**
          * Generate HTML for a single job card.
@@ -5185,10 +5241,10 @@ class NotificationsUI {
                         ${job.response_text ? `<strong>Response:</strong> ${this.escapeHtml( job.response_text )}` : ''}
                     </div>
                     <div class="job-abstract" style="${job.abstract ? '' : 'display: none'}">
-                        ${job.abstract ? `<div class="abstract-header">📄 Summary</div><div class="abstract-content">${this.escapeHtml( job.abstract )}</div>` : ''}
+                        ${this.renderAbstractSection( job.abstract )}
                     </div>
                     <div class="job-report-link" style="${job.report_path ? '' : 'display: none'}">
-                        ${job.report_path ? `<a href="/api/io/file?path=${encodeURIComponent( job.report_path )}" target="_blank" class="report-link-btn">📋 View Full Report</a>` : ''}
+                        ${this.renderReportLinkSection( job.report_path )}
                     </div>
                     <div class="job-cost-summary" style="${job.cost_summary ? '' : 'display: none'}">
                         ${job.cost_summary ? this.renderCostSummaryContent( job.cost_summary, job.duration_seconds ) : ''}

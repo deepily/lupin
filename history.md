@@ -1,5 +1,23 @@
 # Lupin Project History
 
+> **🔧 SESSION 108 ACTIVE**: Bug Fix Mode (2026.01.29)
+> **Owner**: claude.code@lupin.deepily.ai#21a62c05
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Fixes
+> - **Fix 1**: Job card styling inconsistency (WebSocket vs server-fetched)
+>   - **Symptom**: Done queue cards looked different when inserted via WebSocket vs fetched from server
+>   - **Root Cause**: `insertJobMetadata()` used raw HTML (`<strong>Abstract:</strong>`, unclassed `<a>`, plain text cost) instead of CSS-classed structure from `renderJobCard()`
+>   - **Fix**: Extracted `renderAbstractSection()` and `renderReportLinkSection()` helpers; unified rendering in both paths
+>   - **Also Fixed**: Cost summary now uses `renderCostSummaryContent()` with proper object handling
+>   - **Debug Utility**: Added `window.notificationsUI.debugDumpJobCard(jobId)` for DOM comparison
+>   - **File**: `src/fastapi_app/static/js/notifications.js`
+>
+> ### Session Summary
+> (Will be completed at session close)
+>
+> ---
+
 > **✅ SESSION 107 COMPLETE**: job_state_transition WebSocket Event (2026.01.28)
 > **Owner**: claude.code@lupin.deepily.ai
 > **Branch**: `wip-v0.1.2-2026.01.28-job-state-change-refactoring`
