@@ -157,19 +157,6 @@ class NotificationsUI {
         this.jobInteractionsCache = new Map();     // Cache loaded interactions: job_id → interactions[]
 
         // ========================================
-        // JOB-BASED NOTIFICATION ROUTING (Phase 6)
-        // ========================================
-        // Tracks active jobs (todo/running) for notification routing
-        // Notifications with job_id route to job card activity log instead of sender cards
-        this.registeredJobs = new Map();           // job_id → { queueName, metadata }
-        this.completedJobs = new Set();            // Track jobs that have received completion notifications
-
-        // ========================================
-        // RUNNING JOB DURATION TIMERS (Phase 7)
-        // ========================================
-        // Track setInterval handles for live duration updates on running jobs
-        this.durationTimers = new Map();           // job_id → setInterval handle
-
         // Phase 2.2 SSE - Action Required notifications state
         this.actionRequiredNotifications = new Map();  // notification_id → notification data + UI state
         this.countdownTimers = new Map();  // notification_id → setInterval handle
@@ -1754,6 +1741,7 @@ class NotificationsUI {
                 "queue_running_update",
                 "queue_done_update",
                 "queue_dead_update",
+                "job_state_transition",
                 "tts_job_request",
                 "sys_time_update",
                 "notification_play_sound",
@@ -1852,25 +1840,33 @@ class NotificationsUI {
                     break;
                     
                 case "queue_todo_update":
+                    // Session 107: Badge-only update (job_state_transition handles card movement)
                     this.log( `Queue TODO update: ${envelope.value}` );
-                    this.updateQueueLists( "todo" );
+                    this.updateQueueCountBadge( "todo", envelope.value );
                     break;
-                    
+
                 case "queue_running_update":
+                    // Session 107: Badge-only update (job_state_transition handles card movement)
                     this.log( `Queue RUNNING update: ${envelope.value}` );
-                    this.updateQueueLists( "run" );
+                    this.updateQueueCountBadge( "run", envelope.value );
                     break;
-                    
+
                 case "queue_done_update":
+                    // Session 107: Badge-only update (job_state_transition handles card movement)
                     this.log( `Queue DONE update: ${envelope.value}` );
-                    this.updateQueueLists( "done" );
+                    this.updateQueueCountBadge( "done", envelope.value );
                     break;
-                    
+
                 case "queue_dead_update":
+                    // Session 107: Badge-only update (job_state_transition handles card movement)
                     this.log( `Queue DEAD update: ${envelope.value}` );
-                    this.updateQueueLists( "dead" );
+                    this.updateQueueCountBadge( "dead", envelope.value );
                     break;
-                    
+
+                case "job_state_transition":
+                    this.handleJobStateTransition( envelope );
+                    break;
+
                 case "notification_queue_update":
                     this.handleNotificationUpdate( envelope );
                     break;
@@ -3988,9 +3984,316 @@ class NotificationsUI {
     }
 
     // ========================================
+    // JOB STATE TRANSITION HANDLERS (Session 107)
+    // ========================================
+
+    /**
+     * Handle job_state_transition WebSocket event.
+     * Moves job cards between queue containers via DOM reparenting.
+     *
+     * @param {Object} event - WebSocket event with job_id, from_queue, to_queue, metadata
+     */
+    handleJobStateTransition( event ) {
+        // Extract from nested data object (WebSocket envelope structure)
+        const eventData = event.data || event;
+        const { job_id: jobId, from_queue: fromQueue, to_queue: toQueue, metadata } = eventData;
+
+        if ( !jobId || !fromQueue || !toQueue ) {
+            this.error( '[JOB-TRANSITION] Invalid event:', event );
+            return;
+        }
+
+        // Deduplicate events - prevent duplicate card creation (Session 107 bug fix)
+        const eventId = `job_state_transition:${jobId}:${fromQueue}:${toQueue}`;
+        if ( this.processedEvents.has( eventId ) ) {
+            this.log( `[JOB-TRANSITION] Duplicate event ignored: ${eventId}` );
+            return;
+        }
+        this.processedEvents.add( eventId );
+
+        // Clean up old events if set gets too large
+        if ( this.processedEvents.size > this.maxProcessedEvents ) {
+            const eventsArray = Array.from( this.processedEvents );
+            const keepEvents = eventsArray.slice( -this.maxProcessedEvents + 10 );
+            this.processedEvents = new Set( keepEvents );
+            this.log( `[JOB-TRANSITION] Cleaned up processed events cache, kept ${keepEvents.length} recent events` );
+        }
+
+        this.log( `[JOB-TRANSITION] ${jobId}: ${fromQueue} -> ${toQueue}` );
+
+        // Find the card in source container
+        const fromContainer = document.getElementById( `${fromQueue}-jobs-container` );
+        const card = fromContainer?.querySelector( `.job-card[data-job-id="${jobId}"]` );
+
+        if ( !card ) {
+            // Phase 6.3: Card doesn't exist in source queue - create it in target queue
+            this.log( `[JOB-TRANSITION] Card not found in ${fromQueue}, creating in ${toQueue}` );
+
+            const toContainer = document.getElementById( `${toQueue}-jobs-container` );
+            if ( !toContainer ) {
+                this.error( `[JOB-TRANSITION] Target container not found: ${toQueue}-jobs-container` );
+                return;
+            }
+
+            // Check if card already exists in TARGET container (Session 107 bug fix)
+            const existingInTarget = toContainer.querySelector( `.job-card[data-job-id="${jobId}"]` );
+            if ( existingInTarget ) {
+                this.log( `[JOB-TRANSITION] Card ${jobId} already exists in ${toQueue}, skipping creation` );
+                return;
+            }
+
+            if ( metadata ) {
+                // Build job object for renderJobCard from transition metadata
+                // Session 107: Fix field parity between WebSocket and server-fetched cards
+                const job = {
+                    job_id          : jobId,
+                    question_text   : metadata.question_text || 'Processing...',
+                    agent_type      : metadata.agent_type || 'Unknown',
+                    timestamp       : metadata.timestamp || new Date().toISOString(),
+                    started_at      : metadata.started_at || null,
+                    completed_at    : metadata.completed_at || null,
+                    response_text   : metadata.response_text || null,
+                    abstract        : metadata.abstract || null,
+                    report_path     : metadata.report_link || null,
+                    cost_summary    : metadata.cost_summary || null,
+                    is_cache_hit    : metadata.is_cache_hit || false,
+                    status          : metadata.status || 'completed',
+                    error           : metadata.error || null,
+                    has_interactions: metadata.has_interactions || false,
+                    duration_seconds: metadata.duration_seconds || null
+                };
+
+                // Remove empty message if present
+                const emptyMsg = toContainer.querySelector( '.queue-empty-message' );
+                if ( emptyMsg ) emptyMsg.remove();
+
+                const cardHtml = this.renderJobCard( job, toQueue );
+                toContainer.insertAdjacentHTML( 'afterbegin', cardHtml );
+                this.log( `[JOB-TRANSITION] Created new card in ${toQueue} container` );
+
+                // Update count badge for target queue
+                this.updateQueueCountFromDOM( toQueue );
+            } else {
+                this.log( `[JOB-TRANSITION] No metadata provided, cannot create card` );
+            }
+            return;
+        }
+
+        // Update status class
+        card.classList.remove( `status-${fromQueue}` );
+        card.classList.add( `status-${toQueue}` );
+
+        // Move card to target container (DOM reparenting)
+        const toContainer = document.getElementById( `${toQueue}-jobs-container` );
+        if ( toContainer ) {
+            // Remove empty message if present
+            const emptyMsg = toContainer.querySelector( '.queue-empty-message' );
+            if ( emptyMsg ) emptyMsg.remove();
+
+            // Insert at top of target queue
+            toContainer.insertAdjacentElement( 'afterbegin', card );
+            this.log( `[JOB-TRANSITION] Card moved to ${toQueue} container` );
+        }
+
+        // Update empty messages for source container
+        this.updateQueueEmptyMessage( fromQueue );
+
+        // Inject static duration section if entering run queue (no live timer)
+        // Final duration calculated server-side and shown in done queue via job.duration_seconds
+        if ( toQueue === 'run' ) {
+            const detailsSection = card.querySelector( '.job-card-details' );
+            if ( detailsSection && !detailsSection.querySelector( '.job-duration-line' ) ) {
+                const durationHtml = `
+                    <div class="job-duration-line">
+                        <span class="duration-label">Duration:</span>
+                        <span class="duration-value">In progress...</span>
+                    </div>
+                `;
+                detailsSection.insertAdjacentHTML( 'afterbegin', durationHtml );
+            }
+        }
+
+        // Update status indicators when transitioning to done queue
+        if ( toQueue === 'done' ) {
+            const header = card.querySelector( '.job-card-header' );
+            if ( header ) {
+                // 1. Remove spinning indicator
+                const spinner = header.querySelector( '.status-indicator.spinning' );
+                if ( spinner ) {
+                    spinner.remove();
+                }
+
+                // 2. Add completion badge (before .job-question)
+                const questionSpan = header.querySelector( '.job-question' );
+                if ( questionSpan && !header.querySelector( '.completion-badge' ) ) {
+                    const badge = document.createElement( 'span' );
+                    badge.className = 'completion-badge success';
+                    badge.title = 'Completed';
+                    badge.textContent = '✓';
+                    header.insertBefore( badge, questionSpan );
+                }
+
+                // 3. Add interaction indicator (after .job-question, before .job-timestamp)
+                const timestampSpan = header.querySelector( '.job-timestamp' );
+                if ( timestampSpan && !header.querySelector( '.interaction-indicator' ) ) {
+                    const indicator = document.createElement( 'span' );
+                    indicator.className = 'interaction-indicator';
+                    indicator.title = 'Has interaction history';
+                    indicator.textContent = '💬';
+                    header.insertBefore( indicator, timestampSpan );
+                }
+
+                // 4. Remove "In progress..." duration line (will be replaced by cost summary)
+                const durationLine = card.querySelector( '.job-duration-line' );
+                if ( durationLine ) {
+                    durationLine.remove();
+                }
+
+                // 5. Remove activity log (real-time feed no longer needed, interactions section provides history)
+                const activityLog = card.querySelector( '.job-activity-log' );
+                if ( activityLog ) {
+                    activityLog.remove();
+                    this.log( `[JOB-TRANSITION] Removed activity log for ${jobId}` );
+                }
+            }
+
+            // 6. Inject interactions section if not present (card was rendered for run queue)
+            const detailsSection = card.querySelector( '.job-card-details' );
+            if ( detailsSection && !card.querySelector( '.job-interactions-section' ) ) {
+                const interactionsHtml = `
+                    <div class="job-interactions-section" id="job-interactions-${jobId}">
+                        <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${jobId}', event)">
+                            <span>📋 Notification Conversation</span>
+                            <button class="interactions-expand-btn">▶</button>
+                        </div>
+                        <div class="interactions-content collapsed" id="interactions-content-${jobId}">
+                            <div class="interactions-loading">Loading...</div>
+                        </div>
+                    </div>
+                `;
+                detailsSection.insertAdjacentHTML( 'beforeend', interactionsHtml );
+            }
+        }
+
+        // Insert metadata into placeholder nodes if provided (completion events)
+        if ( metadata ) {
+            this.insertJobMetadata( jobId, card, metadata );
+        }
+
+        // Update count badges for both queues
+        this.updateQueueCountFromDOM( fromQueue );
+        this.updateQueueCountFromDOM( toQueue );
+    }
+
+    /**
+     * Insert completion metadata into card's placeholder DOM nodes.
+     *
+     * @param {string} jobId - The job ID
+     * @param {HTMLElement} card - The job card element
+     * @param {Object} metadata - Completion metadata (response_text, abstract, report_link, cost_summary, error)
+     */
+    insertJobMetadata( jobId, card, metadata ) {
+        this.log( `[JOB-TRANSITION] Inserting metadata for ${jobId}:`, metadata );
+
+        if ( metadata.response_text ) {
+            const responseEl = card.querySelector( '.job-response' );
+            if ( responseEl ) {
+                responseEl.innerHTML = `<strong>Response:</strong> ${this.escapeHtml( metadata.response_text )}`;
+                responseEl.style.display = 'block';
+            }
+        }
+
+        if ( metadata.abstract ) {
+            const abstractEl = card.querySelector( '.job-abstract' );
+            if ( abstractEl ) {
+                abstractEl.innerHTML = `<strong>Abstract:</strong> ${this.escapeHtml( metadata.abstract )}`;
+                abstractEl.style.display = 'block';
+            }
+        }
+
+        if ( metadata.report_link ) {
+            const reportEl = card.querySelector( '.job-report-link' );
+            if ( reportEl ) {
+                reportEl.innerHTML = `<a href="${metadata.report_link}" target="_blank">📄 View Report</a>`;
+                reportEl.style.display = 'block';
+            }
+        }
+
+        if ( metadata.cost_summary ) {
+            const costEl = card.querySelector( '.job-cost-summary' );
+            if ( costEl ) {
+                costEl.textContent = `Cost: ${metadata.cost_summary}`;
+                costEl.style.display = 'block';
+            }
+        }
+
+        if ( metadata.error ) {
+            const errorEl = card.querySelector( '.job-error' );
+            if ( errorEl ) {
+                errorEl.innerHTML = `<strong>Error:</strong> ${this.escapeHtml( metadata.error )}`;
+                errorEl.style.display = 'block';
+            }
+        }
+    }
+
+    /**
+     * Update queue count badge by counting cards in DOM.
+     *
+     * @param {string} queueType - Queue type (todo, run, done, dead)
+     */
+    updateQueueCountFromDOM( queueType ) {
+        const container = document.getElementById( `${queueType}-jobs-container` );
+        if ( !container ) return;
+
+        const cardCount = container.querySelectorAll( '.job-card' ).length;
+        const badge = document.getElementById( `${queueType}-count-badge` );
+        if ( badge ) {
+            badge.textContent = cardCount;
+        }
+    }
+
+    /**
+     * Update queue count badge with server-provided count.
+     * Session 107: Badge-only updates from queue_*_update events.
+     *
+     * @param {string} queueType - Queue type (todo, run, done, dead)
+     * @param {number} count - Server-provided count
+     */
+    updateQueueCountBadge( queueType, count ) {
+        const badge = document.getElementById( `${queueType}-count-badge` );
+        if ( badge ) {
+            badge.textContent = count;
+        }
+    }
+
+    /**
+     * Update empty message for a queue container.
+     *
+     * @param {string} queueType - Queue type (todo, run, done, dead)
+     */
+    updateQueueEmptyMessage( queueType ) {
+        const container = document.getElementById( `${queueType}-jobs-container` );
+        if ( !container ) return;
+
+        const cardCount = container.querySelectorAll( '.job-card' ).length;
+        let emptyMsg = container.querySelector( '.queue-empty-message' );
+
+        if ( cardCount === 0 && !emptyMsg ) {
+            // Add empty message
+            emptyMsg = document.createElement( 'div' );
+            emptyMsg.className = 'queue-empty-message';
+            emptyMsg.textContent = 'No jobs in queue';
+            container.appendChild( emptyMsg );
+        } else if ( cardCount > 0 && emptyMsg ) {
+            // Remove empty message
+            emptyMsg.remove();
+        }
+    }
+
+    // ========================================
     // NOTIFICATION HANDLERS (from original queue.js)
     // ========================================
-    
+
     async handleNotificationUpdate( envelope ) {
         this.log( "Notification queue update received:", envelope );
 
@@ -4058,44 +4361,8 @@ class NotificationsUI {
             }
         }
         if ( jobId ) {
-            if ( !this.isJobRegistered( jobId ) ) {
-                // Phase 6 FIX: Job not registered yet (race condition)
-                // Use queue_name from backend (source of truth) for provisional registration
-                const queueName = notification.queue_name || "run";  // Fallback for backward compat
-                this.log( `[Phase 6] Job ${jobId} not registered - creating provisional registration (queue: ${queueName})` );
-
-                // Create provisional registration so job card exists immediately
-                this.createProvisionalJobRegistration( jobId, notification, queueName );
-
-                // Route notification to the (now existing) job card
-                this.appendNotificationToJobCard( jobId, notification );
-
-                // Schedule deferred queue refresh to get full metadata
-                this.scheduleQueueRefreshForJob( jobId, queueName );
-
-                // Handle TTS for high/urgent priority
-                if ( notification.priority === "high" || notification.priority === "urgent" ) {
-                    if ( notification.suppress_ding !== true ) {
-                        await this.playNotificationSoundByPriority( notification.priority );
-                    }
-                    const notificationId = notification.id || notification.id_hash;
-                    const ttsMessage = notification.message;
-                    this.log( `[Phase 6] Queuing job notification for TTS: "${ttsMessage}"` );
-                    setTimeout( () => {
-                        this.addToTTSQueue( {
-                            id           : notificationId,
-                            type         : 'job-card',
-                            notification : notification,
-                            ttsText      : ttsMessage,
-                            addedAt      : Date.now()
-                        } );
-                    }, notification.suppress_ding ? 0 : 300 );
-                }
-                return;  // Don't fall through to sender card
-            }
-
-            // Job is registered - route normally
-            this.log( `[Phase 6] Routing notification to job card: ${jobId}` );
+            // Session 107: Simplified - job_state_transition creates cards, we just route
+            this.log( `[Session 107] Routing notification to job card: ${jobId}` );
             this.appendNotificationToJobCard( jobId, notification );
 
             // Play notification sound for high/urgent priority unless suppress_ding is set
@@ -4295,19 +4562,16 @@ class NotificationsUI {
             
             // Update the appropriate list based on queue name
             // Also update the new progressive disclosure count badges
+            // Session 107: Removed updateJobRegistration calls - job_state_transition handles routing
             if ( queueName === "todo" ) {
                 // Update count badge for progressive disclosure UI
                 const countBadge = document.getElementById( "todo-count-badge" );
                 if ( countBadge ) countBadge.textContent = data.todo_jobs.length;
-                // Phase 6 FIX: Always register jobs, regardless of expand state
-                this.updateJobRegistration( "todo", data.todo_jobs_metadata || [] );
                 // Also refresh job cards if category is expanded
                 this.updateQueueCategoryIfExpanded( "todo", data.todo_jobs.length );
             } else if ( queueName === "run" ) {
                 const countBadge = document.getElementById( "run-count-badge" );
                 if ( countBadge ) countBadge.textContent = data.run_jobs.length;
-                // Phase 6 FIX: Always register jobs, regardless of expand state
-                this.updateJobRegistration( "run", data.run_jobs_metadata || [] );
                 this.updateQueueCategoryIfExpanded( "run", data.run_jobs.length );
             } else if ( queueName === "done" ) {
                 // Enhanced done queue handling with structured job metadata for replay functionality
@@ -4547,21 +4811,13 @@ class NotificationsUI {
             this.queueCategoryState[ queueName ].jobs = jobsMetadata.length > 0 ? jobsMetadata : jobsHtml;
             this.queueCategoryState[ queueName ].loaded = true;
 
-            // Phase 6: Register/unregister jobs for notification routing
-            this.updateJobRegistration( queueName, jobsMetadata );
+            // Session 107: Removed updateJobRegistration - job_state_transition handles routing
 
             // Update count badge
             if ( countBadge ) countBadge.textContent = jobsHtml.length;
 
             // Render job cards
             if ( jobsHtml.length === 0 ) {
-                // Phase 6 FIX: Check if container has provisional cards that should be preserved
-                const provisionalCards = container.querySelectorAll( '.job-card[data-provisional="true"]' );
-                if ( provisionalCards.length > 0 ) {
-                    this.log( `[Phase 6] Preserving ${provisionalCards.length} provisional card(s) in ${queueName}` );
-                    // Don't replace - provisional cards exist and will get real data soon
-                    return;
-                }
                 container.innerHTML = '<div class="queue-empty-message">No jobs in this queue</div>';
             } else {
                 // Use metadata if available (done queue), otherwise create minimal metadata from HTML
@@ -4592,81 +4848,9 @@ class NotificationsUI {
     }
 
     // ========================================
-    // JOB REGISTRATION FOR NOTIFICATION ROUTING (Phase 6)
     // ========================================
-
-    updateJobRegistration( queueName, jobsMetadata ) {
-        /**
-         * Register or unregister jobs based on queue state.
-         * Also upgrades provisional registrations to full registrations.
-         *
-         * Requires:
-         *     - queueName is 'todo', 'run', 'done', or 'dead'
-         *     - jobsMetadata is array of job metadata objects
-         *
-         * Ensures:
-         *     - Jobs in todo/run queues are registered for notification routing
-         *     - Jobs in done/dead queues are unregistered
-         *     - Provisional registrations are upgraded with full metadata
-         *     - Activity log content is preserved during upgrade
-         *     - registeredJobs Map is updated
-         */
-        if ( !jobsMetadata || jobsMetadata.length === 0 ) return;
-
-        // Active queues: register jobs
-        if ( queueName === 'todo' || queueName === 'run' ) {
-            for ( const job of jobsMetadata ) {
-                const jobId = job.job_id || job.id_hash;
-                if ( jobId ) {
-                    // Check if this is upgrading a provisional registration
-                    const existing = this.registeredJobs.get( jobId );
-                    const wasProvisional = existing && existing.provisional === true;
-
-                    if ( wasProvisional ) {
-                        this.log( `[Phase 6] Upgrading provisional registration: ${jobId}` );
-                        // Update job card with full metadata (preserving activity log)
-                        this.updateJobCardMetadata( jobId, job, queueName );
-                    }
-
-                    // Register/update with full metadata (no provisional flag)
-                    this.registeredJobs.set( jobId, {
-                        queueName : queueName,
-                        metadata  : job
-                    } );
-
-                    if ( !wasProvisional ) {
-                        this.log( `[Phase 6] Registered job: ${jobId} (${queueName})` );
-                    }
-
-                    // Phase 6 FIX: Replay any cached notifications for this job
-                    if ( this.pendingJobNotifications && this.pendingJobNotifications.has( jobId ) ) {
-                        const cached = this.pendingJobNotifications.get( jobId );
-                        this.log( `[Phase 6] Replaying ${cached.length} cached notification(s) for job ${jobId}` );
-                        cached.forEach( n => this.appendNotificationToJobCard( jobId, n ) );
-                        this.pendingJobNotifications.delete( jobId );
-                    }
-                }
-            }
-        }
-
-        // Completed queues: unregister jobs
-        if ( queueName === 'done' || queueName === 'dead' ) {
-            for ( const job of jobsMetadata ) {
-                const jobId = job.job_id || job.id_hash;
-                if ( jobId && this.registeredJobs.has( jobId ) ) {
-                    const oldReg = this.registeredJobs.get( jobId );
-
-                    // If job was in run queue, clean up its card and timer
-                    if ( oldReg && oldReg.queueName === 'run' ) {
-                        this.cleanupRunQueueCard( jobId );
-                    }
-
-                    this.registeredJobs.delete( jobId );
-                    this.log( `[Phase 6] Unregistered job: ${jobId} (moved to ${queueName})` );
-                }
-            }
-        }
-    }
+    // JOB CARD HELPERS (Session 107: Simplified after job_state_transition refactor)
+    // ========================================
 
     cleanupRunQueueCard( jobId ) {
         /**
@@ -4678,12 +4862,8 @@ class NotificationsUI {
          *
          * Ensures:
          *     - Job card is removed from run queue container
-         *     - Duration timer is stopped
          *     - Empty message shown if container becomes empty
          */
-        // Stop the duration timer
-        this.stopDurationTimer( jobId );
-
         // Remove the card from run queue
         const container = document.getElementById( 'run-jobs-container' );
         if ( !container ) return;
@@ -4747,62 +4927,29 @@ class NotificationsUI {
             }
         }
 
-        this.log( `[Phase 6] Updated job card with full metadata: ${jobId}` );
-    }
-
-    isJobRegistered( jobId ) {
-        /**
-         * Check if a job is registered for notification routing.
-         *
-         * Requires:
-         *     - jobId is a string (e.g., 'dr-a1b2c3d4')
-         *
-         * Ensures:
-         *     - Returns true if job is in todo or running queue
-         *     - Returns false otherwise
-         */
-        return this.registeredJobs.has( jobId );
-    }
-
-    getRegisteredJobInfo( jobId ) {
-        /**
-         * Get metadata for a registered job.
-         *
-         * Returns:
-         *     - { queueName, metadata } if job is registered
-         *     - null if job is not registered
-         */
-        return this.registeredJobs.get( jobId ) || null;
+        this.log( `[Session 107] Updated job card with full metadata: ${jobId}` );
     }
 
     appendNotificationToJobCard( jobId, notification ) {
         /**
          * Append a notification to a job card's activity log.
+         * Session 107: Simplified - searches all queue containers directly.
          *
          * Requires:
-         *     - jobId is a registered job ID
+         *     - jobId is a valid job ID string
          *     - notification has message, priority, timestamp
          *
          * Ensures:
-         *     - Finds job card in DOM (todo or running queue)
+         *     - Finds job card in DOM (any queue)
          *     - Creates activity log if not exists
          *     - Appends notification entry with timestamp
          *     - Auto-expands job card if collapsed
          */
-        const jobInfo = this.getRegisteredJobInfo( jobId );
-        if ( !jobInfo ) {
-            this.log( `[Phase 6] Job not found for notification routing: ${jobId}` );
-            return;
-        }
-
-        // Find job card in the appropriate queue
-        const queueName = jobInfo.queueName;
-        const jobCard = document.querySelector( `#${queueName}-jobs-container .job-card[data-job-id="${jobId}"]` );
+        // Session 107: Search all queue containers for the job card
+        const jobCard = document.querySelector( `.job-card[data-job-id="${jobId}"]` );
 
         if ( !jobCard ) {
-            this.log( `[Phase 6] Job card DOM element not found: ${jobId}` );
-            // Cache the notification for when the job card is rendered
-            this.cacheJobNotification( jobId, notification );
+            this.log( `[Session 107] Job card not found for notification: ${jobId}` );
             return;
         }
 
@@ -4812,9 +4959,14 @@ class NotificationsUI {
             activityLog = this.createJobActivityLog( jobCard );
         }
 
-        // Create notification entry
+        // Create notification entry - insert after header (newest first)
         const entry = this.createActivityLogEntry( notification );
-        activityLog.appendChild( entry );
+        const header = activityLog.querySelector( '.activity-log-header' );
+        if ( header && header.nextSibling ) {
+            activityLog.insertBefore( entry, header.nextSibling );
+        } else {
+            activityLog.appendChild( entry );
+        }
 
         // Auto-expand job card to show new notification
         if ( !this.expandedJobCards.has( jobId ) ) {
@@ -4824,7 +4976,7 @@ class NotificationsUI {
         // Scroll to show new entry
         entry.scrollIntoView( { behavior: 'smooth', block: 'nearest' } );
 
-        this.log( `[Phase 6] Notification appended to job ${jobId}: ${notification.message.substring( 0, 50 )}...` );
+        this.log( `[Session 107] Notification appended to job ${jobId}: ${notification.message.substring( 0, 50 )}...` );
     }
 
     createJobActivityLog( jobCard ) {
@@ -4870,147 +5022,8 @@ class NotificationsUI {
         return entry;
     }
 
-    cacheJobNotification( jobId, notification ) {
-        /**
-         * Cache notification for a job that isn't rendered yet.
-         * Will be applied when job card is created.
-         */
-        if ( !this.pendingJobNotifications ) {
-            this.pendingJobNotifications = new Map();
-        }
-
-        if ( !this.pendingJobNotifications.has( jobId ) ) {
-            this.pendingJobNotifications.set( jobId, [] );
-        }
-
-        this.pendingJobNotifications.get( jobId ).push( notification );
-        this.log( `[Phase 6] Cached notification for job ${jobId} (card not rendered yet)` );
-    }
-
-    // ========================================
-    // PROVISIONAL JOB REGISTRATION (Race Condition Fix)
-    // ========================================
-
-    createProvisionalJobRegistration( jobId, notification, queueName ) {
-        /**
-         * Create provisional job registration when notification arrives before job is fetched.
-         *
-         * Requires:
-         *     - jobId is a valid job ID string (e.g., 'dr-a1b2c3d4')
-         *     - notification is the incoming notification object
-         *     - queueName is 'run', 'todo', 'done', or 'dead' (from backend)
-         *
-         * Ensures:
-         *     - Job is registered in registeredJobs Map with provisional: true flag
-         *     - Job card DOM element exists in the correct queue container
-         *     - Activity log is ready to receive notifications
-         */
-        const agentType = this.inferAgentTypeFromJobId( jobId );
-        const now = new Date().toISOString();
-
-        // Create minimal metadata for provisional registration
-        const provisionalMetadata = {
-            job_id        : jobId,
-            question_text : notification.message || 'Loading...',
-            timestamp     : now,
-            started_at    : now,
-            agent_type    : agentType,
-            provisional   : true  // Flag to indicate this is provisional
-        };
-
-        // Register in Map
-        this.registeredJobs.set( jobId, {
-            queueName   : queueName,
-            metadata    : provisionalMetadata,
-            provisional : true
-        } );
-        this.log( `[Phase 6] Created provisional registration: ${jobId} (${queueName})` );
-
-        // Ensure job card exists in DOM
-        this.ensureJobCardExists( jobId, queueName, provisionalMetadata );
-    }
-
-    ensureJobCardExists( jobId, queueName, metadata ) {
-        /**
-         * Ensure a job card exists in the DOM for the given queue.
-         * Creates a placeholder card if not exists.
-         *
-         * Requires:
-         *     - jobId is a valid job ID string
-         *     - queueName is a valid queue name
-         *     - metadata contains at least job_id and question_text
-         *
-         * Ensures:
-         *     - Job card DOM element exists in the queue container
-         *     - Card has data-job-id attribute for later lookup
-         */
-        const container = document.getElementById( `${queueName}-jobs-container` );
-        if ( !container ) {
-            this.error( `[Phase 6] Queue container not found: ${queueName}-jobs-container` );
-            return;
-        }
-
-        // Check if card already exists
-        const existingCard = container.querySelector( `.job-card[data-job-id="${jobId}"]` );
-        if ( existingCard ) {
-            this.log( `[Phase 6] Job card already exists: ${jobId}` );
-            return;
-        }
-
-        // Remove empty message if present
-        const emptyMessage = container.querySelector( '.queue-empty-message' );
-        if ( emptyMessage ) {
-            emptyMessage.remove();
-        }
-
-        // Render placeholder job card and insert at top
-        const cardHtml = this.renderJobCard( metadata, queueName );
-        container.insertAdjacentHTML( 'afterbegin', cardHtml );
-
-        // Phase 6 FIX: Expand the queue category visually WITHOUT fetching data
-        // (toggleQueueCategory triggers loadQueueJobCards which destroys provisional cards)
-        if ( !this.queueCategoryState[ queueName ].expanded ) {
-            const content = document.getElementById( `${queueName}-jobs-container` );
-            const expandBtn = document.getElementById( `${queueName}-expand` );
-            if ( content ) content.classList.remove( 'collapsed' );
-            if ( expandBtn ) expandBtn.textContent = '▼';
-            this.queueCategoryState[ queueName ].expanded = true;
-            this.saveQueueExpandState();
-        }
-
-        this.log( `[Phase 6] Created placeholder job card: ${jobId}` );
-    }
-
-    scheduleQueueRefreshForJob( jobId, queueName ) {
-        /**
-         * Schedule a deferred queue refresh to get full job metadata.
-         * Debounced to handle multiple rapid notifications.
-         *
-         * Requires:
-         *     - jobId is a valid job ID string
-         *     - queueName is a valid queue name
-         *
-         * Ensures:
-         *     - Queue is refreshed after 250ms delay (debounced)
-         *     - Full metadata replaces provisional registration
-         */
-        // Use a debounce key to prevent multiple rapid refreshes
-        const debounceKey = `queueRefresh_${queueName}`;
-
-        if ( this[ debounceKey ] ) {
-            clearTimeout( this[ debounceKey ] );
-        }
-
-        this[ debounceKey ] = setTimeout( async () => {
-            this.log( `[Phase 6] Executing deferred queue refresh for ${queueName}` );
-            try {
-                await this.loadQueueJobCards( queueName );
-            } catch ( error ) {
-                this.error( `[Phase 6] Queue refresh failed for ${queueName}:`, error );
-            }
-            delete this[ debounceKey ];
-        }, 250 );
-    }
+    // Session 107: Removed cacheJobNotification, createProvisionalJobRegistration,
+    // ensureJobCardExists, scheduleQueueRefreshForJob - job_state_transition handles this now
 
     inferAgentTypeFromJobId( jobId ) {
         /**
@@ -5053,6 +5066,32 @@ class NotificationsUI {
             if ( expandBtn ) expandBtn.textContent = '▼';
             this.expandedJobCards.add( jobId );
         }
+    }
+
+    /**
+     * Render cost summary content HTML.
+     * Session 107: Helper for placeholder-based rendering.
+     *
+     * @param {Object} costSummary - Cost summary object with total_cost_usd, total_input_tokens, total_output_tokens
+     * @param {number} durationSeconds - Optional job duration in seconds
+     * @returns {string} HTML content for cost summary div
+     */
+    renderCostSummaryContent( costSummary, durationSeconds ) {
+        const cost = costSummary.total_cost_usd || 0;
+        const duration = durationSeconds ? this.formatDuration( durationSeconds ) : 'N/A';
+        const tokens = ( costSummary.total_input_tokens || 0 ) + ( costSummary.total_output_tokens || 0 );
+
+        return `
+            <div class="cost-header">💰 Cost Breakdown</div>
+            <div class="cost-grid">
+                <span class="cost-label">Total Cost:</span>
+                <span class="cost-value">$${cost.toFixed( 4 )}</span>
+                <span class="cost-label">Duration:</span>
+                <span class="cost-value">${duration}</span>
+                <span class="cost-label">Tokens:</span>
+                <span class="cost-value">${tokens.toLocaleString()}</span>
+            </div>
+        `;
     }
 
     renderJobCard( job, queueName ) {
@@ -5109,99 +5148,27 @@ class NotificationsUI {
         }
 
         // ═══════════════════════════════════════════════════════════════════
-        // Phase 7: Running job - duration timer
+        // Phase 7: Running job - show "In progress..." (no live timer)
+        // Final duration calculated server-side and shown in done queue via job.duration_seconds
         // ═══════════════════════════════════════════════════════════════════
         let durationSection = '';
-        if ( queueName === 'run' && job.started_at ) {
-            const startTime = new Date( job.started_at ).getTime();
-            const elapsed = Math.floor( ( Date.now() - startTime ) / 1000 );
-            const formattedDuration = this.formatDuration( elapsed );
-
+        if ( queueName === 'run' ) {
             durationSection = `
                 <div class="job-duration-line">
                     <span class="duration-label">Duration:</span>
-                    <span class="duration-value" id="duration-${jobId}" data-started-at="${job.started_at}">${formattedDuration}</span>
-                </div>
-            `;
-
-            // Schedule timer start after render (will be called after DOM insertion)
-            setTimeout( () => this.startDurationTimer( jobId, job.started_at ), 100 );
-        }
-
-        // ═══════════════════════════════════════════════════════════════════
-        // Phase 7: Done job - abstract, report link, cost summary
-        // ═══════════════════════════════════════════════════════════════════
-        let abstractSection = '';
-        let reportLinkSection = '';
-        let costSummarySection = '';
-
-        if ( queueName === 'done' ) {
-            // Abstract display
-            if ( job.abstract ) {
-                abstractSection = `
-                    <div class="job-abstract">
-                        <div class="abstract-header">📄 Summary</div>
-                        <div class="abstract-content">${this.escapeHtml( job.abstract )}</div>
-                    </div>
-                `;
-            }
-
-            // Report link (for agentic jobs like Deep Research)
-            if ( job.report_path ) {
-                const encodedPath = encodeURIComponent( job.report_path );
-                reportLinkSection = `
-                    <div class="job-report-link">
-                        <a href="/api/io/file?path=${encodedPath}"
-                           target="_blank" class="report-link-btn">
-                            📋 View Full Report
-                        </a>
-                    </div>
-                `;
-            }
-
-            // Cost summary (for agentic jobs)
-            if ( job.cost_summary ) {
-                const cost = job.cost_summary.total_cost_usd || 0;
-                const duration = job.duration_seconds ? this.formatDuration( job.duration_seconds ) : 'N/A';
-                const tokens = ( job.cost_summary.total_input_tokens || 0 ) + ( job.cost_summary.total_output_tokens || 0 );
-
-                costSummarySection = `
-                    <div class="job-cost-summary">
-                        <div class="cost-header">💰 Cost Breakdown</div>
-                        <div class="cost-grid">
-                            <span class="cost-label">Total Cost:</span>
-                            <span class="cost-value">$${cost.toFixed( 4 )}</span>
-                            <span class="cost-label">Duration:</span>
-                            <span class="cost-value">${duration}</span>
-                            <span class="cost-label">Tokens:</span>
-                            <span class="cost-value">${tokens.toLocaleString()}</span>
-                        </div>
-                    </div>
-                `;
-            }
-        }
-
-        // ═══════════════════════════════════════════════════════════════════
-        // Phase 7: Error display for dead jobs
-        // ═══════════════════════════════════════════════════════════════════
-        let errorSection = '';
-        if ( ( queueName === 'dead' || job.status === 'failed' ) && job.error ) {
-            errorSection = `
-                <div class="job-error">
-                    <div class="error-header">❌ Error</div>
-                    <div class="error-content">${this.escapeHtml( job.error )}</div>
+                    <span class="duration-value">In progress...</span>
                 </div>
             `;
         }
 
         // ═══════════════════════════════════════════════════════════════════
         // Build final HTML
+        // Session 107: Placeholder divs always present (hidden until populated)
+        // Session 107: Removed provisionalAttr - no longer using provisional registration
         // ═══════════════════════════════════════════════════════════════════
-        // Phase 6: Add data-provisional attribute for provisional cards
-        const provisionalAttr = job.provisional ? ' data-provisional="true"' : '';
 
         return `
-            <div class="job-card ${statusClass}" id="job-card-${jobId}" data-job-id="${jobId}"${provisionalAttr}>
+            <div class="job-card ${statusClass}" id="job-card-${jobId}" data-job-id="${jobId}">
                 <div class="job-card-header" onclick="window.notificationsUI.toggleJobCard('${jobId}', '${queueName}')">
                     ${agentBadge}${cacheHitBadge}${completionBadge}
                     <span class="job-question">${this.escapeHtml( truncatedQuestion )}</span>
@@ -5214,13 +5181,21 @@ class NotificationsUI {
                     <div class="job-full-question">
                         <strong>Question:</strong> ${this.escapeHtml( job.question_text || '' )}
                     </div>
-                    <div class="job-response">
-                        <strong>Response:</strong> ${this.escapeHtml( job.response_text || 'Processing...' )}
+                    <div class="job-response" style="${job.response_text ? '' : 'display: none'}">
+                        ${job.response_text ? `<strong>Response:</strong> ${this.escapeHtml( job.response_text )}` : ''}
                     </div>
-                    ${abstractSection}
-                    ${reportLinkSection}
-                    ${costSummarySection}
-                    ${errorSection}
+                    <div class="job-abstract" style="${job.abstract ? '' : 'display: none'}">
+                        ${job.abstract ? `<div class="abstract-header">📄 Summary</div><div class="abstract-content">${this.escapeHtml( job.abstract )}</div>` : ''}
+                    </div>
+                    <div class="job-report-link" style="${job.report_path ? '' : 'display: none'}">
+                        ${job.report_path ? `<a href="/api/io/file?path=${encodeURIComponent( job.report_path )}" target="_blank" class="report-link-btn">📋 View Full Report</a>` : ''}
+                    </div>
+                    <div class="job-cost-summary" style="${job.cost_summary ? '' : 'display: none'}">
+                        ${job.cost_summary ? this.renderCostSummaryContent( job.cost_summary, job.duration_seconds ) : ''}
+                    </div>
+                    <div class="job-error" style="${job.error ? '' : 'display: none'}">
+                        ${job.error ? `<div class="error-header">❌ Error</div><div class="error-content">${this.escapeHtml( job.error )}</div>` : ''}
+                    </div>
                     <div class="job-metadata">
                         <span>Agent: ${job.agent_type || 'Unknown'}</span>
                         <span>Time: ${timestamp}</span>
@@ -5295,81 +5270,6 @@ class NotificationsUI {
         } else {
             return `${secs}s`;
         }
-    }
-
-    startDurationTimer( jobId, startedAt ) {
-        /**
-         * Start a live-updating duration timer for a running job.
-         *
-         * Requires:
-         *     - jobId is a valid job ID
-         *     - startedAt is an ISO timestamp string
-         *
-         * Ensures:
-         *     - Updates duration display every second
-         *     - Timer handle stored in durationTimers map
-         *     - Previous timer for same job is cleared
-         */
-        // Clear any existing timer for this job
-        this.stopDurationTimer( jobId );
-
-        const durationEl = document.getElementById( `duration-${jobId}` );
-        if ( !durationEl ) {
-            this.log( `[Phase 7] Duration element not found: ${jobId}` );
-            return;
-        }
-
-        const startTime = new Date( startedAt ).getTime();
-        if ( isNaN( startTime ) ) {
-            this.log( `[Phase 7] Invalid startedAt timestamp: ${startedAt}` );
-            return;
-        }
-
-        // Update function
-        const updateDuration = () => {
-            const elapsed = Math.floor( ( Date.now() - startTime ) / 1000 );
-            durationEl.textContent = this.formatDuration( elapsed );
-        };
-
-        // Initial update
-        updateDuration();
-
-        // Start interval (update every second)
-        const timerId = setInterval( updateDuration, 1000 );
-        this.durationTimers.set( jobId, timerId );
-
-        this.log( `[Phase 7] Started duration timer for job: ${jobId}` );
-    }
-
-    stopDurationTimer( jobId ) {
-        /**
-         * Stop and clean up duration timer for a job.
-         *
-         * Requires:
-         *     - jobId is a job ID
-         *
-         * Ensures:
-         *     - Timer interval is cleared
-         *     - Timer handle removed from map
-         */
-        if ( this.durationTimers.has( jobId ) ) {
-            clearInterval( this.durationTimers.get( jobId ) );
-            this.durationTimers.delete( jobId );
-            this.log( `[Phase 7] Stopped duration timer for job: ${jobId}` );
-        }
-    }
-
-    stopAllDurationTimers() {
-        /**
-         * Stop all active duration timers.
-         *
-         * Called when clearing queues or during cleanup.
-         */
-        for ( const [ jobId, timerId ] of this.durationTimers ) {
-            clearInterval( timerId );
-        }
-        this.durationTimers.clear();
-        this.log( '[Phase 7] Stopped all duration timers' );
     }
 
     async toggleJobInteractions( jobId, event ) {

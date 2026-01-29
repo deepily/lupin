@@ -1,11 +1,18 @@
 # Bug Fix Queue
 
-## Session: 2026.01.27 (Session 103)
-**Owner**: claude.code@lupin.deepily.ai#8cc66d0d
-**Status**: Active
+## Session: 2026.01.28 (Session 107 - Bug Fix Mode)
+**Owner**: claude.code@lupin.deepily.ai#b9faa342
+**Status**: Closed
 
 ### Queued
 (No bugs remaining)
+
+### Completed (Session 107)
+- [x] Job card field parity bug → commit: 57a9fbb (Lupin)
+  - **Symptom**: WebSocket-created cards missing fields present in server-fetched cards
+  - **Fix**: Added 5 missing fields (completed_at, status, error, has_interactions, duration_seconds) to JS job object in handleJobStateTransition()
+  - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js`
+  - **Note**: Server-side fix (6 fields in running_fifo_queue.py) is in CoSA submodule - needs separate commit
 
 ### Completed (Session 105)
 - [x] Job cards not rendering when queue collapsed → commit: f13a8f1 (Lupin)

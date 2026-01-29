@@ -1,8 +1,34 @@
 # TODO
 
-Last updated: 2026-01-27 (Session 106)
+Last updated: 2026-01-28 (Session 107 - Complete)
 
 ## Pending
+
+### Tomorrow's Priority
+
+- [ ] Reinstall the skills builder multi-modality slash commands from the planning-is-prompting repo and rerun discovery mode
+
+### job_state_transition Implementation (Session 107 - Complete)
+
+- [x] Phase 1: Add job_state_transition to config files
+- [x] Phase 2: Add _emit_job_state_transition method to FifoQueue
+- [x] Phase 3: Add server emissions (7 transition points)
+- [x] Phase 4: Client subscription to job_state_transition
+- [x] Phase 5: Client handler (handleJobStateTransition, insertJobMetadata)
+- [x] Phase 6: Badge-only handlers
+- [x] Phase 7: Placeholder DOM nodes in renderJobCard()
+- [x] Phase 8: Remove cruft - data structures
+- [x] Phase 9: Remove cruft - methods
+- [x] Phase 10: Remove cruft - logic
+- [x] WebSocket smoke tests after Phase 10
+- [ ] Manual browser verification of job transitions
+
+### Bug Fix: Job Card Field Parity (Session 107 - For Next Session)
+
+- [ ] **Test bug fix**: WebSocket cards now include 6 missing fields (status, has_interactions, is_cache_hit, started_at, completed_at, duration_seconds)
+- [ ] Verify cards created via WebSocket match server-fetched cards after page refresh
+- [ ] Test with mock job submission (success path)
+- [ ] Test with mock job failure (error path)
 
 ### Implementation Plans
 
@@ -30,6 +56,10 @@ Last updated: 2026-01-27 (Session 106)
 - [ ] Loading spinners show during submission
 - [ ] Error messages display correctly
 
+### Architecture Review
+
+- [ ] **Cache Hit Behavior**: Revisit cache hit logic in `running_fifo_queue.py:_format_cached_result()`. Currently propagates cached `answer_conversational` without re-running code. General rule should be: re-run the code instead of simply returning cached conversational answer. May need to distinguish between "answer cache" vs "computation cache". See Session 107 discussion.
+
 ### Carried Over from Session 102
 
 - [ ] Test math agent notification fixes (hard refresh, ask "What's 11+11?", verify console logs and TTS)
@@ -44,6 +74,9 @@ Last updated: 2026-01-27 (Session 106)
 
 ## Completed (Recent)
 
+- [x] job_state_transition Phases 6-10 (badge handlers, DOM nodes, cruft removal) - Session 107
+- [x] WebSocket smoke tests for job_state_transition - Session 107
+- [x] Bug fix implementation: Add 6 missing fields to WebSocket metadata - Session 107
 - [x] Rename `currentUser` to `currentUserEmail` in notifications.js - Session 106
 - [x] Remove redundant `user_email` from Deep Research JS request body - Session 106
 - [x] Fix job cards not rendering when queue collapsed - Session 105
