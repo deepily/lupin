@@ -1,30 +1,33 @@
 # Lupin Project History
 
-> **🔧 SESSION 108 ACTIVE**: Bug Fix Mode (2026.01.29)
+> **✅ SESSION 108 COMPLETE**: Bug Fix Mode + Math Agent TTS Investigation (2026.01.29)
 > **Owner**: claude.code@lupin.deepily.ai#21a62c05
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
 >
 > ### Fixes
 > - **Fix 1**: Job card styling inconsistency (WebSocket vs server-fetched)
 >   - **Symptom**: Done queue cards looked different when inserted via WebSocket vs fetched from server
->   - **Root Cause**: `insertJobMetadata()` used raw HTML (`<strong>Abstract:</strong>`, unclassed `<a>`, plain text cost) instead of CSS-classed structure from `renderJobCard()`
->   - **Fix**: Extracted `renderAbstractSection()` and `renderReportLinkSection()` helpers; unified rendering in both paths
->   - **Also Fixed**: Cost summary now uses `renderCostSummaryContent()` with proper object handling
->   - **Debug Utility**: Added `window.notificationsUI.debugDumpJobCard(jobId)` for DOM comparison
+>   - **Root Cause**: `insertJobMetadata()` used raw HTML instead of CSS-classed structure from `renderJobCard()`
+>   - **Fix**: Extracted `renderAbstractSection()` and `renderReportLinkSection()` helpers; unified rendering
 >   - **File**: `src/fastapi_app/static/js/notifications.js`
 >
+> - **Fix 2**: Badge/card count mismatch in queue updates
+>   - **Symptom**: Badge showed correct count but cards didn't match after WebSocket updates
+>   - **Fix**: Synchronized badge and card rendering in queue update handlers
+>
+> ### Investigation: Math Agent TTS Not Working
+> - **Symptom**: Math jobs complete successfully but produce NO TTS audio (mock jobs DO work)
+> - **Root Cause Identified**: Two issues found:
+>   1. **Race Condition** (Fixed in earlier commit): `associate_job_with_user()` called AFTER `push()` - consumer thread could grab job before user mapping existed
+>   2. **Missing user_email Attribute** (Pending fix): Math agents lack `user_email` attribute that mock jobs have, causing TTS to route to wrong user (falls back to default email)
+> - **R&D Document**: `src/rnd/2026.01.29-math-agent-tts-bug-investigation.md`
+> - **Implementation Plan**: Look up `user_email` in `push_job()`, set on agents at creation time
+>
 > ### Workflow Installation
-> - Ran `/plan-install-wizard` to check available workflows
 > - Installed `/plan-bug-fix-mode-wrap` slash command (was missing from Lupin)
-> - Completes the bug fix mode command suite:
->   - `/plan-bug-fix-mode` - Main entry point
->   - `/plan-bug-fix-mode-start` - Initialize session
->   - `/plan-bug-fix-mode-continue` - Resume after context clear
->   - `/plan-bug-fix-mode-wrap` - Wrap up fix (NEW)
->   - `/plan-bug-fix-mode-close` - End session
 >
 > ### Session Summary
-> (Will be completed at session close)
+> Fixed job card UI issues, investigated Math Agent TTS bug to root cause, documented findings with implementation plan for next session.
 >
 > ---
 

@@ -1,10 +1,16 @@
 # TODO
 
-Last updated: 2026-01-28 (Session 107 - Complete)
+Last updated: 2026-01-29 (Session 108)
 
 ## Pending
 
 ### Tomorrow's Priority
+
+- [ ] **Math Agent TTS Fix**: Implement `user_email` attribute on agents for TTS routing
+  - Root cause: Agents lack `user_email` attribute, causing TTS to fall back to default email
+  - Plan: Look up `user_email` in `push_job()`, set on agents/snapshots at creation time
+  - R&D doc: `src/rnd/2026.01.29-math-agent-tts-bug-investigation.md`
+  - Files to modify: `src/cosa/rest/todo_fifo_queue.py`
 
 - [ ] Reinstall the skills builder multi-modality slash commands from the planning-is-prompting repo and rerun discovery mode
 
