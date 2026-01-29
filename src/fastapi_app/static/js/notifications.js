@@ -1840,27 +1840,33 @@ class NotificationsUI {
                     break;
                     
                 case "queue_todo_update":
-                    // Session 107: Badge-only update (job_state_transition handles card movement)
-                    this.log( `Queue TODO update: ${envelope.value}` );
-                    this.updateQueueCountBadge( "todo", envelope.value );
+                    // Session 108: Server broadcasts total count (all users), not per-user count.
+                    // Badge is kept accurate by job_state_transition events via updateQueueCountFromDOM().
+                    // Log both for debugging but don't update badge from this event.
+                    const todoContainer = document.getElementById( 'todo-jobs-container' );
+                    const todoDomCount  = todoContainer?.querySelectorAll( '.job-card' ).length || 0;
+                    this.log( `Queue TODO update: server=${envelope.value}, DOM=${todoDomCount} (ignoring server count)` );
                     break;
 
                 case "queue_running_update":
-                    // Session 107: Badge-only update (job_state_transition handles card movement)
-                    this.log( `Queue RUNNING update: ${envelope.value}` );
-                    this.updateQueueCountBadge( "run", envelope.value );
+                    // Session 108: Server broadcasts total count (all users), not per-user count.
+                    const runContainer = document.getElementById( 'run-jobs-container' );
+                    const runDomCount  = runContainer?.querySelectorAll( '.job-card' ).length || 0;
+                    this.log( `Queue RUNNING update: server=${envelope.value}, DOM=${runDomCount} (ignoring server count)` );
                     break;
 
                 case "queue_done_update":
-                    // Session 107: Badge-only update (job_state_transition handles card movement)
-                    this.log( `Queue DONE update: ${envelope.value}` );
-                    this.updateQueueCountBadge( "done", envelope.value );
+                    // Session 108: Server broadcasts total count (all users), not per-user count.
+                    const doneContainer = document.getElementById( 'done-jobs-container' );
+                    const doneDomCount  = doneContainer?.querySelectorAll( '.job-card' ).length || 0;
+                    this.log( `Queue DONE update: server=${envelope.value}, DOM=${doneDomCount} (ignoring server count)` );
                     break;
 
                 case "queue_dead_update":
-                    // Session 107: Badge-only update (job_state_transition handles card movement)
-                    this.log( `Queue DEAD update: ${envelope.value}` );
-                    this.updateQueueCountBadge( "dead", envelope.value );
+                    // Session 108: Server broadcasts total count (all users), not per-user count.
+                    const deadContainer = document.getElementById( 'dead-jobs-container' );
+                    const deadDomCount  = deadContainer?.querySelectorAll( '.job-card' ).length || 0;
+                    this.log( `Queue DEAD update: server=${envelope.value}, DOM=${deadDomCount} (ignoring server count)` );
                     break;
 
                 case "job_state_transition":
