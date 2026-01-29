@@ -1,8 +1,12 @@
 # TODO
 
-Last updated: 2026-01-28 (Session 107 - Bug Fix Mode)
+Last updated: 2026-01-28 (Session 107 - Complete)
 
 ## Pending
+
+### Tomorrow's Priority
+
+- [ ] Reinstall the skills builder multi-modality slash commands from the planning-is-prompting repo and rerun discovery mode
 
 ### job_state_transition Implementation (Session 107 - Complete)
 

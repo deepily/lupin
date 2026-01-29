@@ -1,12 +1,12 @@
 # Lupin Project History
 
-> **🔄 SESSION 107 IN PROGRESS**: job_state_transition WebSocket Event (2026.01.28)
+> **✅ SESSION 107 COMPLETE**: job_state_transition WebSocket Event (2026.01.28)
 > **Owner**: claude.code@lupin.deepily.ai
 > **Branch**: `wip-v0.1.2-2026.01.28-job-state-change-refactoring`
 >
-> ### Problem
+> ### Problem Solved
 >
-> Job cards get stuck in run queue after completion because existing `queue_*_update` events only signal count changes, not which specific job moved.
+> Job cards get stuck in run queue after completion because existing `queue_*_update` events only signal count changes, not which specific job moved. **Fixed** with new `job_state_transition` event that sends job-specific metadata on every queue transition.
 >
 > ### Accomplishments
 >
@@ -14,25 +14,37 @@
 > - Created PR #10 for v0.1.1 merge to main (156 files, +42k/-8k lines)
 > - Created development branch `wip-v0.1.2-2026.01.28-job-state-change-refactoring`
 >
-> **Server-Side** (Phases 1-3b):
+> **Server-Side** (Phases 1-3 Complete):
 > - Added `job_state_transition` WebSocket event to config
 > - Created `queue_util.py` with standalone `emit_job_state_transition()` utility
 > - Implemented 8 emission calls at queue transition points
-> - Refactored to remove thin wrapper, all callers use utility directly
+> - Added 6 fields to WebSocket metadata: status, has_interactions, is_cache_hit, started_at, completed_at, duration_seconds
 >
-> **Client-Side** (Phases 4-6 partial):
-> - Added event subscription and handler methods
-> - Implemented DOM reparenting for card movement between queues
+> **Client-Side** (Phases 4-10 Complete):
+> - Added event subscription and handler `handleJobStateTransition()`
+> - Implemented DOM reparenting for card movement between queues via `insertJobMetadata()`
 > - Changed `queue_*_update` handlers to badge-only updates
+> - Added 5 missing fields to JS job object for field parity with server-fetched cards
+> - Removed cruft: data structures, methods, logic from legacy approach
+>
+> **Bug Fix**: Job card field parity (WebSocket vs server-fetched)
+> - Cards created via WebSocket now have same fields as server-fetched cards
+> - Fields added: completed_at, status, error, has_interactions, duration_seconds
 >
 > **Documentation**:
 > - Created `src/rnd/job-state-transition/` with 6 tracking documents
-> - Master plan: `src/rnd/2026.01.28-job-state-transition-implementation-plan.md`
+> - Added research doc on large repo documents as skills
 >
-> ### Tracking
+> ### Commits
+> - `e9c8a51` - Session 107: job_state_transition Phases 1-3 server complete
+> - `75f0593` - Session 107: Trim history entry, update phase tracking
+> - `247c08b` - Add 4 Agent Skills for intent-based knowledge activation
+> - `57a9fbb` - Session 107: Fix job card field parity (WebSocket vs server-fetched)
 >
-> - **TODO**: See `TODO.md` for phase checklist
-> - **Implementation**: See `src/rnd/job-state-transition/01-implementation-current.md`
+> ### Pending (CoSA Submodule)
+> - `running_fifo_queue.py` - Server-side WebSocket metadata (6 fields)
+> - `queue_consumer.py`, `todo_fifo_queue.py` - Related queue changes
+> - `queue_util.py` - New file for emit utility
 >
 > ---
 
