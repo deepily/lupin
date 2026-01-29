@@ -1,7 +1,7 @@
 # Job State Transition WebSocket Event
 
 **Created**: 2026-01-28 (Session 107)
-**Status**: In Progress (Phase 4 of 10) - Server complete, client pending
+**Status**: In Progress (Phase 6 of 10) - Client handlers added, badge-only conversion in progress
 **Branch**: `wip-v0.1.2-2026.01.28-job-state-change-refactoring`
 
 ## Problem Statement
@@ -29,7 +29,9 @@ Add fine-grained `job_state_transition` WebSocket event for deltas. Remove all r
 | 1 | Configuration files | ✅ Complete |
 | 2 | `_emit_job_state_transition()` method | ✅ Complete |
 | 3 | Server emissions at transition points | ✅ Complete (7/7) |
-| 4 | Client subscription | 🔄 Next |
+| 4 | Client subscription | ✅ Complete |
+| 5 | Client handler | ✅ Complete |
+| 6 | Badge-only handlers | 🔄 In Progress (need `updateQueueCountBadge` method) |
 | 5 | Client handler | ⏳ Pending |
 | 6 | Badge-only handlers | ⏳ Pending |
 | 7 | Placeholder DOM nodes | ⏳ Pending |

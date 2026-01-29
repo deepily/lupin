@@ -1,23 +1,30 @@
 # TODO
 
-Last updated: 2026-01-28 (Session 107)
+Last updated: 2026-01-28 (Session 107 - Bug Fix Mode)
 
 ## Pending
 
-### job_state_transition Implementation (Session 107 - In Progress)
+### job_state_transition Implementation (Session 107 - Complete)
 
 - [x] Phase 1: Add job_state_transition to config files
 - [x] Phase 2: Add _emit_job_state_transition method to FifoQueue
 - [x] Phase 3: Add server emissions (7 transition points)
 - [x] Phase 4: Client subscription to job_state_transition
 - [x] Phase 5: Client handler (handleJobStateTransition, insertJobMetadata)
-- [ ] **Phase 6: Badge-only handlers** ← CURRENT (need `updateQueueCountBadge` method)
-- [ ] Phase 7: Placeholder DOM nodes in renderJobCard()
-- [ ] Phase 8: Remove cruft - data structures
-- [ ] Phase 9: Remove cruft - methods
-- [ ] Phase 10: Remove cruft - logic
-- [ ] WebSocket smoke tests after Phase 10
+- [x] Phase 6: Badge-only handlers
+- [x] Phase 7: Placeholder DOM nodes in renderJobCard()
+- [x] Phase 8: Remove cruft - data structures
+- [x] Phase 9: Remove cruft - methods
+- [x] Phase 10: Remove cruft - logic
+- [x] WebSocket smoke tests after Phase 10
 - [ ] Manual browser verification of job transitions
+
+### Bug Fix: Job Card Field Parity (Session 107 - For Next Session)
+
+- [ ] **Test bug fix**: WebSocket cards now include 6 missing fields (status, has_interactions, is_cache_hit, started_at, completed_at, duration_seconds)
+- [ ] Verify cards created via WebSocket match server-fetched cards after page refresh
+- [ ] Test with mock job submission (success path)
+- [ ] Test with mock job failure (error path)
 
 ### Implementation Plans
 
@@ -63,6 +70,9 @@ Last updated: 2026-01-28 (Session 107)
 
 ## Completed (Recent)
 
+- [x] job_state_transition Phases 6-10 (badge handlers, DOM nodes, cruft removal) - Session 107
+- [x] WebSocket smoke tests for job_state_transition - Session 107
+- [x] Bug fix implementation: Add 6 missing fields to WebSocket metadata - Session 107
 - [x] Rename `currentUser` to `currentUserEmail` in notifications.js - Session 106
 - [x] Remove redundant `user_email` from Deep Research JS request body - Session 106
 - [x] Fix job cards not rendering when queue collapsed - Session 105
