@@ -1,5 +1,29 @@
 # Lupin Project History
 
+> **✅ SESSION 112 COMPLETE**: Deep Research Protocol Compliance Fix (2026.01.30)
+> **Owner**: claude.code@lupin.deepily.ai#bd42074b
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+> Fixed Deep Research job submission failure: "Job must implement QueueableJob protocol, got DeepResearchJob"
+>
+> **Root Cause**: `QueueableJob` protocol (expanded in Session 111) requires `is_cache_hit: bool`, but `AgenticJobBase` was missing this attribute. The protocol had `is_cacheable` (property returning False) but not `is_cache_hit` (instance attribute).
+>
+> **Fix**: Added `self.is_cache_hit = False` to `AgenticJobBase.__init__()` with comment "Agentic jobs are never cache hits"
+>
+> **Verification**: All smoke tests pass:
+> - `deep_research` router import: OK
+> - `AgenticJobBase` smoke test: 8/8 tests passed
+> - `QueueableJob` protocol smoke test: All tests passed
+> - Protocol compliance check: `is_queueable_job()` returns True
+>
+> **Files Modified (COSA)**:
+> - `src/cosa/agents/agentic_job_base.py` (+1 line)
+>
+> **Commit**: 0e0ecfc (Lupin tracking), COSA pending
+>
+> ---
+>
 > **✅ SESSION 111 COMPLETE**: Defensive Attribute Access Refactoring (2026.01.30)
 > **Owner**: claude.code@lupin.deepily.ai#bd42074b
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`

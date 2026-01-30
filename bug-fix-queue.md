@@ -8,6 +8,12 @@
 (No bugs remaining)
 
 ### Completed
+- [x] **Deep Research QueueableJob protocol compliance** → commit: 0e0ecfc (Lupin), COSA pending
+  - **Symptom**: Deep Research jobs fail to submit with "Job must implement QueueableJob protocol"
+  - **Root Cause**: `AgenticJobBase` missing `is_cache_hit` attribute required by expanded Protocol
+  - **Fix**: Added `self.is_cache_hit = False` to `AgenticJobBase.__init__()`
+  - **File (COSA)**: `src/cosa/agents/agentic_job_base.py`
+
 - [x] **user_email injection refactoring** → commit: 7243a31 (Lupin), COSA pending
   - Added `user_email` as first-class constructor parameter to AgentBase, 6 traditional agents, and SolutionSnapshot
   - Removed ugly `agent.user_email = user_email` injection in todo_fifo_queue.py
