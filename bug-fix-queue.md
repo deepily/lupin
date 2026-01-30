@@ -4,8 +4,15 @@
 **Owner**: claude.code@lupin.deepily.ai#0bd32185
 **Status**: Active
 
-### Queued
-(No bugs remaining)
+### Queued (for next session)
+- [ ] **user_email injection refactoring**: Replace ugly attribute injection with first-class parameter
+  - **Problem**: Currently injecting `user_email` directly onto agent/job objects (e.g., `agent.user_email = user_email`)
+  - **Goal**: Use proper first-class parameter through constructor or explicit method
+  - **Files**: `src/cosa/rest/todo_fifo_queue.py`, `src/cosa/rest/fifo_queue.py`
+
+- [ ] **Unknown badge for dynamically created objects**: Fix badge display for WebSocket-created items
+  - **Symptom**: Badge shows "unknown" for objects created via WebSocket instead of proper type
+  - **Context**: Likely related to job card or notification card rendering
 
 ### Completed
 - [x] Math Agent TTS - job_id pattern validation → commit: 9b86ddc
