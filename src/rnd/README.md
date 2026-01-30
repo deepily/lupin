@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.01.30 - Defensive Attribute Access Anti-Pattern Research
+- **Research Document**: [2026.01.30-defensive-attribute-access-anti-pattern.md](2026.01.30-defensive-attribute-access-anti-pattern.md) - **✅ IMPLEMENTED** - Comprehensive analysis and refactoring of the `hasattr()`/`getattr()` anti-pattern in the queue system. **Phases 1-4 complete**: Protocol validation at boundaries (FifoQueue, TodoFifoQueue, RunningFifoQueue), replaced ~89 `getattr` chains with direct attribute access, replaced ~15 `hasattr` type checks with `isinstance()`. Updated QueueableJob Protocol with user_email, started_at, completed_at, is_cache_hit, status, error attributes. All smoke tests passing. Phase 5 (static analysis) deferred to v0.2.0 CI.
+
 ### 2026.01.29 - Math Agent TTS Bug Investigation
 - **Bug Investigation**: [2026.01.29-math-agent-tts-bug-investigation.md](2026.01.29-math-agent-tts-bug-investigation.md) - **🔧 ROOT CAUSE IDENTIFIED** - Investigation of Math Agent TTS not working while Mock Jobs work. Two issues found: (1) Race condition where `associate_job_with_user()` called after `push()` - FIXED. (2) Missing `user_email` attribute on agents causing TTS to route to wrong user - FIX PENDING. Includes code locations, notification flow tracing, and implementation plan for setting `user_email` on agents at creation time.
 
