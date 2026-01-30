@@ -1,5 +1,23 @@
 # Lupin Project History
 
+> **🔧 SESSION 110 ACTIVE**: Bug Fix Mode (2026.01.30)
+> **Owner**: claude.code@lupin.deepily.ai#bd42074b
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Fixes
+> - **Fix 1**: Unknown badge for WebSocket-created job cards
+>   - **Symptom**: Badge shows "Unknown" instead of "Math" when jobs transition via WebSocket (works after page reload)
+>   - **Root Cause**: Defensive `getattr()` chains masked missing implementation; e.g., `getattr(job, 'agent_class_name', getattr(job, 'JOB_TYPE', 'Unknown'))`
+>   - **Fix**: All queueable objects implement `job_type` property - replaced 8 defensive chains with direct `job.job_type` access
+>   - **Files (COSA)**: `queue_consumer.py`, `todo_fifo_queue.py`, `running_fifo_queue.py`
+>   - **Test**: Smoke tests PASS (all 3 files)
+>   - **Commit**: f8e3bda (Lupin tracking), COSA pending
+>
+> ### Session Summary
+> (Will be completed at session close)
+>
+> ---
+
 > **✅ SESSION 109 COMPLETE**: Bug Fix Mode (2026.01.29)
 > **Owner**: claude.code@lupin.deepily.ai#0bd32185
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`

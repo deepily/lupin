@@ -1,20 +1,21 @@
 # Bug Fix Queue
 
-## Session: 2026.01.29 (Session 109 - Bug Fix Mode)
-**Owner**: claude.code@lupin.deepily.ai#0bd32185
-**Status**: Closed
+## Session: 2026.01.30 (Session 110 - Bug Fix Mode)
+**Owner**: claude.code@lupin.deepily.ai#bd42074b
+**Status**: Active
 
-### Queued (for next session)
+### Queued
 - [ ] **user_email injection refactoring**: Replace ugly attribute injection with first-class parameter
   - **Problem**: Currently injecting `user_email` directly onto agent/job objects (e.g., `agent.user_email = user_email`)
   - **Goal**: Use proper first-class parameter through constructor or explicit method
   - **Files**: `src/cosa/rest/todo_fifo_queue.py`, `src/cosa/rest/fifo_queue.py`
 
-- [ ] **Unknown badge for dynamically created objects**: Fix badge display for WebSocket-created items
-  - **Symptom**: Badge shows "unknown" for objects created via WebSocket instead of proper type
-  - **Context**: Likely related to job card or notification card rendering
-
 ### Completed
+- [x] **Unknown badge for dynamically created objects**: Fix badge display for WebSocket-created items → commit: f8e3bda (Lupin), COSA pending
+  - **Symptom**: Badge shows "unknown" for objects created via WebSocket instead of proper type
+  - **Fix**: Replaced 8 defensive `getattr()` chains with direct `job.job_type` access across 3 COSA files
+  - **Files (COSA)**: `queue_consumer.py`, `todo_fifo_queue.py`, `running_fifo_queue.py`
+
 - [x] Math Agent TTS - job_id pattern validation → commit: 9b86ddc
   - **Symptom**: Math agents produced no TTS; Pydantic validation error on compound hash job_id
   - **Fix**: Updated regex in `notification_models.py` to accept `SHA256::UUID` compound format
