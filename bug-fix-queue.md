@@ -5,12 +5,14 @@
 **Status**: Active
 
 ### Queued
-- [ ] **user_email injection refactoring**: Replace ugly attribute injection with first-class parameter
-  - **Problem**: Currently injecting `user_email` directly onto agent/job objects (e.g., `agent.user_email = user_email`)
-  - **Goal**: Use proper first-class parameter through constructor or explicit method
-  - **Files**: `src/cosa/rest/todo_fifo_queue.py`, `src/cosa/rest/fifo_queue.py`
+(No bugs remaining)
 
 ### Completed
+- [x] **user_email injection refactoring** → commit: 7243a31 (Lupin), COSA pending
+  - Added `user_email` as first-class constructor parameter to AgentBase, 6 traditional agents, and SolutionSnapshot
+  - Removed ugly `agent.user_email = user_email` injection in todo_fifo_queue.py
+  - Simplified hasattr check in fifo_queue.py
+
 - [x] **Unknown badge for dynamically created objects**: Fix badge display for WebSocket-created items → commit: f8e3bda (Lupin), COSA pending
   - **Symptom**: Badge shows "unknown" for objects created via WebSocket instead of proper type
   - **Fix**: Replaced 8 defensive `getattr()` chains with direct `job.job_type` access across 3 COSA files

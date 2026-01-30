@@ -13,6 +13,13 @@
 >   - **Test**: Smoke tests PASS (all 3 files)
 >   - **Commit**: f8e3bda (Lupin tracking), COSA pending
 >
+> - **Fix 2**: user_email injection refactoring
+>   - **Problem**: Ugly attribute injection `agent.user_email = user_email` after instantiation
+>   - **Fix**: Added `user_email` as first-class constructor parameter to AgentBase, all 6 traditional agents, and SolutionSnapshot
+>   - **Files (COSA)**: `agent_base.py`, `math_agent.py`, `calendaring_agent.py`, `weather_agent.py`, `receptionist_agent.py`, `todo_list_agent.py`, `date_and_time_agent.py`, `solution_snapshot.py`, `todo_fifo_queue.py`, `fifo_queue.py`
+>   - **Test**: Smoke tests PASS, syntax validation PASS
+>   - **Commit**: 7243a31 (Lupin tracking), COSA pending
+>
 > ### Session Summary
 > (Will be completed at session close)
 >

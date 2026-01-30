@@ -74,9 +74,9 @@ Last updated: 2026-01-29 (Session 109)
 
 ## Completed (Recent)
 
-- [x] **Math Agent TTS Fix**: job_id pattern + user_email pipeline - Session 109
+- [x] **Math Agent TTS Fix**: job_id pattern + user_email pipeline - Session 109, 110
   - Fix: Updated regex in `notification_models.py` to accept compound hash format
-  - Fix: Added `user_email` propagation through job pipeline (COSA changes pending commit)
+  - Fix: Added `user_email` as first-class constructor parameter (Session 110)
   - Verified: TTS now works for math questions via /api/push
 - [x] job_state_transition Phases 6-10 (badge handlers, DOM nodes, cruft removal) - Session 107
 - [x] WebSocket smoke tests for job_state_transition - Session 107
