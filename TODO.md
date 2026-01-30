@@ -1,16 +1,10 @@
 # TODO
 
-Last updated: 2026-01-29 (Session 108)
+Last updated: 2026-01-29 (Session 109)
 
 ## Pending
 
 ### Tomorrow's Priority
-
-- [ ] **Math Agent TTS Fix**: Implement `user_email` attribute on agents for TTS routing
-  - Root cause: Agents lack `user_email` attribute, causing TTS to fall back to default email
-  - Plan: Look up `user_email` in `push_job()`, set on agents/snapshots at creation time
-  - R&D doc: `src/rnd/2026.01.29-math-agent-tts-bug-investigation.md`
-  - Files to modify: `src/cosa/rest/todo_fifo_queue.py`
 
 - [ ] Reinstall the skills builder multi-modality slash commands from the planning-is-prompting repo and rerun discovery mode
 
@@ -68,7 +62,7 @@ Last updated: 2026-01-29 (Session 108)
 
 ### Carried Over from Session 102
 
-- [ ] Test math agent notification fixes (hard refresh, ask "What's 11+11?", verify console logs and TTS)
+- [x] Test math agent notification fixes (hard refresh, ask "What's 11+11?", verify console logs and TTS) - Session 109 ✅
 - [ ] Verify both notifications appear in job card (not sender card)
 - [ ] Future: Add `tts_raw` parameter to cosa-voice MCP server
 
@@ -80,6 +74,10 @@ Last updated: 2026-01-29 (Session 108)
 
 ## Completed (Recent)
 
+- [x] **Math Agent TTS Fix**: job_id pattern + user_email pipeline - Session 109
+  - Fix: Updated regex in `notification_models.py` to accept compound hash format
+  - Fix: Added `user_email` propagation through job pipeline (COSA changes pending commit)
+  - Verified: TTS now works for math questions via /api/push
 - [x] job_state_transition Phases 6-10 (badge handlers, DOM nodes, cruft removal) - Session 107
 - [x] WebSocket smoke tests for job_state_transition - Session 107
 - [x] Bug fix implementation: Add 6 missing fields to WebSocket metadata - Session 107

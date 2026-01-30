@@ -5,10 +5,14 @@
 **Status**: Active
 
 ### Queued
-- [ ] (Add bugs here)
+(No bugs remaining)
 
 ### Completed
-(Completed bugs will be moved here)
+- [x] Math Agent TTS - job_id pattern validation → commit: 9b86ddc
+  - **Symptom**: Math agents produced no TTS; Pydantic validation error on compound hash job_id
+  - **Fix**: Updated regex in `notification_models.py` to accept `SHA256::UUID` compound format
+  - **File (COSA)**: `src/cosa/cli/notification_models.py`
+  - **Verified**: TTS now works for math questions via /api/push
 
 ---
 
