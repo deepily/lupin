@@ -1,5 +1,27 @@
 # Lupin Project History
 
+> **🔧 SESSION 109 ACTIVE**: Bug Fix Mode (2026.01.29)
+> **Owner**: claude.code@lupin.deepily.ai#0bd32185
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Fixes
+> - **Fix 1**: Math Agent TTS - job_id pattern validation ✅ VERIFIED
+>   - **Symptom**: Math agents produced no TTS; Pydantic validation error on compound hash job_id
+>   - **Root Cause**: `notification_models.py` job_id pattern didn't accept `SHA256::UUID` compound format
+>   - **Fix**: Updated regex to accept compound hashes: `^([a-z]+-[a-f0-9]{8}|[a-f0-9]{64}(::[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})?)$`
+>   - **File**: `src/cosa/cli/notification_models.py` (2 locations: NotificationRequest, AsyncNotificationRequest)
+>
+> - **COSA Changes** (pending commit in COSA repo):
+>   - Added `user_email` parameter to `push_job()` and `_queue_best_snapshot()`
+>   - Simplified `_notify()` with direct `target_user` parameter
+>   - Removed `_get_target_user_email()` method (47 lines deleted)
+>   - Set `user_email` on agents/jobs at creation time for TTS routing
+>
+> ### Session Summary
+> (Will be completed at session close)
+>
+> ---
+
 > **✅ SESSION 108 COMPLETE**: Bug Fix Mode + Math Agent TTS Investigation (2026.01.29)
 > **Owner**: claude.code@lupin.deepily.ai#21a62c05
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
