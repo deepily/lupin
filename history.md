@@ -1,6 +1,6 @@
 # Lupin Project History
 
-> **🔧 SESSION 109 ACTIVE**: Bug Fix Mode (2026.01.29)
+> **✅ SESSION 109 COMPLETE**: Bug Fix Mode (2026.01.29)
 > **Owner**: claude.code@lupin.deepily.ai#0bd32185
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
 >
@@ -18,7 +18,12 @@
 >   - Set `user_email` on agents/jobs at creation time for TTS routing
 >
 > ### Session Summary
-> (Will be completed at session close)
+> - **Total Fixes**: 1 (Math Agent TTS)
+> - **Files Changed**: 5 (1 Lupin tracking, 4 COSA pending)
+> - **Commits (Lupin)**: f0a5c33, 7736b44, bce5639
+> - **Queued for Tomorrow**: 2 bugs (user_email refactoring, unknown badge fix)
+>
+> **Status**: Session closed 2026.01.29
 >
 > ---
 
