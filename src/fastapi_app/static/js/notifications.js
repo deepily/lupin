@@ -2335,8 +2335,12 @@ class NotificationsUI {
             return;
         }
 
-        // Use the same recording flow as Q&A STT via recordingManager
-        await this.recordingManager.startRecording( inputId, button, inputElement );
+        // Toggle behavior - stop if recording, start if not
+        if ( this.recordingManager.isRecording() ) {
+            await this.recordingManager.stopRecording();
+        } else if ( !this.recordingManager.isProcessing() ) {
+            await this.recordingManager.startRecording( inputId, button, inputElement );
+        }
     }
 
     // ========================================
@@ -2570,22 +2574,9 @@ class NotificationsUI {
     // ========================================
 
     async handleQASTTButtonClick() {
+        // Thin wrapper - delegates to unified handleSTTButtonClick
         const button = document.getElementById( 'qa-stt-button' );
-        const textInput = document.getElementById( 'qa-input' );
-
-        // If already recording, stop it
-        if ( this.recordingManager.isRecording() ) {
-            await this.recordingManager.stopRecording();
-            return;
-        }
-
-        // If processing, ignore click
-        if ( this.recordingManager.isProcessing() ) {
-            return;
-        }
-
-        // Start new recording using unified RecordingManager
-        await this.recordingManager.startRecording( 'qa', button, textInput );
+        await this.handleSTTButtonClick( 'qa-input', button );
     }
 
     handleJobCompletion( envelope ) {
@@ -2736,15 +2727,9 @@ class NotificationsUI {
      * Uses unified RecordingManager for voice input.
      */
     async handleCCSTTButtonClick() {
+        // Thin wrapper - delegates to unified handleSTTButtonClick
         const button = document.getElementById( 'cc-stt-button' );
-        const textInput = document.getElementById( 'cc-prompt' );
-
-        // Toggle recording state using unified RecordingManager
-        if ( this.recordingManager.isRecording() ) {
-            await this.recordingManager.stopRecording();
-        } else if ( !this.recordingManager.isProcessing() ) {
-            await this.recordingManager.startRecording( 'cc-prompt', button, textInput );
-        }
+        await this.handleSTTButtonClick( 'cc-prompt', button );
     }
 
     async submitClaudeCode() {

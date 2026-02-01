@@ -1,5 +1,36 @@
 # Lupin Project History
 
+> **🔧 SESSION 114 ACTIVE**: Bug Fix Mode (2026.01.31)
+> **Owner**: claude.code@lupin.deepily.ai#42b5bbd7
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Fixes
+> - **Fix 1**: Consolidate voice recording toggle handlers
+>   - **Symptom**: Podcast Generator recording button stuck in recording mode (clicking doesn't stop)
+>   - **Root Cause**: `handleSTTButtonClick()` missing toggle logic - just called `startRecording()` directly
+>   - **Fix**: Added toggle logic to `handleSTTButtonClick()` (if recording → stop, else if not processing → start)
+>   - **Cleanup**: Converted `handleQASTTButtonClick()` and `handleCCSTTButtonClick()` from duplicate implementations (~28 lines total) to thin wrappers (~8 lines total)
+>   - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js`
+>   - **Test**: Browser verification needed (Ctrl+Shift+R to hard refresh)
+>   - **Commit**: e14ae62
+>
+> ### Session Summary
+> (Will be completed at session close)
+>
+> ---
+
+> **🔧 SESSION 113 ACTIVE**: Bug Fix Mode (2026.01.31)
+> **Owner**: claude.code@lupin.deepily.ai#d9d74b04
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Fixes
+> (Individual fixes will be added here)
+>
+> ### Session Summary
+> (Will be completed at session close)
+>
+> ---
+
 > **✅ SESSION 112 COMPLETE**: Deep Research Protocol Compliance Fix (2026.01.30)
 > **Owner**: claude.code@lupin.deepily.ai#bd42074b
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`

@@ -1,6 +1,33 @@
 # Bug Fix Queue
 
-## Session: 2026.01.30 (Sessions 110-112 - Bug Fix Mode)
+## Session: 2026.01.31 (Session 114 - Bug Fix Mode)
+**Owner**: claude.code@lupin.deepily.ai#42b5bbd7
+**Status**: Active
+
+### Queued
+(No bugs remaining)
+
+### Completed
+- [x] Podcast Generator recording button stuck in recording mode → commit: e14ae62
+  - **Root Cause**: `handleSTTButtonClick()` missing toggle logic
+  - **Fix**: Added toggle check, converted duplicate handlers to thin wrappers
+  - **File (Lupin)**: `src/fastapi_app/static/js/notifications.js`
+
+---
+
+## Session: 2026.01.31 (Session 113 - Bug Fix Mode)
+**Owner**: claude.code@lupin.deepily.ai#d9d74b04
+**Status**: Active
+
+### Queued
+- [ ] (Add bugs here)
+
+### Completed
+(Completed bugs will be moved here)
+
+---
+
+## Previous Session: 2026.01.30 (Sessions 110-112 - Bug Fix Mode)
 **Owner**: claude.code@lupin.deepily.ai#bd42074b
 **Status**: Closed
 
