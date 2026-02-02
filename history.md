@@ -1,5 +1,37 @@
 # Lupin Project History
 
+> **✅ SESSION 118 COMPLETE**: Skills Management Commands Installation + Discovery (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#7eeef663
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+>
+> **Skills Management Slash Commands Installed**:
+> Installed 5 mode-specific skills management slash commands from planning-is-prompting repo, adapted for LUPIN project:
+> - `/plan-skills-management-discover` - Find skill candidates in documentation
+> - `/plan-skills-management-create` - Build new skill from documentation
+> - `/plan-skills-management-edit` - Update existing skill
+> - `/plan-skills-management-audit` - Check skills health against documentation
+> - `/plan-skills-management-delete` - Remove obsolete skill
+>
+> **Files Created**:
+> - `.claude/commands/plan-skills-management-discover.md`
+> - `.claude/commands/plan-skills-management-create.md`
+> - `.claude/commands/plan-skills-management-edit.md`
+> - `.claude/commands/plan-skills-management-audit.md`
+> - `.claude/commands/plan-skills-management-delete.md`
+>
+> **Skills Discovery Run**:
+> Executed discovery workflow and identified 3 new skill candidates (added to TODO.md):
+> - **notification-patterns** (HIGH) - cosa-voice MCP usage patterns (~250 lines)
+> - **path-management** (MEDIUM) - `cu.get_project_root()` vs bootstrap (~150 lines)
+> - **code-style-preferences** (LOW) - Spacing, alignment, getattr prohibition (~100 lines)
+>
+> **Files Modified**:
+> - `TODO.md` - Updated session number, added skill candidates section
+>
+> ---
+
 > **✅ SESSION 117 COMPLETE**: Fix Podcast Generator Dry-Run Notifications (2026.02.02)
 > **Owner**: claude.code@lupin.deepily.ai#8594147a
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`

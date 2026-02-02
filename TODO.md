@@ -1,12 +1,15 @@
 # TODO
 
-Last updated: 2026-02-02 (Session 116)
+Last updated: 2026-02-02 (Session 118)
 
 ## Pending
 
-### Tomorrow's Priority
+### Skills Management (Session 118 Discovery)
 
-- [ ] Reinstall the skills builder multi-modality slash commands from the planning-is-prompting repo and rerun discovery mode
+Skill candidates identified - create with `/plan-skills-management-create <skill-name>`:
+- [ ] **notification-patterns** (HIGH) - cosa-voice MCP usage patterns (~250 lines)
+- [ ] **path-management** (MEDIUM) - `cu.get_project_root()` vs bootstrap (~150 lines)
+- [ ] **code-style-preferences** (LOW) - Spacing, alignment, getattr prohibition (~100 lines)
 
 ### Before Branch Merge (This Week)
 
@@ -65,7 +68,7 @@ Last updated: 2026-02-02 (Session 116)
 
 ### Architecture Review
 
-- [ ] **Cache Hit Behavior**: Revisit cache hit logic in `running_fifo_queue.py:_format_cached_result()`. Currently propagates cached `answer_conversational` without re-running code. General rule should be: re-run the code instead of simply returning cached conversational answer. May need to distinguish between "answer cache" vs "computation cache". See Session 107 discussion.
+- [x] **Cache Hit Behavior**: Moved to bug-fix-queue.md - Session 118
 
 ### Future Considerations
 
