@@ -9,7 +9,7 @@ Last updated: 2026-02-02 (Session 115)
 - [ ] Reinstall the skills builder multi-modality slash commands from the planning-is-prompting repo and rerun discovery mode
 - [x] **Run Deep Research dry-run smoke test** - Session 115: All 5 tests passed (login, submit, structure, polling, verification). Job dr-6aa5d16d completed in ~10s with $0.00 cost.
 - [x] **Run Podcast Generator dry-run API smoke test** - Session 115: All tests passed. Job pg-dd026977 completed in ~10s with $0.00 cost.
-- [ ] **Run Research→Podcast dry-run API smoke test** - Test `/api/deep-research-to-podcast/submit` with dry_run=true, verify rp-xxxxxxxx prefix
+- [x] **Run Research→Podcast dry-run API smoke test** - Session 115: All tests passed. Job rp-221fe28e completed in ~14s with $0.00 cost.
 
 ### job_state_transition Implementation (Session 107 - Complete)
 

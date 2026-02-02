@@ -1,6 +1,6 @@
 # Lupin Project History
 
-> **✅ SESSION 115 COMPLETE**: Push Method Bug Fix (2026.02.02)
+> **✅ SESSION 115 COMPLETE**: Push Method Bug Fix + Smoke Tests (2026.02.02)
 > **Owner**: claude.code@lupin.deepily.ai#8594147a
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
 >
@@ -19,13 +19,18 @@
 > - `src/cosa/rest/routers/podcast_generator.py` (+8/-2 lines)
 > - `src/cosa/rest/routers/deep_research_to_podcast.py` (+8/-2 lines)
 >
-> **Files Modified (Lupin)**:
-> - `src/tests/smoke/test_podcast_generator_dry_run_smoke.py` (+2/-2 lines) - Fixed None abstract handling
+> **Files Created (Lupin)**:
+> - `src/tests/smoke/test_research_to_podcast_dry_run_smoke.py` - New smoke test for rp- prefix jobs
 >
-> **Verification**:
-> - ✓ Podcast Generator dry-run: pg-dd026977 completed in 10s, $0.00 cost
-> - ✓ Deep Research dry-run: dr-95e53553 completed in 10s, $0.00 cost
-> - ✓ Both router module smoke tests pass
+> **Files Modified (Lupin)**:
+> - `src/tests/smoke/test_podcast_generator_dry_run_smoke.py` - Fixed None abstract handling
+>
+> **Verification** (all 3 dry-run smoke tests pass):
+> - ✓ Deep Research: dr-6aa5d16d completed in 10s, $0.00 cost
+> - ✓ Podcast Generator: pg-dd026977 completed in 10s, $0.00 cost
+> - ✓ Research→Podcast: rp-221fe28e completed in 14s, $0.00 cost
+>
+> **Commits**: eab45bf (partial), pending (smoke test + docs)
 >
 > ---
 
