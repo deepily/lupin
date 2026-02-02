@@ -1,6 +1,35 @@
 # Lupin Project History
 
-> **🔧 SESSION 114 ACTIVE**: Bug Fix Mode (2026.01.31)
+> **✅ SESSION 115 COMPLETE**: Push Method Bug Fix (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#8594147a
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+> Fixed `push_job()` → `push()` method bug in Podcast Generator and Research→Podcast routers.
+>
+> **Root Cause**: Routers called `todo_queue.push_job( job, user_id, session_id )` which expects a string question, not a pre-built job object. Also used non-existent `get_position()` method.
+>
+> **Fix Applied**:
+> - Import `user_job_tracker` from `cosa.rest.queue_extensions`
+> - Associate user/session BEFORE push (race condition prevention)
+> - Use `todo_queue.push( job )` for pre-built job objects
+> - Use `todo_queue.size()` instead of `get_position()`
+>
+> **Files Modified (COSA)**:
+> - `src/cosa/rest/routers/podcast_generator.py` (+8/-2 lines)
+> - `src/cosa/rest/routers/deep_research_to_podcast.py` (+8/-2 lines)
+>
+> **Files Modified (Lupin)**:
+> - `src/tests/smoke/test_podcast_generator_dry_run_smoke.py` (+2/-2 lines) - Fixed None abstract handling
+>
+> **Verification**:
+> - ✓ Podcast Generator dry-run: pg-dd026977 completed in 10s, $0.00 cost
+> - ✓ Deep Research dry-run: dr-95e53553 completed in 10s, $0.00 cost
+> - ✓ Both router module smoke tests pass
+>
+> ---
+
+> **✅ SESSION 114 COMPLETE**: Bug Fix Mode (2026.01.31 - 2026.02.01)
 > **Owner**: claude.code@lupin.deepily.ai#42b5bbd7
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
 >
@@ -12,22 +41,40 @@
 >   - **Cleanup**: Converted `handleQASTTButtonClick()` and `handleCCSTTButtonClick()` from duplicate implementations (~28 lines total) to thin wrappers (~8 lines total)
 >   - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js`
 >   - **Test**: Browser verification needed (Ctrl+Shift+R to hard refresh)
->   - **Commit**: e14ae62
+>   - **Commit**: f4f6cc8
 >
 > ### Session Summary
-> (Will be completed at session close)
+> - **Total Fixes**: 1
+> - **Files Changed**: `src/fastapi_app/static/js/notifications.js`
+> - **Commits**: f4f6cc8
+>
+> **Status**: Session closed 2026.02.01
 >
 > ---
 
-> **🔧 SESSION 113 ACTIVE**: Bug Fix Mode (2026.01.31)
+> **✅ SESSION 113 COMPLETE**: Bug Fix Mode - Deep Research Dry-Run Smoke Test (2026.01.31)
 > **Owner**: claude.code@lupin.deepily.ai#d9d74b04
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
 >
-> ### Fixes
-> (Individual fixes will be added here)
+> ### Accomplishments
+> Implemented plan from plan mode for Deep Research dry-run smoke test and bug fix verification.
+>
+> **Findings**:
+> - **Bug fix already applied**: The `SessionSummary` dataclass fix in `job.py:396-401` was already implemented (replacing the mock `type()` object that didn't serialize to JSON)
+> - **Smoke test already exists**: `src/tests/smoke/test_deep_research_dry_run_smoke.py` (~250 lines) was already created with full test coverage
+> - **Test not executed**: Deferred to next session due to time constraints
+>
+> **Documentation Updates**:
+> - Updated `TODO.md` with priority item to run dry-run smoke test
+> - Added future consideration: Silent flag for notifications during automated testing
 >
 > ### Session Summary
-> (Will be completed at session close)
+> - **Total Fixes**: 0 (bug already fixed in prior session)
+> - **Files Changed**: `TODO.md` (2 edits)
+> - **Commits**: None (documentation-only session)
+> - **Test Status**: Pending - deferred to next session
+>
+> **Status**: Session closed 2026.01.31
 >
 > ---
 

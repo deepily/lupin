@@ -1,12 +1,15 @@
 # TODO
 
-Last updated: 2026-01-29 (Session 109)
+Last updated: 2026-02-02 (Session 115)
 
 ## Pending
 
 ### Tomorrow's Priority
 
 - [ ] Reinstall the skills builder multi-modality slash commands from the planning-is-prompting repo and rerun discovery mode
+- [x] **Run Deep Research dry-run smoke test** - Session 115: All 5 tests passed (login, submit, structure, polling, verification). Job dr-6aa5d16d completed in ~10s with $0.00 cost.
+- [x] **Run Podcast Generator dry-run API smoke test** - Session 115: All tests passed. Job pg-dd026977 completed in ~10s with $0.00 cost.
+- [ ] **Run Research→Podcast dry-run API smoke test** - Test `/api/deep-research-to-podcast/submit` with dry_run=true, verify rp-xxxxxxxx prefix
 
 ### job_state_transition Implementation (Session 107 - Complete)
 
@@ -59,6 +62,10 @@ Last updated: 2026-01-29 (Session 109)
 ### Architecture Review
 
 - [ ] **Cache Hit Behavior**: Revisit cache hit logic in `running_fifo_queue.py:_format_cached_result()`. Currently propagates cached `answer_conversational` without re-running code. General rule should be: re-run the code instead of simply returning cached conversational answer. May need to distinguish between "answer cache" vs "computation cache". See Session 107 discussion.
+
+### Future Considerations
+
+- [ ] **Silent flag for notifications**: Consider adding a `silent` parameter to the cosa-voice notification system to suppress TTS during automated testing. Would require changes to: router request models, job classes, voice_io wrappers, and core notification functions.
 
 ### Carried Over from Session 102
 
