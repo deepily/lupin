@@ -1,14 +1,51 @@
 # Bug Fix Queue
 
-## Session: 2026.01.31 (Session 114 - Bug Fix Mode)
-**Owner**: claude.code@lupin.deepily.ai#42b5bbd7
+## Session: 2026.02.02 (Session 116 - Bug Fix Mode)
+**Owner**: claude.code@lupin.deepily.ai#379d8015
 **Status**: Active
 
 ### Queued
 (No bugs remaining)
 
 ### Completed
-- [x] Podcast Generator recording button stuck in recording mode → commit: e14ae62
+- [x] **Dry-run completion messages too verbose for TTS** → Fixed
+  - **Symptom**: Dry-run completion messages included full file paths with emails, UUIDs, slashes
+  - **Fix**: Simplified return messages to voice-friendly summaries (paths remain in `abstract`)
+  - **Files (COSA)**:
+    - `src/cosa/agents/podcast_generator/job.py:336`
+    - `src/cosa/agents/deep_research_to_podcast/job.py:341`
+    - `src/cosa/agents/deep_research/job.py:420`
+  - **Smoke tests**: All 3 modules pass
+
+- [x] Run Deep Research dry-run smoke test → All 5 tests PASSED
+  - Job ID: dr-6aa5d16d
+  - Completed in: ~10s
+  - Cost: $0.00 (dry-run confirmed)
+- [x] Podcast Generator dry-run API smoke test → All tests PASSED
+  - Job ID: pg-dd026977
+  - Completed in: ~10s
+  - Cost: $0.00 (dry-run confirmed)
+  - **Bug fixed**: push_job() → push() with user_job_tracker association
+  - **Bug fixed**: get_position() → size()
+  - **Commit**: eab45bf (Lupin), CoSA pending
+- [x] Research→Podcast dry-run API smoke test → All tests PASSED
+  - Job ID: rp-221fe28e
+  - Completed in: ~14s
+  - Cost: $0.00 (dry-run confirmed)
+  - **Bug fixed**: Same push_job() → push() fix as Podcast Generator
+  - **Smoke test created**: test_research_to_podcast_dry_run_smoke.py
+
+---
+
+## Session: 2026.01.31 (Session 114 - Bug Fix Mode)
+**Owner**: claude.code@lupin.deepily.ai#42b5bbd7
+**Status**: Closed
+
+### Queued
+(No bugs remaining)
+
+### Completed
+- [x] Podcast Generator recording button stuck in recording mode → commit: f4f6cc8
   - **Root Cause**: `handleSTTButtonClick()` missing toggle logic
   - **Fix**: Added toggle check, converted duplicate handlers to thin wrappers
   - **File (Lupin)**: `src/fastapi_app/static/js/notifications.js`
@@ -17,13 +54,16 @@
 
 ## Session: 2026.01.31 (Session 113 - Bug Fix Mode)
 **Owner**: claude.code@lupin.deepily.ai#d9d74b04
-**Status**: Active
+**Status**: Closed
 
 ### Queued
-- [ ] (Add bugs here)
+(No bugs remaining)
 
 ### Completed
-(Completed bugs will be moved here)
+- [x] **Documentation-only session**: Verified dry-run bug fix already applied, smoke test already created
+  - Bug fix (`SessionSummary` dataclass in `job.py:396-401`) was already implemented
+  - Smoke test (`test_deep_research_dry_run_smoke.py`) was already created
+  - Test execution deferred to next session
 
 ---
 
