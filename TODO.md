@@ -7,6 +7,10 @@ Last updated: 2026-02-02 (Session 116)
 ### Tomorrow's Priority
 
 - [ ] Reinstall the skills builder multi-modality slash commands from the planning-is-prompting repo and rerun discovery mode
+
+### Before Branch Merge (This Week)
+
+- [ ] Run baseline testing plan: `src/rnd/2026.02.02-test-verification-plan.md`
 - [x] **Run Deep Research dry-run smoke test** - Session 115: All 5 tests passed (login, submit, structure, polling, verification). Job dr-6aa5d16d completed in ~10s with $0.00 cost.
 - [x] **Run Podcast Generator dry-run API smoke test** - Session 115: All tests passed. Job pg-dd026977 completed in ~10s with $0.00 cost.
 - [x] **Run Research→Podcast dry-run API smoke test** - Session 115: All tests passed. Job rp-221fe28e completed in ~14s with $0.00 cost.
@@ -24,14 +28,14 @@ Last updated: 2026-02-02 (Session 116)
 - [x] Phase 9: Remove cruft - methods
 - [x] Phase 10: Remove cruft - logic
 - [x] WebSocket smoke tests after Phase 10
-- [ ] Manual browser verification of job transitions
+- [x] Manual browser verification of job transitions
 
 ### Bug Fix: Job Card Field Parity (Session 107 - For Next Session)
 
-- [ ] **Test bug fix**: WebSocket cards now include 6 missing fields (status, has_interactions, is_cache_hit, started_at, completed_at, duration_seconds)
-- [ ] Verify cards created via WebSocket match server-fetched cards after page refresh
-- [ ] Test with mock job submission (success path)
-- [ ] Test with mock job failure (error path)
+- [x] **Test bug fix**: WebSocket cards now include 6 missing fields (status, has_interactions, is_cache_hit, started_at, completed_at, duration_seconds)
+- [x] Verify cards created via WebSocket match server-fetched cards after page refresh
+- [x] Test with mock job submission (success path)
+- [x] Test with mock job failure (error path)
 
 ### Implementation Plans
 
@@ -39,25 +43,25 @@ Last updated: 2026-02-02 (Session 116)
 
 ### Browser Testing (Agentic Job Submission)
 
-- [ ] **Test 1**: Deep Research submission - verify job queues with dr-xxxxxxxx ID
-- [ ] **Test 2**: Research→Podcast (checkbox) - verify rp-xxxxxxxx prefix and chained routing
-- [ ] **Test 3**: Podcast Generator - Direct path mode (immediate queue)
-- [ ] **Test 4**: Podcast Generator - Description mode (fuzzy match → multiple choice)
-- [ ] **Test 5**: Error handling - empty topic shows validation warning
-- [ ] **Test 6**: Dry-run mode - Deep Research breadcrumb notifications
-- [ ] **Test 7**: Dry-run mode - Podcast Generator breadcrumb notifications
-- [ ] **Test 8**: Dry-run mode - Chained workflow (both sets of breadcrumbs)
+- [x] **Test 1**: Deep Research submission - verify job queues with dr-xxxxxxxx ID
+- [x] **Test 2**: Research→Podcast (checkbox) - verify rp-xxxxxxxx prefix and chained routing
+- [x] **Test 3**: Podcast Generator - Direct path mode (immediate queue)
+- [x] **Test 4**: Podcast Generator - Description mode (fuzzy match → multiple choice)
+- [x] **Test 5**: Error handling - empty topic shows validation warning
+- [x] **Test 6**: Dry-run mode - Deep Research breadcrumb notifications
+- [x] **Test 7**: Dry-run mode - Podcast Generator breadcrumb notifications
+- [x] **Test 8**: Dry-run mode - Chained workflow (both sets of breadcrumbs)
 
 ### Verification Checklist
 
-- [ ] Research card submits to `/api/deep-research/submit`
-- [ ] Checkbox routes to `/api/deep-research-to-podcast/submit`
-- [ ] Podcast card submits to `/api/podcast-generator/submit`
-- [ ] Job IDs use correct prefixes (dr-, rp-, pg-)
-- [ ] Jobs appear in queue UI after submission
-- [ ] STT buttons work for voice input
-- [ ] Loading spinners show during submission
-- [ ] Error messages display correctly
+- [x] Research card submits to `/api/deep-research/submit`
+- [x] Checkbox routes to `/api/deep-research-to-podcast/submit`
+- [x] Podcast card submits to `/api/podcast-generator/submit`
+- [x] Job IDs use correct prefixes (dr-, rp-, pg-)
+- [x] Jobs appear in queue UI after submission
+- [x] STT buttons work for voice input
+- [x] Loading spinners show during submission
+- [x] Error messages display correctly
 
 ### Architecture Review
 
@@ -70,14 +74,14 @@ Last updated: 2026-02-02 (Session 116)
 ### Carried Over from Session 102
 
 - [x] Test math agent notification fixes (hard refresh, ask "What's 11+11?", verify console logs and TTS) - Session 109 ✅
-- [ ] Verify both notifications appear in job card (not sender card)
-- [ ] Future: Add `tts_raw` parameter to cosa-voice MCP server
+- [x] Verify both notifications appear in job card (not sender card)
+- [x] Future: Add `tts_raw` parameter to cosa-voice MCP server
 
 ### COSA Submodule (Needs Separate Commit)
 
-- [ ] Commit API consistency fix: `deep_research.py` derives user_email from JWT
-- [ ] Commit dry-run mode additions to routers and job classes
-- [ ] Commit new `mock_clients.py` for Podcast Generator
+- [x] Commit API consistency fix: `deep_research.py` derives user_email from JWT
+- [x] Commit dry-run mode additions to routers and job classes
+- [x] Commit new `mock_clients.py` for Podcast Generator
 
 ## Completed (Recent)
 
