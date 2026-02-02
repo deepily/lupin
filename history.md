@@ -1,5 +1,73 @@
 # Lupin Project History
 
+> **✅ SESSION 121 COMPLETE**: Cache Freshness Policy Planning (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#49a88ad2
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+>
+> **Bug Analysis**: Investigated cache hit behavior in `running_fifo_queue.py:_format_cached_result()` - returns cached `answer_conversational` without re-executing code, breaking time-sensitive queries.
+>
+> **Design Decision**: Binary freshness policy (IMMUTABLE/VOLATILE) - no TTL complexity.
+>
+> **Implementation Plan Created**: Comprehensive 4-phase implementation plan:
+> - **Phase 1**: Foundation - `cache_freshness_policy.py`, SolutionSnapshot field, LanceDB schema, config keys
+> - **Phase 2**: Agent integration - property overrides in DateAndTimeAgent (VOLATILE), MathAgent (IMMUTABLE), WeatherAgent (VOLATILE)
+> - **Phase 3**: Enforcement - `_is_cache_immutable()` and `_handle_volatile_cache()` in running_fifo_queue.py
+> - **Phase 4**: Semantic match confirmation (deferred)
+>
+> **Key Design Elements**:
+> - Three-tier policy resolution: explicit > auto-detect > agent default
+> - Code pattern detection for datetime.now(), requests.*, pd.read_csv
+> - Feature flag (OFF by default) for backward compatibility
+>
+> **Files Created**:
+> - `src/rnd/2026.02.02-cache-freshness-implementation-plan.md` (~400 lines)
+>
+> **Status**: Planning complete, ready for implementation
+>
+> ---
+
+> **✅ SESSION 120 COMPLETE**: Agentic Job Intent LORA Training - Chunk 1.5 (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#379d8015
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+>
+> **Chunk 1.5: Added Argument Extraction Ground Truth**
+>
+> Fixed training data generation to include extracted arguments as ground truth labels. Previously, all training examples had empty `<args></args>` fields - the model could learn intent classification but not parameter extraction.
+>
+> **Changes Made**:
+> - Changed `args_template: ""` → `args_key: "topic"` for deep research and podcast generator commands
+> - Changed `args_template: ""` → `args_key: "document_path"` for research-to-podcast command
+> - Updated generation logic to dynamically populate args when placeholder is substituted
+> - Templates without placeholders correctly produce empty args (intent-only classification)
+>
+> **Training Data Stats**:
+> - 300 examples regenerated (240 train / 30 test / 30 validate)
+> - 180 examples with populated args (75%)
+> - 60 examples with empty args (25%) - templates without placeholders
+>
+> **Example Outputs**:
+> ```xml
+> <args>topic="space exploration and Mars colonization"</args>
+> <args>document_path="/io/deep-research/social-media-analysis.md"</args>
+> <args></args>  <!-- intent-only, no placeholder in template -->
+> ```
+>
+> **Files Modified (CoSA)** - Requires separate commit:
+> - `src/cosa/training/xml_coordinator.py` (lines 652-700, 741-753)
+>
+> **Files Modified (Lupin)**:
+> - `src/rnd/2026.02.02-agentic-job-intent-lora-training.md` - Status and session log updated
+> - `src/ephemera/prompts/data/agentic-job-xml-{train,test,validate}.jsonl` - Regenerated
+> - `TODO.md` - Added 3 future enhancements (Extended Parameters, Dual Argument Types, Disambiguation Agent)
+>
+> **Next**: Run 1% sample training when GPUs available: `./src/scripts/run-agentic-intent-training.sh test`
+>
+> ---
+
 > **✅ SESSION 119 COMPLETE**: Agentic Job Intent LORA Training - Chunk 1 (2026.02.02)
 > **Owner**: claude.code@lupin.deepily.ai#379d8015
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`

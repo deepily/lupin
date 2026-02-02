@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-02 (Session 118)
+Last updated: 2026-02-02 (Session 121)
 
 ## Pending
 
@@ -14,7 +14,23 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 ### Before Branch Merge (This Week)
 
 - [ ] Run baseline testing plan: `src/rnd/2026.02.02-test-verification-plan.md`
-- [ ] **[LUPIN] Run agentic job intent LORA 1% sample training** - Requires GPUs to be freed. Run: `./src/scripts/run-agentic-intent-training.sh test`. Validates Ministral-8B training pipeline with agentic job intent data (deep research, podcast generator, research→podcast).
+- [ ] **[LUPIN] Run agentic job intent LORA 1% sample training** - Requires GPUs to be freed. Run: `./src/scripts/run-agentic-intent-training.sh test`. Validates Ministral-8B training pipeline with agentic job intent data (deep research, podcast generator, research→podcast). **Scheduled: Evening session 2026-02-02** when GPU resources available.
+- [ ] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - Two cases to handle:
+  1. User makes vague reference to research document contents (e.g., "make a podcast about that AI research")
+  2. User references research document by approximate name/path
+  - Voice mode especially needs fuzzy matching due to transcription variations
+  - Similar implementation already exists in FastAPI endpoint called from notifications UI
+  - **Reference**: `src/conf/prompts/fuzzy-file-matching.txt` (prompt template exists)
+- [ ] **[LUPIN] Extended Parameter Training (Chunk 1.6)** - Extend LORA training data beyond simple topics/filenames to include occasional budget and runtime arguments:
+  - `topic="quantum computing" budget=50`
+  - `topic="AI safety" target_audience=beginner`
+  - `document_path="/io/deep-research/report.md" languages=en,es max_segments=20`
+  - Requires: New placeholder files for budgets, audience levels; update generation logic
+- [ ] **[LUPIN] Disambiguation Agent for Missing Arguments** - Create agent to clarify unusual or missing arguments interactively:
+  - Trigger when LORA model returns intent but args are incomplete/ambiguous
+  - Use `ask_multiple_choice()` or `converse()` for clarification
+  - Example prompts: "What budget would you like for this research?" "Which language(s) for the podcast?"
+  - Affects: Voice routing pipeline, potentially new agent class
 - [x] **Run Deep Research dry-run smoke test** - Session 115: All 5 tests passed (login, submit, structure, polling, verification). Job dr-6aa5d16d completed in ~10s with $0.00 cost.
 - [x] **Run Podcast Generator dry-run API smoke test** - Session 115: All tests passed. Job pg-dd026977 completed in ~10s with $0.00 cost.
 - [x] **Run Research→Podcast dry-run API smoke test** - Session 115: All tests passed. Job rp-221fe28e completed in ~14s with $0.00 cost.
@@ -40,27 +56,6 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 - [x] Verify cards created via WebSocket match server-fetched cards after page refresh
 - [x] Test with mock job submission (success path)
 - [x] Test with mock job failure (error path)
-
-### Voice I/O Features (Session 118 - Needs Planning)
-
-These features require planning documents before implementation. All driven by cosa-voice MCP notification system.
-
-- [ ] **Semantic Cache Hit Confirmation** (HIGH)
-  - **Goal**: Before returning an approximate semantic cache hit, ask user via `ask_yes_no()` to confirm the cached response is appropriate
-  - **Trigger**: When semantic similarity match is found but not exact (e.g., 85-95% similarity threshold)
-  - **Voice Prompt**: "I found a similar previous answer. Would you like me to use that, or should I compute a fresh response?"
-  - **Affects**: `running_fifo_queue.py`, `solution_snapshot.py`, semantic matching logic
-  - **Related**: Cache Hit Behavior bug in bug-fix-queue.md
-  - **TODO**: Create planning document at `src/rnd/2026.02.XX-semantic-cache-confirmation-plan.md`
-
-- [ ] **Post-Execution Feedback Loop** (HIGH)
-  - **Goal**: After AgentBase-derived objects complete execution, collect user feedback via voice
-  - **Questions to ask** (via `ask_yes_no()` or `ask_multiple_choice()`):
-    1. "Was this response correct?" (yes/no)
-    2. "Was the language and tone appropriate?" (yes/no)
-  - **Data Collection**: Store feedback for potential fine-tuning / RLHF training data
-  - **Affects**: `agent_base.py`, `todo_fifo_queue.py`, possibly new feedback storage table
-  - **TODO**: Create planning document at `src/rnd/2026.02.XX-post-execution-feedback-plan.md`
 
 ### Implementation Plans
 
@@ -107,6 +102,38 @@ These features require planning documents before implementation. All driven by c
 - [x] Commit API consistency fix: `deep_research.py` derives user_email from JWT
 - [x] Commit dry-run mode additions to routers and job classes
 - [x] Commit new `mock_clients.py` for Podcast Generator
+
+---
+
+## Next Version: v0.1.4
+
+Voice I/O enhancements driven by cosa-voice MCP notification system. Both require planning documents before implementation.
+
+### Cache Freshness Policy (HIGH) - Session 121
+
+- [x] **Create planning document**: `src/rnd/2026.02.02-cache-freshness-implementation-plan.md` - Session 121
+- [ ] **Phase 1**: Foundation - Create `cache_freshness_policy.py`, add `cache_policy` to SolutionSnapshot, update LanceDB schema, add config keys
+- [ ] **Phase 2**: Agent integration - Add property overrides to DateAndTimeAgent (VOLATILE), MathAgent (IMMUTABLE), WeatherAgent (VOLATILE)
+- [ ] **Phase 3**: Enforcement - Add `_is_cache_immutable()` and `_handle_volatile_cache()` to running_fifo_queue.py
+- [ ] **Phase 4**: Semantic match confirmation (deferred - add `ask_yes_no()` for approximate matches)
+
+### Semantic Cache Hit Confirmation (MEDIUM) - Merged into Cache Freshness
+
+- [x] **Planning document**: Merged into Cache Freshness Policy plan (`src/rnd/2026.02.02-cache-freshness-implementation-plan.md`)
+- [ ] **Implementation**: Part of Cache Freshness Phase 4 (deferred)
+
+### Post-Execution Feedback Loop (HIGH)
+
+- [ ] **Create planning document**: `src/rnd/2026.02.XX-post-execution-feedback-plan.md`
+- [ ] **Implementation**
+  - **Goal**: After AgentBase-derived objects complete execution, collect user feedback via voice
+  - **Questions to ask** (via `ask_yes_no()` or `ask_multiple_choice()`):
+    1. "Was this response correct?" (yes/no)
+    2. "Was the language and tone appropriate?" (yes/no)
+  - **Data Collection**: Store feedback for potential fine-tuning / RLHF training data
+  - **Affects**: `agent_base.py`, `todo_fifo_queue.py`, possibly new feedback storage table
+
+---
 
 ## Completed (Recent)
 
