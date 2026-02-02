@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-02 (Session 115)
+Last updated: 2026-02-02 (Session 116)
 
 ## Pending
 
@@ -81,6 +81,13 @@ Last updated: 2026-02-02 (Session 115)
 
 ## Completed (Recent)
 
+- [x] **Deprecated util_xml.py Elimination**: Migrated all production code to Pydantic XML I/O - Session 116
+  - Removed fallbacks from gister.py, confirmation_dialog.py
+  - Added Pydantic to todo_fifo_queue.py, multimodal_munger.py
+  - Removed ALL deprecated fallbacks from agent_base.py, bug_injector.py, raw_output_formatter.py
+  - Rewrote xml_parser_factory.py to Pydantic-only (removed baseline and hybrid strategies)
+  - Added deprecation warnings to util_xml.py
+  - 12 files modified, all smoke tests passing
 - [x] **Math Agent TTS Fix**: job_id pattern + user_email pipeline - Session 109, 110
   - Fix: Updated regex in `notification_models.py` to accept compound hash format
   - Fix: Added `user_email` as first-class constructor parameter (Session 110)

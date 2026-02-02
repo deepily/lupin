@@ -1,5 +1,76 @@
 # Lupin Project History
 
+> **✅ SESSION 117 COMPLETE**: Fix Podcast Generator Dry-Run Notifications (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#8594147a
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Bug Fix
+> Podcast Generator dry-run notifications not routing to job cards in notifications UI.
+>
+> **Root Cause**: Notifications in `_execute_dry_run()` were missing `job_id` parameter.
+>
+> **Fix**: Added `job_id=self.id_hash` to all 6 notifications (5 breadcrumbs + 1 completion).
+>
+> **Files Modified (CoSA)**:
+> - `src/cosa/agents/podcast_generator/job.py` - Lines 284, 288, 292, 296, 300, 329-334
+>
+> **Verification**: Smoke test passes
+>
+> ---
+
+> **✅ SESSION 116 COMPLETE**: Fuzzy File Matching + util_xml.py Deprecation (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#817f2e64
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+>
+> **Part 1: Fuzzy File Matching for Podcast Generator**
+> - Added `FuzzyFileMatchResponse` Pydantic XML model with `get_example_for_template()` and `get_matches_list()` helpers
+> - Integrated with `PromptTemplateProcessor` for automatic XML example injection
+> - Rewrote `match_research_docs()` to use LlmClientFactory with kaitchup/phi_4_14b
+> - Changed Flow B to block for user selection (was fire-and-forget notification)
+>
+> **Part 2: DEPRECATED util_xml.py - Pydantic-Only Migration**
+> Eliminated all production usage of deprecated `cosa/utils/util_xml.py` in favor of Pydantic XML I/O.
+>
+> **Phase 1**: Removed fallbacks from Pydantic-enabled code
+> - `gister.py`, `confirmation_dialog.py` - Now Pydantic-only, no baseline fallback
+>
+> **Phase 2**: Added Pydantic to queue/router code
+> - `todo_fifo_queue.py`, `multimodal_munger.py` - Replaced `dux.get_value_by_xml_tag_name()` with `CommandResponse.from_xml()`
+>
+> **Phase 3**: Migrated agent classes
+> - `agent_base.py` - Removed ALL deprecated fallback code
+> - `bug_injector.py`, `raw_output_formatter.py` - Removed fallbacks
+>
+> **Phase 4**: Updated parser factory
+> - `xml_parser_factory.py` - **COMPLETELY REWRITTEN**: Removed `BaselineXmlParsingStrategy`, `HybridXmlParsingStrategy`, `XmlParsingStrategy` abstract base. Only `PydanticXmlParser` remains.
+>
+> **Phase 5**: Added deprecation warnings
+> - `util_xml.py` - Module-level and per-function deprecation warnings
+> - Added `remove_xml_escapes()` to `util_xml_pydantic.py`
+>
+> **Additional cleanup**: Removed unused imports from `iterative_debugging_agent.py`, `solution_snapshot.py`, `math_agent.py`
+>
+> **Verification**: All smoke tests pass (gister, confirmation_dialog, xml_parser_factory)
+>
+> **Files Modified (CoSA)**: 12 files
+> - `cosa/memory/gister.py`
+> - `cosa/agents/confirmation_dialog.py`
+> - `cosa/rest/todo_fifo_queue.py`
+> - `cosa/rest/multimodal_munger.py`
+> - `cosa/agents/agent_base.py`
+> - `cosa/agents/bug_injector.py`
+> - `cosa/agents/raw_output_formatter.py`
+> - `cosa/agents/io_models/utils/xml_parser_factory.py`
+> - `cosa/utils/util_xml.py`
+> - `cosa/agents/io_models/utils/util_xml_pydantic.py`
+> - `cosa/agents/iterative_debugging_agent.py`
+> - `cosa/memory/solution_snapshot.py`
+> - `cosa/agents/math_agent.py`
+>
+> ---
+
 > **✅ SESSION 115 COMPLETE**: Push Method Bug Fix + Smoke Tests (2026.02.02)
 > **Owner**: claude.code@lupin.deepily.ai#8594147a
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
