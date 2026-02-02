@@ -1,5 +1,59 @@
 # Lupin Project History
 
+> **✅ SESSION 119 COMPLETE**: Agentic Job Intent LORA Training - Chunk 1 (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#379d8015
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+>
+> **Phase 1.0: Code Cleanup - Removed `gpt_message` field**
+> - Removed `_get_gpt_messages_dict()` method and all GPT training file generation
+> - Changed `_get_6_empty_lists()` to `_get_5_empty_lists()`
+> - Simplified all 4 build methods in `xml_coordinator.py`
+> - Removed `format_gpt_message()` from `xml_prompt_generator.py`
+> - Removed `extract_gpt_message` parameter from `peft_trainer.py`
+>
+> **Phase 1.1: Created 8 placeholder files** for agentic job training data:
+> - `placeholders-research-topics.txt` (50 entries)
+> - `placeholders-budget-values.txt` (7 entries)
+> - `placeholders-language-codes.txt` (7 entries)
+> - `placeholders-document-paths.txt` (24 entries)
+> - `placeholders-audience-levels.txt` (4 entries)
+> - `placeholders-audience-contexts.txt` (24 entries)
+> - `placeholders-max-segments.txt` (5 entries)
+> - `placeholders-agentic-templates.txt` (35 entries)
+>
+> **Phase 1.2: Updated training infrastructure**
+> - Added 3 new commands to `xml_models.py`: `agent router go to deep research`, `agent router go to podcast generator`, `agent router go to research to podcast`
+> - Added 8 placeholder getter methods to `xml_prompt_generator.py`
+> - Added `build_agentic_job_training_prompts()` method to `xml_coordinator.py`
+> - Added `get_agentic_job_train_test_validate_split()` and `write_agentic_job_ttv_split_to_jsonl()` methods
+>
+> **Phase 1.3-1.4: Generated and validated training data**
+> - Generated 300 training examples (240 train, 30 test, 30 validate)
+> - Balanced command distribution: 80/80/80 per command
+> - All JSONL files validated with 5 required fields
+>
+> **Phase 2.1: Created training shell script**
+> - `run-agentic-intent-training.sh` with generate/validate/test/full modes
+>
+> **Phase 2.2: BLOCKED** - Requires GPU resources to be freed
+>
+> **Files Modified (CoSA)**:
+> - `src/cosa/training/xml_coordinator.py`
+> - `src/cosa/training/xml_prompt_generator.py`
+> - `src/cosa/training/peft_trainer.py`
+> - `src/cosa/agents/io_models/xml_models.py`
+>
+> **Files Created**:
+> - 8 placeholder files in `src/ephemera/prompts/data/`
+> - 3 JSONL training files: `agentic-job-xml-{train,test,validate}.jsonl`
+> - `src/scripts/run-agentic-intent-training.sh`
+>
+> **Smoke Tests**: All pass (xml_coordinator, xml_models, peft_trainer structural)
+>
+> ---
+
 > **✅ SESSION 118 COMPLETE**: Skills Management Commands Installation + Discovery (2026.02.02)
 > **Owner**: claude.code@lupin.deepily.ai#7eeef663
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
