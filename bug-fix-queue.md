@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-03T13:35:00
+**Last Updated**: 2026-02-03T14:50:00
 
 ---
 
@@ -9,6 +9,7 @@
 
 | Session ID | Started | Last Activity | Status |
 |------------|---------|---------------|--------|
+| bb3a5d21 | 2026-02-03T14:50:00 | 2026-02-03T14:50:00 | active |
 | d7da6d0d | 2026-02-03T13:15:00 | 2026-02-03T13:35:00 | active |
 | 590273af | 2026-02-03T10:00:00 | 2026-02-03T14:30:00 | active |
 | 4949b964 | 2026-02-02T18:00:00 | 2026-02-02T23:05:00 | closed |
@@ -18,6 +19,20 @@
 ### Queued
 
 (Available for any session to claim)
+
+- [ ] **MathAgent fails QueueableJob protocol check on /api/push**
+  - **Symptom**: Push endpoint returns 500 error with "Job must implement QueueableJob protocol, got MathAgent"
+  - **Stack Trace**:
+    - `queues.py:197` → `todo_queue.push_job( question, websocket_id, user_id, user_email )`
+    - `todo_fifo_queue.py:660` → `self.push( agent )`
+    - `todo_fifo_queue.py:861` → `super().push( item )`
+    - `fifo_queue.py:151` → raises `TypeError`
+  - **Root Cause (suspected)**: `push_job()` creates a `MathAgent` instance and passes it to `push()`, but base `FifoQueue.push()` now enforces `QueueableJob` protocol compliance
+  - **Impact**: All math questions fail to queue
+  - **Files to investigate**:
+    - `src/cosa/rest/todo_fifo_queue.py:660` (push_job creates agent)
+    - `src/cosa/rest/fifo_queue.py:151` (protocol enforcement)
+    - `src/cosa/agents/math_agent.py` (may need protocol compliance)
 
 ---
 
@@ -29,7 +44,13 @@
 
 ### Completed
 
-- [x] **Remove deprecated get_html() and queue_*_update events** → commit: 01b4ac3 | By: 590273af
+- [x] **loadUserQueues called instead of refreshAllQueues after Claude Code submit** → pending commit | By: bb3a5d21
+  - **Symptom**: After submitting a Claude Code job, only todo queue refreshed, not all queues
+  - **Root Cause**: `handleClaudeCodeSubmit()` called `loadUserQueues()` instead of `refreshAllQueues()`
+  - **Fix**: Changed line 2783 from `this.loadUserQueues()` to `this.refreshAllQueues()`
+  - **File**: `src/fastapi_app/static/js/notifications.js:2783`
+
+- [x] **Remove deprecated get_html() and queue_*_update events** → commit: 5c5467b | By: 590273af
   - Frontend uses metadata exclusively; get_html() never rendered
   - queue_*_update broadcasts total counts (all users), replaced by job_state_transition
   - Deleted dormant queue.js/queue.html (last modified 2025-08-15)

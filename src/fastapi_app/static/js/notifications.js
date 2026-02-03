@@ -2780,7 +2780,7 @@ class NotificationsUI {
             document.getElementById( 'cc-option-b-controls' ).style.display = 'none';
 
             // Refresh queues to show new job
-            this.loadUserQueues();
+            this.refreshAllQueues();
 
         } catch ( error ) {
             this.error( 'Claude Code queue submit failed:', error );
