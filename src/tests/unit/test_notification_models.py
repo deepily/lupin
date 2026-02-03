@@ -160,7 +160,8 @@ class TestNotificationRequestValidation:
             title="Test Title"
         )
 
-        params = request.to_api_params( api_key="test_key" )
+        # Phase 2.5: API key moved to X-API-Key header, not in params
+        params = request.to_api_params()
 
         assert params["message"] == "Test notification"
         assert params["type"] == "task"
@@ -170,7 +171,7 @@ class TestNotificationRequestValidation:
         assert params["timeout_seconds"] == 60
         assert params["response_default"] == "yes"
         assert params["title"] == "Test Title"
-        assert params["api_key"] == "test_key"
+        # api_key no longer in params - goes in HTTP header as X-API-Key
 
     def test_to_api_params_excludes_none_values( self ):
         """Test that None optional fields are excluded from params."""
@@ -180,10 +181,12 @@ class TestNotificationRequestValidation:
             # response_default and title are None
         )
 
-        params = request.to_api_params( api_key="test_key" )
+        # Phase 2.5: API key moved to X-API-Key header, not in params
+        params = request.to_api_params()
 
         assert "response_default" not in params
         assert "title" not in params
+        assert "api_key" not in params  # Now in HTTP headers
 
 
 # ============================================================================
@@ -462,26 +465,29 @@ class TestAsyncNotificationRequestValidation:
             target_user="test@example.com"
         )
 
-        params = request.to_api_params( api_key="test_key" )
+        # Phase 2.5: API key moved to X-API-Key header, not in params
+        params = request.to_api_params()
 
         assert params["message"] == "Test notification"
         assert params["type"] == "task"
         assert params["priority"] == "high"
         assert params["target_user"] == "test@example.com"
-        assert params["api_key"] == "test_key"
+        # api_key no longer in params - goes in HTTP header as X-API-Key
         # Async does NOT include response_requested
         assert "response_requested" not in params
 
     def test_to_api_params_no_response_fields( self ):
         """Test that async params don't include sync response fields."""
         request = AsyncNotificationRequest( message="Test" )
-        params = request.to_api_params( api_key="test_key" )
+        # Phase 2.5: API key moved to X-API-Key header, not in params
+        params = request.to_api_params()
 
         # Async should NOT have these sync-only fields
         assert "response_requested" not in params
         assert "response_type" not in params
         assert "timeout_seconds" not in params
         assert "response_default" not in params
+        assert "api_key" not in params  # Now in HTTP headers
 
 
 # ============================================================================
