@@ -1,5 +1,29 @@
 # Lupin Project History
 
+> **✅ SESSION 122 COMPLETE**: Cache Freshness Fix - Simple Approach (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#4949b964
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Bug Fix
+>
+> **Problem**: Cache hits returned stale `answer_conversational` for time-sensitive queries like "What time is it?" - the cached time was returned instead of re-executing the stored code.
+>
+> **Solution**: Added code re-execution in `_format_cached_result()` (lines 689-699) that runs `cached_snapshot.run_code()` and `cached_snapshot.run_formatter()` before returning.
+>
+> **Trade-off Accepted**: Math queries like "4+4" will also re-execute (~100ms overhead) but this is harmless - correctness trumps minor performance cost.
+>
+> **Files Modified (CoSA)**:
+> - `src/cosa/rest/running_fifo_queue.py:689-699` - Added 10 lines for code re-execution
+>
+> **Testing**:
+> - Smoke tests: 9/9 PASS
+> - Unit tests: Module imports verified
+> - Manual testing: Pending (ask "What time is it?" twice)
+>
+> **Commit**: ee9c8d6 (Lupin), CoSA pending
+>
+> ---
+
 > **✅ SESSION 121 COMPLETE**: Cache Freshness Policy Planning (2026.02.02)
 > **Owner**: claude.code@lupin.deepily.ai#49a88ad2
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`

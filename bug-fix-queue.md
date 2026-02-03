@@ -1,14 +1,40 @@
 # Bug Fix Queue
 
-## Session: 2026.02.02 (Session 116 - Bug Fix Mode)
-**Owner**: claude.code@lupin.deepily.ai#379d8015
-**Status**: Active
+**Format Version**: 2.0
+**Last Updated**: 2026-02-02T22:50:00
+
+---
+
+### Active Sessions
+
+| Session ID | Started | Last Activity | Status |
+|------------|---------|---------------|--------|
+| 4949b964 | 2026-02-02T18:00:00 | 2026-02-02T22:50:00 | active |
+
+---
 
 ### Queued
-(No bugs remaining)
+
+(Available for any session to claim)
+
+---
+
+### In Progress
+
+(Claimed by a specific session)
+
+---
 
 ### Completed
-- [x] **Dry-run completion messages too verbose for TTS** → Fixed
+
+- [x] **Cache Hit Behavior**: Re-execute cached code for fresh results → commit: ee9c8d6 | By: 4949b964
+  - **Symptom**: Cache hits returned stale `answer_conversational` for time-sensitive queries
+  - **Fix**: Added code re-execution in `_format_cached_result()` before returning cached result
+  - **File**: `src/cosa/rest/running_fifo_queue.py:689-699`
+  - **Test**: Smoke 9/9 PASS, Unit imports verified
+  - **Trade-off**: Math queries re-execute unnecessarily (~100ms) but correctness > performance
+
+- [x] **Dry-run completion messages too verbose for TTS** → Fixed | By: 49a88ad2
   - **Symptom**: Dry-run completion messages included full file paths with emails, UUIDs, slashes
   - **Fix**: Simplified return messages to voice-friendly summaries (paths remain in `abstract`)
   - **Files (COSA)**:
@@ -17,18 +43,18 @@
     - `src/cosa/agents/deep_research/job.py:420`
   - **Smoke tests**: All 3 modules pass
 
-- [x] Run Deep Research dry-run smoke test → All 5 tests PASSED
+- [x] Run Deep Research dry-run smoke test → All 5 tests PASSED | By: 8594147a
   - Job ID: dr-6aa5d16d
   - Completed in: ~10s
   - Cost: $0.00 (dry-run confirmed)
-- [x] Podcast Generator dry-run API smoke test → All tests PASSED
+- [x] Podcast Generator dry-run API smoke test → All tests PASSED | By: 8594147a
   - Job ID: pg-dd026977
   - Completed in: ~10s
   - Cost: $0.00 (dry-run confirmed)
   - **Bug fixed**: push_job() → push() with user_job_tracker association
   - **Bug fixed**: get_position() → size()
   - **Commit**: eab45bf (Lupin), CoSA pending
-- [x] Research→Podcast dry-run API smoke test → All tests PASSED
+- [x] Research→Podcast dry-run API smoke test → All tests PASSED | By: 8594147a
   - Job ID: rp-221fe28e
   - Completed in: ~14s
   - Cost: $0.00 (dry-run confirmed)
@@ -37,167 +63,34 @@
 
 ---
 
-## Session: 2026.01.31 (Session 114 - Bug Fix Mode)
-**Owner**: claude.code@lupin.deepily.ai#42b5bbd7
-**Status**: Closed
+## Archive: Previous Sessions
 
-### Queued
-(No bugs remaining)
-
-### Completed
+### 2026.01.31 - Session 42b5bbd7 (1 fix)
 - [x] Podcast Generator recording button stuck in recording mode → commit: f4f6cc8
   - **Root Cause**: `handleSTTButtonClick()` missing toggle logic
   - **Fix**: Added toggle check, converted duplicate handlers to thin wrappers
   - **File (Lupin)**: `src/fastapi_app/static/js/notifications.js`
 
----
-
-## Session: 2026.01.31 (Session 113 - Bug Fix Mode)
-**Owner**: claude.code@lupin.deepily.ai#d9d74b04
-**Status**: Closed
-
-### Queued
-(No bugs remaining)
-
-### Completed
+### 2026.01.31 - Session d9d74b04 (documentation-only)
 - [x] **Documentation-only session**: Verified dry-run bug fix already applied, smoke test already created
   - Bug fix (`SessionSummary` dataclass in `job.py:396-401`) was already implemented
   - Smoke test (`test_deep_research_dry_run_smoke.py`) was already created
   - Test execution deferred to next session
 
----
+### 2026.01.30 - Sessions 110-112 (4 fixes)
+- [x] **Deep Research QueueableJob protocol compliance** → commit: 0e0ecfc (Lupin), COSA pending | By: bd42074b
+- [x] **user_email injection refactoring** → commit: 7243a31 (Lupin), COSA pending | By: bd42074b
+- [x] **Unknown badge for dynamically created objects** → commit: f8e3bda (Lupin), COSA pending | By: bd42074b
+- [x] Math Agent TTS - job_id pattern validation → commit: 9b86ddc | By: bd42074b
 
-## Previous Session: 2026.01.30 (Sessions 110-112 - Bug Fix Mode)
-**Owner**: claude.code@lupin.deepily.ai#bd42074b
-**Status**: Closed
-
-### Queued
-(No bugs remaining)
-
-### Completed
-- [x] **Deep Research QueueableJob protocol compliance** → commit: 0e0ecfc (Lupin), COSA pending
-  - **Symptom**: Deep Research jobs fail to submit with "Job must implement QueueableJob protocol"
-  - **Root Cause**: `AgenticJobBase` missing `is_cache_hit` attribute required by expanded Protocol
-  - **Fix**: Added `self.is_cache_hit = False` to `AgenticJobBase.__init__()`
-  - **File (COSA)**: `src/cosa/agents/agentic_job_base.py`
-
-- [x] **user_email injection refactoring** → commit: 7243a31 (Lupin), COSA pending
-  - Added `user_email` as first-class constructor parameter to AgentBase, 6 traditional agents, and SolutionSnapshot
-  - Removed ugly `agent.user_email = user_email` injection in todo_fifo_queue.py
-  - Simplified hasattr check in fifo_queue.py
-
-- [x] **Unknown badge for dynamically created objects**: Fix badge display for WebSocket-created items → commit: f8e3bda (Lupin), COSA pending
-  - **Symptom**: Badge shows "unknown" for objects created via WebSocket instead of proper type
-  - **Fix**: Replaced 8 defensive `getattr()` chains with direct `job.job_type` access across 3 COSA files
-  - **Files (COSA)**: `queue_consumer.py`, `todo_fifo_queue.py`, `running_fifo_queue.py`
-
-- [x] Math Agent TTS - job_id pattern validation → commit: 9b86ddc
-  - **Symptom**: Math agents produced no TTS; Pydantic validation error on compound hash job_id
-  - **Fix**: Updated regex in `notification_models.py` to accept `SHA256::UUID` compound format
-  - **File (COSA)**: `src/cosa/cli/notification_models.py`
-  - **Verified**: TTS now works for math questions via /api/push
-
----
-
-## Previous Session: 2026.01.29 (Session 108 - Bug Fix Mode)
-**Owner**: claude.code@lupin.deepily.ai#21a62c05
-**Status**: Closed
-
-### Completed (Session 108)
-- [x] Job card styling inconsistency (WebSocket vs server-fetched) → this commit
+### 2026.01.29 - Session 21a62c05 (1 fix)
+- [x] Job card styling inconsistency (WebSocket vs server-fetched) | By: 21a62c05
   - **Symptom**: Done queue job cards look different when dynamically inserted (WebSocket) vs fetched from server
   - **Root Cause**: `insertJobMetadata()` used completely different HTML structure than `renderJobCard()`
   - **Fix**: Extracted helper functions (`renderAbstractSection()`, `renderReportLinkSection()`) and unified rendering
   - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js`
   - **Debug Utility Added**: `window.notificationsUI.debugDumpJobCard(jobId)` for DOM comparison
 
----
-
-## Previous Session: 2026.01.28 (Session 107 - Bug Fix Mode)
-**Owner**: claude.code@lupin.deepily.ai#b9faa342
-**Status**: Closed
-
-### Queued
-(No bugs remaining)
-
-### Completed (Session 107)
-- [x] Job card field parity bug → commit: 57a9fbb (Lupin)
-  - **Symptom**: WebSocket-created cards missing fields present in server-fetched cards
-  - **Fix**: Added 5 missing fields (completed_at, status, error, has_interactions, duration_seconds) to JS job object in handleJobStateTransition()
-  - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js`
-  - **Note**: Server-side fix (6 fields in running_fifo_queue.py) is in CoSA submodule - needs separate commit
-
-### Completed (Session 105)
-- [x] Job cards not rendering when queue collapsed → commit: f13a8f1 (Lupin)
-  - **Symptom**: Badge count updates but cards don't appear when expanding collapsed section
-  - **Fix**: Reset `state.loaded = false` when data arrives, not just when expanded
-  - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js`
-
-- [x] sender_id regex rejects job ID format → pending commit (CoSA)
-  - **Symptom**: `Failed to send progress notification: 1 validation error... String should match pattern`
-  - **Fix**: Added `[a-z]+-[a-f0-9]{8}` pattern for job IDs like `dr-a0ebba60`
-  - **Files (CoSA)**: `src/cosa/cli/notification_models.py`
-  - **Note**: CoSA submodule change - needs separate commit in CoSA context
-
-- [x] Agentic job progress notifications route to sender cards instead of job cards → pending commit (Lupin)
-  - **Symptom**: Progress notifications go to Claude Code sender card, not CJ Flow job card
-  - **Root cause**: job_id embedded in sender_id suffix, but not passed as separate job_id param
-  - **Fix**: Extract job_id from sender_id suffix in frontend routing logic
-  - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js`
-
-### Completed (Session 103)
-- [x] LanceDB nprobes warning suppression → **Already fixed** (Session 7, commit 24b463b)
-  - Fix implemented Nov 2025: `warnings.filterwarnings()` + logger levels
-  - Configurable via `suppress lancedb warnings = true` (enabled by default)
-  - nprobes value configurable: `solution snapshots lancedb nprobes = 20`
-- [x] LanceDB gist_cache.lance corruption - missing file → commit: 0b8c915 (Lupin docs) + pending CoSA
-  - **Symptom**: `Object at location .../gist_cache.lance/data/<uuid>.lance not found`
-  - **Fix**: Added `_is_table_corrupted()` + auto-recovery in `__init__`
-  - **Files (CoSA)**: `src/cosa/memory/gist_cache_table.py`
-  - **Tests**: 8 smoke tests (including corruption detection + auto-recovery)
-
----
-
-## Previous Session: 2026.01.26 (Session 100-101)
-**Owner**: claude.code@lupin.deepily.ai#514f7e7a
-**Status**: Closed - 4 fixes completed, 2 bugs carried over
-
-### Completed
-- [x] clearAllNotifications TypeError - Cannot read properties of undefined (reading 'length') at notifications.js:7490 (ad-hoc) → marked fixed by user
-- [x] Boolean configuration parsing case-sensitive bug (ad-hoc)
-  - Fixed: `configuration_manager.py:817-822` - now handles `true`/`True`/`TRUE` variants
-  - CoSA change: needs separate commit in CoSA context
-
-### Completed
-- [x] LanceDB embedding cache corruption recovery (ad-hoc) → commit: 77ab971 (Lupin unit tests)
-  - CoSA changes: `embedding_cache_table.py` needs separate commit in CoSA context
-  - Added `_is_table_corrupted()` method with data scan detection
-  - Auto-recovery: drops and recreates table when corruption detected
-  - Unit tests: 9 tests covering mocked and real corruption scenarios
-
----
-
-## Previous Session: 2026.01.23 (Session 95)
-**Owner**: claude.code@lupin.deepily.ai#6fa77d02
-**Status**: Completed - 4 fixes
-
-- [x] cosa-voice MCP project detection order bug - CoSA detected as Lupin (ad-hoc) - Fixed prior to session
-- [x] LanceDB/PostgreSQL permissions issue - database recreation blocked by wrong ownership/permissions (from Session 94 TODO)
-  - Fixed: `lupin.lancedb` ownership changed from root:root to rruiz:rruiz
-  - Fixed: `postgresql-dev-data` permissions changed from 700 to 750 (group r-x added)
-- [x] Podcast Generator - English audio generated when not requested (ad-hoc)
-  - Fixed: Conditional English inclusion in `orchestrator.py:441-462`
-  - Change in CoSA repo (needs separate commit)
-- [x] Podcast Generator - English audio notifications missing language identifier (ad-hoc)
-  - Fixed: Added "English" to `do_audio_only_async()` notifications → commit: 329ad9b (COSA)
-
----
-
-## Previous Session: 2026.01.22 (Session 92)
-**Owner**: claude.code@lupin.deepily.ai#40d6e532
-**Status**: Carried over 1 bug to next session
-
----
-
-## Previous Session: 2026.01.21 (Session 89)
-- [x] Gist enhancement with abstract fields → commit: f24337f (ad-hoc)
+### 2026.01.28 - Session b9faa342 (2 fixes)
+- [x] Job card field parity bug → commit: 57a9fbb (Lupin) | By: b9faa342
+- [x] sender_id regex rejects job ID format → pending commit (CoSA) | By: b9faa342

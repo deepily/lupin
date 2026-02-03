@@ -109,9 +109,12 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 
 Voice I/O enhancements driven by cosa-voice MCP notification system. Both require planning documents before implementation.
 
-### Cache Freshness Policy (HIGH) - Session 121
+### Cache Freshness Policy (HIGH) - Session 121/122
 
 - [x] **Create planning document**: `src/rnd/2026.02.02-cache-freshness-implementation-plan.md` - Session 121
+- [x] **Simple fix implemented**: Always re-execute cached code in `_format_cached_result()` - Session 122
+  - Trade-off: Math queries re-execute unnecessarily (~100ms) but ensures time queries are always fresh
+  - Full policy system (Phases 1-4) deferred until simple fix proves insufficient
 - [ ] **Phase 1**: Foundation - Create `cache_freshness_policy.py`, add `cache_policy` to SolutionSnapshot, update LanceDB schema, add config keys
 - [ ] **Phase 2**: Agent integration - Add property overrides to DateAndTimeAgent (VOLATILE), MathAgent (IMMUTABLE), WeatherAgent (VOLATILE)
 - [ ] **Phase 3**: Enforcement - Add `_is_cache_immutable()` and `_handle_volatile_cache()` to running_fifo_queue.py
