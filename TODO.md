@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-03 (Session 128 - CJ Flow Verification)
+Last updated: 2026-02-03 (Session 129)
 
 ## Pending
 
@@ -137,6 +137,19 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
 
 - [x] **Planning document**: Merged into Cache Freshness Policy plan (`src/rnd/2026.02.02-cache-freshness-implementation-plan.md`)
 - [ ] **Implementation**: Part of Cache Freshness Phase 4 (deferred)
+
+### Voice Module Audit (MEDIUM)
+
+- [ ] **Review cosa_interface.py vs voice_io.py** - Audit for overlap, redundancy, and execution flow clarity
+  - **Files**: `src/cosa/agents/claude_code/cosa_interface.py`, `src/cosa/agents/claude_code/voice_io.py`
+  - **Goal**: Understand and document the relationship between these modules
+  - **Deliverable**: Refactor if redundancy found, or document if distinct purposes
+
+### CJ Flow Persistence (HIGH)
+
+- [ ] **Add persistence for CJ Flow job tracking** - Jobs are currently transient
+  - **Goal**: Durable storage for ClaudeCode Job tracking state
+  - **Affects**: Job state survives server restarts, enables job history/resume
 
 ### Post-Execution Feedback Loop (HIGH)
 
