@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-02 (Session 124 - Unified LoRA Training Integration)
+Last updated: 2026-02-02 (Session 123 - Test Suite Remediation Phase 3 Complete)
 
 ## Pending
 
@@ -13,15 +13,15 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 
 ### Before Branch Merge (This Week)
 
-- [ ] **[LUPIN] Verify CJ Flow Queueable Job Protocol Compliance** - Confirm unbounded and bounded agentic jobs created for Claude Code implement the CJ Flow queueable job protocol correctly
-- [ ] Run baseline testing plan: `src/rnd/2026.02.02-test-verification-plan.md` - Session 123: In progress
-  - Unit tests improved: 84.4% → 95.5% (+22 tests)
-  - Fixed: Notification Models (41), FIFO Queue Filtering (15), API Key Middleware (15)
-  - Remaining 9 failures: JWT timing (2), config loader (2), integration-dependent (5)
-- [ ] **Investigate remaining 9 unit test failures** - Session 123 identified root causes:
-  - JWT timing tests need `freezegun` or timing tolerance increase
-  - Config loader tests have expectation mismatches
-  - WebSocket/queue tests require server running
+- [ ] **[LUPIN] Verify CJ Flow Queueable Job Protocol Compliance** - Session 124: Investigation complete, implementation verified compliant. Run smoke tests to confirm.
+  - **Report**: `src/rnd/2026.02.02-cj-flow-protocol-compliance-report.md`
+  - **Finding**: ClaudeCodeJob implements all 22 protocol requirements for both BOUNDED and INTERACTIVE modes
+  - **Next**: Run verification smoke tests (commands in report)
+- [x] **Run baseline testing plan** - Session 123: **COMPLETE** ✅
+  - Unit tests: 168/199 (84.4%) → **195/195 (100%)**
+  - All test infrastructure issues resolved
+  - 4 debug scripts moved to `src/scripts/debug/`
+  - See: `src/rnd/2026.02.02-test-suite-remediation-plan.md`
 - [ ] **[LUPIN] Run agentic job intent LORA 1% sample training** - Requires GPUs to be freed. Run: `./src/scripts/run-agentic-intent-training.sh test`. **Session 124**: Unified training pipeline now includes agentic jobs (40,258 total examples, 600 agentic). **Scheduled: Evening session 2026-02-02** when GPU resources available.
 - [ ] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - Two cases to handle:
   1. User makes vague reference to research document contents (e.g., "make a podcast about that AI research")
@@ -116,6 +116,10 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 ## Next Version: v0.1.4
 
 Voice I/O enhancements driven by cosa-voice MCP notification system. Both require planning documents before implementation.
+
+### Pre-Development Setup
+
+- [ ] **[LUPIN] Create baseline test report for wip-v0.1.4 branch** - Run `/smoke-test-baseline` to establish pass/fail baseline before starting development work. This ensures we can detect regressions introduced during v0.1.4 development.
 
 ### Cache Freshness Policy (HIGH) - Session 121/122
 

@@ -59,7 +59,7 @@ class TestAccessTokenGeneration:
         payload = jwt.decode( token, SECRET_KEY, algorithms=[ALGORITHM] )
 
         # Check expiration is approximately 30 minutes in future
-        exp_time = datetime.fromtimestamp( payload["exp"] )
+        exp_time = datetime.utcfromtimestamp( payload["exp"] )
         now = datetime.utcnow()
         time_diff = (exp_time - now).total_seconds()
 
@@ -125,7 +125,7 @@ class TestRefreshTokenGeneration:
         payload = jwt.decode( token, SECRET_KEY, algorithms=[ALGORITHM] )
 
         # Check expiration is approximately 7 days in future
-        exp_time = datetime.fromtimestamp( payload["exp"] )
+        exp_time = datetime.utcfromtimestamp( payload["exp"] )
         now = datetime.utcnow()
         time_diff = (exp_time - now).total_seconds()
 
