@@ -1,5 +1,37 @@
 # Lupin Project History
 
+> **✅ SESSION 123 COMPLETE**: Test Suite Remediation (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#d1c3ccff
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Test Infrastructure Fixes
+>
+> **Problem**: Baseline report showed 61 failing tests (76.8% overall pass rate). Root causes were test infrastructure issues, not production bugs.
+>
+> **Results**:
+> | Category | Before | After | Change |
+> |----------|--------|-------|--------|
+> | Unit Tests | 168/199 (84.4%) | 190/199 (95.5%) | +22 tests |
+> | Notification Models | Failing | 41/41 | ✅ Fixed |
+> | FIFO Queue Filtering | Failing | 15/15 | ✅ Fixed |
+> | API Key Middleware | Failing | 15/15 | ✅ Fixed |
+>
+> **Fixes Applied**:
+> 1. **WebSocket Auth**: Added `get_jwt_token()` method for real JWT login instead of mock tokens
+> 2. **FIFO Queue MockJob**: Implemented full QueueableJob protocol (18 attributes, 4 methods)
+> 3. **API Key Middleware**: Rewrote tests to mock ORM layer (`get_db()` + `ApiKeyRepository`)
+> 4. **Shell Script**: Added credential requirement check for `LUPIN_TEST_EMAIL`/`PASSWORD`
+>
+> **Files Modified**:
+> - `src/tests/websocket_smoke/infrastructure/test_utilities.py` - JWT login support
+> - `src/scripts/run-websocket-smoke-tests.sh` - Credential checks
+> - `src/tests/unit/test_fifo_queue_filtering.py` - Protocol-compliant MockJob
+> - `src/tests/unit/test_api_key_middleware.py` - ORM mocking rewrite
+>
+> **Remaining Failures (9 tests)**: JWT timing, config loader, integration-dependent tests - not in scope
+>
+> ---
+
 > **✅ SESSION 122 COMPLETE**: Cache Freshness Fix - Simple Approach (2026.02.02)
 > **Owner**: claude.code@lupin.deepily.ai#4949b964
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
@@ -20,7 +52,7 @@
 > - Unit tests: Module imports verified
 > - Manual testing: Pending (ask "What time is it?" twice)
 >
-> **Commit**: ee9c8d6 (Lupin), CoSA pending
+> **Commit**: 3cff850 (Lupin), CoSA pending
 >
 > ---
 
