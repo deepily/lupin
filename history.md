@@ -31,6 +31,38 @@
 >
 > ---
 
+### 2026.02.03 - Session 128 | Planning Workflow Installation Wizard
+
+**Accomplishments**:
+- Ran `/plan-install-wizard` to check for missing planning-is-prompting workflows
+- Installed new `/plan-session-checkpoint` command (mid-session commits)
+- Lupin project now has complete 29/29 workflow coverage
+
+**Files Modified**:
+- `.claude/commands/plan-session-checkpoint.md` - NEW: Mid-session commit workflow
+
+**Session Checkpoint Use Cases**:
+- Save progress during long work sessions (2+ hours)
+- Commit before anticipated context clear
+- Create save points while continuing work
+
+---
+
+### 2026.02.03 - Session 126 (cont.) | Job Card Disappearing Bug Fix
+
+**Bug**: Job cards disappeared after `refreshAllQueues()` was called, showing "No jobs in this queue" despite API returning correct data.
+
+**Root Cause**: Two field name mismatches in `notifications.js`:
+1. `loadQueueJobCards()` used `jobsHtml.length` but API returns `*_jobs_metadata` not `*_jobs`
+2. `processQueueUpdate()` used `data.{queue}_jobs.length` but API returns `total_jobs` count
+
+**Files Modified**:
+- `src/fastapi_app/static/js/notifications.js` - Fixed field references in `loadQueueJobCards()` (lines 4789-4793) and `processQueueUpdate()` (lines 4532-4565)
+
+**Testing**: Submit Claude Code dry-run job → Job card appears and persists after queue refresh
+
+---
+
 ### 2026.02.03 - Session 126 | Mock Claude Code Job + Dry-Run Support
 
 **Accomplishments**:

@@ -4529,28 +4529,35 @@ class NotificationsUI {
             // Update the appropriate list based on queue name
             // Also update the new progressive disclosure count badges
             // Session 107: Removed updateJobRegistration calls - job_state_transition handles routing
+            // Session 128: Fixed field names - backend returns total_jobs, not {queue}_jobs arrays
             if ( queueName === "todo" ) {
                 // Update count badge for progressive disclosure UI
                 const countBadge = document.getElementById( "todo-count-badge" );
-                if ( countBadge ) countBadge.textContent = data.todo_jobs.length;
+                if ( countBadge ) countBadge.textContent = data.total_jobs;
+                // Store metadata for progressive disclosure job cards
+                this.queueCategoryState.todo.jobs = data.todo_jobs_metadata || [];
                 // Also refresh job cards if category is expanded
-                this.updateQueueCategoryIfExpanded( "todo", data.todo_jobs.length );
+                this.updateQueueCategoryIfExpanded( "todo", data.total_jobs );
             } else if ( queueName === "run" ) {
                 const countBadge = document.getElementById( "run-count-badge" );
-                if ( countBadge ) countBadge.textContent = data.run_jobs.length;
-                this.updateQueueCategoryIfExpanded( "run", data.run_jobs.length );
+                if ( countBadge ) countBadge.textContent = data.total_jobs;
+                // Store metadata for progressive disclosure job cards
+                this.queueCategoryState.run.jobs = data.run_jobs_metadata || [];
+                this.updateQueueCategoryIfExpanded( "run", data.total_jobs );
             } else if ( queueName === "done" ) {
                 // Enhanced done queue handling with structured job metadata for replay functionality
                 await this.handleDoneQueueUpdate( data );
                 const countBadge = document.getElementById( "done-count-badge" );
-                if ( countBadge ) countBadge.textContent = data.done_jobs.length;
+                if ( countBadge ) countBadge.textContent = data.total_jobs;
                 // Store metadata for progressive disclosure job cards
                 this.queueCategoryState.done.jobs = data.done_jobs_metadata || [];
-                this.updateQueueCategoryIfExpanded( "done", data.done_jobs.length );
+                this.updateQueueCategoryIfExpanded( "done", data.total_jobs );
             } else if ( queueName === "dead" ) {
                 const countBadge = document.getElementById( "dead-count-badge" );
-                if ( countBadge ) countBadge.textContent = data.dead_jobs.length;
-                this.updateQueueCategoryIfExpanded( "dead", data.dead_jobs.length );
+                if ( countBadge ) countBadge.textContent = data.total_jobs;
+                // Store metadata for progressive disclosure job cards
+                this.queueCategoryState.dead.jobs = data.dead_jobs_metadata || [];
+                this.updateQueueCategoryIfExpanded( "dead", data.total_jobs );
             } else {
                 this.error( "Unknown queue name:", queueName );
             }
@@ -4779,11 +4786,11 @@ class NotificationsUI {
 
             // Session 107: Removed updateJobRegistration - job_state_transition handles routing
 
-            // Update count badge
-            if ( countBadge ) countBadge.textContent = jobsHtml.length;
+            // Update count badge - use metadata length (API returns *_jobs_metadata, not *_jobs)
+            if ( countBadge ) countBadge.textContent = jobsMetadata.length;
 
-            // Render job cards
-            if ( jobsHtml.length === 0 ) {
+            // Render job cards - check metadata, not the non-existent jobsHtml
+            if ( jobsMetadata.length === 0 ) {
                 container.innerHTML = '<div class="queue-empty-message">No jobs in this queue</div>';
             } else {
                 // Use metadata if available (done queue), otherwise create minimal metadata from HTML

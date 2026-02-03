@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-03T14:50:00
+**Last Updated**: 2026-02-03T15:05:00
 
 ---
 
@@ -19,6 +19,11 @@
 ### Queued
 
 (Available for any session to claim)
+
+- [ ] **CJ flow compliance fails for bounded/unbounded ClaudeCode tasks**
+  - **Symptom**: (Awaiting stack trace from user)
+  - **Context**: Discovered during ClaudeCode task testing
+  - **Files to investigate**: TBD
 
 - [ ] **MathAgent fails QueueableJob protocol check on /api/push**
   - **Symptom**: Push endpoint returns 500 error with "Job must implement QueueableJob protocol, got MathAgent"
@@ -44,7 +49,15 @@
 
 ### Completed
 
-- [x] **loadUserQueues called instead of refreshAllQueues after Claude Code submit** → pending commit | By: bb3a5d21
+- [x] **Job cards disappear after queue refresh** → pending commit | By: bb3a5d21
+  - **Symptom**: Job cards show "No jobs in this queue" after `refreshAllQueues()` despite API returning data
+  - **Root Cause**: `loadQueueJobCards()` and `processQueueUpdate()` used wrong field names:
+    - `jobsHtml.length` instead of `jobsMetadata.length` (API returns `*_jobs_metadata` not `*_jobs`)
+    - `data.{queue}_jobs.length` instead of `data.total_jobs` (API returns `total_jobs` count)
+  - **Fix**: Updated field references in `loadQueueJobCards()` (lines 4789-4793) and `processQueueUpdate()` (lines 4532-4565)
+  - **File**: `src/fastapi_app/static/js/notifications.js`
+
+- [x] **loadUserQueues called instead of refreshAllQueues after Claude Code submit** → commit: 0329bf4 | By: bb3a5d21
   - **Symptom**: After submitting a Claude Code job, only todo queue refreshed, not all queues
   - **Root Cause**: `handleClaudeCodeSubmit()` called `loadUserQueues()` instead of `refreshAllQueues()`
   - **Fix**: Changed line 2783 from `this.loadUserQueues()` to `this.refreshAllQueues()`
