@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-02T22:50:00
+**Last Updated**: 2026-02-03T13:35:00
 
 ---
 
@@ -9,6 +9,8 @@
 
 | Session ID | Started | Last Activity | Status |
 |------------|---------|---------------|--------|
+| d7da6d0d | 2026-02-03T13:15:00 | 2026-02-03T13:35:00 | active |
+| 590273af | 2026-02-03T10:00:00 | 2026-02-03T14:30:00 | active |
 | 4949b964 | 2026-02-02T18:00:00 | 2026-02-02T23:05:00 | closed |
 
 ---
@@ -26,6 +28,18 @@
 ---
 
 ### Completed
+
+- [x] **Remove deprecated get_html() and queue_*_update events** → commit: 01b4ac3 | By: 590273af
+  - Frontend uses metadata exclusively; get_html() never rendered
+  - queue_*_update broadcasts total counts (all users), replaced by job_state_transition
+  - Deleted dormant queue.js/queue.html (last modified 2025-08-15)
+  - Unit tests: 195/195 PASS
+
+- [x] **Directory Analyzer "Other" Classification**: 97.58% of files classified as "Other" → commit: be0afa6 | By: d7da6d0d
+  - **Symptom**: Running directory analyzer on Lupin showed 46M lines (97.58%) as "Other"
+  - **Root Cause**: LanceDB files (.lance, .manifest, .txn) + Flutter SDK not excluded, .dart not mapped
+  - **Fix**: Added exclusions and mappings to `src/cosa/repo/directory_analyzer/default_config.yaml`
+  - **Result**: "Other" dropped to 3.57% (12k lines), files scanned 59,471 → 1,223
 
 - [x] **Cache Hit Behavior**: Re-execute cached code for fresh results → commit: 3cff850 | By: 4949b964
   - **Symptom**: Cache hits returned stale `answer_conversational` for time-sensitive queries

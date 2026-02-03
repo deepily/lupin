@@ -46,10 +46,6 @@ class MockJob:
         self.status                = "pending"
         self.error                 = None
 
-    def get_html( self ):
-        """Return HTML representation of this job."""
-        return f"<li id='{self.id_hash}'>{self.content}</li>"
-
     def do_all( self ):
         """Execute the job (mock implementation)."""
         return "done"

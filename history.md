@@ -5,7 +5,26 @@
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
 >
 > ### Fixes
-> (Individual fixes will be added here)
+>
+> #### Fix 1: Remove deprecated `get_html()` and `queue_*_update` events
+> - **Source**: Plan file (majestic-splashing-turing.md)
+> - **Files (Lupin)**:
+>   - `src/cosa/rest/routers/queues.py` - Removed `html` field from API responses
+>   - `src/fastapi_app/static/js/notifications.js` - Removed queue_*_update handlers
+>   - `src/fastapi_app/static/js/queue.js` - **DELETED** (dormant since 2025-08-15)
+>   - `src/fastapi_app/static/html/queue.html` - **DELETED** (dormant since 2025-08-15)
+>   - `src/conf/lupin-app.ini` - Removed queue_*_update events from available events
+>   - `src/conf/lupin-app-splainer.ini` - Removed event descriptions
+>   - `src/docs/websocket-events.md` - Updated documentation for job_state_transition
+>   - `src/tests/unit/test_fifo_queue_filtering.py` - Removed get_html() from MockJob
+> - **Files (CoSA)** - Code changed, git state NOT managed:
+>   - `src/cosa/rest/queue_protocol.py` - Removed get_html() from QueueableJob protocol
+>   - `src/cosa/rest/fifo_queue.py` - Removed get_html_list() and _emit_queue_update()
+>   - `src/cosa/agents/agentic_job_base.py` - Removed get_html() method
+>   - `src/cosa/agents/agent_base.py` - Removed get_html() method
+>   - `src/cosa/memory/solution_snapshot.py` - Removed get_html() method
+> - **Test**: Unit 195/195 PASS, All modules import successfully
+> - **Commit**: 01b4ac3
 >
 > ### Session Summary
 > (Will be completed at session close)

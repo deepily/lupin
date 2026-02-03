@@ -10,65 +10,27 @@ This document provides a complete catalog of WebSocket events used in the Lupin 
 
 ## Event Categories
 
-### 1. Queue Management Events
+### 1. Job State Management Events
 
-These events notify clients about changes to the job queue states.
+Job state is managed via the `job_state_transition` event, which provides per-user filtered job updates. The legacy `queue_*_update` events have been deprecated and removed as they broadcast total counts across all users, which is incorrect for per-user badge displays.
 
-#### `queue_todo_update`
-- **Purpose**: Updates to the TODO queue count
+#### `job_state_transition`
+- **Purpose**: Notifies when a job moves between queues (todo → run → done/dead)
 - **Direction**: Server → Client
+- **User-Filtered**: Yes - only sent to the job's owner
 - **Payload**:
   ```json
   {
-    "type": "queue_todo_update",
-    "value": 5,
+    "type": "job_state_transition",
+    "job_id": "abc123",
+    "from_queue": "run",
+    "to_queue": "done",
+    "job_metadata": { ... },
     "timestamp": "2025-07-30T10:30:00Z"
   }
   ```
-- **Subscribed by**: queue.js
-- **Handler**: Updates `#todo` element display
-
-#### `queue_running_update`
-- **Purpose**: Updates to the RUNNING queue count
-- **Direction**: Server → Client
-- **Payload**:
-  ```json
-  {
-    "type": "queue_running_update", 
-    "value": 2,
-    "timestamp": "2025-07-30T10:30:00Z"
-  }
-  ```
-- **Subscribed by**: queue.js
-- **Handler**: Updates `#run` element display and refreshes running job list
-
-#### `queue_done_update`
-- **Purpose**: Updates to the DONE queue count
-- **Direction**: Server → Client  
-- **Payload**:
-  ```json
-  {
-    "type": "queue_done_update",
-    "value": 10,
-    "timestamp": "2025-07-30T10:30:00Z"
-  }
-  ```
-- **Subscribed by**: queue.js
-- **Handler**: Updates `#done` element display and refreshes completed job list
-
-#### `queue_dead_update`
-- **Purpose**: Updates to the DEAD queue count
-- **Direction**: Server → Client
-- **Payload**:
-  ```json
-  {
-    "type": "queue_dead_update",
-    "value": 1,
-    "timestamp": "2025-07-30T10:30:00Z"
-  }
-  ```
-- **Subscribed by**: queue.js
-- **Handler**: Updates `#dead` element display and refreshes dead job list
+- **Subscribed by**: notifications.js
+- **Handler**: `handleJobStateTransition()` - Updates job cards and badge counts
 
 ### 2. Audio/TTS Events
 
@@ -304,16 +266,13 @@ These events manage WebSocket behavior and subscriptions.
 ### Queue Interface Subscriptions
 ```javascript
 const queueSubscriptions = [
-    "queue_todo_update",
-    "queue_running_update", 
-    "queue_done_update",
-    "queue_dead_update",
+    "job_state_transition",
     "tts_job_request",
     "sys_time_update",
     "notification_play_sound",
     "notification_queue_update",
     "auth_success",
-    "auth_error", 
+    "auth_error",
     "connect",
     "sys_ping"
 ];
@@ -351,14 +310,12 @@ const audioSubscriptions = [
 ### Job Submission and Completion
 ```
 1. Client submits job via /api/push
-2. Server emits queue_todo_update (count increased)
+2. Server emits job_state_transition (to: todo)
 3. Job begins processing
-4. Server emits queue_todo_update (count decreased)
-5. Server emits queue_running_update (count increased) 
-6. Job completes
-7. Server emits queue_running_update (count decreased)
-8. Server emits queue_done_update (count increased)
-9. Server emits tts_job_request (completion notification)
+4. Server emits job_state_transition (from: todo, to: run)
+5. Job completes
+6. Server emits job_state_transition (from: run, to: done)
+7. Server emits tts_job_request (completion notification)
 ```
 
 ### TTS Audio Streaming
@@ -387,7 +344,7 @@ const audioSubscriptions = [
 The available events are configured in `lupin-app.ini`:
 
 ```ini
-websocket available events = queue_todo_update, queue_done_update, queue_running_update, queue_dead_update, tts_job_request, audio_streaming_chunk, notification_queue_update, notification_play_sound, sys_time_update, sys_ping, sys_pong, auth_request, auth_success, auth_error, connect, audio_streaming_status, audio_streaming_complete, update_subscriptions
+websocket available events = job_state_transition, tts_job_request, audio_streaming_chunk, notification_queue_update, notification_play_sound, sys_time_update, sys_ping, sys_pong, auth_request, auth_success, auth_error, connect, audio_streaming_status, audio_streaming_complete, update_subscriptions
 ```
 
 ## Error Handling
