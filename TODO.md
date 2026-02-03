@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-02 (Session 123 - Test Suite Remediation Phase 3 Complete)
+Last updated: 2026-02-03 (Session 128 - CJ Flow Verification)
 
 ## Pending
 
@@ -13,10 +13,11 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 
 ### Before Branch Merge (This Week)
 
-- [ ] **[LUPIN] Verify CJ Flow Queueable Job Protocol Compliance** - Session 124: Investigation complete, implementation verified compliant. Run smoke tests to confirm.
+- [x] **[LUPIN] Verify CJ Flow Queueable Job Protocol Compliance** - Session 124: Investigation complete, implementation verified compliant. Session 128: Verification complete.
   - **Report**: `src/rnd/2026.02.02-cj-flow-protocol-compliance-report.md`
   - **Finding**: ClaudeCodeJob implements all 22 protocol requirements for both BOUNDED and INTERACTIVE modes
-  - **Next**: Run verification smoke tests (commands in report)
+- [x] **[LUPIN] CJ Flow verification: Dry run end-to-end testing for BOUNDED tasks** - Session 128: Complete
+- [ ] **[LUPIN] CJ Flow verification: Dry run end-to-end testing for UNBOUNDED tasks** - Pending
 - [x] **Run baseline testing plan** - Session 123: **COMPLETE** ✅
   - Unit tests: 168/199 (84.4%) → **195/195 (100%)**
   - All test infrastructure issues resolved
