@@ -1,6 +1,48 @@
 # Lupin Project History
 
-> **✅ SESSION 123 COMPLETE**: Test Suite Remediation (2026.02.02)
+> **✅ SESSION 124 COMPLETE**: Unified LoRA Training Integration (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#02ebea7d
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+>
+> **Integrated 3 agentic job intents into unified LoRA training pipeline**:
+> - `agent router go to deep research`
+> - `agent router go to podcast generator`
+> - `agent router go to research to podcast`
+>
+> **Changes Made**:
+> 1. Created 3 synthetic data files for agentic commands (50 templates each)
+> 2. Added agentic commands to `_get_simple_agent_router_commands()` in xml_prompt_generator.py
+> 3. Updated `build_all_training_prompts()` to include agentic jobs parameter
+> 4. Updated `build_agentic_job_training_prompts()` to use shared agent router instruction template
+> 5. Updated `run-agentic-intent-training.sh` for unified approach
+>
+> **Results**:
+> | Metric | Before | After |
+> |--------|--------|-------|
+> | Total training examples | ~38,000 | 40,258 |
+> | Agentic train examples | 240 (isolated) | 600 (unified) |
+> | Commands in agentic instruction | 3 | 10 (all agent router commands) |
+>
+> **Files Created (Lupin)**:
+> - `src/ephemera/prompts/data/synthetic-data-agent-routing-deep-research.txt`
+> - `src/ephemera/prompts/data/synthetic-data-agent-routing-podcast-generator.txt`
+> - `src/ephemera/prompts/data/synthetic-data-agent-routing-research-to-podcast.txt`
+> - `src/rnd/2026.02.02-unified-lora-training-integration-plan.md`
+>
+> **Files Modified (Lupin)**:
+> - `src/scripts/run-agentic-intent-training.sh` (+74/-14)
+> - `src/ephemera/prompts/data/voice-commands-xml-{train,test,validate}.jsonl` (regenerated)
+> - `src/ephemera/prompts/data/agentic-job-xml-{train,test,validate}.jsonl` (regenerated)
+>
+> **Files Modified (CoSA)** - Requires separate commit:
+> - `src/cosa/training/xml_prompt_generator.py` - Added 3 agentic commands
+> - `src/cosa/training/xml_coordinator.py` - Added agentic jobs to unified pipeline
+>
+> ---
+
+> **🔄 SESSION 123 IN PROGRESS**: Test Suite Remediation (2026.02.02)
 > **Owner**: claude.code@lupin.deepily.ai#d1c3ccff
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
 >

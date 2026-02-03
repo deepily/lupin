@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-02 (Session 123)
+Last updated: 2026-02-02 (Session 124 - Unified LoRA Training Integration)
 
 ## Pending
 
@@ -13,7 +13,8 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 
 ### Before Branch Merge (This Week)
 
-- [x] Run baseline testing plan: `src/rnd/2026.02.02-test-verification-plan.md` - Session 123: Remediation complete
+- [ ] **[LUPIN] Verify CJ Flow Queueable Job Protocol Compliance** - Confirm unbounded and bounded agentic jobs created for Claude Code implement the CJ Flow queueable job protocol correctly
+- [ ] Run baseline testing plan: `src/rnd/2026.02.02-test-verification-plan.md` - Session 123: In progress
   - Unit tests improved: 84.4% → 95.5% (+22 tests)
   - Fixed: Notification Models (41), FIFO Queue Filtering (15), API Key Middleware (15)
   - Remaining 9 failures: JWT timing (2), config loader (2), integration-dependent (5)
@@ -21,7 +22,7 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - JWT timing tests need `freezegun` or timing tolerance increase
   - Config loader tests have expectation mismatches
   - WebSocket/queue tests require server running
-- [ ] **[LUPIN] Run agentic job intent LORA 1% sample training** - Requires GPUs to be freed. Run: `./src/scripts/run-agentic-intent-training.sh test`. Validates Ministral-8B training pipeline with agentic job intent data (deep research, podcast generator, research→podcast). **Scheduled: Evening session 2026-02-02** when GPU resources available.
+- [ ] **[LUPIN] Run agentic job intent LORA 1% sample training** - Requires GPUs to be freed. Run: `./src/scripts/run-agentic-intent-training.sh test`. **Session 124**: Unified training pipeline now includes agentic jobs (40,258 total examples, 600 agentic). **Scheduled: Evening session 2026-02-02** when GPU resources available.
 - [ ] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - Two cases to handle:
   1. User makes vague reference to research document contents (e.g., "make a podcast about that AI research")
   2. User references research document by approximate name/path

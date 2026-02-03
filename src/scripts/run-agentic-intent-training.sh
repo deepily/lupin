@@ -63,27 +63,47 @@ cd "$LUPIN_ROOT/src"
 
 case "$MODE" in
     generate)
-        echo -e "${GREEN}Generating training data...${NC}"
+        echo -e "${GREEN}Generating unified training data (includes agentic jobs)...${NC}"
         python -c "
 from cosa.training.xml_coordinator import XmlCoordinator
 import cosa.utils.util as du
 
-du.print_banner( 'Generating Agentic Job Training Data', prepend_nl=True )
+du.print_banner( 'Generating Unified Training Data (with Agentic Jobs)', prepend_nl=True )
 
-coordinator = XmlCoordinator( debug=False, verbose=False, silent=True )
+coordinator = XmlCoordinator( debug=False, verbose=False, silent=False )
 
-print( 'Building training prompts...' )
-df = coordinator.build_agentic_job_training_prompts( sample_size_per_command=100 )
-print( f'Generated {df.shape[0]} training examples' )
+print( 'Building ALL training prompts (vox commands + agent router + agentic jobs)...' )
+# Note: agentic commands have ~200-500 unique examples per command (research-to-podcast has fewer templates)
+df = coordinator.build_all_training_prompts(
+    sample_size_per_compound_command=2000,
+    sample_size_per_simple_command=400,
+    sample_size_per_agentic_command=200,
+    include_agentic_jobs=True
+)
+print( f'Generated {df.shape[0]} total training examples' )
 
-print( 'Splitting into train/test/validate...' )
-train_df, test_df, validate_df = coordinator.get_agentic_job_train_test_validate_split( df, sample_size=300 )
+# Show command distribution
+print( '\\nCommand distribution:' )
+print( df[ 'command' ].value_counts().sort_index() )
+
+print( '\\nSplitting into train/test/validate...' )
+# Calculate appropriate sample size (80% of total for train)
+total_examples = df.shape[0]
+train_df, test_df, validate_df = coordinator.get_train_test_validate_split( df, sample_size=total_examples )
 print( f'Train: {train_df.shape[0]}, Test: {test_df.shape[0]}, Validate: {validate_df.shape[0]}' )
 
-print( 'Writing to JSONL files...' )
-coordinator.write_agentic_job_ttv_split_to_jsonl( train_df, test_df, validate_df )
+print( '\\nWriting unified JSONL files...' )
+coordinator.write_ttv_split_to_jsonl( train_df, test_df, validate_df )
 
-print( 'Done!' )
+# Also write isolated agentic job files for reference
+print( '\\nAlso writing isolated agentic job JSONL files (for reference)...' )
+agentic_df = df[ df[ 'command' ].str.contains( 'deep research|podcast generator|research to podcast' ) ].copy()
+if agentic_df.shape[0] > 0:
+    agentic_train, agentic_test, agentic_val = coordinator.get_agentic_job_train_test_validate_split( agentic_df, sample_size=agentic_df.shape[0] )
+    coordinator.write_agentic_job_ttv_split_to_jsonl( agentic_train, agentic_test, agentic_val )
+    print( f'Agentic-only: Train: {agentic_train.shape[0]}, Test: {agentic_test.shape[0]}, Validate: {agentic_val.shape[0]}' )
+
+print( '\\nDone!' )
 "
         ;;
 
@@ -95,16 +115,56 @@ import cosa.utils.util as du
 
 du.print_banner( 'Validating JSONL Training Data', prepend_nl=True )
 
-files = [
+# Validate both unified and isolated agentic job files
+unified_files = [
+    '$TEST_TRAIN_PATH/voice-commands-xml-train.jsonl',
+    '$TEST_TRAIN_PATH/voice-commands-xml-test.jsonl',
+    '$TEST_TRAIN_PATH/voice-commands-xml-validate.jsonl'
+]
+
+agentic_files = [
     '$TEST_TRAIN_PATH/agentic-job-xml-train.jsonl',
     '$TEST_TRAIN_PATH/agentic-job-xml-test.jsonl',
     '$TEST_TRAIN_PATH/agentic-job-xml-validate.jsonl'
 ]
 
 required_fields = [ 'command', 'instruction', 'input', 'output', 'prompt' ]
+agentic_commands = [ 'agent router go to deep research', 'agent router go to podcast generator', 'agent router go to research to podcast' ]
 total_errors = 0
 
-for filepath in files:
+print( '=== Unified Training Files ===' )
+for filepath in unified_files:
+    name = filepath.split( '/' )[ -1 ]
+    try:
+        with open( filepath, 'r' ) as f:
+            lines = f.readlines()
+
+        errors = 0
+        agentic_count = 0
+        for i, line in enumerate( lines ):
+            try:
+                data = json.loads( line )
+                for field in required_fields:
+                    if field not in data:
+                        errors += 1
+                        print( f'  Missing {field} in line {i}' )
+                # Count agentic commands in unified files
+                if data.get( 'command', '' ) in agentic_commands:
+                    agentic_count += 1
+            except json.JSONDecodeError:
+                errors += 1
+
+        if errors == 0:
+            print( f'✓ {name}: {len( lines )} examples ({agentic_count} agentic) - VALID' )
+        else:
+            print( f'✗ {name}: {errors} errors' )
+            total_errors += errors
+    except FileNotFoundError:
+        print( f'✗ {name}: FILE NOT FOUND' )
+        total_errors += 1
+
+print( '\\n=== Isolated Agentic Job Files (Reference) ===' )
+for filepath in agentic_files:
     name = filepath.split( '/' )[ -1 ]
     try:
         with open( filepath, 'r' ) as f:
@@ -127,8 +187,8 @@ for filepath in files:
             print( f'✗ {name}: {errors} errors' )
             total_errors += errors
     except FileNotFoundError:
-        print( f'✗ {name}: FILE NOT FOUND' )
-        total_errors += 1
+        print( f'⚠ {name}: FILE NOT FOUND (optional)' )
+        # Don't count as error - isolated files are optional now
 
 if total_errors == 0:
     print( '\\n✓ All validation checks passed!' )
