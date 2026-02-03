@@ -99,6 +99,14 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 ### Future Considerations
 
 - [ ] **Silent flag for notifications**: Consider adding a `silent` parameter to the cosa-voice notification system to suppress TTS during automated testing. Would require changes to: router request models, job classes, voice_io wrappers, and core notification functions.
+- [ ] **Standardize compound job/user ID usage** - Currently compound IDs (job_id + user_id) are only used when submitting jobs to the standard queue entry point. Consider standardizing this pattern across all job submission paths to avoid inconsistency issues later.
+  - **Current state**: Only standard Q entry point uses compound IDs
+  - **Risk**: Inconsistent ID formats could cause routing/tracking bugs
+  - **Action**: Audit all job submission paths and standardize on compound ID format
+- [ ] **Standardize job-user-session association interface** - Jobs are repeatedly associated with users and sessions at multiple points: queue transfers, job submission, processing handoffs. This repetition suggests an opportunity for a unified interface.
+  - **Current state**: Ad-hoc association at each queue transition point
+  - **Risk**: Inconsistent association logic, potential for user/session mismatch bugs
+  - **Action**: Design a single interface/method for job-user-session binding that all queue operations use
 
 ### Carried Over from Session 102
 
