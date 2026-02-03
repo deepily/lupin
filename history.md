@@ -1,5 +1,38 @@
 # Lupin Project History
 
+> **🔧 SESSION 125 ACTIVE**: Bug Fix Mode (2026.02.03)
+> **Owner**: claude.code@lupin.deepily.ai#590273af
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Fixes
+> (Individual fixes will be added here)
+>
+> ### Session Summary
+> (Will be completed at session close)
+>
+> ---
+
+### 2026.02.03 - Session 126 | Mock Claude Code Job + Dry-Run Support
+
+**Accomplishments**:
+- Implemented dry-run mode for ClaudeCodeJob (matching Deep Research/Podcast patterns)
+- Fixed blocking import bug in `claude_code_queue.py` (ModuleNotFoundError)
+- Created dedicated `voice_io.py` wrapper for Claude Code agent
+- Added dry-run checkbox to notifications UI (checked by default)
+
+**Files Modified (Lupin)**:
+- `src/fastapi_app/static/html/notifications.html` - Added dry-run checkbox
+- `src/fastapi_app/static/js/notifications.js` - Pass dry_run to queue submission
+
+**Files Modified (CoSA)** - Requires separate commit:
+- `src/cosa/rest/routers/claude_code_queue.py` - Fixed import bug, added dry_run field
+- `src/cosa/agents/claude_code/job.py` - Added dry_run param, _execute_dry_run() method
+- `src/cosa/agents/claude_code/voice_io.py` - NEW: Voice I/O wrapper
+
+**Smoke Tests**: All passing (router + job)
+
+---
+
 > **✅ SESSION 124 COMPLETE**: Unified LoRA Training Integration (2026.02.02)
 > **Owner**: claude.code@lupin.deepily.ai#02ebea7d
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`

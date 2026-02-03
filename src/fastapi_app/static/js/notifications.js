@@ -1737,10 +1737,6 @@ class NotificationsUI {
             token: this.authToken.replace( "Bearer ", "" ), // Strip Bearer prefix for WebSocket auth
             session_id: this.queueSessionId,
             subscribed_events: [
-                "queue_todo_update",
-                "queue_running_update",
-                "queue_done_update",
-                "queue_dead_update",
                 "job_state_transition",
                 "tts_job_request",
                 "sys_time_update",
@@ -1839,35 +1835,6 @@ class NotificationsUI {
                     this.handleJobCompletion( envelope );
                     break;
                     
-                case "queue_todo_update":
-                    // Session 108: Server broadcasts total count (all users), not per-user count.
-                    // Badge is kept accurate by job_state_transition events via updateQueueCountFromDOM().
-                    // Log both for debugging but don't update badge from this event.
-                    const todoContainer = document.getElementById( 'todo-jobs-container' );
-                    const todoDomCount  = todoContainer?.querySelectorAll( '.job-card' ).length || 0;
-                    this.log( `Queue TODO update: server=${envelope.value}, DOM=${todoDomCount} (ignoring server count)` );
-                    break;
-
-                case "queue_running_update":
-                    // Session 108: Server broadcasts total count (all users), not per-user count.
-                    const runContainer = document.getElementById( 'run-jobs-container' );
-                    const runDomCount  = runContainer?.querySelectorAll( '.job-card' ).length || 0;
-                    this.log( `Queue RUNNING update: server=${envelope.value}, DOM=${runDomCount} (ignoring server count)` );
-                    break;
-
-                case "queue_done_update":
-                    // Session 108: Server broadcasts total count (all users), not per-user count.
-                    const doneContainer = document.getElementById( 'done-jobs-container' );
-                    const doneDomCount  = doneContainer?.querySelectorAll( '.job-card' ).length || 0;
-                    this.log( `Queue DONE update: server=${envelope.value}, DOM=${doneDomCount} (ignoring server count)` );
-                    break;
-
-                case "queue_dead_update":
-                    // Session 108: Server broadcasts total count (all users), not per-user count.
-                    const deadContainer = document.getElementById( 'dead-jobs-container' );
-                    const deadDomCount  = deadContainer?.querySelectorAll( '.job-card' ).length || 0;
-                    this.log( `Queue DEAD update: server=${envelope.value}, DOM=${deadDomCount} (ignoring server count)` );
-                    break;
 
                 case "job_state_transition":
                     this.handleJobStateTransition( envelope );
@@ -2737,6 +2704,8 @@ class NotificationsUI {
         const prompt = document.getElementById( 'cc-prompt' ).value;
         const taskType = document.querySelector( 'input[name="cc-task-type"]:checked' ).value;
         const executionMode = document.querySelector( 'input[name="cc-execution-mode"]:checked' ).value;
+        const dryRunCheckbox = document.getElementById( 'cc-dry-run' );
+        const dryRun = dryRunCheckbox ? dryRunCheckbox.checked : false;
 
         if ( !prompt.trim() ) {
             alert( 'Please enter a task prompt' );
@@ -2753,20 +2722,20 @@ class NotificationsUI {
 
         // Route to appropriate submission method based on execution mode
         if ( executionMode === 'queue' ) {
-            await this.submitClaudeCodeToQueue( project, prompt, taskType, loadingEl, submitBtn, responseEl );
+            await this.submitClaudeCodeToQueue( project, prompt, taskType, dryRun, loadingEl, submitBtn, responseEl );
         } else {
             await this.submitClaudeCodeDirect( project, prompt, taskType, loadingEl, submitBtn, responseEl );
         }
     }
 
-    async submitClaudeCodeToQueue( project, prompt, taskType, loadingEl, submitBtn, responseEl ) {
+    async submitClaudeCodeToQueue( project, prompt, taskType, dryRun, loadingEl, submitBtn, responseEl ) {
         /**
          * Submit Claude Code task to CJF queue for background execution.
          * Jobs appear in the queue section and are tracked via job cards.
          */
         if ( responseEl ) responseEl.textContent = 'Submitting to CJF queue...';
 
-        this.log( `Claude Code queue submit: project=${project}, type=${taskType}` );
+        this.log( `Claude Code queue submit: project=${project}, type=${taskType}, dry_run=${dryRun}` );
 
         try {
             const response = await fetch( '/api/claude-code/queue/submit', {
@@ -2780,7 +2749,8 @@ class NotificationsUI {
                     project: project,
                     task_type: taskType,
                     max_turns: taskType === 'INTERACTIVE' ? 200 : 50,
-                    websocket_id: this.sessionId
+                    websocket_id: this.sessionId,
+                    dry_run: dryRun
                 } )
             } );
 
