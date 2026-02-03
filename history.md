@@ -33,6 +33,33 @@
 
 ---
 
+### 2026.02.03 - Session 127 | WebSocket JWT Auth Fix & PR Merge Requirements
+
+**Accomplishments**:
+- Fixed WebSocket smoke tests to use JWT authentication instead of deprecated mock tokens
+- WebSocket tests now 100% passing (50/50) - up from 46% (23/50)
+- Removed stale "92% pass rate" from documentation
+- Added PR MERGE REQUIREMENTS section to CLAUDE.md
+
+**Files Modified**:
+- `src/tests/websocket_smoke/infrastructure/smoke_test_runner.py` - JWT auth (2 locations)
+- `src/tests/websocket_smoke/core/test_authentication_flow.py` - JWT auth (~10 locations)
+- `src/tests/websocket_smoke/core/test_session_management.py` - JWT auth (~13 locations)
+- `src/tests/websocket_smoke/core/test_event_system.py` - JWT auth (~10 locations)
+- `CLAUDE.md` - Removed pass rate, added PR MERGE REQUIREMENTS section
+- `src/tests/README.md` - Removed stale pass rate
+
+**Test Results**:
+| Category | Before | After |
+|----------|--------|-------|
+| Core | 19/25 (76%) | 25/25 (100%) |
+| Integration | 2/22 (9%) | 22/22 (100%) |
+| Performance | 2/2 (100%) | 2/2 (100%) |
+| Load | 0/1 (0%) | 1/1 (100%) |
+| **Total** | **23/50 (46%)** | **50/50 (100%)** |
+
+---
+
 > **✅ SESSION 124 COMPLETE**: Unified LoRA Training Integration (2026.02.02)
 > **Owner**: claude.code@lupin.deepily.ai#02ebea7d
 > **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`

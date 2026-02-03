@@ -123,8 +123,13 @@ class SessionManagementTests:
         try:
             session_id = self.utils.generate_session_id()
             user_id = "lifecycle_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Create session
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth_success, auth_data = await self.utils.authenticate_websocket( websocket, token )
@@ -202,12 +207,17 @@ class SessionManagementTests:
         try:
             session_id = self.utils.generate_session_id()
             user_id = "persistence_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Create session and send some data
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
-            
+
             if not auth_success:
                 raise Exception( "Authentication failed" )
             
@@ -313,25 +323,28 @@ class SessionManagementTests:
         websockets_to_close = []
         
         try:
+            # Get JWT token - will be used for both sessions (same user)
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Create two separate sessions
             session1_id = self.utils.generate_session_id()
             session2_id = self.utils.generate_session_id()
-            
+
             user1_id = "isolation_user_1"
             user2_id = "isolation_user_2"
-            
-            token1 = self.utils.generate_mock_token( user1_id )
-            token2 = self.utils.generate_mock_token( user2_id )
-            
+
             # Connect both sessions
             ws1 = await self.utils.connect_websocket( "queue", session1_id, timeout=5.0 )
             ws2 = await self.utils.connect_websocket( "queue", session2_id, timeout=5.0 )
             websockets_to_close = [ws1, ws2]
-            
-            # Authenticate both
-            auth1_success, _ = await self.utils.authenticate_websocket( ws1, token1 )
-            auth2_success, _ = await self.utils.authenticate_websocket( ws2, token2 )
-            
+
+            # Authenticate both with JWT token
+            auth1_success, _ = await self.utils.authenticate_websocket( ws1, token )
+            auth2_success, _ = await self.utils.authenticate_websocket( ws2, token )
+
             if not (auth1_success and auth2_success):
                 raise Exception( f"Authentication failed: session1={auth1_success}, session2={auth2_success}" )
             
@@ -455,22 +468,25 @@ class SessionManagementTests:
         websockets_to_close = []
         
         try:
+            # Get JWT token - will be used for both sessions
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Create sender and receiver sessions
             sender_session = self.utils.generate_session_id()
             receiver_session = self.utils.generate_session_id()
-            
-            sender_token = self.utils.generate_mock_token( "sender_user" )
-            receiver_token = self.utils.generate_mock_token( "receiver_user" )
-            
+
             # Connect both sessions
             sender_ws = await self.utils.connect_websocket( "queue", sender_session, timeout=5.0 )
             receiver_ws = await self.utils.connect_websocket( "queue", receiver_session, timeout=5.0 )
             websockets_to_close = [sender_ws, receiver_ws]
-            
-            # Authenticate both
-            sender_auth, _ = await self.utils.authenticate_websocket( sender_ws, sender_token )
-            receiver_auth, _ = await self.utils.authenticate_websocket( receiver_ws, receiver_token )
-            
+
+            # Authenticate both with JWT token
+            sender_auth, _ = await self.utils.authenticate_websocket( sender_ws, token )
+            receiver_auth, _ = await self.utils.authenticate_websocket( receiver_ws, token )
+
             if not (sender_auth and receiver_auth):
                 raise Exception( "Authentication failed for cross-session test" )
             
@@ -578,12 +594,17 @@ class SessionManagementTests:
         try:
             session_id = self.utils.generate_session_id()
             user_id = "cleanup_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Create session
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
-            
+
             if not auth_success:
                 raise Exception( "Authentication failed" )
             
@@ -678,11 +699,16 @@ class SessionManagementTests:
         
         start_time = time.time()
         websockets_to_close = []
-        
+
         try:
             user_id = "multi_session_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Create multiple sessions for same user
             sessions = []
             for i in range( 3 ):
@@ -794,12 +820,17 @@ class SessionManagementTests:
         try:
             session_id = self.utils.generate_session_id()
             user_id = "reconnection_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Initial connection
             websocket1 = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth1_success, _ = await self.utils.authenticate_websocket( websocket1, token )
-            
+
             if not auth1_success:
                 raise Exception( "Initial authentication failed" )
             
@@ -909,12 +940,17 @@ class SessionManagementTests:
         try:
             session_id = self.utils.generate_session_id()
             user_id = "timeout_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Create session
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
-            
+
             if not auth_success:
                 raise Exception( "Authentication failed" )
             
@@ -1016,15 +1052,21 @@ class SessionManagementTests:
         
         start_time = time.time()
         websockets_to_close = []
-        
+
         try:
             user_id = "limit_test_user"
-            token = self.utils.generate_mock_token( user_id )
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             max_attempts = 10  # Try to create many sessions
-            
+
             successful_sessions = []
             failed_sessions = []
-            
+
             # Attempt to create many sessions
             for i in range( max_attempts ):
                 try:
@@ -1125,21 +1167,26 @@ class SessionManagementTests:
         
         start_time = time.time()
         try:
+            # Get JWT token once for all cycles
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Create and destroy sessions rapidly to test resource cleanup
             cycles = 5
             sessions_per_cycle = 3
-            
+
             for cycle in range( cycles ):
                 self.utils.log( f"   Resource test cycle {cycle + 1}/{cycles}" )
-                
+
                 cycle_websockets = []
-                
+
                 # Create sessions
                 for i in range( sessions_per_cycle ):
                     session_id = self.utils.generate_session_id()
                     user_id = f"resource_user_{cycle}_{i}"
-                    token = self.utils.generate_mock_token( user_id )
-                    
+
                     websocket = await self.utils.connect_websocket( "queue", session_id, timeout=3.0 )
                     auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
                     
@@ -1159,10 +1206,9 @@ class SessionManagementTests:
             
             # Final test: create one more session to verify server is still responsive
             final_session_id = self.utils.generate_session_id()
-            final_token = self.utils.generate_mock_token( "final_test_user" )
-            
+
             final_websocket = await self.utils.connect_websocket( "queue", final_session_id, timeout=5.0 )
-            final_auth_success, _ = await self.utils.authenticate_websocket( final_websocket, final_token )
+            final_auth_success, _ = await self.utils.authenticate_websocket( final_websocket, token )
             await final_websocket.close()
             
             duration = ( time.time() - start_time ) * 1000

@@ -129,8 +129,13 @@ class AuthenticationFlowTests:
         start_time = time.time()
         try:
             session_id = self.utils.generate_session_id()
-            token = self.utils.generate_mock_token( "test_user_queue" )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth_success, auth_data = await self.utils.authenticate_websocket( websocket, token )
             await websocket.close()
@@ -190,8 +195,13 @@ class AuthenticationFlowTests:
         start_time = time.time()
         try:
             session_id = self.utils.generate_session_id()
-            token = self.utils.generate_mock_token( "test_user_audio" )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             websocket = await self.utils.connect_websocket( "audio", session_id, timeout=5.0 )
             auth_success, auth_data = await self.utils.authenticate_websocket( websocket, token )
             await websocket.close()
@@ -252,69 +262,69 @@ class AuthenticationFlowTests:
         """
         test_name = "token_formats"
         self.utils.log( f"\\n🧪 Testing: {test_name}" )
-        
-        # Test cases: (user_id, should_succeed, description)
-        token_test_cases = [
-            ( "valid_user_123", True, "Standard user ID format" ),
-            ( "user@domain.com", True, "Email-like user ID" ),
-            ( "test-user-456", True, "Hyphenated user ID" ),
-            ( "UserWithCaps", True, "Mixed case user ID" ),
-            ( "u", True, "Single character user ID" ),
-            ( "user_with_very_long_name_12345", True, "Long user ID" ),
-            ( "", False, "Empty user ID should fail" ),
-            ( "user with spaces", True, "User ID with spaces" ),
-            ( "用户123", True, "Unicode user ID" ),
-        ]
-        
+
+        # With JWT authentication, we test valid JWT token authentication
+        # Mock token format tests are obsolete - server requires real JWT tokens
+        start_time = time.time()
         results = []
-        
-        for user_id, should_succeed, description in token_test_cases:
-            try:
-                start_time = time.time()
-                session_id = self.utils.generate_session_id()
-                token = self.utils.generate_mock_token( user_id )
-                
-                websocket = await self.utils.connect_websocket( "queue", session_id, timeout=3.0 )
-                auth_success, auth_data = await self.utils.authenticate_websocket( websocket, token )
-                await websocket.close()
-                
-                duration = ( time.time() - start_time ) * 1000
-                
-                # Evaluate success based on expectation
-                test_success = ( auth_success == should_succeed )
-                
-                results.append( {
-                    "user_id": repr( user_id ),
-                    "expected": should_succeed,
-                    "actual": auth_success,
-                    "correct": test_success,
-                    "duration_ms": duration,
-                    "description": description,
-                    "auth_data": auth_data
-                } )
-                
-                status = "✅" if test_success else "❌"
-                auth_status = "succeeded" if auth_success else "failed"
-                self.utils.log( f"   {status} {repr(user_id)}: Auth {auth_status} ({duration:.1f}ms) - {description}" )
-                
-            except Exception as e:
-                duration = ( time.time() - start_time ) * 1000
-                # If we expected success but got an exception, that's a failure
-                test_success = not should_succeed
-                
-                results.append( {
-                    "user_id": repr( user_id ),
-                    "expected": should_succeed,
-                    "actual": False,
-                    "correct": test_success,
-                    "duration_ms": duration,
-                    "description": description,
-                    "error": str( e )
-                } )
-                
-                status = "✅" if test_success else "❌"
-                self.utils.log( f"   {status} {repr(user_id)}: Exception ({duration:.1f}ms) - {description} - {e}" )
-        
+
+        try:
+            # Test 1: Valid JWT token should succeed
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
+            session_id = self.utils.generate_session_id()
+            websocket = await self.utils.connect_websocket( "queue", session_id, timeout=3.0 )
+            auth_success, auth_data = await self.utils.authenticate_websocket( websocket, token )
+            await websocket.close()
+
+            duration = ( time.time() - start_time ) * 1000
+            results.append( {
+                "test": "valid_jwt_token",
+                "expected": True,
+                "actual": auth_success,
+                "correct": auth_success,
+                "duration_ms": duration,
+                "description": "Valid JWT token authentication"
+            } )
+            status = "✅" if auth_success else "❌"
+            self.utils.log( f"   {status} valid_jwt: Auth {'succeeded' if auth_success else 'failed'} ({duration:.1f}ms)" )
+
+            # Test 2: Invalid token should fail
+            invalid_start = time.time()
+            session_id = self.utils.generate_session_id()
+            websocket = await self.utils.connect_websocket( "queue", session_id, timeout=3.0 )
+            invalid_auth, invalid_data = await self.utils.authenticate_websocket( websocket, "invalid_token_123" )
+            await websocket.close()
+
+            invalid_duration = ( time.time() - invalid_start ) * 1000
+            invalid_correct = not invalid_auth  # Invalid token SHOULD fail
+            results.append( {
+                "test": "invalid_token",
+                "expected": False,
+                "actual": invalid_auth,
+                "correct": invalid_correct,
+                "duration_ms": invalid_duration,
+                "description": "Invalid token should be rejected"
+            } )
+            status = "✅" if invalid_correct else "❌"
+            self.utils.log( f"   {status} invalid_token: Auth {'succeeded' if invalid_auth else 'failed'} ({invalid_duration:.1f}ms)" )
+
+        except Exception as e:
+            duration = ( time.time() - start_time ) * 1000
+            results.append( {
+                "test": "jwt_auth",
+                "expected": True,
+                "actual": False,
+                "correct": False,
+                "duration_ms": duration,
+                "description": "JWT authentication test",
+                "error": str( e )
+            } )
+            self.utils.log( f"   ❌ JWT auth test: Exception ({duration:.1f}ms) - {e}" )
+
         # Overall test success
         all_correct = all( r["correct"] for r in results )
         overall_duration = sum( r["duration_ms"] for r in results )
@@ -476,42 +486,45 @@ class AuthenticationFlowTests:
         timing_results = []
         
         try:
+            # Get JWT token once - will be cached for all timing tests
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Test 1: Immediate authentication after connection
             session_id = self.utils.generate_session_id()
-            token = self.utils.generate_mock_token( "timing_user_1" )
-            
+
             websocket = await self.utils.connect_websocket( "queue", session_id )
             immediate_start = time.time()
             auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
             immediate_duration = ( time.time() - immediate_start ) * 1000
             await websocket.close()
-            
+
             timing_results.append( {
                 "scenario": "immediate_auth",
                 "success": auth_success,
                 "duration_ms": immediate_duration
             } )
-            
+
             # Test 2: Delayed authentication (wait 1 second)
             session_id = self.utils.generate_session_id()
-            token = self.utils.generate_mock_token( "timing_user_2" )
-            
+
             websocket = await self.utils.connect_websocket( "queue", session_id )
             await asyncio.sleep( 1.0 )  # Wait 1 second
             delayed_start = time.time()
             auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
             delayed_duration = ( time.time() - delayed_start ) * 1000
             await websocket.close()
-            
+
             timing_results.append( {
                 "scenario": "delayed_auth",
                 "success": auth_success,
                 "duration_ms": delayed_duration
             } )
-            
+
             # Test 3: Authentication response time validation (ensure reasonable performance)
             session_id = self.utils.generate_session_id()
-            token = self.utils.generate_mock_token( "timing_user_3" )
 
             websocket = await self.utils.connect_websocket( "queue", session_id )
             response_start = time.time()
@@ -595,17 +608,21 @@ class AuthenticationFlowTests:
         
         start_time = time.time()
         try:
+            # Get JWT token - same token will be used for both attempts
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             session_id = self.utils.generate_session_id()
             websocket = await self.utils.connect_websocket( "queue", session_id )
-            
+
             # First authentication attempt
-            token1 = self.utils.generate_mock_token( "multi_user_1" )
-            auth1_success, auth1_data = await self.utils.authenticate_websocket( websocket, token1 )
-            
-            # Second authentication attempt (should this work or fail?)
-            token2 = self.utils.generate_mock_token( "multi_user_2" )
+            auth1_success, auth1_data = await self.utils.authenticate_websocket( websocket, token )
+
+            # Second authentication attempt with same token (test re-auth behavior)
             try:
-                auth2_success, auth2_data = await self.utils.authenticate_websocket( websocket, token2 )
+                auth2_success, auth2_data = await self.utils.authenticate_websocket( websocket, token )
                 second_auth_attempted = True
             except Exception as e:
                 auth2_success = False
@@ -878,10 +895,13 @@ class AuthenticationFlowTests:
             except Exception:
                 can_send_after_failure = False
             
-            # Try valid authentication after initial failure
+            # Try valid JWT authentication after initial failure
             try:
-                valid_token = self.utils.generate_mock_token( "recovery_user" )
-                recovery_success, _ = await self.utils.authenticate_websocket( websocket, valid_token )
+                jwt_success, token_or_error = await self.utils.get_jwt_token()
+                if jwt_success:
+                    recovery_success, _ = await self.utils.authenticate_websocket( websocket, token_or_error )
+                else:
+                    recovery_success = False
             except Exception:
                 recovery_success = False
             
@@ -1027,11 +1047,21 @@ class AuthenticationFlowTests:
             None (exceptions are caught and returned in result dictionary)
         """
         try:
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                return {
+                    "success": False,
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "error": f"JWT login failed: {token_or_error}"
+                }
+            token = token_or_error
+
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=3.0 )
-            token = self.utils.generate_mock_token( user_id )
             auth_success, auth_data = await self.utils.authenticate_websocket( websocket, token )
             await websocket.close()
-            
+
             return {
                 "success": auth_success,
                 "user_id": user_id,

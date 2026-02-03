@@ -146,12 +146,17 @@ class EventSystemTests:
         try:
             session_id = self.utils.generate_session_id()
             user_id = "event_subscription_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Connect and authenticate
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth_success, auth_data = await self.utils.authenticate_websocket( websocket, token )
-            
+
             if not auth_success:
                 raise Exception( "Authentication failed" )
             
@@ -246,12 +251,17 @@ class EventSystemTests:
         try:
             session_id = self.utils.generate_session_id()
             user_id = "event_delivery_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Connect and authenticate
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
-            
+
             if not auth_success:
                 raise Exception( "Authentication failed" )
             
@@ -367,15 +377,20 @@ class EventSystemTests:
         try:
             session_id = self.utils.generate_session_id()
             user_id = "event_filtering_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Connect and authenticate
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
-            
+
             if not auth_success:
                 raise Exception( "Authentication failed" )
-            
+
             # Try to modify event subscription (if supported)
             subscription_message = {
                 "type": "subscribe_events",
@@ -494,15 +509,20 @@ class EventSystemTests:
         try:
             session_id = self.utils.generate_session_id()
             user_id = "event_unsub_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Connect and authenticate
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
-            
+
             if not auth_success:
                 raise Exception( "Authentication failed" )
-            
+
             # First, send some messages to establish baseline event flow
             baseline_message = {"type": "user_message", "content": "Baseline test message"}
             await websocket.send( json.dumps( baseline_message ) )
@@ -625,15 +645,20 @@ class EventSystemTests:
         try:
             session_id = self.utils.generate_session_id()
             user_id = "system_events_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Connect and authenticate
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
-            
+
             if not auth_success:
                 raise Exception( "Authentication failed" )
-            
+
             # Trigger system events
             system_event_triggers = [
                 {"type": "ping"},  # Should trigger sys_ping/sys_pong
@@ -744,15 +769,20 @@ class EventSystemTests:
         try:
             session_id = self.utils.generate_session_id()
             user_id = "user_events_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Connect and authenticate
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
-            
+
             if not auth_success:
                 raise Exception( "Authentication failed" )
-            
+
             # Send user-generated content that should trigger events
             user_messages = [
                 {"type": "user_message", "content": "Hello, can you help me?"},
@@ -867,15 +897,20 @@ class EventSystemTests:
         try:
             session_id = self.utils.generate_session_id()
             user_id = "event_ordering_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Connect and authenticate
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
-            
+
             if not auth_success:
                 raise Exception( "Authentication failed" )
-            
+
             # Send sequence of messages with timestamps
             sequence_messages = []
             for i in range( 5 ):
@@ -995,15 +1030,20 @@ class EventSystemTests:
         try:
             session_id = self.utils.generate_session_id()
             user_id = "high_freq_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Connect and authenticate
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
-            
+
             if not auth_success:
                 raise Exception( "Authentication failed" )
-            
+
             # Send high-frequency messages
             message_count = 20
             sent_messages = []
@@ -1117,15 +1157,20 @@ class EventSystemTests:
         try:
             session_id = self.utils.generate_session_id()
             user_id = "invalid_events_user"
-            token = self.utils.generate_mock_token( user_id )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Connect and authenticate
             websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
             auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
-            
+
             if not auth_success:
                 raise Exception( "Authentication failed" )
-            
+
             # Try various invalid subscription requests
             invalid_subscriptions = [
                 {"type": "subscribe_events", "event_types": None},
@@ -1255,18 +1300,23 @@ class EventSystemTests:
         websockets_to_close = []
         
         try:
+            # Get JWT token once for all sessions
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             # Create multiple concurrent sessions to test event system under load
             session_count = 3
             sessions = []
-            
+
             for i in range( session_count ):
                 session_id = self.utils.generate_session_id()
                 user_id = f"load_test_user_{i}"
-                token = self.utils.generate_mock_token( user_id )
-                
+
                 websocket = await self.utils.connect_websocket( "queue", session_id, timeout=5.0 )
                 websockets_to_close.append( websocket )
-                
+
                 auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
                 
                 sessions.append( {
