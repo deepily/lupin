@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-03T15:05:00
+**Last Updated**: 2026-02-03T19:45:00
 
 ---
 
@@ -9,7 +9,7 @@
 
 | Session ID | Started | Last Activity | Status |
 |------------|---------|---------------|--------|
-| bb3a5d21 | 2026-02-03T14:50:00 | 2026-02-03T14:50:00 | active |
+| bb3a5d21 | 2026-02-03T14:50:00 | 2026-02-03T19:45:00 | closed |
 | d7da6d0d | 2026-02-03T13:15:00 | 2026-02-03T13:35:00 | active |
 | 590273af | 2026-02-03T10:00:00 | 2026-02-03T14:30:00 | active |
 | 4949b964 | 2026-02-02T18:00:00 | 2026-02-02T23:05:00 | closed |
@@ -49,7 +49,7 @@
 
 ### Completed
 
-- [x] **Job cards disappear after queue refresh** → pending commit | By: bb3a5d21
+- [x] **Job cards disappear after queue refresh** → commit: c8a77ef | By: bb3a5d21
   - **Symptom**: Job cards show "No jobs in this queue" after `refreshAllQueues()` despite API returning data
   - **Root Cause**: `loadQueueJobCards()` and `processQueueUpdate()` used wrong field names:
     - `jobsHtml.length` instead of `jobsMetadata.length` (API returns `*_jobs_metadata` not `*_jobs`)
