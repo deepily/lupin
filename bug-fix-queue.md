@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-03T19:45:00
+**Last Updated**: 2026-02-04T09:10:00
 
 ---
 
@@ -9,9 +9,10 @@
 
 | Session ID | Started | Last Activity | Status |
 |------------|---------|---------------|--------|
+| bcd6e830 | 2026-02-04T08:30:00 | 2026-02-04T08:30:00 | active |
 | bb3a5d21 | 2026-02-03T14:50:00 | 2026-02-03T19:45:00 | closed |
-| d7da6d0d | 2026-02-03T13:15:00 | 2026-02-03T13:35:00 | active |
-| 590273af | 2026-02-03T10:00:00 | 2026-02-03T14:30:00 | active |
+| d7da6d0d | 2026-02-03T13:15:00 | 2026-02-03T13:35:00 | stale |
+| 590273af | 2026-02-03T10:00:00 | 2026-02-03T14:30:00 | stale |
 | 4949b964 | 2026-02-02T18:00:00 | 2026-02-02T23:05:00 | closed |
 
 ---
@@ -19,11 +20,6 @@
 ### Queued
 
 (Available for any session to claim)
-
-- [ ] **CJ flow compliance fails for bounded/unbounded ClaudeCode tasks**
-  - **Symptom**: (Awaiting stack trace from user)
-  - **Context**: Discovered during ClaudeCode task testing
-  - **Files to investigate**: TBD
 
 - [ ] **MathAgent fails QueueableJob protocol check on /api/push**
   - **Symptom**: Push endpoint returns 500 error with "Job must implement QueueableJob protocol, got MathAgent"
@@ -45,9 +41,24 @@
 
 (Claimed by a specific session)
 
+*None currently*
+
 ---
 
 ### Completed
+
+- [x] **Notifications UI: Claude Code submission layout cleanup** → commit: pending | By: bcd6e830
+  - **Changes**:
+    - Replaced radio buttons with two compact dropdowns (Task Type + Flow Type)
+    - Task dropdown: "Bounded" / "Unbounded (Interactive)"
+    - Flow dropdown: "CJ Flow" (default) / "Socket"
+    - Added branding: "Cosa Jobs Flow: Current States" for Job Queues section
+  - **Files**: `notifications.html`, `notifications.js`
+
+- [x] **CJ flow compliance fails for bounded/unbounded ClaudeCode tasks** → Verified working | By: bcd6e830
+  - Both BOUNDED and UNBOUNDED dry-run tests passed
+  - Job cards render correctly in CJ flow states
+  - No code changes required - was already fixed in prior sessions
 
 - [x] **Job cards disappear after queue refresh** → commit: c8a77ef | By: bb3a5d21
   - **Symptom**: Job cards show "No jobs in this queue" after `refreshAllQueues()` despite API returning data

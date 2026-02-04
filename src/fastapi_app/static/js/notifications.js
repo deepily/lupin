@@ -1405,14 +1405,15 @@ class NotificationsUI {
         }
 
         // Show/hide Option B controls based on task type selection
-        document.querySelectorAll( 'input[name="cc-task-type"]' ).forEach( radio => {
-            radio.addEventListener( 'change', ( e ) => {
+        const taskTypeSelect = document.getElementById( 'cc-task-type' );
+        if ( taskTypeSelect ) {
+            taskTypeSelect.addEventListener( 'change', ( e ) => {
                 const optionBControls = document.getElementById( 'cc-option-b-controls' );
                 if ( optionBControls ) {
                     optionBControls.style.display = e.target.value === 'INTERACTIVE' ? 'block' : 'none';
                 }
             });
-        });
+        }
 
         // Enter key in inject input
         const injectInput = document.getElementById( 'cc-inject-input' );
@@ -2702,8 +2703,8 @@ class NotificationsUI {
     async submitClaudeCode() {
         const project = document.getElementById( 'cc-project' ).value;
         const prompt = document.getElementById( 'cc-prompt' ).value;
-        const taskType = document.querySelector( 'input[name="cc-task-type"]:checked' ).value;
-        const executionMode = document.querySelector( 'input[name="cc-execution-mode"]:checked' ).value;
+        const taskType = document.getElementById( 'cc-task-type' ).value;
+        const executionMode = document.getElementById( 'cc-execution-mode' ).value;
         const dryRunCheckbox = document.getElementById( 'cc-dry-run' );
         const dryRun = dryRunCheckbox ? dryRunCheckbox.checked : false;
 

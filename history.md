@@ -1,35 +1,21 @@
 # Lupin Project History
 
-> **🔧 SESSION 125 ACTIVE**: Bug Fix Mode (2026.02.03)
-> **Owner**: claude.code@lupin.deepily.ai#590273af
-> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
->
-> ### Fixes
->
-> #### Fix 1: Remove deprecated `get_html()` and `queue_*_update` events
-> - **Source**: Plan file (majestic-splashing-turing.md)
-> - **Files (Lupin)**:
->   - `src/cosa/rest/routers/queues.py` - Removed `html` field from API responses
->   - `src/fastapi_app/static/js/notifications.js` - Removed queue_*_update handlers
->   - `src/fastapi_app/static/js/queue.js` - **DELETED** (dormant since 2025-08-15)
->   - `src/fastapi_app/static/html/queue.html` - **DELETED** (dormant since 2025-08-15)
->   - `src/conf/lupin-app.ini` - Removed queue_*_update events from available events
->   - `src/conf/lupin-app-splainer.ini` - Removed event descriptions
->   - `src/docs/websocket-events.md` - Updated documentation for job_state_transition
->   - `src/tests/unit/test_fifo_queue_filtering.py` - Removed get_html() from MockJob
-> - **Files (CoSA)** - Code changed, git state NOT managed:
->   - `src/cosa/rest/queue_protocol.py` - Removed get_html() from QueueableJob protocol
->   - `src/cosa/rest/fifo_queue.py` - Removed get_html_list() and _emit_queue_update()
->   - `src/cosa/agents/agentic_job_base.py` - Removed get_html() method
->   - `src/cosa/agents/agent_base.py` - Removed get_html() method
->   - `src/cosa/memory/solution_snapshot.py` - Removed get_html() method
-> - **Test**: Unit 195/195 PASS, All modules import successfully
-> - **Commit**: 5c5467b
->
-> ### Session Summary
-> (Will be completed at session close)
->
-> ---
+### 2026.02.04 - Session 129 | Notifications UI Claude Code Submission Cleanup
+
+**Accomplishments**:
+- Replaced cluttered radio buttons with two compact dropdown selects
+- Task Type dropdown: "Bounded" / "Unbounded (Interactive)"
+- Flow Type dropdown: "CJ Flow" (default) / "Socket"
+- Added CJ Flow branding: "Cosa Jobs Flow: Current States" for Job Queues section
+- Updated JavaScript selectors from radio to select elements
+
+**Files Modified**:
+- `src/fastapi_app/static/html/notifications.html` - Dropdown UI, CJ Flow title
+- `src/fastapi_app/static/js/notifications.js` - Updated selectors and event listeners
+
+**Bug Fixed**: Notifications UI Claude Code submission layout clumsy (bug-fix-queue.md)
+
+---
 
 ### 2026.02.03 - Session 128 | Planning Workflow Installation Wizard
 
