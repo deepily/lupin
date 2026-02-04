@@ -44,14 +44,44 @@ Lupin is built on a modern FastAPI architecture with WebSocket support for real-
 - **[Audio Chunk Sequential Playback Analysis](src/rnd/2025.08.01-audio-chunk-sequential-playback-analysis.md)** - Root cause analysis and solution for ElevenLabs audio duplication issues
 - **[LanceDB Migration Plan](src/rnd/2025.08.22-solution-snapshot-lancedb-interface-migration-plan.md)** - Complete migration from file-based to vector database storage
 
-**Current Development Status (2025.09.05):**
+**Current Development Status (2026.02.04):**
 
-The project currently has several **completed and ongoing development efforts**:
+## What's New in v0.1.3
 
-1. **✅ LanceDB Migration Complete** - Successfully migrated solution snapshots from file-based storage to LanceDB vector database with 100% feature parity and massive performance improvements
-2. **✅ Configuration-Based Backend Switching** - Implemented seamless switching between storage backends via simple configuration change
-2. **WebSocket FastAPI Test Suite** - Comprehensive diagnostic and testing tools for WebSocket functionality
-3. **FastAPI and Socket Polishing** - Continued refinement of WebSocket infrastructure and API endpoints
+### Agentic Job System (CJ Flow)
+- **Claude Code Job Integration** - Full Claude Agent SDK integration with QueueableJob protocol (22 attributes + 3 methods)
+- **Deep Research Agent** - Background research jobs with automatic report generation
+- **Podcast Generator** - Convert research documents to audio podcast format
+- **Research→Podcast Workflow** - Chained pipeline from research to podcast in one click
+- **Dry-Run Mode** - Test all agentic jobs without API costs (enabled by default in UI)
+
+### WebSocket Infrastructure
+- **JWT Authentication** - Secure WebSocket connections with JWT tokens (replaces mock tokens)
+- **job_state_transition Events** - Real-time job status updates via WebSocket
+- **100% WebSocket Test Coverage** - All 50 smoke tests passing (up from 46% before v0.1.3)
+
+### Testing & Quality
+- **Unit Tests**: 195/195 (100%) - Complete test infrastructure remediation
+- **WebSocket Tests**: 50/50 (100%) - JWT auth migration complete
+- **Integration Tests**: Comprehensive API endpoint testing with auth
+
+### Training Pipeline
+- **Unified LoRA Training** - Single pipeline for voice commands + agentic job intents
+- **40,258 Training Examples** - Including 600 agentic command examples
+- **Agentic Intent Recognition** - "Go to deep research", "make a podcast about..."
+
+### Notifications UI
+- **Compact Dropdown Controls** - Task Type and Flow Type selectors (replaces cluttered radio buttons)
+- **cosa-voice MCP Integration** - Voice I/O for Claude Code workflows via MCP server
+
+### Previous Releases
+
+The project has several **completed milestones from earlier versions**:
+
+1. **✅ LanceDB Migration Complete** (v0.1.2) - Successfully migrated solution snapshots from file-based storage to LanceDB vector database with 100% feature parity and massive performance improvements
+2. **✅ Configuration-Based Backend Switching** (v0.1.2) - Implemented seamless switching between storage backends via simple configuration change
+3. **✅ WebSocket FastAPI Test Suite** (v0.1.1) - Comprehensive diagnostic and testing tools for WebSocket functionality
+4. **✅ FastAPI Migration** (v0.1.0) - Complete Flask elimination, FastAPI-only architecture
 
 ## Solution Snapshot Storage
 
