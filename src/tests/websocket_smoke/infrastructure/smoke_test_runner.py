@@ -499,12 +499,17 @@ class SmokeTestRunner:
             None (captures all exceptions as test failures)
         """
         test_name = f"{endpoint}_websocket_authentication"
-        
+
         start_time = time.time()
         try:
             session_id = self.utils.generate_session_id()
-            token = self.utils.generate_mock_token( "auth_test_user" )
-            
+
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                raise Exception( f"JWT login failed: {token_or_error}" )
+            token = token_or_error
+
             websocket = await self.utils.connect_websocket( endpoint, session_id )
             auth_success, auth_data = await self.utils.authenticate_websocket( websocket, token )
             await websocket.close()
@@ -814,8 +819,13 @@ class SmokeTestRunner:
             None (returns False for any exception)
         """
         try:
+            # Use JWT authentication instead of deprecated mock tokens
+            jwt_success, token_or_error = await self.utils.get_jwt_token()
+            if not jwt_success:
+                return False
+            token = token_or_error
+
             websocket = await self.utils.connect_websocket( endpoint, session_id )
-            token = self.utils.generate_mock_token( user_id )
             auth_success, _ = await self.utils.authenticate_websocket( websocket, token )
             await websocket.close()
             return auth_success

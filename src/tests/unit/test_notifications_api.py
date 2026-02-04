@@ -394,6 +394,10 @@ class TestSubmitNotificationResponse:
 
         mock_ws_instance = AsyncMock()
 
+        # Create mock config_mgr
+        mock_config_mgr = MagicMock()
+        mock_config_mgr.get.return_value = 300  # Default grace period
+
         # Override FastAPI dependencies
         app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
 
@@ -401,24 +405,26 @@ class TestSubmitNotificationResponse:
         with patch( 'cosa.rest.routers.notifications.get_db', return_value=db_context_manager ):
             # Patch NotificationRepository
             with patch( 'cosa.rest.routers.notifications.NotificationRepository' ) as MockRepo:
-                mock_repo_instance = MagicMock()
-                mock_repo_instance.get_by_id.return_value = mock_notification
-                mock_repo_instance.update_response.return_value = mock_notification
-                MockRepo.return_value = mock_repo_instance
+                # Patch fastapi_app.main.config_mgr by patching the import in the module
+                with patch( 'fastapi_app.main.config_mgr', mock_config_mgr ):
+                    mock_repo_instance = MagicMock()
+                    mock_repo_instance.get_by_id.return_value = mock_notification
+                    mock_repo_instance.update_response.return_value = mock_notification
+                    MockRepo.return_value = mock_repo_instance
 
-                client = TestClient( app )
+                    client = TestClient( app )
 
-                response = client.post(
-                    "/api/notify/response",
-                    json={
-                        "notification_id" : "550e8400-e29b-41d4-a716-446655440001",
-                        "response_value"  : {"answer": "yes"}
-                    }
-                )
+                    response = client.post(
+                        "/api/notify/response",
+                        json={
+                            "notification_id" : "550e8400-e29b-41d4-a716-446655440001",
+                            "response_value"  : {"answer": "yes"}
+                        }
+                    )
 
-                assert response.status_code == 200
-                assert response.json()["status"] == "success"
-                mock_repo_instance.update_response.assert_called_once()
+                    assert response.status_code == 200
+                    assert response.json()["status"] == "success"
+                    mock_repo_instance.update_response.assert_called_once()
 
     def test_submit_response_notification_not_found(self, app, mock_db_session):
         """Test response submission for non-existent notification returns 404."""

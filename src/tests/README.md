@@ -170,7 +170,6 @@ def test_complete_registration_flow( test_user_credentials ):
 
 **Coverage**:
 - 50 WebSocket tests
-- 92% pass rate (as of last run)
 - Connection, authentication, event delivery
 
 **Run Command**:

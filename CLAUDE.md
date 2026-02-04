@@ -212,7 +212,7 @@ Lupin uses a three-tier testing strategy for comprehensive validation:
 
 4. **WebSocket Tests** (`src/tests/websocket_smoke/`)
    - WebSocket functionality validation
-   - Coverage: 50 tests (92% pass rate)
+   - Coverage: 50 tests
    - Run: `src/scripts/run-websocket-smoke-tests.sh`
 
 ### Running Tests
@@ -247,6 +247,75 @@ pytest --cov=cosa.rest --cov-report=html src/tests/
 - **Critical Paths**: Login, registration, token refresh, password change all tested
 
 See `src/tests/README.md` for comprehensive testing documentation.
+
+## PR MERGE REQUIREMENTS
+
+**CRITICAL**: The following tests MUST pass before merging any branch to main.
+
+### Pre-Merge Test Checklist
+
+| Test Suite | Command | Requirement |
+|------------|---------|-------------|
+| Unit Tests | `pytest src/tests/unit/` | 100% pass |
+| WebSocket Tests | `./src/scripts/run-websocket-smoke-tests.sh` | 100% pass |
+| Integration Tests | `./src/tests/run-integration-tests.sh -v` | 100% pass (FINAL GATE) |
+
+### Integration Tests are the Final Gate
+
+Integration tests are the **FINAL validation step** before any branch merge to main.
+
+**Why integration tests are critical**:
+- Test complete user workflows end-to-end
+- Validate API, database, and authentication work together
+- Catch regressions that unit tests miss
+- Require a running server (realistic conditions)
+
+### Pre-Merge Workflow
+
+```bash
+# Complete pre-merge validation sequence
+pytest src/tests/unit/ -v && \
+./src/scripts/run-websocket-smoke-tests.sh && \
+./src/tests/run-integration-tests.sh -v
+```
+
+### When Tests Fail
+
+- **DO NOT** merge with failing tests
+- **Fix the failing tests first**, then re-run the full suite
+- If a test is legitimately flaky (not your code), document and create a separate fix
+
+## TEST CREDENTIALS
+
+**CRITICAL**: Never hardcode test credentials. Always use environment variables.
+
+### Required Environment Variables
+
+```bash
+export LUPIN_TEST_EMAIL="your@email.com"
+export LUPIN_TEST_PASSWORD="yourpassword"
+```
+
+### Usage Pattern (Python)
+
+```python
+import os
+
+email    = os.environ.get( "LUPIN_TEST_EMAIL" )
+password = os.environ.get( "LUPIN_TEST_PASSWORD" )
+
+if not email or not password:
+    raise ValueError( "Set LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables" )
+```
+
+### When to Use
+
+- Any smoke test that calls authenticated API endpoints
+- Integration tests that require login
+- Manual testing scripts
+- Protocol verification tests that need real user context
+
+**Reference**: See `src/tests/AUTH-TESTING-GUIDE.md` for complete patterns including curl examples.
 
 ## HISTORY STRUCTURE NOTES
 - **Project Span**: December 2024 - Present (Lupin evolution from Genie-in-the-Box)

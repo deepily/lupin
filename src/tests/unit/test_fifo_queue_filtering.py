@@ -10,14 +10,53 @@ from cosa.rest.fifo_queue import FifoQueue
 
 
 class MockJob:
-    """Mock job object for testing FifoQueue filtering."""
+    """
+    Mock job object for testing FifoQueue filtering.
 
-    def __init__(self, id_hash: str, content: str):
-        self.id_hash = id_hash
-        self.content = content
+    Implements the full QueueableJob protocol required by FifoQueue.push().
+    """
 
-    def get_html(self):
-        return f"<li id='{self.id_hash}'>{self.content}</li>"
+    def __init__( self, id_hash: str, content: str, user_id: str = "test_user" ):
+        # Core identifiers
+        self.id_hash               = id_hash
+        self.content               = content
+        self.push_counter          = 0
+
+        # User/session info
+        self.user_id               = user_id
+        self.user_email            = f"{user_id}@test.com"
+        self.session_id            = "test_session"
+
+        # Job metadata
+        self.routing_command       = "test"
+        self.run_date              = "2026-02-02"
+        self.created_date          = "2026-02-02"
+        self.started_at            = None
+        self.completed_at          = None
+
+        # Question/answer data
+        self.question              = content
+        self.last_question_asked   = content
+        self.answer                = f"Answer to {content}"
+        self.answer_conversational = f"Here's the answer to {content}"
+
+        # Status tracking
+        self.job_type              = "MockJob"
+        self.is_cache_hit          = False
+        self.status                = "pending"
+        self.error                 = None
+
+    def do_all( self ):
+        """Execute the job (mock implementation)."""
+        return "done"
+
+    def code_ran_to_completion( self ):
+        """Check if code execution completed."""
+        return True
+
+    def formatter_ran_to_completion( self ):
+        """Check if formatting completed."""
+        return True
 
 
 class TestFifoQueueFiltering:

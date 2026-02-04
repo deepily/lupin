@@ -1,5 +1,696 @@
 # Lupin Project History
 
+#### Checkpoint | 2026.02.04 10:20 | Install PR workflow command
+
+**Files**: `.claude/commands/plan-branch-pr-and-merge.md` (NEW)
+**Commit**: 4fc6910
+
+---
+
+### 2026.02.04 - Session 129 (cont.) | Bug Fix Mode - MathAgent Protocol Verification
+
+**Bug Investigated**: MathAgent fails QueueableJob protocol check on /api/push
+
+**Investigation Results**:
+- Protocol compliance test: **PASS** (MathAgent implements all 18 required attributes + 3 methods)
+- API test: `/api/push` with math question returns **200 OK** with `{"status":"queued"}`
+- **No code changes required** - bug was already fixed in Sessions 110-112
+
+**Root Cause Analysis**:
+- The QueueableJob protocol was introduced in Session 109-110
+- AgentBase (parent of MathAgent) already implements all protocol requirements:
+  - Identity: `id_hash`, `push_counter`
+  - Ownership: `user_id`, `session_id`, `routing_command`, `user_email`
+  - Timestamps: `run_date`, `created_date`, `started_at`, `completed_at`
+  - Question/Answer: `question`, `last_question_asked`, `answer`, `answer_conversational`
+  - Type: `job_type` (property returning class name)
+  - Status: `is_cache_hit`, `status`, `error`
+  - Methods: `do_all()`, `code_ran_to_completion()`, `formatter_ran_to_completion()`
+
+**Bug Fix Queue Status**: Empty (all bugs resolved or verified)
+
+### Session 129 Summary
+- **Total Items Verified/Fixed**: 3
+  1. Notifications UI cleanup → commit: 425568a
+  2. CJ flow compliance → Verified working (no changes)
+  3. MathAgent protocol → commit: 34f4874 (docs-only)
+- **Files Changed**: 2 (notifications.html, notifications.js)
+- **Commits**: 425568a, 34f4874
+- **Status**: Session closed 2026.02.04
+
+---
+
+### 2026.02.04 - Session 129 | Notifications UI Claude Code Submission Cleanup
+
+**Accomplishments**:
+- Replaced cluttered radio buttons with two compact dropdown selects
+- Task Type dropdown: "Bounded" / "Unbounded (Interactive)"
+- Flow Type dropdown: "CJ Flow" (default) / "Socket"
+- Added CJ Flow branding: "Cosa Jobs Flow: Current States" for Job Queues section
+- Updated JavaScript selectors from radio to select elements
+
+**Files Modified**:
+- `src/fastapi_app/static/html/notifications.html` - Dropdown UI, CJ Flow title
+- `src/fastapi_app/static/js/notifications.js` - Updated selectors and event listeners
+
+**Bug Fixed**: Notifications UI Claude Code submission layout clumsy (bug-fix-queue.md)
+
+---
+
+### 2026.02.03 - Session 128 | Planning Workflow Installation Wizard
+
+**Accomplishments**:
+- Ran `/plan-install-wizard` to check for missing planning-is-prompting workflows
+- Installed new `/plan-session-checkpoint` command (mid-session commits)
+- Lupin project now has complete 29/29 workflow coverage
+
+**Files Modified**:
+- `.claude/commands/plan-session-checkpoint.md` - NEW: Mid-session commit workflow
+
+**Session Checkpoint Use Cases**:
+- Save progress during long work sessions (2+ hours)
+- Commit before anticipated context clear
+- Create save points while continuing work
+
+---
+
+### 2026.02.03 - Session 126 (cont.) | Job Card Disappearing Bug Fix
+
+**Bug**: Job cards disappeared after `refreshAllQueues()` was called, showing "No jobs in this queue" despite API returning correct data.
+
+**Root Cause**: Two field name mismatches in `notifications.js`:
+1. `loadQueueJobCards()` used `jobsHtml.length` but API returns `*_jobs_metadata` not `*_jobs`
+2. `processQueueUpdate()` used `data.{queue}_jobs.length` but API returns `total_jobs` count
+
+**Files Modified**:
+- `src/fastapi_app/static/js/notifications.js` - Fixed field references in `loadQueueJobCards()` (lines 4789-4793) and `processQueueUpdate()` (lines 4532-4565)
+
+**Testing**: Submit Claude Code dry-run job → Job card appears and persists after queue refresh
+
+---
+
+### 2026.02.03 - Session 126 | Mock Claude Code Job + Dry-Run Support
+
+**Accomplishments**:
+- Implemented dry-run mode for ClaudeCodeJob (matching Deep Research/Podcast patterns)
+- Fixed blocking import bug in `claude_code_queue.py` (ModuleNotFoundError)
+- Created dedicated `voice_io.py` wrapper for Claude Code agent
+- Added dry-run checkbox to notifications UI (checked by default)
+
+**Files Modified (Lupin)**:
+- `src/fastapi_app/static/html/notifications.html` - Added dry-run checkbox
+- `src/fastapi_app/static/js/notifications.js` - Pass dry_run to queue submission
+
+**Files Modified (CoSA)** - Requires separate commit:
+- `src/cosa/rest/routers/claude_code_queue.py` - Fixed import bug, added dry_run field
+- `src/cosa/agents/claude_code/job.py` - Added dry_run param, _execute_dry_run() method
+- `src/cosa/agents/claude_code/voice_io.py` - NEW: Voice I/O wrapper
+
+**Smoke Tests**: All passing (router + job)
+
+---
+
+### 2026.02.03 - Session 127 | WebSocket JWT Auth Fix & PR Merge Requirements
+
+**Accomplishments**:
+- Fixed WebSocket smoke tests to use JWT authentication instead of deprecated mock tokens
+- WebSocket tests now 100% passing (50/50) - up from 46% (23/50)
+- Removed stale "92% pass rate" from documentation
+- Added PR MERGE REQUIREMENTS section to CLAUDE.md
+
+**Files Modified**:
+- `src/tests/websocket_smoke/infrastructure/smoke_test_runner.py` - JWT auth (2 locations)
+- `src/tests/websocket_smoke/core/test_authentication_flow.py` - JWT auth (~10 locations)
+- `src/tests/websocket_smoke/core/test_session_management.py` - JWT auth (~13 locations)
+- `src/tests/websocket_smoke/core/test_event_system.py` - JWT auth (~10 locations)
+- `CLAUDE.md` - Removed pass rate, added PR MERGE REQUIREMENTS section
+- `src/tests/README.md` - Removed stale pass rate
+
+**Test Results**:
+| Category | Before | After |
+|----------|--------|-------|
+| Core | 19/25 (76%) | 25/25 (100%) |
+| Integration | 2/22 (9%) | 22/22 (100%) |
+| Performance | 2/2 (100%) | 2/2 (100%) |
+| Load | 0/1 (0%) | 1/1 (100%) |
+| **Total** | **23/50 (46%)** | **50/50 (100%)** |
+
+---
+
+> **✅ SESSION 124 COMPLETE**: Unified LoRA Training Integration (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#02ebea7d
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+>
+> **Integrated 3 agentic job intents into unified LoRA training pipeline**:
+> - `agent router go to deep research`
+> - `agent router go to podcast generator`
+> - `agent router go to research to podcast`
+>
+> **Changes Made**:
+> 1. Created 3 synthetic data files for agentic commands (50 templates each)
+> 2. Added agentic commands to `_get_simple_agent_router_commands()` in xml_prompt_generator.py
+> 3. Updated `build_all_training_prompts()` to include agentic jobs parameter
+> 4. Updated `build_agentic_job_training_prompts()` to use shared agent router instruction template
+> 5. Updated `run-agentic-intent-training.sh` for unified approach
+>
+> **Results**:
+> | Metric | Before | After |
+> |--------|--------|-------|
+> | Total training examples | ~38,000 | 40,258 |
+> | Agentic train examples | 240 (isolated) | 600 (unified) |
+> | Commands in agentic instruction | 3 | 10 (all agent router commands) |
+>
+> **Files Created (Lupin)**:
+> - `src/ephemera/prompts/data/synthetic-data-agent-routing-deep-research.txt`
+> - `src/ephemera/prompts/data/synthetic-data-agent-routing-podcast-generator.txt`
+> - `src/ephemera/prompts/data/synthetic-data-agent-routing-research-to-podcast.txt`
+> - `src/rnd/2026.02.02-unified-lora-training-integration-plan.md`
+>
+> **Files Modified (Lupin)**:
+> - `src/scripts/run-agentic-intent-training.sh` (+74/-14)
+> - `src/ephemera/prompts/data/voice-commands-xml-{train,test,validate}.jsonl` (regenerated)
+> - `src/ephemera/prompts/data/agentic-job-xml-{train,test,validate}.jsonl` (regenerated)
+>
+> **Files Modified (CoSA)** - Requires separate commit:
+> - `src/cosa/training/xml_prompt_generator.py` - Added 3 agentic commands
+> - `src/cosa/training/xml_coordinator.py` - Added agentic jobs to unified pipeline
+>
+> ---
+
+> **✅ SESSION 123 COMPLETE**: Test Suite Remediation - Phase 3 (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#d1c3ccff
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Test Suite Remediation Complete
+>
+> **Problem**: Baseline report showed 61 failing tests (76.8% overall pass rate). All failures were test infrastructure issues, not production bugs.
+>
+> **Final Results**:
+> | Category | Original | After Phase 1-2 | After Phase 3 |
+> |----------|----------|-----------------|---------------|
+> | Unit Tests | 168/199 (84.4%) | 190/199 (95.5%) | **195/195 (100%)** ✅ |
+>
+> **Phase 3 Fixes Applied**:
+> 1. **JWT Timing** (2 tests): Fixed `fromtimestamp()` → `utcfromtimestamp()` for UTC consistency
+> 2. **Config Loader** (2 tests): Added `monkeypatch.delenv('LUPIN_ENV')` for test isolation
+> 3. **Notifications API** (1 test): Added `patch('fastapi_app.main.config_mgr')` for proper mocking
+> 4. **Debug Scripts** (4 files): Moved non-test scripts from `tests/unit/` to `scripts/debug/`
+>
+> **Files Modified**:
+> - `src/tests/unit/test_jwt_service.py` - UTC timestamp fix
+> - `src/tests/unit/test_config_loader.py` - LUPIN_ENV cleanup
+> - `src/tests/unit/test_notifications_api.py` - config_mgr mock
+> - `src/rnd/2026.02.02-test-suite-remediation-plan.md` - Updated status
+>
+> **Files Moved** (via git mv):
+> - `test_queue_endpoint_simple.py` → `src/scripts/debug/debug_queue_endpoint.py`
+> - `test_queue_state_monitoring_debug.py` → `src/scripts/debug/debug_queue_state_monitoring.py`
+> - `test_simple_websocket_connection.py` → `src/scripts/debug/debug_websocket_connection.py`
+> - `test_websocket_auth_validation_simple.py` → `src/scripts/debug/debug_websocket_auth_validation.py`
+>
+> ---
+
+> **✅ SESSION 122 COMPLETE**: Cache Freshness Fix - Simple Approach (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#4949b964
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Bug Fix
+>
+> **Problem**: Cache hits returned stale `answer_conversational` for time-sensitive queries like "What time is it?" - the cached time was returned instead of re-executing the stored code.
+>
+> **Solution**: Added code re-execution in `_format_cached_result()` (lines 689-699) that runs `cached_snapshot.run_code()` and `cached_snapshot.run_formatter()` before returning.
+>
+> **Trade-off Accepted**: Math queries like "4+4" will also re-execute (~100ms overhead) but this is harmless - correctness trumps minor performance cost.
+>
+> **Files Modified (CoSA)**:
+> - `src/cosa/rest/running_fifo_queue.py:689-699` - Added 10 lines for code re-execution
+>
+> **Testing**:
+> - Smoke tests: 9/9 PASS
+> - Unit tests: Module imports verified
+> - Manual testing: Pending (ask "What time is it?" twice)
+>
+> **Commit**: 3cff850 (Lupin), CoSA pending
+>
+> ---
+
+> **✅ SESSION 121 COMPLETE**: Cache Freshness Policy Planning (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#49a88ad2
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+>
+> **Bug Analysis**: Investigated cache hit behavior in `running_fifo_queue.py:_format_cached_result()` - returns cached `answer_conversational` without re-executing code, breaking time-sensitive queries.
+>
+> **Design Decision**: Binary freshness policy (IMMUTABLE/VOLATILE) - no TTL complexity.
+>
+> **Implementation Plan Created**: Comprehensive 4-phase implementation plan:
+> - **Phase 1**: Foundation - `cache_freshness_policy.py`, SolutionSnapshot field, LanceDB schema, config keys
+> - **Phase 2**: Agent integration - property overrides in DateAndTimeAgent (VOLATILE), MathAgent (IMMUTABLE), WeatherAgent (VOLATILE)
+> - **Phase 3**: Enforcement - `_is_cache_immutable()` and `_handle_volatile_cache()` in running_fifo_queue.py
+> - **Phase 4**: Semantic match confirmation (deferred)
+>
+> **Key Design Elements**:
+> - Three-tier policy resolution: explicit > auto-detect > agent default
+> - Code pattern detection for datetime.now(), requests.*, pd.read_csv
+> - Feature flag (OFF by default) for backward compatibility
+>
+> **Files Created**:
+> - `src/rnd/2026.02.02-cache-freshness-implementation-plan.md` (~400 lines)
+>
+> **Status**: Planning complete, ready for implementation
+>
+> ---
+
+> **✅ SESSION 120 COMPLETE**: Agentic Job Intent LORA Training - Chunk 1.5 (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#379d8015
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+>
+> **Chunk 1.5: Added Argument Extraction Ground Truth**
+>
+> Fixed training data generation to include extracted arguments as ground truth labels. Previously, all training examples had empty `<args></args>` fields - the model could learn intent classification but not parameter extraction.
+>
+> **Changes Made**:
+> - Changed `args_template: ""` → `args_key: "topic"` for deep research and podcast generator commands
+> - Changed `args_template: ""` → `args_key: "document_path"` for research-to-podcast command
+> - Updated generation logic to dynamically populate args when placeholder is substituted
+> - Templates without placeholders correctly produce empty args (intent-only classification)
+>
+> **Training Data Stats**:
+> - 300 examples regenerated (240 train / 30 test / 30 validate)
+> - 180 examples with populated args (75%)
+> - 60 examples with empty args (25%) - templates without placeholders
+>
+> **Example Outputs**:
+> ```xml
+> <args>topic="space exploration and Mars colonization"</args>
+> <args>document_path="/io/deep-research/social-media-analysis.md"</args>
+> <args></args>  <!-- intent-only, no placeholder in template -->
+> ```
+>
+> **Files Modified (CoSA)** - Requires separate commit:
+> - `src/cosa/training/xml_coordinator.py` (lines 652-700, 741-753)
+>
+> **Files Modified (Lupin)**:
+> - `src/rnd/2026.02.02-agentic-job-intent-lora-training.md` - Status and session log updated
+> - `src/ephemera/prompts/data/agentic-job-xml-{train,test,validate}.jsonl` - Regenerated
+> - `TODO.md` - Added 3 future enhancements (Extended Parameters, Dual Argument Types, Disambiguation Agent)
+>
+> **Next**: Run 1% sample training when GPUs available: `./src/scripts/run-agentic-intent-training.sh test`
+>
+> ---
+
+> **✅ SESSION 119 COMPLETE**: Agentic Job Intent LORA Training - Chunk 1 (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#379d8015
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+>
+> **Phase 1.0: Code Cleanup - Removed `gpt_message` field**
+> - Removed `_get_gpt_messages_dict()` method and all GPT training file generation
+> - Changed `_get_6_empty_lists()` to `_get_5_empty_lists()`
+> - Simplified all 4 build methods in `xml_coordinator.py`
+> - Removed `format_gpt_message()` from `xml_prompt_generator.py`
+> - Removed `extract_gpt_message` parameter from `peft_trainer.py`
+>
+> **Phase 1.1: Created 8 placeholder files** for agentic job training data:
+> - `placeholders-research-topics.txt` (50 entries)
+> - `placeholders-budget-values.txt` (7 entries)
+> - `placeholders-language-codes.txt` (7 entries)
+> - `placeholders-document-paths.txt` (24 entries)
+> - `placeholders-audience-levels.txt` (4 entries)
+> - `placeholders-audience-contexts.txt` (24 entries)
+> - `placeholders-max-segments.txt` (5 entries)
+> - `placeholders-agentic-templates.txt` (35 entries)
+>
+> **Phase 1.2: Updated training infrastructure**
+> - Added 3 new commands to `xml_models.py`: `agent router go to deep research`, `agent router go to podcast generator`, `agent router go to research to podcast`
+> - Added 8 placeholder getter methods to `xml_prompt_generator.py`
+> - Added `build_agentic_job_training_prompts()` method to `xml_coordinator.py`
+> - Added `get_agentic_job_train_test_validate_split()` and `write_agentic_job_ttv_split_to_jsonl()` methods
+>
+> **Phase 1.3-1.4: Generated and validated training data**
+> - Generated 300 training examples (240 train, 30 test, 30 validate)
+> - Balanced command distribution: 80/80/80 per command
+> - All JSONL files validated with 5 required fields
+>
+> **Phase 2.1: Created training shell script**
+> - `run-agentic-intent-training.sh` with generate/validate/test/full modes
+>
+> **Phase 2.2: BLOCKED** - Requires GPU resources to be freed
+>
+> **Files Modified (CoSA)**:
+> - `src/cosa/training/xml_coordinator.py`
+> - `src/cosa/training/xml_prompt_generator.py`
+> - `src/cosa/training/peft_trainer.py`
+> - `src/cosa/agents/io_models/xml_models.py`
+>
+> **Files Created**:
+> - 8 placeholder files in `src/ephemera/prompts/data/`
+> - 3 JSONL training files: `agentic-job-xml-{train,test,validate}.jsonl`
+> - `src/scripts/run-agentic-intent-training.sh`
+>
+> **Smoke Tests**: All pass (xml_coordinator, xml_models, peft_trainer structural)
+>
+> ---
+
+> **✅ SESSION 118 COMPLETE**: Skills Management Commands Installation + Discovery (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#7eeef663
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+>
+> **Skills Management Slash Commands Installed**:
+> Installed 5 mode-specific skills management slash commands from planning-is-prompting repo, adapted for LUPIN project:
+> - `/plan-skills-management-discover` - Find skill candidates in documentation
+> - `/plan-skills-management-create` - Build new skill from documentation
+> - `/plan-skills-management-edit` - Update existing skill
+> - `/plan-skills-management-audit` - Check skills health against documentation
+> - `/plan-skills-management-delete` - Remove obsolete skill
+>
+> **Files Created**:
+> - `.claude/commands/plan-skills-management-discover.md`
+> - `.claude/commands/plan-skills-management-create.md`
+> - `.claude/commands/plan-skills-management-edit.md`
+> - `.claude/commands/plan-skills-management-audit.md`
+> - `.claude/commands/plan-skills-management-delete.md`
+>
+> **Skills Discovery Run**:
+> Executed discovery workflow and identified 3 new skill candidates (added to TODO.md):
+> - **notification-patterns** (HIGH) - cosa-voice MCP usage patterns (~250 lines)
+> - **path-management** (MEDIUM) - `cu.get_project_root()` vs bootstrap (~150 lines)
+> - **code-style-preferences** (LOW) - Spacing, alignment, getattr prohibition (~100 lines)
+>
+> **Files Modified**:
+> - `TODO.md` - Updated session number, added skill candidates section
+>
+> ---
+
+> **✅ SESSION 117 COMPLETE**: Fix Podcast Generator Dry-Run Notifications (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#8594147a
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Bug Fix
+> Podcast Generator dry-run notifications not routing to job cards in notifications UI.
+>
+> **Root Cause**: Notifications in `_execute_dry_run()` were missing `job_id` parameter.
+>
+> **Fix**: Added `job_id=self.id_hash` to all 6 notifications (5 breadcrumbs + 1 completion).
+>
+> **Files Modified (CoSA)**:
+> - `src/cosa/agents/podcast_generator/job.py` - Lines 284, 288, 292, 296, 300, 329-334
+>
+> **Verification**: Smoke test passes
+>
+> ---
+
+> **✅ SESSION 116 COMPLETE**: Fuzzy File Matching + util_xml.py Deprecation (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#817f2e64
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+>
+> **Part 1: Fuzzy File Matching for Podcast Generator**
+> - Added `FuzzyFileMatchResponse` Pydantic XML model with `get_example_for_template()` and `get_matches_list()` helpers
+> - Integrated with `PromptTemplateProcessor` for automatic XML example injection
+> - Rewrote `match_research_docs()` to use LlmClientFactory with kaitchup/phi_4_14b
+> - Changed Flow B to block for user selection (was fire-and-forget notification)
+>
+> **Part 2: DEPRECATED util_xml.py - Pydantic-Only Migration**
+> Eliminated all production usage of deprecated `cosa/utils/util_xml.py` in favor of Pydantic XML I/O.
+>
+> **Phase 1**: Removed fallbacks from Pydantic-enabled code
+> - `gister.py`, `confirmation_dialog.py` - Now Pydantic-only, no baseline fallback
+>
+> **Phase 2**: Added Pydantic to queue/router code
+> - `todo_fifo_queue.py`, `multimodal_munger.py` - Replaced `dux.get_value_by_xml_tag_name()` with `CommandResponse.from_xml()`
+>
+> **Phase 3**: Migrated agent classes
+> - `agent_base.py` - Removed ALL deprecated fallback code
+> - `bug_injector.py`, `raw_output_formatter.py` - Removed fallbacks
+>
+> **Phase 4**: Updated parser factory
+> - `xml_parser_factory.py` - **COMPLETELY REWRITTEN**: Removed `BaselineXmlParsingStrategy`, `HybridXmlParsingStrategy`, `XmlParsingStrategy` abstract base. Only `PydanticXmlParser` remains.
+>
+> **Phase 5**: Added deprecation warnings
+> - `util_xml.py` - Module-level and per-function deprecation warnings
+> - Added `remove_xml_escapes()` to `util_xml_pydantic.py`
+>
+> **Additional cleanup**: Removed unused imports from `iterative_debugging_agent.py`, `solution_snapshot.py`, `math_agent.py`
+>
+> **Verification**: All smoke tests pass (gister, confirmation_dialog, xml_parser_factory)
+>
+> **Files Modified (CoSA)**: 12 files
+> - `cosa/memory/gister.py`
+> - `cosa/agents/confirmation_dialog.py`
+> - `cosa/rest/todo_fifo_queue.py`
+> - `cosa/rest/multimodal_munger.py`
+> - `cosa/agents/agent_base.py`
+> - `cosa/agents/bug_injector.py`
+> - `cosa/agents/raw_output_formatter.py`
+> - `cosa/agents/io_models/utils/xml_parser_factory.py`
+> - `cosa/utils/util_xml.py`
+> - `cosa/agents/io_models/utils/util_xml_pydantic.py`
+> - `cosa/agents/iterative_debugging_agent.py`
+> - `cosa/memory/solution_snapshot.py`
+> - `cosa/agents/math_agent.py`
+>
+> ---
+
+> **✅ SESSION 115 COMPLETE**: Push Method Bug Fix + Smoke Tests (2026.02.02)
+> **Owner**: claude.code@lupin.deepily.ai#8594147a
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+> Fixed `push_job()` → `push()` method bug in Podcast Generator and Research→Podcast routers.
+>
+> **Root Cause**: Routers called `todo_queue.push_job( job, user_id, session_id )` which expects a string question, not a pre-built job object. Also used non-existent `get_position()` method.
+>
+> **Fix Applied**:
+> - Import `user_job_tracker` from `cosa.rest.queue_extensions`
+> - Associate user/session BEFORE push (race condition prevention)
+> - Use `todo_queue.push( job )` for pre-built job objects
+> - Use `todo_queue.size()` instead of `get_position()`
+>
+> **Files Modified (COSA)**:
+> - `src/cosa/rest/routers/podcast_generator.py` (+8/-2 lines)
+> - `src/cosa/rest/routers/deep_research_to_podcast.py` (+8/-2 lines)
+>
+> **Files Created (Lupin)**:
+> - `src/tests/smoke/test_research_to_podcast_dry_run_smoke.py` - New smoke test for rp- prefix jobs
+>
+> **Files Modified (Lupin)**:
+> - `src/tests/smoke/test_podcast_generator_dry_run_smoke.py` - Fixed None abstract handling
+>
+> **Verification** (all 3 dry-run smoke tests pass):
+> - ✓ Deep Research: dr-6aa5d16d completed in 10s, $0.00 cost
+> - ✓ Podcast Generator: pg-dd026977 completed in 10s, $0.00 cost
+> - ✓ Research→Podcast: rp-221fe28e completed in 14s, $0.00 cost
+>
+> **Commits**: eab45bf (partial), pending (smoke test + docs)
+>
+> ---
+
+> **✅ SESSION 114 COMPLETE**: Bug Fix Mode (2026.01.31 - 2026.02.01)
+> **Owner**: claude.code@lupin.deepily.ai#42b5bbd7
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Fixes
+> - **Fix 1**: Consolidate voice recording toggle handlers
+>   - **Symptom**: Podcast Generator recording button stuck in recording mode (clicking doesn't stop)
+>   - **Root Cause**: `handleSTTButtonClick()` missing toggle logic - just called `startRecording()` directly
+>   - **Fix**: Added toggle logic to `handleSTTButtonClick()` (if recording → stop, else if not processing → start)
+>   - **Cleanup**: Converted `handleQASTTButtonClick()` and `handleCCSTTButtonClick()` from duplicate implementations (~28 lines total) to thin wrappers (~8 lines total)
+>   - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js`
+>   - **Test**: Browser verification needed (Ctrl+Shift+R to hard refresh)
+>   - **Commit**: f4f6cc8
+>
+> ### Session Summary
+> - **Total Fixes**: 1
+> - **Files Changed**: `src/fastapi_app/static/js/notifications.js`
+> - **Commits**: f4f6cc8
+>
+> **Status**: Session closed 2026.02.01
+>
+> ---
+
+> **✅ SESSION 113 COMPLETE**: Bug Fix Mode - Deep Research Dry-Run Smoke Test (2026.01.31)
+> **Owner**: claude.code@lupin.deepily.ai#d9d74b04
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+> Implemented plan from plan mode for Deep Research dry-run smoke test and bug fix verification.
+>
+> **Findings**:
+> - **Bug fix already applied**: The `SessionSummary` dataclass fix in `job.py:396-401` was already implemented (replacing the mock `type()` object that didn't serialize to JSON)
+> - **Smoke test already exists**: `src/tests/smoke/test_deep_research_dry_run_smoke.py` (~250 lines) was already created with full test coverage
+> - **Test not executed**: Deferred to next session due to time constraints
+>
+> **Documentation Updates**:
+> - Updated `TODO.md` with priority item to run dry-run smoke test
+> - Added future consideration: Silent flag for notifications during automated testing
+>
+> ### Session Summary
+> - **Total Fixes**: 0 (bug already fixed in prior session)
+> - **Files Changed**: `TODO.md` (2 edits)
+> - **Commits**: None (documentation-only session)
+> - **Test Status**: Pending - deferred to next session
+>
+> **Status**: Session closed 2026.01.31
+>
+> ---
+
+> **✅ SESSION 112 COMPLETE**: Deep Research Protocol Compliance Fix (2026.01.30)
+> **Owner**: claude.code@lupin.deepily.ai#bd42074b
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+> Fixed Deep Research job submission failure: "Job must implement QueueableJob protocol, got DeepResearchJob"
+>
+> **Root Cause**: `QueueableJob` protocol (expanded in Session 111) requires `is_cache_hit: bool`, but `AgenticJobBase` was missing this attribute. The protocol had `is_cacheable` (property returning False) but not `is_cache_hit` (instance attribute).
+>
+> **Fix**: Added `self.is_cache_hit = False` to `AgenticJobBase.__init__()` with comment "Agentic jobs are never cache hits"
+>
+> **Verification**: All smoke tests pass:
+> - `deep_research` router import: OK
+> - `AgenticJobBase` smoke test: 8/8 tests passed
+> - `QueueableJob` protocol smoke test: All tests passed
+> - Protocol compliance check: `is_queueable_job()` returns True
+>
+> **Files Modified (COSA)**:
+> - `src/cosa/agents/agentic_job_base.py` (+1 line)
+>
+> **Commit**: 0e0ecfc (Lupin tracking), COSA pending
+>
+> ---
+>
+> **✅ SESSION 111 COMPLETE**: Defensive Attribute Access Refactoring (2026.01.30)
+> **Owner**: claude.code@lupin.deepily.ai#bd42074b
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Accomplishments
+> Implemented Phases 1-4 of the defensive attribute access refactoring plan to replace fragile `getattr()`/`hasattr()` patterns with trusted Protocol-based direct attribute access.
+>
+> **Phase 1 - Enforce Protocol at Boundaries**:
+> - Added `is_queueable_job()` validation in `FifoQueue.push()` method
+> - Objects are now validated ONCE on queue entry, enabling downstream code to trust the interface
+>
+> **Phase 2 - Replace getattr Chains (~89 replacements)**:
+> - `running_fifo_queue.py`: ~62 replacements across 6 metadata construction blocks
+> - `queue_consumer.py`: 7 replacements in `consumer_worker()`
+> - `todo_fifo_queue.py`: 8 replacements in `push()` metadata
+> - `queues.py`: 12 replacements in done queue endpoint
+>
+> **Phase 3 - Replace hasattr with isinstance**:
+> - Replaced `hasattr(job, 'JOB_TYPE') and hasattr(job, 'artifacts')` duck-typing
+> - Now uses explicit `isinstance(job, AgenticJobBase)` type check
+>
+> **Phase 4 - Protocol Expansion**:
+> - Added 6 missing attributes to QueueableJob Protocol: `user_email`, `started_at`, `completed_at`, `is_cache_hit`, `status`, `error`
+> - Updated smoke test mocks to implement full Protocol
+>
+> **Verification**: All 5 smoke tests pass (queue_protocol, fifo_queue, todo_fifo_queue, running_fifo_queue, queue_consumer)
+>
+> **Documentation**: Created `src/rnd/2026.01.30-defensive-attribute-access-anti-pattern.md` with implementation addendum
+>
+> **Files Modified (COSA - pending commit)**:
+> - `fifo_queue.py`, `todo_fifo_queue.py`, `running_fifo_queue.py`, `queue_consumer.py`
+> - `routers/queues.py`, `queue_protocol.py`
+> - 7 agent files (agent_base.py + 6 traditional agents) - from earlier user_email work
+> - `solution_snapshot.py` - from earlier user_email work
+>
+> ---
+>
+> **✅ SESSION 110 COMPLETE**: Bug Fix Mode (2026.01.30)
+> **Owner**: claude.code@lupin.deepily.ai#bd42074b
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Fixes
+> - **Fix 1**: Unknown badge for WebSocket-created job cards
+>   - **Symptom**: Badge shows "Unknown" instead of "Math" when jobs transition via WebSocket (works after page reload)
+>   - **Root Cause**: Defensive `getattr()` chains masked missing implementation; e.g., `getattr(job, 'agent_class_name', getattr(job, 'JOB_TYPE', 'Unknown'))`
+>   - **Fix**: All queueable objects implement `job_type` property - replaced 8 defensive chains with direct `job.job_type` access
+>   - **Files (COSA)**: `queue_consumer.py`, `todo_fifo_queue.py`, `running_fifo_queue.py`
+>   - **Test**: Smoke tests PASS (all 3 files)
+>   - **Commit**: f8e3bda (Lupin tracking), COSA pending
+>
+> - **Fix 2**: user_email injection refactoring
+>   - **Problem**: Ugly attribute injection `agent.user_email = user_email` after instantiation
+>   - **Fix**: Added `user_email` as first-class constructor parameter to AgentBase, all 6 traditional agents, and SolutionSnapshot
+>   - **Files (COSA)**: `agent_base.py`, `math_agent.py`, `calendaring_agent.py`, `weather_agent.py`, `receptionist_agent.py`, `todo_list_agent.py`, `date_and_time_agent.py`, `solution_snapshot.py`, `todo_fifo_queue.py`, `fifo_queue.py`
+>   - **Test**: Smoke tests PASS, syntax validation PASS
+>   - **Commit**: 7243a31 (Lupin tracking), COSA pending
+>
+> ### Session Summary
+> - **Total Fixes**: 2 (+ Session 111 defensive refactoring + Session 112 protocol fix)
+> - **Files Changed**: Multiple COSA files (pending commit in COSA context)
+> - **Commits (Lupin)**: f8e3bda, 7243a31, 9ddfa99, 2da5467
+> - **Status**: Bug fix session closed 2026.01.30
+>
+> ---
+
+> **✅ SESSION 109 COMPLETE**: Bug Fix Mode (2026.01.29)
+> **Owner**: claude.code@lupin.deepily.ai#0bd32185
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Fixes
+> - **Fix 1**: Math Agent TTS - job_id pattern validation ✅ VERIFIED
+>   - **Symptom**: Math agents produced no TTS; Pydantic validation error on compound hash job_id
+>   - **Root Cause**: `notification_models.py` job_id pattern didn't accept `SHA256::UUID` compound format
+>   - **Fix**: Updated regex to accept compound hashes: `^([a-z]+-[a-f0-9]{8}|[a-f0-9]{64}(::[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})?)$`
+>   - **File**: `src/cosa/cli/notification_models.py` (2 locations: NotificationRequest, AsyncNotificationRequest)
+>
+> - **COSA Changes** (pending commit in COSA repo):
+>   - Added `user_email` parameter to `push_job()` and `_queue_best_snapshot()`
+>   - Simplified `_notify()` with direct `target_user` parameter
+>   - Removed `_get_target_user_email()` method (47 lines deleted)
+>   - Set `user_email` on agents/jobs at creation time for TTS routing
+>
+> ### Session Summary
+> - **Total Fixes**: 1 (Math Agent TTS)
+> - **Files Changed**: 5 (1 Lupin tracking, 4 COSA pending)
+> - **Commits (Lupin)**: f0a5c33, 7736b44, bce5639
+> - **Queued for Tomorrow**: 2 bugs (user_email refactoring, unknown badge fix)
+>
+> **Status**: Session closed 2026.01.29
+>
+> ---
+
+> **✅ SESSION 108 COMPLETE**: Bug Fix Mode + Math Agent TTS Investigation (2026.01.29)
+> **Owner**: claude.code@lupin.deepily.ai#21a62c05
+> **Branch**: `wip-v0.1.3-2026.01.29-spit-and-polish-for-agentic-jobs-and-notifications-ui`
+>
+> ### Fixes
+> - **Fix 1**: Job card styling inconsistency (WebSocket vs server-fetched)
+>   - **Symptom**: Done queue cards looked different when inserted via WebSocket vs fetched from server
+>   - **Root Cause**: `insertJobMetadata()` used raw HTML instead of CSS-classed structure from `renderJobCard()`
+>   - **Fix**: Extracted `renderAbstractSection()` and `renderReportLinkSection()` helpers; unified rendering
+>   - **File**: `src/fastapi_app/static/js/notifications.js`
+>
+> - **Fix 2**: Badge/card count mismatch in queue updates
+>   - **Symptom**: Badge showed correct count but cards didn't match after WebSocket updates
+>   - **Fix**: Synchronized badge and card rendering in queue update handlers
+>
+> ### Investigation: Math Agent TTS Not Working
+> - **Symptom**: Math jobs complete successfully but produce NO TTS audio (mock jobs DO work)
+> - **Root Cause Identified**: Two issues found:
+>   1. **Race Condition** (Fixed in earlier commit): `associate_job_with_user()` called AFTER `push()` - consumer thread could grab job before user mapping existed
+>   2. **Missing user_email Attribute** (Pending fix): Math agents lack `user_email` attribute that mock jobs have, causing TTS to route to wrong user (falls back to default email)
+> - **R&D Document**: `src/rnd/2026.01.29-math-agent-tts-bug-investigation.md`
+> - **Implementation Plan**: Look up `user_email` in `push_job()`, set on agents at creation time
+>
+> ### Workflow Installation
+> - Installed `/plan-bug-fix-mode-wrap` slash command (was missing from Lupin)
+>
+> ### Session Summary
+> Fixed job card UI issues, investigated Math Agent TTS bug to root cause, documented findings with implementation plan for next session.
+>
+> ---
+
 > **✅ SESSION 107 COMPLETE**: job_state_transition WebSocket Event (2026.01.28)
 > **Owner**: claude.code@lupin.deepily.ai
 > **Branch**: `wip-v0.1.2-2026.01.28-job-state-change-refactoring`

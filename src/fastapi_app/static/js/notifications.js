@@ -1405,14 +1405,15 @@ class NotificationsUI {
         }
 
         // Show/hide Option B controls based on task type selection
-        document.querySelectorAll( 'input[name="cc-task-type"]' ).forEach( radio => {
-            radio.addEventListener( 'change', ( e ) => {
+        const taskTypeSelect = document.getElementById( 'cc-task-type' );
+        if ( taskTypeSelect ) {
+            taskTypeSelect.addEventListener( 'change', ( e ) => {
                 const optionBControls = document.getElementById( 'cc-option-b-controls' );
                 if ( optionBControls ) {
                     optionBControls.style.display = e.target.value === 'INTERACTIVE' ? 'block' : 'none';
                 }
             });
-        });
+        }
 
         // Enter key in inject input
         const injectInput = document.getElementById( 'cc-inject-input' );
@@ -1737,10 +1738,6 @@ class NotificationsUI {
             token: this.authToken.replace( "Bearer ", "" ), // Strip Bearer prefix for WebSocket auth
             session_id: this.queueSessionId,
             subscribed_events: [
-                "queue_todo_update",
-                "queue_running_update",
-                "queue_done_update",
-                "queue_dead_update",
                 "job_state_transition",
                 "tts_job_request",
                 "sys_time_update",
@@ -1839,29 +1836,6 @@ class NotificationsUI {
                     this.handleJobCompletion( envelope );
                     break;
                     
-                case "queue_todo_update":
-                    // Session 107: Badge-only update (job_state_transition handles card movement)
-                    this.log( `Queue TODO update: ${envelope.value}` );
-                    this.updateQueueCountBadge( "todo", envelope.value );
-                    break;
-
-                case "queue_running_update":
-                    // Session 107: Badge-only update (job_state_transition handles card movement)
-                    this.log( `Queue RUNNING update: ${envelope.value}` );
-                    this.updateQueueCountBadge( "run", envelope.value );
-                    break;
-
-                case "queue_done_update":
-                    // Session 107: Badge-only update (job_state_transition handles card movement)
-                    this.log( `Queue DONE update: ${envelope.value}` );
-                    this.updateQueueCountBadge( "done", envelope.value );
-                    break;
-
-                case "queue_dead_update":
-                    // Session 107: Badge-only update (job_state_transition handles card movement)
-                    this.log( `Queue DEAD update: ${envelope.value}` );
-                    this.updateQueueCountBadge( "dead", envelope.value );
-                    break;
 
                 case "job_state_transition":
                     this.handleJobStateTransition( envelope );
@@ -2329,8 +2303,12 @@ class NotificationsUI {
             return;
         }
 
-        // Use the same recording flow as Q&A STT via recordingManager
-        await this.recordingManager.startRecording( inputId, button, inputElement );
+        // Toggle behavior - stop if recording, start if not
+        if ( this.recordingManager.isRecording() ) {
+            await this.recordingManager.stopRecording();
+        } else if ( !this.recordingManager.isProcessing() ) {
+            await this.recordingManager.startRecording( inputId, button, inputElement );
+        }
     }
 
     // ========================================
@@ -2564,22 +2542,9 @@ class NotificationsUI {
     // ========================================
 
     async handleQASTTButtonClick() {
+        // Thin wrapper - delegates to unified handleSTTButtonClick
         const button = document.getElementById( 'qa-stt-button' );
-        const textInput = document.getElementById( 'qa-input' );
-
-        // If already recording, stop it
-        if ( this.recordingManager.isRecording() ) {
-            await this.recordingManager.stopRecording();
-            return;
-        }
-
-        // If processing, ignore click
-        if ( this.recordingManager.isProcessing() ) {
-            return;
-        }
-
-        // Start new recording using unified RecordingManager
-        await this.recordingManager.startRecording( 'qa', button, textInput );
+        await this.handleSTTButtonClick( 'qa-input', button );
     }
 
     handleJobCompletion( envelope ) {
@@ -2730,22 +2695,18 @@ class NotificationsUI {
      * Uses unified RecordingManager for voice input.
      */
     async handleCCSTTButtonClick() {
+        // Thin wrapper - delegates to unified handleSTTButtonClick
         const button = document.getElementById( 'cc-stt-button' );
-        const textInput = document.getElementById( 'cc-prompt' );
-
-        // Toggle recording state using unified RecordingManager
-        if ( this.recordingManager.isRecording() ) {
-            await this.recordingManager.stopRecording();
-        } else if ( !this.recordingManager.isProcessing() ) {
-            await this.recordingManager.startRecording( 'cc-prompt', button, textInput );
-        }
+        await this.handleSTTButtonClick( 'cc-prompt', button );
     }
 
     async submitClaudeCode() {
         const project = document.getElementById( 'cc-project' ).value;
         const prompt = document.getElementById( 'cc-prompt' ).value;
-        const taskType = document.querySelector( 'input[name="cc-task-type"]:checked' ).value;
-        const executionMode = document.querySelector( 'input[name="cc-execution-mode"]:checked' ).value;
+        const taskType = document.getElementById( 'cc-task-type' ).value;
+        const executionMode = document.getElementById( 'cc-execution-mode' ).value;
+        const dryRunCheckbox = document.getElementById( 'cc-dry-run' );
+        const dryRun = dryRunCheckbox ? dryRunCheckbox.checked : false;
 
         if ( !prompt.trim() ) {
             alert( 'Please enter a task prompt' );
@@ -2762,20 +2723,20 @@ class NotificationsUI {
 
         // Route to appropriate submission method based on execution mode
         if ( executionMode === 'queue' ) {
-            await this.submitClaudeCodeToQueue( project, prompt, taskType, loadingEl, submitBtn, responseEl );
+            await this.submitClaudeCodeToQueue( project, prompt, taskType, dryRun, loadingEl, submitBtn, responseEl );
         } else {
             await this.submitClaudeCodeDirect( project, prompt, taskType, loadingEl, submitBtn, responseEl );
         }
     }
 
-    async submitClaudeCodeToQueue( project, prompt, taskType, loadingEl, submitBtn, responseEl ) {
+    async submitClaudeCodeToQueue( project, prompt, taskType, dryRun, loadingEl, submitBtn, responseEl ) {
         /**
          * Submit Claude Code task to CJF queue for background execution.
          * Jobs appear in the queue section and are tracked via job cards.
          */
         if ( responseEl ) responseEl.textContent = 'Submitting to CJF queue...';
 
-        this.log( `Claude Code queue submit: project=${project}, type=${taskType}` );
+        this.log( `Claude Code queue submit: project=${project}, type=${taskType}, dry_run=${dryRun}` );
 
         try {
             const response = await fetch( '/api/claude-code/queue/submit', {
@@ -2789,7 +2750,8 @@ class NotificationsUI {
                     project: project,
                     task_type: taskType,
                     max_turns: taskType === 'INTERACTIVE' ? 200 : 50,
-                    websocket_id: this.sessionId
+                    websocket_id: this.sessionId,
+                    dry_run: dryRun
                 } )
             } );
 
@@ -2819,7 +2781,7 @@ class NotificationsUI {
             document.getElementById( 'cc-option-b-controls' ).style.display = 'none';
 
             // Refresh queues to show new job
-            this.loadUserQueues();
+            this.refreshAllQueues();
 
         } catch ( error ) {
             this.error( 'Claude Code queue submit failed:', error );
@@ -4203,26 +4165,31 @@ class NotificationsUI {
             }
         }
 
+        // Session 108: Use helper functions for consistent rendering
         if ( metadata.abstract ) {
             const abstractEl = card.querySelector( '.job-abstract' );
             if ( abstractEl ) {
-                abstractEl.innerHTML = `<strong>Abstract:</strong> ${this.escapeHtml( metadata.abstract )}`;
+                abstractEl.innerHTML = this.renderAbstractSection( metadata.abstract );
                 abstractEl.style.display = 'block';
             }
         }
 
-        if ( metadata.report_link ) {
+        // Session 108: Use helper function for report link (handle both report_link URL and report_path)
+        const reportPath = metadata.report_link || metadata.report_path;
+        if ( reportPath ) {
             const reportEl = card.querySelector( '.job-report-link' );
             if ( reportEl ) {
-                reportEl.innerHTML = `<a href="${metadata.report_link}" target="_blank">📄 View Report</a>`;
+                reportEl.innerHTML = this.renderReportLinkSection( reportPath );
                 reportEl.style.display = 'block';
             }
         }
 
+        // Session 108: Use helper function for cost summary (handle object type)
         if ( metadata.cost_summary ) {
             const costEl = card.querySelector( '.job-cost-summary' );
             if ( costEl ) {
-                costEl.textContent = `Cost: ${metadata.cost_summary}`;
+                const durationSeconds = metadata.duration_seconds || null;
+                costEl.innerHTML = this.renderCostSummaryContent( metadata.cost_summary, durationSeconds );
                 costEl.style.display = 'block';
             }
         }
@@ -4563,28 +4530,35 @@ class NotificationsUI {
             // Update the appropriate list based on queue name
             // Also update the new progressive disclosure count badges
             // Session 107: Removed updateJobRegistration calls - job_state_transition handles routing
+            // Session 128: Fixed field names - backend returns total_jobs, not {queue}_jobs arrays
             if ( queueName === "todo" ) {
                 // Update count badge for progressive disclosure UI
                 const countBadge = document.getElementById( "todo-count-badge" );
-                if ( countBadge ) countBadge.textContent = data.todo_jobs.length;
+                if ( countBadge ) countBadge.textContent = data.total_jobs;
+                // Store metadata for progressive disclosure job cards
+                this.queueCategoryState.todo.jobs = data.todo_jobs_metadata || [];
                 // Also refresh job cards if category is expanded
-                this.updateQueueCategoryIfExpanded( "todo", data.todo_jobs.length );
+                this.updateQueueCategoryIfExpanded( "todo", data.total_jobs );
             } else if ( queueName === "run" ) {
                 const countBadge = document.getElementById( "run-count-badge" );
-                if ( countBadge ) countBadge.textContent = data.run_jobs.length;
-                this.updateQueueCategoryIfExpanded( "run", data.run_jobs.length );
+                if ( countBadge ) countBadge.textContent = data.total_jobs;
+                // Store metadata for progressive disclosure job cards
+                this.queueCategoryState.run.jobs = data.run_jobs_metadata || [];
+                this.updateQueueCategoryIfExpanded( "run", data.total_jobs );
             } else if ( queueName === "done" ) {
                 // Enhanced done queue handling with structured job metadata for replay functionality
                 await this.handleDoneQueueUpdate( data );
                 const countBadge = document.getElementById( "done-count-badge" );
-                if ( countBadge ) countBadge.textContent = data.done_jobs.length;
+                if ( countBadge ) countBadge.textContent = data.total_jobs;
                 // Store metadata for progressive disclosure job cards
                 this.queueCategoryState.done.jobs = data.done_jobs_metadata || [];
-                this.updateQueueCategoryIfExpanded( "done", data.done_jobs.length );
+                this.updateQueueCategoryIfExpanded( "done", data.total_jobs );
             } else if ( queueName === "dead" ) {
                 const countBadge = document.getElementById( "dead-count-badge" );
-                if ( countBadge ) countBadge.textContent = data.dead_jobs.length;
-                this.updateQueueCategoryIfExpanded( "dead", data.dead_jobs.length );
+                if ( countBadge ) countBadge.textContent = data.total_jobs;
+                // Store metadata for progressive disclosure job cards
+                this.queueCategoryState.dead.jobs = data.dead_jobs_metadata || [];
+                this.updateQueueCategoryIfExpanded( "dead", data.total_jobs );
             } else {
                 this.error( "Unknown queue name:", queueName );
             }
@@ -4813,11 +4787,11 @@ class NotificationsUI {
 
             // Session 107: Removed updateJobRegistration - job_state_transition handles routing
 
-            // Update count badge
-            if ( countBadge ) countBadge.textContent = jobsHtml.length;
+            // Update count badge - use metadata length (API returns *_jobs_metadata, not *_jobs)
+            if ( countBadge ) countBadge.textContent = jobsMetadata.length;
 
-            // Render job cards
-            if ( jobsHtml.length === 0 ) {
+            // Render job cards - check metadata, not the non-existent jobsHtml
+            if ( jobsMetadata.length === 0 ) {
                 container.innerHTML = '<div class="queue-empty-message">No jobs in this queue</div>';
             } else {
                 // Use metadata if available (done queue), otherwise create minimal metadata from HTML
@@ -5094,6 +5068,57 @@ class NotificationsUI {
         `;
     }
 
+    /**
+     * Render abstract section HTML.
+     * Session 108: Helper for consistent rendering between WebSocket and server-fetched cards.
+     *
+     * @param {string} abstract - Abstract text to render
+     * @returns {string} HTML content for abstract section
+     */
+    renderAbstractSection( abstract ) {
+        if ( !abstract ) return '';
+        return `
+            <div class="abstract-header">📄 Summary</div>
+            <div class="abstract-content">${this.escapeHtml( abstract )}</div>
+        `;
+    }
+
+    /**
+     * Render report link section HTML.
+     * Session 108: Helper for consistent rendering between WebSocket and server-fetched cards.
+     *
+     * @param {string} reportPath - Path to the report file
+     * @returns {string} HTML content for report link section
+     */
+    renderReportLinkSection( reportPath ) {
+        if ( !reportPath ) return '';
+        return `<a href="/api/io/file?path=${encodeURIComponent( reportPath )}" target="_blank" class="report-link-btn">📋 View Full Report</a>`;
+    }
+
+    /**
+     * Debug utility to dump job card DOM for comparison.
+     * Session 108: Helps verify WebSocket vs server-fetched card consistency.
+     *
+     * Usage: window.notificationsUI.debugDumpJobCard( 'dr-a0ebba60' )
+     *
+     * @param {string} jobId - The job ID to inspect
+     */
+    debugDumpJobCard( jobId ) {
+        const card = document.querySelector( `.job-card[data-job-id="${jobId}"]` );
+        if ( !card ) {
+            console.warn( `Job card not found: ${jobId}` );
+            return;
+        }
+        const container = card.closest( '.queue-jobs-container' );
+        const queue = container?.id?.replace( '-jobs-container', '' ) || 'unknown';
+        console.group( `Job Card: ${jobId} (${queue} queue)` );
+        console.log( 'Outer HTML:' );
+        console.log( card.outerHTML );
+        console.log( 'Classes:', card.className );
+        console.log( 'Data attributes:', { ...card.dataset } );
+        console.groupEnd();
+    }
+
     renderJobCard( job, queueName ) {
         /**
          * Generate HTML for a single job card.
@@ -5185,10 +5210,10 @@ class NotificationsUI {
                         ${job.response_text ? `<strong>Response:</strong> ${this.escapeHtml( job.response_text )}` : ''}
                     </div>
                     <div class="job-abstract" style="${job.abstract ? '' : 'display: none'}">
-                        ${job.abstract ? `<div class="abstract-header">📄 Summary</div><div class="abstract-content">${this.escapeHtml( job.abstract )}</div>` : ''}
+                        ${this.renderAbstractSection( job.abstract )}
                     </div>
                     <div class="job-report-link" style="${job.report_path ? '' : 'display: none'}">
-                        ${job.report_path ? `<a href="/api/io/file?path=${encodeURIComponent( job.report_path )}" target="_blank" class="report-link-btn">📋 View Full Report</a>` : ''}
+                        ${this.renderReportLinkSection( job.report_path )}
                     </div>
                     <div class="job-cost-summary" style="${job.cost_summary ? '' : 'display: none'}">
                         ${job.cost_summary ? this.renderCostSummaryContent( job.cost_summary, job.duration_seconds ) : ''}

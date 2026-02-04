@@ -11,6 +11,7 @@ WebSocket Endpoints: ws://localhost:7999/ws/queue/ and ws://localhost:7999/ws/au
 
 import asyncio
 import json
+import os
 import time
 import random
 import urllib.parse
@@ -155,25 +156,117 @@ class WebSocketTestUtilities:
     def generate_mock_token( self, user_id: str = "test_user" ) -> str:
         """
         Generate a mock authentication token.
-        
+
+        DEPRECATED: Use get_jwt_token() for real JWT authentication.
+        This method only works when server is in mock auth mode.
+
         Requires:
             - user_id must be a valid string identifier
-            
+
         Ensures:
             - Returns token string in format 'mock_token_{user_id}'
             - Token format is consistent for testing purposes
             - String concatenation always succeeds
-            
+
         Args:
             user_id: User identifier for the token
-            
+
         Returns:
             str: Mock token string in expected format
-            
+
         Raises:
             No exceptions raised - string formatting is guaranteed to work
         """
         return f"mock_token_{user_id}"
+
+    async def get_jwt_token( self, email: str = None, password: str = None ) -> Tuple[bool, str]:
+        """
+        Get a real JWT access token by logging in via the /auth/login endpoint.
+
+        This method uses real JWT authentication, which works regardless of
+        server auth mode configuration.
+
+        Requires:
+            - FastAPI server must be running with /auth/login endpoint
+            - Valid user credentials (from parameters or environment variables)
+            - LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD env vars if not provided
+
+        Ensures:
+            - Returns tuple of (success: bool, token_or_error: str)
+            - On success, returns valid JWT access token
+            - On failure, returns error message string
+            - Caches token in self._cached_jwt_token for reuse
+            - Logs authentication attempt and result
+
+        Args:
+            email: User email for login (uses LUPIN_TEST_EMAIL if not provided)
+            password: User password for login (uses LUPIN_TEST_PASSWORD if not provided)
+
+        Returns:
+            Tuple[bool, str]: (True, token) on success, (False, error_message) on failure
+
+        Raises:
+            No exceptions raised - all errors returned as (False, error_message)
+        """
+        # Check for cached token
+        if hasattr( self, '_cached_jwt_token' ) and self._cached_jwt_token:
+            self.log( "Using cached JWT token" )
+            return True, self._cached_jwt_token
+
+        # Get credentials from parameters or environment
+        email = email or os.environ.get( "LUPIN_TEST_EMAIL" )
+        password = password or os.environ.get( "LUPIN_TEST_PASSWORD" )
+
+        if not email or not password:
+            error_msg = (
+                "JWT authentication requires credentials. Either:\n"
+                "  - Pass email and password parameters, OR\n"
+                "  - Set LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables"
+            )
+            self.log( error_msg, "ERROR" )
+            return False, error_msg
+
+        self.log( f"Authenticating as {email} via /auth/login..." )
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.http_base}/auth/login",
+                    json={ "email": email, "password": password },
+                    timeout=10.0
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    token = data.get( "tokens", {} ).get( "access_token" )
+
+                    if token:
+                        self._cached_jwt_token = token
+                        self.log( f"✅ JWT login successful for {email}" )
+                        return True, token
+                    else:
+                        error_msg = "Login succeeded but no access_token in response"
+                        self.log( error_msg, "ERROR" )
+                        return False, error_msg
+                else:
+                    error_msg = f"Login failed with status {response.status_code}: {response.text}"
+                    self.log( error_msg, "ERROR" )
+                    return False, error_msg
+
+        except Exception as e:
+            error_msg = f"Login request failed: {e}"
+            self.log( error_msg, "ERROR" )
+            return False, error_msg
+
+    def clear_jwt_cache( self ):
+        """
+        Clear the cached JWT token.
+
+        Use this to force a fresh login on the next get_jwt_token() call.
+        """
+        if hasattr( self, '_cached_jwt_token' ):
+            self._cached_jwt_token = None
+            self.log( "JWT token cache cleared" )
     
     async def connect_websocket( 
         self, 
@@ -464,21 +557,23 @@ class WebSocketTestUtilities:
         """
         return PerformanceTimer( operation_name, self.log )
     
-    async def test_websocket_flow( 
+    async def test_websocket_flow(
         self,
         endpoint: str,
         user_id: str = "test_user",
-        duration: float = 5.0 
+        duration: float = 5.0,
+        use_jwt: bool = True
     ) -> Dict[str, Any]:
         """
         Test a complete WebSocket connection flow.
-        
+
         Requires:
             - endpoint must be 'queue' or 'audio'
             - user_id must be valid non-empty string identifier
             - duration must be positive number of seconds
             - WebSocket server must be running and accessible
-            
+            - For JWT auth: LUPIN_TEST_EMAIL/PASSWORD env vars or credentials
+
         Ensures:
             - Performs full connection, authentication, and event collection cycle
             - Measures connection and authentication timing
@@ -486,15 +581,16 @@ class WebSocketTestUtilities:
             - Returns comprehensive test results including success status
             - Properly closes WebSocket connection after test
             - Logs all test phases and their outcomes
-            
+
         Args:
             endpoint: WebSocket endpoint to test ('queue' or 'audio')
-            user_id: User ID for authentication
+            user_id: User ID for authentication (used only with mock tokens)
             duration: How long to maintain connection and collect events
-            
+            use_jwt: If True, use real JWT login; if False, use mock tokens
+
         Returns:
             Dict[str, Any]: Dictionary with test results including success, timing, and collected data
-            
+
         Raises:
             ConnectionError: If WebSocket connection fails
             asyncio.TimeoutError: If authentication or event collection times out
@@ -510,21 +606,30 @@ class WebSocketTestUtilities:
             "events": [],
             "error": None
         }
-        
+
         session_id = self.generate_session_id()  # No prefix to match working test format
-        token = self.generate_mock_token( user_id )
-        
+
+        # Get authentication token
+        if use_jwt:
+            jwt_success, token_or_error = await self.get_jwt_token()
+            if not jwt_success:
+                results["error"] = f"JWT login failed: {token_or_error}"
+                return results
+            token = token_or_error
+        else:
+            token = self.generate_mock_token( user_id )
+
         try:
             # Measure connection time
             with self.measure_performance( f"{endpoint} connection" ):
                 websocket = await self.connect_websocket( endpoint, session_id )
                 results["connection_time"] = time.time()
-            
+
             # Measure authentication time
             with self.measure_performance( f"{endpoint} authentication" ):
                 auth_success, auth_data = await self.authenticate_websocket( websocket, token )
                 results["auth_time"] = time.time()
-                
+
                 # Audio WebSocket may not require authentication in the same way
                 if not auth_success and endpoint != "audio":
                     results["error"] = f"Authentication failed: {auth_data}"
@@ -533,21 +638,21 @@ class WebSocketTestUtilities:
                     # Audio WebSocket might send different messages instead of auth responses
                     self.log( f"Audio WebSocket connected but no auth response - this may be expected behavior" )
                     results["auth_time"] = time.time()  # Mark auth as complete
-            
+
             # Collect events for specified duration
             events = await self.collect_events( websocket, duration )
             results["events"] = events
             results["events_collected"] = len( events )
             results["success"] = True
-            
+
             # Close connection
             await websocket.close()
             self.log( f"✅ Completed {endpoint} WebSocket flow test" )
-            
+
         except Exception as e:
             results["error"] = str( e )
             self.log( f"❌ WebSocket flow test failed: {e}", "ERROR" )
-        
+
         return results
 
 
@@ -664,34 +769,36 @@ async def quick_health_check( base_url: str = "localhost:7999" ) -> bool:
     return await utils.check_server_health()
 
 
-async def quick_websocket_test( endpoint: str = "queue", user_id: str = "test" ) -> Dict[str, Any]:
+async def quick_websocket_test( endpoint: str = "queue", user_id: str = "test", use_jwt: bool = True ) -> Dict[str, Any]:
     """
     Quick WebSocket connection and authentication test.
-    
+
     Requires:
         - endpoint must be 'queue' or 'audio'
         - user_id must be valid non-empty string identifier
         - WebSocket server must be running at default location
-        
+        - For JWT auth: LUPIN_TEST_EMAIL/PASSWORD env vars set
+
     Ensures:
         - Creates temporary WebSocketTestUtilities instance with default config
         - Performs complete WebSocket flow test with 2-second duration
         - Returns comprehensive test results including success status
-        
+
     Args:
         endpoint: WebSocket endpoint to test (default: "queue")
-        user_id: User ID for authentication (default: "test")
-        
+        user_id: User ID for authentication (default: "test", used only with mock tokens)
+        use_jwt: If True, use real JWT login; if False, use mock tokens (default: True)
+
     Returns:
         Dict[str, Any]: Test results including success, timing, and event data
-        
+
     Raises:
         ConnectionError: If WebSocket connection fails
         asyncio.TimeoutError: If authentication or event collection times out
         json.JSONDecodeError: If server sends invalid JSON responses
     """
     utils = WebSocketTestUtilities()
-    return await utils.test_websocket_flow( endpoint, user_id, duration=2.0 )
+    return await utils.test_websocket_flow( endpoint, user_id, duration=2.0, use_jwt=use_jwt )
 
 
 if __name__ == "__main__":

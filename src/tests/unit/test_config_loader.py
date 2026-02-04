@@ -41,6 +41,7 @@ class TestConfigPrecedenceOrder:
         # Ensure env vars are NOT set
         monkeypatch.delenv( 'LUPIN_API_URL', raising=False )
         monkeypatch.delenv( 'LUPIN_API_KEY_FILE', raising=False )
+        monkeypatch.delenv( 'LUPIN_ENV', raising=False )
 
         # Create temporary config file
         config_file = tmp_path / 'config'
@@ -357,6 +358,7 @@ api_key_file = /tmp/local_key
         """Test that missing required fields in environment raises ValueError."""
         monkeypatch.delenv( 'LUPIN_API_URL', raising=False )
         monkeypatch.delenv( 'LUPIN_API_KEY_FILE', raising=False )
+        monkeypatch.delenv( 'LUPIN_ENV', raising=False )
 
         # Config missing api_key_file
         config_file = tmp_path / 'config'

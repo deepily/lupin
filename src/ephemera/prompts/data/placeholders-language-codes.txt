@@ -1,0 +1,7 @@
+en
+es
+es-MX
+es-ES
+es-AR
+fr
+de

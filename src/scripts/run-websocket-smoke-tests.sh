@@ -82,6 +82,7 @@ REQUIREMENTS:
     - FastAPI server running on http://localhost:7999
     - Python 3.7+ with asyncio, websockets, httpx packages
     - WebSocket endpoints /ws/queue/ and /ws/audio/ accessible
+    - LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables set
 
 FILES:
     Configuration: $CONFIG_FILE
@@ -119,37 +120,54 @@ check_server_health() {
     fi
 }
 
+# Function to check test credentials
+check_test_credentials() {
+    log_info "Checking test credentials..."
+
+    if [ -z "$LUPIN_TEST_EMAIL" ] || [ -z "$LUPIN_TEST_PASSWORD" ]; then
+        log_error "Test credentials not set!"
+        log_info "WebSocket tests require JWT authentication."
+        log_info "Set these environment variables:"
+        log_info "  export LUPIN_TEST_EMAIL='your@email.com'"
+        log_info "  export LUPIN_TEST_PASSWORD='yourpassword'"
+        return 1
+    fi
+
+    log_success "Test credentials configured (LUPIN_TEST_EMAIL=$LUPIN_TEST_EMAIL)"
+    return 0
+}
+
 # Function to check Python dependencies
 check_python_deps() {
     log_info "Checking Python dependencies..."
-    
+
     # Check if Python is available
     if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
         log_error "Python not found. Please install Python 3.7+"
         return 1
     fi
-    
+
     # Determine Python command
     PYTHON_CMD="python3"
     if ! command -v python3 >/dev/null 2>&1; then
         PYTHON_CMD="python"
     fi
-    
+
     # Check required packages
     local missing_packages=()
-    
+
     if ! $PYTHON_CMD -c "import asyncio" 2>/dev/null; then
         missing_packages+=("asyncio")
     fi
-    
+
     if ! $PYTHON_CMD -c "import websockets" 2>/dev/null; then
         missing_packages+=("websockets")
     fi
-    
+
     if ! $PYTHON_CMD -c "import httpx" 2>/dev/null; then
         missing_packages+=("httpx")
     fi
-    
+
     if [ ${#missing_packages[@]} -eq 0 ]; then
         log_success "All Python dependencies available"
         return 0
@@ -189,13 +207,16 @@ check_test_infrastructure() {
 # Function to run smoke tests
 run_smoke_tests() {
     local args=("$@")
-    
+
     log_info "Starting WebSocket Smoke Test Suite..."
     log_info "Test Directory: $SMOKE_TEST_DIR"
     log_info "Configuration: $CONFIG_FILE"
-    
+
     # Set up Python path for proper module imports
     export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
+
+    # JWT authentication is used - credentials from LUPIN_TEST_EMAIL/PASSWORD env vars
+    # No longer using AUTH_MODE=mock as server runs in JWT mode
 
     # Run the test suite as a module from project root
     local python_cmd="python3"
@@ -301,18 +322,23 @@ main() {
     
     # Pre-flight checks
     log_info "Running pre-flight checks..."
-    
+
+    if ! check_test_credentials; then
+        log_error "Test credentials not configured"
+        exit 1
+    fi
+
     if ! check_server_health; then
         log_error "Server is not healthy. Please start the FastAPI server on port 7999"
         log_info "Run: cd src && python -m uvicorn fastapi_app.main:app --port 7999"
         exit 1
     fi
-    
+
     if ! check_python_deps; then
         log_error "Python dependencies not satisfied"
         exit 1
     fi
-    
+
     if ! check_test_infrastructure; then
         log_error "Test infrastructure is incomplete"
         exit 1
