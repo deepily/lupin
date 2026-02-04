@@ -1,5 +1,13 @@
 # Lupin Project History
 
+#### Checkpoint | 2026.02.04 17:05 | GPU memory release gate for LORA training OOM fix
+
+**Files**: peft_trainer.py, xml_prompt_generator.py (CoSA submodule - pending separate commit)
+**Summary**: Added `_wait_for_gpu_memory_release()` polling gate to prevent CUDA OOM when vLLM→fine-tune transition happens before GPU memory is freed. Commented out phind entries in xml_prompt_generator.py.
+**Commit**: 3d9958f
+
+---
+
 #### Checkpoint | 2026.02.04 10:20 | Install PR workflow command
 
 **Files**: `.claude/commands/plan-branch-pr-and-merge.md` (NEW)
