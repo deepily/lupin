@@ -1,5 +1,13 @@
 # Lupin Project History
 
+#### Checkpoint | 2026.02.04 18:00 | Fix get_model AttributeError + plan NotImplementedError fix
+
+**Summary**: Fixed `AttributeError: module 'cosa.agents.llm_client' has no attribute 'get_model'` by renaming import alias `llm_v010` → `llmc` and adding class qualifier `LlmClient.get_model()` (6 changes in peft_trainer.py). Diagnosed deeper `NotImplementedError` in `llm_client_factory.py:449` — dynamic vLLM model keys bypass config lookup and hit unimplemented guard. Plan designed for factory fix.
+**Files**: peft_trainer.py (CoSA submodule - pending separate commit), llm_client_factory.py (planned, not yet applied)
+**Commit**: e3e3392
+
+---
+
 #### Checkpoint | 2026.02.04 17:05 | GPU memory release gate for LORA training OOM fix
 
 **Files**: peft_trainer.py, xml_prompt_generator.py (CoSA submodule - pending separate commit)
