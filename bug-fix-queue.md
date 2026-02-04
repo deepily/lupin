@@ -9,7 +9,7 @@
 
 | Session ID | Started | Last Activity | Status |
 |------------|---------|---------------|--------|
-| bcd6e830 | 2026-02-04T08:30:00 | 2026-02-04T08:30:00 | active |
+| bcd6e830 | 2026-02-04T08:30:00 | 2026-02-04T10:00:00 | closed |
 | bb3a5d21 | 2026-02-03T14:50:00 | 2026-02-03T19:45:00 | closed |
 | d7da6d0d | 2026-02-03T13:15:00 | 2026-02-03T13:35:00 | stale |
 | 590273af | 2026-02-03T10:00:00 | 2026-02-03T14:30:00 | stale |
@@ -34,87 +34,37 @@
 
 ### Completed
 
-- [x] **MathAgent QueueableJob protocol check** → Verified working | By: bcd6e830
-  - Protocol compliance test: PASS (MathAgent implements all 18 required attributes + 3 methods)
-  - API test: `/api/push` with math question returns 200 OK
-  - No code changes required - was already fixed in prior sessions (Session 110-112)
-
-- [x] **Notifications UI: Claude Code submission layout cleanup** → commit: 425568a | By: bcd6e830
-  - **Changes**:
-    - Replaced radio buttons with two compact dropdowns (Task Type + Flow Type)
-    - Task dropdown: "Bounded" / "Unbounded (Interactive)"
-    - Flow dropdown: "CJ Flow" (default) / "Socket"
-    - Added branding: "Cosa Jobs Flow: Current States" for Job Queues section
-  - **Files**: `notifications.html`, `notifications.js`
-
-- [x] **CJ flow compliance fails for bounded/unbounded ClaudeCode tasks** → Verified working | By: bcd6e830
-  - Both BOUNDED and UNBOUNDED dry-run tests passed
-  - Job cards render correctly in CJ flow states
-  - No code changes required - was already fixed in prior sessions
-
-- [x] **Job cards disappear after queue refresh** → commit: c8a77ef | By: bb3a5d21
-  - **Symptom**: Job cards show "No jobs in this queue" after `refreshAllQueues()` despite API returning data
-  - **Root Cause**: `loadQueueJobCards()` and `processQueueUpdate()` used wrong field names:
-    - `jobsHtml.length` instead of `jobsMetadata.length` (API returns `*_jobs_metadata` not `*_jobs`)
-    - `data.{queue}_jobs.length` instead of `data.total_jobs` (API returns `total_jobs` count)
-  - **Fix**: Updated field references in `loadQueueJobCards()` (lines 4789-4793) and `processQueueUpdate()` (lines 4532-4565)
-  - **File**: `src/fastapi_app/static/js/notifications.js`
-
-- [x] **loadUserQueues called instead of refreshAllQueues after Claude Code submit** → commit: 0329bf4 | By: bb3a5d21
-  - **Symptom**: After submitting a Claude Code job, only todo queue refreshed, not all queues
-  - **Root Cause**: `handleClaudeCodeSubmit()` called `loadUserQueues()` instead of `refreshAllQueues()`
-  - **Fix**: Changed line 2783 from `this.loadUserQueues()` to `this.refreshAllQueues()`
-  - **File**: `src/fastapi_app/static/js/notifications.js:2783`
-
-- [x] **Remove deprecated get_html() and queue_*_update events** → commit: 5c5467b | By: 590273af
-  - Frontend uses metadata exclusively; get_html() never rendered
-  - queue_*_update broadcasts total counts (all users), replaced by job_state_transition
-  - Deleted dormant queue.js/queue.html (last modified 2025-08-15)
-  - Unit tests: 195/195 PASS
-
-- [x] **Directory Analyzer "Other" Classification**: 97.58% of files classified as "Other" → commit: be0afa6 | By: d7da6d0d
-  - **Symptom**: Running directory analyzer on Lupin showed 46M lines (97.58%) as "Other"
-  - **Root Cause**: LanceDB files (.lance, .manifest, .txn) + Flutter SDK not excluded, .dart not mapped
-  - **Fix**: Added exclusions and mappings to `src/cosa/repo/directory_analyzer/default_config.yaml`
-  - **Result**: "Other" dropped to 3.57% (12k lines), files scanned 59,471 → 1,223
-
-- [x] **Cache Hit Behavior**: Re-execute cached code for fresh results → commit: 3cff850 | By: 4949b964
-  - **Symptom**: Cache hits returned stale `answer_conversational` for time-sensitive queries
-  - **Fix**: Added code re-execution in `_format_cached_result()` before returning cached result
-  - **File**: `src/cosa/rest/running_fifo_queue.py:689-699`
-  - **Test**: Smoke 9/9 PASS, Unit imports verified
-  - **Trade-off**: Math queries re-execute unnecessarily (~100ms) but correctness > performance
-
-- [x] **Dry-run completion messages too verbose for TTS** → Fixed | By: 49a88ad2
-  - **Symptom**: Dry-run completion messages included full file paths with emails, UUIDs, slashes
-  - **Fix**: Simplified return messages to voice-friendly summaries (paths remain in `abstract`)
-  - **Files (COSA)**:
-    - `src/cosa/agents/podcast_generator/job.py:336`
-    - `src/cosa/agents/deep_research_to_podcast/job.py:341`
-    - `src/cosa/agents/deep_research/job.py:420`
-  - **Smoke tests**: All 3 modules pass
-
-- [x] Run Deep Research dry-run smoke test → All 5 tests PASSED | By: 8594147a
-  - Job ID: dr-6aa5d16d
-  - Completed in: ~10s
-  - Cost: $0.00 (dry-run confirmed)
-- [x] Podcast Generator dry-run API smoke test → All tests PASSED | By: 8594147a
-  - Job ID: pg-dd026977
-  - Completed in: ~10s
-  - Cost: $0.00 (dry-run confirmed)
-  - **Bug fixed**: push_job() → push() with user_job_tracker association
-  - **Bug fixed**: get_position() → size()
-  - **Commit**: eab45bf (Lupin), CoSA pending
-- [x] Research→Podcast dry-run API smoke test → All tests PASSED | By: 8594147a
-  - Job ID: rp-221fe28e
-  - Completed in: ~14s
-  - Cost: $0.00 (dry-run confirmed)
-  - **Bug fixed**: Same push_job() → push() fix as Podcast Generator
-  - **Smoke test created**: test_research_to_podcast_dry_run_smoke.py
+*Queue cleared - see Archive for completed items*
 
 ---
 
 ## Archive: Previous Sessions
+
+### 2026.02.04 - Session bcd6e830 (3 items)
+- [x] **MathAgent QueueableJob protocol check** → commit: 34f4874 (docs-only)
+- [x] **Notifications UI: Claude Code submission layout cleanup** → commit: 425568a
+- [x] **CJ flow compliance** → Verified working (no changes)
+
+### 2026.02.03 - Session bb3a5d21 (2 fixes)
+- [x] **Job cards disappear after queue refresh** → commit: c8a77ef
+- [x] **loadUserQueues called instead of refreshAllQueues** → commit: 0329bf4
+
+### 2026.02.03 - Session 590273af (1 fix)
+- [x] **Remove deprecated get_html() and queue_*_update events** → commit: 5c5467b
+
+### 2026.02.03 - Session d7da6d0d (1 fix)
+- [x] **Directory Analyzer "Other" Classification** → commit: be0afa6
+
+### 2026.02.02 - Session 4949b964 (1 fix)
+- [x] **Cache Hit Behavior**: Re-execute cached code → commit: 3cff850
+
+### 2026.02.02 - Session 49a88ad2 (1 fix)
+- [x] **Dry-run completion messages too verbose for TTS** → Fixed
+
+### 2026.02.02 - Session 8594147a (3 smoke tests)
+- [x] Deep Research dry-run → All tests PASSED
+- [x] Podcast Generator dry-run → All tests PASSED, commit: eab45bf
+- [x] Research→Podcast dry-run → All tests PASSED
 
 ### 2026.01.31 - Session 42b5bbd7 (1 fix)
 - [x] Podcast Generator recording button stuck in recording mode → commit: f4f6cc8

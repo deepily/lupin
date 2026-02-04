@@ -1,5 +1,12 @@
 # Lupin Project History
 
+#### Checkpoint | 2026.02.04 10:20 | Install PR workflow command
+
+**Files**: `.claude/commands/plan-branch-pr-and-merge.md` (NEW)
+**Commit**: 4fc6910
+
+---
+
 ### 2026.02.04 - Session 129 (cont.) | Bug Fix Mode - MathAgent Protocol Verification
 
 **Bug Investigated**: MathAgent fails QueueableJob protocol check on /api/push
@@ -21,6 +28,15 @@
   - Methods: `do_all()`, `code_ran_to_completion()`, `formatter_ran_to_completion()`
 
 **Bug Fix Queue Status**: Empty (all bugs resolved or verified)
+
+### Session 129 Summary
+- **Total Items Verified/Fixed**: 3
+  1. Notifications UI cleanup → commit: 425568a
+  2. CJ flow compliance → Verified working (no changes)
+  3. MathAgent protocol → commit: 34f4874 (docs-only)
+- **Files Changed**: 2 (notifications.html, notifications.js)
+- **Commits**: 425568a, 34f4874
+- **Status**: Session closed 2026.02.04
 
 ---
 
