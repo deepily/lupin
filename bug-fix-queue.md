@@ -21,19 +21,6 @@
 
 (Available for any session to claim)
 
-- [ ] **MathAgent fails QueueableJob protocol check on /api/push**
-  - **Symptom**: Push endpoint returns 500 error with "Job must implement QueueableJob protocol, got MathAgent"
-  - **Stack Trace**:
-    - `queues.py:197` → `todo_queue.push_job( question, websocket_id, user_id, user_email )`
-    - `todo_fifo_queue.py:660` → `self.push( agent )`
-    - `todo_fifo_queue.py:861` → `super().push( item )`
-    - `fifo_queue.py:151` → raises `TypeError`
-  - **Root Cause (suspected)**: `push_job()` creates a `MathAgent` instance and passes it to `push()`, but base `FifoQueue.push()` now enforces `QueueableJob` protocol compliance
-  - **Impact**: All math questions fail to queue
-  - **Files to investigate**:
-    - `src/cosa/rest/todo_fifo_queue.py:660` (push_job creates agent)
-    - `src/cosa/rest/fifo_queue.py:151` (protocol enforcement)
-    - `src/cosa/agents/math_agent.py` (may need protocol compliance)
 
 ---
 
@@ -47,7 +34,12 @@
 
 ### Completed
 
-- [x] **Notifications UI: Claude Code submission layout cleanup** → commit: pending | By: bcd6e830
+- [x] **MathAgent QueueableJob protocol check** → Verified working | By: bcd6e830
+  - Protocol compliance test: PASS (MathAgent implements all 18 required attributes + 3 methods)
+  - API test: `/api/push` with math question returns 200 OK
+  - No code changes required - was already fixed in prior sessions (Session 110-112)
+
+- [x] **Notifications UI: Claude Code submission layout cleanup** → commit: 425568a | By: bcd6e830
   - **Changes**:
     - Replaced radio buttons with two compact dropdowns (Task Type + Flow Type)
     - Task dropdown: "Bounded" / "Unbounded (Interactive)"
