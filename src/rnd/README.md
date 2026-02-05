@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.04 - Runtime Argument Expeditor Design
+- **Design Document**: [2026.02.04-runtime-argument-expeditor-design.md](2026.02.04-runtime-argument-expeditor-design.md) - **✅ IMPLEMENTED** - Runtime argument disambiguation layer between LORA intent classification and agentic job creation. Detects missing CLI arguments via LLM gap analysis against `--help` output, asks user for missing info via synchronous voice notifications, then creates the job with complete args. Covers 3 agents: Deep Research, Podcast Generator, Research-to-Podcast. 8 implementation phases complete: agent registry, XML response model, core expeditor, prompt template, config, router template extension, TodoFifoQueue integration, testing integration (shared agentic_job_factory, REST endpoint refactor, mock job expeditor test mode). All smoke tests passing.
+
 ### 2026.01.30 - Defensive Attribute Access Anti-Pattern Research
 - **Research Document**: [2026.01.30-defensive-attribute-access-anti-pattern.md](2026.01.30-defensive-attribute-access-anti-pattern.md) - **✅ IMPLEMENTED** - Comprehensive analysis and refactoring of the `hasattr()`/`getattr()` anti-pattern in the queue system. **Phases 1-4 complete**: Protocol validation at boundaries (FifoQueue, TodoFifoQueue, RunningFifoQueue), replaced ~89 `getattr` chains with direct attribute access, replaced ~15 `hasattr` type checks with `isinstance()`. Updated QueueableJob Protocol with user_email, started_at, completed_at, is_cache_hit, status, error attributes. All smoke tests passing. Phase 5 (static analysis) deferred to v0.2.0 CI.
 

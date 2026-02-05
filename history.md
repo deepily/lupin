@@ -1,5 +1,13 @@
 # Lupin Project History
 
+#### Checkpoint | 2026.02.04 20:15 | Runtime Argument Expeditor implementation (Phases 1-8)
+
+**Summary**: Implemented RuntimeArgumentExpeditor — runtime argument disambiguation layer between LORA intent classification and agentic job creation. All 8 phases complete: agent registry (3 agents), ExpeditorResponse XML model + MODEL_MAPPING, prompt template, config keys (ini + splainer), router template commands, core expeditor class with LLM gap analysis + voice prompting, TodoFifoQueue elif integration, shared agentic_job_factory.py (DRY refactor for voice + REST paths), mock job expeditor test mode. 16 files total (6 new, 10 modified). All smoke tests passing (expeditor 5/5, registry 3/3, xml_models, prompt_template_processor 15/15).
+**Files**: lupin-app.ini, lupin-app-splainer.ini, agent-router-template.txt, agent-router-template-completion.txt, runtime-argument-expeditor.txt (NEW), rnd/README.md (+11 CoSA files pending separate commit)
+**Commit**: d0bdfa4
+
+---
+
 #### Checkpoint | 2026.02.04 19:45 | NotImplementedError fix + training distribution analysis
 
 **Summary**: Applied factory fix for `NotImplementedError` in `llm_client_factory.py:447-449` — replaced guard with dynamic `CompletionClient` creation for local vLLM (localhost:3000). Created smoke test (3/3 passing). Created `analyze-training-distribution.py` script revealing 19x imbalance across 32 commands (28,686 training rows): top tier at 1,600 samples vs clipboard variants at 83-160, agentic jobs at 200.

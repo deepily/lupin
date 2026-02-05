@@ -35,11 +35,11 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - `topic="AI safety" target_audience=beginner`
   - `document_path="/io/deep-research/report.md" languages=en,es max_segments=20`
   - Requires: New placeholder files for budgets, audience levels; update generation logic
-- [ ] **[LUPIN] Disambiguation Agent for Missing Arguments** - Create agent to clarify unusual or missing arguments interactively:
-  - Trigger when LORA model returns intent but args are incomplete/ambiguous
-  - Use `ask_multiple_choice()` or `converse()` for clarification
-  - Example prompts: "What budget would you like for this research?" "Which language(s) for the podcast?"
-  - Affects: Voice routing pipeline, potentially new agent class
+- [x] **[LUPIN] Disambiguation Agent for Missing Arguments** - Session 130 (checkpoint): Implemented as RuntimeArgumentExpeditor
+  - `src/cosa/agents/runtime_argument_expeditor/` (agent_registry.py, xml_models.py, expeditor.py)
+  - LLM gap analysis against `--help` output, asks user via `notify_user_sync()` for missing args
+  - Integrated into TodoFifoQueue elif chain + mock_job.py expeditor test mode
+  - Shared `agentic_job_factory.py` DRY factory for both voice and REST paths
 - [x] **Run Deep Research dry-run smoke test** - Session 115: All 5 tests passed (login, submit, structure, polling, verification). Job dr-6aa5d16d completed in ~10s with $0.00 cost.
 - [x] **Run Podcast Generator dry-run API smoke test** - Session 115: All tests passed. Job pg-dd026977 completed in ~10s with $0.00 cost.
 - [x] **Run Research→Podcast dry-run API smoke test** - Session 115: All tests passed. Job rp-221fe28e completed in ~14s with $0.00 cost.
