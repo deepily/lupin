@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.05 - Runtime Argument Expeditor Testing Plan
+- **Testing Plan**: [2026.02.05-runtime-argument-expeditor-testing-plan.md](2026.02.05-runtime-argument-expeditor-testing-plan.md) - **✅ UNIT + AUTOMATED SMOKE COMPLETE, INTERACTIVE PENDING** - Comprehensive testing plan for the Runtime Argument Expeditor. 49 unit tests (5 classes: ExpeditorResponse model, _parse_lora_args, _inject_system_args, agent registry, agentic_job_factory) all passing in 0.54s. 3/5 smoke tests automated and passing (login, health, mock job). 2 interactive smoke tests pending (`LUPIN_INTERACTIVE_TESTS=true` required — expeditor voice routing + dry-run verification need LLM and user present for voice prompts).
+
 ### 2026.02.04 - Rebalancing XML Training Datasets
 - **Planning Document**: [2026.02.04-rebalancing-xml-training-datasets.md](2026.02.04-rebalancing-xml-training-datasets.md) - **📋 READY TO IMPLEMENT (after first full training run review)** - Plan to rebalance all 32 routing commands to 400 samples/command in the pre-split dataset. Current state: 19x imbalance (1,600 max vs 83 min). Root cause: compound commands cross-multiply while simple commands have ~200 raw lines with no augmentation. Changes: unified `sample_size_per_command` parameter, add interjections/salutations to `build_simple_vox_cmd_training_prompts()`, fix 2 copy-paste `len()` bugs, add distribution verification. Target: 12,800 pre-split → ~10,240 train / ~1,280 test / ~1,280 validate. Analysis script: `src/scripts/analyze-training-distribution.py`.
 

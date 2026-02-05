@@ -12,6 +12,12 @@
 
 **Summary**: Created comprehensive test suite for Runtime Argument Expeditor. Unit tests (49) cover ExpeditorResponse model, _parse_lora_args, _inject_system_args, agent registry + get_cli_help, and create_agentic_job factory — all mocked, no server needed, 0.54s runtime. Smoke tests (5) cover login, health check, standard mock job baseline (3 automated, passing), plus 2 interactive tests (expeditor voice routing + dry-run verification) gated behind `LUPIN_INTERACTIVE_TESTS=true`.
 **Files**: test_runtime_argument_expeditor.py (NEW), test_expeditor_mock_job_smoke.py (NEW), TODO.md
+**Commit**: 8135a5d
+
+#### Checkpoint | 2026.02.05 11:20 | Testing plan R&D document
+
+**Summary**: Copied testing plan to `src/rnd/2026.02.05-runtime-argument-expeditor-testing-plan.md` with execution status header. Added entry to `src/rnd/README.md`.
+**Files**: 2026.02.05-runtime-argument-expeditor-testing-plan.md (NEW), rnd/README.md
 **Commit**: TBD
 
 ---
