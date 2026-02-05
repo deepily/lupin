@@ -75,9 +75,7 @@ coordinator = XmlCoordinator( debug=False, verbose=False, silent=False )
 print( 'Building ALL training prompts (vox commands + agent router + agentic jobs)...' )
 # Note: agentic commands have ~200-500 unique examples per command (research-to-podcast has fewer templates)
 df = coordinator.build_all_training_prompts(
-    sample_size_per_compound_command=2000,
-    sample_size_per_simple_command=400,
-    sample_size_per_agentic_command=200,
+    sample_size_per_command=400,
     include_agentic_jobs=True
 )
 print( f'Generated {df.shape[0]} total training examples' )

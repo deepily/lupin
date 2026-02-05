@@ -1,0 +1,5 @@
+{
+    "agent router go to todo list" : "/src/ephemera/prompts/data/synthetic-data-agent-routing-todo-lists.txt",
+    "agent router go to math"      : "/src/ephemera/prompts/data/synthetic-data-agent-routing-math.txt",
+    "none"                         : "/src/ephemera/prompts/data/synthetic-data-none-of-the-above.txt"
+}
