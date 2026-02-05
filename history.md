@@ -9,7 +9,7 @@
 - Created shared `agentic_job_factory.py` DRY factory for voice + REST job creation paths
 - All smoke tests passing (expeditor 5/5, registry 3/3, xml_models, prompt_template_processor 15/15)
 
-**Checkpoints**: 13ff105 (expeditor), 3883765 (NotImplementedError fix), e3e3392 (get_model fix), 3d9958f (GPU memory gate)
+**Checkpoints**: fe770a0 (rebalancing plan docs), 13ff105 (expeditor), 3883765 (NotImplementedError fix), e3e3392 (get_model fix), 3d9958f (GPU memory gate)
 
 #### Checkpoint | 2026.02.04 20:15 | Runtime Argument Expeditor implementation (Phases 1-8)
 
@@ -23,7 +23,7 @@
 
 **Summary**: Added rebalancing plan reference to TODO.md (deferred until after first full training run review). Added R&D README entry for `2026.02.04-rebalancing-xml-training-datasets.md`. Plan addresses 19x imbalance across 32 routing commands — unified sample_size param, interjections for simple vox, len() bug fixes, distribution verification. Target: 400 samples/command.
 **Files**: TODO.md, src/rnd/README.md, history.md
-**Commit**: TBD
+**Commit**: fe770a0
 
 ---
 
