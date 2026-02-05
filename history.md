@@ -19,6 +19,14 @@
 
 ---
 
+#### Checkpoint | 2026.02.04 20:45 | Rebalancing plan docs + TODO reference
+
+**Summary**: Added rebalancing plan reference to TODO.md (deferred until after first full training run review). Added R&D README entry for `2026.02.04-rebalancing-xml-training-datasets.md`. Plan addresses 19x imbalance across 32 routing commands — unified sample_size param, interjections for simple vox, len() bug fixes, distribution verification. Target: 400 samples/command.
+**Files**: TODO.md, src/rnd/README.md, history.md
+**Commit**: TBD
+
+---
+
 #### Checkpoint | 2026.02.04 19:45 | NotImplementedError fix + training distribution analysis
 
 **Summary**: Applied factory fix for `NotImplementedError` in `llm_client_factory.py:447-449` — replaced guard with dynamic `CompletionClient` creation for local vLLM (localhost:3000). Created smoke test (3/3 passing). Created `analyze-training-distribution.py` script revealing 19x imbalance across 32 commands (28,686 training rows): top tier at 1,600 samples vs clipboard variants at 83-160, agentic jobs at 200.

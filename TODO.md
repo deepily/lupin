@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-04 (Session 130)
+Last updated: 2026-02-04 (Session 130+)
 
 ## Pending
 
@@ -24,6 +24,10 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - 4 debug scripts moved to `src/scripts/debug/`
   - See: `src/rnd/2026.02.02-test-suite-remediation-plan.md`
 - [ ] **[LUPIN] Run agentic job intent LORA 1% sample training** - Requires GPUs to be freed. Run: `./src/scripts/run-agentic-intent-training.sh test`. **Session 124**: Unified training pipeline now includes agentic jobs (40,258 total examples, 600 agentic). **Scheduled: Evening session 2026-02-02** when GPU resources available.
+- [ ] **[LUPIN] Rebalance XML training data to 400 samples/command** - After reviewing first full training run, implement rebalancing plan to eliminate 19x imbalance (1,600 max vs 83 min). Changes: unified sample_size param, interjections for simple vox, len() bug fixes, distribution verification.
+  - **Plan**: `src/rnd/2026.02.04-rebalancing-xml-training-datasets.md`
+  - **Analysis script**: `src/scripts/analyze-training-distribution.py`
+  - **Prerequisite**: Review first full long-run training session results before implementing
 - [ ] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - Two cases to handle:
   1. User makes vague reference to research document contents (e.g., "make a podcast about that AI research")
   2. User references research document by approximate name/path

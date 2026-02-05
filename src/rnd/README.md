@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.04 - Rebalancing XML Training Datasets
+- **Planning Document**: [2026.02.04-rebalancing-xml-training-datasets.md](2026.02.04-rebalancing-xml-training-datasets.md) - **📋 READY TO IMPLEMENT (after first full training run review)** - Plan to rebalance all 32 routing commands to 400 samples/command in the pre-split dataset. Current state: 19x imbalance (1,600 max vs 83 min). Root cause: compound commands cross-multiply while simple commands have ~200 raw lines with no augmentation. Changes: unified `sample_size_per_command` parameter, add interjections/salutations to `build_simple_vox_cmd_training_prompts()`, fix 2 copy-paste `len()` bugs, add distribution verification. Target: 12,800 pre-split → ~10,240 train / ~1,280 test / ~1,280 validate. Analysis script: `src/scripts/analyze-training-distribution.py`.
+
 ### 2026.02.04 - Runtime Argument Expeditor Design
 - **Design Document**: [2026.02.04-runtime-argument-expeditor-design.md](2026.02.04-runtime-argument-expeditor-design.md) - **✅ IMPLEMENTED** - Runtime argument disambiguation layer between LORA intent classification and agentic job creation. Detects missing CLI arguments via LLM gap analysis against `--help` output, asks user for missing info via synchronous voice notifications, then creates the job with complete args. Covers 3 agents: Deep Research, Podcast Generator, Research-to-Podcast. 8 implementation phases complete: agent registry, XML response model, core expeditor, prompt template, config, router template extension, TodoFifoQueue integration, testing integration (shared agentic_job_factory, REST endpoint refactor, mock job expeditor test mode). All smoke tests passing.
 
