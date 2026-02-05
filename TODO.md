@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-04 (Session 129)
+Last updated: 2026-02-04 (Session 130)
 
 ## Pending
 
@@ -129,6 +129,15 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
 ### Pre-Development Setup
 
 - [ ] **[LUPIN] Create baseline test report for wip-v0.1.4 branch** - Run `/smoke-test-baseline` to establish pass/fail baseline before starting development work. This ensures we can detect regressions introduced during v0.1.4 development.
+
+### Runtime Argument Expeditor Testing (HIGH) - Session 130
+
+- [ ] **[LUPIN] Test Runtime Argument Expeditor end-to-end** - Verify all changes from `src/rnd/2026.02.04-runtime-argument-expeditor-design.md`. Three testing surfaces:
+  1. **Notification UI text input** (`/api/push`): "do deep research on quantum computing", "make me a podcast", "research AI safety and make a podcast"
+  2. **Dedicated REST endpoints**: `/api/deep-research/submit`, `/api/podcast-generator/submit`, `/api/deep-research-to-podcast/submit` (shared `agentic_job_factory`)
+  3. **Mock endpoint expeditor test mode**: `POST /api/mock-job/submit {"voice_command": "make me a podcast"}` (dry-run, zero inference cost)
+  - Requires running Lupin server on port 7999
+- [ ] **[LUPIN] Create and execute testing plan for Runtime Argument Expeditor** - TBD: Define formal test plan covering expeditor gap analysis, voice prompting for missing args, fuzzy file matching, shared factory parity between voice and REST paths
 
 ### Cache Freshness Policy (HIGH) - Session 121/122
 
