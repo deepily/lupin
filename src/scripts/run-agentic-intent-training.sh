@@ -13,6 +13,7 @@
 #   full      - Full training (100% sample, ~3-4 hours)
 #   generate  - Regenerate training data only
 #   validate  - Validate existing training data
+#   dry-run   - Show training data stats without training
 #
 # Requirements:
 #   - LUPIN_ROOT environment variable set
@@ -199,9 +200,6 @@ else:
     test)
         echo -e "${GREEN}Running fast iteration training (1% sample)...${NC}"
         echo ""
-        echo "Note: This uses the sample_size=0.01 from the model config file."
-        echo "Training data: agentic-job-xml-train.jsonl"
-        echo ""
 
         # Check if training data exists
         if [ ! -f "$TEST_TRAIN_PATH/agentic-job-xml-train.jsonl" ]; then
@@ -214,6 +212,7 @@ else:
             --model-name "$MODEL_NAME" \
             --test-train-path "$TEST_TRAIN_PATH" \
             --lora-dir "$LORA_DIR" \
+            --sample-size 0.01 \
             --validation-sample-size 10 \
             --pre-training-stats \
             --post-training-stats
@@ -231,17 +230,27 @@ else:
             $0 generate
         fi
 
-        # Note: Full training would require modifying the config file's sample_size
-        # or adding a command-line override. For now, we use validation sample size.
         python -m cosa.training.peft_trainer \
             --model "$MODEL" \
             --model-name "$MODEL_NAME" \
             --test-train-path "$TEST_TRAIN_PATH" \
             --lora-dir "$LORA_DIR" \
-            --validation-sample-size 100 \
+            --sample-size 1.0 \
+            --validation-sample-size 500 \
             --pre-training-stats \
             --post-training-stats \
             --post-quantization-stats
+        ;;
+
+    dry-run)
+        echo -e "${GREEN}Dry run: showing training data stats...${NC}"
+        python -m cosa.training.peft_trainer \
+            --model "$MODEL" \
+            --model-name "$MODEL_NAME" \
+            --test-train-path "$TEST_TRAIN_PATH" \
+            --lora-dir "$LORA_DIR" \
+            --sample-size 1.0 \
+            --dry-run
         ;;
 
     *)
@@ -254,6 +263,7 @@ else:
         echo "  full      - Full training (100% sample)"
         echo "  generate  - Regenerate training data only"
         echo "  validate  - Validate existing training data"
+        echo "  dry-run   - Show training data stats without training"
         exit 1
         ;;
 esac
