@@ -1,5 +1,13 @@
 # Lupin Project History
 
+#### Checkpoint | 2026.02.04 19:45 | NotImplementedError fix + training distribution analysis
+
+**Summary**: Applied factory fix for `NotImplementedError` in `llm_client_factory.py:447-449` — replaced guard with dynamic `CompletionClient` creation for local vLLM (localhost:3000). Created smoke test (3/3 passing). Created `analyze-training-distribution.py` script revealing 19x imbalance across 32 commands (28,686 training rows): top tier at 1,600 samples vs clipboard variants at 83-160, agentic jobs at 200.
+**Files**: llm_client_factory.py (CoSA submodule), test_vllm_dynamic_client_smoke.py (NEW), analyze-training-distribution.py (NEW)
+**Commit**: 3883765
+
+---
+
 #### Checkpoint | 2026.02.04 18:00 | Fix get_model AttributeError + plan NotImplementedError fix
 
 **Summary**: Fixed `AttributeError: module 'cosa.agents.llm_client' has no attribute 'get_model'` by renaming import alias `llm_v010` → `llmc` and adding class qualifier `LlmClient.get_model()` (6 changes in peft_trainer.py). Diagnosed deeper `NotImplementedError` in `llm_client_factory.py:449` — dynamic vLLM model keys bypass config lookup and hit unimplemented guard. Plan designed for factory fix.
