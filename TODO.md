@@ -141,7 +141,10 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
   2. **Dedicated REST endpoints**: `/api/deep-research/submit`, `/api/podcast-generator/submit`, `/api/deep-research-to-podcast/submit` (shared `agentic_job_factory`)
   3. **Mock endpoint expeditor test mode**: `POST /api/mock-job/submit {"voice_command": "make me a podcast"}` (dry-run, zero inference cost)
   - Requires running Lupin server on port 7999
-- [ ] **[LUPIN] Create and execute testing plan for Runtime Argument Expeditor** - TBD: Define formal test plan covering expeditor gap analysis, voice prompting for missing args, fuzzy file matching, shared factory parity between voice and REST paths
+- [x] **[LUPIN] Create testing plan for Runtime Argument Expeditor** - Session 131: Unit tests (49) created and passing. Smoke tests (5) created, 3/3 automated passing.
+  - **Unit tests**: `src/tests/unit/test_runtime_argument_expeditor.py` (49 tests, 5 classes: ExpeditorResponse, ParseLoraArgs, InjectSystemArgs, AgentRegistry, CreateAgenticJob)
+  - **Smoke tests**: `src/tests/smoke/test_expeditor_mock_job_smoke.py` (3 automated + 2 interactive)
+- [ ] **[LUPIN] Run interactive expeditor smoke tests 4-5** - Requires `LUPIN_INTERACTIVE_TESTS=true`, user present to answer voice prompts, and LLM available for gap analysis. Tests expeditor end-to-end via `/api/mock-job/submit` with `voice_command` field.
 
 ### Cache Freshness Policy (HIGH) - Session 121/122
 

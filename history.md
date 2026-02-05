@@ -1,5 +1,21 @@
 # Lupin Project History
 
+### 2026.02.05 - Session 131 | Bug Fix Mode
+
+### Fixes
+(Individual fixes will be added here)
+
+### Session Summary
+(Will be completed at session close)
+
+#### Checkpoint | 2026.02.05 11:00 | Runtime Argument Expeditor test suite
+
+**Summary**: Created comprehensive test suite for Runtime Argument Expeditor. Unit tests (49) cover ExpeditorResponse model, _parse_lora_args, _inject_system_args, agent registry + get_cli_help, and create_agentic_job factory — all mocked, no server needed, 0.54s runtime. Smoke tests (5) cover login, health check, standard mock job baseline (3 automated, passing), plus 2 interactive tests (expeditor voice routing + dry-run verification) gated behind `LUPIN_INTERACTIVE_TESTS=true`.
+**Files**: test_runtime_argument_expeditor.py (NEW), test_expeditor_mock_job_smoke.py (NEW), TODO.md
+**Commit**: TBD
+
+---
+
 ### 2026.02.04 - Session 130 | Runtime Argument Expeditor + LORA Training Fixes
 
 **Accomplishments**:
