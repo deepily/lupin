@@ -1,5 +1,32 @@
 # Lupin Project History
 
+### 2026.02.06 - Session 136 | Bug Fix Mode
+
+**Checkpoint 1**: PEFT Phase 1 results + pending docs
+- PEFT optimization plan updated with Phase 1 actual results: 92.2% exact match (target: 89%)
+- Agentic job training data regenerated (train/test/validate JSONL)
+- DataFrame CRUD design doc added (`src/rnd/2026.02.05-headless-cc-for-dataframe-crud.md`)
+
+### Fixes
+(Individual fixes will be added here)
+
+### Session Summary
+(Will be completed at session close)
+
+---
+
+### 2026.02.05 - Session 135 [COSA] | Branch Transition v0.1.3 → v0.1.4
+
+**Accomplishments**:
+- Completed COSA branch transition via PR merge workflow
+- Stashed 11 modified + 3 untracked WIP files, created PR #15 (8 commits, 55 files, +4,316/-1,380)
+- PR merged, main fast-forwarded, created `wip-v0.1.4-2026.02.05-tracking-lupin-work`
+- Restored WIP changes cleanly (RuntimeArgumentExpeditor, agentic_job_factory, training pipeline)
+
+**PR**: https://github.com/deepily/cosa/pull/15
+
+---
+
 ### 2026.02.05 - Session 134 | PEFT Training Optimization - Phase 1 Data Preparation
 
 **Accomplishments**:
