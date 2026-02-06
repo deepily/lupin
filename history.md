@@ -15,6 +15,23 @@
 
 ---
 
+### 2026.02.06 - Session 138 | Yes/No Comment Feature for Voice Notifications
+
+#### Checkpoint 1 (8834751) | Optional comment field for ask_yes_no()
+
+**Accomplishments**:
+- Added expandable comment field to yes/no blocking notifications (compact hint: "Press C to add comment")
+- Voice-first comment input using existing RecordingManager pattern (mic button + text input)
+- Keyboard shortcut C toggles comment field; input guard prevents Y/N/P keys from firing while typing
+- MCP `ask_yes_no()` return type changed from `bool` to annotated `str`: `"yes [comment: ...]"` or plain `"yes"`
+- ~90 lines CSS (collapsible container with max-height transition, mic recording/processing states)
+- **No regressions**: 335/335 unit tests, 50/50 websocket smoke tests passing
+
+**Files**: notifications.js, notifications.css, cosa_voice_mcp.py
+**Commit**: 8834751
+
+---
+
 ### 2026.02.06 - Session 137 | DataFrame CRUD Phase 1 Implementation
 
 #### Checkpoint | 2026.02.06 15:00 | Phase 1 DataFrame CRUD Storage Layer complete
