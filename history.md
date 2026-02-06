@@ -7,8 +7,21 @@
 - Agentic job training data regenerated (train/test/validate JSONL)
 - DataFrame CRUD design doc added (`src/rnd/2026.02.05-headless-cc-for-dataframe-crud.md`)
 
+**Checkpoint 2**: PEFT Phase 2 — Disambiguation + Validation Improvements
+- **Product name disambiguation**: Deep Dive (deep research), PodMaker (podcast generator), Doc-to-Pod (research to podcast)
+- **Template expansion**: 50→65 templates per agentic command with product name variants + contrastive anchors
+- **Code: file-loaded templates** in `xml_coordinator.py` — replaced 10 hardcoded patterns with 65 file-loaded templates per command
+- **Code: stratified validation** in `peft_trainer.py` — equal samples per command instead of random sampling
+- **Code: disambiguation confirmation loop** in `todo_fifo_queue.py` — voice prompt before agentic routing
+- **Google Scholar anchor fixes**: 98 missing "Scholar" in new-tab, 97 missing "Google" in current-tab templates
+- **None examples**: 200→250 with 50 near-miss examples (vague commands that resemble valid commands)
+- **Document paths**: 24→50 placeholders, eliminating research_to_podcast sample gap
+- **Training data regenerated**: 18,510 total (14,808 train / 1,851 test / 1,851 validate), 640 train/command for agentic
+- **research_to_podcast**: 145→640 training samples (+341%)
+- 335/335 unit tests passing, zero regressions
+
 ### Fixes
-(Individual fixes will be added here)
+- **6b41a24** | `ask_yes_no()` missing `priority` parameter — was hardcoded to `MEDIUM`, preventing TTS read-aloud. Added `priority: str = "medium"` param matching `converse()` and `ask_multiple_choice()` signatures. File: `src/lupin_mcp/cosa_voice_mcp.py`
 
 ### Session Summary
 (Will be completed at session close)

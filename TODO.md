@@ -41,9 +41,11 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - **Data prepared**: 17,236 samples (receptionist + weather keywords added)
   - **Command**: `python peft_trainer.py --model mistralai/Ministral-8B-Instruct-2410 --pre-training-stats --post-training-stats --validation-sample-size 500`
   - **Target**: receptionist 61.9%→78%, weather 64.7%→78%, overall 85%→89%
-- [ ] **[LUPIN] PEFT Training Optimization - Phase 2 Disambiguation** - After Phase 1 validation, implement contrastive training pairs and structured negative examples
+- [x] **[LUPIN] PEFT Training Optimization - Phase 2 Disambiguation** - Session 136: Templates, code changes, training data complete. Pending: training run
   - **Plan**: `src/rnd/2026.02.05-peft-trainer-optimization-plan.md` (Phase 2 section)
-  - **Focus**: deep research vs research to podcast disambiguation, structured "none" categories
+  - **Changes**: Product names (Deep Dive/PodMaker/Doc-to-Pod), file-loaded templates, stratified validation, disambiguation confirmation loop, Google Scholar anchor fixes, 250 near-miss "none" examples
+  - **Data**: 18,510 total samples, 640 train/command for all 3 agentic commands (research_to_podcast: 145→640, +341%)
+  - **Pending**: Training run with `--pre-training-stats --post-training-stats --validation-sample-size 500`
 - [ ] **[LUPIN] Rebalance XML training data to 400 samples/command** - After reviewing first full training run, implement rebalancing plan to eliminate 19x imbalance (1,600 max vs 83 min). Changes: unified sample_size param, interjections for simple vox, len() bug fixes, distribution verification.
   - **Plan**: `src/rnd/2026.02.04-rebalancing-xml-training-datasets.md`
   - **Analysis script**: `src/scripts/analyze-training-distribution.py`
