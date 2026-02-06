@@ -1,5 +1,28 @@
 # Lupin Project History
 
+### 2026.02.05 - Session 134 | PEFT Training Optimization - Phase 1 Data Preparation
+
+**Accomplishments**:
+- Created 3-phase PEFT training optimization plan targeting 85% → 96%+ accuracy
+- Identified 5 struggling commands (50-67% accuracy) due to semantic ambiguity, alias fragmentation, implicit context
+- Implemented Phase 1 quick wins:
+  - Added 15 "receptionist" keyword variants to placeholders (The Receptionist, Front Desk Receptionist, etc.)
+  - Added 40 weather-keyword templates with explicit "weather" in queries
+  - Regenerated training data: 17,236 total samples → 13,788 train / 1,724 test / 1,724 validate
+  - receptionist and weather commands now at 640 training samples each (was underrepresented)
+
+**Files**: 3 new/modified
+- `src/rnd/2026.02.05-peft-trainer-optimization-plan.md` (NEW - full 3-phase plan)
+- `src/ephemera/prompts/data/placeholders-receptionist-titles.txt` (+15 variants)
+- `src/ephemera/prompts/data/synthetic-data-agent-routing-weather.txt` (+40 templates)
+- `voice-commands-xml-*.jsonl` (regenerated, gitignored)
+
+**Checkpoint**: 1ac1a4d
+
+**Next**: Run PEFT trainer to validate Phase 1 improvements
+
+---
+
 ### 2026.02.05 - Session 132 | DataFrame CRUD Implementation Plan
 
 **Accomplishments**:
