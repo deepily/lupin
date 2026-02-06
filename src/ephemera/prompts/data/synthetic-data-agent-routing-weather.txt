@@ -198,3 +198,43 @@ Is it a good day to go swimming in GEOGRAPHIC_LOCATION?
 Is it a good day to go boating in GEOGRAPHIC_LOCATION?
 Is it a good day to go golfing in GEOGRAPHIC_LOCATION?
 Is it a good day to go surfing in GEOGRAPHIC_LOCATION?
+What's the weather like in GEOGRAPHIC_LOCATION?
+Tell me about the weather in GEOGRAPHIC_LOCATION
+Check the weather for GEOGRAPHIC_LOCATION
+Weather in GEOGRAPHIC_LOCATION please
+How's the weather in GEOGRAPHIC_LOCATION today?
+What's the weather forecast for GEOGRAPHIC_LOCATION?
+Give me the weather report for GEOGRAPHIC_LOCATION
+I need weather information for GEOGRAPHIC_LOCATION
+Weather update for GEOGRAPHIC_LOCATION
+What's the current weather in GEOGRAPHIC_LOCATION?
+GEOGRAPHIC_LOCATION weather forecast
+Weather conditions in GEOGRAPHIC_LOCATION
+Get me the weather for GEOGRAPHIC_LOCATION
+Show me the weather in GEOGRAPHIC_LOCATION
+Weather check for GEOGRAPHIC_LOCATION
+What's the weather situation in GEOGRAPHIC_LOCATION?
+GEOGRAPHIC_LOCATION weather update
+Can you check the weather in GEOGRAPHIC_LOCATION?
+Look up the weather for GEOGRAPHIC_LOCATION
+Weather status in GEOGRAPHIC_LOCATION
+What's the weather doing in GEOGRAPHIC_LOCATION?
+Pull up weather for GEOGRAPHIC_LOCATION
+Get weather info for GEOGRAPHIC_LOCATION
+Weather report GEOGRAPHIC_LOCATION
+Check weather conditions in GEOGRAPHIC_LOCATION
+I want to know the weather in GEOGRAPHIC_LOCATION
+Tell me the weather for GEOGRAPHIC_LOCATION
+What weather is expected in GEOGRAPHIC_LOCATION?
+GEOGRAPHIC_LOCATION weather please
+Weather lookup for GEOGRAPHIC_LOCATION
+Give me weather details for GEOGRAPHIC_LOCATION
+What's the weather outlook for GEOGRAPHIC_LOCATION?
+Weather summary for GEOGRAPHIC_LOCATION
+Check on the weather in GEOGRAPHIC_LOCATION
+How is the weather in GEOGRAPHIC_LOCATION right now?
+GEOGRAPHIC_LOCATION current weather
+Weather prediction for GEOGRAPHIC_LOCATION
+What weather should I expect in GEOGRAPHIC_LOCATION?
+Look up weather in GEOGRAPHIC_LOCATION
+Get the weather forecast for GEOGRAPHIC_LOCATION

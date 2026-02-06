@@ -43,6 +43,21 @@ Reception Agent
 Reception
 Receptionist Agent
 Receptionist
+The Receptionist
+Front Desk Receptionist
+Front Desk Receptionist Agent
+Office Receptionist
+Office Receptionist Agent
+Main Receptionist
+Main Receptionist Agent
+Building Receptionist
+Building Receptionist Agent
+Company Receptionist
+Company Receptionist Agent
+Corporate Receptionist
+Corporate Receptionist Agent
+Lobby Receptionist
+Lobby Receptionist Agent
 Help Desk Agent
 Help Desk
 Help Desk Agent
