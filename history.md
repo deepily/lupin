@@ -1,12 +1,58 @@
 # Lupin Project History
 
+### 2026.02.05 - Session 132 | DataFrame CRUD Implementation Plan
+
+**Accomplishments**:
+- Created comprehensive 4-phase implementation plan for Voice-Driven DataFrame CRUD
+- Pattern 1 (Multi-Phase): Storage layer → Agent implementation → Queue integration → Voice I/O
+- Key design decisions: per-user parquet storage with `list_name` column, ConfigurationManager pattern, BaseXMLModel reuse, RuntimeArgumentExpeditor reuse
+- Added to TODO.md with Phase 1 marked "CONTINUES TOMORROW"
+
+**Files**: 2 new, 1 modified
+- `src/rnd/2026.02.05-crud-for-dataframes-implementation.md` (NEW) - Full implementation plan
+- `src/rnd/README.md` (entry added)
+- `TODO.md` (DataFrame CRUD section added)
+
+**Design Doc Reference**: `src/rnd/2026.02.05-headless-cc-for-dataframe-crud.md`
+
+---
+
+### 2026.02.05 - Session 133 | Agentic Voice Workflow Skill Expansion Plan
+
+**Accomplishments**:
+- Created comprehensive expansion plan for `lupin-new-claude-agent-sdk-voice-workflow` skill
+- Gap analysis: current workflow covers ~30% of real agent complexity (1,100 lines vs ~4,000 in reference agents)
+- Proposed structure: CONCEPT → BUILD → TEST lifecycle with 16 sequential phases
+- Key additions: LLM client integration, cost tracking, rate limiting, external service integration, advanced orchestration patterns, comprehensive test phases
+
+**Files**: 1 new (+250 lines)
+- `src/rnd/2026.02.05-agentic-voice-workflow-expansion-plan.md` (NEW)
+- `src/rnd/README.md` (added entry)
+
+---
+
 ### 2026.02.05 - Session 131 | Bug Fix Mode
 
 ### Fixes
-(Individual fixes will be added here)
+
+#### Fix 1: PEFT Trainer False Positive Error Detection
+- **Source**: ad-hoc (observed during LORA validation runs)
+- **Problem**: `print_server_output()` used overly broad `"Error:" in line` check, triggering false positives on model-generated output containing error-related text
+- **Files**: `src/cosa/training/peft_trainer.py` (lines 1365-1377)
+- **Solution**: Replaced broad string matching with precise patterns:
+  - `line.strip().startswith( "Error:" )` - only match line-start errors
+  - `line.strip().startswith( "ERROR" )` - Python logging ERROR level
+  - `line.strip().startswith( "Traceback" )` / `startswith( "RuntimeError" )` - Python exceptions
+  - `"AsyncEngineDeadError"` / `"EngineDeadError"` in line - vLLM-specific errors
+- **Test**: Existing smoke tests pass (no regressions)
+- **Commit**: 9b0e6a7 (docs-only, CoSA code change pending separate commit)
 
 ### Session Summary
-(Will be completed at session close)
+- **Total Fixes**: 1
+- **Files Changed**: 1 (src/cosa/training/peft_trainer.py - CoSA submodule, pending separate commit)
+- **Commits**: 9b0e6a7 (docs-only)
+
+**Status**: Session closed 2026.02.05
 
 #### Checkpoint | 2026.02.05 11:00 | Runtime Argument Expeditor test suite
 
@@ -18,7 +64,7 @@
 
 **Summary**: Copied testing plan to `src/rnd/2026.02.05-runtime-argument-expeditor-testing-plan.md` with execution status header. Added entry to `src/rnd/README.md`.
 **Files**: 2026.02.05-runtime-argument-expeditor-testing-plan.md (NEW), rnd/README.md
-**Commit**: TBD
+**Commit**: 3e2d66b
 
 ---
 

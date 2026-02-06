@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-04T09:10:00
+**Last Updated**: 2026-02-05T09:00:00
 
 ---
 
@@ -9,6 +9,7 @@
 
 | Session ID | Started | Last Activity | Status |
 |------------|---------|---------------|--------|
+| 662576da | 2026-02-05T09:00:00 | 2026-02-05T14:45:00 | closed |
 | bcd6e830 | 2026-02-04T08:30:00 | 2026-02-04T10:00:00 | closed |
 | bb3a5d21 | 2026-02-03T14:50:00 | 2026-02-03T19:45:00 | closed |
 | d7da6d0d | 2026-02-03T13:15:00 | 2026-02-03T13:35:00 | stale |
@@ -34,7 +35,7 @@
 
 ### Completed
 
-*Queue cleared - see Archive for completed items*
+- [x] **PEFT Trainer False Positive Error Detection** (ad-hoc) → commit: 9b0e6a7 (docs), CoSA pending | By: 662576da
 
 ---
 
