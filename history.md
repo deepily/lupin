@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.02.06 - Session 141 | PEFT Phase 2: Model Swap + Disambiguation Tests
+
+**Accomplishments**:
+- Swapped PEFT model config from Spring 2025 (Phase 1) to 2026-02-05 Phase 2 training run (product name disambiguation + stratified validation)
+- Verified 15/15 disambiguation unit tests pass (TestProductNameMapping: 3, TestConfirmAgenticRouting: 12)
+- Full unit regression: 350/350 passed, zero regressions
+- Last night's trained router confirmed working end-to-end
+
+**Files Modified**: src/conf/lupin-app.ini (model path swap)
+**Files Created**: src/tests/unit/test_agentic_disambiguation.py (15 tests)
+**Checkpoint**: 423b217
+
+---
+
 ### 2026.02.06 - Session 140 | Agentic Voice Workflow v2.0 Expansion
 
 **Checkpoint 1**: Expanded workflow document from v1.0 (1,114 lines) to v2.0 (3,461 lines)

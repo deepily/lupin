@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-06 (Session 136 checkpoint)
+Last updated: 2026-02-06 (Session 141)
 
 ## Pending
 
@@ -36,16 +36,8 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - 4 debug scripts moved to `src/scripts/debug/`
   - See: `src/rnd/2026.02.02-test-suite-remediation-plan.md`
 - [ ] **[LUPIN] Run agentic job intent LORA 1% sample training** - Requires GPUs to be freed. Run: `./src/scripts/run-agentic-intent-training.sh test`. **Session 124**: Unified training pipeline now includes agentic jobs (40,258 total examples, 600 agentic). **Scheduled: Evening session 2026-02-02** when GPU resources available.
-- [ ] **[LUPIN] PEFT Training Optimization - Phase 1 Training Run** - Run PEFT trainer with Phase 1 data improvements to validate accuracy gains
-  - **Plan**: `src/rnd/2026.02.05-peft-trainer-optimization-plan.md`
-  - **Data prepared**: 17,236 samples (receptionist + weather keywords added)
-  - **Command**: `python peft_trainer.py --model mistralai/Ministral-8B-Instruct-2410 --pre-training-stats --post-training-stats --validation-sample-size 500`
-  - **Target**: receptionist 61.9%→78%, weather 64.7%→78%, overall 85%→89%
-- [x] **[LUPIN] PEFT Training Optimization - Phase 2 Disambiguation** - Session 136: Templates, code changes, training data complete. Pending: training run
-  - **Plan**: `src/rnd/2026.02.05-peft-trainer-optimization-plan.md` (Phase 2 section)
-  - **Changes**: Product names (Deep Dive/PodMaker/Doc-to-Pod), file-loaded templates, stratified validation, disambiguation confirmation loop, Google Scholar anchor fixes, 250 near-miss "none" examples
-  - **Data**: 18,510 total samples, 640 train/command for all 3 agentic commands (research_to_podcast: 145→640, +341%)
-  - **Pending**: Training run with `--pre-training-stats --post-training-stats --validation-sample-size 500`
+- [x] **[LUPIN] PEFT Training Optimization - Phase 1 Training Run** - Session 136: Phase 1 actual results: 92.2% exact match (target: 89%)
+- [x] **[LUPIN] PEFT Training Optimization - Phase 2 Disambiguation** - Session 136: Code/data complete. Session 141: Model swap to 2026-02-05 training run, 15 disambiguation tests passing, router confirmed working
 - [ ] **[LUPIN] Rebalance XML training data to 400 samples/command** - After reviewing first full training run, implement rebalancing plan to eliminate 19x imbalance (1,600 max vs 83 min). Changes: unified sample_size param, interjections for simple vox, len() bug fixes, distribution verification.
   - **Plan**: `src/rnd/2026.02.04-rebalancing-xml-training-datasets.md`
   - **Analysis script**: `src/scripts/analyze-training-distribution.py`
