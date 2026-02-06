@@ -25,21 +25,7 @@ relevant fields, filters, or sorting parameters.
 ## Output Format
 
 Respond with XML in this exact format:
-
-<intent>
-    <operation>add</operation>
-    <target_list>groceries</target_list>
-    <schema_type>todo</schema_type>
-    <confidence>0.95</confidence>
-    <requires_confirmation>false</requires_confirmation>
-    <item_id></item_id>
-    <match_fields>{}</match_fields>
-    <fields>{"todo_item": "buy milk", "priority": "high"}</fields>
-    <filters>{}</filters>
-    <sort_by></sort_by>
-    <limit></limit>
-    <raw_query>add buy milk to my groceries list with high priority</raw_query>
-</intent>
+{intent_example}
 
 ## Important Rules
 
@@ -48,6 +34,10 @@ Respond with XML in this exact format:
 3. Use JSON format for match_fields, fields, and filters
 4. Leave unused fields empty (not null)
 5. Preserve the user's exact wording in raw_query
+
+## Your User's Current Lists
+
+{available_lists}
 
 ## User Query
 
