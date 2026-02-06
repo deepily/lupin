@@ -955,6 +955,92 @@
             margin-left: 5px;
         }
 
+        /* Yes/No comment hint and expandable comment field */
+        .yes-no-comment-hint {
+            text-align: center;
+            font-size: 11px;
+            color: #999;
+            cursor: pointer;
+            padding: 4px 0 0 0;
+            user-select: none;
+            transition: color 0.2s;
+        }
+
+        .yes-no-comment-hint:hover {
+            color: #666;
+        }
+
+        .yes-no-comment-container {
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+        }
+
+        .yes-no-comment-container.expanded {
+            max-height: 60px;
+            opacity: 1;
+            margin-top: 6px;
+        }
+
+        .yes-no-comment-input-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .yes-no-comment-input {
+            flex: 1;
+            font-size: 13px;
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .yes-no-comment-input::placeholder {
+            font-style: italic;
+            color: #aaa;
+        }
+
+        .yes-no-comment-input:focus {
+            border-color: #5b9bd5;
+            box-shadow: 0 0 0 2px rgba( 91, 155, 213, 0.2 );
+        }
+
+        .yes-no-comment-mic {
+            width: 34px;
+            height: 34px;
+            border: 1px solid #ddd;
+            border-radius: 50%;
+            background: white;
+            font-size: 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .yes-no-comment-mic:hover {
+            border-color: #5b9bd5;
+            background-color: #f0f7ff;
+        }
+
+        .yes-no-comment-mic.recording {
+            border-color: #dc3545;
+            background-color: #fff5f5;
+            animation: pulse 1.5s infinite;
+        }
+
+        .yes-no-comment-mic.processing {
+            border-color: #ffc107;
+            background-color: #fffdf0;
+            animation: pulse 1.5s infinite;
+        }
+
         /* Cancel button in upper-left corner of notification card */
         .action-required-cancel-btn {
             position: absolute;

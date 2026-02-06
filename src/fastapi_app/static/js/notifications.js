@@ -9649,6 +9649,17 @@ class NotificationsUI {
                         ✗ No <span class="keyboard-hint">(N)</span>
                     </button>
                 </div>
+                <div class="yes-no-comment-hint" data-notification-id="${notification.id}">
+                    Press C to add comment
+                </div>
+                <div class="yes-no-comment-container" id="yn-comment-container-${notification.id}">
+                    <div class="yes-no-comment-input-row">
+                        <button class="yes-no-comment-mic" data-notification-id="${notification.id}" title="Record voice comment">
+                            🎤
+                        </button>
+                        <input type="text" class="yes-no-comment-input" id="yn-comment-input-${notification.id}" maxlength="300" placeholder="Qualify your answer...">
+                    </div>
+                </div>
             `;
         } else if ( notification.response_type === 'open_ended' ) {
             // DEBUG: Log notification object and response_default value
@@ -9728,9 +9739,32 @@ class NotificationsUI {
             card.querySelectorAll( '.response-button' ).forEach( button => {
                 button.addEventListener( 'click', ( e ) => {
                     const response = e.target.closest( '.response-button' ).dataset.response;
-                    this.submitResponse( notification.id, response );
+                    this.submitYesNoWithComment( notification.id, response );
                 } );
             } );
+
+            // Comment hint toggle
+            const commentHint = card.querySelector( '.yes-no-comment-hint' );
+            if ( commentHint ) {
+                commentHint.addEventListener( 'click', () => this.toggleYesNoComment( notification.id ) );
+            }
+
+            // Comment mic button
+            const commentMic = card.querySelector( '.yes-no-comment-mic' );
+            if ( commentMic ) {
+                commentMic.addEventListener( 'click', () => this.startYesNoCommentVoiceInput( notification.id ) );
+            }
+
+            // Comment input Enter key — blur back to card so Y/N keys work
+            const commentInput = card.querySelector( '.yes-no-comment-input' );
+            if ( commentInput ) {
+                commentInput.addEventListener( 'keydown', ( e ) => {
+                    if ( e.key === 'Enter' ) {
+                        e.preventDefault();
+                        commentInput.blur();
+                    }
+                } );
+            }
         } else if ( notification.response_type === 'open_ended' ) {
             const submitButton = card.querySelector( '.response-submit-button' );
             const input = card.querySelector( '.response-text-input' );
@@ -11578,10 +11612,14 @@ class NotificationsUI {
     attachKeyboardListener() {
         if ( this.keyboardListenerActive ) return;
 
-        // keypress for Y/N/P shortcuts
+        // keypress for Y/N/C/P shortcuts
         document.addEventListener( 'keypress', ( e ) => {
             // Only respond if there's an active action-required notification
             if ( this.actionRequiredNotifications.size === 0 ) return;
+
+            // Don't intercept keys when user is typing in an input field
+            const activeEl = document.activeElement;
+            if ( activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' ) return;
 
             // P key - toggle pause (works for all response types)
             if ( e.key.toLowerCase() === 'p' && this.activeActionRequiredId ) {
@@ -11598,11 +11636,18 @@ class NotificationsUI {
             // Only for yes/no type
             if ( state.notification.response_type !== 'yes_no' ) return;
 
+            // C key - toggle comment field
+            if ( e.key.toLowerCase() === 'c' ) {
+                e.preventDefault();
+                this.toggleYesNoComment( firstId );
+                return;
+            }
+
             // Check key
             if ( e.key.toLowerCase() === 'y' ) {
-                this.submitResponse( firstId, 'yes' );
+                this.submitYesNoWithComment( firstId, 'yes' );
             } else if ( e.key.toLowerCase() === 'n' ) {
-                this.submitResponse( firstId, 'no' );
+                this.submitYesNoWithComment( firstId, 'no' );
             }
         } );
 
@@ -11643,6 +11688,67 @@ class NotificationsUI {
             await this.recordingManager.stopRecording();
         } else if ( !this.recordingManager.isProcessing() ) {
             await this.recordingManager.startRecording( `response-${notificationId}`, micButton, textInput );
+        }
+    }
+
+    /**
+     * Toggles the expandable comment field for a yes/no notification.
+     * Focuses the text input after expand transition.
+     */
+    toggleYesNoComment( notificationId ) {
+        const container = document.getElementById( `yn-comment-container-${notificationId}` );
+        if ( !container ) return;
+
+        container.classList.toggle( 'expanded' );
+
+        // Focus input after expand transition
+        if ( container.classList.contains( 'expanded' ) ) {
+            setTimeout( () => {
+                const input = document.getElementById( `yn-comment-input-${notificationId}` );
+                if ( input ) input.focus();
+            }, 300 );
+        }
+    }
+
+    /**
+     * Submits a yes/no response with an optional comment annotation.
+     *
+     * If the comment input contains text, the response is annotated:
+     *   "yes [comment: user text here]"
+     * Otherwise the plain response is submitted: "yes" or "no"
+     */
+    submitYesNoWithComment( notificationId, response ) {
+        const input = document.getElementById( `yn-comment-input-${notificationId}` );
+        const comment = input ? input.value.trim() : '';
+
+        if ( comment.length > 0 ) {
+            response = `${response} [comment: ${comment}]`;
+        }
+
+        this.submitResponse( notificationId, response );
+    }
+
+    /**
+     * Starts voice input for the comment field in a yes/no notification.
+     * Follows the same RecordingManager pattern as open-ended and multiple-choice voice input.
+     */
+    async startYesNoCommentVoiceInput( notificationId ) {
+        this.log( `Starting voice input for yes/no comment field: ${notificationId}` );
+
+        const card = document.getElementById( `action-required-${notificationId}` );
+        const micButton = card?.querySelector( '.yes-no-comment-mic' );
+        const textInput = document.getElementById( `yn-comment-input-${notificationId}` );
+
+        if ( !micButton || !textInput ) {
+            this.error( `Voice input: Could not find yes/no comment UI elements for ${notificationId}` );
+            return;
+        }
+
+        // Toggle recording state using unified RecordingManager
+        if ( this.recordingManager.isRecording() ) {
+            await this.recordingManager.stopRecording();
+        } else if ( !this.recordingManager.isProcessing() ) {
+            await this.recordingManager.startRecording( `yn-comment-${notificationId}`, micButton, textInput );
         }
     }
 

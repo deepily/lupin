@@ -365,11 +365,21 @@ def ask_yes_no(
     timeout_seconds: int = 60,
     abstract: Optional[ str ] = None,
     job_id: Optional[ str ] = None
-) -> bool:
+) -> str:
     """
-    Ask a yes/no question and get a boolean result.
+    Ask a yes/no question and get the user's response as a string.
 
-    Convenience wrapper for quick binary decisions.
+    Convenience wrapper for quick binary decisions. The user may optionally
+    attach a qualifying comment to their answer via the UI.
+
+    Requires:
+        - question is a non-empty string
+        - default is "yes" or "no"
+        - timeout_seconds is a positive integer
+
+    Ensures:
+        - returns "yes", "no", "yes [comment: ...]", or "no [comment: ...]"
+        - returns the default value (as string) on timeout or error
 
     Args:
         question: The yes/no question to ask
@@ -379,13 +389,11 @@ def ask_yes_no(
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
 
     Returns:
-        True if user said yes, False otherwise
+        Annotated string: "yes", "no", "yes [comment: ...]", or "no [comment: ...]"
 
     Examples:
-        if ask_yes_no("Delete the old backups?"):
-            # User said yes
-        if ask_yes_no("Continue despite warnings?", default="no"):
-            # User said yes (or default was overridden)
+        response = ask_yes_no("Delete the old backups?")
+        # response == "yes" or "no" or "yes [comment: only the March ones]"
     """
     logger.debug( f"ask_yes_no() called: {question[:50]}..." )
 
@@ -402,14 +410,14 @@ def ask_yes_no(
             job_id=job_id
         )
     except ( ValidationError, ValueError ):
-        return default == "yes"
+        return default
 
     response: NotificationResponse = notify_user_sync( request=request, debug=False )
 
     if response.exit_code == 0 and response.response_value:
-        return response.response_value.lower().strip() == "yes"
+        return response.response_value.strip()
 
-    return default == "yes"
+    return default
 
 
 @mcp.tool
