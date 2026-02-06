@@ -1,5 +1,20 @@
 # Lupin Project History
 
+### 2026.02.06 - Session 139 | Yes/No Comment Mic Button Styling Fix
+
+**Accomplishments**:
+- Unified yes/no comment mic button with shared `.response-mic-button` styles
+- Removed ~25 lines of duplicate CSS (base, hover, recording, processing states)
+- Added `response-mic-button` class to mic button element in JS template
+- Kept minimal `.response-mic-button.yes-no-comment-mic` compound selector for `flex-shrink: 0`
+- CSS specificity issue fixed: compound selector overrides later-declared base styles
+- 335/335 unit tests passing, zero regressions
+
+**Files**: notifications.js, notifications.css
+**Checkpoint**: e2d92d2
+
+---
+
 ### 2026.02.06 - Session 136 | Bug Fix Mode
 
 **Checkpoint 1**: PEFT Phase 1 results + pending docs
