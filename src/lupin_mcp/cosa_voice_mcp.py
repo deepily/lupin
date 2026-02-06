@@ -363,6 +363,7 @@ def ask_yes_no(
     question: str,
     default: str = "no",
     timeout_seconds: int = 60,
+    priority: str = "medium",
     abstract: Optional[ str ] = None,
     job_id: Optional[ str ] = None
 ) -> str:
@@ -385,6 +386,7 @@ def ask_yes_no(
         question: The yes/no question to ask
         default: Default answer if timeout ("yes" or "no")
         timeout_seconds: How long to wait (default 60)
+        priority: "low", "medium", "high", or "urgent"
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
 
@@ -402,7 +404,7 @@ def ask_yes_no(
             message=question,
             response_type=ResponseType.YES_NO,
             notification_type=NotificationType.CUSTOM,
-            priority=NotificationPriority.MEDIUM,
+            priority=NotificationPriority( priority ),
             timeout_seconds=timeout_seconds,
             response_default=default,
             sender_id=SENDER_ID,
