@@ -9654,7 +9654,7 @@ class NotificationsUI {
                 </div>
                 <div class="yes-no-comment-container" id="yn-comment-container-${notification.id}">
                     <div class="yes-no-comment-input-row">
-                        <button class="yes-no-comment-mic" data-notification-id="${notification.id}" title="Record voice comment">
+                        <button class="response-mic-button yes-no-comment-mic" data-notification-id="${notification.id}" title="Record voice comment">
                             🎤
                         </button>
                         <input type="text" class="yes-no-comment-input" id="yn-comment-input-${notification.id}" maxlength="300" placeholder="Qualify your answer...">

@@ -1009,36 +1009,9 @@
             box-shadow: 0 0 0 2px rgba( 91, 155, 213, 0.2 );
         }
 
-        .yes-no-comment-mic {
-            width: 34px;
-            height: 34px;
-            border: 1px solid #ddd;
-            border-radius: 50%;
-            background: white;
-            font-size: 16px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
+        /* Size, shape, colors, hover, focus, recording/processing all from .response-mic-button */
+        .response-mic-button.yes-no-comment-mic {
             flex-shrink: 0;
-        }
-
-        .yes-no-comment-mic:hover {
-            border-color: #5b9bd5;
-            background-color: #f0f7ff;
-        }
-
-        .yes-no-comment-mic.recording {
-            border-color: #dc3545;
-            background-color: #fff5f5;
-            animation: pulse 1.5s infinite;
-        }
-
-        .yes-no-comment-mic.processing {
-            border-color: #ffc107;
-            background-color: #fffdf0;
-            animation: pulse 1.5s infinite;
         }
 
         /* Cancel button in upper-left corner of notification card */
