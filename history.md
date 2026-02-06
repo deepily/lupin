@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.02.06 - Session 140 | Agentic Voice Workflow v2.0 Expansion
+
+**Checkpoint 1**: Expanded workflow document from v1.0 (1,114 lines) to v2.0 (3,461 lines)
+
+**Accomplishments**:
+- Added Part I: CONCEPT — Why Agentic Jobs Exist, Architecture Overview (ASCII diagram), comparison table, decision checklist
+- Expanded Part II: BUILD — Phase 0 pre-flight checks (API key firewall, ConfigurationManager, dependency verification), Phase 1-2 mock clients template, renamed Phase 5+ → Phase 5
+- Added Phases 6-10: LLM Client Integration, Cost Tracking (thread-safe budget enforcement), Rate Limiting (sliding window), External Service Integration (WebSocket streaming, audio, caching), Advanced Orchestration (chained agents, progressive narrowing, parallel subagents)
+- Added Part III: VALIDATE — The Testing Ladder with 5 surfaces ordered cheapest→most expensive: Unit+Smoke (free), Mock Endpoint (free), UI Cards+LLM ($0.001), PEFT Training ($5-50), Voice Pipeline ($0.01)
+- Added complete new-agent checklist spanning CONCEPT → BUILD → VALIDATE → FINAL VERIFICATION
+- Expanded Reference Implementations with all 16 key reference files
+- All code templates follow Lupin code style (spaces inside parens, vertical alignment, Design by Contract)
+
+**Files**: src/workflow/agentic-voice-workflow.md
+
+---
+
 ### 2026.02.06 - Session 139 | Yes/No Comment Mic Button Styling Fix
 
 **Accomplishments**:

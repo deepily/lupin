@@ -3413,6 +3413,42 @@ src/cosa/agents/deep_research/state.py
 
 # Job wrapper pattern
 src/cosa/agents/deep_research/job.py
+
+# LLM client (Phase 6)
+src/cosa/agents/deep_research/api_client.py
+
+# Cost tracking (Phase 7)
+src/cosa/agents/deep_research/cost_tracker.py
+
+# Rate limiting (Phase 8)
+src/cosa/agents/deep_research/rate_limiter.py
+
+# Mock clients (Phase 1-2)
+src/cosa/agents/podcast_generator/mock_clients.py
+
+# TTS integration (Phase 9)
+src/cosa/agents/podcast_generator/tts_client.py
+
+# Chained agent (Phase 10)
+src/cosa/agents/deep_research_to_podcast/agent.py
+
+# Job factory
+src/cosa/rest/agentic_job_factory.py
+
+# Mock job endpoint (Surface 2)
+src/cosa/rest/routers/mock_job.py
+
+# Training coordinator (Surface 4)
+src/cosa/training/xml_coordinator.py
+
+# PEFT trainer (Surface 4)
+src/cosa/training/peft_trainer.py
+
+# Smoke test example (Surface 1)
+src/tests/smoke/test_deep_research_dry_run_smoke.py
+
+# Unit test example (Surface 1)
+src/tests/unit/test_runtime_argument_expeditor.py
 ```
 
 ---
@@ -3421,4 +3457,5 @@ src/cosa/agents/deep_research/job.py
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 1.0 | 2026-01-27 | Initial workflow documentation |
+| 2.0 | 2026-02-06 | Complete lifecycle guide: Part I CONCEPT, Part II BUILD expanded (Phases 6-10), Part III VALIDATE Testing Ladder (5 surfaces), Part IV Reference Implementations |
+| 1.0 | 2026-01-27 | Initial workflow documentation (BUILD phases 0-5 only) |
