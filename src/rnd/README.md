@@ -4,6 +4,13 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.06 - DataFrame CRUD Storage Layer (Phase 1)
+- **Implementation Directory**: [headless-cc-for-dataframe-crud/](headless-cc-for-dataframe-crud/) - **🔄 PHASE 1 IN PROGRESS** - Per-user parquet-backed DataFrame CRUD storage layer. Layer 1 of 3-layer architecture (Storage → Intent Extraction → Dispatcher). Contains layer docs, implementation tracker, and cross-phase progress. Code at `src/cosa/crud_for_dataframes/`.
+  - [layer-1.md](headless-cc-for-dataframe-crud/layer-1.md) - Storage + schemas + CRUD + XML models
+  - [layer-2.md](headless-cc-for-dataframe-crud/layer-2.md) - Phi-4 14B intent extraction (stub)
+  - [layer-3.md](headless-cc-for-dataframe-crud/layer-3.md) - Dispatcher + caching + voice I/O (stub)
+  - [implementation-tracker.md](headless-cc-for-dataframe-crud/implementation-tracker.md) - Cross-phase progress
+
 ### 2026.02.05 - Agentic Voice Workflow Skill Expansion Plan
 - **Planning Document**: [2026.02.05-agentic-voice-workflow-expansion-plan.md](2026.02.05-agentic-voice-workflow-expansion-plan.md) - **📋 READY TO IMPLEMENT** - Plan to expand the `lupin-new-claude-agent-sdk-voice-workflow` skill from ~1,100 lines (BUILD only) to ~2,500 lines covering CONCEPT → BUILD → TEST lifecycle. Gap analysis reveals current workflow covers only ~30% of real agent complexity. Key additions: Part I CONCEPT (architecture overview, decision criteria), Part II BUILD phases 5-10 (LLM client integration, cost tracking, rate limiting, external service integration, advanced orchestration, async/callback architecture), Part III TEST phases 11-16 (inline smoke tests, dry-run mode, API smoke tests, unit tests, integration tests, manual verification checklist). Full templates for all new phases. Reference agents: Deep Research (~4,000 lines), Podcast Generator (~2,500 lines).
 

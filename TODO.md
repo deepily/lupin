@@ -1,24 +1,18 @@
 # TODO
 
-Last updated: 2026-02-05 (Session 134)
+Last updated: 2026-02-06 (Session 136 checkpoint)
 
 ## Pending
 
-### DataFrame CRUD with Voice I/O (Session 132 - IN PROGRESS)
+### DataFrame CRUD with Voice I/O (Session 132-136)
 
-- [ ] **[LUPIN] Phase 1: Storage Layer + Pydantic Models** - 🔄 CONTINUES TOMORROW
-  - Implementation plan created: `src/rnd/2026.02.05-crud-for-dataframes-implementation.md`
-  - Pattern 1 (Multi-Phase): 4 phases, 2-4 weeks total
-  - Phase 1 files to create:
-    - [ ] `src/cosa/crud_for_dataframes/__init__.py`
-    - [ ] `src/cosa/crud_for_dataframes/storage.py` (per-user parquet I/O)
-    - [ ] `src/cosa/crud_for_dataframes/schemas.py` (todo, calendar, generic)
-    - [ ] `src/cosa/crud_for_dataframes/crud_operations.py`
-    - [ ] `src/cosa/crud_for_dataframes/xml_models.py` (CRUDIntent using BaseXMLModel)
-    - [ ] Config additions to `lupin-app.ini` and `lupin-app-splainer.ini`
-    - [ ] Unit tests: `src/tests/unit/test_crud_for_dataframes_storage.py`
-  - Design doc: `src/rnd/2026.02.05-headless-cc-for-dataframe-crud.md`
-- [ ] **[LUPIN] Phase 2: Agent Implementation** - PENDING (blocked by Phase 1)
+- [x] **[LUPIN] Phase 1: Storage Layer + Pydantic Models** - ✅ COMPLETE (Session 136)
+  - 5 source files in `src/cosa/crud_for_dataframes/` (schemas, xml_models, storage, crud_operations, __init__)
+  - 91 unit tests + 16 smoke tests, all passing
+  - 4 config keys + prompt template stub
+  - R&D docs: `src/rnd/headless-cc-for-dataframe-crud/`
+  - Issues fixed: Pydantic ClassVar, XML None coercion, timestamp truncation
+- [ ] **[LUPIN] Phase 2: Agent Implementation** - PENDING (blocked by Phase 1 ✅)
 - [ ] **[LUPIN] Phase 3: Queue Integration + Expeditor Reuse** - PENDING (blocked by Phase 2)
 - [ ] **[LUPIN] Phase 4: Voice I/O + Confirmation Flow** - PENDING (blocked by Phase 3)
 

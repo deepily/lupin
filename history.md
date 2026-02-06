@@ -15,6 +15,34 @@
 
 ---
 
+### 2026.02.06 - Session 137 | DataFrame CRUD Phase 1 Implementation
+
+#### Checkpoint | 2026.02.06 15:00 | Phase 1 DataFrame CRUD Storage Layer complete
+
+**Accomplishments**:
+- Implemented complete Phase 1 storage layer for voice-driven DataFrame CRUD operations
+- Created `src/cosa/crud_for_dataframes/` package (5 modules):
+  - `schemas.py` — 3 schemas (todo, calendar, generic) aligned with existing CSV conventions
+  - `xml_models.py` — CRUDIntent BaseXMLModel with 12 fields, 8 convenience methods
+  - `storage.py` — DataFrameStorage with per-user parquet I/O, datetime conversion at boundary
+  - `crud_operations.py` — 10 stateless CRUD functions (create/delete/list/add/delete/update/mark_done/query/get_schema_info)
+  - `__init__.py` — Public API exports, v0.1.0
+- Added 4 config keys to `lupin-app.ini` + matching `lupin-app-splainer.ini` entries
+- Created prompt template stub for Phase 2 intent extraction
+- Created R&D documentation: `src/rnd/headless-cc-for-dataframe-crud/` (4 docs)
+- **91 unit tests** + **16 smoke tests**, all passing
+- **No regressions**: 335/335 existing unit tests still passing
+
+**Issues found & fixed**:
+1. Pydantic ClassVar: `VALID_OPERATIONS`/`DESTRUCTIVE_OPERATIONS` needed `ClassVar[List[str]]`
+2. XML None coercion: xmltodict returns None for empty tags — added `field_validator`
+3. Timestamp truncation: Added `allow_truncated_timestamps=True` for ns→ms parquet write
+
+**Files**: schemas.py, xml_models.py, storage.py, crud_operations.py, __init__.py (+10 more)
+**Commit**: [pending]
+
+---
+
 ### 2026.02.05 - Session 135 [COSA] | Branch Transition v0.1.3 → v0.1.4
 
 **Accomplishments**:
