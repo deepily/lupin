@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-06 (Session 144)
+Last updated: 2026-02-06 (Session 145)
 
 ## Pending
 
@@ -19,7 +19,7 @@ Last updated: 2026-02-06 (Session 144)
   - Feature-flag routing swap in todo_fifo_queue.py, cache skip + serialization exclusion
   - Voice confirmation for destructive ops (delete, delete_list, update)
   - 26 unit tests, 449 total passing, 50 WebSocket smoke tests passing
-- [ ] **[LUPIN] Interactive E2E Testing of CRUD Agents** - Run live todo/calendar voice queries through the queue with server running. Test via CRUD submission card in notifications UI or mock objects. Validate routing swap, cache skip, voice confirmation, and cancelled-op handling.
+- [ ] **[LUPIN] Interactive E2E Testing of CRUD Agents** (HIGH PRIORITY — tomorrow) - Execute the 24-scenario testing protocol at `src/rnd/headless-cc-for-dataframe-crud/testing-protocol.md`. Three parts: Part 1 mock pipeline tests (12 scenarios, no server), Part 2 notifications UI tests (8 scenarios, live server), Part 3 curl smoke tests (4 scenarios). Validates routing swap, cache skip, voice confirmation, and full CRUD cycle across all 3 layers.
 - [ ] **[LUPIN] Phase 4: End-to-End Voice Workflows + Polish** - PENDING (blocked by Phase 3 ✅)
 
 ### Skills Management (Session 118 Discovery)

@@ -1,5 +1,20 @@
 # Lupin Project History
 
+### 2026.02.06 - Session 145 | CRUD Interactive Testing Protocol
+
+**Accomplishments**:
+- Created 24-scenario interactive testing protocol for DataFrame CRUD system (Layers 1-3)
+- Part 1: 12 mock pipeline scenarios (routing swap, full pipeline, cache bypass, confirmation flow) — no server required
+- Part 2: 8 notifications UI scenarios (Q&A submission, confirmation cards, TTS, feature flag toggle) — live server
+- Part 3: 4 curl smoke tests (health check, push endpoint, feature flag, destructive ops)
+- Updated implementation tracker with testing protocol reference
+- Updated TODO.md with high-priority E2E testing item for tomorrow
+
+**Files Created**: `src/rnd/headless-cc-for-dataframe-crud/testing-protocol.md`
+**Files Modified**: `src/rnd/headless-cc-for-dataframe-crud/implementation-tracker.md`, `TODO.md`
+
+---
+
 ### 2026.02.06 - Session 144 | Fix Expeditor Async Event Loop Deadlock
 
 **Accomplishments**:
