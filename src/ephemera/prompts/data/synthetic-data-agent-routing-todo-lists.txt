@@ -401,3 +401,47 @@ Check off 'Send out invitations' as completed in Event Planning.
 Mark 'Send out invitations' as done in Event Planning.
 Launch 'Jog for 30 minutes' routine in Health and Fitness Goals.
 Begin 'Jog for 30 minutes' activity in Health and Fitness Goals.
+
+# Explicit agent routing phrases — direct requests to switch to todo list agent
+→Connect me with the todo list agent
+→Switch to the task manager
+→I want to talk to the todo mode
+→Put me through to the task list please
+→Activate todo mode
+→Switch me over to the todo list agent
+→I need the task manager
+→Let me speak with the todo assistant
+→Connect me to todo mode please
+→Take me to the task list agent
+→I'd like to use the todo list agent
+→Route me to the task manager please
+→Hand me off to the todo list
+→Transfer me to the todo mode
+→Go to todo mode
+→I want the task list agent
+→Bring up the todo list agent
+→Give me the task manager please
+→Switch over to the todo list
+→I need to talk to the todo mode agent
+→Put the task list on
+→Can I get the todo list agent
+→Take me to task manager mode
+→Let me use the todo list agent please
+→Open up the task manager for me
+
+# Quantization-resilient supplements — strong todo anchors
+Add 'buy groceries' to my todo list
+Check off the laundry task from my list
+Mark the dentist appointment as done on my task list
+I need to add a new task to my todo list: clean the garage
+Remove 'return library books' from my task list
+What's left on my todo list for today?
+Add a reminder to my list to call the plumber
+Show me all incomplete tasks on my todo list
+Move 'file taxes' to the top of my task list
+How many items are on my todo list right now?
+Mark 'pick up dry cleaning' as complete on my list
+I want to add several tasks to my todo list
+Update the priority of 'paint bedroom' on my task list
+Check what tasks I still need to do on my list
+Add 'renew passport' as a high priority task to my todo list

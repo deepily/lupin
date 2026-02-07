@@ -203,3 +203,30 @@ Could you provide a comprehensive list of all stakeholders involved in the EVENT
 I need to prepare for a presentation at the EVENT_TYPE at PLACE. Can you summarize the expected audience, key topics to cover, and any specific requests?
 Can you trace the history of my involvement in similar EVENT_TYPE to the one at LOCATION on START_TIME, highlighting key learnings and outcomes?
 I'm assessing my time management. Can you analyze how much time I've spent on EVENT_TYPE at LOCATION in the past three months and suggest ways to optimize it?
+
+# Explicit agent routing phrases — direct requests to switch to calendar agent
+Connect me with the calendar agent
+Switch to the scheduler
+I want to talk to the calendar mode
+Put me through to the scheduling assistant please
+Activate calendar mode
+Switch me over to the calendar agent
+I need the scheduler
+Let me speak with the calendar assistant
+Connect me to calendar mode please
+Take me to the scheduling agent
+I'd like to use the calendar agent
+Route me to the scheduler please
+Hand me off to the calendar assistant
+Transfer me to the calendar mode
+Go to calendar mode
+I want the scheduling assistant
+Bring up the calendar agent
+Give me the scheduler please
+Switch over to the calendar
+I need to talk to the calendar agent
+Put the scheduling assistant on
+Can I get the calendar mode
+Take me to scheduler mode
+Let me use the calendar agent please
+Open up the scheduling assistant for me

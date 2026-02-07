@@ -1,0 +1,60 @@
+Switch back to automatic mode
+Return to normal routing
+Go back to auto mode
+Exit direct mode
+Cancel agent mode
+Switch to automatic
+Return to system routing
+Go back to letting you decide
+I want automatic routing again
+Resume automatic intent detection
+Stop direct mode and go back to normal
+Turn off manual routing
+Deactivate agent mode
+End direct routing
+Go back to automatic
+Return me to auto mode please
+Switch back to normal mode
+Cancel the current agent mode
+I don't want direct routing anymore
+Put me back on automatic
+Restore automatic routing please
+Exit this mode and go back to auto
+Turn automatic routing back on
+I want you to decide which agent to use
+Let the system pick the right agent
+Go back to the default routing
+Stop routing me to a specific agent
+Remove the agent lock
+Clear agent mode
+Undo the agent switch
+Back to automatic please
+Reset routing to automatic
+Switch off direct mode
+No more manual routing
+I'm done with this agent, go back to automatic
+Return to default mode
+Take me off this agent
+Disengage direct routing
+Go back to smart routing
+Resume normal operations
+Let the router decide
+Turn off math mode and go automatic
+Turn off weather mode and go automatic
+Turn off calendar mode and go automatic
+Turn off todo mode and go automatic
+Exit calculator mode
+Stop using the current agent
+I want to switch back to automatic routing
+Disable the current agent mode
+Clear the active agent
+End the current session mode
+Release me from this agent
+Automatic mode please
+Default routing mode
+Normal mode
+Auto routing
+Back to default
+Reset agent routing
+System mode
+Automatic please

@@ -63,3 +63,23 @@ podcast creator build an episode about RESEARCH_TOPIC
 podcast generator produce a show on RESEARCH_TOPIC
 launch the podcast generator for RESEARCH_TOPIC
 fire up the podcast creator for an episode about RESEARCH_TOPIC
+
+# Quantization-resilient supplements — strong podcast anchors
+I'd love a podcast episode about RESEARCH_TOPIC
+Turn RESEARCH_TOPIC into a podcast I can listen to
+Record a podcast about RESEARCH_TOPIC for me
+Give me a podcast on RESEARCH_TOPIC
+I want to listen to a podcast about RESEARCH_TOPIC
+Create a listenable podcast episode on RESEARCH_TOPIC
+Produce an audio show discussing RESEARCH_TOPIC
+Can you whip up a podcast about RESEARCH_TOPIC
+Generate a podcast I can listen to about RESEARCH_TOPIC
+Set up a podcast episode covering RESEARCH_TOPIC
+Put together an audio podcast on RESEARCH_TOPIC
+I'm in the mood for a podcast about RESEARCH_TOPIC
+Cook up a podcast episode on RESEARCH_TOPIC
+Let's do a podcast about RESEARCH_TOPIC
+Spin up a podcast on RESEARCH_TOPIC
+I want an audio episode about RESEARCH_TOPIC
+Please create a listenable episode on RESEARCH_TOPIC
+Make me an audio show about RESEARCH_TOPIC

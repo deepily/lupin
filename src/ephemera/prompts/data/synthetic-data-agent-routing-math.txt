@@ -404,4 +404,51 @@ I need you to turn into a number machine and solve this
 Imagine you’re a calculator, now tell me the answer
 Let's go back to basics—just crunch those numbers
 Flip the switch to calculator mode and handle this
-You’re in full calculation mode—give me the final answer
+You're in full calculation mode—give me the final answer
+
+# Explicit agent routing phrases — direct requests to switch to math agent
+Connect me with the math specialist
+Switch to the math agent
+I want to talk to the calculator
+Put me through to the math agent please
+Activate math mode
+Switch me over to the math specialist
+I need the math agent
+Let me speak with the calculator
+Connect me to math mode please
+Take me to the math specialist
+I'd like to use the math agent
+Route me to the calculator please
+Hand me off to the math specialist
+Transfer me to the math agent
+Go to math mode
+I want the math specialist
+Bring up the calculator agent
+Give me the math agent please
+Switch over to the calculator
+I need to talk to the math mode agent
+Put the math specialist on
+Can I get the math agent
+Take me to calculator mode
+Let me use the math specialist please
+Open up the math agent for me
+
+# Quantization-resilient supplements — strong math anchors
+Calculate the total cost if I buy 15 items at $3.99 each
+Solve this equation for me: 2x + 5 = 17
+Do the math on how much I'll save with a 25% discount on $450
+Compute the area of a circle with radius 8
+I need you to solve this arithmetic problem: 847 divided by 23
+Can you calculate compound interest on $10,000 at 5% for 3 years
+Work out this math problem: what's 15% of 680
+Solve for x: 3x squared minus 12 equals zero
+Calculate the tip on a $87.50 dinner bill at 20%
+Do some math for me: if a train goes 60 mph for 2.5 hours how far
+Compute the square root of 1764
+I need math help: what's the hypotenuse if the sides are 5 and 12
+Solve this formula: distance equals rate times time, rate is 55 and time is 3.5
+Calculate how many tiles I need for a 12 by 15 foot room using 1 foot tiles
+Math question: what's 7 factorial
+Help me compute the monthly payment on a $250,000 mortgage at 6.5%
+Solve this arithmetic: 3,456 times 789
+Can you do the math on splitting a $234 bill four ways with 18% tip

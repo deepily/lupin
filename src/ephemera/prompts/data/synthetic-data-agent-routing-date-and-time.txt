@@ -98,3 +98,30 @@ Got the day before yesterday in GEOGRAPHIC_LOCATION?
 Is it a cultural event today in GEOGRAPHIC_LOCATION?
 What's the local time difference with GEOGRAPHIC_LOCATION?
 Hey, is it the same weekday there in GEOGRAPHIC_LOCATION as here?
+
+# Explicit agent routing phrases — direct requests to switch to date and time agent
+Connect me with the date and time agent
+Switch to the clock
+I want to talk to the time mode
+Put me through to the date agent please
+Activate time mode
+Switch me over to the date and time agent
+I need the clock agent
+Let me speak with the time assistant
+Connect me to time mode please
+Take me to the date and time agent
+I'd like to use the date agent
+Route me to the clock please
+Hand me off to the time specialist
+Transfer me to the date and time mode
+Go to time mode
+I want the date agent
+Bring up the clock agent
+Give me the time agent please
+Switch over to the date and time agent
+I need to talk to the time mode agent
+Put the clock on
+Can I get the date and time agent
+Take me to clock mode
+Let me use the date and time agent please
+Open up the time agent for me

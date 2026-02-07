@@ -238,3 +238,30 @@ Weather prediction for GEOGRAPHIC_LOCATION
 What weather should I expect in GEOGRAPHIC_LOCATION?
 Look up weather in GEOGRAPHIC_LOCATION
 Get the weather forecast for GEOGRAPHIC_LOCATION
+
+# Explicit agent routing phrases — direct requests to switch to weather agent
+Connect me with the weather agent
+Switch to the meteorologist
+I want to talk to the weather mode
+Put me through to the weather forecaster please
+Activate weather mode
+Switch me over to the weather agent
+I need the meteorologist
+Let me speak with the weather assistant
+Connect me to weather mode please
+Take me to the weather agent
+I'd like to use the weather agent
+Route me to the meteorologist please
+Hand me off to the weather forecaster
+Transfer me to the weather mode
+Go to weather mode
+I want the weather forecaster
+Bring up the weather agent
+Give me the meteorologist please
+Switch over to the weather agent
+I need to talk to the weather mode agent
+Put the weather forecaster on
+Can I get the weather agent
+Take me to meteorologist mode
+Let me use the weather agent please
+Open up the weather forecaster for me

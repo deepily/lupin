@@ -74,9 +74,9 @@ du.print_banner( 'Generating Unified Training Data (with Agentic Jobs)', prepend
 coordinator = XmlCoordinator( debug=False, verbose=False, silent=False )
 
 print( 'Building ALL training prompts (vox commands + agent router + agentic jobs)...' )
-# Note: 1200/command target; agentic commands have 65 templates × 200 placeholders = 13,000 raw combinations each
+# Note: 1500/command target; agentic commands have 65 templates × 200 placeholders = 13,000 raw combinations each
 df = coordinator.build_all_training_prompts(
-    sample_size_per_command=1200,
+    sample_size_per_command=1500,
     include_agentic_jobs=True
 )
 print( f'Generated {df.shape[0]} total training examples' )

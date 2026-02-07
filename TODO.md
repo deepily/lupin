@@ -47,6 +47,12 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 - [x] **[LUPIN] Rebalance XML training data to 1200 samples/command** - Session 145 (checkpoint): Fixed `run-agentic-intent-training.sh` (hardcoded 400→1200), expanded placeholders (research-topics 50→190, document-paths 50→179), removed near-miss none examples, replaced product names (Deep Dive, PodMaker, Doc-to-Pod) with natural phrasing
   - **Plan**: `src/rnd/2026.02.05-peft-trainer-optimization-plan.md`
   - **Analysis script**: `src/scripts/analyze-training-distribution.py`
+- [x] **[LUPIN] PEFT Phase 2 — Results Dashboard + Explicit Routing + Quantization Strengthening** - Session 148 (checkpoint): Part A (results dashboard in peft_trainer.py), Part B (explicit routing phrases for 5 agents + new automatic routing mode command with 60 templates), Part C (strengthened podcast-generator, math, todo-list, none-of-the-above with disambiguation anchors). Bumped sample size 1200→1500.
+  - **Plan**: `src/rnd/2026.02.07-peft-trainer-optimization-plan-part-2.md`
+  - **461 unit tests passing**, zero regressions
+  - **CoSA submodule files need separate commit**: xml_coordinator.py, peft_trainer.py, todo_fifo_queue.py
+- [ ] **[LUPIN] Run PEFT Phase 2 training** - Regenerate training data at 1500/command, then full training run. Dashboard (Part A) will display consolidated results automatically.
+  - Run: `./src/scripts/run-agentic-intent-training.sh generate` then `./src/scripts/run-agentic-intent-training.sh train`
 - [ ] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - Two cases to handle:
   1. User makes vague reference to research document contents (e.g., "make a podcast about that AI research")
   2. User references research document by approximate name/path

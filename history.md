@@ -1,5 +1,33 @@
 # Lupin Project History
 
+### 2026.02.07 - Session 148 | PEFT Phase 2 — Results Dashboard + Explicit Routing + Quantization Strengthening
+
+#### Checkpoint | 2026.02.07 | Parts A/B/C complete, 461 unit tests pass
+
+**Accomplishments**:
+- **Part A (Results Dashboard)**: Added consolidated training summary to `peft_trainer.py` — captures validation results from all 3 stages (pre/post-training, post-quantization) and prints 4 comparison tables: Overall Metrics, Per-Command Deltas, Quantization Impact, Pipeline Stage Timing. Stored `last_ms_per_item` in `xml_coordinator.py`.
+- **Part B (Explicit Routing Data)**: Appended ~25 explicit routing phrases ("Connect me with...", "Switch to...") to 5 agent template files (math, calendar, weather, todo, date-and-time). Created new "automatic routing mode" command with 60 templates. Registered in `agent-router-simple-commands.json` and both router prompt templates. Added routing handler in `todo_fifo_queue.py`.
+- **Part C (Quantization Strengthening)**: Supplemented degraded commands — podcast-generator (+18 strong-anchor templates), math (+18 explicit-framing), todo-list (+15 task-specific), none (+15 diverse negatives).
+- **Sample size bump**: 1200 → 1500 samples/command in `run-agentic-intent-training.sh`
+- **R&D Document**: Created `src/rnd/2026.02.07-peft-trainer-optimization-plan-part-2.md`
+
+**Files Created**: `synthetic-data-agent-routing-automatic-routing-mode.txt` (60 templates), `2026.02.07-peft-trainer-optimization-plan-part-2.md`
+**Files Modified** (Lupin repo): `src/rnd/README.md`, `src/scripts/run-agentic-intent-training.sh`, 5 agent routing template files, `agent-router-simple-commands.json`, `agent-router-template.txt`, `agent-router-template-completion.txt`, `synthetic-data-agent-routing-podcast-generator.txt`, `synthetic-data-none-of-the-above.txt`
+**Files Modified** (CoSA repo, not committed here): `xml_coordinator.py`, `peft_trainer.py`, `todo_fifo_queue.py`
+**Verification**: 461/461 unit tests passing, zero regressions
+
+---
+
+### 2026.02.07 - Session 147 | Bug Fix Mode
+
+### Fixes
+(Individual fixes will be added here)
+
+### Session Summary
+(Will be completed at session close)
+
+---
+
 ### 2026.02.06 - Session 146 | PEFT Phase 2 Remediation + Data Volume Fix
 
 #### Checkpoint | 2026.02.06 23:58 | Template fixes + script fix + placeholder expansion

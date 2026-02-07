@@ -197,3 +197,20 @@ Is finding a plan for a vegetable garden a green thumb's dream?
 Shall we start the dishwasher before bed?
 Is stopping the washing machine an option right now?
 I'm feeling a bit warm; could you turn on the fan?
+
+# Quantization-resilient supplements — diverse negative examples
+Tell me a fun fact about dolphins
+What's the capital of Mongolia?
+Can you recommend a good thriller novel?
+How do you say hello in Mandarin?
+Explain the theory of relativity in simple terms
+Who won the last Super Bowl?
+What's the difference between a crocodile and an alligator?
+Can you write me a haiku about autumn?
+Tell me about the history of jazz music
+What are some tips for better public speaking?
+How does a refrigerator actually work?
+What's the tallest building in the world?
+Can you explain what blockchain technology is?
+Tell me about the most unusual animals in the ocean
+What are the benefits of meditation?
