@@ -1,6 +1,6 @@
 # DataFrame CRUD Implementation Tracker
 
-**Last Updated**: 2026-02-06
+**Last Updated**: 2026-02-07
 
 ## Cross-Phase Progress
 
@@ -9,7 +9,43 @@
 | 1 | Layer 1: Storage | COMPLETE | 91 unit tests, 16 smoke tests, all passing |
 | 2 | Layer 2: Intent | COMPLETE | 73 unit tests, 5 new source files + 1 modified + 1 test file |
 | 3 | Layer 3: Queue Integration | COMPLETE | 26 unit tests, feature-flag routing swap + cache skip + voice confirmation |
+| E2E | Testing Protocol Part 1 | COMPLETE | 12 mock pipeline tests (routing, pipeline, cache, confirmation) |
+| E2E | Testing Protocol Part 3 | PENDING | Curl integration smoke tests (health, push, routing, destructive) |
+| E2E | Testing Protocol Part 2 | PENDING | Manual UI tests (Q&A, confirmation cards, feature flag toggle) |
 | 4 | Layer 3: Polish | NOT STARTED | End-to-end voice workflows |
+
+> **Recommended execution order**: Part 1 (mock) → Part 3 (curl) → Part 2 (UI). Curl validates server routing before UI tests the full notification card flow.
+
+## E2E Testing Protocol Part 1 — Mock Pipeline (2026-02-07)
+
+| Step | Component | Status |
+|------|-----------|--------|
+| 1 | TestRoutingSwapPipeline (3 tests) | Done |
+| 2 | TestFullPipelineMocked (3 tests) | Done |
+| 3 | TestCacheBypassPipeline (2 tests) | Done |
+| 4 | TestConfirmationFlowPipeline (4 tests) | Done |
+
+### Part 1 Verification Results (2026-02-07)
+
+- Part 1 mock pipeline tests: 12/12 passed (1.77s)
+- Full unit suite: 461/461 passed (9.61s, zero regressions)
+- Test file: `src/tests/unit/test_crud_mock_pipeline.py`
+- Note: Placed in `unit/` instead of `integration/` because integration conftest requires live server; these tests are fully mocked
+
+### Part 1 Test Coverage
+
+| Test Class | Count | What It Tests |
+|------------|-------|---------------|
+| TestRoutingSwapPipeline | 3 | Feature flag true/false, todo/calendar routing |
+| TestFullPipelineMocked | 3 | Full add/query/delete pipeline: run_prompt → run_code → run_formatter |
+| TestCacheBypassPipeline | 2 | CRUD agents skip cache, non-CRUD agents don't |
+| TestConfirmationFlowPipeline | 4 | Delete yes/no/timeout, add skips confirmation |
+
+### Testing Protocol Discrepancy Found
+
+- `query` operation returns `status: "ok"` not `"queried"` (protocol had wrong assertion)
+
+---
 
 ## Phase 3 Detailed Progress
 

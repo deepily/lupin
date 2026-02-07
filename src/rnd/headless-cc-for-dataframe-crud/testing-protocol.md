@@ -1,8 +1,19 @@
 # DataFrame CRUD Interactive Testing Protocol
 
 **Created**: 2026-02-06
-**Context**: Layers 1-3 complete (449 unit tests passing). This protocol validates live behavior before Phase 4 Polish.
+**Updated**: 2026-02-07
+**Context**: Layers 1-3 complete (461 unit tests passing). This protocol validates live behavior before Phase 4 Polish.
 **Goal**: Verify routing swap, cache skip, voice confirmation, and full CRUD cycle work end-to-end.
+
+## Execution Status
+
+| Part | Description | Status | Recommended Order |
+|------|-------------|--------|-------------------|
+| Part 1 | Mock Objects Protocol | **DONE** (12/12 passed) | 1st |
+| Part 3 | Curl Smoke Tests | PENDING | 2nd |
+| Part 2 | Notifications UI Protocol | PENDING | 3rd |
+
+> **Recommended order**: 1 → 3 → 2. Part 3 (curl) validates server-side routing before Part 2 (UI) tests the full notification card flow.
 
 ---
 
@@ -29,7 +40,7 @@ The CRUD routing swap is controlled by `crud for dataframes agents enabled` in `
 Before running this protocol, confirm the unit test baseline:
 
 ```bash
-pytest src/tests/unit/ -v  # Expect 449/449 passed
+pytest src/tests/unit/ -v  # Expect 461/461 passed
 ```
 
 ---
@@ -40,7 +51,7 @@ Standalone Python test scenarios exercising the full pipeline with mocked LLM an
 
 ### 1.1 Setup
 
-**File**: `src/tests/integration/test_crud_mock_pipeline.py`
+**File**: `src/tests/unit/test_crud_mock_pipeline.py`
 
 **Key patterns reused from existing tests:**
 
@@ -216,7 +227,7 @@ class TestFullPipelineMocked:
 
         code_result = agent.run_code()
         assert code_result[ "return_code" ] == 0
-        assert "items" in code_result[ "output" ] or code_result[ "output" ][ "status" ] == "queried"
+        assert "items" in code_result[ "output" ] or code_result[ "output" ][ "status" ] == "ok"
 
         tts_result = agent.run_formatter()
         assert len( tts_result ) > 0
@@ -383,13 +394,13 @@ class TestConfirmationFlowPipeline:
 
 ```bash
 # Run all mock pipeline tests
-pytest src/tests/integration/test_crud_mock_pipeline.py -v
+pytest src/tests/unit/test_crud_mock_pipeline.py -v
 
 # Run a specific test class
-pytest src/tests/integration/test_crud_mock_pipeline.py::TestFullPipelineMocked -v
+pytest src/tests/unit/test_crud_mock_pipeline.py::TestFullPipelineMocked -v
 
 # Run with debug output
-pytest src/tests/integration/test_crud_mock_pipeline.py -v -s
+pytest src/tests/unit/test_crud_mock_pipeline.py -v -s
 ```
 
 ---
@@ -496,10 +507,10 @@ Quick command-line verification without opening the UI. **Requires server runnin
 
 ```bash
 # Get auth token (replace with your test credentials)
-TOKEN=$(curl -s -X POST http://localhost:7999/api/login \
+TOKEN=$(curl -s -X POST http://localhost:7999/auth/login \
   -H "Content-Type: application/json" \
   -d "{\"email\": \"$LUPIN_TEST_EMAIL\", \"password\": \"$LUPIN_TEST_PASSWORD\"}" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))")
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['tokens']['access_token'])")
 
 echo "Token: ${TOKEN:0:20}..."
 ```
@@ -605,9 +616,9 @@ curl -s -X POST http://localhost:7999/api/push \
 
 ### Test Summary Matrix
 
-| Part | Test Count | Server Required | LLM Required | What's Validated |
-|------|-----------|-----------------|-------------|-----------------|
-| Part 1: Mock Objects | 12 | No | No (mocked) | Routing swap, full pipeline, cache bypass, confirmation flow |
-| Part 2: Notifications UI | 8 | Yes (port 7999) | Yes (Phi-4 14B) | Q&A submission, confirmation cards, TTS responses, feature flag |
-| Part 3: Curl Smoke Tests | 4 | Yes (port 7999) | Yes (Phi-4 14B) | Health check, push endpoint, feature flag toggle, destructive ops |
-| **Total** | **24** | — | — | — |
+| Part | Test Count | Server Required | LLM Required | Status | What's Validated |
+|------|-----------|-----------------|-------------|--------|-----------------|
+| Part 1: Mock Objects | 12 | No | No (mocked) | **DONE** (12/12) | Routing swap, full pipeline, cache bypass, confirmation flow |
+| Part 3: Curl Smoke Tests | 4 | Yes (port 7999) | Yes (Phi-4 14B) | PENDING | Health check, push endpoint, feature flag toggle, destructive ops |
+| Part 2: Notifications UI | 8 | Yes (port 7999) | Yes (Phi-4 14B) | PENDING | Q&A submission, confirmation cards, TTS responses, feature flag |
+| **Total** | **24** | — | — | — | — |
