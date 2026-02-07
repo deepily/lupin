@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.02.06 - Session 146 | PEFT Phase 2 Remediation + Data Volume Fix
+
+#### Checkpoint | 2026.02.06 23:58 | Template fixes + script fix + placeholder expansion
+
+**Accomplishments**:
+- Fixed PEFT Phase 2 template issues: removed 51 near-miss none-of-the-above examples, replaced product names (Deep Dive, PodMaker, Doc-to-Pod) with natural English phrasing across 3 agentic routing template files
+- Fixed training data volume bug: `run-agentic-intent-training.sh` hardcoded `sample_size_per_command=400` instead of target 1200
+- Expanded placeholder files: research-topics.txt (50→190), document-paths.txt (50→179) for richer training diversity (65 templates × 190 topics = 12,350 raw combinations per agentic command)
+
+**Files Modified**: synthetic-data-none-of-the-above.txt, synthetic-data-agent-routing-deep-research.txt, synthetic-data-agent-routing-podcast-generator.txt, synthetic-data-agent-routing-research-to-podcast.txt, run-agentic-intent-training.sh, placeholders-research-topics.txt, placeholders-document-paths.txt, TODO.md
+**Commit**: b1cffa2
+
+---
+
 ### 2026.02.06 - Session 145 | CRUD Interactive Testing Protocol
 
 **Accomplishments**:

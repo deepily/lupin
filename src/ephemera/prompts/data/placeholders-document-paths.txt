@@ -48,3 +48,132 @@
 /io/deep-research/privacy-regulation-analysis.md
 /io/deep-research/sustainable-agriculture-report.md
 /io/deep-research/quantum-networking-study.md
+/io/deep-research/2026-01-12-microbiome-health-study.md
+/io/deep-research/2026-01-16-fusion-energy-progress.md
+/io/deep-research/2026-01-19-crispr-therapeutics-review.md
+/io/deep-research/2026-01-23-autonomous-drone-survey.md
+/io/deep-research/2026-01-26-ocean-acidification-data.md
+/io/deep-research/2026-01-30-ai-governance-framework.md
+/io/deep-research/2026-02-03-battery-technology-update.md
+/io/deep-research/2026-02-06-synthetic-biology-report.md
+/io/deep-research/water-scarcity-global-analysis.md
+/io/deep-research/rare-earth-supply-chain.md
+/io/deep-research/pandemic-preparedness-review.md
+/io/deep-research/brain-computer-interface-study.md
+/io/deep-research/vertical-farming-economics.md
+/io/deep-research/dark-matter-detection-methods.md
+/io/deep-research/gig-economy-labor-analysis.md
+/io/deep-research/coral-reef-recovery-strategies.md
+/io/deep-research/nuclear-waste-solutions.md
+/io/deep-research/personalized-medicine-overview.md
+/reports/quarterly-technology-trends-q1-2026.pdf
+/reports/annual-climate-assessment-2025.pdf
+/reports/healthcare-innovation-benchmarks.pdf
+/reports/global-cybersecurity-threat-landscape.pdf
+/reports/renewable-energy-market-outlook.pdf
+/reports/ai-ethics-governance-whitepaper.pdf
+/reports/urban-mobility-transformation.pdf
+/reports/biodiversity-conservation-status.pdf
+/reports/digital-economy-analysis-2026.pdf
+/reports/space-industry-investment-review.pdf
+/reports/food-systems-sustainability.pdf
+/reports/quantum-computing-readiness.pdf
+/reports/mental-health-workplace-study.pdf
+/reports/clean-energy-transition-roadmap.pdf
+/reports/agricultural-technology-adoption.pdf
+/reports/global-education-trends.pdf
+/reports/pharmaceutical-pipeline-review.pdf
+/reports/ocean-health-indicators.pdf
+/reports/manufacturing-4.0-assessment.pdf
+/reports/geopolitical-risk-analysis.pdf
+/docs/research-summary-nanotechnology.txt
+/docs/literature-review-gene-editing.txt
+/docs/technical-brief-hydrogen-fuel.txt
+/docs/white-paper-carbon-capture.txt
+/docs/analysis-remote-work-productivity.txt
+/docs/overview-stem-cell-applications.txt
+/docs/briefing-nuclear-fusion-timeline.txt
+/docs/summary-microplastics-research.txt
+/docs/review-autonomous-vehicle-safety.txt
+/docs/notes-blockchain-governance.txt
+/docs/draft-biometric-privacy-policy.txt
+/docs/memo-supply-chain-resilience.txt
+/docs/outline-digital-twin-applications.txt
+/docs/survey-results-ai-adoption.txt
+/docs/findings-sleep-research-2026.txt
+/docs/comparison-battery-chemistries.txt
+/docs/assessment-wildfire-risk-models.txt
+/docs/evaluation-desalination-methods.txt
+/docs/protocol-phage-therapy-trials.txt
+/docs/brief-semiconductor-shortage.txt
+/research/neuroscience-consciousness-paper.md
+/research/quantum-encryption-methods.md
+/research/climate-tipping-points-analysis.md
+/research/protein-folding-breakthroughs.md
+/research/social-media-mental-health-study.md
+/research/exoplanet-habitability-criteria.md
+/research/urban-heat-island-mitigation.md
+/research/mRNA-platform-applications.md
+/research/circular-economy-case-studies.md
+/research/gravitational-wave-sources.md
+/research/antibiotic-resistance-patterns.md
+/research/neural-interface-advances.md
+/research/geothermal-energy-potential.md
+/research/algorithmic-bias-detection.md
+/research/rewilding-ecological-outcomes.md
+/research/metamaterial-applications.md
+/research/cultured-meat-scaling-study.md
+/research/optogenetics-review-2026.md
+/research/federated-learning-benchmarks.md
+/research/permafrost-methane-projections.md
+research-on-vaccine-distribution.md
+latest-deep-dive-results.md
+the climate report from last week
+my research on quantum computing
+that AI ethics paper I downloaded
+the renewable energy analysis
+quantum-networking-findings.docx
+2026-healthcare-technology-review.docx
+ai-in-criminal-justice-study.docx
+biosensor-wearable-data-report.docx
+housing-affordability-analysis.docx
+space-mining-feasibility-study.docx
+gut-microbiome-research-summary.docx
+precision-agriculture-survey.docx
+hydrogen-economy-roadmap.docx
+neuromorphic-computing-overview.docx
+lidar-archaeological-discoveries.docx
+ocean-thermal-energy-assessment.docx
+smart-grid-deployment-report.docx
+carbon-credit-market-analysis.docx
+epigenetics-trauma-literature-review.docx
+swarm-robotics-applications.docx
+pfas-remediation-strategies.docx
+photonic-chip-research-summary.docx
+xenotransplantation-progress-report.docx
+solid-state-battery-comparison.docx
+deep-sea-species-catalog.docx
+biochar-sequestration-data.docx
+electrocatalysis-green-hydrogen.docx
+polar-ice-core-climate-records.docx
+digital-activism-case-studies.docx
+closed-loop-ewaste-recycling.docx
+robotic-surgery-outcomes-meta-analysis.docx
+atmospheric-river-forecast-models.docx
+adaptive-optics-telescope-design.docx
+microfluidics-diagnostic-platforms.docx
+bioplastic-degradation-study.docx
+spintronics-memory-technology.docx
+perovskite-solar-efficiency-data.docx
+induced-pluripotent-stem-cell-review.docx
+graph-neural-network-drug-discovery.docx
+topological-qubit-progress-report.docx
+the research document about marine biology
+that report on cybersecurity threats
+my notes on blockchain applications
+the paper about climate adaptation
+that study on social media effects
+the analysis of renewable energy costs
+my findings on machine learning bias
+the overview of gene therapy methods
+that document about urban planning trends

@@ -48,18 +48,18 @@ make a podcast that covers RESEARCH_TOPIC
 build a podcast episode covering RESEARCH_TOPIC
 generate a podcast for RESEARCH_TOPIC
 produce a podcast that discusses RESEARCH_TOPIC
-PodMaker episode about RESEARCH_TOPIC
-podcast maker create an episode on RESEARCH_TOPIC
-use PodMaker for a show about RESEARCH_TOPIC
-PodMaker make a podcast about RESEARCH_TOPIC
-pod maker create a podcast on RESEARCH_TOPIC
-I want PodMaker to make an episode about RESEARCH_TOPIC
-PodMaker generate a podcast on RESEARCH_TOPIC
-run PodMaker for RESEARCH_TOPIC
-use pod maker to produce a podcast about RESEARCH_TOPIC
-PodMaker create an audio show about RESEARCH_TOPIC
-can you use PodMaker for RESEARCH_TOPIC
-start PodMaker with RESEARCH_TOPIC
-podcast maker build an episode about RESEARCH_TOPIC
-PodMaker produce a show on RESEARCH_TOPIC
-launch PodMaker for a podcast about RESEARCH_TOPIC
+use the podcast generator for RESEARCH_TOPIC
+podcast generator create an episode on RESEARCH_TOPIC
+generate a podcast episode about RESEARCH_TOPIC
+use the podcast creator to make a show about RESEARCH_TOPIC
+podcast generator make a podcast about RESEARCH_TOPIC
+I want the podcast generator to create an episode about RESEARCH_TOPIC
+run the podcast generator on RESEARCH_TOPIC
+use podcast generator to produce a podcast about RESEARCH_TOPIC
+podcast creator build an audio show about RESEARCH_TOPIC
+can you use the podcast generator for RESEARCH_TOPIC
+start the podcast generator with RESEARCH_TOPIC
+podcast creator build an episode about RESEARCH_TOPIC
+podcast generator produce a show on RESEARCH_TOPIC
+launch the podcast generator for RESEARCH_TOPIC
+fire up the podcast creator for an episode about RESEARCH_TOPIC

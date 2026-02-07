@@ -44,10 +44,9 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 - [ ] **[LUPIN] Run agentic job intent LORA 1% sample training** - Requires GPUs to be freed. Run: `./src/scripts/run-agentic-intent-training.sh test`. **Session 124**: Unified training pipeline now includes agentic jobs (40,258 total examples, 600 agentic). **Scheduled: Evening session 2026-02-02** when GPU resources available.
 - [x] **[LUPIN] PEFT Training Optimization - Phase 1 Training Run** - Session 136: Phase 1 actual results: 92.2% exact match (target: 89%)
 - [x] **[LUPIN] PEFT Training Optimization - Phase 2 Disambiguation** - Session 136: Code/data complete. Session 141: Model swap to 2026-02-05 training run, 15 disambiguation tests passing, router confirmed working
-- [ ] **[LUPIN] Rebalance XML training data to 400 samples/command** - After reviewing first full training run, implement rebalancing plan to eliminate 19x imbalance (1,600 max vs 83 min). Changes: unified sample_size param, interjections for simple vox, len() bug fixes, distribution verification.
-  - **Plan**: `src/rnd/2026.02.04-rebalancing-xml-training-datasets.md`
+- [x] **[LUPIN] Rebalance XML training data to 1200 samples/command** - Session 145 (checkpoint): Fixed `run-agentic-intent-training.sh` (hardcoded 400→1200), expanded placeholders (research-topics 50→190, document-paths 50→179), removed near-miss none examples, replaced product names (Deep Dive, PodMaker, Doc-to-Pod) with natural phrasing
+  - **Plan**: `src/rnd/2026.02.05-peft-trainer-optimization-plan.md`
   - **Analysis script**: `src/scripts/analyze-training-distribution.py`
-  - **Prerequisite**: Review first full long-run training session results before implementing
 - [ ] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - Two cases to handle:
   1. User makes vague reference to research document contents (e.g., "make a podcast about that AI research")
   2. User references research document by approximate name/path

@@ -48,19 +48,19 @@ transform research at DOCUMENT_PATH into audio
 convert DOCUMENT_PATH into an audio episode
 create an audio version of DOCUMENT_PATH
 turn DOCUMENT_PATH into a podcast
-Doc-to-Pod the climate report
-Doc-to-Pod convert DOCUMENT_PATH
-document to podcast from DOCUMENT_PATH
-transform a document to podcast from DOCUMENT_PATH
-convert document to podcast from DOCUMENT_PATH
-Doc-to-Pod DOCUMENT_PATH
-doc to pod this research
-use Doc-to-Pod on DOCUMENT_PATH
-run Doc-to-Pod on the research document
-Doc-to-Pod make DOCUMENT_PATH into audio
-I want Doc-to-Pod for DOCUMENT_PATH
-doc to pod the research results
-start Doc-to-Pod with DOCUMENT_PATH
-can you Doc-to-Pod DOCUMENT_PATH
-launch Doc-to-Pod for this research
-Doc-to-Pod convert the research into a podcast
+convert the climate report into a podcast
+convert DOCUMENT_PATH to a podcast episode
+turn this research document into a podcast
+transform DOCUMENT_PATH into podcast format
+convert the document at DOCUMENT_PATH into a podcast
+take DOCUMENT_PATH and turn it into a podcast episode
+transform this research paper into an audio podcast
+convert DOCUMENT_PATH into an audio podcast episode
+I want to turn DOCUMENT_PATH into a podcast
+turn the research results into a podcast episode
+take DOCUMENT_PATH and convert it to podcast format
+can you transform DOCUMENT_PATH into a podcast
+convert this research into a podcast episode
+turn DOCUMENT_PATH into audio podcast format
+transform the research document at DOCUMENT_PATH into a podcast
+convert this document into a podcast and make it engaging
