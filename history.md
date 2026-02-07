@@ -1,5 +1,18 @@
 # Lupin Project History
 
+### 2026.02.06 - Session 144 | Fix Expeditor Async Event Loop Deadlock
+
+**Accomplishments**:
+- Fixed async event loop deadlock in expeditor test mode (smoke tests 4-5 returning `status=cancelled`)
+- Root cause: `expeditor.expedite()` (synchronous) called from async handler blocked the single-worker event loop, preventing the self-referential `/api/notify` request from being processed
+- Fix: Wrapped `expeditor.expedite()` in `asyncio.to_thread()` to run in threadpool, freeing event loop
+- Verified interactive smoke tests 4-5 now pass (user can respond to voice prompt, dry-run job completes with $0.00 cost)
+
+**Files Modified**: `src/cosa/rest/routers/mock_job.py` (added `import asyncio`, wrapped expedite call in `asyncio.to_thread()`)
+**Verification**: 449/449 unit tests passing, zero regressions
+
+---
+
 ### 2026.02.06 - Session 143 | CRUD Phase 3: Queue Integration + Voice Confirmation
 
 #### Checkpoint | 2026.02.06 22:30 | CRUD Phase 3 complete — queue integration + voice confirmation

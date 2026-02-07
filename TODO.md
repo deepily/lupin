@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-06 (Session 143)
+Last updated: 2026-02-06 (Session 144)
 
 ## Pending
 
@@ -164,7 +164,7 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
 - [x] **[LUPIN] Create testing plan for Runtime Argument Expeditor** - Session 131: Unit tests (49) created and passing. Smoke tests (5) created, 3/3 automated passing.
   - **Unit tests**: `src/tests/unit/test_runtime_argument_expeditor.py` (49 tests, 5 classes: ExpeditorResponse, ParseLoraArgs, InjectSystemArgs, AgentRegistry, CreateAgenticJob)
   - **Smoke tests**: `src/tests/smoke/test_expeditor_mock_job_smoke.py` (3 automated + 2 interactive)
-- [ ] **[LUPIN] Run interactive expeditor smoke tests 4-5** - Requires `LUPIN_INTERACTIVE_TESTS=true`, user present to answer voice prompts, and LLM available for gap analysis. Tests expeditor end-to-end via `/api/mock-job/submit` with `voice_command` field.
+- [x] **[LUPIN] Run interactive expeditor smoke tests 4-5** - Session 144: Fixed async deadlock (`asyncio.to_thread()` wrapper), tests 4-5 now pass. User responds to voice prompt, dry-run job completes with $0.00 cost.
 
 ### Cache Freshness Policy (HIGH) - Session 121/122
 
