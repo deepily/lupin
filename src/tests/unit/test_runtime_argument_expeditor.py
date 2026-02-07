@@ -5,12 +5,13 @@ Tests 5 components:
 1. ExpeditorResponse model (xml_models.py) - 16 tests
 2. _parse_lora_args() (expeditor.py) - 9 tests
 3. _inject_system_args() (expeditor.py) - 4 tests
-4. Agent registry + get_cli_help() (agent_registry.py) - 11 tests
-5. create_agentic_job() factory (agentic_job_factory.py) - 9 tests
+4. Agent registry + get_cli_help() (agent_registry.py) - 14 tests
+5. create_agentic_job() factory (agentic_job_factory.py) - 12 tests
 
 All external dependencies mocked. No server, no LLM, no filesystem I/O.
 
 Created: 2026-02-05
+Updated: 2026-02-07 — audience/audience_context normalization
 """
 
 import pytest
@@ -415,6 +416,29 @@ class TestAgentRegistry:
         result = get_cli_help( "agent router go to deep research" )
         assert result is None
 
+    def test_all_agents_have_audience_in_arg_mapping( self ):
+        """All three agents have 'audience' and 'audience_context' in arg_mapping."""
+        for cmd_key, entry in AGENTIC_AGENTS.items():
+            mapping = entry[ "arg_mapping" ]
+            assert "audience" in mapping, f"Missing 'audience' in arg_mapping for '{cmd_key}'"
+            assert mapping[ "audience" ] == "audience"
+            assert "audience_context" in mapping, f"Missing 'audience_context' in arg_mapping for '{cmd_key}'"
+            assert mapping[ "audience_context" ] == "audience_context"
+
+    def test_all_agents_have_audience_fallback_question( self ):
+        """All three agents have 'audience' in fallback_questions."""
+        for cmd_key, entry in AGENTIC_AGENTS.items():
+            questions = entry[ "fallback_questions" ]
+            assert "audience" in questions, f"Missing 'audience' in fallback_questions for '{cmd_key}'"
+
+    def test_deep_research_audience_mapping( self ):
+        """Deep research maps audience args correctly."""
+        entry = AGENTIC_AGENTS[ "agent router go to deep research" ]
+        assert entry[ "arg_mapping" ][ "audience" ] == "audience"
+        assert entry[ "arg_mapping" ][ "audience_context" ] == "audience_context"
+        assert "beginner" in entry[ "fallback_questions" ][ "audience" ].lower() or \
+               "academic" in entry[ "fallback_questions" ][ "audience" ].lower()
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Class 5: TestCreateAgenticJob (9 tests)
@@ -599,3 +623,63 @@ class TestCreateAgenticJob:
 
         call_kwargs = MockDR.call_args[ 1 ]
         assert call_kwargs[ "dry_run" ] is True
+
+    @patch( "cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob" )
+    @patch( "cosa.agents.podcast_generator.job.PodcastGeneratorJob" )
+    @patch( "cosa.agents.deep_research.job.DeepResearchJob" )
+    def test_deep_research_audience_passthrough( self, MockDR, MockPG, MockRTP ):
+        """Audience params are forwarded to DeepResearchJob."""
+        MockDR.return_value = MagicMock()
+        args = { "query": "test", "audience": "beginner", "audience_context": "high school students" }
+
+        create_agentic_job(
+            command    = "agent router go to deep research",
+            args_dict  = args,
+            user_id    = "uid-1",
+            user_email = "test@test.com",
+            session_id = "sess-1"
+        )
+
+        call_kwargs = MockDR.call_args[ 1 ]
+        assert call_kwargs[ "audience" ] == "beginner"
+        assert call_kwargs[ "audience_context" ] == "high school students"
+
+    @patch( "cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob" )
+    @patch( "cosa.agents.podcast_generator.job.PodcastGeneratorJob" )
+    @patch( "cosa.agents.deep_research.job.DeepResearchJob" )
+    def test_podcast_generator_audience_passthrough( self, MockDR, MockPG, MockRTP ):
+        """Audience params are forwarded to PodcastGeneratorJob."""
+        MockPG.return_value = MagicMock()
+        args = { "research": "/doc.md", "audience": "expert", "audience_context": "ML researchers" }
+
+        create_agentic_job(
+            command    = "agent router go to podcast generator",
+            args_dict  = args,
+            user_id    = "uid-1",
+            user_email = "test@test.com",
+            session_id = "sess-1"
+        )
+
+        call_kwargs = MockPG.call_args[ 1 ]
+        assert call_kwargs[ "audience" ] == "expert"
+        assert call_kwargs[ "audience_context" ] == "ML researchers"
+
+    @patch( "cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob" )
+    @patch( "cosa.agents.podcast_generator.job.PodcastGeneratorJob" )
+    @patch( "cosa.agents.deep_research.job.DeepResearchJob" )
+    def test_rtp_audience_passthrough( self, MockDR, MockPG, MockRTP ):
+        """Audience params are forwarded to DeepResearchToPodcastJob."""
+        MockRTP.return_value = MagicMock()
+        args = { "query": "AI safety", "audience": "academic", "audience_context": "PhD students" }
+
+        create_agentic_job(
+            command    = "agent router go to research to podcast",
+            args_dict  = args,
+            user_id    = "uid-1",
+            user_email = "test@test.com",
+            session_id = "sess-1"
+        )
+
+        call_kwargs = MockRTP.call_args[ 1 ]
+        assert call_kwargs[ "audience" ] == "academic"
+        assert call_kwargs[ "audience_context" ] == "PhD students"

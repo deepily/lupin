@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.02.07 - Session 149 | Normalize audience + audience_context Across All Agentic Agents
+
+#### Checkpoint | 2026.02.07 15:30 | 5-phase audience normalization complete
+
+**Accomplishments**:
+- **Phase 0**: Renamed `target_audience` → `audience` across all deep_research, deep_research_to_podcast, and podcast_generator modules. Changed default from `"expert"` → `"academic"`. Renamed podcast `ContentAnalysis.target_audience` → `inferred_audience` (LLM JSON key stays `target_audience`, mapped at extraction time).
+- **Phase 1**: Wired `audience`/`audience_context` through Deep Research job → factory → REST router → agent registry pipeline with config fallback chain.
+- **Phase 2**: Wired same through Research-to-Podcast pipeline. Added `audience` to fallback_questions.
+- **Phase 3**: Added full audience support to Podcast Generator — `PodcastConfig` dataclass fields, `AUDIENCE_DIALOGUE_GUIDELINES` dict in script_generation.py (beginner/general/expert/academic), orchestrator pass-through, job params with config fallback, CLI args, REST model fields, factory wiring, registry entries.
+- **Phase 4**: Added `podcast generator audience` and `podcast generator audience context` config keys to lupin-app.ini + splainer.
+- **Phase 5**: Added 6 new unit tests (3 registry audience assertions + 3 factory audience passthrough). 467/467 unit tests passing, all smoke tests pass.
+
+**Files Modified** (Lupin repo): `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/tests/unit/test_runtime_argument_expeditor.py`
+**Files Modified** (CoSA repo, not committed here): 20 files across `agents/deep_research/`, `agents/deep_research_to_podcast/`, `agents/podcast_generator/`, `agents/runtime_argument_expeditor/`, `rest/`
+**Commit**: 03574d4
+
+---
+
 ### 2026.02.07 - Session 148 | PEFT Phase 2 — Results Dashboard + Explicit Routing + Quantization Strengthening
 
 #### Checkpoint | 2026.02.07 | Parts A/B/C complete, 461 unit tests pass
