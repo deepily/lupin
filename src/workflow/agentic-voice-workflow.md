@@ -1,8 +1,8 @@
 # Agentic Voice Workflow: Complete Lifecycle Guide
 
-**Version**: 2.0
+**Version**: 2.1
 **Created**: 2026-01-27
-**Updated**: 2026-02-06
+**Updated**: 2026-02-07
 **Purpose**: Complete lifecycle guide — CONCEPT → BUILD → VALIDATE — for creating agentic background jobs with voice I/O and queue integration
 
 **Pattern Source**: Derived from `deep_research`, `podcast_generator`, and `deep_research_to_podcast` agents.
@@ -22,6 +22,7 @@
   - [Phase 1-2: Skeletal Agent Foundation + Mock Clients](#phase-1-2-skeletal-agent-foundation--mock-clients)
   - [Phase 3-4: Notification Integration](#phase-3-4-notification-integration)
   - [Phase 5: AgenticJob Queue Wrapper](#phase-5-agenticjob-queue-wrapper)
+  - [Phase 5b: Dedicated FastAPI Router](#phase-5b-dedicated-fastapi-router)
   - [Phase 6: LLM Client Integration](#phase-6-llm-client-integration)
   - [Phase 7: Cost Tracking](#phase-7-cost-tracking)
   - [Phase 8: Rate Limiting](#phase-8-rate-limiting)
@@ -1371,8 +1372,17 @@ class {AgentName}Job( AgenticJobBase ):
             await voice_io.notify( "Operation was cancelled.", priority="medium" )
             return "Operation was cancelled by the user."
 
-        # Store artifacts
+        # ── Artifact Storage ──────────────────────────────────
+        # Store output files and metadata in self.artifacts for UI access.
+        # The queue runner includes artifacts in job_state_transition events.
+        #
+        # Config key pattern: "{agent_name} output directory = /io/{agent_name}"
+        # Path construction:
+        #   output_dir = config_mgr.get( "{agent_name} output directory" )
+        #   full_path  = cu.get_project_root() + output_dir + f"/{user_email}/{timestamp}_{sanitized}.md"
+        #
         self.artifacts[ "result" ] = result
+        # Real agents also store: "report_path", "audio_path", "cost_summary", etc.
 
         # Notify completion
         await voice_io.notify(
@@ -1442,24 +1452,91 @@ if __name__ == "__main__":
     quick_smoke_test()
 ```
 
-### Queue Registration
+### Expeditor Registration (agent_registry.py)
 
-Register the job type in the queue router (typically in `src/cosa/rest/routers/queue_router.py`):
+**CRITICAL**: New agents MUST be registered in the Expeditor's agent registry for argument
+parsing and fallback question prompting. Without this, the voice path cannot discover your agent.
+
+**File**: `src/cosa/agents/runtime_argument_expeditor/agent_registry.py`
+
+Add an entry to the `AGENTIC_AGENTS` dictionary:
 
 ```python
-from cosa.agents.{agent_name}.job import {AgentName}Job
+AGENTIC_AGENTS = {
+    # ... existing agents ...
 
-# In the job creation endpoint:
-if job_type == "{agent_name}":
-    job = {AgentName}Job(
-        input_value = request.input_value,
-        user_id     = current_user.uid,
-        user_email  = current_user.email,
-        session_id  = request.session_id,
-        debug       = request.debug or False
-    )
-    queue.push( job )
+    "agent router go to {agent_name}" : {
+        "cli_module"         : "cosa.agents.{agent_name}.cli",
+        "job_class_path"     : "cosa.agents.{agent_name}.job.{AgentName}Job",
+        "required_user_args" : [ "query" ],           # Args the user MUST provide
+        "system_provided"    : [ "user_email", "session_id", "user_id", "no_confirm" ],
+        "arg_mapping"        : {
+            # Maps natural-language arg names → CLI arg names
+            "topic"  : "query",
+            "query"  : "query",
+            "budget" : "budget",
+        },
+        "fallback_questions" : {
+            # If arg is missing, Expeditor asks the user via voice
+            "query"  : "What would you like me to process?",
+            "budget" : "Would you like to set a budget limit? Say a dollar amount, or 'no limit'.",
+        },
+    },
+}
 ```
+
+**Key fields explained**:
+
+| Field | Purpose |
+|-------|---------|
+| `cli_module` | Python module path for `--help` capture |
+| `job_class_path` | Fully qualified class path for import |
+| `required_user_args` | Args the Expeditor will extract or prompt for |
+| `system_provided` | Args injected by the system (user never provides these) |
+| `arg_mapping` | Maps synonyms to canonical arg names (e.g., "topic" → "query") |
+| `fallback_questions` | Voice prompts for missing required args |
+
+**Optional field**: `special_handlers` — for advanced input resolution (e.g., `"research": "fuzzy_file_match"` in the podcast generator).
+
+### Factory Registration (agentic_job_factory.py)
+
+Add an `elif` branch to `create_agentic_job()` in `src/cosa/rest/agentic_job_factory.py`:
+
+```python
+def create_agentic_job( command, args_dict, user_id, user_email, session_id, debug=False, verbose=False ):
+
+    from cosa.agents.deep_research.job import DeepResearchJob
+    from cosa.agents.podcast_generator.job import PodcastGeneratorJob
+    from cosa.agents.deep_research_to_podcast.job import DeepResearchToPodcastJob
+    from cosa.agents.{agent_name}.job import {AgentName}Job     # <-- ADD IMPORT
+
+    if command == "agent router go to deep research":
+        # ... existing ...
+
+    elif command == "agent router go to podcast generator":
+        # ... existing ...
+
+    elif command == "agent router go to research to podcast":
+        # ... existing ...
+
+    elif command == "agent router go to {agent_name}":           # <-- ADD BRANCH
+        return {AgentName}Job(
+            input_value = args_dict.get( "query", "" ),
+            user_id     = user_id,
+            user_email  = user_email,
+            session_id  = session_id,
+            dry_run     = args_dict.get( "dry_run", False ),
+            debug       = debug,
+            verbose     = verbose
+        )
+
+    else:
+        print( f"[agentic_job_factory] Unknown command: {command}" )
+        return None
+```
+
+This factory is shared by both the voice path (Expeditor → TodoFifoQueue) and the REST path
+(dedicated router endpoints). Adding your branch here means both paths work automatically.
 
 ### Phase 5 Smoke Test Checklist
 
@@ -1473,15 +1550,204 @@ if job_type == "{agent_name}":
 [ ] Job appears in queue UI correctly
 ```
 
+### WebSocket Job State Transitions
+
+You do **not** need to emit WebSocket events manually. The `RunningFifoQueue` handles this
+automatically via `emit_job_state_transition()` (defined in `src/cosa/rest/queue_util.py`).
+
+Your job just needs to set these fields — the queue runner reads them at transition time:
+
+| Field | When to Set | Purpose |
+|-------|------------|---------|
+| `self.status` | In `do_all()` | "running", "completed", "failed" |
+| `self.artifacts` | In `_execute()` | File paths, cost summaries, metadata |
+| `self.answer_conversational` | In `do_all()` | Human-readable result for UI display |
+
+**Automatic transitions emitted by the queue**:
+- `todo → run` — when the consumer thread picks up your job
+- `run → done` — when `do_all()` returns successfully
+- `run → dead` — when `do_all()` raises an exception
+
+Each transition includes metadata (response_text, agent_type, duration_seconds, etc.) and is
+targeted to the correct user via `user_job_tracker`. The browser receives these as
+`job_state_transition` WebSocket events and updates the UI automatically.
+
 ### Phase 5 TodoWrite Template
 
 ```
 [LUPIN] Create {agent_name}/job.py with AgenticJobBase inheritance
 [LUPIN] Implement do_all() -> _execute() bridge pattern
 [LUPIN] Add dry-run mode with breadcrumb notifications
-[LUPIN] Register job type in queue router
+[LUPIN] Register agent in agent_registry.py (AGENTIC_AGENTS dict)
+[LUPIN] Add factory elif branch in agentic_job_factory.py
+[LUPIN] Create dedicated FastAPI router (Phase 5b)
+[LUPIN] Register router in main.py
 [LUPIN] Run smoke tests for job.py
 [LUPIN] Test job submission and queue visualization
+```
+
+---
+
+## Phase 5b: Dedicated FastAPI Router
+
+Each agentic job gets a **dedicated REST endpoint** for direct submission from the browser UI.
+This is how the notification submission cards (Surface 3) submit jobs — separate from the voice
+routing path.
+
+**Reference implementations**:
+- `src/cosa/rest/routers/deep_research.py`
+- `src/cosa/rest/routers/podcast_generator.py`
+
+### Router Template
+
+Create `src/cosa/rest/routers/{agent_name}.py`:
+
+```python
+"""
+{Agent Display Name} REST router for direct job submission.
+
+Provides the endpoint used by the notification UI submission card.
+
+Endpoints:
+    POST /api/{agent-name}/submit - Submit {agent_name} job
+"""
+
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel, Field
+
+import cosa.utils.util as cu
+from cosa.rest.auth import get_current_user
+from cosa.rest.queue_extensions import user_job_tracker
+from cosa.rest.agentic_job_factory import create_agentic_job
+
+
+router = APIRouter( tags=[ "{agent-name}" ] )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Pydantic Models
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class {AgentName}SubmitRequest( BaseModel ):
+    """Request body for submitting a {agent_name} job."""
+    query   : str            = Field( ..., min_length=1, description="Primary input" )
+    budget  : Optional[float] = Field( None, ge=0, description="Max budget in USD" )
+    dry_run : bool           = Field( False, description="Simulate without API calls" )
+
+
+class {AgentName}SubmitResponse( BaseModel ):
+    """Response body for {agent_name} job submission."""
+    status         : str = Field( ..., description="Job status (queued)" )
+    job_id         : str = Field( ..., description="Unique job identifier" )
+    queue_position : int = Field( ..., description="Position in the todo queue" )
+    message        : str = Field( ..., description="Human-readable confirmation" )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Dependencies
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_todo_queue():
+    """Dependency to get todo queue from main module."""
+    import fastapi_app.main as main_module
+    return main_module.jobs_todo_queue
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Endpoint
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.post( "/api/{agent-name}/submit", response_model={AgentName}SubmitResponse )
+async def submit_{agent_name}(
+    request_body: {AgentName}SubmitRequest,
+    current_user: dict = Depends( get_current_user ),
+    todo_queue = Depends( get_todo_queue )
+):
+    """
+    Submit a {agent_name} job to the background queue.
+
+    Requires:
+        - Authenticated user (Bearer token)
+        - Valid input in request_body
+
+    Ensures:
+        - Job created and pushed to queue
+        - User-job association tracked for WebSocket notifications
+        - Returns job_id for polling
+    """
+    user_id    = current_user.get( "uid" )
+    user_email = current_user.get( "email" )
+
+    if not user_id or not user_email:
+        raise HTTPException( status_code=400, detail="User ID or email not found in token" )
+
+    session_id = f"api-{user_id[ :8 ]}"
+
+    try:
+        args_dict = { "query": request_body.query }
+        if request_body.budget is not None:
+            args_dict[ "budget" ] = str( request_body.budget )
+        if request_body.dry_run:
+            args_dict[ "dry_run" ] = True
+
+        job = create_agentic_job(
+            command    = "agent router go to {agent_name}",
+            args_dict  = args_dict,
+            user_id    = user_id,
+            user_email = user_email,
+            session_id = session_id
+        )
+
+        if job is None:
+            raise HTTPException( status_code=500, detail="Failed to create job" )
+
+        # Associate BEFORE push to prevent race condition
+        user_job_tracker.associate_job_with_user( job.id_hash, user_id )
+        user_job_tracker.associate_job_with_session( job.id_hash, session_id )
+
+        # Push to todo queue
+        todo_queue.push( job )
+
+        return {AgentName}SubmitResponse(
+            status         = "queued",
+            job_id         = job.id_hash,
+            queue_position = todo_queue.size(),
+            message        = f"{Agent Display Name} job queued: {job.last_question_asked}"
+        )
+
+    except Exception as e:
+        raise HTTPException( status_code=500, detail=f"Failed to submit job: {str( e )}" )
+```
+
+### Register Router in main.py
+
+Add the import and registration in `src/fastapi_app/main.py`:
+
+```python
+# At the top with other router imports:
+from cosa.rest.routers import {agent_name}
+
+# In the router registration block:
+app.include_router( {agent_name}.router )
+```
+
+### Critical Pattern: Associate BEFORE Push
+
+The `user_job_tracker.associate_job_with_user()` and `associate_job_with_session()` calls MUST
+happen **before** `todo_queue.push()`. The queue's consumer thread may grab the job immediately
+after push, and if the user mapping doesn't exist yet, WebSocket notifications can't be routed
+to the correct user.
+
+```python
+# ✅ CORRECT — associate first, push second
+user_job_tracker.associate_job_with_user( job.id_hash, user_id )
+user_job_tracker.associate_job_with_session( job.id_hash, session_id )
+todo_queue.push( job )
+
+# ❌ WRONG — race condition if consumer grabs job before association
+todo_queue.push( job )
+user_job_tracker.associate_job_with_user( job.id_hash, user_id )
 ```
 
 ---
@@ -1812,6 +2078,11 @@ class {AgentName}Config:
     subagent_model: str = "claude-sonnet-4-20250514"    # Supporting tasks
     max_tokens    : int = 16000
 ```
+
+> **Note on model strings**: The hardcoded model names above are **examples only**. In the
+> actual codebase, model names are loaded from `lupin-app.ini` via `ConfigurationManager` (see
+> Phase 0). The config supports multiple providers and uses a `Provider/model-name` format.
+> Always load model names from config rather than hardcoding them in production code.
 
 ### Phase 6 Smoke Test Checklist
 
@@ -3066,9 +3337,121 @@ User input (text or voice transcription)
 **Catches**: LLM routing failures, prompt template bugs, snapshot cache mismatches,
 confirmation dialog issues, argument extraction errors.
 
+### Creating a Submission Card
+
+Each agent needs an HTML card in the notification UI and a JavaScript handler to submit jobs.
+
+**1. HTML Card** — Add to `src/fastapi_app/static/html/notifications.html`:
+
+```html
+<div class="job-submit-card" id="{agent-name}-submit-card">
+    <h4>🔧 {Agent Display Name}</h4>
+    <div class="form-group" style="margin-bottom: 12px;">
+        <label for="{agent-name}-input" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">
+            Input:
+        </label>
+        <div style="display: flex; gap: 8px; align-items: center;">
+            <button type="button" id="{agent-name}-stt-button" class="stt-button"
+                    title="Click to record (30s max, ESC to cancel)">🎤</button>
+            <input type="text" id="{agent-name}-input"
+                   placeholder="Enter your request..."
+                   style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+        </div>
+    </div>
+    <div style="margin-bottom: 12px;">
+        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="{agent-name}-dry-run" checked />
+            <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
+        </label>
+    </div>
+    <button id="submit-{agent-name}-job" type="button"
+            style="padding: 10px 20px; background: #28a745; color: white; border: none;
+                   border-radius: 4px; cursor: pointer; font-weight: 500;">
+        🚀 Submit Job
+        <span id="{agent-name}-loading" class="loading" style="display: none;">
+            <span class="spinner"></span>
+        </span>
+    </button>
+    <div id="{agent-name}-submit-status"
+         style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+</div>
+```
+
+**2. JavaScript Handler** — Add to `src/fastapi_app/static/js/notifications.js`:
+
+Wire the submit button in `setupJobSubmitEventListeners()`:
+
+```javascript
+const submit{AgentName}Btn = document.getElementById( 'submit-{agent-name}-job' );
+if ( submit{AgentName}Btn ) {
+    submit{AgentName}Btn.addEventListener( 'click', () => {
+        this.submit{AgentName}Job();
+    });
+}
+```
+
+Then add the submission method (follows the established fetch pattern):
+
+```javascript
+async submit{AgentName}Job() {
+    const input      = document.getElementById( '{agent-name}-input' );
+    const dryRun     = document.getElementById( '{agent-name}-dry-run' );
+    const submitBtn  = document.getElementById( 'submit-{agent-name}-job' );
+    const loading    = document.getElementById( '{agent-name}-loading' );
+    const statusDiv  = document.getElementById( '{agent-name}-submit-status' );
+
+    const query = input.value.trim();
+    if ( !query ) {
+        statusDiv.textContent = '⚠️ Please enter input.';
+        statusDiv.style.color = '#dc3545';
+        return;
+    }
+
+    try {
+        submitBtn.disabled = true;
+        loading.style.display = 'inline-block';
+        statusDiv.textContent = 'Submitting...';
+
+        await this.ensureValidToken();
+
+        const response = await fetch( '/api/{agent-name}/submit', {
+            method  : 'POST',
+            headers : {
+                'Authorization' : this.getAuthHeader(),
+                'X-Session-ID'  : this.queueSessionId,
+                'Content-Type'  : 'application/json'
+            },
+            body: JSON.stringify({ query: query, dry_run: dryRun.checked })
+        });
+
+        if ( !response.ok ) {
+            const err = await response.json().catch( () => ({ detail: response.statusText }) );
+            throw new Error( err.detail || `HTTP ${response.status}` );
+        }
+
+        const result = await response.json();
+        statusDiv.textContent = `✓ Job submitted! ID: ${result.job_id}, Position: ${result.queue_position}`;
+        statusDiv.style.color = '#28a745';
+        input.value = '';
+
+    } catch ( error ) {
+        statusDiv.textContent = `✗ Error: ${error.message}`;
+        statusDiv.style.color = '#dc3545';
+    } finally {
+        submitBtn.disabled = false;
+        loading.style.display = 'none';
+    }
+}
+```
+
+**Key patterns**: Bearer token auth via `this.getAuthHeader()`, session ID header, loading
+spinner toggle, color-coded status feedback (#28a745 = green success, #dc3545 = red error).
+
 ### Surface 3 Checklist
 
 ```
+[ ] Submission card added to notifications.html
+[ ] JS handler added to notifications.js (setupJobSubmitEventListeners + submit method)
 [ ] Agent's submission card renders in notification UI
 [ ] Text input correctly routes to your agent via LLM
 [ ] /api/push endpoint correctly classifies your agent's commands
@@ -3106,22 +3489,29 @@ Templates (human-written)
 
 ### Step 1: Add to Agent Router Commands
 
-Register your agent in `src/conf/agent-router-agentic-commands.json`:
+Register your agent in `src/conf/training/agent-router-agentic-commands.json`:
 
 ```json
 {
-    "agent router go to {agent_name}": {
-        "template_file": "agentic-intent-{agent_name}-templates.txt",
-        "description": "{Brief description of what this agent does}",
-        "required_args": ["query"],
-        "optional_args": ["budget", "dry_run"]
-    }
+    "agent router go to {agent_name}": "/src/ephemera/prompts/data/synthetic-data-agent-routing-{agent_name}.txt"
+}
+```
+
+The JSON structure maps each routing command directly to its template file path (relative to
+project root). No metadata object — just command → template path.
+
+**Actual file contents** (for reference):
+```json
+{
+    "agent router go to deep research"      : "/src/ephemera/prompts/data/synthetic-data-agent-routing-deep-research.txt",
+    "agent router go to podcast generator"   : "/src/ephemera/prompts/data/synthetic-data-agent-routing-podcast-generator.txt",
+    "agent router go to research to podcast" : "/src/ephemera/prompts/data/synthetic-data-agent-routing-research-to-podcast.txt"
 }
 ```
 
 ### Step 2: Create Training Templates
 
-Create `src/conf/training-data/agentic-intent-{agent_name}-templates.txt`:
+Create `src/ephemera/prompts/data/synthetic-data-agent-routing-{agent_name}.txt`:
 
 ```
 # Templates for {agent_name} — one per line
@@ -3334,7 +3724,9 @@ Phase 5: Queue Integration
 [ ] job.py with AgenticJobBase inheritance
 [ ] do_all() → _execute() bridge pattern
 [ ] Dry-run mode with breadcrumb notifications
-[ ] Job registered in factory + queue router
+[ ] Agent registered in agent_registry.py (AGENTIC_AGENTS dict)
+[ ] Factory elif branch added in agentic_job_factory.py
+[ ] Dedicated FastAPI router created and registered in main.py
 
 Phase 6-10: Advanced (as needed)
 [ ] LLM client with model routing (Phase 6)
@@ -3358,6 +3750,7 @@ Surface 2: Mock Endpoint (FREE)
 [ ] Job lifecycle: todo → run → done
 
 Surface 3: UI Cards + LLM (~$0.001/query)
+[ ] Submission card added to notifications.html + notifications.js
 [ ] Text input routes to agent via LLM
 [ ] Submission card works in notification UI
 [ ] /api/push endpoint classifies correctly
@@ -3432,8 +3825,17 @@ src/cosa/agents/podcast_generator/tts_client.py
 # Chained agent (Phase 10)
 src/cosa/agents/deep_research_to_podcast/agent.py
 
-# Job factory
+# Job factory + agent registry (Phase 5)
 src/cosa/rest/agentic_job_factory.py
+src/cosa/agents/runtime_argument_expeditor/agent_registry.py
+
+# Dedicated routers (Phase 5b)
+src/cosa/rest/routers/deep_research.py
+src/cosa/rest/routers/podcast_generator.py
+
+# Queue utilities (WebSocket state transitions)
+src/cosa/rest/queue_util.py
+src/cosa/rest/queue_extensions.py
 
 # Mock job endpoint (Surface 2)
 src/cosa/rest/routers/mock_job.py
@@ -3457,5 +3859,6 @@ src/tests/unit/test_runtime_argument_expeditor.py
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.1 | 2026-02-07 | Completeness review: fixed training template naming + JSON path (Surface 4), added agent_registry.py + agentic_job_factory.py registration (Phase 5), added FastAPI router template (Phase 5b), added notification UI submission card guide (Surface 3), added artifact storage pattern + WebSocket state transition notes (Phase 5), added model string convention note (Phase 6), expanded final checklist |
 | 2.0 | 2026-02-06 | Complete lifecycle guide: Part I CONCEPT, Part II BUILD expanded (Phases 6-10), Part III VALIDATE Testing Ladder (5 surfaces), Part IV Reference Implementations |
 | 1.0 | 2026-01-27 | Initial workflow documentation (BUILD phases 0-5 only) |

@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.02.07 - Session 150 | Agentic Voice Workflow v2.1 Completeness Review
+
+#### Checkpoint | 2026.02.07 17:00 | 11 changes — 2 fixes, 7 additions, 2 structural
+
+**Accomplishments**:
+- **Fix 1+2**: Corrected Surface 4 training template naming (was `agentic-intent-{name}-templates.txt`, actual is `synthetic-data-agent-routing-{name}.txt`) and fixed JSON path/structure for `agent-router-agentic-commands.json`
+- **Addition 3+4**: Added agent_registry.py `AGENTIC_AGENTS` dict pattern and agentic_job_factory.py `elif` dispatch pattern to Phase 5
+- **Addition 5**: Added new Phase 5b — dedicated FastAPI router template with Pydantic models, auth, and "associate before push" pattern
+- **Addition 6**: Added notification UI submission card guide (HTML + JS handler) to Surface 3
+- **Addition 7+8**: Added artifact storage pattern and WebSocket `job_state_transition` note to Phase 5
+- **Addition 9**: Added model string convention note to Phase 6 (hardcoded strings are examples, use ConfigurationManager)
+- **Structural 10+11**: Expanded final checklist with 4 missing items, added v2.1 version history entry, updated TOC + Reference Implementations
+
+**Files Modified**: `src/workflow/agentic-voice-workflow.md` (3461 → 3864 lines, v2.0 → v2.1)
+**Verification**: All 30 referenced file paths confirmed to exist in codebase
+**Commit**: 8c26b24
+
+---
+
 ### 2026.02.07 - Session 149 | Normalize audience + audience_context Across All Agentic Agents
 
 #### Checkpoint | 2026.02.07 15:30 | 5-phase audience normalization complete
