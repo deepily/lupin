@@ -9,7 +9,8 @@
 
 | Session ID | Started | Last Activity | Status |
 |------------|---------|---------------|--------|
-| 41d2e575 | 2026-02-06T09:00:00 | 2026-02-06T09:00:00 | active |
+| 2417c2b5 | 2026-02-06T21:00:00 | 2026-02-06T21:10:00 | active |
+| 41d2e575 | 2026-02-06T09:00:00 | 2026-02-06T17:00:00 | closed |
 | 662576da | 2026-02-05T09:00:00 | 2026-02-05T14:45:00 | closed |
 | bcd6e830 | 2026-02-04T08:30:00 | 2026-02-04T10:00:00 | closed |
 | bb3a5d21 | 2026-02-03T14:50:00 | 2026-02-03T19:45:00 | closed |
@@ -36,7 +37,9 @@
 
 ### Completed
 
+- [x] **DataFrameGroupBy.apply DeprecationWarning in peft_trainer.py:597** (ad-hoc) → commit: afbfa7d (docs), CoSA pending | By: 2417c2b5
 - [x] **PEFT Trainer False Positive Error Detection** (ad-hoc) → commit: 9b0e6a7 (docs), CoSA pending | By: 662576da
+- [x] **ask_yes_no() missing priority parameter** (ad-hoc) → commit: 6b41a24 | By: 41d2e575
 
 ---
 

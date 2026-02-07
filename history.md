@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.02.06 - Session 142 | Bug Fix Mode
+
+### Fixes
+
+#### Fix 1: DataFrameGroupBy.apply DeprecationWarning
+- **Source**: ad-hoc (observed during PEFT validation runs)
+- **Problem**: `groupby("command").apply(lambda)` included grouping columns in the lambda, triggering pandas DeprecationWarning about future behavior change
+- **Files**: `src/cosa/training/peft_trainer.py` (line 597-600)
+- **Solution**: Added `include_groups=False` to `.apply()` and adjusted index handling with `.droplevel(1).reset_index()` to preserve the "command" column
+- **Test**: Unit 423/423 PASS, custom validation PASS
+- **Commit**: afbfa7d (docs), CoSA pending
+
+### Session Summary
+(Will be completed at session close)
+
+---
+
 ### 2026.02.06 - Session 141 | PEFT Phase 2: Model Swap + Disambiguation Tests
 
 **Accomplishments**:
@@ -70,7 +87,11 @@
 - **6b41a24** | `ask_yes_no()` missing `priority` parameter — was hardcoded to `MEDIUM`, preventing TTS read-aloud. Added `priority: str = "medium"` param matching `converse()` and `ask_multiple_choice()` signatures. File: `src/lupin_mcp/cosa_voice_mcp.py`
 
 ### Session Summary
-(Will be completed at session close)
+- **Total Fixes**: 1
+- **Files Changed**: src/lupin_mcp/cosa_voice_mcp.py
+- **Commits**: 6b41a24
+
+**Status**: Session closed 2026.02.06
 
 ---
 
