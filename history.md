@@ -39,7 +39,19 @@
 
 ### 2026.02.07 - Session 148 | PEFT Phase 2 — Results Dashboard + Explicit Routing + Quantization Strengthening
 
-#### Checkpoint | 2026.02.07 | Parts A/B/C complete, 461 unit tests pass
+#### Checkpoint 2 | 2026.02.07 | Fix blank/comment line crash + regenerate training data
+
+**Accomplishments**:
+- Added `skip_empty` and `skip_comments` parameters to `get_file_as_list()` in `util.py` — backwards-compatible, defaults to `False`
+- Updated all 6 call sites in `xml_coordinator.py` to filter blank lines and `# comment` lines from template files
+- Regenerated training data (3 JSONL files) with the fix — pipeline completes without IndexError
+
+**Files Modified** (CoSA repo, not committed here): `util.py`, `xml_coordinator.py`
+**Files Modified** (Lupin repo): `agentic-job-xml-train.jsonl`, `agentic-job-xml-test.jsonl`, `agentic-job-xml-validate.jsonl`
+**Verification**: 467/467 unit tests passing, zero regressions
+**Commit**: df6ce1d
+
+#### Checkpoint 1 | 2026.02.07 | Parts A/B/C complete, 461 unit tests pass
 
 **Accomplishments**:
 - **Part A (Results Dashboard)**: Added consolidated training summary to `peft_trainer.py` — captures validation results from all 3 stages (pre/post-training, post-quantization) and prints 4 comparison tables: Overall Metrics, Per-Command Deltas, Quantization Impact, Pipeline Stage Timing. Stored `last_ms_per_item` in `xml_coordinator.py`.
