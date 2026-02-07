@@ -8,8 +8,36 @@
 |-------|-------|--------|---------------|
 | 1 | Layer 1: Storage | COMPLETE | 91 unit tests, 16 smoke tests, all passing |
 | 2 | Layer 2: Intent | COMPLETE | 73 unit tests, 5 new source files + 1 modified + 1 test file |
-| 3 | Layer 3: Dispatch | NOT STARTED | Queue routing swap + cache + voice I/O |
+| 3 | Layer 3: Queue Integration | COMPLETE | 26 unit tests, feature-flag routing swap + cache skip + voice confirmation |
 | 4 | Layer 3: Polish | NOT STARTED | End-to-end voice workflows |
+
+## Phase 3 Detailed Progress
+
+| Step | Component | Status |
+|------|-----------|--------|
+| 1 | Feature flag config + splainer | Done |
+| 2 | Producer-side routing swap (todo_fifo_queue.py) | Done |
+| 3 | Consumer-side cache skip + serialization exclusion (running_fifo_queue.py) | Done |
+| 4 | Voice confirmation for destructive operations (agent.py) | Done |
+| 5 | Unit tests (26 tests across 3 test classes) | Done |
+| 6 | Documentation update (layer-3.md, implementation-tracker.md) | Done |
+| 7 | Regression testing (full unit suite + WebSocket smoke) | Done |
+
+## Phase 3 Test Coverage
+
+| Test Class | Count | What It Tests |
+|------------|-------|---------------|
+| TestCrudQueueRouting | 8 | Feature flag true/false/default/whitespace, inheritance, constructor args |
+| TestCrudCacheBehavior | 5 | isinstance checks for CRUD/Todo/Calendar agents, serialization exclusion pattern |
+| TestCrudConfirmationFlow | 13 | needs_confirmation per operation, yes/no/timeout/error paths, cancelled formatting |
+
+## Phase 3 Verification Results (2026-02-06)
+
+- Phase 3 unit tests: 26/26 passed (1.83s)
+- Phase 2 regression: 73/73 passed (2.03s)
+- Phase 1 regression: 91/91 passed (0.55s)
+- Full unit suite: 449/449 passed (9.59s, zero regressions)
+- WebSocket smoke: 50/50 passed (25 core + 22 integration + 2 perf + 1 load)
 
 ## Phase 2 Detailed Progress
 

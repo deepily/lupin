@@ -617,9 +617,17 @@ class TestCrudForDataFramesAgentMocked:
         assert result[ "output" ][ "status" ] == "added"
         assert agent.error is None
 
-    def test_run_code_error_triggers_fallback( self, tmp_storage_dir ):
+    @patch( "cosa.crud_for_dataframes.agent.notify_user_sync" )
+    def test_run_code_error_triggers_fallback( self, mock_notify, tmp_storage_dir ):
         """run_code() falls back to Claude Code when dispatch fails."""
         agent = self._create_agent( tmp_dir=tmp_storage_dir )
+
+        # Mock confirmation to approve destructive operation
+        mock_response = MagicMock()
+        mock_response.is_timeout     = False
+        mock_response.is_error       = False
+        mock_response.response_value = "yes"
+        mock_notify.return_value     = mock_response
 
         # Set an intent that will fail (delete with no id or match_fields)
         agent.crud_intent = CRUDIntent(
@@ -640,10 +648,18 @@ class TestCrudForDataFramesAgentMocked:
             assert result[ "return_code" ] == 0
             assert result[ "output" ][ "status" ] == "added"
 
-    def test_run_code_both_fail_raises( self, tmp_storage_dir ):
+    @patch( "cosa.crud_for_dataframes.agent.notify_user_sync" )
+    def test_run_code_both_fail_raises( self, mock_notify, tmp_storage_dir ):
         """run_code() raises CodeGenerationFailedException when both paths fail."""
         from cosa.agents.agent_base import CodeGenerationFailedException
         agent = self._create_agent( tmp_dir=tmp_storage_dir )
+
+        # Mock confirmation to approve destructive operation
+        mock_response = MagicMock()
+        mock_response.is_timeout     = False
+        mock_response.is_error       = False
+        mock_response.response_value = "yes"
+        mock_notify.return_value     = mock_response
 
         # Set an intent that will fail
         agent.crud_intent = CRUDIntent(
@@ -656,10 +672,18 @@ class TestCrudForDataFramesAgentMocked:
             with pytest.raises( CodeGenerationFailedException, match="CRUD dispatch failed" ):
                 agent.run_code()
 
-    def test_run_code_fallback_also_fails_raises( self, tmp_storage_dir ):
+    @patch( "cosa.crud_for_dataframes.agent.notify_user_sync" )
+    def test_run_code_fallback_also_fails_raises( self, mock_notify, tmp_storage_dir ):
         """run_code() raises CodeGenerationFailedException when fallback dispatch also fails."""
         from cosa.agents.agent_base import CodeGenerationFailedException
         agent = self._create_agent( tmp_dir=tmp_storage_dir )
+
+        # Mock confirmation to approve destructive operation
+        mock_response = MagicMock()
+        mock_response.is_timeout     = False
+        mock_response.is_error       = False
+        mock_response.response_value = "yes"
+        mock_notify.return_value     = mock_response
 
         # Set an intent that will fail
         agent.crud_intent = CRUDIntent(

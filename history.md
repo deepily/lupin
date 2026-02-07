@@ -1,5 +1,25 @@
 # Lupin Project History
 
+### 2026.02.06 - Session 143 | CRUD Phase 3: Queue Integration + Voice Confirmation
+
+#### Checkpoint | 2026.02.06 22:30 | CRUD Phase 3 complete — queue integration + voice confirmation
+
+**Accomplishments**:
+- Implemented Layer 3 of DataFrame CRUD system: queue integration + voice confirmation
+- Feature-flag routing swap in todo_fifo_queue.py (TodoCrudAgent/CalendarCrudAgent replace legacy agents)
+- Cache skip + serialization exclusion in running_fifo_queue.py (mutable data shouldn't be cached)
+- Voice confirmation for destructive operations (delete, delete_list, update) via notify_user_sync
+- 26 new unit tests across 3 test classes (routing, cache behavior, confirmation flow)
+- Fixed 3 existing Layer 2 tests that needed notify_user_sync mocks after confirmation was added
+
+**Files Modified** (Lupin repo): src/conf/lupin-app.ini, src/conf/lupin-app-splainer.ini, src/rnd/headless-cc-for-dataframe-crud/implementation-tracker.md, layer-3.md, src/tests/unit/test_crud_for_dataframes_agent.py
+**Files Created**: src/tests/unit/test_crud_queue_integration.py (26 tests)
+**Files Modified** (CoSA repo, not committed here): src/cosa/rest/todo_fifo_queue.py, src/cosa/rest/running_fifo_queue.py, src/cosa/crud_for_dataframes/agent.py
+**Verification**: 449/449 unit tests, 50/50 WebSocket smoke tests, zero regressions
+**Commit**: a51d9f6
+
+---
+
 ### 2026.02.06 - Session 142 | Bug Fix Mode
 
 ### Fixes

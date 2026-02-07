@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-06 (Session 141)
+Last updated: 2026-02-06 (Session 143)
 
 ## Pending
 
@@ -12,9 +12,15 @@ Last updated: 2026-02-06 (Session 141)
   - 4 config keys + prompt template stub
   - R&D docs: `src/rnd/headless-cc-for-dataframe-crud/`
   - Issues fixed: Pydantic ClassVar, XML None coercion, timestamp truncation
-- [ ] **[LUPIN] Phase 2: Agent Implementation** - PENDING (blocked by Phase 1 ✅)
-- [ ] **[LUPIN] Phase 3: Queue Integration + Expeditor Reuse** - PENDING (blocked by Phase 2)
-- [ ] **[LUPIN] Phase 4: Voice I/O + Confirmation Flow** - PENDING (blocked by Phase 3)
+- [x] **[LUPIN] Phase 2: Agent Implementation** - ✅ COMPLETE (Session 143)
+  - CrudForDataFramesAgent + TodoCrudAgent + CalendarCrudAgent + dispatcher + intent_extractor
+  - 73 unit tests, all passing
+- [x] **[LUPIN] Phase 3: Queue Integration + Voice Confirmation** - ✅ COMPLETE (Session 143)
+  - Feature-flag routing swap in todo_fifo_queue.py, cache skip + serialization exclusion
+  - Voice confirmation for destructive ops (delete, delete_list, update)
+  - 26 unit tests, 449 total passing, 50 WebSocket smoke tests passing
+- [ ] **[LUPIN] Interactive E2E Testing of CRUD Agents** - Run live todo/calendar voice queries through the queue with server running. Test via CRUD submission card in notifications UI or mock objects. Validate routing swap, cache skip, voice confirmation, and cancelled-op handling.
+- [ ] **[LUPIN] Phase 4: End-to-End Voice Workflows + Polish** - PENDING (blocked by Phase 3 ✅)
 
 ### Skills Management (Session 118 Discovery)
 
