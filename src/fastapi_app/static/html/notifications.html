@@ -471,7 +471,18 @@
                 </div>
                 <div class="status-item">
                     <strong>Sessions:</strong>
-                    Queue: <span id="queue-session">-</span>, Audio: <span id="audio-session">-</span>
+                    <div class="session-list">
+                        <div class="session-entry">
+                            <span class="session-label">Queue:</span>
+                            <code id="queue-session">-</code>
+                            <span class="copy-btn" title="Copy Queue session ID" onclick="window.notificationsUI.copyToClipboard( 'queue-session' )">📋</span>
+                        </div>
+                        <div class="session-entry">
+                            <span class="session-label">Audio:</span>
+                            <code id="audio-session">-</code>
+                            <span class="copy-btn" title="Copy Audio session ID" onclick="window.notificationsUI.copyToClipboard( 'audio-session' )">📋</span>
+                        </div>
+                    </div>
                 </div>
                 <div class="status-item">
                     <strong>Health Monitor:</strong>

@@ -1181,6 +1181,34 @@ class NotificationsUI {
         this.updateElement( 'audio-session', this.audioSessionId || '-' );
     }
 
+    copyToClipboard( elementId ) {
+        /**
+         * Copy the text content of a session ID element to the clipboard.
+         *
+         * Requires:
+         *     - elementId is the ID of an existing DOM element
+         *
+         * Ensures:
+         *     - copies text to clipboard if value is not empty or '-'
+         *     - shows brief checkmark feedback on the adjacent copy button
+         */
+        const el = document.getElementById( elementId );
+        if ( !el ) return;
+
+        const text = el.textContent.trim();
+        if ( !text || text === '-' ) return;
+
+        navigator.clipboard.writeText( text ).then( () => {
+            // Brief visual feedback: swap icon to checkmark
+            const btn = el.nextElementSibling;
+            if ( btn ) {
+                const original = btn.textContent;
+                btn.textContent = '✅';
+                setTimeout( () => { btn.textContent = original; }, 1200 );
+            }
+        } );
+    }
+
     createAudioElement() {
         const audio = document.createElement( 'audio' );
         audio.controls = false; // Hidden for UI cleanliness

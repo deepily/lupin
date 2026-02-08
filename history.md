@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.02.08 - Session 154 | User-Visible Args Whitelist for Runtime Argument Expeditor
+
+**Accomplishments**:
+- **Whitelist Design**: Implemented "agents publish, expeditor consumes" pattern — each agent CLI self-declares its user-visible args via `USER_VISIBLE_ARGS` constant and `--user-visible-args` flag that prints JSON and exits
+- **3 CLI Modules Updated** (CoSA submodule):
+  - `deep_research/cli.py`: `["query", "budget", "audience", "audience_context"]`
+  - `podcast_generator/__main__.py`: `["research", "languages", "audience", "audience_context"]`
+  - `deep_research_to_podcast/__main__.py`: `["query", "budget", "languages", "audience", "audience_context"]`
+- **Registry Function**: Added `get_user_visible_args()` + `_user_visible_cache` to `agent_registry.py` (parallel to existing `get_cli_help()`)
+- **Expeditor Filter**: Changed `_confirm_and_iterate()` from blacklist (hide `system_provided`) to whitelist (show only user-visible args), with fallback to `fallback_questions` keys. Added gate on missing-arg prompts in `expedite()` to skip non-user-visible args
+- **6 New Unit Tests**: 4 for `get_user_visible_args` (success, caching, missing key, timeout) + 2 for confirmation whitelist (engineering params excluded, fallback behavior). Full regression: 493/493 unit tests pass
+
+**Files Modified** (Lupin repo): `test_runtime_argument_expeditor.py`, R&D doc rename (02.05 → 02.07)
+**Files Modified** (CoSA submodule, not committed here): `cli.py`, `__main__.py` x2, `agent_registry.py`, `expeditor.py`
+**Checkpoint**: 8c798ff
+
+---
+
 ### 2026.02.08 - Session 148 (continued) | Part 3 Curl Smoke Test Planning
 
 **Accomplishments**:
@@ -156,8 +174,19 @@
 - **Solution**: Changed cancel fallback from `''` to `'[cancelled]'`, aligning with the existing non-empty patterns (`'no'` for yes_no, `JSON.stringify({cancelled: true, answers: {}})` for multiple_choice)
 - **Test**: Unit 487/487 PASS, manual verification PASS (cancel dismissed cleanly, `converse()` returned `"[cancelled]"`)
 
+#### Fix 2: No Way to Copy WebSocket Session IDs from System Status
+- **Source**: ad-hoc
+- **Problem**: Session IDs displayed inline with no copy mechanism, requiring manual text selection
+- **Files**: `notifications.html`, `notifications.css`, `notifications.js`
+- **Solution**: Converted inline display to vertical list layout with `<code>` elements and clipboard copy icons. `copyToClipboard()` method with checkmark feedback. No-op when `-` (not connected).
+- **Test**: Manual verification PASS
+
 ### Session Summary
-(Will be completed at session close)
+- **Total Fixes**: 2
+- **Files Changed**: `notifications.js`, `notifications.html`, `notifications.css`
+- **Commits**: 65658ba (Fix 1), pending (Fix 2)
+
+**Status**: Session closed 2026.02.08
 
 ---
 
