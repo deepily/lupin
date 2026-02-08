@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.02.08 - Session 148 (continued) | Part 3 Curl Smoke Test Planning
+
+**Accomplishments**:
+- Planned Part 3 curl smoke tests for CRUD agents (4 scenarios: health, add, feature-flag toggle, delete)
+- Found `GET /api/debug/websocket-state` endpoint for programmatic WebSocket session lookup — enables real notification delivery during curl tests instead of dummy websocket IDs
+- Plan ready at `.claude/plans/shimmering-exploring-blossom.md`, pending execution next session
+
+**Next**: Execute Part 3 curl tests (server + Phi-4 required), then Part 2 UI tests
+
+---
+
+### 2026.02.08 - Session 147 (continued) | Bug Fix: Copy Buttons for WebSocket Session IDs
+
+**Fix 2**: Added clipboard copy buttons to Queue and Audio WebSocket session IDs in the System Status section of the notifications UI. Converted inline display to vertical list layout with `<code>` elements and copy icons. Clicking the clipboard icon copies the session ID and shows brief checkmark feedback. No-op when value is `-` (not connected).
+
+**Files Modified**: `notifications.html` (list layout), `notifications.css` (session-list + copy-btn styles), `notifications.js` (copyToClipboard method)
+
+---
+
 ### 2026.02.07 - Session 152 | Principled Augmentation for Under-Sampled Training Commands
 
 **Accomplishments**:
