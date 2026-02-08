@@ -5,15 +5,15 @@ Tests 7 components:
 1. ExpeditorResponse model (xml_models.py) - 16 tests
 2. _parse_lora_args() (expeditor.py) - 9 tests
 3. _inject_system_args() (expeditor.py) - 4 tests
-4. Agent registry + get_cli_help() (agent_registry.py) - 14 tests
+4. Agent registry + get_cli_help() + get_user_visible_args() (agent_registry.py) - 18 tests
 5. create_agentic_job() factory (agentic_job_factory.py) - 12 tests
 6. ArgConfirmationResponse model (xml_models.py) - 8 tests
-7. _confirm_and_iterate() (expeditor.py) - 7 tests
+7. _confirm_and_iterate() (expeditor.py) - 9 tests
 
 All external dependencies mocked. No server, no LLM, no filesystem I/O.
 
 Created: 2026-02-05
-Updated: 2026-02-07 — audience/audience_context normalization + confirmation loop
+Updated: 2026-02-07 — user-visible-args whitelist + confirmation loop
 """
 
 import pytest
@@ -25,7 +25,9 @@ from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpe
 from cosa.agents.runtime_argument_expeditor.agent_registry import (
     AGENTIC_AGENTS,
     get_cli_help,
-    _help_cache
+    get_user_visible_args,
+    _help_cache,
+    _user_visible_cache
 )
 from cosa.rest.agentic_job_factory import create_agentic_job
 
@@ -335,15 +337,16 @@ class TestInjectSystemArgs:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Class 4: TestAgentRegistry (11 tests)
+# Class 4: TestAgentRegistry (18 tests)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestAgentRegistry:
-    """Tests for AGENTIC_AGENTS dict and get_cli_help() function."""
+    """Tests for AGENTIC_AGENTS dict, get_cli_help(), and get_user_visible_args()."""
 
     def setup_method( self ):
-        """Clear the help cache before each test."""
+        """Clear help and user-visible caches before each test."""
         _help_cache.clear()
+        _user_visible_cache.clear()
 
     def test_registry_has_three_agents( self ):
         """Registry contains exactly 3 agentic agents."""
@@ -441,6 +444,48 @@ class TestAgentRegistry:
         assert entry[ "arg_mapping" ][ "audience_context" ] == "audience_context"
         assert "beginner" in entry[ "fallback_questions" ][ "audience" ].lower() or \
                "academic" in entry[ "fallback_questions" ][ "audience" ].lower()
+
+    # --- get_user_visible_args tests ---
+
+    @patch( "cosa.agents.runtime_argument_expeditor.agent_registry.subprocess.run" )
+    def test_get_user_visible_args_deep_research( self, mock_run ):
+        """Successful subprocess returns expected arg list for deep research."""
+        mock_run.return_value = MagicMock(
+            returncode = 0,
+            stdout     = '["query", "budget", "audience", "audience_context"]'
+        )
+
+        result = get_user_visible_args( "agent router go to deep research" )
+
+        assert result == [ "query", "budget", "audience", "audience_context" ]
+        mock_run.assert_called_once()
+
+    @patch( "cosa.agents.runtime_argument_expeditor.agent_registry.subprocess.run" )
+    def test_get_user_visible_args_caching( self, mock_run ):
+        """Second call uses cache, subprocess called only once."""
+        mock_run.return_value = MagicMock(
+            returncode = 0,
+            stdout     = '["query", "budget"]'
+        )
+
+        result1 = get_user_visible_args( "agent router go to deep research" )
+        result2 = get_user_visible_args( "agent router go to deep research" )
+
+        assert result1 == result2 == [ "query", "budget" ]
+        assert mock_run.call_count == 1
+
+    def test_get_user_visible_args_missing_key( self ):
+        """Nonexistent command returns None without calling subprocess."""
+        result = get_user_visible_args( "nonexistent" )
+        assert result is None
+
+    @patch( "cosa.agents.runtime_argument_expeditor.agent_registry.subprocess.run" )
+    def test_get_user_visible_args_timeout( self, mock_run ):
+        """TimeoutExpired returns None."""
+        mock_run.side_effect = subprocess.TimeoutExpired( cmd="test", timeout=10 )
+
+        result = get_user_visible_args( "agent router go to deep research" )
+        assert result is None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -757,11 +802,13 @@ class TestArgConfirmationResponse:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Class 7: TestConfirmAndIterate (7 tests)
+# Class 7: TestConfirmAndIterate (9 tests)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestConfirmAndIterate:
     """Tests for RuntimeArgumentExpeditor._confirm_and_iterate() with mocked voice I/O."""
+
+    DR_COMMAND_KEY = "agent router go to deep research"
 
     def setup_method( self ):
         """Create a minimal expeditor instance with mocked dependencies."""
@@ -772,87 +819,147 @@ class TestConfirmAndIterate:
         self.expeditor.llm_spec_key             = "test_key"
         self.expeditor.llm_factory              = MagicMock()
 
-        self.agent_entry = AGENTIC_AGENTS[ "agent router go to deep research" ]
+        self.agent_entry = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
 
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
     @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
-    def test_immediate_approval_yes( self, mock_ask ):
+    def test_immediate_approval_yes( self, mock_ask, mock_uva ):
         """User says 'yes' → returns args immediately."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         mock_ask.return_value = "yes"
         args = { "query": "quantum computing" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result == args
         mock_ask.assert_called_once()
 
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
     @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
-    def test_immediate_approval_looks_good( self, mock_ask ):
+    def test_immediate_approval_looks_good( self, mock_ask, mock_uva ):
         """User says 'looks good' → returns args immediately."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         mock_ask.return_value = "looks good"
         args = { "query": "AI safety" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result == args
 
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
     @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
-    def test_cancel_keyword( self, mock_ask ):
+    def test_cancel_keyword( self, mock_ask, mock_uva ):
         """User says 'cancel' → returns None."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         mock_ask.return_value = "cancel"
         args = { "query": "test" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result is None
 
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
     @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
-    def test_timeout_returns_none( self, mock_ask ):
+    def test_timeout_returns_none( self, mock_ask, mock_uva ):
         """_ask_for_arg returns None (timeout) → returns None."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         mock_ask.return_value = None
         args = { "query": "test" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result is None
 
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
     @patch.object( RuntimeArgumentExpeditor, "_parse_modification" )
     @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
-    def test_modify_then_approve( self, mock_ask, mock_parse ):
+    def test_modify_then_approve( self, mock_ask, mock_parse, mock_uva ):
         """User requests modification, then approves on second prompt."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         mock_ask.side_effect = [ "change the budget to 50", "yes" ]
         mock_parse.return_value = ArgConfirmationResponse(
             action="modify", arg_name="budget", new_value="50"
         )
         args = { "query": "quantum computing" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result is not None
         assert result[ "budget" ] == "50"
         assert result[ "query" ] == "quantum computing"
 
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
     @patch.object( RuntimeArgumentExpeditor, "_parse_modification" )
     @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
-    def test_llm_parse_fails_treats_as_approval( self, mock_ask, mock_parse ):
+    def test_llm_parse_fails_treats_as_approval( self, mock_ask, mock_parse, mock_uva ):
         """LLM parse failure → treated as approval (safe fallback)."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         mock_ask.return_value = "something unparseable"
         mock_parse.return_value = None
         args = { "query": "test" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result == args
 
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
     @patch.object( RuntimeArgumentExpeditor, "_parse_modification" )
     @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
-    def test_llm_returns_cancel( self, mock_ask, mock_parse ):
+    def test_llm_returns_cancel( self, mock_ask, mock_parse, mock_uva ):
         """LLM parses user intent as cancel → returns None."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
         mock_ask.return_value = "actually nevermind I don't want this"
         mock_parse.return_value = ArgConfirmationResponse(
             action="cancel", arg_name="", new_value=""
         )
         args = { "query": "test" }
 
-        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, "test@test.com" )
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
 
         assert result is None
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
+    def test_confirm_only_shows_user_visible_args( self, mock_ask, mock_uva ):
+        """Engineering params (lead_model, debug) excluded from summary shown to user."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
+        # Capture the message passed to _ask_for_arg
+        mock_ask.return_value = "yes"
+        args = {
+            "query"      : "quantum computing",
+            "budget"     : "10",
+            "lead_model" : "claude-opus-4-20250514",
+            "debug"      : True,
+        }
+
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+
+        assert result == args
+        # Verify the summary message sent to _ask_for_arg
+        call_args = mock_ask.call_args[ 0 ]
+        message = call_args[ 1 ]  # second positional arg is the message
+        assert "query" in message
+        assert "budget" in message
+        assert "lead_model" not in message
+        assert "debug" not in message
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
+    def test_confirm_fallback_when_no_user_visible( self, mock_ask, mock_uva ):
+        """When get_user_visible_args returns None, falls back to fallback_questions keys."""
+        mock_uva.return_value = None  # Simulate CLI not supporting --user-visible-args
+        mock_ask.return_value = "yes"
+        args = {
+            "query"      : "quantum computing",
+            "lead_model" : "claude-opus-4-20250514",
+        }
+
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+
+        assert result == args
+        # Verify the summary message uses fallback_questions keys
+        call_args = mock_ask.call_args[ 0 ]
+        message = call_args[ 1 ]
+        assert "query" in message
+        # lead_model is NOT in fallback_questions, so should be excluded
+        assert "lead_model" not in message
