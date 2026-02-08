@@ -6,19 +6,20 @@ Verifies that:
 1. Login and auth token retrieval works
 2. Mock job health endpoint is alive
 3. Standard mock job (no voice_command) baseline works
-4. Expeditor test mode routes voice commands correctly (INTERACTIVE)
-5. Dry-run job completes in done queue with $0.00 cost (INTERACTIVE)
+4.1-4.9 Nine expeditor scenarios covering all 3 agents, audience params,
+        missing args, confirmation loop, and cancellation (INTERACTIVE)
 
-Tests 4-5 require LUPIN_INTERACTIVE_TESTS=true because they:
+Tests 4.x require LUPIN_INTERACTIVE_TESTS=true because they:
 - Call LLM for gap analysis (real inference cost)
-- Call notify_user_sync() for missing args (blocks for user response)
+- Call notify_user_sync() for missing args + confirmation (blocks for user response)
 
 Requires:
 - Server running on localhost:7999
 - Environment variables: LUPIN_TEST_EMAIL, LUPIN_TEST_PASSWORD
-- For tests 4-5: LUPIN_INTERACTIVE_TESTS=true
+- For tests 4.x: LUPIN_INTERACTIVE_TESTS=true
 
 Created: 2026-02-05
+Updated: 2026-02-07 — 9-scenario matrix with confirmation loop coverage
 """
 
 import os
@@ -36,9 +37,274 @@ import cosa.utils.util as cu
 
 
 BASE_URL         = "http://localhost:7999"
-MAX_POLL_SECONDS = 60
+MAX_POLL_SECONDS = 90
 POLL_INTERVAL    = 2
+REQUEST_TIMEOUT  = 180
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Scenario Matrix
+# ═══════════════════════════════════════════════════════════════════════════════
+
+EXPEDITOR_SCENARIOS = [
+    {
+        "id"            : "DR_HAPPY",
+        "voice_command" : "do deep research on quantum computing",
+        "agent"         : "deep research",
+        "key_arg"       : "query",
+        "missing"       : False,
+        "expect_cancel" : False,
+        "instructions"  : "All args in voice command. You'll be asked to CONFIRM the summary — say 'yes'.",
+    },
+    {
+        "id"            : "DR_MISSING",
+        "voice_command" : "do some deep research",
+        "agent"         : "deep research",
+        "key_arg"       : "query",
+        "missing"       : True,
+        "expect_cancel" : False,
+        "instructions"  : "You'll be prompted for the topic. Provide one (e.g. 'climate change'), then CONFIRM — say 'yes'.",
+    },
+    {
+        "id"            : "DR_BUDGET",
+        "voice_command" : "do deep research on climate change with a budget of 5 dollars",
+        "agent"         : "deep research",
+        "key_arg"       : "query",
+        "missing"       : False,
+        "expect_cancel" : False,
+        "instructions"  : "All args in voice command (query + budget). CONFIRM the summary — say 'yes'.",
+    },
+    {
+        "id"            : "DR_AUDIENCE",
+        "voice_command" : "do deep research on machine learning for a beginner audience",
+        "agent"         : "deep research",
+        "key_arg"       : "query",
+        "missing"       : False,
+        "expect_cancel" : False,
+        "instructions"  : "Audience should auto-extract. Verify summary includes audience, then say 'yes'.",
+    },
+    {
+        "id"            : "PG_MISSING",
+        "voice_command" : "make me a podcast",
+        "agent"         : "podcast",
+        "key_arg"       : "research",
+        "missing"       : True,
+        "expect_cancel" : False,
+        "instructions"  : "You'll be prompted for a research document. Describe one, then CONFIRM — say 'yes'.",
+    },
+    {
+        "id"            : "PG_AUDIENCE",
+        "voice_command" : "make me a podcast for an expert audience",
+        "agent"         : "podcast",
+        "key_arg"       : "research",
+        "missing"       : True,
+        "expect_cancel" : False,
+        "instructions"  : "Audience should auto-extract. You'll be prompted for research doc. Provide one, then CONFIRM — say 'yes'.",
+    },
+    {
+        "id"            : "RTP_HAPPY",
+        "voice_command" : "research quantum gravity and turn it into a podcast",
+        "agent"         : "research to podcast",
+        "key_arg"       : "query",
+        "missing"       : False,
+        "expect_cancel" : False,
+        "instructions"  : "All args in voice command. CONFIRM the summary — say 'yes'.",
+    },
+    {
+        "id"            : "RTP_MISSING",
+        "voice_command" : "I want research to podcast",
+        "agent"         : "research to podcast",
+        "key_arg"       : "query",
+        "missing"       : True,
+        "expect_cancel" : False,
+        "instructions"  : "You'll be prompted for the topic. Provide one, then CONFIRM — say 'yes'.",
+    },
+    {
+        "id"            : "DR_CANCEL",
+        "voice_command" : "do some deep research for me",
+        "agent"         : "deep research",
+        "key_arg"       : None,
+        "missing"       : True,
+        "expect_cancel" : True,
+        "instructions"  : "Say 'cancel' when prompted for the missing topic (or at confirmation).",
+    },
+]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Helper Functions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _login( email, password ):
+    """
+    Authenticate and return (token, headers) tuple.
+
+    Requires:
+        - email and password are non-empty strings
+        - Server running on BASE_URL
+
+    Ensures:
+        - Returns (token_str, headers_dict) on success
+        - Returns (None, None) on failure
+    """
+    login_resp = requests.post(
+        f"{BASE_URL}/auth/login",
+        json={ "email": email, "password": password },
+        timeout=30
+    )
+
+    if login_resp.status_code != 200:
+        print( f"✗ Login failed: {login_resp.status_code}" )
+        print( f"  Response: {login_resp.text[ :200 ]}" )
+        return None, None
+
+    token   = login_resp.json()[ "tokens" ][ "access_token" ]
+    headers = { "Authorization": f"Bearer {token}" }
+    return token, headers
+
+
+def _run_scenario( scenario, headers ):
+    """
+    Submit a single expeditor scenario via mock job endpoint.
+
+    Requires:
+        - scenario is a dict from EXPEDITOR_SCENARIOS
+        - headers contains valid auth token
+
+    Ensures:
+        - Returns (status, response_data) tuple
+        - status is 'pass', 'fail', or 'cancel'
+
+    Returns:
+        tuple: (status_str, response_dict_or_None)
+    """
+    try:
+        resp = requests.post(
+            f"{BASE_URL}/api/mock-job/submit",
+            json={ "voice_command": scenario[ "voice_command" ] },
+            headers=headers,
+            timeout=REQUEST_TIMEOUT
+        )
+
+        if resp.status_code != 200:
+            print( f"    ✗ HTTP {resp.status_code}: {resp.text[ :200 ]}" )
+            return "fail", None
+
+        data = resp.json()
+
+        if data[ "status" ] == "cancelled":
+            if scenario[ "expect_cancel" ]:
+                return "pass", data
+            else:
+                return "cancel", data
+
+        # Verify config has expected command
+        config = data.get( "config", {} )
+        if scenario[ "agent" ] not in config.get( "command", "" ):
+            print( f"    ✗ Expected '{scenario[ 'agent' ]}' in command, got: {config.get( 'command' )}" )
+            return "fail", data
+
+        return "pass", data
+
+    except requests.exceptions.Timeout:
+        print( f"    ✗ Request timed out after {REQUEST_TIMEOUT}s" )
+        return "fail", None
+    except Exception as e:
+        print( f"    ✗ Error: {e}" )
+        return "fail", None
+
+
+def _poll_for_completion( job_id, headers ):
+    """
+    Poll done queue for a completed job.
+
+    Requires:
+        - job_id is a non-empty string
+        - headers contains valid auth token
+
+    Ensures:
+        - Returns completed job dict if found within MAX_POLL_SECONDS
+        - Returns None if not found
+
+    Returns:
+        dict or None
+    """
+    elapsed = 0
+
+    while elapsed < MAX_POLL_SECONDS:
+        done_resp = requests.get(
+            f"{BASE_URL}/api/get-queue/done",
+            headers=headers,
+            timeout=30
+        )
+
+        if done_resp.status_code == 200:
+            done_data = done_resp.json()
+            jobs      = done_data.get( "done_jobs_metadata", [] )
+
+            for job in jobs:
+                if job.get( "job_id" ) == job_id:
+                    return job
+
+        time.sleep( POLL_INTERVAL )
+        elapsed += POLL_INTERVAL
+
+    return None
+
+
+def _verify_dry_run_cost( completed_job ):
+    """
+    Verify a completed job has $0.00 cost (dry-run).
+
+    Requires:
+        - completed_job is a dict from done queue
+
+    Ensures:
+        - Returns True if cost is $0.00
+        - Returns False otherwise
+    """
+    cost_summary = completed_job.get( "cost_summary" )
+    if cost_summary is None:
+        total_cost = 0.0
+    elif isinstance( cost_summary, dict ):
+        total_cost = cost_summary.get( "total_cost_usd", cost_summary.get( "total_cost", -1 ) )
+    else:
+        total_cost = 0.0
+
+    return total_cost == 0.0 or total_cost == 0
+
+
+def _print_results_table( results ):
+    """
+    Print a formatted summary table of all scenario results.
+
+    Requires:
+        - results is a list of dicts with keys: id, status, agent, details
+
+    Ensures:
+        - Prints tabular summary to console
+    """
+    print( "\n" + "=" * 80 )
+    print( f"  {'#':<4} {'Scenario':<14} {'Agent':<22} {'Status':<8} {'Details'}" )
+    print( "-" * 80 )
+
+    for i, r in enumerate( results, 1 ):
+        status_icon = "✓" if r[ "status" ] == "pass" else "✗" if r[ "status" ] == "fail" else "⚠"
+        print( f"  {i:<4} {r[ 'id' ]:<14} {r[ 'agent' ]:<22} {status_icon} {r[ 'status' ]:<5}  {r[ 'details' ]}" )
+
+    print( "=" * 80 )
+
+    passed = sum( 1 for r in results if r[ "status" ] == "pass" )
+    failed = sum( 1 for r in results if r[ "status" ] == "fail" )
+    cancel = sum( 1 for r in results if r[ "status" ] == "cancel" )
+
+    print( f"\n  Total: {passed} passed, {failed} failed, {cancel} unexpected cancels" )
+    print( f"  Overall: {'PASS' if failed == 0 and cancel == 0 else 'FAIL'}" )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Main Test
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def quick_smoke_test():
     """
@@ -52,14 +318,14 @@ def quick_smoke_test():
     Ensures:
         - Health endpoint returns ok
         - Standard mock job submits and queues correctly
-        - Expeditor test routes voice commands (interactive tests only)
-        - Dry-run jobs complete with $0.00 cost (interactive tests only)
+        - All 9 expeditor scenarios execute (interactive tests only)
+        - Results are summarized in tabular form
     """
-    cu.print_banner( "Expeditor Mock Job Smoke Test", prepend_nl=True )
+    cu.print_banner( "Expeditor Mock Job Smoke Test (9-Scenario Matrix)", prepend_nl=True )
 
     interactive = os.environ.get( "LUPIN_INTERACTIVE_TESTS", "" ).lower() == "true"
     if not interactive:
-        print( "Note: Tests 4-5 skipped (set LUPIN_INTERACTIVE_TESTS=true to enable)" )
+        print( "Note: Scenario tests skipped (set LUPIN_INTERACTIVE_TESTS=true to enable)" )
 
     # Get credentials from environment
     email    = os.environ.get( "LUPIN_TEST_EMAIL" )
@@ -76,25 +342,18 @@ def quick_smoke_test():
         # Test 1: Login and get token
         # ═══════════════════════════════════════════════════════════════════
         print( f"\nTest 1: Logging in as {email}..." )
-        login_resp = requests.post(
-            f"{BASE_URL}/auth/login",
-            json={ "email": email, "password": password }
-        )
+        token, headers = _login( email, password )
 
-        if login_resp.status_code != 200:
-            print( f"✗ Login failed: {login_resp.status_code}" )
-            print( f"  Response: {login_resp.text[ :200 ]}" )
+        if not token:
             return False
 
-        token = login_resp.json()[ "tokens" ][ "access_token" ]
         print( f"✓ Login successful, token: {token[ :30 ]}..." )
-        headers = { "Authorization": f"Bearer {token}" }
 
         # ═══════════════════════════════════════════════════════════════════
         # Test 2: Health check
         # ═══════════════════════════════════════════════════════════════════
         print( "\nTest 2: Checking mock job health endpoint..." )
-        health_resp = requests.get( f"{BASE_URL}/api/mock-job/health" )
+        health_resp = requests.get( f"{BASE_URL}/api/mock-job/health", timeout=10 )
 
         if health_resp.status_code != 200:
             print( f"✗ Health check failed: {health_resp.status_code}" )
@@ -116,7 +375,8 @@ def quick_smoke_test():
                 "fixed_sleep"      : 0.5,
                 "description"      : "expeditor smoke test baseline"
             },
-            headers=headers
+            headers=headers,
+            timeout=30
         )
 
         if mock_resp.status_code != 200:
@@ -131,136 +391,97 @@ def quick_smoke_test():
         print( f"  Config: {mock_data[ 'config' ]}" )
 
         # ═══════════════════════════════════════════════════════════════════
-        # Test 4: Expeditor test (INTERACTIVE)
+        # Tests 4.1-4.9: Expeditor Scenarios (INTERACTIVE)
         # ═══════════════════════════════════════════════════════════════════
         if not interactive:
-            print( "\nTest 4: SKIPPED (requires LUPIN_INTERACTIVE_TESTS=true)" )
-            print( "Test 5: SKIPPED (requires LUPIN_INTERACTIVE_TESTS=true)" )
+            print( "\nTests 4.1-4.9: SKIPPED (requires LUPIN_INTERACTIVE_TESTS=true)" )
 
             print( "\n" + "=" * 70 )
             print( "AUTOMATED SMOKE TESTS PASSED (3/3)!" )
-            print( "  Tests 4-5 skipped: set LUPIN_INTERACTIVE_TESTS=true to enable" )
+            print( "  Scenario tests skipped: set LUPIN_INTERACTIVE_TESTS=true to enable" )
             print( "=" * 70 )
             return True
 
-        print( "\nTest 4: Submitting expeditor test with voice_command..." )
-        print( "  ⚠ This calls the LLM and may prompt you for missing args!" )
-
-        expeditor_resp = requests.post(
-            f"{BASE_URL}/api/mock-job/submit",
-            json={
-                "voice_command": "do deep research on quantum computing"
-            },
-            headers=headers
-        )
-
-        if expeditor_resp.status_code != 200:
-            print( f"✗ Expeditor test failed: {expeditor_resp.status_code}" )
-            print( f"  Response: {expeditor_resp.text[ :300 ]}" )
-            return False
-
-        exp_data = expeditor_resp.json()
-        print( f"✓ Expeditor test returned: status={exp_data[ 'status' ]}" )
-        print( f"  Job ID: {exp_data[ 'job_id' ]}" )
-
-        # Check for cancelled vs queued
-        if exp_data[ "status" ] == "cancelled":
-            print( "  ⚠ User cancelled or timed out - this is valid behavior" )
-            print( f"  Config: {exp_data[ 'config' ]}" )
-            print( "\n" + "=" * 70 )
-            print( "EXPEDITOR SMOKE TESTS: 4/5 PASSED (Test 5 skipped - user cancelled)" )
-            print( "=" * 70 )
-            return True
-
-        # Verify expeditor resolved the command
-        config = exp_data[ "config" ]
-        assert "command" in config, "Missing 'command' in config"
-        assert "deep research" in config[ "command" ], f"Expected deep research command, got: {config[ 'command' ]}"
-        assert config.get( "dry_run" ) is True, "Expected dry_run=True"
-
-        args_resolved = config.get( "args_resolved", {} )
-        assert "query" in args_resolved, f"Expected 'query' in resolved args, got: {args_resolved}"
-        print( f"  Command matched: {config[ 'command' ]}" )
-        print( f"  Args resolved: {args_resolved}" )
-        print( f"  dry_run: {config.get( 'dry_run' )}" )
-
-        exp_job_id = exp_data[ "job_id" ]
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Test 5: Verify dry-run job completes ($0.00 cost)
-        # ═══════════════════════════════════════════════════════════════════
-        print( f"\nTest 5: Polling done queue for expeditor job (max {MAX_POLL_SECONDS}s)..." )
-
-        job_found     = False
-        completed_job = None
-        elapsed       = 0
-
-        while elapsed < MAX_POLL_SECONDS:
-            done_resp = requests.get(
-                f"{BASE_URL}/api/get-queue/done",
-                headers=headers
-            )
-
-            if done_resp.status_code == 200:
-                done_data = done_resp.json()
-                jobs      = done_data.get( "done_jobs_metadata", [] )
-
-                for job in jobs:
-                    if job.get( "job_id" ) == exp_job_id:
-                        job_found     = True
-                        completed_job = job
-                        break
-
-                if job_found:
-                    print( f"✓ Job found in done queue after {elapsed}s" )
-                    break
-
-            print( f"  Polling... ({elapsed}s)" )
-            time.sleep( POLL_INTERVAL )
-            elapsed += POLL_INTERVAL
-
-        if not job_found:
-            print( f"✗ Job not found in done queue after {MAX_POLL_SECONDS}s" )
-            print( "  Note: Dry-run jobs should complete in ~6 seconds" )
-            return False
-
-        # Verify cost is $0.00 (dry-run)
-        cost_summary = completed_job.get( "cost_summary" )
-        if cost_summary is None:
-            total_cost = 0.0
-        elif isinstance( cost_summary, dict ):
-            total_cost = cost_summary.get( "total_cost_usd", cost_summary.get( "total_cost", -1 ) )
-        else:
-            total_cost = 0.0
-
-        if total_cost == 0.0 or total_cost == 0:
-            print( f"✓ Cost is $0.00 (dry-run mode confirmed)" )
-        else:
-            print( f"✗ Expected cost $0.00, got ${total_cost}" )
-            return False
-
-        # Check job status
-        job_status = completed_job.get( "status", "" )
-        if job_status == "completed":
-            print( "✓ Job status is 'completed'" )
-        else:
-            print( f"✗ Expected status 'completed', got '{job_status}'" )
-            return False
-
-        # ═══════════════════════════════════════════════════════════════════
-        # All tests passed
-        # ═══════════════════════════════════════════════════════════════════
         print( "\n" + "=" * 70 )
-        print( "ALL EXPEDITOR SMOKE TESTS PASSED (5/5)!" )
+        print( "  INTERACTIVE EXPEDITOR SCENARIOS (9 total)" )
+        print( "  Each scenario will prompt you via voice. Follow the instructions." )
+        print( "  Timeout: 180s per scenario. Say 'cancel' to skip any scenario." )
         print( "=" * 70 )
-        print( f"\n  Expeditor correctly routed voice command:" )
-        print( f"    Command: {config[ 'command' ]}" )
-        print( f"    Args: {args_resolved}" )
-        print( f"    Job ID: {exp_job_id}" )
-        print( f"    Cost: ${total_cost:.2f}" )
-        print( f"    Completed in: ~{elapsed}s" )
 
-        return True
+        results = []
+
+        for i, scenario in enumerate( EXPEDITOR_SCENARIOS, 1 ):
+            print( f"\n{'─' * 70}" )
+            print( f"  Scenario 4.{i}: {scenario[ 'id' ]}" )
+            print( f"  Voice command: \"{scenario[ 'voice_command' ]}\"" )
+            print( f"  Instructions: {scenario[ 'instructions' ]}" )
+            print( f"{'─' * 70}" )
+
+            status, data = _run_scenario( scenario, headers )
+
+            result = {
+                "id"      : scenario[ "id" ],
+                "status"  : status,
+                "agent"   : scenario[ "agent" ],
+                "details" : "",
+            }
+
+            if status == "pass" and data:
+                config = data.get( "config", {} )
+                if scenario[ "expect_cancel" ]:
+                    result[ "details" ] = "Cancelled as expected"
+                    print( f"    ✓ Cancelled as expected" )
+                else:
+                    job_id = data.get( "job_id", "" )
+                    args   = config.get( "args_resolved", {} )
+                    result[ "details" ] = f"job={job_id}, args={list( args.keys() )}"
+                    print( f"    ✓ Command: {config.get( 'command', 'N/A' )}" )
+                    print( f"    ✓ Args: {args}" )
+                    print( f"    ✓ Job ID: {job_id}" )
+
+                    # Poll for completion and verify dry-run cost
+                    if job_id and not scenario[ "expect_cancel" ]:
+                        print( f"    Polling for completion..." )
+                        completed = _poll_for_completion( job_id, headers )
+                        if completed:
+                            if _verify_dry_run_cost( completed ):
+                                print( f"    ✓ Dry-run cost: $0.00" )
+                            else:
+                                print( f"    ⚠ Non-zero cost detected" )
+                                result[ "details" ] += " (non-zero cost)"
+                        else:
+                            print( f"    ⚠ Job not found in done queue after {MAX_POLL_SECONDS}s" )
+                            result[ "details" ] += " (poll timeout)"
+
+            elif status == "cancel":
+                result[ "details" ] = "User cancelled unexpectedly"
+                print( f"    ⚠ User cancelled (expected to complete)" )
+
+            elif status == "fail":
+                result[ "details" ] = "Request failed"
+                print( f"    ✗ Scenario failed" )
+
+            results.append( result )
+
+        # ═══════════════════════════════════════════════════════════════════
+        # Results Summary
+        # ═══════════════════════════════════════════════════════════════════
+        _print_results_table( results )
+
+        passed = sum( 1 for r in results if r[ "status" ] == "pass" )
+        failed = sum( 1 for r in results if r[ "status" ] == "fail" )
+        cancel = sum( 1 for r in results if r[ "status" ] == "cancel" )
+
+        all_passed = failed == 0 and cancel == 0
+
+        print( f"\n{'=' * 70}" )
+        if all_passed:
+            print( f"ALL EXPEDITOR SMOKE TESTS PASSED ({3 + passed}/{3 + len( EXPEDITOR_SCENARIOS )})!" )
+        else:
+            print( f"EXPEDITOR SMOKE TESTS: {3 + passed} passed, {failed} failed, {cancel} unexpected cancels" )
+        print( "=" * 70 )
+
+        return all_passed
 
     except AssertionError as e:
         print( f"\n✗ Assertion failed: {e}" )

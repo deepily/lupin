@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.02.07 - Session 151 | Runtime Argument Expeditor — Confirmation Loop + Expanded Tests
+
+#### Checkpoint | 2026.02.07 19:30 | Confirmation loop + 9-scenario smoke test matrix
+
+**Accomplishments**:
+- **Confirmation Loop**: Added `_confirm_and_iterate()` and `_parse_modification()` to `expeditor.py`. After args are collected, the user now sees a summary and can approve, cancel, or modify args via voice before job submission. Quick keyword matching for common responses ("yes", "cancel"), LLM parse for modification intent. Max 5 iterations safety valve.
+- **ArgConfirmationResponse Model**: New `BaseXMLModel` subclass in `xml_models.py` with `is_approval()`, `is_cancel()`, `is_modify()` helpers. Registered in `MODEL_MAPPING` as `'argument confirmation'`.
+- **Prompt Template**: New `runtime-argument-confirmation.txt` for parsing user modification intent. Config key added to `lupin-app.ini` + splainer.
+- **Audience Context**: Added `audience_context` fallback questions to all 3 agents in `agent_registry.py`. Changed "general" → "intermediate" in audience options.
+- **Unit Tests**: 15 new tests — `TestArgConfirmationResponse` (8 tests) + `TestConfirmAndIterate` (7 tests, fully mocked voice I/O). 70/70 expeditor tests, 482/482 total.
+- **Smoke Test Rewrite**: 9-scenario matrix covering all 3 agents (DR, PG, RTP), happy/missing/budget/audience/cancel paths. Data-driven from `EXPEDITOR_SCENARIOS` list with tabular summary output.
+
+**Files Modified** (Lupin repo): `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/conf/prompts/runtime-argument-confirmation.txt` (NEW), `src/tests/unit/test_runtime_argument_expeditor.py`, `src/tests/smoke/test_expeditor_mock_job_smoke.py`
+**Files Modified** (CoSA repo, not committed here): `xml_models.py`, `expeditor.py`, `agent_registry.py`, `prompt_template_processor.py`
+
+---
+
 ### 2026.02.07 - Session 150 | Agentic Voice Workflow v2.1 Completeness Review
 
 #### Checkpoint | 2026.02.07 17:00 | 11 changes — 2 fixes, 7 additions, 2 structural
@@ -49,7 +66,7 @@
 **Files Modified** (CoSA repo, not committed here): `util.py`, `xml_coordinator.py`
 **Files Modified** (Lupin repo): `agentic-job-xml-train.jsonl`, `agentic-job-xml-test.jsonl`, `agentic-job-xml-validate.jsonl`
 **Verification**: 467/467 unit tests passing, zero regressions
-**Commit**: df6ce1d
+**Commit**: e17b366
 
 #### Checkpoint 1 | 2026.02.07 | Parts A/B/C complete, 461 unit tests pass
 

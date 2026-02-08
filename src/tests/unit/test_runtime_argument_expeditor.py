@@ -1,24 +1,26 @@
 """
 Unit tests for Runtime Argument Expeditor.
 
-Tests 5 components:
+Tests 7 components:
 1. ExpeditorResponse model (xml_models.py) - 16 tests
 2. _parse_lora_args() (expeditor.py) - 9 tests
 3. _inject_system_args() (expeditor.py) - 4 tests
 4. Agent registry + get_cli_help() (agent_registry.py) - 14 tests
 5. create_agentic_job() factory (agentic_job_factory.py) - 12 tests
+6. ArgConfirmationResponse model (xml_models.py) - 8 tests
+7. _confirm_and_iterate() (expeditor.py) - 7 tests
 
 All external dependencies mocked. No server, no LLM, no filesystem I/O.
 
 Created: 2026-02-05
-Updated: 2026-02-07 — audience/audience_context normalization
+Updated: 2026-02-07 — audience/audience_context normalization + confirmation loop
 """
 
 import pytest
 from unittest.mock import patch, MagicMock
 import subprocess
 
-from cosa.agents.runtime_argument_expeditor.xml_models import ExpeditorResponse
+from cosa.agents.runtime_argument_expeditor.xml_models import ExpeditorResponse, ArgConfirmationResponse
 from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
 from cosa.agents.runtime_argument_expeditor.agent_registry import (
     AGENTIC_AGENTS,
@@ -426,10 +428,11 @@ class TestAgentRegistry:
             assert mapping[ "audience_context" ] == "audience_context"
 
     def test_all_agents_have_audience_fallback_question( self ):
-        """All three agents have 'audience' in fallback_questions."""
+        """All three agents have 'audience' and 'audience_context' in fallback_questions."""
         for cmd_key, entry in AGENTIC_AGENTS.items():
             questions = entry[ "fallback_questions" ]
             assert "audience" in questions, f"Missing 'audience' in fallback_questions for '{cmd_key}'"
+            assert "audience_context" in questions, f"Missing 'audience_context' in fallback_questions for '{cmd_key}'"
 
     def test_deep_research_audience_mapping( self ):
         """Deep research maps audience args correctly."""
@@ -683,3 +686,173 @@ class TestCreateAgenticJob:
         call_kwargs = MockRTP.call_args[ 1 ]
         assert call_kwargs[ "audience" ] == "academic"
         assert call_kwargs[ "audience_context" ] == "PhD students"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Class 6: TestArgConfirmationResponse (8 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestArgConfirmationResponse:
+    """Tests for ArgConfirmationResponse Pydantic model - pure data, no mocking needed."""
+
+    def test_is_approval_approve( self ):
+        """action='approve' returns is_approval() True."""
+        response = ArgConfirmationResponse( action="approve", arg_name="", new_value="" )
+        assert response.is_approval() is True
+        assert response.is_cancel() is False
+        assert response.is_modify() is False
+
+    def test_is_approval_variants( self ):
+        """'yes' and 'ok' also return is_approval() True."""
+        for variant in [ "yes", "ok", "Yes", "OK", " approve " ]:
+            response = ArgConfirmationResponse( action=variant, arg_name="", new_value="" )
+            assert response.is_approval() is True, f"Failed for variant: '{variant}'"
+
+    def test_is_cancel( self ):
+        """action='cancel' returns is_cancel() True."""
+        response = ArgConfirmationResponse( action="cancel", arg_name="", new_value="" )
+        assert response.is_cancel() is True
+        assert response.is_approval() is False
+        assert response.is_modify() is False
+
+    def test_is_cancel_variants( self ):
+        """'stop' and 'quit' also return is_cancel() True."""
+        for variant in [ "stop", "quit", "Cancel", " STOP " ]:
+            response = ArgConfirmationResponse( action=variant, arg_name="", new_value="" )
+            assert response.is_cancel() is True, f"Failed for variant: '{variant}'"
+
+    def test_is_modify( self ):
+        """action='modify' with arg_name and new_value populated."""
+        response = ArgConfirmationResponse( action="modify", arg_name="budget", new_value="50" )
+        assert response.is_modify() is True
+        assert response.is_approval() is False
+        assert response.is_cancel() is False
+        assert response.arg_name == "budget"
+        assert response.new_value == "50"
+
+    def test_xml_round_trip( self ):
+        """to_xml() → from_xml() preserves all fields."""
+        original = ArgConfirmationResponse( action="modify", arg_name="audience", new_value="expert" )
+        xml_str  = original.to_xml()
+        parsed   = ArgConfirmationResponse.from_xml( xml_str )
+
+        assert parsed.action == original.action
+        assert parsed.arg_name == original.arg_name
+        assert parsed.new_value == original.new_value
+
+    def test_get_example_for_template( self ):
+        """get_example_for_template() returns a valid modify instance."""
+        example = ArgConfirmationResponse.get_example_for_template()
+        assert isinstance( example, ArgConfirmationResponse )
+        assert example.action == "modify"
+        assert example.arg_name == "budget"
+        assert example.new_value == "50"
+
+    def test_empty_arg_name_for_approve( self ):
+        """Approval with empty arg_name and new_value is valid."""
+        response = ArgConfirmationResponse( action="approve", arg_name="", new_value="" )
+        assert response.is_approval() is True
+        assert response.arg_name == ""
+        assert response.new_value == ""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Class 7: TestConfirmAndIterate (7 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestConfirmAndIterate:
+    """Tests for RuntimeArgumentExpeditor._confirm_and_iterate() with mocked voice I/O."""
+
+    def setup_method( self ):
+        """Create a minimal expeditor instance with mocked dependencies."""
+        self.expeditor                          = RuntimeArgumentExpeditor.__new__( RuntimeArgumentExpeditor )
+        self.expeditor.debug                    = False
+        self.expeditor.verbose                  = False
+        self.expeditor.confirmation_prompt_path = "/src/conf/prompts/runtime-argument-confirmation.txt"
+        self.expeditor.llm_spec_key             = "test_key"
+        self.expeditor.llm_factory              = MagicMock()
+
+        self.agent_entry = AGENTIC_AGENTS[ "agent router go to deep research" ]
+
+    @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
+    def test_immediate_approval_yes( self, mock_ask ):
+        """User says 'yes' → returns args immediately."""
+        mock_ask.return_value = "yes"
+        args = { "query": "quantum computing" }
+
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, "test@test.com" )
+
+        assert result == args
+        mock_ask.assert_called_once()
+
+    @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
+    def test_immediate_approval_looks_good( self, mock_ask ):
+        """User says 'looks good' → returns args immediately."""
+        mock_ask.return_value = "looks good"
+        args = { "query": "AI safety" }
+
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, "test@test.com" )
+
+        assert result == args
+
+    @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
+    def test_cancel_keyword( self, mock_ask ):
+        """User says 'cancel' → returns None."""
+        mock_ask.return_value = "cancel"
+        args = { "query": "test" }
+
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, "test@test.com" )
+
+        assert result is None
+
+    @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
+    def test_timeout_returns_none( self, mock_ask ):
+        """_ask_for_arg returns None (timeout) → returns None."""
+        mock_ask.return_value = None
+        args = { "query": "test" }
+
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, "test@test.com" )
+
+        assert result is None
+
+    @patch.object( RuntimeArgumentExpeditor, "_parse_modification" )
+    @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
+    def test_modify_then_approve( self, mock_ask, mock_parse ):
+        """User requests modification, then approves on second prompt."""
+        mock_ask.side_effect = [ "change the budget to 50", "yes" ]
+        mock_parse.return_value = ArgConfirmationResponse(
+            action="modify", arg_name="budget", new_value="50"
+        )
+        args = { "query": "quantum computing" }
+
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, "test@test.com" )
+
+        assert result is not None
+        assert result[ "budget" ] == "50"
+        assert result[ "query" ] == "quantum computing"
+
+    @patch.object( RuntimeArgumentExpeditor, "_parse_modification" )
+    @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
+    def test_llm_parse_fails_treats_as_approval( self, mock_ask, mock_parse ):
+        """LLM parse failure → treated as approval (safe fallback)."""
+        mock_ask.return_value = "something unparseable"
+        mock_parse.return_value = None
+        args = { "query": "test" }
+
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, "test@test.com" )
+
+        assert result == args
+
+    @patch.object( RuntimeArgumentExpeditor, "_parse_modification" )
+    @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
+    def test_llm_returns_cancel( self, mock_ask, mock_parse ):
+        """LLM parses user intent as cancel → returns None."""
+        mock_ask.return_value = "actually nevermind I don't want this"
+        mock_parse.return_value = ArgConfirmationResponse(
+            action="cancel", arg_name="", new_value=""
+        )
+        args = { "query": "test" }
+
+        result = self.expeditor._confirm_and_iterate( args, self.agent_entry, "test@test.com" )
+
+        assert result is None

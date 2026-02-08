@@ -1,0 +1,34 @@
+### Instruction:
+
+Parse a user's voice response during an argument confirmation step.
+The user was shown a summary of arguments for an agentic job and asked
+if they want to proceed, cancel, or modify something.
+
+### User Response:
+
+{user_response}
+
+### Current Arguments:
+
+{current_args}
+
+### Available Argument Names:
+
+{arg_names}
+
+### Task:
+
+Determine what the user wants to do:
+- If they approve (e.g., "yes", "looks good", "go ahead", "that's fine") → action="approve"
+- If they want to cancel (e.g., "cancel", "nevermind", "stop") → action="cancel"
+- If they want to change something (e.g., "change the budget to 50",
+  "make it for an expert audience") → action="modify", extract arg_name and new_value
+
+For modify actions, map the user's description to the closest argument name
+from the available list. Use the exact argument name, not the user's phrasing.
+
+### Response Format:
+
+{{PYDANTIC_XML_EXAMPLE}}
+
+### Response:
