@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.02.07 - Session 152 | Principled Augmentation for Under-Sampled Training Commands
+
+**Accomplishments**:
+- **Template Expansion**: Expanded 4 under-sampled training template files to provide semantic diversity for simple agent-routing commands:
+  - `automatic-routing-mode.txt`: 60 → 192 lines (conversational, questioning, indirect, polite, negative framing, agent-specific exits, error recovery, short/terse)
+  - `none-of-the-above.txt`: 214 → 500 lines (science, cooking, coding, philosophy, health, travel, finance, entertainment, relationships, home/DIY, e-commerce)
+  - `math.txt`: 454 → 511 lines (statistics, probability, number theory, logic puzzles)
+  - `todo-lists.txt`: 447 → 511 lines (batch operations, priority/context, conversational, recurring tasks, status/overview)
+- **Augmentation Factor Loop**: Added `augmentation_config` parameter to `build_simple_agent_router_training_prompts()` in `xml_coordinator.py`. Each factor pass applies fresh random interjection/salutation, creating distinct variants from the same template line
+- **Config at Call Site**: `build_all_training_prompts()` now passes per-command factors: auto-routing=9x, math=3x, todo=3x, none=3x
+- **Verified Distribution**: All 4 target commands now hit exactly 1500 samples. Total training examples: 36,980 across 33 commands. 482/482 unit tests pass
+
+**Files Modified** (Lupin repo): 4 template files in `src/ephemera/prompts/data/`
+**Files Modified** (CoSA repo, not committed here): `src/cosa/training/xml_coordinator.py`
+
+---
+
 ### 2026.02.07 - Session 148 (continued) | CRUD Agent — Fix Phi-4 Empty Response
 
 #### Checkpoint 2 | 2026.02.07 21:00 | Fix CRUD prompt for Phi-4 + debug script full dump

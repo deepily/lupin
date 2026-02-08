@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.07 - PEFT Training Optimization Plan — Part 3
+- **Optimization Plan**: [2026.02.07-peft-trainer-optimization-plan-part-3.md](2026.02.07-peft-trainer-optimization-plan-part-3.md) - **📋 PLANNED** - Principled augmentation for 4 under-sampled simple commands (automatic routing mode: 60, none: 214, math: 450, todo list: 443 — all targeting 1500). Hybrid strategy: expand templates to ~200-500 lines each for semantic diversity, then apply controlled augmentation factor (3-8x) via new `augmentation_config` parameter in `build_simple_agent_router_training_prompts()`. Avoids pure factor multiplication which degrades LORA generalization. Cross-references [Part 2](2026.02.07-peft-trainer-optimization-plan-part-2.md).
+
 ### 2026.02.07 - PEFT Training Optimization Plan — Part 2
 - **Optimization Plan**: [2026.02.07-peft-trainer-optimization-plan-part-2.md](2026.02.07-peft-trainer-optimization-plan-part-2.md) - **🔄 IN PROGRESS** - Continuation of PEFT training optimization. Phase 2 achieved 99.0% pre-quant / 95.6% post-quant exact match. Three workstreams: Part A (Training Results Dashboard — consolidated comparison of pre/post-training/post-quantization stages), Part B (Explicit Agent Routing Data — "Switch to math mode" phrases for all agents + new automatic routing mode command), Part C (Strengthen Quantization-Degraded Commands — supplement podcast generator, math, todo list, none with stronger anchors). Sample size increase 1200 → 1500 samples/command. Cross-references [Part 1](2026.02.05-peft-trainer-optimization-plan.md).
 

@@ -452,3 +452,72 @@ Math question: what's 7 factorial
 Help me compute the monthly payment on a $250,000 mortgage at 6.5%
 Solve this arithmetic: 3,456 times 789
 Can you do the math on splitting a $234 bill four ways with 18% tip
+
+# Statistics — data analysis, distributions, inference
+What is the standard deviation of the data set 4, 8, 15, 16, 23, 42?
+How do you calculate the mean, median, and mode of a set of numbers?
+What is a p-value and how do you interpret it?
+How do you perform a linear regression on a data set?
+What is the correlation coefficient between two variables?
+How do you calculate the variance of a sample?
+What is the difference between a population and a sample in statistics?
+How do you find the interquartile range of a data set?
+What is a confidence interval and how do you calculate one?
+Explain the difference between Type I and Type II errors in hypothesis testing
+How do you calculate a z-score for a given data point?
+What is the standard error of the mean?
+
+# Probability — dice, coins, combinatorics, chance
+What is the probability of rolling a 7 with two dice?
+If I flip a coin 5 times, what is the probability of getting all heads?
+How many ways can you arrange 6 books on a shelf?
+What is the probability of drawing a red card from a standard deck?
+How do you calculate combinations of 10 items taken 3 at a time?
+What are the odds of winning the lottery if you pick 6 numbers from 49?
+If a bag has 5 red and 3 blue marbles, what is the probability of drawing 2 red in a row?
+How do you calculate permutations of 8 items taken 4 at a time?
+What is the expected value if a game pays $10 on heads and loses $6 on tails?
+What is Bayes theorem and how do you apply it to a simple example?
+How many different 4-digit PINs are possible using digits 0 through 9?
+What is the probability of at least one six in four rolls of a die?
+
+# Number theory — primes, factors, modular arithmetic
+Is 97 a prime number and how can you check?
+What is the greatest common factor of 84 and 126?
+How do you find the least common multiple of 15 and 20?
+What is 17 mod 5?
+How do you determine if a large number is divisible by 9?
+What are the first 20 prime numbers?
+How do you use the Euclidean algorithm to find the GCD of 252 and 198?
+What is the prime factorization of 360?
+How do you solve 3x is congruent to 7 mod 11?
+Is 561 a Carmichael number?
+What is Euler's totient function of 24?
+How many divisors does the number 120 have?
+
+# Logic puzzles — set theory, syllogisms, reasoning
+If all cats are animals and some animals are pets, what can you conclude?
+How do you calculate the union and intersection of two sets?
+What is the complement of a set in set theory?
+If set A has 10 elements and set B has 8 elements and their intersection has 3, how many are in the union?
+Is the statement "if it rains then the ground is wet" logically equivalent to its contrapositive?
+How do you construct a truth table for the statement P and not Q?
+What is a Venn diagram and how do you use it to solve a problem with three overlapping sets?
+If 40 students study math, 30 study science, and 15 study both, how many study at least one subject?
+What is the difference between necessary and sufficient conditions in logic?
+How do you prove that the square root of 2 is irrational?
+What is proof by contradiction and can you give an example?
+How do you determine if an argument is valid using modus ponens?
+What is a geometric series and how do you find its sum?
+How do you convert between degrees and radians?
+What is the formula for the volume of a cone?
+How do you calculate the median of a set of 20 numbers?
+What is the probability of getting exactly 3 heads in 5 coin flips?
+How many prime numbers are there between 1 and 100?
+What is modular arithmetic and how do you use it?
+If you roll three dice, what is the probability the sum is 10?
+How do you find the greatest common divisor of 144 and 60?
+What is the least common multiple of 12, 15, and 20?
+How do you calculate the mean absolute deviation of a data set?
+What is a normal distribution and what does the 68-95-99.7 rule mean?
+How do you calculate the number of permutations of the letters in the word MISSISSIPPI?

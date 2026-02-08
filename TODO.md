@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-06 (Session 145)
+Last updated: 2026-02-07 (Session 152)
 
 ## Pending
 
@@ -51,8 +51,9 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - **Plan**: `src/rnd/2026.02.07-peft-trainer-optimization-plan-part-2.md`
   - **461 unit tests passing**, zero regressions
   - **CoSA submodule files need separate commit**: xml_coordinator.py, peft_trainer.py, todo_fifo_queue.py
-- [ ] **[LUPIN] Run PEFT Phase 2 training** - Regenerate training data at 1500/command, then full training run. Dashboard (Part A) will display consolidated results automatically.
-  - Run: `./src/scripts/run-agentic-intent-training.sh generate` then `./src/scripts/run-agentic-intent-training.sh train`
+- [ ] **[LUPIN] Run PEFT Phase 2 training** - Training data regenerated at 1500/command (Session 152: principled augmentation with factor loop). Ready for full training run.
+  - Run: `./src/scripts/run-agentic-intent-training.sh full`
+  - Data verified: 36,980 examples, all 4 previously-undersampled commands hit 1500 exactly
 - [ ] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - Two cases to handle:
   1. User makes vague reference to research document contents (e.g., "make a podcast about that AI research")
   2. User references research document by approximate name/path
