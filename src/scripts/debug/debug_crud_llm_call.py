@@ -60,7 +60,10 @@ prompt = prompt_template.format(
 )
 
 print( f"Prompt length: {len( prompt )} chars" )
-print( f"Prompt preview (first 500 chars):\n{prompt[ :500 ]}" )
+print()
+print( "--- FULL EXPANDED PROMPT ---" )
+print( prompt )
+print( "--- END PROMPT ---" )
 print()
 
 # --- Test 1: Non-streaming ---

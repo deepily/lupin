@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.02.07 - Session 148 (continued) | CRUD Agent — Fix Phi-4 Empty Response
+
+#### Checkpoint 2 | 2026.02.07 21:00 | Fix CRUD prompt for Phi-4 + debug script full dump
+
+**Accomplishments**:
+- **Root Cause Identified**: Phi-4 14B returned immediate EOS (empty response) for CRUD intent extraction prompts. Root cause: prompt lacked proper Alpaca instruction format markers (`### Instruction:`, `### Task:`, `### Input:`, `### Response:`) that the math agent (working reference) uses
+- **Prompt Fix**: Restructured `intent-extraction.txt` with Alpaca markers and moved "Requirement:" directives to stronger positions within the prompt. Verified working: Phi-4 now returns 2,481 chars of valid `<intent>` XML
+- **Debug Script Enhanced**: Updated `debug_crud_llm_call.py` to dump the full expanded prompt before sending to vLLM, enabling rapid prompt iteration
+- **Rejected Approaches**: Response priming (`<intent>` prepend after `### Response:`) worked but was rejected as a kludge. Chat completions format switch was rejected since math agent works with same CompletionClient
+
+**Files Modified**: `src/conf/prompts/crud-for-dataframes/intent-extraction.txt`, `src/scripts/debug/debug_crud_llm_call.py`
+
+---
+
 ### 2026.02.07 - Session 151 | Runtime Argument Expeditor — Confirmation Loop + Expanded Tests
 
 #### Checkpoint | 2026.02.07 19:30 | Confirmation loop + 9-scenario smoke test matrix
