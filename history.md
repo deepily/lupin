@@ -28,7 +28,7 @@
 - **Part 1 Testing Protocol**: 12 → 17 mock pipeline tests (total 29 protocol scenarios). Full regression: 487/487 unit tests passing.
 
 **Files Modified**: `intent-extraction.txt`, `test_crud_mock_pipeline.py`, `test_crud_for_dataframes_agent.py`, `testing-protocol.md`, `implementation-tracker.md` (+6 more in CoSA submodule)
-**Commit**: 6f6961f
+**Commit**: 9742659
 
 #### Checkpoint 2 | 2026.02.07 21:00 | Fix CRUD prompt for Phi-4 + debug script full dump
 
@@ -129,7 +129,13 @@
 ### 2026.02.07 - Session 147 | Bug Fix Mode
 
 ### Fixes
-(Individual fixes will be added here)
+
+#### Fix 1: Cancel Button on Open-Ended Notifications Fails with "Response cannot be empty"
+- **Source**: ad-hoc (discovered during cosa-voice testing)
+- **Problem**: Clicking Cancel on an open-ended blocking notification (e.g., from `converse()`) triggered error alert "Failed to submit response: Response cannot be empty". The frontend `cancelActionRequired()` used `''` (empty string) as the fallback for open-ended notifications, but the backend `/api/notify/response` endpoint rejects empty strings.
+- **Files**: `src/fastapi_app/static/js/notifications.js` (line 11039)
+- **Solution**: Changed cancel fallback from `''` to `'[cancelled]'`, aligning with the existing non-empty patterns (`'no'` for yes_no, `JSON.stringify({cancelled: true, answers: {}})` for multiple_choice)
+- **Test**: Unit 487/487 PASS, manual verification PASS (cancel dismissed cleanly, `converse()` returned `"[cancelled]"`)
 
 ### Session Summary
 (Will be completed at session close)

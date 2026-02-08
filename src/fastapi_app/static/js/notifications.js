@@ -11036,7 +11036,7 @@ class NotificationsUI {
                 // For multiple choice, return a cancelled/timeout response structure
                 defaultValue = JSON.stringify( { cancelled: true, answers: {} } );
             } else {
-                defaultValue = '';
+                defaultValue = '[cancelled]';
             }
         }
 
