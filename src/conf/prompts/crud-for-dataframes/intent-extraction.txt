@@ -45,7 +45,7 @@ Your user's current lists:
 {available_lists}
 
 You MUST respond to the query using the following XML format:
-{intent_example}
+{{PYDANTIC_XML_EXAMPLE}}
 
 User query: `{query}`
 

@@ -9,7 +9,7 @@
 
 | Part | Description | Status | Recommended Order |
 |------|-------------|--------|-------------------|
-| Part 1 | Mock Objects Protocol | **DONE** (12/12 passed) | 1st |
+| Part 1 | Mock Objects Protocol | **DONE** (17/17 passed) | 1st |
 | Part 3 | Curl Smoke Tests | PENDING | 2nd |
 | Part 2 | Notifications UI Protocol | PENDING | 3rd |
 
@@ -390,7 +390,33 @@ class TestConfirmationFlowPipeline:
 
 ---
 
-### 1.6 Running the Tests
+### 1.6 Prompt Construction Scenarios (5 tests)
+
+**What's validated**: Real template from disk + `PromptTemplateProcessor` produces a correct, format-ready prompt. Fills the gap between "plumbing works in isolation" and "the actual agent gets the right prompt."
+
+```python
+class TestPromptConstruction:
+    """Verify the real template + PromptTemplateProcessor produces a correct prompt."""
+
+    def test_template_marker_replaced( self ):
+        """{{PYDANTIC_XML_EXAMPLE}} marker is replaced by PromptTemplateProcessor."""
+
+    def test_intent_xml_injected( self ):
+        """Processed template contains <intent>...</intent> XML block."""
+
+    def test_stop_sentinel_present( self ):
+        """Processed template includes </stop> sentinel after closing </intent>."""
+
+    def test_generic_placeholders_not_concrete( self ):
+        """XML example uses generic placeholders, not concrete data like 'groceries'."""
+
+    def test_format_substitution_works( self ):
+        """prompt_template.format(query=..., available_lists=...) succeeds."""
+```
+
+---
+
+### 1.7 Running the Tests
 
 ```bash
 # Run all mock pipeline tests
@@ -618,7 +644,7 @@ curl -s -X POST http://localhost:7999/api/push \
 
 | Part | Test Count | Server Required | LLM Required | Status | What's Validated |
 |------|-----------|-----------------|-------------|--------|-----------------|
-| Part 1: Mock Objects | 12 | No | No (mocked) | **DONE** (12/12) | Routing swap, full pipeline, cache bypass, confirmation flow |
+| Part 1: Mock Objects | 17 | No | No (mocked) | **DONE** (17/17) | Routing swap, full pipeline, cache bypass, confirmation flow, prompt construction |
 | Part 3: Curl Smoke Tests | 4 | Yes (port 7999) | Yes (Phi-4 14B) | PENDING | Health check, push endpoint, feature flag toggle, destructive ops |
 | Part 2: Notifications UI | 8 | Yes (port 7999) | Yes (Phi-4 14B) | PENDING | Q&A submission, confirmation cards, TTS responses, feature flag |
-| **Total** | **24** | — | — | — | — |
+| **Total** | **29** | — | — | — | — |

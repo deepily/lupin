@@ -17,7 +17,18 @@
 
 ---
 
-### 2026.02.07 - Session 148 (continued) | CRUD Agent — Fix Phi-4 Empty Response
+### 2026.02.07 - Session 148 (continued) | CRUD Agent — Pipeline Alignment + Prompt Construction Tests
+
+#### Checkpoint 3 | 2026.02.07 23:00 | Generic placeholders + prompt construction verification tests
+
+**Accomplishments**:
+- **Pipeline Alignment**: Replaced ad-hoc `{intent_example}` placeholder in CRUD prompt template with `{{PYDANTIC_XML_EXAMPLE}}` marker, aligning with the standard `PromptTemplateProcessor` pipeline used by all other agents. Registered `CRUDIntent` in `MODEL_MAPPING`. Updated `agent.py` to use processor instead of manual XML generation.
+- **Generic Placeholders**: Changed `CRUDIntent.get_example_for_template()` from concrete values ("groceries", "add") to generic placeholders ("[operation name]", "[target list name]") so the LLM sees XML structure without being biased toward canned answers.
+- **5 New Prompt Construction Tests** (`TestPromptConstruction` in `test_crud_mock_pipeline.py`): Reads real template from disk, processes through `PromptTemplateProcessor`, verifies: marker replaced, `<intent>` XML injected, `</stop>` sentinel present, generic placeholders (not concrete data), `.format()` substitution works.
+- **Part 1 Testing Protocol**: 12 → 17 mock pipeline tests (total 29 protocol scenarios). Full regression: 487/487 unit tests passing.
+
+**Files Modified**: `intent-extraction.txt`, `test_crud_mock_pipeline.py`, `test_crud_for_dataframes_agent.py`, `testing-protocol.md`, `implementation-tracker.md` (+6 more in CoSA submodule)
+**Commit**: 6f6961f
 
 #### Checkpoint 2 | 2026.02.07 21:00 | Fix CRUD prompt for Phi-4 + debug script full dump
 

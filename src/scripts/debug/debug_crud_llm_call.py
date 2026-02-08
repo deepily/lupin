@@ -34,18 +34,21 @@ print( "=" * 80 )
 print( "STEP 1: Building prompt (same as CrudForDataFramesAgent)" )
 print( "=" * 80 )
 
-from cosa.crud_for_dataframes.xml_models import CRUDIntent
 from cosa.crud_for_dataframes.storage import DataFrameStorage
+from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
 
 # Load the prompt template
 template_path = cu.get_project_root() + "/src/conf/prompts/crud-for-dataframes/intent-extraction.txt"
 with open( template_path, "r" ) as f:
     prompt_template = f.read()
 
+# Process template with PromptTemplateProcessor (same as AgentBase.__init__)
+processor       = PromptTemplateProcessor( debug=True )
+prompt_template = processor.process_template( prompt_template, "agent router go to crud for dataframes" )
+
 # Build context (same as agent.__init__)
 storage         = DataFrameStorage( user_email="ricardo.felipe.ruiz@gmail.com", base_path=cu.get_project_root() + "/io/dfs" )
 available_lists = storage.get_all_lists_metadata()
-intent_example  = CRUDIntent.get_example_for_template().to_xml( root_tag="intent" )
 
 # Format available lists (same as agent._format_lists_for_prompt)
 if available_lists:
@@ -56,7 +59,6 @@ else:
 prompt = prompt_template.format(
     query           = QUESTION,
     available_lists = lists_str,
-    intent_example  = intent_example
 )
 
 print( f"Prompt length: {len( prompt )} chars" )

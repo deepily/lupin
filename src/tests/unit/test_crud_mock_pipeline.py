@@ -2,7 +2,7 @@
 """
 Integration tests for DataFrame CRUD mock pipeline (Part 1 of testing protocol).
 
-12 scenarios testing the full pipeline with mocked LLM and notification services.
+17 scenarios testing the full pipeline with mocked LLM and notification services.
 No server required — all dependencies are mocked.
 
 Test classes:
@@ -10,6 +10,7 @@ Test classes:
     - TestFullPipelineMocked (3): End-to-end add/query/delete via run_prompt → run_code → run_formatter
     - TestCacheBypassPipeline (2): CRUD agents skip snapshot cache, non-CRUD agents don't
     - TestConfirmationFlowPipeline (4): Delete triggers confirmation; add skips it entirely
+    - TestPromptConstruction (5): Real template + PromptTemplateProcessor produces correct prompt
 
 Run: pytest src/tests/unit/test_crud_mock_pipeline.py -v
 """
@@ -19,6 +20,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+import cosa.utils.util as cu
+from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
 from cosa.crud_for_dataframes.xml_models import CRUDIntent
 from cosa.crud_for_dataframes.storage import DataFrameStorage
 from cosa.crud_for_dataframes.crud_operations import add_item
@@ -79,6 +82,8 @@ def _create_mock_agent( agent_cls=CrudForDataFramesAgent, tmp_dir=None, question
         agent.storage = MagicMock()
         agent.storage.get_all_lists_metadata.return_value = []
 
+    # Ad-hoc prompt — sufficient for mocked-LLM tests. For real template +
+    # PromptTemplateProcessor verification, see TestPromptConstruction below.
     intent_example = CRUDIntent.get_example_for_template().to_xml( root_tag="intent" )
     agent.prompt = f"Extract intent: {question}\n{intent_example}"
 
@@ -331,3 +336,66 @@ class TestConfirmationFlowPipeline:
         # No mock for notify_user_sync — if called, test would fail
         result = agent.run_code()
         assert result[ "output" ][ "status" ] == "added"
+
+
+# ============================================================================
+# TestPromptConstruction — Real template + PromptTemplateProcessor verification
+# ============================================================================
+
+class TestPromptConstruction:
+    """Verify the real template + PromptTemplateProcessor produces a correct prompt."""
+
+    TEMPLATE_PATH    = "/src/conf/prompts/crud-for-dataframes/intent-extraction.txt"
+    ROUTING_COMMAND  = "agent router go to crud for dataframes"
+
+    @pytest.fixture
+    def processed_prompt( self ):
+        """Read real template, process through PromptTemplateProcessor, return result."""
+        template_path = cu.get_project_root() + self.TEMPLATE_PATH
+        with open( template_path, "r" ) as f:
+            raw_template = f.read()
+
+        processor = PromptTemplateProcessor( debug=False )
+        return processor.process_template( raw_template, self.ROUTING_COMMAND )
+
+    def test_template_marker_replaced( self, processed_prompt ):
+        """{{PYDANTIC_XML_EXAMPLE}} marker is replaced by PromptTemplateProcessor."""
+        assert "{{PYDANTIC_XML_EXAMPLE}}" not in processed_prompt
+
+    def test_intent_xml_injected( self, processed_prompt ):
+        """Processed template contains <intent>...</intent> XML block."""
+        assert "<intent>" in processed_prompt
+        assert "</intent>" in processed_prompt
+        assert "<operation>" in processed_prompt
+
+    def test_stop_sentinel_present( self, processed_prompt ):
+        """Processed template includes </stop> sentinel after closing </intent>."""
+        assert "</stop>" in processed_prompt
+        # Sentinel should come after the intent block
+        intent_end = processed_prompt.index( "</intent>" )
+        stop_pos   = processed_prompt.index( "</stop>" )
+        assert stop_pos > intent_end
+
+    def test_generic_placeholders_not_concrete( self, processed_prompt ):
+        """XML example uses generic placeholders, not concrete data like 'groceries'."""
+        # Verify generic placeholders are present
+        assert "[operation name]" in processed_prompt
+        assert "[target list name]" in processed_prompt
+
+        # Verify concrete data from old template is absent (the example should NOT
+        # contain specific values that might bias the LLM toward canned answers)
+        xml_start = processed_prompt.index( "<intent>" )
+        xml_end   = processed_prompt.index( "</stop>" ) + len( "</stop>" )
+        xml_block = processed_prompt[ xml_start:xml_end ]
+        assert "groceries" not in xml_block
+
+    def test_format_substitution_works( self, processed_prompt ):
+        """prompt_template.format(query=..., available_lists=...) succeeds."""
+        # After processor replaces {{PYDANTIC_XML_EXAMPLE}}, .format() with 2 params should work.
+        # This would fail if legacy {intent_example} placeholder were still present.
+        final_prompt = processed_prompt.format(
+            query           = "add buy milk to my grocery list",
+            available_lists = "- groceries (todo, 3 items)"
+        )
+        assert "add buy milk to my grocery list" in final_prompt
+        assert "- groceries (todo, 3 items)" in final_prompt

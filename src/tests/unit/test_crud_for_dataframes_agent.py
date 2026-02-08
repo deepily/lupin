@@ -578,7 +578,9 @@ class TestCrudForDataFramesAgentMocked:
             agent.storage = MagicMock()
             agent.storage.get_all_lists_metadata.return_value = []
 
-        # Build a simple prompt
+        # Ad-hoc prompt — sufficient for mocked-LLM tests. For real template +
+        # PromptTemplateProcessor verification, see TestPromptConstruction in
+        # test_crud_mock_pipeline.py.
         intent_example = CRUDIntent.get_example_for_template().to_xml( root_tag="intent" )
         agent.prompt = f"Extract intent: add buy milk to my grocery list\n{intent_example}"
 

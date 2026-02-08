@@ -9,7 +9,7 @@
 | 1 | Layer 1: Storage | COMPLETE | 91 unit tests, 16 smoke tests, all passing |
 | 2 | Layer 2: Intent | COMPLETE | 73 unit tests, 5 new source files + 1 modified + 1 test file |
 | 3 | Layer 3: Queue Integration | COMPLETE | 26 unit tests, feature-flag routing swap + cache skip + voice confirmation |
-| E2E | Testing Protocol Part 1 | COMPLETE | 12 mock pipeline tests (routing, pipeline, cache, confirmation) |
+| E2E | Testing Protocol Part 1 | COMPLETE | 17 mock pipeline tests (routing, pipeline, cache, confirmation, prompt construction) |
 | E2E | Testing Protocol Part 3 | PENDING | Curl integration smoke tests (health, push, routing, destructive) |
 | E2E | Testing Protocol Part 2 | PENDING | Manual UI tests (Q&A, confirmation cards, feature flag toggle) |
 | 4 | Layer 3: Polish | NOT STARTED | End-to-end voice workflows |
@@ -24,11 +24,12 @@
 | 2 | TestFullPipelineMocked (3 tests) | Done |
 | 3 | TestCacheBypassPipeline (2 tests) | Done |
 | 4 | TestConfirmationFlowPipeline (4 tests) | Done |
+| 5 | TestPromptConstruction (5 tests) | Done |
 
 ### Part 1 Verification Results (2026-02-07)
 
-- Part 1 mock pipeline tests: 12/12 passed (1.77s)
-- Full unit suite: 461/461 passed (9.61s, zero regressions)
+- Part 1 mock pipeline tests: 17/17 passed (1.95s)
+- Full unit suite: 487/487 passed (9.82s, zero regressions)
 - Test file: `src/tests/unit/test_crud_mock_pipeline.py`
 - Note: Placed in `unit/` instead of `integration/` because integration conftest requires live server; these tests are fully mocked
 
@@ -40,6 +41,7 @@
 | TestFullPipelineMocked | 3 | Full add/query/delete pipeline: run_prompt → run_code → run_formatter |
 | TestCacheBypassPipeline | 2 | CRUD agents skip cache, non-CRUD agents don't |
 | TestConfirmationFlowPipeline | 4 | Delete yes/no/timeout, add skips confirmation |
+| TestPromptConstruction | 5 | Real template + PromptTemplateProcessor: marker, XML, sentinel, placeholders, format() |
 
 ### Testing Protocol Discrepancy Found
 

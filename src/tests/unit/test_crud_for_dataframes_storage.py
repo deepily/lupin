@@ -192,9 +192,9 @@ class TestCRUDIntent:
     def test_creation_with_all_fields( self ):
         """CRUDIntent accepts all fields."""
         intent = CRUDIntent.get_example_for_template()
-        assert intent.operation == "add"
-        assert intent.target_list == "groceries"
-        assert intent.schema_type == "todo"
+        assert intent.operation == "[operation name]"
+        assert intent.target_list == "[target list name]"
+        assert intent.schema_type == "[schema type: todo, calendar, or generic]"
 
     def test_default_values( self ):
         """CRUDIntent has sensible defaults."""
@@ -296,10 +296,10 @@ class TestCRUDIntent:
     def test_xml_round_trip( self ):
         """CRUDIntent survives XML serialization/deserialization."""
         original = CRUDIntent.get_example_for_template()
-        xml_str  = original.to_xml( root_tag="intent" )
+        xml_str  = original.to_xml()  # defaults to root_tag="intent"
 
-        assert "<operation>add</operation>" in xml_str
-        assert "<target_list>groceries</target_list>" in xml_str
+        assert "<operation>[operation name]</operation>" in xml_str
+        assert "<target_list>[target list name]</target_list>" in xml_str
 
         parsed = CRUDIntent.from_xml( xml_str, root_tag="intent" )
         assert parsed.operation == original.operation
@@ -320,11 +320,11 @@ class TestCRUDIntent:
         assert parsed.get_fields_dict() == original.get_fields_dict()
 
     def test_example_for_template( self ):
-        """Template example has expected structure."""
+        """Template example has generic placeholder values."""
         example = CRUDIntent.get_example_for_template()
-        assert example.operation == "add"
-        assert "groceries" in example.target_list
-        assert "buy milk" in example.raw_query
+        assert example.operation == "[operation name]"
+        assert "[target list name]" in example.target_list
+        assert "[original user query" in example.raw_query
 
     def test_valid_operations_list( self ):
         """VALID_OPERATIONS contains expected operations."""
