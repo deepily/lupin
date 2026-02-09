@@ -2641,6 +2641,83 @@
             min-width: 0;  /* Allow input to shrink */
         }
 
+        /* ========================================
+           OPEN-ENDED BATCH RESPONSE STYLES
+           ======================================== */
+
+        .response-open-ended-batch {
+            margin-top: 12px;
+        }
+
+        .batch-question {
+            padding: 12px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .batch-question:last-of-type {
+            border-bottom: none;
+        }
+
+        .batch-question-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #6c757d;
+            background-color: #e9ecef;
+            padding: 4px 10px;
+            border-radius: 12px;
+            display: inline-block;
+            margin-bottom: 6px;
+        }
+
+        .batch-question-text {
+            font-size: 15px;
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+
+        .batch-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+        }
+
+        .batch-input-row .response-mic-button {
+            flex-shrink: 0;
+        }
+
+        .batch-input-row .response-text-input {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .batch-submit-actions {
+            margin-top: 16px;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .batch-submit-all {
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .batch-submit-all:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba( 0, 123, 255, 0.4 );
+        }
+
+        /* Validation state */
+        .response-open-ended-batch.invalid::after {
+            content: "Please fill in all fields";
+            display: block;
+            color: #dc3545;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+
 /* ========================================
    JOB QUEUE PROGRESSIVE DISCLOSURE STYLES
    ======================================== */

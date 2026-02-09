@@ -1,7 +1,7 @@
 """
 Unit tests for Runtime Argument Expeditor.
 
-Tests 7 components:
+Tests 8 components:
 1. ExpeditorResponse model (xml_models.py) - 16 tests
 2. _parse_lora_args() (expeditor.py) - 9 tests
 3. _inject_system_args() (expeditor.py) - 4 tests
@@ -9,11 +9,12 @@ Tests 7 components:
 5. create_agentic_job() factory (agentic_job_factory.py) - 12 tests
 6. ArgConfirmationResponse model (xml_models.py) - 8 tests
 7. _confirm_and_iterate() (expeditor.py) - 9 tests
+8. _batch_collect_args() + batch integration (expeditor.py) - 6 tests
 
 All external dependencies mocked. No server, no LLM, no filesystem I/O.
 
 Created: 2026-02-05
-Updated: 2026-02-07 — user-visible-args whitelist + confirmation loop
+Updated: 2026-02-09 — batch open-ended question collection
 """
 
 import pytest
@@ -963,3 +964,169 @@ class TestConfirmAndIterate:
         assert "query" in message
         # lead_model is NOT in fallback_questions, so should be excluded
         assert "lead_model" not in message
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Class 8: TestBatchCollectArgs (6 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestBatchCollectArgs:
+    """Tests for RuntimeArgumentExpeditor._batch_collect_args() and batch integration."""
+
+    DR_COMMAND_KEY = "agent router go to deep research"
+
+    def setup_method( self ):
+        """Create a minimal expeditor instance with mocked dependencies."""
+        self.expeditor                          = RuntimeArgumentExpeditor.__new__( RuntimeArgumentExpeditor )
+        self.expeditor.debug                    = False
+        self.expeditor.verbose                  = False
+        self.expeditor.confirmation_prompt_path = "/src/conf/prompts/runtime-argument-confirmation.txt"
+        self.expeditor.llm_spec_key             = "test_key"
+        self.expeditor.llm_factory              = MagicMock()
+
+        self.agent_entry       = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
+        self.fallback_questions = self.agent_entry[ "fallback_questions" ]
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.notify_user_sync" )
+    def test_batch_collect_args_success( self, mock_sync ):
+        """Successful batch returns dict of answers keyed by arg name."""
+        import json
+        mock_sync.return_value = MagicMock(
+            success        = True,
+            response_value = json.dumps( { "answers": { "budget": "10", "audience": "expert" } } )
+        )
+
+        result = self.expeditor._batch_collect_args(
+            [ "budget", "audience" ], self.fallback_questions, "test@test.com"
+        )
+
+        assert result is not None
+        assert result[ "budget" ] == "10"
+        assert result[ "audience" ] == "expert"
+        mock_sync.assert_called_once()
+
+        # Verify the request used OPEN_ENDED_BATCH response type
+        call_kwargs = mock_sync.call_args[ 1 ]
+        request = call_kwargs[ "request" ]
+        assert request.response_type.value == "open_ended_batch"
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.notify_user_sync" )
+    def test_batch_collect_args_timeout( self, mock_sync ):
+        """Timeout returns None."""
+        mock_sync.return_value = MagicMock(
+            success        = False,
+            response_value = None
+        )
+
+        result = self.expeditor._batch_collect_args(
+            [ "budget", "audience" ], self.fallback_questions, "test@test.com"
+        )
+
+        assert result is None
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.notify_user_sync" )
+    def test_batch_collect_args_cancel( self, mock_sync ):
+        """Cancel keyword in any answer returns None."""
+        import json
+        mock_sync.return_value = MagicMock(
+            success        = True,
+            response_value = json.dumps( { "answers": { "budget": "cancel", "audience": "expert" } } )
+        )
+
+        result = self.expeditor._batch_collect_args(
+            [ "budget", "audience" ], self.fallback_questions, "test@test.com"
+        )
+
+        assert result is None
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.notify_user_sync" )
+    def test_batch_collect_args_cancelled_flag( self, mock_sync ):
+        """Cancelled flag in response returns None."""
+        import json
+        mock_sync.return_value = MagicMock(
+            success        = True,
+            response_value = json.dumps( { "cancelled": True, "answers": {} } )
+        )
+
+        result = self.expeditor._batch_collect_args(
+            [ "budget", "audience" ], self.fallback_questions, "test@test.com"
+        )
+
+        assert result is None
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_batch_collect_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_confirm_and_iterate" )
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.LlmClientFactory" )
+    def test_expedite_uses_batch_for_multiple_missing( self, mock_factory, mock_confirm, mock_batch, mock_uva ):
+        """When >1 batchable args missing, batch path is taken."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
+        mock_batch.return_value = { "budget": "10", "audience": "expert" }
+        mock_confirm.return_value = { "query": "quantum", "budget": "10", "audience": "expert" }
+
+        # Set up LLM to return "args missing" response
+        mock_llm = MagicMock()
+        mock_llm.run.return_value = (
+            "<expeditor_response><all_required_met>false</all_required_met>"
+            "<args_present>query=quantum</args_present>"
+            "<args_missing>budget, audience</args_missing></expeditor_response>"
+        )
+        mock_factory_instance = MagicMock()
+        mock_factory_instance.get_client.return_value = mock_llm
+        self.expeditor.llm_factory = mock_factory_instance
+        self.expeditor.prompt_template_path = "/src/conf/prompts/test.txt"
+
+        with patch( "cosa.utils.util.get_file_as_string", return_value="{system_args}{help_text}{voice_command}{extracted_args}{required_args}" ), \
+             patch( "cosa.utils.util.get_project_root", return_value="/fake" ), \
+             patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_cli_help", return_value="test help" ), \
+             patch( "cosa.agents.io_models.utils.prompt_template_processor.PromptTemplateProcessor.process_template", return_value="{system_args}{help_text}{voice_command}{extracted_args}{required_args}" ):
+            result = self.expeditor.expedite(
+                command           = self.DR_COMMAND_KEY,
+                raw_args          = 'query="quantum"',
+                user_email        = "test@test.com",
+                session_id        = "sess-1",
+                user_id           = "uid-1",
+                original_question = "research quantum computing"
+            )
+
+        mock_batch.assert_called_once()
+        batch_call_args = mock_batch.call_args[ 0 ]
+        assert "budget" in batch_call_args[ 0 ]
+        assert "audience" in batch_call_args[ 0 ]
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_ask_for_arg" )
+    @patch.object( RuntimeArgumentExpeditor, "_confirm_and_iterate" )
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.LlmClientFactory" )
+    def test_expedite_uses_single_for_one_missing( self, mock_factory, mock_confirm, mock_ask, mock_uva ):
+        """When exactly 1 batchable arg missing, single path is taken (no batch)."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
+        mock_ask.return_value = "10"
+        mock_confirm.return_value = { "query": "quantum", "budget": "10" }
+
+        mock_llm = MagicMock()
+        mock_llm.run.return_value = (
+            "<expeditor_response><all_required_met>false</all_required_met>"
+            "<args_present>query=quantum</args_present>"
+            "<args_missing>budget</args_missing></expeditor_response>"
+        )
+        mock_factory_instance = MagicMock()
+        mock_factory_instance.get_client.return_value = mock_llm
+        self.expeditor.llm_factory = mock_factory_instance
+        self.expeditor.prompt_template_path = "/src/conf/prompts/test.txt"
+
+        with patch( "cosa.utils.util.get_file_as_string", return_value="{system_args}{help_text}{voice_command}{extracted_args}{required_args}" ), \
+             patch( "cosa.utils.util.get_project_root", return_value="/fake" ), \
+             patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_cli_help", return_value="test help" ), \
+             patch( "cosa.agents.io_models.utils.prompt_template_processor.PromptTemplateProcessor.process_template", return_value="{system_args}{help_text}{voice_command}{extracted_args}{required_args}" ):
+            result = self.expeditor.expedite(
+                command           = self.DR_COMMAND_KEY,
+                raw_args          = 'query="quantum"',
+                user_email        = "test@test.com",
+                session_id        = "sess-1",
+                user_id           = "uid-1",
+                original_question = "research quantum computing"
+            )
+
+        mock_ask.assert_called()
+        # Verify _batch_collect_args was NOT called (it's not patched, so would fail if called)

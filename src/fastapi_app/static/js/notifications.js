@@ -8761,6 +8761,11 @@ class NotificationsUI {
             state.collectedAnswers     = {};  // { header: value/[values] }
         }
 
+        // Add empty answers state for open_ended_batch notifications
+        if ( notification.response_type === 'open_ended_batch' ) {
+            state.collectedAnswers = {};  // { header: value }
+        }
+
         this.actionRequiredNotifications.set( notification.id, state );
 
         // Show the Action Required section
@@ -9711,6 +9716,8 @@ class NotificationsUI {
             `;
         } else if ( notification.response_type === 'multiple_choice' ) {
             responseUI = this.renderMultipleChoiceUI( notification );
+        } else if ( notification.response_type === 'open_ended_batch' ) {
+            responseUI = this.renderOpenEndedBatchUI( notification );
         }
 
         // Build abstract section if present - render markdown with XSS protection
@@ -9857,6 +9864,196 @@ class NotificationsUI {
         } else if ( notification.response_type === 'multiple_choice' ) {
             // Use centralized event handler attachment (supports multi-question navigation)
             this.attachMultipleChoiceEventHandlers( notification.id, card );
+        } else if ( notification.response_type === 'open_ended_batch' ) {
+            this.attachOpenEndedBatchEventHandlers( notification.id, card );
+        }
+    }
+
+    /**
+     * Renders the UI for an open-ended batch notification.
+     * All questions visible at once with text input + mic button per question.
+     *
+     * Requires:
+     *   - notification.response_options.questions is a non-empty array
+     *   - Each question has: question (string), header (string), input_type = "text"
+     *
+     * Ensures:
+     *   - Returns HTML string with all questions rendered at once
+     *   - Each question has a numbered label, text, mic button, and text input
+     *   - Single "Submit All" button at bottom
+     */
+    renderOpenEndedBatchUI( notification ) {
+        const questions = notification.response_options?.questions || [];
+        const total     = questions.length;
+
+        if ( total === 0 ) {
+            return '<div class="response-open-ended-batch"><p>No questions provided.</p></div>';
+        }
+
+        let questionsHTML = '';
+        for ( let i = 0; i < total; i++ ) {
+            const q = questions[ i ];
+            const header = q.header || `Question ${i + 1}`;
+
+            questionsHTML += `
+                <div class="batch-question" data-question-index="${i}" data-header="${this.escapeHtml( header )}">
+                    <div class="batch-question-label">Question ${i + 1} of ${total}</div>
+                    <div class="batch-question-text">${this.escapeHtml( q.question || '' )}</div>
+                    <div class="batch-input-row">
+                        <button class="response-mic-button batch-mic-button" data-question-index="${i}" title="Press to record (30s max, ESC to cancel)">
+                            🎤
+                        </button>
+                        <input type="text" class="response-text-input batch-text-input" data-question-index="${i}" data-header="${this.escapeHtml( header )}" placeholder="Type your answer...">
+                    </div>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="response-open-ended-batch">
+                ${questionsHTML}
+                <div class="batch-submit-actions">
+                    <button class="response-submit-button batch-submit-all">
+                        Submit All ✓
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Attaches event handlers for an open-ended batch notification.
+     *
+     * Requires:
+     *   - card contains rendered batch UI elements
+     *
+     * Ensures:
+     *   - Submit button collects all answers and submits
+     *   - Mic buttons start voice input for their respective text inputs
+     *   - Enter on last input submits; Enter on others focuses next input
+     */
+    attachOpenEndedBatchEventHandlers( notificationId, card ) {
+        const submitButton = card.querySelector( '.batch-submit-all' );
+        const textInputs   = card.querySelectorAll( '.batch-text-input' );
+        const micButtons   = card.querySelectorAll( '.batch-mic-button' );
+        const totalInputs  = textInputs.length;
+
+        // Submit button click
+        if ( submitButton ) {
+            submitButton.addEventListener( 'click', () => {
+                this.submitOpenEndedBatchAnswers( notificationId );
+            } );
+        }
+
+        // Text input keydown handlers
+        textInputs.forEach( ( input, index ) => {
+            input.addEventListener( 'keydown', ( e ) => {
+                if ( e.key === 'Enter' ) {
+                    e.preventDefault();
+                    if ( index < totalInputs - 1 ) {
+                        // Focus next input
+                        textInputs[ index + 1 ].focus();
+                    } else {
+                        // Last input — submit
+                        this.submitOpenEndedBatchAnswers( notificationId );
+                    }
+                }
+            } );
+        } );
+
+        // Mic button click handlers — each bound to its own text input
+        micButtons.forEach( ( micButton, index ) => {
+            const textInput = textInputs[ index ];
+            micButton.addEventListener( 'click', () => {
+                this.startBatchVoiceInput( notificationId, index, micButton, textInput );
+            } );
+            micButton.addEventListener( 'keydown', ( e ) => {
+                if ( e.key === 'Enter' || e.key === ' ' ) {
+                    e.preventDefault();
+                    this.startBatchVoiceInput( notificationId, index, micButton, textInput );
+                }
+            } );
+        } );
+
+        // Voice-first: focus first mic button for immediate activation
+        if ( micButtons.length > 0 ) {
+            micButtons[ 0 ].focus( { preventScroll: true } );
+        }
+    }
+
+    /**
+     * Collects all batch answers and submits as JSON.
+     *
+     * Requires:
+     *   - All required batch text inputs have values
+     *
+     * Ensures:
+     *   - Collects values keyed by header
+     *   - Validates at least one field has content
+     *   - Submits as JSON: { answers: { "Header": "value", ... } }
+     */
+    submitOpenEndedBatchAnswers( notificationId ) {
+        const card       = document.getElementById( `action-required-${notificationId}` );
+        const textInputs = card?.querySelectorAll( '.batch-text-input' );
+
+        if ( !textInputs || textInputs.length === 0 ) return;
+
+        const answers = {};
+        let hasAnyContent = false;
+        let allValid      = true;
+
+        textInputs.forEach( ( input ) => {
+            const header = input.dataset.header;
+            const value  = input.value.trim();
+            answers[ header ] = value;
+
+            if ( value.length > 0 ) {
+                hasAnyContent = true;
+                input.classList.remove( 'invalid' );
+            } else {
+                input.classList.add( 'invalid' );
+                allValid = false;
+            }
+        } );
+
+        if ( !hasAnyContent || !allValid ) {
+            this.log( 'submitOpenEndedBatchAnswers: Not all fields filled' );
+            // Shake the container briefly for visual feedback
+            const container = card?.querySelector( '.response-open-ended-batch' );
+            if ( container ) {
+                container.classList.add( 'invalid' );
+                setTimeout( () => container.classList.remove( 'invalid' ), 2000 );
+            }
+            return;
+        }
+
+        const response = { answers: answers };
+        this.log( 'Submitting batch answers:', response );
+        this.submitResponse( notificationId, JSON.stringify( response ) );
+    }
+
+    /**
+     * Starts voice input for a specific question in an open-ended batch.
+     * Uses unified RecordingManager.
+     */
+    async startBatchVoiceInput( notificationId, questionIndex, micButton, textInput ) {
+        this.log( `Starting voice input for batch question ${questionIndex}: ${notificationId}` );
+
+        if ( !micButton || !textInput ) {
+            this.error( `Voice input: Could not find batch UI elements for question ${questionIndex}` );
+            return;
+        }
+
+        // Toggle recording state using unified RecordingManager
+        if ( this.recordingManager.isRecording() ) {
+            await this.recordingManager.stopRecording();
+        } else if ( !this.recordingManager.isProcessing() ) {
+            await this.recordingManager.startRecording( `batch-${notificationId}-${questionIndex}`, micButton, textInput, {
+                onTranscriptionComplete: () => {
+                    // Clear invalid state on successful transcription
+                    textInput.classList.remove( 'invalid' );
+                }
+            } );
         }
     }
 
@@ -11060,8 +11257,8 @@ class NotificationsUI {
         if ( defaultValue === undefined || defaultValue === null ) {
             if ( notification.response_type === 'yes_no' ) {
                 defaultValue = 'no';
-            } else if ( notification.response_type === 'multiple_choice' ) {
-                // For multiple choice, return a cancelled/timeout response structure
+            } else if ( notification.response_type === 'multiple_choice' || notification.response_type === 'open_ended_batch' ) {
+                // For multiple choice and batch, return a cancelled/timeout response structure
                 defaultValue = JSON.stringify( { cancelled: true, answers: {} } );
             } else {
                 defaultValue = '[cancelled]';
@@ -11568,7 +11765,7 @@ class NotificationsUI {
         let responseMessage;
         if ( wasExpired ) {
             responseMessage = `[Default: ${response}]`;
-        } else if ( notification.response_type === 'multiple_choice' ) {
+        } else if ( notification.response_type === 'multiple_choice' || notification.response_type === 'open_ended_batch' ) {
             responseMessage = this.formatMultipleChoiceResponse( response );
         } else {
             responseMessage = response;

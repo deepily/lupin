@@ -52,7 +52,12 @@ from cosa.cli.notification_models import (
 )
 from cosa.cli.notify_user_sync import notify_user_sync
 from cosa.cli.notify_user_async import notify_user_async
-from cosa.utils.notification_utils import format_questions_for_tts, convert_questions_for_api
+from cosa.utils.notification_utils import (
+    format_questions_for_tts,
+    convert_questions_for_api,
+    format_open_ended_batch_for_tts,
+    convert_open_ended_batch_for_api
+)
 
 
 def _normalize_abstract( abstract: Optional[ str ] ) -> Optional[ str ]:
@@ -86,7 +91,7 @@ logger = logging.getLogger( __name__ )
 # Version
 # ============================================================================
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 # ============================================================================
 # Configuration
@@ -554,6 +559,120 @@ def _parse_multiple_choice_response( response_value: Optional[ str ] ) -> dict:
     except ( json.JSONDecodeError, TypeError ) as e:
         logger.warning( f"Could not parse multiple choice response: {e}" )
         # Return raw value wrapped in answers
+        return { "answers": { "response": response_value } }
+
+
+@mcp.tool
+def ask_open_ended_batch(
+    questions: list,
+    timeout_seconds: int = 300,
+    priority: str = "high",
+    title: Optional[ str ] = None,
+    abstract: Optional[ str ] = None,
+    job_id: Optional[ str ] = None
+) -> dict:
+    """
+    Ask multiple open-ended questions at once and get all answers as a dict.
+
+    Presents all questions on a single screen with text input + mic button per question.
+    User answers all questions and submits once. Much faster than asking one at a time.
+
+    Args:
+        questions: List of question objects, each with "question" and "header" keys:
+            [
+                {"question": "What topic would you like to research?", "header": "Topic"},
+                {"question": "Would you like to set a budget limit?", "header": "Budget"},
+                {"question": "Who is the target audience?", "header": "Audience"}
+            ]
+        timeout_seconds: How long to wait for response (1-600, default 300)
+        priority: "low", "medium", "high", or "urgent"
+        title: Optional short title for the notification
+        abstract: Optional supplementary context (plan details, URLs, markdown)
+        job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
+
+    Returns:
+        dict with answers keyed by header:
+        {
+            "answers": {
+                "Topic": "quantum computing",
+                "Budget": "no limit",
+                "Audience": "graduate students"
+            }
+        }
+
+    Examples:
+        result = ask_open_ended_batch([
+            {"question": "What topic?", "header": "Topic"},
+            {"question": "What budget?", "header": "Budget"}
+        ])
+        # Returns: {"answers": {"Topic": "quantum computing", "Budget": "10"}}
+    """
+    logger.debug( f"ask_open_ended_batch() called with {len( questions )} questions" )
+
+    if not questions or not isinstance( questions, list ):
+        return { "error": "questions must be a non-empty list" }
+
+    # Build TTS-friendly message from questions
+    tts_message = format_open_ended_batch_for_tts( questions )
+
+    # Convert questions to response_options format
+    response_options = convert_open_ended_batch_for_api( questions )
+
+    try:
+        request = NotificationRequest(
+            message          = tts_message,
+            response_type    = ResponseType.OPEN_ENDED_BATCH,
+            notification_type = NotificationType.CUSTOM,
+            priority         = NotificationPriority( priority ),
+            timeout_seconds  = timeout_seconds,
+            title            = title,
+            sender_id        = SENDER_ID,
+            response_options = response_options,
+            abstract         = _normalize_abstract( abstract ),
+            job_id           = job_id
+        )
+    except ( ValidationError, ValueError ) as e:
+        logger.error( f"Validation error: {e}" )
+        return { "error": f"validation error: {e}" }
+
+    response: NotificationResponse = notify_user_sync( request=request, debug=False )
+
+    if response.exit_code == 0:
+        return _parse_open_ended_batch_response( response.response_value )
+    elif response.exit_code == 2:
+        return { "error": "timeout - no response received", "timeout": True }
+    else:
+        return { "error": f"error: {response.status}" }
+
+
+def _parse_open_ended_batch_response( response_value: Optional[ str ] ) -> dict:
+    """
+    Parse the response from an open-ended batch notification.
+
+    Expects JSON string like: {"answers": {"Topic": "quantum computing", "Budget": "10"}}
+
+    Requires:
+        - response_value is None or a JSON string
+
+    Ensures:
+        - Returns parsed dict if valid JSON
+        - Returns error dict if parsing fails
+
+    Args:
+        response_value: JSON string from notification response
+
+    Returns:
+        dict: Parsed answers or error
+    """
+    if not response_value:
+        return { "answers": {} }
+
+    try:
+        import json
+        parsed = json.loads( response_value )
+        return parsed if isinstance( parsed, dict ) else { "answers": parsed }
+    except ( json.JSONDecodeError, TypeError ) as e:
+        logger.warning( f"Could not parse open-ended batch response: {e}" )
         return { "answers": { "response": response_value } }
 
 

@@ -1,5 +1,35 @@
 # Lupin Project History
 
+### 2026.02.09 - Session 156 | Batch Open-Ended Questions for cosa-voice MCP Server
+
+#### Checkpoint 1 | 2026.02.09 | Full 8-step implementation + 499 unit tests pass
+
+**Accomplishments**:
+- **New MCP Tool**: Added `ask_open_ended_batch()` to cosa-voice MCP server (v0.2.1 → v0.3.0) — asks multiple open-ended questions at once instead of one at a time, returns answers as dict keyed by header
+- **New ResponseType**: `OPEN_ENDED_BATCH = "open_ended_batch"` added to `ResponseType` enum with validator in `notification_models.py`
+- **Utility Functions**: `format_open_ended_batch_for_tts()` and `convert_open_ended_batch_for_api()` in `notification_utils.py` with smoke tests
+- **Frontend Rendering**: Form-style UI with all questions visible at once, each with numbered label + mic button + text input, single "Submit All" button. Per-question voice input via unified RecordingManager
+- **Expeditor Integration**: Added `_batch_collect_args()` method, refactored missing-args loop to partition batchable vs special-handler args. >1 batchable → batch collection; exactly 1 → existing single flow. Special handlers (fuzzy_file_match) always sequential after batch
+- **Cancel Semantics**: Cancel keyword in any batch answer → entire batch cancelled (matches existing single-arg behavior)
+- **6 New Unit Tests**: `TestBatchCollectArgs` class — success, timeout, cancel keyword, cancelled flag, batch-for-multiple, single-for-one. Full regression: 499/499 unit tests pass
+
+**Files Modified** (Lupin repo): `src/lupin_mcp/cosa_voice_mcp.py`, `src/fastapi_app/static/js/notifications.js` (+203 lines), `src/fastapi_app/static/css/notifications.css` (+85 lines), `src/tests/unit/test_runtime_argument_expeditor.py` (+171 lines)
+**Files Modified** (CoSA submodule, not committed here): `notification_models.py`, `notification_utils.py`, `expeditor.py`
+
+---
+
+### 2026.02.09 - Session 155 | Gist Embeddings Analysis: Keep vs. Jettison
+
+**Accomplishments**:
+- **Research Document**: Wrote comprehensive analysis of gist embedding system value in the retrieval pipeline. Traced every usage of gist generation and gist embeddings across the repo
+- **Finding**: Gist _text_ is valuable (Level 3 exact matching via CanonicalSynonymsTable), but gist _embeddings_ are dead code — never searched in Level 4 vector similarity, `threshold_gist` parameter accepted but never applied, `get_snapshots_by_solution_gist_similarity()` has zero callers
+- **Recommendation**: 3-phase cleanup — Phase 1: remove dead code paths, Phase 2: stop generating gist embeddings at snapshot creation, Phase 3: optionally re-enable with proper integration if needed
+
+**Files Created**: `src/rnd/2026.02.09-gist-embeddings-analysis-keep-vs-jettison.md`
+**Files Modified**: `src/rnd/README.md` (added analysis entry)
+
+---
+
 ### 2026.02.08 - Session 154 | User-Visible Args Whitelist for Runtime Argument Expeditor
 
 **Accomplishments**:
