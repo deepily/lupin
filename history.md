@@ -2,6 +2,16 @@
 
 ### 2026.02.09 - Session 157 | PEFT Trainer Enhancements: Dual Quant, Markdown Dashboard, Multi-LLM
 
+#### Checkpoint 2 (58a4fbf) | 2026.02.09 | Fix vLLM server launch for Qwen3-4B-Base — bash executable + HF vendor parsing
+
+**Accomplishments**:
+- **Fix 1 — Bash Executable**: Added `executable='/bin/bash'` to `subprocess.Popen` in `_start_vllm_server()`. Ubuntu's `/bin/sh` (dash) doesn't support `source`, so venv activation silently failed, running vllm from system Python instead of vllm-pip venv
+- **Fix 2 — Transformers Downgrade**: Downgraded `transformers` from 5.1.0 to 4.57.6 in both vllm-pip and Lupin venvs. v5.x renamed `torch_dtype` → `dtype`, breaking vLLM 0.8.2 internally
+- **Fix 3 — HF Model ID Vendor Parsing** (KLUDGE): `_parse_model_descriptor()` now falls back to `vllm` vendor when parsed org name (e.g., `Qwen` from `Qwen/Qwen3-4B-Base`) isn't a known vendor. Needs proper model registry
+- **Verification**: 509/509 unit tests pass. Dry-run `./run-agentic-intent-training.sh dry-run --llm qwen3-4b` completes successfully
+
+**Files Modified** (CoSA submodule, not committed here): `peft_trainer.py` (executable='/bin/bash'), `llm_client_factory.py` (KLUDGE vendor fallback)
+
 #### Checkpoint 1 | 2026.02.09 | All 3 enhancements implemented, 455 unit tests pass (no regressions)
 
 **Accomplishments**:
