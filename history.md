@@ -2,6 +2,15 @@
 
 ### 2026.02.09 - Session 157 | PEFT Trainer Enhancements: Dual Quant, Markdown Dashboard, Multi-LLM
 
+#### Checkpoint 3 (316bd65) | 2026.02.09 | Fix post-training validation model name — use bare path for vLLM
+
+**Accomplishments**:
+- **Fix**: `llmc.LlmClient.get_model( dir )` prepends `"deepily/"` to local paths, producing invalid model names like `"deepily//mnt/.../merged-on-..."`. vLLM was started with the bare directory path, so it returned 404. Replaced all 4 call sites (3 active + 1 commented) with direct path assignment
+- **Verification**: 525/525 unit tests pass, zero regressions
+
+**Files Modified** (CoSA submodule, not committed here): `peft_trainer.py` (lines 2138, 2179, 2330, 2363)
+**Commit**: 316bd65
+
 #### Checkpoint 2 (58a4fbf) | 2026.02.09 | Fix vLLM server launch for Qwen3-4B-Base — bash executable + HF vendor parsing
 
 **Accomplishments**:
