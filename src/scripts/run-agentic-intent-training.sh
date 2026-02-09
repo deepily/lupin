@@ -3,10 +3,9 @@
 # run-agentic-intent-training.sh
 #
 # Train LORA adapters for agentic job intent classification.
-# Target Model: Ministral-8B-Instruct-2410
 #
 # Usage:
-#   ./run-agentic-intent-training.sh [MODE]
+#   ./run-agentic-intent-training.sh [MODE] [--llm MODEL] [--quantize-bits BITS]
 #
 # Modes:
 #   test      - Fast iteration (1% sample, ~5-10 min)
@@ -14,6 +13,15 @@
 #   generate  - Regenerate training data only
 #   validate  - Validate existing training data
 #   dry-run   - Show training data stats without training
+#
+# Options:
+#   --llm MODEL          - Target model: ministral-8b (default), qwen3-4b
+#   --quantize-bits BITS - Quantization: both (default), 4, 8
+#
+# Examples:
+#   ./run-agentic-intent-training.sh full --llm qwen3-4b --quantize-bits 4
+#   ./run-agentic-intent-training.sh test --llm ministral-8b
+#   ./run-agentic-intent-training.sh full   # defaults: ministral-8b, quantize both
 #
 # Requirements:
 #   - LUPIN_ROOT environment variable set
@@ -41,23 +49,68 @@ if [ -z "$DEEPILY_PROJECTS_DIR" ]; then
     DEEPILY_PROJECTS_DIR="/mnt/DATA02/include/projects"
 fi
 
-# Configuration
-MODEL="mistralai/Ministral-8B-Instruct-2410"
-MODEL_NAME="Ministral-8B-Instruct-2410"
-TEST_TRAIN_PATH="$LUPIN_ROOT/src/ephemera/prompts/data"
-LORA_DIR="$DEEPILY_PROJECTS_DIR/models/Ministral-8B-Instruct-2410.lora"
+# Defaults
+MODE="test"
+LLM="ministral-8b"
+QUANTIZE_BITS="both"
 
-# Parse mode argument
-MODE="${1:-test}"
+# Parse arguments: positional MODE + named --llm and --quantize-bits
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --llm)
+            LLM="$2"
+            shift 2
+            ;;
+        --quantize-bits)
+            QUANTIZE_BITS="$2"
+            shift 2
+            ;;
+        *)
+            MODE="$1"
+            shift
+            ;;
+    esac
+done
+
+# Map LLM shortname to model config
+case "$LLM" in
+    ministral-8b)
+        MODEL="mistralai/Ministral-8B-Instruct-2410"
+        MODEL_NAME="Ministral-8B-Instruct-2410"
+        LORA_DIR="$DEEPILY_PROJECTS_DIR/models/Ministral-8B-Instruct-2410.lora"
+        ;;
+    qwen3-4b)
+        MODEL="Qwen/Qwen3-4B-Base"
+        MODEL_NAME="Qwen3-4B-Base"
+        LORA_DIR="$DEEPILY_PROJECTS_DIR/models/Qwen3-4B-Base.lora"
+        ;;
+    *)
+        echo -e "${RED}Unknown LLM: $LLM. Supported: ministral-8b, qwen3-4b${NC}"
+        exit 1
+        ;;
+esac
+
+# Validate quantize-bits
+case "$QUANTIZE_BITS" in
+    both|4|8) ;;
+    *)
+        echo -e "${RED}Unknown quantize-bits: $QUANTIZE_BITS. Supported: both, 4, 8${NC}"
+        exit 1
+        ;;
+esac
+
+TEST_TRAIN_PATH="$LUPIN_ROOT/src/ephemera/prompts/data"
 
 echo "=========================================="
 echo " Agentic Job Intent LORA Training"
 echo "=========================================="
 echo ""
-echo "Mode: $MODE"
-echo "Model: $MODEL_NAME"
-echo "Training Data: $TEST_TRAIN_PATH"
-echo "LORA Output: $LORA_DIR"
+echo "Mode:           $MODE"
+echo "LLM:            $LLM"
+echo "Model:          $MODEL_NAME"
+echo "Quantize Bits:  $QUANTIZE_BITS"
+echo "Training Data:  $TEST_TRAIN_PATH"
+echo "LORA Output:    $LORA_DIR"
 echo ""
 
 cd "$LUPIN_ROOT/src"
@@ -214,6 +267,7 @@ else:
             --lora-dir "$LORA_DIR" \
             --sample-size 0.01 \
             --validation-sample-size 10 \
+            --quantize-bits "$QUANTIZE_BITS" \
             --pre-training-stats \
             --post-training-stats
         ;;
@@ -237,6 +291,7 @@ else:
             --lora-dir "$LORA_DIR" \
             --sample-size 1.0 \
             --validation-sample-size 500 \
+            --quantize-bits "$QUANTIZE_BITS" \
             --pre-training-stats \
             --post-training-stats \
             --post-quantization-stats
@@ -250,13 +305,14 @@ else:
             --test-train-path "$TEST_TRAIN_PATH" \
             --lora-dir "$LORA_DIR" \
             --sample-size 1.0 \
+            --quantize-bits "$QUANTIZE_BITS" \
             --dry-run
         ;;
 
     *)
         echo -e "${RED}Unknown mode: $MODE${NC}"
         echo ""
-        echo "Usage: $0 [MODE]"
+        echo "Usage: $0 [MODE] [--llm MODEL] [--quantize-bits BITS]"
         echo ""
         echo "Modes:"
         echo "  test      - Fast iteration (1% sample)"
@@ -264,6 +320,10 @@ else:
         echo "  generate  - Regenerate training data only"
         echo "  validate  - Validate existing training data"
         echo "  dry-run   - Show training data stats without training"
+        echo ""
+        echo "Options:"
+        echo "  --llm MODEL          - Target model: ministral-8b (default), qwen3-4b"
+        echo "  --quantize-bits BITS - Quantization: both (default), 4, 8"
         exit 1
         ;;
 esac

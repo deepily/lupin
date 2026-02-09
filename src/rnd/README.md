@@ -4,6 +4,12 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.09 - Expeditor Default Values Design
+- **Design Document**: [2026.02.09-expeditor-default-values-design.md](2026.02.09-expeditor-default-values-design.md) - **IMPLEMENTED** - Default values for RuntimeArgumentExpeditor batch question inputs. Pre-populates text fields with sensible defaults (budget: "no limit", audience: "academic", languages: "en,es-MX") so users can accept by hitting Submit All. Three-tier override chain: config INI > agent_registry fallback_defaults > None. Key files: `agent_registry.py` (fallback_defaults dict), `expeditor.py` (_resolve_default method), `notification_utils.py` (default_value passthrough), `notifications.js` (value attribute on inputs), `lupin-app.ini` (config overrides).
+
+### 2026.02.09 - PEFT Trainer Enhancements: Dual Quantization, Markdown Dashboard, Multi-LLM
+- **Implementation Document**: [2026.02.09-peft-trainer-enhancements-dual-quant-multi-llm.md](2026.02.09-peft-trainer-enhancements-dual-quant-multi-llm.md) - **✅ IMPLEMENTED** - Three enhancements to the PEFT training pipeline: (1) Dual quantization — compare 4-bit vs 8-bit via `--quantize-bits {both,4,8}` flag. (2) Markdown training results — versioned files with YAML frontmatter in `io/peft/`. (3) Multi-LLM support — `--llm {ministral-8b,qwen3-4b}` flag with Qwen3-4B-Base config. Files: `peft_trainer.py` (~200 net new lines), `qwen3_4b.py` (NEW), `model_config_loader.py`, `run-agentic-intent-training.sh`, config files.
+
 ### 2026.02.09 - Gist Embeddings Analysis: Keep vs. Jettison
 - **Research Document**: [2026.02.09-gist-embeddings-analysis-keep-vs-jettison.md](2026.02.09-gist-embeddings-analysis-keep-vs-jettison.md) - **📊 ANALYSIS COMPLETE** - Comprehensive analysis of gist embedding system value in the retrieval pipeline. Finding: gist _text_ is valuable (Level 3 exact matching), but gist _embeddings_ are dead code — never searched in Level 4 vector similarity, `threshold_gist` parameter accepted but never applied, `get_snapshots_by_solution_gist_similarity()` has zero callers. Recommends 3-phase cleanup: Phase 1 remove dead code paths, Phase 2 stop generating gist embeddings at snapshot creation, Phase 3 optionally re-enable with proper integration if needed. Key files: `lancedb_solution_manager.py`, `solution_snapshot.py`, `todo_fifo_queue.py`.
 

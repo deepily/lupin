@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.02.09 - Session 157 | PEFT Trainer Enhancements: Dual Quant, Markdown Dashboard, Multi-LLM
+
+#### Checkpoint 1 | 2026.02.09 | All 3 enhancements implemented, 455 unit tests pass (no regressions)
+
+**Accomplishments**:
+- **Dual Quantization**: Added `--quantize-bits {both,4,8}` CLI arg to `peft_trainer.py`. Pipeline now loops over requested bit widths, producing separate quantized models and validation results for each. New stage timing keys: `quantization_{bits}bit`, `post_quantization_{bits}bit_validation`
+- **Markdown Training Results**: New `_write_training_summary_to_file()` method writes YAML frontmatter + 4 GitHub-flavored markdown tables + Output Paths section to `io/peft/YYYY.MM.DD-at-HH-MM-peft-training-results-{model}-{bits}-bits.md`
+- **Multi-LLM Support**: New `--llm` flag in shell script supports `ministral-8b` (default) and `qwen3-4b`. New Qwen3-4B-Base LoRA config with Alpaca prompt template for base model. Model registered in `MODEL_CONFIG_MAP` and `supported_model_names`
+- **Dashboard Updates**: Tables 2-4 in `_print_training_summary()` now render per-quant-variant comparisons against post-training baseline with dynamic table numbering
+- **Verification**: 455/455 unit tests pass. Qwen3 config loads correctly. PeftTrainer instantiation with `Qwen3-4B-Base` succeeds. `_parse_quantize_bits()` verified for all 3 input values
+
+**Files Modified** (Lupin repo): `src/scripts/run-agentic-intent-training.sh` (--llm/--quantize-bits flags), `src/conf/lupin-app.ini` (Qwen3-4B-Base placeholder), `src/conf/lupin-app-splainer.ini` (matching explainer), `src/rnd/README.md` (R&D entry)
+**Files Created** (Lupin repo): `src/rnd/2026.02.09-peft-trainer-enhancements-dual-quant-multi-llm.md`
+**Files Modified** (CoSA submodule, not committed here): `peft_trainer.py` (dual quant loop, markdown writer, CLI arg, dashboard), `model_config_loader.py` (Qwen3-4B-Base), `qwen3_4b.py` (NEW config)
+
+---
+
 ### 2026.02.09 - Session 156 | Batch Open-Ended Questions for cosa-voice MCP Server
 
 #### Checkpoint 1 | 2026.02.09 | Full 8-step implementation + 499 unit tests pass
