@@ -1,8 +1,8 @@
 # DataFrame CRUD Interactive Testing Protocol
 
 **Created**: 2026-02-06
-**Updated**: 2026-02-07
-**Context**: Layers 1-3 complete (461 unit tests passing). This protocol validates live behavior before Phase 4 Polish.
+**Updated**: 2026-02-09
+**Context**: Layers 1-3 complete + CRUD completion bug fix (532 unit tests passing). This protocol validates live behavior before Phase 4 Polish.
 **Goal**: Verify routing swap, cache skip, voice confirmation, and full CRUD cycle work end-to-end.
 
 ## Execution Status
@@ -10,7 +10,7 @@
 | Part | Description | Status | Recommended Order |
 |------|-------------|--------|-------------------|
 | Part 1 | Mock Objects Protocol | **DONE** (17/17 passed) | 1st |
-| Part 3 | Curl Smoke Tests | PENDING | 2nd |
+| Part 3 | Curl Smoke Tests | **IN PROGRESS** (Test 2 partial — card OK, TTS blocked by pre-existing stuck focus mode) | 2nd |
 | Part 2 | Notifications UI Protocol | PENDING | 3rd |
 
 > **Recommended order**: 1 → 3 → 2. Part 3 (curl) validates server-side routing before Part 2 (UI) tests the full notification card flow.
@@ -559,17 +559,23 @@ curl -s http://localhost:7999/api/mock-job/health | python3 -m json.tool
 **Test 2: Submit Todo via Push**
 
 ```bash
-# Note: /api/push requires a valid websocket_id from an active session.
-# Use the browser session's websocket_id from localStorage or get one via:
-# GET /api/get-session-id
+# Get websocket_id from an active browser session:
+WS_ID=$(curl -s http://localhost:7999/api/debug/websocket-state \
+  | python3 -c "
+import sys, json
+state = json.load(sys.stdin)
+user_sessions = state.get('user_sessions', {})
+if not user_sessions: print('NO_ACTIVE_SESSION')
+else:
+    first_user = list(user_sessions.keys())[0]
+    sessions = user_sessions[first_user]
+    print(sessions[0] if sessions else 'NO_ACTIVE_SESSION')
+")
 
 curl -s -X POST http://localhost:7999/api/push \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "question": "add buy milk to my grocery list",
-    "websocket_id": "YOUR_WEBSOCKET_ID"
-  }'
+  -d "{\"question\": \"add buy milk to my grocery list\", \"websocket_id\": \"$WS_ID\"}"
 ```
 
 **Expected server console output**:

@@ -22,11 +22,27 @@ relevant fields, filters, or sorting parameters.
 - list_lists: Show all available lists
 - get_schema_info: Show schema information
 
-## Schema Types
+## Schema Types and Field Names
 
-- todo: Task lists with todo_item, due_date, priority, completed, tags
-- calendar: Events with event, start_date, end_date, start_time, end_time, event_type, etc.
-- generic: Simple name/value pairs
+CRITICAL: You MUST use the exact field names listed below in match_fields and fields.
+Using incorrect field names (e.g., "name" instead of "todo_item") will cause errors.
+
+### todo schema
+Fields: todo_item, due_date, priority, completed, tags
+- Use `todo_item` (NOT `name`, `item`, or `task`) in match_fields and fields
+- Example match_fields: {{"todo_item": "buy milk"}}
+- Example fields: {{"todo_item": "buy groceries", "priority": "high"}}
+
+### calendar schema
+Fields: event, start_date, end_date, start_time, end_time, event_type, name, location, recurrent, priority_level
+- Use `event` for the event description (NOT `name` or `title`)
+- Example match_fields: {{"event": "dentist appointment"}}
+- Example fields: {{"event": "team meeting", "start_date": "2026-03-15"}}
+
+### generic schema
+Fields: name, value
+- Use `name` for the item identifier
+- Example match_fields: {{"name": "setting1"}}
 
 ## Important Rules
 

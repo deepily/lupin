@@ -1,6 +1,6 @@
 # DataFrame CRUD Implementation Tracker
 
-**Last Updated**: 2026-02-07
+**Last Updated**: 2026-02-09
 
 ## Cross-Phase Progress
 
@@ -10,7 +10,8 @@
 | 2 | Layer 2: Intent | COMPLETE | 73 unit tests, 5 new source files + 1 modified + 1 test file |
 | 3 | Layer 3: Queue Integration | COMPLETE | 26 unit tests, feature-flag routing swap + cache skip + voice confirmation |
 | E2E | Testing Protocol Part 1 | COMPLETE | 17 mock pipeline tests (routing, pipeline, cache, confirmation, prompt construction) |
-| E2E | Testing Protocol Part 3 | PENDING | Curl integration smoke tests (health, push, routing, destructive) |
+| E2E | Bug Fix: CRUD Completion | COMPLETE | emit_job_state_transition + answer guard + done queue (3 unit tests, 532/532 pass) |
+| E2E | Testing Protocol Part 3 | IN PROGRESS | Curl Test 2 verified card transition running→done. TTS blocked by pre-existing stuck focus mode (separate issue). Manual re-run pending. |
 | E2E | Testing Protocol Part 2 | PENDING | Manual UI tests (Q&A, confirmation cards, feature flag toggle) |
 | 4 | Layer 3: Polish | NOT STARTED | End-to-end voice workflows |
 
@@ -46,6 +47,43 @@
 ### Testing Protocol Discrepancy Found
 
 - `query` operation returns `status: "ok"` not `"queried"` (protocol had wrong assertion)
+
+---
+
+## E2E Bug Fix: CRUD Agent Completion (2026-02-09)
+
+Three bugs found during Part 3 curl testing prevented CRUD agent jobs from completing properly:
+
+| Fix | File | Issue | Resolution |
+|-----|------|-------|------------|
+| Fix 1 | `running_fifo_queue.py:474-481` | `emit_job_state_transition()` only fired for serializing agents | Fire for ALL agents unconditionally |
+| Fix 2 | `running_fifo_queue.py:489-493` | CRUD agent answer overwritten with canned `"Hmm, I'm having trouble..."` string | Guard: only overwrite if `agent.answer` is empty |
+| Fix 3 | `running_fifo_queue.py:545-557` | CRUD agents not pushed to done queue | Push ALL agents to done queue, not just serializing ones |
+
+### Verification
+- 3 new unit tests in `TestCrudQueueCompletion` class (`test_crud_queue_integration.py`)
+- Full regression: 532/532 unit tests pass
+- Curl Test 2: Card correctly transitions "running" → "done"
+
+### Additional Fix
+- Debug print truncation in `agent.py:131`: Removed `[:200]` preview — full XML response now visible in debug output
+
+### Known Issue: TTS Focus Mode Stuck
+- TTS blocked by pre-existing stuck `notifications_tts_queue` in localStorage (36 items)
+- Not caused by CRUD changes — pre-existing issue
+- Fix: `localStorage.removeItem('notifications_tts_queue'); location.reload();`
+- TODO logged: Add 60s safety timeout to TTS focus mode
+
+---
+
+## E2E Testing Protocol Part 3 — Curl Smoke Tests (2026-02-09)
+
+| Test | Status | Notes |
+|------|--------|-------|
+| Test 1: Health check | PENDING (manual) | User will run |
+| Test 2: Submit todo | PARTIAL | Card transition verified (running→done). TTS blocked by stuck focus mode. Re-run after localStorage clear. |
+| Test 3: Feature flag toggle | PENDING (manual) | User will run |
+| Test 4: Destructive operation | PENDING (manual) | User will run |
 
 ---
 

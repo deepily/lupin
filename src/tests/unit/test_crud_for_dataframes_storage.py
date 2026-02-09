@@ -799,3 +799,89 @@ class TestCalendarOperations:
         # Time columns stay as strings (parquet has no native time-only type)
         assert df.iloc[ 0 ][ "start_time" ] == "14:30"
         assert df.iloc[ 0 ][ "end_time" ] == "15:30"
+
+
+# ============================================================================
+# TestMatchFieldsValidation — Critical delete/update safety guard
+# ============================================================================
+
+class TestMatchFieldsValidation:
+    """Tests for match_fields validation in delete_item and update_item.
+
+    Regression tests for the bug where unknown field names in match_fields
+    silently produced an ALL TRUE mask, deleting/updating every row.
+    """
+
+    def test_delete_with_invalid_field_returns_error( self, populated_storage ):
+        """delete_item with unknown field name returns error, zero rows deleted."""
+        result = delete_item( populated_storage, "todo", match_fields={ "name": "buy milk" } )
+        assert result[ "status" ] == "error"
+        assert "Unknown field(s)" in result[ "message" ]
+        assert "name" in result[ "message" ]
+
+        # Verify ALL rows are still present (nothing deleted)
+        remaining = query_items( populated_storage, "todo" )
+        assert remaining[ "total_count" ] == 3
+
+    def test_delete_with_valid_field_deletes_only_match( self, populated_storage ):
+        """delete_item with correct field name deletes only the matching row."""
+        result = delete_item( populated_storage, "todo", match_fields={ "todo_item": "buy milk" } )
+        assert result[ "status" ] == "deleted"
+        assert result[ "deleted_count" ] == 1
+
+        remaining = query_items( populated_storage, "todo" )
+        assert remaining[ "total_count" ] == 2
+        items = [ i[ "todo_item" ] for i in remaining[ "items" ] ]
+        assert "buy milk" not in items
+        assert "buy bread" in items
+
+    def test_update_with_invalid_field_returns_error( self, populated_storage ):
+        """update_item with unknown match field returns error, zero rows updated."""
+        result = update_item(
+            populated_storage, "todo",
+            field_updates={ "priority": "low" },
+            match_fields={ "name": "buy milk" }
+        )
+        assert result[ "status" ] == "error"
+        assert "Unknown field(s)" in result[ "message" ]
+
+        # Verify nothing was changed
+        items = query_items( populated_storage, "todo", filters={ "todo_item": "buy milk" } )
+        assert items[ "items" ][ 0 ][ "priority" ] == "high"
+
+    def test_delete_preserves_data_on_field_mismatch( self, populated_storage ):
+        """Original DataFrame is UNCHANGED after error return from invalid match_fields."""
+        # Snapshot row count before
+        before = query_items( populated_storage, "todo" )
+        before_count = before[ "total_count" ]
+
+        # Attempt delete with wrong field
+        result = delete_item( populated_storage, "todo", match_fields={ "item": "buy milk" } )
+        assert result[ "status" ] == "error"
+
+        # Verify data is identical
+        after = query_items( populated_storage, "todo" )
+        assert after[ "total_count" ] == before_count
+        assert [ i[ "todo_item" ] for i in after[ "items" ] ] == [ i[ "todo_item" ] for i in before[ "items" ] ]
+
+    def test_delete_by_id_still_works( self, populated_storage ):
+        """delete_item by item_id path is unaffected by validation guard."""
+        items   = query_items( populated_storage, "todo", list_name="groceries" )
+        item_id = items[ "items" ][ 0 ][ "id" ]
+
+        result = delete_item( populated_storage, "todo", item_id=item_id )
+        assert result[ "status" ] == "deleted"
+        assert result[ "deleted_count" ] == 1
+
+    def test_mark_done_with_invalid_field_returns_error( self, populated_storage ):
+        """mark_done (via update_item) with unknown match field returns error."""
+        result = mark_done( populated_storage, "todo", match_fields={ "name": "buy milk" } )
+        assert result[ "status" ] == "error"
+        assert "Unknown field(s)" in result[ "message" ]
+
+    def test_error_message_lists_valid_fields( self, populated_storage ):
+        """Error message includes valid field names for user guidance."""
+        result = delete_item( populated_storage, "todo", match_fields={ "wrong_field": "value" } )
+        assert result[ "status" ] == "error"
+        assert "todo_item" in result[ "message" ]
+        assert "priority" in result[ "message" ]

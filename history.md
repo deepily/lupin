@@ -1,15 +1,31 @@
 # Lupin Project History
 
+### 2026.02.09 - Session 159 | Fix CRITICAL Delete Bug — Silent Filter Skipping Deletes All Rows
+
+#### Checkpoint | 2026.02.09 23:30 | Validate match_fields, strengthen prompt, 7 new tests
+
+**Accomplishments**:
+- **CRITICAL Fix**: `delete_item()` and `update_item()` silently skipped unknown `match_fields` keys, leaving an ALL TRUE mask that deleted/updated every row. Added `_validate_match_fields()` helper that returns error dict if any key doesn't exist in the DataFrame columns
+- **Prompt Hardening**: Replaced brief schema listing in `intent-extraction.txt` with explicit field tables per schema type — includes negative examples ("NOT `name`, `item`, or `task`") and concrete `match_fields` examples to reduce LLM hallucination
+- **7 New Unit Tests**: `TestMatchFieldsValidation` class covering delete with invalid field, valid field, update with invalid field, data preservation on error, delete-by-id unaffected, mark_done inherits guard, error message includes valid fields
+- **Verification**: 542/542 unit tests pass, zero regressions
+
+**Files Modified** (Lupin repo): `src/conf/prompts/crud-for-dataframes/intent-extraction.txt`, `src/tests/unit/test_crud_for_dataframes_storage.py`
+**Files Modified** (CoSA submodule, not committed here): `crud_operations.py` (`_validate_match_fields()` + guards in `delete_item()` and `update_item()`)
+**Commit**: 7de0263
+
+---
+
 ### 2026.02.09 - Session 157 | PEFT Trainer Enhancements: Dual Quant, Markdown Dashboard, Multi-LLM
 
-#### Checkpoint 3 (316bd65) | 2026.02.09 | Fix post-training validation model name — use bare path for vLLM
+#### Checkpoint 3 (55ed874) | 2026.02.09 | Fix post-training validation model name — use bare path for vLLM
 
 **Accomplishments**:
 - **Fix**: `llmc.LlmClient.get_model( dir )` prepends `"deepily/"` to local paths, producing invalid model names like `"deepily//mnt/.../merged-on-..."`. vLLM was started with the bare directory path, so it returned 404. Replaced all 4 call sites (3 active + 1 commented) with direct path assignment
 - **Verification**: 525/525 unit tests pass, zero regressions
 
 **Files Modified** (CoSA submodule, not committed here): `peft_trainer.py` (lines 2138, 2179, 2330, 2363)
-**Commit**: 316bd65
+**Commit**: 55ed874
 
 #### Checkpoint 2 (58a4fbf) | 2026.02.09 | Fix vLLM server launch for Qwen3-4B-Base — bash executable + HF vendor parsing
 

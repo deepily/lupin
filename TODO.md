@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-08 (Session 154)
+Last updated: 2026-02-09 (Session 158)
 
 ## Pending
 
@@ -21,7 +21,8 @@ Last updated: 2026-02-08 (Session 154)
   - 26 unit tests, 449 total passing, 50 WebSocket smoke tests passing
 - [ ] **[LUPIN] Interactive E2E Testing of CRUD Agents** (HIGH PRIORITY) - Execute the 29-scenario testing protocol at `src/rnd/headless-cc-for-dataframe-crud/testing-protocol.md`.
   - [x] Part 1: Mock pipeline tests (17/17 passed — routing, pipeline, cache, confirmation, prompt construction)
-  - [ ] Part 3: Curl smoke tests (4 scenarios, server + Phi-4 required)
+  - [x] Bug fix: CRUD agent completion — emit_job_state_transition, answer guard, done queue push (3 new tests, 532/532 pass)
+  - [ ] Part 3: Curl smoke tests (Test 2 partial — card transitions OK, TTS blocked by pre-existing stuck focus mode. Manual re-run pending after localStorage clear.)
   - [ ] Part 2: Notifications UI tests (8 scenarios, live server)
 - [ ] **[LUPIN] Phase 4: End-to-End Voice Workflows + Polish** - PENDING (blocked by Phase 3 ✅)
 
@@ -131,6 +132,7 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 
 ### Future Considerations
 
+- [ ] **[LUPIN] Add 60s safety timeout to TTS focus mode** - Prevent permanent stuck state when TTS queue items fail to play. Currently, if TTS playback fails, `notifications_tts_queue` in localStorage accumulates items indefinitely and blocks all future TTS. Add a 60-second safety timeout that auto-exits focus mode. **File**: `src/fastapi_app/static/js/notifications.js:9355-9393`
 - [ ] **Silent flag for notifications**: Consider adding a `silent` parameter to the cosa-voice notification system to suppress TTS during automated testing. Would require changes to: router request models, job classes, voice_io wrappers, and core notification functions.
 - [ ] **Standardize compound job/user ID usage** - Currently compound IDs (job_id + user_id) are only used when submitting jobs to the standard queue entry point. Consider standardizing this pattern across all job submission paths to avoid inconsistency issues later.
   - **Current state**: Only standard Q entry point uses compound IDs
@@ -170,9 +172,10 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
   2. **Dedicated REST endpoints**: `/api/deep-research/submit`, `/api/podcast-generator/submit`, `/api/deep-research-to-podcast/submit` (shared `agentic_job_factory`)
   3. **Mock endpoint expeditor test mode**: `POST /api/mock-job/submit {"voice_command": "make me a podcast"}` (dry-run, zero inference cost)
   - Requires running Lupin server on port 7999
-- [x] **[LUPIN] Create testing plan for Runtime Argument Expeditor** - Session 131: Unit tests (49) created and passing. Smoke tests (5) created, 3/3 automated passing.
-  - **Unit tests**: `src/tests/unit/test_runtime_argument_expeditor.py` (49 tests, 5 classes: ExpeditorResponse, ParseLoraArgs, InjectSystemArgs, AgentRegistry, CreateAgenticJob)
-  - **Smoke tests**: `src/tests/smoke/test_expeditor_mock_job_smoke.py` (3 automated + 2 interactive)
+- [x] **[LUPIN] Create testing plan for Runtime Argument Expeditor** - Session 131: Initial 49 tests. Sessions 144-158: Expanded to 92 unit tests across 10 classes, 9 interactive smoke scenarios.
+  - **Unit tests**: `src/tests/unit/test_runtime_argument_expeditor.py` (92 tests, 10 classes)
+  - **Smoke tests**: `src/tests/smoke/test_expeditor_mock_job_smoke.py` (3 automated + 9 interactive)
+  - **Testing plan**: `src/rnd/2026.02.07-runtime-argument-expeditor-testing-plan.md`
 - [x] **[LUPIN] Run interactive expeditor smoke tests 4-5** - Session 144: Fixed async deadlock (`asyncio.to_thread()` wrapper), tests 4-5 now pass. User responds to voice prompt, dry-run job completes with $0.00 cost.
 
 ### Cache Freshness Policy (HIGH) - Session 121/122

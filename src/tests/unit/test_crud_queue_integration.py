@@ -364,3 +364,118 @@ class TestCrudConfirmationFlow:
         result = agent.run_code()
         assert result[ "return_code" ] == 0
         assert result[ "output" ][ "status" ] == "added"
+
+
+# ============================================================================
+# TestCrudQueueCompletion — Bug fix: emit_job_state_transition + done queue
+# ============================================================================
+
+class TestCrudQueueCompletion:
+    """Tests verifying the CRUD agent completion bug fix (Session 158).
+
+    Bug: emit_job_state_transition() and jobs_done_queue.push() were gated
+    behind `if serialize_snapshot:`, which is False for CRUD agents. This
+    caused UI cards to stay stuck in 'running' state forever.
+
+    Fix: Moved emit_job_state_transition() and jobs_done_queue.push() outside
+    the serialize_snapshot gate so they fire for ALL agents.
+    """
+
+    def _create_queue_and_agent( self, tmp_storage_dir ):
+        """Helper: Create a minimal RunningFifoQueue + CRUD agent for completion tests."""
+        from cosa.rest.running_fifo_queue import RunningFifoQueue
+
+        queue = RunningFifoQueue.__new__( RunningFifoQueue )
+        queue.debug           = True
+        queue.verbose         = False
+        queue.websocket_mgr   = MagicMock()
+        queue.snapshot_mgr    = MagicMock()
+        queue.jobs_done_queue = MagicMock()
+        queue.jobs_dead_queue = MagicMock()
+        queue.io_tbl          = MagicMock()
+        queue.gist_normalizer = MagicMock()
+        queue.user_job_tracker = MagicMock()
+        queue.user_job_tracker.get_user_for_job.return_value = "test@example.com"
+
+        # Create a CRUD agent that has already completed do_all()
+        agent = _create_mock_agent( tmp_dir=tmp_storage_dir, operation="add" )
+
+        # Simulate successful pipeline completion (code_ran_to_completion + formatter_ran_to_completion)
+        agent.code_response_dict = { "return_code": 0, "output": { "status": "added", "message": "Added item" } }
+        agent.answer_conversational = "I added buy milk to your grocery list."
+        agent.answer                = "I added buy milk to your grocery list."
+        agent.id_hash               = "test-hash-123"
+        agent.run_date              = "2026-02-09"
+        agent.push_counter          = 1
+        agent.routing_command       = "agent router go to crud for dataframes"
+        agent.is_cache_hit          = False
+        agent.started_at            = "2026-02-09T22:00:00"
+        agent.session_id            = "test-session"
+
+        return queue, agent
+
+    @patch( "cosa.rest.running_fifo_queue.emit_job_state_transition" )
+    def test_crud_agent_emits_job_state_transition( self, mock_emit, tmp_storage_dir ):
+        """CRUD agent triggers emit_job_state_transition with 'run' -> 'done' after completion."""
+        queue, agent = self._create_queue_and_agent( tmp_storage_dir )
+
+        # Mock pop() to avoid queue internals
+        queue.pop = MagicMock()
+
+        # Mock _notify to avoid notification service
+        queue._notify = MagicMock()
+
+        timer = MagicMock()
+        timer.print = MagicMock()
+
+        result = queue._handle_base_agent( agent, "add buy milk...", timer )
+
+        # Verify emit was called with 'run' -> 'done'
+        mock_emit.assert_called_once()
+        call_args = mock_emit.call_args
+        assert call_args[ 0 ][ 0 ] == queue.websocket_mgr     # websocket_mgr
+        assert call_args[ 0 ][ 1 ] == "test-hash-123"          # job_id
+        assert call_args[ 0 ][ 2 ] == "run"                    # from_state
+        assert call_args[ 0 ][ 3 ] == "done"                   # to_state
+        assert call_args[ 0 ][ 4 ] == "test@example.com"       # user_id
+
+        # Verify metadata contains expected fields
+        metadata = call_args[ 0 ][ 5 ]
+        assert metadata[ 'status' ] == 'completed'
+        assert metadata[ 'response_text' ] == "I added buy milk to your grocery list."
+        assert metadata[ 'agent_type' ] is not None
+
+    @patch( "cosa.rest.running_fifo_queue.emit_job_state_transition" )
+    def test_crud_agent_answer_not_overwritten( self, mock_emit, tmp_storage_dir ):
+        """CRUD agent's real answer is preserved, not replaced with canned 'no code executed...' string."""
+        queue, agent = self._create_queue_and_agent( tmp_storage_dir )
+        queue.pop    = MagicMock()
+        queue._notify = MagicMock()
+
+        timer = MagicMock()
+        timer.print = MagicMock()
+
+        original_answer = agent.answer
+
+        result = queue._handle_base_agent( agent, "add buy milk...", timer )
+
+        # The answer should still be the CRUD agent's real answer, not the canned string
+        assert result.answer == original_answer
+        assert "no code executed" not in result.answer
+
+    @patch( "cosa.rest.running_fifo_queue.emit_job_state_transition" )
+    def test_crud_agent_pushed_to_done_queue( self, mock_emit, tmp_storage_dir ):
+        """CRUD agent is pushed to jobs_done_queue after completion."""
+        queue, agent = self._create_queue_and_agent( tmp_storage_dir )
+        queue.pop    = MagicMock()
+        queue._notify = MagicMock()
+
+        timer = MagicMock()
+        timer.print = MagicMock()
+
+        queue._handle_base_agent( agent, "add buy milk...", timer )
+
+        # Verify the agent was pushed to done queue
+        queue.jobs_done_queue.push.assert_called_once()
+        pushed_job = queue.jobs_done_queue.push.call_args[ 0 ][ 0 ]
+        assert isinstance( pushed_job, CrudForDataFramesAgent )
