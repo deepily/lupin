@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.09 - Gist Embeddings Analysis: Keep vs. Jettison
+- **Research Document**: [2026.02.09-gist-embeddings-analysis-keep-vs-jettison.md](2026.02.09-gist-embeddings-analysis-keep-vs-jettison.md) - **📊 ANALYSIS COMPLETE** - Comprehensive analysis of gist embedding system value in the retrieval pipeline. Finding: gist _text_ is valuable (Level 3 exact matching), but gist _embeddings_ are dead code — never searched in Level 4 vector similarity, `threshold_gist` parameter accepted but never applied, `get_snapshots_by_solution_gist_similarity()` has zero callers. Recommends 3-phase cleanup: Phase 1 remove dead code paths, Phase 2 stop generating gist embeddings at snapshot creation, Phase 3 optionally re-enable with proper integration if needed. Key files: `lancedb_solution_manager.py`, `solution_snapshot.py`, `todo_fifo_queue.py`.
+
 ### 2026.02.07 - PEFT Training Optimization Plan — Part 3
 - **Optimization Plan**: [2026.02.07-peft-trainer-optimization-plan-part-3.md](2026.02.07-peft-trainer-optimization-plan-part-3.md) - **📋 PLANNED** - Principled augmentation for 4 under-sampled simple commands (automatic routing mode: 60, none: 214, math: 450, todo list: 443 — all targeting 1500). Hybrid strategy: expand templates to ~200-500 lines each for semantic diversity, then apply controlled augmentation factor (3-8x) via new `augmentation_config` parameter in `build_simple_agent_router_training_prompts()`. Avoids pure factor multiplication which degrades LORA generalization. Cross-references [Part 2](2026.02.07-peft-trainer-optimization-plan-part-2.md).
 
