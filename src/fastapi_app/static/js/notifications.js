@@ -9893,7 +9893,8 @@ class NotificationsUI {
         let questionsHTML = '';
         for ( let i = 0; i < total; i++ ) {
             const q = questions[ i ];
-            const header = q.header || `Question ${i + 1}`;
+            const header       = q.header || `Question ${i + 1}`;
+            const defaultValue = q.default_value || '';
 
             questionsHTML += `
                 <div class="batch-question" data-question-index="${i}" data-header="${this.escapeHtml( header )}">
@@ -9903,7 +9904,7 @@ class NotificationsUI {
                         <button class="response-mic-button batch-mic-button" data-question-index="${i}" title="Press to record (30s max, ESC to cancel)">
                             🎤
                         </button>
-                        <input type="text" class="response-text-input batch-text-input" data-question-index="${i}" data-header="${this.escapeHtml( header )}" placeholder="Type your answer...">
+                        <input type="text" class="response-text-input batch-text-input" data-question-index="${i}" data-header="${this.escapeHtml( header )}" value="${this.escapeHtml( defaultValue )}" placeholder="Type your answer...">
                     </div>
                 </div>
             `;

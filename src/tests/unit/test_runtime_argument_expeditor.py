@@ -984,7 +984,12 @@ class TestBatchCollectArgs:
         self.expeditor.llm_spec_key             = "test_key"
         self.expeditor.llm_factory              = MagicMock()
 
-        self.agent_entry       = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
+        # Mock config_mgr for _resolve_default()
+        mock_config_mgr           = MagicMock()
+        mock_config_mgr.get       = MagicMock( return_value=None )
+        self.expeditor.config_mgr = mock_config_mgr
+
+        self.agent_entry        = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
         self.fallback_questions = self.agent_entry[ "fallback_questions" ]
 
     @patch( "cosa.agents.runtime_argument_expeditor.expeditor.notify_user_sync" )

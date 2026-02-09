@@ -19,6 +19,22 @@
 
 ### 2026.02.09 - Session 156 | Batch Open-Ended Questions for cosa-voice MCP Server
 
+#### Checkpoint 2 | 2026.02.09 | Expeditor default values — fallback_defaults registry, config override chain, frontend pre-fill
+
+**Accomplishments**:
+- **Agent Registry `fallback_defaults`**: Added parallel `fallback_defaults` dict to each agent entry in `AGENTIC_AGENTS` — budget: "no limit", audience: "academic", audience_context: "none", languages: "en,es-MX" (where applicable). Updated languages fallback question to mention ISO codes
+- **`_resolve_default()` Method**: Three-tier override chain — config INI > agent_registry fallback_defaults > None. Config key format: `expeditor default value for <agent_short_name> <arg_name>`
+- **Batch Flow Wiring**: `_batch_collect_args()` now accepts `fallback_defaults` and `command_key`, builds question objects with `default_value` key. Single-arg flow also passes `response_default` to `_ask_for_arg()`
+- **Notification Utils Passthrough**: `convert_open_ended_batch_for_api()` passes `default_value` through when present, omits when absent
+- **Frontend Pre-fill**: `renderOpenEndedBatchUI()` reads `q.default_value` and sets as `value` attribute on text inputs (falls back to empty string)
+- **Config Override Keys**: 10 keys in `lupin-app.ini` (2 enabled: podcast/research-to-podcast languages = "en,es-MX"), 10 matching explanations in splainer
+- **MCP Docstring**: Updated `ask_open_ended_batch()` to document optional `default_value` key
+- **All Tests Pass**: 499/499 unit tests, all 3 smoke tests green (agent_registry, notification_utils, expeditor)
+
+**Files Modified** (Lupin repo): `src/lupin_mcp/cosa_voice_mcp.py`, `src/fastapi_app/static/js/notifications.js`, `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/tests/unit/test_runtime_argument_expeditor.py`, `src/rnd/README.md`
+**Files Created** (Lupin repo): `src/rnd/2026.02.09-expeditor-default-values-design.md`
+**Files Modified** (CoSA submodule, not committed here): `agent_registry.py`, `expeditor.py`, `notification_utils.py`
+
 #### Checkpoint 1 | 2026.02.09 | Full 8-step implementation + 499 unit tests pass
 
 **Accomplishments**:

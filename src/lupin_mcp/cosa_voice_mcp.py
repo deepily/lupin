@@ -578,11 +578,13 @@ def ask_open_ended_batch(
     User answers all questions and submits once. Much faster than asking one at a time.
 
     Args:
-        questions: List of question objects, each with "question" and "header" keys:
+        questions: List of question objects, each with "question" and "header" keys.
+            Optional "default_value" key pre-fills the text input so the user can
+            accept the default by simply hitting Submit All:
             [
                 {"question": "What topic would you like to research?", "header": "Topic"},
-                {"question": "Would you like to set a budget limit?", "header": "Budget"},
-                {"question": "Who is the target audience?", "header": "Audience"}
+                {"question": "Would you like to set a budget limit?", "header": "Budget", "default_value": "no limit"},
+                {"question": "Who is the target audience?", "header": "Audience", "default_value": "academic"}
             ]
         timeout_seconds: How long to wait for response (1-600, default 300)
         priority: "low", "medium", "high", or "urgent"
