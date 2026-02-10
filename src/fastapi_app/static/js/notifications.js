@@ -5063,8 +5063,8 @@ class NotificationsUI {
         const details = jobCard.querySelector( '.job-card-details' );
         const expandBtn = jobCard.querySelector( '.job-expand-btn' );
 
-        if ( details && !details.classList.contains( 'expanded' ) ) {
-            details.classList.add( 'expanded' );
+        if ( details && details.classList.contains( 'collapsed' ) ) {
+            details.classList.remove( 'collapsed' );
             if ( expandBtn ) expandBtn.textContent = '▼';
             this.expandedJobCards.add( jobId );
         }
@@ -9570,6 +9570,18 @@ class NotificationsUI {
 
             this.updateTTSQueueSection();
 
+            // Staleness check: if focus mode was restored but the triggering
+            // notification no longer exists, auto-exit focus mode
+            if ( this.ttsFocusModeActive && this.focusModeNotificationId ) {
+                const notificationStillExists = this.actionRequiredNotifications.has( this.focusModeNotificationId );
+                if ( !notificationStillExists ) {
+                    this.log( `TTS Focus Mode: Stale — notification ${this.focusModeNotificationId} no longer exists, auto-exiting` );
+                    this.ttsFocusModeActive = false;
+                    this.focusModeNotificationId = null;
+                    this.saveTTSQueueState();
+                }
+            }
+
             // If not in focus mode and queue has items, start playback
             // (isTTSPaused is always false after restore - refresh resets pause state)
             if ( !this.ttsFocusModeActive && this.ttsQueue.length > 0 ) {
@@ -10778,6 +10790,11 @@ class NotificationsUI {
         this.actionRequiredNotifications.delete( notificationId );
         this.updateActionRequiredCount();
         this.saveActionRequiredState();  // Persist removal
+
+        // TTS FOCUS MODE: Exit if this notification triggered focus mode
+        if ( this.focusModeNotificationId === notificationId ) {
+            this.exitTTSFocusMode();
+        }
 
         // Add to regular notifications (already has response info from server)
         this.addNotificationToList( state.notification );

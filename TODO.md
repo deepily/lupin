@@ -1,8 +1,20 @@
 # TODO
 
-Last updated: 2026-02-10 (Session 165)
+Last updated: 2026-02-10 (Session 166)
 
 ## Pending
+
+### vLLM Upgrade for Qwen3-4B-Base (FIRST THING TOMORROW — Session 166)
+
+- [ ] **[LUPIN] Upgrade vLLM to >= 0.8.5** — ROOT CAUSE of Qwen3 20x slowdown identified: vLLM 0.8.2 lacks native `Qwen3ForCausalLM`, falls back to unoptimized HuggingFace Transformers engine. **Do this first.**
+  - Step 1: `cd /mnt/DATA01/include/www.deepily.ai/projects/vllm-pip && source .venv/bin/activate && pip install --upgrade vllm`
+  - Step 2: Verify `qwen3.py` exists in `vllm/model_executor/models/` post-upgrade
+  - Step 3: Start vLLM server for Qwen3-4B-Base, check logs for no Transformers fallback warnings
+  - Step 4: Re-run PEFT test: `src/scripts/run-agentic-intent-training.sh --test --llm qwen3-4b --quantize-bits both`
+  - Step 5: If still slow, try `--no-enable-chunked-prefill` and `VLLM_ENABLE_V1_MULTIPROCESSING=0`
+  - **Risk**: `transformers` version may need adjustment (was downgraded 5.1.0→4.57.6 for vLLM 0.8.2)
+  - **Expected**: ms/item drops from ~7,400 to ~200-400 (comparable to Ministral-8B)
+  - **Research doc**: `src/rnd/2026.02.10-qwen3-vllm-inference-slowdown-root-cause.md`
 
 ### DataFrame CRUD with Voice I/O (Session 132-136)
 

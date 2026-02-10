@@ -1,5 +1,31 @@
 # Lupin Project History
 
+### 2026.02.10 - Session 167 | TTS Focus Mode Stuck Fix + CRUD Delete Bug Plan
+
+**Accomplishments**:
+- **TTS Focus Mode Fix**: Fixed stuck `ttsFocusModeActive` where the TTS queue never drained (11 items backed up). Two changes to `notifications.js`: (1) Staleness check in `restoreTTSQueueState()` — if restored `focusModeNotificationId` no longer exists in `actionRequiredNotifications`, auto-exit focus mode and clear localStorage. (2) Focus mode exit in `moveToRegularNotifications()` — when the triggering notification is answered, call `exitTTSFocusMode()` to resume queue.
+- **CRUD Delete Bug Investigation**: Test 4 (destructive delete) revealed "2 items deleted from list" when only 1 should be deleted. Root cause: duplicate rows from repeated test inserts with no dedup guard. Created comprehensive fix plan at `~/.claude/plans/cached-growing-mist.md` with 5 changes across 4 files + 6 new tests.
+- **CRUD Testing Progress**: Part 3 Tests 1-2 complete, Tests 3-4 blocked by delete bug.
+
+**Files Modified**: `src/fastapi_app/static/js/notifications.js` (staleness check + focus exit), `TODO.md` (CRUD testing status)
+**Plan Created**: `~/.claude/plans/cached-growing-mist.md` (dedup keys, dedup guard, multi-delete guard, infra column rejection, voice formatting — for next session)
+**Commit**: [pending]
+
+---
+
+### 2026.02.10 - Session 166 | Qwen3-4B vLLM Inference Slowdown — Root Cause Analysis
+
+**Accomplishments**:
+- **Root Cause Identified**: Qwen3-4B-Base shows 20x slowdown (~7,392 ms/item vs Ministral-8B ~368.7 ms/item) during PEFT validation. Cause: vLLM 0.8.2 has no native `Qwen3ForCausalLM` support — falls back to unoptimized HuggingFace Transformers engine. Architecture comparison rules out model design (Qwen3 is smaller in every compute dimension).
+- **Fix Identified**: Upgrade vLLM from 0.8.2 to >= 0.8.5 where native Qwen3 support was added (confirmed via vLLM Issue #17630)
+- **Research Document**: Wrote `src/rnd/2026.02.10-qwen3-vllm-inference-slowdown-root-cause.md` with full analysis, architecture comparison table, community issues, and step-by-step upgrade plan
+
+**Files Created**: `src/rnd/2026.02.10-qwen3-vllm-inference-slowdown-root-cause.md`
+**Files Modified**: `src/rnd/README.md` (added entry)
+**Commit**: [pending]
+
+---
+
 ### 2026.02.10 - Session 165 | Calculator Implementation Doc Sync + Phase 5-6 Planning
 
 **Accomplishments**:
