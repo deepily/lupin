@@ -30,8 +30,7 @@ Requires:
     - Server running on localhost:7999
     - Phi-4 LLM server running for intent extraction
     - Environment variables:
-        LUPIN_MOCK_JOB_TEST_EMAIL / LUPIN_MOCK_JOB_TEST_PASSWORD (preferred)
-        OR LUPIN_TEST_EMAIL / LUPIN_TEST_PASSWORD (fallback)
+        LUPIN_TEST_EMAIL / LUPIN_TEST_PASSWORD
 
 Created: 2026-02-10 (Session 172)
 """
@@ -111,21 +110,15 @@ CALCULATOR_QUERIES = [
 
 def _get_credentials():
     """
-    Get test credentials from environment, preferring mock job test account.
+    Get test credentials from environment.
 
     Requires:
-        - At least one pair of env vars is set
+        - LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD are set
 
     Ensures:
         - Returns (email, password) tuple
         - Returns (None, None) if no credentials found
     """
-    email    = os.environ.get( "LUPIN_MOCK_JOB_TEST_EMAIL" )
-    password = os.environ.get( "LUPIN_MOCK_JOB_TEST_PASSWORD" )
-
-    if email and password:
-        return email, password
-
     email    = os.environ.get( "LUPIN_TEST_EMAIL" )
     password = os.environ.get( "LUPIN_TEST_PASSWORD" )
 
@@ -163,7 +156,6 @@ def _login( email, password ):
         print( f'       -H "Content-Type: application/json" \\' )
         print( f'       -d \'{{"email": "{email}", "password": "<your-password>"}}\'' )
         print( "  2. Password may be wrong. Check your env vars:" )
-        print( "     LUPIN_MOCK_JOB_TEST_EMAIL / LUPIN_MOCK_JOB_TEST_PASSWORD" )
         print( "     LUPIN_TEST_EMAIL / LUPIN_TEST_PASSWORD" )
         return None, None
 
@@ -414,10 +406,7 @@ def quick_smoke_test( query_indices=None ):
     # Get credentials
     email, password = _get_credentials()
     if not email or not password:
-        print( "Missing environment variables. Set one of:" )
-        print( "  export LUPIN_MOCK_JOB_TEST_EMAIL='mock.job.tester@lupin.deepily.ai'" )
-        print( "  export LUPIN_MOCK_JOB_TEST_PASSWORD='<your-password>'" )
-        print( "  OR" )
+        print( "Missing environment variables. Set:" )
         print( "  export LUPIN_TEST_EMAIL='your@email.com'" )
         print( "  export LUPIN_TEST_PASSWORD='<your-password>'" )
         return False
