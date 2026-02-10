@@ -1,5 +1,39 @@
 # Lupin Project History
 
+### 2026.02.10 - Session 171 | Notification Proxy Agent — Expediter Auto-Responder
+
+#### Checkpoint | 2026.02.10 17:00 | Notification Proxy Agent — full implementation + 49 unit tests
+
+**Accomplishments**:
+- **Notification Proxy Agent**: Standalone CLI agent (`python -m cosa.agents.notification_proxy`) that connects via WebSocket as `mock.tester@lupin.deepily.ai`, subscribes to notification events, and automatically answers expediter questions using a hybrid strategy: rules for known patterns, LLM fallback for unknowns.
+- **Architecture** (11 source files):
+  - `listener.py` — async WebSocket client with auth, ping/pong, exponential backoff reconnection
+  - `responder.py` — notification router + REST API response submission via `POST /api/notify/response`
+  - `strategies/expediter_rules.py` — rule-based keyword matching with 4 test profiles (deep_research, podcast, research_to_podcast, minimal)
+  - `strategies/llm_fallback.py` — Anthropic SDK fallback using `ANTHROPIC_API_KEY_FIREWALLED`
+  - `config.py` — test profiles, connection defaults, API key resolution
+  - `__main__.py` — CLI entry point with argparse, async event loop, graceful shutdown
+- **Unit Tests**: 49 tests across 10 classes — config, rules construction, can_handle, respond (keyword matching, YES_NO, batch, multiple choice), LLM fallback, listener, responder routing, keyword mapping, profile coverage
+- **Regression**: 710/710 unit tests pass (49 new + 661 existing)
+- **All 5 module smoke tests pass**: config, expediter_rules, llm_fallback, listener, responder
+
+**Files Created** (CoSA submodule, not committed here):
+- `src/cosa/agents/notification_proxy/__init__.py`
+- `src/cosa/agents/notification_proxy/__main__.py`
+- `src/cosa/agents/notification_proxy/config.py`
+- `src/cosa/agents/notification_proxy/cosa_interface.py`
+- `src/cosa/agents/notification_proxy/listener.py`
+- `src/cosa/agents/notification_proxy/responder.py`
+- `src/cosa/agents/notification_proxy/voice_io.py`
+- `src/cosa/agents/notification_proxy/strategies/__init__.py`
+- `src/cosa/agents/notification_proxy/strategies/expediter_rules.py`
+- `src/cosa/agents/notification_proxy/strategies/llm_fallback.py`
+
+**Files Created** (Lupin repo): `src/tests/unit/test_notification_proxy.py` (NEW — 49 tests)
+**Commit**: [pending]
+
+---
+
 ### 2026.02.10 - Session 167 | TTS Focus Mode Stuck Fix + CRUD Delete Bug Plan
 
 **Accomplishments**:
