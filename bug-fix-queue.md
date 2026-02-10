@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-06T09:00:00
+**Last Updated**: 2026-02-10T14:30:00
 
 ---
 
@@ -40,6 +40,11 @@
 
 ### Completed
 
+- [x] **vLLM max_tokens overflow in PEFT validation** (ad-hoc) → CoSA pending | By: 4d6d238f
+  - **Symptom**: `ValueError: maximum context length is 1024 tokens. However, you requested 1403 tokens`
+  - **Root Cause**: `xml_coordinator.py:1266` dropped `max_new_tokens` param — `llm_client.run( prompt )` never received it
+  - **Fix**: `llm_client.run( prompt, max_tokens=max_new_tokens )` — threads 128 tokens through to CompletionClient
+  - **File (CoSA)**: `src/cosa/training/xml_coordinator.py:1266`
 - [x] **Resume button references stale `window.freshQueueUI`** (ad-hoc) → pending commit | By: 6d82cf6e
 - [x] **Double-click-to-expand bug on CJ flow job cards** (ad-hoc) → pending commit | By: 04aad364
 - [x] **No way to copy WebSocket session IDs from System Status** (ad-hoc) → pending commit | By: 0266f064
