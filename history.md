@@ -1,5 +1,14 @@
 # Lupin Project History
 
+### 2026.02.10 - Session 175 | Mark Calculator Step 24 done + live pipeline test docs
+
+#### Checkpoint | 2026.02.10 20:00 | Mark Step 24 done + add live pipeline test notes to skills docs
+
+**Files**: `2026.02.09-everyday-calculator-agent-implementation.md`, `TODO.md`, `SKILL.md` (agentic-voice-workflow, testing-patterns)
+**Commit**: f3dc1fa
+
+---
+
 ### 2026.02.10 - Session 172 | Calculator Step 24 — job_id in /api/push + 6-query live smoke test
 
 #### Checkpoint | 2026.02.10 19:30 | Add --queries flag for selective query execution

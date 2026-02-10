@@ -109,3 +109,22 @@ Contains:
 - **Don't** forget voice notifications - user needs progress updates
 - **Don't** ignore state machine - enables proper job tracking
 - **Don't** hardcode job IDs - use the prefix pattern
+
+## Testing Best Practice: Automated Pipeline Tests
+
+**Prefer automated smoke test scripts over manual curl submissions.**
+
+| Approach | Effort | Repeatability | Example |
+|----------|--------|---------------|---------|
+| Manual curl POST to `/api/push` | High (copy-paste, edit JSON, poll manually) | Low | Ad-hoc debugging only |
+| Automated smoke test script | Low (single command) | High | `src/tests/smoke/test_calculator_live_pipeline.py` |
+
+**Pattern**: `test_calculator_live_pipeline.py` demonstrates the preferred approach:
+- Login via `/auth/login`, get JWT
+- Set agent mode via `/api/mode/current`
+- Submit queries via `/api/push`, extract `job_id` from response
+- Poll `/api/get-queue/done` by `job_id` until completion
+- Validate answers contain expected keywords
+- Print summary table
+
+When building new agents, create an automated smoke test following this pattern rather than relying on manual curl commands.

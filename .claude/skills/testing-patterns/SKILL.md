@@ -19,6 +19,7 @@ Lupin uses a **three-tier testing strategy** for comprehensive validation.
 | Smoke | inline `quick_smoke_test()` | 10-100ms | Module sanity | `python -m cosa.rest.jwt_service` |
 | Integration | `src/tests/integration/` | 100-1000ms | End-to-end flows | `./src/tests/run-integration-tests.sh -v` |
 | WebSocket | `src/tests/websocket_smoke/` | varies | WS functionality | `src/scripts/run-websocket-smoke-tests.sh` |
+| Live Pipeline | `src/tests/smoke/test_*_live_pipeline.py` | 10-120s | Full LLM pipeline | `python src/tests/smoke/test_calculator_live_pipeline.py` |
 
 ## Quick Commands
 
@@ -42,6 +43,27 @@ pytest --cov=cosa.rest --cov-report=html src/tests/
 src/scripts/run-websocket-smoke-tests.sh
 ```
 
+## Live Pipeline Tests (Server Required)
+
+A fifth tier for **end-to-end live LLM validation** — submits real queries through the full pipeline and validates responses.
+
+| Property | Value |
+|----------|-------|
+| Location | `src/tests/smoke/` (named `test_*_live_pipeline.py`) |
+| Speed | 10-120s per query (LLM inference) |
+| Requires | Running server + LLM backend |
+| Credentials | `LUPIN_TEST_EMAIL` / `LUPIN_TEST_PASSWORD` |
+
+```bash
+# Calculator 6-query live pipeline test
+python src/tests/smoke/test_calculator_live_pipeline.py
+
+# Run specific queries only
+python src/tests/smoke/test_calculator_live_pipeline.py -q 0,2,4
+```
+
+**Why this exists**: Manual curl-based job submission is labor-intensive and error-prone. Automated pipeline tests are repeatable, self-validating, and produce summary tables. Always prefer automated scripts over manual curl for pipeline validation.
+
 ## Which Test Type to Use?
 
 | Scenario | Use |
@@ -52,6 +74,7 @@ src/scripts/run-websocket-smoke-tests.sh
 | Testing WebSocket events | WebSocket test |
 | Testing with database | Integration test |
 | Testing auth flow | Integration test |
+| Testing full agent pipeline with real LLM | Live pipeline test |
 
 ## Critical Rules
 
