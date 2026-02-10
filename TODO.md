@@ -172,8 +172,8 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
   2. **Dedicated REST endpoints**: `/api/deep-research/submit`, `/api/podcast-generator/submit`, `/api/deep-research-to-podcast/submit` (shared `agentic_job_factory`)
   3. **Mock endpoint expeditor test mode**: `POST /api/mock-job/submit {"voice_command": "make me a podcast"}` (dry-run, zero inference cost)
   - Requires running Lupin server on port 7999
-- [x] **[LUPIN] Create testing plan for Runtime Argument Expeditor** - Session 131: Initial 49 tests. Sessions 144-158: Expanded to 92 unit tests across 10 classes, 9 interactive smoke scenarios.
-  - **Unit tests**: `src/tests/unit/test_runtime_argument_expeditor.py` (92 tests, 10 classes)
+- [x] **[LUPIN] Create testing plan for Runtime Argument Expeditor** - Session 131: Initial 49 tests. Sessions 144-160: Expanded to 115 unit tests across 13 classes, 9 interactive smoke scenarios.
+  - **Unit tests**: `src/tests/unit/test_runtime_argument_expeditor.py` (115 tests, 13 classes)
   - **Smoke tests**: `src/tests/smoke/test_expeditor_mock_job_smoke.py` (3 automated + 9 interactive)
   - **Testing plan**: `src/rnd/2026.02.07-runtime-argument-expeditor-testing-plan.md`
 - [x] **[LUPIN] Run interactive expeditor smoke tests 4-5** - Session 144: Fixed async deadlock (`asyncio.to_thread()` wrapper), tests 4-5 now pass. User responds to voice prompt, dry-run job completes with $0.00 cost.

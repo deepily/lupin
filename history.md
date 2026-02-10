@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.02.10 - Session 160 | Expeditor job_id Threading, Request Context, DIAG Logging Gate
+
+#### Checkpoint | 2026.02.10 02:00 | Expeditor job_id threading, request context, DIAG logging gate + 10 new tests
+
+**Accomplishments**:
+- **Job ID Threading**: Threaded `job_id` from expeditor through all notification calls (`_ask_for_confirmation`, `_ask_for_arg`, `_batch_collect_args`) so action-required cards route to the correct job card in the UI
+- **Request Context Builder**: New `_build_request_context()` method constructs human-readable abstract for notification cards showing agent, command, and collected args
+- **Display Name Fix**: `agent_registry.py` entries now include `display_name` for user-facing labels
+- **DIAG Logging Gate**: Wrapped 8-line WebSocket state dump in `notifications.py` behind `app_debug and app_verbose` — was flooding production logs with per-call diagnostics after offline detection investigation
+- **Safer Default**: `response_default="no"` in `_ask_for_confirmation()` (was `None`, which caused 503 instead of graceful OfflineEvent)
+- **10 New Unit Tests**: `TestRequestContext` (4 tests), `TestBatchAbstractPassthrough` (3 tests), `TestJobIdThreading` (3 tests) — 115 total, 13 classes
+- **Verification**: 115/115 unit tests pass, zero regressions
+
+**Files Modified** (Lupin repo): `src/tests/unit/test_runtime_argument_expeditor.py`
+**Files Modified** (CoSA submodule, not committed here): `agent_registry.py` (display_name), `expeditor.py` (request context, job_id, response_default), `notifications.py` (DIAG logging gate)
+**Commit**: ec67d87
+
+---
+
 ### 2026.02.09 - Session 159 | Fix CRITICAL Delete Bug — Silent Filter Skipping Deletes All Rows
 
 #### Checkpoint | 2026.02.09 23:30 | Validate match_fields, strengthen prompt, 7 new tests
