@@ -266,10 +266,11 @@ else:
             --test-train-path "$TEST_TRAIN_PATH" \
             --lora-dir "$LORA_DIR" \
             --sample-size 0.01 \
-            --validation-sample-size 10 \
+            --validation-sample-size 33 \
             --quantize-bits "$QUANTIZE_BITS" \
             --pre-training-stats \
-            --post-training-stats
+            --post-training-stats \
+            --post-quantization-stats
         ;;
 
     full)
