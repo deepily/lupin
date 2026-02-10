@@ -9119,9 +9119,19 @@ class NotificationsUI {
         stopBtn.textContent = '⏹️ Stop';
         stopBtn.onclick = () => this.stopTTSAndAdvance();
 
+        const deleteBtn       = document.createElement( 'button' );
+        deleteBtn.className   = 'tts-delete-button';
+        deleteBtn.textContent = '🗑';
+        deleteBtn.title       = 'Remove from queue';
+        deleteBtn.onclick     = ( e ) => {
+            e.stopPropagation();
+            this.removeFromTTSQueue( item.id );
+        };
+
         card.appendChild( iconDiv );
         card.appendChild( messageDiv );
         card.appendChild( stopBtn );
+        card.appendChild( deleteBtn );
 
         container.innerHTML = '';
         container.appendChild( card );
@@ -9225,21 +9235,30 @@ class NotificationsUI {
 
     /**
      * Clears all pending items from the TTS queue.
-     * Does NOT stop the active/playing item or exit focus mode.
+     * Also clears the active slot to remove any ghost cards.
      *
      * Requires:
      *     - nothing (safe to call when queue is empty)
      *
      * Ensures:
      *     - ttsQueue is emptied
-     *     - Pending queue DOM is cleared
+     *     - activeTTSItem is cleared
+     *     - Active slot and pending queue DOM are cleared
      *     - Section and localStorage updated
      */
     clearTTSQueue() {
-        if ( this.ttsQueue.length === 0 ) return;
+        const hasPending = this.ttsQueue.length > 0;
+        const hasActive  = this.activeTTSItem !== null;
+        const activeSlot = document.getElementById( 'tts-active-slot' );
+        const hasGhost   = activeSlot?.querySelector( '.tts-active-card' ) !== null;
 
-        this.log( `TTS queue: Clearing all ${this.ttsQueue.length} pending items` );
-        this.ttsQueue = [];
+        if ( !hasPending && !hasActive && !hasGhost ) return;
+
+        this.log( `TTS queue: Clearing all (${this.ttsQueue.length} pending, active: ${hasActive}, ghost: ${hasGhost})` );
+        this.ttsQueue      = [];
+        this.activeTTSItem = null;
+
+        if ( activeSlot ) activeSlot.innerHTML = '';
 
         const pendingContainer = document.getElementById( 'tts-pending-queue' );
         if ( pendingContainer ) pendingContainer.innerHTML = '';
@@ -9250,19 +9269,22 @@ class NotificationsUI {
 
     /**
      * Updates the Clear All button visibility and disabled state
-     * based on whether there are pending queue items.
+     * based on whether there are pending queue items, an active item,
+     * or a ghost card in the active slot DOM.
      *
      * Ensures:
-     *     - Button shown and enabled when ttsQueue has items
-     *     - Button hidden and disabled when ttsQueue is empty
+     *     - Button shown and enabled when any TTS items exist (pending, active, or ghost)
+     *     - Button hidden and disabled when nothing exists
      */
     updateTTSClearAllButtonState() {
         const btn = document.getElementById( 'tts-clear-all-btn' );
         if ( !btn ) return;
 
-        const hasPending = this.ttsQueue.length > 0;
-        btn.style.display = hasPending ? 'inline-block' : 'none';
-        btn.disabled      = !hasPending;
+        const activeSlot  = document.getElementById( 'tts-active-slot' );
+        const hasActiveUI = activeSlot?.querySelector( '.tts-active-card' ) !== null;
+        const hasItems    = this.ttsQueue.length > 0 || this.activeTTSItem !== null || hasActiveUI;
+        btn.style.display = hasItems ? 'inline-block' : 'none';
+        btn.disabled      = !hasItems;
     }
 
     /**
@@ -9378,12 +9400,12 @@ class NotificationsUI {
         if ( activeSlot ) activeSlot.innerHTML = '';
 
         // FOCUS MODE: If action-required just finished, pause queue for user response
-        // IMPORTANT: Enter focus mode BEFORE clearing activeTTSItem to prevent race condition
-        // where incoming notifications could trigger TTS between clearing and setting focus mode
+        // Clear activeTTSItem BEFORE entering focus mode so updateTTSQueueSection()
+        // (called inside enterTTSFocusMode) doesn't re-render a ghost card into active slot
         if ( wasActionRequired && justCompletedItem?.id ) {
+            this.activeTTSItem = null;  // Clear BEFORE focus mode to prevent ghost re-render
             this.enterTTSFocusMode( justCompletedItem.id );
-            this.activeTTSItem = null;  // Now safe to clear
-            this.updateTTSQueueSection();
+            // updateTTSQueueSection() already called inside enterTTSFocusMode
             return;  // Exit early - don't activate next until response received
         }
 
