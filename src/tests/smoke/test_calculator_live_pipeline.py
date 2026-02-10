@@ -8,6 +8,24 @@ Verifies the full end-to-end pipeline:
 
 Tests 6 queries covering: unit conversion, price comparison, mortgage calculation.
 
+Usage:
+    # Run all 6 queries (default)
+    python src/tests/smoke/test_calculator_live_pipeline.py
+
+    # Run only query 0 (CONVERT_KM)
+    python src/tests/smoke/test_calculator_live_pipeline.py --queries 0
+
+    # Run queries 0, 2, 4
+    python src/tests/smoke/test_calculator_live_pipeline.py -q 0,2,4
+
+Query index reference:
+    0: CONVERT_KM      — How many miles is 10 kilometers?
+    1: CONVERT_TEMP    — Convert 72 Fahrenheit to Celsius
+    2: CONVERT_WEIGHT  — 500 grams in pounds
+    3: COMPARE_PRICE   — Compare 12 oz at $3.49 vs 24 oz at $5.99
+    4: MORTGAGE        — Monthly payment on $300k mortgage at 6.5% for 30 years
+    5: CONVERT_ML      — What's 500 ml in cups?
+
 Requires:
     - Server running on localhost:7999
     - Phi-4 LLM server running for intent extraction
@@ -18,6 +36,7 @@ Requires:
 Created: 2026-02-10 (Session 172)
 """
 
+import argparse
 import os
 import sys
 import time
@@ -359,7 +378,7 @@ def _print_results_table( results ):
 # Main Test
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def quick_smoke_test():
+def quick_smoke_test( query_indices=None ):
     """
     Smoke test for Calculator agent via live pipeline.
 
@@ -367,16 +386,24 @@ def quick_smoke_test():
         - Server running on port 7999
         - Phi-4 LLM server running for intent extraction
         - Test credentials available via environment variables
+        - query_indices is None (run all) or a list of valid ints (0-5)
 
     Ensures:
         - Sets calculator mode
-        - Submits 6 queries covering all calculator operations
+        - Submits selected queries (all 6 by default)
         - Polls for completion via job_id
         - Validates answers contain expected keywords
         - Resets mode to system on exit
-        - Returns True if all queries pass
+        - Returns True if all selected queries pass
     """
-    banner = "Calculator Live Pipeline Smoke Test (6-Query Matrix)"
+    if query_indices is not None:
+        queries = [ CALCULATOR_QUERIES[ i ] for i in query_indices if i < len( CALCULATOR_QUERIES ) ]
+        label   = f"Calculator Live Pipeline Smoke Test ({len( queries )} of {len( CALCULATOR_QUERIES )} queries)"
+    else:
+        queries = CALCULATOR_QUERIES
+        label   = f"Calculator Live Pipeline Smoke Test ({len( queries )}-Query Matrix)"
+
+    banner = label
     if cu:
         cu.print_banner( banner, prepend_nl=True )
     else:
@@ -428,16 +455,16 @@ def quick_smoke_test():
         # Step 4: Run 6-query test matrix
         # ═══════════════════════════════════════════════════════════════════
         print( "\n" + "=" * 70 )
-        print( "  CALCULATOR QUERY MATRIX (6 queries)" )
+        print( f"  CALCULATOR QUERY MATRIX ({len( queries )} queries)" )
         print( "  Each query is submitted via /api/push and polled for completion." )
         print( f"  Timeout: {MAX_POLL_SECONDS}s per query." )
         print( "=" * 70 )
 
         results = []
 
-        for i, query_info in enumerate( CALCULATOR_QUERIES, 1 ):
+        for i, query_info in enumerate( queries, 1 ):
             print( f"\n{'─' * 70}" )
-            print( f"  Query {i}/{len( CALCULATOR_QUERIES )}: {query_info[ 'id' ]}" )
+            print( f"  Query {i}/{len( queries )}: {query_info[ 'id' ]}" )
             print( f"  Question: \"{query_info[ 'query' ]}\"" )
             print( f"  Expected op: {query_info[ 'expected_op' ]}" )
             print( f"  Expected keywords: {query_info[ 'expected_keywords' ]}" )
@@ -497,7 +524,7 @@ def quick_smoke_test():
 
         print( f"\n{'=' * 70}" )
         if all_passed:
-            print( f"ALL CALCULATOR SMOKE TESTS PASSED ({passed}/{len( CALCULATOR_QUERIES )})!" )
+            print( f"ALL CALCULATOR SMOKE TESTS PASSED ({passed}/{len( queries )})!" )
         else:
             print( f"CALCULATOR SMOKE TESTS: {passed} passed, {failed} failed" )
         print( "=" * 70 )
@@ -526,8 +553,21 @@ def test_calculator_live_pipeline():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser( description="Calculator live pipeline smoke test" )
+    parser.add_argument(
+        "--queries", "-q",
+        type=str,
+        default=None,
+        help="Comma-separated query indices to run (e.g., '0,1,3'). Default: all."
+    )
+    args = parser.parse_args()
+
+    indices = None
+    if args.queries:
+        indices = [ int( x.strip() ) for x in args.queries.split( "," ) ]
+
     try:
-        success = quick_smoke_test()
+        success = quick_smoke_test( query_indices=indices )
         sys.exit( 0 if success else 1 )
     except Exception as e:
         traceback.print_exc()

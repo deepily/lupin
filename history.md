@@ -2,6 +2,11 @@
 
 ### 2026.02.10 - Session 172 | Calculator Step 24 — job_id in /api/push + 6-query live smoke test
 
+#### Checkpoint | 2026.02.10 19:30 | Add --queries flag for selective query execution
+
+**Files**: `src/tests/smoke/test_calculator_live_pipeline.py`
+**Commit**: 61eab3c
+
 #### Checkpoint | 2026.02.10 19:00 | Calculator Step 24 — job_id in /api/push + 6-query live smoke test
 
 **Accomplishments**:
