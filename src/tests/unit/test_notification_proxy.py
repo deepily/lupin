@@ -17,10 +17,10 @@ from cosa.agents.notification_proxy.config import (
     TEST_PROFILES,
     EXPEDITER_SENDER_ID,
     DEFAULT_SERVER_PORT,
-    DEFAULT_EMAIL,
     SUBSCRIBED_EVENTS,
     RECONNECT_MAX_ATTEMPTS,
     get_anthropic_api_key,
+    get_credentials,
 )
 from cosa.agents.notification_proxy.cosa_interface import SENDER_ID
 from cosa.agents.notification_proxy.strategies.expediter_rules import (
@@ -67,7 +67,6 @@ class TestConfig:
     def test_connection_defaults( self ):
         """Connection defaults are sensible."""
         assert DEFAULT_SERVER_PORT == 7999
-        assert DEFAULT_EMAIL == "mock.tester@lupin.deepily.ai"
         assert len( SUBSCRIBED_EVENTS ) >= 3
         assert "notification_queue_update" in SUBSCRIBED_EVENTS
         assert "sys_ping" in SUBSCRIBED_EVENTS
@@ -82,6 +81,57 @@ class TestConfig:
         """get_anthropic_api_key returns str or None."""
         key = get_anthropic_api_key()
         assert key is None or isinstance( key, str )
+
+
+# ============================================================================
+# Test Credential Resolution
+# ============================================================================
+
+class TestGetCredentials:
+    """Tests for get_credentials() 2-tier priority resolution."""
+
+    def test_cli_override_takes_priority( self ):
+        """CLI values override everything."""
+        email, password = get_credentials( "cli@test.com", "cli-pass" )
+        assert email == "cli@test.com"
+        assert password == "cli-pass"
+
+    def test_env_fallback( self, monkeypatch ):
+        """LUPIN_TEST_INTERACTIVE_MOCK_JOBS env vars used when CLI is None."""
+        monkeypatch.setenv( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL", "mock@test.com" )
+        monkeypatch.setenv( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD", "mock-pass" )
+
+        email, password = get_credentials()
+        assert email == "mock@test.com"
+        assert password == "mock-pass"
+
+    def test_no_email_raises( self, monkeypatch ):
+        """Raises ValueError when no email from any source."""
+        monkeypatch.delenv( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL", raising=False )
+
+        with pytest.raises( ValueError, match="No email found" ):
+            get_credentials( cli_password="some-pass" )
+
+    def test_no_password_raises( self, monkeypatch ):
+        """Raises ValueError when no password from any source."""
+        monkeypatch.delenv( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD", raising=False )
+
+        with pytest.raises( ValueError, match="No password found" ):
+            get_credentials( cli_email="user@test.com" )
+
+    def test_cli_password_overrides_env( self, monkeypatch ):
+        """CLI password takes priority over env var password."""
+        monkeypatch.setenv( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD", "env-pass" )
+        monkeypatch.setenv( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL", "mock@test.com" )
+        email, password = get_credentials( cli_password="cli-pass" )
+        assert password == "cli-pass"
+
+    def test_cli_email_overrides_env( self, monkeypatch ):
+        """CLI email takes priority over env var email."""
+        monkeypatch.setenv( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL", "env@test.com" )
+        monkeypatch.setenv( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD", "env-pass" )
+        email, password = get_credentials( cli_email="cli@test.com" )
+        assert email == "cli@test.com"
 
 
 # ============================================================================
@@ -347,12 +397,16 @@ class TestWebSocketListener:
 
         listener = WebSocketListener(
             email      = "test@example.com",
+            password   = "test-password",
             session_id = "test proxy",
             on_event   = handler
         )
         assert listener.email == "test@example.com"
+        assert listener.password == "test-password"
         assert listener.session_id == "test proxy"
         assert not listener.is_connected
+        assert listener._user_id is None
+        assert listener._token is None
 
     def test_default_host_port( self ):
         """Uses default host and port."""
@@ -361,6 +415,7 @@ class TestWebSocketListener:
 
         listener = WebSocketListener(
             email      = "test@example.com",
+            password   = "test-password",
             session_id = "test proxy",
             on_event   = handler
         )
@@ -374,6 +429,7 @@ class TestWebSocketListener:
 
         listener = WebSocketListener(
             email      = "test@example.com",
+            password   = "test-password",
             session_id = "test proxy",
             on_event   = handler,
             host       = "example.com",
@@ -395,6 +451,12 @@ class TestNotificationResponder:
         responder = NotificationResponder( "deep_research" )
         assert responder.rule_strategy is not None
         assert responder.llm_strategy is not None
+        assert responder.dry_run is False
+
+    def test_dry_run_construction( self ):
+        """Constructs with dry_run enabled."""
+        responder = NotificationResponder( "deep_research", dry_run=True )
+        assert responder.dry_run is True
 
     def test_stats_initialized( self ):
         """Stats start at zero."""
