@@ -4,6 +4,12 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.10 - Qwen3-4B vLLM Inference Slowdown Root Cause Analysis
+- **Research Document**: [2026.02.10-qwen3-vllm-inference-slowdown-root-cause.md](2026.02.10-qwen3-vllm-inference-slowdown-root-cause.md) - **🔍 ROOT CAUSE IDENTIFIED** - Qwen3-4B-Base shows 20x slowdown (~7,392 ms/item) vs Ministral-8B (~368.7 ms/item) during PEFT validation. Root cause: vLLM 0.8.2 has no native `Qwen3ForCausalLM` support — falls back to unoptimized HuggingFace Transformers engine. Architecture comparison rules out model design (Qwen3 is smaller in every compute dimension). Fix: upgrade vLLM to >= 0.8.5 where native Qwen3 support was added. Community confirmation via vLLM Issue #17630.
+
+### 2026.02.09 - Everyday Calculator Agent Implementation
+- **Implementation Plan**: [2026.02.09-everyday-calculator-agent-implementation.md](2026.02.09-everyday-calculator-agent-implementation.md) - **PENDING** - Intent-dispatched deterministic calculator agent using CRUD-style pattern. LLM extracts intent into CalcIntent XML model, pure Python functions execute the operation (no code generation, no sandbox). Three capability domains: (1) Unit conversions (km/miles, F/C, grams/pounds — hub-and-spoke conversion tables), (2) Unit price comparison (normalize dissimilar product sizes to common cost-per-unit), (3) Mortgage calculator (amortization formula). Single routing command `agent router go to calculator`, CalculatorAgent inherits AgentBase, MathAgent fallback for exotic queries. Package: `src/cosa/agents/calculator/`. 4 implementation phases, 22 steps.
+
 ### 2026.02.09 - Expeditor Default Values Design
 - **Design Document**: [2026.02.09-expeditor-default-values-design.md](2026.02.09-expeditor-default-values-design.md) - **IMPLEMENTED** - Default values for RuntimeArgumentExpeditor batch question inputs. Pre-populates text fields with sensible defaults (budget: "no limit", audience: "academic", languages: "en,es-MX") so users can accept by hitting Submit All. Three-tier override chain: config INI > agent_registry fallback_defaults > None. Key files: `agent_registry.py` (fallback_defaults dict), `expeditor.py` (_resolve_default method), `notification_utils.py` (default_value passthrough), `notifications.js` (value attribute on inputs), `lupin-app.ini` (config overrides).
 
