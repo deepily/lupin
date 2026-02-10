@@ -1,5 +1,25 @@
 # Lupin Project History
 
+### 2026.02.10 - Session 161 | Calculator Testing Ladder — Mock Pipeline, Fallback, LORA Templates
+
+#### Checkpoint | 2026.02.10 03:30 | Mock pipeline tests, MathAgent fallback, HTML dropdown, 83 LORA templates, training config
+
+**Accomplishments**:
+- **Mock Pipeline Tests (Surface 2)**: Created `test_calculator_mock_pipeline.py` with 17 tests across 6 classes — TestConvertPipelineMocked (3), TestMortgagePipelineMocked (2), TestPriceComparisonPipelineMocked (2), TestErrorHandling (3), TestPromptConstruction (4), TestMathAgentFallback (3). Follows `test_crud_mock_pipeline.py` pattern: `__new__()` bypass, mocked LLM factory, canned XML responses.
+- **MathAgent Fallback (Step 2B)**: Added `run_prompt_with_fallback()` and `_delegate_to_math_agent()` to CalculatorAgent. When intent extraction fails, gracefully delegates to MathAgent (LLM code gen — slower but handles anything).
+- **Agent Mode Dropdown (Surface 3A)**: Added `<option value="calculator">Calculator</option>` to notifications.html. Backend already wired (MODE_TO_AGENT + MODE_METADATA from Session 160).
+- **LORA Training Templates (Surface 4A)**: Created 83 conversational templates covering unit conversions (~30), price comparisons (~20), mortgage (~15), casual/filler variants (~18). Clearly distinguishable from math templates.
+- **Training Config (Surface 4B)**: Registered `"agent router go to calculator"` in `agent-router-simple-commands.json`.
+- **Math Disambiguation (Surface 4C)**: Removed 1 mortgage template from math training data that was calculator territory.
+- **Bug Fix**: Fixed CalcIntent `get_example_for_template()` items field — literal JSON braces broke Python `.format()` at runtime. Replaced with descriptive text.
+- **Verification**: 653/653 unit tests pass (17 new mock pipeline), zero regressions
+
+**Files Created** (Lupin repo): `src/tests/unit/test_calculator_mock_pipeline.py`, `src/ephemera/prompts/data/synthetic-data-agent-routing-calculator.txt`
+**Files Modified** (Lupin repo): `src/cosa/agents/calculator/agent.py` (fallback), `src/cosa/agents/calculator/xml_models.py` (fix), `src/fastapi_app/static/html/notifications.html` (dropdown), `src/conf/training/agent-router-simple-commands.json` (register), `src/ephemera/prompts/data/synthetic-data-agent-routing-math.txt` (disambiguation)
+**Commit**: [pending]
+
+---
+
 ### 2026.02.10 - Session 160 | Expeditor job_id Threading, Request Context, DIAG Logging Gate
 
 #### Checkpoint | 2026.02.10 02:00 | Expeditor job_id threading, request context, DIAG logging gate + 10 new tests
