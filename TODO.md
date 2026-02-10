@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-10 (Session 166)
+Last updated: 2026-02-10 (Session 172)
 
 ## Pending
 
@@ -71,7 +71,7 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - **CoSA submodule files need separate commit**: xml_coordinator.py, peft_trainer.py, todo_fifo_queue.py
 - [ ] **[LUPIN] Everyday Calculator — Phase 5-6 Remaining** (Session 165 planning)
   - [x] Phases 1-4 COMPLETE (94 unit tests, 17 mock pipeline tests, MathAgent fallback, 83 LORA templates)
-  - [ ] Step 24: Test 6 queries via Q&A Card with Calculator mode (needs server on 7999)
+  - [ ] Step 24: Test 6 queries via Q&A Card with Calculator mode (needs server on 7999) — **Test script created**: `src/tests/smoke/test_calculator_live_pipeline.py` (6-query matrix with poll-by-job_id). `/api/push` now returns `job_id`. Live run pending.
   - [ ] Step 25: Test 6 queries via System Mode auto-routing (needs retrained LORA)
   - [ ] Step 29: Regenerate training data + retrain LORA (needs GPU — current JSONL has 66 calculator examples, regeneration will use full 83 templates)
   - [ ] Step 30: Validate LORA accuracy (>95%, no regression)

@@ -1,5 +1,28 @@
 # Lupin Project History
 
+### 2026.02.10 - Session 172 | Calculator Step 24 — job_id in /api/push + 6-query live smoke test
+
+#### Checkpoint | 2026.02.10 19:00 | Calculator Step 24 — job_id in /api/push + 6-query live smoke test
+
+**Accomplishments**:
+- **`/api/push` returns `job_id`**: Modified `push_job()` in `todo_fifo_queue.py` to return `Dict` instead of `str` at all 5 return sites (rejection, auto-routing, main agent, `_queue_best_snapshot`). Updated `queues.py` with backward-compatible `isinstance(result, dict)` extraction. API response now includes `job_id` field for poll-by-ID patterns.
+- **6-query live smoke test**: Created `src/tests/smoke/test_calculator_live_pipeline.py` — automated test matrix covering convert (km, temp, weight, ml), compare_prices, and mortgage queries. Uses poll-by-`job_id` pattern against `GET /api/get-queue/done`. Login-only auth (no auto-registration), with remediation instructions on failure.
+- **Removed auto-registration from smoke test**: Deleted `_try_register_and_login()`, simplified caller to use `_login()` only, removed hardcoded password from help text.
+- **Plan document**: Wrote Step 24 plan to `src/rnd/2026.02.10-calculator-step-24-automated-qa-card-test-matrix.md`, indexed in R&D README.
+- **Regression**: 710/710 unit tests pass, zero regressions.
+
+**Files Modified** (Lupin repo):
+- `src/cosa/rest/routers/queues.py` (extract job_id from dict return, include in API response)
+- `src/tests/smoke/test_calculator_live_pipeline.py` (NEW — 6-query live test matrix)
+- `src/rnd/2026.02.10-calculator-step-24-automated-qa-card-test-matrix.md` (NEW — plan doc)
+- `src/rnd/README.md` (added Step 24 entry)
+- `TODO.md` (Step 24 progress note)
+
+**Files Modified** (CoSA submodule, not committed here):
+- `src/cosa/rest/todo_fifo_queue.py` (push_job returns Dict with job_id at 5 return sites)
+
+---
+
 ### 2026.02.10 - Session 171 | Notification Proxy Agent — Expediter Auto-Responder
 
 #### Checkpoint | 2026.02.10 17:00 | Notification Proxy Agent — full implementation + 49 unit tests
