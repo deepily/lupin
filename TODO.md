@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-10 (Session 163)
+Last updated: 2026-02-10 (Session 165)
 
 ## Pending
 
@@ -57,7 +57,16 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - **Plan**: `src/rnd/2026.02.07-peft-trainer-optimization-plan-part-2.md`
   - **461 unit tests passing**, zero regressions
   - **CoSA submodule files need separate commit**: xml_coordinator.py, peft_trainer.py, todo_fifo_queue.py
-- [ ] **[LUPIN] Run PEFT Phase 2 training** - Training data regenerated at 1500/command (Session 152: principled augmentation with factor loop). Ready for full training run.
+- [ ] **[LUPIN] Everyday Calculator — Phase 5-6 Remaining** (Session 165 planning)
+  - [x] Phases 1-4 COMPLETE (94 unit tests, 17 mock pipeline tests, MathAgent fallback, 83 LORA templates)
+  - [ ] Step 24: Test 6 queries via Q&A Card with Calculator mode (needs server on 7999)
+  - [ ] Step 25: Test 6 queries via System Mode auto-routing (needs retrained LORA)
+  - [ ] Step 29: Regenerate training data + retrain LORA (needs GPU — current JSONL has 66 calculator examples, regeneration will use full 83 templates)
+  - [ ] Step 30: Validate LORA accuracy (>95%, no regression)
+  - [ ] Step 31: Full voice routing test (10 spoken queries)
+  - **Execution order**: Step 24 (direct mode) → Step 29 (retrain) → Step 30 (validate) → Step 25 (auto-route) → Step 31 (voice)
+  - **Implementation doc**: `src/rnd/2026.02.09-everyday-calculator-agent-implementation.md`
+- [ ] **[LUPIN] Run PEFT Phase 2 training** - Training data regenerated at 1500/command (Session 152: principled augmentation with factor loop). Ready for full training run. **Note**: Can be combined with Calculator LORA retrain (Step 29) — single training run covers both.
   - Run: `./src/scripts/run-agentic-intent-training.sh full`
   - Data verified: 36,980 examples, all 4 previously-undersampled commands hit 1500 exactly
 - [ ] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - Two cases to handle:

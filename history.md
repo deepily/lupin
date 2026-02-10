@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.02.10 - Session 165 | Calculator Implementation Doc Sync + Phase 5-6 Planning
+
+**Accomplishments**:
+- **Implementation Doc Sync**: Updated `2026.02.09-everyday-calculator-agent-implementation.md` to reflect actual state on disk — marked Steps 20, 21, 23, 26, 27, 28 as `[x]` (all completed in Session 161 commit `1c0e8d4` but not marked in doc)
+- **Phase Status Updates**: Phase 4 `NOT STARTED` → `COMPLETE`, Phase 5 → `IN PROGRESS` (Step 23 done), Phase 6 → `IN PROGRESS` (Steps 26-28 done)
+- **Session 161 Log Enriched**: Added commit hash, verified test counts (17/17 mock pipeline, 661 total), evidence for completed steps (83 LORA templates, MathAgent fallback methods, HTML dropdown)
+- **Phase 5-6 Execution Planning**: Explored Q&A Card REST endpoints (`POST /api/push`, mode management via `/api/mode/current`) and LORA training pipeline (`run-agentic-intent-training.sh` modes). Planning interrupted — ready to execute next session.
+
+**Remaining Calculator Work** (5 steps):
+- Steps 24-25: Live LLM testing via Q&A Card + System Mode auto-routing (needs server)
+- Steps 29-31: LORA retrain + validate + voice routing test (needs GPU)
+- Current JSONL has 66 calculator training examples; regeneration will use full 83 templates
+
+**Files Modified**: `src/rnd/2026.02.09-everyday-calculator-agent-implementation.md` (12 edits)
+**Commit**: [pending]
+
+---
+
 ### 2026.02.10 - Session 164 | Bug Fix: Double-Click-to-Expand on CJ Flow Job Cards
 
 **Accomplishments**:
@@ -28,7 +46,7 @@
 
 **Files Modified** (CoSA submodule, not committed here): `expeditor.py` (3 timeout values + 3 diagnostic logging blocks), `notifications.py` (API default 30→120)
 **Files Modified** (Lupin repo): `src/tests/smoke/test_expeditor_mock_job_smoke.py` (REQUEST_TIMEOUT, MAX_POLL_SECONDS, UI message)
-**Commit**: [pending]
+**Commit**: 85156cb
 
 ---
 
