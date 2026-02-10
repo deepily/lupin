@@ -9162,9 +9162,19 @@ class NotificationsUI {
         textDiv.className = 'tts-text';
         textDiv.textContent = truncatedText;
 
+        const deleteBtn = document.createElement( 'button' );
+        deleteBtn.className = 'tts-delete-button';
+        deleteBtn.textContent = '\u00D7';
+        deleteBtn.title = 'Remove from queue';
+        deleteBtn.onclick = ( e ) => {
+            e.stopPropagation();
+            this.removeFromTTSQueue( item.id );
+        };
+
         card.appendChild( positionDiv );
         card.appendChild( badgeDiv );
         card.appendChild( textDiv );
+        card.appendChild( deleteBtn );
 
         container.appendChild( card );
     }
@@ -9179,6 +9189,80 @@ class NotificationsUI {
                 badge.textContent = `${index + 1}`;
             }
         } );
+    }
+
+    /**
+     * Removes a single item from the TTS pending queue by ID.
+     *
+     * Requires:
+     *     - itemId is a valid string matching a queued item's id
+     *
+     * Ensures:
+     *     - Item is spliced from ttsQueue array
+     *     - DOM card animates out with shrink-fade, then removed
+     *     - Queue positions, section, and localStorage updated
+     */
+    removeFromTTSQueue( itemId ) {
+        const idx = this.ttsQueue.findIndex( i => i.id === itemId );
+        if ( idx === -1 ) {
+            this.log( `TTS queue: removeFromTTSQueue - item ${itemId} not found, ignoring` );
+            return;
+        }
+
+        this.log( `TTS queue: Removing item ${itemId} at position ${idx + 1}` );
+        this.ttsQueue.splice( idx, 1 );
+
+        const card = document.getElementById( `tts-minimized-${itemId}` );
+        if ( card ) {
+            card.classList.add( 'shrink-fade' );
+            card.addEventListener( 'animationend', () => card.remove(), { once: true } );
+        }
+
+        this.updateTTSQueuePositions();
+        this.updateTTSQueueSection();
+        this.saveTTSQueueState();
+    }
+
+    /**
+     * Clears all pending items from the TTS queue.
+     * Does NOT stop the active/playing item or exit focus mode.
+     *
+     * Requires:
+     *     - nothing (safe to call when queue is empty)
+     *
+     * Ensures:
+     *     - ttsQueue is emptied
+     *     - Pending queue DOM is cleared
+     *     - Section and localStorage updated
+     */
+    clearTTSQueue() {
+        if ( this.ttsQueue.length === 0 ) return;
+
+        this.log( `TTS queue: Clearing all ${this.ttsQueue.length} pending items` );
+        this.ttsQueue = [];
+
+        const pendingContainer = document.getElementById( 'tts-pending-queue' );
+        if ( pendingContainer ) pendingContainer.innerHTML = '';
+
+        this.updateTTSQueueSection();
+        this.saveTTSQueueState();
+    }
+
+    /**
+     * Updates the Clear All button visibility and disabled state
+     * based on whether there are pending queue items.
+     *
+     * Ensures:
+     *     - Button shown and enabled when ttsQueue has items
+     *     - Button hidden and disabled when ttsQueue is empty
+     */
+    updateTTSClearAllButtonState() {
+        const btn = document.getElementById( 'tts-clear-all-btn' );
+        if ( !btn ) return;
+
+        const hasPending = this.ttsQueue.length > 0;
+        btn.style.display = hasPending ? 'inline-block' : 'none';
+        btn.disabled      = !hasPending;
     }
 
     /**
@@ -9260,6 +9344,9 @@ class NotificationsUI {
 
         // Update pause/play button states
         this.updateTTSPausePlayButtons();
+
+        // Update Clear All button visibility
+        this.updateTTSClearAllButtonState();
     }
 
     /**

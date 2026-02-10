@@ -273,6 +273,13 @@
                             onclick="window.notificationsUI.resumeTTS()">▶️</button>
                 </div>
 
+                <button id="tts-clear-all-btn" class="tts-clear-all-button"
+                        style="display: none;" disabled
+                        title="Clear all pending queue items"
+                        onclick="event.stopPropagation(); window.notificationsUI.clearTTSQueue()">
+                    Clear
+                </button>
+
                 <button class="toggle-button" id="tts-queue-toggle">▼</button>
             </div>
             <div class="section-content" id="tts-queue-content">

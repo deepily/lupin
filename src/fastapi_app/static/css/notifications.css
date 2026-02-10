@@ -2397,6 +2397,83 @@
             background: rgba( 0, 0, 0, 0.25 );
         }
 
+        /* =========================================================================
+           TTS QUEUE DELETE CONTROLS - Per-item delete + Clear All
+           ========================================================================= */
+
+        /* Per-item delete button on minimized queue cards */
+        .tts-delete-button {
+            width: 22px;
+            height: 22px;
+            border: none;
+            border-radius: 50%;
+            background: transparent;
+            color: #999;
+            font-size: 16px;
+            line-height: 22px;
+            text-align: center;
+            cursor: pointer;
+            flex-shrink: 0;
+            padding: 0;
+            transition: all 0.15s ease;
+        }
+
+        .tts-delete-button:hover {
+            background: rgba( 220, 53, 69, 0.15 );
+            color: #dc3545;
+            transform: scale( 1.1 );
+        }
+
+        /* Shrink-fade animation for minimized queue cards being deleted */
+        .tts-minimized.shrink-fade {
+            animation: shrinkFadeOut 0.35s ease-out forwards;
+            pointer-events: none;
+        }
+
+        /* Clear All button in TTS queue header */
+        .tts-clear-all-button {
+            display: none;
+            background: transparent;
+            border: 1px solid rgba( 255, 255, 255, 0.4 );
+            color: white;
+            padding: 2px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            margin-right: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .tts-clear-all-button:hover:not(:disabled) {
+            background: rgba( 255, 255, 255, 0.2 );
+            border-color: rgba( 255, 255, 255, 0.6 );
+        }
+
+        .tts-clear-all-button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* Clear All button adapts to paused (amber) header */
+        #tts-queue-section.paused .tts-clear-all-button {
+            color: #333;
+            border-color: rgba( 0, 0, 0, 0.3 );
+        }
+
+        #tts-queue-section.paused .tts-clear-all-button:hover:not(:disabled) {
+            background: rgba( 0, 0, 0, 0.1 );
+            border-color: rgba( 0, 0, 0, 0.5 );
+        }
+
+        /* Clear All button adapts to focus-mode (gray) header */
+        #tts-queue-section.focus-mode .tts-clear-all-button {
+            border-color: rgba( 255, 255, 255, 0.3 );
+        }
+
+        #tts-queue-section.focus-mode .tts-clear-all-button:hover:not(:disabled) {
+            background: rgba( 255, 255, 255, 0.15 );
+        }
+
         /* Shrink-fade animation state for action-required notifications */
         .action-required-notification.shrink-fade {
             animation: shrinkFadeOut 0.5s ease-out forwards;
