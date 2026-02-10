@@ -1,7 +1,7 @@
 """
 Unit tests for Runtime Argument Expeditor.
 
-Tests 14 components (115 tests total):
+Tests 15 components (123 tests total):
 1. ExpeditorResponse model (xml_models.py) - 16 tests
 2. _parse_lora_args() (expeditor.py) - 9 tests
 3. _inject_system_args() (expeditor.py) - 4 tests
@@ -16,11 +16,12 @@ Tests 14 components (115 tests total):
 12. Batch default values integration (expeditor.py) - 4 tests
 13. Notification utils edge cases (notification_utils.py) - 3 tests
 14. job_id threading (expeditor.py) - 3 tests
+15. Optional arg prompting (expeditor.py) - 8 tests (post-bug-fix)
 
 All external dependencies mocked. No server, no LLM, no filesystem I/O.
 
 Created: 2026-02-05
-Updated: 2026-02-09 — job_id threading, response_default fix for OfflineEvent bug
+Updated: 2026-02-10 — optional arg prompting tests (bug fix: is_complete() gate replaced)
 """
 
 import pytest
@@ -1252,8 +1253,12 @@ class TestBatchCollectArgs:
     @patch.object( RuntimeArgumentExpeditor, "_confirm_and_iterate" )
     @patch( "cosa.agents.runtime_argument_expeditor.expeditor.LlmClientFactory" )
     def test_expedite_uses_single_for_one_missing( self, mock_factory, mock_confirm, mock_ask, mock_uva ):
-        """When exactly 1 batchable arg missing, single path is taken (no batch)."""
-        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
+        """When exactly 1 user-visible arg missing, single path is taken (no batch).
+
+        Note: user_visible returns only [ "query", "budget" ] here so that with
+        query present, only budget is missing → single arg path.
+        """
+        mock_uva.return_value = [ "query", "budget" ]
         mock_ask.return_value = "10"
         mock_confirm.return_value = { "query": "quantum", "budget": "10" }
 
@@ -1733,3 +1738,227 @@ class TestJobIdThreading:
         call_kwargs = mock_sync.call_args[ 1 ]
         request = call_kwargs[ "request" ]
         assert request.job_id is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Class 15: TestOptionalArgPrompting (8 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestOptionalArgPrompting:
+    """Tests for the optional arg prompting fix.
+
+    Verifies that when all *required* args are satisfied (e.g., query extracted
+    from voice command), the expeditor still prompts for *optional* user-visible
+    args (budget, audience, audience_context, languages).
+
+    Bug context: Prior to this fix, `if parsed.is_complete()` checked only
+    all_required_met. When true, the entire missing-args block was skipped.
+    """
+
+    DR_COMMAND_KEY  = "agent router go to deep research"
+    RTP_COMMAND_KEY = "agent router go to research to podcast"
+    PG_COMMAND_KEY  = "agent router go to podcast generator"
+
+    def setup_method( self ):
+        """Create a minimal expeditor instance with mocked dependencies."""
+        self.expeditor                          = RuntimeArgumentExpeditor.__new__( RuntimeArgumentExpeditor )
+        self.expeditor.debug                    = False
+        self.expeditor.verbose                  = False
+        self.expeditor.confirmation_prompt_path = "/src/conf/prompts/runtime-argument-confirmation.txt"
+        self.expeditor.prompt_template_path     = "/src/conf/prompts/test.txt"
+        self.expeditor.llm_spec_key             = "test_key"
+        self.expeditor.llm_factory              = MagicMock()
+        self.expeditor._job_id                  = None
+
+        # Mock config_mgr for _resolve_default()
+        mock_config_mgr           = MagicMock()
+        mock_config_mgr.get       = MagicMock( return_value=None )
+        self.expeditor.config_mgr = mock_config_mgr
+
+        # Standard LLM mock: returns "all required met" with query present
+        self.mock_llm = MagicMock()
+        mock_factory_instance                  = MagicMock()
+        mock_factory_instance.get_client.return_value = self.mock_llm
+        self.expeditor.llm_factory             = mock_factory_instance
+
+    def _make_llm_response( self, args_present, args_missing="(none)", all_required_met="true" ):
+        """Build an ExpeditorResponse XML string.
+
+        Note: args_missing defaults to '(none)' not '' because xmltodict
+        converts empty XML tags to None, which fails Pydantic string validation.
+        """
+        return (
+            f"<expeditor_response><all_required_met>{all_required_met}</all_required_met>"
+            f"<args_present>{args_present}</args_present>"
+            f"<args_missing>{args_missing}</args_missing></expeditor_response>"
+        )
+
+    def _run_expedite( self, command_key, raw_args, original_question ):
+        """Run expedite() with standard mocking for LLM + file system."""
+        with patch( "cosa.utils.util.get_file_as_string", return_value="{system_args}{help_text}{voice_command}{extracted_args}{required_args}" ), \
+             patch( "cosa.utils.util.get_project_root", return_value="/fake" ), \
+             patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_cli_help", return_value="test help" ), \
+             patch( "cosa.agents.io_models.utils.prompt_template_processor.PromptTemplateProcessor.process_template", return_value="{system_args}{help_text}{voice_command}{extracted_args}{required_args}" ):
+            return self.expeditor.expedite(
+                command           = command_key,
+                raw_args          = raw_args,
+                user_email        = "test@test.com",
+                session_id        = "sess-1",
+                user_id           = "uid-1",
+                original_question = original_question
+            )
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_batch_collect_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_confirm_and_iterate" )
+    def test_happy_path_still_prompts_optional_args( self, mock_confirm, mock_batch, mock_uva ):
+        """DR with query present (all_required_met=true) → still asks budget, audience, audience_context via batch."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
+        mock_batch.return_value = { "budget": "10", "audience": "expert", "audience_context": "researchers" }
+        mock_confirm.return_value = { "query": "quantum computing", "budget": "10", "audience": "expert", "audience_context": "researchers" }
+        self.mock_llm.run.return_value = self._make_llm_response( "query=quantum computing" )
+
+        result = self._run_expedite( self.DR_COMMAND_KEY, 'query="quantum computing"', "do deep research on quantum computing" )
+
+        # Batch MUST be called for the 3 optional args
+        mock_batch.assert_called_once()
+        batch_args = mock_batch.call_args[ 0 ][ 0 ]
+        assert "budget" in batch_args
+        assert "audience" in batch_args
+        assert "audience_context" in batch_args
+        assert "query" not in batch_args  # Already present
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_batch_collect_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_confirm_and_iterate" )
+    def test_rtp_prompts_languages_when_query_present( self, mock_confirm, mock_batch, mock_uva ):
+        """RTP with query present → asks budget, audience, audience_context, languages."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context", "languages" ]
+        mock_batch.return_value = { "budget": "5", "audience": "beginner", "audience_context": "students", "languages": "en" }
+        mock_confirm.return_value = { "query": "AI safety", "budget": "5", "audience": "beginner", "audience_context": "students", "languages": "en" }
+        self.mock_llm.run.return_value = self._make_llm_response( "query=AI safety" )
+
+        result = self._run_expedite( self.RTP_COMMAND_KEY, 'query="AI safety"', "research AI safety and make a podcast" )
+
+        mock_batch.assert_called_once()
+        batch_args = mock_batch.call_args[ 0 ][ 0 ]
+        assert "languages" in batch_args
+        assert "budget" in batch_args
+        assert "audience" in batch_args
+        assert "audience_context" in batch_args
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_handle_fuzzy_file_match" )
+    @patch.object( RuntimeArgumentExpeditor, "_batch_collect_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_confirm_and_iterate" )
+    def test_pg_prompts_optional_when_research_present( self, mock_confirm, mock_batch, mock_fuzzy, mock_uva ):
+        """PG with research present (via special handler) → asks languages, audience, audience_context."""
+        mock_uva.return_value = [ "research", "languages", "audience", "audience_context" ]
+        # research is a special_handler (fuzzy_file_match), so it won't be in batchable
+        mock_fuzzy.return_value = "/io/deep-research/test@test.com/doc.md"
+        mock_batch.return_value = { "languages": "en,es-MX", "audience": "academic", "audience_context": "none" }
+        mock_confirm.return_value = { "research": "/io/deep-research/test@test.com/doc.md", "languages": "en,es-MX", "audience": "academic", "audience_context": "none" }
+        # LLM says required arg (research) is missing — but fuzzy handler provides it
+        self.mock_llm.run.return_value = self._make_llm_response( "", "research", "false" )
+
+        result = self._run_expedite( self.PG_COMMAND_KEY, "", "make me a podcast" )
+
+        # Fuzzy file match called for research (special handler)
+        mock_fuzzy.assert_called_once()
+        # Batch called for the 3 non-special optional args
+        mock_batch.assert_called_once()
+        batch_args = mock_batch.call_args[ 0 ][ 0 ]
+        assert "languages" in batch_args
+        assert "audience" in batch_args
+        assert "audience_context" in batch_args
+        assert "research" not in batch_args  # Handled by special handler
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_batch_collect_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_confirm_and_iterate" )
+    def test_already_extracted_optional_not_re_prompted( self, mock_confirm, mock_batch, mock_uva ):
+        """DR with query AND audience both present → only asks missing ones (budget, audience_context)."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
+        mock_batch.return_value = { "budget": "no limit", "audience_context": "none" }
+        mock_confirm.return_value = { "query": "quantum", "audience": "beginner", "budget": "no limit", "audience_context": "none" }
+        # LLM detects both query and audience as present
+        self.mock_llm.run.return_value = self._make_llm_response( "query=quantum, audience=beginner" )
+
+        result = self._run_expedite( self.DR_COMMAND_KEY, 'query="quantum"', "deep research on quantum for beginners" )
+
+        mock_batch.assert_called_once()
+        batch_args = mock_batch.call_args[ 0 ][ 0 ]
+        assert "budget" in batch_args
+        assert "audience_context" in batch_args
+        assert "query" not in batch_args       # Already present
+        assert "audience" not in batch_args    # Already present
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_batch_collect_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_confirm_and_iterate" )
+    def test_optional_defaults_prefilled_in_batch( self, mock_confirm, mock_batch, mock_uva ):
+        """Batch questions include default_value from fallback_defaults."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
+        mock_batch.return_value = { "budget": "no limit", "audience": "academic", "audience_context": "none" }
+        mock_confirm.return_value = { "query": "test" }
+        self.mock_llm.run.return_value = self._make_llm_response( "query=test" )
+
+        result = self._run_expedite( self.DR_COMMAND_KEY, 'query="test"', "research test" )
+
+        mock_batch.assert_called_once()
+        # Verify fallback_defaults dict is passed to _batch_collect_args
+        batch_kwargs = mock_batch.call_args
+        # fallback_defaults is the 4th positional arg (index 3)
+        fallback_defaults = batch_kwargs[ 0 ][ 3 ]
+        assert fallback_defaults[ "budget" ] == "no limit"
+        assert fallback_defaults[ "audience" ] == "academic"
+        assert fallback_defaults[ "audience_context" ] == "none"
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_batch_collect_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_confirm_and_iterate" )
+    def test_no_limit_skips_budget( self, mock_confirm, mock_batch, mock_uva ):
+        """User answers 'no limit' for budget → budget not in final_args."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
+        # Batch returns "no limit" for budget — should be skipped
+        mock_batch.return_value = { "budget": "no limit", "audience": "expert", "audience_context": "none" }
+        mock_confirm.return_value = { "query": "quantum", "audience": "expert" }
+        self.mock_llm.run.return_value = self._make_llm_response( "query=quantum" )
+
+        result = self._run_expedite( self.DR_COMMAND_KEY, 'query="quantum"', "research quantum" )
+
+        # Confirm is called — check the args_dict it received
+        mock_confirm.assert_called_once()
+        args_passed = mock_confirm.call_args[ 0 ][ 0 ]
+        assert "budget" not in args_passed        # "no limit" skips it
+        assert args_passed[ "audience" ] == "expert"
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_batch_collect_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_confirm_and_iterate" )
+    def test_none_skips_audience_context( self, mock_confirm, mock_batch, mock_uva ):
+        """User answers 'none' for audience_context → not filtered (audience_context is a non-skippable arg)."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
+        mock_batch.return_value = { "budget": "10", "audience": "academic", "audience_context": "none" }
+        mock_confirm.return_value = { "query": "quantum", "budget": "10", "audience": "academic", "audience_context": "none" }
+        self.mock_llm.run.return_value = self._make_llm_response( "query=quantum" )
+
+        result = self._run_expedite( self.DR_COMMAND_KEY, 'query="quantum"', "research quantum" )
+
+        mock_confirm.assert_called_once()
+        args_passed = mock_confirm.call_args[ 0 ][ 0 ]
+        # audience_context="none" is a valid value (not in the skip list for budget/languages)
+        assert args_passed[ "audience_context" ] == "none"
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_batch_collect_args" )
+    def test_cancel_in_optional_batch_returns_none( self, mock_batch, mock_uva ):
+        """Cancel keyword in optional batch → expedite returns None."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
+        mock_batch.return_value = None  # User cancelled
+        self.mock_llm.run.return_value = self._make_llm_response( "query=quantum" )
+
+        result = self._run_expedite( self.DR_COMMAND_KEY, 'query="quantum"', "research quantum" )
+
+        assert result is None
+        mock_batch.assert_called_once()

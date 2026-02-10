@@ -1,5 +1,37 @@
 # Lupin Project History
 
+### 2026.02.10 - Session 164 | Bug Fix: Double-Click-to-Expand on CJ Flow Job Cards
+
+**Accomplishments**:
+- **Fix**: `expandJobCard()` used a non-existent `expanded` CSS class while `toggleJobCard()` and the CSS used `collapsed`. This state/DOM mismatch meant auto-expanded cards appeared collapsed, and the first user click was silently swallowed (toggling internal state back to "collapsed") before the second click actually worked. Changed 2 lines: check for `collapsed` instead of `!expanded`, remove `collapsed` instead of adding `expanded`.
+- **Verification**: Code review confirms `expandJobCard()` and `toggleJobCard()` now both operate on the same `collapsed` class mechanism
+
+### Session Summary
+- **Total Fixes**: 1
+- **Files Changed**: `src/fastapi_app/static/js/notifications.js` (2 lines)
+- **Commits**: pending
+
+**Status**: Session closed 2026.02.10
+
+---
+
+### 2026.02.10 - Session 163 | Expeditor Interactive Test Timeout Fix — Increased Timeouts, Diagnostic Logging
+
+#### Checkpoint | 2026.02.10 09:30 | Timeout chain fix for interactive expeditor smoke tests
+
+**Accomplishments**:
+- **Expeditor Timeout Increases**: Raised notification timeouts for interactive testing — `_ask_for_arg` 60→180s, `_ask_for_confirmation` 60→180s, `_batch_collect_args` 120→300s. Root cause: users couldn't read/understand/respond to voice prompts within the old tight windows
+- **Diagnostic Logging**: Added `[Expeditor]` debug prints after all 3 `notify_user_sync` calls showing `success`, `status`, `exit_code`, `is_timeout`, `response_value`. Enables diagnosing why first scenario (DR_HAPPY) fails instantly — will reveal if it's offline detection vs LLM cold start vs other
+- **Smoke Test Timeouts**: Increased `REQUEST_TIMEOUT` 180→600s (10 min per scenario), `MAX_POLL_SECONDS` 90→120s (2 min polling)
+- **API Default Timeout**: Changed notifications.py endpoint default from 30→120s (doesn't affect expeditor which passes explicit values, but prevents confusion for other callers)
+- **Verification**: 661/661 unit tests pass (123 expeditor-specific), zero regressions
+
+**Files Modified** (CoSA submodule, not committed here): `expeditor.py` (3 timeout values + 3 diagnostic logging blocks), `notifications.py` (API default 30→120)
+**Files Modified** (Lupin repo): `src/tests/smoke/test_expeditor_mock_job_smoke.py` (REQUEST_TIMEOUT, MAX_POLL_SECONDS, UI message)
+**Commit**: [pending]
+
+---
+
 ### 2026.02.10 - Session 161 | Calculator Testing Ladder — Mock Pipeline, Fallback, LORA Templates
 
 #### Checkpoint | 2026.02.10 03:30 | Mock pipeline tests, MathAgent fallback, HTML dropdown, 83 LORA templates, training config

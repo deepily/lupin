@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-09 (Session 158)
+Last updated: 2026-02-10 (Session 163)
 
 ## Pending
 
@@ -22,8 +22,10 @@ Last updated: 2026-02-09 (Session 158)
 - [ ] **[LUPIN] Interactive E2E Testing of CRUD Agents** (HIGH PRIORITY) - Execute the 29-scenario testing protocol at `src/rnd/headless-cc-for-dataframe-crud/testing-protocol.md`.
   - [x] Part 1: Mock pipeline tests (17/17 passed — routing, pipeline, cache, confirmation, prompt construction)
   - [x] Bug fix: CRUD agent completion — emit_job_state_transition, answer guard, done queue push (3 new tests, 532/532 pass)
-  - [ ] Part 3: Curl smoke tests (Test 2 partial — card transitions OK, TTS blocked by pre-existing stuck focus mode. Manual re-run pending after localStorage clear.)
+  - [x] Bug fix: TTS focus mode stuck — staleness check in restoreTTSQueueState + exit in moveToRegularNotifications (Session 164)
+  - [ ] Part 3: Curl smoke tests (Tests 1-2 done, Tests 3-4 pending. Test 4 revealed **delete-all-records bug** — see plan below)
   - [ ] Part 2: Notifications UI tests (8 scenarios, live server)
+  - [ ] **Bug fix: delete_item deletes all records** — Duplicate inserts + no multi-delete guard. Plan at `~/.claude/plans/cached-growing-mist.md`. Changes: dedup keys in schemas.py, dedup guard in add_item, multi-delete guard in delete_item, reject infra columns in match_fields, 6 new tests. **Resume here next session.**
 - [ ] **[LUPIN] Phase 4: End-to-End Voice Workflows + Polish** - PENDING (blocked by Phase 3 ✅)
 
 ### Skills Management (Session 118 Discovery)
@@ -132,7 +134,7 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 
 ### Future Considerations
 
-- [ ] **[LUPIN] Add 60s safety timeout to TTS focus mode** - Prevent permanent stuck state when TTS queue items fail to play. Currently, if TTS playback fails, `notifications_tts_queue` in localStorage accumulates items indefinitely and blocks all future TTS. Add a 60-second safety timeout that auto-exits focus mode. **File**: `src/fastapi_app/static/js/notifications.js:9355-9393`
+- [ ] **[LUPIN] Add 60s safety timeout to TTS focus mode** - Prevent permanent stuck state when TTS queue items fail to play. **Partially addressed** (Session 164): Added staleness check on restore + exit in moveToRegularNotifications. Still need: runtime 60s timeout for cases where notification exists but user never responds and timeout doesn't fire. **File**: `src/fastapi_app/static/js/notifications.js:9374-9393`
 - [ ] **Silent flag for notifications**: Consider adding a `silent` parameter to the cosa-voice notification system to suppress TTS during automated testing. Would require changes to: router request models, job classes, voice_io wrappers, and core notification functions.
 - [ ] **Standardize compound job/user ID usage** - Currently compound IDs (job_id + user_id) are only used when submitting jobs to the standard queue entry point. Consider standardizing this pattern across all job submission paths to avoid inconsistency issues later.
   - **Current state**: Only standard Q entry point uses compound IDs
@@ -172,10 +174,13 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
   2. **Dedicated REST endpoints**: `/api/deep-research/submit`, `/api/podcast-generator/submit`, `/api/deep-research-to-podcast/submit` (shared `agentic_job_factory`)
   3. **Mock endpoint expeditor test mode**: `POST /api/mock-job/submit {"voice_command": "make me a podcast"}` (dry-run, zero inference cost)
   - Requires running Lupin server on port 7999
-- [x] **[LUPIN] Create testing plan for Runtime Argument Expeditor** - Session 131: Initial 49 tests. Sessions 144-160: Expanded to 115 unit tests across 13 classes, 9 interactive smoke scenarios.
-  - **Unit tests**: `src/tests/unit/test_runtime_argument_expeditor.py` (115 tests, 13 classes)
-  - **Smoke tests**: `src/tests/smoke/test_expeditor_mock_job_smoke.py` (3 automated + 9 interactive)
+  - **Session 162**: Bug fix — optional args gate now uses deterministic user-visible-args diff instead of `is_complete()`. 9 interactive scenarios ready to run.
+- [x] **[LUPIN] Create testing plan for Runtime Argument Expeditor** - Session 131: Initial 49 tests. Sessions 144-160: Expanded to 115 unit tests across 13 classes, 9 interactive smoke scenarios. **Session 162**: Bug fix + 8 new tests (Class 15: TestOptionalArgPrompting), total 123 tests across 15 classes. **Session 163**: Timeout chain fix (60/60/120→180/180/300) + diagnostic logging for notification failure analysis.
+  - **Unit tests**: `src/tests/unit/test_runtime_argument_expeditor.py` (123 tests, 15 classes)
+  - **Smoke tests**: `src/tests/smoke/test_expeditor_mock_job_smoke.py` (3 automated + 9 interactive, 600s timeout)
   - **Testing plan**: `src/rnd/2026.02.07-runtime-argument-expeditor-testing-plan.md`
+  - **Bug fix**: `expeditor.py` — replaced `if parsed.is_complete()` gate with deterministic user-visible-args diff (optional args now always prompted)
+  - **Next**: Run interactive scenarios (`LUPIN_INTERACTIVE_TESTS=true`) — first scenario failure diagnosis via new `[Expeditor]` debug logging
 - [x] **[LUPIN] Run interactive expeditor smoke tests 4-5** - Session 144: Fixed async deadlock (`asyncio.to_thread()` wrapper), tests 4-5 now pass. User responds to voice prompt, dry-run job completes with $0.00 cost.
 
 ### Cache Freshness Policy (HIGH) - Session 121/122

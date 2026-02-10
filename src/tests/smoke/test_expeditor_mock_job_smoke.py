@@ -37,9 +37,9 @@ import cosa.utils.util as cu
 
 
 BASE_URL         = "http://localhost:7999"
-MAX_POLL_SECONDS = 90
+MAX_POLL_SECONDS = 120
 POLL_INTERVAL    = 2
-REQUEST_TIMEOUT  = 180
+REQUEST_TIMEOUT  = 600
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -405,7 +405,7 @@ def quick_smoke_test():
         print( "\n" + "=" * 70 )
         print( "  INTERACTIVE EXPEDITOR SCENARIOS (9 total)" )
         print( "  Each scenario will prompt you via voice. Follow the instructions." )
-        print( "  Timeout: 180s per scenario. Say 'cancel' to skip any scenario." )
+        print( "  Timeout: 600s per scenario. Say 'cancel' to skip any scenario." )
         print( "=" * 70 )
 
         results = []
