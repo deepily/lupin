@@ -4,6 +4,12 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.10 - Calculator Step 24: Automated Q&A Card Test Matrix
+- **Implementation Plan**: [2026.02.10-calculator-step-24-automated-qa-card-test-matrix.md](2026.02.10-calculator-step-24-automated-qa-card-test-matrix.md) - **IN PROGRESS** - Automated smoke test for Calculator agent live pipeline (Step 24 of testing ladder). Adds `job_id` to `/api/push` response for clean poll-by-ID, creates 6-query test matrix exercising full pipeline: TodoFifoQueue → mode bypass → CalculatorAgent → Phi-4 intent extraction → dispatch → TTS. Includes dedicated mock job test account with auto-registration. Session 172.
+
+### 2026.02.10 - Notification Proxy Agent Design
+- **Design Document**: [2026.02.10-notification-proxy-agent-design.md](2026.02.10-notification-proxy-agent-design.md) - **✅ IMPLEMENTED** - Standalone CLI agent ("Notification Proxy") that logs in as `mock.tester@lupin.deepily.ai`, subscribes to notification events via WebSocket, and automatically answers Runtime Argument Expediter questions using a hybrid strategy: rules for known patterns, LLM fallback for unknowns. Architecture: WebSocket listener → notification router → strategy chain (ExpediterRuleStrategy + LLMFallbackStrategy) → REST API response submission. 4 test profiles (deep_research, podcast, research_to_podcast, minimal). 49 unit tests, 10 test classes. Package: `src/cosa/agents/notification_proxy/`. Extensible to Use Case 2 (meta-orchestrator proxy for all agent notifications). Session 171, commit e485bb1.
+
 ### 2026.02.10 - Qwen3-4B vLLM Inference Slowdown Root Cause Analysis
 - **Research Document**: [2026.02.10-qwen3-vllm-inference-slowdown-root-cause.md](2026.02.10-qwen3-vllm-inference-slowdown-root-cause.md) - **🔍 ROOT CAUSE IDENTIFIED** - Qwen3-4B-Base shows 20x slowdown (~7,392 ms/item) vs Ministral-8B (~368.7 ms/item) during PEFT validation. Root cause: vLLM 0.8.2 has no native `Qwen3ForCausalLM` support — falls back to unoptimized HuggingFace Transformers engine. Architecture comparison rules out model design (Qwen3 is smaller in every compute dimension). Fix: upgrade vLLM to >= 0.8.5 where native Qwen3 support was added. Community confirmation via vLLM Issue #17630.
 

@@ -30,7 +30,12 @@
 - `src/cosa/agents/notification_proxy/strategies/llm_fallback.py`
 
 **Files Created** (Lupin repo): `src/tests/unit/test_notification_proxy.py` (NEW — 49 tests)
-**Commit**: [pending]
+**Commit**: e485bb1
+
+#### Checkpoint | 2026.02.10 17:30 | R&D design document + README index entry
+
+**Files**: `src/rnd/2026.02.10-notification-proxy-agent-design.md` (NEW), `src/rnd/README.md`
+**Commit**: f108873
 
 ---
 
