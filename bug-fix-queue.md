@@ -9,6 +9,8 @@
 
 | Session ID | Started | Last Activity | Status |
 |------------|---------|---------------|--------|
+| 6d82cf6e | 2026-02-10T12:00:00 | 2026-02-10T12:00:00 | active |
+| 04aad364 | 2026-02-09T23:00:00 | 2026-02-10T09:30:00 | closed |
 | 0266f064 | 2026-02-07T09:00:00 | 2026-02-08T00:30:00 | closed |
 | 2417c2b5 | 2026-02-06T21:00:00 | 2026-02-07T00:15:00 | closed |
 | 41d2e575 | 2026-02-06T09:00:00 | 2026-02-06T17:00:00 | closed |
@@ -38,6 +40,8 @@
 
 ### Completed
 
+- [x] **Resume button references stale `window.freshQueueUI`** (ad-hoc) → pending commit | By: 6d82cf6e
+- [x] **Double-click-to-expand bug on CJ flow job cards** (ad-hoc) → pending commit | By: 04aad364
 - [x] **No way to copy WebSocket session IDs from System Status** (ad-hoc) → pending commit | By: 0266f064
 - [x] **Cancel button on open-ended notifications fails with "Response cannot be empty"** (ad-hoc) → commit: 65658ba | By: 0266f064
 - [x] **DataFrameGroupBy.apply DeprecationWarning in peft_trainer.py:597** (ad-hoc) → commit: afbfa7d (docs), CoSA pending | By: 2417c2b5
