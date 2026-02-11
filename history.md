@@ -1,5 +1,37 @@
 # Lupin Project History
 
+### 2026.02.11 - Session 189 | CRUD Delete Bug Fix + Dedup Guards + Live Pipeline Smoke Test
+
+#### Checkpoint | 2026.02.11 | Fix delete-all-records bug, add dedup/multi-delete guards, CRUD live pipeline test
+
+**Accomplishments**:
+- Fixed **delete-all-records bug** from Session 167 Part 3 Test 4: three guards added to crud_operations.py
+  - **Dedup guard** in `add_item()`: rejects duplicate inserts within same list (checks DEDUP_KEYS per schema)
+  - **Multi-delete guard** in `delete_item()`: refuses match_fields delete when >1 row matches, returns preview
+  - **Infrastructure column rejection** in `_validate_match_fields()`: blocks `id`, `list_name`, `created_at` from match_fields
+- Added `DEDUP_KEYS` dict, `INFRASTRUCTURE_COLS` frozenset, `get_dedup_keys()` helper to schemas.py
+- Added `"duplicate"` voice formatting to dispatcher.py: "That item already exists in the list."
+- Created `crud.json` Q&A script for notification proxy (delete/update auto-confirm via `sender_ids`)
+- Added `"crud"` profile to notification proxy `TEST_PROFILES`
+- Added CRUD confirmation entries to `all-agents.json` union script
+- 6 new `TestDeduplicationGuards` unit tests: dedup rejection, cross-list allowed, infra rejection, multi-delete guard, single-delete success
+- Created `test_crud_live_pipeline.py` — 8-scenario live smoke test with `--mode direct|lora|all` CLI
+- **Regression**: 816/816 unit tests passed (was 810)
+
+**Files Modified** (Lupin repo):
+- `src/conf/notification-proxy-scripts/crud.json` (NEW — CRUD Q&A script)
+- `src/conf/notification-proxy-scripts/all-agents.json` (2 CRUD confirmation entries)
+- `src/tests/unit/test_crud_for_dataframes_storage.py` (6 new TestDeduplicationGuards tests)
+- `src/tests/smoke/test_crud_live_pipeline.py` (NEW — 8-scenario live pipeline test)
+
+**Files Modified** (CoSA submodule, not committed here):
+- `src/cosa/crud_for_dataframes/schemas.py` (DEDUP_KEYS, INFRASTRUCTURE_COLS, get_dedup_keys)
+- `src/cosa/crud_for_dataframes/crud_operations.py` (dedup guard, multi-delete guard, infra rejection)
+- `src/cosa/crud_for_dataframes/dispatcher.py` (duplicate voice formatting)
+- `src/cosa/agents/notification_proxy/config.py` (crud profile in TEST_PROFILES)
+
+---
+
 ### 2026.02.11 - Session 188 | Q&A Script README Architecture Clarification
 
 #### Checkpoint | 2026.02.11 | Clarify standalone vs union script architecture in README
@@ -15,7 +47,7 @@
 **Files Modified**:
 - `src/conf/notification-proxy-scripts/README.md` (4 edits: architecture section, warning note, count fix, Step 5 clarification)
 
-**Commit**: 2785cb2
+**Commit**: 0aa7d6c
 
 ---
 

@@ -18,11 +18,14 @@ import pytest
 
 from cosa.crud_for_dataframes.schemas import (
     COMMON_COLUMNS,
+    DEDUP_KEYS,
+    INFRASTRUCTURE_COLS,
     SCHEMAS,
     VALID_SCHEMA_TYPES,
     get_columns,
     get_date_columns,
     get_datetime_columns,
+    get_dedup_keys,
     get_defaults,
     get_schema,
     get_time_columns,
@@ -885,3 +888,87 @@ class TestMatchFieldsValidation:
         assert result[ "status" ] == "error"
         assert "todo_item" in result[ "message" ]
         assert "priority" in result[ "message" ]
+
+
+# ============================================================================
+# TestDeduplicationGuards — dedup on add, multi-delete guard, infra rejection
+# ============================================================================
+
+class TestDeduplicationGuards:
+    """Tests for duplicate insert prevention, multi-delete guard, and infrastructure column rejection."""
+
+    @pytest.fixture
+    def fresh_storage( self ):
+        """Provide fresh DataFrameStorage in temp directory."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            storage = DataFrameStorage( user_email="dedup@test.com", base_path=tmp_dir )
+            yield storage
+
+    def test_add_duplicate_rejected( self, fresh_storage ):
+        """Adding the same item twice to the same list returns 'duplicate'."""
+        r1 = add_item( fresh_storage, "groceries", "todo", { "todo_item": "buy milk" } )
+        assert r1[ "status" ] == "added"
+
+        r2 = add_item( fresh_storage, "groceries", "todo", { "todo_item": "buy milk" } )
+        assert r2[ "status" ] == "duplicate"
+        assert "already exists" in r2[ "message" ]
+
+        # Verify only 1 row in storage
+        result = query_items( fresh_storage, "todo", list_name="groceries" )
+        assert result[ "total_count" ] == 1
+
+    def test_add_same_item_different_list_allowed( self, fresh_storage ):
+        """Same item in different lists is allowed (not a duplicate)."""
+        r1 = add_item( fresh_storage, "groceries", "todo", { "todo_item": "buy milk" } )
+        assert r1[ "status" ] == "added"
+
+        r2 = add_item( fresh_storage, "work-errands", "todo", { "todo_item": "buy milk" } )
+        assert r2[ "status" ] == "added"
+
+        # Verify 1 item in each list
+        g = query_items( fresh_storage, "todo", list_name="groceries" )
+        w = query_items( fresh_storage, "todo", list_name="work-errands" )
+        assert g[ "total_count" ] == 1
+        assert w[ "total_count" ] == 1
+
+    def test_match_fields_rejects_list_name( self, fresh_storage ):
+        """delete_item with match_fields containing 'list_name' returns error."""
+        add_item( fresh_storage, "groceries", "todo", { "todo_item": "buy milk" } )
+
+        result = delete_item( fresh_storage, "todo", match_fields={ "list_name": "groceries" } )
+        assert result[ "status" ] == "error"
+        assert "infrastructure column" in result[ "message" ].lower()
+
+    def test_match_fields_rejects_id( self, fresh_storage ):
+        """delete_item with match_fields containing 'id' returns error."""
+        r = add_item( fresh_storage, "groceries", "todo", { "todo_item": "buy milk" } )
+
+        result = delete_item( fresh_storage, "todo", match_fields={ "id": r[ "item_id" ] } )
+        assert result[ "status" ] == "error"
+        assert "infrastructure column" in result[ "message" ].lower()
+
+    def test_multi_delete_guard_refuses_broad_match( self, fresh_storage ):
+        """Deleting by a field that matches multiple items returns error."""
+        add_item( fresh_storage, "groceries", "todo", { "todo_item": "buy milk", "priority": "high" } )
+        add_item( fresh_storage, "groceries", "todo", { "todo_item": "buy bread", "priority": "high" } )
+
+        result = delete_item( fresh_storage, "todo", match_fields={ "priority": "high" } )
+        assert result[ "status" ] == "error"
+        assert "Multiple items (2)" in result[ "message" ]
+
+        # Verify nothing was deleted
+        remaining = query_items( fresh_storage, "todo", list_name="groceries" )
+        assert remaining[ "total_count" ] == 2
+
+    def test_single_delete_by_match_fields_succeeds( self, fresh_storage ):
+        """Deleting by exact match that hits exactly 1 item succeeds."""
+        add_item( fresh_storage, "groceries", "todo", { "todo_item": "buy milk", "priority": "high" } )
+        add_item( fresh_storage, "groceries", "todo", { "todo_item": "buy bread", "priority": "normal" } )
+
+        result = delete_item( fresh_storage, "todo", match_fields={ "todo_item": "buy milk" } )
+        assert result[ "status" ] == "deleted"
+        assert result[ "deleted_count" ] == 1
+
+        remaining = query_items( fresh_storage, "todo", list_name="groceries" )
+        assert remaining[ "total_count" ] == 1
+        assert remaining[ "items" ][ 0 ][ "todo_item" ] == "buy bread"

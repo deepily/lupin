@@ -55,6 +55,20 @@
             "answer"           : "yes",
             "arg_name"         : "confirmation",
             "response_types"   : [ "yes_no" ]
+        },
+        {
+            "question_pattern" : "Are you sure you want to delete",
+            "answer"           : "yes",
+            "arg_name"         : "confirmation",
+            "response_types"   : [ "yes_no" ],
+            "agents"           : [ "crud" ]
+        },
+        {
+            "question_pattern" : "Are you sure you want to update",
+            "answer"           : "yes",
+            "arg_name"         : "confirmation",
+            "response_types"   : [ "yes_no" ],
+            "agents"           : [ "crud" ]
         }
     ]
 }
