@@ -1,5 +1,40 @@
 # Lupin Project History
 
+### 2026.02.10 - Session 177 | Expand Calculator LORA Training Templates (83 → 1500)
+
+**Accomplishments**:
+- **Phase 1 — Clean math ↔ calculator boundary**: Removed 27 calculator-territory lines from `synthetic-data-agent-routing-math.txt` — 20 "calculator mode" metaphor phrases, 6 explicit calculator routing lines, 1 compound interest line. Math: 523 → 495 lines (483 content). Zero calculator/mortgage/convert references remain.
+- **Phase 2 — Expand calculator templates**: Rewrote `synthetic-data-agent-routing-calculator.txt` from 83 → 508 content lines. Organized into 7 categories: unit conversions (~280), price comparisons (~100), mortgages/financial (~80), routing/meta/disambiguation (~50). Natural spoken language with varied sentence structure.
+- **Phase 3 — Code change**: Added `"agent router go to calculator": { "factor": 3 }` to `augmentation_config` in `xml_coordinator.py` (CoSA submodule, not committed here).
+- **Training data regenerated**: 38,371 total examples. Calculator: 83 → 1,483 (pre-split). Math: 1,500 → 1,417 (acceptable). All 34 commands balanced. Ready for PEFT retrain.
+
+**Files Modified** (Lupin repo):
+- `src/ephemera/prompts/data/synthetic-data-agent-routing-math.txt` (removed 27 calculator-territory lines)
+- `src/ephemera/prompts/data/synthetic-data-agent-routing-calculator.txt` (expanded 83 → 508 content lines)
+- `src/ephemera/prompts/data/voice-commands-xml-{train,test,validate}.jsonl` (regenerated)
+- `src/ephemera/prompts/data/agentic-job-xml-{train,test,validate}.jsonl` (regenerated)
+
+**Files Modified** (CoSA submodule, not committed here):
+- `src/cosa/training/xml_coordinator.py` (add calculator to augmentation_config with factor=3)
+
+---
+
+### 2026.02.10 - Session 176 | Fix TTS Ghost Card Stranded After Action-Required Response
+
+**Accomplishments**:
+- **Root cause fix**: `onTTSPlaybackComplete()` cleared `activeTTSItem` AFTER `enterTTSFocusMode()`, allowing `updateTTSQueueSection()` to re-render a ghost card into the active slot. Swapped ordering so `activeTTSItem = null` runs BEFORE focus mode entry. Removed duplicate `updateTTSQueueSection()` call.
+- **Clear All button visibility**: `updateTTSClearAllButtonState()` now checks active slot DOM for ghost cards in addition to `ttsQueue.length` and `activeTTSItem`
+- **clearTTSQueue() hardened**: No longer returns early when queue is empty — also checks for `activeTTSItem` and ghost cards in active slot DOM, clears both
+- **Delete button on active cards**: `renderActiveTTSCard()` now includes a delete button alongside Stop, matching `renderMinimizedTTSCard()` pattern (defense-in-depth)
+- **Bug fix session closed**: 1 prior fix (Resume button stale freshQueueUI reference) + this ghost card fix
+
+**Files Modified** (Lupin repo):
+- `src/fastapi_app/static/js/notifications.js` (4 targeted fixes: +37/-15 lines)
+
+**Commit**: 2a83679 (checkpoint)
+
+---
+
 ### 2026.02.10 - Session 173 | Simplify Credential Resolution + Fix JWT WebSocket Auth
 
 #### Checkpoint | 2026.02.10 | 2-tier credentials + Bearer prefix fix
