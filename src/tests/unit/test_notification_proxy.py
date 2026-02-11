@@ -615,6 +615,53 @@ class TestProfileCoverage:
             assert arg_name in profile, \
                 f"Profile 'research_to_podcast' missing answer for '{arg_name}'"
 
+    def test_all_agents_profile_covers_all_arg_names( self ):
+        """all_agents union profile covers every arg name across all 3 agents."""
+        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+
+        profile = TEST_PROFILES[ "all_agents" ]
+
+        # Collect all unique arg names across all agents
+        all_arg_names = set()
+        for key, agent in AGENTIC_AGENTS.items():
+            for arg_name in agent[ "fallback_questions" ]:
+                all_arg_names.add( arg_name )
+
+        for arg_name in all_arg_names:
+            assert arg_name in profile, \
+                f"Profile 'all_agents' missing answer for '{arg_name}'"
+
+
+# ============================================================================
+# Test Keyword Ordering Regression
+# ============================================================================
+
+class TestKeywordOrderingRegression:
+    """Regression tests for keyword-to-arg mapping bug fix (Session 178)."""
+
+    def test_research_keyword_maps_to_research_not_query( self ):
+        """'research' keyword in OPEN_ENDED matches research arg, not query.
+
+        Regression: Before fix, 'research' was in the query keyword group,
+        causing PG scenarios to get profile['query'] instead of profile['research']
+        when _ask_for_arg("research", ...) sent a message containing 'research'.
+        """
+        strategy = ExpediterRuleStrategy( "all_agents" )
+        answer = strategy.respond( {
+            "response_type" : "open_ended",
+            "message"       : "I don't see any research documents. Please provide a path.",
+            "title"         : "Missing: research"
+        } )
+        assert answer == "/tmp/mock-research-document.md", \
+            f"Expected research path, got: {answer}"
+
+    def test_research_keyword_not_in_query_group( self ):
+        """Structural assertion: 'research' must NOT be in the query keyword group."""
+        for keywords, arg_name in KEYWORD_TO_ARG:
+            if arg_name == "query":
+                assert "research" not in keywords, \
+                    "'research' must not be in query keyword group (causes PG bug)"
+
 
 # ============================================================================
 # Run inline if needed

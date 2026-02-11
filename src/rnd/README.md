@@ -4,6 +4,12 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.10 - Fix CRUD Delete Bug + Live Pipeline Smoke Test
+- **Implementation Plan**: [2026.02.10-crud-delete-bug-fix-and-live-pipeline-smoke-test.md](2026.02.10-crud-delete-bug-fix-and-live-pipeline-smoke-test.md) - **📋 PLANNED** - Fix delete-all-records bug (Session 167) + create live pipeline smoke test. Part A: 5-change bug fix (dedup keys in schemas.py, dedup guard in add_item, multi-delete guard in delete_item, reject infra columns in match_fields, "duplicate" voice formatting). Part B: 6 new unit tests (TestDeduplicationGuards). Part C: `test_crud_live_pipeline.py` — 8-scenario live test matrix following calculator + expeditor patterns (direct-mode todo/calendar CRUD + LORA routing). Part D: Full regression verification. Replaces Part 3 curl tests.
+
+### 2026.02.10 - Expand Smoke Test Matrix to 13 Scenarios
+- **Implementation Plan**: [2026.02.10-expand-smoke-test-matrix-13-scenarios.md](2026.02.10-expand-smoke-test-matrix-13-scenarios.md) - **🔄 IN PROGRESS** - Expand expeditor smoke test matrix from 9 to 13 scenarios. 4 new scenarios: DR_FULL (all args, confirmation-only), RTP_LANGUAGES (partial extraction), PG_LANGUAGES (languages + special handler), RTP_BARE (maximum 5-arg batch). Fixes two-pass docstring to single-pass automated instructions. DR_CANCEL stays manual-only (1-of-13). Automated run covers 12 scenarios in single proxy pass. Session 179.
+
 ### 2026.02.10 - Calculator Step 24: Automated Q&A Card Test Matrix
 - **Implementation Plan**: [2026.02.10-calculator-step-24-automated-qa-card-test-matrix.md](2026.02.10-calculator-step-24-automated-qa-card-test-matrix.md) - **IN PROGRESS** - Automated smoke test for Calculator agent live pipeline (Step 24 of testing ladder). Adds `job_id` to `/api/push` response for clean poll-by-ID, creates 6-query test matrix exercising full pipeline: TodoFifoQueue → mode bypass → CalculatorAgent → Phi-4 intent extraction → dispatch → TTS. Includes dedicated mock job test account with auto-registration. Session 172.
 

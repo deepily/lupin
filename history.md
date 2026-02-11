@@ -1,5 +1,26 @@
 # Lupin Project History
 
+### 2026.02.10 - Session 179 | Expand Smoke Test Matrix (9 → 13 Scenarios) — Partial
+
+**Accomplishments**:
+- **4 new scenarios added**: DR_FULL (all args, confirmation-only), RTP_LANGUAGES (partial extraction), PG_LANGUAGES (languages + special handler), RTP_BARE (maximum 5-arg batch). Appended to `EXPEDITOR_SCENARIOS` list at indices 9-12.
+- **Plan documented**: Wrote implementation plan to `src/rnd/2026.02.10-expand-smoke-test-matrix-13-scenarios.md` with coverage gap analysis, scenario definitions, and remaining changes.
+- **Notification proxy changes from prior session**: `all_agents` union profile in `config.py`, keyword ordering fix in `expediter_rules.py`, `expected_args` soft verification + two-pass docs in smoke test, 3 regression tests in unit tests.
+- **Work paused mid-implementation**: Docstring replacement (two-pass → single-pass) and count reference updates (9→13) still pending. User requested session shutdown.
+
+**Files Modified** (Lupin repo):
+- `src/tests/smoke/test_expeditor_mock_job_smoke.py` (4 new scenarios + expected_args from prior session)
+- `src/tests/unit/test_notification_proxy.py` (3 regression tests from prior session)
+- `src/rnd/2026.02.10-expand-smoke-test-matrix-13-scenarios.md` (NEW — plan doc)
+- `src/rnd/README.md` (added plan doc entry)
+- `TODO.md` (added continuation item for tomorrow)
+
+**Files Modified** (CoSA submodule, not committed here):
+- `src/cosa/agents/notification_proxy/config.py` (all_agents union profile)
+- `src/cosa/agents/notification_proxy/strategies/expediter_rules.py` (keyword ordering fix)
+
+---
+
 ### 2026.02.10 - Session 177 | Expand Calculator LORA Training Templates (83 → 1500)
 
 **Accomplishments**:

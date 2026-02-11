@@ -45,6 +45,15 @@ Requires:
 
 Created: 2026-02-05
 Updated: 2026-02-10 — Selective scenario execution via --scenarios/-s flag
+
+Automated Execution with Notification Proxy:
+    # Pass 1: Scenarios 0-7 (proxy answers normally)
+    Terminal 2: python -m cosa.agents.notification_proxy --profile all_agents --debug
+    Terminal 3: LUPIN_INTERACTIVE_TESTS=true python -m tests.smoke.test_expeditor_mock_job_smoke -s 0,1,2,3,4,5,6,7
+
+    # Pass 2: Scenario 8 (proxy cancels via dry-run)
+    Terminal 2: python -m cosa.agents.notification_proxy --dry-run
+    Terminal 3: LUPIN_INTERACTIVE_TESTS=true python -m tests.smoke.test_expeditor_mock_job_smoke -s 8
 """
 
 import os
@@ -90,6 +99,7 @@ EXPEDITOR_SCENARIOS = [
         "missing"       : True,
         "expect_cancel" : False,
         "instructions"  : "You'll be prompted for the topic. Provide one (e.g. 'climate change'), then CONFIRM — say 'yes'.",
+        "expected_args" : { "query": "quantum computing breakthroughs 2026" },
     },
     {
         "id"            : "DR_BUDGET",
@@ -117,6 +127,7 @@ EXPEDITOR_SCENARIOS = [
         "missing"       : True,
         "expect_cancel" : False,
         "instructions"  : "You'll be prompted for a research document. Describe one, then CONFIRM — say 'yes'.",
+        "expected_args" : { "research": "/tmp/mock-research-document.md" },
     },
     {
         "id"            : "PG_AUDIENCE",
@@ -144,6 +155,7 @@ EXPEDITOR_SCENARIOS = [
         "missing"       : True,
         "expect_cancel" : False,
         "instructions"  : "You'll be prompted for the topic. Provide one, then CONFIRM — say 'yes'.",
+        "expected_args" : { "query": "quantum computing breakthroughs 2026" },
     },
     {
         "id"            : "DR_CANCEL",
@@ -153,6 +165,44 @@ EXPEDITOR_SCENARIOS = [
         "missing"       : True,
         "expect_cancel" : True,
         "instructions"  : "Say 'cancel' when prompted for the missing topic (or at confirmation).",
+    },
+    {
+        "id"            : "DR_FULL",
+        "voice_command" : "do deep research on dark matter with a budget of 10 dollars for an expert audience",
+        "agent"         : "deep research",
+        "key_arg"       : "query",
+        "missing"       : False,
+        "expect_cancel" : False,
+        "instructions"  : "All main args in voice command. Confirm the summary — say 'yes'.",
+    },
+    {
+        "id"            : "RTP_LANGUAGES",
+        "voice_command" : "research artificial intelligence and make a podcast in Spanish",
+        "agent"         : "research to podcast",
+        "key_arg"       : "query",
+        "missing"       : False,
+        "expect_cancel" : False,
+        "instructions"  : "Query + languages should extract. You'll be asked about budget/audience. Provide answers, then say 'yes'.",
+    },
+    {
+        "id"            : "PG_LANGUAGES",
+        "voice_command" : "make me a podcast in English and Spanish",
+        "agent"         : "podcast",
+        "key_arg"       : "research",
+        "missing"       : True,
+        "expect_cancel" : False,
+        "instructions"  : "Languages should extract. You'll be asked for research doc + audience. Provide answers, then say 'yes'.",
+        "expected_args" : { "research": "/tmp/mock-research-document.md" },
+    },
+    {
+        "id"            : "RTP_BARE",
+        "voice_command" : "I want a research to podcast job",
+        "agent"         : "research to podcast",
+        "key_arg"       : "query",
+        "missing"       : True,
+        "expect_cancel" : False,
+        "instructions"  : "No args extracted. Provide all values when prompted, then say 'yes'.",
+        "expected_args" : { "query": "quantum computing breakthroughs 2026" },
     },
 ]
 
@@ -229,6 +279,14 @@ def _run_scenario( scenario, headers ):
         if scenario[ "agent" ] not in config.get( "command", "" ):
             print( f"    ✗ Expected '{scenario[ 'agent' ]}' in command, got: {config.get( 'command' )}" )
             return "fail", data
+
+        # Soft verification: check proxy-provided args match expected values
+        expected = scenario.get( "expected_args" )
+        if expected and config.get( "args_resolved" ):
+            for arg_name, expected_value in expected.items():
+                actual = config[ "args_resolved" ].get( arg_name )
+                if actual != expected_value:
+                    print( f"    ⚠ Arg mismatch: {arg_name} expected='{expected_value}' got='{actual}'" )
 
         return "pass", data
 

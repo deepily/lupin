@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-10 (Session 177)
+Last updated: 2026-02-10 (Session 179)
 
 ## Pending
 
@@ -202,6 +202,10 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
   - **Testing plan**: `src/rnd/2026.02.07-runtime-argument-expeditor-testing-plan.md`
   - **Bug fix**: `expeditor.py` — replaced `if parsed.is_complete()` gate with deterministic user-visible-args diff (optional args now always prompted)
   - **Next**: Run interactive scenarios (`LUPIN_INTERACTIVE_TESTS=true`) — first scenario failure diagnosis via new `[Expeditor]` debug logging
+- [ ] **[LUPIN] Finish expanding smoke test matrix to 13 scenarios** - Session 179: 4 new scenario dicts added (DR_FULL, RTP_LANGUAGES, PG_LANGUAGES, RTP_BARE). Still pending: replace two-pass docstring with single-pass instructions, update all count references (9→13), update Scenario Index Reference block. Resume tomorrow.
+  - **Plan**: `src/rnd/2026.02.10-expand-smoke-test-matrix-13-scenarios.md`
+  - **File**: `src/tests/smoke/test_expeditor_mock_job_smoke.py`
+  - **Changes remaining**: Docstring fix (Change 2), count updates (Change 3)
 - [x] **[LUPIN] Run interactive expeditor smoke tests 4-5** - Session 144: Fixed async deadlock (`asyncio.to_thread()` wrapper), tests 4-5 now pass. User responds to voice prompt, dry-run job completes with $0.00 cost.
 
 ### Cache Freshness Policy (HIGH) - Session 121/122
