@@ -1,5 +1,27 @@
 # Lupin Project History
 
+### 2026.02.10 - Session 173 | Simplify Credential Resolution + Fix JWT WebSocket Auth
+
+#### Checkpoint | 2026.02.10 | 2-tier credentials + Bearer prefix fix
+
+**Accomplishments**:
+- **Credential resolution simplified to 2 tiers**: Rewrote `get_credentials()` — removed `LUPIN_TEST_*` (tier 3) and `DEFAULT_EMAIL` (tier 4) fallbacks. Now: CLI > `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` > `ValueError` for both email and password
+- **JWT "Invalid header padding" fix**: WebSocket auth handler in `websocket.py` didn't strip `Bearer ` prefix before calling `verify_token()` → `jwt.decode()`. REST endpoints got this for free from FastAPI's `HTTPBearer`. Added 3-line `startswith` guard
+- **Auth DB research**: Determined simplest path for test user email rename (PostgreSQL — register new account via env vars, no code change needed)
+- **Test updates**: Rewrote `TestGetCredentials` — 6 focused tests replacing 7 old ones. Removed obsolete `DEFAULT_EMAIL` import and assertions. 56/56 notification proxy tests passing
+
+**Files Modified** (CoSA submodule, not committed here):
+- `src/cosa/agents/notification_proxy/config.py` (2-tier get_credentials)
+- `src/cosa/agents/notification_proxy/listener.py` (updated remediation env var names)
+- `src/cosa/rest/routers/websocket.py` (Bearer prefix strip)
+
+**Files Modified** (Lupin repo):
+- `src/tests/unit/test_notification_proxy.py` (rewrote credential tests)
+
+**Commit**: 5b18ecc (test file checkpoint)
+
+---
+
 ### 2026.02.10 - Session 175 | Mark Calculator Step 24 done + live pipeline test docs
 
 #### Checkpoint | 2026.02.10 20:00 | Mark Step 24 done + add live pipeline test notes to skills docs
