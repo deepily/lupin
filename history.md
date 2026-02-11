@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.02.11 - Session 185 | Agentic Voice Workflow Skill v1.1 Update
+
+#### Checkpoint | 2026.02.11 | SKILL.md v1.0 → v1.1: Q&A script documentation
+
+**Accomplishments**:
+- Updated `.claude/skills/agentic-voice-workflow/SKILL.md` v1.0 → v1.1 with Notification Proxy Q&A script documentation
+- Added Phase 5b (Q&A Script) to workflow phases table
+- Added new anti-pattern: "Don't skip Q&A scripts"
+- Added cross-reference in Testing Best Practice section
+- Added full "Notification Proxy: Automated Q&A Scripts" section (~50 lines) covering: 5-step checklist, JSON entry anatomy, multi-agent scripts, two-terminal usage pattern, key files table
+
+**Files Modified**:
+- `.claude/skills/agentic-voice-workflow/SKILL.md` (5 changes: version bump, Phase 5b row, anti-pattern, cross-reference, new section)
+
+**Commit**: bbd1324
+
+---
+
 ### 2026.02.11 - Session 184 | vLLM verbose_server Flag + Marlin Kernel Verification
 
 **Accomplishments**:
