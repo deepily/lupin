@@ -1,5 +1,26 @@
 # Lupin Project History
 
+### 2026.02.11 - Session 182 | Llama 3.2 3B vLLM Latency Analysis + gptq_marlin Config
+
+#### Checkpoint | 2026.02.11 | Llama 3.2 latency research doc + Marlin kernel config
+
+**Accomplishments**:
+- **Research document**: Created `src/rnd/2026.02.11-vllm-llama-3.2-latency-analysis.md` — analysis of Llama-3.2-3B ~490 ms/item at 4-bit GPTQ (2.8x slower than Qwen3-4B's 174 ms). Root cause: AutoRound GPTQ not triggering Marlin kernel (documented 2.6x gap). Cross-model comparison, CPU overhead analysis, tiered recommendations.
+- **Config change**: Added `"quantization": "gptq_marlin"` to `llama_3_2_3b.py:vllm_config` (CoSA submodule).
+- **Pipeline change**: Added `quantization` parameter to `peft_trainer.py:_start_vllm_server()`, passed only at post-quantization call sites (CoSA submodule).
+
+**Files Modified** (Lupin repo):
+- `src/rnd/2026.02.11-vllm-llama-3.2-latency-analysis.md` (NEW — research doc)
+- `src/rnd/README.md` (added analysis link)
+
+**Files Modified** (CoSA submodule, not committed here):
+- `src/cosa/training/conf/llama_3_2_3b.py` (quantization key in vllm_config)
+- `src/cosa/training/peft_trainer.py` (quantization parameter + 2 call sites)
+
+**Commit**: 7451070
+
+---
+
 ### 2026.02.10 - Session 180 | Save CRUD Delete Bug Fix Plan to R&D
 
 **Accomplishments**:

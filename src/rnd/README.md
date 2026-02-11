@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.11 - vLLM Llama-3.2-3B Latency Analysis: Why 2.8x Slower Than Qwen3-4B?
+- **Research Document**: [2026.02.11-vllm-llama-3.2-latency-analysis.md](2026.02.11-vllm-llama-3.2-latency-analysis.md) - **📊 ANALYSIS COMPLETE — Fix: Force Marlin GPTQ kernel** - Llama-3.2-3B (3B params, 4-bit GPTQ) runs at ~490 ms/item — 2.8x slower than Qwen3-4B (174 ms) despite being a smaller model. Root cause: AutoRound GPTQ not triggering the Marlin kernel (documented 2.6x gap between naive GPTQ and Marlin-GPTQ). Fix: add `--quantization gptq_marlin` to vLLM config for post-quantization validation stage only. Expected improvement: ~490 ms → ~200 ms. Includes cross-model architecture comparison, CPU overhead analysis, tiered optimization recommendations, and vLLM 0.9.x upgrade warning. Follow-up to [Qwen3 Upgrade Analysis](2026.02.10-vllm-upgrade-analysis-qwen3-performance.md).
+
 ### 2026.02.10 - Fix CRUD Delete Bug + Live Pipeline Smoke Test
 - **Implementation Plan**: [2026.02.10-crud-delete-bug-fix-and-live-pipeline-smoke-test.md](2026.02.10-crud-delete-bug-fix-and-live-pipeline-smoke-test.md) - **📋 PLANNED** - Fix delete-all-records bug (Session 167) + create live pipeline smoke test. Part A: 5-change bug fix (dedup keys in schemas.py, dedup guard in add_item, multi-delete guard in delete_item, reject infra columns in match_fields, "duplicate" voice formatting). Part B: 6 new unit tests (TestDeduplicationGuards). Part C: `test_crud_live_pipeline.py` — 8-scenario live test matrix following calculator + expeditor patterns (direct-mode todo/calendar CRUD + LORA routing). Part D: Full regression verification. Replaces Part 3 curl tests.
 
