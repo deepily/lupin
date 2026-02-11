@@ -73,14 +73,14 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - [x] Phases 1-4 COMPLETE (94 unit tests, 17 mock pipeline tests, MathAgent fallback, 83 LORA templates)
   - [x] Step 24: Test 6 queries via Q&A Card with Calculator mode — **Automated**: `src/tests/smoke/test_calculator_live_pipeline.py` (6-query matrix with poll-by-job_id, all passing)
   - [ ] Step 25: Test 6 queries via System Mode auto-routing (needs retrained LORA)
-  - [ ] Step 29: Regenerate training data + retrain LORA (needs GPU — current JSONL has 66 calculator examples, regeneration will use full 83 templates)
+  - [x] Step 29: Regenerate training data — **Session 177**: Expanded calculator templates 83 → 508, cleaned math ↔ calculator boundary (27 lines removed), regenerated 38,371 training examples. Calculator: 1,483 samples. **LORA retrain still needed** (GPU required).
   - [ ] Step 30: Validate LORA accuracy (>95%, no regression)
   - [ ] Step 31: Full voice routing test (10 spoken queries)
-  - **Execution order**: Step 24 (direct mode) → Step 29 (retrain) → Step 30 (validate) → Step 25 (auto-route) → Step 31 (voice)
+  - **Execution order**: Step 29 data ✅ → LORA retrain (GPU) → Step 30 (validate) → Step 25 (auto-route) → Step 31 (voice)
   - **Implementation doc**: `src/rnd/2026.02.09-everyday-calculator-agent-implementation.md`
-- [ ] **[LUPIN] Run PEFT Phase 2 training** - Training data regenerated at 1500/command (Session 152: principled augmentation with factor loop). Ready for full training run. **Note**: Can be combined with Calculator LORA retrain (Step 29) — single training run covers both.
+- [ ] **[LUPIN] Run PEFT Phase 2 training** - Training data regenerated at 1500/command (Session 152 + Session 177: calculator expanded to 1,483). Ready for full training run. **Note**: Single training run covers both PEFT Phase 2 and Calculator LORA retrain.
   - Run: `./src/scripts/run-agentic-intent-training.sh full`
-  - Data verified: 36,980 examples, all 4 previously-undersampled commands hit 1500 exactly
+  - Data verified: 38,371 examples (Session 177), 34 commands, calculator at 1,483
 - [ ] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - Two cases to handle:
   1. User makes vague reference to research document contents (e.g., "make a podcast about that AI research")
   2. User references research document by approximate name/path

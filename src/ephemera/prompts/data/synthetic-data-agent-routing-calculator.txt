@@ -1,28 +1,201 @@
+# ── LENGTH CONVERSIONS ─────────────────────────────────────────────────────────
+
 How many miles is 10 kilometers?
-Convert 72 degrees Fahrenheit to Celsius
-What's 500 grams in pounds?
-How many ounces are in a pound?
 Convert 5 feet to centimeters
 What's 100 yards in meters?
-How many liters in a gallon?
-Convert 32 Fahrenheit to Celsius
-What's a marathon distance in miles?
-How many cups are in a gallon?
-How many milliliters in a cup?
-Convert 200 pounds to kilograms
-What's 1000 millimeters in inches?
 How many feet are in a mile?
-Convert 2 liters to fluid ounces
-What's 50 Celsius in Fahrenheit?
-How many pints in a quart?
 Convert 10 miles to kilometers
-What's 250 milliliters in cups?
-How many grams in an ounce?
 What's 5 kilometers in miles?
 Convert 180 centimeters to feet
+How many miles is 1 kilometer?
+What's 50 kilometers in miles?
+Convert 15 kilometers to miles
+How many miles is 100 kilometers?
+What's 200 kilometers in miles?
+Convert 1 mile to kilometers
+How many kilometers is 5 miles?
+What's 20 miles in kilometers?
+Convert 3 feet to meters
+How many meters is 10 feet?
+What's 6 feet in meters?
+Convert 100 feet to meters
+How many feet is 50 meters?
+What's 1 meter in feet?
+Convert 12 inches to centimeters
+How many centimeters is 36 inches?
+What's 1 inch in centimeters?
+Convert 100 centimeters to inches
+How many inches is 50 centimeters?
+What's 10 yards in meters?
+Convert 50 yards to meters
+How many yards is 100 meters?
+What's 1 yard in feet?
+Convert 1 mile to feet
+How many feet is half a mile?
+What's 2 miles in feet?
+Convert 500 meters to feet
+How many millimeters is 1 inch?
+What's 10 millimeters in inches?
+Convert 1000 millimeters to inches
+How far is 15 km in miles?
+What's a marathon distance in miles?
+How many meters are in a kilometer?
+Convert 30 centimeters to inches
+What's 8 inches in centimeters
+How many yards in a mile?
+Convert 2.5 miles to kilometers
+What's 42 kilometers in miles?
+How many feet is 3 meters?
+Convert 72 inches to feet
+What's 1000 meters in miles?
+How far is 100 miles in kilometers?
+What's 150 centimeters in feet and inches?
+Convert 10 meters to yards
+How many inches in a yard?
+What's 5280 feet in kilometers?
+Convert 400 meters to yards
+How many centimeters is 5 feet?
+What's 3 miles in meters?
+Convert 18 inches to centimeters
+How many kilometers is 10 miles?
+What's 75 meters in feet?
+
+# ── MASS / WEIGHT CONVERSIONS ────────────────────────────────────────────────
+
+What's 500 grams in pounds?
+How many ounces are in a pound?
+Convert 200 pounds to kilograms
+How many grams in an ounce?
+What's 1 ton in pounds?
+How heavy is 100 kg in pounds?
+Convert 10 kg to grams
+How many milligrams in a gram?
+What's 1 kilogram in pounds?
+Convert 5 pounds to kilograms
+How many pounds is 70 kg?
+What's 50 grams in ounces?
+Convert 1 pound to grams
+How many grams is 8 ounces?
+What's 250 grams in pounds?
+Convert 150 pounds to kilograms
+How many kilograms is 200 pounds?
+What's 10 ounces in grams?
+Convert 2 tons to pounds
+How many pounds in a ton?
+What's 3 kg in pounds?
+Convert 100 grams to ounces
+How many ounces is 500 grams?
+What's 1 ounce in grams?
+Convert 75 kg to pounds
+How many mg is 1 gram?
+What's 2000 milligrams in grams?
+Convert 5 kg to pounds
+How many grams in a kilogram?
+What's 12 ounces in grams?
+Convert 180 pounds to kg
+How much does a 5 kg package weigh in pounds?
+What's 2.5 pounds in grams?
+Convert 1000 grams to pounds
+How many pounds is 45 kilograms?
+What's 16 ounces in pounds?
+How heavy is 90 kg in pounds?
+Convert 300 grams to ounces
+What's 10 pounds in kilograms?
+How many grams in 3 ounces?
+Convert 50 pounds to kg
+What's 1 metric ton in pounds?
+How many kilograms is 1 ton?
+What's 4 ounces in grams?
+Convert 65 kg to pounds
+How many pounds is 110 kg?
+What's 6 ounces in grams?
+Convert 25 pounds to kg
+How many grams is 2 pounds?
+What's 200 mg in grams?
+
+# ── VOLUME CONVERSIONS ───────────────────────────────────────────────────────
+
+How many liters in a gallon?
+How many cups are in a gallon?
+How many milliliters in a cup?
+Convert 2 liters to fluid ounces
+How many pints in a quart?
+What's 250 milliliters in cups?
+What's 3 gallons in liters
+How many quarts in a gallon?
+How many fluid ounces in a liter?
+What's 500 ml in cups?
+Convert 2.5 liters to quarts
+How many ounces in a quart?
 How many tablespoons in a cup?
-What's 3 gallons in liters?
+What's 1 gallon in liters?
+Convert 1 liter to gallons
+How many cups is 500 ml?
+What's 2 cups in milliliters?
+Convert 3 quarts to liters
+How many pints in a gallon?
+What's 1 pint in cups?
+Convert 750 ml to cups
+How many fluid ounces in a cup?
+What's 1 cup in milliliters?
+Convert 5 gallons to liters
+How many liters is 2 gallons?
+What's 100 ml in fluid ounces?
+Convert 16 fluid ounces to milliliters
+How many cups in a liter?
+What's 1 quart in liters?
+Convert 4 cups to milliliters
+How many milliliters in a tablespoon?
+What's 2 liters in cups?
+Convert 1 gallon to quarts
+How many teaspoons in a tablespoon?
+What's 32 fluid ounces in liters?
+Convert 500 ml to fluid ounces
+How many cups in 2 liters?
+What's 1 liter in quarts?
+Convert 8 cups to liters
+How many ml is 12 fluid ounces?
+
+# ── TEMPERATURE CONVERSIONS ──────────────────────────────────────────────────
+
+Convert 72 degrees Fahrenheit to Celsius
+Convert 32 Fahrenheit to Celsius
+What's 50 Celsius in Fahrenheit?
+Convert 98.6 Fahrenheit to Celsius
+What's 0 Celsius in Kelvin?
+Convert 212 Fahrenheit to Celsius
+What's minus 40 Celsius in Fahrenheit?
 Convert absolute zero to Fahrenheit
+What's 100 Celsius in Fahrenheit?
+Convert 0 Fahrenheit to Celsius
+What's 350 Fahrenheit in Celsius?
+Convert 400 degrees Fahrenheit to Celsius
+What's room temperature in Celsius?
+Convert body temperature to Celsius
+What's 37 Celsius in Fahrenheit?
+What's boiling point in Fahrenheit?
+Convert freezing point to Celsius
+What's negative 10 Celsius in Fahrenheit?
+Convert 75 Fahrenheit to Celsius
+What's 200 Celsius in Fahrenheit?
+Convert 0 Kelvin to Fahrenheit
+What's 300 Kelvin in Celsius?
+Convert 25 Celsius to Fahrenheit
+What's 68 Fahrenheit in Celsius?
+Convert oven temperature 375 Fahrenheit to Celsius
+What's 180 Celsius in Fahrenheit for baking?
+Convert 450 Fahrenheit to Celsius
+What's 20 degrees Celsius in Fahrenheit?
+Convert negative 20 Fahrenheit to Celsius
+What's 90 Fahrenheit in Celsius?
+Convert 85 Fahrenheit to Celsius
+What's 15 Celsius in Fahrenheit?
+Convert 500 Kelvin to Celsius
+What's 40 Fahrenheit in Celsius?
+What's 110 Fahrenheit in Celsius?
+
+# ── CASUAL CONVERSION VARIANTS ───────────────────────────────────────────────
+
 Um, how many miles is 10 kilometers?
 Hey, what's 72 Fahrenheit in Celsius?
 So like, how many ounces in a pound?
@@ -33,51 +206,356 @@ What would 5 feet be in centimeters?
 How do I convert kilometers to miles? I have 15 of them
 Could you convert 30 Celsius to Fahrenheit for me?
 I'm trying to figure out how many cups are in 2 liters
+Hey uh how many miles is like 10 kilometers?
+Um, what's 50 kg in pounds?
+So uh, convert 3 gallons to liters for me
+Hey, how many ounces are in a cup?
+Uh, what's 100 Fahrenheit in Celsius?
+Can you convert like 20 miles to kilometers?
+Um, I need to know how many grams are in a pound
+Hey so what's 6 feet in meters?
+Uh, how many cups is 750 ml?
+So like how many inches is 30 centimeters?
+Hey can you convert 25 Celsius to Fahrenheit?
+Uh, what's 200 pounds in kilograms?
+So um, how many tablespoons in a cup again?
+Hey, what would 10 kg be in pounds?
+Uh how many feet is like 2 meters?
+Um, convert 5 miles to km for me
+Hey so what's 350 Fahrenheit in Celsius for my oven?
+Uh, how many milliliters is 2 cups?
+So like, what's 80 kg in pounds?
+Hey um, how do I convert quarts to liters? I have 4 quarts
+Uh, what's negative 10 Celsius in Fahrenheit?
+Can you tell me what 1000 grams is in pounds?
+Um, how many yards is 50 meters?
+Hey, what's 400 Fahrenheit in Celsius?
+So uh, convert 12 ounces to grams
+Hey what's a liter in gallons again?
+Uh, how far is 25 km in miles?
+Um, I'm trying to convert 150 cm to feet
+Hey so, what's 90 Fahrenheit in Celsius?
+So like, how many pints in a gallon?
+Um how many ml is like a cup?
+Hey uh, convert 160 pounds to kg
+So what's 5 gallons in liters?
+Uh, how many inches in 10 centimeters?
+Hey can you tell me what 65 kg is in pounds?
+Um, I need 2.5 liters converted to quarts
+So uh, what's 1 mile in feet again?
+Hey, how many grams is like 4 ounces?
+Uh, what would 15 miles be in kilometers?
+Um convert 40 Celsius to Fahrenheit please
+Hey so what's 500 ml in cups?
+Uh, how heavy is 120 pounds in kg?
+So like, how many fluid ounces in a quart?
+Hey um, convert 45 km to miles
+Uh, what's room temp in Fahrenheit?
+Hey how many feet is 1.5 meters?
+Um, so how far is 8 kilometers in miles?
+So uh, what's 3 pounds in grams?
+Hey, convert 60 inches to centimeters for me
+Uh, how many liters is like 3 gallons?
+
+# ── GENERAL "HOW MANY X IN Y" (unit equivalence) ────────────────────────────
+
+How many ounces in a pound?
+How many feet in a mile?
+How many inches in a foot?
+How many cups in a gallon?
+How many quarts in a gallon?
+How many pints in a quart?
+How many tablespoons in a cup?
+How many teaspoons in a tablespoon?
+How many grams in a kilogram?
+How many milligrams in a gram?
+How many meters in a kilometer?
+How many centimeters in a meter?
+How many millimeters in a centimeter?
+How many milliliters in a liter?
+How many fluid ounces in a cup?
+How many yards in a mile?
+How many inches in a yard?
+How many pounds in a ton?
+How many ounces in a cup?
+How many pints in a gallon?
+How many fluid ounces in a liter?
+How many cups in a liter?
+How many feet in a meter?
+How many miles in a kilometer?
+How many pounds in a kilogram?
+How many grams in a pound?
+How many liters in a gallon?
+How many milliliters in a cup?
+How many centimeters in an inch?
+How many feet in a yard?
+
+# ── VARIED NUMERIC VALUES (large, decimal, edge) ────────────────────────────
+
+Convert 1000 kilometers to miles
+What's 10000 grams in pounds?
+Convert 0.5 miles to feet
+What's 2.5 liters in quarts?
+Convert 500 miles to kilometers
+How many pounds is 1000 grams?
+What's 0.25 gallons in cups?
+Convert 100000 millimeters to meters
+How many kg is 500 pounds?
+What's 1.5 kilometers in miles?
+Convert 7.5 gallons to liters
+What's 0.1 miles in feet?
+How many ounces is 2.5 kg?
+Convert 3000 feet to miles
+What's 250 km in miles?
+How many cups is 1500 ml?
+Convert 50000 grams to pounds
+What's 0.75 liters in cups?
+How many meters is 10000 feet?
+Convert 999 Fahrenheit to Celsius
+
+# ── PRICE COMPARISONS ────────────────────────────────────────────────────────
+
 Which is cheaper, 12 ounces at $3.49 or 24 ounces at $5.99?
 Compare prices: a gallon of milk at $4.29 versus a half gallon at $2.89
 What's the better deal, the 16 oz bag for $2.99 or the 32 oz bag for $4.99?
 Which one is cheaper per ounce, Brand A 8 oz at $1.99 or Brand B 12 oz at $2.49?
 Compare a 1 kg bag of rice at $3.50 versus a 2 pound bag at $2.99
 Is the family size cereal a better deal? 24 oz at $5.49 vs 12 oz at $3.29
-Uh, which is a better value, the large or small? Large is 48 oz for $7.99, small is 16 oz for $3.49
 Help me compare prices between a 6 pack of soda at $4.99 and a 12 pack at $8.49
 What's cheaper per ounce, the 10 oz jar of peanut butter for $3.79 or the 28 oz for $6.99?
 Compare the cost of these two olive oils: 500 ml for $8.99 vs 1 liter for $14.99
 So which is the better deal, 2 pounds of chicken at $5.98 or 5 pounds at $12.49?
 Hey compare these two coffees for me, 12 oz bag at $8.99 or 2 pound bag at $18.99
-Um, is it cheaper to buy the big one? 64 oz at $6.99 or 32 oz at $3.99
 Which yogurt is cheaper per ounce, 6 oz for $1.29 or 32 oz for $4.49?
 Compare prices on these detergents, 50 oz for $7.99 or 100 oz for $12.99
+Which is the better value, 1 pound of butter for $4.99 or 8 oz for $2.99?
+Compare these two juices: 64 oz for $3.99 vs 128 oz for $6.49
+Which pasta is cheaper, 1 lb box at $1.89 or 2 lb box at $3.29?
+What's the better deal on cheese, 8 oz block for $3.49 or 2 lb block for $9.99?
+Compare the price per ounce of a 15 oz can of beans at $1.29 vs 28 oz at $2.19
+Which is cheaper, the 10 count granola bars at $4.99 or 20 count at $8.49?
+Is it worth buying the big bag? 5 lb bag of sugar for $4.49 or 2 lb for $2.29
+Compare these two waters: 24 pack at $4.99 vs 12 pack at $2.99
+Which one should I buy, 4 rolls of paper towels for $5.99 or 8 rolls for $9.99?
+What's cheaper per pound, 3 lb bag of apples at $4.99 or loose apples at $1.99 per pound?
+Compare the unit price of 18 eggs at $3.49 vs 12 eggs at $2.49
+Is the bulk oatmeal worth it? 42 oz for $5.99 vs 18 oz for $3.49
+Which honey is the better deal, 12 oz for $6.99 or 24 oz for $11.99?
+Compare these two shampoos: 12 oz for $4.99 vs 32 oz for $8.99
+What's the better value on ice cream, a pint for $4.99 or half gallon for $7.99?
+Which chips are cheaper per ounce, 8 oz bag for $3.99 or 13 oz bag for $5.49?
+Compare prices on these two soaps: 3 bar pack for $4.99 vs 6 bar pack for $8.49
+
+# ── CASUAL PRICE VARIANTS ────────────────────────────────────────────────────
+
+Uh, which is a better value, the large or small? Large is 48 oz for $7.99, small is 16 oz for $3.49
+Um, is it cheaper to buy the big one? 64 oz at $6.99 or 32 oz at $3.99
+Hey so I'm at the store comparing these two coffees, 12 oz for $9 or 2 pounds for $19
+Uh, which cereal should I get, the 18 oz for $4.49 or the 32 oz for $6.99?
+So like which is the better deal, the small milk or the big one? Small is $2.89 big is $4.29
+Hey can you compare these two for me? 16 oz peanut butter at $3.99 vs 40 oz at $7.99
+Um, I'm trying to figure out which juice is cheaper per ounce, 46 oz at $3.29 or 64 oz at $3.99
+Uh so is the family size worth it? Regular is 12 oz for $3.99, family is 24 oz for $6.49
+Hey which one's the better deal, the 5 lb flour for $4.49 or 2 lb for $2.19?
+So like um, compare the price on 1 lb of ground beef at $5.99 vs 3 lb pack at $14.99
+Uh, hey, which olive oil is cheaper, the 500 ml for $7.99 or 1 liter for $12.99?
+Um so I'm looking at two yogurts, 5.3 oz for $1.19 or 32 oz for $4.99, which is better?
+Hey uh can you tell me which rice is the better deal? 2 lb at $3.49 or 10 lb at $12.99
+So which butter should I grab, the 8 oz for $3.49 or 16 oz for $5.99?
+Um, the store has two sizes of ketchup, 20 oz for $2.99 and 38 oz for $4.49, which is cheaper?
+Hey so like which is cheaper per ounce, the 10 oz salsa at $3.49 or the 24 oz at $5.99?
+Uh, help me compare these two, a 4 pack of paper towels for $6.99 or 12 pack for $16.99
+Um, which laundry detergent is the better buy, 46 oz for $8.99 or 92 oz for $14.99?
+Hey which dog food is the better deal, 5 lb bag for $12.99 or 15 lb bag for $29.99?
+So uh, is it worth getting the big tub? 32 oz sour cream for $3.99 vs 16 oz for $2.49
+
+# ── DIFFERENT COMPARISON PHRASINGS ───────────────────────────────────────────
+
+What's the better deal between these two sizes of laundry detergent?
+Which should I buy, the regular or the family size?
+Compare the value per ounce of these two products
+Is the bigger package actually cheaper per unit?
+Help me figure out which one gives me more for my money
+Tell me which of these two is the better value per ounce
+What's more economical, the small size or the large?
+Which product gives you more bang for your buck?
+Break down the price per ounce for both of these
+I want to know the unit price for both sizes
+Figure out which is cheaper per serving
+What's the cost per ounce of these two options?
+Compare price per unit for both sizes
+Is it worth paying more for the bigger container?
+Tell me which size is the smarter buy
+Calculate the price per pound for each of these
+Which option stretches my dollar further?
+What gives me the lowest cost per ounce?
+Help me decide which size to buy based on price per unit
+Is the bulk size actually a better deal or am I wasting money?
+
+# ── EDGE CASE COMPARISONS ───────────────────────────────────────────────────
+
+Compare 1 pound of honey at $8 vs a 12 oz jar at $5, which is cheaper per ounce?
+Which is the better deal, a 750 ml bottle of olive oil at $9.99 or a 16 oz bottle at $7.99?
+Compare a 1 kg bag of sugar at $2.99 versus a 2 lb bag at $2.49
+Which is cheaper per ounce, 1 liter of soda at $1.99 or 2 liter at $2.79?
+I have a 500 gram block of cheese for $6.99 and a 1 lb block for $5.49, which is the better value?
+Compare three brands of coffee: A is 12 oz for $8.99, B is 16 oz for $10.99, C is 2 lb for $18.99
+Which is cheaper, the 3 pack at $2.99 each or the bulk 10 pack at $24.99?
+Is it better to buy 4 cans at $1.29 each or a 4 pack for $4.49?
+Compare the per unit cost of a 6 pack of yogurt at $5.49 vs buying 6 individual cups at $1.19 each
+The small bottle is 12 oz for $2.99, medium is 20 oz for $3.99, and large is 32 oz for $5.49, which is cheapest per ounce?
+
+# ── STANDARD MORTGAGE QUERIES ────────────────────────────────────────────────
+
 What's the monthly payment on a $300,000 mortgage at 6.5% for 30 years?
 Calculate my mortgage payment for a $250,000 loan at 7% over 15 years
-How much would a $500,000 home cost per month with $100,000 down at 6% for 30 years?
 What would my monthly payment be on a $400,000 mortgage at 5.5% for 30 years?
 If I borrow $350,000 at 7.25% for 30 years, what's my monthly payment?
 Calculate the mortgage payment on $200,000 at 6% for 20 years
-How much is the monthly payment for a $600,000 house with $150,000 down at 6.75%?
+How much per month is a 280,000 dollar loan at 5.75 percent for 30 years?
+What's the monthly payment on a $500,000 mortgage at 6% for 30 years?
+Calculate mortgage payment for $275,000 at 6.25% for 30 years
+What would I pay monthly on a $450,000 loan at 6.75% for 30 years?
+How much is the monthly payment on $375,000 at 7% for 30 years?
+What's a 15 year mortgage payment on $300,000 at 5.5%?
+Calculate the monthly on a $600,000 mortgage at 6.5% over 30 years
+What would a $750,000 mortgage cost per month at 7% for 30 years?
+How much per month for a $200,000 loan at 5% for 15 years?
+What's the payment on a $325,000 mortgage at 6.75% for 30 years?
+Calculate my monthly payment on $550,000 at 6.25% for 30 years
+What would I pay on a $400,000 home loan at 7.5% for 30 years?
+How much is a $225,000 mortgage at 6% for 20 years per month?
+What's the monthly on a $350,000 loan at 5.75% over 15 years?
+Calculate mortgage for $475,000 at 6.5% for 30 years
+What would my payment be on $300,000 at 7.25% over 30 years?
+How much per month for a $650,000 mortgage at 6% for 30 years?
+What's the monthly payment on $250,000 at 5.5% for 20 years?
+Calculate the payment on a $425,000 loan at 6.75% for 30 years
+What would a $500,000 mortgage at 7% for 15 years cost monthly?
+How much is the monthly on $350,000 at 6.25% for 30 years?
+What's a $275,000 mortgage payment at 6.5% over 30 years?
+Calculate monthly payment for $400,000 at 5.75% for 30 years
+How much per month on a $300,000 loan at 7% for 20 years?
+What would I pay monthly on a $550,000 mortgage at 6.5% for 30 years?
+
+# ── MORTGAGE WITH DOWN PAYMENT ───────────────────────────────────────────────
+
+How much would a $500,000 home cost per month with $100,000 down at 6% for 30 years?
 I'm looking at a $450,000 house, 20% down, 6.5% rate, 30 year term, what's the payment?
+How much is the monthly payment for a $600,000 house with $150,000 down at 6.75%?
+If I put $50,000 down on a $350,000 house at 6.5% for 30 years, what's the monthly?
+What's the payment on a $400,000 home with 20% down at 7% for 30 years?
+Calculate the mortgage if I put $75,000 down on a $375,000 house at 6.25% for 30 years
+How much per month for a $500,000 house with 10% down at 6.5%?
+What would I pay on a $650,000 home with $130,000 down at 6.75% for 30 years?
+If I put 15% down on a $300,000 home at 7% for 30 years, what's the monthly payment?
+Calculate payment on a $450,000 house, 25% down, 6% rate, 15 year term
+What's the monthly if I put $100,000 down on a $550,000 home at 6.5% for 30 years?
+How much per month for a $750,000 house with $150,000 down at 7.25%?
+If I put 20% down on a $400,000 house at 5.75% for 30 years, what's my payment?
+Calculate mortgage for a $325,000 home with $65,000 down at 6.5% for 30 years
+What would the monthly be on a $500,000 house with 20% down at 6% for 20 years?
+
+# ── CASUAL MORTGAGE VARIANTS ────────────────────────────────────────────────
+
 Uh, what would my mortgage be on like a $300k house at 7 percent?
 Hey can you calculate a mortgage payment for me? $275,000 at 6.25% for 30 years
 So if I put 50,000 down on a 350,000 dollar house at 6.5 percent for 30 years, um, what's the monthly?
 What's the monthly cost of a home loan for 225,000 at 7 percent over 15 years?
 Um, I need to figure out the mortgage payment on 500k with 20 percent down at 6 point 5
-How much per month is a 280,000 dollar loan at 5.75 percent for 30 years?
-Convert 98.6 Fahrenheit to Celsius
-What's 1 ton in pounds?
-How many quarts in a gallon?
-How many inches in a foot?
-What's 0 Celsius in Kelvin?
-Convert 212 Fahrenheit to Celsius
-How heavy is 100 kg in pounds?
-What's 1 mile in feet?
-Convert 1 yard to inches
-How many fluid ounces in a liter?
-What's 500 ml in cups?
-Convert 10 kg to grams
-How many meters in a kilometer?
-What's minus 40 Celsius in Fahrenheit?
-Convert 2.5 liters to quarts
-How many milligrams in a gram?
-What's 6 feet in meters?
-Convert 20 miles to kilometers
-How many ounces in a quart?
+Hey so what would I pay per month on a 400 thousand dollar house at 7 percent?
+Uh, can you figure out the mortgage on like a 350k loan at 6.5 for 30 years?
+So um, if I borrow 300 grand at 6 percent for 30 years, what's my monthly?
+Hey, what's the payment on a 250 thousand dollar mortgage at 7 percent?
+Uh, I'm looking at a house that's 450k, what would the mortgage be at like 6.75 percent?
+Um, can you run the numbers on a 500k mortgage at 6 percent for 30 years?
+Hey so like, what would my payment be on a 375 thousand dollar loan at 7.25%?
+Uh, figure out the monthly for me on 280k at 5.75 percent for 30 years
+So what's a 600k mortgage look like at 6.5 percent for 30 years?
+Hey um, calculate a mortgage on 325 thousand at 6.75 for 30 years
+
+# ── FINANCIAL CALCULATOR EXTRAS ──────────────────────────────────────────────
+
+Can you calculate compound interest on $10,000 at 5% for 3 years?
+What's compound interest on $5,000 at 4% for 10 years?
+Calculate compound interest on $25,000 at 6% for 5 years
+How much would $50,000 grow at 7% interest over 20 years?
+What's the total interest on a $300,000 mortgage at 6.5% over 30 years?
+Compare a 15 year vs 30 year mortgage on $300,000 at 6.5%
+If I refinance my $250,000 mortgage from 7% to 5.5%, how much do I save per month?
+How much total interest would I pay on a $400,000 mortgage at 6.5% for 30 years?
+What's the difference in total cost between a 15 and 30 year mortgage on $350,000 at 6%?
+Calculate the payoff amount if I pay an extra $200 per month on my $300,000 mortgage at 6.5%
+How much would I save by refinancing from 7.5% to 6% on a $400,000 mortgage?
+What's the total cost of a $500,000 mortgage at 7% over 30 years including interest?
+Compare monthly payments: $300k at 6% for 15 years vs 30 years
+If I invest $500 per month at 8% annual return, how much will I have in 20 years?
+Calculate how much interest I'd earn on $100,000 at 4.5% for 5 years
+What's the monthly payment on a $25,000 car loan at 5.9% for 5 years?
+Calculate the total interest on a $30,000 auto loan at 6% for 4 years
+How much would a $20,000 personal loan cost per month at 8% for 3 years?
+If I put $10,000 in a savings account at 4% APY, how much do I earn in a year?
+What's the future value of $1,000 invested at 10% for 30 years?
+
+# ── EXPLICIT CALCULATOR ROUTING ──────────────────────────────────────────────
+
+I want to talk to the calculator
+Let me speak with the calculator
+Route me to the calculator please
+Bring up the calculator agent
+Switch over to the calculator
+Take me to calculator mode
+Switch to calculator mode
+Use the calculator agent
+Go to the conversion calculator
+I need the unit converter
+Open the mortgage calculator
+Take me to the price comparison tool
+Activate the calculator
+I need the calculator agent
+Put me through to the calculator
+Connect me to the calculator
+I want the calculator please
+Give me the calculator agent
+Transfer me to the calculator
+Can I get the calculator?
+
+# ── CALCULATOR MODE PHRASES ──────────────────────────────────────────────────
+
+Go into calculator mode for this one
+This is a calculator question
+Handle this as a conversion
+Flex your inner calculator and figure this out
+Let's not overthink—give me a straight answer, calculator style
+Dust off the imaginary calculator and work through this
+This is a unit conversion, use the calculator
+Treat this as a mortgage calculation
+Handle this with the price comparison calculator
+This needs the calculator, not the math agent
+Use calculator mode for this one
+Switch into conversion mode for this
+I need this handled as a calculator task
+Put on your calculator hat for this one
+This is a straightforward conversion, go calculator mode
+
+# ── DISAMBIGUATION ANCHORS ───────────────────────────────────────────────────
+
+Convert this for me, don't solve it as math
+This isn't algebra, just convert the units
+I need a unit conversion, not a math equation
+This is a price comparison question, not a math problem
+Calculate my mortgage payment, this isn't a word problem
+Just do the conversion, don't treat this as a math question
+This is a calculator task, not something for the math agent
+I want a unit conversion, not a math solution
+Handle this as a conversion, not an equation
+This is about comparing prices, use the calculator
+Don't do algebra, just convert these units for me
+I need the calculator for a conversion, not the math solver
+This is a mortgage question, route it to the calculator
+Compare these prices for me, this isn't a math puzzle
+I need a simple conversion, don't overthink the math
+This is for the calculator, not a math equation
+Route this to the unit converter, not the math solver
+I want a price comparison, don't give me a math lesson
+Handle this conversion with the calculator agent
