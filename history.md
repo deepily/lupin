@@ -1,5 +1,18 @@
 # Lupin Project History
 
+### 2026.02.11 - Session 184 | vLLM verbose_server Flag + Marlin Kernel Verification
+
+**Accomplishments**:
+- Added `verbose_server` parameter to `_start_vllm_server()` — prints all vLLM startup output when `True`, defaults to `False`
+- Enabled at post-quantization call sites (`run_pipeline` + `run_pipeline_adhoc`) so Marlin kernel loading is visible
+- **Verified via live run**: Marlin IS loading correctly (`gptq_marlin.py:143: "Using gptq_marlin kernel"`, `gptq_marlin.py:238: "Using MarlinLinearKernel"`)
+- Small-batch latency still ~457 ms (unchanged from ~490 ms) — awaiting full batch run tonight to assess Marlin speedup at scale
+
+**Files Modified** (CoSA submodule, not committed here):
+- `src/cosa/training/peft_trainer.py` (`verbose_server` param + 4 changes: signature, docstring, print condition, 2 call sites)
+
+---
+
 ### 2026.02.11 - Session 183 | Notification Proxy LLM Script Matcher Implementation
 
 #### Checkpoint | 2026.02.11 | Phi-4 script matcher + answer verifier + Q&A scripts + 50 new tests
