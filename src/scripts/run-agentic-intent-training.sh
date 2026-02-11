@@ -15,7 +15,7 @@
 #   dry-run   - Show training data stats without training
 #
 # Options:
-#   --llm MODEL          - Target model: ministral-8b (default), qwen3-4b
+#   --llm MODEL          - Target model: ministral-8b (default), qwen3-4b, llama-3b
 #   --quantize-bits BITS - Quantization: both (default), 4, 8
 #
 # Examples:
@@ -46,7 +46,7 @@ fi
 
 if [ -z "$DEEPILY_PROJECTS_DIR" ]; then
     echo -e "${YELLOW}Warning: DEEPILY_PROJECTS_DIR not set, using default${NC}"
-    DEEPILY_PROJECTS_DIR="/mnt/DATA02/include/projects"
+    DEEPILY_PROJECTS_DIR="/mnt/DATA01/include/www.deepily.ai/projects"
 fi
 
 # Defaults
@@ -84,8 +84,13 @@ case "$LLM" in
         MODEL_NAME="Qwen3-4B-Base"
         LORA_DIR="$DEEPILY_PROJECTS_DIR/models/Qwen3-4B-Base.lora"
         ;;
+    llama-3b)
+        MODEL="meta-llama/Llama-3.2-3B-Instruct"
+        MODEL_NAME="Llama-3.2-3B-Instruct"
+        LORA_DIR="$DEEPILY_PROJECTS_DIR/models/Llama-3.2-3B-Instruct.lora"
+        ;;
     *)
-        echo -e "${RED}Unknown LLM: $LLM. Supported: ministral-8b, qwen3-4b${NC}"
+        echo -e "${RED}Unknown LLM: $LLM. Supported: ministral-8b, qwen3-4b, llama-3b${NC}"
         exit 1
         ;;
 esac
@@ -323,7 +328,7 @@ else:
         echo "  dry-run   - Show training data stats without training"
         echo ""
         echo "Options:"
-        echo "  --llm MODEL          - Target model: ministral-8b (default), qwen3-4b"
+        echo "  --llm MODEL          - Target model: ministral-8b (default), qwen3-4b, llama-3b"
         echo "  --quantize-bits BITS - Quantization: both (default), 4, 8"
         exit 1
         ;;
