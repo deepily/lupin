@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
 """
-Smoke test for Calculator agent via live pipeline (Step 24 of testing ladder).
+Smoke test for Calculator agent via live pipeline (Steps 24 & 25 of testing ladder).
 
 Verifies the full end-to-end pipeline:
   TodoFifoQueue -> mode bypass -> CalculatorAgent -> Phi-4 intent extraction
   -> dispatch -> TTS response
 
+Step 24 (default): Explicitly sets calculator mode, bypassing LORA router.
+Step 25 (--auto-route): No mode set — verifies LORA router classifies queries correctly.
+
 Tests 6 queries covering: unit conversion, price comparison, mortgage calculation.
 
 Usage:
-    # Run all 6 queries (default)
+    # Step 24: Run all 6 queries with explicit calculator mode (default)
     python src/tests/smoke/test_calculator_live_pipeline.py
+
+    # Step 25: Run all 6 queries via LORA auto-routing
+    python src/tests/smoke/test_calculator_live_pipeline.py --auto-route
 
     # Run only query 0 (CONVERT_KM)
     python src/tests/smoke/test_calculator_live_pipeline.py --queries 0
 
     # Run queries 0, 2, 4
     python src/tests/smoke/test_calculator_live_pipeline.py -q 0,2,4
+
+    # Combined: specific queries + auto-route
+    python src/tests/smoke/test_calculator_live_pipeline.py --auto-route -q 0,1,4
 
 Query index reference:
     0: CONVERT_KM      — How many miles is 10 kilometers?
@@ -33,6 +42,7 @@ Requires:
         LUPIN_TEST_EMAIL / LUPIN_TEST_PASSWORD
 
 Created: 2026-02-10 (Session 172)
+Updated: 2026-02-11 — Added --auto-route flag for Step 25 (LORA routing verification)
 """
 
 import argparse
@@ -370,7 +380,7 @@ def _print_results_table( results ):
 # Main Test
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def quick_smoke_test( query_indices=None ):
+def quick_smoke_test( query_indices=None, auto_route=False ):
     """
     Smoke test for Calculator agent via live pipeline.
 
@@ -379,21 +389,30 @@ def quick_smoke_test( query_indices=None ):
         - Phi-4 LLM server running for intent extraction
         - Test credentials available via environment variables
         - query_indices is None (run all) or a list of valid ints (0-5)
+        - auto_route is a boolean (False = Step 24 explicit mode, True = Step 25 LORA routing)
 
     Ensures:
-        - Sets calculator mode
+        - If auto_route is False: sets calculator mode explicitly (Step 24)
+        - If auto_route is True: clears mode so LORA router decides (Step 25)
         - Submits selected queries (all 6 by default)
         - Polls for completion via job_id
         - Validates answers contain expected keywords
-        - Resets mode to system on exit
+        - If auto_route: also validates agent_type == CalculatorAgent
+        - Resets mode to system on exit (if mode was set)
         - Returns True if all selected queries pass
     """
     if query_indices is not None:
         queries = [ CALCULATOR_QUERIES[ i ] for i in query_indices if i < len( CALCULATOR_QUERIES ) ]
-        label   = f"Calculator Live Pipeline Smoke Test ({len( queries )} of {len( CALCULATOR_QUERIES )} queries)"
+        if auto_route:
+            label = f"Calculator Auto-Route Test ({len( queries )} of {len( CALCULATOR_QUERIES )} queries, LORA routing)"
+        else:
+            label = f"Calculator Live Pipeline Smoke Test ({len( queries )} of {len( CALCULATOR_QUERIES )} queries)"
     else:
         queries = CALCULATOR_QUERIES
-        label   = f"Calculator Live Pipeline Smoke Test ({len( queries )}-Query Matrix)"
+        if auto_route:
+            label = f"Calculator Auto-Route Test ({len( queries )}-Query Matrix, LORA routing)"
+        else:
+            label = f"Calculator Live Pipeline Smoke Test ({len( queries )}-Query Matrix)"
 
     banner = label
     if cu:
@@ -433,12 +452,17 @@ def quick_smoke_test( query_indices=None ):
         print( f"  Using session ID: {ws_id}" )
 
         # ═══════════════════════════════════════════════════════════════════
-        # Step 3: Set calculator mode
+        # Step 3: Set mode (explicit calculator vs auto-route)
         # ═══════════════════════════════════════════════════════════════════
-        print( "\nStep 3: Setting calculator mode..." )
-        if not _set_calculator_mode( headers ):
-            print( "Failed to set calculator mode." )
-            return False
+        if auto_route:
+            print( "\nStep 3: Auto-route mode (no explicit mode set, LORA router decides)..." )
+            _clear_mode( headers )
+            print( "  Mode cleared — LORA router will classify each query." )
+        else:
+            print( "\nStep 3: Setting calculator mode..." )
+            if not _set_calculator_mode( headers ):
+                print( "Failed to set calculator mode." )
+                return False
 
         # ═══════════════════════════════════════════════════════════════════
         # Step 4: Run 6-query test matrix
@@ -473,6 +497,18 @@ def quick_smoke_test( query_indices=None ):
                 result[ "details" ] = error
                 print( f"    FAIL: {error}" )
             elif job_data:
+                # Auto-route: verify LORA routed to CalculatorAgent
+                if auto_route:
+                    agent_type = job_data.get( "agent_type", "" )
+                    if agent_type != "CalculatorAgent":
+                        result[ "status" ]  = "fail"
+                        result[ "details" ] = f"Routed to {agent_type}, expected CalculatorAgent"
+                        print( f"    FAIL: Routed to {agent_type} instead of CalculatorAgent" )
+                        results.append( result )
+                        continue
+                    else:
+                        print( f"    Routing: correctly routed to {agent_type}" )
+
                 answer = job_data.get( "response_text", "" ) or ""
                 result[ "answer_preview" ] = answer[ :80 ]
 
@@ -481,6 +517,7 @@ def quick_smoke_test( query_indices=None ):
                 if matched:
                     result[ "status" ]  = "pass"
                     result[ "details" ] = f"matched '{keyword}'"
+                    if auto_route: result[ "details" ] += " (auto-routed)"
                     print( f"    PASS: Answer contains '{keyword}'" )
                     print( f"    Answer: {answer[ :120 ]}" )
                 else:
@@ -497,9 +534,12 @@ def quick_smoke_test( query_indices=None ):
         # Step 5: Reset mode
         # ═══════════════════════════════════════════════════════════════════
         print( f"\n{'─' * 70}" )
-        print( "Step 5: Clearing calculator mode..." )
-        _clear_mode( headers )
-        print( "  Mode cleared." )
+        if not auto_route:
+            print( "Step 5: Clearing calculator mode..." )
+            _clear_mode( headers )
+            print( "  Mode cleared." )
+        else:
+            print( "Step 5: (auto-route mode — no mode to clear)" )
 
         # ═══════════════════════════════════════════════════════════════════
         # Step 6: Results summary
@@ -528,12 +568,13 @@ def quick_smoke_test( query_indices=None ):
         traceback.print_exc()
         return False
     finally:
-        # Always try to clear mode on exit
-        try:
-            if "headers" in dir():
-                _clear_mode( headers )
-        except Exception:
-            pass
+        # Always try to clear mode on exit (only if mode was explicitly set)
+        if not auto_route:
+            try:
+                if "headers" in dir():
+                    _clear_mode( headers )
+            except Exception:
+                pass
 
 
 def test_calculator_live_pipeline():
@@ -549,6 +590,12 @@ if __name__ == "__main__":
         default=None,
         help="Comma-separated query indices to run (e.g., '0,1,3'). Default: all."
     )
+    parser.add_argument(
+        "--auto-route", "-a",
+        action="store_true",
+        default=False,
+        help="Skip setting calculator mode. Tests LORA auto-routing (Step 25)."
+    )
     args = parser.parse_args()
 
     indices = None
@@ -556,7 +603,7 @@ if __name__ == "__main__":
         indices = [ int( x.strip() ) for x in args.queries.split( "," ) ]
 
     try:
-        success = quick_smoke_test( query_indices=indices )
+        success = quick_smoke_test( query_indices=indices, auto_route=args.auto_route )
         sys.exit( 0 if success else 1 )
     except Exception as e:
         traceback.print_exc()
