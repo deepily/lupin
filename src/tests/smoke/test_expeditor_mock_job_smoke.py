@@ -13,18 +13,44 @@ Tests 4.x require LUPIN_INTERACTIVE_TESTS=true because they:
 - Call LLM for gap analysis (real inference cost)
 - Call notify_user_sync() for missing args + confirmation (blocks for user response)
 
+Scenario Index Reference:
+    0  DR_HAPPY    — "do deep research on quantum computing"
+    1  DR_MISSING  — "do some deep research"
+    2  DR_BUDGET   — "...climate change with a budget of 5 dollars"
+    3  DR_AUDIENCE — "...machine learning for a beginner audience"
+    4  PG_MISSING  — "make me a podcast"
+    5  PG_AUDIENCE — "...for an expert audience"
+    6  RTP_HAPPY   — "research quantum gravity and turn it into a podcast"
+    7  RTP_MISSING — "I want research to podcast"
+    8  DR_CANCEL   — "do some deep research for me" (user cancels)
+
+Usage:
+    # Run all 9 scenarios
+    LUPIN_INTERACTIVE_TESTS=true python src/tests/smoke/test_expeditor_mock_job_smoke.py
+
+    # Run only DR_HAPPY (scenario 0) to diagnose first
+    LUPIN_INTERACTIVE_TESTS=true python -m tests.smoke.test_expeditor_mock_job_smoke -s 0
+
+    # Run DR scenarios only (0-3 and cancel)
+    LUPIN_INTERACTIVE_TESTS=true python -m tests.smoke.test_expeditor_mock_job_smoke -s 0,1,2,3,8
+
+    # Run just PG scenarios (4, 5)
+    LUPIN_INTERACTIVE_TESTS=true python -m tests.smoke.test_expeditor_mock_job_smoke -s 4,5
+
 Requires:
 - Server running on localhost:7999
 - Environment variables: LUPIN_TEST_EMAIL, LUPIN_TEST_PASSWORD
 - For tests 4.x: LUPIN_INTERACTIVE_TESTS=true
+  (uses LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / PASSWORD)
 
 Created: 2026-02-05
-Updated: 2026-02-07 — 9-scenario matrix with confirmation loop coverage
+Updated: 2026-02-10 — Selective scenario execution via --scenarios/-s flag
 """
 
 import os
 import sys
 import time
+import argparse
 import traceback
 
 # Bootstrap path setup
@@ -306,7 +332,7 @@ def _print_results_table( results ):
 # Main Test
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def quick_smoke_test():
+def quick_smoke_test( scenario_indices=None ):
     """
     Smoke test for Runtime Argument Expeditor via mock job endpoint.
 
@@ -314,11 +340,12 @@ def quick_smoke_test():
         - Server running on port 7999
         - LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables set
         - User account exists in development database
+        - scenario_indices is None (all) or a list of valid int indices into EXPEDITOR_SCENARIOS
 
     Ensures:
         - Health endpoint returns ok
         - Standard mock job submits and queues correctly
-        - All 9 expeditor scenarios execute (interactive tests only)
+        - Selected expeditor scenarios execute (interactive tests only)
         - Results are summarized in tabular form
     """
     cu.print_banner( "Expeditor Mock Job Smoke Test (9-Scenario Matrix)", prepend_nl=True )
@@ -328,13 +355,20 @@ def quick_smoke_test():
         print( "Note: Scenario tests skipped (set LUPIN_INTERACTIVE_TESTS=true to enable)" )
 
     # Get credentials from environment
-    email    = os.environ.get( "LUPIN_TEST_EMAIL" )
-    password = os.environ.get( "LUPIN_TEST_PASSWORD" )
+    # Interactive tests use a dedicated tester account for voice I/O routing
+    if interactive:
+        email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+        password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
+        env_prefix = "LUPIN_TEST_INTERACTIVE_MOCK_JOBS"
+    else:
+        email    = os.environ.get( "LUPIN_TEST_EMAIL" )
+        password = os.environ.get( "LUPIN_TEST_PASSWORD" )
+        env_prefix = "LUPIN_TEST"
 
     if not email or not password:
-        print( "✗ Missing environment variables:" )
-        print( "  export LUPIN_TEST_EMAIL='your@email.com'" )
-        print( "  export LUPIN_TEST_PASSWORD='yourpassword'" )
+        print( f"✗ Missing environment variables:" )
+        print( f"  export {env_prefix}_EMAIL='your@email.com'" )
+        print( f"  export {env_prefix}_PASSWORD='yourpassword'" )
         return False
 
     try:
@@ -402,15 +436,23 @@ def quick_smoke_test():
             print( "=" * 70 )
             return True
 
+        # Filter scenarios if indices provided
+        if scenario_indices is not None:
+            scenarios = [ EXPEDITOR_SCENARIOS[ i ] for i in scenario_indices if i < len( EXPEDITOR_SCENARIOS ) ]
+            label     = f"INTERACTIVE EXPEDITOR SCENARIOS ({len( scenarios )} of {len( EXPEDITOR_SCENARIOS )})"
+        else:
+            scenarios = EXPEDITOR_SCENARIOS
+            label     = f"INTERACTIVE EXPEDITOR SCENARIOS ({len( scenarios )} total)"
+
         print( "\n" + "=" * 70 )
-        print( "  INTERACTIVE EXPEDITOR SCENARIOS (9 total)" )
+        print( f"  {label}" )
         print( "  Each scenario will prompt you via voice. Follow the instructions." )
         print( "  Timeout: 600s per scenario. Say 'cancel' to skip any scenario." )
         print( "=" * 70 )
 
         results = []
 
-        for i, scenario in enumerate( EXPEDITOR_SCENARIOS, 1 ):
+        for i, scenario in enumerate( scenarios, 1 ):
             print( f"\n{'─' * 70}" )
             print( f"  Scenario 4.{i}: {scenario[ 'id' ]}" )
             print( f"  Voice command: \"{scenario[ 'voice_command' ]}\"" )
@@ -476,7 +518,7 @@ def quick_smoke_test():
 
         print( f"\n{'=' * 70}" )
         if all_passed:
-            print( f"ALL EXPEDITOR SMOKE TESTS PASSED ({3 + passed}/{3 + len( EXPEDITOR_SCENARIOS )})!" )
+            print( f"ALL EXPEDITOR SMOKE TESTS PASSED ({3 + passed}/{3 + len( scenarios )})!" )
         else:
             print( f"EXPEDITOR SMOKE TESTS: {3 + passed} passed, {failed} failed, {cancel} unexpected cancels" )
         print( "=" * 70 )
@@ -502,8 +544,21 @@ def test_expeditor_mock_job_smoke():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser( description="Expeditor mock job smoke test (9-scenario matrix)" )
+    parser.add_argument(
+        "--scenarios", "-s",
+        type=str,
+        default=None,
+        help="Comma-separated scenario indices to run (e.g., '0,3,8'). Default: all."
+    )
+    args = parser.parse_args()
+
+    indices = None
+    if args.scenarios:
+        indices = [ int( x.strip() ) for x in args.scenarios.split( "," ) ]
+
     try:
-        success = quick_smoke_test()
+        success = quick_smoke_test( scenario_indices=indices )
         sys.exit( 0 if success else 1 )
     except Exception as e:
         traceback.print_exc()
