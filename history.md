@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.02.11 - Session 188 | Q&A Script README Architecture Clarification
+
+#### Checkpoint | 2026.02.11 | Clarify standalone vs union script architecture in README
+
+**Accomplishments**:
+- Added "Script Architecture" section to Q&A scripts README explicitly documenting standalone (one-per-agent) vs union (`all-agents.json`) file types
+- Added warning blockquote to "Multi-Agent Scripts" section: always create standalone first
+- Fixed incorrect "13-scenario" reference (actual: 4 entries in `all-agents.json`)
+- Clarified Step 5 "Register the Profile": `config.py TEST_PROFILES` is required, `__main__.py` is auto-derived
+
+**Root cause**: Two parallel sessions misread the README and added entries directly to `all-agents.json` instead of creating standalone files
+
+**Files Modified**:
+- `src/conf/notification-proxy-scripts/README.md` (4 edits: architecture section, warning note, count fix, Step 5 clarification)
+
+**Commit**: 2785cb2
+
+---
+
 ### 2026.02.11 - Session 187 | Data-Driven Sender ID Filtering for Notification Proxy
 
 #### Checkpoint | 2026.02.11 | Replace hardcoded EXPEDITER_SENDER_ID with data-driven sender_ids
@@ -29,7 +48,7 @@
 - `src/cosa/agents/notification_proxy/strategies/llm_script_matcher.py` (accepted_senders param + script extraction + list-based can_handle)
 - `src/cosa/agents/notification_proxy/responder.py` (extract sender_ids from script, pass to strategies)
 
-**Commit**: c51e207
+**Commit**: fb8cb1c
 
 ---
 

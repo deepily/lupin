@@ -11,6 +11,26 @@ Q&A scripts define the scripted answers that the Notification Proxy Agent return
 3. Phi-4 fuzzy-matches the question to the best script entry using semantic similarity
 4. The scripted answer from the matched entry is returned as the response
 
+## Script Architecture
+
+There are two types of Q&A script files:
+
+### Standalone Scripts (one per agent)
+
+Each agent/service gets its own JSON file with its specific question-answer pairs:
+
+- `deep-research.json` — deep research agent only
+- `podcast.json` — podcast generator only
+- `research-to-podcast.json` — chained research + podcast workflow
+
+**When adding a new agent, always create a standalone file first.** Copy `_template.json` and fill in your agent's entries.
+
+### Union Script (for combined testing)
+
+`all-agents.json` combines entries from multiple agents into a single file for running multi-agent test suites in one proxy session. It uses the `"agents"` field to scope entries.
+
+**Do NOT add new agent entries directly to `all-agents.json`.** Create a standalone file first, then optionally duplicate entries into the union script for combined testing.
+
 ## JSON Format
 
 ### Required Fields
@@ -110,12 +130,21 @@ Always include a yes/no confirmation entry:
 
 ### Step 5: Register the Profile
 
-Add your profile to the `--profile` choices in `__main__.py` and add a matching
-entry in `config.py` `TEST_PROFILES` (for backward compatibility with the rules strategy).
+Add your profile to `TEST_PROFILES` in `config.py`. This is required for:
+- CLI validation (`--profile` flag uses `choices = list( TEST_PROFILES.keys() )`)
+- Startup banner display
+- Rules strategy backward compatibility
+
+You do **not** need to edit `__main__.py` — profile choices are auto-derived
+from `TEST_PROFILES.keys()`.
 
 ## Multi-Agent Scripts
 
-For testing multiple agents in a single run (e.g., the 13-scenario smoke test), use `all-agents.json`. Entries can be scoped to specific agents using the `agents` tag:
+> **Note**: Always create a standalone script for your agent first (see "Creating a
+> New Script"). Only add entries to `all-agents.json` after your standalone script is
+> working — and only if you need combined multi-agent testing.
+
+For testing multiple agents in a single run, use `all-agents.json`. Entries can be scoped to specific agents using the `agents` tag:
 
 ```json
 {
