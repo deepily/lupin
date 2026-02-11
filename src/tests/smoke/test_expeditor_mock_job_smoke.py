@@ -6,7 +6,7 @@ Verifies that:
 1. Login and auth token retrieval works
 2. Mock job health endpoint is alive
 3. Standard mock job (no voice_command) baseline works
-4.1-4.9 Nine expeditor scenarios covering all 3 agents, audience params,
+4.1-4.13 Thirteen expeditor scenarios covering all 3 agents, audience params,
         missing args, confirmation loop, and cancellation (INTERACTIVE)
 
 Tests 4.x require LUPIN_INTERACTIVE_TESTS=true because they:
@@ -23,9 +23,13 @@ Scenario Index Reference:
     6  RTP_HAPPY   — "research quantum gravity and turn it into a podcast"
     7  RTP_MISSING — "I want research to podcast"
     8  DR_CANCEL   — "do some deep research for me" (user cancels)
+    9  DR_FULL       — "...dark matter with a budget of 10 dollars for an expert audience"
+   10  RTP_LANGUAGES — "research artificial intelligence and make a podcast in Spanish"
+   11  PG_LANGUAGES  — "make me a podcast in English and Spanish"
+   12  RTP_BARE      — "I want a research to podcast job"
 
 Usage:
-    # Run all 9 scenarios
+    # Run all 13 scenarios
     LUPIN_INTERACTIVE_TESTS=true python src/tests/smoke/test_expeditor_mock_job_smoke.py
 
     # Run only DR_HAPPY (scenario 0) to diagnose first
@@ -44,16 +48,18 @@ Requires:
   (uses LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / PASSWORD)
 
 Created: 2026-02-05
-Updated: 2026-02-10 — Selective scenario execution via --scenarios/-s flag
+Updated: 2026-02-11 — Expanded to 13 scenarios, single-pass proxy docs
 
-Automated Execution with Notification Proxy:
-    # Pass 1: Scenarios 0-7 (proxy answers normally)
-    Terminal 2: python -m cosa.agents.notification_proxy --profile all_agents --debug
-    Terminal 3: LUPIN_INTERACTIVE_TESTS=true python -m tests.smoke.test_expeditor_mock_job_smoke -s 0,1,2,3,4,5,6,7
+Automated Execution with Notification Proxy (scenarios 0-7, 9-12):
+    Terminal 1: Server running on port 7999
+    Terminal 2: PYTHONPATH=src python -m cosa.agents.notification_proxy --profile expeditor_smoke --debug
+    Terminal 3: LUPIN_INTERACTIVE_TESTS=true python -m tests.smoke.test_expeditor_mock_job_smoke -s 0,1,2,3,4,5,6,7,9,10,11,12
 
-    # Pass 2: Scenario 8 (proxy cancels via dry-run)
-    Terminal 2: python -m cosa.agents.notification_proxy --dry-run
-    Terminal 3: LUPIN_INTERACTIVE_TESTS=true python -m tests.smoke.test_expeditor_mock_job_smoke -s 8
+    Scenario 8 (DR_CANCEL) excluded: The proxy auto-answers all notifications,
+    but DR_CANCEL needs a "cancel" response. Its notification is identical to
+    DR_MISSING (same response_type, title, sender_id) so the proxy cannot
+    distinguish them. Cancel path is unit-tested in test_notification_proxy.py
+    and test_runtime_argument_expeditor.py.
 """
 
 import os
@@ -406,7 +412,7 @@ def quick_smoke_test( scenario_indices=None ):
         - Selected expeditor scenarios execute (interactive tests only)
         - Results are summarized in tabular form
     """
-    cu.print_banner( "Expeditor Mock Job Smoke Test (9-Scenario Matrix)", prepend_nl=True )
+    cu.print_banner( "Expeditor Mock Job Smoke Test (13-Scenario Matrix)", prepend_nl=True )
 
     interactive = os.environ.get( "LUPIN_INTERACTIVE_TESTS", "" ).lower() == "true"
     if not interactive:
@@ -483,10 +489,10 @@ def quick_smoke_test( scenario_indices=None ):
         print( f"  Config: {mock_data[ 'config' ]}" )
 
         # ═══════════════════════════════════════════════════════════════════
-        # Tests 4.1-4.9: Expeditor Scenarios (INTERACTIVE)
+        # Tests 4.1-4.13: Expeditor Scenarios (INTERACTIVE)
         # ═══════════════════════════════════════════════════════════════════
         if not interactive:
-            print( "\nTests 4.1-4.9: SKIPPED (requires LUPIN_INTERACTIVE_TESTS=true)" )
+            print( "\nTests 4.1-4.13: SKIPPED (requires LUPIN_INTERACTIVE_TESTS=true)" )
 
             print( "\n" + "=" * 70 )
             print( "AUTOMATED SMOKE TESTS PASSED (3/3)!" )
@@ -602,7 +608,7 @@ def test_expeditor_mock_job_smoke():
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser( description="Expeditor mock job smoke test (9-scenario matrix)" )
+    parser = argparse.ArgumentParser( description="Expeditor mock job smoke test (13-scenario matrix)" )
     parser.add_argument(
         "--scenarios", "-s",
         type=str,

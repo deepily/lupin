@@ -81,6 +81,7 @@ The `--profile` flag maps to script files by replacing underscores with dashes:
 --profile research_to_podcast →  research-to-podcast.json
 --profile all_agents          →  all-agents.json
 --profile minimal             →  minimal.json
+--profile expeditor_smoke    →  expeditor-smoke.json
 ```
 
 ## Creating a New Script
@@ -173,4 +174,5 @@ The proxy extracts the agent name from the notification's `abstract` field and f
 | `research-to-podcast.json` | Chained workflow (query, budget, audience, languages) |
 | `all-agents.json` | Union script for multi-agent testing |
 | `minimal.json` | Bare minimum — required args only |
+| `expeditor-smoke.json` | Dedicated script for 13-scenario expeditor smoke test |
 | `_template.json` | Copy-and-modify starter template |
