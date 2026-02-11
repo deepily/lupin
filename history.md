@@ -1,5 +1,38 @@
 # Lupin Project History
 
+### 2026.02.11 - Session 187 | Data-Driven Sender ID Filtering for Notification Proxy
+
+#### Checkpoint | 2026.02.11 | Replace hardcoded EXPEDITER_SENDER_ID with data-driven sender_ids
+
+**Accomplishments**:
+- Replaced hardcoded `EXPEDITER_SENDER_ID` constant with data-driven `sender_ids` field in Q&A script JSON files
+- Both `LlmScriptMatcherStrategy` and `ExpediterRuleStrategy` now accept `accepted_senders` parameter — iterate over a list instead of matching a single string
+- `NotificationResponder` extracts `sender_ids` from script JSON and passes to both strategies at construction time
+- 3-tier priority: explicit `accepted_senders` param > script `sender_ids` field > `DEFAULT_ACCEPTED_SENDERS` constant
+- Adding a new sender = adding to a JSON list, zero Python code changes
+- `EXPEDITER_SENDER_ID` kept as deprecated alias for backward compatibility
+- 11 new unit tests (9 sender_ids filtering + 2 config): 810/810 pass, all 4 smoke tests pass
+
+**Files Modified** (Lupin repo):
+- `src/conf/notification-proxy-scripts/deep-research.json` (add sender_ids field)
+- `src/conf/notification-proxy-scripts/podcast.json` (add sender_ids field)
+- `src/conf/notification-proxy-scripts/research-to-podcast.json` (add sender_ids field)
+- `src/conf/notification-proxy-scripts/all-agents.json` (add sender_ids field)
+- `src/conf/notification-proxy-scripts/minimal.json` (add sender_ids field)
+- `src/conf/notification-proxy-scripts/_template.json` (add sender_ids field)
+- `src/conf/notification-proxy-scripts/README.md` (document sender_ids field)
+- `src/tests/unit/test_notification_proxy.py` (11 new tests: TestSenderIdFiltering class + 2 config tests)
+
+**Files Modified** (CoSA submodule, not committed here):
+- `src/cosa/agents/notification_proxy/config.py` (DEFAULT_ACCEPTED_SENDERS list + deprecated alias)
+- `src/cosa/agents/notification_proxy/strategies/expediter_rules.py` (accepted_senders param + list-based can_handle)
+- `src/cosa/agents/notification_proxy/strategies/llm_script_matcher.py` (accepted_senders param + script extraction + list-based can_handle)
+- `src/cosa/agents/notification_proxy/responder.py` (extract sender_ids from script, pass to strategies)
+
+**Commit**: c51e207
+
+---
+
 ### 2026.02.11 - Session 185 | Agentic Voice Workflow Skill v1.1 Update
 
 #### Checkpoint | 2026.02.11 | SKILL.md v1.0 → v1.1: Q&A script documentation

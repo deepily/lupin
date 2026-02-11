@@ -1,6 +1,7 @@
 {
     "profile_name"  : "minimal",
     "description"   : "Bare minimum answers — required args only, skip optionals",
+    "sender_ids"    : [ "arg.expeditor@lupin.deepily.ai" ],
     "entries" : [
         {
             "question_pattern" : "What topic would you like me to research?",

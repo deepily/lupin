@@ -1,6 +1,7 @@
 {
     "profile_name"  : "research_to_podcast",
     "description"   : "Q&A script for research-to-podcast chained workflow expediter questions",
+    "sender_ids"    : [ "arg.expeditor@lupin.deepily.ai" ],
     "entries" : [
         {
             "question_pattern" : "What topic would you like me to research and turn into a podcast?",

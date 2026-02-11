@@ -1,6 +1,7 @@
 {
     "profile_name"  : "deep_research",
     "description"   : "Q&A script for deep research agent expediter questions",
+    "sender_ids"    : [ "arg.expeditor@lupin.deepily.ai" ],
     "entries" : [
         {
             "question_pattern" : "What topic would you like me to research?",

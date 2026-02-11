@@ -2,6 +2,7 @@
     "_comment"      : "Copy this file and rename to <your-agent>.json. Remove _comment fields before use.",
     "profile_name"  : "your_agent_name",
     "description"   : "Q&A script for <your agent> expediter questions",
+    "sender_ids"    : [ "arg.expeditor@lupin.deepily.ai" ],
     "entries" : [
         {
             "_comment"         : "Derive question_pattern from agent_registry fallback_questions",

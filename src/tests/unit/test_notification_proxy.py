@@ -18,6 +18,7 @@ from unittest.mock import patch, MagicMock
 from cosa.agents.notification_proxy.config import (
     TEST_PROFILES,
     EXPEDITER_SENDER_ID,
+    DEFAULT_ACCEPTED_SENDERS,
     DEFAULT_SERVER_PORT,
     DEFAULT_STRATEGY,
     STRATEGY_CHOICES,
@@ -88,6 +89,16 @@ class TestConfig:
         assert SENDER_ID == "notification.proxy@lupin.deepily.ai"
         assert "@" in SENDER_ID
         assert ".deepily.ai" in SENDER_ID
+
+    def test_default_accepted_senders_is_list( self ):
+        """DEFAULT_ACCEPTED_SENDERS is a non-empty list."""
+        assert isinstance( DEFAULT_ACCEPTED_SENDERS, list )
+        assert len( DEFAULT_ACCEPTED_SENDERS ) >= 1
+        assert DEFAULT_ACCEPTED_SENDERS[ 0 ] == "arg.expeditor@lupin.deepily.ai"
+
+    def test_deprecated_sender_id_alias( self ):
+        """EXPEDITER_SENDER_ID is a deprecated alias for DEFAULT_ACCEPTED_SENDERS[0]."""
+        assert EXPEDITER_SENDER_ID == DEFAULT_ACCEPTED_SENDERS[ 0 ]
 
     def test_api_key_resolution_returns_string_or_none( self ):
         """get_anthropic_api_key returns str or None."""
@@ -1305,6 +1316,190 @@ class TestQAScriptFormat:
                     assert entry[ "answer" ] == profile[ arg_name ], \
                         f"{profile_name}: script answer for '{arg_name}' ({entry[ 'answer' ]}) != " \
                         f"profile value ({profile[ arg_name ]})"
+
+
+# ============================================================================
+# Test Data-Driven Sender ID Filtering
+# ============================================================================
+
+class TestSenderIdFiltering:
+    """Tests for data-driven sender_ids filtering in strategies."""
+
+    def test_can_handle_multiple_senders_rules( self ):
+        """ExpediterRuleStrategy matches against a list of 2+ senders."""
+        strategy = ExpediterRuleStrategy(
+            "deep_research",
+            accepted_senders=[ "arg.expeditor@lupin.deepily.ai", "workflow.orchestrator@lupin.deepily.ai" ]
+        )
+
+        # First sender should match
+        assert strategy.can_handle( {
+            "sender_id"          : "arg.expeditor@lupin.deepily.ai",
+            "response_requested" : True
+        } )
+
+        # Second sender should match
+        assert strategy.can_handle( {
+            "sender_id"          : "workflow.orchestrator@lupin.deepily.ai",
+            "response_requested" : True
+        } )
+
+        # Second sender with session suffix should match
+        assert strategy.can_handle( {
+            "sender_id"          : "workflow.orchestrator@lupin.deepily.ai#abc123",
+            "response_requested" : True
+        } )
+
+    def test_can_handle_unknown_sender_rejected_rules( self ):
+        """ExpediterRuleStrategy rejects senders not in accepted list."""
+        strategy = ExpediterRuleStrategy(
+            "deep_research",
+            accepted_senders=[ "arg.expeditor@lupin.deepily.ai" ]
+        )
+
+        assert not strategy.can_handle( {
+            "sender_id"          : "unknown.sender@lupin.deepily.ai",
+            "response_requested" : True
+        } )
+
+    def test_can_handle_multiple_senders_script_matcher( self ):
+        """LlmScriptMatcherStrategy matches against a list of 2+ senders."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        script_path = resolve_script_path( "deep_research", scripts_dir )
+
+        with patch( "cosa.agents.notification_proxy.strategies.llm_script_matcher.LlmClientFactory" ) as MockFactory:
+            mock_factory = MagicMock()
+            mock_client  = MagicMock()
+            MockFactory.return_value = mock_factory
+            mock_factory.get_client.return_value = mock_client
+
+            strategy = LlmScriptMatcherStrategy(
+                script_path      = script_path,
+                accepted_senders = [ "arg.expeditor@lupin.deepily.ai", "custom.sender@lupin.deepily.ai" ],
+                debug            = False
+            )
+
+        # Both senders should be accepted
+        assert strategy.can_handle( {
+            "sender_id"          : "arg.expeditor@lupin.deepily.ai",
+            "response_requested" : True
+        } )
+        assert strategy.can_handle( {
+            "sender_id"          : "custom.sender@lupin.deepily.ai#xyz789",
+            "response_requested" : True
+        } )
+
+    def test_can_handle_unknown_sender_rejected_script_matcher( self ):
+        """LlmScriptMatcherStrategy rejects senders not in accepted list."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        script_path = resolve_script_path( "deep_research", scripts_dir )
+
+        with patch( "cosa.agents.notification_proxy.strategies.llm_script_matcher.LlmClientFactory" ) as MockFactory:
+            mock_factory = MagicMock()
+            mock_client  = MagicMock()
+            MockFactory.return_value = mock_factory
+            mock_factory.get_client.return_value = mock_client
+
+            strategy = LlmScriptMatcherStrategy(
+                script_path      = script_path,
+                accepted_senders = [ "arg.expeditor@lupin.deepily.ai" ],
+                debug            = False
+            )
+
+        assert not strategy.can_handle( {
+            "sender_id"          : "unknown.sender@lupin.deepily.ai",
+            "response_requested" : True
+        } )
+
+    def test_sender_ids_loaded_from_script( self ):
+        """LlmScriptMatcherStrategy extracts sender_ids from script JSON."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        script_path = resolve_script_path( "deep_research", scripts_dir )
+
+        with patch( "cosa.agents.notification_proxy.strategies.llm_script_matcher.LlmClientFactory" ) as MockFactory:
+            mock_factory = MagicMock()
+            mock_client  = MagicMock()
+            MockFactory.return_value = mock_factory
+            mock_factory.get_client.return_value = mock_client
+
+            strategy = LlmScriptMatcherStrategy(
+                script_path = script_path,
+                debug       = False
+            )
+
+        # Should have loaded sender_ids from the script file
+        assert strategy.accepted_senders == [ "arg.expeditor@lupin.deepily.ai" ]
+
+    def test_default_sender_ids_fallback( self ):
+        """LlmScriptMatcherStrategy falls back to DEFAULT_ACCEPTED_SENDERS when script lacks sender_ids."""
+        import tempfile
+
+        # Create a script without sender_ids field
+        script_no_senders = {
+            "profile_name" : "test",
+            "description"  : "Test script without sender_ids",
+            "entries"      : []
+        }
+
+        with tempfile.NamedTemporaryFile( mode="w", suffix=".json", delete=False ) as f:
+            json.dump( script_no_senders, f )
+            tmp_path = f.name
+
+        try:
+            with patch( "cosa.agents.notification_proxy.strategies.llm_script_matcher.LlmClientFactory" ) as MockFactory:
+                mock_factory = MagicMock()
+                mock_client  = MagicMock()
+                MockFactory.return_value = mock_factory
+                mock_factory.get_client.return_value = mock_client
+
+                strategy = LlmScriptMatcherStrategy(
+                    script_path = tmp_path,
+                    debug       = False
+                )
+
+            assert strategy.accepted_senders == DEFAULT_ACCEPTED_SENDERS
+        finally:
+            os.unlink( tmp_path )
+
+    def test_script_sender_ids_field_format( self ):
+        """All Q&A script files have a sender_ids field with valid format."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        for profile in [ "deep_research", "podcast", "research_to_podcast", "all_agents", "minimal" ]:
+            path = resolve_script_path( profile, scripts_dir )
+            with open( path, "r" ) as f:
+                script = json.load( f )
+            assert "sender_ids" in script, f"{profile} missing sender_ids field"
+            assert isinstance( script[ "sender_ids" ], list ), f"{profile} sender_ids is not a list"
+            assert len( script[ "sender_ids" ] ) >= 1, f"{profile} sender_ids is empty"
+            for sid in script[ "sender_ids" ]:
+                assert isinstance( sid, str ), f"{profile} sender_ids contains non-string: {sid}"
+                assert "@" in sid, f"{profile} sender_id missing @: {sid}"
+
+    def test_accepted_senders_parameter_overrides_script( self ):
+        """Explicit accepted_senders parameter takes priority over script field."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        script_path = resolve_script_path( "deep_research", scripts_dir )
+
+        custom_senders = [ "custom.sender@lupin.deepily.ai" ]
+
+        with patch( "cosa.agents.notification_proxy.strategies.llm_script_matcher.LlmClientFactory" ) as MockFactory:
+            mock_factory = MagicMock()
+            mock_client  = MagicMock()
+            MockFactory.return_value = mock_factory
+            mock_factory.get_client.return_value = mock_client
+
+            strategy = LlmScriptMatcherStrategy(
+                script_path      = script_path,
+                accepted_senders = custom_senders,
+                debug            = False
+            )
+
+        assert strategy.accepted_senders == custom_senders
+
+    def test_responder_passes_sender_ids_to_rules( self ):
+        """NotificationResponder passes sender_ids from script to ExpediterRuleStrategy."""
+        responder = NotificationResponder( "deep_research", strategy="rules" )
+        assert responder.rule_strategy.accepted_senders == [ "arg.expeditor@lupin.deepily.ai" ]
 
 
 # ============================================================================

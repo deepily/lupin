@@ -19,7 +19,27 @@ Q&A scripts define the scripted answers that the Notification Proxy Agent return
 |-------|------|-------------|
 | `profile_name` | string | Profile identifier (matches `--profile` CLI flag) |
 | `description` | string | Human-readable description of this script |
+| `sender_ids` | array | List of sender ID prefixes this script handles (without `#suffix`) |
 | `entries` | array | List of question-answer pairs |
+
+### Sender ID Filtering
+
+The `sender_ids` field declares which notification senders this script can respond to. Each entry is a sender ID prefix — the proxy strips any `#session` suffix before matching.
+
+```json
+"sender_ids": [ "arg.expeditor@lupin.deepily.ai" ]
+```
+
+To handle notifications from multiple senders, add more entries:
+
+```json
+"sender_ids": [
+    "arg.expeditor@lupin.deepily.ai",
+    "workflow.orchestrator@lupin.deepily.ai"
+]
+```
+
+If the field is missing from a script file, the proxy falls back to the default sender: `arg.expeditor@lupin.deepily.ai`. Adding a new sender requires only a JSON edit — no Python code changes.
 
 ### Entry Fields
 

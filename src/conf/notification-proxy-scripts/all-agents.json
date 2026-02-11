@@ -1,6 +1,7 @@
 {
     "profile_name"  : "all_agents",
     "description"   : "Union script for multi-agent testing across all agents",
+    "sender_ids"    : [ "arg.expeditor@lupin.deepily.ai" ],
     "entries" : [
         {
             "question_pattern" : "What topic would you like me to research?",

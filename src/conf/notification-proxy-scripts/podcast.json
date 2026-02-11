@@ -1,6 +1,7 @@
 {
     "profile_name"  : "podcast",
     "description"   : "Q&A script for podcast generator agent expediter questions",
+    "sender_ids"    : [ "arg.expeditor@lupin.deepily.ai" ],
     "entries" : [
         {
             "question_pattern" : "Which research document should I use for the podcast? Describe it or say the filename.",
