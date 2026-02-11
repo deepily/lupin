@@ -11,12 +11,17 @@ Tests:
 
 import asyncio
 import json
+import os
 import pytest
+from unittest.mock import patch, MagicMock
 
 from cosa.agents.notification_proxy.config import (
     TEST_PROFILES,
     EXPEDITER_SENDER_ID,
     DEFAULT_SERVER_PORT,
+    DEFAULT_STRATEGY,
+    STRATEGY_CHOICES,
+    NOTIFICATION_PROXY_SCRIPTS_DIR,
     SUBSCRIBED_EVENTS,
     RECONNECT_MAX_ATTEMPTS,
     get_anthropic_api_key,
@@ -28,8 +33,15 @@ from cosa.agents.notification_proxy.strategies.expediter_rules import (
     KEYWORD_TO_ARG,
 )
 from cosa.agents.notification_proxy.strategies.llm_fallback import LLMFallbackStrategy
+from cosa.agents.notification_proxy.strategies.llm_script_matcher import (
+    LlmScriptMatcherStrategy,
+    resolve_script_path,
+)
+from cosa.agents.notification_proxy.xml_models import ScriptMatcherResponse, VerificationResponse
+from cosa.agents.notification_proxy.verification import LlmAnswerVerifier
 from cosa.agents.notification_proxy.listener import WebSocketListener
 from cosa.agents.notification_proxy.responder import NotificationResponder
+import cosa.utils.util as cu
 
 
 # ============================================================================
@@ -661,6 +673,681 @@ class TestKeywordOrderingRegression:
             if arg_name == "query":
                 assert "research" not in keywords, \
                     "'research' must not be in query keyword group (causes PG bug)"
+
+
+# ============================================================================
+# Test ScriptMatcherResponse XML Model
+# ============================================================================
+
+class TestScriptMatcherResponseModel:
+    """Tests for ScriptMatcherResponse Pydantic XML model."""
+
+    def test_creation_with_all_fields( self ):
+        """Creates with all required and optional fields."""
+        response = ScriptMatcherResponse(
+            matched_entry = "2",
+            answer        = "quantum computing",
+            confidence    = "0.95",
+            reasoning     = "Keyword match"
+        )
+        assert response.matched_entry == "2"
+        assert response.answer == "quantum computing"
+        assert response.confidence == "0.95"
+        assert response.reasoning == "Keyword match"
+
+    def test_xml_round_trip( self ):
+        """Serializes to XML and parses back identically."""
+        original = ScriptMatcherResponse(
+            matched_entry = "1",
+            answer        = "academic",
+            confidence    = "0.9",
+            reasoning     = "Audience question"
+        )
+        xml_str = original.to_xml()
+        assert "<matched_entry>1</matched_entry>" in xml_str
+        assert "<answer>academic</answer>" in xml_str
+
+        parsed = ScriptMatcherResponse.from_xml( xml_str )
+        assert parsed.matched_entry == original.matched_entry
+        assert parsed.answer == original.answer
+        assert parsed.confidence == original.confidence
+
+    def test_is_match_true( self ):
+        """is_match() returns True for valid matches."""
+        response = ScriptMatcherResponse(
+            matched_entry = "0",
+            answer        = "yes",
+            confidence    = "0.8"
+        )
+        assert response.is_match()
+
+    def test_is_match_false_none( self ):
+        """is_match() returns False when matched_entry is 'none'."""
+        response = ScriptMatcherResponse(
+            matched_entry = "none",
+            answer        = "",
+            confidence    = "0.0"
+        )
+        assert not response.is_match()
+
+    def test_is_match_false_empty_answer( self ):
+        """is_match() returns False when answer is empty."""
+        response = ScriptMatcherResponse(
+            matched_entry = "0",
+            answer        = "",
+            confidence    = "0.5"
+        )
+        assert not response.is_match()
+
+    def test_get_confidence_float( self ):
+        """get_confidence_float() parses string to clamped float."""
+        response = ScriptMatcherResponse(
+            matched_entry = "0", answer = "x", confidence = "0.85"
+        )
+        assert response.get_confidence_float() == 0.85
+
+    def test_get_confidence_float_invalid( self ):
+        """get_confidence_float() returns 0.0 for invalid string."""
+        response = ScriptMatcherResponse(
+            matched_entry = "0", answer = "x", confidence = "invalid"
+        )
+        assert response.get_confidence_float() == 0.0
+
+    def test_get_confidence_float_clamped( self ):
+        """get_confidence_float() clamps to [0.0, 1.0]."""
+        response = ScriptMatcherResponse(
+            matched_entry = "0", answer = "x", confidence = "1.5"
+        )
+        assert response.get_confidence_float() == 1.0
+
+        response2 = ScriptMatcherResponse(
+            matched_entry = "0", answer = "x", confidence = "-0.3"
+        )
+        assert response2.get_confidence_float() == 0.0
+
+    def test_get_answers_dict_valid_json( self ):
+        """get_answers_dict() parses JSON dict from answer field."""
+        response = ScriptMatcherResponse(
+            matched_entry = "0",
+            answer        = '{"budget": "no limit", "audience": "academic"}',
+            confidence    = "0.9"
+        )
+        answers = response.get_answers_dict()
+        assert answers[ "budget" ] == "no limit"
+        assert answers[ "audience" ] == "academic"
+
+    def test_get_answers_dict_non_json( self ):
+        """get_answers_dict() returns empty dict for non-JSON answer."""
+        response = ScriptMatcherResponse(
+            matched_entry = "0",
+            answer        = "plain text",
+            confidence    = "0.8"
+        )
+        assert response.get_answers_dict() == {}
+
+    def test_get_answers_dict_empty( self ):
+        """get_answers_dict() returns empty dict for empty answer."""
+        response = ScriptMatcherResponse(
+            matched_entry = "0",
+            answer        = "",
+            confidence    = "0.0"
+        )
+        assert response.get_answers_dict() == {}
+
+    def test_get_example_for_template( self ):
+        """Template example has placeholder-style values."""
+        example = ScriptMatcherResponse.get_example_for_template()
+        assert "index" in example.matched_entry.lower()
+        assert "answer" in example.answer.lower()
+
+    def test_none_coercion_optional_fields( self ):
+        """None values on optional fields are coerced to empty string."""
+        response = ScriptMatcherResponse(
+            matched_entry = "0",
+            answer        = "test",
+            confidence    = None,
+            reasoning     = None
+        )
+        assert response.confidence == ""
+        assert response.reasoning == ""
+
+
+# ============================================================================
+# Test VerificationResponse XML Model
+# ============================================================================
+
+class TestVerificationResponseModel:
+    """Tests for VerificationResponse Pydantic XML model."""
+
+    def test_creation_with_all_fields( self ):
+        """Creates with all required and optional fields."""
+        response = VerificationResponse(
+            match      = "true",
+            confidence = "0.95",
+            reasoning  = "Same meaning"
+        )
+        assert response.match == "true"
+        assert response.confidence == "0.95"
+
+    def test_xml_round_trip( self ):
+        """Serializes to XML and parses back identically."""
+        original = VerificationResponse(
+            match      = "false",
+            confidence = "0.8",
+            reasoning  = "Different meanings"
+        )
+        xml_str = original.to_xml()
+        assert "<match>false</match>" in xml_str
+
+        parsed = VerificationResponse.from_xml( xml_str )
+        assert parsed.match == original.match
+        assert parsed.confidence == original.confidence
+
+    def test_is_match_true( self ):
+        """is_match() returns True for 'true' match."""
+        response = VerificationResponse( match="true", confidence="0.9" )
+        assert response.is_match()
+
+    def test_is_match_false( self ):
+        """is_match() returns False for 'false' match."""
+        response = VerificationResponse( match="false", confidence="0.9" )
+        assert not response.is_match()
+
+    def test_is_match_case_insensitive( self ):
+        """is_match() handles case and whitespace."""
+        response = VerificationResponse( match=" True ", confidence="0.9" )
+        assert response.is_match()
+
+    def test_get_confidence_float( self ):
+        """get_confidence_float() parses correctly."""
+        response = VerificationResponse( match="true", confidence="0.75" )
+        assert response.get_confidence_float() == 0.75
+
+    def test_get_example_for_template( self ):
+        """Template example has placeholder-style values."""
+        example = VerificationResponse.get_example_for_template()
+        assert "true" in example.match.lower()
+
+    def test_none_coercion( self ):
+        """None values on optional fields are coerced to empty string."""
+        response = VerificationResponse(
+            match      = "true",
+            confidence = None,
+            reasoning  = None
+        )
+        assert response.confidence == ""
+        assert response.reasoning == ""
+
+
+# ============================================================================
+# Test LLM Script Matcher Construction
+# ============================================================================
+
+class TestLlmScriptMatcherConstruction:
+    """Tests for LlmScriptMatcherStrategy construction and script loading."""
+
+    def test_script_path_resolution( self ):
+        """resolve_script_path maps profile names to JSON files."""
+        path = resolve_script_path( "deep_research" )
+        assert path.endswith( "deep-research.json" )
+
+    def test_script_path_resolution_all_agents( self ):
+        """resolve_script_path handles all_agents profile."""
+        path = resolve_script_path( "all_agents" )
+        assert path.endswith( "all-agents.json" )
+
+    def test_script_path_resolution_custom_dir( self ):
+        """resolve_script_path accepts custom scripts directory."""
+        path = resolve_script_path( "deep_research", scripts_dir="/tmp" )
+        assert path == "/tmp/deep-research.json"
+
+    def test_missing_script_raises( self ):
+        """FileNotFoundError for non-existent script file."""
+        with pytest.raises( FileNotFoundError ):
+            LlmScriptMatcherStrategy( script_path="/nonexistent/script.json" )
+
+    def test_script_files_exist( self ):
+        """All expected Q&A script files exist on disk."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        for profile_name in [ "deep_research", "podcast", "research_to_podcast", "all_agents", "minimal" ]:
+            path = resolve_script_path( profile_name, scripts_dir )
+            assert os.path.exists( path ), f"Missing script: {path}"
+
+
+# ============================================================================
+# Test LLM Script Matcher can_handle
+# ============================================================================
+
+class TestLlmScriptMatcherCanHandle:
+    """Tests for LlmScriptMatcherStrategy.can_handle()."""
+
+    def _make_strategy( self ):
+        """Create a strategy with mocked LLM client."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        script_path = resolve_script_path( "deep_research", scripts_dir )
+
+        with patch( "cosa.agents.notification_proxy.strategies.llm_script_matcher.LlmClientFactory" ) as MockFactory:
+            mock_factory = MagicMock()
+            mock_client  = MagicMock()
+            MockFactory.return_value = mock_factory
+            mock_factory.get_client.return_value = mock_client
+
+            strategy = LlmScriptMatcherStrategy(
+                script_path = script_path,
+                debug       = False
+            )
+        return strategy
+
+    def test_handles_expediter_notification( self ):
+        """Returns True for expediter notifications requesting response."""
+        strategy = self._make_strategy()
+        assert strategy.can_handle( {
+            "sender_id"          : EXPEDITER_SENDER_ID,
+            "response_requested" : True
+        } )
+
+    def test_rejects_non_expediter( self ):
+        """Returns False for non-expediter sender."""
+        strategy = self._make_strategy()
+        assert not strategy.can_handle( {
+            "sender_id"          : "claude.code@lupin.deepily.ai",
+            "response_requested" : True
+        } )
+
+    def test_rejects_no_response_requested( self ):
+        """Returns False when response not requested."""
+        strategy = self._make_strategy()
+        assert not strategy.can_handle( {
+            "sender_id"          : EXPEDITER_SENDER_ID,
+            "response_requested" : False
+        } )
+
+
+# ============================================================================
+# Test LLM Script Matcher respond (with mocked LLM)
+# ============================================================================
+
+class TestLlmScriptMatcherRespond:
+    """Tests for LlmScriptMatcherStrategy.respond() with mocked LLM."""
+
+    def _make_strategy_with_mock( self, xml_response ):
+        """Create strategy with mocked LLM that returns the given XML."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        script_path = resolve_script_path( "deep_research", scripts_dir )
+
+        with patch( "cosa.agents.notification_proxy.strategies.llm_script_matcher.LlmClientFactory" ) as MockFactory:
+            mock_factory = MagicMock()
+            mock_client  = MagicMock()
+            mock_client.run.return_value = xml_response
+            MockFactory.return_value = mock_factory
+            mock_factory.get_client.return_value = mock_client
+
+            strategy = LlmScriptMatcherStrategy(
+                script_path = script_path,
+                debug       = False
+            )
+        return strategy
+
+    def test_yes_no_returns_scripted_answer( self ):
+        """YES_NO type returns 'yes' from script via LLM."""
+        xml = ScriptMatcherResponse(
+            matched_entry = "4",
+            answer        = "yes",
+            confidence    = "0.95",
+            reasoning     = "Confirmation match"
+        ).to_xml()
+
+        strategy = self._make_strategy_with_mock( xml )
+        answer = strategy.respond( {
+            "response_type" : "yes_no",
+            "message"       : "Would you like to proceed?",
+            "title"         : "Confirm"
+        } )
+        assert answer == "yes"
+
+    def test_open_ended_returns_scripted_answer( self ):
+        """OPEN_ENDED type returns matched script answer via LLM."""
+        xml = ScriptMatcherResponse(
+            matched_entry = "0",
+            answer        = "quantum computing breakthroughs 2026",
+            confidence    = "0.92",
+            reasoning     = "Topic question match"
+        ).to_xml()
+
+        strategy = self._make_strategy_with_mock( xml )
+        answer = strategy.respond( {
+            "response_type" : "open_ended",
+            "message"       : "What topic would you like me to research?",
+            "title"         : "Missing: query"
+        } )
+        assert answer == "quantum computing breakthroughs 2026"
+
+    def test_open_ended_no_match_returns_none( self ):
+        """OPEN_ENDED returns None when LLM finds no match."""
+        xml = ScriptMatcherResponse(
+            matched_entry = "none",
+            answer        = "",
+            confidence    = "0.1",
+            reasoning     = "No matching entry"
+        ).to_xml()
+
+        strategy = self._make_strategy_with_mock( xml )
+        answer = strategy.respond( {
+            "response_type" : "open_ended",
+            "message"       : "What is the meaning of life?",
+            "title"         : "Philosophy"
+        } )
+        assert answer is None
+
+    def test_multiple_choice_returns_option_label( self ):
+        """MULTIPLE_CHOICE returns selected option label via LLM."""
+        xml = ScriptMatcherResponse(
+            matched_entry = "2",
+            answer        = "academic",
+            confidence    = "0.88",
+            reasoning     = "Audience matches academic option"
+        ).to_xml()
+
+        strategy = self._make_strategy_with_mock( xml )
+        answer = strategy.respond( {
+            "response_type"    : "multiple_choice",
+            "message"          : "Who is the target audience?",
+            "title"            : "Audience",
+            "response_options" : {
+                "questions" : [ {
+                    "options" : [
+                        { "label": "beginner", "description": "New to the topic" },
+                        { "label": "academic", "description": "Research audience" },
+                        { "label": "general",  "description": "General public" },
+                    ]
+                } ]
+            }
+        } )
+        assert answer == "academic"
+
+    def test_batch_returns_json_dict( self ):
+        """OPEN_ENDED_BATCH returns JSON dict via LLM."""
+        xml = ScriptMatcherResponse(
+            matched_entry = "0",
+            answer        = '{"budget": "no limit", "audience": "academic"}',
+            confidence    = "0.90",
+            reasoning     = "Batch match"
+        ).to_xml()
+
+        strategy = self._make_strategy_with_mock( xml )
+        answer = strategy.respond( {
+            "response_type"    : "open_ended_batch",
+            "message"          : "I need a few things...",
+            "title"            : "Missing arguments",
+            "response_options" : {
+                "questions" : [
+                    { "header": "budget",   "question": "Budget limit?" },
+                    { "header": "audience", "question": "Who is the audience?" },
+                ]
+            }
+        } )
+        assert answer is not None
+        parsed = json.loads( answer )
+        assert parsed[ "answers" ][ "budget" ] == "no limit"
+        assert parsed[ "answers" ][ "audience" ] == "academic"
+
+    def test_batch_no_match_returns_none( self ):
+        """OPEN_ENDED_BATCH returns None when no match."""
+        xml = ScriptMatcherResponse(
+            matched_entry = "none",
+            answer        = "",
+            confidence    = "0.0",
+            reasoning     = "No match"
+        ).to_xml()
+
+        strategy = self._make_strategy_with_mock( xml )
+        answer = strategy.respond( {
+            "response_type"    : "open_ended_batch",
+            "message"          : "Random questions",
+            "title"            : "Unknown",
+            "response_options" : {
+                "questions" : [
+                    { "header": "unknown", "question": "What?" },
+                ]
+            }
+        } )
+        assert answer is None
+
+    def test_llm_error_returns_none( self ):
+        """LLM exceptions are caught and return None."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        script_path = resolve_script_path( "deep_research", scripts_dir )
+
+        with patch( "cosa.agents.notification_proxy.strategies.llm_script_matcher.LlmClientFactory" ) as MockFactory:
+            mock_factory = MagicMock()
+            mock_client  = MagicMock()
+            mock_client.run.side_effect = RuntimeError( "vLLM down" )
+            MockFactory.return_value = mock_factory
+            mock_factory.get_client.return_value = mock_client
+
+            strategy = LlmScriptMatcherStrategy(
+                script_path = script_path,
+                debug       = False
+            )
+
+        answer = strategy.respond( {
+            "response_type" : "open_ended",
+            "message"       : "What topic?",
+            "title"         : "Query"
+        } )
+        assert answer is None
+
+    def test_agent_context_filtering( self ):
+        """Entry filtering based on agent name in abstract."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        script_path = resolve_script_path( "all_agents", scripts_dir )
+
+        with patch( "cosa.agents.notification_proxy.strategies.llm_script_matcher.LlmClientFactory" ) as MockFactory:
+            mock_factory = MagicMock()
+            mock_client  = MagicMock()
+            MockFactory.return_value = mock_factory
+            mock_factory.get_client.return_value = mock_client
+
+            strategy = LlmScriptMatcherStrategy(
+                script_path = script_path,
+                debug       = False
+            )
+
+        # Filter for deep_research — should include universal + deep_research-tagged entries
+        notif_dr = { "abstract": "Agent: Deep Research\nJob: test" }
+        filtered_dr = strategy._filter_entries_by_agent( notif_dr )
+
+        # Filter for podcast — should include universal + podcast-tagged entries
+        notif_pg = { "abstract": "Agent: Podcast\nJob: test" }
+        filtered_pg = strategy._filter_entries_by_agent( notif_pg )
+
+        # No context — should return all entries
+        notif_none = { "abstract": "" }
+        filtered_all = strategy._filter_entries_by_agent( notif_none )
+
+        assert len( filtered_dr ) < len( filtered_all )
+        assert len( filtered_pg ) < len( filtered_all )
+
+
+# ============================================================================
+# Test LLM Answer Verifier
+# ============================================================================
+
+class TestLlmAnswerVerifier:
+    """Tests for LlmAnswerVerifier."""
+
+    def test_exact_match_bypasses_llm( self ):
+        """Exact case-insensitive match returns true without LLM."""
+        with patch( "cosa.agents.notification_proxy.verification.LlmClientFactory" ) as MockFactory:
+            MockFactory.return_value = MagicMock()
+            MockFactory.return_value.get_client.return_value = MagicMock()
+            verifier = LlmAnswerVerifier( debug=False )
+
+        result = verifier.verify( "academic", "Academic" )
+        assert result.is_match()
+        assert result.get_confidence_float() == 1.0
+
+    def test_exact_match_whitespace_stripped( self ):
+        """Whitespace-stripped exact match returns true."""
+        with patch( "cosa.agents.notification_proxy.verification.LlmClientFactory" ) as MockFactory:
+            MockFactory.return_value = MagicMock()
+            MockFactory.return_value.get_client.return_value = MagicMock()
+            verifier = LlmAnswerVerifier( debug=False )
+
+        result = verifier.verify( "  no limit  ", "no limit" )
+        assert result.is_match()
+        assert result.get_confidence_float() == 1.0
+
+    def test_semantic_match_via_llm( self ):
+        """Non-exact match goes through LLM and returns parsed result."""
+        xml = VerificationResponse(
+            match      = "true",
+            confidence = "0.85",
+            reasoning  = "Both mean unlimited budget"
+        ).to_xml()
+
+        with patch( "cosa.agents.notification_proxy.verification.LlmClientFactory" ) as MockFactory:
+            mock_factory = MagicMock()
+            mock_client  = MagicMock()
+            mock_client.run.return_value = xml
+            MockFactory.return_value = mock_factory
+            mock_factory.get_client.return_value = mock_client
+
+            verifier = LlmAnswerVerifier( debug=False )
+
+        result = verifier.verify( "no limit", "unlimited", context="Budget question" )
+        assert result.is_match()
+        assert result.get_confidence_float() == 0.85
+
+    def test_semantic_no_match( self ):
+        """LLM returns false for semantically different answers."""
+        xml = VerificationResponse(
+            match      = "false",
+            confidence = "0.90",
+            reasoning  = "Answers differ in meaning"
+        ).to_xml()
+
+        with patch( "cosa.agents.notification_proxy.verification.LlmClientFactory" ) as MockFactory:
+            mock_factory = MagicMock()
+            mock_client  = MagicMock()
+            mock_client.run.return_value = xml
+            MockFactory.return_value = mock_factory
+            mock_factory.get_client.return_value = mock_client
+
+            verifier = LlmAnswerVerifier( debug=False )
+
+        result = verifier.verify( "academic", "general public", context="Audience" )
+        assert not result.is_match()
+
+    def test_batch_verification( self ):
+        """verify_batch returns list of VerificationResponse objects."""
+        with patch( "cosa.agents.notification_proxy.verification.LlmClientFactory" ) as MockFactory:
+            MockFactory.return_value = MagicMock()
+            MockFactory.return_value.get_client.return_value = MagicMock()
+            verifier = LlmAnswerVerifier( debug=False )
+
+        # All exact matches — no LLM needed
+        pairs = [
+            ( "academic", "academic" ),
+            ( "no limit", "no limit" ),
+            ( "en", "en" ),
+        ]
+        results = verifier.verify_batch( pairs )
+        assert len( results ) == 3
+        assert all( r.is_match() for r in results )
+
+
+# ============================================================================
+# Test Q&A Script Format
+# ============================================================================
+
+class TestQAScriptFormat:
+    """Tests for Q&A script JSON format correctness."""
+
+    def _load_script( self, profile_name ):
+        """Load a Q&A script by profile name."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        path = resolve_script_path( profile_name, scripts_dir )
+        with open( path, "r" ) as f:
+            return json.load( f )
+
+    def test_scripts_have_required_fields( self ):
+        """All scripts have profile_name, description, and entries."""
+        for profile in [ "deep_research", "podcast", "research_to_podcast", "all_agents", "minimal" ]:
+            script = self._load_script( profile )
+            assert "profile_name" in script, f"{profile} missing profile_name"
+            assert "description" in script, f"{profile} missing description"
+            assert "entries" in script, f"{profile} missing entries"
+            assert len( script[ "entries" ] ) > 0, f"{profile} has no entries"
+
+    def test_entries_have_required_fields( self ):
+        """All script entries have question_pattern, answer, arg_name, response_types."""
+        for profile in [ "deep_research", "podcast", "research_to_podcast", "all_agents", "minimal" ]:
+            script = self._load_script( profile )
+            for i, entry in enumerate( script[ "entries" ] ):
+                assert "question_pattern" in entry, f"{profile} entry {i} missing question_pattern"
+                assert "answer" in entry, f"{profile} entry {i} missing answer"
+                assert "arg_name" in entry, f"{profile} entry {i} missing arg_name"
+                assert "response_types" in entry, f"{profile} entry {i} missing response_types"
+
+    def test_scripts_match_test_profiles( self ):
+        """Q&A script answers are consistent with TEST_PROFILES values."""
+        for profile_name in [ "deep_research", "podcast" ]:
+            script   = self._load_script( profile_name )
+            profile  = TEST_PROFILES[ profile_name ]
+
+            for entry in script[ "entries" ]:
+                arg_name = entry[ "arg_name" ]
+                # Skip confirmation entries — not in TEST_PROFILES
+                if arg_name == "confirmation":
+                    continue
+                if arg_name in profile:
+                    assert entry[ "answer" ] == profile[ arg_name ], \
+                        f"{profile_name}: script answer for '{arg_name}' ({entry[ 'answer' ]}) != " \
+                        f"profile value ({profile[ arg_name ]})"
+
+
+# ============================================================================
+# Test Config Additions
+# ============================================================================
+
+class TestConfigAdditions:
+    """Tests for new config constants."""
+
+    def test_strategy_choices( self ):
+        """Strategy choices include expected values."""
+        assert "llm_script" in STRATEGY_CHOICES
+        assert "rules" in STRATEGY_CHOICES
+        assert "auto" in STRATEGY_CHOICES
+
+    def test_default_strategy( self ):
+        """Default strategy is llm_script."""
+        assert DEFAULT_STRATEGY == "llm_script"
+
+    def test_scripts_dir_constant( self ):
+        """Scripts directory constant is set."""
+        assert NOTIFICATION_PROXY_SCRIPTS_DIR == "/src/conf/notification-proxy-scripts"
+
+
+# ============================================================================
+# Test Responder with Strategy Mode
+# ============================================================================
+
+class TestResponderStrategyMode:
+    """Tests for NotificationResponder with different strategy modes."""
+
+    def test_rules_mode_no_script_strategy( self ):
+        """Rules mode does not create script strategy."""
+        responder = NotificationResponder( "deep_research", strategy="rules" )
+        assert responder.script_strategy is None
+        assert responder.rule_strategy is not None
+        assert responder.strategy_mode == "rules"
+
+    def test_stats_include_script_matcher( self ):
+        """Stats dict includes script_matcher_used counter."""
+        responder = NotificationResponder( "deep_research", strategy="rules" )
+        assert "script_matcher_used" in responder.stats
+        assert responder.stats[ "script_matcher_used" ] == 0
 
 
 # ============================================================================

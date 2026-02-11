@@ -1,0 +1,32 @@
+### Instruction:
+
+Match an incoming notification question to the best entry from a Q&A script.
+For multiple_choice questions, evaluate ALL options against the script and choose the best one.
+
+### Task:
+
+You are an automated test proxy. A notification has arrived asking a question.
+You must determine which Q&A script entry best matches the incoming question,
+then return the answer from that entry inside the XML structure shown below.
+
+For multiple_choice: The options are provided. Pick the option label that best
+aligns with the Q&A script's answer for this type of question.
+
+IMPORTANT: Use semantic similarity — the question will NOT match exactly.
+IMPORTANT: If no entry matches, set matched_entry to "none" and answer to empty.
+
+### Input:
+
+Response type: {response_type}
+Title context: {title}
+Incoming question: {incoming_question}
+{options_section}
+
+Q&A Script entries:
+{script_entries}
+
+### Response Format:
+
+{{PYDANTIC_XML_EXAMPLE}}
+
+### Response:

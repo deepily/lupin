@@ -1,0 +1,59 @@
+{
+    "profile_name"  : "all_agents",
+    "description"   : "Union script for multi-agent testing across all agents",
+    "entries" : [
+        {
+            "question_pattern" : "What topic would you like me to research?",
+            "answer"           : "quantum computing breakthroughs 2026",
+            "arg_name"         : "query",
+            "response_types"   : [ "open_ended", "open_ended_batch" ],
+            "agents"           : [ "deep_research" ]
+        },
+        {
+            "question_pattern" : "What topic would you like me to research and turn into a podcast?",
+            "answer"           : "quantum computing breakthroughs 2026",
+            "arg_name"         : "query",
+            "response_types"   : [ "open_ended", "open_ended_batch" ],
+            "agents"           : [ "research_to_podcast" ]
+        },
+        {
+            "question_pattern" : "Would you like to set a budget limit in dollars?",
+            "answer"           : "no limit",
+            "arg_name"         : "budget",
+            "response_types"   : [ "open_ended", "open_ended_batch" ],
+            "agents"           : [ "deep_research", "research_to_podcast" ]
+        },
+        {
+            "question_pattern" : "Who is the target audience?",
+            "answer"           : "academic",
+            "arg_name"         : "audience",
+            "response_types"   : [ "open_ended", "open_ended_batch", "multiple_choice" ]
+        },
+        {
+            "question_pattern" : "Any additional context about the audience?",
+            "answer"           : "none",
+            "arg_name"         : "audience_context",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "question_pattern" : "Which research document should I use for the podcast?",
+            "answer"           : "/tmp/mock-research-document.md",
+            "arg_name"         : "research",
+            "response_types"   : [ "open_ended", "open_ended_batch" ],
+            "agents"           : [ "podcast" ]
+        },
+        {
+            "question_pattern" : "What languages for the podcast?",
+            "answer"           : "en",
+            "arg_name"         : "languages",
+            "response_types"   : [ "open_ended", "open_ended_batch" ],
+            "agents"           : [ "podcast", "research_to_podcast" ]
+        },
+        {
+            "question_pattern" : "Would you like to proceed with these settings?",
+            "answer"           : "yes",
+            "arg_name"         : "confirmation",
+            "response_types"   : [ "yes_no" ]
+        }
+    ]
+}

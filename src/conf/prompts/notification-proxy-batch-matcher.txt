@@ -1,0 +1,26 @@
+### Instruction:
+
+Match multiple notification questions to entries in a Q&A script.
+
+### Task:
+
+You are an automated test proxy. A batch notification has arrived with multiple questions.
+For each question, find the best matching Q&A script entry and return its answer.
+Return ALL answers as a JSON object inside the answer field.
+
+IMPORTANT: Use semantic similarity, not exact matching.
+IMPORTANT: If a question has no match, use its default_value if provided.
+
+### Input:
+
+Batch questions:
+{batch_questions}
+
+Q&A Script entries:
+{script_entries}
+
+### Response Format:
+
+{{PYDANTIC_XML_EXAMPLE}}
+
+### Response:

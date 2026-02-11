@@ -1,0 +1,29 @@
+{
+    "_comment"      : "Copy this file and rename to <your-agent>.json. Remove _comment fields before use.",
+    "profile_name"  : "your_agent_name",
+    "description"   : "Q&A script for <your agent> expediter questions",
+    "entries" : [
+        {
+            "_comment"         : "Derive question_pattern from agent_registry fallback_questions",
+            "question_pattern" : "What is the primary input for your agent?",
+            "answer"           : "your scripted answer here",
+            "arg_name"         : "the_cli_arg_name",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "_comment"         : "Confirmation questions — always yes for automated testing",
+            "question_pattern" : "Would you like to proceed?",
+            "answer"           : "yes",
+            "arg_name"         : "confirmation",
+            "response_types"   : [ "yes_no" ]
+        },
+        {
+            "_comment"         : "For multi-agent scripts, add an agents tag to scope entries",
+            "question_pattern" : "Example agent-scoped question",
+            "answer"           : "example answer",
+            "arg_name"         : "example_arg",
+            "response_types"   : [ "open_ended" ],
+            "agents"           : [ "your_agent_name" ]
+        }
+    ]
+}

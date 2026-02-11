@@ -3207,6 +3207,16 @@ pytest src/tests/unit/test_{agent_name}.py -v
 [ ] All smoke tests pass: python -m cosa.agents.{agent_name}.{module}
 ```
 
+### Automated Notification Proxy Responses
+
+If your agent uses the Runtime Argument Expediter (which sends notification questions to gather missing arguments), you will need a **Q&A script** for the Notification Proxy to auto-answer those questions during automated testing.
+
+**See**: `src/conf/notification-proxy-scripts/README.md` for:
+- Q&A script JSON format specification
+- Step-by-step guide to create a script for your agent
+- How to derive entries from your agent's `fallback_questions` in the agent registry
+- Template file (`_template.json`) to copy and modify
+
 ---
 
 ## Surface 2: Mock Job Endpoint (FREE, <1s, server required)

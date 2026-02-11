@@ -1,5 +1,43 @@
 # Lupin Project History
 
+### 2026.02.11 - Session 183 | Notification Proxy LLM Script Matcher Implementation
+
+#### Checkpoint | 2026.02.11 | Phi-4 script matcher + answer verifier + Q&A scripts + 50 new tests
+
+**Accomplishments**:
+- **Implemented full plan**: "Replace Notification Proxy Keyword Matching with Local Phi-4 LLM Strategy" (Parts A-I)
+- **XML models** (Part A): Created `ScriptMatcherResponse` and `VerificationResponse` BaseXMLModel subclasses in `xml_models.py` with field validators, helper methods, smoke tests
+- **Prompt templates** (Part B): 3 new templates using `{{PYDANTIC_XML_EXAMPLE}}` — script-matcher, batch-matcher, answer-verifier
+- **Q&A scripts** (Part C): 7 JSON script files in `src/conf/notification-proxy-scripts/` — deep-research, podcast, research-to-podcast, all-agents (multi-agent with `agents` tags), minimal, template, README
+- **LLM Script Matcher** (Part D): `LlmScriptMatcherStrategy` drop-in replacement for `ExpediterRuleStrategy` — handles all 4 response types via Phi-4, agent-aware entry filtering
+- **Answer Verifier** (Part E): `LlmAnswerVerifier` with exact-match bypass optimization, batch verification
+- **Configuration** (Part F): 5 new config keys in `lupin-app.ini` + matching explanations
+- **Wiring** (Part G): 3-tier strategy chain in responder (script_matcher → rules → cloud), `--strategy` CLI flag, MODEL_MAPPING registration
+- **Unit tests** (Part H): 50 new tests across 8 test classes (109 total notification proxy tests, 770 full suite)
+- **Documentation** (Part I): Cross-reference in `agentic-voice-workflow.md`, README in scripts directory
+
+**Files Modified** (Lupin repo):
+- `src/conf/lupin-app.ini` (5 new config keys)
+- `src/conf/lupin-app-splainer.ini` (5 matching explanations)
+- `src/tests/unit/test_notification_proxy.py` (50 new tests, 8 new test classes)
+- `src/workflow/agentic-voice-workflow.md` (proxy scripts cross-reference)
+- `src/conf/prompts/notification-proxy-script-matcher.txt` (NEW)
+- `src/conf/prompts/notification-proxy-batch-matcher.txt` (NEW)
+- `src/conf/prompts/notification-proxy-answer-verifier.txt` (NEW)
+- `src/conf/notification-proxy-scripts/` (NEW — 7 files: deep-research.json, podcast.json, research-to-podcast.json, all-agents.json, minimal.json, _template.json, README.md)
+
+**Files Modified** (CoSA submodule, not committed here):
+- `src/cosa/agents/notification_proxy/xml_models.py` (NEW — ScriptMatcherResponse + VerificationResponse)
+- `src/cosa/agents/notification_proxy/strategies/llm_script_matcher.py` (NEW — LlmScriptMatcherStrategy)
+- `src/cosa/agents/notification_proxy/verification.py` (NEW — LlmAnswerVerifier)
+- `src/cosa/agents/io_models/utils/prompt_template_processor.py` (2 MODEL_MAPPING entries)
+- `src/cosa/agents/notification_proxy/strategies/__init__.py` (updated docstring)
+- `src/cosa/agents/notification_proxy/config.py` (10 new constants)
+- `src/cosa/agents/notification_proxy/responder.py` (3-tier strategy chain)
+- `src/cosa/agents/notification_proxy/__main__.py` (--strategy CLI flag)
+
+---
+
 ### 2026.02.11 - Session 182 | Llama 3.2 3B vLLM Latency Analysis + gptq_marlin Config
 
 #### Checkpoint | 2026.02.11 | Llama 3.2 latency research doc + Marlin kernel config

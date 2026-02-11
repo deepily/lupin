@@ -1,0 +1,42 @@
+{
+    "profile_name"  : "research_to_podcast",
+    "description"   : "Q&A script for research-to-podcast chained workflow expediter questions",
+    "entries" : [
+        {
+            "question_pattern" : "What topic would you like me to research and turn into a podcast?",
+            "answer"           : "artificial intelligence safety research 2026",
+            "arg_name"         : "query",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "question_pattern" : "Would you like to set a budget limit for the research phase?",
+            "answer"           : "no limit",
+            "arg_name"         : "budget",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "question_pattern" : "Who is the target audience? Options: beginner, intermediate, expert, or academic.",
+            "answer"           : "academic",
+            "arg_name"         : "audience",
+            "response_types"   : [ "open_ended", "open_ended_batch", "multiple_choice" ]
+        },
+        {
+            "question_pattern" : "Any additional context about the audience? Say 'none' to skip.",
+            "answer"           : "none",
+            "arg_name"         : "audience_context",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "question_pattern" : "What languages for the podcast? Use ISO codes like 'en' for English, 'es-MX' for Mexican Spanish.",
+            "answer"           : "en,es-MX",
+            "arg_name"         : "languages",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "question_pattern" : "Would you like to proceed with these settings?",
+            "answer"           : "yes",
+            "arg_name"         : "confirmation",
+            "response_types"   : [ "yes_no" ]
+        }
+    ]
+}
