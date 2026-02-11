@@ -37,7 +37,7 @@ Last updated: 2026-02-10 (Session 179)
   - [x] Bug fix: TTS focus mode stuck — staleness check in restoreTTSQueueState + exit in moveToRegularNotifications (Session 164)
   - [ ] Part 3: Curl smoke tests (Tests 1-2 done, Tests 3-4 pending. Test 4 revealed **delete-all-records bug** — see plan below)
   - [ ] Part 2: Notifications UI tests (8 scenarios, live server)
-  - [ ] **Bug fix: delete_item deletes all records** — Duplicate inserts + no multi-delete guard. Plan at `~/.claude/plans/cached-growing-mist.md`. Changes: dedup keys in schemas.py, dedup guard in add_item, multi-delete guard in delete_item, reject infra columns in match_fields, 6 new tests. **Resume here next session.**
+  - [ ] **Bug fix: delete_item deletes all records** — Duplicate inserts + no multi-delete guard. Full implementation plan at `src/rnd/2026.02.10-crud-delete-bug-fix-and-live-pipeline-smoke-test.md` (original plan at `~/.claude/plans/cached-growing-mist.md`). 4 parts: (A) 5-change bug fix, (B) 6 new unit tests, (C) `test_crud_live_pipeline.py` 8-scenario live smoke test, (D) full regression. **RESUME TOMORROW (Session 181).**
 - [ ] **[LUPIN] Phase 4: End-to-End Voice Workflows + Polish** - PENDING (blocked by Phase 3 ✅)
 
 ### Skills Management (Session 118 Discovery)

@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.02.10 - Session 180 | Save CRUD Delete Bug Fix Plan to R&D
+
+**Accomplishments**:
+- **Plan document saved**: Wrote `src/rnd/2026.02.10-crud-delete-bug-fix-and-live-pipeline-smoke-test.md` — comprehensive 4-part plan: (A) 5-change bug fix (dedup guard, multi-delete guard, infra column rejection), (B) 6 new unit tests, (C) `test_crud_live_pipeline.py` 8-scenario live smoke test following calculator + expeditor patterns, (D) full regression verification.
+- **R&D README updated**: Added plan doc entry.
+- **TODO.md updated**: CRUD bug fix item now references R&D plan doc, marked "RESUME TOMORROW (Session 181)".
+
+**Files Modified** (Lupin repo):
+- `src/rnd/2026.02.10-crud-delete-bug-fix-and-live-pipeline-smoke-test.md` (NEW — plan doc)
+- `src/rnd/README.md` (added plan doc entry)
+- `TODO.md` (updated CRUD bug fix item)
+
+---
+
 ### 2026.02.10 - Session 179 | Expand Smoke Test Matrix (9 → 13 Scenarios) — Partial
 
 **Accomplishments**:
