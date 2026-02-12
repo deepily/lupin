@@ -1,5 +1,32 @@
 # Lupin Project History
 
+### 2026.02.12 - Session 196 | Three-Model PEFT Comparison + Ministral 8-bit Config Swap
+
+#### Checkpoint | 2026.02.12 | Three-model PEFT comparison doc + Ministral 8-bit config swap
+
+**Accomplishments**:
+- Created comprehensive R&D comparison document for 3 fine-tuned LoRA models (Ministral-8B, Qwen3-4B, Llama-3.2-3B) across 34 agentic routing commands
+- **Key finding**: Ministral-8B 8-bit quantization is lossless (98.7% EM, 0 commands degraded, +0.8pp vs full precision)
+- Switched development router from Qwen3-4B 4-bit (83.0% EM) to Ministral-8B 8-bit (98.7% EM)
+- Updated bash aliases: `svllmr` now serves Ministral 8-bit with `--quantization gptq_marlin --gpu_memory_utilization 0.85`
+- Added `svllmrq` backup alias for Qwen3-4B fallback
+- Added Llama-3.2-3B reference entries (commented out, 64.1% EM too low for production)
+
+**Files Created**:
+- `src/rnd/2026.02.12-three-model-peft-comparison-ministral-qwen-llama.md` (NEW)
+
+**Files Modified** (Lupin repo):
+- `src/rnd/README.md` (added comparison doc entry)
+- `src/conf/lupin-app.ini` (Phase 3 Ministral 8-bit, router swap, Llama reference)
+- `src/conf/lupin-app-splainer.ini` (router explanation, Llama entries)
+
+**Files Modified** (outside repo):
+- `~/.bash_aliases` (svllmr → Ministral 8-bit, svllmrq Qwen3 backup)
+
+**Commit**: c0a71e0
+
+---
+
 ### 2026.02.12 - Session 195 | Debug Script Matching Smoke Test (11/19 → 18/19)
 
 #### Checkpoint | 2026.02.12 | Debug script matching smoke test — batch XML model, ampersand escaping, fuzzy prompt hints (11/19 → 18/19)
