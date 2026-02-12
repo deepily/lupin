@@ -134,6 +134,19 @@ Based on benchmarks with real data:
 
 *Note: Performance varies based on dataset size. For small datasets (<100 snapshots), file-based may be faster due to lower overhead.*
 
+## Embedding Performance
+
+Local GPU embedding engines (CodeRankEmbed + nomic-embed-text-v1.5) vs OpenAI API (text-embedding-3-small), benchmarked with N=10 iterations over 3 queries each:
+
+| Operation | Content Type | Local GPU | OpenAI API | Speedup |
+|-----------|-------------|-----------|------------|---------|
+| Single embedding | prose | 164 ms | 1,146 ms | **7x faster** |
+| Single embedding | code | 70 ms | 1,211 ms | **17x faster** |
+| Batch (3 items) | prose | 8 ms | 2,989 ms | **374x faster** |
+| Batch (3 items) | code | 8 ms | 3,183 ms | **398x faster** |
+
+Toggle between providers via `embedding provider = local | openai` in `lupin-app.ini`. Benchmark harness: `pytest src/tests/smoke/test_embedding_benchmark.py -v -s`
+
 **Quick Start Commands:**
 - Run FastAPI server: `src/scripts/run-fastapi-lupin.sh` (port 7999)
 - Run GUI client: `src/scripts/run-lupin-gui.sh`
