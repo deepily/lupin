@@ -1,5 +1,73 @@
 # Lupin Project History
 
+### 2026.02.11 - Session 191 | Calculator Step 25 — LORA Auto-Route Verification + Implementation Complete
+
+**Accomplishments**:
+- Added `--auto-route` / `-a` CLI flag to `test_calculator_live_pipeline.py` for Step 25 (LORA routing verification)
+- Auto-route mode clears explicit calculator mode, submits queries, and verifies `agent_type == CalculatorAgent` in done queue metadata
+- All 6 queries correctly routed by LORA classifier — 6/6 pass
+- Marked Steps 25, 29, 30, 31 as complete in implementation doc
+- **Everyday Calculator agent is 100% complete** — all 31 steps across 6 phases finished
+
+**Files Modified**:
+- `src/tests/smoke/test_calculator_live_pipeline.py` (Step 25: `--auto-route` flag, conditional mode skip, `agent_type` verification)
+- `src/rnd/2026.02.09-everyday-calculator-agent-implementation.md` (all remaining checkboxes marked done)
+- `TODO.md` (calculator item marked fully complete)
+
+**Commits**: c479bfe (Step 25 code), f65a2d4 (all 31 steps complete)
+
+---
+
+### 2026.02.12 - Session 199 | Bug Fix: Dead Job Card Missing run->dead WebSocket Transition
+
+#### Checkpoint | 2026.02.12 | Add missing emit_job_state_transition() to _handle_error_case()
+
+**Accomplishments**:
+- **Root cause**: `_handle_error_case()` in `running_fifo_queue.py` was the only error/completion path that didn't emit a `job_state_transition` WebSocket event — all 6 other paths (AgentBase success, AgenticJob success/failure/crash, SolutionSnapshot success, cached result) already did
+- **Fix**: Added `emit_job_state_transition()` call for `run -> dead` with full error metadata (error msg, question text, agent type, timestamps, duration), following the exact pattern from the agentic job failure path
+- **Effect**: Dead job cards now move from run bucket to dead bucket in the UI with error message rendered inline
+- **814 unit tests pass, 0 regressions** (2 pre-existing CRUD test failures confirmed unrelated)
+
+**Files Modified** (CoSA submodule — needs separate commit):
+- `src/cosa/rest/running_fifo_queue.py` (`_handle_error_case()` — added WebSocket emission block)
+
+**Commit**: [pending]
+
+---
+
+### 2026.02.12 - Session 198 | Fix LanceDB Embedding Dimension Mismatch (768 Standardization)
+
+#### Checkpoint | 2026.02.12 | Standardize all embedding providers on 768 dims + schema validation
+
+**Accomplishments**:
+- **Root cause**: LanceDB tables created with 1536-dim schemas (OpenAI default), config switched to local provider (768 dims), causing Arrow `FixedSizeList` casting errors on insert
+- **Part 1**: Standardized on 768 dimensions for ALL providers — OpenAI `text-embedding-3-small` now uses MRL truncation via `dimensions` API parameter
+- **Part 2**: Added `_validate_embedding_dimensions()` to all 6 LanceDB table classes — auto-drops and recreates tables if schema dimension mismatch detected
+- Simplified dimension initialization in all 6 table classes: replaced if/else provider pattern with single `config_mgr.get("embedding dimensions")` call
+- Updated `EmbeddingProvider.dimensions` and `code_dimensions` properties to use centralized config
+- Fixed unit test: `test_dimensions_property_openai` updated to expect 768 (MRL truncation)
+- **811 unit tests pass, 0 new failures** (5 pre-existing failures unrelated to embeddings)
+
+**Files Modified** (Lupin repo):
+- `src/conf/lupin-app.ini` (added `embedding dimensions = 768`)
+- `src/conf/lupin-app-splainer.ini` (added matching explanation)
+- `src/tests/unit/test_local_embedding_engine.py` (updated mock config + assertion)
+
+**Files Modified** (CoSA submodule — needs separate commit):
+- `memory/embedding_manager.py` (pass `dimensions=embedding_dim` to OpenAI API)
+- `memory/embedding_provider.py` (simplified `dimensions` + `code_dimensions` properties)
+- `memory/input_and_output_table.py` (simplified dim init + validation)
+- `memory/question_embeddings_table.py` (simplified dim init + validation)
+- `memory/embedding_cache_table.py` (simplified dim init + validation)
+- `memory/canonical_synonyms_table.py` (simplified dim init + validation)
+- `memory/query_log_table.py` (simplified dim init + validation)
+- `memory/lancedb_solution_manager.py` (simplified dim init + validation)
+
+**Plan**: `~/.claude/plans/eager-foraging-ember.md`
+**Commit**: [pending]
+
+---
+
 ### 2026.02.12 - Session 197 | CJ Flow Branding + Bounded Job Packaging + Claude Code LORA Data
 
 #### Checkpoint | 2026.02.12 19:00 | CJ Flow plan implementation — branding, factory, config, training data
