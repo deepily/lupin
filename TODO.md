@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-12 (Session 195)
+Last updated: 2026-02-12 (Session 199)
 
 ## Pending
 
@@ -69,14 +69,12 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - **Plan**: `src/rnd/2026.02.07-peft-trainer-optimization-plan-part-2.md`
   - **461 unit tests passing**, zero regressions
   - **CoSA submodule files need separate commit**: xml_coordinator.py, peft_trainer.py, todo_fifo_queue.py
-- [ ] **[LUPIN] Everyday Calculator — Phase 5-6 Remaining** (Session 165 planning)
-  - [x] Phases 1-4 COMPLETE (94 unit tests, 17 mock pipeline tests, MathAgent fallback, 83 LORA templates)
-  - [x] Step 24: Test 6 queries via Q&A Card with Calculator mode — **Automated**: `src/tests/smoke/test_calculator_live_pipeline.py` (6-query matrix with poll-by-job_id, all passing)
-  - [ ] Step 25: Test 6 queries via System Mode auto-routing (needs retrained LORA)
-  - [x] Step 29: Regenerate training data — **Session 177**: Expanded calculator templates 83 → 508, cleaned math ↔ calculator boundary (27 lines removed), regenerated 38,371 training examples. Calculator: 1,483 samples. **LORA retrain still needed** (GPU required).
-  - [ ] Step 30: Validate LORA accuracy (>95%, no regression)
-  - [ ] Step 31: Full voice routing test (10 spoken queries)
-  - **Execution order**: Step 29 data ✅ → LORA retrain (GPU) → Step 30 (validate) → Step 25 (auto-route) → Step 31 (voice)
+- [x] **[LUPIN] Everyday Calculator — ALL 31 STEPS COMPLETE** (Sessions 165-191)
+  - [x] Phases 1-4: 94 unit tests, 17 mock pipeline tests, MathAgent fallback, 508 LORA templates
+  - [x] Step 24: Automated 6-query test via Calculator mode (`test_calculator_live_pipeline.py`)
+  - [x] Step 25: Auto-route test via LORA router (`test_calculator_live_pipeline.py --auto-route`) — Session 191
+  - [x] Steps 29-30: LORA retrained, >95% accuracy, no regression
+  - [x] Step 31: Full voice routing test (10 spoken queries, 8/10 correct routing)
   - **Implementation doc**: `src/rnd/2026.02.09-everyday-calculator-agent-implementation.md`
 - [ ] **[LUPIN] Run PEFT Phase 2 training + LORA retrain (THIS EVENING)** - Training data regenerated at 1500/command. Single training run covers PEFT Phase 2, Calculator LORA, and new Claude Code routing.
   - Run: `./src/scripts/run-agentic-intent-training.sh full`
@@ -253,6 +251,8 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
 
 ## Completed (Recent)
 
+- [x] **[LUPIN] Bug fix: Dead job card stuck in run bucket** - Session 199: Added missing `emit_job_state_transition()` call in `_handle_error_case()` for `run -> dead` transition. Only AgentBase error path was missing the WebSocket event — all other paths (agentic success/failure/crash, snapshot, cached) already emitted correctly. 814 unit tests pass.
+- [x] **[LUPIN] Fix LanceDB Embedding Dimension Mismatch** - Session 198: Standardized all providers on 768 dims (OpenAI MRL truncation), added `_validate_embedding_dimensions()` to all 6 table classes, 811 tests pass. CoSA submodule changes need separate commit.
 - [x] **[LUPIN] CJ Flow Branding + Bounded Job Packaging + Claude Code LORA Data** - Session 195
   - Part A: CJ Flow branding propagated to 12 files (docstrings/comments only)
   - Part B1: ClaudeCodeJob registered in agentic_job_factory.py, claude_code_queue.py router, agent_registry.py
