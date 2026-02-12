@@ -1,5 +1,6 @@
 {
     "agent router go to deep research"      : "/src/ephemera/prompts/data/synthetic-data-agent-routing-deep-research.txt",
     "agent router go to podcast generator"   : "/src/ephemera/prompts/data/synthetic-data-agent-routing-podcast-generator.txt",
-    "agent router go to research to podcast" : "/src/ephemera/prompts/data/synthetic-data-agent-routing-research-to-podcast.txt"
+    "agent router go to research to podcast" : "/src/ephemera/prompts/data/synthetic-data-agent-routing-research-to-podcast.txt",
+    "agent router go to claude code"         : "/src/ephemera/prompts/data/synthetic-data-agent-routing-claude-code.txt"
 }

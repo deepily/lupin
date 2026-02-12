@@ -21,6 +21,29 @@
   - **Canonical doc**: `src/workflow/agentic-voice-workflow.md`
   - **Reference agents**: `src/cosa/agents/deep_research/`, `podcast_generator/`
 
+## CJ FLOW (COSA JOBS FLOW)
+
+CJ Flow is Lupin's unified work queue system. All jobs that implement the `QueueableJob` protocol flow through it.
+
+**Queue Pipeline**: todo → running → done/dead
+**Protocol**: `QueueableJob` (22 attrs + 4 methods) — see `src/cosa/rest/queue_protocol.py`
+
+**Job Types Handled**:
+- **AgentBase** — Traditional sync agents (MathAgent, CalendarAgent, DateAndTimeAgent, etc.)
+- **SolutionSnapshot** — Cached solution playback from prior runs
+- **AgenticJobBase** — Long-running async jobs (DeepResearchJob, PodcastGeneratorJob, etc.)
+- **ClaudeCodeJob** — Claude Agent SDK tasks in BOUNDED (fire-and-forget) or INTERACTIVE (bidirectional) mode
+
+**Key Files**:
+- `src/cosa/rest/queue_protocol.py` — QueueableJob protocol definition
+- `src/cosa/agents/agentic_job_base.py` — Abstract base for long-running jobs
+- `src/cosa/rest/agentic_job_factory.py` — Agentic job creation factory
+- `src/cosa/rest/todo_fifo_queue.py` — Ingress queue + agent routing
+- `src/cosa/rest/running_fifo_queue.py` — Execution engine
+- `src/cosa/rest/queue_consumer.py` — Background consumer thread
+
+**Packaging Guide**: `src/rnd/2026.02.12-cj-flow-bounded-job-packaging-guide.md`
+
 ## CODE STYLE
 - **Imports**: Group by stdlib, third-party, local
 - **Naming**: snake_case for functions, PascalCase for classes, UPPER_SNAKE_CASE for constants

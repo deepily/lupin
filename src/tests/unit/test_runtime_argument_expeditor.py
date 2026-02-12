@@ -356,9 +356,9 @@ class TestAgentRegistry:
         _help_cache.clear()
         _user_visible_cache.clear()
 
-    def test_registry_has_three_agents( self ):
-        """Registry contains exactly 3 agentic agents."""
-        assert len( AGENTIC_AGENTS ) == 3
+    def test_registry_has_four_agents( self ):
+        """Registry contains exactly 4 agentic agents."""
+        assert len( AGENTIC_AGENTS ) == 4
 
     def test_all_entries_required_keys( self ):
         """All registry entries have the required keys."""
@@ -429,18 +429,30 @@ class TestAgentRegistry:
         result = get_cli_help( "agent router go to deep research" )
         assert result is None
 
-    def test_all_agents_have_audience_in_arg_mapping( self ):
-        """All three agents have 'audience' and 'audience_context' in arg_mapping."""
-        for cmd_key, entry in AGENTIC_AGENTS.items():
+    def test_content_agents_have_audience_in_arg_mapping( self ):
+        """Content-oriented agents have 'audience' and 'audience_context' in arg_mapping."""
+        content_agents = [
+            "agent router go to deep research",
+            "agent router go to podcast generator",
+            "agent router go to research to podcast",
+        ]
+        for cmd_key in content_agents:
+            entry   = AGENTIC_AGENTS[ cmd_key ]
             mapping = entry[ "arg_mapping" ]
             assert "audience" in mapping, f"Missing 'audience' in arg_mapping for '{cmd_key}'"
             assert mapping[ "audience" ] == "audience"
             assert "audience_context" in mapping, f"Missing 'audience_context' in arg_mapping for '{cmd_key}'"
             assert mapping[ "audience_context" ] == "audience_context"
 
-    def test_all_agents_have_audience_fallback_question( self ):
-        """All three agents have 'audience' and 'audience_context' in fallback_questions."""
-        for cmd_key, entry in AGENTIC_AGENTS.items():
+    def test_content_agents_have_audience_fallback_question( self ):
+        """Content-oriented agents have 'audience' and 'audience_context' in fallback_questions."""
+        content_agents = [
+            "agent router go to deep research",
+            "agent router go to podcast generator",
+            "agent router go to research to podcast",
+        ]
+        for cmd_key in content_agents:
+            entry     = AGENTIC_AGENTS[ cmd_key ]
             questions = entry[ "fallback_questions" ]
             assert "audience" in questions, f"Missing 'audience' in fallback_questions for '{cmd_key}'"
             assert "audience_context" in questions, f"Missing 'audience_context' in fallback_questions for '{cmd_key}'"

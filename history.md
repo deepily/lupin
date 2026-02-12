@@ -1,5 +1,37 @@
 # Lupin Project History
 
+### 2026.02.12 - Session 197 | CJ Flow Branding + Bounded Job Packaging + Claude Code LORA Data
+
+#### Checkpoint | 2026.02.12 19:00 | CJ Flow plan implementation — branding, factory, config, training data
+
+**Accomplishments**:
+- **Part A**: Propagated "CJ Flow" branding to 12 files (docstrings/comments only, zero code logic)
+- **Part B1**: Registered ClaudeCodeJob in agentic_job_factory.py, updated claude_code_queue.py router to use shared factory, added entry to agent_registry.py
+- **Part B2**: Externalized hardcoded defaults (max_turns=50, timeout_seconds=3600) to lupin-app.ini with class-level config caching in job.py
+- **Part B3**: Created 420-line R&D packaging guide for building new CJ Flow bounded jobs
+- **Part C1-C5**: Created 66 voice templates + 100 task placeholders for Claude Code LORA routing, updated training pipeline (coordinator, prompt_generator, xml_models, router templates, command registry)
+- **Part C6**: Regenerated training data — 39,871 examples (35 commands), Claude Code at 1,500 samples
+- Fixed 5 test failures from 4th agent addition (registry count, audience scope, PRODUCT_NAMES, TEST_PROFILES)
+- **816 unit tests pass, zero regressions**
+
+**Files Created**:
+- `src/rnd/2026.02.12-cj-flow-bounded-job-packaging-guide.md` (NEW)
+- `src/ephemera/prompts/data/synthetic-data-agent-routing-claude-code.txt` (NEW)
+- `src/ephemera/prompts/data/placeholders-claude-code-tasks.txt` (NEW)
+
+**Files Modified** (30+ files across branding, factory, config, training pipeline, tests):
+- CLAUDE.md, queue_protocol.py, agentic_job_base.py, todo_fifo_queue.py, running_fifo_queue.py, queue_consumer.py, agentic_job_factory.py
+- Routers: deep_research.py, podcast_generator.py, deep_research_to_podcast.py, claude_code_queue.py
+- Config: lupin-app.ini, lupin-app-splainer.ini
+- Training: agent-router-agentic-commands.json, xml_coordinator.py, xml_prompt_generator.py, xml_models.py, agent-router-template.txt, agent-router-template-completion.txt
+- Tests: test_runtime_argument_expeditor.py, test_notification_proxy config.py, rnd/README.md
+- Workflow: agentic-voice-workflow.md
+- Training JSONL files (regenerated)
+
+**Commit**: 0daf0de
+
+---
+
 ### 2026.02.12 - Session 196 | Three-Model PEFT Comparison + Ministral 8-bit Config Swap
 
 #### Checkpoint | 2026.02.12 | Three-model PEFT comparison doc + Ministral 8-bit config swap

@@ -3,7 +3,7 @@
 **Version**: 2.1
 **Created**: 2026-01-27
 **Updated**: 2026-02-07
-**Purpose**: Complete lifecycle guide — CONCEPT → BUILD → VALIDATE — for creating agentic background jobs with voice I/O and queue integration
+**Purpose**: Complete lifecycle guide — CONCEPT → BUILD → VALIDATE — for creating CJ Flow agentic background jobs with voice I/O and queue integration
 
 **Pattern Source**: Derived from `deep_research`, `podcast_generator`, and `deep_research_to_podcast` agents.
 
@@ -64,7 +64,7 @@ tasks need a fundamentally different execution model.
    at defined states to ask the user for approval, clarification, or selection between options.
    This keeps humans in control of expensive or irreversible operations.
 
-## Architecture Overview
+## CJ Flow Architecture Overview
 
 ```
                           ┌─────────────────────────────────────────────────┐

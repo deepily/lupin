@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-10 (Session 179)
+Last updated: 2026-02-12 (Session 195)
 
 ## Pending
 
@@ -78,9 +78,10 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - [ ] Step 31: Full voice routing test (10 spoken queries)
   - **Execution order**: Step 29 data ✅ → LORA retrain (GPU) → Step 30 (validate) → Step 25 (auto-route) → Step 31 (voice)
   - **Implementation doc**: `src/rnd/2026.02.09-everyday-calculator-agent-implementation.md`
-- [ ] **[LUPIN] Run PEFT Phase 2 training** - Training data regenerated at 1500/command (Session 152 + Session 177: calculator expanded to 1,483). Ready for full training run. **Note**: Single training run covers both PEFT Phase 2 and Calculator LORA retrain.
+- [ ] **[LUPIN] Run PEFT Phase 2 training + LORA retrain (THIS EVENING)** - Training data regenerated at 1500/command. Single training run covers PEFT Phase 2, Calculator LORA, and new Claude Code routing.
   - Run: `./src/scripts/run-agentic-intent-training.sh full`
-  - Data verified: 38,371 examples (Session 177), 34 commands, calculator at 1,483
+  - Data verified: **39,871 examples** (Session 195), **35 commands**, claude code at 1,500, calculator at 1,483
+  - **Session 195**: Added Claude Code routing (66 templates, 100 placeholders, 1,500 training examples). All pipeline files updated.
 - [ ] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - Two cases to handle:
   1. User makes vague reference to research document contents (e.g., "make a podcast about that AI research")
   2. User references research document by approximate name/path
@@ -252,6 +253,15 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
 
 ## Completed (Recent)
 
+- [x] **[LUPIN] CJ Flow Branding + Bounded Job Packaging + Claude Code LORA Data** - Session 195
+  - Part A: CJ Flow branding propagated to 12 files (docstrings/comments only)
+  - Part B1: ClaudeCodeJob registered in agentic_job_factory.py, claude_code_queue.py router, agent_registry.py
+  - Part B2: Hardcoded defaults (max_turns, timeout_seconds) externalized to lupin-app.ini config
+  - Part B3: 420-line packaging guide at `src/rnd/2026.02.12-cj-flow-bounded-job-packaging-guide.md`
+  - Part C1-C5: 66 voice templates + 100 placeholders + training pipeline (coordinator, prompt_generator, xml_models, templates)
+  - Part C6: Training data regenerated — 39,871 examples, 35 commands, Claude Code at 1,500
+  - 816 unit tests pass, zero regressions
+  - **Plan**: `~/.claude/plans/eager-dazzling-gem.md`
 - [x] **Deprecated util_xml.py Elimination**: Migrated all production code to Pydantic XML I/O - Session 116
   - Removed fallbacks from gister.py, confirmation_dialog.py
   - Added Pydantic to todo_fifo_queue.py, multimodal_munger.py
