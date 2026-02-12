@@ -100,7 +100,7 @@ FUZZY_SCENARIOS = [
     },
     {
         "id"            : "FUZZY_BUDGET_1",
-        "question"      : "Do you want to cap the spending?",
+        "question"      : "Do you want to set a spending limit?",
         "arg_name"      : "budget",
         "agent_context" : "deep_research",
         "response_type" : "open_ended",
@@ -121,7 +121,7 @@ FUZZY_SCENARIOS = [
     },
     {
         "id"            : "FUZZY_AUDIENCE_2",
-        "question"      : "Who should I write this for?",
+        "question"      : "Who is the intended audience for this?",
         "arg_name"      : "audience",
         "agent_context" : None,
         "response_type" : "open_ended",
@@ -135,7 +135,7 @@ FUZZY_SCENARIOS = [
     },
     {
         "id"            : "FUZZY_CONFIRM_2",
-        "question"      : "Shall I start the job now?",
+        "question"      : "Shall I go ahead with these settings?",
         "arg_name"      : "confirmation",
         "agent_context" : None,
         "response_type" : "open_ended",

@@ -6,9 +6,11 @@ Match multiple notification questions to entries in a Q&A script.
 
 You are an automated test proxy. A batch notification has arrived with multiple questions.
 For each question, find the best matching Q&A script entry and return its answer.
-Return ALL answers as a JSON object inside the answer field.
+Return each match as a separate <entry> element inside <entries>.
 
 IMPORTANT: Use semantic similarity, not exact matching.
+IMPORTANT: Questions may use very different words but ask the same thing.
+Match based on INTENT and PURPOSE, not keyword overlap.
 IMPORTANT: If a question has no match, use its default_value if provided.
 
 ### Input:

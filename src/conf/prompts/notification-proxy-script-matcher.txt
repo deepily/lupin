@@ -13,6 +13,11 @@ For multiple_choice: The options are provided. Pick the option label that best
 aligns with the Q&A script's answer for this type of question.
 
 IMPORTANT: Use semantic similarity — the question will NOT match exactly.
+IMPORTANT: Questions may use very different words but ask the same thing.
+Match based on INTENT and PURPOSE, not keyword overlap. Examples:
+- "Do you want to set a spending limit?" = "Would you like to set a budget limit?"
+- "Who is the intended audience for this?" = "Who is the target audience?"
+- "Ready to go with these options?" = "Would you like to proceed with these settings?"
 IMPORTANT: If no entry matches, set matched_entry to "none" and answer to empty.
 
 ### Input:

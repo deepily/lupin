@@ -38,7 +38,7 @@ from cosa.agents.notification_proxy.strategies.llm_script_matcher import (
     LlmScriptMatcherStrategy,
     resolve_script_path,
 )
-from cosa.agents.notification_proxy.xml_models import ScriptMatcherResponse, VerificationResponse
+from cosa.agents.notification_proxy.xml_models import ScriptMatcherResponse, BatchScriptMatcherResponse, VerificationResponse
 from cosa.agents.notification_proxy.verification import LlmAnswerVerifier
 from cosa.agents.notification_proxy.listener import WebSocketListener
 from cosa.agents.notification_proxy.responder import NotificationResponder
@@ -1078,11 +1078,13 @@ class TestLlmScriptMatcherRespond:
 
     def test_batch_returns_json_dict( self ):
         """OPEN_ENDED_BATCH returns JSON dict via LLM."""
-        xml = ScriptMatcherResponse(
-            matched_entry = "0",
-            answer        = '{"budget": "no limit", "audience": "academic"}',
-            confidence    = "0.90",
-            reasoning     = "Batch match"
+        xml = BatchScriptMatcherResponse(
+            entries = [
+                { "header" : "budget",   "matched_index" : "1", "answer" : "no limit" },
+                { "header" : "audience", "matched_index" : "2", "answer" : "academic" },
+            ],
+            confidence = "0.90",
+            reasoning  = "Batch match",
         ).to_xml()
 
         strategy = self._make_strategy_with_mock( xml )
@@ -1104,11 +1106,10 @@ class TestLlmScriptMatcherRespond:
 
     def test_batch_no_match_returns_none( self ):
         """OPEN_ENDED_BATCH returns None when no match."""
-        xml = ScriptMatcherResponse(
-            matched_entry = "none",
-            answer        = "",
-            confidence    = "0.0",
-            reasoning     = "No match"
+        xml = BatchScriptMatcherResponse(
+            entries    = [],
+            confidence = "0.0",
+            reasoning  = "No match",
         ).to_xml()
 
         strategy = self._make_strategy_with_mock( xml )
