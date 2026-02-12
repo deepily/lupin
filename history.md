@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.02.12 - Session 193 | Live Phi-4 Script Matching Smoke Test
+
+#### Checkpoint | 2026.02.12 | Live Phi-4 script matching smoke test — 24-scenario 3-tier test matrix
+
+**Accomplishments**:
+- Created `test_notification_proxy_script_matching.py` — standalone smoke test that calls `LlmScriptMatcherStrategy.respond()` directly against live Phi-4 via vLLM (no server, no WebSocket, no auth required)
+- **3-tier scenario matrix**:
+  - **Tier 1 (Exact)**: Auto-generated from script entries — sends literal `question_pattern` text
+  - **Tier 2 (Fuzzy)**: 12 paraphrased questions for semantic matching validation
+  - **Tier 3 (Multi)**: Multiple-choice, batch (open_ended_batch), and negative (no-match) scenarios
+- **CLI interface**: `--script deep_research|expeditor_smoke|all`, `--tier exact|fuzzy|multi|all`, `--scenarios 0,8,20`, `--no-verify`, `--confidence 0.7`, `--debug`, `--verbose`
+- **Pre-flight vLLM check**: Sends a minimal LLM query before running scenarios; gracefully skips with exit 0 if vLLM unreachable
+- **Optional LlmAnswerVerifier** second-pass on fuzzy tier for semantic confidence scoring
+- **Initial results** (deep_research, all tiers): 11/19 passed — reveals real Phi-4 XML generation issues and fuzzy matching limitations
+- Follows existing test patterns from `test_calculator_live_pipeline.py`
+
+**Files Created** (Lupin repo):
+- `src/tests/smoke/test_notification_proxy_script_matching.py` (NEW — ~500 lines)
+
 ### 2026.02.11 - Session 189 | CRUD Delete Bug Fix + Dedup Guards + Live Pipeline Smoke Test
 
 #### Checkpoint | 2026.02.11 | Fix delete-all-records bug, add dedup/multi-delete guards, CRUD live pipeline test
