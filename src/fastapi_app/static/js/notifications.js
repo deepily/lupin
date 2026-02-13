@@ -1885,7 +1885,7 @@ class NotificationsUI {
 
                 case "active_conversation_changed":
                     // Conversation Identity Phase 3 - Update active sender indicator
-                    this.handleActiveConversationChanged( envelope.data || envelope );
+                    this.handleActiveConversationChanged( envelope );
                     break;
 
                 case "sys_time_update":
@@ -2595,55 +2595,10 @@ class NotificationsUI {
             this.log( `Cleaned up processed events cache, kept ${keepEvents.length} recent events` );
         }
         
-        // 🔍 ENHANCED DEBUGGING: Comprehensive envelope object analysis
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] === JOB COMPLETION RECEIVED ===" );
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] Full envelope object:", JSON.stringify( envelope, null, 2 ) );
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] envelope.text type:", typeof envelope.text );
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] envelope.text value:", envelope.text );
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] envelope.text length:", envelope.text?.length || 'N/A' );
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] Available fields:", Object.keys( envelope ) );
-        
-        // 🔍 DEBUGGING: Calculate timing from Q&A submission
-        const timeSinceSubmission = this.lastQASubmissionTime ? ( Date.now() - this.lastQASubmissionTime ) / 1000 : 'N/A';
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] Time since Q&A submission:", timeSinceSubmission + 's' );
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] Original Q&A text:", this.lastQASubmissionText );
-        
-        // 🔍 DEBUGGING: Current TTS mode context
         const mode = document.getElementById( 'tts-mode' ).value;
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] Current TTS mode:", mode );
-        
-        // 🚨 CRITICAL: Detect when fallback will be triggered (check both locations)
-        const hasDirectText = envelope.text && envelope.text.trim() !== '';
-        const hasNestedText = envelope.data?.text && envelope.data.text.trim() !== '';
-        const willUseFallback = !hasDirectText && !hasNestedText;
-        
-        if ( willUseFallback ) {
-            this.error( "🚨 [FALLBACK-TRIGGERED] Job completed with no/empty text!" );
-            this.error( "🚨 [FALLBACK-TRIGGERED] This will play 'Job completed' instead of actual response" );
-            this.error( "🚨 [FALLBACK-TRIGGERED] envelope.text:", envelope.text );
-            this.error( "🚨 [FALLBACK-TRIGGERED] envelope.data.text:", envelope.data?.text );
-            this.error( "🚨 [FALLBACK-TRIGGERED] Full envelope object:", envelope );
-            this.error( "🚨 [FALLBACK-TRIGGERED] Expected Q&A response for:", this.lastQASubmissionText );
-        } else {
-            const textLocation = hasDirectText ? 'envelope.text' : 'envelope.data.text';
-            this.log( `✅ [JOB-COMPLETION-DEBUG] Text found at ${textLocation}, will use actual response` );
-        }
-        
         this.log( "Job completion received:", envelope );
-        
-        // 🔧 Server uses event envelope pattern: envelope.data contains actual payload
-        // The nested structure (envelope.data.text) is intentional server architecture  
-        // Event envelope pattern: {type, timestamp, data: {actual_payload}}
-        const actualText = envelope.data?.text || envelope.text; // Try nested first, fallback to direct
-        
-        // 🔍 DEBUGGING: Confirm we're extracting the right text
-        if ( envelope.data?.text && !envelope.text ) {
-            this.log( "✅ [ENVELOPE-PATTERN] Found text in nested location: envelope.data.text" );
-        } else if ( envelope.text && !envelope.data?.text ) {
-            this.log( "⚠️ [ENVELOPE-PATTERN] Found text in direct location: envelope.text (unusual)" );
-        } else if ( !actualText ) {
-            this.error( "❌ [ENVELOPE-PATTERN] No text found in either envelope.text or envelope.data.text" );
-        }
+
+        const actualText = envelope.text;
         
         // Update response area with job completion
         this.updateElement( "response-text", `Job completed: ${actualText || 'No text provided'}` );
@@ -3984,9 +3939,7 @@ class NotificationsUI {
      * @param {Object} event - WebSocket event with job_id, from_queue, to_queue, metadata
      */
     handleJobStateTransition( event ) {
-        // Extract from nested data object (WebSocket envelope structure)
-        const eventData = event.data || event;
-        const { job_id: jobId, from_queue: fromQueue, to_queue: toQueue, metadata } = eventData;
+        const { job_id: jobId, from_queue: fromQueue, to_queue: toQueue, metadata } = event;
 
         if ( !jobId || !fromQueue || !toQueue ) {
             this.error( '[JOB-TRANSITION] Invalid event:', event );
@@ -4292,21 +4245,8 @@ class NotificationsUI {
     async handleNotificationUpdate( envelope ) {
         this.log( "Notification queue update received:", envelope );
 
-        // DEBUG: Log the raw envelope structure
-        console.log( '[DEBUG] WebSocket envelope:', envelope );
-        console.log( '[DEBUG] envelope.notification:', envelope.notification );
-        console.log( '[DEBUG] envelope.data:', envelope.data );
-
         // Handle real-time notification updates from NotificationFifoQueue
-        const notification = envelope.notification || envelope.data?.notification;
-
-        // DEBUG: Log extracted notification and its response_default field
-        console.log( '[DEBUG] Extracted notification:', notification );
-        if ( notification ) {
-            console.log( '[DEBUG] notification.response_default:', notification.response_default );
-            console.log( '[DEBUG] notification.response_requested:', notification.response_requested );
-            console.log( '[DEBUG] notification.response_type:', notification.response_type );
-        }
+        const notification = envelope.notification;
 
         if ( !notification ) {
             this.log( "No notification data in WebSocket event" );
