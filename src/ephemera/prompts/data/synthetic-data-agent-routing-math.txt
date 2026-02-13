@@ -385,23 +385,111 @@ Handle this like a math word problem that involves numbers
 Use your math word problem-solving strategies for this
 Think of this as a math word problem, not just a math equation
 Interpret this as a math word problem and solve it accordingly
-Put on your number-crunching hat and solve this
-Let's keep it simple—go into calculator mode for this one
-Time to flex your inner calculator and figure this out
-Turn on the math brain and crunch these numbers for me
-Channel your calculator spirit and handle this equation
-Shift into calculation mode and solve this like a pro
-Let's not overthink—give me a straight-up answer, calculator style
-Switch to math mode and compute this for me
-Time to play number wizard, give me the answer
-Become the ultimate number machine and solve this math problem
-Dust off the imaginary calculator and work through this one
-Crunch those numbers as if you were a calculator
-Go into your calculating zone and handle this
-Let’s keep it by the book—straight calculations, no flair
-Summon your inner math bot and figure this out
-I need you to turn into a number machine and solve this
-Imagine you’re a calculator, now tell me the answer
-Let's go back to basics—just crunch those numbers
-Flip the switch to calculator mode and handle this
-You’re in full calculation mode—give me the final answer
+
+# Explicit agent routing phrases — direct requests to switch to math agent
+Connect me with the math specialist
+Switch to the math agent
+Put me through to the math agent please
+Activate math mode
+Switch me over to the math specialist
+I need the math agent
+Connect me to math mode please
+Take me to the math specialist
+I'd like to use the math agent
+Hand me off to the math specialist
+Transfer me to the math agent
+Go to math mode
+I want the math specialist
+Give me the math agent please
+I need to talk to the math mode agent
+Put the math specialist on
+Can I get the math agent
+Let me use the math specialist please
+Open up the math agent for me
+
+# Quantization-resilient supplements — strong math anchors
+Calculate the total cost if I buy 15 items at $3.99 each
+Solve this equation for me: 2x + 5 = 17
+Do the math on how much I'll save with a 25% discount on $450
+Compute the area of a circle with radius 8
+I need you to solve this arithmetic problem: 847 divided by 23
+Work out this math problem: what's 15% of 680
+Solve for x: 3x squared minus 12 equals zero
+Calculate the tip on a $87.50 dinner bill at 20%
+Do some math for me: if a train goes 60 mph for 2.5 hours how far
+Compute the square root of 1764
+I need math help: what's the hypotenuse if the sides are 5 and 12
+Solve this formula: distance equals rate times time, rate is 55 and time is 3.5
+Calculate how many tiles I need for a 12 by 15 foot room using 1 foot tiles
+Math question: what's 7 factorial
+Solve this arithmetic: 3,456 times 789
+Can you do the math on splitting a $234 bill four ways with 18% tip
+
+# Statistics — data analysis, distributions, inference
+What is the standard deviation of the data set 4, 8, 15, 16, 23, 42?
+How do you calculate the mean, median, and mode of a set of numbers?
+What is a p-value and how do you interpret it?
+How do you perform a linear regression on a data set?
+What is the correlation coefficient between two variables?
+How do you calculate the variance of a sample?
+What is the difference between a population and a sample in statistics?
+How do you find the interquartile range of a data set?
+What is a confidence interval and how do you calculate one?
+Explain the difference between Type I and Type II errors in hypothesis testing
+How do you calculate a z-score for a given data point?
+What is the standard error of the mean?
+
+# Probability — dice, coins, combinatorics, chance
+What is the probability of rolling a 7 with two dice?
+If I flip a coin 5 times, what is the probability of getting all heads?
+How many ways can you arrange 6 books on a shelf?
+What is the probability of drawing a red card from a standard deck?
+How do you calculate combinations of 10 items taken 3 at a time?
+What are the odds of winning the lottery if you pick 6 numbers from 49?
+If a bag has 5 red and 3 blue marbles, what is the probability of drawing 2 red in a row?
+How do you calculate permutations of 8 items taken 4 at a time?
+What is the expected value if a game pays $10 on heads and loses $6 on tails?
+What is Bayes theorem and how do you apply it to a simple example?
+How many different 4-digit PINs are possible using digits 0 through 9?
+What is the probability of at least one six in four rolls of a die?
+
+# Number theory — primes, factors, modular arithmetic
+Is 97 a prime number and how can you check?
+What is the greatest common factor of 84 and 126?
+How do you find the least common multiple of 15 and 20?
+What is 17 mod 5?
+How do you determine if a large number is divisible by 9?
+What are the first 20 prime numbers?
+How do you use the Euclidean algorithm to find the GCD of 252 and 198?
+What is the prime factorization of 360?
+How do you solve 3x is congruent to 7 mod 11?
+Is 561 a Carmichael number?
+What is Euler's totient function of 24?
+How many divisors does the number 120 have?
+
+# Logic puzzles — set theory, syllogisms, reasoning
+If all cats are animals and some animals are pets, what can you conclude?
+How do you calculate the union and intersection of two sets?
+What is the complement of a set in set theory?
+If set A has 10 elements and set B has 8 elements and their intersection has 3, how many are in the union?
+Is the statement "if it rains then the ground is wet" logically equivalent to its contrapositive?
+How do you construct a truth table for the statement P and not Q?
+What is a Venn diagram and how do you use it to solve a problem with three overlapping sets?
+If 40 students study math, 30 study science, and 15 study both, how many study at least one subject?
+What is the difference between necessary and sufficient conditions in logic?
+How do you prove that the square root of 2 is irrational?
+What is proof by contradiction and can you give an example?
+How do you determine if an argument is valid using modus ponens?
+What is a geometric series and how do you find its sum?
+How do you convert between degrees and radians?
+What is the formula for the volume of a cone?
+How do you calculate the median of a set of 20 numbers?
+What is the probability of getting exactly 3 heads in 5 coin flips?
+How many prime numbers are there between 1 and 100?
+What is modular arithmetic and how do you use it?
+If you roll three dice, what is the probability the sum is 10?
+How do you find the greatest common divisor of 144 and 60?
+What is the least common multiple of 12, 15, and 20?
+How do you calculate the mean absolute deviation of a data set?
+What is a normal distribution and what does the 68-95-99.7 rule mean?
+How do you calculate the number of permutations of the letters in the word MISSISSIPPI?

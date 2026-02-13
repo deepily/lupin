@@ -1,8 +1,45 @@
 # TODO
 
-Last updated: 2026-02-04 (Session 129)
+Last updated: 2026-02-12 (Session 200)
 
 ## Pending
+
+### vLLM Upgrade for Qwen3-4B-Base (FIRST THING TOMORROW — Session 166)
+
+- [ ] **[LUPIN] Upgrade vLLM to >= 0.8.5** — ROOT CAUSE of Qwen3 20x slowdown identified: vLLM 0.8.2 lacks native `Qwen3ForCausalLM`, falls back to unoptimized HuggingFace Transformers engine. **Do this first.**
+  - Step 1: `cd /mnt/DATA01/include/www.deepily.ai/projects/vllm-pip && source .venv/bin/activate && pip install --upgrade vllm`
+  - Step 2: Verify `qwen3.py` exists in `vllm/model_executor/models/` post-upgrade
+  - Step 3: Start vLLM server for Qwen3-4B-Base, check logs for no Transformers fallback warnings
+  - Step 4: Re-run PEFT test: `src/scripts/run-agentic-intent-training.sh --test --llm qwen3-4b --quantize-bits both`
+  - Step 5: If still slow, try `--no-enable-chunked-prefill` and `VLLM_ENABLE_V1_MULTIPROCESSING=0`
+  - **Risk**: `transformers` version may need adjustment (was downgraded 5.1.0→4.57.6 for vLLM 0.8.2)
+  - **Expected**: ms/item drops from ~7,400 to ~200-400 (comparable to Ministral-8B)
+  - **Research doc**: `src/rnd/2026.02.10-qwen3-vllm-inference-slowdown-root-cause.md`
+
+### DataFrame CRUD with Voice I/O (Session 132-136)
+
+- [x] **[LUPIN] Phase 1: Storage Layer + Pydantic Models** - ✅ COMPLETE (Session 136)
+  - 5 source files in `src/cosa/crud_for_dataframes/` (schemas, xml_models, storage, crud_operations, __init__)
+  - 91 unit tests + 16 smoke tests, all passing
+  - 4 config keys + prompt template stub
+  - R&D docs: `src/rnd/headless-cc-for-dataframe-crud/`
+  - Issues fixed: Pydantic ClassVar, XML None coercion, timestamp truncation
+- [x] **[LUPIN] Phase 2: Agent Implementation** - ✅ COMPLETE (Session 143)
+  - CrudForDataFramesAgent + TodoCrudAgent + CalendarCrudAgent + dispatcher + intent_extractor
+  - 73 unit tests, all passing
+- [x] **[LUPIN] Phase 3: Queue Integration + Voice Confirmation** - ✅ COMPLETE (Session 143)
+  - Feature-flag routing swap in todo_fifo_queue.py, cache skip + serialization exclusion
+  - Voice confirmation for destructive ops (delete, delete_list, update)
+  - 26 unit tests, 449 total passing, 50 WebSocket smoke tests passing
+- [ ] **[LUPIN] Interactive E2E Testing of CRUD Agents** (HIGH PRIORITY) - Execute the 29-scenario testing protocol at `src/rnd/headless-cc-for-dataframe-crud/testing-protocol.md`.
+  - [x] Part 1: Mock pipeline tests (17/17 passed — routing, pipeline, cache, confirmation, prompt construction)
+  - [x] Bug fix: CRUD agent completion — emit_job_state_transition, answer guard, done queue push (3 new tests, 532/532 pass)
+  - [x] Bug fix: TTS focus mode stuck — staleness check in restoreTTSQueueState + exit in moveToRegularNotifications (Session 164)
+  - [x] **Bug fix: delete_item deletes all records** — Session 189: dedup guard, multi-delete guard, infra column rejection. 6 new tests (816 total). Commit fd21f0c.
+  - [x] Part 3: Curl smoke tests → **SUPERSEDED** by `test_crud_live_pipeline.py` (8-scenario automated test, Session 189)
+  - [ ] **Run CRUD live pipeline test** — `test_crud_live_pipeline.py --mode direct` with notification proxy (`--profile crud`). **Testing guide**: `src/rnd/2026.02.11-crud-live-pipeline-testing-guide.md`. **RESUME NEXT SESSION.**
+  - [ ] Part 2: Notifications UI tests (8 scenarios, live server)
+- [ ] **[LUPIN] Phase 4: End-to-End Voice Workflows + Polish** - PENDING (blocked by Phase 3 ✅)
 
 ### Skills Management (Session 118 Discovery)
 
@@ -24,6 +61,26 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - 4 debug scripts moved to `src/scripts/debug/`
   - See: `src/rnd/2026.02.02-test-suite-remediation-plan.md`
 - [ ] **[LUPIN] Run agentic job intent LORA 1% sample training** - Requires GPUs to be freed. Run: `./src/scripts/run-agentic-intent-training.sh test`. **Session 124**: Unified training pipeline now includes agentic jobs (40,258 total examples, 600 agentic). **Scheduled: Evening session 2026-02-02** when GPU resources available.
+- [x] **[LUPIN] PEFT Training Optimization - Phase 1 Training Run** - Session 136: Phase 1 actual results: 92.2% exact match (target: 89%)
+- [x] **[LUPIN] PEFT Training Optimization - Phase 2 Disambiguation** - Session 136: Code/data complete. Session 141: Model swap to 2026-02-05 training run, 15 disambiguation tests passing, router confirmed working
+- [x] **[LUPIN] Rebalance XML training data to 1200 samples/command** - Session 145 (checkpoint): Fixed `run-agentic-intent-training.sh` (hardcoded 400→1200), expanded placeholders (research-topics 50→190, document-paths 50→179), removed near-miss none examples, replaced product names (Deep Dive, PodMaker, Doc-to-Pod) with natural phrasing
+  - **Plan**: `src/rnd/2026.02.05-peft-trainer-optimization-plan.md`
+  - **Analysis script**: `src/scripts/analyze-training-distribution.py`
+- [x] **[LUPIN] PEFT Phase 2 — Results Dashboard + Explicit Routing + Quantization Strengthening** - Session 148 (checkpoint): Part A (results dashboard in peft_trainer.py), Part B (explicit routing phrases for 5 agents + new automatic routing mode command with 60 templates), Part C (strengthened podcast-generator, math, todo-list, none-of-the-above with disambiguation anchors). Bumped sample size 1200→1500.
+  - **Plan**: `src/rnd/2026.02.07-peft-trainer-optimization-plan-part-2.md`
+  - **461 unit tests passing**, zero regressions
+  - **CoSA submodule files need separate commit**: xml_coordinator.py, peft_trainer.py, todo_fifo_queue.py
+- [x] **[LUPIN] Everyday Calculator — ALL 31 STEPS COMPLETE** (Sessions 165-191)
+  - [x] Phases 1-4: 94 unit tests, 17 mock pipeline tests, MathAgent fallback, 508 LORA templates
+  - [x] Step 24: Automated 6-query test via Calculator mode (`test_calculator_live_pipeline.py`)
+  - [x] Step 25: Auto-route test via LORA router (`test_calculator_live_pipeline.py --auto-route`) — Session 191
+  - [x] Steps 29-30: LORA retrained, >95% accuracy, no regression
+  - [x] Step 31: Full voice routing test (10 spoken queries, 8/10 correct routing)
+  - **Implementation doc**: `src/rnd/2026.02.09-everyday-calculator-agent-implementation.md`
+- [ ] **[LUPIN] Run PEFT Phase 2 training + LORA retrain (THIS EVENING)** - Training data regenerated at 1500/command. Single training run covers PEFT Phase 2, Calculator LORA, and new Claude Code routing.
+  - Run: `./src/scripts/run-agentic-intent-training.sh full`
+  - Data verified: **39,871 examples** (Session 195), **35 commands**, claude code at 1,500, calculator at 1,483
+  - **Session 195**: Added Claude Code routing (66 templates, 100 placeholders, 1,500 training examples). All pipeline files updated.
 - [ ] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - Two cases to handle:
   1. User makes vague reference to research document contents (e.g., "make a podcast about that AI research")
   2. User references research document by approximate name/path
@@ -35,11 +92,11 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - `topic="AI safety" target_audience=beginner`
   - `document_path="/io/deep-research/report.md" languages=en,es max_segments=20`
   - Requires: New placeholder files for budgets, audience levels; update generation logic
-- [ ] **[LUPIN] Disambiguation Agent for Missing Arguments** - Create agent to clarify unusual or missing arguments interactively:
-  - Trigger when LORA model returns intent but args are incomplete/ambiguous
-  - Use `ask_multiple_choice()` or `converse()` for clarification
-  - Example prompts: "What budget would you like for this research?" "Which language(s) for the podcast?"
-  - Affects: Voice routing pipeline, potentially new agent class
+- [x] **[LUPIN] Disambiguation Agent for Missing Arguments** - Session 130 (checkpoint): Implemented as RuntimeArgumentExpeditor
+  - `src/cosa/agents/runtime_argument_expeditor/` (agent_registry.py, xml_models.py, expeditor.py)
+  - LLM gap analysis against `--help` output, asks user via `notify_user_sync()` for missing args
+  - Integrated into TodoFifoQueue elif chain + mock_job.py expeditor test mode
+  - Shared `agentic_job_factory.py` DRY factory for both voice and REST paths
 - [x] **Run Deep Research dry-run smoke test** - Session 115: All 5 tests passed (login, submit, structure, polling, verification). Job dr-6aa5d16d completed in ~10s with $0.00 cost.
 - [x] **Run Podcast Generator dry-run API smoke test** - Session 115: All tests passed. Job pg-dd026977 completed in ~10s with $0.00 cost.
 - [x] **Run Research→Podcast dry-run API smoke test** - Session 115: All tests passed. Job rp-221fe28e completed in ~14s with $0.00 cost.
@@ -98,6 +155,7 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 
 ### Future Considerations
 
+- [ ] **[LUPIN] Add 60s safety timeout to TTS focus mode** - Prevent permanent stuck state when TTS queue items fail to play. **Partially addressed** (Session 164): Added staleness check on restore + exit in moveToRegularNotifications. Still need: runtime 60s timeout for cases where notification exists but user never responds and timeout doesn't fire. **File**: `src/fastapi_app/static/js/notifications.js:9374-9393`
 - [ ] **Silent flag for notifications**: Consider adding a `silent` parameter to the cosa-voice notification system to suppress TTS during automated testing. Would require changes to: router request models, job classes, voice_io wrappers, and core notification functions.
 - [ ] **Standardize compound job/user ID usage** - Currently compound IDs (job_id + user_id) are only used when submitting jobs to the standard queue entry point. Consider standardizing this pattern across all job submission paths to avoid inconsistency issues later.
   - **Current state**: Only standard Q entry point uses compound IDs
@@ -129,6 +187,23 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
 ### Pre-Development Setup
 
 - [ ] **[LUPIN] Create baseline test report for wip-v0.1.4 branch** - Run `/smoke-test-baseline` to establish pass/fail baseline before starting development work. This ensures we can detect regressions introduced during v0.1.4 development.
+
+### Runtime Argument Expeditor Testing (HIGH) - Session 130
+
+- [x] **[LUPIN] Test Runtime Argument Expeditor end-to-end** - ✅ COMPLETE (Session 200): All three testing surfaces verified. 12/12 proxy-automated smoke scenarios pass, 814 unit tests pass. Root cause of `http_error`: missing `open_ended_batch` in `/api/notify` response_type validation — fixed. No secondary JWT auth issues.
+  - **Design review**: Return tomorrow to review expeditor notification architecture (dual-auth, batch collection flow)
+  - **Plan**: `src/rnd/2026.02.12-fix-expeditor-notification-dual-auth-plan.md`
+- [x] **[LUPIN] Create testing plan for Runtime Argument Expeditor** - Session 131: Initial 49 tests. Sessions 144-160: Expanded to 115 unit tests across 13 classes, 9 interactive smoke scenarios. **Session 162**: Bug fix + 8 new tests (Class 15: TestOptionalArgPrompting), total 123 tests across 15 classes. **Session 163**: Timeout chain fix (60/60/120→180/180/300) + diagnostic logging for notification failure analysis.
+  - **Unit tests**: `src/tests/unit/test_runtime_argument_expeditor.py` (123 tests, 15 classes)
+  - **Smoke tests**: `src/tests/smoke/test_expeditor_mock_job_smoke.py` (3 automated + 9 interactive, 600s timeout)
+  - **Testing plan**: `src/rnd/2026.02.07-runtime-argument-expeditor-testing-plan.md`
+  - **Bug fix**: `expeditor.py` — replaced `if parsed.is_complete()` gate with deterministic user-visible-args diff (optional args now always prompted)
+  - **Next**: Run interactive scenarios (`LUPIN_INTERACTIVE_TESTS=true`) — first scenario failure diagnosis via new `[Expeditor]` debug logging
+- [ ] **[LUPIN] Finish expanding smoke test matrix to 13 scenarios** - Session 179: 4 new scenario dicts added (DR_FULL, RTP_LANGUAGES, PG_LANGUAGES, RTP_BARE). Still pending: replace two-pass docstring with single-pass instructions, update all count references (9→13), update Scenario Index Reference block. Resume tomorrow.
+  - **Plan**: `src/rnd/2026.02.10-expand-smoke-test-matrix-13-scenarios.md`
+  - **File**: `src/tests/smoke/test_expeditor_mock_job_smoke.py`
+  - **Changes remaining**: Docstring fix (Change 2), count updates (Change 3)
+- [x] **[LUPIN] Run interactive expeditor smoke tests 4-5** - Session 144: Fixed async deadlock (`asyncio.to_thread()` wrapper), tests 4-5 now pass. User responds to voice prompt, dry-run job completes with $0.00 cost.
 
 ### Cache Freshness Policy (HIGH) - Session 121/122
 
@@ -174,6 +249,18 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
 
 ## Completed (Recent)
 
+- [x] **[LUPIN] Embedding benchmark harness** - Session 194: Side-by-side local GPU vs OpenAI API comparison. Local 7-398x faster. File: `src/tests/smoke/test_embedding_benchmark.py`
+- [x] **[LUPIN] Bug fix: Dead job card stuck in run bucket** - Session 199: Added missing `emit_job_state_transition()` call in `_handle_error_case()` for `run -> dead` transition. Only AgentBase error path was missing the WebSocket event — all other paths (agentic success/failure/crash, snapshot, cached) already emitted correctly. 814 unit tests pass.
+- [x] **[LUPIN] Fix LanceDB Embedding Dimension Mismatch** - Session 198: Standardized all providers on 768 dims (OpenAI MRL truncation), added `_validate_embedding_dimensions()` to all 6 table classes, 811 tests pass. CoSA submodule changes need separate commit.
+- [x] **[LUPIN] CJ Flow Branding + Bounded Job Packaging + Claude Code LORA Data** - Session 195
+  - Part A: CJ Flow branding propagated to 12 files (docstrings/comments only)
+  - Part B1: ClaudeCodeJob registered in agentic_job_factory.py, claude_code_queue.py router, agent_registry.py
+  - Part B2: Hardcoded defaults (max_turns, timeout_seconds) externalized to lupin-app.ini config
+  - Part B3: 420-line packaging guide at `src/rnd/2026.02.12-cj-flow-bounded-job-packaging-guide.md`
+  - Part C1-C5: 66 voice templates + 100 placeholders + training pipeline (coordinator, prompt_generator, xml_models, templates)
+  - Part C6: Training data regenerated — 39,871 examples, 35 commands, Claude Code at 1,500
+  - 816 unit tests pass, zero regressions
+  - **Plan**: `~/.claude/plans/eager-dazzling-gem.md`
 - [x] **Deprecated util_xml.py Elimination**: Migrated all production code to Pydantic XML I/O - Session 116
   - Removed fallbacks from gister.py, confirmation_dialog.py
   - Added Pydantic to todo_fifo_queue.py, multimodal_munger.py

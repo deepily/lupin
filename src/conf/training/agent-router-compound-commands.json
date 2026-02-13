@@ -1,0 +1,6 @@
+{
+    "agent router go to date and time" : "/src/ephemera/prompts/data/synthetic-data-agent-routing-date-and-time.txt",
+    "agent router go to weather"       : "/src/ephemera/prompts/data/synthetic-data-agent-routing-weather.txt",
+    "agent router go to calendar"      : "/src/ephemera/prompts/data/synthetic-data-agent-routing-calendaring.txt",
+    "agent router go to receptionist"  : "/src/ephemera/prompts/data/synthetic-data-agent-routing-receptionist.txt"
+}

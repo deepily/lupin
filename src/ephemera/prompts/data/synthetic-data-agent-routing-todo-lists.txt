@@ -401,3 +401,127 @@ Check off 'Send out invitations' as completed in Event Planning.
 Mark 'Send out invitations' as done in Event Planning.
 Launch 'Jog for 30 minutes' routine in Health and Fitness Goals.
 Begin 'Jog for 30 minutes' activity in Health and Fitness Goals.
+
+# Explicit agent routing phrases — direct requests to switch to todo list agent
+→Connect me with the todo list agent
+→Switch to the task manager
+→I want to talk to the todo mode
+→Put me through to the task list please
+→Activate todo mode
+→Switch me over to the todo list agent
+→I need the task manager
+→Let me speak with the todo assistant
+→Connect me to todo mode please
+→Take me to the task list agent
+→I'd like to use the todo list agent
+→Route me to the task manager please
+→Hand me off to the todo list
+→Transfer me to the todo mode
+→Go to todo mode
+→I want the task list agent
+→Bring up the todo list agent
+→Give me the task manager please
+→Switch over to the todo list
+→I need to talk to the todo mode agent
+→Put the task list on
+→Can I get the todo list agent
+→Take me to task manager mode
+→Let me use the todo list agent please
+→Open up the task manager for me
+
+# Quantization-resilient supplements — strong todo anchors
+Add 'buy groceries' to my todo list
+Check off the laundry task from my list
+Mark the dentist appointment as done on my task list
+I need to add a new task to my todo list: clean the garage
+Remove 'return library books' from my task list
+What's left on my todo list for today?
+Add a reminder to my list to call the plumber
+Show me all incomplete tasks on my todo list
+Move 'file taxes' to the top of my task list
+How many items are on my todo list right now?
+Mark 'pick up dry cleaning' as complete on my list
+I want to add several tasks to my todo list
+Update the priority of 'paint bedroom' on my task list
+Check what tasks I still need to do on my list
+Add 'renew passport' as a high priority task to my todo list
+
+# Batch operations — bulk actions on lists
+Clear all completed items from my todo list
+Move everything from today's list to archive
+Delete all the finished tasks from my task list
+Remove all checked-off items on my list
+Archive everything that's been marked as done
+Wipe the completed section of my todo list clean
+Bulk delete all tasks from last week
+Clear out my entire shopping list and start fresh
+
+# Priority and context — urgency, filtering, overdue items
+What's the most urgent thing on my todo list?
+Show me overdue items on my task list
+Which tasks are past their deadline?
+What do I need to do first thing tomorrow?
+Are there any high priority tasks I'm forgetting?
+Sort my todo list by priority
+Show me everything due this week
+What's been on my list the longest without being done?
+Which items on my list are time-sensitive?
+List everything I need to finish before Friday
+
+# Conversational — natural, informal task management
+I finished the laundry, check that off
+Oh wait, add eggs too
+Actually, scratch that last item I just added
+Never mind about the dentist appointment, remove it
+Hey, I just remembered I need to pick up the kids
+I already did the grocery shopping, mark it done
+Can you put dog food on my list real quick?
+Oops, I meant to say milk, not eggs
+While you're at it, add toilet paper to the shopping list
+I took care of the oil change, you can check that off
+
+# Recurring tasks — repeating, scheduled, periodic
+Set up a weekly reminder to water the plants
+Make this repeat every Monday
+Add a daily task to take my vitamins
+Set a recurring reminder to pay rent on the first
+I need a monthly task to check the smoke detectors
+Add a repeating item to review my budget every Friday
+Schedule a weekly task to clean the bathroom
+Create a bi-weekly reminder for grocery shopping
+Set up a daily reminder to practice guitar for 30 minutes
+Add a yearly task to renew my car registration
+
+# Status and overview — checking progress, summaries
+How many tasks do I have left for today?
+Give me a summary of my todo list
+What's the status of my weekly goals?
+How many items have I completed this week?
+Am I on track with my tasks for today?
+Show me a quick overview of all my lists
+Which list has the most pending items?
+What percentage of my tasks are done?
+How productive was I this week based on my task completion?
+Do I have anything scheduled for the weekend on my list?
+
+# Mixed intent — task management with conversational context
+I need to plan dinner, can you add cooking supplies to my list?
+We're having people over Saturday, put party prep on the list
+I'm going on vacation next week, add pack suitcase to my todo
+The car is making a weird noise, put mechanic visit on my list
+My boss asked me to prepare a report, add that to work tasks
+I promised my mom I'd call her, put that on today's list
+The sink is leaking again, add call plumber to my errands
+I have a doctor appointment Thursday, put that on my calendar list
+Add changing the air filters to my home maintenance list
+I need to return those shoes, add that to my errands for tomorrow
+Remind me to water the garden every other day
+Show me what I got done last week from my tasks
+Can you move the meeting prep task to tomorrow's list?
+What tasks have I been putting off the longest?
+Combine my work and personal task lists into one view
+I need a new list for wedding planning tasks
+How many tasks did I complete yesterday?
+Is there anything on my list that's been there more than a week?
+Add a task to review my investment portfolio this month
+Create a new category called home repairs and add fix the fence to it

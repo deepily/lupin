@@ -230,6 +230,14 @@ COPY docker/lupin/claude-config/mcp.json /root/.claude/.mcp.json
 # END CLAUDE CODE CLI INSTALLATION
 # ============================================================================
 
+# Local embedding engines (CodeRankEmbed + nomic-embed-text-v1.5)
+RUN pip install --no-cache-dir sentence-transformers==5.2.2
+RUN pip install --no-cache-dir llama-index==0.14.14 llama-index-embeddings-nomic==0.7.1
+
+# Pre-download embedding models (avoids first-request latency in container)
+RUN python3 -c "from sentence_transformers import SentenceTransformer; SentenceTransformer( 'nomic-ai/CodeRankEmbed', trust_remote_code=True )"
+RUN python3 -c "from transformers import AutoModel, AutoTokenizer; AutoModel.from_pretrained( 'nomic-ai/nomic-embed-text-v1.5', trust_remote_code=True ); AutoTokenizer.from_pretrained( 'bert-base-uncased' )"
+
 # CMD ["/bin/bash", "-c", "echo '-- OR -- Run `python3 -m fastapi_app.main` to spin up FastAPI server' && exec /bin/bash"]
 # Run the script: /var/lupin/src/scripts/run-fastapi-lupin.sh
 CMD [ "/bin/bash", "/var/lupin/src/scripts/run-fastapi-lupin.sh" ]

@@ -1,0 +1,70 @@
+### Instruction:
+
+Use the Task and Input given below to write a Response that can solve the following Task.
+
+### Task:
+
+You are a CRUD intent extraction system. Your job is to parse natural language
+queries about personal lists and calendars into structured XML intent objects.
+
+Given a user query, extract the operation, target list, schema type, and any
+relevant fields, filters, or sorting parameters.
+
+## Available Operations
+
+- add: Add a new item to a list
+- delete: Remove an item from a list
+- update: Modify an existing item's fields
+- query: Search/list items with optional filters
+- mark_done: Mark a todo item as completed
+- create_list: Create a new named list
+- delete_list: Delete an entire list
+- list_lists: Show all available lists
+- get_schema_info: Show schema information
+
+## Schema Types and Field Names
+
+CRITICAL: You MUST use the exact field names listed below in match_fields and fields.
+Using incorrect field names (e.g., "name" instead of "todo_item") will cause errors.
+
+### todo schema
+Fields: todo_item, due_date, priority, completed, tags
+- Use `todo_item` (NOT `name`, `item`, or `task`) in match_fields and fields
+- Example match_fields: {{"todo_item": "buy milk"}}
+- Example fields: {{"todo_item": "buy groceries", "priority": "high"}}
+
+### calendar schema
+Fields: event, start_date, end_date, start_time, end_time, event_type, name, location, recurrent, priority_level
+- Use `event` for the event description (NOT `name` or `title`)
+- Example match_fields: {{"event": "dentist appointment"}}
+- Example fields: {{"event": "team meeting", "start_date": "2026-03-15"}}
+
+### generic schema
+Fields: name, value
+- Use `name` for the item identifier
+- Example match_fields: {{"name": "setting1"}}
+
+## Important Rules
+
+1. Set confidence between 0.0 and 1.0 based on how clearly the query maps to an operation
+2. Set requires_confirmation to "true" for delete and update operations
+3. Use JSON format for match_fields, fields, and filters
+4. Leave unused fields empty (not null)
+5. Preserve the user's exact wording in raw_query
+
+Requirement: You MUST respond with valid XML and nothing else.
+Requirement: The first word of your response MUST be the XML tag `<intent>` and your last MUST be the XML tag `</intent>`.
+
+### Input:
+
+Your user's current lists:
+{available_lists}
+
+You MUST respond to the query using the following XML format:
+{{PYDANTIC_XML_EXAMPLE}}
+
+User query: `{query}`
+
+Take a deep breath and pause for a moment before you begin. Good luck!
+
+### Response:

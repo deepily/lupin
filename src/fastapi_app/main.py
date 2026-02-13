@@ -476,7 +476,20 @@ async def lifespan( app: FastAPI ):
     print( "Loading distill whisper engine... ", end="" )
     whisper_pipeline = await load_stt_model()
     print( "Done!" )
-    
+
+    # Load local embedding models on startup (claim VRAM before vLLM)
+    from cosa.memory.local_embedding_engine import get_code_engine, get_prose_engine
+
+    print( "Loading CodeRankEmbed embedding engine... ", end="" )
+    code_engine = get_code_engine( debug=app_debug, verbose=app_verbose )
+    code_engine.encode_code( [ "warmup" ] )
+    print( "Done!" )
+
+    print( "Loading nomic-embed-text-v1.5 embedding engine... ", end="" )
+    prose_engine = get_prose_engine( debug=app_debug, verbose=app_verbose )
+    prose_engine.encode_query( [ "warmup" ] )
+    print( "Done!" )
+
     # Store event loop reference in WebSocketManager for thread-safe operations
     print( "[WS] Storing event loop reference for thread-safe operations..." )
     loop = asyncio.get_running_loop()

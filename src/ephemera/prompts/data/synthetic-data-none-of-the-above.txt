@@ -12,13 +12,11 @@ Start the dishwasher.
 Stop the washing machine.
 Turn on the fan.
 Deactivate the alarm.
-Reboot the router.
 Connect to the Bluetooth speaker.
 Unload the dryer.
 Water the plants.
 Feed the cat.
 Charge the robot vacuum.
-Eject the USB drive.
 Switch the channel to BBC.
 Lower the thermostat.
 Raise the desk.
@@ -31,6 +29,46 @@ Disarm the security system.
 Shuffle the playlist.
 Flip the lights to cool white.
 Silence the phone.
+Could you mute the TV, please?
+Might you increase the volume a bit?
+Is it possible to switch to HDMI2 instead?
+Would you mind dimming the kitchen lights for dinner?
+Can we pause the video for a moment?
+Would it be alright to resume playback now?
+Could you ensure the front door is locked tonight?
+Would activating the alarm system be a good idea now?
+Is opening the garage necessary at the moment?
+Could we close the curtains to start the movie?
+Reboot the router.
+Eject the USB drive.
+Could you reboot the router to fix the internet?
+Would connecting to the Bluetooth speaker improve the sound?
+Is it time to unload the dryer, or should we wait?
+Could you water the plants while I'm away?
+Would feeding the cat now be too early?
+Is the robot vacuum charged enough for cleaning?
+Could you eject the USB drive after saving the files?
+Would switching the channel to BBC offer better news?
+Might lowering the thermostat make it more comfortable?
+Could raising the desk help with my posture?
+Would activating do not disturb mode aid my focus?
+Is enabling night light on the phone good for my eyes?
+Could turning off notifications help me relax?
+Would setting the mood lighting make the evening nicer?
+Is warming up the car necessary in this weather?
+Could disarming the security system be safe for now?
+Would you mind shuffling the playlist for variety?
+Could flipping the lights to cool white energize the room?
+Would silencing the phone ensure a quieter night?
+Could we consider installing smart bulbs in the living room?
+Would it be possible to arrange a virtual meeting setup in the office?
+Can you recommend a natural remedy for a common cold?
+Could you suggest a guide to online security for personal data protection?
+Could you find a beginner's guide to personal finance management?
+Would exploring virtual reality games be an exciting experience?
+I want to understand the basics of coding; can you suggest where to start for absolute beginners?
+I'm curious about home automation; what are the basics I should know before getting started?
+I want to improve my home's energy efficiency; what are some easy changes I can make?
 Recommend a new podcast about technology.
 Show me beginner's guide to meditation.
 Suggest a workout for lower back pain.
@@ -65,6 +103,12 @@ Find a course on digital photography.
 Show me how to write a cover letter.
 Suggest ways to decorate a small balcony.
 Find a plan for a vegetable garden.
+Could you recommend a new podcast about technology, please?
+Might showing me a beginner's guide to meditation be helpful?
+Could suggesting a workout for lower back pain relieve my discomfort?
+Is playing ambient sounds for studying a good idea?
+Could you find a documentary about ancient Egypt for tonight?
+Would showing steps for baking sourdough bread be too complex?
 I'm looking for a hobby that can help me unwind on weekends, any ideas for something creative?
 Can you provide a summary of the latest findings in renewable energy technologies?
 I'm planning a themed movie night; could you suggest films that explore dystopian futures?
@@ -79,15 +123,12 @@ I want to explore graphic design as a hobby; what beginner tools and software wo
 I'm interested in learning about mindfulness meditation; can you suggest a comprehensive guide or app to get started?
 I'm looking for non-fiction books that delve into the psychology of happiness; what are your recommendations?
 I'd like to understand more about sustainable travel; can you suggest how to travel responsibly?
-I'm curious about home automation; what are the basics I should know before getting started?
 I want to start a small herb garden indoors; can you guide me on the essentials I need to know?
 I'm looking for creative writing prompts to help overcome writer's block; what are some stimulating ideas?
 I'm interested in the art of filmmaking; can you suggest beginner-friendly resources to learn more?
 I'm exploring ways to reduce waste in daily life; what are some practical steps I can take?
-I want to understand the basics of coding; can you suggest where to start for absolute beginners?
 I'm planning to repaint my living room; can you provide tips on choosing the right colors?
 I'm interested in vintage fashion; where can I learn more about the history and sourcing of vintage clothing?
-I want to improve my home's energy efficiency; what are some easy changes I can make?
 I'm looking for a comprehensive guide to plant-based nutrition; what resources do you recommend?
 I'm curious about the process of making handmade soap; can you show me how to get started?
 I want to learn about the cultural significance of tea in different countries; where can I find detailed information?
@@ -98,45 +139,33 @@ I want to understand the science behind climate change; what are some accessible
 I'm looking for art therapy activities for stress relief; what do you suggest?
 I'm interested in astronomy; can you suggest how to start observing the night sky with basic equipment?
 I want to learn more about the traditions and origins of yoga; can you provide information on its history?
-Could you mute the TV, please?
-Might you increase the volume a bit?
-Is it possible to switch to HDMI2 instead?
-Would you mind dimming the kitchen lights for dinner?
-Can we pause the video for a moment?
-Would it be alright to resume playback now?
-Could you ensure the front door is locked tonight?
-Would activating the alarm system be a good idea now?
-Is opening the garage necessary at the moment?
-Could we close the curtains to start the movie?
-Shall we start the dishwasher before bed?
-Is stopping the washing machine an option right now?
-I'm feeling a bit warm; could you turn on the fan?
-Might deactivating the alarm be wise before we leave?
-Could you reboot the router to fix the internet?
-Would connecting to the Bluetooth speaker improve the sound?
-Is it time to unload the dryer, or should we wait?
-Could you water the plants while I'm away?
-Would feeding the cat now be too early?
-Is the robot vacuum charged enough for cleaning?
-Could you eject the USB drive after saving the files?
-Would switching the channel to BBC offer better news?
-Might lowering the thermostat make it more comfortable?
-Could raising the desk help with my posture?
-Would activating do not disturb mode aid my focus?
-Is enabling night light on the phone good for my eyes?
-Could turning off notifications help me relax?
-Would setting the mood lighting make the evening nicer?
-Is warming up the car necessary in this weather?
-Could disarming the security system be safe for now?
-Would you mind shuffling the playlist for variety?
-Could flipping the lights to cool white energize the room?
-Would silencing the phone ensure a quieter night?
-Could you recommend a new podcast about technology, please?
-Might showing me a beginner's guide to meditation be helpful?
-Could suggesting a workout for lower back pain relieve my discomfort?
-Is playing ambient sounds for studying a good idea?
-Could you find a documentary about ancient Egypt for tonight?
-Would showing steps for baking sourdough bread be too complex?
+Might creating a weekly meal plan help with healthy eating?
+Is organizing a family game night a good way to spend the evening?
+Could you find easy DIY crafts for children's birthday parties?
+Would learning about historical landmarks be an educational trip?
+Is exploring new music genres a way to expand my playlist?
+Could practicing mindfulness meditation before bed improve sleep?
+Would adopting a minimalist lifestyle declutter my space and mind?
+Is learning a new language online an achievable goal this year?
+Could you provide tips for eco-friendly cleaning solutions at home?
+Would planning a sustainable garden benefit the environment?
+Is creating a home workout routine a good strategy for fitness?
+Is trying out new coffee brewing methods a way to enhance mornings?
+Could you suggest ways to celebrate anniversaries at home?
+Would learning about astronomy deepen my understanding of the universe?
+Is finding ways to reduce digital screen time beneficial for health?
+Could you help plan a road trip with eco-friendly stops?
+Would experimenting with vegan baking be a fun kitchen adventure?
+Is learning about sustainable fashion choices a way to shop smarter?
+Would finding a hobby that reduces stress be helpful in my daily routine?
+Is discovering local hiking trails a good weekend activity?
+Could you suggest a simple meditation routine for beginners?
+Would exploring art as a hobby improve my creative skills?
+Is finding a guide to composting at home a step towards sustainability?
+Could you suggest environmentally friendly travel tips?
+Would learning calligraphy be a unique skill to acquire?
+Is finding resources for home-based learning beneficial for kids?
+Could exploring different cultures through cuisine be an enriching experience?
 Might recommending a strategy game for PC entertain us tonight?
 Could you list top-rated science fiction books for my reading list?
 Would suggesting weekend getaways nearby spark an adventure?
@@ -165,36 +194,331 @@ Is finding a course on digital photography a good step for my hobby?
 Could showing me how to write a cover letter advance my career?
 Would suggesting ways to decorate a small balcony beautify my space?
 Is finding a plan for a vegetable garden a green thumb's dream?
-Could we consider installing smart bulbs in the living room?
-Would it be possible to arrange a virtual meeting setup in the office?
-Can you recommend a natural remedy for a common cold?
-Might creating a weekly meal plan help with healthy eating?
-Is organizing a family game night a good way to spend the evening?
-Could you find easy DIY crafts for children's birthday parties?
-Would learning about historical landmarks be an educational trip?
-Is exploring new music genres a way to expand my playlist?
-Could practicing mindfulness meditation before bed improve sleep?
-Would adopting a minimalist lifestyle declutter my space and mind?
-Is learning a new language online an achievable goal this year?
-Could you provide tips for eco-friendly cleaning solutions at home?
-Would planning a sustainable garden benefit the environment?
-Is creating a home workout routine a good strategy for fitness?
-Could you find a beginner's guide to personal finance management?
-Would exploring virtual reality games be an exciting experience?
-Is trying out new coffee brewing methods a way to enhance mornings?
-Could you suggest ways to celebrate anniversaries at home?
-Would learning about astronomy deepen my understanding of the universe?
-Is finding ways to reduce digital screen time beneficial for health?
-Could you help plan a road trip with eco-friendly stops?
-Would experimenting with vegan baking be a fun kitchen adventure?
-Is learning about sustainable fashion choices a way to shop smarter?
-Could you suggest a guide to online security for personal data protection?
-Would finding a hobby that reduces stress be helpful in my daily routine?
-Is discovering local hiking trails a good weekend activity?
-Could you suggest a simple meditation routine for beginners?
-Would exploring art as a hobby improve my creative skills?
-Is finding a guide to composting at home a step towards sustainability?
-Could you suggest environmentally friendly travel tips?
-Would learning calligraphy be a unique skill to acquire?
-Is finding resources for home-based learning beneficial for kids?
-Could exploring different cultures through cuisine be an enriching experience?
+Shall we start the dishwasher before bed?
+Is stopping the washing machine an option right now?
+I'm feeling a bit warm; could you turn on the fan?
+
+# Quantization-resilient supplements — diverse negative examples
+Tell me a fun fact about dolphins
+What's the capital of Mongolia?
+Can you recommend a good thriller novel?
+How do you say hello in Mandarin?
+Explain the theory of relativity in simple terms
+Who won the last Super Bowl?
+What's the difference between a crocodile and an alligator?
+Can you write me a haiku about autumn?
+Tell me about the history of jazz music
+What are some tips for better public speaking?
+How does a refrigerator actually work?
+What's the tallest building in the world?
+Can you explain what blockchain technology is?
+Tell me about the most unusual animals in the ocean
+What are the benefits of meditation?
+
+# Science — general knowledge questions about the natural world
+How does photosynthesis work in plants?
+What causes gravity and why do objects fall?
+Explain how DNA stores genetic information
+What is the difference between mitosis and meiosis?
+How do vaccines train the immune system?
+What causes earthquakes and how are they measured?
+Why is the sky blue during the day?
+How do black holes form in space?
+What are the different states of matter?
+Can you explain the water cycle?
+How does evolution work through natural selection?
+What is the electromagnetic spectrum?
+Why do some elements react and others are inert?
+How does the human brain process memories?
+What causes the northern lights?
+Explain how solar panels convert sunlight to electricity
+What is the difference between a virus and a bacterium?
+How do tides work and what causes them?
+What makes a species endangered versus extinct?
+How does carbon dating determine the age of fossils?
+Why is the ozone layer important for life on Earth?
+How do antibiotics fight infections?
+What is the theory of plate tectonics?
+Explain what dark matter is and why scientists think it exists
+How does sound travel through different materials?
+What is nuclear fusion and how does it power the sun?
+Why do we have seasons on Earth?
+How do animals use echolocation?
+What causes thunder and lightning?
+Explain the difference between weather and climate
+
+# Cooking — recipes, techniques, substitutions
+What can I substitute for eggs in baking?
+How do you make a basic roux for gravy?
+What is the difference between baking soda and baking powder?
+How long should you marinate chicken for the best flavor?
+What are some easy one-pot meals for busy weeknights?
+How do you properly season a cast iron skillet?
+What temperature should I roast vegetables at?
+Can you suggest a simple pasta sauce from scratch?
+How do you know when bread dough has risen enough?
+What are some good spices for Indian cooking?
+How do I make a proper French omelette?
+What is the best way to cook brown rice?
+How do you make homemade pizza dough?
+Can you explain the difference between sauteing and frying?
+What are some healthy meal prep ideas for the week?
+How do you properly caramelize onions?
+What is the difference between stock and broth?
+How long do you blanch green beans?
+What are some easy appetizers for a party?
+Can you suggest dairy-free dessert options?
+How do you make whipped cream from scratch?
+What are some quick breakfast ideas that aren't cereal?
+How do you deglaze a pan for making sauce?
+What is the best way to store fresh herbs?
+How do you make fried rice that isn't mushy?
+What are some low-sodium seasoning alternatives?
+How long should I let steak rest after cooking?
+Can you recommend a beginner-friendly curry recipe?
+What is the proper way to dice an onion?
+How do you make a good vinaigrette dressing?
+
+# Coding — programming concepts, debugging, best practices
+How do you reverse a string in Python?
+What is the difference between REST and GraphQL?
+Can you explain what recursion is with a simple example?
+How do I debug a segmentation fault in C?
+What is the difference between a list and a tuple in Python?
+How do you center a div in CSS?
+What is the purpose of version control in software development?
+Can you explain what an API endpoint is?
+How do you handle errors in JavaScript with try-catch?
+What is the difference between SQL and NoSQL databases?
+How do you write a for loop in JavaScript?
+What is object-oriented programming in simple terms?
+How do you read a file line by line in Python?
+What is a hash table and when would you use one?
+Can you explain what Docker containers are?
+How do you sort an array in ascending order?
+What is the difference between compiled and interpreted languages?
+How do you create a virtual environment in Python?
+What is a binary search and when is it useful?
+Can you explain the concept of Big O notation?
+How do you make an HTTP GET request in Python?
+What is the difference between a stack and a queue?
+How do you write a regular expression to match email addresses?
+What are environment variables and why are they useful?
+How do you merge two sorted arrays efficiently?
+What is the purpose of a package manager like npm or pip?
+How do you implement a linked list from scratch?
+What is the difference between synchronous and asynchronous code?
+How do you connect to a database in Python?
+What is the MVC design pattern?
+
+# Philosophy — meaning, ethics, thought experiments
+What is the meaning of life according to different philosophies?
+Can you explain the trolley problem and its ethical implications?
+What is the difference between determinism and free will?
+How did Socrates define wisdom?
+What is existentialism in simple terms?
+Can you explain the concept of Occam's Razor?
+What is the difference between ethics and morals?
+How does the philosophy of stoicism help with daily life?
+What is the ship of Theseus thought experiment about?
+Can you explain utilitarianism and its criticisms?
+What did Nietzsche mean by the will to power?
+How does Plato's allegory of the cave relate to modern life?
+What is the difference between empiricism and rationalism?
+Can you explain the concept of cognitive dissonance?
+What is nihilism and how is it different from existentialism?
+What are the main principles of Buddhist philosophy?
+How does the concept of karma work across different traditions?
+What is the paradox of tolerance?
+Can you explain what epistemology studies?
+What is the difference between subjective and objective truth?
+How does pragmatism differ from idealism?
+What is the Socratic method of questioning?
+Can you explain the prisoner's dilemma?
+What is the veil of ignorance thought experiment?
+How does moral relativism differ from moral absolutism?
+
+# Health and fitness — exercise, nutrition, wellness
+How many calories should I eat per day to lose weight?
+What are the best stretches to do before running?
+How much sleep do adults actually need each night?
+What foods are high in protein but low in fat?
+How do I improve my posture while sitting at a desk?
+What are the signs of dehydration and how do I prevent it?
+How often should I exercise per week for general health?
+What is the difference between aerobic and anaerobic exercise?
+Can you suggest some core strengthening exercises for beginners?
+What are the health benefits of drinking green tea?
+How do I start a couch-to-5K running program?
+What vitamins and minerals are most people deficient in?
+How do you properly warm up before weight lifting?
+What are some effective stress management techniques?
+How much water should I drink each day?
+What is intermittent fasting and is it safe?
+How do I prevent shin splints when jogging?
+What are the benefits of foam rolling after exercise?
+Can you suggest a simple morning stretching routine?
+What foods help reduce inflammation in the body?
+How do I calculate my body mass index?
+What are some healthy snack options for between meals?
+How does regular exercise affect mental health?
+What is the proper form for a basic squat?
+How do I get better quality sleep each night?
+
+# Travel — destinations, logistics, tips
+Do I need a visa to visit Japan as a US citizen?
+What is the best time of year to visit Thailand?
+How do I pack light for a two-week trip?
+What are the must-see attractions in Paris?
+How do I find cheap flights for international travel?
+What vaccinations do I need before traveling to Africa?
+Can you suggest a good itinerary for a week in Italy?
+What is the safest way to carry money while traveling abroad?
+How do I deal with jet lag after a long flight?
+What are some hidden gems to visit in Portugal?
+How do I choose between a hostel and a hotel?
+What travel insurance should I get for an overseas trip?
+What are the best road trip routes in the United States?
+How do I navigate public transportation in Tokyo?
+What should I know about tipping customs in Europe?
+Can you recommend budget-friendly destinations in Southeast Asia?
+What are the best national parks to visit in summer?
+How do I stay safe while traveling solo?
+What essentials should go in my carry-on bag?
+How do I convert currencies when traveling internationally?
+What are some good travel apps for planning trips?
+How early should I arrive at the airport for international flights?
+What are the best destinations for food tourism?
+How do I find authentic local restaurants when traveling?
+What are some eco-friendly travel tips?
+
+# Finance — budgeting, investing, money management
+How do I create a monthly budget that actually works?
+What is compound interest and why does it matter?
+How should a beginner start investing in the stock market?
+What is the difference between a Roth IRA and a traditional IRA?
+How do I build an emergency fund from scratch?
+What are index funds and why are they popular?
+How do I improve my credit score?
+What is the 50/30/20 budgeting rule?
+How does inflation affect my savings over time?
+What is dollar cost averaging in investing?
+How do I pay off credit card debt effectively?
+What are the pros and cons of renting versus buying a home?
+How much should I save for retirement each month?
+What is diversification in investing and why is it important?
+How do I negotiate a raise at work?
+What are some common tax deductions people miss?
+How do I start saving for my children's college education?
+What is the difference between stocks and bonds?
+How do I choose a high-yield savings account?
+What is a 401k and how does employer matching work?
+How do I track my spending without it being overwhelming?
+What are some passive income ideas for beginners?
+How do I set financial goals that are realistic?
+What is the snowball method for paying off debt?
+How do I protect myself from financial scams online?
+
+# Entertainment — movies, books, games, music
+What are the best movies to watch on a rainy day?
+Can you recommend a good book series for fantasy lovers?
+What are some fun board games for adults?
+How do I learn to play the ukulele?
+What are the most popular video games right now?
+Can you suggest a binge-worthy TV show on Netflix?
+What are some classic novels everyone should read?
+How do I find new music that matches my taste?
+What are some fun outdoor activities for the weekend?
+Can you recommend a good true crime podcast?
+What are the best documentaries about nature?
+How do I get started with watercolor painting?
+What are some must-read graphic novels?
+Can you suggest party games for a group of ten people?
+What are the best albums of the decade?
+How do I start a book club with friends?
+What are some relaxing hobbies to pick up?
+Can you recommend a good comedy movie for family night?
+What are the best puzzle games for mobile phones?
+How do I learn photography composition basics?
+What are some good escape room strategies?
+Can you suggest instrumental music for concentration?
+What are the best museums to visit virtually online?
+How do I get started with creative writing?
+What are some fun card games for two players?
+
+# Relationships — communication, conflict, connection
+How do I have a difficult conversation with a friend?
+What are some effective communication tips for couples?
+How do I set healthy boundaries with family members?
+What are the signs of a toxic relationship?
+How do I make new friends as an adult?
+What are some good conversation starters for networking events?
+How do I deal with a coworker who is always negative?
+What are some ways to show appreciation for your partner?
+How do I apologize sincerely when I've made a mistake?
+What are the key elements of active listening?
+How do I handle disagreements without escalating into arguments?
+What are some fun activities for couples to do together?
+How do I rebuild trust after it's been broken?
+What are some tips for long-distance relationships?
+How do I communicate my needs without sounding demanding?
+What are some strategies for managing conflict at work?
+How do I support a friend who is going through a tough time?
+What are the love languages and how do they help relationships?
+How do I balance alone time with quality time in a relationship?
+What are some ways to strengthen family bonds?
+How do I deal with feeling lonely even when surrounded by people?
+What are some icebreaker questions for meeting new people?
+How do I navigate differences in values with a close friend?
+What are some tips for effective teamwork?
+How do I handle rejection gracefully?
+
+# Home and DIY — repairs, gardening, improvement
+How do I unclog a drain without chemicals?
+What is the best way to paint a room evenly?
+How do I start a compost bin at home?
+What tools does every homeowner need?
+How do I fix a running toilet?
+What are some easy weekend DIY projects?
+How do I hang shelves on drywall properly?
+What plants are best for a beginner's garden?
+How do I remove wallpaper without damaging the wall?
+What is the best way to organize a small closet?
+How do I replace a light switch safely?
+What are some low-maintenance landscaping ideas?
+How do I insulate a drafty window?
+What is the best way to clean hardwood floors?
+How do I build a raised garden bed?
+What are some creative storage solutions for small spaces?
+How do I fix a squeaky door hinge?
+What are the best indoor plants for air purification?
+How do I refinish a wood table?
+What is the proper way to caulk a bathtub?
+How do I grow tomatoes in containers?
+What are some energy-saving home improvements?
+How do I patch a hole in drywall?
+What are the best plants for a shady yard?
+How do I install a ceiling fan?
+
+# E-commerce — shopping, products, returns
+How do I find the best deals when shopping online?
+What should I look for when comparing product reviews?
+How do I return an item I bought online?
+What is the difference between free shipping and standard shipping?
+How do I know if an online store is legitimate?
+Can you help me find a laptop under 500 dollars?
+What are the best websites for comparing prices on electronics?
+How do I use a coupon code when checking out online?
+What is the best time of year to buy a new mattress?
+How do I track my online order status?
+What should I know about extended warranties on electronics?
+How do I dispute a charge on my credit card from an online purchase?
+What are some tips for buying clothes online that actually fit?
+How do I find sustainable and ethical brands to buy from?
+What is the return policy for most major retailers?
+How do I sell things I no longer need online?
+What are the best budget smartphones available right now?
+How do I avoid buying counterfeit products online?
+What are some good subscription box services?
+How do I compare washing machines to find the best value?
+What are the safest online payment methods?

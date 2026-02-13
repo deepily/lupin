@@ -43,6 +43,7 @@
                         <option value="receptionist">Receptionist</option>
                         <option value="todo">Todo List</option>
                         <option value="datetime">Date & Time</option>
+                        <option value="calculator">Calculator</option>
                     </select>
                     <span id="mode-badge" class="mode-badge" style="display: none; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; text-transform: uppercase; background: #0d6efd; color: white; cursor: pointer;" title="Click to return to System mode">
                         <!-- Mode name will be inserted here -->
@@ -258,7 +259,7 @@
 
                 <!-- Keep existing resume button for Focus Mode -->
                 <button id="tts-resume-btn" class="tts-resume-button" style="display: none;"
-                        onclick="event.stopPropagation(); window.freshQueueUI.toggleTTSFocusMode()">
+                        onclick="event.stopPropagation(); window.notificationsUI.toggleTTSFocusMode()">
                     ▶️ Resume
                 </button>
 
@@ -271,6 +272,13 @@
                             title="Resume playback"
                             onclick="window.notificationsUI.resumeTTS()">▶️</button>
                 </div>
+
+                <button id="tts-clear-all-btn" class="tts-clear-all-button"
+                        style="display: none;" disabled
+                        title="Clear all pending queue items"
+                        onclick="event.stopPropagation(); window.notificationsUI.clearTTSQueue()">
+                    Clear
+                </button>
 
                 <button class="toggle-button" id="tts-queue-toggle">▼</button>
             </div>
@@ -471,7 +479,18 @@
                 </div>
                 <div class="status-item">
                     <strong>Sessions:</strong>
-                    Queue: <span id="queue-session">-</span>, Audio: <span id="audio-session">-</span>
+                    <div class="session-list">
+                        <div class="session-entry">
+                            <span class="session-label">Queue:</span>
+                            <code id="queue-session">-</code>
+                            <span class="copy-btn" title="Copy Queue session ID" onclick="window.notificationsUI.copyToClipboard( 'queue-session' )">📋</span>
+                        </div>
+                        <div class="session-entry">
+                            <span class="session-label">Audio:</span>
+                            <code id="audio-session">-</code>
+                            <span class="copy-btn" title="Copy Audio session ID" onclick="window.notificationsUI.copyToClipboard( 'audio-session' )">📋</span>
+                        </div>
+                    </div>
                 </div>
                 <div class="status-item">
                     <strong>Health Monitor:</strong>

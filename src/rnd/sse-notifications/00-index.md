@@ -1,5 +1,12 @@
 # SSE Notification System - Master Index
 
+> **NOTE**: For the consolidated Notification API reference, see:
+> **[src/docs/notification-api.md](../../docs/notification-api.md)**
+>
+> This directory contains historical R&D planning artifacts from the
+> original implementation. They are preserved for reference but are
+> no longer the authoritative documentation.
+
 **Project ID**: `sse-notifications`
 **Created**: 2025.10.15
 **Pattern**: Pattern 1 (Multi-Phase Implementation)

@@ -1,0 +1,19 @@
+{
+    "profile_name"  : "crud",
+    "description"   : "Q&A script for CRUD agent confirmation dialogs (delete, update)",
+    "sender_ids"    : [ "crud.agent@lupin.deepily.ai" ],
+    "entries" : [
+        {
+            "question_pattern" : "Are you sure you want to delete",
+            "answer"           : "yes",
+            "arg_name"         : "confirmation",
+            "response_types"   : [ "yes_no" ]
+        },
+        {
+            "question_pattern" : "Are you sure you want to update",
+            "answer"           : "yes",
+            "arg_name"         : "confirmation",
+            "response_types"   : [ "yes_no" ]
+        }
+    ]
+}

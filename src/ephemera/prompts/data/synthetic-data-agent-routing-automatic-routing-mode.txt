@@ -1,0 +1,208 @@
+Switch back to automatic mode
+Return to normal routing
+Go back to auto mode
+Exit direct mode
+Cancel agent mode
+Switch to automatic
+Return to system routing
+Go back to letting you decide
+I want automatic routing again
+Resume automatic intent detection
+Stop direct mode and go back to normal
+Turn off manual routing
+Deactivate agent mode
+End direct routing
+Go back to automatic
+Return me to auto mode please
+Switch back to normal mode
+Cancel the current agent mode
+I don't want direct routing anymore
+Put me back on automatic
+Restore automatic routing please
+Exit this mode and go back to auto
+Turn automatic routing back on
+I want you to decide which agent to use
+Let the system pick the right agent
+Go back to the default routing
+Stop routing me to a specific agent
+Remove the agent lock
+Clear agent mode
+Undo the agent switch
+Back to automatic please
+Reset routing to automatic
+Switch off direct mode
+No more manual routing
+I'm done with this agent, go back to automatic
+Return to default mode
+Take me off this agent
+Disengage direct routing
+Go back to smart routing
+Resume normal operations
+Let the router decide
+Turn off math mode and go automatic
+Turn off weather mode and go automatic
+Turn off calendar mode and go automatic
+Turn off todo mode and go automatic
+Exit calculator mode
+Stop using the current agent
+I want to switch back to automatic routing
+Disable the current agent mode
+Clear the active agent
+End the current session mode
+Release me from this agent
+Automatic mode please
+Default routing mode
+Normal mode
+Auto routing
+Back to default
+Reset agent routing
+System mode
+Automatic please
+
+# Conversational — natural, informal requests to return to auto mode
+I think I'd like to go back to automatic now
+Actually, just let the system decide
+You know what, never mind the direct mode
+I changed my mind, go back to auto
+Let's just go back to how it was before
+Can we go back to the normal way please
+I'd rather have you pick the agent for me
+On second thought, auto mode is fine
+Alright, I'm done here, back to normal please
+Hmm, let's just switch back to the way it was
+I think automatic is better for what I need
+Let's return to the regular setup
+I don't need a specific agent right now
+Just go back to the default please
+I'd prefer automatic routing at this point
+Let me go back to the way things were
+OK I'm finished, restore the default mode
+That's enough of this mode, switch back
+I'm good now, you can go back to automatic
+The automatic way was working fine before
+Let's reset everything back to normal
+I want to go back to the standard routing
+How about we just use automatic from here
+Take me back to where we started
+I'd like to return to the regular mode now
+
+# Questioning — asking how to switch back
+Can you switch me back to auto mode?
+How do I get back to normal routing?
+Is there a way to go back to automatic?
+Could you return me to the default mode?
+Would you put me back on automatic please?
+Can we switch back to the system choosing?
+How do I turn off this agent mode?
+Can I go back to the way it was before?
+Is it possible to reset to automatic?
+How do I exit this direct mode?
+Could you disable this mode and go back?
+Can you undo the agent switch?
+
+# Indirect/contextual — expressing intent without explicit command
+I don't need the math agent anymore
+I'm done with the calculator
+I don't want to use this specific agent
+I no longer need direct routing
+This agent isn't what I was looking for
+I'd rather not stay in this mode
+I'm finished with the task list agent
+I don't want the todo agent anymore
+I'm all done with the calendar agent
+I don't need this agent, go back
+The weather agent isn't needed now
+I finished what I needed the math agent for
+I'm done talking to this specific agent
+I don't want any particular agent right now
+I'm through with this mode
+
+# Polite/casual — friendly or casual tone
+Thanks, you can go back to picking the right agent
+No worries, just put me back on auto
+Hey, switch me back to the default mode please
+Cheers, back to automatic would be great
+Alright thanks, I'll take automatic mode now
+Much appreciated, auto mode from here
+Cool, let's go back to normal routing
+Sweet, just put it back to automatic
+Thanks for the help, back to auto please
+No problem, just reset the routing
+Appreciate it, default mode is fine
+Thanks a lot, back to the regular mode please
+
+# Negative framing — stopping, canceling, exiting
+Stop using the calendar agent
+Cancel this mode
+Exit agent mode
+Quit direct routing
+Stop the math mode
+Deactivate direct routing mode
+Disable this agent
+Abort the current mode
+Terminate the agent lock
+Kill this mode and go back
+Shut down direct routing
+End the current agent session
+Close out this agent mode
+Turn this off and go back to auto
+Drop the direct routing
+
+# Agent-specific exits — leaving a particular agent
+Leave math mode
+Exit the calculator
+I don't want the todo agent
+Stop using the weather agent
+Get me out of math mode
+Take me away from the calendar agent
+Leave the task list mode
+Disconnect from the math specialist
+Get me out of this calculator mode
+I'm done with the weather specialist
+Remove me from todo mode
+I don't need the calendar anymore
+Exit the task manager mode
+Leave the weather mode please
+Get me out of the todo agent
+
+# Error recovery — wrong agent, not helpful
+This agent isn't helping
+Wrong agent, go back
+This isn't the right agent for me
+That's not what I need, go back to auto
+I ended up in the wrong mode
+The system picked the wrong agent
+Go back, this isn't right
+Nope, wrong agent, switch back
+This agent can't help with what I need
+I need a different agent, or just go back to auto
+This mode isn't working for what I want
+Not the right mode, please switch back
+That's not what I was looking for, go auto
+Can you fix this? I don't want this agent
+Wrong choice, let the system decide instead
+
+# Short/terse — minimal phrasing
+Auto
+Automatic
+Default
+Go auto
+Reset
+Back
+Normal please
+Auto mode
+Default mode
+Go default
+Regular mode
+Standard routing
+Just go back
+Switch back
+Undo
+Reset mode
+Cancel mode
+End mode
+Normal routing
+Back to normal
+Original mode please
+Revert to auto
+Restore default routing

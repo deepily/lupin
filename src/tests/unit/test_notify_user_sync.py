@@ -231,7 +231,7 @@ class TestNotifyUserSync:
 
         assert response.exit_code == 1
         assert response.response_value is None
-        assert response.status == "http_error"
+        assert response.status == "http_error_404"
         assert response.is_error is True
 
     @patch( 'cosa.cli.notify_user_sync.requests.post' )

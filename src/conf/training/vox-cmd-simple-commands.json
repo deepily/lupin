@@ -1,0 +1,13 @@
+{
+    "search using clipboard current tab"                : "/src/ephemera/prompts/data/synthetic-data-search-clipboard-in-current-tab.txt",
+    "search using clipboard new tab"                    : "/src/ephemera/prompts/data/synthetic-data-search-clipboard-in-new-tab.txt",
+    "search google using clipboard current tab"         : "/src/ephemera/prompts/data/synthetic-data-search-clipboard-google-in-current-tab.txt",
+    "search google using clipboard new tab"             : "/src/ephemera/prompts/data/synthetic-data-search-clipboard-google-in-new-tab.txt",
+    "search google scholar using clipboard current tab" : "/src/ephemera/prompts/data/synthetic-data-search-clipboard-google-scholar-in-current-tab.txt",
+    "search google scholar using clipboard new tab"     : "/src/ephemera/prompts/data/synthetic-data-search-clipboard-google-scholar-in-new-tab.txt",
+    "search kagi using clipboard current tab"           : "/src/ephemera/prompts/data/synthetic-data-search-clipboard-kagi-in-current-tab.txt",
+    "search kagi using clipboard new tab"               : "/src/ephemera/prompts/data/synthetic-data-search-clipboard-kagi-in-new-tab.txt",
+    "search perplexity using clipboard current tab"     : "/src/ephemera/prompts/data/synthetic-data-search-clipboard-perplexity-in-current-tab.txt",
+    "search perplexity using clipboard new tab"         : "/src/ephemera/prompts/data/synthetic-data-search-clipboard-perplexity-in-new-tab.txt",
+    "none"                                              : "/src/ephemera/prompts/data/synthetic-data-none-of-the-above.txt"
+}

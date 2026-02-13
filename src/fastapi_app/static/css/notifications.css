@@ -233,6 +233,38 @@
             font-size: 14px;
         }
 
+        .session-list {
+            margin-top: 4px;
+            margin-left: 12px;
+        }
+
+        .session-entry {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 2px;
+            font-size: 13px;
+        }
+
+        .session-entry code {
+            background: #f1f3f5;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+            user-select: all;
+        }
+
+        .copy-btn {
+            cursor: pointer;
+            font-size: 14px;
+            opacity: 0.6;
+            transition: opacity 0.15s;
+        }
+
+        .copy-btn:hover {
+            opacity: 1.0;
+        }
+
         .status-good {
             color: #28a745;
         }
@@ -953,6 +985,65 @@
             font-size: 11px;
             color: #6c757d;
             margin-left: 5px;
+        }
+
+        /* Yes/No comment hint and expandable comment field */
+        .yes-no-comment-hint {
+            text-align: center;
+            font-size: 11px;
+            color: #999;
+            cursor: pointer;
+            padding: 4px 0 0 0;
+            user-select: none;
+            transition: color 0.2s;
+        }
+
+        .yes-no-comment-hint:hover {
+            color: #666;
+        }
+
+        .yes-no-comment-container {
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+        }
+
+        .yes-no-comment-container.expanded {
+            max-height: 60px;
+            opacity: 1;
+            margin-top: 6px;
+        }
+
+        .yes-no-comment-input-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .yes-no-comment-input {
+            flex: 1;
+            font-size: 13px;
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .yes-no-comment-input::placeholder {
+            font-style: italic;
+            color: #aaa;
+        }
+
+        .yes-no-comment-input:focus {
+            border-color: #5b9bd5;
+            box-shadow: 0 0 0 2px rgba( 91, 155, 213, 0.2 );
+        }
+
+        /* Size, shape, colors, hover, focus, recording/processing all from .response-mic-button */
+        .response-mic-button.yes-no-comment-mic {
+            flex-shrink: 0;
         }
 
         /* Cancel button in upper-left corner of notification card */
@@ -2306,6 +2397,83 @@
             background: rgba( 0, 0, 0, 0.25 );
         }
 
+        /* =========================================================================
+           TTS QUEUE DELETE CONTROLS - Per-item delete + Clear All
+           ========================================================================= */
+
+        /* Per-item delete button on minimized queue cards */
+        .tts-delete-button {
+            width: 22px;
+            height: 22px;
+            border: none;
+            border-radius: 50%;
+            background: transparent;
+            color: #999;
+            font-size: 16px;
+            line-height: 22px;
+            text-align: center;
+            cursor: pointer;
+            flex-shrink: 0;
+            padding: 0;
+            transition: all 0.15s ease;
+        }
+
+        .tts-delete-button:hover {
+            background: rgba( 220, 53, 69, 0.15 );
+            color: #dc3545;
+            transform: scale( 1.1 );
+        }
+
+        /* Shrink-fade animation for minimized queue cards being deleted */
+        .tts-minimized.shrink-fade {
+            animation: shrinkFadeOut 0.35s ease-out forwards;
+            pointer-events: none;
+        }
+
+        /* Clear All button in TTS queue header */
+        .tts-clear-all-button {
+            display: none;
+            background: transparent;
+            border: 1px solid rgba( 255, 255, 255, 0.4 );
+            color: white;
+            padding: 2px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            margin-right: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .tts-clear-all-button:hover:not(:disabled) {
+            background: rgba( 255, 255, 255, 0.2 );
+            border-color: rgba( 255, 255, 255, 0.6 );
+        }
+
+        .tts-clear-all-button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* Clear All button adapts to paused (amber) header */
+        #tts-queue-section.paused .tts-clear-all-button {
+            color: #333;
+            border-color: rgba( 0, 0, 0, 0.3 );
+        }
+
+        #tts-queue-section.paused .tts-clear-all-button:hover:not(:disabled) {
+            background: rgba( 0, 0, 0, 0.1 );
+            border-color: rgba( 0, 0, 0, 0.5 );
+        }
+
+        /* Clear All button adapts to focus-mode (gray) header */
+        #tts-queue-section.focus-mode .tts-clear-all-button {
+            border-color: rgba( 255, 255, 255, 0.3 );
+        }
+
+        #tts-queue-section.focus-mode .tts-clear-all-button:hover:not(:disabled) {
+            background: rgba( 255, 255, 255, 0.15 );
+        }
+
         /* Shrink-fade animation state for action-required notifications */
         .action-required-notification.shrink-fade {
             animation: shrinkFadeOut 0.5s ease-out forwards;
@@ -2548,6 +2716,83 @@
         .mc-other-input-container .mc-other-input {
             flex: 1;
             min-width: 0;  /* Allow input to shrink */
+        }
+
+        /* ========================================
+           OPEN-ENDED BATCH RESPONSE STYLES
+           ======================================== */
+
+        .response-open-ended-batch {
+            margin-top: 12px;
+        }
+
+        .batch-question {
+            padding: 12px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .batch-question:last-of-type {
+            border-bottom: none;
+        }
+
+        .batch-question-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #6c757d;
+            background-color: #e9ecef;
+            padding: 4px 10px;
+            border-radius: 12px;
+            display: inline-block;
+            margin-bottom: 6px;
+        }
+
+        .batch-question-text {
+            font-size: 15px;
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+
+        .batch-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+        }
+
+        .batch-input-row .response-mic-button {
+            flex-shrink: 0;
+        }
+
+        .batch-input-row .response-text-input {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .batch-submit-actions {
+            margin-top: 16px;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .batch-submit-all {
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .batch-submit-all:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba( 0, 123, 255, 0.4 );
+        }
+
+        /* Validation state */
+        .response-open-ended-batch.invalid::after {
+            content: "Please fill in all fields";
+            display: block;
+            color: #dc3545;
+            font-size: 12px;
+            margin-top: 8px;
         }
 
 /* ========================================

@@ -1,0 +1,25 @@
+{
+    "profile_name"  : "minimal",
+    "description"   : "Bare minimum answers — required args only, skip optionals",
+    "sender_ids"    : [ "arg.expeditor@lupin.deepily.ai" ],
+    "entries" : [
+        {
+            "question_pattern" : "What topic would you like me to research?",
+            "answer"           : "test query for automated proxy",
+            "arg_name"         : "query",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "question_pattern" : "Which research document should I use?",
+            "answer"           : "latest",
+            "arg_name"         : "research",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "question_pattern" : "Would you like to proceed with these settings?",
+            "answer"           : "yes",
+            "arg_name"         : "confirmation",
+            "response_types"   : [ "yes_no" ]
+        }
+    ]
+}

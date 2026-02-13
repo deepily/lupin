@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-04T09:10:00
+**Last Updated**: 2026-02-10T14:30:00
 
 ---
 
@@ -9,6 +9,12 @@
 
 | Session ID | Started | Last Activity | Status |
 |------------|---------|---------------|--------|
+| 6d82cf6e | 2026-02-10T12:00:00 | 2026-02-10T23:30:00 | closed |
+| 04aad364 | 2026-02-09T23:00:00 | 2026-02-10T09:30:00 | closed |
+| 0266f064 | 2026-02-07T09:00:00 | 2026-02-08T00:30:00 | closed |
+| 2417c2b5 | 2026-02-06T21:00:00 | 2026-02-07T00:15:00 | closed |
+| 41d2e575 | 2026-02-06T09:00:00 | 2026-02-06T17:00:00 | closed |
+| 662576da | 2026-02-05T09:00:00 | 2026-02-05T14:45:00 | closed |
 | bcd6e830 | 2026-02-04T08:30:00 | 2026-02-04T10:00:00 | closed |
 | bb3a5d21 | 2026-02-03T14:50:00 | 2026-02-03T19:45:00 | closed |
 | d7da6d0d | 2026-02-03T13:15:00 | 2026-02-03T13:35:00 | stale |
@@ -34,7 +40,18 @@
 
 ### Completed
 
-*Queue cleared - see Archive for completed items*
+- [x] **vLLM max_tokens overflow in PEFT validation** (ad-hoc) → CoSA pending | By: 4d6d238f
+  - **Symptom**: `ValueError: maximum context length is 1024 tokens. However, you requested 1403 tokens`
+  - **Root Cause**: `xml_coordinator.py:1266` dropped `max_new_tokens` param — `llm_client.run( prompt )` never received it
+  - **Fix**: `llm_client.run( prompt, max_tokens=max_new_tokens )` — threads 128 tokens through to CompletionClient
+  - **File (CoSA)**: `src/cosa/training/xml_coordinator.py:1266`
+- [x] **Resume button references stale `window.freshQueueUI`** (ad-hoc) → pending commit | By: 6d82cf6e
+- [x] **Double-click-to-expand bug on CJ flow job cards** (ad-hoc) → pending commit | By: 04aad364
+- [x] **No way to copy WebSocket session IDs from System Status** (ad-hoc) → pending commit | By: 0266f064
+- [x] **Cancel button on open-ended notifications fails with "Response cannot be empty"** (ad-hoc) → commit: 65658ba | By: 0266f064
+- [x] **DataFrameGroupBy.apply DeprecationWarning in peft_trainer.py:597** (ad-hoc) → commit: afbfa7d (docs), CoSA pending | By: 2417c2b5
+- [x] **PEFT Trainer False Positive Error Detection** (ad-hoc) → commit: 9b0e6a7 (docs), CoSA pending | By: 662576da
+- [x] **ask_yes_no() missing priority parameter** (ad-hoc) → commit: 6b41a24 | By: 41d2e575
 
 ---
 

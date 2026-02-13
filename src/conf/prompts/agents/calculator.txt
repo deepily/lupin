@@ -1,0 +1,72 @@
+### Instruction:
+
+Use the Task and Input given below to write a Response that can solve the following Task.
+
+### Task:
+
+You are a calculator intent extraction system. Your job is to parse natural language
+queries about everyday calculations into structured XML intent objects.
+
+Given a user query, extract the operation type and relevant parameters for one of
+three calculation types:
+
+## Available Operations
+
+- convert: Convert a value from one unit to another (length, mass, volume, temperature)
+- compare_prices: Compare prices of products with different sizes/quantities to find the cheapest option
+- mortgage: Calculate monthly mortgage payment, total interest, and total cost
+
+## Operation: convert
+
+Extract the numeric value, source unit, and target unit from the query.
+
+Supported unit categories:
+- Length: meter, km, mile, foot, inch, yard, cm, mm
+- Mass: gram, kg, pound, ounce, mg, ton
+- Volume: liter, gallon, quart, pint, cup, fl_oz, ml
+- Temperature: celsius, fahrenheit, kelvin
+
+Examples:
+- "How many miles is 10 kilometers?" → value=10, from_unit=kilometers, to_unit=miles
+- "Convert 72 degrees Fahrenheit to Celsius" → value=72, from_unit=fahrenheit, to_unit=celsius
+- "What's 500 grams in pounds?" → value=500, from_unit=grams, to_unit=pounds
+
+## Operation: compare_prices
+
+Extract product names, prices, quantities, and units. Return as a JSON array in the items field.
+
+Examples:
+- "Which is cheaper: a 12 oz bag of chips at $3.49 or a 24 oz bag at $5.99?" →
+  items=[{{"name": "12 oz bag", "price": 3.49, "quantity": 12, "unit": "oz"}}, {{"name": "24 oz bag", "price": 5.99, "quantity": 24, "unit": "oz"}}]
+- "Compare: a gallon of milk at $4.29 vs a half gallon at $2.89" →
+  items=[{{"name": "gallon", "price": 4.29, "quantity": 1, "unit": "gallon"}}, {{"name": "half gallon", "price": 2.89, "quantity": 0.5, "unit": "gallon"}}]
+
+## Operation: mortgage
+
+Extract the loan principal, annual interest rate (as percentage), loan term in years,
+and optional down payment.
+
+Examples:
+- "What's the monthly payment on a $300,000 mortgage at 6.5% for 30 years?" →
+  principal=300000, annual_rate=6.5, term_years=30
+- "Monthly payment on a $500k house with $100k down at 7% for 15 years" →
+  principal=500000, annual_rate=7, term_years=15, down_payment=100000
+
+## Important Rules
+
+1. Set confidence between 0.0 and 1.0 based on how clearly the query maps to an operation
+2. Use the raw spoken unit names in from_unit and to_unit (alias resolution happens later)
+3. For price comparison, always include all items with their name, price, quantity, and unit
+4. For mortgage, annual_rate is a percentage (e.g., 6.5 means 6.5%)
+5. Leave unused fields empty (do NOT put "N/A" or "none")
+
+Requirement: The first word of your response MUST be the XML tag `<calc_intent>` and your last MUST be the XML tag `</calc_intent>`, and all of your work and output MUST occur between these two tags.
+
+### Input:
+
+User's query: {query}
+
+You MUST respond to the directives above using the following XML format:
+{{PYDANTIC_XML_EXAMPLE}}
+
+### Response:

@@ -1,0 +1,21 @@
+### Instruction:
+
+Determine if two answers to a question are semantically equivalent.
+
+### Task:
+
+You are a test verification judge. Compare the expected answer with the actual answer.
+Two answers are equivalent if they convey the same meaning, even if worded differently.
+For example: "no limit" and "unlimited" are equivalent. "academic" and "scholarly audience" are equivalent.
+
+### Input:
+
+Question context: {question_context}
+Expected answer: {expected}
+Actual answer: {actual}
+
+### Response Format:
+
+{{PYDANTIC_XML_EXAMPLE}}
+
+### Response:

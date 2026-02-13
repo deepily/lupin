@@ -1181,6 +1181,34 @@ class NotificationsUI {
         this.updateElement( 'audio-session', this.audioSessionId || '-' );
     }
 
+    copyToClipboard( elementId ) {
+        /**
+         * Copy the text content of a session ID element to the clipboard.
+         *
+         * Requires:
+         *     - elementId is the ID of an existing DOM element
+         *
+         * Ensures:
+         *     - copies text to clipboard if value is not empty or '-'
+         *     - shows brief checkmark feedback on the adjacent copy button
+         */
+        const el = document.getElementById( elementId );
+        if ( !el ) return;
+
+        const text = el.textContent.trim();
+        if ( !text || text === '-' ) return;
+
+        navigator.clipboard.writeText( text ).then( () => {
+            // Brief visual feedback: swap icon to checkmark
+            const btn = el.nextElementSibling;
+            if ( btn ) {
+                const original = btn.textContent;
+                btn.textContent = '✅';
+                setTimeout( () => { btn.textContent = original; }, 1200 );
+            }
+        } );
+    }
+
     createAudioElement() {
         const audio = document.createElement( 'audio' );
         audio.controls = false; // Hidden for UI cleanliness
@@ -1857,7 +1885,7 @@ class NotificationsUI {
 
                 case "active_conversation_changed":
                     // Conversation Identity Phase 3 - Update active sender indicator
-                    this.handleActiveConversationChanged( envelope.data || envelope );
+                    this.handleActiveConversationChanged( envelope );
                     break;
 
                 case "sys_time_update":
@@ -2567,55 +2595,10 @@ class NotificationsUI {
             this.log( `Cleaned up processed events cache, kept ${keepEvents.length} recent events` );
         }
         
-        // 🔍 ENHANCED DEBUGGING: Comprehensive envelope object analysis
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] === JOB COMPLETION RECEIVED ===" );
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] Full envelope object:", JSON.stringify( envelope, null, 2 ) );
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] envelope.text type:", typeof envelope.text );
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] envelope.text value:", envelope.text );
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] envelope.text length:", envelope.text?.length || 'N/A' );
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] Available fields:", Object.keys( envelope ) );
-        
-        // 🔍 DEBUGGING: Calculate timing from Q&A submission
-        const timeSinceSubmission = this.lastQASubmissionTime ? ( Date.now() - this.lastQASubmissionTime ) / 1000 : 'N/A';
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] Time since Q&A submission:", timeSinceSubmission + 's' );
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] Original Q&A text:", this.lastQASubmissionText );
-        
-        // 🔍 DEBUGGING: Current TTS mode context
         const mode = document.getElementById( 'tts-mode' ).value;
-        this.log( "🔍 [JOB-COMPLETION-DEBUG] Current TTS mode:", mode );
-        
-        // 🚨 CRITICAL: Detect when fallback will be triggered (check both locations)
-        const hasDirectText = envelope.text && envelope.text.trim() !== '';
-        const hasNestedText = envelope.data?.text && envelope.data.text.trim() !== '';
-        const willUseFallback = !hasDirectText && !hasNestedText;
-        
-        if ( willUseFallback ) {
-            this.error( "🚨 [FALLBACK-TRIGGERED] Job completed with no/empty text!" );
-            this.error( "🚨 [FALLBACK-TRIGGERED] This will play 'Job completed' instead of actual response" );
-            this.error( "🚨 [FALLBACK-TRIGGERED] envelope.text:", envelope.text );
-            this.error( "🚨 [FALLBACK-TRIGGERED] envelope.data.text:", envelope.data?.text );
-            this.error( "🚨 [FALLBACK-TRIGGERED] Full envelope object:", envelope );
-            this.error( "🚨 [FALLBACK-TRIGGERED] Expected Q&A response for:", this.lastQASubmissionText );
-        } else {
-            const textLocation = hasDirectText ? 'envelope.text' : 'envelope.data.text';
-            this.log( `✅ [JOB-COMPLETION-DEBUG] Text found at ${textLocation}, will use actual response` );
-        }
-        
         this.log( "Job completion received:", envelope );
-        
-        // 🔧 Server uses event envelope pattern: envelope.data contains actual payload
-        // The nested structure (envelope.data.text) is intentional server architecture  
-        // Event envelope pattern: {type, timestamp, data: {actual_payload}}
-        const actualText = envelope.data?.text || envelope.text; // Try nested first, fallback to direct
-        
-        // 🔍 DEBUGGING: Confirm we're extracting the right text
-        if ( envelope.data?.text && !envelope.text ) {
-            this.log( "✅ [ENVELOPE-PATTERN] Found text in nested location: envelope.data.text" );
-        } else if ( envelope.text && !envelope.data?.text ) {
-            this.log( "⚠️ [ENVELOPE-PATTERN] Found text in direct location: envelope.text (unusual)" );
-        } else if ( !actualText ) {
-            this.error( "❌ [ENVELOPE-PATTERN] No text found in either envelope.text or envelope.data.text" );
-        }
+
+        const actualText = envelope.text;
         
         // Update response area with job completion
         this.updateElement( "response-text", `Job completed: ${actualText || 'No text provided'}` );
@@ -3956,9 +3939,7 @@ class NotificationsUI {
      * @param {Object} event - WebSocket event with job_id, from_queue, to_queue, metadata
      */
     handleJobStateTransition( event ) {
-        // Extract from nested data object (WebSocket envelope structure)
-        const eventData = event.data || event;
-        const { job_id: jobId, from_queue: fromQueue, to_queue: toQueue, metadata } = eventData;
+        const { job_id: jobId, from_queue: fromQueue, to_queue: toQueue, metadata } = event;
 
         if ( !jobId || !fromQueue || !toQueue ) {
             this.error( '[JOB-TRANSITION] Invalid event:', event );
@@ -4264,21 +4245,8 @@ class NotificationsUI {
     async handleNotificationUpdate( envelope ) {
         this.log( "Notification queue update received:", envelope );
 
-        // DEBUG: Log the raw envelope structure
-        console.log( '[DEBUG] WebSocket envelope:', envelope );
-        console.log( '[DEBUG] envelope.notification:', envelope.notification );
-        console.log( '[DEBUG] envelope.data:', envelope.data );
-
         // Handle real-time notification updates from NotificationFifoQueue
-        const notification = envelope.notification || envelope.data?.notification;
-
-        // DEBUG: Log extracted notification and its response_default field
-        console.log( '[DEBUG] Extracted notification:', notification );
-        if ( notification ) {
-            console.log( '[DEBUG] notification.response_default:', notification.response_default );
-            console.log( '[DEBUG] notification.response_requested:', notification.response_requested );
-            console.log( '[DEBUG] notification.response_type:', notification.response_type );
-        }
+        const notification = envelope.notification;
 
         if ( !notification ) {
             this.log( "No notification data in WebSocket event" );
@@ -5035,8 +5003,8 @@ class NotificationsUI {
         const details = jobCard.querySelector( '.job-card-details' );
         const expandBtn = jobCard.querySelector( '.job-expand-btn' );
 
-        if ( details && !details.classList.contains( 'expanded' ) ) {
-            details.classList.add( 'expanded' );
+        if ( details && details.classList.contains( 'collapsed' ) ) {
+            details.classList.remove( 'collapsed' );
             if ( expandBtn ) expandBtn.textContent = '▼';
             this.expandedJobCards.add( jobId );
         }
@@ -8733,6 +8701,11 @@ class NotificationsUI {
             state.collectedAnswers     = {};  // { header: value/[values] }
         }
 
+        // Add empty answers state for open_ended_batch notifications
+        if ( notification.response_type === 'open_ended_batch' ) {
+            state.collectedAnswers = {};  // { header: value }
+        }
+
         this.actionRequiredNotifications.set( notification.id, state );
 
         // Show the Action Required section
@@ -9086,9 +9059,19 @@ class NotificationsUI {
         stopBtn.textContent = '⏹️ Stop';
         stopBtn.onclick = () => this.stopTTSAndAdvance();
 
+        const deleteBtn       = document.createElement( 'button' );
+        deleteBtn.className   = 'tts-delete-button';
+        deleteBtn.textContent = '🗑';
+        deleteBtn.title       = 'Remove from queue';
+        deleteBtn.onclick     = ( e ) => {
+            e.stopPropagation();
+            this.removeFromTTSQueue( item.id );
+        };
+
         card.appendChild( iconDiv );
         card.appendChild( messageDiv );
         card.appendChild( stopBtn );
+        card.appendChild( deleteBtn );
 
         container.innerHTML = '';
         container.appendChild( card );
@@ -9129,9 +9112,19 @@ class NotificationsUI {
         textDiv.className = 'tts-text';
         textDiv.textContent = truncatedText;
 
+        const deleteBtn = document.createElement( 'button' );
+        deleteBtn.className = 'tts-delete-button';
+        deleteBtn.textContent = '\u00D7';
+        deleteBtn.title = 'Remove from queue';
+        deleteBtn.onclick = ( e ) => {
+            e.stopPropagation();
+            this.removeFromTTSQueue( item.id );
+        };
+
         card.appendChild( positionDiv );
         card.appendChild( badgeDiv );
         card.appendChild( textDiv );
+        card.appendChild( deleteBtn );
 
         container.appendChild( card );
     }
@@ -9146,6 +9139,92 @@ class NotificationsUI {
                 badge.textContent = `${index + 1}`;
             }
         } );
+    }
+
+    /**
+     * Removes a single item from the TTS pending queue by ID.
+     *
+     * Requires:
+     *     - itemId is a valid string matching a queued item's id
+     *
+     * Ensures:
+     *     - Item is spliced from ttsQueue array
+     *     - DOM card animates out with shrink-fade, then removed
+     *     - Queue positions, section, and localStorage updated
+     */
+    removeFromTTSQueue( itemId ) {
+        const idx = this.ttsQueue.findIndex( i => i.id === itemId );
+        if ( idx === -1 ) {
+            this.log( `TTS queue: removeFromTTSQueue - item ${itemId} not found, ignoring` );
+            return;
+        }
+
+        this.log( `TTS queue: Removing item ${itemId} at position ${idx + 1}` );
+        this.ttsQueue.splice( idx, 1 );
+
+        const card = document.getElementById( `tts-minimized-${itemId}` );
+        if ( card ) {
+            card.classList.add( 'shrink-fade' );
+            card.addEventListener( 'animationend', () => card.remove(), { once: true } );
+        }
+
+        this.updateTTSQueuePositions();
+        this.updateTTSQueueSection();
+        this.saveTTSQueueState();
+    }
+
+    /**
+     * Clears all pending items from the TTS queue.
+     * Also clears the active slot to remove any ghost cards.
+     *
+     * Requires:
+     *     - nothing (safe to call when queue is empty)
+     *
+     * Ensures:
+     *     - ttsQueue is emptied
+     *     - activeTTSItem is cleared
+     *     - Active slot and pending queue DOM are cleared
+     *     - Section and localStorage updated
+     */
+    clearTTSQueue() {
+        const hasPending = this.ttsQueue.length > 0;
+        const hasActive  = this.activeTTSItem !== null;
+        const activeSlot = document.getElementById( 'tts-active-slot' );
+        const hasGhost   = activeSlot?.querySelector( '.tts-active-card' ) !== null;
+
+        if ( !hasPending && !hasActive && !hasGhost ) return;
+
+        this.log( `TTS queue: Clearing all (${this.ttsQueue.length} pending, active: ${hasActive}, ghost: ${hasGhost})` );
+        this.ttsQueue      = [];
+        this.activeTTSItem = null;
+
+        if ( activeSlot ) activeSlot.innerHTML = '';
+
+        const pendingContainer = document.getElementById( 'tts-pending-queue' );
+        if ( pendingContainer ) pendingContainer.innerHTML = '';
+
+        this.updateTTSQueueSection();
+        this.saveTTSQueueState();
+    }
+
+    /**
+     * Updates the Clear All button visibility and disabled state
+     * based on whether there are pending queue items, an active item,
+     * or a ghost card in the active slot DOM.
+     *
+     * Ensures:
+     *     - Button shown and enabled when any TTS items exist (pending, active, or ghost)
+     *     - Button hidden and disabled when nothing exists
+     */
+    updateTTSClearAllButtonState() {
+        const btn = document.getElementById( 'tts-clear-all-btn' );
+        if ( !btn ) return;
+
+        const activeSlot  = document.getElementById( 'tts-active-slot' );
+        const hasActiveUI = activeSlot?.querySelector( '.tts-active-card' ) !== null;
+        const hasItems    = this.ttsQueue.length > 0 || this.activeTTSItem !== null || hasActiveUI;
+        btn.style.display = hasItems ? 'inline-block' : 'none';
+        btn.disabled      = !hasItems;
     }
 
     /**
@@ -9227,6 +9306,9 @@ class NotificationsUI {
 
         // Update pause/play button states
         this.updateTTSPausePlayButtons();
+
+        // Update Clear All button visibility
+        this.updateTTSClearAllButtonState();
     }
 
     /**
@@ -9258,12 +9340,12 @@ class NotificationsUI {
         if ( activeSlot ) activeSlot.innerHTML = '';
 
         // FOCUS MODE: If action-required just finished, pause queue for user response
-        // IMPORTANT: Enter focus mode BEFORE clearing activeTTSItem to prevent race condition
-        // where incoming notifications could trigger TTS between clearing and setting focus mode
+        // Clear activeTTSItem BEFORE entering focus mode so updateTTSQueueSection()
+        // (called inside enterTTSFocusMode) doesn't re-render a ghost card into active slot
         if ( wasActionRequired && justCompletedItem?.id ) {
+            this.activeTTSItem = null;  // Clear BEFORE focus mode to prevent ghost re-render
             this.enterTTSFocusMode( justCompletedItem.id );
-            this.activeTTSItem = null;  // Now safe to clear
-            this.updateTTSQueueSection();
+            // updateTTSQueueSection() already called inside enterTTSFocusMode
             return;  // Exit early - don't activate next until response received
         }
 
@@ -9537,6 +9619,18 @@ class NotificationsUI {
 
             this.updateTTSQueueSection();
 
+            // Staleness check: if focus mode was restored but the triggering
+            // notification no longer exists, auto-exit focus mode
+            if ( this.ttsFocusModeActive && this.focusModeNotificationId ) {
+                const notificationStillExists = this.actionRequiredNotifications.has( this.focusModeNotificationId );
+                if ( !notificationStillExists ) {
+                    this.log( `TTS Focus Mode: Stale — notification ${this.focusModeNotificationId} no longer exists, auto-exiting` );
+                    this.ttsFocusModeActive = false;
+                    this.focusModeNotificationId = null;
+                    this.saveTTSQueueState();
+                }
+            }
+
             // If not in focus mode and queue has items, start playback
             // (isTTSPaused is always false after restore - refresh resets pause state)
             if ( !this.ttsFocusModeActive && this.ttsQueue.length > 0 ) {
@@ -9649,6 +9743,17 @@ class NotificationsUI {
                         ✗ No <span class="keyboard-hint">(N)</span>
                     </button>
                 </div>
+                <div class="yes-no-comment-hint" data-notification-id="${notification.id}">
+                    Press C to add comment
+                </div>
+                <div class="yes-no-comment-container" id="yn-comment-container-${notification.id}">
+                    <div class="yes-no-comment-input-row">
+                        <button class="response-mic-button yes-no-comment-mic" data-notification-id="${notification.id}" title="Record voice comment">
+                            🎤
+                        </button>
+                        <input type="text" class="yes-no-comment-input" id="yn-comment-input-${notification.id}" maxlength="300" placeholder="Qualify your answer...">
+                    </div>
+                </div>
             `;
         } else if ( notification.response_type === 'open_ended' ) {
             // DEBUG: Log notification object and response_default value
@@ -9672,6 +9777,8 @@ class NotificationsUI {
             `;
         } else if ( notification.response_type === 'multiple_choice' ) {
             responseUI = this.renderMultipleChoiceUI( notification );
+        } else if ( notification.response_type === 'open_ended_batch' ) {
+            responseUI = this.renderOpenEndedBatchUI( notification );
         }
 
         // Build abstract section if present - render markdown with XSS protection
@@ -9728,9 +9835,32 @@ class NotificationsUI {
             card.querySelectorAll( '.response-button' ).forEach( button => {
                 button.addEventListener( 'click', ( e ) => {
                     const response = e.target.closest( '.response-button' ).dataset.response;
-                    this.submitResponse( notification.id, response );
+                    this.submitYesNoWithComment( notification.id, response );
                 } );
             } );
+
+            // Comment hint toggle
+            const commentHint = card.querySelector( '.yes-no-comment-hint' );
+            if ( commentHint ) {
+                commentHint.addEventListener( 'click', () => this.toggleYesNoComment( notification.id ) );
+            }
+
+            // Comment mic button
+            const commentMic = card.querySelector( '.yes-no-comment-mic' );
+            if ( commentMic ) {
+                commentMic.addEventListener( 'click', () => this.startYesNoCommentVoiceInput( notification.id ) );
+            }
+
+            // Comment input Enter key — blur back to card so Y/N keys work
+            const commentInput = card.querySelector( '.yes-no-comment-input' );
+            if ( commentInput ) {
+                commentInput.addEventListener( 'keydown', ( e ) => {
+                    if ( e.key === 'Enter' ) {
+                        e.preventDefault();
+                        commentInput.blur();
+                    }
+                } );
+            }
         } else if ( notification.response_type === 'open_ended' ) {
             const submitButton = card.querySelector( '.response-submit-button' );
             const input = card.querySelector( '.response-text-input' );
@@ -9795,6 +9925,197 @@ class NotificationsUI {
         } else if ( notification.response_type === 'multiple_choice' ) {
             // Use centralized event handler attachment (supports multi-question navigation)
             this.attachMultipleChoiceEventHandlers( notification.id, card );
+        } else if ( notification.response_type === 'open_ended_batch' ) {
+            this.attachOpenEndedBatchEventHandlers( notification.id, card );
+        }
+    }
+
+    /**
+     * Renders the UI for an open-ended batch notification.
+     * All questions visible at once with text input + mic button per question.
+     *
+     * Requires:
+     *   - notification.response_options.questions is a non-empty array
+     *   - Each question has: question (string), header (string), input_type = "text"
+     *
+     * Ensures:
+     *   - Returns HTML string with all questions rendered at once
+     *   - Each question has a numbered label, text, mic button, and text input
+     *   - Single "Submit All" button at bottom
+     */
+    renderOpenEndedBatchUI( notification ) {
+        const questions = notification.response_options?.questions || [];
+        const total     = questions.length;
+
+        if ( total === 0 ) {
+            return '<div class="response-open-ended-batch"><p>No questions provided.</p></div>';
+        }
+
+        let questionsHTML = '';
+        for ( let i = 0; i < total; i++ ) {
+            const q = questions[ i ];
+            const header       = q.header || `Question ${i + 1}`;
+            const defaultValue = q.default_value || '';
+
+            questionsHTML += `
+                <div class="batch-question" data-question-index="${i}" data-header="${this.escapeHtml( header )}">
+                    <div class="batch-question-label">Question ${i + 1} of ${total}</div>
+                    <div class="batch-question-text">${this.escapeHtml( q.question || '' )}</div>
+                    <div class="batch-input-row">
+                        <button class="response-mic-button batch-mic-button" data-question-index="${i}" title="Press to record (30s max, ESC to cancel)">
+                            🎤
+                        </button>
+                        <input type="text" class="response-text-input batch-text-input" data-question-index="${i}" data-header="${this.escapeHtml( header )}" value="${this.escapeHtml( defaultValue )}" placeholder="Type your answer...">
+                    </div>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="response-open-ended-batch">
+                ${questionsHTML}
+                <div class="batch-submit-actions">
+                    <button class="response-submit-button batch-submit-all">
+                        Submit All ✓
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Attaches event handlers for an open-ended batch notification.
+     *
+     * Requires:
+     *   - card contains rendered batch UI elements
+     *
+     * Ensures:
+     *   - Submit button collects all answers and submits
+     *   - Mic buttons start voice input for their respective text inputs
+     *   - Enter on last input submits; Enter on others focuses next input
+     */
+    attachOpenEndedBatchEventHandlers( notificationId, card ) {
+        const submitButton = card.querySelector( '.batch-submit-all' );
+        const textInputs   = card.querySelectorAll( '.batch-text-input' );
+        const micButtons   = card.querySelectorAll( '.batch-mic-button' );
+        const totalInputs  = textInputs.length;
+
+        // Submit button click
+        if ( submitButton ) {
+            submitButton.addEventListener( 'click', () => {
+                this.submitOpenEndedBatchAnswers( notificationId );
+            } );
+        }
+
+        // Text input keydown handlers
+        textInputs.forEach( ( input, index ) => {
+            input.addEventListener( 'keydown', ( e ) => {
+                if ( e.key === 'Enter' ) {
+                    e.preventDefault();
+                    if ( index < totalInputs - 1 ) {
+                        // Focus next input
+                        textInputs[ index + 1 ].focus();
+                    } else {
+                        // Last input — submit
+                        this.submitOpenEndedBatchAnswers( notificationId );
+                    }
+                }
+            } );
+        } );
+
+        // Mic button click handlers — each bound to its own text input
+        micButtons.forEach( ( micButton, index ) => {
+            const textInput = textInputs[ index ];
+            micButton.addEventListener( 'click', () => {
+                this.startBatchVoiceInput( notificationId, index, micButton, textInput );
+            } );
+            micButton.addEventListener( 'keydown', ( e ) => {
+                if ( e.key === 'Enter' || e.key === ' ' ) {
+                    e.preventDefault();
+                    this.startBatchVoiceInput( notificationId, index, micButton, textInput );
+                }
+            } );
+        } );
+
+        // Voice-first: focus first mic button for immediate activation
+        if ( micButtons.length > 0 ) {
+            micButtons[ 0 ].focus( { preventScroll: true } );
+        }
+    }
+
+    /**
+     * Collects all batch answers and submits as JSON.
+     *
+     * Requires:
+     *   - All required batch text inputs have values
+     *
+     * Ensures:
+     *   - Collects values keyed by header
+     *   - Validates at least one field has content
+     *   - Submits as JSON: { answers: { "Header": "value", ... } }
+     */
+    submitOpenEndedBatchAnswers( notificationId ) {
+        const card       = document.getElementById( `action-required-${notificationId}` );
+        const textInputs = card?.querySelectorAll( '.batch-text-input' );
+
+        if ( !textInputs || textInputs.length === 0 ) return;
+
+        const answers = {};
+        let hasAnyContent = false;
+        let allValid      = true;
+
+        textInputs.forEach( ( input ) => {
+            const header = input.dataset.header;
+            const value  = input.value.trim();
+            answers[ header ] = value;
+
+            if ( value.length > 0 ) {
+                hasAnyContent = true;
+                input.classList.remove( 'invalid' );
+            } else {
+                input.classList.add( 'invalid' );
+                allValid = false;
+            }
+        } );
+
+        if ( !hasAnyContent || !allValid ) {
+            this.log( 'submitOpenEndedBatchAnswers: Not all fields filled' );
+            // Shake the container briefly for visual feedback
+            const container = card?.querySelector( '.response-open-ended-batch' );
+            if ( container ) {
+                container.classList.add( 'invalid' );
+                setTimeout( () => container.classList.remove( 'invalid' ), 2000 );
+            }
+            return;
+        }
+
+        const response = { answers: answers };
+        this.log( 'Submitting batch answers:', response );
+        this.submitResponse( notificationId, JSON.stringify( response ) );
+    }
+
+    /**
+     * Starts voice input for a specific question in an open-ended batch.
+     * Uses unified RecordingManager.
+     */
+    async startBatchVoiceInput( notificationId, questionIndex, micButton, textInput ) {
+        this.log( `Starting voice input for batch question ${questionIndex}: ${notificationId}` );
+
+        if ( !micButton || !textInput ) {
+            this.error( `Voice input: Could not find batch UI elements for question ${questionIndex}` );
+            return;
+        }
+
+        // Toggle recording state using unified RecordingManager
+        if ( this.recordingManager.isRecording() ) {
+            await this.recordingManager.stopRecording();
+        } else if ( !this.recordingManager.isProcessing() ) {
+            await this.recordingManager.startRecording( `batch-${notificationId}-${questionIndex}`, micButton, textInput, {
+                onTranscriptionComplete: () => {
+                    // Clear invalid state on successful transcription
+                    textInput.classList.remove( 'invalid' );
+                }
+            } );
         }
     }
 
@@ -10519,6 +10840,11 @@ class NotificationsUI {
         this.updateActionRequiredCount();
         this.saveActionRequiredState();  // Persist removal
 
+        // TTS FOCUS MODE: Exit if this notification triggered focus mode
+        if ( this.focusModeNotificationId === notificationId ) {
+            this.exitTTSFocusMode();
+        }
+
         // Add to regular notifications (already has response info from server)
         this.addNotificationToList( state.notification );
     }
@@ -10998,11 +11324,11 @@ class NotificationsUI {
         if ( defaultValue === undefined || defaultValue === null ) {
             if ( notification.response_type === 'yes_no' ) {
                 defaultValue = 'no';
-            } else if ( notification.response_type === 'multiple_choice' ) {
-                // For multiple choice, return a cancelled/timeout response structure
+            } else if ( notification.response_type === 'multiple_choice' || notification.response_type === 'open_ended_batch' ) {
+                // For multiple choice and batch, return a cancelled/timeout response structure
                 defaultValue = JSON.stringify( { cancelled: true, answers: {} } );
             } else {
-                defaultValue = '';
+                defaultValue = '[cancelled]';
             }
         }
 
@@ -11506,7 +11832,7 @@ class NotificationsUI {
         let responseMessage;
         if ( wasExpired ) {
             responseMessage = `[Default: ${response}]`;
-        } else if ( notification.response_type === 'multiple_choice' ) {
+        } else if ( notification.response_type === 'multiple_choice' || notification.response_type === 'open_ended_batch' ) {
             responseMessage = this.formatMultipleChoiceResponse( response );
         } else {
             responseMessage = response;
@@ -11578,10 +11904,14 @@ class NotificationsUI {
     attachKeyboardListener() {
         if ( this.keyboardListenerActive ) return;
 
-        // keypress for Y/N/P shortcuts
+        // keypress for Y/N/C/P shortcuts
         document.addEventListener( 'keypress', ( e ) => {
             // Only respond if there's an active action-required notification
             if ( this.actionRequiredNotifications.size === 0 ) return;
+
+            // Don't intercept keys when user is typing in an input field
+            const activeEl = document.activeElement;
+            if ( activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' ) return;
 
             // P key - toggle pause (works for all response types)
             if ( e.key.toLowerCase() === 'p' && this.activeActionRequiredId ) {
@@ -11598,11 +11928,18 @@ class NotificationsUI {
             // Only for yes/no type
             if ( state.notification.response_type !== 'yes_no' ) return;
 
+            // C key - toggle comment field
+            if ( e.key.toLowerCase() === 'c' ) {
+                e.preventDefault();
+                this.toggleYesNoComment( firstId );
+                return;
+            }
+
             // Check key
             if ( e.key.toLowerCase() === 'y' ) {
-                this.submitResponse( firstId, 'yes' );
+                this.submitYesNoWithComment( firstId, 'yes' );
             } else if ( e.key.toLowerCase() === 'n' ) {
-                this.submitResponse( firstId, 'no' );
+                this.submitYesNoWithComment( firstId, 'no' );
             }
         } );
 
@@ -11643,6 +11980,67 @@ class NotificationsUI {
             await this.recordingManager.stopRecording();
         } else if ( !this.recordingManager.isProcessing() ) {
             await this.recordingManager.startRecording( `response-${notificationId}`, micButton, textInput );
+        }
+    }
+
+    /**
+     * Toggles the expandable comment field for a yes/no notification.
+     * Focuses the text input after expand transition.
+     */
+    toggleYesNoComment( notificationId ) {
+        const container = document.getElementById( `yn-comment-container-${notificationId}` );
+        if ( !container ) return;
+
+        container.classList.toggle( 'expanded' );
+
+        // Focus input after expand transition
+        if ( container.classList.contains( 'expanded' ) ) {
+            setTimeout( () => {
+                const input = document.getElementById( `yn-comment-input-${notificationId}` );
+                if ( input ) input.focus();
+            }, 300 );
+        }
+    }
+
+    /**
+     * Submits a yes/no response with an optional comment annotation.
+     *
+     * If the comment input contains text, the response is annotated:
+     *   "yes [comment: user text here]"
+     * Otherwise the plain response is submitted: "yes" or "no"
+     */
+    submitYesNoWithComment( notificationId, response ) {
+        const input = document.getElementById( `yn-comment-input-${notificationId}` );
+        const comment = input ? input.value.trim() : '';
+
+        if ( comment.length > 0 ) {
+            response = `${response} [comment: ${comment}]`;
+        }
+
+        this.submitResponse( notificationId, response );
+    }
+
+    /**
+     * Starts voice input for the comment field in a yes/no notification.
+     * Follows the same RecordingManager pattern as open-ended and multiple-choice voice input.
+     */
+    async startYesNoCommentVoiceInput( notificationId ) {
+        this.log( `Starting voice input for yes/no comment field: ${notificationId}` );
+
+        const card = document.getElementById( `action-required-${notificationId}` );
+        const micButton = card?.querySelector( '.yes-no-comment-mic' );
+        const textInput = document.getElementById( `yn-comment-input-${notificationId}` );
+
+        if ( !micButton || !textInput ) {
+            this.error( `Voice input: Could not find yes/no comment UI elements for ${notificationId}` );
+            return;
+        }
+
+        // Toggle recording state using unified RecordingManager
+        if ( this.recordingManager.isRecording() ) {
+            await this.recordingManager.stopRecording();
+        } else if ( !this.recordingManager.isProcessing() ) {
+            await this.recordingManager.startRecording( `yn-comment-${notificationId}`, micButton, textInput );
         }
     }
 

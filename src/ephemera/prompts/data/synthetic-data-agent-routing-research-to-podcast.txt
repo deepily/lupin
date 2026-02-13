@@ -33,18 +33,34 @@ convert this analysis to a podcast
 make a podcast based on the research results
 transform the document into audio format
 turn the research summary into a podcast
-convert the summary to a podcast
-make a podcast from my research document
-create an audio podcast from the document
-turn this into a podcast episode
-convert the research paper to a podcast
-make the document into a podcast
-transform research into podcast audio
-turn the findings into a podcast
-convert these results to a podcast
-make an audio podcast from this document
-create a podcast using the research
-turn the research output into a podcast
-convert the research to audio format
 make a podcast from research at DOCUMENT_PATH
 create a podcast from document at DOCUMENT_PATH
+convert document at DOCUMENT_PATH into a podcast
+turn DOCUMENT_PATH into a podcast episode
+transform DOCUMENT_PATH into an audio podcast
+generate a podcast from DOCUMENT_PATH
+make an audio podcast from DOCUMENT_PATH
+create a podcast episode from DOCUMENT_PATH
+convert DOCUMENT_PATH to podcast format
+turn the document at DOCUMENT_PATH into a podcast
+make a podcast from the research at DOCUMENT_PATH
+transform research at DOCUMENT_PATH into audio
+convert DOCUMENT_PATH into an audio episode
+create an audio version of DOCUMENT_PATH
+turn DOCUMENT_PATH into a podcast
+convert the climate report into a podcast
+convert DOCUMENT_PATH to a podcast episode
+turn this research document into a podcast
+transform DOCUMENT_PATH into podcast format
+convert the document at DOCUMENT_PATH into a podcast
+take DOCUMENT_PATH and turn it into a podcast episode
+transform this research paper into an audio podcast
+convert DOCUMENT_PATH into an audio podcast episode
+I want to turn DOCUMENT_PATH into a podcast
+turn the research results into a podcast episode
+take DOCUMENT_PATH and convert it to podcast format
+can you transform DOCUMENT_PATH into a podcast
+convert this research into a podcast episode
+turn DOCUMENT_PATH into audio podcast format
+transform the research document at DOCUMENT_PATH into a podcast
+convert this document into a podcast and make it engaging

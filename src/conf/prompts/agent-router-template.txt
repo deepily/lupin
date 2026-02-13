@@ -14,6 +14,12 @@ You will be given a human voice command as INPUT as well as a list of possible s
     <command>agent router go to receptionist</command>
     <command>agent router go to todo list</command>
     <command>agent router go to math</command>
+    <command>agent router go to deep research</command>
+    <command>agent router go to podcast generator</command>
+    <command>agent router go to research to podcast</command>
+    <command>agent router go to calculator</command>
+    <command>agent router go to claude code</command>
+    <command>agent router go to automatic routing mode</command>
     <command>none</command>
 </agent-routing-commands>
 

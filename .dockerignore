@@ -1,5 +1,7 @@
 # PostgreSQL data directories (Docker volumes - should not be in image)
 src/conf/long-term-memory/postgresql-dev-data
+src/conf/long-term-memory/postgresql-dev-data/**
+src/conf/long-term-memory/*.lancedb.backup-*
 
 # Python cache
 __pycache__

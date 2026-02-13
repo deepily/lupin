@@ -3,16 +3,25 @@
 # run-agentic-intent-training.sh
 #
 # Train LORA adapters for agentic job intent classification.
-# Target Model: Ministral-8B-Instruct-2410
 #
 # Usage:
-#   ./run-agentic-intent-training.sh [MODE]
+#   ./run-agentic-intent-training.sh [MODE] [--llm MODEL] [--quantize-bits BITS]
 #
 # Modes:
 #   test      - Fast iteration (1% sample, ~5-10 min)
 #   full      - Full training (100% sample, ~3-4 hours)
 #   generate  - Regenerate training data only
 #   validate  - Validate existing training data
+#   dry-run   - Show training data stats without training
+#
+# Options:
+#   --llm MODEL          - Target model: ministral-8b (default), qwen3-4b, llama-3b
+#   --quantize-bits BITS - Quantization: both (default), 4, 8
+#
+# Examples:
+#   ./run-agentic-intent-training.sh full --llm qwen3-4b --quantize-bits 4
+#   ./run-agentic-intent-training.sh test --llm ministral-8b
+#   ./run-agentic-intent-training.sh full   # defaults: ministral-8b, quantize both
 #
 # Requirements:
 #   - LUPIN_ROOT environment variable set
@@ -37,26 +46,76 @@ fi
 
 if [ -z "$DEEPILY_PROJECTS_DIR" ]; then
     echo -e "${YELLOW}Warning: DEEPILY_PROJECTS_DIR not set, using default${NC}"
-    DEEPILY_PROJECTS_DIR="/mnt/DATA02/include/projects"
+    DEEPILY_PROJECTS_DIR="/mnt/DATA01/include/www.deepily.ai/projects"
 fi
 
-# Configuration
-MODEL="mistralai/Ministral-8B-Instruct-2410"
-MODEL_NAME="Ministral-8B-Instruct-2410"
-TEST_TRAIN_PATH="$LUPIN_ROOT/src/ephemera/prompts/data"
-LORA_DIR="$DEEPILY_PROJECTS_DIR/models/Ministral-8B-Instruct-2410.lora"
+# Defaults
+MODE="test"
+LLM="ministral-8b"
+QUANTIZE_BITS="both"
 
-# Parse mode argument
-MODE="${1:-test}"
+# Parse arguments: positional MODE + named --llm and --quantize-bits
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --llm)
+            LLM="$2"
+            shift 2
+            ;;
+        --quantize-bits)
+            QUANTIZE_BITS="$2"
+            shift 2
+            ;;
+        *)
+            MODE="$1"
+            shift
+            ;;
+    esac
+done
+
+# Map LLM shortname to model config
+case "$LLM" in
+    ministral-8b)
+        MODEL="mistralai/Ministral-8B-Instruct-2410"
+        MODEL_NAME="Ministral-8B-Instruct-2410"
+        LORA_DIR="$DEEPILY_PROJECTS_DIR/models/Ministral-8B-Instruct-2410.lora"
+        ;;
+    qwen3-4b)
+        MODEL="Qwen/Qwen3-4B-Base"
+        MODEL_NAME="Qwen3-4B-Base"
+        LORA_DIR="$DEEPILY_PROJECTS_DIR/models/Qwen3-4B-Base.lora"
+        ;;
+    llama-3b)
+        MODEL="meta-llama/Llama-3.2-3B-Instruct"
+        MODEL_NAME="Llama-3.2-3B-Instruct"
+        LORA_DIR="$DEEPILY_PROJECTS_DIR/models/Llama-3.2-3B-Instruct.lora"
+        ;;
+    *)
+        echo -e "${RED}Unknown LLM: $LLM. Supported: ministral-8b, qwen3-4b, llama-3b${NC}"
+        exit 1
+        ;;
+esac
+
+# Validate quantize-bits
+case "$QUANTIZE_BITS" in
+    both|4|8) ;;
+    *)
+        echo -e "${RED}Unknown quantize-bits: $QUANTIZE_BITS. Supported: both, 4, 8${NC}"
+        exit 1
+        ;;
+esac
+
+TEST_TRAIN_PATH="$LUPIN_ROOT/src/ephemera/prompts/data"
 
 echo "=========================================="
 echo " Agentic Job Intent LORA Training"
 echo "=========================================="
 echo ""
-echo "Mode: $MODE"
-echo "Model: $MODEL_NAME"
-echo "Training Data: $TEST_TRAIN_PATH"
-echo "LORA Output: $LORA_DIR"
+echo "Mode:           $MODE"
+echo "LLM:            $LLM"
+echo "Model:          $MODEL_NAME"
+echo "Quantize Bits:  $QUANTIZE_BITS"
+echo "Training Data:  $TEST_TRAIN_PATH"
+echo "LORA Output:    $LORA_DIR"
 echo ""
 
 cd "$LUPIN_ROOT/src"
@@ -73,11 +132,9 @@ du.print_banner( 'Generating Unified Training Data (with Agentic Jobs)', prepend
 coordinator = XmlCoordinator( debug=False, verbose=False, silent=False )
 
 print( 'Building ALL training prompts (vox commands + agent router + agentic jobs)...' )
-# Note: agentic commands have ~200-500 unique examples per command (research-to-podcast has fewer templates)
+# Note: 1500/command target; agentic commands have 65 templates × 200 placeholders = 13,000 raw combinations each
 df = coordinator.build_all_training_prompts(
-    sample_size_per_compound_command=2000,
-    sample_size_per_simple_command=400,
-    sample_size_per_agentic_command=200,
+    sample_size_per_command=1500,
     include_agentic_jobs=True
 )
 print( f'Generated {df.shape[0]} total training examples' )
@@ -201,9 +258,6 @@ else:
     test)
         echo -e "${GREEN}Running fast iteration training (1% sample)...${NC}"
         echo ""
-        echo "Note: This uses the sample_size=0.01 from the model config file."
-        echo "Training data: agentic-job-xml-train.jsonl"
-        echo ""
 
         # Check if training data exists
         if [ ! -f "$TEST_TRAIN_PATH/agentic-job-xml-train.jsonl" ]; then
@@ -216,9 +270,12 @@ else:
             --model-name "$MODEL_NAME" \
             --test-train-path "$TEST_TRAIN_PATH" \
             --lora-dir "$LORA_DIR" \
-            --validation-sample-size 10 \
+            --sample-size 0.01 \
+            --validation-sample-size 33 \
+            --quantize-bits "$QUANTIZE_BITS" \
             --pre-training-stats \
-            --post-training-stats
+            --post-training-stats \
+            --post-quantization-stats
         ;;
 
     full)
@@ -233,29 +290,46 @@ else:
             $0 generate
         fi
 
-        # Note: Full training would require modifying the config file's sample_size
-        # or adding a command-line override. For now, we use validation sample size.
         python -m cosa.training.peft_trainer \
             --model "$MODEL" \
             --model-name "$MODEL_NAME" \
             --test-train-path "$TEST_TRAIN_PATH" \
             --lora-dir "$LORA_DIR" \
-            --validation-sample-size 100 \
+            --sample-size 1.0 \
+            --validation-sample-size 500 \
+            --quantize-bits "$QUANTIZE_BITS" \
             --pre-training-stats \
             --post-training-stats \
             --post-quantization-stats
         ;;
 
+    dry-run)
+        echo -e "${GREEN}Dry run: showing training data stats...${NC}"
+        python -m cosa.training.peft_trainer \
+            --model "$MODEL" \
+            --model-name "$MODEL_NAME" \
+            --test-train-path "$TEST_TRAIN_PATH" \
+            --lora-dir "$LORA_DIR" \
+            --sample-size 1.0 \
+            --quantize-bits "$QUANTIZE_BITS" \
+            --dry-run
+        ;;
+
     *)
         echo -e "${RED}Unknown mode: $MODE${NC}"
         echo ""
-        echo "Usage: $0 [MODE]"
+        echo "Usage: $0 [MODE] [--llm MODEL] [--quantize-bits BITS]"
         echo ""
         echo "Modes:"
         echo "  test      - Fast iteration (1% sample)"
         echo "  full      - Full training (100% sample)"
         echo "  generate  - Regenerate training data only"
         echo "  validate  - Validate existing training data"
+        echo "  dry-run   - Show training data stats without training"
+        echo ""
+        echo "Options:"
+        echo "  --llm MODEL          - Target model: ministral-8b (default), qwen3-4b, llama-3b"
+        echo "  --quantize-bits BITS - Quantization: both (default), 4, 8"
         exit 1
         ;;
 esac
