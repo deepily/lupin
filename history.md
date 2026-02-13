@@ -1,5 +1,34 @@
 # Lupin Project History
 
+### 2026.02.13 - Session 202 | Consolidated Notification API Reference Document
+
+#### Checkpoint | 2026.02.13 17:30 | Notification API reference: 4,033-line doc + 5 diagrams + 3 cross-refs
+
+**Accomplishments**:
+- Created `src/docs/notification-api.md` — comprehensive one-stop reference for the entire notification system (4,033 lines, 14 sections)
+- Sections cover: Overview & Architecture, Historical Evolution (3-phase timeline), Quick-Start Examples (6 recipes), Authentication (dual auth), complete REST API Reference (all 17 endpoints with curl examples), Data Models & Enums, Notification Lifecycle state machine, Sender Identity & Multi-Project Routing, Sending Notifications (4-tier client stack), Receiving Notifications, Voice I/O Integration, Notification Proxy Agent (3-tier strategy chain), Configuration Reference, Testing Guide
+- Rendered 5 Mermaid diagrams to PNG: system architecture, historical evolution timeline, notification lifecycle state machine, client tier stack, proxy strategy chain sequence diagram
+- Added deprecation banner to `src/rnd/sse-notifications/00-index.md` pointing to new doc
+- Added NOTIFICATION SYSTEM section to `CLAUDE.md` with doc links
+- Added cross-reference in `src/docs/websocket-events.md` notification events section
+
+**Files Created**:
+- `src/docs/notification-api.md` (4,033 lines — main deliverable)
+- `src/docs/images/notification-system-architecture.png` (36K)
+- `src/docs/images/notification-historical-evolution.png` (20K)
+- `src/docs/images/notification-lifecycle.png` (45K)
+- `src/docs/images/notification-client-tiers.png` (51K)
+- `src/docs/images/notification-proxy-strategy.png` (56K)
+
+**Files Modified**:
+- `CLAUDE.md` (+5 lines — NOTIFICATION SYSTEM section)
+- `src/docs/websocket-events.md` (+2 lines — cross-reference)
+- `src/rnd/sse-notifications/00-index.md` (+6 lines — deprecation banner)
+
+**Commit**: a17e753
+
+---
+
 ### 2026.02.13 - Session 201 | Unified Smoke Test Framework — Extract Base Classes + Auto-Proxy
 
 #### Checkpoint | 2026.02.13 12:00 | Unified smoke test framework: 4 new utility files, 3 tests refactored

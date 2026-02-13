@@ -91,6 +91,8 @@ These events handle text-to-speech and audio streaming functionality.
 
 ### 3. Notification Events
 
+> **See also**: [Notification API Reference](notification-api.md) for the complete notification system documentation including REST endpoints, data models, client tiers, and testing guide.
+
 These events handle user notifications and system alerts.
 
 #### `notification_queue_update`

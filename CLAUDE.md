@@ -108,6 +108,12 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 - **Event Debugging**: See `/src/docs/websocket-troubleshooting.md` for comprehensive debugging procedures
 - **Configuration**: All WebSocket settings in lupin-app.ini under websocket_* keys
 
+## NOTIFICATION SYSTEM
+- **API Reference**: `src/docs/notification-api.md` (comprehensive one-stop reference)
+- **WebSocket Events**: `src/docs/websocket-events.md` (event catalog)
+- **Agentic Voice Integration**: `src/workflow/agentic-voice-workflow.md`
+- **R&D Planning Docs**: `src/rnd/sse-notifications/` (historical)
+
 ## STARTUP PROCEDURE
 - The first thing you should do when you start a session is read the global Claude configuration file and follow its instructions.
 - **HISTORY FILE READING**: Read the main history file (`/mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md`) which contains recent 30-day context and links to archived periods
