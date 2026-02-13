@@ -166,7 +166,7 @@
 **Files Modified** (outside repo):
 - `~/.bash_aliases` (svllmr → Ministral 8-bit, svllmrq Qwen3 backup)
 
-**Commit**: c0a71e0
+**Commit**: 5545115
 
 ---
 
@@ -218,8 +218,6 @@
 
 ### 2026.02.11 - Session 189 | CRUD Delete Bug Fix + Dedup Guards + Live Pipeline Smoke Test
 
-#### Checkpoint | 2026.02.11 | Fix delete-all-records bug, add dedup/multi-delete guards, CRUD live pipeline test
-
 **Accomplishments**:
 - Fixed **delete-all-records bug** from Session 167 Part 3 Test 4: three guards added to crud_operations.py
   - **Dedup guard** in `add_item()`: rejects duplicate inserts within same list (checks DEDUP_KEYS per schema)
@@ -232,6 +230,7 @@
 - Added CRUD confirmation entries to `all-agents.json` union script
 - 6 new `TestDeduplicationGuards` unit tests: dedup rejection, cross-list allowed, infra rejection, multi-delete guard, single-delete success
 - Created `test_crud_live_pipeline.py` — 8-scenario live smoke test with `--mode direct|lora|all` CLI
+- Created CRUD live pipeline testing guide for next-session pickup
 - **Regression**: 816/816 unit tests passed (was 810)
 
 **Files Modified** (Lupin repo):
@@ -239,12 +238,16 @@
 - `src/conf/notification-proxy-scripts/all-agents.json` (2 CRUD confirmation entries)
 - `src/tests/unit/test_crud_for_dataframes_storage.py` (6 new TestDeduplicationGuards tests)
 - `src/tests/smoke/test_crud_live_pipeline.py` (NEW — 8-scenario live pipeline test)
+- `src/rnd/2026.02.11-crud-live-pipeline-testing-guide.md` (NEW — testing guide for live pipeline + proxy)
+- `src/rnd/README.md` (added testing guide link)
 
 **Files Modified** (CoSA submodule, not committed here):
 - `src/cosa/crud_for_dataframes/schemas.py` (DEDUP_KEYS, INFRASTRUCTURE_COLS, get_dedup_keys)
 - `src/cosa/crud_for_dataframes/crud_operations.py` (dedup guard, multi-delete guard, infra rejection)
 - `src/cosa/crud_for_dataframes/dispatcher.py` (duplicate voice formatting)
 - `src/cosa/agents/notification_proxy/config.py` (crud profile in TEST_PROFILES)
+
+**Commits**: fd21f0c (checkpoint 1)
 
 ---
 
