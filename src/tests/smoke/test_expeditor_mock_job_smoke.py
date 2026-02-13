@@ -275,6 +275,9 @@ def _run_scenario( scenario, headers ):
         data = resp.json()
 
         if data[ "status" ] == "cancelled":
+            notif_status = data.get( "config", {} ).get( "notification_status" )
+            if notif_status and notif_status != "responded":
+                print( f"    ⚠ Notification status: {notif_status}" )
             if scenario[ "expect_cancel" ]:
                 return "pass", data
             else:

@@ -1,5 +1,29 @@
 # Lupin Project History
 
+### 2026.02.12 - Session 200 | Expeditor Notification Fix — Missing `open_ended_batch` Response Type
+
+**Accomplishments**:
+- Fixed `http_error` in expeditor smoke tests: root cause was `/api/notify` endpoint rejecting `open_ended_batch` as invalid response type
+- Added `"open_ended_batch"` to `valid_response_types` list in notifications router (line 319)
+- Enhanced error diagnostic in `notify_user_sync.py`: HTTP error status now includes status code (`http_error_400` instead of generic `http_error`)
+- Added dedicated unit test `test_notify_response_required_open_ended_batch_accepted` (offline-with-default path)
+- Confirmed no secondary JWT auth issues — dual-auth (`require_api_key_or_jwt`) works correctly
+- Marked expeditor end-to-end testing as complete in TODO.md; design review deferred to next session
+
+**Files Modified**:
+- `src/tests/unit/test_notifications_api.py` (+79 lines — new `open_ended_batch` acceptance test)
+- `src/tests/unit/test_notify_user_sync.py` (updated `http_error` assertion to match new `http_error_{code}` format)
+- `src/tests/unit/test_runtime_argument_expeditor.py` (+10 lines — expeditor test updates)
+- `src/tests/smoke/test_expeditor_mock_job_smoke.py` (+3 lines — smoke test adjustments)
+- `TODO.md` (expeditor e2e testing marked complete)
+
+**Files Created**:
+- `src/rnd/2026.02.12-fix-expeditor-notification-dual-auth-plan.md` (implementation plan)
+
+**Test Results**: 814 unit tests pass, 12/12 smoke scenarios pass
+
+---
+
 ### 2026.02.12 - Session 194 | Embedding Benchmark Harness — Local GPU 7-398x Faster Than OpenAI API
 
 **Accomplishments**:

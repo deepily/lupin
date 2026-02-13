@@ -30,7 +30,7 @@ from cosa.rest.routers.notifications import (
     get_websocket_manager
 )
 from cosa.rest.db.database import get_db
-from cosa.rest.middleware.api_key_auth import require_api_key
+from cosa.rest.middleware.api_key_auth import require_api_key, require_api_key_or_jwt
 from cosa.rest import user_service
 from fastapi import FastAPI
 
@@ -92,7 +92,7 @@ class TestNotifyFireAndForget:
         mock_notification.id = uuid_module.UUID( "550e8400-e29b-41d4-a716-446655440001" )
 
         # Override FastAPI dependencies - including API key auth
-        app.dependency_overrides[require_api_key] = lambda: "service_account_123"
+        app.dependency_overrides[require_api_key_or_jwt] = lambda: "service_account_123"
         app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
         app.dependency_overrides[get_notification_queue] = lambda: mock_queue_instance
 
@@ -157,7 +157,7 @@ class TestNotifyFireAndForget:
         mock_notification.id = uuid_module.UUID( "550e8400-e29b-41d4-a716-446655440001" )
 
         # Override FastAPI dependencies - including API key auth
-        app.dependency_overrides[require_api_key] = lambda: "service_account_123"
+        app.dependency_overrides[require_api_key_or_jwt] = lambda: "service_account_123"
         app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
         app.dependency_overrides[get_notification_queue] = lambda: mock_queue_instance
 
@@ -220,7 +220,7 @@ class TestNotifyResponseRequired:
     def test_notify_response_required_validation(self, app):
         """Test response-required mode requires response_type parameter."""
         # Override API key auth
-        app.dependency_overrides[require_api_key] = lambda: "service_account_123"
+        app.dependency_overrides[require_api_key_or_jwt] = lambda: "service_account_123"
 
         client = TestClient( app )
 
@@ -243,7 +243,7 @@ class TestNotifyResponseRequired:
     def test_notify_response_required_invalid_response_type(self, app):
         """Test response-required mode validates response_type values."""
         # Override API key auth
-        app.dependency_overrides[require_api_key] = lambda: "service_account_123"
+        app.dependency_overrides[require_api_key_or_jwt] = lambda: "service_account_123"
 
         client = TestClient( app )
 
@@ -262,6 +262,71 @@ class TestNotifyResponseRequired:
 
         assert response.status_code == 400
         assert "Invalid response_type" in response.json()["detail"]
+
+    def test_notify_response_required_open_ended_batch_accepted(self, app, mock_db_session):
+        """Test response-required mode accepts open_ended_batch as a valid response_type."""
+        from unittest.mock import patch
+        import uuid as uuid_module
+
+        # Setup mocks
+        mock_user_service = Mock()
+        mock_user_service.get_user_by_email = Mock( return_value={"id": "550e8400-e29b-41d4-a716-446655440000", "email": "test@example.com"} )
+
+        mock_ws_instance = Mock()
+        mock_ws_instance.is_user_connected.return_value = False
+
+        mock_queue_instance = Mock()
+
+        # Setup mock database session
+        db_context_manager, mock_session = mock_db_session
+
+        # Mock the NotificationRepository
+        mock_notification = MagicMock()
+        mock_notification.id = uuid_module.UUID( "550e8400-e29b-41d4-a716-446655440001" )
+
+        # Override FastAPI dependencies
+        app.dependency_overrides[require_api_key_or_jwt] = lambda: "service_account_123"
+        app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
+        app.dependency_overrides[get_notification_queue] = lambda: mock_queue_instance
+
+        # Mock user_service module-level function
+        original_get_user = user_service.get_user_by_email
+        user_service.get_user_by_email = mock_user_service.get_user_by_email
+
+        try:
+            # Patch get_db to return our mock context manager
+            with patch( 'cosa.rest.routers.notifications.get_db', return_value=db_context_manager ):
+                with patch( 'cosa.rest.routers.notifications.NotificationRepository' ) as MockRepo:
+                    mock_repo_instance = MagicMock()
+                    mock_repo_instance.create_notification.return_value = mock_notification
+                    mock_repo_instance.update_state.return_value = mock_notification
+                    MockRepo.return_value = mock_repo_instance
+
+                    client = TestClient( app )
+
+                    # open_ended_batch should NOT return 400 validation error
+                    response = client.post(
+                        "/api/notify",
+                        params={
+                            "message"           : "Batch questions",
+                            "type"              : "task",
+                            "priority"          : "high",
+                            "target_user"       : "test@example.com",
+                            "response_requested": True,
+                            "response_type"     : "open_ended_batch",
+                            "response_default"  : "defer"
+                        },
+                        headers={"X-API-Key": "claude_code_simple_key"}
+                    )
+
+                    # Should pass validation (200 offline-with-default, not 400)
+                    assert response.status_code == 200
+                    data = response.json()
+                    assert data["status"] == "offline"
+                    assert data["default_used"] == "defer"
+
+        finally:
+            user_service.get_user_by_email = original_get_user
 
     def test_notify_response_required_offline_with_default(self, app, mock_db_session):
         """Test response-required mode returns default immediately when user offline."""
@@ -285,7 +350,7 @@ class TestNotifyResponseRequired:
         mock_notification.id = uuid_module.UUID( "550e8400-e29b-41d4-a716-446655440001" )
 
         # Override FastAPI dependencies - including API key auth
-        app.dependency_overrides[require_api_key] = lambda: "service_account_123"
+        app.dependency_overrides[require_api_key_or_jwt] = lambda: "service_account_123"
         app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
         app.dependency_overrides[get_notification_queue] = lambda: mock_queue_instance
 
@@ -341,7 +406,7 @@ class TestNotifyResponseRequired:
         mock_queue_instance = Mock()
 
         # Override FastAPI dependencies - including API key auth
-        app.dependency_overrides[require_api_key] = lambda: "service_account_123"
+        app.dependency_overrides[require_api_key_or_jwt] = lambda: "service_account_123"
         app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
         app.dependency_overrides[get_notification_queue] = lambda: mock_queue_instance
 

@@ -1071,6 +1071,8 @@ class TestBatchCollectArgs:
         self.expeditor.llm_spec_key             = "test_key"
         self.expeditor.llm_factory              = MagicMock()
         self.expeditor._job_id                  = None
+        self.expeditor._bearer_token            = None
+        self.expeditor._last_notification_status = None
 
         # Mock config_mgr for _resolve_default()
         mock_config_mgr           = MagicMock()
@@ -1418,6 +1420,8 @@ class TestBatchAbstractPassthrough:
         self.expeditor.llm_spec_key             = "test_key"
         self.expeditor.llm_factory              = MagicMock()
         self.expeditor._job_id                  = None
+        self.expeditor._bearer_token            = None
+        self.expeditor._last_notification_status = None
 
         # Mock config_mgr for _resolve_default()
         mock_config_mgr           = MagicMock()
@@ -1539,6 +1543,8 @@ class TestBatchDefaultValues:
         self.expeditor.llm_spec_key             = "test_key"
         self.expeditor.llm_factory              = MagicMock()
         self.expeditor._job_id                  = None
+        self.expeditor._bearer_token            = None
+        self.expeditor._last_notification_status = None
 
         # Mock config_mgr — default: return None (no config override)
         self.mock_config_mgr           = MagicMock()
@@ -1709,6 +1715,8 @@ class TestJobIdThreading:
         self.expeditor.llm_spec_key             = "test_key"
         self.expeditor.llm_factory              = MagicMock()
         self.expeditor._job_id                  = None
+        self.expeditor._bearer_token            = None
+        self.expeditor._last_notification_status = None
 
         # Mock config_mgr for _resolve_default()
         mock_config_mgr           = MagicMock()
@@ -1781,6 +1789,8 @@ class TestOptionalArgPrompting:
         self.expeditor.llm_spec_key             = "test_key"
         self.expeditor.llm_factory              = MagicMock()
         self.expeditor._job_id                  = None
+        self.expeditor._bearer_token            = None
+        self.expeditor._last_notification_status = None
 
         # Mock config_mgr for _resolve_default()
         mock_config_mgr           = MagicMock()

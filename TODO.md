@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-12 (Session 194)
+Last updated: 2026-02-12 (Session 200)
 
 ## Pending
 
@@ -35,9 +35,10 @@ Last updated: 2026-02-12 (Session 194)
   - [x] Part 1: Mock pipeline tests (17/17 passed — routing, pipeline, cache, confirmation, prompt construction)
   - [x] Bug fix: CRUD agent completion — emit_job_state_transition, answer guard, done queue push (3 new tests, 532/532 pass)
   - [x] Bug fix: TTS focus mode stuck — staleness check in restoreTTSQueueState + exit in moveToRegularNotifications (Session 164)
-  - [ ] Part 3: Curl smoke tests (Tests 1-2 done, Tests 3-4 pending. Test 4 revealed **delete-all-records bug** — see plan below)
+  - [x] **Bug fix: delete_item deletes all records** — Session 189: dedup guard, multi-delete guard, infra column rejection. 6 new tests (816 total). Commit fd21f0c.
+  - [x] Part 3: Curl smoke tests → **SUPERSEDED** by `test_crud_live_pipeline.py` (8-scenario automated test, Session 189)
+  - [ ] **Run CRUD live pipeline test** — `test_crud_live_pipeline.py --mode direct` with notification proxy (`--profile crud`). **Testing guide**: `src/rnd/2026.02.11-crud-live-pipeline-testing-guide.md`. **RESUME NEXT SESSION.**
   - [ ] Part 2: Notifications UI tests (8 scenarios, live server)
-  - [ ] **Bug fix: delete_item deletes all records** — Duplicate inserts + no multi-delete guard. Full implementation plan at `src/rnd/2026.02.10-crud-delete-bug-fix-and-live-pipeline-smoke-test.md` (original plan at `~/.claude/plans/cached-growing-mist.md`). 4 parts: (A) 5-change bug fix, (B) 6 new unit tests, (C) `test_crud_live_pipeline.py` 8-scenario live smoke test, (D) full regression. **RESUME TOMORROW (Session 181).**
 - [ ] **[LUPIN] Phase 4: End-to-End Voice Workflows + Polish** - PENDING (blocked by Phase 3 ✅)
 
 ### Skills Management (Session 118 Discovery)
@@ -189,12 +190,9 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
 
 ### Runtime Argument Expeditor Testing (HIGH) - Session 130
 
-- [ ] **[LUPIN] Test Runtime Argument Expeditor end-to-end** - Verify all changes from `src/rnd/2026.02.04-runtime-argument-expeditor-design.md`. Three testing surfaces:
-  1. **Notification UI text input** (`/api/push`): "do deep research on quantum computing", "make me a podcast", "research AI safety and make a podcast"
-  2. **Dedicated REST endpoints**: `/api/deep-research/submit`, `/api/podcast-generator/submit`, `/api/deep-research-to-podcast/submit` (shared `agentic_job_factory`)
-  3. **Mock endpoint expeditor test mode**: `POST /api/mock-job/submit {"voice_command": "make me a podcast"}` (dry-run, zero inference cost)
-  - Requires running Lupin server on port 7999
-  - **Session 162**: Bug fix — optional args gate now uses deterministic user-visible-args diff instead of `is_complete()`. 9 interactive scenarios ready to run.
+- [x] **[LUPIN] Test Runtime Argument Expeditor end-to-end** - ✅ COMPLETE (Session 200): All three testing surfaces verified. 12/12 proxy-automated smoke scenarios pass, 814 unit tests pass. Root cause of `http_error`: missing `open_ended_batch` in `/api/notify` response_type validation — fixed. No secondary JWT auth issues.
+  - **Design review**: Return tomorrow to review expeditor notification architecture (dual-auth, batch collection flow)
+  - **Plan**: `src/rnd/2026.02.12-fix-expeditor-notification-dual-auth-plan.md`
 - [x] **[LUPIN] Create testing plan for Runtime Argument Expeditor** - Session 131: Initial 49 tests. Sessions 144-160: Expanded to 115 unit tests across 13 classes, 9 interactive smoke scenarios. **Session 162**: Bug fix + 8 new tests (Class 15: TestOptionalArgPrompting), total 123 tests across 15 classes. **Session 163**: Timeout chain fix (60/60/120→180/180/300) + diagnostic logging for notification failure analysis.
   - **Unit tests**: `src/tests/unit/test_runtime_argument_expeditor.py` (123 tests, 15 classes)
   - **Smoke tests**: `src/tests/smoke/test_expeditor_mock_job_smoke.py` (3 automated + 9 interactive, 600s timeout)
