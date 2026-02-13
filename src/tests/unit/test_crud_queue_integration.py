@@ -412,6 +412,11 @@ class TestCrudQueueCompletion:
         agent.started_at            = "2026-02-09T22:00:00"
         agent.session_id            = "test-session"
 
+        # Mock do_all() to skip real LLM pipeline — agent attributes already set to final state
+        agent.do_all                      = MagicMock( return_value="I added buy milk to your grocery list." )
+        agent.code_ran_to_completion      = MagicMock( return_value=True )
+        agent.formatter_ran_to_completion = MagicMock( return_value=True )
+
         return queue, agent
 
     @patch( "cosa.rest.running_fifo_queue.emit_job_state_transition" )

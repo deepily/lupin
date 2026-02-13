@@ -27,6 +27,19 @@
 
 (Available for any session to claim)
 
+- [ ] **HIGH** `test_crud_agent_emits_job_state_transition` fails — expects `'done'`, gets `'dead'`
+  - **Symptom**: `_handle_base_agent()` calls real `do_all()` which hits LLM, raises `ValueError: Empty response from LLM`, triggers error path emitting `run → dead`
+  - **Root Cause**: `_create_queue_and_agent()` never mocked `do_all()`, `code_ran_to_completion()`, or `formatter_ran_to_completion()`
+  - **Fix**: Add 3 MagicMock lines in `_create_queue_and_agent()` after agent attribute setup
+  - **File**: `src/tests/unit/test_crud_queue_integration.py`
+  - **Status**: FIXED (2026-02-13)
+
+- [ ] **HIGH** `test_crud_agent_pushed_to_done_queue` fails — `jobs_done_queue.push` never called
+  - **Symptom**: Same root cause as above — error path pushes to `jobs_dead_queue` instead of `jobs_done_queue`
+  - **Root Cause**: Same as above — unmocked `do_all()` triggers error flow
+  - **Fix**: Same 3-line mock fix in `_create_queue_and_agent()`
+  - **File**: `src/tests/unit/test_crud_queue_integration.py`
+  - **Status**: FIXED (2026-02-13)
 
 ---
 

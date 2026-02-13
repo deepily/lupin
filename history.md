@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.02.13 - Session 203 | Fix Failing TestCrudQueueCompletion Tests
+
+#### Checkpoint | 2026.02.13 12:40 | Fix 2 failing tests — mock do_all() + completion gates
+
+**Accomplishments**:
+- Fixed 2 failing `TestCrudQueueCompletion` tests: `test_crud_agent_emits_job_state_transition` and `test_crud_agent_pushed_to_done_queue`
+- Root cause: `_create_queue_and_agent()` never mocked `do_all()`, so real LLM pipeline ran, raised `ValueError: Empty response from LLM`, triggered error path emitting `run -> dead` instead of `run -> done`
+- Added 3 MagicMock lines: `do_all()`, `code_ran_to_completion()`, `formatter_ran_to_completion()`
+- All 3 `TestCrudQueueCompletion` tests now pass; full suite 817/817 pass, zero regressions
+- Added both bugs to `bug-fix-queue.md` as FIXED items
+
+**Files Modified**:
+- `src/tests/unit/test_crud_queue_integration.py` (+3 lines — mock do_all + completion gates)
+- `bug-fix-queue.md` (+2 FIXED items in Queued section)
+
+**Commit**: b435c3a
+
+---
+
 ### 2026.02.13 - Session 202 | Consolidated Notification API Reference Document
 
 #### Checkpoint | 2026.02.13 17:30 | Notification API reference: 4,033-line doc + 5 diagrams + 3 cross-refs
