@@ -75,6 +75,7 @@ def _make_fake_config( overrides=None ):
         "local embedding prose query prefix"     : "search_query:",
         "local embedding prose document prefix"  : "search_document:",
         "embedding provider"                     : "local",
+        "embedding dimensions"                   : "768",
         "debug_local_embedding"                  : "False",
     }
     if overrides:
@@ -388,10 +389,10 @@ class TestEmbeddingProvider:
 
     @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config( { "embedding provider": "openai" } ) )
     def test_dimensions_property_openai( self, mock_cm ):
-        """dimensions property should return 1536 when provider=openai."""
+        """dimensions property should return standardized 768 even when provider=openai (MRL truncation)."""
         from cosa.memory.embedding_provider import EmbeddingProvider
         provider = EmbeddingProvider( debug=False )
-        assert provider.dimensions == 1536
+        assert provider.dimensions == 768
 
     @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
     def test_reset_metrics_clears_all( self, mock_cm ):
