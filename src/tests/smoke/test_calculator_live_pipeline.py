@@ -43,31 +43,18 @@ Requires:
 
 Created: 2026-02-10 (Session 172)
 Updated: 2026-02-11 — Added --auto-route flag for Step 25 (LORA routing verification)
+Refactored: 2026-02-13 — Migrated to LivePipelineTestBase
 """
 
-import argparse
 import os
 import sys
-import time
-import traceback
 
 # Bootstrap path setup
 lupin_root = os.environ.get( "LUPIN_ROOT" )
 if lupin_root:
     sys.path.insert( 0, os.path.join( lupin_root, "src" ) )
 
-import requests
-
-try:
-    import cosa.utils.util as cu
-except ImportError:
-    cu = None
-
-
-BASE_URL         = "http://localhost:7999"
-MAX_POLL_SECONDS = 120
-POLL_INTERVAL    = 2
-REQUEST_TIMEOUT  = 60
+from tests.smoke.utilities.live_pipeline_base import LivePipelineTestBase
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -115,466 +102,142 @@ CALCULATOR_QUERIES = [
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Helper Functions
+# Calculator Test Class
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _get_credentials():
-    """
-    Get test credentials from environment.
-
-    Requires:
-        - LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD are set
-
-    Ensures:
-        - Returns (email, password) tuple
-        - Returns (None, None) if no credentials found
-    """
-    email    = os.environ.get( "LUPIN_TEST_EMAIL" )
-    password = os.environ.get( "LUPIN_TEST_PASSWORD" )
-
-    if email and password:
-        return email, password
-
-    return None, None
-
-
-def _login( email, password ):
-    """
-    Authenticate and return (token, headers) tuple.
-
-    Requires:
-        - email and password are non-empty strings
-        - Server running on BASE_URL
-
-    Ensures:
-        - Returns (token_str, headers_dict) on success
-        - Returns (None, None) on failure with remediation instructions
-    """
-    login_resp = requests.post(
-        f"{BASE_URL}/auth/login",
-        json={ "email": email, "password": password },
-        timeout=30
-    )
-
-    if login_resp.status_code != 200:
-        print( f"  Login failed: {login_resp.status_code}" )
-        print( f"  Response: {login_resp.text[ :200 ]}" )
-        print()
-        print( "  Possible fixes:" )
-        print( "  1. Account may not exist. Register it:" )
-        print( f'     curl -X POST "{BASE_URL}/auth/register" \\' )
-        print( f'       -H "Content-Type: application/json" \\' )
-        print( f'       -d \'{{"email": "{email}", "password": "<your-password>"}}\'' )
-        print( "  2. Password may be wrong. Check your env vars:" )
-        print( "     LUPIN_TEST_EMAIL / LUPIN_TEST_PASSWORD" )
-        return None, None
-
-    token   = login_resp.json()[ "tokens" ][ "access_token" ]
-    headers = { "Authorization": f"Bearer {token}" }
-    return token, headers
-
-
-def _get_websocket_session_id( headers ):
-    """
-    Get a valid WebSocket session ID for API calls.
-
-    Requires:
-        - headers contains valid auth token
-
-    Ensures:
-        - Returns session_id string on success
-        - Returns None on failure
-    """
-    resp = requests.get(
-        f"{BASE_URL}/api/debug/websocket-state",
-        headers=headers,
-        timeout=10
-    )
-
-    if resp.status_code != 200:
-        print( f"  WebSocket state endpoint failed: {resp.status_code}" )
-        return None
-
-    data     = resp.json()
-    sessions = data.get( "sessions", {} )
-
-    if sessions:
-        # Use the first active session
-        session_id = list( sessions.keys() )[ 0 ]
-        return session_id
-
-    # No active sessions — use a placeholder
-    return "smoke-test-session"
-
-
-def _set_calculator_mode( headers ):
-    """
-    Set user mode to calculator for direct routing.
-
-    Requires:
-        - headers contains valid auth token
-
-    Ensures:
-        - Returns True if mode set successfully
-        - Returns False on failure
-    """
-    resp = requests.post(
-        f"{BASE_URL}/api/mode/current",
-        json={ "mode": "calculator" },
-        headers=headers,
-        timeout=10
-    )
-
-    if resp.status_code != 200:
-        print( f"  Set mode failed: {resp.status_code} - {resp.text[ :200 ]}" )
-        return False
-
-    data = resp.json()
-    print( f"  Mode set to: {data.get( 'display_name', 'unknown' )} (was: {data.get( 'previous_mode', 'system' )})" )
-    return True
-
-
-def _clear_mode( headers ):
-    """
-    Clear user mode back to system.
-
-    Requires:
-        - headers contains valid auth token
-
-    Ensures:
-        - Mode is cleared regardless of success/failure
-    """
-    try:
-        requests.post(
-            f"{BASE_URL}/api/mode/current",
-            json={ "mode": None },
-            headers=headers,
-            timeout=10
-        )
-    except Exception:
-        pass  # Best effort
-
-
-def _submit_and_wait( query_info, headers, ws_id, timeout=None ):
-    """
-    Submit a question and poll the done queue for completion.
-
-    Requires:
-        - query_info is a dict from CALCULATOR_QUERIES
-        - headers contains valid auth token
-        - ws_id is a valid session ID
-
-    Ensures:
-        - Returns (job_metadata_dict, error_msg) on completion
-        - Returns (None, error_msg) on failure or timeout
-    """
-    if timeout is None:
-        timeout = MAX_POLL_SECONDS
-
-    question = query_info[ "query" ]
-
-    # Submit
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/api/push",
-            json={ "question": question, "websocket_id": ws_id },
-            headers={ **headers, "X-Session-ID": ws_id },
-            timeout=REQUEST_TIMEOUT
-        )
-    except requests.exceptions.Timeout:
-        return None, f"Submit timed out after {REQUEST_TIMEOUT}s"
-    except Exception as e:
-        return None, f"Submit error: {e}"
-
-    if resp.status_code != 200:
-        return None, f"HTTP {resp.status_code}: {resp.text[ :200 ]}"
-
-    push_data = resp.json()
-    job_id    = push_data.get( "job_id" )
-
-    if not job_id:
-        return None, f"No job_id in push response: {push_data}"
-
-    print( f"    Submitted, job_id={job_id}, polling..." )
-
-    # Poll done queue
-    elapsed = 0
-    while elapsed < timeout:
-        try:
-            done_resp = requests.get(
-                f"{BASE_URL}/api/get-queue/done",
-                headers=headers,
-                timeout=30
-            )
-
-            if done_resp.status_code == 200:
-                done_data = done_resp.json()
-                jobs      = done_data.get( "done_jobs_metadata", [] )
-
-                for job in jobs:
-                    if job.get( "job_id" ) == job_id:
-                        return job, None
-
-        except Exception as e:
-            print( f"    Poll error: {e}" )
-
-        time.sleep( POLL_INTERVAL )
-        elapsed += POLL_INTERVAL
-
-    return None, f"Timeout after {timeout}s waiting for job_id={job_id}"
-
-
-def _check_answer( answer_text, expected_keywords ):
-    """
-    Check if the answer contains any of the expected keywords.
-
-    Requires:
-        - answer_text is a string (may be None)
-        - expected_keywords is a non-empty list of strings
-
-    Ensures:
-        - Returns (True, matched_keyword) if any keyword found
-        - Returns (False, None) if no keyword found
-    """
-    if not answer_text:
-        return False, None
-
-    answer_lower = answer_text.lower()
-    for keyword in expected_keywords:
-        if keyword.lower() in answer_lower:
-            return True, keyword
-
-    return False, None
-
-
-def _print_results_table( results ):
-    """
-    Print a formatted summary table of all query results.
-
-    Requires:
-        - results is a list of dicts with keys: id, status, query, answer_preview, details
-
-    Ensures:
-        - Prints tabular summary to console
-    """
-    print( "\n" + "=" * 90 )
-    print( f"  {'#':<4} {'Test ID':<16} {'Status':<8} {'Answer Preview':<40} {'Details'}" )
-    print( "-" * 90 )
-
-    for i, r in enumerate( results, 1 ):
-        status_icon = "PASS" if r[ "status" ] == "pass" else "FAIL"
-        icon        = "+" if r[ "status" ] == "pass" else "-"
-        preview     = r.get( "answer_preview", "" )[ :38 ]
-        print( f"  {icon} {i:<3} {r[ 'id' ]:<16} {status_icon:<8} {preview:<40} {r[ 'details' ]}" )
-
-    print( "=" * 90 )
-
-    passed = sum( 1 for r in results if r[ "status" ] == "pass" )
-    failed = sum( 1 for r in results if r[ "status" ] == "fail" )
-
-    print( f"\n  Total: {passed} passed, {failed} failed out of {len( results )}" )
-    print( f"  Overall: {'PASS' if failed == 0 else 'FAIL'}" )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Main Test
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def quick_smoke_test( query_indices=None, auto_route=False ):
+class CalculatorPipelineTest( LivePipelineTestBase ):
     """
     Smoke test for Calculator agent via live pipeline.
 
     Requires:
         - Server running on port 7999
         - Phi-4 LLM server running for intent extraction
-        - Test credentials available via environment variables
-        - query_indices is None (run all) or a list of valid ints (0-5)
-        - auto_route is a boolean (False = Step 24 explicit mode, True = Step 25 LORA routing)
 
     Ensures:
-        - If auto_route is False: sets calculator mode explicitly (Step 24)
-        - If auto_route is True: clears mode so LORA router decides (Step 25)
-        - Submits selected queries (all 6 by default)
-        - Polls for completion via job_id
-        - Validates answers contain expected keywords
-        - If auto_route: also validates agent_type == CalculatorAgent
-        - Resets mode to system on exit (if mode was set)
+        - Step 24: Explicit calculator mode routes correctly
+        - Step 25: LORA auto-routing classifies queries to CalculatorAgent
+    """
+
+    TEST_NAME       = "Calculator Live Pipeline"
+    SCENARIOS       = CALCULATOR_QUERIES
+    DEFAULT_TIMEOUT = 120
+
+    def build_argparser( self ):
+        """Add calculator-specific CLI arguments."""
+        parser = super().build_argparser()
+        parser.add_argument(
+            "--queries", "-q",
+            type=str,
+            default=None,
+            help="Comma-separated query indices to run (e.g., '0,1,3'). Default: all."
+        )
+        parser.add_argument(
+            "--auto-route", "-a",
+            action="store_true",
+            default=False,
+            help="Skip setting calculator mode. Tests LORA auto-routing (Step 25)."
+        )
+        return parser
+
+    def get_scenario_indices( self, args ):
+        """
+        Parse --queries flag for selective query execution.
+
+        Ensures:
+            - Returns list of valid indices into CALCULATOR_QUERIES
+        """
+        if hasattr( args, "queries" ) and args.queries:
+            return [ int( x.strip() ) for x in args.queries.split( "," ) if int( x.strip() ) < len( self.SCENARIOS ) ]
+        return list( range( len( self.SCENARIOS ) ) )
+
+    def get_mode_for_scenario( self, scenario ):
+        """
+        Return 'calculator' for explicit mode, or None for auto-route.
+
+        Ensures:
+            - Returns 'calculator' if not in auto-route mode
+            - Returns None if auto-route mode is active
+        """
+        if self._auto_route:
+            return None
+        return "calculator"
+
+    def validate_result( self, scenario, job_data ):
+        """
+        Validate answer keywords and optionally verify LORA routing.
+
+        Ensures:
+            - Checks agent_type == CalculatorAgent in auto-route mode
+            - Checks answer contains expected keywords
+        """
+        # Auto-route: verify LORA routed to CalculatorAgent
+        if self._auto_route:
+            agent_type = job_data.get( "agent_type", "" )
+            if agent_type != "CalculatorAgent":
+                return {
+                    "status"         : "fail",
+                    "answer_preview" : "",
+                    "details"        : f"Routed to {agent_type}, expected CalculatorAgent",
+                }
+            print( f"    Routing: correctly routed to {agent_type}" )
+
+        # Default keyword validation
+        result = super().validate_result( scenario, job_data )
+
+        # Append auto-route note to passing results
+        if self._auto_route and result[ "status" ] == "pass":
+            result[ "details" ] += " (auto-routed)"
+
+        return result
+
+    def _print_scenario_header( self, scenario ):
+        """Print calculator-specific scenario details."""
+        print( f"  Question: \"{scenario[ 'query' ]}\"" )
+        print( f"  Expected op: {scenario[ 'expected_op' ]}" )
+        print( f"  Expected keywords: {scenario[ 'expected_keywords' ]}" )
+
+    def run_scenarios( self, args=None ):
+        """
+        Override to capture auto_route state before running.
+
+        Ensures:
+            - self._auto_route is set before scenario execution
+        """
+        self._auto_route = getattr( args, "auto_route", False )
+
+        # Update test label based on routing mode
+        if self._auto_route:
+            self.TEST_NAME = "Calculator Auto-Route (LORA routing)"
+        else:
+            self.TEST_NAME = "Calculator Live Pipeline"
+
+        return super().run_scenarios( args )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Pytest + CLI Entry Points
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def quick_smoke_test( query_indices=None, auto_route=False ):
+    """
+    Backward-compatible entry point for direct invocation.
+
+    Requires:
+        - query_indices is None (all) or list of valid ints
+        - auto_route is a boolean
+
+    Ensures:
         - Returns True if all selected queries pass
     """
-    if query_indices is not None:
-        queries = [ CALCULATOR_QUERIES[ i ] for i in query_indices if i < len( CALCULATOR_QUERIES ) ]
-        if auto_route:
-            label = f"Calculator Auto-Route Test ({len( queries )} of {len( CALCULATOR_QUERIES )} queries, LORA routing)"
-        else:
-            label = f"Calculator Live Pipeline Smoke Test ({len( queries )} of {len( CALCULATOR_QUERIES )} queries)"
-    else:
-        queries = CALCULATOR_QUERIES
-        if auto_route:
-            label = f"Calculator Auto-Route Test ({len( queries )}-Query Matrix, LORA routing)"
-        else:
-            label = f"Calculator Live Pipeline Smoke Test ({len( queries )}-Query Matrix)"
-
-    banner = label
-    if cu:
-        cu.print_banner( banner, prepend_nl=True )
-    else:
-        print( f"\n{'=' * 60}" )
-        print( f"  {banner}" )
-        print( f"{'=' * 60}" )
-
-    # Get credentials
-    email, password = _get_credentials()
-    if not email or not password:
-        print( "Missing environment variables. Set:" )
-        print( "  export LUPIN_TEST_EMAIL='your@email.com'" )
-        print( "  export LUPIN_TEST_PASSWORD='<your-password>'" )
-        return False
-
-    try:
-        # ═══════════════════════════════════════════════════════════════════
-        # Step 1: Login (with auto-registration for mock test account)
-        # ═══════════════════════════════════════════════════════════════════
-        print( f"\nStep 1: Logging in as {email}..." )
-
-        token, headers = _login( email, password )
-
-        if not token:
-            print( "Login failed." )
-            return False
-
-        print( f"  Login successful, token: {token[ :30 ]}..." )
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Step 2: Get WebSocket session ID
-        # ═══════════════════════════════════════════════════════════════════
-        print( "\nStep 2: Getting WebSocket session ID..." )
-        ws_id = _get_websocket_session_id( headers )
-        print( f"  Using session ID: {ws_id}" )
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Step 3: Set mode (explicit calculator vs auto-route)
-        # ═══════════════════════════════════════════════════════════════════
-        if auto_route:
-            print( "\nStep 3: Auto-route mode (no explicit mode set, LORA router decides)..." )
-            _clear_mode( headers )
-            print( "  Mode cleared — LORA router will classify each query." )
-        else:
-            print( "\nStep 3: Setting calculator mode..." )
-            if not _set_calculator_mode( headers ):
-                print( "Failed to set calculator mode." )
-                return False
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Step 4: Run 6-query test matrix
-        # ═══════════════════════════════════════════════════════════════════
-        print( "\n" + "=" * 70 )
-        print( f"  CALCULATOR QUERY MATRIX ({len( queries )} queries)" )
-        print( "  Each query is submitted via /api/push and polled for completion." )
-        print( f"  Timeout: {MAX_POLL_SECONDS}s per query." )
-        print( "=" * 70 )
-
-        results = []
-
-        for i, query_info in enumerate( queries, 1 ):
-            print( f"\n{'─' * 70}" )
-            print( f"  Query {i}/{len( queries )}: {query_info[ 'id' ]}" )
-            print( f"  Question: \"{query_info[ 'query' ]}\"" )
-            print( f"  Expected op: {query_info[ 'expected_op' ]}" )
-            print( f"  Expected keywords: {query_info[ 'expected_keywords' ]}" )
-            print( f"{'─' * 70}" )
-
-            result = {
-                "id"             : query_info[ "id" ],
-                "status"         : "fail",
-                "query"          : query_info[ "query" ],
-                "answer_preview" : "",
-                "details"        : "",
-            }
-
-            job_data, error = _submit_and_wait( query_info, headers, ws_id )
-
-            if error:
-                result[ "details" ] = error
-                print( f"    FAIL: {error}" )
-            elif job_data:
-                # Auto-route: verify LORA routed to CalculatorAgent
-                if auto_route:
-                    agent_type = job_data.get( "agent_type", "" )
-                    if agent_type != "CalculatorAgent":
-                        result[ "status" ]  = "fail"
-                        result[ "details" ] = f"Routed to {agent_type}, expected CalculatorAgent"
-                        print( f"    FAIL: Routed to {agent_type} instead of CalculatorAgent" )
-                        results.append( result )
-                        continue
-                    else:
-                        print( f"    Routing: correctly routed to {agent_type}" )
-
-                answer = job_data.get( "response_text", "" ) or ""
-                result[ "answer_preview" ] = answer[ :80 ]
-
-                matched, keyword = _check_answer( answer, query_info[ "expected_keywords" ] )
-
-                if matched:
-                    result[ "status" ]  = "pass"
-                    result[ "details" ] = f"matched '{keyword}'"
-                    if auto_route: result[ "details" ] += " (auto-routed)"
-                    print( f"    PASS: Answer contains '{keyword}'" )
-                    print( f"    Answer: {answer[ :120 ]}" )
-                else:
-                    result[ "details" ] = f"no keyword match in answer"
-                    print( f"    FAIL: Expected one of {query_info[ 'expected_keywords' ]}" )
-                    print( f"    Got: {answer[ :200 ]}" )
-            else:
-                result[ "details" ] = "No job data returned"
-                print( f"    FAIL: No job data" )
-
-            results.append( result )
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Step 5: Reset mode
-        # ═══════════════════════════════════════════════════════════════════
-        print( f"\n{'─' * 70}" )
-        if not auto_route:
-            print( "Step 5: Clearing calculator mode..." )
-            _clear_mode( headers )
-            print( "  Mode cleared." )
-        else:
-            print( "Step 5: (auto-route mode — no mode to clear)" )
-
-        # ═══════════════════════════════════════════════════════════════════
-        # Step 6: Results summary
-        # ═══════════════════════════════════════════════════════════════════
-        _print_results_table( results )
-
-        passed = sum( 1 for r in results if r[ "status" ] == "pass" )
-        failed = sum( 1 for r in results if r[ "status" ] == "fail" )
-
-        all_passed = failed == 0
-
-        print( f"\n{'=' * 70}" )
-        if all_passed:
-            print( f"ALL CALCULATOR SMOKE TESTS PASSED ({passed}/{len( queries )})!" )
-        else:
-            print( f"CALCULATOR SMOKE TESTS: {passed} passed, {failed} failed" )
-        print( "=" * 70 )
-
-        return all_passed
-
-    except requests.exceptions.ConnectionError:
-        print( f"\nConnection failed - is the server running on {BASE_URL}?" )
-        return False
-    except Exception as e:
-        print( f"\nSmoke test failed: {e}" )
-        traceback.print_exc()
-        return False
-    finally:
-        # Always try to clear mode on exit (only if mode was explicitly set)
-        if not auto_route:
-            try:
-                if "headers" in dir():
-                    _clear_mode( headers )
-            except Exception:
-                pass
+    import argparse
+    test = CalculatorPipelineTest()
+    args = argparse.Namespace(
+        queries    = ",".join( str( i ) for i in query_indices ) if query_indices else None,
+        auto_route = auto_route,
+        debug      = False,
+        verbose    = False,
+    )
+    return test.run_scenarios( args )
 
 
 def test_calculator_live_pipeline():
@@ -583,28 +246,6 @@ def test_calculator_live_pipeline():
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser( description="Calculator live pipeline smoke test" )
-    parser.add_argument(
-        "--queries", "-q",
-        type=str,
-        default=None,
-        help="Comma-separated query indices to run (e.g., '0,1,3'). Default: all."
-    )
-    parser.add_argument(
-        "--auto-route", "-a",
-        action="store_true",
-        default=False,
-        help="Skip setting calculator mode. Tests LORA auto-routing (Step 25)."
-    )
-    args = parser.parse_args()
-
-    indices = None
-    if args.queries:
-        indices = [ int( x.strip() ) for x in args.queries.split( "," ) ]
-
-    try:
-        success = quick_smoke_test( query_indices=indices, auto_route=args.auto_route )
-        sys.exit( 0 if success else 1 )
-    except Exception as e:
-        traceback.print_exc()
-        sys.exit( 1 )
+    test    = CalculatorPipelineTest()
+    success = test.run( sys.argv[ 1: ] )
+    sys.exit( 0 if success else 1 )

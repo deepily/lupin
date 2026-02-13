@@ -1,5 +1,35 @@
 # Lupin Project History
 
+### 2026.02.13 - Session 201 | Unified Smoke Test Framework — Extract Base Classes + Auto-Proxy
+
+#### Checkpoint | 2026.02.13 12:00 | Unified smoke test framework: 4 new utility files, 3 tests refactored
+
+**Accomplishments**:
+- Extracted ~450 lines of duplicated infrastructure from 3 live pipeline smoke tests into reusable base classes
+- Created `LivePipelineTestBase` — shared auth, session, mode management, submit-and-poll, keyword validation, results table
+- Created `EmbeddedProxyMixin` — auto-launches notification proxy as subprocess with `os.setsid` process group management, SIGINT graceful shutdown
+- Created `InteractiveSmokeTest` — merges base + mixin, adds `--auto-proxy` and `--proxy-debug` CLI flags
+- Refactored calculator (611→252 lines), CRUD (599→241 lines), expeditor (633→704 lines) tests
+- Created R&D tracking document with architecture overview and phase checklist
+- Unit test regression: 815 passed, 2 pre-existing failures (unrelated)
+
+**Files Created**:
+- `src/tests/smoke/utilities/__init__.py` (package marker + exports)
+- `src/tests/smoke/utilities/live_pipeline_base.py` (~400 lines — `LivePipelineTestBase`)
+- `src/tests/smoke/utilities/embedded_proxy.py` (~230 lines — `EmbeddedProxyMixin`)
+- `src/tests/smoke/utilities/interactive_smoke_test.py` (~85 lines — `InteractiveSmokeTest`)
+- `src/rnd/2026.02.13-unified-smoke-test-framework.md` (R&D tracking doc)
+
+**Files Modified**:
+- `src/tests/smoke/test_calculator_live_pipeline.py` (refactored to extend `LivePipelineTestBase`)
+- `src/tests/smoke/test_crud_live_pipeline.py` (refactored to extend `InteractiveSmokeTest`)
+- `src/tests/smoke/test_expeditor_mock_job_smoke.py` (refactored to extend `InteractiveSmokeTest`)
+- `src/rnd/README.md` (linked new R&D document)
+
+**Commit**: 09f288b
+
+---
+
 ### 2026.02.12 - Session 200 | Expeditor Notification Fix — Missing `open_ended_batch` Response Type
 
 **Accomplishments**:

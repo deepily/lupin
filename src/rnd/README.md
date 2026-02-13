@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.13 - Unified Notification Proxy + Interactive Smoke Test Framework
+- **Implementation Document**: [2026.02.13-unified-smoke-test-framework.md](2026.02.13-unified-smoke-test-framework.md) - **🔄 IN PROGRESS** - Extract ~450 lines of duplicated infrastructure from 3 live pipeline smoke tests (calculator, CRUD, expeditor) into reusable base classes. `LivePipelineTestBase` (shared auth, session, polling, validation), `EmbeddedProxyMixin` (auto-launch notification proxy as subprocess), `InteractiveSmokeTest` (merged class for voice-interactive tests). 4 new files in `src/tests/smoke/utilities/`, 3 existing tests refactored. Phase 1-2 complete, Phase 3 live verification pending server availability. Unit regression: 815 passed, 2 pre-existing failures.
+
 ### 2026.02.12 - Three-Model PEFT/LoRA Comparison: Ministral-8B vs Qwen3-4B vs Llama-3.2-3B
 - **Analysis Document**: [2026.02.12-three-model-peft-comparison-ministral-qwen-llama.md](2026.02.12-three-model-peft-comparison-ministral-qwen-llama.md) - **ANALYSIS COMPLETE — Deploy Ministral-8B 8-bit** - Comprehensive comparison of three fine-tuned LoRA models for 34-command agentic intent routing. Ministral-8B dominates: 97.9% exact match POST-training, 8-bit quantization is lossless (98.7% EM, 0 commands degraded, +0.8pp vs full precision). Qwen3-4B loses 11.8pp on 4-bit quantization (94.7% → 83.0%, 20 commands degraded). Llama-3.2-3B is not viable (64.1% EM post-quant, 25 commands degraded). Includes per-command accuracy breakdown across all 34 commands, speed vs accuracy tradeoff matrix, VRAM footprint analysis (8-bit Ministral ~8.7GB fits on 24GB RTX 4090 at 0.85 util), and training pipeline timing comparison. Config switched from Qwen3 4-bit to Ministral 8-bit for development routing.
 
