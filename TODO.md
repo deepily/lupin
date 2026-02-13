@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-12 (Session 199)
+Last updated: 2026-02-12 (Session 194)
 
 ## Pending
 
@@ -251,6 +251,7 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
 
 ## Completed (Recent)
 
+- [x] **[LUPIN] Embedding benchmark harness** - Session 194: Side-by-side local GPU vs OpenAI API comparison. Local 7-398x faster. File: `src/tests/smoke/test_embedding_benchmark.py`
 - [x] **[LUPIN] Bug fix: Dead job card stuck in run bucket** - Session 199: Added missing `emit_job_state_transition()` call in `_handle_error_case()` for `run -> dead` transition. Only AgentBase error path was missing the WebSocket event — all other paths (agentic success/failure/crash, snapshot, cached) already emitted correctly. 814 unit tests pass.
 - [x] **[LUPIN] Fix LanceDB Embedding Dimension Mismatch** - Session 198: Standardized all providers on 768 dims (OpenAI MRL truncation), added `_validate_embedding_dimensions()` to all 6 table classes, 811 tests pass. CoSA submodule changes need separate commit.
 - [x] **[LUPIN] CJ Flow Branding + Bounded Job Packaging + Claude Code LORA Data** - Session 195

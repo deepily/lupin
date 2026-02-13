@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.02.12 - Session 194 | Embedding Benchmark Harness — Local GPU 7-398x Faster Than OpenAI API
+
+**Accomplishments**:
+- Created side-by-side embedding benchmark harness toggling `embedding provider` config between local/openai
+- Resets EmbeddingProvider singleton between providers to collect comparable metrics through production routing path
+- Results (N=10 iterations, 3 queries each): local GPU 7x faster (prose single), 17x (code single), 374x (batch prose), 398x (batch code)
+- Added Embedding Performance comparison table to project README.md
+- Graceful OpenAI skip if API key unavailable — shows local-only results with warning
+
+**Files Created**:
+- `src/tests/smoke/test_embedding_benchmark.py` (NEW — 280 lines, pytest + standalone `__main__` support)
+
+**Files Modified**:
+- `README.md` (added Embedding Performance section with benchmark table)
+
+**Commit**: 1a47087
+
+---
+
 ### 2026.02.11 - Session 191 | Calculator Step 25 — LORA Auto-Route Verification + Implementation Complete
 
 **Accomplishments**:
