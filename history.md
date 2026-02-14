@@ -1,5 +1,41 @@
 # Lupin Project History
 
+### 2026.02.14 - Session 210 | SWE Team Phase 4 — Trust-Aware Decision Proxy
+
+#### Checkpoint | 2026.02.14 | Phase 4 complete — 4-layer decision proxy + 214 new tests (1160 total)
+
+**Accomplishments**:
+- Implemented all 5 sub-phases of the Trust-Aware Decision Proxy (4-layer hybrid architecture)
+- **Phase 4a**: Extracted shared proxy infrastructure to `proxy_agents/` (7 files) — BaseStrategy protocol, BaseWebSocketListener, BaseResponder ABC, shared config, REST submitter, CLI args
+- **Phase 4b**: Built decision proxy framework in `decision_proxy/` (11 files) — trust mode, smart router, category classifier ABC, base decision strategy ABC, XML models, WebSocket listener, responder
+- **Phase 4c**: Implemented trust tracker + circuit breaker (2 files) — per-category trust levels L1-L5 with time-weighted decay, error rate/confidence collapse detection, auto-demotion
+- **Phase 4d**: Created decision store + ratification API — ProxyDecision + TrustState ORM models, repository with shadow/log/ratify/find_similar, FastAPI router (4 endpoints), migration SQL
+- **Phase 4e**: Built SWE engineering proxy domain layer in `swe_team/proxy/` (5 files) — 6 engineering categories (deployment/testing/deps/architecture/destructive/general), keyword classifier with sender hints, full evaluate pipeline
+- Refactored notification_proxy/config.py for backward compatibility (120/120 existing tests still pass)
+- Added 16 config keys to lupin-app.ini + lupin-app-splainer.ini
+- **214 new unit tests** across 4 test files, **1160 total unit tests** passing, zero regressions
+
+**Files Created (Lupin repo)**:
+- `src/conf/lupin-app.ini` (modified — 16 new config keys)
+- `src/conf/lupin-app-splainer.ini` (modified — 16 matching explanations)
+- `src/scripts/sql/2026.02.14-decision-proxy-schema.sql`
+- `src/tests/unit/test_proxy_common.py` (51 tests)
+- `src/tests/unit/test_decision_proxy_config.py` (70 tests)
+- `src/tests/unit/test_decision_store.py` (46 tests)
+- `src/tests/unit/test_swe_engineering_proxy.py` (47 tests)
+
+**Files Created/Modified (CoSA submodule — needs separate commit)**:
+- `agents/utils/proxy_agents/` (7 new files)
+- `agents/decision_proxy/` (13 new files)
+- `agents/swe_team/proxy/` (5 new files)
+- `agents/notification_proxy/config.py` (modified — re-export shared constants)
+- `rest/postgres_models.py` (modified — ProxyDecision + TrustState models)
+- `rest/db/repositories/proxy_decision_repository.py` (new)
+- `rest/db/repositories/__init__.py` (modified)
+- `rest/routers/decision_proxy.py` (new)
+
+---
+
 ### 2026.02.14 - Session 209 | PEFT Trainer Resume-from-Merged
 
 #### Checkpoint | 2026.02.14 18:30 | Add --resume-from-merged to PEFT trainer
