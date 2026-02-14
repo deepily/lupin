@@ -1,5 +1,34 @@
 # Lupin Project History
 
+### 2026.02.14 - Session 209 | PEFT Trainer Resume-from-Merged
+
+#### Checkpoint | 2026.02.14 18:30 | Add --resume-from-merged to PEFT trainer
+
+**Accomplishments**:
+- Added `--resume-from-merged <path>` CLI argument to `peft_trainer.py` — skips phases 1-3 (pre-validation, fine-tuning, merge) and uses existing merged adapter dir for phases 4-5 (post-training validation, quantization)
+- Wrapped phases 1-3 in conditional block gated on `resume_from_merged` parameter
+- Updated completion message to distinguish resume mode from normal mode
+- Removed `run_pipeline_adhoc()` method (170 lines of hardcoded workaround code) — replaced by the new CLI flag
+- Cleaned up adhoc references in `__main__` block and smoke test `expected_methods` list
+- Structural smoke test passes: all 12 methods present, all imports verified
+
+**Files Modified (CoSA submodule — needs separate commit)**:
+- `src/cosa/training/peft_trainer.py` (resume logic, adhoc removal, CLI arg, docstring update)
+
+**Commit**: 96cbf21 (Lupin docs-only; CoSA submodule commit pending)
+
+---
+
+### 2026.02.14 - Session 208 | Bug Fix Mode
+
+#### Fixes
+(Individual fixes will be added here)
+
+#### Session Summary
+(Will be completed at session close)
+
+---
+
 ### 2026.02.14 - Session 207 | SWE Team Phase 3 — Tester Verification Loop
 
 #### Checkpoint | 2026.02.14 | SWE Team Phase 3 — tester verification loop + 31 unit tests (946 total)
