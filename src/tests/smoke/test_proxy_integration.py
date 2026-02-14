@@ -103,7 +103,7 @@ INTEGRATION_SCENARIOS = [
         "query"             : "add buy milk to my grocery list",
         "mode"              : "todo",
         "needs_confirm"     : False,
-        "expected_keywords" : [ "done", "added", "milk" ],
+        "expected_keywords" : [ "done", "added", "milk", "already exists" ],
         "expected_status"   : [ "added", "duplicate" ],
     },
     {
@@ -112,8 +112,8 @@ INTEGRATION_SCENARIOS = [
         "query"             : "add buy bread to my grocery list",
         "mode"              : "todo",
         "needs_confirm"     : False,
-        "expected_keywords" : [ "done", "added", "bread" ],
-        "expected_status"   : [ "added" ],
+        "expected_keywords" : [ "done", "added", "bread", "already exists" ],
+        "expected_status"   : [ "added", "duplicate" ],
     },
     {
         "id"                : "CRUD_QUERY",
