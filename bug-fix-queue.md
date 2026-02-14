@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-10T14:30:00
+**Last Updated**: 2026-02-13T17:00:00
 
 ---
 
@@ -19,6 +19,7 @@
 | bb3a5d21 | 2026-02-03T14:50:00 | 2026-02-03T19:45:00 | closed |
 | d7da6d0d | 2026-02-03T13:15:00 | 2026-02-03T13:35:00 | stale |
 | 590273af | 2026-02-03T10:00:00 | 2026-02-03T14:30:00 | stale |
+| 649565dd | 2026-02-13T17:00:00 | 2026-02-13T17:00:00 | active |
 | 4949b964 | 2026-02-02T18:00:00 | 2026-02-02T23:05:00 | closed |
 
 ---
@@ -47,7 +48,10 @@
 
 (Claimed by a specific session)
 
-*None currently*
+- [ ] **MEDIUM** Make semantic-similarity confirmation step configurable at runtime (ad-hoc)
+  - **Symptom**: Semantic similarity confirmation in CJ flow todo bucket is always enabled, not configurable
+  - **Goal**: Add config key to `lupin-app.ini` with default `true`, read at runtime to skip/enable confirmation
+  - **Owner**: 649565dd
 
 ---
 
