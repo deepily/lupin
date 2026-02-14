@@ -1,5 +1,40 @@
 # Lupin Project History
 
+### 2026.02.14 - Session 206 | SWE Team Phase 2 — Lead + Coder Delegation Loop
+
+#### Checkpoint | 2026.02.14 12:00 | SWE Team Phase 2 — delegation loop + 34 unit tests (915 total)
+
+**Accomplishments**:
+- Implemented Phase 2 of the SWE Team multi-agent system: Lead decomposes tasks into TaskSpec[], delegates each to Coder subagent via Claude Agent SDK
+- Created `hooks.py`: SDK hook functions (notification_hook, pre_tool_hook with dangerous command gating, post_tool_hook for file change tracking)
+- Created `state_files.py`: Cross-session persistence with FeatureList (JSON) + ProgressLog (timestamped entries)
+- Replaced `_execute_live()` stub with real delegation loop: `_decompose_task()` → `_parse_task_specs()` → user confirmation → `_delegate_task()` per TaskSpec
+- Activated coder role (`active=True`) in agent_definitions.py
+- Updated `__init__.py` exports and bumped to v0.2.0
+- Updated `claude-agent-sdk==0.1.18` → `0.1.36` in requirements.txt
+- 34 new unit tests across 5 classes (hooks, state files, decomposition, delegation, live flow)
+- Full regression: 915/915 pass, zero regressions
+
+**Files Created (CoSA submodule — needs separate commit)**:
+- `src/cosa/agents/swe_team/hooks.py` (NEW — SDK hook functions)
+- `src/cosa/agents/swe_team/state_files.py` (NEW — FeatureList + ProgressLog)
+
+**Files Modified (CoSA submodule — needs separate commit)**:
+- `src/cosa/agents/swe_team/orchestrator.py` (replace stub with delegation loop)
+- `src/cosa/agents/swe_team/agent_definitions.py` (activate coder role)
+- `src/cosa/agents/swe_team/__init__.py` (add exports, bump to v0.2.0)
+- `src/cosa/requirements.txt` (claude-agent-sdk 0.1.18 → 0.1.36)
+
+**Files Modified (Lupin repo)**:
+- `src/tests/unit/test_swe_team_delegation.py` (NEW — 34 Phase 2 tests)
+- `src/tests/unit/test_swe_team_config.py` (update active roles assertion)
+- `src/rnd/2026.02.13-claude-code-agentic-dev-team/01-implementation-current.md` (Phase 2: PENDING → DONE)
+- `src/rnd/2026.02.13-claude-code-agentic-dev-team/03-testing-validation.md` (Phase 2 test results)
+
+**Commit**: [pending]
+
+---
+
 ### 2026.02.13 - Session 205 | ADD_CALENDAR Duplicate Tolerance Fix
 
 **Accomplishments**:

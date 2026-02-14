@@ -241,10 +241,11 @@ class TestAgentDefinitions:
         expected = { "lead", "architect", "coder", "reviewer", "tester", "debugger" }
         assert set( roles.keys() ) == expected
 
-    def test_phase_1_only_lead_active( self ):
+    def test_phase_2_lead_and_coder_active( self ):
         active = get_active_roles()
-        assert len( active ) == 1
+        assert len( active ) == 2
         assert "lead" in active
+        assert "coder" in active
 
     def test_model_tier_lead_roles( self ):
         roles = get_agent_roles()
