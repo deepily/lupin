@@ -8,18 +8,18 @@ Your job is to discern the intent of a human voice command transcription and tra
 
 You will be given a human voice command as INPUT as well as a list of possible standardized commands. You must choose the correct standardized command from the following list:
 <agent-routing-commands>
-    <command>agent router go to date and time</command>
+    <command>agent router go to datetime</command>
     <command>agent router go to weather</command>
     <command>agent router go to calendar</command>
     <command>agent router go to receptionist</command>
-    <command>agent router go to todo list</command>
+    <command>agent router go to todo</command>
     <command>agent router go to math</command>
     <command>agent router go to deep research</command>
     <command>agent router go to podcast generator</command>
     <command>agent router go to research to podcast</command>
     <command>agent router go to calculator</command>
     <command>agent router go to claude code</command>
-    <command>agent router go to automatic routing mode</command>
+    <command>agent router go to automatic</command>
     <command>none</command>
 </agent-routing-commands>
 

@@ -1,5 +1,18 @@
 # Lupin Project History
 
+### 2026.02.13 - Session 205 | ADD_CALENDAR Duplicate Tolerance Fix
+
+**Accomplishments**:
+- Fixed ADD_CALENDAR scenario in CRUD live pipeline smoke test to accept "already exists" responses
+- When calendar entry exists from a prior run, the system correctly responds with "That item already exists" — test now recognizes this as valid (matching the existing ADD_DUPLICATE pattern)
+- Added TODO item for unified smoke test framework verification plan (resume tomorrow)
+
+**Files Modified**:
+- `src/tests/smoke/test_crud_live_pipeline.py` (+2/-2 — added "already exists" keyword + "duplicate" status)
+- `TODO.md` (+4 — unified smoke test framework verification section)
+
+---
+
 ### 2026.02.13 - Session 204 | Bug Fix: Cache Re-Execution of Non-Executable Code
 
 **Accomplishments**:

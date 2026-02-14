@@ -9,6 +9,10 @@ Last updated: 2026-02-13
 - [x] **[LUPIN] Upgrade vLLM to >= 0.8.5** — ✅ COMPLETE (2026-02-13)
   - **Research doc**: `src/rnd/2026.02.10-qwen3-vllm-inference-slowdown-root-cause.md`
 
+### Unified Smoke Test Framework Verification (RESUME TOMORROW)
+
+- [ ] **[LUPIN] Execute unified smoke test framework verification plan** - Return to `src/rnd/2026.02.13-unified-smoke-test-framework-verification-plan.md` and execute the verification steps.
+
 ### Pre-Execution Confirmation of Top Semantically Similar Matches (HIGH)
 
 - [ ] **[LUPIN] Pre-execution confirmation of top semantically similar matches** - Before executing a cached/semantic match, present the top similar matches to the user for confirmation via voice. Prevents stale or incorrect cache hits from being served silently.
@@ -239,6 +243,7 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
 
 ## Completed (Recent)
 
+- [x] **[LUPIN] Add `refresh()` method to ConfigurationManager** - 2026-02-13: WON'T FIX. Planned as a convenience wrapper around `init( silent=True )` for runtime config reloads. Decided not to implement.
 - [x] **[LUPIN] Upgrade vLLM to >= 0.8.5** - 2026-02-13: Qwen3-4B-Base native support confirmed
 - [x] **[LUPIN] Run PEFT Phase 2 training + LORA retrain** - 2026-02-13: 39,871 examples, 35 commands
 - [x] **[LUPIN] Finish expanding smoke test matrix to 13 scenarios** - 2026-02-13
