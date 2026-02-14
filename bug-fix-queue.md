@@ -28,6 +28,14 @@
 
 (Available for any session to claim)
 
+- [ ] **MEDIUM** Cache re-execution of non-executable code ("N/A" bug) — `NameError: name 'N' is not defined`
+  - **Symptom**: Cached snapshots with `code="N/A"` cause `NameError` when re-executed in `_format_cached_result()`
+  - **Root Cause**: `solution_snapshot.py:446` used `"N/A"` string fallback, Python parses as `N / A` division
+  - **Fix**: (1) Changed fallback to `[ "" ]`, (2) Added empty-code guard in `run_code()`, (3) `try/except ValueError` wrapper in caller
+  - **Files (CoSA)**: `solution_snapshot.py`, `running_fifo_queue.py`
+  - **Status**: FIXED (2026-02-13) — CoSA submodule pending commit
+  - **By**: c4619072
+
 - [ ] **HIGH** `test_crud_agent_emits_job_state_transition` fails — expects `'done'`, gets `'dead'`
   - **Symptom**: `_handle_base_agent()` calls real `do_all()` which hits LLM, raises `ValueError: Empty response from LLM`, triggers error path emitting `run → dead`
   - **Root Cause**: `_create_queue_and_agent()` never mocked `do_all()`, `code_ran_to_completion()`, or `formatter_ran_to_completion()`

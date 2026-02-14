@@ -1,12 +1,18 @@
 # Lupin Project History
 
-### 2026.02.13 - Session 204 | Bug Fix Mode
+### 2026.02.13 - Session 204 | Bug Fix: Cache Re-Execution of Non-Executable Code
 
-#### Fixes
-(Individual fixes will be added here)
+**Accomplishments**:
+- Fixed "N/A" bug where cached snapshots with no executable code caused `NameError: name 'N' is not defined` during cache replay
+- Root cause: `solution_snapshot.py:446` used `"N/A"` string as fallback for missing code, which Python parsed as `N / A` division
+- Change 1: Fixed fallback from `"N/A"` to `[ "" ]` (correct `list[str]` type)
+- Change 2: Added empty-code guard in `run_code()` raising `ValueError` before subprocess spawn
+- Change 3: Wrapped `run_code()` call in `_format_cached_result()` with `try/except ValueError`
+- All 817 unit tests pass, zero regressions
 
-#### Session Summary
-(Will be completed at session close)
+**Files Modified (CoSA submodule — needs separate commit)**:
+- `src/cosa/memory/solution_snapshot.py` (+4/-1 — fallback fix + empty-code guard)
+- `src/cosa/rest/running_fifo_queue.py` (+4/-1 — ValueError catch in cache path)
 
 ---
 
