@@ -26,7 +26,7 @@ The Lupin project needs a multi-agent engineering team powered by the Claude Age
 | Phase | Description | Status | Started | Completed |
 |-------|-------------|--------|---------|-----------|
 | 0 | Research + Architecture Design | DONE | 2026-02-13 | 2026-02-13 |
-| 1 | Single Agent + Lupin Notification Integration | PENDING | — | — |
+| 1 | Single Agent + Lupin Notification Integration | DONE | 2026-02-13 | 2026-02-13 |
 | 2 | Lead + Coder Delegation Loop | PENDING | — | — |
 | 3 | Add Tester to Loop | PENDING | — | — |
 | 4 | Trust-Aware Proxy Expansion | PENDING | — | — |
