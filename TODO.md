@@ -1,20 +1,25 @@
 # TODO
 
-Last updated: 2026-02-12 (Session 200)
+Last updated: 2026-02-13
 
 ## Pending
 
 ### vLLM Upgrade for Qwen3-4B-Base (FIRST THING TOMORROW — Session 166)
 
-- [ ] **[LUPIN] Upgrade vLLM to >= 0.8.5** — ROOT CAUSE of Qwen3 20x slowdown identified: vLLM 0.8.2 lacks native `Qwen3ForCausalLM`, falls back to unoptimized HuggingFace Transformers engine. **Do this first.**
-  - Step 1: `cd /mnt/DATA01/include/www.deepily.ai/projects/vllm-pip && source .venv/bin/activate && pip install --upgrade vllm`
-  - Step 2: Verify `qwen3.py` exists in `vllm/model_executor/models/` post-upgrade
-  - Step 3: Start vLLM server for Qwen3-4B-Base, check logs for no Transformers fallback warnings
-  - Step 4: Re-run PEFT test: `src/scripts/run-agentic-intent-training.sh --test --llm qwen3-4b --quantize-bits both`
-  - Step 5: If still slow, try `--no-enable-chunked-prefill` and `VLLM_ENABLE_V1_MULTIPROCESSING=0`
-  - **Risk**: `transformers` version may need adjustment (was downgraded 5.1.0→4.57.6 for vLLM 0.8.2)
-  - **Expected**: ms/item drops from ~7,400 to ~200-400 (comparable to Ministral-8B)
+- [x] **[LUPIN] Upgrade vLLM to >= 0.8.5** — ✅ COMPLETE (2026-02-13)
   - **Research doc**: `src/rnd/2026.02.10-qwen3-vllm-inference-slowdown-root-cause.md`
+
+### Pre-Execution Confirmation of Top Semantically Similar Matches (HIGH)
+
+- [ ] **[LUPIN] Pre-execution confirmation of top semantically similar matches** - Before executing a cached/semantic match, present the top similar matches to the user for confirmation via voice. Prevents stale or incorrect cache hits from being served silently.
+
+### Agentic Software Development Team (HIGH)
+
+- [ ] **[LUPIN] Begin design of Agentic Software Development Team** - Design an agentic team architecture for collaborative software development tasks. Requires planning document before implementation.
+
+### Notification Proxy Agent Refactor (HIGH)
+
+- [ ] **[LUPIN] Refactor mock job client into standalone Notification Proxy Agent** - Extract the existing mock job client into a proper standalone notification proxy agent object. Decouples notification testing/proxying from mock job infrastructure.
 
 ### DataFrame CRUD with Voice I/O (Session 132-136)
 
@@ -60,7 +65,7 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - All test infrastructure issues resolved
   - 4 debug scripts moved to `src/scripts/debug/`
   - See: `src/rnd/2026.02.02-test-suite-remediation-plan.md`
-- [ ] **[LUPIN] Run agentic job intent LORA 1% sample training** - Requires GPUs to be freed. Run: `./src/scripts/run-agentic-intent-training.sh test`. **Session 124**: Unified training pipeline now includes agentic jobs (40,258 total examples, 600 agentic). **Scheduled: Evening session 2026-02-02** when GPU resources available.
+- [x] **[LUPIN] Run agentic job intent LORA 1% sample training** - ✅ COMPLETE (2026-02-13)
 - [x] **[LUPIN] PEFT Training Optimization - Phase 1 Training Run** - Session 136: Phase 1 actual results: 92.2% exact match (target: 89%)
 - [x] **[LUPIN] PEFT Training Optimization - Phase 2 Disambiguation** - Session 136: Code/data complete. Session 141: Model swap to 2026-02-05 training run, 15 disambiguation tests passing, router confirmed working
 - [x] **[LUPIN] Rebalance XML training data to 1200 samples/command** - Session 145 (checkpoint): Fixed `run-agentic-intent-training.sh` (hardcoded 400→1200), expanded placeholders (research-topics 50→190, document-paths 50→179), removed near-miss none examples, replaced product names (Deep Dive, PodMaker, Doc-to-Pod) with natural phrasing
@@ -77,21 +82,9 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - [x] Steps 29-30: LORA retrained, >95% accuracy, no regression
   - [x] Step 31: Full voice routing test (10 spoken queries, 8/10 correct routing)
   - **Implementation doc**: `src/rnd/2026.02.09-everyday-calculator-agent-implementation.md`
-- [ ] **[LUPIN] Run PEFT Phase 2 training + LORA retrain (THIS EVENING)** - Training data regenerated at 1500/command. Single training run covers PEFT Phase 2, Calculator LORA, and new Claude Code routing.
-  - Run: `./src/scripts/run-agentic-intent-training.sh full`
-  - Data verified: **39,871 examples** (Session 195), **35 commands**, claude code at 1,500, calculator at 1,483
-  - **Session 195**: Added Claude Code routing (66 templates, 100 placeholders, 1,500 training examples). All pipeline files updated.
-- [ ] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - Two cases to handle:
-  1. User makes vague reference to research document contents (e.g., "make a podcast about that AI research")
-  2. User references research document by approximate name/path
-  - Voice mode especially needs fuzzy matching due to transcription variations
-  - Similar implementation already exists in FastAPI endpoint called from notifications UI
-  - **Reference**: `src/conf/prompts/fuzzy-file-matching.txt` (prompt template exists)
-- [ ] **[LUPIN] Extended Parameter Training (Chunk 1.6)** - Extend LORA training data beyond simple topics/filenames to include occasional budget and runtime arguments:
-  - `topic="quantum computing" budget=50`
-  - `topic="AI safety" target_audience=beginner`
-  - `document_path="/io/deep-research/report.md" languages=en,es max_segments=20`
-  - Requires: New placeholder files for budgets, audience levels; update generation logic
+- [x] **[LUPIN] Run PEFT Phase 2 training + LORA retrain** - ✅ COMPLETE (2026-02-13). 39,871 examples, 35 commands trained.
+- [x] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - ✅ COMPLETE (2026-02-13)
+- [x] **[LUPIN] Extended Parameter Training (Chunk 1.6)** - ✅ COMPLETE (2026-02-13)
 - [x] **[LUPIN] Disambiguation Agent for Missing Arguments** - Session 130 (checkpoint): Implemented as RuntimeArgumentExpeditor
   - `src/cosa/agents/runtime_argument_expeditor/` (agent_registry.py, xml_models.py, expeditor.py)
   - LLM gap analysis against `--help` output, asks user via `notify_user_sync()` for missing args
@@ -199,10 +192,7 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
   - **Testing plan**: `src/rnd/2026.02.07-runtime-argument-expeditor-testing-plan.md`
   - **Bug fix**: `expeditor.py` — replaced `if parsed.is_complete()` gate with deterministic user-visible-args diff (optional args now always prompted)
   - **Next**: Run interactive scenarios (`LUPIN_INTERACTIVE_TESTS=true`) — first scenario failure diagnosis via new `[Expeditor]` debug logging
-- [ ] **[LUPIN] Finish expanding smoke test matrix to 13 scenarios** - Session 179: 4 new scenario dicts added (DR_FULL, RTP_LANGUAGES, PG_LANGUAGES, RTP_BARE). Still pending: replace two-pass docstring with single-pass instructions, update all count references (9→13), update Scenario Index Reference block. Resume tomorrow.
-  - **Plan**: `src/rnd/2026.02.10-expand-smoke-test-matrix-13-scenarios.md`
-  - **File**: `src/tests/smoke/test_expeditor_mock_job_smoke.py`
-  - **Changes remaining**: Docstring fix (Change 2), count updates (Change 3)
+- [x] **[LUPIN] Finish expanding smoke test matrix to 13 scenarios** - ✅ COMPLETE (2026-02-13)
 - [x] **[LUPIN] Run interactive expeditor smoke tests 4-5** - Session 144: Fixed async deadlock (`asyncio.to_thread()` wrapper), tests 4-5 now pass. User responds to voice prompt, dry-run job completes with $0.00 cost.
 
 ### Cache Freshness Policy (HIGH) - Session 121/122
@@ -249,8 +239,16 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
 
 ## Completed (Recent)
 
+- [x] **[LUPIN] Upgrade vLLM to >= 0.8.5** - 2026-02-13: Qwen3-4B-Base native support confirmed
+- [x] **[LUPIN] Run PEFT Phase 2 training + LORA retrain** - 2026-02-13: 39,871 examples, 35 commands
+- [x] **[LUPIN] Finish expanding smoke test matrix to 13 scenarios** - 2026-02-13
+- [x] **[LUPIN] Run agentic job intent LORA 1% sample training** - 2026-02-13
+- [x] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - 2026-02-13
+- [x] **[LUPIN] Extended Parameter Training (Chunk 1.6)** - 2026-02-13
 - [x] **[LUPIN] Embedding benchmark harness** - Session 194: Side-by-side local GPU vs OpenAI API comparison. Local 7-398x faster. File: `src/tests/smoke/test_embedding_benchmark.py`
 - [x] **[LUPIN] Bug fix: Dead job card stuck in run bucket** - Session 199: Added missing `emit_job_state_transition()` call in `_handle_error_case()` for `run -> dead` transition. Only AgentBase error path was missing the WebSocket event — all other paths (agentic success/failure/crash, snapshot, cached) already emitted correctly. 814 unit tests pass.
+- [x] **[LUPIN] Bug fix: Stopwatch API mismatch in cache hit path** - `_format_cached_result()` called non-existent `stop()` + `get_elapsed_millis()` → replaced with `get_delta_ms()`. 817 unit tests pass.
+- [x] **[LUPIN] Bug fix: Missing WebSocket event in generic exception handler** - `_process_job()` except block now emits `job_state_transition( 'run', 'dead' )` + TTS notification, matching `_handle_error_case()` pattern. 817 unit tests pass.
 - [x] **[LUPIN] Fix LanceDB Embedding Dimension Mismatch** - Session 198: Standardized all providers on 768 dims (OpenAI MRL truncation), added `_validate_embedding_dimensions()` to all 6 table classes, 811 tests pass. CoSA submodule changes need separate commit.
 - [x] **[LUPIN] CJ Flow Branding + Bounded Job Packaging + Claude Code LORA Data** - Session 195
   - Part A: CJ Flow branding propagated to 12 files (docstrings/comments only)
