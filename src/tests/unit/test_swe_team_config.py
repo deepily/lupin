@@ -226,6 +226,8 @@ class TestStateSchemas:
         assert state[ "task_specs" ] == []
         assert state[ "delegation_results" ] == []
         assert state[ "files_changed" ] == []
+        assert state[ "verification_results" ] == []
+        assert state[ "total_verification_iterations" ] == 0
 
 
 # =============================================================================
@@ -241,11 +243,12 @@ class TestAgentDefinitions:
         expected = { "lead", "architect", "coder", "reviewer", "tester", "debugger" }
         assert set( roles.keys() ) == expected
 
-    def test_phase_2_lead_and_coder_active( self ):
+    def test_phase_3_lead_coder_tester_active( self ):
         active = get_active_roles()
-        assert len( active ) == 2
+        assert len( active ) == 3
         assert "lead" in active
         assert "coder" in active
+        assert "tester" in active
 
     def test_model_tier_lead_roles( self ):
         roles = get_agent_roles()

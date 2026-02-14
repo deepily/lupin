@@ -516,7 +516,7 @@ class TestOrchestratorLiveFlow:
     """Tests for orchestrator _execute_live E2E mock flow."""
 
     def _make_orchestrator( self ):
-        config = SweTeamConfig( dry_run=False )
+        config = SweTeamConfig( dry_run=False, require_test_pass=False )
         return SweTeamOrchestrator(
             task_description = "Add health check endpoint",
             config           = config,
