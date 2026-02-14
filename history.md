@@ -1,5 +1,35 @@
 # Lupin Project History
 
+### 2026.02.14 - Session 211 | Proxy Integration Test — CRUD + Calculator + Expediter
+
+#### Checkpoint | 2026.02.14 22:40 | Proxy integration test implementation complete
+
+**Accomplishments**:
+- Created 12-scenario integration test combining Calculator, CRUD, and Expediter agents
+- 3 calculator scenarios (km conversion, mortgage, price compare)
+- 5 CRUD scenarios (add, query, delete w/ proxy auto-confirm, calendar)
+- 4 expediter scenarios (DR happy, DR missing args, PG missing, RTP happy)
+- `--group` flag for selective execution (calculator/crud/expediter/all)
+- `--scenarios` flag for individual scenario selection by index
+- Expediter scenarios auto-filtered when LUPIN_INTERACTIVE_TESTS not set
+- Added `proxy_integration_test` profile to TEST_PROFILES (union of expediter + CRUD answers)
+- Added `crud.agent@lupin.deepily.ai` to `all-agents.json` sender_ids
+- 10 new unit tests (TestMultiSenderIntegration), **1170 total unit tests** passing
+
+**Files Created**:
+- `src/conf/notification-proxy-scripts/proxy-integration-test.json`
+- `src/tests/smoke/test_proxy_integration.py`
+- `src/rnd/2026.02.14-proxy-integration-test-plan.md`
+
+**Files Modified**:
+- `src/conf/notification-proxy-scripts/all-agents.json` (+CRUD sender_id)
+- `src/cosa/agents/notification_proxy/config.py` (+proxy_integration_test profile)
+- `src/tests/unit/test_notification_proxy.py` (+10 tests)
+
+**Commit**: 8721004
+
+---
+
 ### 2026.02.14 - Session 210 | SWE Team Phase 4 — Trust-Aware Decision Proxy
 
 #### Checkpoint | 2026.02.14 | Phase 4 complete — 4-layer decision proxy + 214 new tests (1160 total)

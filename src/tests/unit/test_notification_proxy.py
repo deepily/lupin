@@ -1547,6 +1547,93 @@ class TestResponderStrategyMode:
 
 
 # ============================================================================
+# Test Multi-Sender Integration
+# ============================================================================
+
+class TestMultiSenderIntegration:
+    """Tests for proxy_integration_test profile and multi-sender Q&A script."""
+
+    def test_proxy_integration_test_profile_exists( self ):
+        """proxy_integration_test profile is present in TEST_PROFILES."""
+        assert "proxy_integration_test" in TEST_PROFILES
+
+    def test_proxy_integration_test_profile_has_description( self ):
+        """proxy_integration_test profile has a description field."""
+        profile = TEST_PROFILES[ "proxy_integration_test" ]
+        assert "description" in profile
+
+    def test_proxy_integration_test_profile_covers_expediter_args( self ):
+        """proxy_integration_test profile covers all expediter answer keys."""
+        profile       = TEST_PROFILES[ "proxy_integration_test" ]
+        expected_keys = [ "query", "budget", "audience", "audience_context", "research", "languages" ]
+        for key in expected_keys:
+            assert key in profile, f"proxy_integration_test missing '{key}'"
+
+    def test_proxy_integration_test_profile_covers_crud_confirmation( self ):
+        """proxy_integration_test profile includes confirmation answer."""
+        profile = TEST_PROFILES[ "proxy_integration_test" ]
+        assert "confirmation" in profile
+        assert profile[ "confirmation" ] == "yes"
+
+    def test_integration_script_has_multi_sender( self ):
+        """proxy-integration-test.json has multiple sender_ids."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        path = resolve_script_path( "proxy_integration_test", scripts_dir )
+        with open( path, "r" ) as f:
+            script = json.load( f )
+        assert len( script[ "sender_ids" ] ) >= 2
+        assert "arg.expeditor@lupin.deepily.ai" in script[ "sender_ids" ]
+        assert "crud.agent@lupin.deepily.ai" in script[ "sender_ids" ]
+
+    def test_integration_script_has_expediter_entries( self ):
+        """proxy-integration-test.json includes expediter question entries."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        path = resolve_script_path( "proxy_integration_test", scripts_dir )
+        with open( path, "r" ) as f:
+            script = json.load( f )
+
+        query_entries = [ e for e in script[ "entries" ] if e[ "arg_name" ] == "query" ]
+        assert len( query_entries ) >= 1, "No query entries found"
+
+    def test_integration_script_has_crud_entries( self ):
+        """proxy-integration-test.json includes CRUD confirmation entries."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        path = resolve_script_path( "proxy_integration_test", scripts_dir )
+        with open( path, "r" ) as f:
+            script = json.load( f )
+
+        crud_entries = [
+            e for e in script[ "entries" ]
+            if e.get( "agents" ) and "crud" in e[ "agents" ]
+        ]
+        assert len( crud_entries ) >= 2, f"Expected >= 2 CRUD entries, got {len( crud_entries )}"
+
+    def test_responder_with_integration_profile_accepts_expediter( self ):
+        """Responder with proxy_integration_test profile accepts expediter sender."""
+        responder = NotificationResponder( "proxy_integration_test", strategy="rules" )
+        assert responder.rule_strategy.can_handle( {
+            "sender_id"          : "arg.expeditor@lupin.deepily.ai",
+            "response_requested" : True
+        } )
+
+    def test_responder_with_integration_profile_accepts_crud( self ):
+        """Responder with proxy_integration_test profile accepts CRUD sender."""
+        responder = NotificationResponder( "proxy_integration_test", strategy="rules" )
+        assert responder.rule_strategy.can_handle( {
+            "sender_id"          : "crud.agent@lupin.deepily.ai",
+            "response_requested" : True
+        } )
+
+    def test_all_agents_script_includes_crud_sender( self ):
+        """all-agents.json sender_ids includes crud.agent sender."""
+        scripts_dir = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
+        path = resolve_script_path( "all_agents", scripts_dir )
+        with open( path, "r" ) as f:
+            script = json.load( f )
+        assert "crud.agent@lupin.deepily.ai" in script[ "sender_ids" ]
+
+
+# ============================================================================
 # Run inline if needed
 # ============================================================================
 
