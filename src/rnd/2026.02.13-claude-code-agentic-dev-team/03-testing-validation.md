@@ -6,7 +6,7 @@
 |-----------|-------|-------|--------|
 | `test_swe_team_config.py` | 1 | 64 tests: config, safety, state, definitions, sender IDs, mock, orchestrator, COSA interface | PASS |
 | `test_swe_team_delegation.py` | 2 | 34 tests: hooks, state files, decomposition, delegation, live flow | PASS |
-| `test_swe_team_verification.py` | 3 | Loop termination, failure escalation | PENDING |
+| `test_swe_team_verification.py` | 3 | 31 tests: verification result, test runner, parse output, verify result, redelegate, coder-tester loop, build agent options | PASS |
 | `test_trust_tracker.py` | 4 | Graduation, rollback, per-category isolation | PENDING |
 | `test_circuit_breaker.py` | 4 | Demotion triggers | PENDING |
 | `test_engineering_decisions.py` | 4 | Classification, trust gating, shadow mode | PENDING |
@@ -32,13 +32,21 @@
 | `hooks.py` | 6 | PASS |
 | `state_files.py` | 4 | PASS |
 
+## Smoke Test Results (Phase 3)
+
+| Module | Tests | Status |
+|--------|-------|--------|
+| `test_runner.py` | 4 | PASS |
+| `state.py` (updated) | 8 | PASS |
+| `agent_definitions.py` (updated) | 7 | PASS |
+
 ## Regression Tracking
 
 | Phase | Pre-Phase Unit Tests | Post-Phase Unit Tests | Regressions | Date |
 |-------|---------------------|----------------------|-------------|------|
 | 1 | 817 | 881 (+64 new) | 0 | 2026-02-13 |
 | 2 | 881 | 915 (+34 new) | 0 | 2026-02-14 |
-| 3 | — | — | — | — |
+| 3 | 915 | 946 (+31 new) | 0 | 2026-02-14 |
 | 4 | — | — | — | — |
 | 5 | — | — | — | — |
 
@@ -66,8 +74,14 @@
 - [x] State files round-trip correctly with tempdir isolation
 
 ### Phase 3 Gate
-- [ ] Task requiring tests -> coder+tester loop terminates correctly
-- [ ] All existing unit tests pass
+- [x] Task requiring tests -> coder+tester loop terminates correctly (6 loop tests)
+- [x] `pytest src/tests/unit/test_swe_team_verification.py -v` — 31/31 pass
+- [x] `pytest src/tests/unit/ -v` — full regression 946/946 pass, 0 regressions
+- [x] `_verify_result()` sets TESTING state, sends notifications, tracks test files
+- [x] `_redelegate_with_feedback()` includes prior output + tester feedback + iteration number
+- [x] Loop caps at MAX_VERIFICATION_ITERATIONS=3, guard.record_failure() called
+- [x] `require_test_pass=False` skips verification (backward compat)
+- [x] `_build_agent_options("tester")` returns worker model + TESTER_SYSTEM_PROMPT + acceptEdits
 
 ### Phase 4 Gate
 - [ ] Proxy in L1 shadow mode -> predictions logged, no autonomous action

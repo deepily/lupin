@@ -219,6 +219,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # To update: rebuild this image. Auto-update disabled for container immutability.
 RUN npm install -g @anthropic-ai/claude-code
 
+# latest, as of feb 10 2026
+RUN pip install claude-agent-sdk==0.1.36
+
 # Create Claude config directory and copy pre-configured settings
 RUN mkdir -p /root/.claude
 
