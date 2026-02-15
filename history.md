@@ -1,5 +1,20 @@
 # Lupin Project History
 
+### 2026.02.14 - Session 213 | Fix Post-Quantization vLLM OOM — Revised Change H
+
+**Accomplishments**:
+- Added `release_gpu_memory()` method to Quantizer class that explicitly dismantles the autoround-model reference web, moves model to CPU via `model.cpu()`, then forces GC + CUDA cache clear
+- Updated `peft_trainer.py` to call `quantizer.release_gpu_memory()` before `del quantizer` in the quantization cleanup block
+- Key insight: `model.cpu()` physically moves tensors off GPU, making CUDA blocks truly empty so `empty_cache()` can release reserved memory (previous approach only dropped Python references)
+- Updated smoke test `expected_methods` to include `release_gpu_memory`
+- 1170 unit tests pass, zero regressions
+
+**Files Modified** (CoSA submodule — needs separate commit):
+- `src/cosa/training/quantizer.py` (+`import gc`, +`release_gpu_memory()` method, +smoke test update)
+- `src/cosa/training/peft_trainer.py` (cleanup block calls `release_gpu_memory()` before `del`)
+
+---
+
 ### 2026.02.14 - Session 212 | Comprehensive Documentation for Automated Interactive Testing
 
 **Accomplishments**:
