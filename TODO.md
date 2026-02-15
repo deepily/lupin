@@ -26,6 +26,16 @@ Last updated: 2026-02-14 (Session 210)
   - Phase 4: Trust-Aware Decision Proxy — 4-layer architecture, 6 engineering categories, trust tracker L1-L5, circuit breaker, ratification API (214 unit tests, 1160 total)
   - **Plan**: `src/rnd/2026.02.14-swe-team-phase-4-decision-proxy-architecture.md`
 
+### SWE Team Interactive Proxy Smoke Testing (HIGH — TOMORROW)
+
+- [ ] **[LUPIN] Update SWE team testing docs + begin interactive proxy smoke testing** - Session TBD
+  - Update `src/rnd/2026.02.13-claude-code-agentic-dev-team/00-index.md`: Phases 2-5 status (Phases 2, 3, 4 are DONE, not PENDING)
+  - Update `src/rnd/2026.02.13-claude-code-agentic-dev-team/03-testing-validation.md`: Add Phase 4 results (214 unit tests, trust tracker, circuit breaker, engineering proxy, decision store), Phase 4 gate checklist, regression row (946 → 1160)
+  - Create new Q&A script: `src/conf/notification-proxy-scripts/swe-team.json` for SWE team decision proxy notifications
+  - Create new test profile in `config.py:TEST_PROFILES` for SWE team
+  - Write smoke test scenarios for the decision proxy agent
+  - Add SWE team sender_id to `all-agents.json`
+
 ### Notification Proxy Agent Refactor (HIGH)
 
 - [ ] **[LUPIN] Refactor mock job client into standalone Notification Proxy Agent** - Extract the existing mock job client into a proper standalone notification proxy agent object. Decouples notification testing/proxying from mock job infrastructure.
