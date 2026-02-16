@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-16
+Last updated: 2026-02-16 (TODO add)
 
 ## Pending
 
@@ -173,6 +173,10 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - **Current state**: Ad-hoc association at each queue transition point
   - **Risk**: Inconsistent association logic, potential for user/session mismatch bugs
   - **Action**: Design a single interface/method for job-user-session binding that all queue operations use
+- [ ] **[LUPIN] Gist embeddings: keep vs. jettison** - Gist _text_ has value (Level 3 exact match), but gist _embeddings_ are dead code — stored but never searched. Jettisoning saves ~30% embedding cost per snapshot (2 of 7 embeddings) and removes unused search methods.
+  - **Analysis**: `src/rnd/2026.02.09-gist-embeddings-analysis-keep-vs-jettison.md`
+  - **Dead code**: `question_gist_embedding`, `solution_gist_embedding` fields, `get_snapshots_by_solution_gist_similarity()`, `get_question_gist_similarity()`
+  - **Action**: Review analysis, decide keep/jettison, clean up if jettisoning
 
 ### Carried Over from Session 102
 
