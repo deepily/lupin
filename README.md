@@ -44,7 +44,39 @@ Lupin is built on a modern FastAPI architecture with WebSocket support for real-
 - **[Audio Chunk Sequential Playback Analysis](src/rnd/2025.08.01-audio-chunk-sequential-playback-analysis.md)** - Root cause analysis and solution for ElevenLabs audio duplication issues
 - **[LanceDB Migration Plan](src/rnd/2025.08.22-solution-snapshot-lancedb-interface-migration-plan.md)** - Complete migration from file-based to vector database storage
 
-**Current Development Status (2026.02.04):**
+**Current Development Status (2026.02.16):**
+
+## What's New in v0.1.4
+
+### End-to-End Voice I/O for Agentics
+- **cosa-voice MCP Server** - Full voice I/O integration for Claude Code workflows via MCP protocol
+- **Notification Proxy Agent** - Automated proxy for interactive notifications during testing and production
+- **Runtime Argument Expeditor** - LLM-powered gap analysis that asks users for missing arguments via voice
+- **Batch Open-Ended Questions** - Multi-question voice collection on a single screen (`ask_open_ended_batch`)
+- **Yes/No Comments** - Optional qualifying comments on yes/no blocking notifications
+
+### New Agents
+- **SWE Team Agent** - 4-phase agentic software development team (foundation → delegation → tester verification → trust-aware decision proxy) with L1-L5 trust tracking, circuit breaker, and ratification API
+- **Everyday Calculator Agent** - Natural language calculator with MathAgent fallback, 508 LORA templates, full voice routing (31 implementation steps complete)
+- **CRUD for DataFrames Agent** - Voice-controlled create/read/update/delete for Pandas DataFrames with confirmation dialogs for destructive operations
+- **Notification Proxy Agent** - Phi-4 LLM fuzzy script matching for automated interactive testing with Q&A scripts
+
+### Testing Expansion (881 → 1170 unit tests)
+- **+289 unit tests** across SWE Team (214), Calculator (94), CRUD (73+), Expeditor (123), Proxy (49+)
+- **12-scenario proxy integration test** combining Calculator, CRUD, and Expediter agents
+- **Automated interactive testing framework** with 3-tier strategy chain (exact → fuzzy → fallback)
+- **Comprehensive testing documentation** (`automated-interactive-testing.md`, smoke test README)
+
+### Training Pipeline
+- **39,871 Training Examples** - 35 commands including Calculator (1,500 templates) and Claude Code intents
+- **PEFT Phase 2** - Results dashboard, explicit routing phrases, quantization strengthening (1,200→1,500 samples/command)
+- **Post-Quantization GPU Memory Fix** - Explicit `release_gpu_memory()` for vLLM OOM prevention
+
+### Infrastructure
+- **Local GPU Embeddings** - CodeRankEmbed + nomic-embed-text-v1.5 (7-398x faster than OpenAI API)
+- **LanceDB Dimension Standardization** - All providers on 768 dims with validation
+- **CJ Flow Bounded Job Packaging** - Complete guide for packaging new QueueableJob types
+- **Consolidated Notification API Reference** - 4,033-line comprehensive doc with 5 Mermaid diagrams
 
 ## What's New in v0.1.3
 
