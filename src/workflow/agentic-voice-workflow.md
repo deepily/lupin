@@ -3665,6 +3665,18 @@ curl -s -X POST http://localhost:7999/api/push \
 
 ---
 
+### Automated Interactive Testing (Cross-Surface)
+
+For agents that interact with users through response-required notifications (expediter
+questions, CRUD confirmations), the **notification proxy testing system** automates the
+human-in-the-loop portion across Surfaces 2-5.
+
+See [`src/docs/automated-interactive-testing.md`](../docs/automated-interactive-testing.md)
+for the comprehensive guide covering proxy architecture, Q&A scripts, strategy chain,
+test profiles, and scenario authoring.
+
+---
+
 ## Recommended Iteration Strategy
 
 ### Development Flow

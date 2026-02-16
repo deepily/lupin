@@ -112,6 +112,7 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 - **API Reference**: `src/docs/notification-api.md` (comprehensive one-stop reference)
 - **WebSocket Events**: `src/docs/websocket-events.md` (event catalog)
 - **Agentic Voice Integration**: `src/workflow/agentic-voice-workflow.md`
+- **Interactive Proxy Testing**: `src/docs/automated-interactive-testing.md` (proxy auto-answer testing guide)
 - **R&D Planning Docs**: `src/rnd/sse-notifications/` (historical)
 
 ## STARTUP PROCEDURE
@@ -244,6 +245,13 @@ Lupin uses a three-tier testing strategy for comprehensive validation:
    - Coverage: 50 tests
    - Run: `src/scripts/run-websocket-smoke-tests.sh`
 
+5. **Interactive Proxy Tests** (`src/tests/smoke/test_proxy_integration.py`)
+   - Automated interactive testing with notification proxy auto-answer
+   - Coverage: 12 scenarios across Calculator, CRUD, and Expediter agents
+   - Tests submit-and-poll pipelines with proxy-driven notification responses
+   - Run: `python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-confirm`
+   - **Guide**: `src/docs/automated-interactive-testing.md`
+
 ### Running Tests
 
 ```bash
@@ -267,6 +275,8 @@ pytest --cov=cosa.rest --cov-report=html src/tests/
 
 - **Testing Overview**: `src/tests/README.md` - Complete testing strategy and hierarchy
 - **Integration Tests**: `src/tests/integration/README.md` - Detailed integration test guide
+- **Interactive Proxy Tests**: `src/docs/automated-interactive-testing.md` - Comprehensive proxy testing guide
+- **Smoke Tests**: `src/tests/smoke/README.md` - Quick-start guide for smoke tests
 - **Unit Tests**: Inline documentation in test files
 
 ### Test Coverage

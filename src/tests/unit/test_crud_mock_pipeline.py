@@ -98,7 +98,7 @@ class TestRoutingSwapPipeline:
     """Routing swap creates the correct agent type based on feature flag."""
 
     def test_todo_command_creates_crud_agent_when_enabled( self ):
-        """'agent router go to todo list' with flag=true creates TodoCrudAgent."""
+        """'agent router go to todo' with flag=true creates TodoCrudAgent."""
         from cosa.rest.todo_fifo_queue import TodoFifoQueue
 
         queue            = TodoFifoQueue.__new__( TodoFifoQueue )
@@ -108,7 +108,7 @@ class TestRoutingSwapPipeline:
         assert queue._crud_agents_enabled() is True
 
     def test_todo_command_creates_legacy_agent_when_disabled( self ):
-        """'agent router go to todo list' with flag=false creates legacy TodoListAgent."""
+        """'agent router go to todo' with flag=false creates legacy TodoListAgent."""
         from cosa.rest.todo_fifo_queue import TodoFifoQueue
 
         queue            = TodoFifoQueue.__new__( TodoFifoQueue )

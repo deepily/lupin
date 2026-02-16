@@ -99,8 +99,8 @@ CRUD_SCENARIOS = [
         "query"             : "add dentist appointment on March 15 at 2pm",
         "mode"              : "calendar",
         "needs_confirm"     : False,
-        "expected_keywords" : [ "done", "added", "dentist" ],
-        "expected_status"   : [ "added" ],
+        "expected_keywords" : [ "done", "added", "dentist", "already exists" ],
+        "expected_status"   : [ "added", "duplicate" ],
     },
     # --- LORA routing scenarios (6-7) ---
     {

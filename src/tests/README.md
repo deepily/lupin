@@ -181,6 +181,36 @@ src/scripts/run-websocket-smoke-tests.sh
 python src/tests/websocket_smoke/test_basic_connection.py
 ```
 
+### 5. Interactive Proxy Tests (`src/tests/smoke/test_proxy_integration.py`)
+
+**Purpose**: Automated interactive testing with notification proxy auto-answer
+
+**Characteristics**:
+- Tests full agent pipelines including notification-driven user interactions
+- Notification proxy auto-answers expediter questions and CRUD confirmations
+- 12 scenarios across 3 agent groups (Calculator, CRUD, Expediter)
+- Validates submit-and-poll pipelines, arg resolution, and proxy auto-confirmation
+
+**Coverage**:
+- Calculator: 3 scenarios (unit conversion, mortgage, price comparison)
+- CRUD: 5 scenarios (add/list/delete for todo + calendar)
+- Expediter: 4 scenarios (deep research, podcast, research-to-podcast, full args)
+
+**Run Command**:
+```bash
+# Full integration (requires LUPIN_INTERACTIVE_TESTS=true for expediter)
+LUPIN_INTERACTIVE_TESTS=true \
+python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-confirm
+
+# Calculator only (no proxy needed)
+python src/tests/smoke/test_proxy_integration.py --group calculator --no-confirm
+
+# Via pytest
+pytest src/tests/smoke/test_proxy_integration.py -v
+```
+
+**Full Guide**: See [`src/docs/automated-interactive-testing.md`](../docs/automated-interactive-testing.md)
+
 ---
 
 ## Test Comparison Matrix
@@ -191,6 +221,7 @@ python src/tests/websocket_smoke/test_basic_connection.py
 | **Smoke** | ~50 | Fast (10-100ms) | Single module | Minimal | Module sanity check |
 | **Integration** | 8 | Medium (100-1000ms) | Full flow | Real (API, DB) | End-to-end validation |
 | **WebSocket** | 50 | Medium | WebSocket layer | Real (WS server) | WebSocket functionality |
+| **Interactive Proxy** | 12 | Slow (5-60s) | Full pipeline | Server + Proxy + LLM | Interactive agent validation |
 
 ---
 
@@ -292,6 +323,13 @@ pytest -x src/tests/
 - Testing real-time features
 - Validating WebSocket authentication
 
+### Use Interactive Proxy Tests When:
+- Testing agents that require user interaction (notifications)
+- Validating expediter argument resolution end-to-end
+- Testing CRUD operations that require delete confirmation
+- Verifying the notification proxy auto-answer pipeline
+- Running pre-merge integration validation for interactive agents
+
 ---
 
 ## Test Development Guidelines
@@ -379,6 +417,8 @@ Recommended test sequence for CI/CD:
 ## Related Documentation
 
 - **Integration Tests**: `src/tests/integration/README.md`
+- **Interactive Proxy Tests**: [`src/docs/automated-interactive-testing.md`](../docs/automated-interactive-testing.md) — Comprehensive proxy testing guide
+- **Smoke Tests**: [`src/tests/smoke/README.md`](smoke/README.md) — Quick-start guide for smoke tests
 - **JWT Authentication**: `src/rnd/jwt-oauth/README.md`
 - **API Documentation**: (Phase 10 - coming soon)
 - **Project CLAUDE.md**: Development guidelines and testing section

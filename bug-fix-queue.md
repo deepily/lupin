@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-10T14:30:00
+**Last Updated**: 2026-02-13T17:00:00
 
 ---
 
@@ -19,6 +19,8 @@
 | bb3a5d21 | 2026-02-03T14:50:00 | 2026-02-03T19:45:00 | closed |
 | d7da6d0d | 2026-02-03T13:15:00 | 2026-02-03T13:35:00 | stale |
 | 590273af | 2026-02-03T10:00:00 | 2026-02-03T14:30:00 | stale |
+| 649565dd | 2026-02-13T17:00:00 | 2026-02-14T23:59:00 | closed |
+| 0a2fa054 | 2026-02-14T16:00:00 | 2026-02-14T16:30:00 | closed |
 | 4949b964 | 2026-02-02T18:00:00 | 2026-02-02T23:05:00 | closed |
 
 ---
@@ -27,6 +29,27 @@
 
 (Available for any session to claim)
 
+- [ ] **MEDIUM** Cache re-execution of non-executable code ("N/A" bug) — `NameError: name 'N' is not defined`
+  - **Symptom**: Cached snapshots with `code="N/A"` cause `NameError` when re-executed in `_format_cached_result()`
+  - **Root Cause**: `solution_snapshot.py:446` used `"N/A"` string fallback, Python parses as `N / A` division
+  - **Fix**: (1) Changed fallback to `[ "" ]`, (2) Added empty-code guard in `run_code()`, (3) `try/except ValueError` wrapper in caller
+  - **Files (CoSA)**: `solution_snapshot.py`, `running_fifo_queue.py`
+  - **Status**: FIXED (2026-02-13) — CoSA submodule pending commit
+  - **By**: c4619072
+
+- [ ] **HIGH** `test_crud_agent_emits_job_state_transition` fails — expects `'done'`, gets `'dead'`
+  - **Symptom**: `_handle_base_agent()` calls real `do_all()` which hits LLM, raises `ValueError: Empty response from LLM`, triggers error path emitting `run → dead`
+  - **Root Cause**: `_create_queue_and_agent()` never mocked `do_all()`, `code_ran_to_completion()`, or `formatter_ran_to_completion()`
+  - **Fix**: Add 3 MagicMock lines in `_create_queue_and_agent()` after agent attribute setup
+  - **File**: `src/tests/unit/test_crud_queue_integration.py`
+  - **Status**: FIXED (2026-02-13)
+
+- [ ] **HIGH** `test_crud_agent_pushed_to_done_queue` fails — `jobs_done_queue.push` never called
+  - **Symptom**: Same root cause as above — error path pushes to `jobs_dead_queue` instead of `jobs_done_queue`
+  - **Root Cause**: Same as above — unmocked `do_all()` triggers error flow
+  - **Fix**: Same 3-line mock fix in `_create_queue_and_agent()`
+  - **File**: `src/tests/unit/test_crud_queue_integration.py`
+  - **Status**: FIXED (2026-02-13)
 
 ---
 
@@ -34,7 +57,10 @@
 
 (Claimed by a specific session)
 
-*None currently*
+- [ ] **MEDIUM** Make semantic-similarity confirmation step configurable at runtime (ad-hoc)
+  - **Symptom**: Semantic similarity confirmation in CJ flow todo bucket is always enabled, not configurable
+  - **Goal**: Add config key to `lupin-app.ini` with default `true`, read at runtime to skip/enable confirmation
+  - **Owner**: 649565dd
 
 ---
 

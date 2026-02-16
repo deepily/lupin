@@ -1,7 +1,7 @@
 {
-    "agent router go to todo list"              : "/src/ephemera/prompts/data/synthetic-data-agent-routing-todo-lists.txt",
+    "agent router go to todo"                   : "/src/ephemera/prompts/data/synthetic-data-agent-routing-todo-lists.txt",
     "agent router go to math"                   : "/src/ephemera/prompts/data/synthetic-data-agent-routing-math.txt",
     "agent router go to calculator"             : "/src/ephemera/prompts/data/synthetic-data-agent-routing-calculator.txt",
-    "agent router go to automatic routing mode"  : "/src/ephemera/prompts/data/synthetic-data-agent-routing-automatic-routing-mode.txt",
+    "agent router go to automatic"               : "/src/ephemera/prompts/data/synthetic-data-agent-routing-automatic-routing-mode.txt",
     "none"                                      : "/src/ephemera/prompts/data/synthetic-data-none-of-the-above.txt"
 }

@@ -4031,3 +4031,14 @@ if __name__ == "__main__":
 - Both use spaces inside parentheses: `len( items )`, `range( 10 )`
 - Align colons in dicts: `"key"  : "value"`
 - Use Design by Contract docstrings for test helper functions
+
+---
+
+### 13.8 Related Testing Documentation
+
+| Document | Description |
+|----------|-------------|
+| [`src/docs/automated-interactive-testing.md`](automated-interactive-testing.md) | Comprehensive guide to the notification proxy testing system — profiles, Q&A scripts, strategy chain, scenario authoring, CLI reference |
+| [`src/tests/smoke/README.md`](../tests/smoke/README.md) | Quick-start guide for all smoke tests |
+| [`src/tests/README.md`](../tests/README.md) | Lupin 5-tier testing strategy overview |
+| [`src/tests/AUTH-TESTING-GUIDE.md`](../tests/AUTH-TESTING-GUIDE.md) | Test credential management patterns |

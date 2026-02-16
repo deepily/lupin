@@ -217,6 +217,75 @@ class LivePipelineTestBase:
             pass  # Best effort
 
     # ═══════════════════════════════════════════════════════════════════════
+    # Similarity Confirmation Toggle
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _disable_similarity_confirmation( self, headers ):
+        """
+        Save current similarity_confirmation_enabled state and disable it.
+
+        Requires:
+            - headers contains valid auth token
+
+        Ensures:
+            - Returns True if successfully disabled (and saves original value)
+            - Returns False on failure (original value unchanged)
+        """
+        try:
+            # GET current value
+            resp = requests.get(
+                f"{self.BASE_URL}/api/config/similarity-confirmation",
+                headers=headers,
+                timeout=10
+            )
+            if resp.status_code != 200:
+                print( f"  WARNING: Could not read similarity confirmation state: {resp.status_code}" )
+                return False
+
+            self._similarity_confirmation_original = resp.json().get( "enabled", True )
+
+            # POST disable
+            resp = requests.post(
+                f"{self.BASE_URL}/api/config/similarity-confirmation",
+                json={ "enabled": False },
+                headers=headers,
+                timeout=10
+            )
+            if resp.status_code != 200:
+                print( f"  WARNING: Could not disable similarity confirmation: {resp.status_code}" )
+                return False
+
+            print( f"  Similarity confirmation disabled (was: {self._similarity_confirmation_original})" )
+            return True
+
+        except Exception as e:
+            print( f"  WARNING: Failed to disable similarity confirmation: {e}" )
+            return False
+
+    def _restore_similarity_confirmation( self, headers ):
+        """
+        Restore similarity_confirmation_enabled to its original value.
+
+        Requires:
+            - headers contains valid auth token
+            - _similarity_confirmation_original was set by _disable_similarity_confirmation
+
+        Ensures:
+            - Config key restored to its pre-test value
+        """
+        try:
+            original = getattr( self, "_similarity_confirmation_original", True )
+            requests.post(
+                f"{self.BASE_URL}/api/config/similarity-confirmation",
+                json={ "enabled": original },
+                headers=headers,
+                timeout=10
+            )
+            print( f"  Similarity confirmation restored to: {original}" )
+        except Exception as e:
+            print( f"  WARNING: Failed to restore similarity confirmation: {e}" )
+
+    # ═══════════════════════════════════════════════════════════════════════
     # Submit and Poll
     # ═══════════════════════════════════════════════════════════════════════
 
@@ -566,6 +635,12 @@ class LivePipelineTestBase:
             default=False,
             help="Enable verbose output"
         )
+        parser.add_argument(
+            "--no-confirm", "-nc",
+            action="store_true",
+            default=False,
+            help="Disable similarity confirmation prompts during test run"
+        )
         return parser
 
     # ═══════════════════════════════════════════════════════════════════════
@@ -630,6 +705,13 @@ class LivePipelineTestBase:
                 return False
 
             print( f"  Login successful, token: {token[ :30 ]}..." )
+
+            # ═══════════════════════════════════════════════════════════
+            # Step 1b: Disable similarity confirmation if --no-confirm
+            # ═══════════════════════════════════════════════════════════
+            self._confirm_was_disabled = False
+            if getattr( args, "no_confirm", False ):
+                self._confirm_was_disabled = self._disable_similarity_confirmation( headers )
 
             # ═══════════════════════════════════════════════════════════
             # Step 2: Get WebSocket session ID
@@ -714,6 +796,8 @@ class LivePipelineTestBase:
         finally:
             try:
                 if "headers" in dir():
+                    if getattr( self, "_confirm_was_disabled", False ):
+                        self._restore_similarity_confirmation( headers )
                     self._clear_mode( headers )
             except Exception:
                 pass

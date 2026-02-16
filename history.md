@@ -1,5 +1,265 @@
 # Lupin Project History
 
+### 2026.02.14 - Session 213 | Fix Post-Quantization vLLM OOM — Revised Change H
+
+**Accomplishments**:
+- Added `release_gpu_memory()` method to Quantizer class that explicitly dismantles the autoround-model reference web, moves model to CPU via `model.cpu()`, then forces GC + CUDA cache clear
+- Updated `peft_trainer.py` to call `quantizer.release_gpu_memory()` before `del quantizer` in the quantization cleanup block
+- Key insight: `model.cpu()` physically moves tensors off GPU, making CUDA blocks truly empty so `empty_cache()` can release reserved memory (previous approach only dropped Python references)
+- Updated smoke test `expected_methods` to include `release_gpu_memory`
+- 1170 unit tests pass, zero regressions
+
+**Files Modified** (CoSA submodule — needs separate commit):
+- `src/cosa/training/quantizer.py` (+`import gc`, +`release_gpu_memory()` method, +smoke test update)
+- `src/cosa/training/peft_trainer.py` (cleanup block calls `release_gpu_memory()` before `del`)
+
+---
+
+### 2026.02.14 - Session 212 | Comprehensive Documentation for Automated Interactive Testing
+
+**Accomplishments**:
+- Created comprehensive reference guide `src/docs/automated-interactive-testing.md` (~600 lines, 14 sections, 5 Mermaid diagrams) covering the notification proxy testing system: architecture, 3-tier strategy chain, test profiles, Q&A scripts, base classes, scenario authoring, CLI reference, environment variables, execution flow, and troubleshooting
+- Created `src/tests/smoke/README.md` quick-start guide listing all 16 smoke test files with descriptions and commands
+- Added 5th test tier (Interactive Proxy Tests) to Lupin testing hierarchy across CLAUDE.md and src/tests/README.md
+- Updated 6 existing documents with bidirectional cross-references to the new guide
+- Added proxy integration test plan entry to src/rnd/README.md
+- Added TODO item for tomorrow's SWE team interactive proxy smoke testing session
+- All cross-references verified bidirectional, all 9 linked files confirmed to exist
+
+**Files Created**:
+- `src/docs/automated-interactive-testing.md` (primary reference guide)
+- `src/tests/smoke/README.md` (quick-start guide)
+
+**Files Modified**:
+- `CLAUDE.md` (+5th test tier, notification system cross-ref, documentation links)
+- `src/tests/README.md` (+Section 5 Interactive Proxy Tests, comparison matrix row, "When to Use" entry)
+- `src/docs/notification-api.md` (+Section 13.8 Related Testing Documentation)
+- `src/workflow/agentic-voice-workflow.md` (+Automated Interactive Testing cross-surface reference)
+- `src/rnd/README.md` (+proxy integration test plan entry)
+- `TODO.md` (+SWE team proxy smoke testing TODO)
+
+**Unit Tests**: 1170 passing, zero regressions (doc-only changes)
+
+---
+
+### 2026.02.14 - Session 211 | Proxy Integration Test — CRUD + Calculator + Expediter
+
+#### Checkpoint | 2026.02.14 22:40 | Proxy integration test implementation complete
+
+**Accomplishments**:
+- Created 12-scenario integration test combining Calculator, CRUD, and Expediter agents
+- 3 calculator scenarios (km conversion, mortgage, price compare)
+- 5 CRUD scenarios (add, query, delete w/ proxy auto-confirm, calendar)
+- 4 expediter scenarios (DR happy, DR missing args, PG missing, RTP happy)
+- `--group` flag for selective execution (calculator/crud/expediter/all)
+- `--scenarios` flag for individual scenario selection by index
+- Expediter scenarios auto-filtered when LUPIN_INTERACTIVE_TESTS not set
+- Added `proxy_integration_test` profile to TEST_PROFILES (union of expediter + CRUD answers)
+- Added `crud.agent@lupin.deepily.ai` to `all-agents.json` sender_ids
+- 10 new unit tests (TestMultiSenderIntegration), **1170 total unit tests** passing
+
+**Files Created**:
+- `src/conf/notification-proxy-scripts/proxy-integration-test.json`
+- `src/tests/smoke/test_proxy_integration.py`
+- `src/rnd/2026.02.14-proxy-integration-test-plan.md`
+
+**Files Modified**:
+- `src/conf/notification-proxy-scripts/all-agents.json` (+CRUD sender_id)
+- `src/cosa/agents/notification_proxy/config.py` (+proxy_integration_test profile)
+- `src/tests/unit/test_notification_proxy.py` (+10 tests)
+
+**Commit**: 8721004
+
+---
+
+### 2026.02.14 - Session 210 | SWE Team Phase 4 — Trust-Aware Decision Proxy
+
+#### Checkpoint | 2026.02.14 | Phase 4 complete — 4-layer decision proxy + 214 new tests (1160 total)
+
+**Accomplishments**:
+- Implemented all 5 sub-phases of the Trust-Aware Decision Proxy (4-layer hybrid architecture)
+- **Phase 4a**: Extracted shared proxy infrastructure to `proxy_agents/` (7 files) — BaseStrategy protocol, BaseWebSocketListener, BaseResponder ABC, shared config, REST submitter, CLI args
+- **Phase 4b**: Built decision proxy framework in `decision_proxy/` (11 files) — trust mode, smart router, category classifier ABC, base decision strategy ABC, XML models, WebSocket listener, responder
+- **Phase 4c**: Implemented trust tracker + circuit breaker (2 files) — per-category trust levels L1-L5 with time-weighted decay, error rate/confidence collapse detection, auto-demotion
+- **Phase 4d**: Created decision store + ratification API — ProxyDecision + TrustState ORM models, repository with shadow/log/ratify/find_similar, FastAPI router (4 endpoints), migration SQL
+- **Phase 4e**: Built SWE engineering proxy domain layer in `swe_team/proxy/` (5 files) — 6 engineering categories (deployment/testing/deps/architecture/destructive/general), keyword classifier with sender hints, full evaluate pipeline
+- Refactored notification_proxy/config.py for backward compatibility (120/120 existing tests still pass)
+- Added 16 config keys to lupin-app.ini + lupin-app-splainer.ini
+- **214 new unit tests** across 4 test files, **1160 total unit tests** passing, zero regressions
+
+**Files Created (Lupin repo)**:
+- `src/conf/lupin-app.ini` (modified — 16 new config keys)
+- `src/conf/lupin-app-splainer.ini` (modified — 16 matching explanations)
+- `src/scripts/sql/2026.02.14-decision-proxy-schema.sql`
+- `src/tests/unit/test_proxy_common.py` (51 tests)
+- `src/tests/unit/test_decision_proxy_config.py` (70 tests)
+- `src/tests/unit/test_decision_store.py` (46 tests)
+- `src/tests/unit/test_swe_engineering_proxy.py` (47 tests)
+
+**Files Created/Modified (CoSA submodule — needs separate commit)**:
+- `agents/utils/proxy_agents/` (7 new files)
+- `agents/decision_proxy/` (13 new files)
+- `agents/swe_team/proxy/` (5 new files)
+- `agents/notification_proxy/config.py` (modified — re-export shared constants)
+- `rest/postgres_models.py` (modified — ProxyDecision + TrustState models)
+- `rest/db/repositories/proxy_decision_repository.py` (new)
+- `rest/db/repositories/__init__.py` (modified)
+- `rest/routers/decision_proxy.py` (new)
+
+---
+
+### 2026.02.14 - Session 209 | PEFT Trainer Resume-from-Merged
+
+#### Checkpoint | 2026.02.14 18:30 | Add --resume-from-merged to PEFT trainer
+
+**Accomplishments**:
+- Added `--resume-from-merged <path>` CLI argument to `peft_trainer.py` — skips phases 1-3 (pre-validation, fine-tuning, merge) and uses existing merged adapter dir for phases 4-5 (post-training validation, quantization)
+- Wrapped phases 1-3 in conditional block gated on `resume_from_merged` parameter
+- Updated completion message to distinguish resume mode from normal mode
+- Removed `run_pipeline_adhoc()` method (170 lines of hardcoded workaround code) — replaced by the new CLI flag
+- Cleaned up adhoc references in `__main__` block and smoke test `expected_methods` list
+- Structural smoke test passes: all 12 methods present, all imports verified
+
+**Files Modified (CoSA submodule — needs separate commit)**:
+- `src/cosa/training/peft_trainer.py` (resume logic, adhoc removal, CLI arg, docstring update)
+
+**Commit**: 96cbf21 (Lupin docs-only; CoSA submodule commit pending)
+
+---
+
+### 2026.02.14 - Session 208 | Bug Fix Mode
+
+#### Fixes
+(No bugs fixed — standby session only)
+
+#### Session Summary
+- **Total Fixes**: 0
+- **Files Changed**: 0 (session infrastructure only)
+- **GitHub Issues Closed**: None
+- **Commits**: None
+
+**Status**: Session closed 2026.02.14 — initialized and stood by, no bugs worked
+
+---
+
+### 2026.02.14 - Session 207 | SWE Team Phase 3 — Tester Verification Loop
+
+#### Checkpoint | 2026.02.14 | SWE Team Phase 3 — tester verification loop + 31 unit tests (946 total)
+
+**Accomplishments**:
+- Implemented Phase 3 of the SWE Team multi-agent system: Coder-Tester verification loop with max 3 retry iterations
+- Created `test_runner.py`: Orchestrator-level pytest subprocess wrapper using `asyncio.create_subprocess_exec` with timeout + output truncation (NOT an MCP tool)
+- Added `VerificationResult` Pydantic model to `state.py` with pass/fail tracking, tester output, test files created, iteration count
+- Activated tester role (`active=True`) in `agent_definitions.py` — 3 active roles now (lead + coder + tester)
+- Added `_verify_result()` and `_redelegate_with_feedback()` methods to orchestrator
+- Rewrote `_execute_live()` delegation loop with coder-tester iteration cycle (MAX_VERIFICATION_ITERATIONS=3)
+- Extended `_build_agent_options()` with tester role support (TESTER_SYSTEM_PROMPT, permission gating)
+- Backward compatibility: `require_test_pass=False` skips verification entirely
+- Updated `__init__.py` exports and bumped to v0.3.0
+- 31 new unit tests across 7 classes in `test_swe_team_verification.py`
+- Full regression: 946/946 pass, zero regressions
+
+**Files Created (CoSA submodule — needs separate commit)**:
+- `src/cosa/agents/swe_team/test_runner.py` (NEW — pytest subprocess wrapper)
+
+**Files Modified (CoSA submodule — needs separate commit)**:
+- `src/cosa/agents/swe_team/state.py` (add VerificationResult, expand SweTeamState)
+- `src/cosa/agents/swe_team/agent_definitions.py` (activate tester role)
+- `src/cosa/agents/swe_team/orchestrator.py` (verification loop, _verify_result, _redelegate_with_feedback)
+- `src/cosa/agents/swe_team/__init__.py` (add exports, bump to v0.3.0)
+
+**Files Modified (Lupin repo)**:
+- `src/tests/unit/test_swe_team_verification.py` (NEW — 31 Phase 3 tests)
+- `src/tests/unit/test_swe_team_config.py` (update active roles assertion to 3)
+- `src/tests/unit/test_swe_team_delegation.py` (add require_test_pass=False for backward compat)
+
+**Commit**: [pending]
+
+---
+
+### 2026.02.14 - Session 206 | SWE Team Phase 2 — Lead + Coder Delegation Loop
+
+#### Checkpoint | 2026.02.14 12:00 | SWE Team Phase 2 — delegation loop + 34 unit tests (915 total)
+
+**Accomplishments**:
+- Implemented Phase 2 of the SWE Team multi-agent system: Lead decomposes tasks into TaskSpec[], delegates each to Coder subagent via Claude Agent SDK
+- Created `hooks.py`: SDK hook functions (notification_hook, pre_tool_hook with dangerous command gating, post_tool_hook for file change tracking)
+- Created `state_files.py`: Cross-session persistence with FeatureList (JSON) + ProgressLog (timestamped entries)
+- Replaced `_execute_live()` stub with real delegation loop: `_decompose_task()` → `_parse_task_specs()` → user confirmation → `_delegate_task()` per TaskSpec
+- Activated coder role (`active=True`) in agent_definitions.py
+- Updated `__init__.py` exports and bumped to v0.2.0
+- Updated `claude-agent-sdk==0.1.18` → `0.1.36` in requirements.txt
+- 34 new unit tests across 5 classes (hooks, state files, decomposition, delegation, live flow)
+- Full regression: 915/915 pass, zero regressions
+
+**Files Created (CoSA submodule — needs separate commit)**:
+- `src/cosa/agents/swe_team/hooks.py` (NEW — SDK hook functions)
+- `src/cosa/agents/swe_team/state_files.py` (NEW — FeatureList + ProgressLog)
+
+**Files Modified (CoSA submodule — needs separate commit)**:
+- `src/cosa/agents/swe_team/orchestrator.py` (replace stub with delegation loop)
+- `src/cosa/agents/swe_team/agent_definitions.py` (activate coder role)
+- `src/cosa/agents/swe_team/__init__.py` (add exports, bump to v0.2.0)
+- `src/cosa/requirements.txt` (claude-agent-sdk 0.1.18 → 0.1.36)
+
+**Files Modified (Lupin repo)**:
+- `src/tests/unit/test_swe_team_delegation.py` (NEW — 34 Phase 2 tests)
+- `src/tests/unit/test_swe_team_config.py` (update active roles assertion)
+- `src/rnd/2026.02.13-claude-code-agentic-dev-team/01-implementation-current.md` (Phase 2: PENDING → DONE)
+- `src/rnd/2026.02.13-claude-code-agentic-dev-team/03-testing-validation.md` (Phase 2 test results)
+
+**Commit**: [pending]
+
+---
+
+### 2026.02.13 - Session 205 | ADD_CALENDAR Duplicate Tolerance Fix
+
+**Accomplishments**:
+- Fixed ADD_CALENDAR scenario in CRUD live pipeline smoke test to accept "already exists" responses
+- When calendar entry exists from a prior run, the system correctly responds with "That item already exists" — test now recognizes this as valid (matching the existing ADD_DUPLICATE pattern)
+- Added TODO item for unified smoke test framework verification plan (resume tomorrow)
+
+**Files Modified**:
+- `src/tests/smoke/test_crud_live_pipeline.py` (+2/-2 — added "already exists" keyword + "duplicate" status)
+- `TODO.md` (+4 — unified smoke test framework verification section)
+
+---
+
+### 2026.02.13 - Session 204 | Bug Fix: Cache Re-Execution of Non-Executable Code
+
+**Accomplishments**:
+- Fixed "N/A" bug where cached snapshots with no executable code caused `NameError: name 'N' is not defined` during cache replay
+- Root cause: `solution_snapshot.py:446` used `"N/A"` string as fallback for missing code, which Python parsed as `N / A` division
+- Change 1: Fixed fallback from `"N/A"` to `[ "" ]` (correct `list[str]` type)
+- Change 2: Added empty-code guard in `run_code()` raising `ValueError` before subprocess spawn
+- Change 3: Wrapped `run_code()` call in `_format_cached_result()` with `try/except ValueError`
+- All 817 unit tests pass, zero regressions
+
+**Files Modified (CoSA submodule — needs separate commit)**:
+- `src/cosa/memory/solution_snapshot.py` (+4/-1 — fallback fix + empty-code guard)
+- `src/cosa/rest/running_fifo_queue.py` (+4/-1 — ValueError catch in cache path)
+
+---
+
+### 2026.02.13 - Session 203 | Fix Failing TestCrudQueueCompletion Tests
+
+#### Checkpoint | 2026.02.13 12:40 | Fix 2 failing tests — mock do_all() + completion gates
+
+**Accomplishments**:
+- Fixed 2 failing `TestCrudQueueCompletion` tests: `test_crud_agent_emits_job_state_transition` and `test_crud_agent_pushed_to_done_queue`
+- Root cause: `_create_queue_and_agent()` never mocked `do_all()`, so real LLM pipeline ran, raised `ValueError: Empty response from LLM`, triggered error path emitting `run -> dead` instead of `run -> done`
+- Added 3 MagicMock lines: `do_all()`, `code_ran_to_completion()`, `formatter_ran_to_completion()`
+- All 3 `TestCrudQueueCompletion` tests now pass; full suite 817/817 pass, zero regressions
+- Added both bugs to `bug-fix-queue.md` as FIXED items
+
+**Files Modified**:
+- `src/tests/unit/test_crud_queue_integration.py` (+3 lines — mock do_all + completion gates)
+- `bug-fix-queue.md` (+2 FIXED items in Queued section)
+
+**Commit**: b435c3a
+
+---
+
 ### 2026.02.13 - Session 202 | Consolidated Notification API Reference Document
 
 #### Checkpoint | 2026.02.13 17:30 | Notification API reference: 4,033-line doc + 5 diagrams + 3 cross-refs
