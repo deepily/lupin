@@ -7,9 +7,11 @@
 | `test_swe_team_config.py` | 1 | 64 tests: config, safety, state, definitions, sender IDs, mock, orchestrator, COSA interface | PASS |
 | `test_swe_team_delegation.py` | 2 | 34 tests: hooks, state files, decomposition, delegation, live flow | PASS |
 | `test_swe_team_verification.py` | 3 | 31 tests: verification result, test runner, parse output, verify result, redelegate, coder-tester loop, build agent options | PASS |
-| `test_trust_tracker.py` | 4 | Graduation, rollback, per-category isolation | PENDING |
-| `test_circuit_breaker.py` | 4 | Demotion triggers | PENDING |
-| `test_engineering_decisions.py` | 4 | Classification, trust gating, shadow mode | PENDING |
+| `test_trust_tracker.py` | 4c | 28 tests: L3-L5 graduation, intermediate demotion, rolling window, decay precision, serialization, tracker deep edge cases | PASS |
+| `test_circuit_breaker.py` | 4c | 27 tests: min-sample gate, confidence boundary, trip demotion, multi-category, reset, callback, cooldown, confidence window | PASS |
+| `test_engineering_decisions.py` | 4e | 32 tests: keyword content, cap constants, sender hints, confidence formula, evaluate with trust, custom construction | PASS |
+| `test_decision_proxy_config.py` | 4b+4c | 70 tests: config, smart router, strategy, classifier, XML, listener, responder, CategoryTrust, TrustTracker, CircuitBreaker | PASS |
+| `test_swe_engineering_proxy.py` | 4e | 47 tests: categories, classifier, strategy, config, exports | PASS |
 | `test_swe_team_job.py` | 5 | Job creation, mock do_all() | PENDING |
 
 ## Smoke Test Results (Phase 1)
@@ -47,7 +49,7 @@
 | 1 | 817 | 881 (+64 new) | 0 | 2026-02-13 |
 | 2 | 881 | 915 (+34 new) | 0 | 2026-02-14 |
 | 3 | 915 | 946 (+31 new) | 0 | 2026-02-14 |
-| 4 | — | — | — | — |
+| 4 | 1178 | 1265 (+87 new) | 0 | 2026-02-16 |
 | 5 | — | — | — | — |
 
 ## 5-Surface Validation
@@ -84,9 +86,12 @@
 - [x] `_build_agent_options("tester")` returns worker model + TESTER_SYSTEM_PROMPT + acceptEdits
 
 ### Phase 4 Gate
+- [x] `pytest src/tests/unit/test_trust_tracker.py -v` — 28/28 pass
+- [x] `pytest src/tests/unit/test_circuit_breaker.py -v` — 27/27 pass
+- [x] `pytest src/tests/unit/test_engineering_decisions.py -v` — 32/32 pass
+- [x] `pytest src/tests/unit/ -v` — full regression 1265/1265 pass, 0 regressions
 - [ ] Proxy in L1 shadow mode -> predictions logged, no autonomous action
 - [ ] Morning ratification endpoint functional
-- [ ] All existing unit tests pass
 
 ### Phase 5 Gate
 - [ ] `POST /api/swe-team/submit` -> job queued -> runs -> done

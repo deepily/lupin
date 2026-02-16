@@ -1,5 +1,19 @@
 # Lupin Project History
 
+#### Checkpoint | 2026.02.16 14:30 | Phase 4c/4e gap-filling unit tests
+
+**Files**: test_trust_tracker.py, test_circuit_breaker.py, test_engineering_decisions.py (+1 more)
+**Commit**: d5f5e24
+
+- Created 87 new gap-filling unit tests across 3 files for SWE Team Decision Proxy
+- `test_trust_tracker.py` (28 tests): L3-L5 graduation, intermediate demotion, rolling window, decay, serialization
+- `test_circuit_breaker.py` (27 tests): min-sample gate, confidence boundary, trip demotion, cooldown, callbacks
+- `test_engineering_decisions.py` (32 tests): keyword validation, cap constants, confidence formula, trust buildup
+- Updated `03-testing-validation.md` with Phase 4 results and regression tracking
+- Full regression: 1265 unit tests pass, 0 failures (was 1178)
+
+---
+
 ### 2026.02.16 - Session 214 | Bug Fix Mode
 
 **Accomplishments**:
