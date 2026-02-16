@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-13T17:00:00
+**Last Updated**: 2026-02-16T10:00:00
 
 ---
 
@@ -22,6 +22,7 @@
 | 649565dd | 2026-02-13T17:00:00 | 2026-02-14T23:59:00 | closed |
 | 0a2fa054 | 2026-02-14T16:00:00 | 2026-02-14T16:30:00 | closed |
 | 4949b964 | 2026-02-02T18:00:00 | 2026-02-02T23:05:00 | closed |
+| 07b80074 | 2026-02-16T10:00:00 | 2026-02-16T10:00:00 | active |
 
 ---
 
@@ -29,27 +30,7 @@
 
 (Available for any session to claim)
 
-- [ ] **MEDIUM** Cache re-execution of non-executable code ("N/A" bug) — `NameError: name 'N' is not defined`
-  - **Symptom**: Cached snapshots with `code="N/A"` cause `NameError` when re-executed in `_format_cached_result()`
-  - **Root Cause**: `solution_snapshot.py:446` used `"N/A"` string fallback, Python parses as `N / A` division
-  - **Fix**: (1) Changed fallback to `[ "" ]`, (2) Added empty-code guard in `run_code()`, (3) `try/except ValueError` wrapper in caller
-  - **Files (CoSA)**: `solution_snapshot.py`, `running_fifo_queue.py`
-  - **Status**: FIXED (2026-02-13) — CoSA submodule pending commit
-  - **By**: c4619072
-
-- [ ] **HIGH** `test_crud_agent_emits_job_state_transition` fails — expects `'done'`, gets `'dead'`
-  - **Symptom**: `_handle_base_agent()` calls real `do_all()` which hits LLM, raises `ValueError: Empty response from LLM`, triggers error path emitting `run → dead`
-  - **Root Cause**: `_create_queue_and_agent()` never mocked `do_all()`, `code_ran_to_completion()`, or `formatter_ran_to_completion()`
-  - **Fix**: Add 3 MagicMock lines in `_create_queue_and_agent()` after agent attribute setup
-  - **File**: `src/tests/unit/test_crud_queue_integration.py`
-  - **Status**: FIXED (2026-02-13)
-
-- [ ] **HIGH** `test_crud_agent_pushed_to_done_queue` fails — `jobs_done_queue.push` never called
-  - **Symptom**: Same root cause as above — error path pushes to `jobs_dead_queue` instead of `jobs_done_queue`
-  - **Root Cause**: Same as above — unmocked `do_all()` triggers error flow
-  - **Fix**: Same 3-line mock fix in `_create_queue_and_agent()`
-  - **File**: `src/tests/unit/test_crud_queue_integration.py`
-  - **Status**: FIXED (2026-02-13)
+(none)
 
 ---
 
@@ -57,15 +38,22 @@
 
 (Claimed by a specific session)
 
-- [ ] **MEDIUM** Make semantic-similarity confirmation step configurable at runtime (ad-hoc)
-  - **Symptom**: Semantic similarity confirmation in CJ flow todo bucket is always enabled, not configurable
-  - **Goal**: Add config key to `lupin-app.ini` with default `true`, read at runtime to skip/enable confirmation
-  - **Owner**: 649565dd
+(none)
 
 ---
 
 ### Completed
 
+- [x] **Calculator→MathAgent snapshot replay: missing `prompt_response_dict` copy** → FIXED | By: 07b80074
+  - **Symptom**: "What's 4+4?" works first time but fails on cache replay — snapshot saved with `code=[""]`
+  - **Root Cause**: `_delegate_to_math_agent()` copied only 3 attrs back from MathAgent, missing `prompt_response_dict` which `SolutionSnapshot.create()` reads for `code`
+  - **Fix**: Added `self.prompt_response_dict = math_agent.prompt_response_dict` in copy-back block
+  - **Files (CoSA)**: `calculator/agent.py`; **(Tests)**: `test_calculator_mock_pipeline.py` (4 tests updated)
+- [x] **Calculator "unitless" bug — "2 unitless is about 2.00 unitless"** → FIXED, verified 1170 tests pass | By: 07b80074
+  - **Symptom**: "What's 2 + 2?" returns "2 unitless is about 2.00 unitless" instead of routing to MathAgent
+  - **Root Cause**: 3-layer bug chain: (1) prompt has no arithmetic op so LLM picks `convert`, (2) LLM invents "unitless" as unit, (3) formatter always uses `.2f`
+  - **Fix**: (1) Added prompt rule 6 for empty unit fields, (2) Added unit validation guard in `run_code()` that falls back to MathAgent, (3) Added whole-number check in `_format_convert_for_voice()`
+  - **Files (CoSA)**: `calculator/agent.py`, `calculator/dispatcher.py`; **(Lupin)**: `src/conf/prompts/agents/calculator.txt`
 - [x] **vLLM max_tokens overflow in PEFT validation** (ad-hoc) → CoSA pending | By: 4d6d238f
   - **Symptom**: `ValueError: maximum context length is 1024 tokens. However, you requested 1403 tokens`
   - **Root Cause**: `xml_coordinator.py:1266` dropped `max_new_tokens` param — `llm_client.run( prompt )` never received it
@@ -78,6 +66,15 @@
 - [x] **DataFrameGroupBy.apply DeprecationWarning in peft_trainer.py:597** (ad-hoc) → commit: afbfa7d (docs), CoSA pending | By: 2417c2b5
 - [x] **PEFT Trainer False Positive Error Detection** (ad-hoc) → commit: 9b0e6a7 (docs), CoSA pending | By: 662576da
 - [x] **ask_yes_no() missing priority parameter** (ad-hoc) → commit: 6b41a24 | By: 41d2e575
+- [x] **Make semantic-similarity confirmation step configurable at runtime** (ad-hoc) → implemented by 649565dd, verified by 07b80074 | By: 649565dd
+  - Config key `similarity_confirmation_enabled` in `lupin-app.ini`, runtime check in `todo_fifo_queue.py:500`, REST toggle in `system.py`
+- [x] **Cache re-execution of non-executable code ("N/A" bug)** → FIXED by c4619072, verified by 07b80074 | By: c4619072
+  - Fix: Changed code fallback from `"N/A"` to `[ "" ]`, added empty-code guard in `run_code()`, `try/except ValueError` in caller
+  - Files (CoSA): `solution_snapshot.py`, `running_fifo_queue.py`
+- [x] **`test_crud_agent_emits_job_state_transition`** → FIXED, verified by 07b80074 (1170 tests pass)
+  - Fix: 3 MagicMock lines in `_create_queue_and_agent()` — `do_all()`, `code_ran_to_completion()`, `formatter_ran_to_completion()`
+- [x] **`test_crud_agent_pushed_to_done_queue`** → FIXED, verified by 07b80074 (1170 tests pass)
+  - Same root cause and fix as above
 
 ---
 

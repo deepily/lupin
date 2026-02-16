@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.02.16 - Session 214 | Bug Fix Mode
+
+**Accomplishments**:
+- Verified and closed 4 pre-existing bug fix queue items (3 queued + 1 orphaned in-progress)
+- Verified semantic-similarity confirmation is fully configurable at runtime via `similarity_confirmation_enabled` config key, REST toggle endpoint, and runtime check in `todo_fifo_queue.py` — moved from In Progress to Completed
+- Verified Cache N/A bug fix: code fallback changed from `"N/A"` to `[ "" ]`, empty-code guard in `run_code()`, `try/except ValueError` in caller — moved to Completed
+- Verified CRUD test fixes (`test_crud_agent_emits_job_state_transition`, `test_crud_agent_pushed_to_done_queue`): 3 MagicMock lines added — both tests now pass
+- Full unit test suite: 1170 tests pass, zero regressions
+
+**Files Modified**:
+- `bug-fix-queue.md` (queue cleanup: 3 queued → completed, 1 in-progress → completed)
+
+---
+
 ### 2026.02.14 - Session 213 | Fix Post-Quantization vLLM OOM — Revised Change H
 
 **Accomplishments**:

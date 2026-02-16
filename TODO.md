@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-14 (Session 210)
+Last updated: 2026-02-16
 
 ## Pending
 
@@ -11,7 +11,7 @@ Last updated: 2026-02-14 (Session 210)
 
 ### Unified Smoke Test Framework Verification (RESUME TOMORROW)
 
-- [ ] **[LUPIN] Execute unified smoke test framework verification plan** - Return to `src/rnd/2026.02.13-unified-smoke-test-framework-verification-plan.md` and execute the verification steps.
+- [x] **[LUPIN] Execute unified smoke test framework verification plan** - ✅ COMPLETE (2026-02-16). Return to `src/rnd/2026.02.13-unified-smoke-test-framework-verification-plan.md` and execute the verification steps.
 
 ### Pre-Execution Confirmation of Top Semantically Similar Matches (HIGH)
 
@@ -35,10 +35,6 @@ Last updated: 2026-02-14 (Session 210)
   - Create new test profile in `config.py:TEST_PROFILES` for SWE team
   - Write smoke test scenarios for the decision proxy agent
   - Add SWE team sender_id to `all-agents.json`
-
-### Notification Proxy Agent Refactor (HIGH)
-
-- [ ] **[LUPIN] Refactor mock job client into standalone Notification Proxy Agent** - Extract the existing mock job client into a proper standalone notification proxy agent object. Decouples notification testing/proxying from mock job infrastructure.
 
 ### DataFrame CRUD with Voice I/O (Session 132-136)
 
@@ -258,6 +254,8 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
 
 ## Completed (Recent)
 
+- [x] **[LUPIN] Refactor mock job client into standalone Notification Proxy Agent** - Sessions 210-211: Phase 4a proxy extraction (`src/cosa/agents/utils/proxy_agents/` shared base infrastructure) + standalone `src/cosa/agents/notification_proxy/` agent. Fully decoupled from mock job infrastructure.
+- [x] **[LUPIN] Execute unified smoke test framework verification plan** - 2026-02-16
 - [x] **[LUPIN] Add `refresh()` method to ConfigurationManager** - 2026-02-13: WON'T FIX. Planned as a convenience wrapper around `init( silent=True )` for runtime config reloads. Decided not to implement.
 - [x] **[LUPIN] Upgrade vLLM to >= 0.8.5** - 2026-02-13: Qwen3-4B-Base native support confirmed
 - [x] **[LUPIN] Run PEFT Phase 2 training + LORA retrain** - 2026-02-13: 39,871 examples, 35 commands

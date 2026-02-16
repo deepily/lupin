@@ -12,6 +12,7 @@ Test classes:
     - TestErrorHandling (3): Graceful failures for bad LLM output
     - TestPromptConstruction (2): Real template + PromptTemplateProcessor verification
     - TestMathAgentFallback (3): Fallback to MathAgent when intent extraction fails
+    - TestUnsupportedOperationFallback (3): Unsupported op → MathAgent delegation
 
 Run: pytest src/tests/unit/test_calculator_mock_pipeline.py -v
 """
@@ -62,6 +63,7 @@ def _create_mock_calculator_agent( question="how many miles is 10 kilometers" ):
     agent.prompt_response_dict  = None
     agent.code_response_dict    = None
     agent._fallback_to_math     = False
+    agent._delegated_to_math    = False
 
     # Build ad-hoc prompt — sufficient for mocked-LLM tests
     intent_example = CalcIntent.get_example_for_template().to_xml( root_tag="calc_intent" )
@@ -441,6 +443,7 @@ class TestMathAgentFallback:
         """When fallback flag is set, run_code delegates to MathAgent."""
         agent = _create_mock_calculator_agent( "what is the integral of x squared" )
         agent._fallback_to_math   = True
+        agent._delegated_to_math  = False
         agent.user_id             = "test_user"
         agent.session_id          = "test_session"
 
@@ -449,12 +452,156 @@ class TestMathAgentFallback:
         mock_math_instance.answer_conversational = "The integral of x squared is x cubed over 3 plus a constant."
         mock_math_instance.answer                = "x^3/3 + C"
         mock_math_instance.code_response_dict    = { "return_code": 0, "output": "x^3/3 + C" }
+        mock_math_instance.prompt_response_dict  = {
+            "code"        : [ "from sympy import symbols, integrate\nx = symbols('x')\nprint( integrate( x**2, x ) )" ],
+            "explanation" : "Integration of x squared",
+            "returns"     : "x^3/3 + C",
+            "example"     : "integrate( x**2, x )",
+            "thoughts"    : "Standard polynomial integration"
+        }
         mock_math_cls.return_value               = mock_math_instance
 
         code_result = agent.run_code()
         mock_math_instance.do_all.assert_called_once()
         assert agent.answer_conversational == "The integral of x squared is x cubed over 3 plus a constant."
         assert agent.answer == "x^3/3 + C"
+        assert agent.prompt_response_dict is not None
+        assert "code" in agent.prompt_response_dict
+        assert len( agent.prompt_response_dict[ "code" ][ 0 ] ) > 0
+
+
+# ============================================================================
+# TestUnsupportedOperationFallback — Unsupported op → MathAgent delegation
+# ============================================================================
+
+class TestUnsupportedOperationFallback:
+    """Verify unsupported operation triggers MathAgent delegation."""
+
+    @patch( "cosa.agents.calculator.agent.MathAgent" )
+    @patch( "cosa.agents.calculator.agent.LlmClientFactory" )
+    def test_unsupported_arithmetic_delegates_to_math( self, mock_factory_cls, mock_math_cls ):
+        """LLM returns operation='unsupported' for '2+2' → delegates to MathAgent."""
+        agent = _create_mock_calculator_agent( "What is 2 plus 2?" )
+        agent.user_id    = "test_user"
+        agent.session_id = "test_session"
+
+        mock_llm = MagicMock()
+        mock_llm.run.return_value = (
+            '<calc_intent>'
+            '<operation>unsupported</operation>'
+            '<value></value>'
+            '<from_unit></from_unit>'
+            '<to_unit></to_unit>'
+            '<confidence>0.95</confidence>'
+            '<raw_query>What is 2 plus 2?</raw_query>'
+            '</calc_intent>'
+        )
+        mock_factory_cls.return_value.get_client.return_value = mock_llm
+
+        # Mock MathAgent
+        mock_math_instance                       = MagicMock()
+        mock_math_instance.answer_conversational = "2 plus 2 equals 4."
+        mock_math_instance.answer                = "4"
+        mock_math_instance.code_response_dict    = { "return_code": 0, "output": "4" }
+        mock_math_instance.prompt_response_dict  = {
+            "code"        : [ "print( 2 + 2 )" ],
+            "explanation" : "Simple addition",
+            "returns"     : "4",
+            "example"     : "print( 2 + 2 )",
+            "thoughts"    : "Basic arithmetic"
+        }
+        mock_math_cls.return_value               = mock_math_instance
+
+        agent.run_prompt()
+        assert agent.calc_intent.operation == "unsupported"
+
+        code_result = agent.run_code()
+        mock_math_instance.do_all.assert_called_once()
+        assert agent._delegated_to_math is True
+        assert agent.answer_conversational == "2 plus 2 equals 4."
+        assert agent.prompt_response_dict is not None
+        assert "code" in agent.prompt_response_dict
+        assert agent.prompt_response_dict[ "code" ] == [ "print( 2 + 2 )" ]
+
+    @patch( "cosa.agents.calculator.agent.MathAgent" )
+    @patch( "cosa.agents.calculator.agent.LlmClientFactory" )
+    def test_unsupported_trig_delegates_to_math( self, mock_factory_cls, mock_math_cls ):
+        """LLM returns operation='unsupported' for 'sin(45)' → delegates to MathAgent."""
+        agent = _create_mock_calculator_agent( "what is the sine of 45 degrees" )
+        agent.user_id    = "test_user"
+        agent.session_id = "test_session"
+
+        mock_llm = MagicMock()
+        mock_llm.run.return_value = (
+            '<calc_intent>'
+            '<operation>unsupported</operation>'
+            '<confidence>0.92</confidence>'
+            '<raw_query>what is the sine of 45 degrees</raw_query>'
+            '</calc_intent>'
+        )
+        mock_factory_cls.return_value.get_client.return_value = mock_llm
+
+        mock_math_instance                       = MagicMock()
+        mock_math_instance.answer_conversational = "The sine of 45 degrees is approximately 0.707."
+        mock_math_instance.answer                = "0.707"
+        mock_math_instance.code_response_dict    = { "return_code": 0, "output": "0.707" }
+        mock_math_instance.prompt_response_dict  = {
+            "code"        : [ "import math\nprint( round( math.sin( math.radians( 45 ) ), 3 ) )" ],
+            "explanation" : "Sine of 45 degrees",
+            "returns"     : "0.707",
+            "example"     : "math.sin( math.radians( 45 ) )",
+            "thoughts"    : "Trigonometric calculation"
+        }
+        mock_math_cls.return_value               = mock_math_instance
+
+        agent.run_prompt()
+        assert agent.calc_intent.operation == "unsupported"
+
+        agent.run_code()
+        mock_math_instance.do_all.assert_called_once()
+        assert agent._delegated_to_math is True
+        assert agent.answer_conversational == "The sine of 45 degrees is approximately 0.707."
+        assert agent.prompt_response_dict is not None
+        assert "code" in agent.prompt_response_dict
+
+    @patch( "cosa.agents.calculator.agent.MathAgent" )
+    @patch( "cosa.agents.calculator.agent.LlmClientFactory" )
+    def test_do_all_with_unsupported_skips_formatter( self, mock_factory_cls, mock_math_cls ):
+        """Full do_all() flow with unsupported op → MathAgent, no formatter crash."""
+        agent = _create_mock_calculator_agent( "What is 2 plus 2?" )
+        agent.user_id    = "test_user"
+        agent.session_id = "test_session"
+
+        mock_llm = MagicMock()
+        mock_llm.run.return_value = (
+            '<calc_intent>'
+            '<operation>unsupported</operation>'
+            '<confidence>0.95</confidence>'
+            '<raw_query>What is 2 plus 2?</raw_query>'
+            '</calc_intent>'
+        )
+        mock_factory_cls.return_value.get_client.return_value = mock_llm
+
+        mock_math_instance                       = MagicMock()
+        mock_math_instance.answer_conversational = "2 plus 2 equals 4."
+        mock_math_instance.answer                = "4"
+        mock_math_instance.code_response_dict    = { "return_code": 0, "output": "4" }
+        mock_math_instance.prompt_response_dict  = {
+            "code"        : [ "print( 2 + 2 )" ],
+            "explanation" : "Simple addition",
+            "returns"     : "4",
+            "example"     : "print( 2 + 2 )",
+            "thoughts"    : "Basic arithmetic"
+        }
+        mock_math_cls.return_value               = mock_math_instance
+
+        # do_all should NOT crash on run_formatter when delegated to MathAgent
+        result = agent.do_all()
+        mock_math_instance.do_all.assert_called_once()
+        assert agent._delegated_to_math is True
+        assert result == "2 plus 2 equals 4."
+        assert agent.prompt_response_dict is not None
+        assert "code" in agent.prompt_response_dict
 
 
 def quick_smoke_test():

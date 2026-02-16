@@ -15,6 +15,7 @@ three calculation types:
 - convert: Convert a value from one unit to another (length, mass, volume, temperature)
 - compare_prices: Compare prices of products with different sizes/quantities to find the cheapest option
 - mortgage: Calculate monthly mortgage payment, total interest, and total cost
+- unsupported: Query involves math NOT handled here (arithmetic, algebra, trigonometry, calculus)
 
 ## Operation: convert
 
@@ -52,6 +53,22 @@ Examples:
 - "Monthly payment on a $500k house with $100k down at 7% for 15 years" →
   principal=500000, annual_rate=7, term_years=15, down_payment=100000
 
+## Operation: unsupported
+
+If the user's query involves any of the following, set operation to "unsupported":
+- Arithmetic: addition, subtraction, multiplication, division (e.g., "What's 2+2?", "12 times 8")
+- Algebra: solving equations, factoring, simplifying (e.g., "solve x^2 - 4 = 0")
+- Trigonometry: sin, cos, tan, inverse functions (e.g., "what's sin(45)?")
+- Calculus: derivatives, integrals, limits (e.g., "integrate x^2 dx")
+- Any other mathematical operation NOT listed under Available Operations above
+
+For unsupported operations, leave all parameter fields empty. Only set operation, confidence, and raw_query.
+
+Examples:
+- "What's 2 plus 2?" → operation=unsupported, confidence=0.95, raw_query=What's 2 plus 2?
+- "solve x squared minus 4 equals 0" → operation=unsupported, confidence=0.90
+- "what's the sine of 45 degrees" → operation=unsupported, confidence=0.92
+
 ## Important Rules
 
 1. Set confidence between 0.0 and 1.0 based on how clearly the query maps to an operation
@@ -59,6 +76,12 @@ Examples:
 3. For price comparison, always include all items with their name, price, quantity, and unit
 4. For mortgage, annual_rate is a percentage (e.g., 6.5 means 6.5%)
 5. Leave unused fields empty (do NOT put "N/A" or "none")
+6. If no units are mentioned in the query, from_unit and to_unit MUST be empty strings.
+   Do NOT invent unit names like "unitless" or "unit" — if the user does not mention
+   a specific unit, leave the unit fields empty.
+7. If the query is about arithmetic, algebra, trigonometry, calculus, or any math NOT covered by
+   convert/compare_prices/mortgage, you MUST set operation to "unsupported". Do NOT invent
+   operation names like "add", "solve", "calculate", or "arithmetic".
 
 Requirement: The first word of your response MUST be the XML tag `<calc_intent>` and your last MUST be the XML tag `</calc_intent>`, and all of your work and output MUST occur between these two tags.
 
