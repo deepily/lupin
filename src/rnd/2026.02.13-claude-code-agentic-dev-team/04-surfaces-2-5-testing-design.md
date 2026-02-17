@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-The SWE Team uses a 5-Surface Validation scheme. Surface 1 (Unit Tests + Inline Smoke Tests) is **PASS** with 1265 tests across 8 test files plus 46 inline smoke tests across 8 modules. Surfaces 2-5 are **PENDING** and require implementation.
+The SWE Team uses a 5-Surface Validation scheme. Surface 1 (Unit Tests + Inline Smoke Tests) is **PASS** with 1265 tests across 8 test files plus 46 inline smoke tests across 8 modules. Surfaces 2 and 3 are **PASS**. Surfaces 4-5 are **PENDING** and require implementation.
 
 This document is the implementation blueprint for Surfaces 2-5. It describes what tests to build, what files to create, and what acceptance criteria must be met.
 
@@ -17,8 +17,8 @@ This document is the implementation blueprint for Surfaces 2-5. It describes wha
 | Surface | Purpose | Test Type | Status | Est. Tests |
 |---------|---------|-----------|--------|------------|
 | 1 | Unit Tests + Inline Smoke Tests | `pytest` + `__main__` smoke | **PASS** (1265 unit, 46 smoke) | 1311 |
-| 2 | Mock Job Endpoint | Unit + endpoint smoke | PENDING | ~21 |
-| 3 | Notification UI Submission Cards | Interactive proxy smoke | PENDING | ~4 |
+| 2 | Mock Job Endpoint | Unit + endpoint smoke | **PASS** (22 unit + 6 smoke) | ~21 |
+| 3 | Notification UI Submission Cards | Interactive proxy smoke | **PASS** (3 scenarios) | ~4 |
 | 4 | LORA Training Data Generation | Unit + data validation | PENDING | ~8 |
 | 5 | Voice Routing (ASR -> LORA -> Queue) | Live pipeline E2E | PENDING | ~4 |
 
@@ -27,9 +27,9 @@ This document is the implementation blueprint for Surfaces 2-5. It describes wha
 ```mermaid
 flowchart TD
     S1["Surface 1<br/>Unit Tests + Smoke<br/>✅ PASS (1265 tests)"]
-    S2A["Surface 2 Layer A<br/>Job Unit Tests<br/>~15 tests"]
-    S2B["Surface 2 Layer B<br/>Mock Endpoint Smoke<br/>~6 scenarios"]
-    S3["Surface 3<br/>Proxy Integration<br/>~4 scenarios"]
+    S2A["Surface 2 Layer A<br/>Job Unit Tests<br/>✅ PASS (22 tests)"]
+    S2B["Surface 2 Layer B<br/>Mock Endpoint Smoke<br/>✅ PASS (6 scenarios)"]
+    S3["Surface 3<br/>Proxy Integration<br/>✅ PASS (3 scenarios)"]
     S4["Surface 4<br/>LORA Training Data<br/>~8 validation tests"]
     S5["Surface 5<br/>Voice Routing E2E<br/>~4 scenarios"]
 

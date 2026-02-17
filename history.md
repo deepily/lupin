@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.02.17 - Session 222 | SWE Team Training Data + Remove Superfluous Agentic JSONL
+
+#### Checkpoint | 2026.02.17 | SWE Team training data + remove unused agentic-only JSONL output
+
+**Accomplishments**:
+- Removed superfluous agentic-only JSONL write pipeline (stale regex, unused output)
+  - Deleted `write_agentic_job_ttv_split_to_jsonl()` + `get_agentic_job_train_test_validate_split()` from xml_coordinator.py
+  - Removed reference write block + cleaned validate/test/full blocks in run-agentic-intent-training.sh
+  - Removed agentic entries from analyze-training-distribution.py
+  - Deleted 3 orphaned agentic-job-xml-{train,test,validate}.jsonl files
+- SWE Team training data additions (from earlier in session)
+- Full regression: 1395 unit tests pass, 0 failures
+
+**Files**: xml_coordinator.py, run-agentic-intent-training.sh, analyze-training-distribution.py, +7 earlier files
+**Commit**: 6bae381
+
+---
+
 ### 2026.02.17 - Session 221 | TODO.md Structural Cleanup
 
 #### Checkpoint | 2026.02.17 | TODO.md structural cleanup

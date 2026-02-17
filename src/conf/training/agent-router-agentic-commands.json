@@ -1,6 +1,27 @@
 {
-    "agent router go to deep research"      : "/src/ephemera/prompts/data/synthetic-data-agent-routing-deep-research.txt",
-    "agent router go to podcast generator"   : "/src/ephemera/prompts/data/synthetic-data-agent-routing-podcast-generator.txt",
-    "agent router go to research to podcast" : "/src/ephemera/prompts/data/synthetic-data-agent-routing-research-to-podcast.txt",
-    "agent router go to claude code"         : "/src/ephemera/prompts/data/synthetic-data-agent-routing-claude-code.txt"
+    "agent router go to deep research" : {
+        "template_file" : "/src/ephemera/prompts/data/synthetic-data-agent-routing-deep-research.txt",
+        "placeholders"  : { "RESEARCH_TOPIC" : "research_topics" },
+        "args_key"      : "topic"
+    },
+    "agent router go to podcast generator" : {
+        "template_file" : "/src/ephemera/prompts/data/synthetic-data-agent-routing-podcast-generator.txt",
+        "placeholders"  : { "RESEARCH_TOPIC" : "research_topics" },
+        "args_key"      : "topic"
+    },
+    "agent router go to research to podcast" : {
+        "template_file" : "/src/ephemera/prompts/data/synthetic-data-agent-routing-research-to-podcast.txt",
+        "placeholders"  : { "DOCUMENT_PATH" : "document_paths" },
+        "args_key"      : "document_path"
+    },
+    "agent router go to claude code" : {
+        "template_file" : "/src/ephemera/prompts/data/synthetic-data-agent-routing-claude-code.txt",
+        "placeholders"  : { "TASK" : "claude_code_tasks" },
+        "args_key"      : "prompt"
+    },
+    "agent router go to swe team" : {
+        "template_file" : "/src/ephemera/prompts/data/synthetic-data-agent-routing-swe-team.txt",
+        "placeholders"  : { "FEATURE" : "claude_code_tasks" },
+        "args_key"      : "prompt"
+    }
 }

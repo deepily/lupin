@@ -23,13 +23,6 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 - [ ] **path-management** (MEDIUM) - `cu.get_project_root()` vs bootstrap (~150 lines)
 - [ ] **code-style-preferences** (LOW) - Spacing, alignment, getattr prohibition (~100 lines)
 
-### SWE Team Testing Docs Update (DONE)
-
-- [x] **[LUPIN] Update SWE team R&D docs for completed phases** - Session 221
-  - Updated `00-index.md`: Phases 2-4 → DONE, Testing → ACTIVE
-  - Updated `04-surfaces-2-5-testing-design.md`: Surfaces 2-3 → PASS
-  - Added SWE team entries to `all-agents.json`
-
 ### Voice Module Audit (MEDIUM)
 
 - [ ] **Review cosa_interface.py vs voice_io.py** - Audit for overlap, redundancy, and execution flow clarity
@@ -52,6 +45,7 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 
 ### Before Branch Merge
 
+- [ ] **[LUPIN] Run and remediate full testing harness** - Unit, smoke, WebSocket, and integration tests. Fix any regressions before merge.
 - [ ] **[LUPIN] CJ Flow verification: Dry run end-to-end testing for UNBOUNDED tasks** - Pending
 
 ### Implementation Plans
@@ -79,6 +73,7 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 
 ## Completed (Recent)
 
+- [x] **SWE Team Testing Docs Update** - Session 221: Updated 00-index.md (Phases 2-4 DONE), 04-surfaces testing design (Surfaces 2-3 PASS), all-agents.json entries
 - [x] **Post-Execution Feedback Loop** - Session 215-220: answer_is_correct tri-state, language/tone feedback, data collection pipeline. All 3 parts complete.
 - [x] **CoSA Submodule Commit Backlog** - Session 220: 16 files across 5 areas committed
 - [x] **SWE Team Surface 3 Proxy Crash Fix** - Session 219: 3 bugs fixed (ImportError, ValueError, expeditor pass-through). 1343 tests pass.

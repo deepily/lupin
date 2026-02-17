@@ -7,7 +7,7 @@
 | [Architecture Design](agent-team-architecture-design.md) | Phase 0 research — 6-role team, trust proxy, safety limits | DONE |
 | [Implementation Plan](01-implementation-current.md) | Active phase tracking (Phases 1-5) | ACTIVE |
 | [Architecture Decisions](02-architecture-decisions.md) | Design decisions traced to research | PENDING |
-| [Testing & Validation](03-testing-validation.md) | Test results, coverage, regression tracking | PENDING |
+| [Testing & Validation](03-testing-validation.md) | Test results, coverage, regression tracking | ACTIVE |
 | [Surfaces 2-5 Testing Design](04-surfaces-2-5-testing-design.md) | Implementation blueprint for non-unit test surfaces | ACTIVE |
 
 ## Phase Overview
@@ -15,9 +15,9 @@
 ```
 Phase 0: Research + Architecture Design .............. DONE
 Phase 1: Single Agent + Notification Integration ..... DONE
-Phase 2: Lead + Coder Delegation Loop ................ PENDING
-Phase 3: Add Tester to Loop .......................... PENDING
-Phase 4: Trust-Aware Proxy Expansion ................. PENDING
+Phase 2: Lead + Coder Delegation Loop ................ DONE
+Phase 3: Add Tester to Loop .......................... DONE
+Phase 4: Trust-Aware Proxy Expansion ................. DONE
 Phase 5: Full Team + CJ Flow Integration ............. PENDING
 ```
 
