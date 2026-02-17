@@ -1,5 +1,20 @@
 # Lupin Project History
 
+### 2026.02.17 - Session 221 | TODO.md Structural Cleanup
+
+#### Checkpoint | 2026.02.17 | TODO.md structural cleanup
+
+**Accomplishments**:
+- Moved 14 fully-completed sections from Pending to condensed one-liners in Completed (Recent)
+- Trimmed mixed sections (DataFrame CRUD, Before Branch Merge) to open items only
+- Pending section reduced from ~200 lines to ~74 lines (17 open items preserved)
+- 15 new condensed summary lines added to Completed (Recent)
+
+**Files**: TODO.md
+**Commit**: f914be7
+
+---
+
 ### 2026.02.17 - Session 220 | Wire progress_group_id Into All Agentic Iterative Loops
 
 #### Checkpoint | 2026.02.17 | Wire progress_group_id into PG, DR, SWE Team loops
@@ -24,7 +39,7 @@
 - Full regression: 1384 unit tests pass (1343 + 41 new), 0 failures
 
 **Files**: src/tests/unit/test_progress_group_passthrough.py
-**Commit**: 5bd7e52
+**Commit**: 1bb8cda
 
 ---
 
