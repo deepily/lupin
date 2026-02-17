@@ -3586,3 +3586,32 @@
     background: #e9ecef;
     font-weight: 600;
 }
+
+/* ========================================
+   PROGRESS GROUP IN-PLACE UPDATES
+   ======================================== */
+.progress-group-entry {
+    border-left: 3px solid #17a2b8;
+}
+.progress-group-counter {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 18px;
+    padding: 0 4px;
+    margin-left: 6px;
+    background: #17a2b8;
+    color: white;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 600;
+    vertical-align: middle;
+}
+.progress-group-updated {
+    animation: progressGroupPulse 0.6s ease-out;
+}
+@keyframes progressGroupPulse {
+    0%   { background-color: rgba( 23, 162, 184, 0.15 ); }
+    100% { background-color: transparent; }
+}

@@ -4876,6 +4876,7 @@ class NotificationsUI {
         /**
          * Append a notification to a job card's activity log.
          * Session 107: Simplified - searches all queue containers directly.
+         * Progress Group: If progress_group_id is set, updates existing entry in-place.
          *
          * Requires:
          *     - jobId is a valid job ID string
@@ -4884,7 +4885,8 @@ class NotificationsUI {
          * Ensures:
          *     - Finds job card in DOM (any queue)
          *     - Creates activity log if not exists
-         *     - Appends notification entry with timestamp
+         *     - If progress_group_id: updates existing entry in-place (or creates first)
+         *     - If no progress_group_id: appends notification entry (original behavior)
          *     - Auto-expands job card if collapsed
          */
         // Session 107: Search all queue containers for the job card
@@ -4901,8 +4903,26 @@ class NotificationsUI {
             activityLog = this.createJobActivityLog( jobCard );
         }
 
+        // Progress group: update existing entry in-place if one exists
+        const groupId = notification.progress_group_id;
+        if ( groupId ) {
+            const existing = activityLog.querySelector( `[data-progress-group="${groupId}"]` );
+            if ( existing ) {
+                this.updateProgressGroupEntry( existing, notification );
+                return;
+            }
+        }
+
         // Create notification entry - insert after header (newest first)
         const entry = this.createActivityLogEntry( notification );
+
+        // Tag with progress group ID if present (first occurrence)
+        if ( groupId ) {
+            entry.setAttribute( 'data-progress-group', groupId );
+            entry.classList.add( 'progress-group-entry' );
+            entry.setAttribute( 'data-progress-group-count', '1' );
+        }
+
         const header = activityLog.querySelector( '.activity-log-header' );
         if ( header && header.nextSibling ) {
             activityLog.insertBefore( entry, header.nextSibling );
@@ -4919,6 +4939,59 @@ class NotificationsUI {
         entry.scrollIntoView( { behavior: 'smooth', block: 'nearest' } );
 
         this.log( `[Session 107] Notification appended to job ${jobId}: ${notification.message.substring( 0, 50 )}...` );
+    }
+
+    updateProgressGroupEntry( element, notification ) {
+        /**
+         * Update an existing progress group entry in-place.
+         *
+         * Requires:
+         *     - element is a DOM element with data-progress-group attribute
+         *     - notification has message, timestamp
+         *
+         * Ensures:
+         *     - Updates message text and timestamp
+         *     - Increments and displays counter badge (#2, #3, ...)
+         *     - Triggers CSS pulse animation
+         */
+        // Update message text
+        const messageSpan = element.querySelector( '.activity-message' );
+        if ( messageSpan ) {
+            messageSpan.textContent = this.escapeHtml( notification.message );
+        }
+
+        // Update timestamp
+        const timestampSpan = element.querySelector( '.activity-timestamp' );
+        if ( timestampSpan ) {
+            const timestamp = notification.timestamp
+                ? new Date( notification.timestamp ).toLocaleTimeString()
+                : new Date().toLocaleTimeString();
+            timestampSpan.textContent = timestamp;
+        }
+
+        // Increment counter badge
+        let count = parseInt( element.getAttribute( 'data-progress-group-count' ) || '1', 10 ) + 1;
+        element.setAttribute( 'data-progress-group-count', String( count ) );
+
+        // Find or create counter badge
+        let counterBadge = element.querySelector( '.progress-group-counter' );
+        if ( !counterBadge ) {
+            counterBadge = document.createElement( 'span' );
+            counterBadge.className = 'progress-group-counter';
+            const messageEl = element.querySelector( '.activity-message' );
+            if ( messageEl ) {
+                messageEl.after( counterBadge );
+            } else {
+                element.appendChild( counterBadge );
+            }
+        }
+        counterBadge.textContent = `#${count}`;
+
+        // Trigger CSS pulse animation
+        element.classList.remove( 'progress-group-updated' );
+        // Force reflow to restart animation
+        void element.offsetWidth;
+        element.classList.add( 'progress-group-updated' );
     }
 
     createJobActivityLog( jobCard ) {
@@ -6937,6 +7010,16 @@ class NotificationsUI {
             return;
         }
 
+        // Progress group: update existing message in-place if one exists
+        const groupId = notification.progress_group_id;
+        if ( groupId && !isResponse ) {
+            const existing = container.querySelector( `[data-progress-group="${groupId}"]` );
+            if ( existing ) {
+                this.updateSenderProgressGroupEntry( existing, notification );
+                return;
+            }
+        }
+
         // Format timestamp for display (time only since date is in header)
         // Prefer backend-provided time_display (includes timezone abbreviation: "23:10 EST")
         // Fall back to JavaScript formatting for legacy data
@@ -6986,6 +7069,14 @@ class NotificationsUI {
         const messageDiv = document.createElement( 'div' );
         messageDiv.className = cssClass;
         messageDiv.id = notification.id || notification.id_hash || '';  // Set ID for TTS indicator
+
+        // Tag with progress group ID if present (first occurrence in sender card)
+        if ( groupId && !isResponse ) {
+            messageDiv.setAttribute( 'data-progress-group', groupId );
+            messageDiv.classList.add( 'progress-group-entry' );
+            messageDiv.setAttribute( 'data-progress-group-count', '1' );
+        }
+
         messageDiv.innerHTML = `
             <span class="message-time">${timeStr}</span>
             <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}${expiredBadge}${abstractIndicator}</span>
@@ -6996,6 +7087,76 @@ class NotificationsUI {
 
         // Update date accordion count
         this.updateDateAccordionCount( senderId, dateString );
+    }
+
+    updateSenderProgressGroupEntry( element, notification ) {
+        /**
+         * Update an existing progress group entry in-place (sender card path).
+         *
+         * Requires:
+         *     - element is a DOM element with data-progress-group attribute
+         *     - notification has message, timestamp/time_display
+         *
+         * Ensures:
+         *     - Updates message text and timestamp
+         *     - Increments and displays counter badge (#2, #3, ...)
+         *     - Triggers CSS pulse animation
+         */
+        // Clean message
+        let cleanMessage = notification.message || '';
+        cleanMessage = cleanMessage.replace( /^\[[A-Z]+\]\s*/, '' );
+
+        const maxLength = 120;
+        const displayMessage = cleanMessage.length > maxLength
+            ? cleanMessage.substring( 0, maxLength ) + '...'
+            : cleanMessage;
+
+        // Update message text
+        const messageSpan = element.querySelector( '.message-text' );
+        if ( messageSpan ) {
+            messageSpan.textContent = displayMessage;
+            messageSpan.title = cleanMessage.replace( /"/g, '&quot;' );
+        }
+
+        // Update timestamp
+        const timeSpan = element.querySelector( '.message-time' );
+        if ( timeSpan ) {
+            let timeStr;
+            if ( notification.time_display ) {
+                timeStr = notification.time_display;
+            } else {
+                const timestamp = new Date( notification.timestamp || Date.now() );
+                timeStr = timestamp.toLocaleTimeString( 'en-US', {
+                    hour   : '2-digit',
+                    minute : '2-digit',
+                    hour12 : false
+                });
+            }
+            timeSpan.textContent = timeStr;
+        }
+
+        // Increment counter badge
+        let count = parseInt( element.getAttribute( 'data-progress-group-count' ) || '1', 10 ) + 1;
+        element.setAttribute( 'data-progress-group-count', String( count ) );
+
+        // Find or create counter badge
+        let counterBadge = element.querySelector( '.progress-group-counter' );
+        if ( !counterBadge ) {
+            counterBadge = document.createElement( 'span' );
+            counterBadge.className = 'progress-group-counter';
+            const messageEl = element.querySelector( '.message-text' );
+            if ( messageEl ) {
+                messageEl.after( counterBadge );
+            } else {
+                element.appendChild( counterBadge );
+            }
+        }
+        counterBadge.textContent = `#${count}`;
+
+        // Trigger CSS pulse animation
+        element.classList.remove( 'progress-group-updated' );
+        void element.offsetWidth;
+        element.classList.add( 'progress-group-updated' );
     }
 
     /**

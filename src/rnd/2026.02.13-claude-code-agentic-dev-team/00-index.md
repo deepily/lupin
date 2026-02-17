@@ -8,6 +8,7 @@
 | [Implementation Plan](01-implementation-current.md) | Active phase tracking (Phases 1-5) | ACTIVE |
 | [Architecture Decisions](02-architecture-decisions.md) | Design decisions traced to research | PENDING |
 | [Testing & Validation](03-testing-validation.md) | Test results, coverage, regression tracking | PENDING |
+| [Surfaces 2-5 Testing Design](04-surfaces-2-5-testing-design.md) | Implementation blueprint for non-unit test surfaces | ACTIVE |
 
 ## Phase Overview
 

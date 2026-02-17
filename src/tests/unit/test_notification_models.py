@@ -634,6 +634,149 @@ class TestAsyncNotificationResponse:
 
 
 # ============================================================================
+# Progress Group ID Tests
+# ============================================================================
+
+class TestProgressGroupId:
+    """Test progress_group_id field on AsyncNotificationRequest."""
+
+    def test_default_is_none( self ):
+        """Test that progress_group_id defaults to None."""
+        req = AsyncNotificationRequest( message="Test message" )
+        assert req.progress_group_id is None
+
+    def test_valid_progress_group_id( self ):
+        """Test that valid progress_group_id patterns are accepted."""
+        valid_ids = [
+            "pg-a1b2c3d4",
+            "pg-00000000",
+            "pg-ffffffff",
+            "pg-abcdef01",
+        ]
+        for pg_id in valid_ids:
+            req = AsyncNotificationRequest( message="Test", progress_group_id=pg_id )
+            assert req.progress_group_id == pg_id
+
+    def test_invalid_progress_group_id_rejected( self ):
+        """Test that invalid progress_group_id patterns are rejected."""
+        invalid_ids = [
+            "pg-ABCDEF01",    # Uppercase hex
+            "pg-a1b2c3d",     # Too short (7 hex chars)
+            "pg-a1b2c3d4e",   # Too long (9 hex chars)
+            "a1b2c3d4",       # Missing pg- prefix
+            "PG-a1b2c3d4",    # Uppercase prefix
+            "pg_a1b2c3d4",    # Underscore instead of hyphen
+        ]
+        for pg_id in invalid_ids:
+            with pytest.raises( ValidationError ):
+                AsyncNotificationRequest( message="Test", progress_group_id=pg_id )
+
+    def test_included_in_to_api_params( self ):
+        """Test that progress_group_id is included in to_api_params() when set."""
+        req = AsyncNotificationRequest(
+            message="Test progress",
+            progress_group_id="pg-a1b2c3d4"
+        )
+        params = req.to_api_params()
+        assert "progress_group_id" in params
+        assert params[ "progress_group_id" ] == "pg-a1b2c3d4"
+
+    def test_excluded_from_to_api_params_when_none( self ):
+        """Test that progress_group_id is excluded from to_api_params() when None."""
+        req = AsyncNotificationRequest( message="Test no progress" )
+        params = req.to_api_params()
+        assert "progress_group_id" not in params
+
+    def test_coexists_with_job_id( self ):
+        """Test that progress_group_id works alongside job_id."""
+        req = AsyncNotificationRequest(
+            message="Test",
+            job_id="dr-a1b2c3d4",
+            progress_group_id="pg-12345678"
+        )
+        params = req.to_api_params()
+        assert params[ "job_id" ] == "dr-a1b2c3d4"
+        assert params[ "progress_group_id" ] == "pg-12345678"
+
+
+class TestNotificationItemProgressGroup:
+    """Test progress_group_id on NotificationItem and queue."""
+
+    def test_notification_item_stores_progress_group_id( self ):
+        """Test that NotificationItem stores progress_group_id."""
+        from cosa.rest.notification_fifo_queue import NotificationItem
+        item = NotificationItem( message="Step 1/5", progress_group_id="pg-abcdef01" )
+        assert item.progress_group_id == "pg-abcdef01"
+
+    def test_notification_item_default_none( self ):
+        """Test that NotificationItem defaults progress_group_id to None."""
+        from cosa.rest.notification_fifo_queue import NotificationItem
+        item = NotificationItem( message="No group" )
+        assert item.progress_group_id is None
+
+    def test_notification_item_to_dict_includes_progress_group_id( self ):
+        """Test that to_dict() includes progress_group_id."""
+        from cosa.rest.notification_fifo_queue import NotificationItem
+        item = NotificationItem( message="Step 2/5", progress_group_id="pg-12345678" )
+        d = item.to_dict()
+        assert "progress_group_id" in d
+        assert d[ "progress_group_id" ] == "pg-12345678"
+
+    def test_notification_item_to_dict_none_when_unset( self ):
+        """Test that to_dict() includes progress_group_id as None when unset."""
+        from cosa.rest.notification_fifo_queue import NotificationItem
+        item = NotificationItem( message="No group" )
+        d = item.to_dict()
+        assert "progress_group_id" in d
+        assert d[ "progress_group_id" ] is None
+
+
+class TestAgenticJobBaseProgressGroup:
+    """Test create_progress_group() on AgenticJobBase."""
+
+    def test_create_progress_group_format( self ):
+        """Test that create_progress_group() returns valid pg-{8hex} format."""
+        from cosa.agents.agentic_job_base import AgenticJobBase
+
+        class _TestJob( AgenticJobBase ):
+            JOB_TYPE = "test"
+            JOB_PREFIX = "tj"
+            def __init__( self ):
+                super().__init__( "u1", "t@t.com", "s1" )
+            @property
+            def last_question_asked( self ): return "test"
+            def do_all( self ): return ""
+            async def _execute( self ): return ""
+
+        job = _TestJob()
+        pg_id = job.create_progress_group()
+
+        assert pg_id.startswith( "pg-" )
+        assert len( pg_id ) == 11  # "pg-" + 8 hex chars
+        # Validate hex characters
+        hex_part = pg_id[ 3: ]
+        int( hex_part, 16 )  # Should not raise
+
+    def test_create_progress_group_unique( self ):
+        """Test that create_progress_group() generates unique IDs."""
+        from cosa.agents.agentic_job_base import AgenticJobBase
+
+        class _TestJob( AgenticJobBase ):
+            JOB_TYPE = "test"
+            JOB_PREFIX = "tj"
+            def __init__( self ):
+                super().__init__( "u1", "t@t.com", "s1" )
+            @property
+            def last_question_asked( self ): return "test"
+            def do_all( self ): return ""
+            async def _execute( self ): return ""
+
+        job = _TestJob()
+        ids = { job.create_progress_group() for _ in range( 20 ) }
+        assert len( ids ) == 20  # All unique
+
+
+# ============================================================================
 # Smoke Test
 # ============================================================================
 
