@@ -1,5 +1,21 @@
 # Lupin Project History
 
+#### Checkpoint | 2026.02.16 18:30 | Add answer_is_correct to solution snapshots with async verification
+
+**Files**: solution_snapshot.py, lancedb_solution_manager.py, running_fifo_queue.py, test_answer_is_correct.py (new)
+**Commit**: dbb3b20
+
+- Added `answer_is_correct` tri-state field (True/False/None) to SolutionSnapshot constructor and LanceDB schema
+- Created `_fire_correctness_check_async()` in RunningFifoQueue — non-blocking daemon thread sends yes/no notification after agent completion, persists response to LanceDB
+- Cache hits inherit stored `answer_is_correct` value (no re-asking)
+- Added `answer_is_correct` to WebSocket metadata in all 3 completion paths (base agent, snapshot, cached)
+- Dropped and recreated LanceDB `solution_snapshots` table for schema migration
+- 12 new unit tests (field defaults, for_current_user/get_copy preservation, LanceDB round-trip for all 3 states)
+- Full regression: 1331 unit tests pass, 0 failures
+- **Note**: CoSA submodule changes (3 files) need separate commit
+
+---
+
 #### Checkpoint | 2026.02.16 16:00 | SWE Team notification gap analysis implementation
 
 **Files**: orchestrator.py, config.py, state_files.py, cosa_interface.py, voice_io.py, test_swe_team_orchestrator.py

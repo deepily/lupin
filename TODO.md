@@ -245,14 +245,13 @@ Voice I/O enhancements driven by cosa-voice MCP notification system. Both requir
 
 ### Post-Execution Feedback Loop (HIGH)
 
-- [ ] **Create planning document**: `src/rnd/2026.02.XX-post-execution-feedback-plan.md`
-- [ ] **Implementation**
-  - **Goal**: After AgentBase-derived objects complete execution, collect user feedback via voice
-  - **Questions to ask** (via `ask_yes_no()` or `ask_multiple_choice()`):
-    1. "Was this response correct?" (yes/no)
-    2. "Was the language and tone appropriate?" (yes/no)
-  - **Data Collection**: Store feedback for potential fine-tuning / RLHF training data
-  - **Affects**: `agent_base.py`, `todo_fifo_queue.py`, possibly new feedback storage table
+- [x] **Part 1: answer_is_correct** - Session 215 (checkpoint): Added `answer_is_correct` tri-state field (True/False/None) to SolutionSnapshot, LanceDB schema, and async non-blocking verification via `_fire_correctness_check_async()` in RunningFifoQueue. 12 unit tests, 1331 total passing.
+  - **Files**: `solution_snapshot.py`, `lancedb_solution_manager.py`, `running_fifo_queue.py`, `test_answer_is_correct.py`
+- [ ] **Part 2: Language/tone feedback** - PENDING
+  - "Was the language and tone appropriate?" (yes/no)
+- [ ] **Part 3: Data collection pipeline** - PENDING
+  - Store feedback for potential fine-tuning / RLHF training data
+  - **Affects**: possibly new feedback storage table
 
 ---
 
