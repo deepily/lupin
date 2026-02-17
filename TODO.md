@@ -32,6 +32,7 @@ Last updated: 2026-02-16 (Top-1 + confirm checkpoint)
   - SWE Team notification gaps (5 files: orchestrator.py, config.py, state_files.py, cosa_interface.py, voice_io.py)
   - answer_is_correct field (3 files: solution_snapshot.py, lancedb_solution_manager.py, running_fifo_queue.py)
   - Semantic match simplification (3 files: lancedb_solution_manager.py, todo_fifo_queue.py, file_based_solution_manager.py)
+  - PEFT resume OOM known-issue comment (1 file: training/peft_trainer.py) — WILL NOT FIX annotation
 
 ### SWE Team Interactive Proxy Smoke Testing (HIGH — TOMORROW)
 

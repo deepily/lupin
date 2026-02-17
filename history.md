@@ -1,5 +1,18 @@
 # Lupin Project History
 
+### 2026.02.16 - Session 216 | PEFT Resume OOM Documentation (WILL NOT FIX)
+
+**Accomplishments**:
+- Documented PEFT trainer resume-path OOM as WILL NOT FIX (intractable — PyTorch CUDA allocator internals)
+- Added known-issue comment block in `peft_trainer.py` resume branch (CoSA submodule, pending separate commit)
+- R&D analysis already committed in Session 214 checkpoint: `src/rnd/2026.02.16-peft-resume-oom-cold-allocator-analysis.md`
+- Root cause: cold allocator creates monolithic ~16 GB segment; ~62 MB residual pins it after cleanup; vLLM subprocess OOMs on GPU 0
+- Updated CoSA submodule commit backlog in TODO.md
+
+**Files Modified**: TODO.md, history.md (CoSA: training/peft_trainer.py pending)
+
+---
+
 #### Checkpoint | 2026.02.16 19:30 | Simplify semantic match to top-1 + confirm strategy
 
 **Files**: lupin-app.ini, lupin-app-splainer.ini, lancedb_solution_manager.py, todo_fifo_queue.py, file_based_solution_manager.py
