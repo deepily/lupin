@@ -1,5 +1,21 @@
 # Lupin Project History
 
+### 2026.02.17 - Session 220 | Wire progress_group_id Into All Agentic Iterative Loops
+
+#### Checkpoint | 2026.02.17 | Wire progress_group_id into PG, DR, SWE Team loops
+
+**Accomplishments**:
+- Phase 1 (Infrastructure): Added `progress_group_id` + `queue_name` params to Podcast Generator `voice_io.notify()`, SWE Team `cosa_interface.notify_progress()`, orchestrator `_notify()`, and hooks `notification_hook()`
+- Phase 2 (Podcast Generator): Wired per-language group ID into audio generation loop (start/stitch/complete) + TTS milestone callback (`_audio_progress_callback`) — collapses 10+ cards into 1 per language
+- Phase 3 (Deep Research): Wired single `research_group_id` across subquery loop (3 notify calls) — collapses 6-20 cards into 1
+- Phase 4 (SWE Team): Wired 5 separate group IDs — delegation loop, coder SDK stream, tester SDK stream, verification cycle, re-delegation stream
+- Full regression: 1343 unit tests pass, 0 failures
+
+**Files**: voice_io.py (PG), cosa_interface.py (SWE), orchestrator.py (SWE+PG), hooks.py (SWE), cli.py (DR)
+**Commit**: [pending]
+
+---
+
 ### 2026.02.17 - Session 219 | Fix Factory ValueError on Non-Numeric Args (SWE Team Proxy)
 
 **Accomplishments**:
