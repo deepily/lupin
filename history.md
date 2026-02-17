@@ -1,5 +1,18 @@
 # Lupin Project History
 
+### 2026.02.17 - Session 219 | Fix Factory ValueError on Non-Numeric Args (SWE Team Proxy)
+
+**Accomplishments**:
+- Fixed HTTP 500 crash: `ValueError: invalid literal for int() with base 10: 'default'` in `agentic_job_factory.py`
+- Added `_SEMANTIC_NONE` set + `_parse_optional_int()`/`_parse_optional_float()` safe parsing helpers (Layer 1: factory)
+- Replaced 6 raw `int()`/`float()` casts across all 5 agentic job types (deep research, podcast, research-to-podcast, claude code, swe team)
+- Added `"timeout"` + `"default"` to expeditor skip guards at both batch and single paths (Layer 2: belt-and-suspenders)
+- Full regression: 1343 unit tests pass, 0 failures
+
+**Files Modified**: `src/cosa/rest/agentic_job_factory.py`, `src/cosa/agents/runtime_argument_expeditor/expeditor.py`
+
+---
+
 ### 2026.02.16 - Session 218 | SWE Team Surface 3 Proxy Integration + Phase 4 Gap-Fill Tests
 
 **Accomplishments**:

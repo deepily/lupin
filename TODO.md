@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-16 (Surface 3 proxy crash investigation)
+Last updated: 2026-02-17 (Session 219 — factory ValueError fix)
 
 ## Pending
 
@@ -35,14 +35,13 @@ Last updated: 2026-02-16 (Surface 3 proxy crash investigation)
   - PEFT resume OOM known-issue comment (1 file: training/peft_trainer.py) — WILL NOT FIX annotation
   - Surface 3 registry + CLI (4 files: agent_registry.py, swe_team/__main__.py, todo_fifo_queue.py, notification_proxy/config.py)
 
-### SWE Team Surface 3 Proxy Crash Fix (HIGH — TOMORROW)
+### SWE Team Surface 3 Proxy Crash Fix (DONE)
 
-- [ ] **[LUPIN] Fix notification proxy startup crash for SWE Team Surface 3** - Session TBD
-  - **Context**: Surface 3 implementation complete (registry, CLI, Q&A script, smoke test, 1343 unit tests pass), but proxy crashes on startup
-  - **Bug 1**: Truncated ImportError in `responder.py` line 21 → `llm_script_matcher.py` → `LlmClientFactory`/`PromptTemplateProcessor` import chain. Get full traceback by increasing `embedded_proxy.py` truncation (line 127: `stdout[:500]` → `stdout[:2000]`) or run proxy directly
-  - **Bug 2**: Profile name mismatch — smoke test uses `PROXY_PROFILE = "swe_team_test"` but `notification_proxy/__main__.py` line 78 validates against `choices = list( TEST_PROFILES.keys() )`. Only `"swe_team"` exists in TEST_PROFILES, not `"swe_team_test"`. Fix: either rename profile or add `swe_team_test` key
-  - **Checkpoint commit**: f5311c4
-  - **Files to investigate**: `embedded_proxy.py:127`, `notification_proxy/__main__.py:78`, `responder.py:21`, `llm_script_matcher.py`
+- [x] **[LUPIN] Fix notification proxy startup crash for SWE Team Surface 3** - Session 219
+  - **Bug 1** (proxy startup crash): Fixed in prior session — ImportError + profile name mismatch
+  - **Bug 2** (HTTP 500 ValueError): `int("default")` in `agentic_job_factory.py` — fixed with `_parse_optional_int()`/`_parse_optional_float()` safe helpers + `_SEMANTIC_NONE` skip set
+  - **Bug 3** (expeditor pass-through): Added `"timeout"` + `"default"` to expeditor skip guards (belt-and-suspenders)
+  - 1343 unit tests pass, 0 failures
 
 ### SWE Team Testing Docs Update (MEDIUM)
 
