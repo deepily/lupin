@@ -848,6 +848,7 @@ are prefixed with `/api` and tagged as `notifications`.
 | `job_id`             | string   | No       | `null`     | Agentic job ID for routing to job cards ( e.g., `dr-a1b2c3d4` )                               |
 | `queue_name`         | string   | No       | `null`     | Queue where job is running ( `run`/`todo`/`done` ). Used for provisional job card registration  |
 | `suppress_ding`      | boolean  | No       | `false`    | Suppress notification sound while still speaking via TTS                                       |
+| `progress_group_id`  | string   | No       | `null`     | Progress group ID for in-place DOM updates. Notifications sharing this ID update a single element instead of appending new ones. Format: `pg-{8 hex chars}` (e.g., `pg-a1b2c3d4`) |
 
 #### Fire-and-Forget Response ( `response_requested=false` )
 
@@ -1974,12 +1975,13 @@ class AsyncNotificationRequest( BaseModel ):
 | `job_id`            | `Optional[str]`               | `None`                               | Regex pattern (see Section 5.5)       |
 | `suppress_ding`     | `bool`                        | `False`                              | Boolean flag                          |
 | `queue_name`        | `Optional[str]`               | `None`                               | Pattern: `^(run|todo|done|dead)$`     |
+| `progress_group_id` | `Optional[str]`               | `None`                               | Pattern: `^pg-[a-f0-9]{8}$`          |
 
 **Method**: `to_api_params() -> dict`
 
 Same conversion logic as `NotificationRequest.to_api_params()`, minus
 `response_requested`, `response_type`, and `timeout_seconds` fields. Includes
-`queue_name` for provisional job card registration.
+`queue_name` for provisional job card registration, and `progress_group_id` for in-place DOM updates.
 
 ---
 
@@ -2266,6 +2268,7 @@ class NotificationItem:
 | `suppress_ding`      | `bool`          | `False`                              | Skip notification sound for conversational TTS |
 | `job_id`             | `Optional[str]` | `None`                               | Agentic job ID for routing to job cards        |
 | `queue_name`         | `Optional[str]` | `None`                               | Queue where job is running (run/todo/done/dead) |
+| `progress_group_id`  | `Optional[str]` | `None`                               | Progress group ID for in-place DOM updates |
 
 **Methods**:
 
@@ -3053,7 +3056,8 @@ with the full notification payload.
         "abstract"           : null,
         "suppress_ding"      : false,
         "job_id"             : null,
-        "queue_name"         : null
+        "queue_name"         : null,
+        "progress_group_id"  : null
     }
 }
 ```

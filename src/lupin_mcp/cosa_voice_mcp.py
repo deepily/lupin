@@ -313,7 +313,8 @@ def notify(
     priority: str = "medium",
     abstract: Optional[ str ] = None,
     job_id: Optional[ str ] = None,
-    suppress_ding: bool = False
+    suppress_ding: bool = False,
+    progress_group_id: Optional[ str ] = None
 ) -> str:
     """
     Announce something to the user without waiting for response.
@@ -329,6 +330,8 @@ def notify(
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
         suppress_ding: Suppress notification sound while still speaking via TTS (default False)
+        progress_group_id: Optional progress group ID (pg-{8 hex chars}) for in-place DOM updates.
+            Notifications sharing this ID update a single element instead of appending new ones.
 
     Returns:
         Delivery status message
@@ -349,7 +352,8 @@ def notify(
             sender_id=SENDER_ID,
             abstract=_normalize_abstract( abstract ),
             job_id=job_id,
-            suppress_ding=suppress_ding
+            suppress_ding=suppress_ding,
+            progress_group_id=progress_group_id
         )
     except ( ValidationError, ValueError ) as e:
         logger.error( f"Validation error: {e}" )
