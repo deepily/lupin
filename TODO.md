@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-16 (TODO add)
+Last updated: 2026-02-16 (Top-1 + confirm checkpoint)
 
 ## Pending
 
@@ -15,7 +15,7 @@ Last updated: 2026-02-16 (TODO add)
 
 ### Pre-Execution Confirmation of Top Semantically Similar Matches (HIGH)
 
-- [ ] **[LUPIN] Pre-execution confirmation of top semantically similar matches** - Before executing a cached/semantic match, present the top similar matches to the user for confirmation via voice. Prevents stale or incorrect cache hits from being served silently.
+- [x] **[LUPIN] Pre-execution confirmation of top semantically similar matches** - ✅ COMPLETE (2026-02-16). Implemented "top-1 + confirm" strategy: removed 95% hard floor, 3-tier decision (100% auto-accept, >=90% ask user, <90% log and skip).
 
 ### Agentic Software Development Team (HIGH)
 
@@ -25,6 +25,13 @@ Last updated: 2026-02-16 (TODO add)
   - Phase 3: Tester verification loop — pytest runner, coder-tester iteration (31 unit tests, 946 total)
   - Phase 4: Trust-Aware Decision Proxy — 4-layer architecture, 6 engineering categories, trust tracker L1-L5, circuit breaker, ratification API (301 unit tests, 1265 total)
   - **Plan**: `src/rnd/2026.02.14-swe-team-phase-4-decision-proxy-architecture.md`
+
+### CoSA Submodule Commit Backlog (HIGH)
+
+- [ ] **[LUPIN] Commit CoSA submodule changes from Feb 16 sessions** - Multiple sessions modified CoSA files but couldn't commit from parent context:
+  - SWE Team notification gaps (5 files: orchestrator.py, config.py, state_files.py, cosa_interface.py, voice_io.py)
+  - answer_is_correct field (3 files: solution_snapshot.py, lancedb_solution_manager.py, running_fifo_queue.py)
+  - Semantic match simplification (3 files: lancedb_solution_manager.py, todo_fifo_queue.py, file_based_solution_manager.py)
 
 ### SWE Team Interactive Proxy Smoke Testing (HIGH — TOMORROW)
 
