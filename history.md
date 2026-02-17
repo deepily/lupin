@@ -1,5 +1,17 @@
 # Lupin Project History
 
+### 2026.02.16 - Session 217 | Document progress_group_id in Notification API Docs
+
+**Accomplishments**:
+- Documented `progress_group_id` parameter across all 5 relevant sections of `notification-api.md` (query params, AsyncNotificationRequest, to_api_params, NotificationItem, WebSocket payload)
+- Added `progress_group_id` to MCP tool docstring in `cosa_voice_mcp.py`
+- Feature was fully implemented but undocumented — this closes the documentation gap
+
+**Files Modified**: `src/docs/notification-api.md` (+5 insertions), `src/lupin_mcp/cosa_voice_mcp.py` (+3 lines)
+**Commit**: 51b3bff
+
+---
+
 ### 2026.02.16 - Session 216 | PEFT Resume OOM Documentation (WILL NOT FIX)
 
 **Accomplishments**:
