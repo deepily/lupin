@@ -1,5 +1,24 @@
 # Lupin Project History
 
+#### Checkpoint | 2026.02.16 16:00 | SWE Team notification gap analysis implementation
+
+**Files**: orchestrator.py, config.py, state_files.py, cosa_interface.py, voice_io.py, test_swe_team_orchestrator.py
+
+- Implemented 3-tier SWE Team Notification Gap Analysis plan (20 gaps addressed)
+- **Tier 1a**: Added 6 missing progress notifications (verification pass/fail, delegation errors, rich completion abstract)
+- **Tier 1b**: Added escalation `request_decision()` after max verification retries with 3 options
+- **Tier 2a**: Added `job_id` passthrough + `_notify()` helper for CJ Flow readiness
+- **Tier 2b**: Added `state["artifacts"]` dict for CJ Flow-compatible output
+- **Tier 1c**: Added `ResultMessage` forwarding through `notification_hook` in 3 SDK loops
+- **Tier 2c**: Added `_emit_state()` callback at 8 state transitions for WebSocket visibility
+- **Tier 3a**: Added contract documentation to cosa_interface.py and voice_io.py
+- **Tier 3b**: Wired decision proxy via `_gated_confirmation()` adapter (trust_mode: disabled/shadow/suggest/active)
+- **Tier 3c**: Added `on_log` callback to ProgressLog, wired to notifications when `narrate_progress=True`
+- Created 32 new unit tests in `test_swe_team_orchestrator.py`; 183 SWE team tests pass, 0 failures
+- **Note**: CoSA submodule changes (5 files) need separate commit
+
+---
+
 #### Checkpoint | 2026.02.16 14:30 | Phase 4c/4e gap-filling unit tests
 
 **Files**: test_trust_tracker.py, test_circuit_breaker.py, test_engineering_decisions.py (+1 more)
