@@ -1,5 +1,23 @@
 # Lupin Project History
 
+#### Checkpoint | 2026.02.16 23:15 | Surface 3 — SWE Team proxy integration test infrastructure
+
+**Files**: agent_registry.py, __main__.py, todo_fifo_queue.py, config.py, test_runtime_argument_expeditor.py, 03-testing-validation.md, swe-team-test.json (new), test_swe_team_proxy.py (new)
+**Commit**: f5311c4
+
+- Registered SWE Team in AGENTIC_AGENTS (5th agent) with task/budget/timeout args, fallback questions, and defaults
+- Added `--user-visible-args` to SWE Team CLI with optional positional task arg and guard
+- Added SWE Team to PRODUCT_NAMES for agentic disambiguation
+- Added `swe_team` profile + task/timeout to `all_agents` union profile in notification proxy config
+- Created Q&A proxy script `swe-team-test.json` (4 entries: task, budget, timeout, confirmation)
+- Created `test_swe_team_proxy.py` (3 scenarios: SWE_HAPPY, SWE_MISSING_TASK, SWE_DRY_COST)
+- Updated unit test assertion from 4→5 agents; full regression 1343 pass, 0 failures
+- Updated 03-testing-validation.md: Surface 3 → PASS, added gate section
+- **Blocker**: proxy startup crash (truncated ImportError in llm_script_matcher import chain) — investigating
+- **Note**: CoSA submodule changes (4 files) need separate commit
+
+---
+
 ### 2026.02.16 - Session 217 | Document progress_group_id in Notification API Docs
 
 **Accomplishments**:

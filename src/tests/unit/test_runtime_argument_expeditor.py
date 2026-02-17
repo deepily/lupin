@@ -356,9 +356,9 @@ class TestAgentRegistry:
         _help_cache.clear()
         _user_visible_cache.clear()
 
-    def test_registry_has_four_agents( self ):
-        """Registry contains exactly 4 agentic agents."""
-        assert len( AGENTIC_AGENTS ) == 4
+    def test_registry_has_five_agents( self ):
+        """Registry contains exactly 5 agentic agents."""
+        assert len( AGENTIC_AGENTS ) == 5
 
     def test_all_entries_required_keys( self ):
         """All registry entries have the required keys."""
