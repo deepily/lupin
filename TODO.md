@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-16 (Top-1 + confirm checkpoint)
+Last updated: 2026-02-16 (Surface 3 proxy crash investigation)
 
 ## Pending
 
@@ -33,15 +33,21 @@ Last updated: 2026-02-16 (Top-1 + confirm checkpoint)
   - answer_is_correct field (3 files: solution_snapshot.py, lancedb_solution_manager.py, running_fifo_queue.py)
   - Semantic match simplification (3 files: lancedb_solution_manager.py, todo_fifo_queue.py, file_based_solution_manager.py)
   - PEFT resume OOM known-issue comment (1 file: training/peft_trainer.py) — WILL NOT FIX annotation
+  - Surface 3 registry + CLI (4 files: agent_registry.py, swe_team/__main__.py, todo_fifo_queue.py, notification_proxy/config.py)
 
-### SWE Team Interactive Proxy Smoke Testing (HIGH — TOMORROW)
+### SWE Team Surface 3 Proxy Crash Fix (HIGH — TOMORROW)
 
-- [ ] **[LUPIN] Update SWE team testing docs + begin interactive proxy smoke testing** - Session TBD
+- [ ] **[LUPIN] Fix notification proxy startup crash for SWE Team Surface 3** - Session TBD
+  - **Context**: Surface 3 implementation complete (registry, CLI, Q&A script, smoke test, 1343 unit tests pass), but proxy crashes on startup
+  - **Bug 1**: Truncated ImportError in `responder.py` line 21 → `llm_script_matcher.py` → `LlmClientFactory`/`PromptTemplateProcessor` import chain. Get full traceback by increasing `embedded_proxy.py` truncation (line 127: `stdout[:500]` → `stdout[:2000]`) or run proxy directly
+  - **Bug 2**: Profile name mismatch — smoke test uses `PROXY_PROFILE = "swe_team_test"` but `notification_proxy/__main__.py` line 78 validates against `choices = list( TEST_PROFILES.keys() )`. Only `"swe_team"` exists in TEST_PROFILES, not `"swe_team_test"`. Fix: either rename profile or add `swe_team_test` key
+  - **Checkpoint commit**: f5311c4
+  - **Files to investigate**: `embedded_proxy.py:127`, `notification_proxy/__main__.py:78`, `responder.py:21`, `llm_script_matcher.py`
+
+### SWE Team Testing Docs Update (MEDIUM)
+
+- [ ] **[LUPIN] Update SWE team R&D docs for completed phases** - Session TBD
   - Update `src/rnd/2026.02.13-claude-code-agentic-dev-team/00-index.md`: Phases 2-5 status (Phases 2, 3, 4 are DONE, not PENDING)
-  - Update `src/rnd/2026.02.13-claude-code-agentic-dev-team/03-testing-validation.md`: Add Phase 4 results (214 unit tests, trust tracker, circuit breaker, engineering proxy, decision store), Phase 4 gate checklist, regression row (946 → 1160)
-  - Create new Q&A script: `src/conf/notification-proxy-scripts/swe-team.json` for SWE team decision proxy notifications
-  - Create new test profile in `config.py:TEST_PROFILES` for SWE team
-  - Write smoke test scenarios for the decision proxy agent
   - Add SWE team sender_id to `all-agents.json`
 
 ### DataFrame CRUD with Voice I/O (Session 132-136)

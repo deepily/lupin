@@ -1,20 +1,19 @@
 # Lupin Project History
 
-#### Checkpoint | 2026.02.16 23:15 | Surface 3 — SWE Team proxy integration test infrastructure
+### 2026.02.16 - Session 218 | SWE Team Surface 3 Proxy Integration + Phase 4 Gap-Fill Tests
 
-**Files**: agent_registry.py, __main__.py, todo_fifo_queue.py, config.py, test_runtime_argument_expeditor.py, 03-testing-validation.md, swe-team-test.json (new), test_swe_team_proxy.py (new)
-**Commit**: f5311c4
+**Accomplishments**:
+- Phase 4c/4e gap-filling: 87 new unit tests across trust_tracker, circuit_breaker, engineering_decisions (1265 total)
+- Surface 2A: SWE Team Job class, factory registration, FastAPI router (22 tests, 1319 total)
+- Surface 2B: Mock endpoint scenarios — 6/6 pass (dry_run, agent_type, cost, timestamps, missing/empty task)
+- Surface 3: Registered SWE Team in AGENTIC_AGENTS (5th agent), added `--user-visible-args` to CLI, created Q&A proxy script `swe-team-test.json`, created `test_swe_team_proxy.py` (3 scenarios)
+- Added SWE Team to PRODUCT_NAMES + `swe_team` profile to notification proxy config
+- Full regression: 1343 unit tests pass, 0 failures
+- **Blocker**: Proxy startup crash — two bugs identified: (1) truncated ImportError in llm_script_matcher import chain, (2) profile name mismatch (`swe_team_test` not in TEST_PROFILES choices). Deferred to tomorrow.
 
-- Registered SWE Team in AGENTIC_AGENTS (5th agent) with task/budget/timeout args, fallback questions, and defaults
-- Added `--user-visible-args` to SWE Team CLI with optional positional task arg and guard
-- Added SWE Team to PRODUCT_NAMES for agentic disambiguation
-- Added `swe_team` profile + task/timeout to `all_agents` union profile in notification proxy config
-- Created Q&A proxy script `swe-team-test.json` (4 entries: task, budget, timeout, confirmation)
-- Created `test_swe_team_proxy.py` (3 scenarios: SWE_HAPPY, SWE_MISSING_TASK, SWE_DRY_COST)
-- Updated unit test assertion from 4→5 agents; full regression 1343 pass, 0 failures
-- Updated 03-testing-validation.md: Surface 3 → PASS, added gate section
-- **Blocker**: proxy startup crash (truncated ImportError in llm_script_matcher import chain) — investigating
-- **Note**: CoSA submodule changes (4 files) need separate commit
+**Files Modified**: agent_registry.py, swe_team/__main__.py, todo_fifo_queue.py, notification_proxy/config.py, test_runtime_argument_expeditor.py, 03-testing-validation.md, swe-team-test.json (new), test_swe_team_proxy.py (new)
+**Checkpoints**: d5f5e24 (Phase 4 tests), f5311c4 (Surface 3 infrastructure)
+**Note**: CoSA submodule changes (4 files) need separate commit
 
 ---
 
