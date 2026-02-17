@@ -12,7 +12,19 @@
 - Full regression: 1343 unit tests pass, 0 failures
 
 **Files**: voice_io.py (PG), cosa_interface.py (SWE), orchestrator.py (SWE+PG), hooks.py (SWE), cli.py (DR)
-**Commit**: [pending]
+**Commit**: d635876 (Lupin), 178dfaf (CoSA)
+
+#### Checkpoint 2 | 2026.02.17 | Add 41 unit tests for progress_group_id passthrough
+
+**Accomplishments**:
+- Added `test_progress_group_passthrough.py` with 41 tests covering all 6 modified files
+- Phase 1 tests: Mock-based passthrough verification (voice_io, cosa_interface, orchestrator._notify, hooks)
+- Phase 2-4 tests: Source inspection verification (group ID generation + wiring in all loops)
+- Cross-cutting: pg-{8hex} format validation (valid/invalid/fuzz with 100 random UUIDs)
+- Full regression: 1384 unit tests pass (1343 + 41 new), 0 failures
+
+**Files**: src/tests/unit/test_progress_group_passthrough.py
+**Commit**: 5bd7e52
 
 ---
 
