@@ -1,5 +1,21 @@
 # Lupin Project History
 
+### 2026.02.18 - Session 231 | Fix Duplicate Notification + Raw JSON Response Rendering
+
+#### Checkpoint | 2026-02-18 | Fix duplicate "submitted" notification + human-readable response values
+
+**Accomplishments**:
+- **Bug D — Duplicate "submitted" notification**: Added early `return` after the `AGENTIC_AGENTS` branch in `push_job()` — prevents fallthrough to common post-chain code that sent a second `_notify( msg, job=None )` without `job_id`, routing to the wrong sender card (Lupin/Claude Code accordion instead of the job card)
+- **Bug E — Raw JSON in response values**: Added `formatResponseValue()` helper method to `notifications.js` that unwraps the `{value, source}` JSON envelope and formats nested `answers` dicts as readable `key: value` pairs; updated `renderInteractionItem()` to use it
+- Full regression: 1434 unit tests passing, 0 failures
+
+**Files**: 1 modified (Lupin repo), 1 modified (CoSA repo — commit separately)
+- `src/cosa/rest/todo_fifo_queue.py` — Early return after agentic branch (line 738-739) *(CoSA)*
+- `src/fastapi_app/static/js/notifications.js` — `formatResponseValue()` + updated `renderInteractionItem()`
+- `history.md` — this entry
+
+---
+
 ### 2026.02.18 - Session 230 | Expeditor UX Bugs + Speculative Job ID for Agentic Routing
 
 #### Checkpoint | 2026-02-18 | Fix 3 expeditor UX bugs + speculative job card for agentic routing

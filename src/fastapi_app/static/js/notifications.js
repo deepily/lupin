@@ -5569,6 +5569,65 @@ class NotificationsUI {
         }
     }
 
+    formatResponseValue( responseValue ) {
+        /**
+         * Format a notification response value for human-readable display.
+         * Parses JSON envelope { value, source } and formats the inner value.
+         *
+         * Requires:
+         *   - responseValue is a string, object, or primitive
+         *
+         * Ensures:
+         *   - returns an HTML-safe string with the human-readable value
+         *   - nested JSON answers are formatted as "key: value, ..." pairs
+         */
+        let parsed = responseValue;
+
+        // Parse string to object if needed
+        if ( typeof parsed === 'string' ) {
+            try {
+                parsed = JSON.parse( parsed );
+            } catch ( e ) {
+                return this.escapeHtml( parsed );  // Not JSON — show as-is
+            }
+        }
+
+        // Extract inner value from { value, source } envelope
+        if ( parsed && typeof parsed === 'object' && 'value' in parsed ) {
+            let innerValue = parsed.value;
+
+            // Try parsing nested JSON (open_ended_batch wraps answers as string)
+            if ( typeof innerValue === 'string' ) {
+                try {
+                    const nested = JSON.parse( innerValue );
+                    if ( nested && typeof nested === 'object' ) {
+                        // Format answers dict as readable key-value pairs
+                        if ( nested.answers && typeof nested.answers === 'object' ) {
+                            const pairs = Object.entries( nested.answers )
+                                .map( ( [ k, v ] ) => `${k}: ${v}` )
+                                .join( ', ' );
+                            return this.escapeHtml( pairs );
+                        }
+                        // Generic object — format as key-value pairs
+                        const pairs = Object.entries( nested )
+                            .map( ( [ k, v ] ) => `${k}: ${v}` )
+                            .join( ', ' );
+                        return this.escapeHtml( pairs );
+                    }
+                } catch ( e ) {
+                    // Not nested JSON — use the string value directly
+                }
+                return this.escapeHtml( innerValue );
+            }
+
+            // Non-string inner value
+            return this.escapeHtml( String( innerValue ) );
+        }
+
+        // Fallback: stringify the object
+        return this.escapeHtml( JSON.stringify( parsed ) );
+    }
+
     renderInteractionItem( interaction ) {
         /**
          * Render a single notification interaction.
@@ -5590,13 +5649,11 @@ class NotificationsUI {
 
         let responseHtml = '';
         if ( interaction.response_requested && interaction.response_value ) {
-            const responseStr = typeof interaction.response_value === 'object'
-                ? JSON.stringify( interaction.response_value )
-                : String( interaction.response_value );
+            const responseStr = this.formatResponseValue( interaction.response_value );
             responseHtml = `
                 <div class="interaction-response">
                     <span class="response-label">Your response:</span>
-                    <span class="response-value">${this.escapeHtml( responseStr )}</span>
+                    <span class="response-value">${responseStr}</span>
                 </div>
             `;
         }
