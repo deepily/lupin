@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.02.18 - Session 228 | Mount ~/.lora_env into Docker container
+
+#### Checkpoint | 2026-02-18 | Add .lora_env volume mount to start-docker-lupin.sh
+
+**Accomplishments**:
+- Fixed LoRA env var resolution in Docker — Session 227's `main.py` parser works natively but inside the container `/root/.lora_env` didn't exist
+- Added `-v "$HOME/.lora_env:/root/.lora_env:ro"` read-only volume mount to `docker run` command in `start-docker-lupin.sh`
+- Verified: file mounts correctly, parser reads it, env vars resolve in-process (note: `docker exec` can't see them — it spawns a separate process)
+
+**Files**: 1 modified (scripts repo)
+- `$DEEPILY_PROJECTS_DIR/scripts/server/start-docker-lupin.sh` — `.lora_env` volume mount (commit `4ccbcfc` in scripts repo)
+
+---
+
 ### 2026.02.18 - Session 227 | Fix LoRA env var resolution in FastAPI server
 
 #### Checkpoint | 2026-02-18 | Load ~/.lora_env at Python level in main.py + belt-and-suspenders in shell script
