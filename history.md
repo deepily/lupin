@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.02.17 - Session 222 (continued) | Smoke Test Consistency Cleanup
+
+#### Checkpoint | 2026.02.17 | Pattern A consistency for all smoke test files
+
+**Accomplishments**:
+- Converted 2 redundant smoke test files to thin wrappers importing source module QSTs (orchestrator, queue_consumer)
+- Converted 3 legitimate smoke test files to Pattern A: QST authoritative, thin `test_*` wrapper (decision_proxy, answer_feedback, simple_agents)
+- Converted 1 borderline smoke test to Pattern A (agentic_disambiguation)
+- Added pytest `test_*` wrappers to 4 orphaned files (crud_dataframes, deep_research_submit, token_refresh, vllm_client)
+- Fixed 1 broken file: renamed `test_*` functions with non-fixture params to `_run_*` helpers (notifications_progress_group)
+- Added `test_embedding_benchmark()` wrapper to embedding benchmark file
+- Result: 37 smoke tests collected, zero ERRORs, zero orphaned files; 1395 unit tests passing
+
+**Files**: 12 smoke test files in `src/tests/smoke/`
+
+---
+
 ### 2026.02.17 - Session 220 (continued) | Progress Group History Accumulation
 
 #### Checkpoint 3 | 2026.02.17 | Backend persistence + frontend accordion for progress group history

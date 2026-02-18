@@ -365,6 +365,11 @@ def quick_smoke_test():
     print( "Embedding benchmark completed." )
 
 
+def test_embedding_benchmark():
+    """Pytest entry point — delegates to standalone QST."""
+    quick_smoke_test()
+
+
 if __name__ == "__main__":
     # Bootstrap path for standalone execution
     lupin_root = os.environ.get( "LUPIN_ROOT" )

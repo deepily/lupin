@@ -95,7 +95,7 @@ def login_and_get_auth():
         return None, None
 
 
-def test_valid_progress_group_id( auth_header, test_user ):
+def _run_valid_progress_group_id( auth_header, test_user ):
     """
     Test 1: Single notification with progress_group_id.
 
@@ -136,7 +136,7 @@ def test_valid_progress_group_id( auth_header, test_user ):
         return False
 
 
-def test_five_step_progress_series( auth_header, test_user ):
+def _run_five_step_progress_series( auth_header, test_user ):
     """
     Test 2: 5-step progress series with same progress_group_id.
 
@@ -181,7 +181,7 @@ def test_five_step_progress_series( auth_header, test_user ):
         return False
 
 
-def test_mixed_grouped_and_standalone( auth_header, test_user ):
+def _run_mixed_grouped_and_standalone( auth_header, test_user ):
     """
     Test 3: Mixed grouped + standalone notifications.
 
@@ -273,7 +273,7 @@ def test_mixed_grouped_and_standalone( auth_header, test_user ):
         return False
 
 
-def test_with_job_id( auth_header, test_user ):
+def _run_with_job_id( auth_header, test_user ):
     """
     Test 4: Grouped notifications with job_id (job card activity log path).
 
@@ -319,7 +319,7 @@ def test_with_job_id( auth_header, test_user ):
         return False
 
 
-def test_backward_compat_no_group( auth_header, test_user ):
+def _run_backward_compat_no_group( auth_header, test_user ):
     """
     Test 5: Backward compatibility — no progress_group_id.
 
@@ -393,11 +393,11 @@ def run_all_tests():
     # Run tests
     results = []
 
-    results.append( ( "Valid progress_group_id",       test_valid_progress_group_id( auth_header, test_user ) ) )
-    results.append( ( "5-Step Progress Series",        test_five_step_progress_series( auth_header, test_user ) ) )
-    results.append( ( "Mixed Grouped + Standalone",    test_mixed_grouped_and_standalone( auth_header, test_user ) ) )
-    results.append( ( "With job_id (Job Card Path)",   test_with_job_id( auth_header, test_user ) ) )
-    results.append( ( "Backward Compat (No Group)",    test_backward_compat_no_group( auth_header, test_user ) ) )
+    results.append( ( "Valid progress_group_id",       _run_valid_progress_group_id( auth_header, test_user ) ) )
+    results.append( ( "5-Step Progress Series",        _run_five_step_progress_series( auth_header, test_user ) ) )
+    results.append( ( "Mixed Grouped + Standalone",    _run_mixed_grouped_and_standalone( auth_header, test_user ) ) )
+    results.append( ( "With job_id (Job Card Path)",   _run_with_job_id( auth_header, test_user ) ) )
+    results.append( ( "Backward Compat (No Group)",    _run_backward_compat_no_group( auth_header, test_user ) ) )
 
     # Summary
     print( f"\n{'=' * 60}" )
@@ -421,6 +421,26 @@ def run_all_tests():
     else:
         print( "✓ All tests passed successfully" )
         return 0
+
+
+def quick_smoke_test():
+    """
+    Quick smoke test for progress group notifications.
+
+    Requires:
+        - Server running on BASE_URL (localhost:7999)
+        - LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables set
+
+    Ensures:
+        - Returns True if all 5 notification tests pass
+        - Returns False on any failure or connection error
+    """
+    return run_all_tests() == 0
+
+
+def test_notifications_progress_group():
+    """Pytest entry point."""
+    assert quick_smoke_test()
 
 
 if __name__ == "__main__":

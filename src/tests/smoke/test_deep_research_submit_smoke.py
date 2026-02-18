@@ -148,6 +148,11 @@ def quick_smoke_test():
         return False
 
 
+def test_deep_research_submit():
+    """Pytest entry point."""
+    assert quick_smoke_test()
+
+
 if __name__ == "__main__":
     success = quick_smoke_test()
     sys.exit( 0 if success else 1 )
