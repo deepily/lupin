@@ -1,5 +1,20 @@
 # Lupin Project History
 
+### 2026.02.17 - Session 223 | Testing Skill Documentation — Pattern A Authority Model
+
+#### Checkpoint | 2026.02.17 | Update testing-development skill with Pattern A authority model
+
+**Accomplishments**:
+- Updated `~/.claude/skills/testing-development/SKILL.md`: Added "Smoke Test Authority Model (Pattern A)" section between Three-Tier table and Quick Commands; revised Key Principles to 7 items with Pattern A principles first (source QST is truth, wrappers never duplicate, every file has test_*)
+- Rewrote `~/.claude/skills/testing-development/references/smoke-tests.md`: Replaced Option 1/2 with Pattern A two-layer architecture (source QST + thin pytest wrapper), added decision tree (5 categories: thin wrapper, subsystem, offline, cross-object, unit-in-disguise), return convention (True/False vs raises), canonical file anatomy, naming conventions, orphan detection audit commands, nuanced anti-patterns table with exceptions
+- Updated `~/.claude/skills/testing-development/references/unit-tests.md`: Added "Boundary: When a Smoke Test Is Really a Unit Test" section with 4 smell indicators (@patch, MagicMock, method-level testing, fixture mocks)
+- Documentation only — no code changes to actual test files
+- Verified all examples match real Lupin smoke test files (orchestrator dry-run, decision proxy offline, deep research dry-run)
+
+**Files**: 3 skill documentation files in `~/.claude/skills/testing-development/` (outside repo)
+
+---
+
 ### 2026.02.17 - Session 222 (continued) | Smoke Test Consistency Cleanup
 
 #### Checkpoint | 2026.02.17 | Pattern A consistency for all smoke test files
