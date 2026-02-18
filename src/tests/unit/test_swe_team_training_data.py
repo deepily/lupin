@@ -182,7 +182,7 @@ class TestSweTeamTrainingData:
 # ============================================================================
 
 REQUIRED_CONFIG_KEYS = { "template_file", "placeholders", "args_key" }
-VALID_GETTER_NAMES   = { "research_topics", "document_paths", "claude_code_tasks" }
+VALID_GETTER_NAMES   = { "research_topics", "document_paths", "claude_code_tasks", "swe_team_tasks" }
 
 
 def _load_full_config():

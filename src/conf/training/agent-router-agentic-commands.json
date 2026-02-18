@@ -21,7 +21,7 @@
     },
     "agent router go to swe team" : {
         "template_file" : "/src/ephemera/prompts/data/synthetic-data-agent-routing-swe-team.txt",
-        "placeholders"  : { "FEATURE" : "claude_code_tasks" },
+        "placeholders"  : { "FEATURE" : "swe_team_tasks" },
         "args_key"      : "prompt"
     }
 }

@@ -1,5 +1,28 @@
 # Lupin Project History
 
+### 2026.02.18 - Session 232 | Fix SWE Team vs Claude Code Routing Confusion in LoRA Training Data
+
+#### Checkpoint | 2026-02-18 | Improve discriminability between SWE team and Claude Code training examples
+
+**Accomplishments**:
+- Created `placeholders-swe-team-tasks.txt` with 100 feature-oriented task descriptions (e.g., "user authentication and registration flow", "payment processing integration with Stripe") — semantically distinct from the coding-task style of `placeholders-claude-code-tasks.txt`
+- Updated `agent-router-agentic-commands.json` to point SWE team placeholder from `claude_code_tasks` → `swe_team_tasks`
+- Added `get_swe_team_tasks()` getter to `XmlPromptGenerator` and registered `swe_team_tasks` in `XmlCoordinator` dispatch dict
+- Added 6 direct routing phrases ("go to swe team for FEATURE") and 5 ASR robustness variants ("go to the sweet team for FEATURE") to the SWE team template
+- Updated `VALID_GETTER_NAMES` in unit test to include `swe_team_tasks`
+- Full regression: 1434 unit tests passing, 0 failures
+
+**Files**: 4 modified + 1 new (Lupin repo), 2 modified (CoSA repo — commit separately)
+- `src/ephemera/prompts/data/placeholders-swe-team-tasks.txt` — NEW: 100 feature-oriented SWE task descriptions
+- `src/ephemera/prompts/data/synthetic-data-agent-routing-swe-team.txt` — Added 11 routing + ASR phrases
+- `src/conf/training/agent-router-agentic-commands.json` — Placeholder swap `claude_code_tasks` → `swe_team_tasks`
+- `src/tests/unit/test_swe_team_training_data.py` — Added `swe_team_tasks` to valid getter set
+- `src/cosa/training/xml_prompt_generator.py` — `get_swe_team_tasks()` method *(CoSA)*
+- `src/cosa/training/xml_coordinator.py` — Dispatch registration *(CoSA)*
+- `history.md` — this entry
+
+---
+
 ### 2026.02.18 - Session 231 | Fix Duplicate Notification + Raw JSON Response Rendering
 
 #### Checkpoint | 2026-02-18 | Fix duplicate "submitted" notification + human-readable response values

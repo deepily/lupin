@@ -1,3 +1,9 @@
+go to swe team for FEATURE
+go to the swe team for FEATURE
+route to swe team for FEATURE
+switch to swe team for FEATURE
+go to swe team and work on FEATURE
+take me to the swe team for FEATURE
 start an swe team task for FEATURE
 use the swe team to build FEATURE
 run swe team on FEATURE
@@ -67,6 +73,11 @@ the dev team should take on FEATURE
 send FEATURE over to the software team
 
 # ASR robustness — speech-to-text near-misses for "SWE"
+go to the sweet team for FEATURE
+go to the suite team for FEATURE
+go to the S W E team for FEATURE
+route to the sweet team for FEATURE
+switch to the suite team for FEATURE
 start the sweet team on FEATURE
 use the suite team to build FEATURE
 ask the S W E team to implement FEATURE
