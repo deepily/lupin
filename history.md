@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.02.18 - Session 234 | Bug F: sender_id Validation Fix for SWE Team Notifications
+
+**Accomplishments**:
+- Verified Bug F fix already applied in `cosa_interface.py`: `get_sender_id()` now strips `::user_id` suffix from compound session IDs before building sender_id
+- Confirmed smoke test coverage (compound hash stripping assertions) already in place
+- Fix lives in CoSA submodule — uncommitted, needs separate CoSA commit
+
+**Files**: 0 modified (Lupin repo), 1 modified (CoSA repo — commit separately)
+- `src/cosa/agents/swe_team/cosa_interface.py` — Strip `::user_id` from session_id in `get_sender_id()` + smoke test *(CoSA)*
+
+**Note**: Short verification-only session. The fix was applied in a prior session's context but the CoSA commit was not yet made.
+
+---
+
 ### 2026.02.18 - Session 233 | User-Initiated Check-In for SWE Team Orchestrator
 
 #### Checkpoint | 2026.02.18 | Implement Approach B MVP — periodic check-in between tasks
