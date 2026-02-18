@@ -1,5 +1,25 @@
 # Lupin Project History
 
+### 2026.02.18 - Session 229 | Add Agentic Agent Mode Switches to Q&A Card
+
+#### Checkpoint | 2026-02-18 | Add agentic modes to Q&A dropdown + routing logic + unit tests
+
+**Accomplishments**:
+- Added `AGENTIC_MODE_MAP` dict (5 entries) mapping mode keys to routing commands, plus 5 new `MODE_METADATA` entries for UI display
+- Added `elif user_mode in AGENTIC_MODE_MAP` branch in routing logic — agentic modes now bypass LoRA router entirely and produce commands that enter the agentic path (disambiguation → expeditor → factory)
+- Updated `set_user_mode()` validation to accept both `MODE_TO_AGENT` and `AGENTIC_MODE_MAP` keys
+- Added `<optgroup>` separators to HTML dropdown — "Quick Agents" (7 existing) and "Agentic Processes" (5 new: Deep Research, Podcast Generator, Research to Podcast, Claude Code, SWE Team)
+- New unit test file: `test_mode_management.py` with 27 tests across 5 classes (dict consistency, set/get/clear mode, available modes, command mapping)
+- Full regression: 1434 unit tests passing, 0 failures
+
+**Files**: 3 modified + 1 new (Lupin repo), 1 modified (CoSA repo)
+- `src/cosa/rest/todo_fifo_queue.py` — `AGENTIC_MODE_MAP`, `MODE_METADATA` entries, routing branch, validation update *(CoSA repo — commit separately)*
+- `src/fastapi_app/static/html/notifications.html` — `<optgroup>` + 5 agentic `<option>` entries
+- `src/tests/unit/test_mode_management.py` — 27 new unit tests
+- `history.md` — this entry
+
+---
+
 ### 2026.02.18 - Session 228 | Mount ~/.lora_env into Docker container
 
 #### Checkpoint | 2026-02-18 | Add .lora_env volume mount to start-docker-lupin.sh
