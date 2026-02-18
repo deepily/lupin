@@ -25,6 +25,13 @@
             "agents"           : [ "swe_team" ]
         },
         {
+            "question_pattern" : "Would you like to enable dry run mode",
+            "answer"           : "yes",
+            "arg_name"         : "dry_run",
+            "response_types"   : [ "open_ended", "open_ended_batch" ],
+            "agents"           : [ "swe_team" ]
+        },
+        {
             "question_pattern" : "Would you like to proceed with these settings?",
             "answer"           : "yes",
             "arg_name"         : "confirmation",

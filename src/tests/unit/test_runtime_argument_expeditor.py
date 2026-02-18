@@ -1,7 +1,7 @@
 """
 Unit tests for Runtime Argument Expeditor.
 
-Tests 15 components (123 tests total):
+Tests 17 components (135 tests total):
 1. ExpeditorResponse model (xml_models.py) - 16 tests
 2. _parse_lora_args() (expeditor.py) - 9 tests
 3. _inject_system_args() (expeditor.py) - 4 tests
@@ -17,6 +17,8 @@ Tests 15 components (123 tests total):
 13. Notification utils edge cases (notification_utils.py) - 3 tests
 14. job_id threading (expeditor.py) - 3 tests
 15. Optional arg prompting (expeditor.py) - 8 tests (post-bug-fix)
+16. _parse_boolean() (agentic_job_factory.py) - 7 tests
+17. dry_run visibility in _build_request_context() (expeditor.py) - 5 tests
 
 All external dependencies mocked. No server, no LLM, no filesystem I/O.
 
@@ -37,7 +39,7 @@ from cosa.agents.runtime_argument_expeditor.agent_registry import (
     _help_cache,
     _user_visible_cache
 )
-from cosa.rest.agentic_job_factory import create_agentic_job
+from cosa.rest.agentic_job_factory import create_agentic_job, _parse_boolean
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1984,3 +1986,112 @@ class TestOptionalArgPrompting:
 
         assert result is None
         mock_batch.assert_called_once()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Class 16: TestParseBoolean (7 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestParseBoolean:
+    """Tests for _parse_boolean() helper in agentic_job_factory.py."""
+
+    def test_yes_returns_true( self ):
+        """String 'yes' returns True."""
+        assert _parse_boolean( "yes" ) is True
+
+    def test_no_returns_false( self ):
+        """String 'no' returns False."""
+        assert _parse_boolean( "no" ) is False
+
+    def test_true_string_returns_true( self ):
+        """String 'true' returns True."""
+        assert _parse_boolean( "true" ) is True
+
+    def test_false_string_returns_false( self ):
+        """String 'false' returns False."""
+        assert _parse_boolean( "false" ) is False
+
+    def test_none_returns_default( self ):
+        """None returns default (False by default)."""
+        assert _parse_boolean( None ) is False
+        assert _parse_boolean( None, default=True ) is True
+
+    def test_bool_passthrough( self ):
+        """Bool values pass through unchanged."""
+        assert _parse_boolean( True ) is True
+        assert _parse_boolean( False ) is False
+
+    def test_semantic_variants( self ):
+        """Various truthy/falsy strings parse correctly."""
+        for truthy in [ "Yes", "YES", " yes ", "true", "TRUE", "1", "enable", "enabled" ]:
+            assert _parse_boolean( truthy ) is True, f"Failed for truthy: '{truthy}'"
+        for falsy in [ "no", "No", "NO", "false", "0", "disable", "nope", "" ]:
+            assert _parse_boolean( falsy ) is False, f"Failed for falsy: '{falsy}'"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Class 17: TestDryRunVisibility (5 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestDryRunVisibility:
+    """Tests that dry_run is shown/hidden based on user_visible whitelist."""
+
+    SWE_COMMAND_KEY = "agent router go to swe team"
+    DR_COMMAND_KEY  = "agent router go to deep research"
+
+    def setup_method( self ):
+        """Create a minimal expeditor instance."""
+        self.expeditor       = RuntimeArgumentExpeditor.__new__( RuntimeArgumentExpeditor )
+        self.expeditor.debug = False
+        self.swe_entry       = AGENTIC_AGENTS[ self.SWE_COMMAND_KEY ]
+        self.dr_entry        = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    def test_swe_team_shows_dry_run( self, mock_uva ):
+        """SWE Team shows dry_run in context when it's in user_visible list."""
+        mock_uva.return_value = [ "task", "budget", "timeout", "dry_run" ]
+        result = self.expeditor._build_request_context(
+            self.swe_entry, "run swe team task",
+            { "task": "add health check", "dry_run": "yes" }, [ "budget", "timeout" ]
+        )
+        assert "dry_run" in result
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    def test_deep_research_hides_dry_run( self, mock_uva ):
+        """Deep Research hides dry_run from context (not in user_visible list)."""
+        mock_uva.return_value = [ "query", "budget", "audience", "audience_context" ]
+        result = self.expeditor._build_request_context(
+            self.dr_entry, "research quantum",
+            { "query": "quantum", "dry_run": "yes" }, [ "budget" ]
+        )
+        assert "dry_run" not in result
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    def test_swe_team_dry_run_in_present_args( self, mock_uva ):
+        """SWE Team shows dry_run value in 'Already extracted' section."""
+        mock_uva.return_value = [ "task", "budget", "timeout", "dry_run" ]
+        result = self.expeditor._build_request_context(
+            self.swe_entry, "run swe team dry run",
+            { "task": "add health check", "dry_run": "yes" }, [ "budget" ]
+        )
+        assert "dry_run: yes" in result
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    def test_swe_team_dry_run_false_still_shown( self, mock_uva ):
+        """SWE Team shows dry_run=no in 'Already extracted' when set to 'no'."""
+        mock_uva.return_value = [ "task", "budget", "timeout", "dry_run" ]
+        result = self.expeditor._build_request_context(
+            self.swe_entry, "run swe team task",
+            { "task": "fix bug", "dry_run": "no" }, [ "budget" ]
+        )
+        assert "dry_run: no" in result
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    def test_no_user_visible_fallback_shows_dry_run( self, mock_uva ):
+        """When user_visible is None (fallback), dry_run shown for any agent."""
+        mock_uva.return_value = None
+        result = self.expeditor._build_request_context(
+            self.dr_entry, "research quantum",
+            { "query": "quantum", "dry_run": "yes" }, [ "budget" ]
+        )
+        assert "dry_run: yes" in result

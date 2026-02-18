@@ -1,5 +1,33 @@
 # Lupin Project History
 
+### 2026.02.18 - Session 226 | Voice-Driven SWE Team Job Creation with dry_run Support
+
+#### Checkpoint | 2026.02.18 | Fix SWE Team voice + dry_run support (factory wiring, _parse_boolean, registry, proxy, tests)
+
+**Accomplishments**:
+- Wired canonical `create_agentic_job()` factory into voice path in `todo_fifo_queue.py`, replacing inline 3-of-5-agent factory — unblocks SWE Team and Claude Code for voice-driven job creation
+- Added `_parse_boolean()` helper to `agentic_job_factory.py` and updated all 5 `dry_run` lines — fixes bug where string `"no"` was truthy in Python, causing all voice-created jobs to run as dry_run=True
+- Added `dry_run` to SWE Team registry entry (arg_mapping, fallback_questions, fallback_defaults) and CLI `--user-visible-args`
+- Removed 3 hardcoded `dry_run` exclusions in `expeditor.py` — visibility now controlled by `user_visible` whitelist (shown for SWE Team, hidden for Deep Research)
+- Added `dry_run` Q&A proxy entry to `swe-team.json` and updated `all_agents`/`swe_team` TEST_PROFILES
+- Added 12 new unit tests (7 for `_parse_boolean`, 5 for dry_run visibility) — 1407 total passing
+
+**Files (Lupin repo)**: 2 files modified
+- `src/conf/notification-proxy-scripts/swe-team.json` — dry_run Q&A proxy entry
+- `src/tests/unit/test_runtime_argument_expeditor.py` — 12 new tests
+
+**Files (CoSA nested repo)**: 6 files modified
+- `src/cosa/rest/todo_fifo_queue.py` — canonical factory import, deleted 75 lines dead code
+- `src/cosa/rest/agentic_job_factory.py` — `_parse_boolean()`, updated 5 dry_run lines
+- `src/cosa/agents/runtime_argument_expeditor/agent_registry.py` — dry_run in SWE Team entry
+- `src/cosa/agents/runtime_argument_expeditor/expeditor.py` — removed 3 dry_run exclusions
+- `src/cosa/agents/swe_team/__main__.py` — dry_run in --user-visible-args
+- `src/cosa/agents/notification_proxy/config.py` — dry_run in TEST_PROFILES
+
+**Commit**: e568f43
+
+---
+
 ### 2026.02.18 - Session 225 | Fix SWE Team Notification Routing to CJ Flow Job Card
 
 **Accomplishments**:
