@@ -7,6 +7,7 @@ Last updated: 2026-02-17 (Session 222)
 ### SWE Team Proxy Agent (HIGH PRIORITY)
 
 - [ ] **[LUPIN] Finish implementing and testing first cut of SWE Team Proxy Agent** - Complete implementation and testing of the initial SWE Team notification proxy agent
+- [ ] **[LUPIN] Test SWE agent team with small jobs** - Validate SWE team end-to-end with small, scoped tasks to verify orchestration and proxy behavior
 
 ### DataFrame CRUD with Voice I/O (Session 132-136)
 
