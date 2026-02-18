@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-17 (Session 221 — Structural cleanup: moved 14 completed sections to Completed Recent)
+Last updated: 2026-02-17 (Session 221 — Smoke Test Coverage Audit complete: 6 new files, 54 tests)
 
 ## Pending
 
@@ -30,18 +30,30 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - **Goal**: Understand and document the relationship between these modules
   - **Deliverable**: Refactor if redundancy found, or document if distinct purposes
 
-### Smoke Test Coverage Audit (MEDIUM)
+### Smoke Test Coverage Audit (MEDIUM) ✅ DONE
 
-- [ ] **[LUPIN] Verify smoke test coverage across recent work** - Audit that recent features and bug fixes have adequate smoke test coverage
-  - **Scope**: SWE Team proxy, factory ValueError fix, expeditor pass-through, CRUD live pipeline, calculator auto-route, feedback loop
-  - **Goal**: Identify gaps where new code paths lack quick sanity checks
-  - **Deliverable**: List of missing smoke tests + new tests where needed
+- [x] **[LUPIN] Verify smoke test coverage across recent work** - Session 221: 6 new test files, 54 pytest methods, all passing
+  - ST-1: `test_decision_proxy_offline_smoke.py` — TrustTracker, CircuitBreaker, CategoryTrust (15 tests)
+  - ST-2: `test_swe_team_orchestrator_dry_run_smoke.py` — Dry-run pipeline, state, progress (10 tests)
+  - ST-3: `test_queue_consumer_smoke.py` — Thread lifecycle, job processing (3 tests)
+  - ST-4: `test_answer_feedback_smoke.py` — answer_is_correct tri-state round-trip (8 tests)
+  - ST-5: `test_agentic_disambiguation_smoke.py` — Confirm/switch/cancel/timeout (4 tests)
+  - ST-6: `test_simple_agents_instantiation_smoke.py` — Cal/DateTime/Todo constructors (14 tests)
+  - **Deferred**: ST-7 (CRUD queue integration), ST-8 (Decision Proxy live), ST-9 (Classic agents live)
 
 ### CJ Flow Persistence (MEDIUM)
 
 - [ ] **Add persistence for CJ Flow job tracking** - Jobs are currently transient
   - **Goal**: Durable storage for ClaudeCode Job tracking state
   - **Affects**: Job state survives server restarts, enables job history/resume
+
+### Automated E2E Testing Research (MEDIUM)
+
+- [ ] **[LUPIN] Research AI/automation for end-to-end testing of notifications, API, and UI** - Eliminate manual clicking, typing, and visual verification from the testing workflow
+  - **Scope**: Notification delivery verification, API endpoint validation, UI state assertions, full workflow completion checks
+  - **Goal**: Find tools/frameworks that can autonomously exercise the full stack (submit job → verify queue → check notifications → confirm UI renders correctly) without human interaction
+  - **Candidates to evaluate**: Playwright/Puppeteer with AI assertions, browser-use agents, visual regression tools (Percy, Applitools), Claude Computer Use for UI verification, custom harness extending existing proxy auto-answer infrastructure
+  - **Deliverable**: Comparison matrix of approaches with recommendation + proof-of-concept for top candidate
 
 ### Before Branch Merge
 
@@ -73,6 +85,7 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 
 ## Completed (Recent)
 
+- [x] **Smoke Test Coverage Audit** - Session 221: 6 new test files, 54 pytest methods covering Decision Proxy, SWE Orchestrator dry-run, Queue Consumer, Answer Feedback, Agentic Disambiguation, Classic Agents. All passing.
 - [x] **SWE Team Testing Docs Update** - Session 221: Updated 00-index.md (Phases 2-4 DONE), 04-surfaces testing design (Surfaces 2-3 PASS), all-agents.json entries
 - [x] **Post-Execution Feedback Loop** - Session 215-220: answer_is_correct tri-state, language/tone feedback, data collection pipeline. All 3 parts complete.
 - [x] **CoSA Submodule Commit Backlog** - Session 220: 16 files across 5 areas committed

@@ -93,7 +93,17 @@
 - 15 new condensed summary lines added to Completed (Recent)
 
 **Files**: TODO.md
-**Commit**: f914be7
+**Commit**: 3cf8551
+
+#### Checkpoint 2 | 2026.02.17 | TODO.md updates: SWE Team Docs to Completed + new items
+
+**Accomplishments**:
+- Moved SWE Team Testing Docs Update from Pending to Completed (Recent) as condensed one-liner
+- Added "Run and remediate full testing harness" to Before Branch Merge section
+- Added "Automated E2E Testing Research" (MEDIUM) — research AI/automation for notification, API, and UI testing
+
+**Files**: TODO.md
+**Commit**: 2ee4a32
 
 ---
 
