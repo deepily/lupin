@@ -30,6 +30,17 @@ if lupin_root is None:
         "  python src/fastapi_app/main.py"
     )
 
+# Load LoRA model paths from ~/.lora_env (auto-updated by peft_trainer.py)
+_lora_env_path = os.path.expanduser( "~/.lora_env" )
+if os.path.exists( _lora_env_path ):
+    with open( _lora_env_path, "r" ) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line.startswith( "export " ) and "=" in _line:
+                _var_def = _line[ len( "export " ): ]
+                _key, _val = _var_def.split( "=", 1 )
+                os.environ[ _key ] = _val.strip( '"' )
+
 src_path = os.path.join( lupin_root, 'src' )
 if src_path not in sys.path:
     sys.path.insert( 0, src_path )

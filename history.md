@@ -1,5 +1,28 @@
 # Lupin Project History
 
+### 2026.02.18 - Session 227 | Fix LoRA env var resolution in FastAPI server
+
+#### Checkpoint | 2026-02-18 | Load ~/.lora_env at Python level in main.py + belt-and-suspenders in shell script
+
+**Accomplishments**:
+- Fixed `${LUPIN_ROUTER_LORA_MINISTRAL_8B_PATH}` not resolving in FastAPI server — `os.path.expandvars()` was working but env var was unset in server process because `run-fastapi-lupin.sh` never sourced `~/.lora_env`
+- Added `~/.lora_env` parser in `main.py` after LUPIN_ROOT bootstrap — reads `export KEY="value"` lines into `os.environ` before ConfigurationManager init
+- Added `source ~/.lora_env` belt-and-suspenders in `run-fastapi-lupin.sh`
+- Updated `lupin-app.ini` to use `${LUPIN_ROUTER_LORA_MINISTRAL_8B_PATH}` and `${LUPIN_ROUTER_LORA_QWEN3_4B_PATH}` env var references instead of hardcoded paths
+- Updated splainer.ini with env var resolution documentation
+- Added post-training `source ~/.lora_env` to `run-agentic-intent-training.sh`
+- New smoke test: `test_lora_env_update_smoke.py`
+
+**Files**: 6 modified/new
+- `src/fastapi_app/main.py` — `~/.lora_env` loader (11 lines)
+- `src/scripts/run-fastapi-lupin.sh` — belt-and-suspenders source
+- `src/conf/lupin-app.ini` — env var references for LoRA model paths
+- `src/conf/lupin-app-splainer.ini` — env var resolution docs
+- `src/scripts/run-agentic-intent-training.sh` — post-training env sourcing
+- `src/tests/smoke/test_lora_env_update_smoke.py` — new smoke test
+
+---
+
 ### 2026.02.18 - Session 226 | Voice-Driven SWE Team Job Creation with dry_run Support
 
 #### Checkpoint | 2026.02.18 | Fix SWE Team voice + dry_run support (factory wiring, _parse_boolean, registry, proxy, tests)

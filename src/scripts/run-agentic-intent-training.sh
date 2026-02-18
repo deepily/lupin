@@ -288,5 +288,17 @@ else:
         ;;
 esac
 
+# After successful training, source the updated LoRA env vars
+if [ -f ~/.lora_env ]; then
+    source ~/.lora_env
+    echo ""
+    echo -e "${GREEN}LoRA environment variables updated and sourced.${NC}"
+    echo "   LUPIN_ROUTER_LORA_MINISTRAL_8B_PATH=$LUPIN_ROUTER_LORA_MINISTRAL_8B_PATH"
+    echo "   LUPIN_ROUTER_LORA_QWEN3_4B_PATH=$LUPIN_ROUTER_LORA_QWEN3_4B_PATH"
+    echo ""
+    echo "Note: These vars are active in THIS shell. Open a new terminal or run"
+    echo "  'source ~/.bashrc' in other terminals for them to take effect there."
+fi
+
 echo ""
 echo -e "${GREEN}Done!${NC}"
