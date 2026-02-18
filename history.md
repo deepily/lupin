@@ -1,5 +1,30 @@
 # Lupin Project History
 
+### 2026.02.18 - Session 233 | User-Initiated Check-In for SWE Team Orchestrator
+
+#### Checkpoint | 2026.02.18 | Implement Approach B MVP — periodic check-in between tasks
+
+**Accomplishments**:
+- Created R&D document `05-user-initiated-communication.md` analyzing 4 approaches for user-to-orchestrator communication; recommends Approach B (periodic check-in) as MVP foundation for future Approach D (hybrid queue)
+- Added `_check_in_with_user()` method to orchestrator — enters WAITING_FEEDBACK state, calls `get_feedback()` with configurable timeout, classifies response via `is_approval()`
+- Added 2 check-in call sites in `_execute_live()`: between-task (with feedback injection into next task's objective) and post-completion (before summary)
+- Added `enable_checkins` (bool, default True) and `checkin_timeout` (int, default 30s) config fields
+- Updated 9 unit test mocks to include `get_feedback = AsyncMock( return_value=None )` — all 65 SWE Team tests passing
+- Updated 00-index.md with new document entry
+
+**Files**: 2 modified + 1 new (Lupin repo), 2 modified (CoSA repo — commit separately)
+- `src/rnd/2026.02.13-claude-code-agentic-dev-team/05-user-initiated-communication.md` — NEW: Full analysis + MVP design + Approach D expansion
+- `src/rnd/2026.02.13-claude-code-agentic-dev-team/00-index.md` — Added doc row
+- `src/tests/unit/test_swe_team_delegation.py` — 3 tests: added `get_feedback` AsyncMock
+- `src/tests/unit/test_swe_team_verification.py` — 6 tests: added `get_feedback` AsyncMock
+- `src/cosa/agents/swe_team/orchestrator.py` — `_check_in_with_user()` + 2 call sites + feedback injection *(CoSA)*
+- `src/cosa/agents/swe_team/config.py` — `enable_checkins`, `checkin_timeout` *(CoSA)*
+- `history.md` — this entry
+
+**Commit**: c14ca6b
+
+---
+
 ### 2026.02.18 - Session 232 | Fix SWE Team vs Claude Code Routing Confusion in LoRA Training Data
 
 #### Checkpoint | 2026-02-18 | Improve discriminability between SWE team and Claude Code training examples

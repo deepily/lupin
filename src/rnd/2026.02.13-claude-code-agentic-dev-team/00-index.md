@@ -9,6 +9,7 @@
 | [Architecture Decisions](02-architecture-decisions.md) | Design decisions traced to research | PENDING |
 | [Testing & Validation](03-testing-validation.md) | Test results, coverage, regression tracking | ACTIVE |
 | [Surfaces 2-5 Testing Design](04-surfaces-2-5-testing-design.md) | Implementation blueprint for non-unit test surfaces | ACTIVE |
+| [User-Initiated Communication](05-user-initiated-communication.md) | User-to-orchestrator communication analysis + MVP (Approach B) | ACTIVE |
 
 ## Phase Overview
 
