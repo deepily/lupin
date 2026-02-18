@@ -1,21 +1,21 @@
 ---
-description: Run post-change verification for Planning is Prompting project
+description: Run post-change verification for Lupin project
 allowed-tools: Bash(.*), TodoWrite, Read, Write, Edit, Grep, Glob
 arguments:
   - name: baseline_report
     description: Path to baseline report (auto-detects if not provided)
     required: false
   - name: scope
-    description: Remediation scope (ANALYSIS_ONLY recommended for docs repo)
+    description: Remediation scope (FULL recommended for code project)
     required: false
-    default: ANALYSIS_ONLY
+    default: FULL
 ---
 
-# Post-Change Remediation for Planning is Prompting
+# Post-Change Remediation for Lupin
 
-**Purpose**: Verify documentation structure after changes
-**Project**: Planning is Prompting (Meta-repository for workflow templates)
-**Note**: ANALYSIS_ONLY scope recommended (documentation repo doesn't need code fixes)
+**Purpose**: Verify code and tests after changes
+**Project**: Lupin (AI Agent Framework with CoSA submodule)
+**Note**: FULL scope recommended (code project benefits from active remediation)
 **Version**: 1.0
 
 ---
@@ -23,23 +23,23 @@ arguments:
 ## Project Configuration
 
 **Identity**:
-- **Prefix**: [PLAN]
-- **Project Name**: Planning is Prompting
-- **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting
+- **Prefix**: [LUPIN]
+- **Project Name**: Lupin
+- **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin
 
 **Arguments**:
 - **Baseline Report**: ${1:-auto}
-- **Remediation Scope**: ${2:-ANALYSIS_ONLY}
+- **Remediation Scope**: ${2:-FULL}
 
 **Baseline Auto-Detection**:
-- **Directory**: tests/results/reports
-- **Pattern**: *baseline-test-report.md
+- **Directory**: src/rnd/
+- **Pattern**: *baseline-*-report.md
 - **Sort**: Most recent timestamp
 
 **Test Configuration** (same as baseline):
-- **Test Types**: smoke (documentation validation)
-- **Logs Directory**: tests/results/logs
-- **Reports Directory**: tests/results/reports
+- **Test Types**: smoke, unit, integration, websocket
+- **Logs Directory**: src/tests/logs
+- **Reports Directory**: src/rnd/
 
 ---
 
@@ -48,20 +48,20 @@ arguments:
 **On every invocation of this command:**
 
 1. **MUST use the following project-specific configuration**:
-   - **[SHORT_PROJECT_PREFIX]**: [PLAN]
-   - **Project Name**: Planning is Prompting
-   - **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting
+   - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
+   - **Project Name**: Lupin
+   - **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin
    - **Arguments**:
      - Baseline Report: ${1:-auto}
-     - Remediation Scope: ${2:-ANALYSIS_ONLY}
+     - Remediation Scope: ${2:-FULL}
    - **Baseline Auto-Detection**:
-     - Directory: tests/results/reports
-     - Pattern: *baseline-test-report.md
+     - Directory: src/rnd/
+     - Pattern: *baseline-*-report.md
      - Sort: Most recent timestamp
    - **Test Configuration**:
-     - Test Types: smoke (documentation validation)
-     - Logs Directory: tests/results/logs
-     - Reports Directory: tests/results/reports
+     - Test Types: smoke, unit, integration, websocket
+     - Logs Directory: src/tests/logs
+     - Reports Directory: src/rnd/
    - Do NOT proceed without these parameters
 
 2. **MUST read the canonical workflow document**:
@@ -74,8 +74,8 @@ arguments:
    - Do NOT skip any steps (including TodoWrite tracking, notifications, or comparison analysis)
    - Do NOT substitute a shortened or summarized version
    - Follow the workflow exactly as documented using the configuration parameters from Step 1
-   - For this documentation project, ANALYSIS_ONLY scope is recommended (generates comparison report, no code fixes needed)
+   - For this code project, FULL scope is recommended (runs tests, identifies regressions, applies fixes in priority order)
 
 ---
 
-**This wrapper demonstrates remediation for documentation-focused projects.**
+**This wrapper customizes the remediation workflow for the Lupin project.**

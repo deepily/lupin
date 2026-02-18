@@ -124,7 +124,7 @@ class EmbeddedProxyMixin:
                 # Proxy exited prematurely
                 stdout = self._proxy_process.stdout.read().decode( "utf-8", errors="replace" )
                 print( f"  WARNING: Proxy exited prematurely (code={self._proxy_process.returncode})" )
-                print( f"  Output: {stdout[ :500 ]}" )
+                print( f"  Output: {stdout[ :2000 ]}" )
                 self._proxy_process = None
             else:
                 print( f"  Proxy started (pid={self._proxy_process.pid})" )

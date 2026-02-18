@@ -1,13 +1,18 @@
 ---
-description: Run baseline test collection for Planning is Prompting project
+description: Run baseline test collection for Lupin project
 allowed-tools: Bash(.*), TodoWrite, Read, Write, Edit
+arguments:
+  - name: scope
+    description: Test scope (full|lupin|cosa|quick)
+    required: false
+    default: full
 ---
 
-# Baseline Testing for Planning is Prompting
+# Baseline Testing for Lupin
 
-**Purpose**: Establish baseline before workflow/documentation changes
-**Project**: Planning is Prompting (Meta-repository for workflow templates)
-**Note**: This is a documentation-only project - tests validate document structure and links
+**Purpose**: Establish baseline before code changes
+**Project**: Lupin (AI Agent Framework with CoSA submodule)
+**Note**: Code project - tests include smoke, unit, integration, and websocket
 **Version**: 1.0
 
 ---
@@ -15,22 +20,26 @@ allowed-tools: Bash(.*), TodoWrite, Read, Write, Edit
 ## Project Configuration
 
 **Identity**:
-- **Prefix**: [PLAN]
-- **Project Name**: Planning is Prompting
-- **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting
+- **Prefix**: [LUPIN]
+- **Project Name**: Lupin
+- **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin
 
 **Paths**:
-- **Logs Directory**: tests/results/logs
-- **Reports Directory**: tests/results/reports
+- **Logs Directory**: src/tests/logs
+- **Reports Directory**: src/rnd/
 
-**Test Types**: smoke (documentation validation only)
+**Test Types**: smoke, unit, integration, websocket
 
 **Test Scripts**:
-- **Smoke**: Simple validation script (validates docs exist and are readable)
+- **Lupin Smoke**: ./src/tests/run-lupin-smoke-tests.sh
+- **CoSA Smoke**: ./src/cosa/tests/smoke/scripts/run-cosa-smoke-tests.sh
+- **Unit**: pytest src/tests/unit/ -v
+- **Integration**: ./src/tests/run-integration-tests.sh -v
+- **WebSocket**: ./src/scripts/run-websocket-smoke-tests.sh
 
-**Health Checks**: None required (no server/service dependencies)
+**Health Checks**: curl http://localhost:7999/health
 
-**Environment**: No special environment variables needed
+**Environment**: LUPIN_ROOT, PYTHONPATH, LUPIN_TEST_EMAIL, LUPIN_TEST_PASSWORD
 
 ---
 
@@ -39,16 +48,21 @@ allowed-tools: Bash(.*), TodoWrite, Read, Write, Edit
 **On every invocation of this command:**
 
 1. **MUST use the following project-specific configuration**:
-   - **[SHORT_PROJECT_PREFIX]**: [PLAN]
-   - **Project Name**: Planning is Prompting
-   - **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting
+   - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
+   - **Project Name**: Lupin
+   - **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin
    - **Paths**:
-     - Logs Directory: tests/results/logs
-     - Reports Directory: tests/results/reports
-   - **Test Types**: smoke (documentation validation only)
-   - **Test Scripts**: Simple validation script (validates docs exist and are readable)
-   - **Health Checks**: None required (no server/service dependencies)
-   - **Environment**: No special environment variables needed
+     - Logs Directory: src/tests/logs
+     - Reports Directory: src/rnd/
+   - **Test Types**: smoke, unit, integration, websocket
+   - **Test Scripts**:
+     - Lupin Smoke: ./src/tests/run-lupin-smoke-tests.sh
+     - CoSA Smoke: ./src/cosa/tests/smoke/scripts/run-cosa-smoke-tests.sh
+     - Unit: pytest src/tests/unit/ -v
+     - Integration: ./src/tests/run-integration-tests.sh -v
+     - WebSocket: ./src/scripts/run-websocket-smoke-tests.sh
+   - **Health Checks**: curl http://localhost:7999/health
+   - **Environment**: LUPIN_ROOT, PYTHONPATH, LUPIN_TEST_EMAIL, LUPIN_TEST_PASSWORD
    - Do NOT proceed without these parameters
 
 2. **MUST read the canonical workflow document**:
@@ -61,8 +75,8 @@ allowed-tools: Bash(.*), TodoWrite, Read, Write, Edit
    - Do NOT skip any steps (including TodoWrite tracking, notifications, or test execution)
    - Do NOT substitute a shortened or summarized version
    - Follow the workflow exactly as documented using the configuration parameters from Step 1
-   - For this documentation project, "smoke tests" means: verify workflow documents exist and are readable, check referenced paths are valid, validate markdown formatting, ensure cross-references work
+   - For this code project, "smoke tests" means actual test execution (run test scripts, collect pass/fail results, capture logs)
 
 ---
 
-**This wrapper demonstrates the thin wrapper pattern for other projects to follow.**
+**This wrapper customizes the baseline testing workflow for the Lupin project.**

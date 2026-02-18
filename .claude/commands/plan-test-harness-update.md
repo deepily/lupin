@@ -1,5 +1,5 @@
 ---
-description: Analyze documentation changes and plan test coverage updates
+description: Analyze code changes and plan test coverage updates for Lupin
 allowed-tools: Bash(.*), TodoWrite, Read, Write, Edit, Grep, Glob
 arguments:
   - name: date_range
@@ -7,11 +7,11 @@ arguments:
     required: false
 ---
 
-# Test Harness Update for Planning is Prompting
+# Test Harness Update for Lupin
 
-**Purpose**: Identify which workflows were added/modified and ensure proper documentation
-**Project**: Planning is Prompting (Meta-repository for workflow templates)
-**Note**: For docs repo, "test coverage" means cross-references, examples, and installation docs
+**Purpose**: Identify code changes and ensure test coverage is maintained
+**Project**: Lupin (AI Agent Framework with CoSA submodule)
+**Note**: For code repo, test coverage means smoke, unit, and integration tests
 **Version**: 1.0
 
 ---
@@ -19,34 +19,47 @@ arguments:
 ## Project Configuration
 
 **Identity**:
-- **Prefix**: [PLAN]
-- **Project Name**: Planning is Prompting
-- **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting
+- **Prefix**: [LUPIN]
+- **Project Name**: Lupin
+- **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin
 
 **Date Range**: ${1:-auto} (defaults to last 7 days)
 
 **Source Directories**:
-- workflow/
-- .claude/commands/
-- src/rnd/
+- src/
+- src/cosa/
 
-**Component Classification** (for documentation):
+**Component Classification** (for code):
 ```yaml
-"workflow/*.md":
-  type: "critical"
-  requires_documentation: true
-  requires_cross_references: true
-  requires_installation_guide: true
+"src/cosa/memory/":
+  type: "core_infrastructure"
+  criticality: "critical"
+  test_types: ["unit", "smoke"]
+  test_location: "src/cosa/tests/unit/memory/"
 
-".claude/commands/*.md":
-  type: "standard"
-  requires_documentation: true
-  requires_workflow_reference: true
+"src/cosa/rest/":
+  type: "api_integration"
+  criticality: "critical"
+  test_types: ["unit", "smoke"]
+  test_location: "src/cosa/tests/unit/rest/"
 
-"src/rnd/*.md":
+"src/cosa/agents/":
+  type: "business_logic"
+  criticality: "non-critical"
+  test_types: ["unit", "smoke"]
+  test_location: "src/cosa/tests/unit/agents/"
+
+"src/fastapi_app/":
+  type: "lupin_integration"
+  criticality: "critical"
+  test_types: ["smoke"]
+  test_location: "src/tests/unit/"
+
+"src/cosa/utils/":
   type: "support"
-  requires_documentation: false
-  requires_cross_references: false
+  criticality: "non-critical"
+  test_types: ["unit"]
+  test_location: "src/cosa/tests/unit/"
 ```
 
 ---
@@ -56,15 +69,17 @@ arguments:
 **On every invocation of this command:**
 
 1. **MUST use the following project-specific configuration**:
-   - **[SHORT_PROJECT_PREFIX]**: [PLAN]
-   - **Project Name**: Planning is Prompting
-   - **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting
+   - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
+   - **Project Name**: Lupin
+   - **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin
    - **Date Range**: ${1:-auto} (defaults to last 7 days)
-   - **Source Directories**: workflow/, .claude/commands/, src/rnd/
+   - **Source Directories**: src/, src/cosa/
    - **Component Classification**:
-     - workflow/*.md: critical (requires documentation, cross-references, installation guide)
-     - .claude/commands/*.md: standard (requires documentation, workflow reference)
-     - src/rnd/*.md: support (documentation optional)
+     - src/cosa/memory/: core_infrastructure, critical (unit + smoke, tests at src/cosa/tests/unit/memory/)
+     - src/cosa/rest/: api_integration, critical (unit + smoke, tests at src/cosa/tests/unit/rest/)
+     - src/cosa/agents/: business_logic, non-critical (unit + smoke, tests at src/cosa/tests/unit/agents/)
+     - src/fastapi_app/: lupin_integration, critical (smoke only, tests at src/tests/unit/)
+     - src/cosa/utils/: support, non-critical (unit only, tests at src/cosa/tests/unit/)
    - Do NOT proceed without these parameters
 
 2. **MUST read the canonical workflow document**:
@@ -77,8 +92,8 @@ arguments:
    - Do NOT skip any steps (including TodoWrite tracking, notifications, or analysis)
    - Do NOT substitute a shortened or summarized version
    - Follow the workflow exactly as documented using the configuration parameters from Step 1
-   - For this documentation project, "test harness updates" means: identify changed workflow documents and ensure proper cross-references, examples, and installation documentation exist
+   - For this code project, "test harness updates" means actual test file creation/modification (write new tests, update existing test suites, ensure coverage for changed components)
 
 ---
 
-**This wrapper demonstrates test harness analysis for documentation projects.**
+**This wrapper customizes the test harness update workflow for the Lupin project.**

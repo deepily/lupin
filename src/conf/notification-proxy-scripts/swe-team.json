@@ -1,5 +1,5 @@
 {
-    "profile_name"  : "swe_team_test",
+    "profile_name"  : "swe_team",
     "description"   : "Q&A script for SWE Team Surface 3 proxy integration test",
     "sender_ids"    : [ "arg.expeditor@lupin.deepily.ai" ],
     "entries" : [

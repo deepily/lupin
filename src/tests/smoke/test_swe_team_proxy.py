@@ -110,7 +110,7 @@ class SweTeamProxySmokeTest( InteractiveSmokeTest ):
     DEFAULT_TIMEOUT = 120
     REQUEST_TIMEOUT = 600
     SUBMIT_ENDPOINT = "/api/mock-job/submit"
-    PROXY_PROFILE   = "swe_team_test"
+    PROXY_PROFILE   = "swe_team"
     PROXY_STRATEGY  = "llm_script"
 
     def _get_credentials( self ):

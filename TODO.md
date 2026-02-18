@@ -60,6 +60,12 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - **Candidates to evaluate**: Playwright/Puppeteer with AI assertions, browser-use agents, visual regression tools (Percy, Applitools), Claude Computer Use for UI verification, custom harness extending existing proxy auto-answer infrastructure
   - **Deliverable**: Comparison matrix of approaches with recommendation + proof-of-concept for top candidate
 
+### Slash Command Cleanup (LOW)
+
+- [ ] **[LUPIN] Deprecate old standalone test commands** - Remove `smoke-test-baseline.md`, `smoke-test-remediation.md`, `lupin-test-harness-update.md` from `.claude/commands/`. They use deprecated `notify-claude-async` and duplicate the new `plan-*` commands.
+- [ ] **[LUPIN] Audit other repos for verbatim-copy slash command bug** - Check if any other projects have planning-is-prompting config in their test slash commands (same bug fixed in Session 222 for Lupin).
+- [ ] **[LUPIN] Update install wizard to generate from templates** - Instead of copying planning-is-prompting versions verbatim, the wizard should use `workflow/slash-command-templates/` and prompt for project-specific values.
+
 ### Before Branch Merge
 
 - [ ] **[LUPIN] Run and remediate full testing harness** - Unit, smoke, WebSocket, and integration tests. Fix any regressions before merge.
