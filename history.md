@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.02.18 - Session 224 | Progress Group Accordion Layout Fix
+
+#### Checkpoint | 2026.02.18 | Fix progress group side-by-side → vertical stack + right-align toggle badge
+
+**Accomplishments**:
+- Fixed progress group accordion layout: added `flex-direction: column` to `.progress-group-entry` to override parent `.sender-message`'s horizontal flex — head and history now stack vertically instead of side-by-side
+- Right-aligned toggle/count badge: added `width: 100%` to `.progress-group-head` so `margin-left: auto` on the toggle badge pushes it to the right edge
+- Verified with 2 rounds of 5 test notifications using `progress_group_id`
+
+**Files**: `src/fastapi_app/static/css/notifications.css` (2 lines added)
+**Commit**: 29921df
+
+---
+
 ### 2026.02.17 - Session 223 | Testing Skill Documentation — Pattern A Authority Model
 
 #### Checkpoint | 2026.02.17 | Update testing-development skill with Pattern A authority model

@@ -3592,11 +3592,13 @@
    ======================================== */
 .progress-group-entry {
     border-left: 3px solid #17a2b8;
+    flex-direction: column;    /* Override parent .sender-message's horizontal flex */
 }
 
 /* Head row layout */
 .progress-group-head {
     display: flex;
+    width: 100%;
     gap: 8px;
     align-items: center;
 }
