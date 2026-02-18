@@ -1,8 +1,12 @@
 # TODO
 
-Last updated: 2026-02-17 (Session 221 — Smoke Test Coverage Audit complete: 6 new files, 54 tests)
+Last updated: 2026-02-17 (Session 222)
 
 ## Pending
+
+### SWE Team Proxy Agent (HIGH PRIORITY)
+
+- [ ] **[LUPIN] Finish implementing and testing first cut of SWE Team Proxy Agent** - Complete implementation and testing of the initial SWE Team notification proxy agent
 
 ### DataFrame CRUD with Voice I/O (Session 132-136)
 
