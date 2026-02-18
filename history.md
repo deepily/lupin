@@ -1,5 +1,30 @@
 # Lupin Project History
 
+### 2026.02.18 - Session 230 | Expeditor UX Bugs + Speculative Job ID for Agentic Routing
+
+#### Checkpoint | 2026-02-18 | Fix 3 expeditor UX bugs + speculative job card for agentic routing
+
+**Accomplishments**:
+- **Bug 2 — TTS reads all batch questions**: Truncated `format_open_ended_batch_for_tts()` to return count-only preamble (`"I have N questions for you."`) instead of reading every question aloud — individual questions are already displayed in the UI batch form
+- **Bug 1 — Task field not pre-populated**: Added 4-line block in `expeditor.expedite()` that populates `fallback_defaults` with `original_question` for required args missing a default — user's question now appears as `default_value` in the batch form (works for all 5 agents: SWE Team `task`, Deep Research `query`, etc.)
+- **Step 3A — Registry `job_prefix`**: Added `"job_prefix"` field to all 5 AGENTIC_AGENTS entries (dr, pg, rp, cc, swe) — enables speculative ID generation before expeditor runs
+- **Step 3B — Speculative job ID**: Rewrote `_handle_agentic_command()` to generate a speculative job ID before expeditor, emit `pending→todo` with `expediting: True` metadata, pass `job_id` to expeditor for notification routing, and handle cancel/failure cleanup (→ dead queue + `remove_job`)
+- **Step 3C — Expediting UI indicator**: Propagated `expediting` flag from metadata to job object in `handleJobStateTransition()`; added amber spinning `⟳` indicator for expediting cards in todo queue (CSS `.status-indicator.expediting`)
+- Updated 1 unit test assertion + fixed empty-list edge case to match new TTS behavior
+- Full regression: 1434 unit tests passing, 0 failures
+
+**Files**: 4 modified (Lupin repo), 4 modified (CoSA repo — commit separately)
+- `src/cosa/utils/notification_utils.py` — Batch TTS truncation + empty-list guard *(CoSA)*
+- `src/cosa/agents/runtime_argument_expeditor/expeditor.py` — Fallback default pre-population *(CoSA)*
+- `src/cosa/agents/runtime_argument_expeditor/agent_registry.py` — `job_prefix` field + smoke test *(CoSA)*
+- `src/cosa/rest/todo_fifo_queue.py` — Speculative job ID + `import uuid` *(CoSA)*
+- `src/fastapi_app/static/js/notifications.js` — Propagate `expediting` flag + indicator
+- `src/fastapi_app/static/css/notifications.css` — `.expediting` animation (amber spin)
+- `src/tests/unit/test_runtime_argument_expeditor.py` — Updated batch TTS assertion
+- `history.md` — this entry
+
+---
+
 ### 2026.02.18 - Session 229 | Add Agentic Agent Mode Switches to Q&A Card
 
 #### Checkpoint | 2026-02-18 | Add agentic modes to Q&A dropdown + routing logic + unit tests

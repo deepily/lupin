@@ -4116,7 +4116,8 @@ class NotificationsUI {
                     status          : metadata.status || 'completed',
                     error           : metadata.error || null,
                     has_interactions: metadata.has_interactions || false,
-                    duration_seconds: metadata.duration_seconds || null
+                    duration_seconds: metadata.duration_seconds || null,
+                    expediting      : metadata.expediting || false
                 };
 
                 // Remove empty message if present
@@ -5351,6 +5352,11 @@ class NotificationsUI {
         let statusIndicator = '';
         if ( queueName === 'run' ) {
             statusIndicator = '<span class="status-indicator spinning" title="Running">⟳</span>';
+        }
+
+        // Expediting job in todo queue: pulsing indicator while expeditor collects args
+        if ( queueName === 'todo' && job.expediting ) {
+            statusIndicator = '<span class="status-indicator expediting" title="Setting up...">⟳</span>';
         }
 
         // Done job: completion badge

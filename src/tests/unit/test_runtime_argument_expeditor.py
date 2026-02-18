@@ -1208,12 +1208,17 @@ class TestBatchCollectArgs:
             [ "mystery_arg", "another_arg" ], self.fallback_questions, "test@test.com"
         )
 
-        # Verify the fallback question was used by inspecting the request
+        # TTS for batch with 2+ questions is count-only preamble (Bug 2 fix)
         call_kwargs   = mock_sync.call_args[ 1 ]
         request       = call_kwargs[ "request" ]
         tts_message   = request.message
-        assert "mystery_arg" in tts_message
-        assert "another_arg" in tts_message
+        assert "I have 2 questions" in tts_message
+
+        # Fallback questions are in response_options (UI form), not TTS
+        questions = request.response_options[ "questions" ]
+        question_texts = [ q[ "question" ] for q in questions ]
+        assert any( "mystery_arg" in q for q in question_texts )
+        assert any( "another_arg" in q for q in question_texts )
         assert result is not None
         assert result[ "mystery_arg" ] == "42"
 
