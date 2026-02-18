@@ -4921,6 +4921,14 @@ class NotificationsUI {
             entry.setAttribute( 'data-progress-group', groupId );
             entry.classList.add( 'progress-group-entry' );
             entry.setAttribute( 'data-progress-group-count', '1' );
+
+            // Wrap existing content in progress-group-head div
+            const headDiv = document.createElement( 'div' );
+            headDiv.className = 'progress-group-head';
+            while ( entry.firstChild ) {
+                headDiv.appendChild( entry.firstChild );
+            }
+            entry.appendChild( headDiv );
         }
 
         const header = activityLog.querySelector( '.activity-log-header' );
@@ -4943,55 +4951,81 @@ class NotificationsUI {
 
     updateProgressGroupEntry( element, notification ) {
         /**
-         * Update an existing progress group entry in-place.
+         * Update an existing progress group entry with history accumulation.
          *
          * Requires:
          *     - element is a DOM element with data-progress-group attribute
          *     - notification has message, timestamp
          *
          * Ensures:
-         *     - Updates message text and timestamp
-         *     - Increments and displays counter badge (#2, #3, ...)
-         *     - Triggers CSS pulse animation
+         *     - Moves current head message into history container (newest first)
+         *     - Sets new message + timestamp as head
+         *     - Increments counter, updates toggle text
+         *     - Preserves expanded/collapsed toggle state
+         *     - Triggers CSS pulse animation on head
          */
-        // Update message text
-        const messageSpan = element.querySelector( '.activity-message' );
-        if ( messageSpan ) {
-            messageSpan.textContent = this.escapeHtml( notification.message );
+        const head = element.querySelector( '.progress-group-head' );
+        if ( !head ) return;
+
+        // Read current head values before overwriting
+        const oldMessageSpan = head.querySelector( '.activity-message' );
+        const oldTimestampSpan = head.querySelector( '.activity-timestamp' );
+        const oldMessage = oldMessageSpan ? oldMessageSpan.textContent : '';
+        const oldTimestamp = oldTimestampSpan ? oldTimestampSpan.textContent : '';
+
+        // Create history entry from old head values
+        const historyEntry = document.createElement( 'div' );
+        historyEntry.className = 'progress-history-entry';
+        historyEntry.innerHTML = `
+            <span class="activity-timestamp">${this.escapeHtml( oldTimestamp )}</span>
+            <span class="activity-message">${this.escapeHtml( oldMessage )}</span>
+        `;
+
+        // Get or create history container
+        let history = element.querySelector( '.progress-group-history' );
+        if ( !history ) {
+            history = document.createElement( 'div' );
+            history.className = 'progress-group-history';
+            history.style.display = 'none';
+            element.appendChild( history );
         }
 
-        // Update timestamp
-        const timestampSpan = element.querySelector( '.activity-timestamp' );
-        if ( timestampSpan ) {
+        // Prepend old head to history (newest first)
+        history.insertBefore( historyEntry, history.firstChild );
+
+        // Update head with new notification values
+        if ( oldMessageSpan ) {
+            oldMessageSpan.textContent = this.escapeHtml( notification.message );
+        }
+        if ( oldTimestampSpan ) {
             const timestamp = notification.timestamp
                 ? new Date( notification.timestamp ).toLocaleTimeString()
                 : new Date().toLocaleTimeString();
-            timestampSpan.textContent = timestamp;
+            oldTimestampSpan.textContent = timestamp;
         }
 
-        // Increment counter badge
+        // Increment counter
         let count = parseInt( element.getAttribute( 'data-progress-group-count' ) || '1', 10 ) + 1;
         element.setAttribute( 'data-progress-group-count', String( count ) );
 
-        // Find or create counter badge
-        let counterBadge = element.querySelector( '.progress-group-counter' );
-        if ( !counterBadge ) {
-            counterBadge = document.createElement( 'span' );
-            counterBadge.className = 'progress-group-counter';
-            const messageEl = element.querySelector( '.activity-message' );
-            if ( messageEl ) {
-                messageEl.after( counterBadge );
-            } else {
-                element.appendChild( counterBadge );
-            }
+        // Find or create toggle (replaces old counter badge)
+        let toggle = element.querySelector( '.progress-group-toggle' );
+        if ( !toggle ) {
+            toggle = document.createElement( 'span' );
+            toggle.className = 'progress-group-toggle';
+            toggle.title = 'Show history';
+            head.appendChild( toggle );
         }
-        counterBadge.textContent = `#${count}`;
 
-        // Trigger CSS pulse animation
-        element.classList.remove( 'progress-group-updated' );
-        // Force reflow to restart animation
-        void element.offsetWidth;
-        element.classList.add( 'progress-group-updated' );
+        // Update toggle text — preserve expanded/collapsed state
+        const isExpanded = history.style.display !== 'none';
+        const chevron = isExpanded ? '&#9650;' : '&#9660;';
+        toggle.innerHTML = `${chevron} #${count}`;
+
+        // Trigger CSS pulse animation on head
+        head.classList.remove( 'progress-group-updated' );
+        void head.offsetWidth;
+        head.classList.add( 'progress-group-updated' );
     }
 
     createJobActivityLog( jobCard ) {
@@ -5010,6 +5044,20 @@ class NotificationsUI {
         const activityLog = document.createElement( 'div' );
         activityLog.className = 'job-activity-log';
         activityLog.innerHTML = '<div class="activity-log-header">📋 Activity Log</div>';
+
+        // Delegated click handler for progress group toggles
+        activityLog.addEventListener( 'click', ( e ) => {
+            const toggle = e.target.closest( '.progress-group-toggle' );
+            if ( !toggle ) return;
+            const entry = toggle.closest( '.progress-group-entry' );
+            if ( !entry ) return;
+            const history = entry.querySelector( '.progress-group-history' );
+            if ( !history ) return;
+            const isExpanded = history.style.display !== 'none';
+            history.style.display = isExpanded ? 'none' : 'block';
+            const count = entry.getAttribute( 'data-progress-group-count' );
+            toggle.innerHTML = ( isExpanded ? '&#9660;' : '&#9650;' ) + ` #${count}`;
+        } );
 
         detailsSection.appendChild( activityLog );
         return activityLog;
@@ -6942,6 +6990,23 @@ class NotificationsUI {
             }
         }
 
+        // Delegated click handler for progress group toggles within this date accordion
+        const messagesContainer = accordion.querySelector( '.date-accordion-messages' );
+        if ( messagesContainer ) {
+            messagesContainer.addEventListener( 'click', ( e ) => {
+                const toggle = e.target.closest( '.progress-group-toggle' );
+                if ( !toggle ) return;
+                const entry = toggle.closest( '.progress-group-entry' );
+                if ( !entry ) return;
+                const history = entry.querySelector( '.progress-group-history' );
+                if ( !history ) return;
+                const isExpanded = history.style.display !== 'none';
+                history.style.display = isExpanded ? 'none' : 'block';
+                const count = entry.getAttribute( 'data-progress-group-count' );
+                toggle.innerHTML = ( isExpanded ? '&#9660;' : '&#9650;' ) + ` #${count}`;
+            } );
+        }
+
         if ( insertBefore ) {
             container.insertBefore( accordion, insertBefore );
         } else {
@@ -7075,12 +7140,20 @@ class NotificationsUI {
             messageDiv.setAttribute( 'data-progress-group', groupId );
             messageDiv.classList.add( 'progress-group-entry' );
             messageDiv.setAttribute( 'data-progress-group-count', '1' );
-        }
 
-        messageDiv.innerHTML = `
-            <span class="message-time">${timeStr}</span>
-            <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}${expiredBadge}${abstractIndicator}</span>
-        `;
+            // Wrap content in progress-group-head div for accordion structure
+            messageDiv.innerHTML = `
+                <div class="progress-group-head">
+                    <span class="message-time">${timeStr}</span>
+                    <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}${expiredBadge}${abstractIndicator}</span>
+                </div>
+            `;
+        } else {
+            messageDiv.innerHTML = `
+                <span class="message-time">${timeStr}</span>
+                <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}${expiredBadge}${abstractIndicator}</span>
+            `;
+        }
 
         // Add to top (newest first)
         container.insertBefore( messageDiv, container.firstChild );
@@ -7091,18 +7164,49 @@ class NotificationsUI {
 
     updateSenderProgressGroupEntry( element, notification ) {
         /**
-         * Update an existing progress group entry in-place (sender card path).
+         * Update an existing progress group entry with history accumulation (sender card path).
          *
          * Requires:
          *     - element is a DOM element with data-progress-group attribute
          *     - notification has message, timestamp/time_display
          *
          * Ensures:
-         *     - Updates message text and timestamp
-         *     - Increments and displays counter badge (#2, #3, ...)
-         *     - Triggers CSS pulse animation
+         *     - Moves current head message into history container (newest first)
+         *     - Sets new message + timestamp as head
+         *     - Increments counter, updates toggle text
+         *     - Preserves expanded/collapsed toggle state
+         *     - Triggers CSS pulse animation on head
          */
-        // Clean message
+        const head = element.querySelector( '.progress-group-head' );
+        if ( !head ) return;
+
+        // Read current head values before overwriting
+        const oldTimeSpan = head.querySelector( '.message-time' );
+        const oldMessageSpan = head.querySelector( '.message-text' );
+        const oldTime = oldTimeSpan ? oldTimeSpan.textContent : '';
+        const oldMessage = oldMessageSpan ? oldMessageSpan.textContent : '';
+
+        // Create history entry from old head values
+        const historyEntry = document.createElement( 'div' );
+        historyEntry.className = 'progress-history-entry';
+        historyEntry.innerHTML = `
+            <span class="activity-timestamp">${this.escapeHtml( oldTime )}</span>
+            <span class="activity-message">${this.escapeHtml( oldMessage )}</span>
+        `;
+
+        // Get or create history container
+        let history = element.querySelector( '.progress-group-history' );
+        if ( !history ) {
+            history = document.createElement( 'div' );
+            history.className = 'progress-group-history';
+            history.style.display = 'none';
+            element.appendChild( history );
+        }
+
+        // Prepend old head to history (newest first)
+        history.insertBefore( historyEntry, history.firstChild );
+
+        // Clean new message
         let cleanMessage = notification.message || '';
         cleanMessage = cleanMessage.replace( /^\[[A-Z]+\]\s*/, '' );
 
@@ -7111,16 +7215,12 @@ class NotificationsUI {
             ? cleanMessage.substring( 0, maxLength ) + '...'
             : cleanMessage;
 
-        // Update message text
-        const messageSpan = element.querySelector( '.message-text' );
-        if ( messageSpan ) {
-            messageSpan.textContent = displayMessage;
-            messageSpan.title = cleanMessage.replace( /"/g, '&quot;' );
+        // Update head with new notification values
+        if ( oldMessageSpan ) {
+            oldMessageSpan.textContent = displayMessage;
+            oldMessageSpan.title = cleanMessage.replace( /"/g, '&quot;' );
         }
-
-        // Update timestamp
-        const timeSpan = element.querySelector( '.message-time' );
-        if ( timeSpan ) {
+        if ( oldTimeSpan ) {
             let timeStr;
             if ( notification.time_display ) {
                 timeStr = notification.time_display;
@@ -7132,31 +7232,31 @@ class NotificationsUI {
                     hour12 : false
                 });
             }
-            timeSpan.textContent = timeStr;
+            oldTimeSpan.textContent = timeStr;
         }
 
-        // Increment counter badge
+        // Increment counter
         let count = parseInt( element.getAttribute( 'data-progress-group-count' ) || '1', 10 ) + 1;
         element.setAttribute( 'data-progress-group-count', String( count ) );
 
-        // Find or create counter badge
-        let counterBadge = element.querySelector( '.progress-group-counter' );
-        if ( !counterBadge ) {
-            counterBadge = document.createElement( 'span' );
-            counterBadge.className = 'progress-group-counter';
-            const messageEl = element.querySelector( '.message-text' );
-            if ( messageEl ) {
-                messageEl.after( counterBadge );
-            } else {
-                element.appendChild( counterBadge );
-            }
+        // Find or create toggle (replaces old counter badge)
+        let toggle = element.querySelector( '.progress-group-toggle' );
+        if ( !toggle ) {
+            toggle = document.createElement( 'span' );
+            toggle.className = 'progress-group-toggle';
+            toggle.title = 'Show history';
+            head.appendChild( toggle );
         }
-        counterBadge.textContent = `#${count}`;
 
-        // Trigger CSS pulse animation
-        element.classList.remove( 'progress-group-updated' );
-        void element.offsetWidth;
-        element.classList.add( 'progress-group-updated' );
+        // Update toggle text — preserve expanded/collapsed state
+        const isExpanded = history.style.display !== 'none';
+        const chevron = isExpanded ? '&#9650;' : '&#9660;';
+        toggle.innerHTML = `${chevron} #${count}`;
+
+        // Trigger CSS pulse animation on head
+        head.classList.remove( 'progress-group-updated' );
+        void head.offsetWidth;
+        head.classList.add( 'progress-group-updated' );
     }
 
     /**

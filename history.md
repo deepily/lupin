@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.02.17 - Session 220 (continued) | Progress Group History Accumulation
+
+#### Checkpoint 3 | 2026.02.17 | Backend persistence + frontend accordion for progress group history
+
+**Accomplishments**:
+- Step 1: Added `progress_group_id` column to `Notification` model (String(12), nullable, indexed)
+- Step 2: Created Alembic migration `b5c6d7e8f9a0` — add column + index, ran upgrade successfully
+- Step 3: Added `progress_group_id` param to `create_notification()` in notification_repository.py
+- Step 4: Wired `progress_group_id` through all 3 `create_notification()` call sites in notifications router; added `progress_group_id` + `job_id` (bonus fix) to both serialization dicts (`get_sender_conversation` + `get_sender_conversation_by_date`)
+- Step 5: Rewrote `updateProgressGroupEntry()` and `updateSenderProgressGroupEntry()` in JS — now accumulates history (old head → collapsible history container, newest first) with toggle chevron; wrapped initial entries in `.progress-group-head` div structure; added delegated click handlers for toggle on both job card activity logs and sender card date accordions
+- Step 6: Added CSS styles for `.progress-group-head`, `.progress-group-toggle`, `.progress-group-history`, `.progress-history-entry`
+- Full regression: 1395 unit tests pass, 0 failures
+
+**Files**: postgres_models.py, migration b5c6d7e8f9a0, notification_repository.py, notifications.py (router), notifications.js, notifications.css
+**Commit**: 0c53952 (Lupin) + CoSA pending
+
+---
+
 ### 2026.02.17 - Session 222 | SWE Team Training Data + Remove Superfluous Agentic JSONL
 
 #### Checkpoint | 2026.02.17 | SWE Team training data + remove unused agentic-only JSONL output

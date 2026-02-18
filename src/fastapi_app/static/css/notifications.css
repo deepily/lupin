@@ -3593,6 +3593,35 @@
 .progress-group-entry {
     border-left: 3px solid #17a2b8;
 }
+
+/* Head row layout */
+.progress-group-head {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+/* Clickable toggle with pointer cursor */
+.progress-group-toggle {
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    min-width: 28px;
+    height: 18px;
+    padding: 0 5px;
+    margin-left: auto;
+    background: #17a2b8;
+    color: white;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 600;
+}
+.progress-group-toggle:hover {
+    background: #138496;
+}
+
+/* Legacy counter badge (kept for backward compat during transition) */
 .progress-group-counter {
     display: inline-flex;
     align-items: center;
@@ -3608,6 +3637,28 @@
     font-weight: 600;
     vertical-align: middle;
 }
+
+/* History container */
+.progress-group-history {
+    margin-top: 4px;
+    padding-left: 12px;
+    border-left: 2px solid rgba( 23, 162, 184, 0.3 );
+}
+
+/* Individual history entries — muted, compact */
+.progress-history-entry {
+    display: flex;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 11px;
+    color: #6c757d;
+}
+.progress-history-entry .activity-timestamp {
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+/* Pulse animation for head updates */
 .progress-group-updated {
     animation: progressGroupPulse 0.6s ease-out;
 }
