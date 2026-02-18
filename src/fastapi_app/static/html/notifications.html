@@ -225,6 +225,41 @@
                     <div id="podcast-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
                 </div>
 
+                <hr style="margin: 20px 0; border: 0; border-top: 1px solid #e0e0e0;" />
+
+                <!-- SWE Team Submission Card -->
+                <div class="job-submit-card" id="swe-team-submit-card">
+                    <h4>🛠️ Submit SWE Team Task</h4>
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label for="swe-task" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Engineering Task:</label>
+                        <div style="display: flex; gap: 8px; align-items: flex-start;">
+                            <button type="button" id="swe-stt-button" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                            <textarea id="swe-task" rows="3" placeholder="Describe the engineering task..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; resize: vertical; font-family: inherit;"></textarea>
+                        </div>
+                    </div>
+                    <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+                        <div>
+                            <label for="swe-budget" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Budget (USD):</label>
+                            <input type="number" id="swe-budget" placeholder="no limit" min="0.50" max="100" step="0.50" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                        </div>
+                        <div>
+                            <label for="swe-timeout" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Timeout (seconds):</label>
+                            <input type="number" id="swe-timeout" placeholder="default" min="60" max="7200" step="60" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                        </div>
+                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                            <input type="checkbox" id="swe-dry-run" checked />
+                            <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
+                        </label>
+                    </div>
+                    <button id="submit-swe-job" type="button" style="padding: 10px 20px; background: #fd7e14; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                        🛠️ Submit SWE Task
+                        <span id="swe-loading" class="loading" style="display: none;">
+                            <span class="spinner"></span>
+                        </span>
+                    </button>
+                    <div id="swe-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+                </div>
+
             </div>
         </div>
 

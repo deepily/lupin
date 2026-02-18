@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.02.18 - Session 225 | Fix SWE Team Notification Routing to CJ Flow Job Card
+
+**Accomplishments**:
+- Fixed positional argument mismatch between core `voice_io.notify()` dispatcher and SWE Team's `cosa_interface.notify_progress()` — converted all 4 dispatch branches from positional to keyword arguments, making it immune to extra params like `role`
+- Added `SESSION_ID = self.id_hash` in SWE Team job's `_execute_dry_run()` and `_execute()` paths so sender_id includes job hash suffix for proper routing
+- Added missing `progress_group_id` parameter to SWE Team `voice_io.notify()` wrapper
+- Changed `agentic_job_base.py` `notify_progress()` and `notify_completion()` to import core `voice_io` instead of hardcoded Deep Research `voice_io`, preventing all subclasses from using DR's sender identity
+- All 1395 unit tests pass, all smoke tests green
+
+**Files (CoSA nested repo)**: 4 files modified
+- `src/cosa/agents/utils/voice_io.py` — keyword args in dispatch
+- `src/cosa/agents/swe_team/job.py` — SESSION_ID assignment
+- `src/cosa/agents/swe_team/voice_io.py` — progress_group_id param
+- `src/cosa/agents/agentic_job_base.py` — core voice_io import
+
+---
+
 ### 2026.02.18 - Session 224 | Progress Group Accordion Layout Fix
 
 #### Checkpoint | 2026.02.18 | Fix progress group side-by-side → vertical stack + right-align toggle badge
