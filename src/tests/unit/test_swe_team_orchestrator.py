@@ -17,7 +17,9 @@ All SDK calls mocked via unittest.mock. No server required.
 import asyncio
 import json
 import os
+import queue
 import tempfile
+import threading
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
@@ -723,3 +725,163 @@ class TestEscalationDecision:
             orch._stop_requested = True
 
         assert orch._stop_requested is True
+
+
+# =============================================================================
+# Approach D: User Message Queue Tests
+# =============================================================================
+
+class TestUserMessageQueue:
+    """Test user message queue drain and urgent interrupt functionality."""
+
+    def test_orchestrator_has_queue_and_event( self ):
+        """Orchestrator __init__ creates _user_messages queue and _urgent_interrupt event."""
+        orch = SweTeamOrchestrator(
+            task_description = "test",
+            config           = SweTeamConfig(),
+        )
+        assert isinstance( orch._user_messages, queue.Queue )
+        assert isinstance( orch._urgent_interrupt, threading.Event )
+
+    def test_drain_empty_queue_returns_empty_list( self ):
+        """_drain_user_messages on empty queue returns []."""
+        orch = SweTeamOrchestrator(
+            task_description = "test",
+            config           = SweTeamConfig(),
+        )
+        messages = orch._drain_user_messages()
+        assert messages == []
+
+    def test_drain_queue_returns_all_messages( self ):
+        """_drain_user_messages returns all queued messages and empties queue."""
+        orch = SweTeamOrchestrator(
+            task_description = "test",
+            config           = SweTeamConfig(),
+        )
+
+        # Populate queue
+        orch._user_messages.put( { "message": "msg1", "priority": "normal" } )
+        orch._user_messages.put( { "message": "msg2", "priority": "urgent" } )
+        orch._user_messages.put( { "message": "msg3", "priority": "normal" } )
+
+        messages = orch._drain_user_messages()
+        assert len( messages ) == 3
+        assert messages[ 0 ][ "message" ] == "msg1"
+        assert messages[ 1 ][ "message" ] == "msg2"
+        assert messages[ 2 ][ "message" ] == "msg3"
+
+        # Queue should be empty now
+        assert orch._user_messages.empty()
+
+    def test_drain_queue_called_twice_second_empty( self ):
+        """Second call to _drain_user_messages returns [] after first drain."""
+        orch = SweTeamOrchestrator(
+            task_description = "test",
+            config           = SweTeamConfig(),
+        )
+
+        orch._user_messages.put( { "message": "msg1", "priority": "normal" } )
+        first_drain = orch._drain_user_messages()
+        second_drain = orch._drain_user_messages()
+
+        assert len( first_drain ) == 1
+        assert len( second_drain ) == 0
+
+    def test_check_in_drains_messages_when_present( self ):
+        """_check_in_with_user should drain queued messages and call _analyze_user_messages."""
+        orch = SweTeamOrchestrator(
+            task_description = "test",
+            config           = SweTeamConfig( enable_checkins=True, enable_user_messages=True ),
+        )
+
+        # Populate queue with a message
+        orch._user_messages.put( { "message": "Use auth module", "priority": "normal" } )
+
+        team_io = MagicMock()
+        team_io.notify_progress  = AsyncMock()
+        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.get_feedback     = AsyncMock( return_value=None )
+        team_io.is_approval      = MagicMock( return_value=False )
+
+        # Mock _analyze_user_messages to return analysis
+        with patch.object( orch, '_analyze_user_messages', new_callable=AsyncMock ) as mock_analyze:
+            mock_analyze.return_value = "User wants to use existing auth module"
+
+            feedback = asyncio.run( orch._check_in_with_user(
+                team_io, prompt="Task done. Any input?"
+            ) )
+
+            mock_analyze.assert_called_once()
+            # Feedback should be the analysis (user approved incorporation)
+            assert feedback == "User wants to use existing auth module"
+
+    def test_check_in_no_messages_proceeds_normally( self ):
+        """_check_in_with_user with empty queue proceeds to normal get_feedback."""
+        orch = SweTeamOrchestrator(
+            task_description = "test",
+            config           = SweTeamConfig( enable_checkins=True, enable_user_messages=True ),
+        )
+
+        team_io = MagicMock()
+        team_io.notify_progress  = AsyncMock()
+        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.get_feedback     = AsyncMock( return_value=None )
+
+        feedback = asyncio.run( orch._check_in_with_user(
+            team_io, prompt="Task done. Any input?"
+        ) )
+
+        # No messages → should proceed to get_feedback
+        team_io.get_feedback.assert_called_once()
+        assert feedback is None
+
+    def test_urgent_interrupt_triggers_check_in( self ):
+        """Setting _urgent_interrupt should be detectable by orchestrator."""
+        orch = SweTeamOrchestrator(
+            task_description = "test",
+            config           = SweTeamConfig( enable_user_messages=True ),
+        )
+
+        assert not orch._urgent_interrupt.is_set()
+        orch._urgent_interrupt.set()
+        assert orch._urgent_interrupt.is_set()
+
+        # After check-in clears it
+        orch._urgent_interrupt.clear()
+        assert not orch._urgent_interrupt.is_set()
+
+    def test_check_in_clears_urgent_interrupt( self ):
+        """_check_in_with_user clears the urgent interrupt after processing."""
+        orch = SweTeamOrchestrator(
+            task_description = "test",
+            config           = SweTeamConfig( enable_checkins=True, enable_user_messages=True ),
+        )
+
+        # Set urgent interrupt and add a message
+        orch._urgent_interrupt.set()
+        orch._user_messages.put( { "message": "URGENT", "priority": "urgent" } )
+
+        team_io = MagicMock()
+        team_io.notify_progress  = AsyncMock()
+        team_io.ask_confirmation = AsyncMock( return_value=False )  # User declines
+        team_io.get_feedback     = AsyncMock( return_value=None )
+
+        with patch.object( orch, '_analyze_user_messages', new_callable=AsyncMock ) as mock_analyze:
+            mock_analyze.return_value = "Urgent: stop"
+
+            asyncio.run( orch._check_in_with_user(
+                team_io, prompt="Check-in"
+            ) )
+
+        # Urgent interrupt should be cleared regardless of approval
+        assert not orch._urgent_interrupt.is_set()
+
+    def test_enable_user_messages_config_default_true( self ):
+        """enable_user_messages defaults to True."""
+        config = SweTeamConfig()
+        assert config.enable_user_messages is True
+
+    def test_enable_user_messages_config_false( self ):
+        """enable_user_messages can be set to False."""
+        config = SweTeamConfig( enable_user_messages=False )
+        assert config.enable_user_messages is False

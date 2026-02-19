@@ -1581,6 +1581,48 @@ class NotificationsUI {
             });
         }
 
+        // ── Job Message Send: Event delegation on running queue container ──
+        // Handles dynamically-created job message inputs via bubbling
+        const runContainer = document.getElementById( 'run-jobs-container' );
+        if ( runContainer ) {
+            runContainer.addEventListener( 'click', ( e ) => {
+                // STT button click
+                const sttBtn = e.target.closest( '.job-send-message .stt-button' );
+                if ( sttBtn ) {
+                    const jobId = sttBtn.id.replace( 'job-msg-stt-', '' );
+                    this.handleSTTButtonClick( `job-msg-input-${jobId}`, sttBtn );
+                    return;
+                }
+
+                // Send button click
+                const sendBtn = e.target.closest( '.job-send-message .response-submit-button' );
+                if ( sendBtn ) {
+                    const jobId = sendBtn.id.replace( 'job-msg-submit-', '' );
+                    this.sendJobMessage( jobId );
+                    return;
+                }
+
+                // Urgent toggle label click
+                const urgentLabel = e.target.closest( '.urgent-toggle' );
+                if ( urgentLabel ) {
+                    const checkbox = urgentLabel.querySelector( 'input[type="checkbox"]' );
+                    if ( checkbox && e.target !== checkbox ) {
+                        checkbox.checked = !checkbox.checked;
+                    }
+                    urgentLabel.classList.toggle( 'checked', checkbox.checked );
+                }
+            } );
+
+            // Enter key sends message in job input
+            runContainer.addEventListener( 'keydown', ( e ) => {
+                if ( e.key === 'Enter' && e.target.classList.contains( 'job-msg-input' ) ) {
+                    e.preventDefault();
+                    const jobId = e.target.id.replace( 'job-msg-input-', '' );
+                    this.sendJobMessage( jobId );
+                }
+            } );
+        }
+
         this.log( "Job submission event listeners setup complete" );
     }
 
@@ -4378,6 +4420,18 @@ class NotificationsUI {
         this.notificationState.notifications.push( notification );
         this.log( `Processing new notification: ${notification.type}/${notification.priority} - ${notification.message}` );
 
+        // Approach D: Append user_message to live interaction pane on running job card
+        const notifType = notification.type || notification.notification_type;
+        if ( notifType === 'user_message' && notification.job_id ) {
+            this.appendJobUserMessage(
+                notification.job_id,
+                notification.message || '',
+                notification.priority || 'normal'
+            );
+            // Don't play sounds for user's own messages (they just sent it)
+            return;
+        }
+
         // Phase 2.2 SSE - Check if this is a response-required notification
         if ( notification.response_requested === true ) {
             this.log( `Response-required notification detected: ${notification.id}` );
@@ -5434,6 +5488,26 @@ class NotificationsUI {
                         <span>Agent: ${job.agent_type || 'Unknown'}</span>
                         <span>Time: ${timestamp}</span>
                     </div>
+                    ${queueName === 'run' ? `
+                    <div class="job-send-message" id="job-send-msg-${jobId}">
+                        <div class="job-send-message-row">
+                            <button type="button" class="stt-button" id="job-msg-stt-${jobId}"
+                                    title="Click to record (30s max, ESC to cancel)">🎤</button>
+                            <input type="text" id="job-msg-input-${jobId}" class="job-msg-input"
+                                   placeholder="Send message to running job..." />
+                            <label class="urgent-toggle" title="Mark as urgent (interrupts current task)">
+                                <input type="checkbox" id="job-msg-urgent-${jobId}" />
+                                ⚡
+                            </label>
+                            <button type="button" class="response-submit-button"
+                                    id="job-msg-submit-${jobId}">Send</button>
+                        </div>
+                    </div>
+                    <div class="job-interactions-section live-interactions" id="job-interactions-${jobId}">
+                        <div class="interactions-content" id="interactions-content-${jobId}">
+                        </div>
+                    </div>
+                    ` : ''}
                     ${queueName === 'done' ? `
                     <div class="job-interactions-section" id="job-interactions-${jobId}">
                         <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${jobId}', event)">
@@ -5473,6 +5547,114 @@ class NotificationsUI {
             if ( expandBtn ) expandBtn.textContent = '▼';
             this.expandedJobCards.add( jobId );
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Approach D: Job Message Send — User-to-Job Communication
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    async sendJobMessage( jobId ) {
+        /**
+         * Send a user message to a running job via POST /api/jobs/{jobId}/message.
+         *
+         * Reads input text and urgent checkbox state, POSTs to the API,
+         * and appends the message to the job's live interaction pane on success.
+         *
+         * Requires:
+         *     - jobId is a valid running job ID
+         *     - DOM elements job-msg-input-{jobId} and job-msg-urgent-{jobId} exist
+         *
+         * Ensures:
+         *     - Message sent to API on valid input
+         *     - Input cleared on success
+         *     - Message appended to live interaction pane (optimistic UI)
+         *     - Error shown inline on failure
+         */
+        const input    = document.getElementById( `job-msg-input-${jobId}` );
+        const urgentCb = document.getElementById( `job-msg-urgent-${jobId}` );
+        const sendBtn  = document.getElementById( `job-msg-submit-${jobId}` );
+
+        if ( !input ) return;
+
+        const message  = input.value.trim();
+        const priority = urgentCb && urgentCb.checked ? 'urgent' : 'normal';
+
+        if ( !message ) {
+            input.focus();
+            return;
+        }
+
+        // Disable controls during request
+        input.disabled  = true;
+        sendBtn.disabled = true;
+
+        try {
+            const response = await fetch( `/api/jobs/${jobId}/message`, {
+                method  : 'POST',
+                headers : {
+                    'Content-Type'  : 'application/json',
+                    'Authorization' : this.getAuthHeader(),
+                },
+                body: JSON.stringify( { message, priority } ),
+            } );
+
+            if ( !response.ok ) {
+                const errData = await response.json().catch( () => ( {} ) );
+                throw new Error( errData.detail || `HTTP ${response.status}` );
+            }
+
+            // Success — clear input and append to live interaction pane
+            input.value = '';
+            if ( urgentCb ) {
+                urgentCb.checked = false;
+                const label = urgentCb.closest( '.urgent-toggle' );
+                if ( label ) label.classList.remove( 'checked' );
+            }
+
+            // Append to live interaction pane (optimistic UI)
+            this.appendJobUserMessage( jobId, message, priority );
+
+            this.log( `[JOB-MSG] Sent to ${jobId}: ${message.substring( 0, 80 )}` );
+
+        } catch ( error ) {
+            this.error( `[JOB-MSG] Failed to send message to ${jobId}:`, error );
+            // Show inline error
+            input.style.borderColor = '#dc3545';
+            setTimeout( () => { input.style.borderColor = ''; }, 3000 );
+        } finally {
+            input.disabled  = false;
+            sendBtn.disabled = false;
+            input.focus();
+        }
+    }
+
+    appendJobUserMessage( jobId, message, priority ) {
+        /**
+         * Append a user-sent message to the job's live interaction pane.
+         *
+         * Creates a styled interaction-item with user-message class and
+         * inserts it into the running job card's interaction section.
+         */
+        const contentEl = document.getElementById( `interactions-content-${jobId}` );
+        if ( !contentEl ) return;
+
+        const timestamp = new Date().toLocaleTimeString();
+        const priorityBadge = priority === 'urgent' ? ' <strong>[URGENT]</strong>' : '';
+
+        const itemHtml = `
+            <div class="interaction-item user-message priority-${priority === 'urgent' ? 'urgent' : 'medium'}">
+                <div class="interaction-header">
+                    <span class="interaction-type">👤 You${priorityBadge}</span>
+                    <span class="interaction-time">${timestamp}</span>
+                </div>
+                <div class="interaction-message">${this.escapeHtml( message )}</div>
+            </div>
+        `;
+
+        contentEl.insertAdjacentHTML( 'beforeend', itemHtml );
+
+        // Auto-scroll to bottom
+        contentEl.scrollTop = contentEl.scrollHeight;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

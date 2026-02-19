@@ -1,5 +1,37 @@
 # Lupin Project History
 
+### 2026.02.19 - Session 238 | Approach D: Implement Hybrid Queue + Check-In for User-Initiated SWE Team Communication
+
+#### Checkpoint | 2026-02-19 | Full 5-phase implementation of user-to-orchestrator mid-task messaging
+
+**Accomplishments**:
+- Implemented Approach D end-to-end: users can now send messages to running SWE Team jobs anytime via a WebSocket-based message queue. Messages accumulate in a `threading.Queue` and drain at orchestrator check-in points with LLM-powered analysis + yes/no confirmation
+- **Phase 1**: Created `OrchestratorNotificationClient` — WebSocket client adapted from `BaseWebSocketListener` that filters for `user_message` notifications matching the target `job_id`, queues them for the orchestrator, and sets `threading.Event` on urgent priority
+- **Phase 2**: Added queue drain + urgent interrupt to orchestrator — `_drain_user_messages()`, `_analyze_user_messages()` methods, modified `_check_in_with_user()` to drain before existing logic, added urgent interrupt check between task delegations in `_execute_live()`
+- **Phase 3**: Modified `job.py` to create/manage notification client lifecycle; added `POST /api/jobs/{job_id}/message` REST endpoint to `queues.py` with job ownership validation
+- **Phase 4**: Added message input UI to running job cards — text input with STT button, urgent priority toggle, send button, live interaction pane with cross-tab sync via WebSocket
+- **Phase 5**: 20 new notification client tests + 10 new orchestrator queue drain tests — all 317 SWE team tests pass, 0 regressions
+- Moved planning doc from `src/rnd/` root into `src/rnd/2026.02.13-claude-code-agentic-dev-team/`
+
+**Files (CoSA — commit separately)**:
+- `src/cosa/agents/swe_team/notification_client.py` — NEW: WebSocket client for user message filtering + queuing
+- `src/cosa/agents/swe_team/orchestrator.py` — Queue drain, LLM analysis, urgent interrupt between tasks
+- `src/cosa/agents/swe_team/config.py` — Added `enable_user_messages: bool = True`
+- `src/cosa/agents/swe_team/job.py` — Notification client lifecycle management
+- `src/cosa/rest/routers/queues.py` — `POST /api/jobs/{job_id}/message` endpoint
+
+**Files (Lupin)**:
+- `src/fastapi_app/static/js/notifications.js` — Job card message input, STT, send handler, cross-tab sync
+- `src/fastapi_app/static/css/notifications.css` — Message input styling, urgent toggle, user message items
+- `src/rnd/2026.02.13-claude-code-agentic-dev-team/2026.02.18-approach-d-hybrid-queue-checkin.md` — MOVED from `src/rnd/`
+- `src/tests/unit/test_swe_team_notification_client.py` — NEW: 20 unit tests
+- `src/tests/unit/test_swe_team_orchestrator.py` — 10 new `TestUserMessageQueue` tests
+
+**Test**: 317 SWE team tests PASS (20 new + 10 new + 287 existing)
+**Plan file**: `~/.claude/plans/elegant-brewing-adleman.md`
+
+---
+
 ### 2026.02.19 - Session 237 | Approach C: Hybrid Fast Lane + Bounded Agentic Pool (Planning)
 
 #### Checkpoint | 2026-02-19 | Create planning documentation for CJ Flow concurrent processing

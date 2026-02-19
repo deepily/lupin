@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-19 (Session 237)
+Last updated: 2026-02-19 (Session 238)
 
 ## Pending
 
@@ -18,9 +18,10 @@ Last updated: 2026-02-19 (Session 237)
 - [ ] **[LUPIN] Phase 3.2: Integration verification** — Manual E2E test with concurrent agentic + sync jobs
 - **Tracking doc**: `src/rnd/2026.02.19-approach-c-hybrid-queue-architecture.md`
 
-### SWE Team Approach D: User-Initiated Communication (HIGH PRIORITY)
+### SWE Team Approach D: Post-Implementation Verification (MEDIUM)
 
-- [ ] **[LUPIN] Implement Approach D: Hybrid Queue + Check-In** — Users can send messages to running SWE Team jobs anytime via WebSocket; messages accumulate in a `threading.Queue` and drain at check-in points with LLM-powered analysis + yes/no confirmation. **Plan**: `~/.claude/plans/agile-kindling-tide.md`. **Design doc**: `src/rnd/2026.02.13-claude-code-agentic-dev-team/05-user-initiated-communication.md`. **Files**: orchestrator.py (queue + drain + analysis), job.py (orchestrator ref), websocket.py (inbound event handler). **RESUME NEXT SESSION.**
+- [ ] **[LUPIN] Approach D manual E2E verification** — Submit SWE Team job via UI, verify job card shows message input, send normal + urgent messages, verify orchestrator drains at check-in, verify urgent triggers immediate check-in
+- [ ] **[LUPIN] Commit CoSA changes for Approach D** — 5 CoSA files modified (notification_client.py NEW, orchestrator.py, config.py, job.py, queues.py). Must commit in CoSA context separately
 
 ### SWE Team Proxy Agent (HIGH PRIORITY)
 
@@ -99,6 +100,7 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 - [ ] **Silent flag for notifications**: Consider adding a `silent` parameter to the cosa-voice notification system to suppress TTS during automated testing. Would require changes to: router request models, job classes, voice_io wrappers, and core notification functions.
 - [x] **Standardize compound job/user ID usage** - Session 236: Bug #5 made scoped IDs (`base_hash::user_id`) universal across ALL job types via `register_scoped_job()`
 - [x] **Standardize job-user-session association interface** - Session 236: Bug #5 unified all write sites through `register_scoped_job()` and all reads through direct `job.user_id` access
+- [x] **Implement Approach D: Hybrid Queue + Check-In** - Session 238: Full 5-phase implementation. 20+10 new tests, 317 SWE team tests pass
 - [ ] **[LUPIN] Gist embeddings: keep vs. jettison** - Gist _text_ has value (Level 3 exact match), but gist _embeddings_ are dead code — stored but never searched. Jettisoning saves ~30% embedding cost per snapshot (2 of 7 embeddings) and removes unused search methods.
   - **Analysis**: `src/rnd/2026.02.09-gist-embeddings-analysis-keep-vs-jettison.md`
   - **Dead code**: `question_gist_embedding`, `solution_gist_embedding` fields, `get_snapshots_by_solution_gist_similarity()`, `get_question_gist_similarity()`
