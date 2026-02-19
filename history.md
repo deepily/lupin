@@ -1,5 +1,42 @@
 # Lupin Project History
 
+### 2026.02.19 - Session 236 | Bug #5: Unify Job-User-Session Association
+
+#### Checkpoint | 2026-02-19 | Eliminate dual-bookkeeping in CJ Flow queue system
+
+**Accomplishments**:
+- Implemented 5-phase plan to eliminate dual-bookkeeping where `UserJobTracker` side-table duplicated user/session info already on job objects via `QueueableJob` protocol
+- **Phase 0**: Fixed JWT key bug in 2 routers (`"user_id"` -> `"uid"` — key never existed in JWT, silently fell back to email)
+- **Phase 1**: Added `register_scoped_job()` atomic method to `UserJobTracker` — replaces scattered 2-3 call sequences
+- **Phase 2**: Migrated 11 write sites across 9 files to `register_scoped_job()` — makes scoped IDs (`base_hash::user_id`) universal across ALL job types
+- **Phase 3**: Replaced 12 `get_user_for_job()` tracker lookups with direct `job.user_id` — `QueueableJob` protocol guarantees attribute exists
+- **Phase 4**: Removed 5 dead methods + 2 dead dicts from `UserJobTracker` — class now focused on reverse-index for O(1) queue filtering
+- Added 13 new unit tests for `register_scoped_job()` and related methods
+- All 1,447 unit tests passing after changes
+
+**Files (CoSA — commit separately)**:
+- `src/cosa/rest/queue_extensions.py` — Add `register_scoped_job()`, remove 5 dead methods/2 dicts
+- `src/cosa/rest/running_fifo_queue.py` — 9 tracker lookups -> direct `job.user_id`
+- `src/cosa/rest/todo_fifo_queue.py` — 3 write consolidations + 1 read simplification
+- `src/cosa/rest/queue_consumer.py` — 1 tracker lookup -> `job.user_id`
+- `src/cosa/rest/routers/queues.py` — 1 tracker lookup -> `job.user_id` + remove unused import
+- `src/cosa/rest/routers/podcast_generator.py` — JWT fix + scoped ID (2 sites)
+- `src/cosa/rest/routers/deep_research_to_podcast.py` — JWT fix + scoped ID
+- `src/cosa/rest/routers/deep_research.py` — Scoped ID
+- `src/cosa/rest/routers/claude_code_queue.py` — Scoped ID
+- `src/cosa/rest/routers/swe_team.py` — Scoped ID
+- `src/cosa/rest/routers/mock_job.py` — Scoped ID (2 sites)
+
+**Files (Lupin)**:
+- `src/tests/unit/test_queue_extensions.py` — NEW: 13 unit tests
+- `src/tests/unit/test_crud_queue_integration.py` — Fixed mock setup (added `user_id`)
+
+**Test**: 1,447 unit tests PASS
+**Commit**: f0fc016
+**Plan file**: `~/.claude/plans/cosmic-herding-quill.md`
+
+---
+
 ### 2026.02.18 - Session 235 | Approach D Planning: Hybrid Queue + Check-In for User-Initiated Communication
 
 **Accomplishments**:

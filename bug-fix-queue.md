@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-16T10:00:00
+**Last Updated**: 2026-02-19T00:00:00
 
 ---
 
@@ -23,6 +23,7 @@
 | 0a2fa054 | 2026-02-14T16:00:00 | 2026-02-14T16:30:00 | closed |
 | 4949b964 | 2026-02-02T18:00:00 | 2026-02-02T23:05:00 | closed |
 | 07b80074 | 2026-02-16T10:00:00 | 2026-02-16T10:00:00 | active |
+| a118cc5e | 2026-02-19T00:00:00 | 2026-02-19T00:00:00 | committed |
 
 ---
 
@@ -44,6 +45,16 @@
 
 ### Completed
 
+- [x] **Bug #5: Unify Job-User-Session Association** → commit: f0fc016 (Lupin), CoSA pending | By: a118cc5e
+  - **Symptom**: Dual-bookkeeping — `UserJobTracker` side-table duplicated user/session info already on job objects
+  - **Root Cause**: Tracker was added before `user_id` was on all job types; now `QueueableJob` protocol guarantees it
+  - **Fix**: 5-phase refactor: JWT fix, `register_scoped_job()` atomic method, universal scoped IDs, direct `job.user_id` reads, dead code removal
+  - **Verification**: 1,447 unit tests pass, 13 new tests added
+- [x] **CoSA submodule uncommitted changes (Sessions 219-234)** → FIXED, already committed to CoSA repo | By: a118cc5e
+  - **Symptom**: Accumulated uncommitted CoSA changes across Sessions 225-234 (identified as Bug #2 in session summary)
+  - **Root Cause**: Technical debt — CoSA edits made during Lupin sessions were not batch-committed to the CoSA repo
+  - **Resolution**: Already resolved via two batch commits: `4510eb7` (Sessions 226-234, 2026-02-18), `7a7ea21` (Sessions 219-225, 2026-02-17)
+  - **Verification**: `cd src/cosa && git status --short` returns clean (0 uncommitted changes)
 - [x] **Calculator→MathAgent snapshot replay: missing `prompt_response_dict` copy** → FIXED | By: 07b80074
   - **Symptom**: "What's 4+4?" works first time but fails on cache replay — snapshot saved with `code=[""]`
   - **Root Cause**: `_delegate_to_math_agent()` copied only 3 attrs back from MathAgent, missing `prompt_response_dict` which `SolutionSnapshot.create()` reads for `code`
@@ -134,4 +145,4 @@
 
 ### 2026.01.28 - Session b9faa342 (2 fixes)
 - [x] Job card field parity bug → commit: 57a9fbb (Lupin) | By: b9faa342
-- [x] sender_id regex rejects job ID format → pending commit (CoSA) | By: b9faa342
+- [x] sender_id regex rejects job ID format → FIXED, CoSA commit: 4510eb7 | By: b9faa342

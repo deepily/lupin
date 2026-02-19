@@ -52,6 +52,7 @@ def _create_mock_agent( tmp_dir=None, operation="add", needs_confirm=False ):
     agent.question              = "delete buy milk from my grocery list"
     agent.model_name            = "kaitchup/phi_4_14b"
     agent.routing_command       = "agent router go to crud for dataframes"
+    agent.user_id               = "test@example.com"
     agent.user_email            = "test@example.com"
     agent.prompt_response_dict  = None
     agent.code_response_dict    = None
@@ -395,7 +396,6 @@ class TestCrudQueueCompletion:
         queue.io_tbl          = MagicMock()
         queue.gist_normalizer = MagicMock()
         queue.user_job_tracker = MagicMock()
-        queue.user_job_tracker.get_user_for_job.return_value = "test@example.com"
 
         # Create a CRUD agent that has already completed do_all()
         agent = _create_mock_agent( tmp_dir=tmp_storage_dir, operation="add" )
