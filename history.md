@@ -1,5 +1,25 @@
 # Lupin Project History
 
+### 2026.02.19 - Session 237 | Approach C: Hybrid Fast Lane + Bounded Agentic Pool (Planning)
+
+#### Checkpoint | 2026-02-19 | Create planning documentation for CJ Flow concurrent processing
+
+**Accomplishments**:
+- Created implementation tracking document for Approach C: hybrid architecture where consumer thread becomes a dispatcher that processes sync agents inline (fast lane) and submits agentic jobs to a bounded `ThreadPoolExecutor`
+- Documented thread safety model with shared-state analysis (RLock on FifoQueue, existing thread-safety in WebSocketManager/UserJobTracker/emit_job_state_transition)
+- Designed 3-phase implementation plan: Phase 1 (RLock + config + thread safety tests), Phase 2 (pool + dispatcher refactor + tests), Phase 3 (API endpoint + E2E verification)
+- Updated TODO.md with 10 phase-by-phase checklist items
+- Updated src/rnd/README.md with link to tracking document
+- Zero implementation code — planning documents only
+
+**Files (Lupin)**:
+- `src/rnd/2026.02.19-approach-c-hybrid-queue-architecture.md` — NEW: Implementation tracking doc with Mermaid diagram, thread safety model, phase checklist, critical files table
+- `src/rnd/README.md` — Added entry for Approach C
+- `TODO.md` — Added CJ Flow concurrent processing section (10 items)
+- `history.md` — This entry
+
+---
+
 ### 2026.02.19 - Session 236 | Bug #5: Unify Job-User-Session Association
 
 #### Checkpoint | 2026-02-19 | Eliminate dual-bookkeeping in CJ Flow queue system

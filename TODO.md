@@ -1,8 +1,22 @@
 # TODO
 
-Last updated: 2026-02-18 (Session 223)
+Last updated: 2026-02-19 (Session 237)
 
 ## Pending
+
+### CJ Flow: Hybrid Fast Lane + Bounded Agentic Pool (Session 237)
+
+- [ ] **[LUPIN] Phase 1.1: Add RLock to FifoQueue** — `fifo_queue.py`: wrap all mutating + reading methods with `threading.RLock()`
+- [ ] **[LUPIN] Phase 1.2: Add config key** — `lupin-app.ini` + `lupin-app-splainer.ini`: `cj flow max concurrent agentic jobs = 3`
+- [ ] **[LUPIN] Phase 1.3: Write thread safety tests** — `test_fifo_queue_thread_safety.py`: 4 concurrency tests
+- [ ] **[LUPIN] Phase 1.4: Verify Phase 1** — New + existing unit tests pass
+- [ ] **[LUPIN] Phase 2.1: Agentic pool + dispatcher refactor** — `running_fifo_queue.py`: ThreadPoolExecutor, route by isinstance, new methods
+- [ ] **[LUPIN] Phase 2.2: Update shutdown sequence** — `main.py`: add pool shutdown before consumer thread
+- [ ] **[LUPIN] Phase 2.3: Write agentic pool tests** — `test_agentic_pool.py`: 10 pool behavior tests
+- [ ] **[LUPIN] Phase 2.4: Verify Phase 2** — New + existing unit tests pass
+- [ ] **[LUPIN] Phase 3.1: API endpoint** — `/api/queue/pool-status` (optional)
+- [ ] **[LUPIN] Phase 3.2: Integration verification** — Manual E2E test with concurrent agentic + sync jobs
+- **Tracking doc**: `src/rnd/2026.02.19-approach-c-hybrid-queue-architecture.md`
 
 ### SWE Team Approach D: User-Initiated Communication (HIGH PRIORITY)
 

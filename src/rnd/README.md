@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.19 - Approach C: Hybrid Fast Lane + Bounded Agentic Pool for CJ Flow
+- **Implementation Plan**: [2026.02.19-approach-c-hybrid-queue-architecture.md](2026.02.19-approach-c-hybrid-queue-architecture.md) - **🔄 IN PROGRESS** - Hybrid architecture for CJ Flow concurrent job processing. Consumer thread becomes a dispatcher: sync agents (MathAgent, CalendarAgent, etc.) process inline via fast lane, while agentic jobs (DeepResearch, Podcast, ClaudeCode) submit to a bounded `ThreadPoolExecutor` (configurable N workers). Eliminates head-of-line blocking where 10-minute DeepResearchJobs block 2-second MathAgent queries. Phase 1: RLock on FifoQueue for thread safety. Phase 2: Pool + dispatcher refactor in RunningFifoQueue with `delete_by_id_hash()` replacing `pop()` for concurrent removal. Phase 3: API monitoring endpoint + E2E verification. No protocol changes, no agentic job internal changes. Serialized from plan `sprightly-juggling-origami.md`.
+
 ### 2026.02.18 - Approach D: Hybrid Queue + Check-In for User-Initiated Communication
 - **Implementation Plan**: [2026.02.18-approach-d-hybrid-queue-checkin.md](2026.02.18-approach-d-hybrid-queue-checkin.md) - **📋 PLANNED** - User-initiated communication with running SWE Team jobs. Decouples message submission (anytime via WebSocket fire-and-forget) from message consumption (at check-in points). Three components: `threading.Queue` on orchestrator, `user_message_to_job` WebSocket inbound event, LLM-powered drain logic where lead model analyzes accumulated messages and asks yes/no confirmation before incorporating. Builds on Approach B (periodic check-ins, already implemented). 5 files, ~170 lines. Parent design doc: `src/rnd/2026.02.13-claude-code-agentic-dev-team/05-user-initiated-communication.md`. Serialized from plan `agile-kindling-tide.md`.
 
