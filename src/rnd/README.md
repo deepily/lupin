@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.18 - Approach D: Hybrid Queue + Check-In for User-Initiated Communication
+- **Implementation Plan**: [2026.02.18-approach-d-hybrid-queue-checkin.md](2026.02.18-approach-d-hybrid-queue-checkin.md) - **📋 PLANNED** - User-initiated communication with running SWE Team jobs. Decouples message submission (anytime via WebSocket fire-and-forget) from message consumption (at check-in points). Three components: `threading.Queue` on orchestrator, `user_message_to_job` WebSocket inbound event, LLM-powered drain logic where lead model analyzes accumulated messages and asks yes/no confirmation before incorporating. Builds on Approach B (periodic check-ins, already implemented). 5 files, ~170 lines. Parent design doc: `src/rnd/2026.02.13-claude-code-agentic-dev-team/05-user-initiated-communication.md`. Serialized from plan `agile-kindling-tide.md`.
+
 ### 2026.02.16 - PEFT Resume-Path OOM: Cold Allocator Root Cause Analysis
 - **Root Cause Analysis**: [2026.02.16-peft-resume-oom-cold-allocator-analysis.md](2026.02.16-peft-resume-oom-cold-allocator-analysis.md) - **🚫 WILL NOT FIX** - `--resume-from-merged` + `--post-quantization-stats` causes vLLM OOM after 8-bit quantization. Two-factor root cause: (1) Cold CUDA caching allocator creates monolithic ~16 GB segment; ~62 MB residual pins entire segment after cleanup. (2) vLLM subprocess can't access parent's reserved memory, sees only ~10 GB free on GPU 0. Happy path avoids this via mature allocator from prior training/merge cycles. Intractable at application level (PyTorch allocator internals). Workaround: skip `--post-quantization-stats` when resuming, validate vLLM manually in a separate process. Related: [2026.02.14-peft-resume-from-merged.md](2026.02.14-peft-resume-from-merged.md).
 

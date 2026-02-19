@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.02.18 - Session 235 | Approach D Planning: Hybrid Queue + Check-In for User-Initiated Communication
+
+**Accomplishments**:
+- Planned Approach D implementation for user-initiated communication with running SWE Team jobs
+- Design decision: WebSocket inbound event (`user_message_to_job`) instead of REST endpoint — consistent with existing fire-and-forget notification architecture
+- Design decision: LLM-powered analysis at check-in — lead model analyzes accumulated messages and proposes concrete actions, then asks yes/no confirmation before incorporating
+- Created serialized plan document at `src/rnd/2026.02.18-approach-d-hybrid-queue-checkin.md`
+- Updated TODO.md with high-priority resume-next-session item
+- Updated R&D README with new document link
+
+**Files**: 3 new/modified (Lupin repo)
+- `src/rnd/2026.02.18-approach-d-hybrid-queue-checkin.md` — NEW: Serialized implementation plan
+- `src/rnd/README.md` — Added Approach D entry
+- `TODO.md` — Added Approach D implementation item
+
+**Plan file**: `~/.claude/plans/agile-kindling-tide.md` (5 files, ~170 lines, 6 steps)
+
+---
+
 ### 2026.02.18 - Session 234 | Bug F: sender_id Validation Fix for SWE Team Notifications
 
 **Accomplishments**:

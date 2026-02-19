@@ -1,8 +1,12 @@
 # TODO
 
-Last updated: 2026-02-17 (Session 222)
+Last updated: 2026-02-18 (Session 223)
 
 ## Pending
+
+### SWE Team Approach D: User-Initiated Communication (HIGH PRIORITY)
+
+- [ ] **[LUPIN] Implement Approach D: Hybrid Queue + Check-In** — Users can send messages to running SWE Team jobs anytime via WebSocket; messages accumulate in a `threading.Queue` and drain at check-in points with LLM-powered analysis + yes/no confirmation. **Plan**: `~/.claude/plans/agile-kindling-tide.md`. **Design doc**: `src/rnd/2026.02.13-claude-code-agentic-dev-team/05-user-initiated-communication.md`. **Files**: orchestrator.py (queue + drain + analysis), job.py (orchestrator ref), websocket.py (inbound event handler). **RESUME NEXT SESSION.**
 
 ### SWE Team Proxy Agent (HIGH PRIORITY)
 
