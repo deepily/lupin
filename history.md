@@ -1,5 +1,31 @@
 # Lupin Project History
 
+### 2026.02.20 - Session 241 | Activate SWE Team Proxy in Shadow Mode + Wire Trust Feedback Loop
+
+#### Checkpoint | 2026-02-20 | Proxy default changed to shadow, trust feedback recorded on every user decision
+
+**Accomplishments**:
+- Changed SWE Team proxy default `trust_mode` from `"disabled"` to `"shadow"` — proxy object now created on every orchestrator, but shadow mode never acts autonomously (safe, observability-first)
+- Restructured `_gated_confirmation()` to always call `evaluate()` for all non-disabled modes (shadow, suggest, active), then record trust feedback after user answers — agreement/disagreement tracked via `TrustTracker.record_decision()`
+- Active mode auto-approval path now records `success=True` in trust tracker; suggest mode records user follow-through; shadow mode observes and records silently
+- All trust recording wrapped in try/except so failures never break the main confirmation flow
+- Added INI documentation keys for `swe team trust mode` in both config and splainer files
+- Added 7 new tests in `TestTrustFeedbackLoop` class: shadow agreement/disagreement, active auto-approve records success, suggest agreement/disagreement, error resilience, shadow default creates proxy
+- Updated 4 existing tests for new shadow default: renamed `test_default_trust_mode_disabled` → `_shadow`, explicit `trust_mode="disabled"` where proxy-None is needed, shadow evaluate assertion updated
+
+**Files (Lupin)**:
+- `src/conf/lupin-app.ini` — Added `swe team trust mode = shadow`
+- `src/conf/lupin-app-splainer.ini` — Added trust mode explanation
+- `src/tests/unit/test_swe_team_orchestrator.py` — 7 new + 4 updated tests (49 total in file)
+
+**Files (CoSA — commit separately)**:
+- `src/cosa/agents/swe_team/config.py` — Default `trust_mode` from `"disabled"` → `"shadow"`
+- `src/cosa/agents/swe_team/orchestrator.py` — `_gated_confirmation()` restructured with trust feedback loop
+
+**Test**: 1490 unit tests PASS (7 new + 1483 existing)
+
+---
+
 ### 2026.02.20 - Session 240 | Add dry_run as Voice-Detectable Runtime Argument for SWE Team Training Data
 
 #### Checkpoint | 2026-02-20 | Conditional args detection for LoRA training data generation

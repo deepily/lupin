@@ -383,7 +383,7 @@ class TestGatedConfirmation:
         """Without proxy, _gated_confirmation delegates to team_io.ask_confirmation."""
         orch = SweTeamOrchestrator(
             task_description = "test",
-            config           = SweTeamConfig(),  # trust_mode="disabled"
+            config           = SweTeamConfig( trust_mode="disabled" ),
         )
         assert orch.proxy is None
 
@@ -415,10 +415,12 @@ class TestGatedConfirmation:
         mock_proxy = MagicMock()
         mock_proxy.trust_mode = "active"
         mock_result = MagicMock()
-        mock_result.action = "act"
-        mock_result.value = "approved"
+        mock_result.action     = "act"
+        mock_result.value      = "approved"
         mock_result.confidence = 0.95
+        mock_result.category   = "testing"
         mock_proxy.evaluate = MagicMock( return_value=mock_result )
+        mock_proxy.trust_tracker = MagicMock()
         orch.proxy = mock_proxy
 
         team_io = MagicMock()
@@ -441,9 +443,11 @@ class TestGatedConfirmation:
         team_io.notify_progress.assert_called_once()
         msg = team_io.notify_progress.call_args[ 1 ][ "message" ]
         assert "Auto-approved by proxy" in msg
+        # Trust tracker should record success
+        mock_proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=True )
 
     def test_proxy_shadow_mode_falls_through( self ):
-        """Shadow mode should fall through to ask_confirmation."""
+        """Shadow mode should evaluate but still fall through to ask_confirmation."""
         config = SweTeamConfig( trust_mode="disabled" )
         orch = SweTeamOrchestrator(
             task_description = "test",
@@ -452,6 +456,13 @@ class TestGatedConfirmation:
 
         mock_proxy = MagicMock()
         mock_proxy.trust_mode = "shadow"
+        mock_result = MagicMock()
+        mock_result.action     = "shadow"
+        mock_result.value      = "approved"
+        mock_result.category   = "general"
+        mock_result.confidence = 0.9
+        mock_proxy.evaluate = MagicMock( return_value=mock_result )
+        mock_proxy.trust_tracker = MagicMock()
         orch.proxy = mock_proxy
 
         team_io = MagicMock()
@@ -468,8 +479,10 @@ class TestGatedConfirmation:
 
         assert result is True
         team_io.ask_confirmation.assert_called_once()
-        # proxy.evaluate should NOT be called in shadow mode
-        mock_proxy.evaluate.assert_not_called()
+        # Shadow mode now DOES evaluate (for trust feedback recording)
+        mock_proxy.evaluate.assert_called_once()
+        # Trust feedback should be recorded
+        mock_proxy.trust_tracker.record_decision.assert_called_once()
 
     def test_proxy_suggest_appends_to_abstract( self ):
         """When proxy returns action='suggest', suggestion appended to abstract."""
@@ -482,10 +495,12 @@ class TestGatedConfirmation:
         mock_proxy = MagicMock()
         mock_proxy.trust_mode = "suggest"
         mock_result = MagicMock()
-        mock_result.action = "suggest"
-        mock_result.value = "approved"
+        mock_result.action     = "suggest"
+        mock_result.value      = "approved"
         mock_result.confidence = 0.85
+        mock_result.category   = "general"
         mock_proxy.evaluate = MagicMock( return_value=mock_result )
+        mock_proxy.trust_tracker = MagicMock()
         orch.proxy = mock_proxy
 
         team_io = MagicMock()
@@ -505,6 +520,8 @@ class TestGatedConfirmation:
         call_args = team_io.ask_confirmation.call_args
         abstract_arg = call_args[ 0 ][ 4 ] if len( call_args[ 0 ] ) > 4 else call_args[ 1 ].get( "abstract", "" )
         assert "Proxy suggestion" in abstract_arg
+        # Trust feedback should be recorded
+        mock_proxy.trust_tracker.record_decision.assert_called_once()
 
     def test_proxy_evaluation_error_falls_through( self ):
         """If proxy.evaluate raises, should fall through to ask_confirmation."""
@@ -596,10 +613,10 @@ class TestProgressLogCallback:
 class TestConfigTrustMode:
     """Test trust_mode configuration field."""
 
-    def test_default_trust_mode_disabled( self ):
-        """Default trust_mode should be 'disabled'."""
+    def test_default_trust_mode_shadow( self ):
+        """Default trust_mode should be 'shadow'."""
         config = SweTeamConfig()
-        assert config.trust_mode == "disabled"
+        assert config.trust_mode == "shadow"
 
     def test_trust_mode_shadow( self ):
         """trust_mode can be set to 'shadow'."""
@@ -623,6 +640,15 @@ class TestConfigTrustMode:
             config           = SweTeamConfig( trust_mode="disabled" ),
         )
         assert orch.proxy is None
+
+    def test_shadow_default_creates_proxy( self ):
+        """Default SweTeamConfig (shadow) should create proxy on orchestrator."""
+        orch = SweTeamOrchestrator(
+            task_description = "test",
+            config           = SweTeamConfig(),  # trust_mode defaults to "shadow"
+        )
+        assert orch.proxy is not None
+        assert orch.proxy.trust_mode == "shadow"
 
 
 # =============================================================================
@@ -725,6 +751,142 @@ class TestEscalationDecision:
             orch._stop_requested = True
 
         assert orch._stop_requested is True
+
+
+# =============================================================================
+# Trust Feedback Loop Tests
+# =============================================================================
+
+class TestTrustFeedbackLoop:
+    """Test trust feedback recording in _gated_confirmation."""
+
+    def _make_orch_with_mock_proxy( self, trust_mode="shadow", proxy_action="shadow", proxy_value="approved", proxy_category="general" ):
+        """Helper: create orchestrator with mock proxy for feedback tests."""
+        config = SweTeamConfig( trust_mode="disabled" )
+        orch = SweTeamOrchestrator(
+            task_description = "test",
+            config           = config,
+        )
+
+        mock_proxy = MagicMock()
+        mock_proxy.trust_mode = trust_mode
+        mock_result = MagicMock()
+        mock_result.action     = proxy_action
+        mock_result.value      = proxy_value
+        mock_result.category   = proxy_category
+        mock_result.confidence = 0.9
+        mock_proxy.evaluate = MagicMock( return_value=mock_result )
+        mock_proxy.trust_tracker = MagicMock()
+        orch.proxy = mock_proxy
+
+        return orch, mock_proxy
+
+    def test_shadow_mode_evaluates_and_records_agreement( self ):
+        """Shadow: proxy would approve, user approves → record success=True."""
+        orch, mock_proxy = self._make_orch_with_mock_proxy(
+            trust_mode="shadow", proxy_action="shadow", proxy_value="approved", proxy_category="testing"
+        )
+
+        team_io = MagicMock()
+        team_io.ask_confirmation = AsyncMock( return_value=True )
+
+        result = asyncio.run( orch._gated_confirmation(
+            question="Proceed?", role="lead", default="yes",
+            timeout=60, abstract=None, team_io=team_io,
+        ) )
+
+        assert result is True
+        mock_proxy.evaluate.assert_called_once()
+        mock_proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=True )
+
+    def test_shadow_mode_records_disagreement( self ):
+        """Shadow: proxy would approve, user rejects → record success=False."""
+        orch, mock_proxy = self._make_orch_with_mock_proxy(
+            trust_mode="shadow", proxy_action="shadow", proxy_value="approved", proxy_category="deployment"
+        )
+
+        team_io = MagicMock()
+        team_io.ask_confirmation = AsyncMock( return_value=False )
+
+        result = asyncio.run( orch._gated_confirmation(
+            question="Deploy now?", role="lead", default="no",
+            timeout=60, abstract=None, team_io=team_io,
+        ) )
+
+        assert result is False
+        mock_proxy.trust_tracker.record_decision.assert_called_once_with( "deployment", success=False )
+
+    def test_active_act_records_success( self ):
+        """Active mode auto-approve → record success=True, ask_confirmation NOT called."""
+        orch, mock_proxy = self._make_orch_with_mock_proxy(
+            trust_mode="active", proxy_action="act", proxy_value="approved", proxy_category="testing"
+        )
+
+        team_io = MagicMock()
+        team_io.notify_progress = AsyncMock()
+        team_io.ask_confirmation = AsyncMock( return_value=False )
+
+        result = asyncio.run( orch._gated_confirmation(
+            question="Run tests?", role="lead", default="yes",
+            timeout=60, abstract=None, team_io=team_io,
+        ) )
+
+        assert result is True
+        team_io.ask_confirmation.assert_not_called()
+        mock_proxy.trust_tracker.record_decision.assert_called_once_with( "testing", success=True )
+
+    def test_suggest_mode_records_agreement( self ):
+        """Suggest: proxy suggests approve, user follows → record success=True."""
+        orch, mock_proxy = self._make_orch_with_mock_proxy(
+            trust_mode="suggest", proxy_action="suggest", proxy_value="approved", proxy_category="general"
+        )
+
+        team_io = MagicMock()
+        team_io.ask_confirmation = AsyncMock( return_value=True )
+
+        result = asyncio.run( orch._gated_confirmation(
+            question="Continue?", role="lead", default="yes",
+            timeout=60, abstract="context", team_io=team_io,
+        ) )
+
+        assert result is True
+        mock_proxy.trust_tracker.record_decision.assert_called_once_with( "general", success=True )
+
+    def test_suggest_mode_records_disagreement( self ):
+        """Suggest: proxy suggests approve, user overrides → record success=False."""
+        orch, mock_proxy = self._make_orch_with_mock_proxy(
+            trust_mode="suggest", proxy_action="suggest", proxy_value="approved", proxy_category="architecture"
+        )
+
+        team_io = MagicMock()
+        team_io.ask_confirmation = AsyncMock( return_value=False )
+
+        result = asyncio.run( orch._gated_confirmation(
+            question="Refactor module?", role="lead", default="no",
+            timeout=60, abstract=None, team_io=team_io,
+        ) )
+
+        assert result is False
+        mock_proxy.trust_tracker.record_decision.assert_called_once_with( "architecture", success=False )
+
+    def test_feedback_error_does_not_propagate( self ):
+        """trust_tracker.record_decision raising should not break _gated_confirmation."""
+        orch, mock_proxy = self._make_orch_with_mock_proxy(
+            trust_mode="shadow", proxy_action="shadow", proxy_value="approved", proxy_category="testing"
+        )
+        mock_proxy.trust_tracker.record_decision.side_effect = RuntimeError( "tracker broke" )
+
+        team_io = MagicMock()
+        team_io.ask_confirmation = AsyncMock( return_value=True )
+
+        result = asyncio.run( orch._gated_confirmation(
+            question="Proceed?", role="lead", default="yes",
+            timeout=60, abstract=None, team_io=team_io,
+        ) )
+
+        # Should still return user's answer despite tracker error
+        assert result is True
+        mock_proxy.trust_tracker.record_decision.assert_called_once()
 
 
 # =============================================================================

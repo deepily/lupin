@@ -1,8 +1,8 @@
 # TODO
 
-Last updated: 2026-02-19 (Session 238)
+Last updated: 2026-02-20 (Session 241)
 
-## Pending
+## v0.1.6 — HIGH PRIORITY
 
 ### CJ Flow: Hybrid Fast Lane + Bounded Agentic Pool (Session 237)
 
@@ -18,6 +18,24 @@ Last updated: 2026-02-19 (Session 238)
 - [ ] **[LUPIN] Phase 3.2: Integration verification** — Manual E2E test with concurrent agentic + sync jobs
 - **Tracking doc**: `src/rnd/2026.02.19-approach-c-hybrid-queue-architecture.md`
 
+### Automated E2E Testing Research
+
+- [ ] **[LUPIN] Research AI/automation for end-to-end testing of notifications, API, and UI** - Eliminate manual clicking, typing, and visual verification from the testing workflow
+  - **Scope**: Notification delivery verification, API endpoint validation, UI state assertions, full workflow completion checks
+  - **Goal**: Find tools/frameworks that can autonomously exercise the full stack (submit job → verify queue → check notifications → confirm UI renders correctly) without human interaction
+  - **Candidates to evaluate**: Playwright/Puppeteer with AI assertions, browser-use agents, visual regression tools (Percy, Applitools), Claude Computer Use for UI verification, custom harness extending existing proxy auto-answer infrastructure
+  - **Deliverable**: Comparison matrix of approaches with recommendation + proof-of-concept for top candidate
+
+### CJ Flow Persistence
+
+- [ ] **Add persistence for CJ Flow job tracking** - Jobs are currently transient
+  - **Goal**: Durable storage for ClaudeCode Job tracking state
+  - **Affects**: Job state survives server restarts, enables job history/resume
+
+---
+
+## Pending
+
 ### SWE Team Approach D: Post-Implementation Verification (MEDIUM)
 
 - [ ] **[LUPIN] Approach D manual E2E verification** — Submit SWE Team job via UI, verify job card shows message input, send normal + urgent messages, verify orchestrator drains at check-in, verify urgent triggers immediate check-in
@@ -25,8 +43,9 @@ Last updated: 2026-02-19 (Session 238)
 
 ### SWE Team Proxy Agent (HIGH PRIORITY)
 
-- [ ] **[LUPIN] Finish implementing and testing first cut of SWE Team Proxy Agent** - Complete implementation and testing of the initial SWE Team notification proxy agent
+- [x] **[LUPIN] Finish implementing and testing first cut of SWE Team Proxy Agent** - Session 241: Activated proxy in shadow mode, wired trust feedback loop, 7 new tests. 1490 pass.
 - [ ] **[LUPIN] Test SWE agent team with small jobs** - Validate SWE team end-to-end with small, scoped tasks to verify orchestration and proxy behavior
+- [ ] **[LUPIN] Commit CoSA changes for proxy activation** — 2 CoSA files modified (config.py, orchestrator.py). Must commit in CoSA context separately
 
 ### DataFrame CRUD with Voice I/O (Session 132-136)
 
@@ -65,19 +84,7 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
   - ST-6: `test_simple_agents_instantiation_smoke.py` — Cal/DateTime/Todo constructors (14 tests)
   - **Deferred**: ST-7 (CRUD queue integration), ST-8 (Decision Proxy live), ST-9 (Classic agents live)
 
-### CJ Flow Persistence (MEDIUM)
 
-- [ ] **Add persistence for CJ Flow job tracking** - Jobs are currently transient
-  - **Goal**: Durable storage for ClaudeCode Job tracking state
-  - **Affects**: Job state survives server restarts, enables job history/resume
-
-### Automated E2E Testing Research (MEDIUM)
-
-- [ ] **[LUPIN] Research AI/automation for end-to-end testing of notifications, API, and UI** - Eliminate manual clicking, typing, and visual verification from the testing workflow
-  - **Scope**: Notification delivery verification, API endpoint validation, UI state assertions, full workflow completion checks
-  - **Goal**: Find tools/frameworks that can autonomously exercise the full stack (submit job → verify queue → check notifications → confirm UI renders correctly) without human interaction
-  - **Candidates to evaluate**: Playwright/Puppeteer with AI assertions, browser-use agents, visual regression tools (Percy, Applitools), Claude Computer Use for UI verification, custom harness extending existing proxy auto-answer infrastructure
-  - **Deliverable**: Comparison matrix of approaches with recommendation + proof-of-concept for top candidate
 
 ### Slash Command Cleanup (LOW)
 
