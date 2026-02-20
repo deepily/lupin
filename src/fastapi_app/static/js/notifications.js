@@ -4420,9 +4420,9 @@ class NotificationsUI {
         this.notificationState.notifications.push( notification );
         this.log( `Processing new notification: ${notification.type}/${notification.priority} - ${notification.message}` );
 
-        // Approach D: Append user_message to live interaction pane on running job card
+        // Approach D: Append user_initiated_message to live interaction pane on running job card
         const notifType = notification.type || notification.notification_type;
-        if ( notifType === 'user_message' && notification.job_id ) {
+        if ( notifType === 'user_initiated_message' && notification.job_id ) {
             this.appendJobUserMessage(
                 notification.job_id,
                 notification.message || '',

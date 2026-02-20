@@ -49,13 +49,13 @@ def client( msg_queue, urgent_event ):
 # =============================================================================
 
 class TestEventTypeFiltering:
-    """Test that only user_message notifications are queued."""
+    """Test that only user_initiated_message notifications are queued."""
 
     def test_user_message_queued( self, client, msg_queue ):
-        """user_message notification for correct job_id is queued."""
+        """user_initiated_message notification for correct job_id is queued."""
         asyncio.run( client._on_event( "notification_queue_update", {
             "notification": {
-                "type"     : "user_message",
+                "type"     : "user_initiated_message",
                 "job_id"   : "swe-abc123",
                 "message"  : "Use auth module",
                 "priority" : "normal",
@@ -110,7 +110,7 @@ class TestEventTypeFiltering:
         """notification_type field (alternative to type) is also recognized."""
         asyncio.run( client._on_event( "notification_queue_update", {
             "notification": {
-                "notification_type" : "user_message",
+                "notification_type" : "user_initiated_message",
                 "job_id"            : "swe-abc123",
                 "message"           : "Alternative field",
                 "priority"          : "normal",
@@ -133,7 +133,7 @@ class TestJobIdFiltering:
         """Message with matching job_id is queued."""
         asyncio.run( client._on_event( "notification_queue_update", {
             "notification": {
-                "type"     : "user_message",
+                "type"     : "user_initiated_message",
                 "job_id"   : "swe-abc123",
                 "message"  : "Correct job",
                 "priority" : "normal",
@@ -146,7 +146,7 @@ class TestJobIdFiltering:
         """Message with different job_id is NOT queued."""
         asyncio.run( client._on_event( "notification_queue_update", {
             "notification": {
-                "type"     : "user_message",
+                "type"     : "user_initiated_message",
                 "job_id"   : "swe-other456",
                 "message"  : "Wrong job",
                 "priority" : "normal",
@@ -159,7 +159,7 @@ class TestJobIdFiltering:
         """Message with no job_id is NOT queued."""
         asyncio.run( client._on_event( "notification_queue_update", {
             "notification": {
-                "type"     : "user_message",
+                "type"     : "user_initiated_message",
                 "message"  : "No job ID",
                 "priority" : "normal",
             }
@@ -181,7 +181,7 @@ class TestUrgentPriority:
 
         asyncio.run( client._on_event( "notification_queue_update", {
             "notification": {
-                "type"     : "user_message",
+                "type"     : "user_initiated_message",
                 "job_id"   : "swe-abc123",
                 "message"  : "URGENT: Stop!",
                 "priority" : "urgent",
@@ -197,7 +197,7 @@ class TestUrgentPriority:
         """normal priority message does NOT set the threading.Event."""
         asyncio.run( client._on_event( "notification_queue_update", {
             "notification": {
-                "type"     : "user_message",
+                "type"     : "user_initiated_message",
                 "job_id"   : "swe-abc123",
                 "message"  : "Normal message",
                 "priority" : "normal",
@@ -211,7 +211,7 @@ class TestUrgentPriority:
         """medium priority message does NOT set the threading.Event."""
         asyncio.run( client._on_event( "notification_queue_update", {
             "notification": {
-                "type"     : "user_message",
+                "type"     : "user_initiated_message",
                 "job_id"   : "swe-abc123",
                 "message"  : "Medium message",
                 "priority" : "medium",
@@ -286,7 +286,7 @@ class TestClientConfiguration:
         for i in range( 3 ):
             asyncio.run( client._on_event( "notification_queue_update", {
                 "notification": {
-                    "type"     : "user_message",
+                    "type"     : "user_initiated_message",
                     "job_id"   : "swe-abc123",
                     "message"  : f"Message {i}",
                     "priority" : "normal",

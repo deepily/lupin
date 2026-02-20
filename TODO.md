@@ -38,7 +38,9 @@ Last updated: 2026-02-20 (Session 241)
 
 ### SWE Team Approach D: Post-Implementation Verification (MEDIUM)
 
-- [ ] **[LUPIN] Approach D manual E2E verification** — Submit SWE Team job via UI, verify job card shows message input, send normal + urgent messages, verify orchestrator drains at check-in, verify urgent triggers immediate check-in
+- [x] **[LUPIN] Approach D: Rename user_message → user_initiated_message** — 4 files renamed, 330 unit tests pass
+- [x] **[LUPIN] Approach D: Automated smoke test** — `test_approach_d_user_messages.py`, 10 scenarios, 10/10 PASS
+- [x] **[LUPIN] Approach D: Fix running queue poll bug + configurable dry-run** — Response key fix, 10-phase 1.5s dry-run loop
 - [ ] **[LUPIN] Commit CoSA changes for Approach D** — 5 CoSA files modified (notification_client.py NEW, orchestrator.py, config.py, job.py, queues.py). Must commit in CoSA context separately
 
 ### SWE Team Proxy Agent (HIGH PRIORITY)

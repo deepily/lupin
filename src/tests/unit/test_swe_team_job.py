@@ -209,8 +209,8 @@ class TestDryRun:
     def test_dry_run_sends_notifications( self, mock_notify, dry_run_job ):
         """dry_run should send breadcrumb notifications."""
         dry_run_job.do_all()
-        # 6 breadcrumbs + 1 completion = 7 total notify calls
-        assert mock_notify.call_count == 7
+        # 10 phase breadcrumbs + 1 completion = 11 total notify calls
+        assert mock_notify.call_count == 11
 
 
 # ===========================================================================

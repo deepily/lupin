@@ -1,5 +1,32 @@
 # Lupin Project History
 
+### 2026.02.20 - Session 242 | Approach D: Rename, Smoke Tests, Fix Running Queue Poll + Configurable Dry-Run
+
+#### Checkpoint | 2026-02-20 | Rename user_message → user_initiated_message, 10-scenario smoke test, running queue poll fix, loop-based dry-run
+
+**Accomplishments**:
+- Renamed notification type `"user_message"` → `"user_initiated_message"` across 4 files (notification_client.py, queues.py, notifications.js, unit tests) for semantic clarity distinguishing proactive user communication from agent-initiated `response_requested` notifications
+- Created `test_approach_d_user_messages.py` smoke test with 10 scenarios: 6 error scenarios (empty, whitespace, bad priority, no job, no auth, no body) + 4 happy-path inject scenarios (normal msg, urgent msg, multi msg, verify DB interactions)
+- Fixed critical bug in running queue poll: `running_jobs_metadata` → `run_jobs_metadata` (API returns `f"{queue_name}_jobs_metadata"` where `queue_name="run"`)
+- Made dry-run configurable: `dry_run_phases` (default 10) and `dry_run_delay` (default 1.5s) parameters added to SweTeamJob, wired through agentic_job_factory.py. Replaced 6 hardcoded sleep calls with loop over `DRY_RUN_PHASE_LABELS` list. Total dry-run: 15s (was 6s)
+- Fixed results table "skip" handling in smoke test — skips no longer count as failures in "Overall" verdict
+
+**Files (Lupin)**:
+- `src/tests/smoke/test_approach_d_user_messages.py` — NEW: 10-scenario Approach D smoke test
+- `src/tests/unit/test_swe_team_job.py` — Updated notification count assertion (7 → 11)
+- `src/fastapi_app/static/js/notifications.js` — Renamed `'user_message'` → `'user_initiated_message'`
+- `src/tests/unit/test_swe_team_notification_client.py` — Renamed type values in 9 test dicts
+
+**Files (CoSA — commit separately)**:
+- `src/cosa/agents/swe_team/notification_client.py` — Renamed filter, docstrings, smoke test dicts
+- `src/cosa/agents/swe_team/job.py` — Added dry_run_phases/delay params, loop-based _execute_dry_run(), DRY_RUN_PHASE_LABELS
+- `src/cosa/rest/routers/queues.py` — Renamed type in create_notification + WS emission
+- `src/cosa/rest/agentic_job_factory.py` — Wire dry_run_phases/delay through factory
+
+**Test**: 330 SWE unit tests PASS, 10/10 smoke test scenarios PASS
+
+---
+
 ### 2026.02.20 - Session 241 | Activate SWE Team Proxy in Shadow Mode + Wire Trust Feedback Loop
 
 #### Checkpoint | 2026-02-20 | Proxy default changed to shadow, trust feedback recorded on every user decision
