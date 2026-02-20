@@ -1,5 +1,38 @@
 # Lupin Project History
 
+### 2026.02.20 - Session 245 | Phase 6: Decision Proxy UI — Ratification Page + Trust Dashboard
+
+#### Checkpoint | 2026-02-20 | Proxy UI: 6 new files, 2 modified, 1511 tests pass
+
+**Accomplishments**:
+- Built complete Decision Proxy admin UI — Ratification Page and Trust Dashboard (Phase 6 of proxy light-up plan)
+- Created ratification page (`proxy-ratify.html` + CSS + JS): summary cards (pending/approved/rejected/oldest), 3-dropdown filter bar (category/trust/action), decisions table with checkboxes and inline approve/reject, bulk actions, detail modal with feedback textarea, pagination (25/page)
+- Created trust dashboard (`proxy-dashboard.html` + CSS + JS): mode bar (trust mode/domain/user), 6-category trust cards grid with level colors (L1-L5), success rate bars, circuit breaker status indicators (OK/TRIPPED/COOLDOWN), recent decisions table with category selector, pagination (50/page)
+- Defined shared badge system: 4 action badges (shadow/suggest/act/defer), 5 trust level badges (L1-L5), 4 ratification state badges (pending/approved/rejected/N/R), 3 confidence color classes
+- Added 2 admin cards to dashboard hub (shield+checkmark SVG for Ratification, pie chart SVG for Trust Dashboard)
+- Added 2 nav buttons to profile page admin section (Pending Ratification, Trust Dashboard)
+- All pages follow established patterns from `users.html`/`admin-users.js`: `requireAuth()`, `apiCall()`, `getCurrentUser()`, gradient thead, modal pattern, pagination, escapeHtml XSS prevention
+- Responsive design: trust cards 3/2/1 col grid, summary cards 2x2 mobile, table horizontal scroll, modal 95% width mobile
+- 1511 unit tests pass — no regressions (static HTML/CSS/JS only, no Python changes)
+
+**Files Created (Lupin)**:
+- `src/fastapi_app/static/html/auth/admin/proxy-ratify.html` — Ratification page HTML
+- `src/fastapi_app/static/html/auth/admin/css/proxy-ratify.css` — Badge system + ratification styles
+- `src/fastapi_app/static/html/auth/admin/js/proxy-ratify.js` — Ratification state/API/rendering logic
+- `src/fastapi_app/static/html/auth/admin/proxy-dashboard.html` — Trust dashboard HTML
+- `src/fastapi_app/static/html/auth/admin/css/proxy-dashboard.css` — Dashboard grid + trust card styles
+- `src/fastapi_app/static/html/auth/admin/js/proxy-dashboard.js` — Dashboard state/API/rendering logic
+
+**Files Modified (Lupin)**:
+- `src/fastapi_app/static/html/admin/dashboard.html` — Added 2 admin cards in `.admin-tools-grid`
+- `src/fastapi_app/static/html/auth/profile.html` — Added 2 nav buttons in `.admin-section .button-group`
+
+**Implementation Tracking Updated**:
+- `src/rnd/2026.02.14-swe-team-phase-4-decision-proxy-architecture/01-implementation-current.md` — Phase 6 tasks 6.1-6.4 DONE
+- `src/rnd/2026.02.14-swe-team-phase-4-decision-proxy-architecture/06-testing-validation.md` — Phase 6 regression row added
+
+---
+
 ### 2026.02.20 - Session 244 | Fix Duplicate User Bubbles + Urgent Toggle Styling + Cache Busting
 
 #### Checkpoint | 2026-02-20 | Dedup user bubbles, urgent toggle CSS, cache-busting query params
