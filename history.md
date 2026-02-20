@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.02.20 - Session 244 | Fix Duplicate User Bubbles + Urgent Toggle Styling + Cache Busting
+
+#### Checkpoint | 2026-02-20 | Dedup user bubbles, urgent toggle CSS, cache-busting query params
+
+**Accomplishments**:
+- Fixed duplicate user message bubbles: removed redundant `appendJobUserMessage()` call from WebSocket `user_initiated_message` handler — optimistic render in `sendJobMessage()` already adds the bubble
+- Enhanced urgent toggle CSS: base rule gets `border: 2px solid transparent` (prevents layout jitter), checked state changed from identical-to-hover `#fff3cd` to distinct amber `#ffcc80` with `2px solid #f59e0b` border
+- Enhanced urgent user message bubble styling: added amber border + subtle glow + warm timestamp color for `priority-urgent` outgoing messages (applies to both live and history rendering)
+- Added cache-busting query params (`?v=20260220`) to CSS and JS references in `notifications.html`
+- Queued bug: urgent toggle JS handler not propagating priority on send — needs investigation of click handler (~line 1630) and `sendJobMessage()` priority extraction (~line 5580)
+
+**Files (Lupin)**:
+- `src/fastapi_app/static/js/notifications.js` — Removed duplicate `appendJobUserMessage()` in `processNotification()`
+- `src/fastapi_app/static/css/notifications.css` — Urgent toggle base border, checked state amber, urgent bubble border+glow
+- `src/fastapi_app/static/html/notifications.html` — Added `?v=20260220` cache-busting params
+- `bug-fix-queue.md` — Queued urgent toggle propagation bug
+
+---
+
 ### 2026.02.20 - Session 243 | Prohibit Manual Curl Testing — Documentation Updates
 
 #### Checkpoint | 2026-02-20 | Curl prohibition documentation across 6 files
