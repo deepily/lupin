@@ -173,100 +173,111 @@
 
                 <!-- Research Submission Card -->
                 <div class="job-submit-card" id="research-submit-card">
-                    <h4>🔬 Submit Research Job</h4>
-                    <div class="form-group" style="margin-bottom: 12px;">
-                        <label for="research-topic" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Research Topic:</label>
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                            <button type="button" id="research-stt-button" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
-                            <input type="text" id="research-topic" placeholder="Enter your research question..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
-                        </div>
+                    <div class="job-submit-card-header" onclick="toggleSection('research-submit-section')">
+                        <h4>🔬 Submit Research Job</h4>
+                        <button class="toggle-button" id="research-submit-toggle">▶</button>
                     </div>
-                    <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px;">
-                        <div>
-                            <label for="research-budget" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Budget (USD):</label>
-                            <input type="number" id="research-budget" value="3.00" min="0.50" max="20.00" step="0.50" style="width: 80px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                    <div class="section-content collapsed" id="research-submit-section">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label for="research-topic" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Research Topic:</label>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <button type="button" id="research-stt-button" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <input type="text" id="research-topic" placeholder="Enter your research question..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                            </div>
                         </div>
-                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
-                            <input type="checkbox" id="research-with-podcast" />
-                            <span style="font-size: 13px;">Also generate podcast from research</span>
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
-                            <input type="checkbox" id="research-dry-run" checked />
-                            <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
-                        </label>
+                        <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px;">
+                            <div>
+                                <label for="research-budget" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Budget (USD):</label>
+                                <input type="number" id="research-budget" value="3.00" min="0.50" max="20.00" step="0.50" style="width: 80px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                            </div>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                                <input type="checkbox" id="research-with-podcast" />
+                                <span style="font-size: 13px;">Also generate podcast from research</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                                <input type="checkbox" id="research-dry-run" checked />
+                                <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
+                            </label>
+                        </div>
+                        <button id="submit-research-job" type="button" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                            🚀 Submit Research Job
+                            <span id="research-loading" class="loading" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                        <div id="research-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
                     </div>
-                    <button id="submit-research-job" type="button" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
-                        🚀 Submit Research Job
-                        <span id="research-loading" class="loading" style="display: none;">
-                            <span class="spinner"></span>
-                        </span>
-                    </button>
-                    <div id="research-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
                 </div>
-
-                <hr style="margin: 20px 0; border: 0; border-top: 1px solid #e0e0e0;" />
 
                 <!-- Podcast Submission Card -->
                 <div class="job-submit-card" id="podcast-submit-card">
-                    <h4>🎙️ Generate Podcast from Research</h4>
-                    <div class="form-group" style="margin-bottom: 12px;">
-                        <label for="podcast-source" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Research Source:</label>
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                            <button type="button" id="podcast-stt-button" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
-                            <input type="text" id="podcast-source" placeholder="Describe your research or paste file path..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
-                        </div>
-                        <div style="margin-top: 6px; font-size: 11px; color: #888;">
-                            💡 <strong>Smart input:</strong> Describe research → confirm selection | Paste path → generates immediately
-                        </div>
+                    <div class="job-submit-card-header" onclick="toggleSection('podcast-submit-section')">
+                        <h4>🎙️ Generate Podcast from Research</h4>
+                        <button class="toggle-button" id="podcast-submit-toggle">▶</button>
                     </div>
-                    <div style="margin-bottom: 12px;">
-                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                            <input type="checkbox" id="podcast-dry-run" checked />
-                            <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
-                        </label>
+                    <div class="section-content collapsed" id="podcast-submit-section">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label for="podcast-source" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Research Source:</label>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <button type="button" id="podcast-stt-button" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <input type="text" id="podcast-source" placeholder="Describe your research or paste file path..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                            </div>
+                            <div style="margin-top: 6px; font-size: 11px; color: #888;">
+                                💡 <strong>Smart input:</strong> Describe research → confirm selection | Paste path → generates immediately
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 12px;">
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="checkbox" id="podcast-dry-run" checked />
+                                <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
+                            </label>
+                        </div>
+                        <button id="submit-podcast-job" type="button" style="padding: 10px 20px; background: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                            🎙️ Generate Podcast
+                            <span id="podcast-loading" class="loading" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                        <div id="podcast-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
                     </div>
-                    <button id="submit-podcast-job" type="button" style="padding: 10px 20px; background: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
-                        🎙️ Generate Podcast
-                        <span id="podcast-loading" class="loading" style="display: none;">
-                            <span class="spinner"></span>
-                        </span>
-                    </button>
-                    <div id="podcast-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
                 </div>
-
-                <hr style="margin: 20px 0; border: 0; border-top: 1px solid #e0e0e0;" />
 
                 <!-- SWE Team Submission Card -->
                 <div class="job-submit-card" id="swe-team-submit-card">
-                    <h4>🛠️ Submit SWE Team Task</h4>
-                    <div class="form-group" style="margin-bottom: 12px;">
-                        <label for="swe-task" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Engineering Task:</label>
-                        <div style="display: flex; gap: 8px; align-items: flex-start;">
-                            <button type="button" id="swe-stt-button" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
-                            <textarea id="swe-task" rows="3" placeholder="Describe the engineering task..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; resize: vertical; font-family: inherit;"></textarea>
-                        </div>
+                    <div class="job-submit-card-header" onclick="toggleSection('swe-submit-section')">
+                        <h4>🛠️ Submit SWE Team Task</h4>
+                        <button class="toggle-button" id="swe-submit-toggle">▶</button>
                     </div>
-                    <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
-                        <div>
-                            <label for="swe-budget" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Budget (USD):</label>
-                            <input type="number" id="swe-budget" placeholder="no limit" min="0.50" max="100" step="0.50" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                    <div class="section-content collapsed" id="swe-submit-section">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label for="swe-task" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Engineering Task:</label>
+                            <div style="display: flex; gap: 8px; align-items: flex-start;">
+                                <button type="button" id="swe-stt-button" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <textarea id="swe-task" rows="3" placeholder="Describe the engineering task..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; resize: vertical; font-family: inherit;"></textarea>
+                            </div>
                         </div>
-                        <div>
-                            <label for="swe-timeout" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Timeout (seconds):</label>
-                            <input type="number" id="swe-timeout" placeholder="default" min="60" max="7200" step="60" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                        <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+                            <div>
+                                <label for="swe-budget" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Budget (USD):</label>
+                                <input type="number" id="swe-budget" placeholder="no limit" min="0.50" max="100" step="0.50" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                            </div>
+                            <div>
+                                <label for="swe-timeout" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Timeout (seconds):</label>
+                                <input type="number" id="swe-timeout" placeholder="default" min="60" max="7200" step="60" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                            </div>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                                <input type="checkbox" id="swe-dry-run" checked />
+                                <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
+                            </label>
                         </div>
-                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
-                            <input type="checkbox" id="swe-dry-run" checked />
-                            <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
-                        </label>
+                        <button id="submit-swe-job" type="button" style="padding: 10px 20px; background: #fd7e14; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                            🛠️ Submit SWE Task
+                            <span id="swe-loading" class="loading" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                        <div id="swe-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
                     </div>
-                    <button id="submit-swe-job" type="button" style="padding: 10px 20px; background: #fd7e14; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
-                        🛠️ Submit SWE Task
-                        <span id="swe-loading" class="loading" style="display: none;">
-                            <span class="spinner"></span>
-                        </span>
-                    </button>
-                    <div id="swe-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
                 </div>
 
             </div>

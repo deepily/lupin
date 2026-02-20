@@ -3676,9 +3676,49 @@
 }
 
 /* ========================================
+   JOB SUBMIT CARD — Collapsible Sub-Accordions
+   Individual toggleable cards inside "Submit Agentic Jobs"
+   ======================================== */
+
+.job-submit-card {
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    background: white;
+}
+
+.job-submit-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background-color 0.2s;
+}
+
+.job-submit-card-header:hover {
+    background-color: rgba( 0, 0, 0, 0.03 );
+}
+
+.job-submit-card-header h4 {
+    margin: 0;
+    font-size: 14px;
+    color: #495057;
+}
+
+.job-submit-card .section-content {
+    padding: 12px 14px;
+}
+
+.job-submit-card .section-content.collapsed {
+    padding: 0 14px;
+}
+
+/* ========================================
    JOB SEND MESSAGE — User-to-Job Communication (Approach D)
-   Appears on running job cards to allow users to send messages
-   to the SWE Team orchestrator mid-execution.
+   Appears on todo + running job cards to allow users to send
+   messages to the SWE Team orchestrator.
    ======================================== */
 
 .job-send-message {
@@ -3774,4 +3814,21 @@
 .job-interactions-section.live-interactions .interactions-content {
     max-height: 200px;
     overflow-y: auto;
+}
+
+/* Outgoing messages (user chat bubbles) in unified conversation pane */
+.interactions-content .sender-message.outgoing {
+    margin-left: 40px;
+}
+
+/* Urgent outgoing message — red background */
+.interactions-content .sender-message.outgoing.priority-urgent {
+    background-color: #dc3545;
+}
+
+/* Send input sits below accordion header, no top border when inside section */
+.job-interactions-section .job-send-message {
+    margin-top: 0;
+    padding: 8px 8px 0;
+    border-top: none;
 }

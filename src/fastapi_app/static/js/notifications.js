@@ -1581,49 +1581,78 @@ class NotificationsUI {
             });
         }
 
-        // ── Job Message Send: Event delegation on running queue container ──
+        // ── Job Message Send: Event delegation on todo + run queue containers ──
         // Handles dynamically-created job message inputs via bubbling
-        const runContainer = document.getElementById( 'run-jobs-container' );
-        if ( runContainer ) {
-            runContainer.addEventListener( 'click', ( e ) => {
-                // STT button click
-                const sttBtn = e.target.closest( '.job-send-message .stt-button' );
-                if ( sttBtn ) {
-                    const jobId = sttBtn.id.replace( 'job-msg-stt-', '' );
-                    this.handleSTTButtonClick( `job-msg-input-${jobId}`, sttBtn );
-                    return;
-                }
-
-                // Send button click
-                const sendBtn = e.target.closest( '.job-send-message .response-submit-button' );
-                if ( sendBtn ) {
-                    const jobId = sendBtn.id.replace( 'job-msg-submit-', '' );
-                    this.sendJobMessage( jobId );
-                    return;
-                }
-
-                // Urgent toggle label click
-                const urgentLabel = e.target.closest( '.urgent-toggle' );
-                if ( urgentLabel ) {
-                    const checkbox = urgentLabel.querySelector( 'input[type="checkbox"]' );
-                    if ( checkbox && e.target !== checkbox ) {
-                        checkbox.checked = !checkbox.checked;
-                    }
-                    urgentLabel.classList.toggle( 'checked', checkbox.checked );
-                }
-            } );
-
-            // Enter key sends message in job input
-            runContainer.addEventListener( 'keydown', ( e ) => {
-                if ( e.key === 'Enter' && e.target.classList.contains( 'job-msg-input' ) ) {
-                    e.preventDefault();
-                    const jobId = e.target.id.replace( 'job-msg-input-', '' );
-                    this.sendJobMessage( jobId );
-                }
-            } );
-        }
+        this._setupJobMessageDelegation( 'run-jobs-container' );
+        this._setupJobMessageDelegation( 'todo-jobs-container' );
 
         this.log( "Job submission event listeners setup complete" );
+    }
+
+    _setupJobMessageDelegation( containerId ) {
+        /**
+         * Setup click + keydown event delegation for job message send UI.
+         *
+         * Requires:
+         *     - containerId is a valid DOM element ID
+         *
+         * Ensures:
+         *     - STT, Send, Urgent toggle clicks handled via delegation
+         *     - Enter key in job-msg-input triggers send
+         */
+        const container = document.getElementById( containerId );
+        if ( !container ) return;
+
+        container.addEventListener( 'click', ( e ) => {
+            // STT button click
+            const sttBtn = e.target.closest( '.job-send-message .stt-button' );
+            if ( sttBtn ) {
+                const jobId = sttBtn.id.replace( 'job-msg-stt-', '' );
+                this.handleSTTButtonClick( `job-msg-input-${jobId}`, sttBtn );
+                return;
+            }
+
+            // Send button click
+            const sendBtn = e.target.closest( '.job-send-message .response-submit-button' );
+            if ( sendBtn ) {
+                const jobId = sendBtn.id.replace( 'job-msg-submit-', '' );
+                this.sendJobMessage( jobId );
+                return;
+            }
+
+            // Urgent toggle label click
+            const urgentLabel = e.target.closest( '.urgent-toggle' );
+            if ( urgentLabel ) {
+                const checkbox = urgentLabel.querySelector( 'input[type="checkbox"]' );
+                if ( checkbox && e.target !== checkbox ) {
+                    checkbox.checked = !checkbox.checked;
+                }
+                urgentLabel.classList.toggle( 'checked', checkbox.checked );
+                return;
+            }
+
+            // Progress group toggle click (expand/collapse notification history)
+            const pgToggle = e.target.closest( '.progress-group-toggle' );
+            if ( pgToggle ) {
+                const entry = pgToggle.closest( '.progress-group-entry' );
+                if ( !entry ) return;
+                const history = entry.querySelector( '.progress-group-history' );
+                if ( !history ) return;
+                const isExpanded = history.style.display !== 'none';
+                history.style.display = isExpanded ? 'none' : 'block';
+                const count = entry.getAttribute( 'data-progress-group-count' );
+                pgToggle.innerHTML = ( isExpanded ? '&#9660;' : '&#9650;' ) + ` #${count}`;
+            }
+        } );
+
+        // Enter key sends message in job input
+        container.addEventListener( 'keydown', ( e ) => {
+            if ( e.key === 'Enter' && e.target.classList.contains( 'job-msg-input' ) ) {
+                e.preventDefault();
+                const jobId = e.target.id.replace( 'job-msg-input-', '' );
+                this.sendJobMessage( jobId );
+            }
+        } );
     }
 
     /**
@@ -4248,29 +4277,30 @@ class NotificationsUI {
                     durationLine.remove();
                 }
 
-                // 5. Remove activity log (real-time feed no longer needed, interactions section provides history)
-                const activityLog = card.querySelector( '.job-activity-log' );
-                if ( activityLog ) {
-                    activityLog.remove();
-                    this.log( `[JOB-TRANSITION] Removed activity log for ${jobId}` );
+                // 5. Remove send-message input (no messaging for done jobs)
+                const sendMsg = card.querySelector( '.job-send-message' );
+                if ( sendMsg ) {
+                    sendMsg.remove();
+                    this.log( `[JOB-TRANSITION] Removed send-message UI for ${jobId}` );
                 }
-            }
 
-            // 6. Inject interactions section if not present (card was rendered for run queue)
-            const detailsSection = card.querySelector( '.job-card-details' );
-            if ( detailsSection && !card.querySelector( '.job-interactions-section' ) ) {
-                const interactionsHtml = `
-                    <div class="job-interactions-section" id="job-interactions-${jobId}">
-                        <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${jobId}', event)">
-                            <span>📋 Notification Conversation</span>
-                            <button class="interactions-expand-btn">▶</button>
-                        </div>
-                        <div class="interactions-content collapsed" id="interactions-content-${jobId}">
-                            <div class="interactions-loading">Loading...</div>
-                        </div>
-                    </div>
-                `;
-                detailsSection.insertAdjacentHTML( 'beforeend', interactionsHtml );
+                // 6. Convert live interactions to done-queue lazy-load pattern
+                const interactionsSection = card.querySelector( '.job-interactions-section' );
+                if ( interactionsSection ) {
+                    interactionsSection.classList.remove( 'live-interactions' );
+                    // Update header text
+                    const headerSpan = interactionsSection.querySelector( '.interactions-header span' );
+                    if ( headerSpan ) headerSpan.textContent = '📋 Notification Conversation';
+                    // Collapse and set up for lazy loading
+                    const contentEl = interactionsSection.querySelector( '.interactions-content' );
+                    if ( contentEl ) {
+                        contentEl.classList.add( 'collapsed' );
+                        contentEl.innerHTML = '<div class="interactions-loading">Loading...</div>';
+                    }
+                    // Reset expand button
+                    const expandBtn = interactionsSection.querySelector( '.interactions-expand-btn' );
+                    if ( expandBtn ) expandBtn.textContent = '▶';
+                }
             }
         }
 
@@ -5013,9 +5043,9 @@ class NotificationsUI {
             return;
         }
 
-        // Preserve activity log content
-        const oldActivityLog = oldCard.querySelector( '.job-activity-log' );
-        const activityLogHtml = oldActivityLog ? oldActivityLog.innerHTML : null;
+        // Preserve unified conversation content
+        const oldContent = oldCard.querySelector( '.interactions-content' );
+        const conversationHtml = oldContent ? oldContent.innerHTML : null;
 
         // Render new card with full metadata
         const newCardHtml = this.renderJobCard( metadata, queueName );
@@ -5023,27 +5053,21 @@ class NotificationsUI {
         // Replace old card
         oldCard.outerHTML = newCardHtml;
 
-        // Restore activity log if it existed
-        if ( activityLogHtml ) {
-            const newCard = container.querySelector( `.job-card[data-job-id="${jobId}"]` );
-            if ( newCard ) {
-                let activityLog = newCard.querySelector( '.job-activity-log' );
-                if ( !activityLog ) {
-                    activityLog = this.createJobActivityLog( newCard );
-                }
-                if ( activityLog ) {
-                    activityLog.innerHTML = activityLogHtml;
-                }
+        // Restore conversation content if it existed
+        if ( conversationHtml ) {
+            const newContent = document.getElementById( `interactions-content-${jobId}` );
+            if ( newContent ) {
+                newContent.innerHTML = conversationHtml;
             }
         }
 
-        this.log( `[Session 107] Updated job card with full metadata: ${jobId}` );
+        this.log( `[Phase 6] Updated job card with full metadata: ${jobId}` );
     }
 
     appendNotificationToJobCard( jobId, notification ) {
         /**
-         * Append a notification to a job card's activity log.
-         * Session 107: Simplified - searches all queue containers directly.
+         * Append a notification to a job card's unified conversation container.
+         * Writes directly to interactions-content-${jobId} (newest first).
          * Progress Group: If progress_group_id is set, updates existing entry in-place.
          *
          * Requires:
@@ -5051,37 +5075,30 @@ class NotificationsUI {
          *     - notification has message, priority, timestamp
          *
          * Ensures:
-         *     - Finds job card in DOM (any queue)
-         *     - Creates activity log if not exists
+         *     - Finds interactions-content container by ID
          *     - If progress_group_id: updates existing entry in-place (or creates first)
-         *     - If no progress_group_id: appends notification entry (original behavior)
+         *     - If no progress_group_id: inserts entry at top (newest first)
          *     - Auto-expands job card if collapsed
          */
-        // Session 107: Search all queue containers for the job card
-        const jobCard = document.querySelector( `.job-card[data-job-id="${jobId}"]` );
+        // Find the unified conversation container
+        const contentEl = document.getElementById( `interactions-content-${jobId}` );
 
-        if ( !jobCard ) {
-            this.log( `[Session 107] Job card not found for notification: ${jobId}` );
+        if ( !contentEl ) {
+            this.log( `[Phase 6] interactions-content not found for ${jobId}` );
             return;
-        }
-
-        // Find or create activity log section
-        let activityLog = jobCard.querySelector( '.job-activity-log' );
-        if ( !activityLog ) {
-            activityLog = this.createJobActivityLog( jobCard );
         }
 
         // Progress group: update existing entry in-place if one exists
         const groupId = notification.progress_group_id;
         if ( groupId ) {
-            const existing = activityLog.querySelector( `[data-progress-group="${groupId}"]` );
+            const existing = contentEl.querySelector( `[data-progress-group="${groupId}"]` );
             if ( existing ) {
                 this.updateProgressGroupEntry( existing, notification );
                 return;
             }
         }
 
-        // Create notification entry - insert after header (newest first)
+        // Create notification entry
         const entry = this.createActivityLogEntry( notification );
 
         // Tag with progress group ID if present (first occurrence)
@@ -5099,12 +5116,8 @@ class NotificationsUI {
             entry.appendChild( headDiv );
         }
 
-        const header = activityLog.querySelector( '.activity-log-header' );
-        if ( header && header.nextSibling ) {
-            activityLog.insertBefore( entry, header.nextSibling );
-        } else {
-            activityLog.appendChild( entry );
-        }
+        // Insert at top (newest first)
+        contentEl.insertBefore( entry, contentEl.firstChild );
 
         // Auto-expand job card to show new notification
         if ( !this.expandedJobCards.has( jobId ) ) {
@@ -5114,7 +5127,7 @@ class NotificationsUI {
         // Scroll to show new entry
         entry.scrollIntoView( { behavior: 'smooth', block: 'nearest' } );
 
-        this.log( `[Session 107] Notification appended to job ${jobId}: ${notification.message.substring( 0, 50 )}...` );
+        this.log( `[Phase 6] Notification appended to job ${jobId}: ${notification.message.substring( 0, 50 )}...` );
     }
 
     updateProgressGroupEntry( element, notification ) {
@@ -5194,41 +5207,6 @@ class NotificationsUI {
         head.classList.remove( 'progress-group-updated' );
         void head.offsetWidth;
         head.classList.add( 'progress-group-updated' );
-    }
-
-    createJobActivityLog( jobCard ) {
-        /**
-         * Create activity log section in job card.
-         *
-         * Returns:
-         *     - DOM element for activity log container
-         */
-        const detailsSection = jobCard.querySelector( '.job-card-details' );
-        if ( !detailsSection ) {
-            this.error( '[Phase 6] Job card details section not found' );
-            return null;
-        }
-
-        const activityLog = document.createElement( 'div' );
-        activityLog.className = 'job-activity-log';
-        activityLog.innerHTML = '<div class="activity-log-header">📋 Activity Log</div>';
-
-        // Delegated click handler for progress group toggles
-        activityLog.addEventListener( 'click', ( e ) => {
-            const toggle = e.target.closest( '.progress-group-toggle' );
-            if ( !toggle ) return;
-            const entry = toggle.closest( '.progress-group-entry' );
-            if ( !entry ) return;
-            const history = entry.querySelector( '.progress-group-history' );
-            if ( !history ) return;
-            const isExpanded = history.style.display !== 'none';
-            history.style.display = isExpanded ? 'none' : 'block';
-            const count = entry.getAttribute( 'data-progress-group-count' );
-            toggle.innerHTML = ( isExpanded ? '&#9660;' : '&#9650;' ) + ` #${count}`;
-        } );
-
-        detailsSection.appendChild( activityLog );
-        return activityLog;
     }
 
     createActivityLogEntry( notification ) {
@@ -5488,23 +5466,27 @@ class NotificationsUI {
                         <span>Agent: ${job.agent_type || 'Unknown'}</span>
                         <span>Time: ${timestamp}</span>
                     </div>
-                    ${queueName === 'run' ? `
-                    <div class="job-send-message" id="job-send-msg-${jobId}">
-                        <div class="job-send-message-row">
-                            <button type="button" class="stt-button" id="job-msg-stt-${jobId}"
-                                    title="Click to record (30s max, ESC to cancel)">🎤</button>
-                            <input type="text" id="job-msg-input-${jobId}" class="job-msg-input"
-                                   placeholder="Send message to running job..." />
-                            <label class="urgent-toggle" title="Mark as urgent (interrupts current task)">
-                                <input type="checkbox" id="job-msg-urgent-${jobId}" />
-                                ⚡
-                            </label>
-                            <button type="button" class="response-submit-button"
-                                    id="job-msg-submit-${jobId}">Send</button>
-                        </div>
-                    </div>
+                    ${( queueName === 'run' || queueName === 'todo' ) ? `
                     <div class="job-interactions-section live-interactions" id="job-interactions-${jobId}">
-                        <div class="interactions-content" id="interactions-content-${jobId}">
+                        <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${jobId}', event)">
+                            <span>📋 Activity Log</span>
+                            <button class="interactions-expand-btn">▶</button>
+                        </div>
+                        <div class="job-send-message" id="job-send-msg-${jobId}">
+                            <div class="job-send-message-row">
+                                <button type="button" class="stt-button" id="job-msg-stt-${jobId}"
+                                        title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <input type="text" id="job-msg-input-${jobId}" class="job-msg-input"
+                                       placeholder="Send message to job..." />
+                                <label class="urgent-toggle" title="Mark as urgent (interrupts current task)">
+                                    <input type="checkbox" id="job-msg-urgent-${jobId}" />
+                                    ⚡
+                                </label>
+                                <button type="button" class="response-submit-button"
+                                        id="job-msg-submit-${jobId}">Send</button>
+                            </div>
+                        </div>
+                        <div class="interactions-content collapsed" id="interactions-content-${jobId}">
                         </div>
                     </div>
                     ` : ''}
@@ -5614,6 +5596,15 @@ class NotificationsUI {
             // Append to live interaction pane (optimistic UI)
             this.appendJobUserMessage( jobId, message, priority );
 
+            // Auto-expand conversation if collapsed
+            const contentEl = document.getElementById( `interactions-content-${jobId}` );
+            if ( contentEl && contentEl.classList.contains( 'collapsed' ) ) {
+                contentEl.classList.remove( 'collapsed' );
+                const section = document.getElementById( `job-interactions-${jobId}` );
+                const expandBtn = section ? section.querySelector( '.interactions-expand-btn' ) : null;
+                if ( expandBtn ) expandBtn.textContent = '▼';
+            }
+
             this.log( `[JOB-MSG] Sent to ${jobId}: ${message.substring( 0, 80 )}` );
 
         } catch ( error ) {
@@ -5630,10 +5621,10 @@ class NotificationsUI {
 
     appendJobUserMessage( jobId, message, priority ) {
         /**
-         * Append a user-sent message to the job's live interaction pane.
+         * Append a user-sent message to the job's unified conversation pane.
          *
-         * Creates a styled interaction-item with user-message class and
-         * inserts it into the running job card's interaction section.
+         * Creates an outgoing chat bubble (sender-message outgoing) and
+         * inserts it at the top (newest first) of the conversation.
          */
         const contentEl = document.getElementById( `interactions-content-${jobId}` );
         if ( !contentEl ) return;
@@ -5642,19 +5633,13 @@ class NotificationsUI {
         const priorityBadge = priority === 'urgent' ? ' <strong>[URGENT]</strong>' : '';
 
         const itemHtml = `
-            <div class="interaction-item user-message priority-${priority === 'urgent' ? 'urgent' : 'medium'}">
-                <div class="interaction-header">
-                    <span class="interaction-type">👤 You${priorityBadge}</span>
-                    <span class="interaction-time">${timestamp}</span>
-                </div>
-                <div class="interaction-message">${this.escapeHtml( message )}</div>
+            <div class="sender-message outgoing animated-in${priority === 'urgent' ? ' priority-urgent' : ''}">
+                <span class="message-time">${timestamp}${priorityBadge}</span>
+                <span class="message-text">${this.escapeHtml( message )}</span>
             </div>
         `;
 
-        contentEl.insertAdjacentHTML( 'beforeend', itemHtml );
-
-        // Auto-scroll to bottom
-        contentEl.scrollTop = contentEl.scrollHeight;
+        contentEl.insertAdjacentHTML( 'afterbegin', itemHtml );
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -5813,7 +5798,30 @@ class NotificationsUI {
     renderInteractionItem( interaction ) {
         /**
          * Render a single notification interaction.
+         *
+         * User-initiated messages (type="user_initiated_message") render as
+         * outgoing chat bubbles; all other types render as system entries.
          */
+        let timestamp = '';
+        try {
+            timestamp = new Date( interaction.timestamp ).toLocaleTimeString();
+        } catch ( e ) {
+            timestamp = interaction.timestamp || '';
+        }
+
+        // User-initiated messages → outgoing chat bubble (same style as live send)
+        if ( interaction.type === 'user_initiated_message' ) {
+            const urgentClass = interaction.priority === 'urgent' ? ' priority-urgent' : '';
+            const priorityBadge = interaction.priority === 'urgent' ? ' <strong>[URGENT]</strong>' : '';
+            return `
+                <div class="sender-message outgoing${urgentClass}">
+                    <span class="message-time">${timestamp}${priorityBadge}</span>
+                    <span class="message-text">${this.escapeHtml( interaction.message || '' )}</span>
+                </div>
+            `;
+        }
+
+        // System notifications → standard interaction item
         const typeIcons = {
             'task'    : '📋',
             'progress': '⏳',
@@ -5821,13 +5829,6 @@ class NotificationsUI {
             'custom'  : '💬'
         };
         const typeIcon = typeIcons[ interaction.type ] || '📋';
-
-        let timestamp = '';
-        try {
-            timestamp = new Date( interaction.timestamp ).toLocaleTimeString();
-        } catch ( e ) {
-            timestamp = interaction.timestamp || '';
-        }
 
         let responseHtml = '';
         if ( interaction.response_requested && interaction.response_value ) {
