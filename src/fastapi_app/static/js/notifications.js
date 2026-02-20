@@ -4453,12 +4453,7 @@ class NotificationsUI {
         // Approach D: Append user_initiated_message to live interaction pane on running job card
         const notifType = notification.type || notification.notification_type;
         if ( notifType === 'user_initiated_message' && notification.job_id ) {
-            this.appendJobUserMessage(
-                notification.job_id,
-                notification.message || '',
-                notification.priority || 'normal'
-            );
-            // Don't play sounds for user's own messages (they just sent it)
+            // Skip DOM append — optimistic render in sendJobMessage() already added the bubble
             return;
         }
 
@@ -5315,7 +5310,7 @@ class NotificationsUI {
         if ( !abstract ) return '';
         return `
             <div class="abstract-header">📄 Summary</div>
-            <div class="abstract-content">${this.escapeHtml( abstract )}</div>
+            <div class="abstract-content">${this.renderMarkdown( abstract )}</div>
         `;
     }
 

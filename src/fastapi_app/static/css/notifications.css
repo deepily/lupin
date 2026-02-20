@@ -3768,6 +3768,7 @@
     cursor: pointer;
     font-size: 16px;
     padding: 4px;
+    border: 2px solid transparent;
     border-radius: 4px;
     transition: background-color 0.2s;
     user-select: none;
@@ -3783,8 +3784,8 @@
 
 .urgent-toggle.checked,
 .urgent-toggle:has(input:checked) {
-    background-color: #fff3cd;
-    box-shadow: 0 0 0 2px #ffc107;
+    background-color: #ffcc80;
+    border: 2px solid #f59e0b;
     border-radius: 4px;
 }
 
@@ -3821,9 +3822,15 @@
     margin-left: 40px;
 }
 
-/* Urgent outgoing message — red background */
+/* Urgent outgoing message — red background with amber border accent */
 .interactions-content .sender-message.outgoing.priority-urgent {
     background-color: #dc3545;
+    border: 2px solid #f59e0b;
+    box-shadow: 0 0 4px rgba( 245, 158, 11, 0.4 );
+}
+
+.interactions-content .sender-message.outgoing.priority-urgent .message-time {
+    color: #fff3cd;
 }
 
 /* Send input sits below accordion header, no top border when inside section */
