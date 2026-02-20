@@ -3,8 +3,8 @@ name: agentic-voice-workflow
 description: Building Claude Agent SDK background jobs with voice I/O. Use when creating new agents, building background jobs, implementing agentic services, adding voice notifications to agents, or integrating with RunningFifoQueue.
 metadata:
   author: lupin-team
-  version: "1.1"
-  last-updated: "2026-02-11"
+  version: "1.2"
+  last-updated: "2026-02-20"
 ---
 
 # Agentic Voice Workflow
@@ -38,6 +38,7 @@ Use this workflow when building agents that:
 | Phase 4 | Queue Integration | RunningFifoQueue hooks |
 | Phase 5 | Testing | Validation and debugging |
 | Phase 5b | Q&A Script | Notification Proxy profile for automated testing |
+| Phase 5c | UI E2E Testing | Playwright browser tests (planned v0.1.6) |
 
 ## Phase 0: Discovery Questions
 
@@ -112,6 +113,10 @@ Contains:
 - **Don't** hardcode job IDs - use the prefix pattern
 - **Don't** skip Q&A scripts - smoke tests stall without them
 
+## CRITICAL: Automated Testing Is Mandatory
+
+Every new agent **MUST** have an automated live pipeline test before merge. Do not rely on manual curl or UI-click testing for pipeline validation. The automated infrastructure exists — use it.
+
 ## Testing Best Practice: Automated Pipeline Tests
 
 **Prefer automated smoke test scripts over manual curl submissions.**
@@ -131,8 +136,116 @@ Contains:
 
 When building new agents, create an automated smoke test following this pattern rather than relying on manual curl commands.
 
+### Non-Interactive Agent Template (`LivePipelineTestBase`)
+
+Copy and adapt this template for agents that do **not** ask interactive questions:
+
+```python
+#!/usr/bin/env python3
+"""
+Smoke test for {AgentName} agent via live pipeline.
+
+Usage:
+    python src/tests/smoke/test_{agent_name}_live_pipeline.py
+    python src/tests/smoke/test_{agent_name}_live_pipeline.py -q 0,2
+
+Requires:
+    - Server running on localhost:7999
+    - LUPIN_TEST_EMAIL / LUPIN_TEST_PASSWORD
+"""
+
+import os
+import sys
+
+lupin_root = os.environ.get( "LUPIN_ROOT" )
+if lupin_root:
+    sys.path.insert( 0, os.path.join( lupin_root, "src" ) )
+
+from tests.smoke.utilities.live_pipeline_base import LivePipelineTestBase
+
+
+{AGENT_NAME_UPPER}_QUERIES = [
+    {
+        "id"               : "SCENARIO_1",
+        "query"            : "Your test query here",
+        "expected_keywords" : [ "expected", "words" ],
+    },
+    # Add more scenarios...
+]
+
+
+class {AgentName}PipelineTest( LivePipelineTestBase ):
+
+    TEST_NAME       = "{Agent Name} Live Pipeline"
+    SCENARIOS       = {AGENT_NAME_UPPER}_QUERIES
+    DEFAULT_TIMEOUT = 120
+
+    def build_argparser( self ):
+        parser = super().build_argparser()
+        parser.add_argument( "--queries", "-q", type=str, default=None,
+            help="Comma-separated query indices (e.g., '0,1,3'). Default: all." )
+        return parser
+
+    def get_scenario_indices( self, args ):
+        if hasattr( args, "queries" ) and args.queries:
+            return [ int( x.strip() ) for x in args.queries.split( "," )
+                     if int( x.strip() ) < len( self.SCENARIOS ) ]
+        return list( range( len( self.SCENARIOS ) ) )
+
+    def get_mode_for_scenario( self, scenario ):
+        return "{agent_name}"  # Or None for auto-route testing
+
+
+def quick_smoke_test():
+    import argparse
+    test = {AgentName}PipelineTest()
+    args = argparse.Namespace( queries=None, debug=False, verbose=False )
+    return test.run_scenarios( args )
+
+
+def test_{agent_name}_live_pipeline():
+    assert quick_smoke_test()
+
+
+if __name__ == "__main__":
+    test    = {AgentName}PipelineTest()
+    success = test.run( sys.argv[ 1: ] )
+    sys.exit( 0 if success else 1 )
+```
+
+### Interactive Agent Template (`InteractiveSmokeTest`)
+
+For agents that ask interactive questions via the Runtime Argument Expediter, use `InteractiveSmokeTest` instead:
+
+```python
+from tests.smoke.utilities.interactive_smoke_test import InteractiveSmokeTest
+
+class {AgentName}InteractiveTest( InteractiveSmokeTest ):
+
+    TEST_NAME      = "{Agent Name} Interactive"
+    SCENARIOS      = {AGENT_NAME_UPPER}_SCENARIOS
+    PROXY_PROFILE  = "{agent_name}"
+    DEFAULT_TIMEOUT = 180
+```
+
+Run with: `python src/tests/smoke/test_{agent_name}_live_pipeline.py --auto-proxy --no-confirm`
+
+### Key Test Infrastructure Files
+
+| File | Purpose |
+|------|---------|
+| `src/tests/smoke/utilities/live_pipeline_base.py` | Base class: auth, submit-and-poll, validation, reporting |
+| `src/tests/smoke/utilities/interactive_smoke_test.py` | Adds proxy auto-launch for interactive agents |
+| `src/tests/smoke/test_calculator_live_pipeline.py` | Reference: non-interactive (6 scenarios) |
+| `src/tests/smoke/test_proxy_integration.py` | Reference: interactive (12 scenarios, 3 agent groups) |
+| `src/docs/automated-interactive-testing.md` | Comprehensive proxy testing guide |
+
 **For agents with interactive questions**: Also create a Notification Proxy Q&A script so
 expediter questions are auto-answered during automated testing. See "Notification Proxy" section below.
+
+> **Planned (v0.1.6)**: Playwright-based UI E2E tests will add browser-level validation
+> (submit via UI, verify job cards, check notification rendering). When implemented, update
+> this SKILL.md with the Playwright test template and add a Phase 5c section.
 
 ## Notification Proxy: Automated Q&A Scripts
 

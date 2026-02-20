@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.02.20 - Session 239 | Add Playwright E2E Testing Placeholder Notes (v0.1.6)
+
+#### Checkpoint | 2026-02-20 | Forward-looking v0.1.6 Playwright E2E placeholders across 4 docs
+
+**Accomplishments**:
+- Added Phase 5c (UI E2E Testing) row to agentic-voice-workflow SKILL.md phase table and a callout note after the Key Test Infrastructure Files table
+- Added Phase 5c line and Playwright reference to the slash command phase list and Testing References section
+- Added Playwright E2E checklist item to FINAL VERIFICATION section in the canonical workflow document
+- Added UI E2E tier row to testing-patterns SKILL.md Test Tiers table and a new "UI E2E Tests (Planned)" section before Anti-Patterns
+
+**Files (Lupin)**:
+- `.claude/skills/agentic-voice-workflow/SKILL.md` — Phase 5c row + v0.1.6 callout
+- `.claude/commands/lupin-new-claude-agent-sdk-voice-workflow.md` — Phase 5c + Testing References line
+- `src/workflow/agentic-voice-workflow.md` — FINAL VERIFICATION checklist item
+- `.claude/skills/testing-patterns/SKILL.md` — UI E2E tier row + planned section
+
+---
+
 ### 2026.02.19 - Session 238 | Approach D: Implement Hybrid Queue + Check-In for User-Initiated SWE Team Communication
 
 #### Checkpoint | 2026-02-19 | Full 5-phase implementation of user-to-orchestrator mid-task messaging
@@ -84,7 +102,7 @@
 - `src/tests/unit/test_crud_queue_integration.py` — Fixed mock setup (added `user_id`)
 
 **Test**: 1,447 unit tests PASS
-**Commit**: f0fc016
+**Commit**: aece71f
 **Plan file**: `~/.claude/plans/cosmic-herding-quill.md`
 
 ---

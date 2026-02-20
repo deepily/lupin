@@ -927,6 +927,7 @@ src/cosa/agents/{agent_name}/
 [ ] python -m cosa.agents.{agent_name}.orchestrator (smoke test passes)
 [ ] python -m cosa.agents.{agent_name}.mock_clients (smoke test passes)
 [ ] python -m cosa.agents.{agent_name} "test" --debug (CLI runs)
+[ ] (Optional) Scaffold live pipeline test file: src/tests/smoke/test_{agent_name}_live_pipeline.py
 ```
 
 ### Phase 1-2 TodoWrite Template
@@ -1203,6 +1204,7 @@ await voice_io.notify( f"Error: {error_msg}", priority="urgent" )
 [ ] Human-in-the-loop prompts work (if applicable)
 [ ] python -m cosa.agents.{agent_name}.cosa_interface (smoke test)
 [ ] python -m cosa.agents.{agent_name}.voice_io (smoke test)
+[ ] (If live pipeline test exists) Verify notifications appear in test output
 ```
 
 ### Phase 3-4 TodoWrite Template
@@ -1548,6 +1550,8 @@ This factory is shared by both the voice path (Expeditor → TodoFifoQueue) and 
 [ ] python -m cosa.agents.{agent_name}.job (smoke test)
 [ ] Job submission via API endpoint works
 [ ] Job appears in queue UI correctly
+[ ] Live pipeline test created: src/tests/smoke/test_{agent_name}_live_pipeline.py
+[ ] Live pipeline test passes with submit-and-poll validation
 ```
 
 ### WebSocket Job State Transitions
@@ -1749,6 +1753,56 @@ todo_queue.push( job )
 todo_queue.push( job )
 user_job_tracker.associate_job_with_user( job.id_hash, user_id )
 ```
+
+---
+
+## Phase 5b: Dedicated Router + Automated Testing
+
+### Overview
+
+After queue integration is working (Phase 5), create a dedicated FastAPI router for your agent
+and an automated live pipeline test. This ensures every new agent has repeatable, automated
+validation from day one.
+
+**CRITICAL**: Prefer automated pipeline tests over manual curl/UI submission. The test
+infrastructure (`LivePipelineTestBase`, `InteractiveSmokeTest`) already handles auth,
+session resolution, submit-and-poll, validation, and reporting.
+
+### Phase 5b Smoke Test Checklist
+
+```
+[ ] Router created at src/cosa/rest/routers/{agent_name}.py
+[ ] Router registered in main.py via app.include_router()
+[ ] POST /api/{agent-name}/submit returns 200 with valid job_id
+[ ] Job appears in todo queue after submission
+[ ] Live pipeline test created: src/tests/smoke/test_{agent_name}_live_pipeline.py
+[ ] Live pipeline test passes
+[ ] Q&A script created (if interactive): src/conf/notification-proxy-scripts/{agent-name}.json
+[ ] Proxy integration passes (if interactive)
+```
+
+### Phase 5b TodoWrite Template
+
+```
+[LUPIN] Create dedicated FastAPI router for {agent_name}
+[LUPIN] Register router in main.py
+[LUPIN] Verify POST endpoint returns job_id
+[LUPIN] Create live pipeline test (test_{agent_name}_live_pipeline.py)
+[LUPIN] Run live pipeline test (all scenarios pass)
+[LUPIN] Create Q&A script (if interactive)
+[LUPIN] Run proxy integration test (if interactive)
+```
+
+### Reference
+
+For inline test templates and the `LivePipelineTestBase` / `InteractiveSmokeTest` API, see
+the **agentic-voice-workflow** SKILL.md or the test infrastructure files:
+
+- `src/tests/smoke/utilities/live_pipeline_base.py` — Base class
+- `src/tests/smoke/utilities/interactive_smoke_test.py` — Interactive variant
+- `src/tests/smoke/test_calculator_live_pipeline.py` — Non-interactive reference (6 scenarios)
+- `src/tests/smoke/test_proxy_integration.py` — Interactive reference (12 scenarios)
+- `src/docs/automated-interactive-testing.md` — Comprehensive guide
 
 ---
 
@@ -3665,14 +3719,96 @@ curl -s -X POST http://localhost:7999/api/push \
 
 ---
 
-### Automated Interactive Testing (Cross-Surface)
+### Automated Pipeline Testing (Cross-Surface)
 
-For agents that interact with users through response-required notifications (expediter
-questions, CRUD confirmations), the **notification proxy testing system** automates the
-human-in-the-loop portion across Surfaces 2-5.
+Lupin provides two base classes for automated live pipeline testing. Use these instead of
+manual curl/UI submission for all new agents.
+
+#### Class Hierarchy
+
+| Class | Use When | Proxy Required |
+|-------|----------|----------------|
+| `LivePipelineTestBase` | Agent has no interactive questions | No |
+| `InteractiveSmokeTest` | Agent asks expediter/CRUD questions | Yes (auto-launched) |
+
+Both classes handle: authentication, session resolution, mode switching, submit-and-poll,
+keyword validation, and tabular reporting.
+
+#### Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/tests/smoke/utilities/live_pipeline_base.py` | Base class for submit-and-poll tests |
+| `src/tests/smoke/utilities/interactive_smoke_test.py` | Adds proxy auto-launch for interactive agents |
+| `src/tests/smoke/test_calculator_live_pipeline.py` | Reference: non-interactive (6 scenarios) |
+| `src/tests/smoke/test_proxy_integration.py` | Reference: interactive (12 scenarios, 3 agent groups) |
+| `src/conf/notification-proxy-scripts/_template.json` | Q&A script template for new agents |
+
+#### Non-Interactive Template
+
+For agents that do **not** ask interactive questions:
+
+```python
+from tests.smoke.utilities.live_pipeline_base import LivePipelineTestBase
+
+SCENARIOS = [
+    {
+        "id"               : "SCENARIO_1",
+        "query"            : "Your test query here",
+        "expected_keywords" : [ "expected", "words" ],
+    },
+]
+
+class MyAgentPipelineTest( LivePipelineTestBase ):
+    TEST_NAME       = "My Agent Live Pipeline"
+    SCENARIOS       = SCENARIOS
+    DEFAULT_TIMEOUT = 120
+
+    def get_mode_for_scenario( self, scenario ):
+        return "my_agent"  # Or None for auto-route testing
+
+if __name__ == "__main__":
+    test    = MyAgentPipelineTest()
+    success = test.run( sys.argv[ 1: ] )
+    sys.exit( 0 if success else 1 )
+```
+
+#### Interactive Template
+
+For agents that ask interactive questions via the Runtime Argument Expediter:
+
+```python
+from tests.smoke.utilities.interactive_smoke_test import InteractiveSmokeTest
+
+class MyAgentInteractiveTest( InteractiveSmokeTest ):
+    TEST_NAME      = "My Agent Interactive"
+    SCENARIOS      = SCENARIOS
+    PROXY_PROFILE  = "my_agent"
+    DEFAULT_TIMEOUT = 180
+```
+
+Run with: `python src/tests/smoke/test_my_agent_live_pipeline.py --auto-proxy --no-confirm`
+
+#### Running Commands
+
+```bash
+# Non-interactive agent — all scenarios
+python src/tests/smoke/test_{agent_name}_live_pipeline.py
+
+# Non-interactive — specific scenarios only
+python src/tests/smoke/test_{agent_name}_live_pipeline.py -q 0,2,4
+
+# Interactive agent — auto-launch proxy, disable similarity confirmation
+python src/tests/smoke/test_{agent_name}_live_pipeline.py --auto-proxy --no-confirm
+
+# Interactive — specific group only
+python src/tests/smoke/test_proxy_integration.py --group {agent_name} --auto-proxy --no-confirm
+```
+
+#### Comprehensive Guide
 
 See [`src/docs/automated-interactive-testing.md`](../docs/automated-interactive-testing.md)
-for the comprehensive guide covering proxy architecture, Q&A scripts, strategy chain,
+for the full guide covering proxy architecture, Q&A scripts, strategy chain,
 test profiles, and scenario authoring.
 
 ---
@@ -3750,6 +3886,13 @@ Phase 5: Queue Integration
 [ ] Factory elif branch added in agentic_job_factory.py
 [ ] Dedicated FastAPI router created and registered in main.py
 
+Phase 5b: Router + Automated Testing
+[ ] Dedicated FastAPI router created and registered in main.py
+[ ] Live pipeline test created: test_{agent_name}_live_pipeline.py
+[ ] Live pipeline test passes (all scenarios)
+[ ] Q&A script created (if interactive)
+[ ] Proxy integration test passes (if interactive)
+
 Phase 6-10: Advanced (as needed)
 [ ] LLM client with model routing (Phase 6)
 [ ] Cost tracking with budget enforcement (Phase 7)
@@ -3770,12 +3913,14 @@ Surface 2: Mock Endpoint (FREE)
 [ ] Mock endpoint creates job correctly
 [ ] Dry-run executes with $0.00 cost
 [ ] Job lifecycle: todo → run → done
+[ ] Live pipeline test (submit-and-poll): test_{agent_name}_live_pipeline.py passes
 
 Surface 3: UI Cards + LLM (~$0.001/query)
 [ ] Submission card added to notifications.html + notifications.js
 [ ] Text input routes to agent via LLM
 [ ] Submission card works in notification UI
 [ ] /api/push endpoint classifies correctly
+[ ] Automated proxy test passes (if interactive): --auto-proxy --no-confirm
 
 Surface 4: PEFT Training ($5-50)
 [ ] Added to agent-router-agentic-commands.json
@@ -3792,7 +3937,9 @@ Surface 5: Voice Routing (~$0.01/query)
   FINAL VERIFICATION
 ═══════════════════════════════════════════════════════════════
 
-[ ] Manual verification: submit via UI, verify artifacts
+[ ] Automated verification: live pipeline test passes (all scenarios)
+[ ] Manual verification (visual only): submit via UI, visually verify artifacts
+[ ] (v0.1.6) Playwright E2E: submit via UI, verify job card + notification rendering
 [ ] Notifications: start, progress, completion all fire
 [ ] Error handling: simulate failure, verify urgent notification
 [ ] Documentation: agent added to Reference Implementations table
