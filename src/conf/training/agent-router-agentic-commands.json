@@ -20,8 +20,21 @@
         "args_key"      : "prompt"
     },
     "agent router go to swe team" : {
-        "template_file" : "/src/ephemera/prompts/data/synthetic-data-agent-routing-swe-team.txt",
-        "placeholders"  : { "FEATURE" : "swe_team_tasks" },
-        "args_key"      : "prompt"
+        "template_file"    : "/src/ephemera/prompts/data/synthetic-data-agent-routing-swe-team.txt",
+        "placeholders"     : { "FEATURE" : "swe_team_tasks" },
+        "args_key"         : "prompt",
+        "conditional_args" : {
+            "dry_run" : {
+                "value"    : "True",
+                "triggers" : [
+                    "dry run", "dry-run", "dryrun",
+                    "trial run", "trial mode",
+                    "dry mode", "test run",
+                    "try run", "drive run", "dry bun",
+                    "dry ron", "dry one", "dry rum",
+                    "dry rub", "dry done", "dry fun"
+                ]
+            }
+        }
     }
 }

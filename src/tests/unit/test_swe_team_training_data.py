@@ -11,6 +11,10 @@ Tests:
     - Line length limit (<= 200 chars)
     - Router config entry presence
     - No overlap with other agent routing files
+    - Dry-run template count and coverage (>= 50%)
+    - ASR dry-run variant count
+    - Conditional args config presence and trigger list
+    - No dry-run contamination in other agent templates
 """
 
 import json
@@ -40,6 +44,16 @@ VALID_KEYWORDS = [
     "engineering team",   # synonym
     "software team",      # synonym
     "dev team",           # synonym
+]
+
+# Dry-run trigger phrases — must match JSON config triggers
+DRY_RUN_TRIGGERS = [
+    "dry run", "dry-run", "dryrun",
+    "trial run", "trial mode",
+    "dry mode", "test run",
+    "try run", "drive run", "dry bun",
+    "dry ron", "dry one", "dry rum",
+    "dry rub", "dry done", "dry fun",
 ]
 
 
@@ -229,6 +243,102 @@ class TestAgenticCommandsConfig:
         assert len( invalid ) == 0, \
             f"Unknown getter names:\n" + \
             "\n".join( f"  {k}: '{v}' (valid: {VALID_GETTER_NAMES})" for k, v in invalid.items() )
+
+
+# ============================================================================
+# Dry-run coverage tests
+# ============================================================================
+
+def _has_dry_run_trigger( line ):
+    """
+    Check if a line contains any dry-run trigger phrase.
+
+    Requires:
+        - line is a string
+
+    Ensures:
+        - Returns True if any DRY_RUN_TRIGGERS phrase is found (case-insensitive)
+    """
+    lower = line.lower()
+    return any( trigger in lower for trigger in DRY_RUN_TRIGGERS )
+
+
+class TestSweTeamDryRunCoverage:
+    """Validation tests for dry-run voice command coverage in SWE Team training data."""
+
+    def test_dry_run_template_count( self ):
+        """At least 95 lines contain a dry-run trigger phrase."""
+        lines     = _load_utterances()
+        dry_count = sum( 1 for line in lines if _has_dry_run_trigger( line ) )
+        assert dry_count >= 95, \
+            f"Expected >= 95 dry-run lines, got {dry_count}/{len( lines )}"
+
+    def test_dry_run_coverage_minimum( self ):
+        """Dry-run lines comprise >= 50% of all lines."""
+        lines     = _load_utterances()
+        dry_count = sum( 1 for line in lines if _has_dry_run_trigger( line ) )
+        coverage  = dry_count / len( lines ) if lines else 0
+        assert coverage >= 0.50, \
+            f"Dry-run coverage {coverage:.1%} < 50% ({dry_count}/{len( lines )})"
+
+    def test_asr_dry_run_variants_count( self ):
+        """At least 20 ASR mishearing variants for dry-run are present."""
+        asr_triggers = [
+            "try run", "drive run", "dry bun",
+            "dry ron", "dry one", "dry rum",
+            "dry rub", "dry done", "dry fun",
+        ]
+        lines     = _load_utterances()
+        asr_count = 0
+        for line in lines:
+            lower = line.lower()
+            if any( trigger in lower for trigger in asr_triggers ):
+                asr_count += 1
+        assert asr_count >= 20, \
+            f"Expected >= 20 ASR dry-run variants, got {asr_count}"
+
+    def test_conditional_args_config_present( self ):
+        """JSON config has conditional_args for SWE team entry."""
+        config = _load_full_config()
+        entry  = config[ "agent router go to swe team" ]
+        assert "conditional_args" in entry, \
+            "SWE Team config missing 'conditional_args' key"
+        assert "dry_run" in entry[ "conditional_args" ], \
+            "conditional_args missing 'dry_run' entry"
+
+    def test_conditional_args_triggers_list( self ):
+        """Triggers list has >= 10 entries including canonical and ASR variants."""
+        config   = _load_full_config()
+        triggers = config[ "agent router go to swe team" ][ "conditional_args" ][ "dry_run" ][ "triggers" ]
+        assert len( triggers ) >= 10, \
+            f"Expected >= 10 triggers, got {len( triggers )}"
+        # Canonical triggers must be present
+        for canonical in [ "dry run", "trial run", "test run" ]:
+            assert canonical in triggers, f"Missing canonical trigger: '{canonical}'"
+        # At least some ASR variants must be present
+        asr_found = sum( 1 for t in triggers if t in [ "try run", "drive run", "dry bun", "dry ron" ] )
+        assert asr_found >= 3, f"Expected >= 3 ASR triggers, found {asr_found}"
+
+    def test_no_dry_run_in_other_agent_templates( self ):
+        """No dry-run triggers in other agent template files (prevents contamination)."""
+        data_dir      = cu.get_project_root() + TRAINING_DATA_DIR
+        contaminated  = {}
+
+        for filename in os.listdir( data_dir ):
+            if filename.startswith( "synthetic-data-agent-routing-" ) and filename.endswith( ".txt" ):
+                if filename == "synthetic-data-agent-routing-swe-team.txt":
+                    continue
+                filepath = os.path.join( data_dir, filename )
+                with open( filepath, "r" ) as f:
+                    for line_num, line in enumerate( f, 1 ):
+                        stripped = line.strip()
+                        if stripped and not stripped.startswith( "#" ):
+                            if _has_dry_run_trigger( stripped ):
+                                contaminated.setdefault( filename, [] ).append( ( line_num, stripped ) )
+
+        assert len( contaminated ) == 0, \
+            f"Dry-run triggers found in other templates:\n" + \
+            "\n".join( f"  {fname}: line {ln} -> {text}" for fname, hits in contaminated.items() for ln, text in hits )
 
 
 # ============================================================================

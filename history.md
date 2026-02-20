@@ -1,5 +1,28 @@
 # Lupin Project History
 
+### 2026.02.20 - Session 240 | Add dry_run as Voice-Detectable Runtime Argument for SWE Team Training Data
+
+#### Checkpoint | 2026-02-20 | Conditional args detection for LoRA training data generation
+
+**Accomplishments**:
+- Added 108 dry-run template lines to SWE team training data (75 natural phrasing + 33 ASR robustness variants) — 204 total lines, 53% dry-run coverage
+- Introduced `conditional_args` config key to `agent-router-agentic-commands.json` — 16 trigger phrases (canonical + ASR mishearings like "try run", "dry bun", "dry rum")
+- Modified `xml_coordinator.py` generator to scan voice commands for trigger phrases and append `dry_run="True"` to args output when matched
+- Added 6 new unit tests in `TestSweTeamDryRunCoverage` class: template count, coverage minimum, ASR variant count, config presence, triggers list, no contamination in other agent templates
+- All 17 SWE team training data tests pass, full unit suite: 1483 passed, 0 failures
+
+**Files (Lupin)**:
+- `src/ephemera/prompts/data/synthetic-data-agent-routing-swe-team.txt` — 108 new dry-run template lines (2 new sections)
+- `src/conf/training/agent-router-agentic-commands.json` — `conditional_args` with `dry_run` triggers
+- `src/tests/unit/test_swe_team_training_data.py` — 6 new tests + `DRY_RUN_TRIGGERS` constant
+
+**Files (CoSA — commit separately)**:
+- `src/cosa/training/xml_coordinator.py` — 7 lines for conditional args detection in `build_agentic_job_training_prompts()`
+
+**Test**: 1483 unit tests PASS (6 new + 1477 existing)
+
+---
+
 ### 2026.02.20 - Session 239 | Add Playwright E2E Testing Placeholder Notes (v0.1.6)
 
 #### Checkpoint | 2026-02-20 | Forward-looking v0.1.6 Playwright E2E placeholders across 4 docs
