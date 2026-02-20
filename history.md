@@ -1,5 +1,28 @@
 # Lupin Project History
 
+### 2026.02.20 - Session 243 | Prohibit Manual Curl Testing — Documentation Updates
+
+#### Checkpoint | 2026-02-20 | Curl prohibition documentation across 6 files
+
+**Accomplishments**:
+- Established project-wide prohibition against using curl for pipeline/integration testing across 6 documentation files
+- Added "Testing Anti-Patterns" section to `CLAUDE.md` with 5 rules (NEVER curl for pipeline, NEVER manual POST+poll, NEVER bespoke curl scripts)
+- Updated `AUTH-TESTING-GUIDE.md` with "Curl Patterns — Reference Only" deprecation warning before existing curl examples
+- Added anti-patterns table to `src/tests/README.md` (3 anti-patterns with alternatives)
+- Added blockquote note to `src/tests/smoke/README.md` pointing to CLAUDE.md anti-patterns
+- Strengthened `.claude/skills/testing-patterns/SKILL.md` with 2 NEVER rules prepended to existing anti-patterns
+- Updated TEST CREDENTIALS reference in CLAUDE.md to discourage curl, redirect to automated tests
+- Curl remains acceptable for: API reference docs, deployment health checks, one-off debugging (never committed)
+
+**Files (Lupin)**:
+- `CLAUDE.md` — Added Testing Anti-Patterns section + updated TEST CREDENTIALS reference
+- `src/tests/AUTH-TESTING-GUIDE.md` — Added "Curl Patterns — Reference Only" deprecation warning
+- `src/tests/README.md` — Added Testing Anti-Patterns table
+- `src/tests/smoke/README.md` — Added automated-testing-only blockquote
+- `.claude/skills/testing-patterns/SKILL.md` — Prepended 2 NEVER rules to Anti-Patterns section
+
+---
+
 ### 2026.02.20 - Session 242 | Approach D: Rename, Smoke Tests, Fix Running Queue Poll + Configurable Dry-Run
 
 #### Checkpoint | 2026-02-20 | Rename user_message → user_initiated_message, 10-scenario smoke test, running queue poll fix, loop-based dry-run

@@ -225,6 +225,18 @@ pytest src/tests/smoke/test_proxy_integration.py -v
 
 ---
 
+## Testing Anti-Patterns
+
+| Anti-Pattern | Why It's Prohibited | Use Instead |
+|-------------|---------------------|-------------|
+| Manual `curl` to `/api/push` + polling | Non-repeatable, no validation, no reporting | `LivePipelineTestBase` or `InteractiveSmokeTest` |
+| Bespoke shell scripts with curl | Unmaintainable, no framework integration | Automated smoke test scripts |
+| Copy-paste curl from API docs into tests | Fragile, no auth lifecycle management | Test base classes handle auth, submit, poll, validate |
+
+**Acceptable curl usage**: API reference documentation, deployment health checks (`curl /health`), one-off debugging (never committed).
+
+---
+
 ## Running All Tests
 
 ### Run Everything

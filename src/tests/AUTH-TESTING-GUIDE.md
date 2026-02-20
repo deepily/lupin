@@ -66,6 +66,15 @@ headers = {"Authorization": f"Bearer {token}"}
 response = requests.get( f"{BASE_URL}/api/protected-endpoint", headers=headers )
 ```
 
+### Curl Patterns — Reference Only
+
+The curl examples below document HTTP authentication flows for understanding and one-off debugging.
+**Do NOT use curl for pipeline or integration testing.** Use the automated test infrastructure instead:
+
+- **Non-interactive agents**: `LivePipelineTestBase` — see `src/tests/smoke/test_calculator_live_pipeline.py`
+- **Interactive agents**: `InteractiveSmokeTest` — see `src/tests/smoke/test_proxy_integration.py`
+- **Integration tests**: `./src/tests/run-integration-tests.sh -v`
+
 ### CURL - One-Liner Pattern
 
 ```bash

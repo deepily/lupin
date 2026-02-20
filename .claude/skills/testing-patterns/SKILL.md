@@ -127,6 +127,8 @@ be expanded when the Playwright infrastructure is added.
 
 ## Anti-Patterns
 
+- **NEVER** use `curl` for pipeline or integration testing — use automated test scripts
+- **NEVER** manually POST to `/api/push` + poll `/api/get-queue/done` — use `LivePipelineTestBase`
 - **Don't** run integration tests without the wrapper script
 - **Don't** test external APIs in unit tests (use mocks)
 - **Don't** skip smoke tests - they catch major breakage fast

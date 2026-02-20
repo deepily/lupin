@@ -66,6 +66,9 @@ python src/tests/smoke/test_deep_research_dry_run_smoke.py
 python -m cosa.agents.notification_proxy --profile all_agents --strategy llm_script
 ```
 
+> **Important**: Always use these automated scripts for pipeline testing. Manual curl-based
+> job submission is prohibited — see project `CLAUDE.md` Testing Anti-Patterns.
+
 ---
 
 ## Environment Variables

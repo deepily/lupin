@@ -324,6 +324,14 @@ pytest src/tests/unit/ -v && \
 - **Fix the failing tests first**, then re-run the full suite
 - If a test is legitimately flaky (not your code), document and create a separate fix
 
+### Testing Anti-Patterns
+
+- **NEVER** use `curl` commands for pipeline or integration testing — use automated test scripts
+- **NEVER** manually POST to `/api/push` and poll `/api/get-queue/done` — use `LivePipelineTestBase`
+- **NEVER** create bespoke curl scripts as a substitute for repeatable test automation
+- Manual curl is acceptable ONLY for: API reference documentation, deployment health checks, one-off debugging (never committed)
+- When building new agents, create an automated smoke test — see `.claude/skills/agentic-voice-workflow/SKILL.md`
+
 ## TEST CREDENTIALS
 
 **CRITICAL**: Never hardcode test credentials. Always use environment variables.
@@ -354,7 +362,7 @@ if not email or not password:
 - Manual testing scripts
 - Protocol verification tests that need real user context
 
-**Reference**: See `src/tests/AUTH-TESTING-GUIDE.md` for complete patterns including curl examples.
+**Reference**: See `src/tests/AUTH-TESTING-GUIDE.md` for credential patterns. For pipeline testing, always use automated smoke tests — never manual curl.
 
 ## HISTORY STRUCTURE NOTES
 - **Project Span**: December 2024 - Present (Lupin evolution from Genie-in-the-Box)
