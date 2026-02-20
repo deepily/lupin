@@ -1047,3 +1047,70 @@ class TestUserMessageQueue:
         """enable_user_messages can be set to False."""
         config = SweTeamConfig( enable_user_messages=False )
         assert config.enable_user_messages is False
+
+
+# =============================================================================
+# get_state() — Proxy Fields (Phase 4 Light-Up)
+# =============================================================================
+
+class TestGetStateProxyFields:
+    """Tests for proxy-related fields in get_state() return dict."""
+
+    def test_get_state_includes_proxy_fields_when_proxy_active( self ):
+        """get_state() includes proxy trust data when proxy is not None."""
+        config = SweTeamConfig( trust_mode="shadow" )
+        orch = SweTeamOrchestrator(
+            task_description = "Test proxy fields",
+            config           = config,
+            session_id       = "test-proxy",
+        )
+
+        state = orch.get_state()
+
+        # Core fields still present
+        assert "orchestrator_state" in state
+        assert "session_id" in state
+        assert state[ "session_id" ] == "test-proxy"
+
+        # Proxy fields present
+        assert state[ "proxy_trust_mode" ] == "shadow"
+        assert isinstance( state[ "proxy_trust_levels" ], dict )
+        assert isinstance( state[ "proxy_trust_stats" ], dict )
+        assert isinstance( state[ "proxy_circuit_breaker" ], dict )
+
+        # Trust levels should have the 6 engineering categories
+        assert len( state[ "proxy_trust_levels" ] ) == 6
+
+    def test_get_state_proxy_disabled_returns_empty_dicts( self ):
+        """get_state() returns empty dicts when proxy is disabled."""
+        config = SweTeamConfig( trust_mode="disabled" )
+        orch = SweTeamOrchestrator(
+            task_description = "Test no proxy",
+            config           = config,
+            session_id       = "test-no-proxy",
+        )
+
+        state = orch.get_state()
+
+        assert state[ "proxy_trust_mode" ] == "disabled"
+        assert state[ "proxy_trust_levels" ] == {}
+        assert state[ "proxy_trust_stats" ] == {}
+        assert state[ "proxy_circuit_breaker" ] == {}
+
+    def test_get_state_proxy_trust_stats_contain_expected_keys( self ):
+        """Proxy trust stats contain per-category detail dicts."""
+        config = SweTeamConfig( trust_mode="shadow" )
+        orch = SweTeamOrchestrator(
+            task_description = "Test stats shape",
+            config           = config,
+            session_id       = "test-stats",
+        )
+
+        state = orch.get_state()
+        stats = state[ "proxy_trust_stats" ]
+
+        # Each category should have a stats dict from CategoryTrust.to_dict()
+        for cat_name, cat_stats in stats.items():
+            assert "level" in cat_stats
+            assert "total_decisions" in cat_stats
+            assert "success_rate" in cat_stats
