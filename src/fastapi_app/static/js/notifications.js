@@ -1621,13 +1621,18 @@ class NotificationsUI {
             }
 
             // Urgent toggle label click
+            // NOTE: The checkbox is display:none, so clicks always land on the
+            // <label> or the ⚡ emoji.  We must preventDefault() to stop the
+            // browser's native label→checkbox toggle from firing a SECOND time
+            // after our manual toggle (classic double-toggle bug).
             const urgentLabel = e.target.closest( '.urgent-toggle' );
             if ( urgentLabel ) {
+                e.preventDefault();
                 const checkbox = urgentLabel.querySelector( 'input[type="checkbox"]' );
-                if ( checkbox && e.target !== checkbox ) {
+                if ( checkbox ) {
                     checkbox.checked = !checkbox.checked;
+                    urgentLabel.classList.toggle( 'checked', checkbox.checked );
                 }
-                urgentLabel.classList.toggle( 'checked', checkbox.checked );
                 return;
             }
 
@@ -5218,9 +5223,15 @@ class NotificationsUI {
             ? new Date( notification.timestamp ).toLocaleTimeString()
             : new Date().toLocaleTimeString();
 
+        // Abstract indicator — clickable 📋 that opens the abstract tooltip
+        const hasAbstract = notification.abstract && notification.abstract.trim().length > 0;
+        const abstractHtml = hasAbstract
+            ? ` <span class="abstract-indicator" data-abstract="${encodeURIComponent( notification.abstract )}" title="View details">📋</span>`
+            : '';
+
         entry.innerHTML = `
             <span class="activity-timestamp">${timestamp}</span>
-            <span class="activity-message">${this.escapeHtml( notification.message )}</span>
+            <span class="activity-message">${this.escapeHtml( notification.message )}${abstractHtml}</span>
         `;
 
         return entry;
@@ -5561,9 +5572,28 @@ class NotificationsUI {
             return;
         }
 
-        // Disable controls during request
-        input.disabled  = true;
+        // Disable controls and clear input immediately
+        input.disabled   = true;
         sendBtn.disabled = true;
+        input.value      = '';
+        if ( urgentCb ) {
+            urgentCb.checked = false;
+            const label = urgentCb.closest( '.urgent-toggle' );
+            if ( label ) label.classList.remove( 'checked' );
+        }
+
+        // TRUE optimistic render — append user bubble BEFORE the fetch so
+        // the bubble appears above any echo the server sends back via WebSocket
+        this.appendJobUserMessage( jobId, message, priority );
+
+        // Auto-expand conversation if collapsed
+        const contentEl = document.getElementById( `interactions-content-${jobId}` );
+        if ( contentEl && contentEl.classList.contains( 'collapsed' ) ) {
+            contentEl.classList.remove( 'collapsed' );
+            const section = document.getElementById( `job-interactions-${jobId}` );
+            const expandBtn = section ? section.querySelector( '.interactions-expand-btn' ) : null;
+            if ( expandBtn ) expandBtn.textContent = '▼';
+        }
 
         try {
             const response = await fetch( `/api/jobs/${jobId}/message`, {
@@ -5578,26 +5608,6 @@ class NotificationsUI {
             if ( !response.ok ) {
                 const errData = await response.json().catch( () => ( {} ) );
                 throw new Error( errData.detail || `HTTP ${response.status}` );
-            }
-
-            // Success — clear input and append to live interaction pane
-            input.value = '';
-            if ( urgentCb ) {
-                urgentCb.checked = false;
-                const label = urgentCb.closest( '.urgent-toggle' );
-                if ( label ) label.classList.remove( 'checked' );
-            }
-
-            // Append to live interaction pane (optimistic UI)
-            this.appendJobUserMessage( jobId, message, priority );
-
-            // Auto-expand conversation if collapsed
-            const contentEl = document.getElementById( `interactions-content-${jobId}` );
-            if ( contentEl && contentEl.classList.contains( 'collapsed' ) ) {
-                contentEl.classList.remove( 'collapsed' );
-                const section = document.getElementById( `job-interactions-${jobId}` );
-                const expandBtn = section ? section.querySelector( '.interactions-expand-btn' ) : null;
-                if ( expandBtn ) expandBtn.textContent = '▼';
             }
 
             this.log( `[JOB-MSG] Sent to ${jobId}: ${message.substring( 0, 80 )}` );
@@ -5698,6 +5708,12 @@ class NotificationsUI {
             // Lazy load interactions if not cached
             if ( !this.jobInteractionsCache.has( jobId ) ) {
                 await this.loadJobInteractions( jobId );
+            }
+
+            // Scroll the "Notification Conversation" header to the top of the viewport
+            const sectionEl = headerEl ? headerEl.closest( '.job-interactions-section' ) : null;
+            if ( sectionEl ) {
+                sectionEl.scrollIntoView( { behavior: 'smooth', block: 'start' } );
             }
         }
     }
@@ -5836,13 +5852,19 @@ class NotificationsUI {
             `;
         }
 
+        // Abstract indicator — clickable 📋 that opens the abstract tooltip
+        const hasAbstract = interaction.abstract && interaction.abstract.trim().length > 0;
+        const abstractIndicator = hasAbstract
+            ? ` <span class="abstract-indicator" data-abstract="${encodeURIComponent( interaction.abstract )}" title="View details">📋</span>`
+            : '';
+
         return `
             <div class="interaction-item priority-${interaction.priority || 'medium'}">
                 <div class="interaction-header">
                     <span class="interaction-type">${typeIcon} ${interaction.type}</span>
                     <span class="interaction-time">${timestamp}</span>
                 </div>
-                <div class="interaction-message">${this.escapeHtml( interaction.message || '' )}</div>
+                <div class="interaction-message">${this.escapeHtml( interaction.message || '' )}${abstractIndicator}</div>
                 ${responseHtml}
             </div>
         `;

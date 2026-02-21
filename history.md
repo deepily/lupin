@@ -1,5 +1,35 @@
 # Lupin Project History
 
+### 2026.02.21 - Session 246 | Bug Fix Mode
+
+#### Fix 1: Urgent toggle not functional + conversation UX improvements
+
+**Source**: bug-fix-queue.md (queued) + ad-hoc follow-ups
+**Scope**: 7 sub-fixes across 4 files
+
+1. **Double-toggle bug** (JS): `preventDefault()` stops native label→checkbox double-toggle; urgent toggle now works
+2. **Urgent bubble color** (CSS): Changed from `#dc3545` (red) to `#ffcc80` (light amber matching toggle checked state)
+3. **Echo temporal ordering** (JS): Moved optimistic render BEFORE `await fetch()` — user bubble now appears above the echo
+4. **Echo persistence** (Python): Echo acknowledgment now persisted to database via `create_notification()` — visible in history
+5. **Echo message simplified** (Python): Changed from echoing user text to "📨 Your message has been queued"
+6. **Scroll on conversation toggle** (JS): `scrollIntoView()` on the interactions section header when expanding
+7. **Abstract in conversation history** (JS+Python): Added `abstract` field to `get_job_interactions` API response; added clickable 📋 indicator after message text in both `renderInteractionItem()` and `createActivityLogEntry()`
+8. **Claude Code Dispatcher relocated** (HTML): Moved from standalone section into "Submit Agentic Jobs" as a sub-accordion card alongside Research/Podcast/SWE Team; removed standalone toolbar button
+
+**Files (Lupin)**:
+- `src/fastapi_app/static/js/notifications.js` — toggle fix, optimistic render, scroll, abstract indicators
+- `src/fastapi_app/static/css/notifications.css` — amber bubble background
+- `src/fastapi_app/static/html/notifications.html` — Claude Code card relocation
+- `src/cosa/rest/routers/queues.py` — echo persistence, echo message, abstract in interactions API
+- **Test**: 1511 unit tests PASS, no regressions
+- **Commit**: 34807f0 (Lupin), CoSA pending (queues.py)
+
+#### Session Summary
+
+(Will be completed at session close)
+
+---
+
 ### 2026.02.20 - Session 245 | Phase 6: Decision Proxy UI — Ratification Page + Trust Dashboard
 
 #### Checkpoint | 2026-02-20 | Proxy UI: 6 new files, 2 modified, 1511 tests pass

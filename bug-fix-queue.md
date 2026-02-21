@@ -24,6 +24,7 @@
 | 4949b964 | 2026-02-02T18:00:00 | 2026-02-02T23:05:00 | closed |
 | 07b80074 | 2026-02-16T10:00:00 | 2026-02-16T10:00:00 | stale |
 | a118cc5e | 2026-02-19T00:00:00 | 2026-02-20T00:00:00 | closed |
+| ff1fffd0 | 2026-02-21T00:00:00 | 2026-02-21T00:00:00 | active |
 
 ---
 
@@ -31,13 +32,7 @@
 
 (Available for any session to claim)
 
-- [ ] **High-priority toggle not functional — messages not sent/recorded as urgent**
-  - **Symptom**: Clicking the urgent toggle on the job send-message bar has no visible effect; messages sent with toggle active are not marked as high priority in the notification system
-  - **Scope**: (1) Toggle checked-state CSS not rendering (amber border/background not visible despite CSS changes), (2) Priority value not propagated when sending messages — messages always recorded as normal priority
-  - **CSS changes applied but not confirmed working**: `.urgent-toggle` base border, `.urgent-toggle.checked` amber styling, `.priority-urgent` bubble border+glow — all in `notifications.css`
-  - **Investigation needed**: Check toggle click handler (JS ~line 1630), `sendJobMessage()` priority extraction (~line 5580), and whether the `checked` class is actually being toggled on the DOM element
-  - **Files**: `src/fastapi_app/static/js/notifications.js` (toggle handler + send logic), `src/fastapi_app/static/css/notifications.css` (toggle + bubble styling)
-  - **Added**: 2026-02-20
+(empty)
 
 ---
 
@@ -50,6 +45,8 @@
 ---
 
 ### Completed
+
+- [x] **High-priority toggle not functional + conversation UX** → commit: 34807f0 | By: ff1fffd0
 
 - [x] **Calculator→MathAgent snapshot replay: missing `prompt_response_dict` copy** → FIXED | By: 07b80074
   - **Symptom**: "What's 4+4?" works first time but fails on cache replay — snapshot saved with `code=[""]`

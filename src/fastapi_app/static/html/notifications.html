@@ -9,7 +9,6 @@
     <!-- Floating Section Visibility Toolbar -->
     <div class="section-toolbar" id="section-toolbar">
         <button class="toolbar-btn active" data-section="section-qa" title="Q&A Interface">❓</button>
-        <button class="toolbar-btn active" data-section="section-claude-code" title="Claude Code Dispatcher">🤖</button>
         <button class="toolbar-btn active" data-section="section-job-submit" title="Submit Agentic Jobs">📝</button>
         <button class="toolbar-btn active" data-section="action-required-section" title="Action Required">⚠️</button>
         <button class="toolbar-btn active" data-section="tts-queue-section" title="TTS Queue">🔊</button>
@@ -85,91 +84,91 @@
             </div>
         </div>
 
-        <!-- Claude Code Dispatcher Section -->
-        <div class="collapsible-section" id="section-claude-code">
-            <div class="section-header" onclick="toggleSection('claude-code-section')">
-                <h3>Claude Code Dispatcher</h3>
-                <button class="toggle-button" id="claude-code-toggle">▼</button>
-            </div>
-            <div class="section-content" id="claude-code-section">
-                <div class="form-group" style="display: flex; gap: 12px; margin-bottom: 12px;">
-                    <div style="flex: 0 0 auto;">
-                        <label for="cc-project" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Project:</label>
-                        <select id="cc-project" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
-                            <option value="lupin" selected>lupin</option>
-                            <option value="cosa">cosa</option>
-                            <option value="plan">plan</option>
-                        </select>
-                    </div>
-                    <div style="flex: 1;">
-                        <label for="cc-prompt" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Task:</label>
-                        <div class="cc-prompt-container">
-                            <button type="button" id="cc-stt-button" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
-                            <textarea id="cc-prompt" rows="2" placeholder="Enter task prompt..." style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; resize: vertical;"></textarea>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="form-group" style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                        <label for="cc-task-type" style="font-size: 12px; color: #666;">Task:</label>
-                        <select id="cc-task-type" style="padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
-                            <option value="BOUNDED" selected>Bounded</option>
-                            <option value="INTERACTIVE">Unbounded (Interactive)</option>
-                        </select>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                        <label for="cc-execution-mode" style="font-size: 12px; color: #666;">Flow:</label>
-                        <select id="cc-execution-mode" style="padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
-                            <option value="queue" selected>CJ Flow</option>
-                            <option value="direct">Socket</option>
-                        </select>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                        <input type="checkbox" id="cc-dry-run" checked />
-                        <span style="font-size: 13px;">🧪 Dry run</span>
-                    </div>
-                    <button id="cc-submit" type="button" style="padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                        🚀 Submit
-                        <span id="cc-loading" class="loading" style="display: none;">
-                            <span class="spinner"></span>
-                        </span>
-                    </button>
-                </div>
-
-                <div class="form-group" style="margin-bottom: 12px;">
-                    <label style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Response:</label>
-                    <pre id="cc-response" style="background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 4px; min-height: 100px; max-height: 300px; overflow-y: auto; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;"></pre>
-                </div>
-
-                <!-- Option B Controls (hidden by default) -->
-                <div id="cc-option-b-controls" style="display: none; padding: 12px; background: #f8f9fa; border-radius: 4px; margin-bottom: 12px;">
-                    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
-                        <input type="text" id="cc-inject-input" placeholder="Follow-up message..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
-                        <button id="cc-inject-btn" type="button" style="padding: 8px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">💬 Inject</button>
-                    </div>
-                    <div style="display: flex; gap: 8px;">
-                        <button id="cc-interrupt-btn" type="button" style="padding: 8px 12px; background: #ffc107; color: #212529; border: none; border-radius: 4px; cursor: pointer;">⏹️ Interrupt</button>
-                        <button id="cc-end-btn" type="button" style="padding: 8px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">🛑 End Session</button>
-                    </div>
-                </div>
-
-                <!-- Session Info -->
-                <div id="cc-session-info" style="display: none; padding: 8px 12px; background: #e7f3ff; border-radius: 4px; font-size: 12px;">
-                    <span style="margin-right: 16px;">Task ID: <code id="cc-task-id">--</code></span>
-                    <span style="margin-right: 16px;">Status: <span id="cc-status">--</span></span>
-                    <span>Cost: <span id="cc-cost">$0.00</span></span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Job Submission Section - Deep Research & Podcast Generation -->
+        <!-- Job Submission Section - All Agentic Job Dispatchers -->
         <div class="collapsible-section" id="section-job-submit">
             <div class="section-header" onclick="toggleSection('job-submit-section')">
                 <h3>📝 Submit Agentic Jobs</h3>
                 <button class="toggle-button" id="job-submit-toggle">▼</button>
             </div>
             <div class="section-content" id="job-submit-section">
+
+                <!-- Claude Code Dispatcher Card -->
+                <div class="job-submit-card" id="claude-code-submit-card">
+                    <div class="job-submit-card-header" onclick="toggleSection('claude-code-section')">
+                        <h4>🤖 Claude Code Dispatcher</h4>
+                        <button class="toggle-button" id="claude-code-toggle">▶</button>
+                    </div>
+                    <div class="section-content collapsed" id="claude-code-section">
+                        <div class="form-group" style="display: flex; gap: 12px; margin-bottom: 12px;">
+                            <div style="flex: 0 0 auto;">
+                                <label for="cc-project" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Project:</label>
+                                <select id="cc-project" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                                    <option value="lupin" selected>lupin</option>
+                                    <option value="cosa">cosa</option>
+                                    <option value="plan">plan</option>
+                                </select>
+                            </div>
+                            <div style="flex: 1;">
+                                <label for="cc-prompt" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Task:</label>
+                                <div class="cc-prompt-container">
+                                    <button type="button" id="cc-stt-button" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                    <textarea id="cc-prompt" rows="2" placeholder="Enter task prompt..." style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; resize: vertical;"></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <label for="cc-task-type" style="font-size: 12px; color: #666;">Task:</label>
+                                <select id="cc-task-type" style="padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
+                                    <option value="BOUNDED" selected>Bounded</option>
+                                    <option value="INTERACTIVE">Unbounded (Interactive)</option>
+                                </select>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <label for="cc-execution-mode" style="font-size: 12px; color: #666;">Flow:</label>
+                                <select id="cc-execution-mode" style="padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
+                                    <option value="queue" selected>CJ Flow</option>
+                                    <option value="direct">Socket</option>
+                                </select>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <input type="checkbox" id="cc-dry-run" checked />
+                                <span style="font-size: 13px;">🧪 Dry run</span>
+                            </div>
+                            <button id="cc-submit" type="button" style="padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                                🚀 Submit
+                                <span id="cc-loading" class="loading" style="display: none;">
+                                    <span class="spinner"></span>
+                                </span>
+                            </button>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Response:</label>
+                            <pre id="cc-response" style="background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 4px; min-height: 100px; max-height: 300px; overflow-y: auto; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;"></pre>
+                        </div>
+
+                        <!-- Option B Controls (hidden by default) -->
+                        <div id="cc-option-b-controls" style="display: none; padding: 12px; background: #f8f9fa; border-radius: 4px; margin-bottom: 12px;">
+                            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+                                <input type="text" id="cc-inject-input" placeholder="Follow-up message..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                                <button id="cc-inject-btn" type="button" style="padding: 8px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">💬 Inject</button>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <button id="cc-interrupt-btn" type="button" style="padding: 8px 12px; background: #ffc107; color: #212529; border: none; border-radius: 4px; cursor: pointer;">⏹️ Interrupt</button>
+                                <button id="cc-end-btn" type="button" style="padding: 8px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">🛑 End Session</button>
+                            </div>
+                        </div>
+
+                        <!-- Session Info -->
+                        <div id="cc-session-info" style="display: none; padding: 8px 12px; background: #e7f3ff; border-radius: 4px; font-size: 12px;">
+                            <span style="margin-right: 16px;">Task ID: <code id="cc-task-id">--</code></span>
+                            <span style="margin-right: 16px;">Status: <span id="cc-status">--</span></span>
+                            <span>Cost: <span id="cc-cost">$0.00</span></span>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- Research Submission Card -->
                 <div class="job-submit-card" id="research-submit-card">

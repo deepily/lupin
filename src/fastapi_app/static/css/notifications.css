@@ -3822,15 +3822,15 @@
     margin-left: 40px;
 }
 
-/* Urgent outgoing message — red background with amber border accent */
+/* Urgent outgoing message — light amber background matching the toggle checked state */
 .interactions-content .sender-message.outgoing.priority-urgent {
-    background-color: #dc3545;
+    background-color: #ffcc80;
     border: 2px solid #f59e0b;
     box-shadow: 0 0 4px rgba( 245, 158, 11, 0.4 );
 }
 
 .interactions-content .sender-message.outgoing.priority-urgent .message-time {
-    color: #fff3cd;
+    color: #92400e;
 }
 
 /* Send input sits below accordion header, no top border when inside section */
