@@ -16,7 +16,7 @@
             /* Position just left of container (800px max-width, centered) */
             /* Container center = 50%, half container = 400px, plus toolbar width + gap */
             left: calc( 50% - 400px - 60px );
-            top: 80px;  /* Below header, aligned with container top */
+            top: 136px;  /* Below nav bar (56px) + header, aligned with container top */
             display: flex;
             flex-direction: column;
             gap: 4px;

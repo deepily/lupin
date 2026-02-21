@@ -47,7 +47,7 @@ class AdminSnapshotsDashboard {
     async setupAuthentication() {
         // Check if user is authenticated
         if ( !isAuthenticated() ) {
-            window.location.href = '/static/html/auth/login.html?redirect=/static/html/admin/snapshots.html';
+            window.location.href = '/app/auth/login?redirect=/app/admin/snapshots';
             return;
         }
 
@@ -56,7 +56,7 @@ class AdminSnapshotsDashboard {
 
         if ( !userData ) {
             clearTokens();
-            window.location.href = '/static/html/auth/login.html';
+            window.location.href = '/app/auth/login';
             return;
         }
 
@@ -67,7 +67,7 @@ class AdminSnapshotsDashboard {
         // Check admin role
         if ( !this.isAdmin ) {
             alert( 'Admin access required' );
-            window.location.href = '/static/html/auth/profile.html';
+            window.location.href = '/app/auth/profile';
             return;
         }
     }
@@ -105,7 +105,7 @@ class AdminSnapshotsDashboard {
         // Logout button
         document.getElementById( 'logout-btn' ).addEventListener( 'click', () => {
             clearTokens();
-            window.location.href = '/static/html/auth/login.html';
+            window.location.href = '/app/auth/login';
         });
 
         // Detail modal close buttons

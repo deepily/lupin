@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dev Tools — Lupin Admin</title>
+
+    <link rel="stylesheet" href="/static/html/auth/css/auth.css">
+    <link rel="stylesheet" href="/static/html/admin/css/admin-dashboard.css">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
+    <style>
+        .dev-tools-grid {
+            display: grid;
+            grid-template-columns: repeat( auto-fit, minmax( 300px, 1fr ) );
+            gap: 16px;
+            margin-bottom: 48px;
+        }
+
+        .dev-card {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 20px;
+            transition: border-color 200ms;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+
+        .dev-card:hover {
+            border-color: #6366f1;
+        }
+
+        .dev-card-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #111827;
+            margin: 0 0 6px 0;
+        }
+
+        .dev-card-desc {
+            font-size: 13px;
+            color: #6b7280;
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        .dev-section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #374151;
+            margin: 32px 0 12px 0;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-dashboard-container">
+        <!-- Header -->
+        <div class="dashboard-header">
+            <h1>Dev Tools</h1>
+            <p class="subtitle">Test pages, diagnostic tools, and development utilities</p>
+        </div>
+
+        <!-- WebSocket & Session Tests -->
+        <h3 class="dev-section-title">WebSocket &amp; Session</h3>
+        <div class="dev-tools-grid">
+            <a href="/static/html/test/diagnostic-websocket-test.html" class="dev-card">
+                <h4 class="dev-card-title">WebSocket Diagnostics</h4>
+                <p class="dev-card-desc">Comprehensive WebSocket connection diagnostics and message inspector</p>
+            </a>
+            <a href="/static/html/test/test_event_subscription.html" class="dev-card">
+                <h4 class="dev-card-title">Event Subscription</h4>
+                <p class="dev-card-desc">Test WebSocket event subscription and filtering</p>
+            </a>
+            <a href="/static/html/test/test_session_persistence.html" class="dev-card">
+                <h4 class="dev-card-title">Session Persistence</h4>
+                <p class="dev-card-desc">Verify localStorage session persistence across reloads</p>
+            </a>
+            <a href="/static/html/test/test_session_cleanup.html" class="dev-card">
+                <h4 class="dev-card-title">Session Cleanup</h4>
+                <p class="dev-card-desc">Test automatic session cleanup and expiry</p>
+            </a>
+            <a href="/static/html/test/test_heartbeat_cleanup.html" class="dev-card">
+                <h4 class="dev-card-title">Heartbeat Cleanup</h4>
+                <p class="dev-card-desc">Verify WebSocket heartbeat mechanism and dead connection removal</p>
+            </a>
+        </div>
+
+        <!-- Audio & TTS Tests -->
+        <h3 class="dev-section-title">Audio &amp; TTS</h3>
+        <div class="dev-tools-grid">
+            <a href="/static/html/test/test-audio.html" class="dev-card">
+                <h4 class="dev-card-title">Audio Test</h4>
+                <p class="dev-card-desc">Basic audio recording and playback test</p>
+            </a>
+            <a href="/static/html/test/test-audio-hybrid.html" class="dev-card">
+                <h4 class="dev-card-title">Audio Hybrid Mode</h4>
+                <p class="dev-card-desc">Test hybrid audio mode combining WebSocket and REST</p>
+            </a>
+            <a href="/static/html/test/test_tts_websocket_routing.html" class="dev-card">
+                <h4 class="dev-card-title">TTS WebSocket Routing</h4>
+                <p class="dev-card-desc">Verify TTS audio routing via WebSocket channels</p>
+            </a>
+            <a href="/static/html/test/test-hybrid-tts-module.html" class="dev-card">
+                <h4 class="dev-card-title">Hybrid TTS Module</h4>
+                <p class="dev-card-desc">Test the hybrid TTS module integration</p>
+            </a>
+            <a href="/static/html/test/test-hybrid-tts-cache.html" class="dev-card">
+                <h4 class="dev-card-title">TTS Cache Test</h4>
+                <p class="dev-card-desc">Verify TTS audio caching and cache hit/miss behavior</p>
+            </a>
+            <a href="/static/html/test/experimental-tts.html" class="dev-card">
+                <h4 class="dev-card-title">Experimental TTS</h4>
+                <p class="dev-card-desc">Experimental text-to-speech features and prototypes</p>
+            </a>
+            <a href="/static/html/test/chunk-sequencing-test.html" class="dev-card">
+                <h4 class="dev-card-title">Chunk Sequencing</h4>
+                <p class="dev-card-desc">Test audio chunk sequencing and ordering</p>
+            </a>
+            <a href="/static/html/test/pcm-streaming-demo.html" class="dev-card">
+                <h4 class="dev-card-title">PCM Streaming Demo</h4>
+                <p class="dev-card-desc">Raw PCM audio streaming demonstration</p>
+            </a>
+            <a href="/static/html/test/notification_sound_tester.html" class="dev-card">
+                <h4 class="dev-card-title">Notification Sounds</h4>
+                <p class="dev-card-desc">Test notification sound alerts and priority levels</p>
+            </a>
+        </div>
+
+        <!-- Footer -->
+        <footer class="dashboard-footer">
+            <p>14 test/diagnostic pages</p>
+        </footer>
+    </div>
+
+    <script src="/static/js/lupin-nav.js" defer></script>
+    <script src="/static/html/auth/js/auth.js"></script>
+    <script>
+        // Require admin role
+        requireAdmin();
+    </script>
+</body>
+</html>

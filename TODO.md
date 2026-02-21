@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-20 (Session 244)
+Last updated: 2026-02-21 (Session 247)
 
 ## v0.1.6 — HIGH PRIORITY
 
@@ -32,6 +32,10 @@ Last updated: 2026-02-20 (Session 244)
   - **Goal**: Durable storage for ClaudeCode Job tracking state
   - **Affects**: Job state survives server restarts, enables job history/resume
 
+### Centralized Navigation & URL Naming Conventions
+
+- [x] **[LUPIN] Create centralized navigation and URL naming conventions** — Unified nav and URL patterns for entire suite of static HTML/plain vanilla JavaScript pages covering all user and admin tasks
+
 ---
 
 ## Pending
@@ -41,7 +45,7 @@ Last updated: 2026-02-20 (Session 244)
 - [x] **[LUPIN] Approach D: Rename user_message → user_initiated_message** — 4 files renamed, 330 unit tests pass
 - [x] **[LUPIN] Approach D: Automated smoke test** — `test_approach_d_user_messages.py`, 10 scenarios, 10/10 PASS
 - [x] **[LUPIN] Approach D: Fix running queue poll bug + configurable dry-run** — Response key fix, 10-phase 1.5s dry-run loop
-- [ ] **[LUPIN] Commit CoSA changes for Approach D** — 5 CoSA files modified (notification_client.py NEW, orchestrator.py, config.py, job.py, queues.py). Must commit in CoSA context separately
+- [x] **[LUPIN] Commit CoSA changes for Approach D** — 5 CoSA files modified (notification_client.py NEW, orchestrator.py, config.py, job.py, queues.py). Committed in CoSA context
 
 ### SWE Team Proxy Agent (HIGH PRIORITY)
 

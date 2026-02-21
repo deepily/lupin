@@ -112,7 +112,7 @@ async function apiCall( endpoint, method = 'GET', data = null, includeAuth = tru
                 if ( retryCount >= 2 ) {
                     console.error( `🛑 Max retries (${retryCount}) exceeded for ${endpoint}` );
                     clearTokens();
-                    window.location.href = '/static/html/auth/login.html';
+                    window.location.href = '/app/auth/login';
                     throw new Error( 'Session expired. Please login again.' );
                 }
 
@@ -125,7 +125,7 @@ async function apiCall( endpoint, method = 'GET', data = null, includeAuth = tru
                     // Refresh failed, redirect to login
                     console.error( '🛑 Token refresh failed' );
                     clearTokens();
-                    window.location.href = '/static/html/auth/login.html';
+                    window.location.href = '/app/auth/login';
                     throw new Error( 'Session expired. Please login again.' );
                 }
             }
@@ -289,7 +289,7 @@ async function logout() {
     }
 
     clearTokens();
-    window.location.href = '/static/html/auth/login.html';
+    window.location.href = '/app/auth/login';
 }
 
 /**
@@ -338,18 +338,18 @@ function getSafeRedirectUrl() {
     const params = new URLSearchParams( window.location.search );
     const redirect = params.get( 'redirect' );
 
-    // Validate redirect parameter
-    if ( redirect && redirect.startsWith( '/static/html/' ) ) {
+    // Validate redirect parameter — accept both /app/* and legacy /static/html/* paths
+    if ( redirect && ( redirect.startsWith( '/app' ) || redirect.startsWith( '/static/html/' ) ) ) {
         console.log( `✓ Valid redirect parameter: ${redirect}` );
         return redirect;
     }
 
     if ( redirect ) {
-        console.warn( `⚠️ Invalid redirect parameter (must start with /static/html/): ${redirect}` );
+        console.warn( `⚠️ Invalid redirect parameter (must start with /app or /static/html/): ${redirect}` );
     }
 
-    // Default to profile page
-    return '/static/html/auth/profile.html';
+    // Default to landing page
+    return '/app';
 }
 
 // ============================================================================
@@ -438,7 +438,7 @@ function hideLoading( elementId ) {
  */
 function requireAuth() {
     if ( !isAuthenticated() ) {
-        window.location.href = '/static/html/auth/login.html';
+        window.location.href = '/app/auth/login';
     }
 }
 
@@ -452,7 +452,7 @@ async function requireAdmin() {
     const admin = await isAdmin();
     if ( !admin ) {
         alert( 'Access denied. Admin privileges required.' );
-        window.location.href = '/static/html/auth/profile.html';
+        window.location.href = '/app/auth/profile';
     }
 }
 

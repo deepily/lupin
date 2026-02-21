@@ -417,7 +417,7 @@ class NotificationsUI {
             // No tokens found - redirect to login with current page as redirect target
             this.log( "No authentication tokens found - redirecting to login" );
             const currentPath = window.location.pathname;
-            window.location.href = `/static/html/auth/login.html?redirect=${currentPath}`;
+            window.location.href = `/app/auth/login?redirect=${currentPath}`;
             return;
         }
 
@@ -967,7 +967,7 @@ class NotificationsUI {
 
         // Redirect to login with current page as redirect target
         const currentPath = window.location.pathname;
-        window.location.href = `/static/html/auth/login.html?redirect=${currentPath}`;
+        window.location.href = `/app/auth/login?redirect=${currentPath}`;
     }
 
     logout() {
@@ -997,8 +997,8 @@ class NotificationsUI {
         // Update UI
         this.updateStatus( "auth-status", "Logged out", "warning" );
 
-        // Redirect to login page (no redirect param - go to profile after login)
-        window.location.href = '/static/html/auth/login.html';
+        // Redirect to login page
+        window.location.href = '/app/auth/login';
     }
 
     async reinitializeConfig() {

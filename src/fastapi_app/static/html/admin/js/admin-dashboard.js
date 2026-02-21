@@ -28,7 +28,7 @@ class AdminDashboard {
         try {
             // Check if user is authenticated
             if ( !isAuthenticated() ) {
-                window.location.href = '/static/html/auth/login.html';
+                window.location.href = '/app/auth/login';
                 return;
             }
 
@@ -38,7 +38,7 @@ class AdminDashboard {
             if ( !userData ) {
                 // Failed to get user data - redirect to login
                 clearTokens();
-                window.location.href = '/static/html/auth/login.html';
+                window.location.href = '/app/auth/login';
                 return;
             }
 
@@ -47,7 +47,7 @@ class AdminDashboard {
             if ( !isAdmin ) {
                 // Not an admin - redirect to profile with error message
                 alert( 'Access denied: Admin role required' );
-                window.location.href = '/static/html/auth/profile.html';
+                window.location.href = '/app/auth/profile';
                 return;
             }
 
@@ -57,7 +57,7 @@ class AdminDashboard {
         } catch ( error ) {
             console.error( 'Authentication check failed:', error );
             clearTokens();
-            window.location.href = '/static/html/auth/login.html';
+            window.location.href = '/app/auth/login';
         }
     }
 
@@ -81,7 +81,7 @@ class AdminDashboard {
         clearTokens();
 
         // Redirect to login page
-        window.location.href = '/static/html/auth/login.html';
+        window.location.href = '/app/auth/login';
     }
 }
 

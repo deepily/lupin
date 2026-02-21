@@ -1,5 +1,51 @@
 # Lupin Project History
 
+### 2026.02.21 - Session 247 | Central Navigation Hub for All HTML UIs
+
+#### Checkpoint | 2026-02-21 | Nav bar, clean URLs, landing page — 6 new files, 18 modified, 29 nav tests pass
+
+**Accomplishments**:
+- Implemented complete Central Navigation Hub: top nav bar on every page, clean `/app/*` URLs, landing page, dev-tools page, and automated link testing
+- **Phase 1**: Created `pages.py` router mapping 12 clean `/app/*` URLs to static HTML files via `FileResponse`; registered in `main.py` before static mount
+- **Phase 2**: Built self-contained `lupin-nav.js` (IIFE, no auth.js dependency) + `lupin-nav.css` — data-driven nav items with role-based visibility, active page highlighting, responsive hamburger, logout
+- **Phase 3**: Converted all relative CSS/JS paths to absolute in 10 HTML pages (critical for clean URL serving)
+- **Phase 4**: Injected nav CSS+JS into all 10 production pages; updated 30+ hardcoded `window.location.href` calls across 4 JS files to `/app/*` clean URLs; updated `getSafeRedirectUrl()` whitelist
+- **Phase 5**: Created `landing.html` (card dashboard with app + role-gated admin sections, quick stats from `/api/stats/`) and `dev-tools.html` (admin-only, lists 14 test pages as cards)
+- **Phase 6**: Created `test_navigation_links.py` — 29 parametrized integration tests covering all clean URLs, legacy backward-compat paths, nav assets, root health check, and nav injection smoke tests
+- Fixed: notifications.css `.section-toolbar` top offset (80→136px) for new 56px nav bar
+- Fixed: Root `/` conflict — system router already serves health check; removed redirect from pages router
+- All tests pass: 1511 unit, 29/29 navigation, 50/50 WebSocket
+
+**Files Created (Lupin)**:
+- `src/cosa/rest/routers/pages.py` — Clean URL → static file router (12 routes)
+- `src/fastapi_app/static/js/lupin-nav.js` — Shared navigation component (IIFE)
+- `src/fastapi_app/static/css/lupin-nav.css` — Navigation styles (responsive, 56px fixed)
+- `src/fastapi_app/static/html/landing.html` — Central landing page with stats + admin section
+- `src/fastapi_app/static/html/dev-tools.html` — Admin-only dev tools listing (14 test pages)
+- `src/tests/integration/test_navigation_links.py` — 29 automated link verification tests
+
+**Files Modified (Lupin)**:
+- `src/fastapi_app/main.py` — Register pages router
+- `src/fastapi_app/static/html/auth/login.html` — Nav includes + absolute paths + clean URLs
+- `src/fastapi_app/static/html/auth/register.html` — Nav includes + absolute paths + clean URLs
+- `src/fastapi_app/static/html/auth/profile.html` — Nav includes + absolute paths + clean URLs
+- `src/fastapi_app/static/html/auth/change-password.html` — Nav includes + absolute paths + clean URLs
+- `src/fastapi_app/static/html/auth/admin/users.html` — Nav includes + absolute paths + clean URLs
+- `src/fastapi_app/static/html/auth/admin/proxy-ratify.html` — Nav includes + absolute paths + clean URLs
+- `src/fastapi_app/static/html/auth/admin/proxy-dashboard.html` — Nav includes + absolute paths + clean URLs
+- `src/fastapi_app/static/html/admin/dashboard.html` — Nav includes + clean URLs
+- `src/fastapi_app/static/html/admin/snapshots.html` — Nav includes + clean URLs
+- `src/fastapi_app/static/html/notifications.html` — Nav includes
+- `src/fastapi_app/static/html/auth/js/auth.js` — Redirect whitelist + default path + clean URLs
+- `src/fastapi_app/static/js/notifications.js` — 3 redirect paths updated
+- `src/fastapi_app/static/html/admin/js/admin-dashboard.js` — 5 redirect paths updated
+- `src/fastapi_app/static/html/admin/js/admin-snapshots.js` — 4 redirect paths updated
+- `src/fastapi_app/static/css/notifications.css` — Toolbar top offset for nav bar
+
+**Plan serialized**: `~/.claude/plans/jaunty-dazzling-piglet.md` (original 6-phase plan)
+
+---
+
 ### 2026.02.21 - Session 246 | Bug Fix Mode
 
 #### Fix 1: Urgent toggle not functional + conversation UX improvements

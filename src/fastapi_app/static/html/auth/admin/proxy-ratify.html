@@ -4,17 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pending Ratification — Lupin Admin</title>
-    <link rel="stylesheet" href="../css/auth.css">
-    <link rel="stylesheet" href="css/admin.css">
-    <link rel="stylesheet" href="css/proxy-ratify.css">
+    <link rel="stylesheet" href="/static/html/auth/css/auth.css">
+    <link rel="stylesheet" href="/static/html/auth/admin/css/admin.css">
+    <link rel="stylesheet" href="/static/html/auth/admin/css/proxy-ratify.css">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
 </head>
 <body>
     <div class="admin-container">
         <!-- Breadcrumb -->
         <div class="breadcrumb">
-            <a href="/static/html/notifications.html">Home</a>
+            <a href="/app">Home</a>
             <span class="separator">></span>
-            <a href="/static/html/admin/dashboard.html">Admin</a>
+            <a href="/app/admin">Admin</a>
             <span class="separator">></span>
             <span class="current">Pending Ratification</span>
         </div>
@@ -24,7 +25,7 @@
             <h1>Decision Proxy — Pending Ratification</h1>
             <div class="admin-actions">
                 <button class="btn btn-secondary btn-small"
-                        onclick="window.location.href='/static/html/admin/dashboard.html'">
+                        onclick="window.location.href='/app/admin'">
                     ← Back to Admin
                 </button>
             </div>
@@ -196,7 +197,8 @@
     </div>
 
     <!-- Scripts -->
-    <script src="../js/auth.js"></script>
-    <script src="js/proxy-ratify.js"></script>
+    <script src="/static/js/lupin-nav.js" defer></script>
+    <script src="/static/html/auth/js/auth.js"></script>
+    <script src="/static/html/auth/admin/js/proxy-ratify.js"></script>
 </body>
 </html>
