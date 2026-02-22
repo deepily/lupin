@@ -1114,3 +1114,214 @@ class TestGetStateProxyFields:
             assert "level" in cat_stats
             assert "total_decisions" in cat_stats
             assert "success_rate" in cat_stats
+
+
+# =============================================================================
+# Phase 7: Proxy Notification Emission
+# =============================================================================
+
+class TestProxyNotificationEmission:
+    """Tests for proxy summary notification emission in _gated_confirmation."""
+
+    def _make_orchestrator_with_suggest_proxy( self ):
+        """Helper: create orchestrator with a mock proxy in suggest mode."""
+        config = SweTeamConfig( trust_mode="disabled" )
+        orch = SweTeamOrchestrator(
+            task_description = "test proxy notifications",
+            config           = config,
+            session_id       = "test-proxy-notif",
+        )
+
+        mock_proxy = MagicMock()
+        mock_proxy.trust_mode = "suggest"
+        mock_result = MagicMock()
+        mock_result.action      = "suggest"
+        mock_result.value       = "approved"
+        mock_result.confidence  = 0.85
+        mock_result.category    = "testing"
+        mock_result.trust_level = 2
+        mock_proxy.evaluate = MagicMock( return_value=mock_result )
+        mock_proxy.trust_tracker = MagicMock()
+        orch.proxy = mock_proxy
+
+        return orch, mock_result
+
+    def test_pending_ratification_emits_progress_notification( self ):
+        """Suggest action should trigger _emit_proxy_summary_notification."""
+        orch, _ = self._make_orchestrator_with_suggest_proxy()
+
+        team_io = MagicMock()
+        team_io.ask_confirmation = AsyncMock( return_value=True )
+        team_io.notify_progress = AsyncMock()
+
+        with patch.object( orch, "_emit_proxy_summary_notification" ) as mock_emit, \
+             patch.object( orch, "_persist_trust_feedback" ):
+            asyncio.run( orch._gated_confirmation(
+                question = "Run tests?",
+                role     = "lead",
+                default  = "yes",
+                timeout  = 60,
+                abstract = None,
+                team_io  = team_io,
+            ) )
+
+            mock_emit.assert_called_once()
+            call_kwargs = mock_emit.call_args[ 1 ]
+            assert call_kwargs[ "category" ] == "testing"
+            assert call_kwargs[ "action" ] == "suggest"
+
+    def test_shadow_mode_does_not_emit_notification( self ):
+        """Shadow mode (action='shadow') does NOT emit proxy notification."""
+        config = SweTeamConfig( trust_mode="disabled" )
+        orch = SweTeamOrchestrator(
+            task_description = "test shadow no emit",
+            config           = config,
+            session_id       = "test-shadow",
+        )
+
+        mock_proxy = MagicMock()
+        mock_proxy.trust_mode = "shadow"
+        mock_result = MagicMock()
+        mock_result.action      = "shadow"
+        mock_result.value       = "approved"
+        mock_result.confidence  = 0.9
+        mock_result.category    = "general"
+        mock_result.trust_level = 1
+        mock_proxy.evaluate = MagicMock( return_value=mock_result )
+        mock_proxy.trust_tracker = MagicMock()
+        orch.proxy = mock_proxy
+
+        team_io = MagicMock()
+        team_io.ask_confirmation = AsyncMock( return_value=True )
+
+        with patch.object( orch, "_emit_proxy_summary_notification" ) as mock_emit, \
+             patch.object( orch, "_persist_trust_feedback" ):
+            asyncio.run( orch._gated_confirmation(
+                question = "Proceed?",
+                role     = "lead",
+                default  = "yes",
+                timeout  = 60,
+                abstract = None,
+                team_io  = team_io,
+            ) )
+
+            mock_emit.assert_not_called()
+
+    def test_notification_includes_progress_group_id( self ):
+        """_emit_proxy_summary_notification fetches batch_id and passes it to _notify."""
+        orch, _ = self._make_orchestrator_with_suggest_proxy()
+
+        team_io = MagicMock()
+        team_io.notify_progress = AsyncMock()
+
+        mock_batch_response = MagicMock()
+        mock_batch_response.json.return_value = { "batch_id": "pr-a1b2c3d4-1" }
+
+        async def _run():
+            with patch( "requests.get", return_value=mock_batch_response ) as mock_get, \
+                 patch( "requests.post" ), \
+                 patch.object( orch, "_notify", new_callable=AsyncMock ) as mock_notify:
+                orch._proxy_pending_count = 3
+                orch._emit_proxy_summary_notification(
+                    category    = "testing",
+                    action      = "suggest",
+                    trust_level = 2,
+                    confidence  = 0.85,
+                    question    = "Run integration tests?",
+                    team_io     = team_io,
+                )
+
+                # Let ensure_future run
+                await asyncio.sleep( 0 )
+
+                mock_get.assert_called_once()
+                assert "/api/proxy/batch-id" in mock_get.call_args[ 0 ][ 0 ]
+
+                # _notify should be called via ensure_future
+                mock_notify.assert_called_once()
+                call_kwargs = mock_notify.call_args[ 1 ]
+                assert call_kwargs[ "progress_group_id" ] == "pr-a1b2c3d4-1"
+
+        asyncio.run( _run() )
+
+    def test_pending_count_increments( self ):
+        """Second suggest decision should increment _proxy_pending_count to 2."""
+        orch, _ = self._make_orchestrator_with_suggest_proxy()
+
+        team_io = MagicMock()
+        team_io.ask_confirmation = AsyncMock( return_value=True )
+
+        assert orch._proxy_pending_count == 0
+
+        with patch.object( orch, "_emit_proxy_summary_notification" ) as mock_emit, \
+             patch.object( orch, "_persist_trust_feedback" ):
+            # First decision
+            asyncio.run( orch._gated_confirmation(
+                question = "Run tests?", role="lead", default="yes",
+                timeout=60, abstract=None, team_io=team_io,
+            ) )
+            assert orch._proxy_pending_count == 1
+
+            # Second decision
+            asyncio.run( orch._gated_confirmation(
+                question = "Deploy?", role="lead", default="yes",
+                timeout=60, abstract=None, team_io=team_io,
+            ) )
+            assert orch._proxy_pending_count == 2
+            assert mock_emit.call_count == 2
+
+    def test_circuit_breaker_trip_emits_alert( self ):
+        """Circuit breaker trip callback should POST an alert notification."""
+        config = SweTeamConfig( trust_mode="disabled" )
+        orch = SweTeamOrchestrator(
+            task_description = "test CB alert",
+            config           = config,
+            session_id       = "test-cb",
+            job_id           = "swe-test1234",
+        )
+
+        with patch( "requests.post" ) as mock_post:
+            orch._on_circuit_breaker_trip( "testing", "error_rate exceeded 15%" )
+
+            mock_post.assert_called_once()
+            call_kwargs = mock_post.call_args[ 1 ] if mock_post.call_args[ 1 ] else {}
+            call_json = mock_post.call_args[ 1 ].get( "json", {} ) if mock_post.call_args[ 1 ] else mock_post.call_args[ 0 ][ 0 ] if mock_post.call_args[ 0 ] else {}
+
+            # Check via positional or keyword args
+            if "json" in ( mock_post.call_args[ 1 ] or {} ):
+                payload = mock_post.call_args[ 1 ][ "json" ]
+            else:
+                payload = mock_post.call_args.kwargs.get( "json", {} )
+
+            assert "Circuit breaker TRIPPED" in payload[ "message" ]
+            assert payload[ "notification_type" ] == "alert"
+            assert payload[ "priority" ] == "high"
+            assert "testing" in payload[ "message" ]
+
+    def test_acknowledge_increments_batch( self ):
+        """acknowledge_batch() should increment generation and return new batch ID."""
+        from cosa.rest.routers.decision_proxy import (
+            get_current_batch_id,
+            acknowledge_batch,
+            _proxy_batch_state,
+        )
+
+        # Save original state
+        original_gen = _proxy_batch_state[ "generation" ]
+        original_hex = _proxy_batch_state[ "hex" ]
+
+        try:
+            batch_before = get_current_batch_id()
+            assert batch_before == f"pr-{original_hex}-{original_gen}"
+
+            result = acknowledge_batch()
+            assert result[ "retired_batch" ] == batch_before
+            assert _proxy_batch_state[ "generation" ] == original_gen + 1
+
+            batch_after = get_current_batch_id()
+            assert batch_after == result[ "new_batch" ]
+            assert batch_after == f"pr-{original_hex}-{original_gen + 1}"
+
+        finally:
+            # Restore original state for test isolation
+            _proxy_batch_state[ "generation" ] = original_gen

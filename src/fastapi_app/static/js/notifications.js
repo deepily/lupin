@@ -2472,6 +2472,12 @@ class NotificationsUI {
                 body.timeout = timeoutVal;
             }
 
+            const trustModeSelect = document.getElementById( 'swe-trust-mode' );
+            const trustMode = trustModeSelect ? trustModeSelect.value : '';
+            if ( trustMode ) {
+                body.trust_mode = trustMode;
+            }
+
             const response = await fetch( '/api/swe-team/submit', {
                 method  : 'POST',
                 headers : {
@@ -5114,6 +5120,12 @@ class NotificationsUI {
                 headDiv.appendChild( entry.firstChild );
             }
             entry.appendChild( headDiv );
+
+            // Add proxy ratification link for proxy progress groups
+            const proxyLink = this.createProxyRatifyLink( groupId );
+            if ( proxyLink ) {
+                headDiv.appendChild( proxyLink );
+            }
         }
 
         // Insert at top (newest first)
@@ -5207,6 +5219,60 @@ class NotificationsUI {
         head.classList.remove( 'progress-group-updated' );
         void head.offsetWidth;
         head.classList.add( 'progress-group-updated' );
+    }
+
+    /**
+     * Create a proxy ratification link element for proxy progress group notifications.
+     *
+     * @param {string} groupId - The progress group ID (must start with 'pr-')
+     * @returns {HTMLAnchorElement} - The link element, or null if not a proxy group
+     */
+    createProxyRatifyLink( groupId ) {
+        if ( !groupId || !groupId.startsWith( 'pr-' ) ) return null;
+
+        const link = document.createElement( 'a' );
+        link.className = 'proxy-ratify-link';
+        link.href = '#';
+        link.textContent = 'Open Ratification →';
+        link.setAttribute( 'data-batch-id', groupId );
+
+        const self = this;
+        link.onclick = async function( e ) {
+            e.preventDefault();
+
+            // 1. Call acknowledge endpoint to retire this batch
+            try {
+                const response = await fetch( '/api/proxy/acknowledge', {
+                    method  : 'POST',
+                    headers : self.getAuthHeaders()
+                });
+                if ( !response.ok ) {
+                    console.warn( '[PROXY] Acknowledge response not OK:', response.status );
+                }
+            } catch ( err ) {
+                console.warn( '[PROXY] Acknowledge failed:', err );
+            }
+
+            // 2. Gray out this element + add checkmark
+            const entry = this.closest( '.progress-group-entry' );
+            if ( entry ) {
+                entry.classList.add( 'progress-batch-retired' );
+                const head = entry.querySelector( '.progress-group-head' );
+                if ( head ) {
+                    const check = document.createElement( 'span' );
+                    check.className = 'batch-retired-indicator';
+                    check.textContent = ' ✅';
+                    head.appendChild( check );
+                }
+                // Remove the link itself
+                this.remove();
+            }
+
+            // 3. Open (or focus) ratification page in single tab
+            window.open( '/app/proxy-ratify', 'lupin-proxy-ratify' );
+        };
+
+        return link;
     }
 
     createActivityLogEntry( notification ) {
@@ -7525,6 +7591,12 @@ class NotificationsUI {
                     <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}${expiredBadge}${abstractIndicator}</span>
                 </div>
             `;
+
+            // Add proxy ratification link for proxy progress groups
+            const proxyLink = this.createProxyRatifyLink( groupId );
+            if ( proxyLink ) {
+                messageDiv.querySelector( '.progress-group-head' ).appendChild( proxyLink );
+            }
         } else {
             messageDiv.innerHTML = `
                 <span class="message-time">${timeStr}</span>

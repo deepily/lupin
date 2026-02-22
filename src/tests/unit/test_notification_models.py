@@ -646,7 +646,7 @@ class TestProgressGroupId:
         assert req.progress_group_id is None
 
     def test_valid_progress_group_id( self ):
-        """Test that valid progress_group_id patterns are accepted."""
+        """Test that valid progress_group_id patterns are accepted (original pg- format)."""
         valid_ids = [
             "pg-a1b2c3d4",
             "pg-00000000",
@@ -657,15 +657,29 @@ class TestProgressGroupId:
             req = AsyncNotificationRequest( message="Test", progress_group_id=pg_id )
             assert req.progress_group_id == pg_id
 
+    def test_valid_proxy_batch_progress_group_id( self ):
+        """Test that proxy batch pr-{hex}-{N} format is accepted by relaxed regex."""
+        valid_ids = [
+            "pr-a1b2c3d4-1",     # Standard proxy batch
+            "pr-a1b2c3d4-01",    # Zero-padded batch
+            "pr-deadbeef-99",    # Two-digit batch
+            "pr-a1b2c3d4-99999", # Unbounded batch number (long sessions)
+            "pr-abcdef-1",       # 6-char hex is valid too
+        ]
+        for pg_id in valid_ids:
+            req = AsyncNotificationRequest( message="Test", progress_group_id=pg_id )
+            assert req.progress_group_id == pg_id
+
     def test_invalid_progress_group_id_rejected( self ):
         """Test that invalid progress_group_id patterns are rejected."""
         invalid_ids = [
             "pg-ABCDEF01",    # Uppercase hex
-            "pg-a1b2c3d",     # Too short (7 hex chars)
-            "pg-a1b2c3d4e",   # Too long (9 hex chars)
-            "a1b2c3d4",       # Missing pg- prefix
+            "a1b2c3d4",       # Missing prefix
             "PG-a1b2c3d4",    # Uppercase prefix
             "pg_a1b2c3d4",    # Underscore instead of hyphen
+            "pg-a1b2c",       # Too short (5 hex chars)
+            "pr-ABCD1234-1",  # Uppercase hex in proxy format
+            "abcd-a1b2c3d4",  # Prefix too long (4 chars)
         ]
         for pg_id in invalid_ids:
             with pytest.raises( ValidationError ):

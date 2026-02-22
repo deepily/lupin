@@ -265,8 +265,8 @@
 }
 
 .decisions-table thead {
-    background: linear-gradient( 135deg, #667eea 0%, #764ba2 100% );
-    color: white;
+    background-color: #f8f9fa;
+    color: #495057;
 }
 
 .decisions-table th {
@@ -276,6 +276,8 @@
     font-size: 14px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    color: #495057;
+    border-bottom: 2px solid #dee2e6;
 }
 
 .decisions-table tbody tr {
@@ -439,8 +441,8 @@
 
 .feedback-textarea:focus {
     outline: none;
-    border-color: #667eea;
-    box-shadow: 0 0 0 3px rgba( 102, 126, 234, 0.1 );
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba( 59, 130, 246, 0.1 );
 }
 
 /* ============================================================================

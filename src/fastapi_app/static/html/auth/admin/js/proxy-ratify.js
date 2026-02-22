@@ -680,4 +680,68 @@ window.addEventListener( "click", function( event ) {
     }
 });
 
+// ============================================================================
+// Belt: Focus-triggered refresh (Phase 7)
+// ============================================================================
+
+// Re-fetch decisions when tab regains focus (handles notification link clicks)
+window.addEventListener( "focus", () => {
+    console.log( "[PROXY-RATIFY] Tab focused — refreshing decisions" );
+    loadPending();
+});
+
+// ============================================================================
+// Suspenders: WebSocket real-time updates (Phase 7)
+// ============================================================================
+
+/**
+ * Connect WebSocket for real-time proxy_decision_new events.
+ *
+ * Ensures:
+ *     - Subscribes to proxy_decision_new event only
+ *     - Calls loadPending() on each new decision arrival
+ *     - Auto-reconnects on close with 5s delay
+ */
+function connectProxyWebSocket() {
+    const sessionId = localStorage.getItem( "session_id" ) || "proxy-ratify-" + Date.now();
+    const protocol  = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl     = `${protocol}//${window.location.host}/ws/queue/${sessionId}`;
+
+    const ws = new WebSocket( wsUrl );
+
+    ws.onopen = () => {
+        const token = localStorage.getItem( "auth_token" );
+        ws.send( JSON.stringify({
+            type              : "auth_request",
+            token             : token ? `Bearer ${token}` : "",
+            session_id        : sessionId,
+            subscribed_events : [ "proxy_decision_new" ]
+        }));
+        console.log( "[PROXY-RATIFY] WebSocket connected, subscribed to proxy_decision_new" );
+    };
+
+    ws.onmessage = ( event ) => {
+        try {
+            const data = JSON.parse( event.data );
+            if ( data.type === "proxy_decision_new" ) {
+                console.log( "[PROXY-RATIFY] New decision arrived via WebSocket:", data );
+                loadPending();
+            }
+        } catch ( err ) {
+            console.warn( "[PROXY-RATIFY] WebSocket message parse error:", err );
+        }
+    };
+
+    ws.onclose = () => {
+        console.log( "[PROXY-RATIFY] WebSocket closed — reconnecting in 5s" );
+        setTimeout( connectProxyWebSocket, 5000 );
+    };
+
+    ws.onerror = ( err ) => {
+        console.warn( "[PROXY-RATIFY] WebSocket error:", err );
+    };
+}
+
+connectProxyWebSocket();
+
 console.log( "Decision Proxy — Ratification Page Ready" );

@@ -1,5 +1,54 @@
 # Lupin Project History
 
+### 2026.02.21 - Session 248 | Phase 7: Real-Time Proxy Summary Notifications
+
+#### Checkpoint | 2026-02-21 | 10 tasks, 7 new tests, 1 E2E smoke — 1518 pass, 0 fail
+
+**Accomplishments**:
+- Relaxed `progress_group_id` regex + widened DB column for `pr-{hex}-{N}` batch IDs
+- Batch generation counter + `acknowledge`/`batch-id` REST endpoints on decision proxy router
+- Proxy summary notification emission in orchestrator (`_emit_proxy_summary_notification`)
+- Frontend proxy ratify link + batch retirement visual in notification panel
+- Focus refresh + WebSocket subscription on ratify page (belt-and-suspenders)
+- Trust mode dropdown on SWE Team card (end-to-end: HTML → router → factory → job → orchestrator)
+- Circuit breaker alert notification via `on_trip_callback`
+- 7 new unit tests (6 proxy notification + 1 batch regex), 1 E2E smoke test
+- Full regression: 1518 pass, 0 fail
+
+**Files Modified (Lupin)**:
+- `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini` — proxy batch config keys
+- `src/fastapi_app/static/html/notifications.html` — trust mode dropdown on SWE Team card
+- `src/fastapi_app/static/js/notifications.js` — proxy ratify link, batch retirement
+- `src/fastapi_app/static/css/notifications.css` — proxy notification styles
+- `src/fastapi_app/static/html/auth/admin/js/proxy-ratify.js` — focus refresh + WS subscription
+- `src/fastapi_app/static/html/auth/admin/proxy-ratify.html` — WS subscription wiring
+- `src/fastapi_app/static/html/auth/admin/css/proxy-ratify.css` — batch retirement styles
+- `src/fastapi_app/static/html/auth/admin/proxy-dashboard.html` — nav includes
+- `src/fastapi_app/static/html/auth/admin/css/proxy-dashboard.css` — mode bar styles
+- `src/fastapi_app/static/html/auth/admin/css/admin.css` — shared admin styles
+- `src/fastapi_app/static/html/auth/admin/users.html` — nav includes
+- `src/fastapi_app/static/html/auth/change-password.html` — nav includes
+- `src/fastapi_app/static/html/auth/css/auth.css` — shared auth styles
+- `src/fastapi_app/static/html/auth/login.html` — nav includes
+- `src/fastapi_app/static/html/auth/profile.html` — nav includes
+- `src/fastapi_app/static/html/auth/register.html` — nav includes
+- `src/fastapi_app/static/html/dev-tools.html` — nav includes
+- `src/fastapi_app/static/html/landing.html` — nav includes
+- `src/fastapi_app/static/html/admin/dashboard.html` — nav includes
+- `src/fastapi_app/static/html/admin/snapshots.html` — nav includes
+- `src/fastapi_app/static/html/admin/css/admin-dashboard.css` — shared admin styles
+- `src/tests/unit/test_swe_team_orchestrator.py` — 6 proxy notification tests
+- `src/tests/unit/test_notification_models.py` — 1 batch regex test
+
+**Files Created (Lupin)**:
+- `src/tests/smoke/test_proxy_notifications.py` — E2E proxy notification smoke test
+- `src/fastapi_app/static/css/lupin-base.css` — shared base CSS
+
+**CoSA files modified** (separate repo — commit separately):
+- `job.py`, `orchestrator.py`, `notification_models.py`, `agentic_job_factory.py`, `postgres_models.py`, `decision_proxy.py`, `swe_team.py`
+
+---
+
 ### 2026.02.21 - Session 247 | Central Navigation Hub for All HTML UIs
 
 #### Checkpoint | 2026-02-21 | Nav bar, clean URLs, landing page — 6 new files, 18 modified, 29 nav tests pass
