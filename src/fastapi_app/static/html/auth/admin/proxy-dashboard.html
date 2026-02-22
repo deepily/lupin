@@ -49,7 +49,13 @@
             <div class="mode-bar" id="mode-bar">
                 <div class="mode-item">
                     <span class="mode-label">Trust Mode:</span>
-                    <span class="mode-value" id="mode-trust">SHADOW</span>
+                    <select class="mode-selector" id="mode-trust-select">
+                        <option value="disabled">DISABLED</option>
+                        <option value="shadow" selected>SHADOW</option>
+                        <option value="suggest">SUGGEST</option>
+                        <option value="active">ACTIVE</option>
+                    </select>
+                    <span class="mode-status-dot" id="mode-status-dot" title="Mode status"></span>
                 </div>
                 <div class="mode-item">
                     <span class="mode-label">Domain:</span>

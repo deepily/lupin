@@ -22,8 +22,8 @@ wired, and there's no UI. This plan connects every disconnected piece.
 | 4 | Persistence Wiring — Fill the TODO | DONE | 2026-02-20 | 2026-02-20 |
 | 5 | Full INI Integration for Proxy Construction | DONE | 2026-02-20 | 2026-02-20 |
 | 6 | UI — Ratification Page + Trust Dashboard | DONE | 2026-02-20 | 2026-02-20 |
-| 7 | Real-Time Proxy Notifications | PENDING | — | — |
-| 8 | Hot-Reload of Trust Mode (optional) | PENDING | — | — |
+| 7 | Real-Time Proxy Notifications | DONE | 2026-02-21 | 2026-02-21 |
+| 8 | Hot-Reload of Trust Mode | DONE | 2026-02-21 | 2026-02-21 |
 
 **MVP Checkpoint**: After Phase 4 — API returns real data, get_state() exposes proxy.
 **UI Checkpoint**: After Phase 6 — Users can see and ratify decisions in browser.
@@ -120,18 +120,27 @@ wired, and there's no UI. This plan connects every disconnected piece.
 
 | # | Task | File(s) | Status |
 |---|------|---------|--------|
-| 7.1 | Add proxy_decision notification calls | `orchestrator.py` (CoSA) — via POST /api/notify | ☐ |
-| 7.2 | Add proxy_circuit_breaker notification calls | `orchestrator.py` (CoSA) — via POST /api/notify | ☐ |
-| 7.3 | Verify notifications appear in browser | Manual: dry_run job → check notifications | ☐ |
+| 7.0 | Relax progress_group_id regex + widen DB column | `notification_models.py`, `postgres_models.py` (CoSA) | DONE |
+| 7.1 | Batch generation counter + acknowledge/batch-id endpoints | `decision_proxy.py` router (CoSA) | DONE |
+| 7.2 | Proxy summary notification emission | `orchestrator.py` — `_emit_proxy_summary_notification()` (CoSA) | DONE |
+| 7.3 | Frontend proxy ratify link + batch retirement | `notifications.js`, `notifications.css` (Lupin) | DONE |
+| 7.4 | Focus refresh + WebSocket on ratify page | `proxy-ratify.js`, INI config (Lupin) | DONE |
+| 7.5 | Trust mode dropdown (end-to-end plumbing) | `notifications.html`, `swe_team.py`, `agentic_job_factory.py`, `job.py` | DONE |
+| 7.6 | Circuit breaker alert notification | `orchestrator.py` — `_on_circuit_breaker_trip()` (CoSA) | DONE |
+| 7.7 | Unit tests (6 proxy notification + 1 proxy batch regex) | `test_swe_team_orchestrator.py`, `test_notification_models.py` (Lupin) | DONE |
+| 7.8 | E2E smoke test | `test_proxy_notifications.py` (Lupin — NEW) | DONE |
+| 7.9 | Full regression | `pytest src/tests/unit/` — 1518 pass, 0 fail | DONE |
 
 ---
 
-## Phase 8: Hot-Reload of Trust Mode (Optional)
+## Phase 8: Hot-Reload of Trust Mode
 
 | # | Task | File(s) | Status |
 |---|------|---------|--------|
-| 8.1 | Create trust mode registry | `trust_mode_registry.py` (CoSA) | ☐ |
-| 8.2 | Add PUT /mode/{domain} endpoint | `decision_proxy.py` router (CoSA) | ☐ |
-| 8.3 | Read mode from registry | `orchestrator.py` (CoSA) | ☐ |
-| 8.4 | Add mode selector to dashboard UI | `proxy-dashboard.html` (Lupin) | ☐ |
-| 8.5 | Verify: PUT mode change → next decision uses new mode | Manual | ☐ |
+| 8.1 | Expose orchestrator reference on SweTeamJob | `job.py` (CoSA) — `self._orchestrator` | DONE |
+| 8.2 | Add PUT /api/proxy/mode endpoint | `decision_proxy.py` router (CoSA) | DONE |
+| 8.3 | Add GET /api/proxy/mode endpoint | `decision_proxy.py` router (CoSA) | DONE |
+| 8.4 | Replace mode bar with dropdown selector | `proxy-dashboard.html` (Lupin) | DONE |
+| 8.5 | Wire dropdown to REST endpoint + CSS | `proxy-dashboard.js`, `proxy-dashboard.css` (Lupin) | DONE |
+| 8.6 | Unit tests (7 hot-reload + 9 endpoint) | `test_swe_team_orchestrator.py`, `test_decision_proxy_mode.py` (Lupin) | DONE |
+| 8.7 | Full regression | `pytest src/tests/unit/` — 1534 pass, 0 fail | DONE |

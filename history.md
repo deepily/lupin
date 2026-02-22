@@ -33,11 +33,11 @@
 
 ---
 
-### 2026.02.21 - Session 248 | Phase 7: Real-Time Proxy Summary Notifications
+### 2026.02.21 - Session 248 | Phase 7 + Phase 8: Proxy Notifications + Trust Mode Hot-Reload
 
-#### Checkpoint | 2026-02-21 | 10 tasks, 7 new tests, 1 E2E smoke — 1518 pass, 0 fail
+#### Phase 7 Checkpoint | 10 tasks, 7 new tests, 1 E2E smoke — 1518 pass, 0 fail
 
-**Accomplishments**:
+**Phase 7 Accomplishments**:
 - Relaxed `progress_group_id` regex + widened DB column for `pr-{hex}-{N}` batch IDs
 - Batch generation counter + `acknowledge`/`batch-id` REST endpoints on decision proxy router
 - Proxy summary notification emission in orchestrator (`_emit_proxy_summary_notification`)
@@ -46,39 +46,30 @@
 - Trust mode dropdown on SWE Team card (end-to-end: HTML → router → factory → job → orchestrator)
 - Circuit breaker alert notification via `on_trip_callback`
 - 7 new unit tests (6 proxy notification + 1 batch regex), 1 E2E smoke test
-- Full regression: 1518 pass, 0 fail
+
+#### Phase 8: Hot-Reload of Trust Mode | 7 tasks, 16 new tests — 1534 pass, 0 fail
+
+**Phase 8 Accomplishments**:
+- Exposed `_orchestrator` reference on SweTeamJob (set during `_execute`, cleared in `finally`)
+- `PUT /api/proxy/mode` endpoint — hot-reloads running orchestrator's proxy.trust_mode, falls back to INI config update
+- `GET /api/proxy/mode` endpoint — returns INI mode, running mode, effective mode, has_running_job flag
+- Replaced read-only trust mode span with dropdown selector on Trust Dashboard
+- Dropdown wired to REST endpoint with success/queued toast + status dot indicator
+- 7 hot-reload tests + 9 mode endpoint tests = 16 new tests total
 
 **Files Modified (Lupin)**:
-- `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini` — proxy batch config keys
-- `src/fastapi_app/static/html/notifications.html` — trust mode dropdown on SWE Team card
-- `src/fastapi_app/static/js/notifications.js` — proxy ratify link, batch retirement
-- `src/fastapi_app/static/css/notifications.css` — proxy notification styles
-- `src/fastapi_app/static/html/auth/admin/js/proxy-ratify.js` — focus refresh + WS subscription
-- `src/fastapi_app/static/html/auth/admin/proxy-ratify.html` — WS subscription wiring
-- `src/fastapi_app/static/html/auth/admin/css/proxy-ratify.css` — batch retirement styles
-- `src/fastapi_app/static/html/auth/admin/proxy-dashboard.html` — nav includes
-- `src/fastapi_app/static/html/auth/admin/css/proxy-dashboard.css` — mode bar styles
-- `src/fastapi_app/static/html/auth/admin/css/admin.css` — shared admin styles
-- `src/fastapi_app/static/html/auth/admin/users.html` — nav includes
-- `src/fastapi_app/static/html/auth/change-password.html` — nav includes
-- `src/fastapi_app/static/html/auth/css/auth.css` — shared auth styles
-- `src/fastapi_app/static/html/auth/login.html` — nav includes
-- `src/fastapi_app/static/html/auth/profile.html` — nav includes
-- `src/fastapi_app/static/html/auth/register.html` — nav includes
-- `src/fastapi_app/static/html/dev-tools.html` — nav includes
-- `src/fastapi_app/static/html/landing.html` — nav includes
-- `src/fastapi_app/static/html/admin/dashboard.html` — nav includes
-- `src/fastapi_app/static/html/admin/snapshots.html` — nav includes
-- `src/fastapi_app/static/html/admin/css/admin-dashboard.css` — shared admin styles
-- `src/tests/unit/test_swe_team_orchestrator.py` — 6 proxy notification tests
-- `src/tests/unit/test_notification_models.py` — 1 batch regex test
+- `src/fastapi_app/static/html/auth/admin/proxy-dashboard.html` — mode dropdown selector
+- `src/fastapi_app/static/html/auth/admin/css/proxy-dashboard.css` — `.mode-selector` + status dot styles
+- `src/fastapi_app/static/html/auth/admin/js/proxy-dashboard.js` — renderModeBar → API fetch, onModeChange handler
+- `src/tests/unit/test_swe_team_orchestrator.py` — TestTrustModeHotReload (7 tests)
+- 4 tracking documents in `src/rnd/2026.02.14-swe-team-phase-4-decision-proxy-architecture/`
 
 **Files Created (Lupin)**:
-- `src/tests/smoke/test_proxy_notifications.py` — E2E proxy notification smoke test
-- `src/fastapi_app/static/css/lupin-base.css` — shared base CSS
+- `src/tests/unit/test_decision_proxy_mode.py` — 9 mode endpoint tests
 
 **CoSA files modified** (separate repo — commit separately):
-- `job.py`, `orchestrator.py`, `notification_models.py`, `agentic_job_factory.py`, `postgres_models.py`, `decision_proxy.py`, `swe_team.py`
+- `job.py` — `_orchestrator` attribute + cleanup in finally
+- `decision_proxy.py` router — PUT/GET /mode endpoints, TrustModeUpdateRequest, _find_running_swe_job
 
 ---
 

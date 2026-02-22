@@ -45,30 +45,56 @@ Emitted when CircuitBreaker trips or recovers.
 | `reason` | string | Human-readable explanation |
 | `error_rate` | float | Current error rate |
 
-## Implementation (Phase 7)
+## Implementation (Phase 7) — DONE
 
-**File**: `src/cosa/agents/swe_team/orchestrator.py`
+Phase 7 expanded significantly from the original 3-task plan to 10 tasks.
 
-After trust feedback recording in `_gated_confirmation()`, call notification API:
+### What Was Actually Built
 
-```python
-# After proxy evaluation
-notification_payload = {
-    "notification_type" : "proxy_decision",
-    "category"          : category,
-    "action"            : action,
-    "trust_level"       : trust_level,
-    "confidence"        : confidence,
-    "question_snippet"  : question[ :80 ],
-}
-# Use team_io notification methods or direct HTTP call to /api/notify
-```
+1. **Batch lifecycle** — In-place progress group rendering with `pr-{hex}-{N}` batch IDs.
+   - Relaxed `progress_group_id` regex in `notification_models.py` and widened DB column in `postgres_models.py`
+   - Monotonic batch counter in `decision_proxy.py` router with `acknowledge`/`batch-id` endpoints
 
-## No Changes Needed
+2. **Proxy summary notification** — `orchestrator.py` → `_emit_proxy_summary_notification()` emits
+   a summary notification after each `_gated_confirmation()` cycle with category, action, trust level,
+   confidence, and a link to the ratification page.
 
-| Component | Why No Changes |
-|-----------|----------------|
-| `notifications.js` | Existing handler renders all notification types |
-| `websocket_manager.py` | Already routes to user by email |
-| WS event types | No new event types needed |
-| Subscriptions | No custom handlers or subscription changes |
+3. **Batch acknowledge/retire cycle** — Frontend `notifications.js` renders a "View Decisions" link
+   that opens the ratify page. Batch retirement visual in notification panel on acknowledge.
+
+4. **Belt-and-suspenders on ratify page** — `proxy-ratify.js` adds focus refresh + WebSocket subscription
+   for `notification_queue_update` events, ensuring the ratify page shows latest decisions even if
+   the user navigates away and returns.
+
+5. **Per-job trust_mode override** — Trust mode dropdown on SWE Team job card in `notifications.html`.
+   End-to-end plumbing: HTML → `swe_team.py` router → `agentic_job_factory.py` → `job.py` → orchestrator config.
+
+6. **Circuit breaker alert** — `orchestrator.py` → `_on_circuit_breaker_trip()` callback emits
+   urgent notification when any category's circuit breaker trips.
+
+### Key Design Decisions
+
+- **In-place rendering** via `progress_group_id` rather than separate per-decision notifications.
+  This prevents notification panel flood during multi-decision jobs.
+- **Batch ID format**: `pr-{8hex}-{N}` where hex is stable per server lifetime and N is monotonic.
+  The `acknowledge` endpoint retires the current batch and starts a new one.
+- **No new WebSocket event types needed** — reused existing `notification_queue_update` pipeline.
+
+### Files Changed
+
+| File | Repo | What |
+|------|------|------|
+| `notification_models.py` | CoSA | Relaxed progress_group_id regex |
+| `postgres_models.py` | CoSA | Widened DB column |
+| `decision_proxy.py` router | CoSA | Batch counter + acknowledge/batch-id endpoints |
+| `orchestrator.py` | CoSA | `_emit_proxy_summary_notification`, `_on_circuit_breaker_trip` |
+| `agentic_job_factory.py` | CoSA | trust_mode parameter passthrough |
+| `job.py` | CoSA | `_trust_mode_override` attribute |
+| `swe_team.py` router | CoSA | trust_mode in submit request |
+| `notifications.html` | Lupin | Trust mode dropdown on SWE Team card |
+| `notifications.js` | Lupin | Proxy ratify link + batch retirement |
+| `notifications.css` | Lupin | Proxy notification styles |
+| `proxy-ratify.js` | Lupin | Focus refresh + WS subscription |
+| `test_swe_team_orchestrator.py` | Lupin | 6 proxy notification tests |
+| `test_notification_models.py` | Lupin | 1 batch regex test |
+| `test_proxy_notifications.py` | Lupin | 1 E2E smoke test (NEW) |

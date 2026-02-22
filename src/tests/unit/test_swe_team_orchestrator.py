@@ -1325,3 +1325,142 @@ class TestProxyNotificationEmission:
         finally:
             # Restore original state for test isolation
             _proxy_batch_state[ "generation" ] = original_gen
+
+
+# =============================================================================
+# Phase 8: Trust Mode Hot-Reload
+# =============================================================================
+
+class TestTrustModeHotReload:
+    """Tests for Phase 8: hot-reload of trust mode on running orchestrators."""
+
+    def test_orchestrator_reference_initialized_to_none( self ):
+        """SweTeamJob._orchestrator should be None after __init__."""
+        from cosa.agents.swe_team.job import SweTeamJob
+
+        job = SweTeamJob(
+            task       = "test task",
+            user_id    = "user123",
+            user_email = "test@test.com",
+            session_id = "session456",
+            dry_run    = True,
+        )
+        assert job._orchestrator is None
+
+    def test_trust_mode_attribute_is_plain_read( self ):
+        """EngineeringStrategy.gate() reads self.trust_mode on each call — not cached."""
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        from cosa.agents.decision_proxy.circuit_breaker import CircuitBreaker
+
+        tracker  = TrustTracker()
+        cb       = CircuitBreaker( trust_tracker=tracker )
+        strategy = EngineeringStrategy(
+            trust_tracker   = tracker,
+            circuit_breaker = cb,
+            trust_mode      = "shadow",
+        )
+
+        # In shadow mode, gate always returns "shadow"
+        action1 = strategy.gate( "testing", trust_level=3, confidence=0.9 )
+        assert action1 == "shadow"
+
+        # Hot-reload: change to active
+        strategy.trust_mode = "active"
+
+        # Now gate returns trust-level-based action (L3 in active → "act")
+        action2 = strategy.gate( "testing", trust_level=3, confidence=0.9 )
+        assert action2 == "act"
+
+    def test_mode_change_shadow_to_suggest( self ):
+        """Changing trust_mode from shadow to suggest changes gate behavior."""
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        from cosa.agents.decision_proxy.circuit_breaker import CircuitBreaker
+
+        tracker  = TrustTracker()
+        cb       = CircuitBreaker( trust_tracker=tracker )
+        strategy = EngineeringStrategy(
+            trust_tracker   = tracker,
+            circuit_breaker = cb,
+            trust_mode      = "shadow",
+        )
+
+        # Shadow always returns "shadow"
+        assert strategy.gate( "deployment", trust_level=2, confidence=0.8 ) == "shadow"
+
+        # Hot-reload to suggest
+        strategy.trust_mode = "suggest"
+
+        # Suggest at L2+ returns "suggest"
+        assert strategy.gate( "deployment", trust_level=2, confidence=0.8 ) == "suggest"
+
+    def test_active_mode_trust_level_gating( self ):
+        """Active mode gates by trust level: L1=shadow, L2=suggest, L3+=act."""
+        from cosa.agents.swe_team.proxy import EngineeringStrategy
+        from cosa.agents.decision_proxy.trust_tracker import TrustTracker
+        from cosa.agents.decision_proxy.circuit_breaker import CircuitBreaker
+
+        tracker  = TrustTracker()
+        cb       = CircuitBreaker( trust_tracker=tracker )
+        strategy = EngineeringStrategy(
+            trust_tracker   = tracker,
+            circuit_breaker = cb,
+            trust_mode      = "active",
+        )
+
+        assert strategy.gate( "testing", trust_level=1, confidence=0.9 ) == "shadow"
+        assert strategy.gate( "testing", trust_level=2, confidence=0.9 ) == "suggest"
+        assert strategy.gate( "testing", trust_level=3, confidence=0.9 ) == "act"
+        assert strategy.gate( "testing", trust_level=5, confidence=0.9 ) == "act"
+
+    def test_find_running_swe_job_returns_none_when_no_jobs( self ):
+        """_find_running_swe_job returns None when no SWE jobs are running."""
+        from cosa.rest.routers.decision_proxy import _find_running_swe_job
+
+        mock_queue = MagicMock()
+        mock_queue.get_all_jobs.return_value = []
+
+        result = _find_running_swe_job( mock_queue )
+        assert result is None
+
+    def test_find_running_swe_job_returns_job_with_orchestrator( self ):
+        """_find_running_swe_job returns SweTeamJob that has a live _orchestrator."""
+        from cosa.rest.routers.decision_proxy import _find_running_swe_job
+        from cosa.agents.swe_team.job import SweTeamJob
+
+        job = SweTeamJob(
+            task       = "test",
+            user_id    = "u1",
+            user_email = "t@t.com",
+            session_id = "s1",
+            dry_run    = True,
+        )
+        # Simulate _execute() setting the orchestrator
+        job._orchestrator = MagicMock()
+
+        mock_queue = MagicMock()
+        mock_queue.get_all_jobs.return_value = [ job ]
+
+        result = _find_running_swe_job( mock_queue )
+        assert result is job
+
+    def test_find_running_swe_job_skips_jobs_without_orchestrator( self ):
+        """_find_running_swe_job skips SweTeamJob with _orchestrator=None."""
+        from cosa.rest.routers.decision_proxy import _find_running_swe_job
+        from cosa.agents.swe_team.job import SweTeamJob
+
+        job = SweTeamJob(
+            task       = "test",
+            user_id    = "u1",
+            user_email = "t@t.com",
+            session_id = "s1",
+            dry_run    = True,
+        )
+        # _orchestrator is None (default)
+
+        mock_queue = MagicMock()
+        mock_queue.get_all_jobs.return_value = [ job ]
+
+        result = _find_running_swe_job( mock_queue )
+        assert result is None

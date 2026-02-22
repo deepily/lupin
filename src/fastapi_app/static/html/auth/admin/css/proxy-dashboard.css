@@ -41,6 +41,51 @@
     color: #2d3748;
 }
 
+.mode-bar .mode-selector {
+    padding: 6px 12px;
+    border: 2px solid #bee3f8;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: white;
+    color: #2d3748;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.mode-bar .mode-selector:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba( 59, 130, 246, 0.15 );
+}
+
+.mode-bar .mode-selector:hover {
+    border-color: #90cdf4;
+}
+
+.mode-status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-left: 6px;
+    transition: background-color 0.3s;
+}
+
+.mode-status-dot.status-running {
+    background: #48bb78;
+}
+
+.mode-status-dot.status-queued {
+    background: #ecc94b;
+}
+
+.mode-status-dot.status-idle {
+    background: #a0aec0;
+}
+
 /* ============================================================================
    Trust Cards Grid
    ============================================================================ */

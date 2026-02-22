@@ -17,15 +17,15 @@
 
 | Phase | Description | Status | Sessions |
 |-------|-------------|--------|----------|
-| 0 | File Restructuring + Doc Setup | IN PROGRESS | ~0.25 |
-| 1 | Orchestrator `get_state()` — Proxy Fields | PENDING | ~0.25 |
-| 2 | INI Config Wiring | PENDING | ~1 |
-| 3 | Mount REST Router | PENDING | ~0.25 |
-| 4 | Persistence Wiring — Fill the TODO | PENDING | ~1-2 |
-| 5 | Full INI Integration for Proxy Construction | PENDING | ~1 |
-| 6 | UI — Ratification Page + Trust Dashboard | PENDING | ~2-3 |
-| 7 | Real-Time Proxy Notifications | PENDING | ~0.5-1 |
-| 8 | Hot-Reload of Trust Mode (optional) | PENDING | ~1-2 |
+| 0 | File Restructuring + Doc Setup | DONE | ~0.25 |
+| 1 | Orchestrator `get_state()` — Proxy Fields | DONE | ~0.25 |
+| 2 | INI Config Wiring | DONE | ~1 |
+| 3 | Mount REST Router | DONE | ~0.25 |
+| 4 | Persistence Wiring — Fill the TODO | DONE | ~1-2 |
+| 5 | Full INI Integration for Proxy Construction | DONE | ~1 |
+| 6 | UI — Ratification Page + Trust Dashboard | DONE | ~2-3 |
+| 7 | Real-Time Proxy Notifications | DONE | ~1 |
+| 8 | Hot-Reload of Trust Mode | DONE | ~0.5 |
 
 **MVP Checkpoint**: After Phase 4 — API returns real data, `get_state()` exposes proxy.
 **UI Checkpoint**: After Phase 6 — Users can see and ratify decisions in browser.
@@ -46,14 +46,14 @@ flowchart TD
     P7 --> P8[Phase 8: Hot-Reload]
 
     style P0 fill:#90EE90
-    style P1 fill:#FFFFE0
-    style P2 fill:#FFFFE0
-    style P3 fill:#FFFFE0
-    style P4 fill:#FFFFE0
-    style P5 fill:#FFFFE0
-    style P6 fill:#FFFFE0
-    style P7 fill:#FFFFE0
-    style P8 fill:#FFFFE0
+    style P1 fill:#90EE90
+    style P2 fill:#90EE90
+    style P3 fill:#90EE90
+    style P4 fill:#90EE90
+    style P5 fill:#90EE90
+    style P6 fill:#90EE90
+    style P7 fill:#90EE90
+    style P8 fill:#90EE90
 ```
 
 ## Key References

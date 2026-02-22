@@ -145,20 +145,84 @@ async function loadRecentDecisions( category ) {
 // ============================================================================
 
 /**
- * Render the mode bar.
+ * Render the mode bar — fetch effective mode from API and set dropdown.
  */
-function renderModeBar() {
+async function renderModeBar() {
     document.getElementById( "mode-user" ).textContent = userEmail || "—";
     document.getElementById( "mode-domain" ).textContent = "swe";
 
-    // Determine mode from trust states or default
-    let mode = "SHADOW";
-    if ( trustStates.length > 0 ) {
-        const maxLevel = Math.max( ...trustStates.map( t => t.trust_level || 1 ) );
-        if ( maxLevel >= 3 ) mode = "ACTIVE";
-        else if ( maxLevel >= 2 ) mode = "SUGGEST";
+    // Fetch current mode from GET /api/proxy/mode
+    try {
+        const modeData = await apiCall( "/proxy/mode", "GET" );
+        const effective     = modeData.effective || "shadow";
+        const hasRunningJob = modeData.has_running_job || false;
+
+        // Set dropdown to effective mode
+        const select = document.getElementById( "mode-trust-select" );
+        select.value = effective;
+
+        // Update status dot
+        updateModeStatusDot( hasRunningJob );
+
+    } catch ( error ) {
+        console.warn( "Could not fetch trust mode, using default:", error );
+        // Leave dropdown at default (shadow)
+        updateModeStatusDot( false );
     }
-    document.getElementById( "mode-trust" ).textContent = mode;
+}
+
+/**
+ * Update the mode status dot indicator.
+ */
+function updateModeStatusDot( hasRunningJob ) {
+    const dot = document.getElementById( "mode-status-dot" );
+    if ( !dot ) return;
+
+    dot.className = "mode-status-dot";
+
+    if ( hasRunningJob ) {
+        dot.classList.add( "status-running" );
+        dot.title = "Running job — mode change takes effect immediately";
+    } else {
+        dot.classList.add( "status-idle" );
+        dot.title = "No running job — mode change applies to next job";
+    }
+}
+
+/**
+ * Handle trust mode dropdown change.
+ */
+async function onModeChange( event ) {
+    const newMode  = event.target.value;
+    const dot      = document.getElementById( "mode-status-dot" );
+
+    try {
+        const resp = await apiCall( "/proxy/mode", "PUT", { mode: newMode, domain: "swe" } );
+
+        if ( resp.status === "updated" ) {
+            showSuccess( "success-message", `Trust mode changed to ${newMode.toUpperCase()} (active job updated)` );
+            if ( dot ) {
+                dot.className = "mode-status-dot status-running";
+                dot.title = "Running job updated to " + newMode.toUpperCase();
+            }
+        } else {
+            showSuccess( "success-message", `Trust mode queued: ${newMode.toUpperCase()} (applies to next job)` );
+            if ( dot ) {
+                dot.className = "mode-status-dot status-queued";
+                dot.title = "Queued for next job: " + newMode.toUpperCase();
+            }
+        }
+
+        // Clear message after 4 seconds
+        setTimeout( () => {
+            const el = document.getElementById( "success-message" );
+            if ( el ) { el.style.display = "none"; el.textContent = ""; }
+        }, 4000 );
+
+    } catch ( err ) {
+        showError( "error-message", "Mode change failed: " + err.message );
+        console.error( "Mode change error:", err );
+    }
 }
 
 /**
@@ -416,5 +480,8 @@ document.getElementById( "category-selector" )?.addEventListener( "change", func
     selectedCategory = e.target.value;
     loadRecentDecisions( selectedCategory );
 });
+
+// Trust mode selector change (Phase 8: hot-reload)
+document.getElementById( "mode-trust-select" )?.addEventListener( "change", onModeChange );
 
 console.log( "Decision Proxy — Trust Dashboard Ready" );
