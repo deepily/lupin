@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-21 (Session 248)
+Last updated: 2026-02-22 (Session 250)
 
 ## v0.1.6 — HIGH PRIORITY
 
@@ -34,7 +34,7 @@ Last updated: 2026-02-21 (Session 248)
 
 ### Centralized Navigation & URL Naming Conventions
 
-- [x] **[LUPIN] Create centralized navigation and URL naming conventions** — Unified nav and URL patterns for entire suite of static HTML/plain vanilla JavaScript pages covering all user and admin tasks
+- [x] **[LUPIN] Create centralized navigation and URL naming conventions** — Unified nav and URL patterns for entire suite of static HTML/plain vanilla JavaScript pages covering all user and admin tasks - Session 247
 
 ---
 
@@ -51,7 +51,7 @@ Last updated: 2026-02-21 (Session 248)
 
 - [x] **[LUPIN] Finish implementing and testing first cut of SWE Team Proxy Agent** - Session 241: Activated proxy in shadow mode, wired trust feedback loop, 7 new tests. 1490 pass.
 - [x] **[LUPIN] Phase 7: Real-Time Proxy Summary Notifications** - Session 248: 10 tasks, 7 new tests, 1 E2E smoke. Batch lifecycle, proxy summary emission, trust mode dropdown, circuit breaker alerts. 1518 pass.
-- [ ] **[LUPIN] Phase 8: Hot-Reload Trust Mode** - REST endpoint + UI dropdown on Trust Dashboard to change trust mode for running orchestrators at runtime
+- [x] **[LUPIN] Phase 8: Hot-Reload Trust Mode** - Session 248: REST endpoint + UI dropdown on Trust Dashboard, 16 new tests, 1534 pass
 - [ ] **[LUPIN] Test SWE agent team with small jobs** - Validate SWE team end-to-end with small, scoped tasks to verify orchestration and proxy behavior
 - [ ] **[LUPIN] Commit CoSA changes for proxy activation** — 2 CoSA files modified (config.py, orchestrator.py). Must commit in CoSA context separately
 
