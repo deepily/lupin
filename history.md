@@ -1,5 +1,38 @@
 # Lupin Project History
 
+### 2026.02.21 - Session 249 | Unified Page Styling — Shared CSS Base + Purple Removal
+
+#### Checkpoint | 2026-02-21 | 1 new file, 18 modified — lupin-base.css, de-purpled admin pages, 1518 unit tests pass
+
+**Accomplishments**:
+- Created `lupin-base.css` shared CSS foundation: reset, body defaults (`#f8f9fa`), blue buttons (`#3b82f6`), messages, spinner, utilities (8px scale)
+- Scoped `auth.css` body gradient behind `body.auth-page` class — stops purple from leaking to app pages
+- Removed duplicated CSS (buttons, messages, spinner, utilities) from `auth.css`, `admin.css`, `admin-dashboard.css`
+- De-purpled admin pages: `.admin-header` → clean text + border, table `thead` → neutral gray (`#f8f9fa`), focus rings → blue (`#3b82f6`)
+- Updated all 12 HTML templates: `lupin-base.css` as first stylesheet, `class="auth-page"` on login/register/change-password
+- Fixed `.proxy-ratify-link` accent from purple to blue in `notifications.css`
+- Profile page: lighter shadow (`0.1` opacity), centered via `margin: 20px auto`
+- Full regression: 1518 unit tests pass, 0 fail
+
+**Pre-existing integration test issues documented** (unrelated to CSS changes):
+- 28 errors: "Email already registered" — stale test database, teardown not cleaning up prior registrations
+- 6 errors: Missing pytest fixtures (`query`, `agent`) in `test_deep_research_orchestrator.py`
+- 9 failures: bcrypt 72-byte password limit, `SessionSummary` attribute errors, registration conflicts
+
+**Files Created (Lupin)**:
+- `src/fastapi_app/static/css/lupin-base.css` — shared CSS foundation (all pages)
+
+**Files Modified (Lupin)**:
+- `src/fastapi_app/static/html/auth/css/auth.css` — scoped body, removed duplicates, fixed profile + link colors
+- `src/fastapi_app/static/html/auth/admin/css/admin.css` — de-purpled header/table, blue focus rings, removed duplicates
+- `src/fastapi_app/static/html/auth/admin/css/proxy-dashboard.css` — de-purpled thead, blue focus
+- `src/fastapi_app/static/html/auth/admin/css/proxy-ratify.css` — de-purpled thead, blue focus
+- `src/fastapi_app/static/html/admin/css/admin-dashboard.css` — removed duplicate buttons + font-family
+- `src/fastapi_app/static/css/notifications.css` — proxy-ratify-link accent purple → blue
+- 12 HTML templates: login, register, change-password, profile, users, proxy-ratify, proxy-dashboard, dev-tools, landing, dashboard, snapshots, notifications
+
+---
+
 ### 2026.02.21 - Session 248 | Phase 7: Real-Time Proxy Summary Notifications
 
 #### Checkpoint | 2026-02-21 | 10 tasks, 7 new tests, 1 E2E smoke — 1518 pass, 0 fail
