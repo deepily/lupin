@@ -75,7 +75,7 @@
 #### Checkpoint | 2026-02-23 | 4 files (1 doc, 2 test files, 1 updated), 44 offline UI tests pass
 
 **Accomplishments**:
-- Created comprehensive frontend architecture reference doc (`src/docs/frontend-architecture.md`)
+- Created comprehensive frontend architecture reference doc (`src/docs/lupin-mpa-frontend-architecture.md`)
 - Created 44 offline UI smoke tests for proxy ratification and trust dashboard pages
 - Created 15 live integration tests for proxy UI page content verification
 - Updated Phase 6 testing validation doc from "0 tests" to "+59 UI tests"
@@ -96,7 +96,7 @@
 - Page titles, CSS/JS inclusion, admin headers, asset accessibility (requires server on 7999)
 
 **Files Created**:
-- `src/docs/frontend-architecture.md` — Comprehensive frontend reference
+- `src/docs/lupin-mpa-frontend-architecture.md` — Comprehensive frontend reference
 - `src/tests/smoke/test_proxy_ui_offline_smoke.py` — 44 offline tests (Tiers A+B+C)
 - `src/tests/integration/test_proxy_ui_content.py` — 15 live tests (Tier D)
 
