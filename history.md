@@ -1,5 +1,29 @@
 # Lupin Project History
 
+### 2026.02.23 - Session 252 | Playwright E2E Testing — Planning Documents
+
+#### Checkpoint | 2026-02-23 | 7 new files (5 planning docs, 1 serialized plan, 1 README update)
+
+**Accomplishments**:
+- Created comprehensive planning documents for Playwright E2E browser testing (deferred to v0.1.6)
+- Inventoried 189 interactive elements across 12 UI pages + nav component for data-testid rollout
+- Designed 28 test journey specs covering auth, admin, notifications, WebSocket, and visual regression
+- Documented 9 architecture decisions (test runner, auth fixtures, naming conventions, isolation, etc.)
+
+**Planning Documents Created** (`src/rnd/2026.02.23-automating-ui-testing/`):
+- `00-index.md` — Navigation hub with test pyramid and quick-start
+- `01-implementation-plan.md` — 8-phase tracking with ~78 checkboxed tasks and Gantt chart
+- `02-architecture-decisions.md` — 9 ADRs with rationale and code examples
+- `03-data-testid-inventory.md` — 189 elements mapped to proposed data-testid attributes
+- `04-test-journey-specs.md` — 28 journeys, ~140-170 estimated tests, Mermaid flow diagrams
+
+**Other Files**:
+- `src/rnd/2026.02.23-playwright-e2e-testing-plan.md` — Serialized plan (summary + links)
+- `src/rnd/README.md` — Added entry for new planning docs
+- `TODO.md` — Marked research complete, added implementation item with link to planning docs
+
+---
+
 ### 2026.02.23 - Session 253 | Profile Page Button Relocation
 
 #### Fix 1: Move Change Password to header, remove redundant Go to Notifications
@@ -1269,7 +1293,7 @@
 - Created `src/docs/notification-api.md` — comprehensive one-stop reference for the entire notification system (4,033 lines, 14 sections)
 - Sections cover: Overview & Architecture, Historical Evolution (3-phase timeline), Quick-Start Examples (6 recipes), Authentication (dual auth), complete REST API Reference (all 17 endpoints with curl examples), Data Models & Enums, Notification Lifecycle state machine, Sender Identity & Multi-Project Routing, Sending Notifications (4-tier client stack), Receiving Notifications, Voice I/O Integration, Notification Proxy Agent (3-tier strategy chain), Configuration Reference, Testing Guide
 - Rendered 5 Mermaid diagrams to PNG: system architecture, historical evolution timeline, notification lifecycle state machine, client tier stack, proxy strategy chain sequence diagram
-- Added deprecation banner to `src/rnd/sse-notifications/00-index.md` pointing to new doc
+- Added deprecation banner to `src/rnd/2025.10.15-sse-notifications/00-index.md` pointing to new doc
 - Added NOTIFICATION SYSTEM section to `CLAUDE.md` with doc links
 - Added cross-reference in `src/docs/websocket-events.md` notification events section
 
@@ -1284,7 +1308,7 @@
 **Files Modified**:
 - `CLAUDE.md` (+5 lines — NOTIFICATION SYSTEM section)
 - `src/docs/websocket-events.md` (+2 lines — cross-reference)
-- `src/rnd/sse-notifications/00-index.md` (+6 lines — deprecation banner)
+- `src/rnd/2025.10.15-sse-notifications/00-index.md` (+6 lines — deprecation banner)
 
 **Commit**: a17e753
 

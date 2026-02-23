@@ -4,6 +4,10 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.23 - Playwright E2E Testing: Planning & Design Documents
+- **Planning Hub**: [2026.02.23-automating-ui-testing/00-index.md](2026.02.23-automating-ui-testing/00-index.md) - **📋 PLANNED (v0.1.6)** - Comprehensive planning documents for Playwright Python E2E browser testing. 8-phase implementation plan (~78 tasks, ~5 weeks), 9 architecture decisions, complete data-testid inventory (189 elements across 12 pages + nav), 28 test journey specs covering auth, admin, notifications, WebSocket, and visual regression. Foundation research recommends Playwright Python + pytest-playwright for FastAPI + vanilla HTML/JS stack. Round 2 adds Claude Code + Playwright MCP for AI-augmented test generation and self-healing selectors. Serialized plan: [2026.02.23-playwright-e2e-testing-plan.md](2026.02.23-playwright-e2e-testing-plan.md).
+- **Research Foundation**: [2026.02.23-automating-ui-testing/2026.02.23-automating-ui-testing-research.md](2026.02.23-automating-ui-testing/2026.02.23-automating-ui-testing-research.md) - **RESEARCH COMPLETE** - Tool evaluation: Playwright vs Selenium vs Cypress vs browser-use. Community consensus, framework comparison matrix, AI augmentation landscape.
+
 ### 2026.02.19 - Approach C: Hybrid Fast Lane + Bounded Agentic Pool for CJ Flow
 - **Implementation Plan**: [2026.02.19-approach-c-hybrid-queue-architecture.md](2026.02.19-approach-c-hybrid-queue-architecture.md) - **🔄 IN PROGRESS** - Hybrid architecture for CJ Flow concurrent job processing. Consumer thread becomes a dispatcher: sync agents (MathAgent, CalendarAgent, etc.) process inline via fast lane, while agentic jobs (DeepResearch, Podcast, ClaudeCode) submit to a bounded `ThreadPoolExecutor` (configurable N workers). Eliminates head-of-line blocking where 10-minute DeepResearchJobs block 2-second MathAgent queries. Phase 1: RLock on FifoQueue for thread safety. Phase 2: Pool + dispatcher refactor in RunningFifoQueue with `delete_by_id_hash()` replacing `pop()` for concurrent removal. Phase 3: API monitoring endpoint + E2E verification. No protocol changes, no agentic job internal changes. Serialized from plan `sprightly-juggling-origami.md`.
 
@@ -77,11 +81,11 @@ This directory contains research and development documents for the Lupin project
 - **Optimization Plan**: [2026.02.07-peft-trainer-optimization-plan-part-2.md](2026.02.07-peft-trainer-optimization-plan-part-2.md) - **🔄 IN PROGRESS** - Continuation of PEFT training optimization. Phase 2 achieved 99.0% pre-quant / 95.6% post-quant exact match. Three workstreams: Part A (Training Results Dashboard — consolidated comparison of pre/post-training/post-quantization stages), Part B (Explicit Agent Routing Data — "Switch to math mode" phrases for all agents + new automatic routing mode command), Part C (Strengthen Quantization-Degraded Commands — supplement podcast generator, math, todo list, none with stronger anchors). Sample size increase 1200 → 1500 samples/command. Cross-references [Part 1](2026.02.05-peft-trainer-optimization-plan.md).
 
 ### 2026.02.06 - DataFrame CRUD Storage Layer (Phase 1)
-- **Implementation Directory**: [headless-cc-for-dataframe-crud/](headless-cc-for-dataframe-crud/) - **🔄 PHASE 1 IN PROGRESS** - Per-user parquet-backed DataFrame CRUD storage layer. Layer 1 of 3-layer architecture (Storage → Intent Extraction → Dispatcher). Contains layer docs, implementation tracker, and cross-phase progress. Code at `src/cosa/crud_for_dataframes/`.
-  - [layer-1.md](headless-cc-for-dataframe-crud/layer-1.md) - Storage + schemas + CRUD + XML models
-  - [layer-2.md](headless-cc-for-dataframe-crud/layer-2.md) - Phi-4 14B intent extraction (stub)
-  - [layer-3.md](headless-cc-for-dataframe-crud/layer-3.md) - Dispatcher + caching + voice I/O (stub)
-  - [implementation-tracker.md](headless-cc-for-dataframe-crud/implementation-tracker.md) - Cross-phase progress
+- **Implementation Directory**: [2026.02.04-headless-cc-for-dataframe-crud/](2026.02.04-headless-cc-for-dataframe-crud/) - **🔄 PHASE 1 IN PROGRESS** - Per-user parquet-backed DataFrame CRUD storage layer. Layer 1 of 3-layer architecture (Storage → Intent Extraction → Dispatcher). Contains layer docs, implementation tracker, and cross-phase progress. Code at `src/cosa/crud_for_dataframes/`.
+  - [layer-1.md](2026.02.04-headless-cc-for-dataframe-crud/layer-1.md) - Storage + schemas + CRUD + XML models
+  - [layer-2.md](2026.02.04-headless-cc-for-dataframe-crud/layer-2.md) - Phi-4 14B intent extraction (stub)
+  - [layer-3.md](2026.02.04-headless-cc-for-dataframe-crud/layer-3.md) - Dispatcher + caching + voice I/O (stub)
+  - [implementation-tracker.md](2026.02.04-headless-cc-for-dataframe-crud/implementation-tracker.md) - Cross-phase progress
 
 ### 2026.02.05 - Agentic Voice Workflow Skill Expansion Plan
 - **Planning Document**: [2026.02.05-agentic-voice-workflow-expansion-plan.md](2026.02.05-agentic-voice-workflow-expansion-plan.md) - **📋 READY TO IMPLEMENT** - Plan to expand the `lupin-new-claude-agent-sdk-voice-workflow` skill from ~1,100 lines (BUILD only) to ~2,500 lines covering CONCEPT → BUILD → TEST lifecycle. Gap analysis reveals current workflow covers only ~30% of real agent complexity. Key additions: Part I CONCEPT (architecture overview, decision criteria), Part II BUILD phases 5-10 (LLM client integration, cost tracking, rate limiting, external service integration, advanced orchestration, async/callback architecture), Part III TEST phases 11-16 (inline smoke tests, dry-run mode, API smoke tests, unit tests, integration tests, manual verification checklist). Full templates for all new phases. Reference agents: Deep Research (~4,000 lines), Podcast Generator (~2,500 lines).
@@ -156,8 +160,8 @@ This directory contains research and development documents for the Lupin project
 - **XML Pipeline Debugging**: [2025.11.20-math-agent-xml-schema-mismatch.md](2025.11.20-math-agent-xml-schema-mismatch.md) - **🔍 INVESTIGATION IN PROGRESS** - Comprehensive analysis of pydantic_ai integration revealing two-stage XML pipeline schema mismatch. Math agent uses CodeBrainstormResponse (7 required fields) for code generation, but formatter's simple RephraseResponse (`<rephrased-answer>`) is being validated against wrong schema. Includes complete pipeline flow analysis, 4 hypotheses, investigation checklist, and debugging roadmap. Follows successful pydantic_ai 0.6.2 API migration (ModelSettings, `.output`). Ready for next session's debugging.
 
 ### 2025.10.17 - SSE Phase 2 Design Session
-- **Notification System**: [sse-notifications/05-phase2-design-decisions.md](sse-notifications/05-phase2-design-decisions.md) - **🚧 DESIGN IN PROGRESS** - Interactive design session for Phase 2 SSE notification system (response-required notifications). Completed: Database schema (persistent storage), response types (yes/no with LLM interpretation, open-ended), timeout behavior (multi-modal countdown). Pending: SSE architecture, return value propagation, UI/UX, MVP scoping. Resume point: Area 3 Q3.2 (Timeout handling). Session 1 of design Q&A complete (3/9 areas).
-- **Design Questions**: [sse-notifications/98-notification-design-draft.md](sse-notifications/98-notification-design-draft.md) - Original design questions document (answers being captured in 05-phase2-design-decisions.md)
+- **Notification System**: [2025.10.15-sse-notifications/05-phase2-design-decisions.md](2025.10.15-sse-notifications/05-phase2-design-decisions.md) - **🚧 DESIGN IN PROGRESS** - Interactive design session for Phase 2 SSE notification system (response-required notifications). Completed: Database schema (persistent storage), response types (yes/no with LLM interpretation, open-ended), timeout behavior (multi-modal countdown). Pending: SSE architecture, return value propagation, UI/UX, MVP scoping. Resume point: Area 3 Q3.2 (Timeout handling). Session 1 of design Q&A complete (3/9 areas).
+- **Design Questions**: [2025.10.15-sse-notifications/98-notification-design-draft.md](2025.10.15-sse-notifications/98-notification-design-draft.md) - Original design questions document (answers being captured in 05-phase2-design-decisions.md)
 
 ### 2025.10.16 - JWT Token Proactive Refresh
 - **Authentication Enhancement**: [2025.10.16-jwt-token-proactive-refresh.md](2025.10.16-jwt-token-proactive-refresh.md) - **✅ COMPLETE** - Hybrid proactive token refresh system eliminating 401 errors during idle periods. Implements dual-mechanism refresh (periodic monitor + heartbeat-triggered), server-driven configuration with explicit unit naming, comprehensive testing strategy (17/17 tests passing). Solves high-priority notification playback after >1 hour inactivity. Production validated!
@@ -173,11 +177,11 @@ This directory contains research and development documents for the Lupin project
 
 ### 2025.09.27 - Three-Level Question Representation Architecture COMPLETE
 - **Architecture Implementation**: [2025.09.27-three-level-question-representation-architecture.md](2025.09.27-three-level-question-representation-architecture.md) - **✅ COMPLETE** - Comprehensive implementation fixing critical search failures with hierarchical Verbatim → Normalized → Gist architecture
-- **Session-End Automation**: [/src/rnd/prompts/lupin-session-end.md](prompts/lupin-session-end.md) - Automated end-of-session ritual extracted from configuration files
+- **Session-End Automation**: [/src/rnd/2025.09.27-prompts/lupin-session-end.md](2025.09.27-prompts/lupin-session-end.md) - Automated end-of-session ritual extracted from configuration files
 
 ### 2025.09.23 - Smoke Test Prompt Infrastructure
-- **Smoke Test Prompts**: [/src/rnd/prompts/](prompts/) - Comprehensive baseline and remediation testing infrastructure with Claude Code integration
-- **Universal Templates**: [/src/rnd/prompts/templates/](prompts/templates/) - Reusable smoke test templates for any project
+- **Smoke Test Prompts**: [/src/rnd/2025.09.27-prompts/](2025.09.27-prompts/) - Comprehensive baseline and remediation testing infrastructure with Claude Code integration
+- **Universal Templates**: [/src/rnd/2025.09.27-prompts/templates/](2025.09.27-prompts/templates/) - Reusable smoke test templates for any project
 - **Claude Code Commands**: [/src/cosa/.claude/commands/](../cosa/.claude/commands/) - Intelligent slash commands for automated testing workflows
 
 ## Project Architecture Overview

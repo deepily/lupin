@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-23 (Session 251)
+Last updated: 2026-02-23 (Session 252)
 
 ## v0.1.6 — HIGH PRIORITY
 
@@ -18,13 +18,14 @@ Last updated: 2026-02-23 (Session 251)
 - [ ] **[LUPIN] Phase 3.2: Integration verification** — Manual E2E test with concurrent agentic + sync jobs
 - **Tracking doc**: `src/rnd/2026.02.19-approach-c-hybrid-queue-architecture.md`
 
-### Automated E2E Testing Research
+### Playwright E2E Browser Testing (Session 252)
 
-- [ ] **[LUPIN] Research AI/automation for end-to-end testing of notifications, API, and UI** - Eliminate manual clicking, typing, and visual verification from the testing workflow
-  - **Scope**: Notification delivery verification, API endpoint validation, UI state assertions, full workflow completion checks
-  - **Goal**: Find tools/frameworks that can autonomously exercise the full stack (submit job → verify queue → check notifications → confirm UI renders correctly) without human interaction
-  - **Candidates to evaluate**: Playwright/Puppeteer with AI assertions, browser-use agents, visual regression tools (Percy, Applitools), Claude Computer Use for UI verification, custom harness extending existing proxy auto-answer infrastructure
-  - **Deliverable**: Comparison matrix of approaches with recommendation + proof-of-concept for top candidate
+- [x] **[LUPIN] Research AI/automation for end-to-end testing** — Session 252: Research complete. Playwright Python + pytest-playwright recommended for FastAPI + vanilla HTML/JS stack
+- [ ] **[LUPIN] Implement Playwright E2E testing** — 8-phase plan (~78 tasks, ~5 weeks), 189 data-testid elements, 28 test journeys, 9 architecture decisions
+  - **Planning docs**: [`src/rnd/2026.02.23-automating-ui-testing/`](src/rnd/2026.02.23-automating-ui-testing/00-index.md)
+  - **Serialized plan**: `src/rnd/2026.02.23-playwright-e2e-testing-plan.md`
+  - **Phases**: Foundation → data-testid rollout → Auth tests → Page smoke → Admin tests → Notifications/Q&A → WebSocket → Visual regression + CI
+  - **Round 2**: Claude Code + Playwright MCP for AI-augmented test generation + self-healing selectors
 
 ### CJ Flow Persistence
 
@@ -57,7 +58,7 @@ Last updated: 2026-02-23 (Session 251)
 
 ### DataFrame CRUD with Voice I/O (Session 132-136)
 
-- [ ] **[LUPIN] Interactive E2E Testing of CRUD Agents** (HIGH PRIORITY) - Execute the 29-scenario testing protocol at `src/rnd/headless-cc-for-dataframe-crud/testing-protocol.md`.
+- [ ] **[LUPIN] Interactive E2E Testing of CRUD Agents** (HIGH PRIORITY) - Execute the 29-scenario testing protocol at `src/rnd/2026.02.04-headless-cc-for-dataframe-crud/testing-protocol.md`.
   - [x] Part 1: Mock pipeline tests (17/17 passed — routing, pipeline, cache, confirmation, prompt construction)
   - [x] Bug fix: CRUD agent completion — emit_job_state_transition, answer guard, done queue push (3 new tests, 532/532 pass)
   - [x] Bug fix: TTS focus mode stuck — staleness check in restoreTTSQueueState + exit in moveToRegularNotifications (Session 164)
