@@ -62,6 +62,12 @@
 - **Test**: Unit 1534 PASS, Nav link 29 PASS
 - **Commit**: dd62985
 
+#### Checkpoint 2: Alembic migration — proxy_decisions + trust_states tables
+- **Source**: Phase 6 testing blocker — admin proxy pages returning 500 (missing tables)
+- **File created**: `src/migrations/versions/c7d8e9f0a1b2_add_proxy_decision_tables.py`
+- **Changes**: Alembic migration creating `proxy_decisions` table (11 columns, 6 indexes) and `trust_states` table (6 columns, 3 indexes); migration ran successfully via `alembic upgrade head`
+- **Test**: Unit 1534 PASS
+
 ---
 
 ### 2026.02.23 - Session 252 | Frontend Architecture Docs + UI Smoke Tests
