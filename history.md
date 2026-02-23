@@ -1,5 +1,40 @@
 # Lupin Project History
 
+### 2026.02.23 - Session 252 | Frontend Architecture Docs + UI Smoke Tests
+
+#### Checkpoint | 2026-02-23 | 4 files (1 doc, 2 test files, 1 updated), 44 offline UI tests pass
+
+**Accomplishments**:
+- Created comprehensive frontend architecture reference doc (`src/docs/frontend-architecture.md`)
+- Created 44 offline UI smoke tests for proxy ratification and trust dashboard pages
+- Created 15 live integration tests for proxy UI page content verification
+- Updated Phase 6 testing validation doc from "0 tests" to "+59 UI tests"
+
+**Frontend Architecture Doc** covers:
+- Directory structure, URL routing (12 `/app/*` routes via `pages.py`)
+- 4-layer CSS cascade: `lupin-base.css` → domain → page → `lupin-nav.css`
+- `auth.js` (16 functions) with token flow sequence diagram
+- `lupin-nav.js` IIFE architecture with data-driven NAV_ITEMS
+- Page lifecycle, common UI patterns, "Adding a New Page" checklist
+
+**Offline UI Smoke Tests** (`test_proxy_ui_offline_smoke.py` — 44 tests):
+- Tier A: HTML structure — CSS cascade, scripts, breadcrumbs, IDs, filters, table headers, modals (24 tests)
+- Tier B: JS analysis — requireAuth, API endpoints, function declarations, XSS protection (13 tests)
+- Tier C: CSS classes — badges, summary cards, mode bar, trust cards (7 tests)
+
+**Live Integration Tests** (`test_proxy_ui_content.py` — 15 tests):
+- Page titles, CSS/JS inclusion, admin headers, asset accessibility (requires server on 7999)
+
+**Files Created**:
+- `src/docs/frontend-architecture.md` — Comprehensive frontend reference
+- `src/tests/smoke/test_proxy_ui_offline_smoke.py` — 44 offline tests (Tiers A+B+C)
+- `src/tests/integration/test_proxy_ui_content.py` — 15 live tests (Tier D)
+
+**Files Modified**:
+- `src/rnd/.../06-testing-validation.md` — Phase 6 backfill: +59 UI tests
+
+---
+
 ### 2026.02.23 - Session 251 | SWE Team UI Bug Fixes + Dry-Run Mock Proxy Decisions
 
 #### Checkpoint | 2026-02-23 | 4 files modified (3 Lupin JS, 1 CoSA Python), 1534 unit tests pass
