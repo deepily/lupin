@@ -148,6 +148,12 @@ body.auth-page {
     font-weight: 600;
 }
 
+.profile-header-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
 .profile-info {
     display: flex;
     flex-direction: column;

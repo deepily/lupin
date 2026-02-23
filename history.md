@@ -1,5 +1,16 @@
 # Lupin Project History
 
+### 2026.02.23 - Session 253 | Profile Page Button Relocation
+
+#### Fix 1: Move Change Password to header, remove redundant Go to Notifications
+- **Source**: ad-hoc (UX improvement)
+- **Files**: `src/fastapi_app/static/html/auth/profile.html`, `src/fastapi_app/static/html/auth/css/auth.css`
+- **Changes**: Moved "Change Password" button into profile header (left of Logout) inside new `.profile-header-actions` div; removed bottom `.button-group` with redundant "Change Password" and "Go to Notifications" (already in top nav); added `.profile-header-actions` CSS rule
+- **Test**: Unit 1534 PASS, Nav link 29 PASS
+- **Commit**: dd62985
+
+---
+
 ### 2026.02.23 - Session 252 | Frontend Architecture Docs + UI Smoke Tests
 
 #### Checkpoint | 2026-02-23 | 4 files (1 doc, 2 test files, 1 updated), 44 offline UI tests pass

@@ -12,7 +12,12 @@
     <div class="profile-container">
         <div class="profile-header">
             <h1>Your Profile</h1>
-            <button class="btn btn-secondary" onclick="logout()">Logout</button>
+            <div class="profile-header-actions">
+                <button class="btn btn-primary" onclick="window.location.href='/app/auth/change-password'">
+                    Change Password
+                </button>
+                <button class="btn btn-secondary" onclick="logout()">Logout</button>
+            </div>
         </div>
 
         <div class="error-message" id="error-message"></div>
@@ -64,14 +69,6 @@
                 </div>
             </div>
 
-            <div class="button-group mt-3">
-                <button class="btn btn-primary" onclick="window.location.href='/app/auth/change-password'">
-                    Change Password
-                </button>
-                <button class="btn btn-secondary" onclick="window.location.href='/app/notifications'">
-                    Go to Notifications
-                </button>
-            </div>
         </div>
     </div>
 
