@@ -53,7 +53,7 @@ async function loadPending() {
         showLoading( "loading" );
         document.getElementById( "main-content" ).style.display = "none";
 
-        const response = await apiCall( `/proxy/pending/${encodeURIComponent( userEmail )}`, "GET" );
+        const response = await apiCall( `/api/proxy/pending/${encodeURIComponent( userEmail )}`, "GET" );
 
         pendingDecisions = response.decisions || [];
         const summary    = response.summary || {};
@@ -91,7 +91,7 @@ async function ratifyDecision( id, approved, feedback ) {
         params.append( "feedback", feedback );
     }
 
-    return await apiCall( `/proxy/ratify/${id}?${params.toString()}`, "POST" );
+    return await apiCall( `/api/proxy/ratify/${id}?${params.toString()}`, "POST" );
 }
 
 // ============================================================================
@@ -703,14 +703,14 @@ window.addEventListener( "focus", () => {
  *     - Auto-reconnects on close with 5s delay
  */
 function connectProxyWebSocket() {
-    const sessionId = localStorage.getItem( "session_id" ) || "proxy-ratify-" + Date.now();
+    const sessionId = "proxy ratify";
     const protocol  = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl     = `${protocol}//${window.location.host}/ws/queue/${sessionId}`;
 
     const ws = new WebSocket( wsUrl );
 
     ws.onopen = () => {
-        const token = localStorage.getItem( "auth_token" );
+        const token = getAccessToken();
         ws.send( JSON.stringify({
             type              : "auth_request",
             token             : token ? `Bearer ${token}` : "",

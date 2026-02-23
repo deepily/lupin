@@ -67,7 +67,7 @@ async function loadTrustStates() {
         document.getElementById( "main-content" ).style.display = "none";
 
         const response = await apiCall(
-            `/proxy/trust/${encodeURIComponent( userEmail )}?domain=swe`, "GET"
+            `/api/proxy/trust/${encodeURIComponent( userEmail )}?domain=swe`, "GET"
         );
 
         trustStates = response.trust_states || [];
@@ -104,13 +104,13 @@ async function loadRecentDecisions( category ) {
         if ( category ) {
             // Single category
             const response = await apiCall(
-                `/proxy/decisions/swe/${encodeURIComponent( category )}?limit=${pageLimit}`, "GET"
+                `/api/proxy/decisions/swe/${encodeURIComponent( category )}?limit=${pageLimit}`, "GET"
             );
             decisions = response.decisions || [];
         } else {
             // All categories — fetch each and merge
             const allPromises = SWE_CATEGORIES.map( cat =>
-                apiCall( `/proxy/decisions/swe/${cat.key}?limit=10`, "GET" )
+                apiCall( `/api/proxy/decisions/swe/${cat.key}?limit=10`, "GET" )
                     .then( r => r.decisions || [] )
                     .catch( () => [] )
             );
@@ -153,7 +153,7 @@ async function renderModeBar() {
 
     // Fetch current mode from GET /api/proxy/mode
     try {
-        const modeData = await apiCall( "/proxy/mode", "GET" );
+        const modeData = await apiCall( "/api/proxy/mode", "GET" );
         const effective     = modeData.effective || "shadow";
         const hasRunningJob = modeData.has_running_job || false;
 
@@ -197,7 +197,7 @@ async function onModeChange( event ) {
     const dot      = document.getElementById( "mode-status-dot" );
 
     try {
-        const resp = await apiCall( "/proxy/mode", "PUT", { mode: newMode, domain: "swe" } );
+        const resp = await apiCall( "/api/proxy/mode", "PUT", { mode: newMode, domain: "swe" } );
 
         if ( resp.status === "updated" ) {
             showSuccess( "success-message", `Trust mode changed to ${newMode.toUpperCase()} (active job updated)` );

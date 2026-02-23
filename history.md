@@ -1,5 +1,60 @@
 # Lupin Project History
 
+### 2026.02.23 - Session 251 | SWE Team UI Bug Fixes + Dry-Run Mock Proxy Decisions
+
+#### Checkpoint | 2026-02-23 | 4 files modified (3 Lupin JS, 1 CoSA Python), 1534 unit tests pass
+
+**Accomplishments**:
+- Fixed 5 bugs in proxy admin pages discovered during first hands-on SWE Team UI testing
+- Added mock proxy decision generation to dry-run execution path for UI testing
+- All changes verified with 1534 unit tests passing, 0 failures
+
+**Bug Fixes (Part 1)**:
+- **Bug 1.1-1.2**: Added missing `/api` prefix to 7 API calls across `proxy-ratify.js` (2) and `proxy-dashboard.js` (5) — all calls were 404ing
+- **Bug 1.3**: Fixed auth token key from `localStorage.getItem("auth_token")` to `getAccessToken()` in WebSocket auth
+- **Bug 1.4**: Fixed invalid WebSocket session ID fallback (was `"proxy-ratify-" + Date.now()`, now `"proxy ratify"` adjective-noun format)
+- **Bug 1.5**: Fixed ratification link URL from `/app/proxy-ratify` to `/app/admin/proxy-ratify` in notification proxy summary
+
+**Dry-Run Mock Proxy Decisions (Part 2)**:
+- Added 3 mock `ProxyDecision` records at end of `_execute_dry_run()` using `ProxyDecisionRepository.log_decision()`
+- Categories: testing (L2, approved), deployment (L1, requires_review), destructive (L1, requires_review)
+- All records: `action="suggest"`, `requires_ratification=True`, `metadata_json={dry_run: True}`
+- Non-fatal try/except wrapper — dry-run completes even if DB unavailable
+
+**Files Modified (Lupin)**:
+- `src/fastapi_app/static/html/auth/admin/js/proxy-ratify.js` — `/api` prefix (2), `getAccessToken()`, session ID fix
+- `src/fastapi_app/static/html/auth/admin/js/proxy-dashboard.js` — `/api` prefix (5)
+- `src/fastapi_app/static/js/notifications.js` — ratify link URL fix
+
+**Files Modified (CoSA — separate repo)**:
+- `src/cosa/agents/swe_team/job.py` — `import uuid`, mock proxy decisions in `_execute_dry_run()`
+
+---
+
+### 2026.02.22 - Session 250 | CoSA Submodule Commit — Sessions 246-248
+
+#### Checkpoint | 2026-02-22 | 9 CoSA files (1 new, 8 modified, +455/-17 lines)
+
+**Accomplishments**:
+- Committed accumulated CoSA changes from Lupin Sessions 246-248 to CoSA repository
+- **Phase 7**: Proxy summary notifications, batch lifecycle (`acknowledge`/`batch-id` endpoints), circuit breaker alert callback
+- **Phase 8**: Trust mode hot-reload (PUT/GET `/api/proxy/mode`), per-job trust_mode override, `_orchestrator` reference for runtime updates
+- **Bug fixes**: Echo persistence to DB, abstract in interactions API, simplified echo message
+- **Navigation**: `pages.py` clean `/app/*` URL router (12 routes)
+
+**CoSA files committed** (separate repo):
+- `agents/swe_team/job.py` — trust_mode override, _orchestrator ref
+- `agents/swe_team/orchestrator.py` — proxy notifications, circuit breaker callback
+- `cli/notification_models.py` — relaxed progress_group_id regex
+- `rest/agentic_job_factory.py` — trust_mode factory wiring
+- `rest/postgres_models.py` — widened progress_group_id column
+- `rest/routers/decision_proxy.py` — batch endpoints + Phase 8 mode hot-reload
+- `rest/routers/queues.py` — echo persistence, abstract field
+- `rest/routers/swe_team.py` — trust_mode on submit request
+- `rest/routers/pages.py` (NEW) — clean URL router
+
+---
+
 ### 2026.02.21 - Session 249 | Unified Page Styling — Shared CSS Base + Purple Removal
 
 #### Checkpoint | 2026-02-21 | 1 new file, 18 modified — lupin-base.css, de-purpled admin pages, 1518 unit tests pass

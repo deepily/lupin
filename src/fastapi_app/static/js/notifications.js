@@ -5269,7 +5269,7 @@ class NotificationsUI {
             }
 
             // 3. Open (or focus) ratification page in single tab
-            window.open( '/app/proxy-ratify', 'lupin-proxy-ratify' );
+            window.open( '/app/admin/proxy-ratify', 'lupin-proxy-ratify' );
         };
 
         return link;
