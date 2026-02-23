@@ -113,7 +113,7 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 - **WebSocket Events**: `src/docs/websocket-events.md` (event catalog)
 - **Agentic Voice Integration**: `src/workflow/agentic-voice-workflow.md`
 - **Interactive Proxy Testing**: `src/docs/automated-interactive-testing.md` (proxy auto-answer testing guide)
-- **R&D Planning Docs**: `src/rnd/sse-notifications/` (historical)
+- **R&D Planning Docs**: `src/rnd/2025.10.15-sse-notifications/` (historical)
 
 ## STARTUP PROCEDURE
 - The first thing you should do when you start a session is read the global Claude configuration file and follow its instructions.

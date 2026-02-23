@@ -38,9 +38,9 @@ This directory contains comprehensive prompts for testing, design, planning, and
 
 **Available in two locations**:
 - **Executable**: `.claude/commands/design-planning-docs.md` (Claude Code slash command)
-- **Reference**: `src/rnd/prompts/design-planning-docs.md` (version controlled documentation)
+- **Reference**: `src/rnd/2025.09.27-prompts/design-planning-docs.md` (version controlled documentation)
 
-**Template Library**: `src/rnd/prompts/templates/design-planning/` (9 templates)
+**Template Library**: `src/rnd/2025.09.27-prompts/templates/design-planning/` (9 templates)
 - README-template.md
 - active-work-template.md
 - architecture-reference-template.md
@@ -190,7 +190,7 @@ Are you working in the full Lupin project context?
 ## How to Use Templates
 
 ### 1. Copy Template
-Copy the desired template to your project's `rnd/prompts/` directory
+Copy the desired template to your project's `rnd/2025.09.27-prompts/` directory
 
 ### 2. Replace Placeholders
 Replace all placeholders with project-specific values:

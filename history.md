@@ -1,5 +1,34 @@
 # Lupin Project History
 
+### 2026.02.23 - Session 254 | src/rnd/ Directory Rename — Date Prefix Standardization
+
+#### Checkpoint | 2026-02-23 | 9 directory operations, ~25 file reference updates, 0 regressions
+
+**Accomplishments**:
+- Consolidated `src/rnd/archive/` into `src/rnd/archived/` (moved `2025.09.28-perfect-remediation/` subdirectory, removed empty archive/)
+- Renamed 7 directories in `src/rnd/` to add project-standard `YYYY.MM.DD-` date prefixes:
+  - `deep-research-queue/` -> `2026.01.18-deep-research-queue/`
+  - `headless-cc-for-dataframe-crud/` -> `2026.02.04-headless-cc-for-dataframe-crud/`
+  - `job-state-transition/` -> `2026.01.28-job-state-transition/`
+  - `jwt-oauth/` -> `2025.09.29-jwt-oauth/`
+  - `pcm-streaming-demo/` -> `2026.01.07-pcm-streaming-demo/`
+  - `prompts/` -> `2025.09.27-prompts/`
+  - `sse-notifications/` -> `2025.10.15-sse-notifications/`
+- Updated references across ~25 files: README.md, CLAUDE.md, TODO.md, notification-api.md, test READMEs, slash commands, history archives, internal self-references
+- Verification: grep for all 8 old names returns 0 operational hits; 1534/1534 unit tests pass
+
+**Files Modified** (reference updates):
+- `CLAUDE.md`, `TODO.md`, `src/rnd/README.md`
+- `src/docs/notification-api.md`, `src/tests/README.md`, `src/tests/integration/README.md`
+- `.claude/commands/design-planning-docs.md`, `.claude/commands/history-management.md`, `.claude/commands/p-is-p-02-documentation.md`
+- `src/scripts/create_notifications_table.py`, `src/tests/integration/test_notifications_integration.py`
+- `src/rnd/2025.09.27-three-level-question-representation-architecture.md`, `src/rnd/2025.09.28-perfect-baseline-smoke-test-report.md`
+- `src/rnd/2025.10.16-jwt-token-proactive-refresh.md`, `src/rnd/2025.11.08-phase-2.4-async-refactoring.md`
+- Internal self-references in renamed directories (implementation-tracker, layer-2, 02-architecture, 03-decisions, 05-phase2-design-decisions, README, design-planning-docs)
+- History archives: `history.md`, `history/2025-09-03-to-23-history.md`, `history/2025-10-16-to-30-history.md`, `history/2026-01-13-to-19-history.md`, `history/2026-01-19-to-02-02-history.md`, `history/2026-02-03-to-10-history.md`
+
+---
+
 ### 2026.02.23 - Session 252 | Playwright E2E Testing — Planning Documents
 
 #### Checkpoint | 2026-02-23 | 7 new files (5 planning docs, 1 serialized plan, 1 README update)

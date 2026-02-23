@@ -196,7 +196,7 @@ send-notification-from-claude-sync "message" --type=task --priority=high
 ### Phase 1 (PoC)
 
 ```
-src/rnd/sse-notifications/src/
+src/rnd/2025.10.15-sse-notifications/src/
 ├── server.py                    # Standalone FastAPI (port 8000)
 ├── client.py                    # Python SSE client
 └── send-notification-from-claude-sync  # Bash wrapper

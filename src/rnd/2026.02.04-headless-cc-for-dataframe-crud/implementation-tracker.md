@@ -186,5 +186,5 @@ Three bugs found during Part 3 curl testing prevented CRUD agent jobs from compl
 
 - Architecture: `src/rnd/2026.02.05-headless-cc-for-dataframe-crud.md`
 - Implementation plan: `src/rnd/2026.02.05-crud-for-dataframes-implementation.md`
-- Layer docs: `src/rnd/headless-cc-for-dataframe-crud/layer-{1,2,3}.md`
-- Testing protocol: `src/rnd/headless-cc-for-dataframe-crud/testing-protocol.md`
+- Layer docs: `src/rnd/2026.02.04-headless-cc-for-dataframe-crud/layer-{1,2,3}.md`
+- Testing protocol: `src/rnd/2026.02.04-headless-cc-for-dataframe-crud/testing-protocol.md`

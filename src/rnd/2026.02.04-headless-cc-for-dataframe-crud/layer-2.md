@@ -316,4 +316,4 @@ print( result )  # Conversational TTS string
 
 - Original design: `src/rnd/2026.02.05-headless-cc-for-dataframe-crud.md`
 - Implementation plan: `src/rnd/2026.02.05-crud-for-dataframes-implementation.md`
-- Layer 1 (complete): `src/rnd/headless-cc-for-dataframe-crud/layer-1.md`
+- Layer 1 (complete): `src/rnd/2026.02.04-headless-cc-for-dataframe-crud/layer-1.md`

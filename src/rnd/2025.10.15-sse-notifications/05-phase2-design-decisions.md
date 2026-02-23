@@ -970,7 +970,7 @@ When scaling to multiple workers, choose one:
    - Load balancer ensures same user always hits same worker
    - Fragile, not recommended for production
 
-**Documentation Location**: Add to `src/rnd/sse-notifications/02-architecture.md`
+**Documentation Location**: Add to `src/rnd/2025.10.15-sse-notifications/02-architecture.md`
 
 **Configuration Flag** (future):
 ```ini
@@ -2974,7 +2974,7 @@ async def send_notification_with_response( notification ):
 **Final Status**: 🎉 **DESIGN COMPLETE** - 9/9 areas (100%), 40 questions answered, ready for implementation planning
 
 **Final Statistics**:
-- **Document**: `src/rnd/sse-notifications/05-phase2-design-decisions.md`
+- **Document**: `src/rnd/2025.10.15-sse-notifications/05-phase2-design-decisions.md`
 - **Length**: 3,326 lines (comprehensive design + implementation plan)
 - **Sessions**: 3 sessions across 3 days (Oct 17, Oct 26, Oct 27)
 - **Areas Completed**: 9/9 (100%)

@@ -102,7 +102,7 @@ We selected **Option 2: Two-Phase Implementation (PoC → Production)**
 
 - Phase 1: Standalone FastAPI on port 8000
 - Phase 2: Integrate validated pattern into port 7999
-- PoC code preserved in `src/rnd/sse-notifications/src/` for reference
+- PoC code preserved in `src/rnd/2025.10.15-sse-notifications/src/` for reference
 - Documentation archives with PoC code for future reference
 
 ### References
@@ -128,7 +128,7 @@ Need to decide where to place Phase 1 PoC code. Options include temporary locati
 - Pros: Standard location for throwaway code
 - Cons: Gets deleted, lost reference, not preserved with documentation
 
-**Option 2: src/rnd/sse-notifications/src/ (With Documentation)**
+**Option 2: src/rnd/2025.10.15-sse-notifications/src/ (With Documentation)**
 - Pros: Preserved with docs, archives together, permanent reference
 - Cons: Slightly non-standard location for code
 
@@ -138,7 +138,7 @@ Need to decide where to place Phase 1 PoC code. Options include temporary locati
 
 ### Choice
 
-We selected **Option 2: src/rnd/sse-notifications/src/ (With Documentation)**
+We selected **Option 2: src/rnd/2025.10.15-sse-notifications/src/ (With Documentation)**
 
 ### Rationale
 
@@ -152,9 +152,9 @@ We selected **Option 2: src/rnd/sse-notifications/src/ (With Documentation)**
 
 ### Consequences
 
-- PoC location: `src/rnd/sse-notifications/src/`
+- PoC location: `src/rnd/2025.10.15-sse-notifications/src/`
 - Files: `server.py`, `client.py`, `send-notification-from-claude-sync`
-- Archival path: `src/rnd/archive/2025.10.15-sse-notifications/` (entire directory)
+- Archival path: `src/rnd/archived/2025.10.15-sse-notifications/` (entire directory)
 - PoC becomes template for future SSE implementations
 
 ### References

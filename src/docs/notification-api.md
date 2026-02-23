@@ -3,7 +3,7 @@
 > **One-stop reference** for the Lupin notification system — from architecture to testing.
 >
 > **Last Updated**: 2026-02-13
-> **Source of Truth**: This document supersedes all R&D planning docs in `src/rnd/sse-notifications/`.
+> **Source of Truth**: This document supersedes all R&D planning docs in `src/rnd/2025.10.15-sse-notifications/`.
 
 ---
 
@@ -302,7 +302,7 @@ terminal. This was the first working prototype of agent-to-human communication.
 3. For response-required mode, the bash script parsed the SSE stream output
 4. Exit codes conveyed status: 0 = success, 1 = error, 2 = timeout
 
-**Archived at**: `src/rnd/sse-notifications/src/`
+**Archived at**: `src/rnd/2025.10.15-sse-notifications/src/`
 
 ### Phase 2 — Python CLI Consolidation ( November-December 2025 )
 
