@@ -1,5 +1,28 @@
 # Lupin Project History
 
+### 2026.02.23 - Session 257 | INI Config Key Naming Convention — Design Document
+
+#### Design Document | 2026-02-23 | Planning only, no implementation
+
+**Accomplishments**:
+- Created comprehensive design document for standardizing ~98 underscore-separated INI config keys to space-separated format
+- Analyzed current state: ~195 total keys, 44% underscore / 56% space, ~80 files affected (18 Lupin + 62 CoSA)
+- Inventoried all 98 underscore keys grouped by category with proposed space-separated names
+- Designed collision-safe replacement strategy using longest-match-first ordering
+- Specified ConfigurationManager backward-compat shim with deprecation warnings → assertion mode lifecycle
+- Outlined 6-phase migration plan: shim → INI rename → Lupin code → CoSA code → cleanup → regression (~2 weeks)
+- Updated TODO.md with v0.1.6 entry and src/rnd/README.md with design doc entry
+
+**Files Created**:
+- `src/rnd/2026.02.23-ini-config-key-naming-convention.md` (design document)
+
+**Files Modified**:
+- `TODO.md` (new v0.1.6 entry for config key migration)
+- `src/rnd/README.md` (new entry for design document)
+- `history.md` (this entry)
+
+---
+
 ### 2026.02.23 - Session 256 | Rename frontend-architecture.md
 
 - Renamed `src/docs/frontend-architecture.md` → `src/docs/lupin-mpa-frontend-architecture.md`

@@ -1,8 +1,15 @@
 # TODO
 
-Last updated: 2026-02-23 (Session 252)
+Last updated: 2026-02-23 (Session 256)
 
 ## v0.1.6 — HIGH PRIORITY
+
+### INI Config Key Naming Convention — Standardize on Spaces (Session 256)
+
+- [ ] **[LUPIN] Standardize ~98 underscore config keys to space-separated** — 6-phase migration: backward-compat shim → INI rename → Lupin code (18 files) → CoSA code (62 files) → remove shim + guardrail test. ~2 weeks estimated.
+  - **Design doc**: [`src/rnd/2026.02.23-ini-config-key-naming-convention.md`](src/rnd/2026.02.23-ini-config-key-naming-convention.md)
+  - **Scope**: ~98 keys, ~80 files (18 Lupin + 62 CoSA), both INI files + splainer
+  - **Priority**: Medium — no functional impact, improves consistency and predictability
 
 ### CJ Flow: Hybrid Fast Lane + Bounded Agentic Pool (Session 237)
 
