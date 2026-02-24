@@ -917,19 +917,6 @@ class AdminSnapshotsDashboard {
                 ).join( '' );
             }
 
-            // Populate gist similarity column
-            const gistList = document.getElementById( 'solution-gist-similar-list' );
-            const gistCount = document.getElementById( 'solution-gist-similar-count' );
-            gistCount.textContent = `Found ${response.total_solution_gist_matches} match${response.total_solution_gist_matches !== 1 ? 'es' : ''}`;
-
-            if ( response.solution_gist_similar.length === 0 ) {
-                gistList.innerHTML = '<div class="similarity-empty">No similar gists found</div>';
-            } else {
-                gistList.innerHTML = response.solution_gist_similar.map( result =>
-                    this.createSimilarResultItem( result, 'gist' )
-                ).join( '' );
-            }
-
             // Hide loading, show content
             document.getElementById( 'similarity-loading' ).style.display = 'none';
             document.getElementById( 'similarity-content' ).style.display = 'block';
@@ -982,15 +969,10 @@ class AdminSnapshotsDashboard {
                 maxLength = 400;  // Show more code
                 break;
             case 'explanation':
+            default:
                 contentText = result.solution_summary_preview || '';
                 contentClass = 'similar-result-gist';
                 maxLength = 200;
-                break;
-            case 'gist':
-            default:
-                contentText = result.solution_summary_gist || '';
-                contentClass = 'similar-result-gist';
-                maxLength = 150;
                 break;
         }
 

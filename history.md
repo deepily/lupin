@@ -1,5 +1,37 @@
 # Lupin Project History
 
+### 2026.02.24 - Session 261 | Jettison Gist Embeddings — Dead Code Removal
+
+#### Dead Code Removal | 2026-02-24 | 5-phase implementation, 1538 unit tests pass
+
+**Accomplishments**:
+- Removed gist embedding generation from per-query path (`todo_fifo_queue.py`) — saves ~1 embedding API call per query
+- Removed gist embedding generation from per-snapshot path (`solution_snapshot.py`) — saves ~2 embedding calls per snapshot creation (~29% of embedding budget)
+- Removed `get_snapshots_by_solution_gist_similarity()` (~120 lines) from `lancedb_solution_manager.py`
+- Removed 2 dead methods from `solution_snapshot.py`: `set_solution_summary_gist()`, `get_question_gist_similarity()`
+- Removed gist embedding comparison code from deprecated `solution_snapshot_mgr.py`
+- Cleaned admin similarity endpoint: removed `gist_threshold` param, gist search block, gist fields from response model
+- Removed gist similarity column from admin snapshots UI (HTML + JS)
+- Updated 2 test fixtures to use empty list `[]` instead of dummy gist embeddings
+- Preserved: gist text fields, Level 3 exact matching, schema columns (empty to avoid LanceDB migration)
+
+**Files Modified (CoSA — 4 files)**:
+- `src/cosa/rest/todo_fifo_queue.py` — removed per-query gist embedding generation + 5 dict entries
+- `src/cosa/memory/solution_snapshot.py` — stopped generating gist embeddings, removed 2 dead methods
+- `src/cosa/memory/lancedb_solution_manager.py` — removed `get_snapshots_by_solution_gist_similarity()` (~120 lines)
+- `src/cosa/memory/solution_snapshot_mgr.py` — removed gist embedding comparison in deprecated class
+
+**Files Modified (Lupin — 4 files)**:
+- `src/cosa/rest/routers/admin.py` — removed gist from similarity endpoint + response model
+- `src/fastapi_app/static/html/admin/snapshots.html` — removed gist similarity column
+- `src/fastapi_app/static/html/admin/js/admin-snapshots.js` — removed gist tab rendering + switch case
+- `src/tests/smoke/test_answer_feedback_smoke.py` — gist embedding fixture → `[]`
+- `src/tests/unit/test_answer_is_correct.py` — gist embedding fixtures → `[]`
+
+**Reminder**: CoSA changes (4 files) must be committed separately in CoSA context.
+
+---
+
 ### 2026.02.24 - Session 260 | Voice Module Refactoring — 5-Phase Deduplication
 
 #### Refactoring | 2026-02-24 | Implementation complete, 1538 unit tests pass

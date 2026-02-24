@@ -32,11 +32,11 @@ def _make_minimal_snapshot( answer_is_correct=None, **kwargs ):
         # Pre-supply embeddings to prevent regeneration
         "question_embedding"            : [ 0.1 ] * 768,
         "question_normalized_embedding" : [ 0.1 ] * 768,
-        "question_gist_embedding"       : [ 0.1 ] * 768,
+        "question_gist_embedding"       : [],
         "solution_embedding"            : [ 0.1 ] * 768,
         "code_embedding"                : [ 0.1 ] * 768,
         "thoughts_embedding"            : [ 0.1 ] * 768,
-        "solution_gist_embedding"       : [ 0.1 ] * 768,
+        "solution_gist_embedding"       : [],
     }
     defaults.update( kwargs )
     return SolutionSnapshot( **defaults )

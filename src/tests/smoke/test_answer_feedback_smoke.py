@@ -22,7 +22,7 @@ def _make_snapshot( answer_is_correct=None, **kwargs ):
         "question"                       : "What is 2+2?",
         "question_embedding"             : DUMMY_EMBEDDING,
         "question_normalized_embedding"  : DUMMY_EMBEDDING,
-        "question_gist_embedding"        : DUMMY_EMBEDDING,
+        "question_gist_embedding"        : [],
     }
     defaults.update( kwargs )
     return SolutionSnapshot( answer_is_correct=answer_is_correct, **defaults )
