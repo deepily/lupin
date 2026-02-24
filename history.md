@@ -1,5 +1,13 @@
 # Lupin Project History
 
+### 2026.02.23 - Session 256 | Rename frontend-architecture.md
+
+- Renamed `src/docs/frontend-architecture.md` → `src/docs/lupin-mpa-frontend-architecture.md`
+- Updated 2 references in history.md
+- **Commit**: f8d0e73
+
+---
+
 ### 2026.02.23 - Session 255 | Bug Fix: Add Delete Functionality to Proxy Ratification Page
 
 #### Fix 1: Add delete functionality to proxy ratification page
