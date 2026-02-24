@@ -349,7 +349,8 @@
 }
 
 .btn-approve-sm,
-.btn-reject-sm {
+.btn-reject-sm,
+.btn-delete-sm {
     border: none;
     cursor: pointer;
     padding: 4px 8px;
@@ -375,6 +376,16 @@
 
 .btn-reject-sm:hover {
     background: #feb2b2;
+    transform: scale( 1.1 );
+}
+
+.btn-delete-sm {
+    background: #e2e8f0;
+    color: #718096;
+}
+
+.btn-delete-sm:hover {
+    background: #cbd5e0;
     transform: scale( 1.1 );
 }
 

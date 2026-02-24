@@ -94,6 +94,14 @@ async function ratifyDecision( id, approved, feedback ) {
     return await apiCall( `/api/proxy/ratify/${id}?${params.toString()}`, "POST" );
 }
 
+/**
+ * Delete a single pending decision.
+ */
+async function deleteDecision( id ) {
+    const params = new URLSearchParams({ user_email: userEmail });
+    return await apiCall( `/api/proxy/decision/${id}?${params.toString()}`, "DELETE" );
+}
+
 // ============================================================================
 // UI Rendering
 // ============================================================================
@@ -183,6 +191,7 @@ function renderTable( decisions ) {
             <td class="action-buttons">
                 <button class="btn-approve-sm" onclick="event.stopPropagation(); quickApprove( '${escapeHtml( decision.id )}' )" title="Approve">&#10003;</button>
                 <button class="btn-reject-sm" onclick="event.stopPropagation(); quickReject( '${escapeHtml( decision.id )}' )" title="Reject">&#10007;</button>
+                <button class="btn-delete-sm" onclick="event.stopPropagation(); quickDelete( '${escapeHtml( decision.id )}' )" title="Delete">&#x1F5D1;</button>
             </td>
         `;
 
@@ -370,14 +379,47 @@ async function bulkApprove() {
 }
 
 /**
+ * Generic confirm modal helper.
+ *
+ * Shows a confirmation dialog with custom title, message, button label,
+ * and callback. Reused by bulkReject() and bulkDelete().
+ */
+let pendingConfirmAction = null;
+
+function showConfirmModal( title, message, confirmLabel, onConfirm ) {
+    document.getElementById( "confirm-title" ).textContent   = title;
+    document.getElementById( "confirm-message" ).textContent = message;
+    const confirmBtn       = document.getElementById( "confirm-yes" );
+    confirmBtn.textContent = confirmLabel;
+    pendingConfirmAction   = onConfirm;
+    confirmBtn.onclick     = function() {
+        if ( pendingConfirmAction ) pendingConfirmAction();
+        pendingConfirmAction = null;
+    };
+    document.getElementById( "confirm-modal" ).style.display = "block";
+}
+
+/**
+ * Close confirm modal and clear pending action.
+ */
+function closeConfirmModal() {
+    document.getElementById( "confirm-modal" ).style.display = "none";
+    pendingConfirmAction = null;
+}
+
+/**
  * Begin bulk reject — show confirmation dialog.
  */
 function bulkReject() {
     if ( selectedIds.size === 0 ) return;
 
-    document.getElementById( "confirm-message" ).textContent =
-        `Are you sure you want to reject ${selectedIds.size} selected decision${selectedIds.size !== 1 ? "s" : ""}?`;
-    document.getElementById( "confirm-modal" ).style.display = "block";
+    const count = selectedIds.size;
+    showConfirmModal(
+        "Confirm Bulk Rejection",
+        `Are you sure you want to reject ${count} selected decision${count !== 1 ? "s" : ""}?`,
+        "Confirm Reject",
+        confirmBulkReject
+    );
 }
 
 /**
@@ -411,10 +453,48 @@ async function confirmBulkReject() {
 }
 
 /**
- * Close confirm modal.
+ * Begin bulk delete — show confirmation dialog.
  */
-function closeConfirmModal() {
-    document.getElementById( "confirm-modal" ).style.display = "none";
+function bulkDelete() {
+    if ( selectedIds.size === 0 ) return;
+
+    const count = selectedIds.size;
+    showConfirmModal(
+        "Confirm Bulk Deletion",
+        `Are you sure you want to permanently delete ${count} selected decision${count !== 1 ? "s" : ""}? This cannot be undone.`,
+        "Confirm Delete",
+        confirmBulkDelete
+    );
+}
+
+/**
+ * Confirm and execute bulk delete.
+ */
+async function confirmBulkDelete() {
+    closeConfirmModal();
+
+    let succeeded = 0;
+    let failed    = 0;
+
+    for ( const id of selectedIds ) {
+        try {
+            await deleteDecision( id );
+            succeeded++;
+        } catch ( error ) {
+            failed++;
+            console.error( "Bulk delete failed for", id, error );
+        }
+    }
+
+    if ( failed > 0 ) {
+        showSuccess( "success-message", `Deleted ${succeeded} of ${succeeded + failed} decisions. ${failed} failed.` );
+    } else {
+        showSuccess( "success-message", `Deleted ${succeeded} decision${succeeded !== 1 ? "s" : ""} successfully.` );
+    }
+
+    selectedIds.clear();
+    updateBulkActions();
+    await loadPending();
 }
 
 // ============================================================================
@@ -445,6 +525,27 @@ async function quickReject( id ) {
     } catch ( error ) {
         showError( "error-message", "Reject failed: " + error.message );
     }
+}
+
+/**
+ * Quick delete a single decision from the table row (with confirmation).
+ */
+function quickDelete( id ) {
+    showConfirmModal(
+        "Confirm Deletion",
+        "Are you sure you want to permanently delete this decision? This cannot be undone.",
+        "Delete",
+        async function() {
+            closeConfirmModal();
+            try {
+                await deleteDecision( id );
+                showSuccess( "success-message", "Decision deleted." );
+                await loadPending();
+            } catch ( error ) {
+                showError( "error-message", "Delete failed: " + error.message );
+            }
+        }
+    );
 }
 
 // ============================================================================

@@ -190,3 +190,53 @@ class TestResponderPersistDecision:
         with patch( "cosa.rest.db.database.get_db", side_effect=Exception( "DB down" ) ):
             # Should NOT raise
             responder._persist_decision( "notif-123", mock_result, "Question" )
+
+
+# =============================================================================
+# delete_pending() Tests
+# =============================================================================
+
+class TestDeletePending:
+    """Tests for permanent deletion of pending decisions."""
+
+    def test_delete_pending_success( self, repo, mock_session ):
+        """delete_pending() deletes a pending decision and returns True."""
+        mock_decision = MagicMock()
+        mock_decision.ratification_state = "pending"
+
+        with patch.object( repo, "get_by_id", return_value=mock_decision ):
+            result = repo.delete_pending( "fake-uuid" )
+
+        assert result is True
+        mock_session.delete.assert_called_once_with( mock_decision )
+        mock_session.flush.assert_called_once()
+
+    def test_delete_pending_not_found( self, repo, mock_session ):
+        """delete_pending() returns False when decision not found."""
+        with patch.object( repo, "get_by_id", return_value=None ):
+            result = repo.delete_pending( "nonexistent-uuid" )
+
+        assert result is False
+        mock_session.delete.assert_not_called()
+
+    def test_delete_pending_rejects_approved( self, repo, mock_session ):
+        """delete_pending() raises ValueError for approved decisions."""
+        mock_decision = MagicMock()
+        mock_decision.ratification_state = "approved"
+
+        with patch.object( repo, "get_by_id", return_value=mock_decision ):
+            with pytest.raises( ValueError, match="approved" ):
+                repo.delete_pending( "fake-uuid" )
+
+        mock_session.delete.assert_not_called()
+
+    def test_delete_pending_rejects_rejected( self, repo, mock_session ):
+        """delete_pending() raises ValueError for rejected decisions."""
+        mock_decision = MagicMock()
+        mock_decision.ratification_state = "rejected"
+
+        with patch.object( repo, "get_by_id", return_value=mock_decision ):
+            with pytest.raises( ValueError, match="rejected" ):
+                repo.delete_pending( "fake-uuid" )
+
+        mock_session.delete.assert_not_called()

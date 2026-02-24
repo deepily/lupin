@@ -107,6 +107,9 @@
                 <button class="btn btn-danger btn-small" onclick="bulkReject()">
                     Reject Selected
                 </button>
+                <button class="btn btn-danger btn-small" onclick="bulkDelete()">
+                    Delete Selected
+                </button>
             </div>
 
             <!-- Decisions Table -->
@@ -179,15 +182,15 @@
         </div>
     </div>
 
-    <!-- Confirm Modal (for bulk reject) -->
+    <!-- Confirm Modal (generic — used for bulk reject and bulk delete) -->
     <div id="confirm-modal" class="modal">
         <div class="modal-content modal-confirm">
-            <h2>Confirm Bulk Rejection</h2>
-            <p id="confirm-message">Are you sure you want to reject the selected decisions?</p>
+            <h2 id="confirm-title">Confirm Action</h2>
+            <p id="confirm-message">Are you sure?</p>
 
             <div class="modal-actions">
-                <button class="btn btn-danger" id="confirm-yes" onclick="confirmBulkReject()">
-                    Confirm Reject
+                <button class="btn btn-danger" id="confirm-yes">
+                    Confirm
                 </button>
                 <button class="btn btn-secondary" onclick="closeConfirmModal()">
                     Cancel

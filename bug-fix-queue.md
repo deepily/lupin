@@ -25,7 +25,7 @@
 | 07b80074 | 2026-02-16T10:00:00 | 2026-02-16T10:00:00 | stale |
 | a118cc5e | 2026-02-19T00:00:00 | 2026-02-20T00:00:00 | closed |
 | ff1fffd0 | 2026-02-21T00:00:00 | 2026-02-21T00:00:00 | active |
-| e7bfdd1d | 2026-02-23T12:00:00 | 2026-02-23T12:00:00 | closed |
+| e7bfdd1d | 2026-02-23T12:00:00 | 2026-02-23T21:00:00 | closed |
 
 ---
 
@@ -46,6 +46,8 @@
 ---
 
 ### Completed
+
+- [x] **Add delete functionality to proxy ratification page** → commit: 8e56791 | By: e7bfdd1d
 
 - [x] **Profile page button relocation: Change Password to header, remove redundant Go to Notifications** → commit: dd62985 | By: e7bfdd1d
 

@@ -1,5 +1,17 @@
 # Lupin Project History
 
+### 2026.02.23 - Session 255 | Bug Fix: Add Delete Functionality to Proxy Ratification Page
+
+#### Fix 1: Add delete functionality to proxy ratification page
+- **Source**: ad-hoc (feature gap — no way to delete unwanted pending decisions)
+- **Files (CoSA)**: `proxy_decision_repository.py` (new `delete_pending()` method), `decision_proxy.py` (new `DELETE /api/proxy/decision/{id}` endpoint)
+- **Files (Lupin)**: `proxy-ratify.html` (Delete Selected button, generic confirm modal), `proxy-ratify.js` (deleteDecision, quickDelete, bulkDelete, showConfirmModal, per-row delete button), `proxy-ratify.css` (.btn-delete-sm styles), `test_proxy_decision_repository.py` (4 new TestDeletePending tests)
+- **Safety**: Only pending decisions deletable (backend guard), no trust state impact, confirmation required for all deletes
+- **Test**: Unit 1538 PASS (1534 + 4 new), 0 failures
+- **Commit**: 8e56791
+
+---
+
 ### 2026.02.23 - Session 254 | src/rnd/ Directory Rename — Date Prefix Standardization
 
 #### Checkpoint | 2026-02-23 | 9 directory operations, ~25 file reference updates, 0 regressions
