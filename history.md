@@ -8,7 +8,13 @@
 - **Files (Lupin)**: `proxy-ratify.html` (Delete Selected button, generic confirm modal), `proxy-ratify.js` (deleteDecision, quickDelete, bulkDelete, showConfirmModal, per-row delete button), `proxy-ratify.css` (.btn-delete-sm styles), `test_proxy_decision_repository.py` (4 new TestDeletePending tests)
 - **Safety**: Only pending decisions deletable (backend guard), no trust state impact, confirmation required for all deletes
 - **Test**: Unit 1538 PASS (1534 + 4 new), 0 failures
-- **Commit**: 8e56791
+- **Commit**: 33b4122
+
+#### Fix 2: Auto-focus confirm button in delete modal for keyboard-driven workflow
+- **Source**: ad-hoc (UX — enable rapid trash-icon-click + Space-to-confirm workflow)
+- **Files**: `proxy-ratify.js` (added `confirmBtn.focus()` after modal display)
+- **Test**: Not required (1-line UX tweak, no logic change)
+- **Commit**: debb307
 
 ---
 

@@ -397,6 +397,7 @@ function showConfirmModal( title, message, confirmLabel, onConfirm ) {
         pendingConfirmAction = null;
     };
     document.getElementById( "confirm-modal" ).style.display = "block";
+    confirmBtn.focus();
 }
 
 /**
