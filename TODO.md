@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-24 (Session 260)
+Last updated: 2026-02-24 (Session 262)
 
 ## v0.1.6 — FUTURE DEVELOPMENT
 
@@ -40,6 +40,12 @@ Last updated: 2026-02-24 (Session 260)
   - **Goal**: Durable storage for ClaudeCode Job tracking state
   - **Affects**: Job state survives server restarts, enables job history/resume
 
+### Trust Proxy Documentation Update
+
+- [ ] **[LUPIN] Update trust proxy documentation after Phases 3-4 of preference learning** — Revise `src/docs/proxy-admin-guide.md` and related docs to reflect preference learning algorithms, new trust escalation paths, and updated decision proxy behavior.
+  - **Blocked by**: v0.1.5 preference learning Phases 3-4 implementation
+  - **Scope**: Admin guide, API reference, R&D docs
+
 ### Centralized Navigation & URL Naming Conventions
 
 - [x] **[LUPIN] Create centralized navigation and URL naming conventions** — Unified nav and URL patterns for entire suite of static HTML/plain vanilla JavaScript pages covering all user and admin tasks - Session 247
@@ -50,9 +56,11 @@ Last updated: 2026-02-24 (Session 260)
 
 ### SWE Team Proxy: Preference Learning (Session 258)
 
-- [ ] **[LUPIN] Expand SWE Team Proxy Agent to incorporate proxy layer preference learning** — Teach the decision proxy to learn user preferences over time, reducing manual ratification and improving autonomous decision accuracy.
-  - **R&D Synthesis**: [`Take III — Synthesis`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.24-decision-proxy-preference-learning-analysis-take-III-synthesis.md) (Sessions 257-259: gap analysis + algorithms + build/import + phased deployment)
-  - **R&D Analysis**: [`Take II — Algorithms`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.23-decision-proxy-preference-learning-analysis-take-II.md) | [`Take I — Gap Analysis`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.23-decision-proxy-preference-learning-analysis-take-I.md)
+- [ ] **[LUPIN] Expand SWE Team Proxy Agent to incorporate proxy layer preference learning** — Teach the decision proxy to learn user preferences over time, reducing manual ratification and improving autonomous decision accuracy. **Status**: Phase 0+1 implemented (Session 262), Phase 2+3 plans written.
+  - **R&D Synthesis**: [`Take III — Synthesis`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.24-decision-proxy-preference-learning-analysis-take-III-synthesis.md) (Sessions 257-259)
+  - [x] **Phase 0+1**: Embedding infrastructure + CBR + Beta-Bernoulli trust — Session 262, commit `bcd5e4e`+`aa0bd3b`
+  - [ ] **Phase 2**: BLR + Thompson Sampling (~3-5 days, 30+ observations) — [`Plan`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.24-phase-2-blr-thompson-sampling-plan.md)
+  - [ ] **Phase 3**: Conformal Guarantees + optional ICRL (~3-5 days, 100+ observations) — [`Plan`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.24-phase-3-conformal-icrl-plan.md)
 
 ---
 
@@ -88,15 +96,8 @@ Last updated: 2026-02-24 (Session 260)
 ### Skills Management (Session 118 Discovery)
 
 Skill candidates identified - create with `/plan-skills-management-create <skill-name>`:
-- [ ] **notification-patterns** (HIGH) - cosa-voice MCP usage patterns (~250 lines)
-- [ ] **path-management** (MEDIUM) - `cu.get_project_root()` vs bootstrap (~150 lines)
+- [x] **notification-patterns** (HIGH) - cosa-voice MCP usage patterns (~250 lines) — DONE
 - [ ] **code-style-preferences** (LOW) - Spacing, alignment, getattr prohibition (~100 lines)
-
-### Voice Module Audit (MEDIUM) - DONE
-
-- [x] **Review cosa_interface.py vs voice_io.py** — Session 260: Full 5-phase refactoring. Created shared `AgentNotificationDispatcher`, `sender_id.py`, `feedback_analysis.py`, `sync_notify.py`. Eliminated ~1,548 lines of duplication across 16 files. 1538 unit tests pass.
-  - **Plan**: `~/.claude/plans/gleaming-fluttering-panda.md`
-  - **Reminder**: CoSA changes (16 files) must be committed separately in CoSA context
 
 ### Smoke Test Coverage Audit (MEDIUM) ✅ DONE
 
@@ -133,15 +134,14 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 - [x] **Standardize compound job/user ID usage** - Session 236: Bug #5 made scoped IDs (`base_hash::user_id`) universal across ALL job types via `register_scoped_job()`
 - [x] **Standardize job-user-session association interface** - Session 236: Bug #5 unified all write sites through `register_scoped_job()` and all reads through direct `job.user_id` access
 - [x] **Implement Approach D: Hybrid Queue + Check-In** - Session 238: Full 5-phase implementation. 20+10 new tests, 317 SWE team tests pass
-- [ ] **[LUPIN] Gist embeddings: keep vs. jettison** - Gist _text_ has value (Level 3 exact match), but gist _embeddings_ are dead code — stored but never searched. Jettisoning saves ~30% embedding cost per snapshot (2 of 7 embeddings) and removes unused search methods.
-  - **Analysis**: `src/rnd/2026.02.09-gist-embeddings-analysis-keep-vs-jettison.md`
-  - **Dead code**: `question_gist_embedding`, `solution_gist_embedding` fields, `get_snapshots_by_solution_gist_similarity()`, `get_question_gist_similarity()`
-  - **Action**: Review analysis, decide keep/jettison, clean up if jettisoning
 
 ---
 
 ## Completed (Recent)
 
+- [x] **Skill: notification-patterns** - cosa-voice MCP usage patterns skill created (~250 lines)
+- [x] **Gist embeddings: jettisoned** - Dead embedding code removed, ~30% embedding cost savings per snapshot (2 of 7 embeddings). Removed `question_gist_embedding`, `solution_gist_embedding` fields and unused search methods.
+- [x] **Voice Module Audit** - Session 260: Full 5-phase refactoring of `cosa_interface.py` vs `voice_io.py`. Created shared `AgentNotificationDispatcher`, `sender_id.py`, `feedback_analysis.py`, `sync_notify.py`. Eliminated ~1,548 lines of duplication across 16 files. 1538 unit tests pass.
 - [x] **Smoke Test Coverage Audit** - Session 221: 6 new test files, 54 pytest methods covering Decision Proxy, SWE Orchestrator dry-run, Queue Consumer, Answer Feedback, Agentic Disambiguation, Classic Agents. All passing.
 - [x] **SWE Team Testing Docs Update** - Session 221: Updated 00-index.md (Phases 2-4 DONE), 04-surfaces testing design (Surfaces 2-3 PASS), all-agents.json entries
 - [x] **Post-Execution Feedback Loop** - Session 215-220: answer_is_correct tri-state, language/tone feedback, data collection pipeline. All 3 parts complete.

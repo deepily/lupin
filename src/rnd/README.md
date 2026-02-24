@@ -4,6 +4,12 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.24 - Phase 2 Implementation Plan: BLR + Thompson Sampling
+- **Implementation Plan**: [2026.02.23-trust-proxy-preference-learning/2026.02.24-phase-2-blr-thompson-sampling-plan.md](2026.02.23-trust-proxy-preference-learning/2026.02.24-phase-2-blr-thompson-sampling-plan.md) - **PLANNED** - Phase 2 of the preference learning system (30-100 observations, ~3-5 days). Three components: (A) BLR upgrade replacing Beta-Bernoulli with Laplace-approximated Bayesian Logistic Regression using 4-feature vectors (category, question length, time of day, recent error rate), ~150-200 lines of numpy/scipy. (D) Thompson Sampling gate replacing fixed trust-level thresholds with probabilistic Beta posterior sampling for natural exploration-exploitation. (E) Optional GP/BALD active query selection for maximizing learning value of human interactions, ~200-300 lines. 5 new config keys (`swe team trust proxy thompson enabled/act threshold/suggest threshold`, `bald enabled/defer threshold`). 2 new files + 3 test files. Target: ~40-60% autonomous decisions.
+
+### 2026.02.24 - Phase 3 Implementation Plan: Conformal Guarantees + Optional ICRL
+- **Implementation Plan**: [2026.02.23-trust-proxy-preference-learning/2026.02.24-phase-3-conformal-icrl-plan.md](2026.02.23-trust-proxy-preference-learning/2026.02.24-phase-3-conformal-icrl-plan.md) - **PLANNED** - Phase 3 of the preference learning system (100+ observations, ~3-5 days). Two components: Conformal prediction wrapper (~50-80 lines) providing distribution-free coverage guarantees via prediction sets ({approve}, {reject}, or {approve, reject}), using MAPIE library (only new dependency). Optional ICRL prompt augmentation (~60-80 lines) for LLM-based disambiguation of ambiguous CBR cases with mixed verdicts, adding ~500ms-2s latency only for ~5-15% of genuinely ambiguous decisions. 3 new config keys (`conformal enabled`, `icrl enabled/top k`). Target: ~80-95% autonomous decisions.
+
 ### 2026.02.24 - Voice Module Deduplication Plan (Implemented)
 - **Plan**: [2026.02.24-voice-module-deduplication-plan.md](2026.02.24-voice-module-deduplication-plan.md) - **IMPLEMENTED (Session 260)** - 5-phase refactoring plan for voice/notification module deduplication. Created shared `AgentNotificationDispatcher`, `sender_id.py`, `feedback_analysis.py`, `sync_notify.py`. Eliminated ~1,548 lines of copy-paste duplication across 16 files (12 CoSA + 2 Lupin + 4 new). All 1538 unit tests pass.
 

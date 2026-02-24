@@ -1,8 +1,32 @@
 # Lupin Project History
 
-### 2026.02.24 - Session 262 | Preference Learning — Phase 0 + Phase 1
+### 2026.02.24 - Session 262 | Preference Learning — Phases 0-1 Implementation + Phases 2-3 Plans
 
-#### Checkpoint | 2026.02.24 16:30 | Implement embedding infrastructure + CBR + Beta-Bernoulli trust
+#### Checkpoint 3 | 2026.02.24 18:00 | Write Phase 2 + Phase 3 implementation plan documents
+
+**Accomplishments**:
+- Wrote Phase 2 implementation plan: BLR + Thompson Sampling (767 lines)
+  - Component A upgrade: BLR replacing Beta-Bernoulli with 4-feature Laplace approximation
+  - Component D: Thompson Sampling gate with probabilistic Beta posterior sampling
+  - Component E (optional): GP/BALD active query selection for informative deferral
+  - 5 new config keys, 6 implementation steps, full verification plan
+- Wrote Phase 3 implementation plan: Conformal Guarantees + optional ICRL (795 lines)
+  - Conformal prediction wrapper (~50-80 lines) with MAPIE library
+  - Optional ICRL prompt augmentation for ambiguous CBR cases
+  - 3 new config keys, 7 implementation steps, full verification plan
+- Updated R&D README with links to both new plan documents
+- All file paths and class names verified against Phase 0+1 implementation (commit `bcd5e4e`)
+
+**Files Created (Lupin — 2 files)**:
+- `src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.24-phase-2-blr-thompson-sampling-plan.md`
+- `src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.24-phase-3-conformal-icrl-plan.md`
+
+**Files Modified (Lupin — 1 file)**:
+- `src/rnd/README.md` — Added links to Phase 2 + Phase 3 plan documents
+
+---
+
+#### Checkpoint 2 | 2026.02.24 16:30 | Implement embedding infrastructure + CBR + Beta-Bernoulli trust
 
 **Accomplishments**:
 - Step 0: Renamed 11 config keys from `trust proxy` to `swe team trust proxy` prefix (4 files)
