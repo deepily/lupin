@@ -26,6 +26,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 
@@ -56,6 +57,8 @@ class EmbeddedProxyMixin:
         """Initialize proxy state."""
         super().__init__( *args, **kwargs )
         self._proxy_process = None
+        self._proxy_debug   = False
+        self._reader_thread = None
 
     @property
     def proxy_running( self ):
@@ -67,6 +70,26 @@ class EmbeddedProxyMixin:
             - Returns False otherwise
         """
         return self._proxy_process is not None and self._proxy_process.poll() is None
+
+    def _proxy_log_reader( self ):
+        """
+        Read proxy stdout line-by-line and print to console in real time.
+
+        Requires:
+            - self._proxy_process is a running Popen with stdout=PIPE
+            - Called from a daemon thread
+
+        Ensures:
+            - Each line from proxy stdout is printed with [proxy] prefix
+            - Loop exits on EOF (process termination closes pipe)
+        """
+        try:
+            for line in iter( self._proxy_process.stdout.readline, b"" ):
+                text = line.decode( "utf-8", errors="replace" ).rstrip( "\n" )
+                if text:
+                    print( f"  [proxy] {text}" )
+        except Exception:
+            pass  # Process died or pipe closed
 
     def _start_proxy( self, profile=None, strategy=None, debug=False ):
         """
@@ -84,8 +107,9 @@ class EmbeddedProxyMixin:
             print( "  Proxy already running, skipping launch." )
             return
 
-        profile  = profile or self.PROXY_PROFILE
-        strategy = strategy or self.PROXY_STRATEGY
+        profile           = profile or self.PROXY_PROFILE
+        strategy          = strategy or self.PROXY_STRATEGY
+        self._proxy_debug = debug
 
         # Build the command
         cmd = [
@@ -103,6 +127,10 @@ class EmbeddedProxyMixin:
 
         if src_path and src_path not in env.get( "PYTHONPATH", "" ):
             env[ "PYTHONPATH" ] = src_path + ":" + env.get( "PYTHONPATH", "" )
+
+        # Force line-buffered stdout so the reader thread gets lines in real time
+        if debug:
+            env[ "PYTHONUNBUFFERED" ] = "1"
 
         print( f"\n  Starting notification proxy (profile={profile}, strategy={strategy})..." )
 
@@ -128,6 +156,16 @@ class EmbeddedProxyMixin:
                 self._proxy_process = None
             else:
                 print( f"  Proxy started (pid={self._proxy_process.pid})" )
+
+                # Spawn reader thread for real-time log streaming
+                if debug:
+                    self._reader_thread = threading.Thread(
+                        target = self._proxy_log_reader,
+                        name   = "proxy-log-reader",
+                        daemon = True,
+                    )
+                    self._reader_thread.start()
+                    print( "  Real-time proxy log streaming enabled." )
 
         except Exception as e:
             print( f"  WARNING: Failed to start proxy: {e}" )
@@ -176,6 +214,11 @@ class EmbeddedProxyMixin:
         except ProcessLookupError:
             pass  # Already dead
 
+        # Join reader thread to ensure all output is captured
+        if self._reader_thread is not None:
+            self._reader_thread.join( timeout=5 )
+            self._reader_thread = None
+
         self._drain_proxy_output()
         self._proxy_process = None
 
@@ -184,8 +227,13 @@ class EmbeddedProxyMixin:
         Read and display any remaining proxy stdout.
 
         Ensures:
-            - All buffered output is read and printed
+            - If proxy_debug was active, skips (output already streamed)
+            - Otherwise reads all buffered output and prints stats lines
         """
+        if self._proxy_debug:
+            print( "  [proxy] (output was streamed in real-time above)" )
+            return
+
         if not self._proxy_process or not self._proxy_process.stdout:
             return
 
@@ -225,6 +273,6 @@ class EmbeddedProxyMixin:
             "--proxy-debug",
             action="store_true",
             default=False,
-            help="Enable debug output for the auto-launched proxy"
+            help="Enable debug output and real-time log streaming for the auto-launched proxy"
         )
         return parser

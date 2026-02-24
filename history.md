@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.02.24 - Session 263 | Debug Phi-4 Proxy Script Matcher + Real-Time Proxy Log Streaming
+
+#### Checkpoint 1 | 2026.02.24 | Diagnostic script + embedded proxy streaming
+
+**Accomplishments**:
+- Created `debug_proxy_script_matcher.py` — standalone diagnostic reproducing the exact Phi-4 call the notification proxy makes for CRUD delete confirmation. All 5 steps PASS: script loads, strategy creates, can_handle() accepts sender, Phi-4 matches entry 0 with 0.9 confidence, returns "yes".
+- Added real-time proxy log streaming to `EmbeddedProxyMixin` — when `--proxy-debug` is passed, a daemon thread reads proxy stdout line-by-line and prints `[proxy]`-prefixed output in real time during test execution. Previously, all proxy output was buffered and only stats were shown after process exit.
+- Key finding: Phi-4 script matching works correctly in isolation, so the CRUD DELETE_TODO "Operation cancelled" issue is upstream of the LLM matcher.
+
+**Files Created (Lupin — 1 file)**:
+- `src/scripts/debug/debug_proxy_script_matcher.py` — 5-step diagnostic for proxy script matching
+
+**Files Modified (Lupin — 1 file)**:
+- `src/tests/smoke/utilities/embedded_proxy.py` — Added threading import, `_proxy_log_reader` daemon thread, `PYTHONUNBUFFERED=1` env, thread lifecycle management in `_start_proxy`/`_stop_proxy`/`_drain_proxy_output`
+
+---
+
 ### 2026.02.24 - Session 262 | Preference Learning — Phases 0-1 Implementation + Phases 2-3 Plans
 
 #### Checkpoint 3 | 2026.02.24 18:00 | Write Phase 2 + Phase 3 implementation plan documents
