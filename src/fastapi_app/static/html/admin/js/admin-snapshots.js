@@ -883,10 +883,10 @@ class AdminSnapshotsDashboard {
             const response = await this.apiCall( `/admin/snapshots/${idHash}/similar` );
 
             // Update modal title with source question
-            if ( response.source_snapshot ) {
-                const truncatedSource = response.source_snapshot.length > 60
-                    ? response.source_snapshot.substring( 0, 60 ) + '...'
-                    : response.source_snapshot;
+            if ( response.source_question ) {
+                const truncatedSource = response.source_question.length > 60
+                    ? response.source_question.substring( 0, 60 ) + '...'
+                    : response.source_question;
                 document.getElementById( 'similarity-modal-title' ).textContent =
                     `Similar Snapshots: "${truncatedSource}"`;
             }

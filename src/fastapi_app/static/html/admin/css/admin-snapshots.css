@@ -728,9 +728,10 @@
     max-width: 1400px;
 }
 
+/* Two-column layout: Code similarity + Explanation similarity (gist column removed in 38f9704) */
 .similarity-columns {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 20px;
 }
 
@@ -883,12 +884,6 @@
 }
 
 /* Responsive: Stack columns on smaller screens */
-@media ( max-width: 1200px ) {
-    .similarity-columns {
-        grid-template-columns: 1fr 1fr;
-    }
-}
-
 @media ( max-width: 900px ) {
     .similarity-columns {
         grid-template-columns: 1fr;
