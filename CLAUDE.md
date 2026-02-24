@@ -112,6 +112,7 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 - **API Reference**: `src/docs/notification-api.md` (comprehensive one-stop reference)
 - **WebSocket Events**: `src/docs/websocket-events.md` (event catalog)
 - **Agentic Voice Integration**: `src/workflow/agentic-voice-workflow.md`
+- **Decision Proxy Admin Guide**: `src/docs/proxy-admin-guide.md` (Trust Dashboard + Ratification how-to)
 - **Interactive Proxy Testing**: `src/docs/automated-interactive-testing.md` (proxy auto-answer testing guide)
 - **R&D Planning Docs**: `src/rnd/2025.10.15-sse-notifications/` (historical)
 

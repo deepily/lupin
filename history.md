@@ -1,5 +1,26 @@
 # Lupin Project History
 
+### 2026.02.23 - Session 258 | Decision Proxy Preference Learning — R&D Analysis
+
+#### R&D Analysis | 2026-02-23 | Research document, no implementation
+
+**Accomplishments**:
+- Created comprehensive R&D analysis document auditing the decision proxy's learning mechanism
+- Traced 7-stage feedback loop end-to-end with exact file paths and line numbers across 8 source files
+- Identified core gap: system learns *whether to act* (trust level) but not *which answers users prefer* (preference learning)
+- Documented 4 high-priority upgrade paths: Bayesian Beta-Bernoulli trust (~1 day), LanceDB embedding-based decision recall (~2 days), In-Context RL prompt augmentation (~2-3 days), Thompson Sampling for exploration-exploitation gating (~3-5 days)
+- Evaluated and rejected 4 techniques (RLHF, DPO, IDA, CAI) with rationale — all require fine-tuning, incompatible with API-based LLMs
+- Designed phased roadmap with Mermaid diagram: A+B parallel → C → D, critical path ~4-5 days
+
+**Files Created**:
+- `src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.23-decision-proxy-preference-learning-analysis-take-I.md`
+
+**Files Modified**:
+- `src/rnd/README.md` (new entry for analysis document)
+- `history.md` (this entry)
+
+---
+
 ### 2026.02.23 - Session 257 | INI Config Key Naming Convention — Design Document
 
 #### Design Document | 2026-02-23 | Planning only, no implementation

@@ -4046,3 +4046,4 @@ if __name__ == "__main__":
 | [`src/tests/smoke/README.md`](../tests/smoke/README.md) | Quick-start guide for all smoke tests |
 | [`src/tests/README.md`](../tests/README.md) | Lupin 5-tier testing strategy overview |
 | [`src/tests/AUTH-TESTING-GUIDE.md`](../tests/AUTH-TESTING-GUIDE.md) | Test credential management patterns |
+| [`src/docs/proxy-admin-guide.md`](proxy-admin-guide.md) | Decision Proxy admin how-to — Trust Dashboard, Ratification page, trust feedback loop |
