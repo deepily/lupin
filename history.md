@@ -1,5 +1,78 @@
 # Lupin Project History
 
+### 2026.02.24 - Session 260 | Voice Module Refactoring — 5-Phase Deduplication
+
+#### Refactoring | 2026-02-24 | Implementation complete, 1538 unit tests pass
+
+**Accomplishments**:
+- Implemented 5-phase voice/notification module refactoring to eliminate ~1,548 lines of copy-paste duplication across 16 files
+- Phase 1: Created `sender_id.py` (shared project detection + sender_id construction) and `feedback_analysis.py` (shared approval/rejection signals), replacing 5 and 3 copies respectively
+- Phase 2: Created `AgentNotificationDispatcher` class encapsulating shared async notify/confirm/feedback/choices pattern, reducing 4 cosa_interface files from ~1,600 to ~625 lines total
+- Phase 3: Removed `inspect.signature()` hacks from core voice_io.py, reduced DR/PG/SWE voice_io wrappers to thin re-export modules (~100 lines each, down from 270-452)
+- Phase 4: Created shared `sync_notify.py` helper for proxy agents, reduced 2 proxy voice_io files
+- Phase 5: Updated MCP server to use shared `detect_project()` and `build_sender_id()`, moved `normalize_abstract()` to shared `notification_utils.py`
+- Fixed 4 failing unit tests: updated mock targets from old internal paths to dispatcher-level mocks, added missing `job_id`/`queue_name`/`progress_group_id` params to PG cosa_interface
+- Final result: 1538 passed, 0 failed (up from 1534/4 pre-fix)
+
+**Files Created (CoSA)**:
+- `src/cosa/agents/utils/sender_id.py` — shared project detection + sender_id builder
+- `src/cosa/agents/utils/feedback_analysis.py` — shared approval/rejection analysis
+- `src/cosa/agents/utils/agent_notification_dispatcher.py` — shared async notification dispatcher class
+- `src/cosa/agents/utils/sync_notify.py` — shared sync REST notify helper for proxy agents
+
+**Files Modified (CoSA — 12 files, +328/-1,876 lines)**:
+- `src/cosa/agents/deep_research/cosa_interface.py` — dispatcher delegation
+- `src/cosa/agents/podcast_generator/cosa_interface.py` — dispatcher delegation + added missing params
+- `src/cosa/agents/swe_team/cosa_interface.py` — dispatcher delegation (role-aware)
+- `src/cosa/agents/claude_code/cosa_interface.py` — dispatcher delegation
+- `src/cosa/agents/deep_research/voice_io.py` — thin re-export wrapper
+- `src/cosa/agents/podcast_generator/voice_io.py` — thin re-export wrapper
+- `src/cosa/agents/swe_team/voice_io.py` — thin re-export wrapper
+- `src/cosa/agents/decision_proxy/voice_io.py` — shared sync_notify
+- `src/cosa/agents/notification_proxy/voice_io.py` — shared sync_notify
+- `src/cosa/agents/utils/voice_io.py` — removed inspect.signature() hacks
+- `src/cosa/agents/utils/__init__.py` — new module imports
+- `src/cosa/utils/notification_utils.py` — added normalize_abstract()
+
+**Files Modified (Lupin — 2 files)**:
+- `src/lupin_mcp/cosa_voice_mcp.py` — delegated to shared sender_id + normalize_abstract
+- `src/tests/unit/test_progress_group_passthrough.py` — updated 4 mock targets for dispatcher architecture
+
+**Reminder**: CoSA changes (16 files) must be committed separately in CoSA context.
+
+---
+
+### 2026.02.24 - Session 259 | Decision Proxy Preference Learning — Take III Synthesis
+
+#### Checkpoint | 2026.02.24 13:00 | Take III synthesis updates: Build vs Import, key rename, embedding fix
+
+**Accomplishments**:
+- Added Section 4.7 (Build vs Import Analysis): 12 libraries evaluated, ~750-900 lines custom code, 0-1 new packages
+- Renamed all `trust proxy` INI keys to `swe team trust proxy` (21 occurrences) — future-proofs for non-SWE proxy domains
+- Removed embedding model/dimension config keys (existing `EmbeddingProvider` at 768-dim handles this), updated key count from ~21 to ~19
+- Updated Phase 0 work items with effort reduction note (embedding infrastructure already production-ready)
+- Updated TODO.md with Take III synthesis link
+
+**Files**: `2026.02.24-decision-proxy-preference-learning-analysis-take-III-synthesis.md`, TODO.md
+**Commit**: 5485bcd
+
+#### R&D Synthesis | 2026-02-24 | Research document, no implementation
+
+**Accomplishments**:
+- Created unified Take III synthesis document merging Take I (codebase-grounded gap analysis, 4 upgrade paths, exact file paths) and Take II (algorithm-focused research, 3 contenders, 18 citations, cold-start phases)
+- Key synthesis decisions: CBR replaces ICRL as primary preference backbone (works from day zero), GP/BALD added for active learning (absent from Take I), observation-count phases replace dependency-only phases, Beta-Bernoulli and BLR made sequential (not competing)
+- Produced 10-section document: audit, foundations, gap analysis, 6-component algorithm selection, rejected techniques, 4-phase cold-start deployment, file inventory, 21 config keys, 32 consolidated references, 6 recommendations
+- Reframed deferral as information-gathering mechanism (Take II's key conceptual insight)
+
+**Files Created**:
+- `src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.24-decision-proxy-preference-learning-analysis-take-III-synthesis.md`
+
+**Files Modified**:
+- `src/rnd/README.md` (new entry for Take III synthesis + Take II entry added)
+- `history.md` (this entry)
+
+---
+
 ### 2026.02.23 - Session 258 | Decision Proxy Preference Learning — R&D Analysis
 
 #### R&D Analysis | 2026-02-23 | Research document, no implementation

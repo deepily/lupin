@@ -1,8 +1,8 @@
 # TODO
 
-Last updated: 2026-02-23 (Session 256)
+Last updated: 2026-02-24 (Session 260)
 
-## v0.1.6 — HIGH PRIORITY
+## v0.1.6 — FUTURE DEVELOPMENT
 
 ### INI Config Key Naming Convention — Standardize on Spaces (Session 256)
 
@@ -46,6 +46,16 @@ Last updated: 2026-02-23 (Session 256)
 
 ---
 
+## v0.1.5 — HIGH PRIORITY
+
+### SWE Team Proxy: Preference Learning (Session 258)
+
+- [ ] **[LUPIN] Expand SWE Team Proxy Agent to incorporate proxy layer preference learning** — Teach the decision proxy to learn user preferences over time, reducing manual ratification and improving autonomous decision accuracy.
+  - **R&D Synthesis**: [`Take III — Synthesis`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.24-decision-proxy-preference-learning-analysis-take-III-synthesis.md) (Sessions 257-259: gap analysis + algorithms + build/import + phased deployment)
+  - **R&D Analysis**: [`Take II — Algorithms`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.23-decision-proxy-preference-learning-analysis-take-II.md) | [`Take I — Gap Analysis`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.23-decision-proxy-preference-learning-analysis-take-I.md)
+
+---
+
 ## Pending
 
 ### SWE Team Approach D: Post-Implementation Verification (MEDIUM)
@@ -82,12 +92,11 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 - [ ] **path-management** (MEDIUM) - `cu.get_project_root()` vs bootstrap (~150 lines)
 - [ ] **code-style-preferences** (LOW) - Spacing, alignment, getattr prohibition (~100 lines)
 
-### Voice Module Audit (MEDIUM)
+### Voice Module Audit (MEDIUM) - DONE
 
-- [ ] **Review cosa_interface.py vs voice_io.py** - Audit for overlap, redundancy, and execution flow clarity
-  - **Files**: `src/cosa/agents/claude_code/cosa_interface.py`, `src/cosa/agents/claude_code/voice_io.py`
-  - **Goal**: Understand and document the relationship between these modules
-  - **Deliverable**: Refactor if redundancy found, or document if distinct purposes
+- [x] **Review cosa_interface.py vs voice_io.py** — Session 260: Full 5-phase refactoring. Created shared `AgentNotificationDispatcher`, `sender_id.py`, `feedback_analysis.py`, `sync_notify.py`. Eliminated ~1,548 lines of duplication across 16 files. 1538 unit tests pass.
+  - **Plan**: `~/.claude/plans/gleaming-fluttering-panda.md`
+  - **Reminder**: CoSA changes (16 files) must be committed separately in CoSA context
 
 ### Smoke Test Coverage Audit (MEDIUM) ✅ DONE
 
