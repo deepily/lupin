@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.24 - Voice Module Deduplication Plan (Implemented)
+- **Plan**: [2026.02.24-voice-module-deduplication-plan.md](2026.02.24-voice-module-deduplication-plan.md) - **IMPLEMENTED (Session 260)** - 5-phase refactoring plan for voice/notification module deduplication. Created shared `AgentNotificationDispatcher`, `sender_id.py`, `feedback_analysis.py`, `sync_notify.py`. Eliminated ~1,548 lines of copy-paste duplication across 16 files (12 CoSA + 2 Lupin + 4 new). All 1538 unit tests pass.
+
 ### 2026.02.23 - INI Config Key Naming Convention — Design Document
 - **Design Document**: [2026.02.23-ini-config-key-naming-convention.md](2026.02.23-ini-config-key-naming-convention.md) - **📋 PLANNED (v0.1.6)** - Comprehensive design document for standardizing all ~98 underscore-separated INI config keys to space-separated format. Current state: 44% underscore / 56% space across ~195 keys. Migration affects ~80 files (18 Lupin + 62 CoSA). 6-phase plan: backward-compat shim in ConfigurationManager, INI file renames, Lupin code updates, CoSA code updates (separate repo), shim removal + guardrail test, final regression. Includes complete key inventory with proposed names, collision-safe longest-match-first replacement strategy, and rollback plan. Estimated ~2 weeks implementation.
 

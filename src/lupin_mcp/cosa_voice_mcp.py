@@ -56,24 +56,10 @@ from cosa.utils.notification_utils import (
     format_questions_for_tts,
     convert_questions_for_api,
     format_open_ended_batch_for_tts,
-    convert_open_ended_batch_for_api
+    convert_open_ended_batch_for_api,
+    normalize_abstract as _normalize_abstract
 )
-
-
-def _normalize_abstract( abstract: Optional[ str ] ) -> Optional[ str ]:
-    """
-    Convert literal \\n to actual newlines in abstract text.
-
-    Requires:
-        - abstract is None or a string
-
-    Ensures:
-        - returns None if input is None
-        - returns string with literal \\n converted to newlines
-    """
-    if abstract is None:
-        return None
-    return abstract.replace( '\\n', '\n' )
+from cosa.agents.utils.sender_id import detect_project as _detect_project_shared
 
 
 # ============================================================================
@@ -105,35 +91,13 @@ def _get_server_url() -> str:
 def _detect_project_from_cwd() -> Optional[ str ]:
     """Attempt to detect project name from current working directory.
 
-    Requires:
-        - Current working directory is accessible
+    Delegates to the shared detect_project() utility from
+    cosa.agents.utils.sender_id for consistent detection logic.
 
-    Ensures:
-        - Returns lowercase project name if detected
-        - Returns None if no known project pattern found
-
-    Known project patterns (checked in order):
-        - cosa → "cosa" (checked first - may be submodule of lupin)
-        - lupin → "lupin"
-        - planning-is-prompting → "plan"
+    Returns None only if detection fails entirely (exception).
     """
     try:
-        cwd = os.getcwd().lower()
-
-        # CoSA detection (check FIRST - may be submodule of lupin)
-        if "/cosa" in cwd:
-            return "cosa"
-
-        # Lupin project detection (only if not in cosa subdirectory)
-        if "/lupin" in cwd:
-            return "lupin"
-
-        # Planning-is-Prompting project detection
-        if "planning-is-prompting" in cwd:
-            return "plan"
-
-        return None
-
+        return _detect_project_shared()
     except Exception as e:
         logger.debug( f"Could not detect project from cwd: {e}" )
         return None
@@ -184,22 +148,14 @@ def _get_sender_id( project: str, session_id: str = None ) -> str:
     """
     Generate sender_id with optional session identifier.
 
-    Requires:
-        - project is a lowercase string
-        - session_id is an 8-char hex string or None
-
-    Ensures:
-        - Returns claude.code@{project}.deepily.ai#{session_id} if session_id provided
-        - Returns claude.code@{project}.deepily.ai if session_id is None (backward compatible)
+    Delegates to the shared build_sender_id() utility.
 
     Examples:
         _get_sender_id( "lupin" ) -> "claude.code@lupin.deepily.ai"
         _get_sender_id( "lupin", "a1b2c3d4" ) -> "claude.code@lupin.deepily.ai#a1b2c3d4"
     """
-    base = f"claude.code@{project}.deepily.ai"
-    if session_id:
-        return f"{base}#{session_id}"
-    return base
+    from cosa.agents.utils.sender_id import build_sender_id
+    return build_sender_id( "claude.code", project=project, suffix=session_id )
 
 
 # ============================================================================

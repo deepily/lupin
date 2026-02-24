@@ -58,9 +58,9 @@ class TestPodcastGeneratorVoiceIoPassthrough:
 
     @pytest.mark.asyncio
     async def test_progress_group_id_passed_to_core( self ):
-        """progress_group_id reaches the core voice_io.notify() call."""
-        with patch( "cosa.agents.podcast_generator.voice_io._core_voice_io" ) as mock_core:
-            mock_core.notify = AsyncMock()
+        """progress_group_id reaches the AsyncNotificationRequest via dispatcher."""
+        with patch( "cosa.agents.utils.voice_io._voice_available", True ), \
+             patch( "cosa.agents.utils.agent_notification_dispatcher._notify_user_async" ) as mock_send:
 
             from cosa.agents.podcast_generator import voice_io
             await voice_io.notify(
@@ -69,22 +69,21 @@ class TestPodcastGeneratorVoiceIoPassthrough:
                 progress_group_id = "pg-aabbccdd",
             )
 
-            mock_core.notify.assert_awaited_once()
-            args = mock_core.notify.call_args
-            # progress_group_id is the 7th positional arg
-            assert args[ 0 ][ 6 ] == "pg-aabbccdd"
+            mock_send.assert_called_once()
+            request = mock_send.call_args[ 0 ][ 0 ]
+            assert request.progress_group_id == "pg-aabbccdd"
 
     @pytest.mark.asyncio
     async def test_progress_group_id_none_by_default( self ):
         """progress_group_id defaults to None when not provided."""
-        with patch( "cosa.agents.podcast_generator.voice_io._core_voice_io" ) as mock_core:
-            mock_core.notify = AsyncMock()
+        with patch( "cosa.agents.utils.voice_io._voice_available", True ), \
+             patch( "cosa.agents.utils.agent_notification_dispatcher._notify_user_async" ) as mock_send:
 
             from cosa.agents.podcast_generator import voice_io
             await voice_io.notify( "No group" )
 
-            args = mock_core.notify.call_args
-            assert args[ 0 ][ 6 ] is None
+            request = mock_send.call_args[ 0 ][ 0 ]
+            assert request.progress_group_id is None
 
 
 # =============================================================================
@@ -97,7 +96,7 @@ class TestSweTeamCosaInterfacePassthrough:
     @pytest.mark.asyncio
     async def test_progress_group_id_in_request( self ):
         """progress_group_id is set on the AsyncNotificationRequest."""
-        with patch( "cosa.agents.swe_team.cosa_interface._notify_user_async" ) as mock_send, \
+        with patch( "cosa.agents.utils.agent_notification_dispatcher._notify_user_async" ) as mock_send, \
              patch( "cosa.agents.swe_team.cosa_interface.SESSION_ID", "test-session" ), \
              patch( "cosa.agents.swe_team.cosa_interface.SESSION_NAME", "test session" ):
 
@@ -115,7 +114,7 @@ class TestSweTeamCosaInterfacePassthrough:
     @pytest.mark.asyncio
     async def test_progress_group_id_none_by_default( self ):
         """progress_group_id defaults to None when not passed."""
-        with patch( "cosa.agents.swe_team.cosa_interface._notify_user_async" ) as mock_send, \
+        with patch( "cosa.agents.utils.agent_notification_dispatcher._notify_user_async" ) as mock_send, \
              patch( "cosa.agents.swe_team.cosa_interface.SESSION_ID", "test-session" ), \
              patch( "cosa.agents.swe_team.cosa_interface.SESSION_NAME", "test session" ):
 
