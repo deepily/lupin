@@ -1,5 +1,48 @@
 # Lupin Project History
 
+### 2026.02.24 - Session 262 | Preference Learning — Phase 0 + Phase 1
+
+#### Checkpoint | 2026.02.24 16:30 | Implement embedding infrastructure + CBR + Beta-Bernoulli trust
+
+**Accomplishments**:
+- Step 0: Renamed 11 config keys from `trust proxy` to `swe team trust proxy` prefix (4 files)
+- Step 1: Added 12 new INI keys for Phase 0 (embedding/vector search) and Phase 1 (Beta-Bernoulli + CBR)
+- Step 2: Created `ProxyDecisionEmbeddings` LanceDB store — 768-dim vector index for proxy decisions
+- Step 3: Wired embeddings into `DecisionResponder` — best-effort LanceDB writes after PostgreSQL persist
+- Step 4: Phase 0 tests — 10 unit tests (round-trip, similarity ordering, filtering, error resilience)
+- Step 5: Added Beta-Bernoulli trust model to `TrustTracker` — dual-model dispatch (count vs beta), 95% credible interval lower bound, min samples gates
+- Step 6: Created `CBRDecisionStore` — retrieve + majority vote + confidence scoring
+- Step 7: Wired CBR into `EngineeringStrategy` in shadow mode — predict but don't override heuristic
+- Phase 1 tests: 14 Beta-Bernoulli tests + 8 CBR tests
+- Full regression: 1592 unit tests pass, 0 failures
+
+**Files Created (CoSA — 2 files)**:
+- `src/cosa/agents/decision_proxy/proxy_decision_embeddings.py` — LanceDB embedding store
+- `src/cosa/agents/decision_proxy/cbr_decision_store.py` — CBR engine
+
+**Files Modified (CoSA — 4 files)**:
+- `src/cosa/agents/decision_proxy/config.py` — renamed keys + 12 new defaults + factory entries
+- `src/cosa/agents/decision_proxy/responder.py` — embedding_provider, lazy store init, _persist_embedding()
+- `src/cosa/agents/decision_proxy/trust_tracker.py` — Beta-Bernoulli _level_beta(), dual-model dispatch
+- `src/cosa/agents/swe_team/proxy/engineering_strategy.py` — CBR shadow mode in decide() + evaluate()
+
+**Files Modified (Lupin — 5 files)**:
+- `src/conf/lupin-app.ini` — renamed 11 keys + added 12 new keys
+- `src/conf/lupin-app-splainer.ini` — renamed 11 keys + added 12 new explanations
+- `src/tests/unit/test_swe_team_config.py` — updated expected keys (15→27)
+- `src/tests/unit/test_trust_tracker.py` — updated to_dict keys for trust_model field
+
+**Files Created (Lupin — 3 test files)**:
+- `src/tests/unit/test_proxy_decision_embeddings.py` — 10 Phase 0 tests
+- `src/tests/unit/test_trust_tracker_beta.py` — 14 Beta-Bernoulli tests
+- `src/tests/unit/test_cbr_decision_store.py` — 8 CBR tests
+
+**Commit**: aa0bd3b
+
+**Reminder**: CoSA changes (6 files) must be committed separately in CoSA context.
+
+---
+
 ### 2026.02.24 - Session 261 | Jettison Gist Embeddings — Dead Code Removal
 
 #### Dead Code Removal | 2026-02-24 | 5-phase implementation, 1538 unit tests pass

@@ -270,15 +270,15 @@ class TestCategoryTrustDecay:
 class TestCategoryTrustSerialization:
     """Tests for to_dict serialization completeness."""
 
-    def test_to_dict_all_eight_keys( self ):
-        """to_dict should return exactly 8 keys."""
+    def test_to_dict_all_keys( self ):
+        """to_dict should return exactly 9 keys for count model."""
         from cosa.agents.decision_proxy.trust_tracker import CategoryTrust
 
         cat = CategoryTrust( "testing", cap_level=5 )
         cat.record_decision( success=True )
         d = cat.to_dict()
         expected_keys = {
-            "category_name", "cap_level", "level", "total_decisions",
+            "category_name", "cap_level", "trust_model", "level", "total_decisions",
             "total_successes", "total_rejections", "success_rate", "window_size"
         }
         assert set( d.keys() ) == expected_keys
@@ -335,7 +335,7 @@ class TestTrustTrackerDeep:
         tracker.demote_category( "nonexistent", levels=2 )
 
     def test_get_stats_all_keys_per_category( self ):
-        """get_stats should return the full 8-key dict per category."""
+        """get_stats should return the full 9-key dict per category."""
         from cosa.agents.decision_proxy.trust_tracker import TrustTracker
 
         tracker = TrustTracker()
@@ -343,7 +343,7 @@ class TestTrustTrackerDeep:
         tracker.record_decision( "testing", success=True )
         stats = tracker.get_stats()
         expected_keys = {
-            "category_name", "cap_level", "level", "total_decisions",
+            "category_name", "cap_level", "trust_model", "level", "total_decisions",
             "total_successes", "total_rejections", "success_rate", "window_size"
         }
         assert set( stats[ "testing" ].keys() ) == expected_keys
