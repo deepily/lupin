@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.02.25 - Session 270 | Feature: Add Data Origin Filter to Pending Ratification Page
+
+**Accomplishments**:
+- Added `data_origin` field to the Decision Proxy pending decisions API response (`get_pending_decisions()`)
+- Added "All Sources" dropdown as the first filter on the proxy ratification page — supports Organic (Live), Synthetic (Seed), and Synthetic (Generated) filtering
+- Wired up client-side filter logic: state management, `applyFilters()` condition, event listener, `clearFilters()` reset
+- Added "Source" row to the decision detail modal with human-readable labels via `formatDataOrigin()` helper
+- Note: Plan mentioned a copy-paste bug on line 265 (`currentFilters.trustLevel` vs `currentFilters.action`) but the current code was already correct — no fix needed
+
+**Files Modified (CoSA — 1 file)**:
+- `src/cosa/rest/routers/decision_proxy.py` — Added `data_origin` to pending decisions response dict
+
+**Files Modified (Lupin — 2 files)**:
+- `src/fastapi_app/static/html/auth/admin/proxy-ratify.html` — Added Data Origin `<select>` dropdown in filter bar
+- `src/fastapi_app/static/html/auth/admin/js/proxy-ratify.js` — Filter state, condition, event listener, clearFilters, detail modal Source row, `formatDataOrigin()` helper
+
+---
+
 ### 2026.02.25 - Session 269 | Feature: INTERACTIVE Dry-Run Support for ClaudeCodeJob
 
 #### Checkpoint | 2026.02.25 | UNBOUNDED/INTERACTIVE dry-run + 6-scenario smoke test

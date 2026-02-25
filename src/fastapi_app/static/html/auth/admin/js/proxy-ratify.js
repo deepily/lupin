@@ -16,6 +16,7 @@ let selectedIds       = new Set();
 let currentDetailId   = null;
 let userEmail         = "";
 let currentFilters    = {
+    dataOrigin : "",
     category   : "",
     trustLevel : "",
     action     : ""
@@ -260,6 +261,7 @@ function getRatificationBadge( state ) {
  */
 function applyFilters() {
     filteredDecisions = pendingDecisions.filter( d => {
+        if ( currentFilters.dataOrigin && d.data_origin !== currentFilters.dataOrigin ) return false;
         if ( currentFilters.category && d.category !== currentFilters.category ) return false;
         if ( currentFilters.trustLevel && String( d.trust_level ) !== currentFilters.trustLevel ) return false;
         if ( currentFilters.action && d.action !== currentFilters.action ) return false;
@@ -276,15 +278,21 @@ function applyFilters() {
  * Clear all filters and reload.
  */
 function clearFilters() {
+    document.getElementById( "filter-data-origin" ).value = "";
     document.getElementById( "filter-category" ).value    = "";
     document.getElementById( "filter-trust-level" ).value = "";
     document.getElementById( "filter-action" ).value      = "";
 
-    currentFilters = { category: "", trustLevel: "", action: "" };
+    currentFilters = { dataOrigin: "", category: "", trustLevel: "", action: "" };
     applyFilters();
 }
 
 // Filter event listeners
+document.getElementById( "filter-data-origin" )?.addEventListener( "change", function( e ) {
+    currentFilters.dataOrigin = e.target.value;
+    applyFilters();
+});
+
 document.getElementById( "filter-category" )?.addEventListener( "change", function( e ) {
     currentFilters.category = e.target.value;
     applyFilters();
@@ -578,6 +586,10 @@ function showDecisionDetail( id ) {
             <span class="detail-value">${escapeHtml( decision.domain || "swe" )}</span>
         </div>
         <div class="detail-row">
+            <span class="detail-label">Source:</span>
+            <span class="detail-value">${escapeHtml( formatDataOrigin( decision.data_origin ) )}</span>
+        </div>
+        <div class="detail-row">
             <span class="detail-label">Action:</span>
             <span class="detail-value">${getActionBadge( decision.action )}</span>
         </div>
@@ -745,6 +757,18 @@ function escapeHtml( text ) {
     const div = document.createElement( "div" );
     div.textContent = String( text );
     return div.innerHTML;
+}
+
+/**
+ * Format data_origin value to a human-readable label.
+ */
+function formatDataOrigin( origin ) {
+    const labels = {
+        organic              : "Organic (Live)",
+        synthetic_seed       : "Synthetic (Seed)",
+        synthetic_generated  : "Synthetic (Generated)"
+    };
+    return labels[ origin ] || origin || "Unknown";
 }
 
 /**
