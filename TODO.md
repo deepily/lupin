@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-24 (Session 266)
+Last updated: 2026-02-24 (Session 267)
 
 ## v0.1.6 — FUTURE DEVELOPMENT
 
@@ -81,7 +81,7 @@ Last updated: 2026-02-24 (Session 266)
   - [x] Bug fix: TTS focus mode stuck — staleness check in restoreTTSQueueState + exit in moveToRegularNotifications (Session 164)
   - [x] **Bug fix: delete_item deletes all records** — Session 189: dedup guard, multi-delete guard, infra column rejection. 6 new tests (816 total). Commit fd21f0c.
   - [x] Part 3: Curl smoke tests → **SUPERSEDED** by `test_crud_live_pipeline.py` (8-scenario automated test, Session 189)
-  - [ ] **Run CRUD live pipeline test** — `test_crud_live_pipeline.py --mode direct` with notification proxy (`--profile crud`). **Testing guide**: `src/rnd/2026.02.11-crud-live-pipeline-testing-guide.md`. **RESUME NEXT SESSION.**
+  - [ ] **Run CRUD live pipeline test** — `test_crud_live_pipeline.py --mode direct --auto-proxy` with notification proxy. **Testing guide**: `src/rnd/2026.02.11-crud-live-pipeline-testing-guide.md`. **UNBLOCKED**: Session 267 fixed credential mismatch (CREDENTIAL_ENV_PREFIX unified). DELETE_TODO should now work with `--auto-proxy`.
   - [ ] Part 2: Notifications UI tests (8 scenarios, live server)
 - [ ] **[LUPIN] Phase 4: End-to-End Voice Workflows + Polish** - PENDING (blocked by Phase 3 ✅)
 
@@ -131,6 +131,7 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 
 ## Completed (Recent)
 
+- [x] **SWE Team Proxy: Preference Learning** - Sessions 258-266: Phases 0-3 complete. Embedding infrastructure, CBR + Beta-Bernoulli trust, seed data (50 decisions), BLR + Thompson Sampling, Conformal Guarantees + ICRL. 1645 total tests pass.
 - [x] **Skill: notification-patterns** - cosa-voice MCP usage patterns skill created (~250 lines)
 - [x] **Gist embeddings: jettisoned** - Dead embedding code removed, ~30% embedding cost savings per snapshot (2 of 7 embeddings). Removed `question_gist_embedding`, `solution_gist_embedding` fields and unused search methods.
 - [x] **Voice Module Audit** - Session 260: Full 5-phase refactoring of `cosa_interface.py` vs `voice_io.py`. Created shared `AgentNotificationDispatcher`, `sender_id.py`, `feedback_analysis.py`, `sync_notify.py`. Eliminated ~1,548 lines of duplication across 16 files. 1538 unit tests pass.
