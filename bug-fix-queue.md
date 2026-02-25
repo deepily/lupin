@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-23T12:00:00
+**Last Updated**: 2026-02-24T00:00:00
 
 ---
 
@@ -24,8 +24,9 @@
 | 4949b964 | 2026-02-02T18:00:00 | 2026-02-02T23:05:00 | closed |
 | 07b80074 | 2026-02-16T10:00:00 | 2026-02-16T10:00:00 | stale |
 | a118cc5e | 2026-02-19T00:00:00 | 2026-02-20T00:00:00 | closed |
-| ff1fffd0 | 2026-02-21T00:00:00 | 2026-02-21T00:00:00 | active |
+| ff1fffd0 | 2026-02-21T00:00:00 | 2026-02-21T00:00:00 | stale |
 | e7bfdd1d | 2026-02-23T12:00:00 | 2026-02-23T21:20:00 | closed |
+| e10e0f35 | 2026-02-24T00:00:00 | 2026-02-24T20:00:00 | active |
 
 ---
 
@@ -46,6 +47,11 @@
 ---
 
 ### Completed
+
+- [x] **QueryLogTable gist embedding dimension mismatch (ArrowInvalid)** → commit: 922f503 (docs), CoSA pending | By: e10e0f35
+  - **Root Cause**: Schema kept 768-dim `embedding_gist` after gist embeddings jettisoned (38f9704)
+  - **Fix**: Removed `embedding_gist`, `cache_hit_gist` from schema, row data, analytics, smoke test
+  - **File (CoSA)**: `src/cosa/memory/query_log_table.py`
 
 - [x] **Auto-focus confirm button in delete modal for keyboard-driven workflow** → commit: debb307 | By: e7bfdd1d
 

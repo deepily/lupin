@@ -1,5 +1,33 @@
 # Lupin Project History
 
+### 2026.02.24 - Session 265 | Seed Proxy Decisions + CPU Embedding Fallback
+
+#### Checkpoint 1 | 2026.02.24 | Seed 50 decisions, ratify, verify CBR
+
+**Accomplishments**:
+- Seeded 50 proxy decisions into PostgreSQL + LanceDB across 6 engineering categories (deployment, testing, deps, architecture, destructive, general) — 25 approve, 25 reject
+- Batch-ratified all 50 decisions using suggested approve/reject values
+- Verified end-to-end: PG counts correct (50 ratified, 0 pending), LanceDB similarity search returns 3 matches at 80.7% top score, CBR prediction returns `auto_approved` with confidence 0.646
+- Added CUDA availability fallback to `ProseEmbeddingEngine` and `CodeEmbeddingEngine` — when config requests `cuda:0` but CUDA not available (e.g., `CUDA_VISIBLE_DEVICES=""`), engine falls back to CPU with warning message
+- Semantic pair cosine similarity: 0.68 (below aspirational 0.80 target but CBR engine functional)
+
+**Files Modified (CoSA — 1 file)**:
+- `src/cosa/memory/local_embedding_engine.py` — Added CUDA-not-available fallback to CPU for both CodeEmbeddingEngine and ProseEmbeddingEngine init, guarded vram_report calls behind device check
+
+---
+
+### 2026.02.24 - Session 264 | Bug Fix: QueryLogTable Gist Embedding Dimension Mismatch
+
+#### Fix 1: Remove gist embedding fields from QueryLogTable
+- **Source**: ad-hoc (ArrowInvalid error after commit 38f9704 "Jettison gist embeddings")
+- **Root Cause**: `query_log_table.py` schema still defined 768-dim `embedding_gist` vector, but pipeline no longer produces gist embeddings. `embeddings.get('gist', [])` returns 0-dim list, LanceDB rejects insert.
+- **Fix**: Removed `embedding_gist` and `cache_hit_gist` from schema, row data, analytics, smoke test, and docstrings. Retained `query_gist` text field (still populated by normalizer).
+- **Files (CoSA)**: `src/cosa/memory/query_log_table.py`
+- **Test**: Smoke PASS (`python -m cosa.memory.query_log_table`), Unit PASS (1613/1613)
+- **Commit**: 922f503 (Lupin docs), CoSA pending
+
+---
+
 ### 2026.02.24 - Session 262 (cont.) | Phase 2 Implementation — BLR + Thompson Sampling
 
 #### Checkpoint 4 | 2026.02.24 20:30 | Implement Phase 2: Thompson Sampling + BLR
