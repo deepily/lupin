@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-24 (Session 262, Checkpoint 4)
+Last updated: 2026-02-24 (Session 265)
 
 ## v0.1.6 — FUTURE DEVELOPMENT
 
@@ -56,9 +56,10 @@ Last updated: 2026-02-24 (Session 262, Checkpoint 4)
 
 ### SWE Team Proxy: Preference Learning (Session 258)
 
-- [ ] **[LUPIN] Expand SWE Team Proxy Agent to incorporate proxy layer preference learning** — Teach the decision proxy to learn user preferences over time, reducing manual ratification and improving autonomous decision accuracy. **Status**: Phase 0+1 implemented (Session 262), Phase 2+3 plans written.
+- [ ] **[LUPIN] Expand SWE Team Proxy Agent to incorporate proxy layer preference learning** — Teach the decision proxy to learn user preferences over time, reducing manual ratification and improving autonomous decision accuracy. **Status**: Phase 0+1 implemented (Session 262), seed data bootstrapped (Session 265), Phase 2+3 plans written.
   - **R&D Synthesis**: [`Take III — Synthesis`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.24-decision-proxy-preference-learning-analysis-take-III-synthesis.md) (Sessions 257-259)
   - [x] **Phase 0+1**: Embedding infrastructure + CBR + Beta-Bernoulli trust — Session 262, commit `bcd5e4e`+`aa0bd3b`
+  - [x] **Seed data**: 50 decisions seeded + ratified (25 approve, 25 reject) across 6 categories — Session 265. CBR returns `auto_approved` with confidence 0.646.
   - [x] **Phase 2**: BLR + Thompson Sampling — Session 262 Checkpoint 4. Thompson Sampling gate, BayesianLogisticRegression (160 lines), TrustTracker BLR integration, 21 new tests, 1613 total pass.
   - [ ] **Phase 3**: Conformal Guarantees + optional ICRL (~3-5 days, 100+ observations) — [`Plan`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.24-phase-3-conformal-icrl-plan.md)
 

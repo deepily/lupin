@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.24 - Preference Learning Seed Data Generator
+- **Plan + Script**: [2026.02.23-trust-proxy-preference-learning/2026.02.24-preference-learning-seed-data-plan.md](2026.02.23-trust-proxy-preference-learning/2026.02.24-preference-learning-seed-data-plan.md) - **IMPLEMENTED** - Self-contained bootstrap script (`src/scripts/seed_proxy_decisions.py`) that populates 50 realistic decision scenarios across all 6 engineering categories into PostgreSQL + LanceDB, then batch-ratifies them to create training signal for the CBR engine. Includes CLI modes: `--dry-run`, `--ratify`, `--verify`, `--clean`, `--category`. Designed for reuse across all 4 preference learning phases (0-3). Required step for bootstrapping the preference learning system in any new environment.
+
 ### 2026.02.24 - Phase 2 Implementation Plan: BLR + Thompson Sampling
 - **Implementation Plan**: [2026.02.23-trust-proxy-preference-learning/2026.02.24-phase-2-blr-thompson-sampling-plan.md](2026.02.23-trust-proxy-preference-learning/2026.02.24-phase-2-blr-thompson-sampling-plan.md) - **PLANNED** - Phase 2 of the preference learning system (30-100 observations, ~3-5 days). Three components: (A) BLR upgrade replacing Beta-Bernoulli with Laplace-approximated Bayesian Logistic Regression using 4-feature vectors (category, question length, time of day, recent error rate), ~150-200 lines of numpy/scipy. (D) Thompson Sampling gate replacing fixed trust-level thresholds with probabilistic Beta posterior sampling for natural exploration-exploitation. (E) Optional GP/BALD active query selection for maximizing learning value of human interactions, ~200-300 lines. 5 new config keys (`swe team trust proxy thompson enabled/act threshold/suggest threshold`, `bald enabled/defer threshold`). 2 new files + 3 test files. Target: ~40-60% autonomous decisions.
 
