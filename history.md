@@ -1,5 +1,26 @@
 # Lupin Project History
 
+### 2026.02.25 - Session 269 | Feature: INTERACTIVE Dry-Run Support for ClaudeCodeJob
+
+#### Checkpoint | 2026.02.25 | UNBOUNDED/INTERACTIVE dry-run + 6-scenario smoke test
+
+**Accomplishments**:
+- Added INTERACTIVE-specific dry-run logic to `ClaudeCodeJob` — exercises `MessageHistory` with multi-turn conversation simulation (7 phases, 5 tracked messages, context prompt validation)
+- Refactored `_execute_dry_run()` into 3-line dispatcher routing to `_execute_dry_run_bounded()` or `_execute_dry_run_interactive()` based on `task_type`
+- Enhanced BOUNDED dry-run with configurable `dry_run_phases`/`dry_run_delay` params and full `cost_summary` dict (matching SWE Team pattern: `duration_seconds`, `total_cost_usd`, `total_input_tokens`, `total_output_tokens`)
+- Created 6-scenario smoke test for both modes through live queue pipeline
+- All quick_smoke_tests pass (14 ClaudeCodeJob, 7 SweTeamJob — no regressions)
+
+**Files Modified (CoSA — 1 file)**:
+- `src/cosa/agents/claude_code/job.py` — Class-level phase labels, new `__init__` params, dispatcher + bounded/interactive dry-run methods, updated smoke test (536→786 lines)
+
+**Files Created (Lupin — 1 file)**:
+- `src/tests/smoke/test_claude_code_dry_run_smoke.py` — 6-scenario live pipeline smoke test (BOUNDED + INTERACTIVE dry-runs, agent_type, cost_summary, timestamps, missing prompt validation)
+
+**Context**: Comparative analysis (`src/rnd/2026.02.25-unbounded-vs-swe-team-comparative-analysis.md`) identified gap where INTERACTIVE dry-run was identical to BOUNDED.
+
+---
+
 ### 2026.02.25 - Session 268 | Docs: REST API Reference + Credential Doc Unification + CUDA Cleanup
 
 **Accomplishments**:

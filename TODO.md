@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-25 (Session 268)
+Last updated: 2026-02-25 (Session 269)
 
 ## v0.1.6 — FUTURE DEVELOPMENT
 
@@ -92,7 +92,7 @@ Last updated: 2026-02-25 (Session 268)
 ### Before Branch Merge
 
 - [ ] **[LUPIN] Run and remediate full testing harness** - Unit, smoke, WebSocket, and integration tests. Fix any regressions before merge.
-- [ ] **[LUPIN] CJ Flow verification: Dry run end-to-end testing for UNBOUNDED tasks** - Pending
+- [x] **[LUPIN] CJ Flow verification: Dry run end-to-end testing for UNBOUNDED tasks** - Session 269: INTERACTIVE dry-run exercises MessageHistory + 6-scenario smoke test created. Needs live server validation.
 
 ### Future Considerations
 
