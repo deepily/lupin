@@ -426,7 +426,7 @@ class TestTrustProxyConfigFactory:
     """Tests for trust_proxy_config_from_config_mgr factory function."""
 
     def test_factory_returns_all_expected_keys( self ):
-        """Factory returns dict with all 27 config keys."""
+        """Factory returns dict with all 32 config keys."""
         from unittest.mock import MagicMock
         from cosa.agents.decision_proxy.config import trust_proxy_config_from_config_mgr
 
@@ -448,6 +448,8 @@ class TestTrustProxyConfigFactory:
             "beta_l2_min_samples", "beta_l3_min_samples",
             "beta_l4_min_samples", "beta_l5_min_samples",
             "cbr_top_k", "cbr_confidence_threshold",
+            "thompson_enabled", "thompson_act_threshold", "thompson_suggest_threshold",
+            "bald_enabled", "bald_defer_threshold",
         }
         assert set( result.keys() ) == expected_keys
 

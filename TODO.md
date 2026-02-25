@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-24 (Session 262)
+Last updated: 2026-02-24 (Session 262, Checkpoint 4)
 
 ## v0.1.6 — FUTURE DEVELOPMENT
 
@@ -59,7 +59,7 @@ Last updated: 2026-02-24 (Session 262)
 - [ ] **[LUPIN] Expand SWE Team Proxy Agent to incorporate proxy layer preference learning** — Teach the decision proxy to learn user preferences over time, reducing manual ratification and improving autonomous decision accuracy. **Status**: Phase 0+1 implemented (Session 262), Phase 2+3 plans written.
   - **R&D Synthesis**: [`Take III — Synthesis`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.24-decision-proxy-preference-learning-analysis-take-III-synthesis.md) (Sessions 257-259)
   - [x] **Phase 0+1**: Embedding infrastructure + CBR + Beta-Bernoulli trust — Session 262, commit `bcd5e4e`+`aa0bd3b`
-  - [ ] **Phase 2**: BLR + Thompson Sampling (~3-5 days, 30+ observations) — [`Plan`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.24-phase-2-blr-thompson-sampling-plan.md)
+  - [x] **Phase 2**: BLR + Thompson Sampling — Session 262 Checkpoint 4. Thompson Sampling gate, BayesianLogisticRegression (160 lines), TrustTracker BLR integration, 21 new tests, 1613 total pass.
   - [ ] **Phase 3**: Conformal Guarantees + optional ICRL (~3-5 days, 100+ observations) — [`Plan`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.24-phase-3-conformal-icrl-plan.md)
 
 ---

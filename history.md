@@ -1,5 +1,39 @@
 # Lupin Project History
 
+### 2026.02.24 - Session 262 (cont.) | Phase 2 Implementation — BLR + Thompson Sampling
+
+#### Checkpoint 4 | 2026.02.24 20:30 | Implement Phase 2: Thompson Sampling + BLR
+
+**Accomplishments**:
+- Step 1: Added 5 new config keys for Thompson Sampling (3) and GP/BALD (2, deferred) — all disabled by default. Updated config.py factory (27→32 keys), both INI files, splainer, and config test.
+- Step 2: Implemented Thompson Sampling gate in `EngineeringStrategy` — `_gate_thompson()` draws from Beta(alpha, beta) posterior per-category to decide act/suggest/shadow. Added `get_thompson_diagnostics()` using analytical Beta CDF (no Monte Carlo). 8 new unit tests.
+- Step 3: Created `BayesianLogisticRegression` class (160 lines) — online Laplace approximation with Sherman-Morrison rank-1 Hessian updates, 4-feature model (category, question length, hour, error rate), probit predictive approximation, serialization. 8 new unit tests.
+- Step 4: Integrated BLR into `TrustTracker` — added `_level_blr()` dispatch (falls back to Beta under 30 observations), `build_feature_vector()` static helper, `record_decision_with_features()` (backward-compatible), BLR state in `to_dict()`. 5 new unit tests.
+- Step 5: Added `get_decision_diagnostics()` to `DecisionResponder`, created E2E smoke test with summary table output. Full regression: 1613 unit tests pass.
+- Zero behavior change until operator enables: `thompson_enabled=false` and `trust_model="beta"` remain defaults.
+
+**Files Created (CoSA — 1 file)**:
+- `src/cosa/agents/decision_proxy/bayesian_trust.py` — BayesianLogisticRegression class
+
+**Files Created (Lupin — 4 files)**:
+- `src/tests/unit/test_thompson_sampling.py` — 8 Thompson Sampling unit tests
+- `src/tests/unit/test_bayesian_trust.py` — 8 BLR model unit tests
+- `src/tests/unit/test_trust_tracker_blr.py` — 5 BLR integration unit tests
+- `src/tests/smoke/test_thompson_sampling_flow.py` — E2E smoke test
+
+**Files Modified (CoSA — 4 files)**:
+- `src/cosa/agents/decision_proxy/config.py` — 5 new defaults + 5 factory entries
+- `src/cosa/agents/decision_proxy/trust_tracker.py` — BLR dispatch, feature vector, record_with_features
+- `src/cosa/agents/decision_proxy/responder.py` — get_decision_diagnostics()
+- `src/cosa/agents/swe_team/proxy/engineering_strategy.py` — TS constructor params, gate dispatch, diagnostics
+
+**Files Modified (Lupin — 3 files)**:
+- `src/conf/lupin-app.ini` — 5 new Phase 2 config keys
+- `src/conf/lupin-app-splainer.ini` — 5 matching explanations
+- `src/tests/unit/test_swe_team_config.py` — Updated expected key count 27→32
+
+---
+
 ### 2026.02.24 - Session 263 | Debug Phi-4 Proxy Script Matcher + Real-Time Proxy Log Streaming
 
 #### Checkpoint 1 | 2026.02.24 | Diagnostic script + embedded proxy streaming
