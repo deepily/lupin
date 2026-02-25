@@ -71,8 +71,8 @@ def _login():
     Login via /auth/login and return auth headers dict.
 
     Requires:
-        - LUPIN_TEST_EMAIL environment variable is set
-        - LUPIN_TEST_PASSWORD environment variable is set
+        - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL environment variable is set
+        - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD environment variable is set
         - FastAPI server is running at BASE_URL
 
     Ensures:
@@ -82,10 +82,10 @@ def _login():
         - ValueError if environment variables are missing
         - requests.HTTPError if login fails
     """
-    email    = os.environ.get( "LUPIN_TEST_EMAIL" )
-    password = os.environ.get( "LUPIN_TEST_PASSWORD" )
+    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
     if not email or not password:
-        raise ValueError( "Set LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables" )
+        raise ValueError( "Set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD environment variables" )
 
     resp = requests.post(
         f"{BASE_URL}/auth/login",

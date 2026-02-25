@@ -18,7 +18,7 @@ Usage:
 Requires:
     - Server running on localhost:7999
     - Environment variables:
-        LUPIN_TEST_EMAIL / LUPIN_TEST_PASSWORD
+        LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD
 
 Created: 2026-02-21
 """
@@ -53,11 +53,11 @@ def get_credentials():
         - Returns ( email, password ) tuple
         - Exits with error if not found
     """
-    email    = os.environ.get( "LUPIN_TEST_EMAIL" )
-    password = os.environ.get( "LUPIN_TEST_PASSWORD" )
+    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
     if not email or not password:
-        print( "ERROR: Set LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD" )
+        print( "ERROR: Set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
         sys.exit( 1 )
 
     return email, password

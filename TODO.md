@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-24 (Session 267)
+Last updated: 2026-02-25 (Session 268)
 
 ## v0.1.6 — FUTURE DEVELOPMENT
 
@@ -10,6 +10,10 @@ Last updated: 2026-02-24 (Session 267)
   - **Design doc**: [`src/rnd/2026.02.23-ini-config-key-naming-convention.md`](src/rnd/2026.02.23-ini-config-key-naming-convention.md)
   - **Scope**: ~98 keys, ~80 files (18 Lupin + 62 CoSA), both INI files + splainer
   - **Priority**: Medium — no functional impact, improves consistency and predictability
+
+### Config Migration — Claude Agent SDK
+
+- [ ] **[LUPIN] Config Migration**: Implement Claude Agent SDK config migration plan documented at `src/rnd/2026.01.27-claude-agent-sdk-config-migration-plan.md`
 
 ### CJ Flow: Hybrid Fast Lane + Bounded Agentic Pool (Session 237)
 
@@ -34,6 +38,19 @@ Last updated: 2026-02-24 (Session 267)
   - **Phases**: Foundation → data-testid rollout → Auth tests → Page smoke → Admin tests → Notifications/Q&A → WebSocket → Visual regression + CI
   - **Round 2**: Claude Code + Playwright MCP for AI-augmented test generation + self-healing selectors
 
+### DataFrame CRUD with Voice I/O — UI Testing + Voice Polish
+
+- [ ] **[LUPIN] Interactive E2E Testing of CRUD Agents** — Execute the 29-scenario testing protocol at `src/rnd/2026.02.04-headless-cc-for-dataframe-crud/testing-protocol.md`.
+  - [x] Part 1: Mock pipeline tests (17/17 passed — routing, pipeline, cache, confirmation, prompt construction)
+  - [x] Bug fix: CRUD agent completion — emit_job_state_transition, answer guard, done queue push (3 new tests, 532/532 pass)
+  - [x] Bug fix: TTS focus mode stuck — staleness check in restoreTTSQueueState + exit in moveToRegularNotifications (Session 164)
+  - [x] **Bug fix: delete_item deletes all records** — Session 189: dedup guard, multi-delete guard, infra column rejection. 6 new tests (816 total). Commit fd21f0c.
+  - [x] Part 3: Curl smoke tests → **SUPERSEDED** by `test_crud_live_pipeline.py` (8-scenario automated test, Session 189)
+  - [x] **Run CRUD live pipeline test** — `test_crud_live_pipeline.py --mode direct --auto-proxy`. Session 267 fixed credential mismatch (CREDENTIAL_ENV_PREFIX unified).
+  - [ ] Part 2: Notifications UI tests (8 scenarios, live server) — **Leverage Playwright E2E infrastructure**
+- [ ] **[LUPIN] Phase 4: End-to-End Voice Workflows + Polish** - PENDING (blocked by Phase 3 ✅)
+- **Note**: Moved to v0.1.6 to leverage Playwright E2E testing infrastructure for UI test automation
+
 ### CJ Flow Persistence
 
 - [ ] **Add persistence for CJ Flow job tracking** - Jobs are currently transient
@@ -46,10 +63,6 @@ Last updated: 2026-02-24 (Session 267)
   - **Partially unblocked**: Phase 3 implemented (Session 266). Phase 4 pending.
   - **Scope**: Admin guide, API reference, R&D docs
 
-### Centralized Navigation & URL Naming Conventions
-
-- [x] **[LUPIN] Create centralized navigation and URL naming conventions** — Unified nav and URL patterns for entire suite of static HTML/plain vanilla JavaScript pages covering all user and admin tasks - Session 247
-
 ---
 
 ## v0.1.5 — HIGH PRIORITY
@@ -58,12 +71,9 @@ Last updated: 2026-02-24 (Session 267)
 
 ## Pending
 
-### SWE Team Approach D: Post-Implementation Verification (MEDIUM)
+### SWE Team Proxy Simulation (HIGH PRIORITY)
 
-- [x] **[LUPIN] Approach D: Rename user_message → user_initiated_message** — 4 files renamed, 330 unit tests pass
-- [x] **[LUPIN] Approach D: Automated smoke test** — `test_approach_d_user_messages.py`, 10 scenarios, 10/10 PASS
-- [x] **[LUPIN] Approach D: Fix running queue poll bug + configurable dry-run** — Response key fix, 10-phase 1.5s dry-run loop
-- [x] **[LUPIN] Commit CoSA changes for Approach D** — 5 CoSA files modified (notification_client.py NEW, orchestrator.py, config.py, job.py, queues.py). Committed in CoSA context
+- [ ] **[LUPIN] Create SWE team proxy simulation with fully automated interaction** — Build a simulation harness where all SWE team interactions (orchestrator → proxy → decision → feedback) are simulated and automated, enabling repeatable end-to-end validation without manual intervention.
 
 ### SWE Team Proxy Agent (HIGH PRIORITY)
 
@@ -72,37 +82,6 @@ Last updated: 2026-02-24 (Session 267)
 - [x] **[LUPIN] Phase 8: Hot-Reload Trust Mode** - Session 248: REST endpoint + UI dropdown on Trust Dashboard, 16 new tests, 1534 pass
 - [ ] **[LUPIN] Test SWE agent team with small jobs** - Validate SWE team end-to-end with small, scoped tasks to verify orchestration and proxy behavior
 - [ ] **[LUPIN] Commit CoSA changes for proxy activation** — 2 CoSA files modified (config.py, orchestrator.py). Must commit in CoSA context separately
-
-### DataFrame CRUD with Voice I/O (Session 132-136)
-
-- [ ] **[LUPIN] Interactive E2E Testing of CRUD Agents** (HIGH PRIORITY) - Execute the 29-scenario testing protocol at `src/rnd/2026.02.04-headless-cc-for-dataframe-crud/testing-protocol.md`.
-  - [x] Part 1: Mock pipeline tests (17/17 passed — routing, pipeline, cache, confirmation, prompt construction)
-  - [x] Bug fix: CRUD agent completion — emit_job_state_transition, answer guard, done queue push (3 new tests, 532/532 pass)
-  - [x] Bug fix: TTS focus mode stuck — staleness check in restoreTTSQueueState + exit in moveToRegularNotifications (Session 164)
-  - [x] **Bug fix: delete_item deletes all records** — Session 189: dedup guard, multi-delete guard, infra column rejection. 6 new tests (816 total). Commit fd21f0c.
-  - [x] Part 3: Curl smoke tests → **SUPERSEDED** by `test_crud_live_pipeline.py` (8-scenario automated test, Session 189)
-  - [x] **Run CRUD live pipeline test** — `test_crud_live_pipeline.py --mode direct --auto-proxy`. Session 267 fixed credential mismatch (CREDENTIAL_ENV_PREFIX unified).
-  - [ ] Part 2: Notifications UI tests (8 scenarios, live server)
-- [ ] **[LUPIN] Phase 4: End-to-End Voice Workflows + Polish** - PENDING (blocked by Phase 3 ✅)
-
-### Skills Management (Session 118 Discovery)
-
-Skill candidates identified - create with `/plan-skills-management-create <skill-name>`:
-- [x] **notification-patterns** (HIGH) - cosa-voice MCP usage patterns (~250 lines) — DONE
-- [ ] **code-style-preferences** (LOW) - Spacing, alignment, getattr prohibition (~100 lines)
-
-### Smoke Test Coverage Audit (MEDIUM) ✅ DONE
-
-- [x] **[LUPIN] Verify smoke test coverage across recent work** - Session 221: 6 new test files, 54 pytest methods, all passing
-  - ST-1: `test_decision_proxy_offline_smoke.py` — TrustTracker, CircuitBreaker, CategoryTrust (15 tests)
-  - ST-2: `test_swe_team_orchestrator_dry_run_smoke.py` — Dry-run pipeline, state, progress (10 tests)
-  - ST-3: `test_queue_consumer_smoke.py` — Thread lifecycle, job processing (3 tests)
-  - ST-4: `test_answer_feedback_smoke.py` — answer_is_correct tri-state round-trip (8 tests)
-  - ST-5: `test_agentic_disambiguation_smoke.py` — Confirm/switch/cancel/timeout (4 tests)
-  - ST-6: `test_simple_agents_instantiation_smoke.py` — Cal/DateTime/Todo constructors (14 tests)
-  - **Deferred**: ST-7 (CRUD queue integration), ST-8 (Decision Proxy live), ST-9 (Classic agents live)
-
-
 
 ### Slash Command Cleanup (LOW)
 
@@ -114,10 +93,6 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 
 - [ ] **[LUPIN] Run and remediate full testing harness** - Unit, smoke, WebSocket, and integration tests. Fix any regressions before merge.
 - [ ] **[LUPIN] CJ Flow verification: Dry run end-to-end testing for UNBOUNDED tasks** - Pending
-
-### Implementation Plans
-
-- [ ] **Config Migration**: Implement Claude Agent SDK config migration plan documented at `src/rnd/2026.01.27-claude-agent-sdk-config-migration-plan.md`
 
 ### Future Considerations
 
@@ -131,6 +106,7 @@ Skill candidates identified - create with `/plan-skills-management-create <skill
 
 ## Completed (Recent)
 
+- [x] **Centralized Navigation & URL Naming Conventions** — Unified nav and URL patterns for entire suite of static HTML/plain vanilla JavaScript pages covering all user and admin tasks - Session 247
 - [x] **CRUD Live Pipeline Test** - `test_crud_live_pipeline.py --mode direct --auto-proxy` passing. Session 267 fixed credential mismatch (CREDENTIAL_ENV_PREFIX unified).
 - [x] **SWE Team Proxy: Preference Learning** - Sessions 258-266: Phases 0-3 complete. Embedding infrastructure, CBR + Beta-Bernoulli trust, seed data (50 decisions), BLR + Thompson Sampling, Conformal Guarantees + ICRL. 1645 total tests pass.
 - [x] **Skill: notification-patterns** - cosa-voice MCP usage patterns skill created (~250 lines)

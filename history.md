@@ -1,5 +1,43 @@
 # Lupin Project History
 
+### 2026.02.25 - Session 268 | Docs: REST API Reference + Credential Doc Unification + CUDA Cleanup
+
+**Accomplishments**:
+- Created unified REST API reference (`src/docs/rest-api-reference.md`) — 930 lines covering all 22 router groups (~102 REST endpoints + 3 WebSocket + 12 page routes), with cross-references to deep-dive docs
+- Unified stale credential references across 22 files — replaced `LUPIN_TEST_EMAIL`/`LUPIN_TEST_PASSWORD` with `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` in docs, test docstrings, test code, skills, commands, and workflow files
+- Removed dead CUDA fallback code from `CodeEmbeddingEngine` and `ProseEmbeddingEngine` (server always has CUDA)
+
+**Files Created (Lupin — 1 file)**:
+- `src/docs/rest-api-reference.md` — Unified REST API reference document
+
+**Files Modified (CoSA — 1 file)**:
+- `src/cosa/memory/local_embedding_engine.py` — Removed 2 CUDA availability fallback blocks
+
+**Files Modified (Lupin — 21 files)**:
+- `CLAUDE.md` — Updated TEST CREDENTIALS section to unified prefix
+- `src/docs/automated-interactive-testing.md` — Unified credential env vars
+- `src/docs/notification-api.md` — Removed stale LUPIN_TEST_EMAIL/PASSWORD rows
+- `src/tests/AUTH-TESTING-GUIDE.md` — All credential examples updated + unification note
+- `src/tests/smoke/README.md` — Unified credential table
+- `.claude/skills/testing-patterns/SKILL.md` — Updated credential reference
+- `.claude/skills/agentic-voice-workflow/SKILL.md` — Updated credential reference
+- `.claude/commands/plan-test-baseline.md` — Updated environment variable list
+- `src/workflow/agentic-voice-workflow.md` — Updated curl credential example
+- `src/tests/smoke/test_notifications_progress_group_smoke.py` — Docstring + code
+- `src/tests/smoke/test_deep_research_dry_run_smoke.py` — Docstring + code
+- `src/tests/smoke/test_deep_research_submit_smoke.py` — Docstring + code
+- `src/tests/smoke/test_podcast_generator_dry_run_smoke.py` — Docstring + code
+- `src/tests/smoke/test_research_to_podcast_dry_run_smoke.py` — Docstring + code
+- `src/tests/smoke/test_proxy_notifications.py` — Docstring + code
+- `src/tests/smoke/test_calculator_live_pipeline.py` — Docstring
+- `src/tests/smoke/test_crud_live_pipeline.py` — Docstring
+- `src/tests/smoke/test_approach_d_user_messages.py` — Docstring
+- `src/tests/smoke/test_swe_team_mock_endpoint.py` — Docstring
+- `src/tests/websocket_smoke/infrastructure/test_utilities.py` — Docstring + code
+- `src/scripts/seed_proxy_decisions.py` — Docstring + code
+
+---
+
 ### 2026.02.24 - Session 267 | Fix: Unify Test Credentials for Proxy Integration
 
 #### Checkpoint | 2026.02.24 15:45 | Unify CREDENTIAL_ENV_PREFIX across test classes

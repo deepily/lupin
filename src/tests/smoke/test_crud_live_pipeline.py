@@ -30,7 +30,7 @@ Requires:
     - Server running on localhost:7999
     - Phi-4 LLM server running for intent extraction
     - Environment variables:
-        LUPIN_TEST_EMAIL / LUPIN_TEST_PASSWORD
+        LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD
 
 Created: 2026-02-11 (Session 189)
 Refactored: 2026-02-13 — Migrated to InteractiveSmokeTest

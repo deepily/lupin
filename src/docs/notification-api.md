@@ -3715,8 +3715,6 @@ All config keys have matching explainer entries in `src/conf/lupin-app-splainer.
 | `ANTHROPIC_API_KEY_FIREWALLED` | Anthropic API key for Tier 3 LLM Fallback |
 | `LUPIN_ROOT` | Project root directory ( used by `cu.get_project_root()` ) |
 | `LUPIN_CONFIG_MGR_CLI_ARGS` | CLI args JSON for `ConfigurationManager` |
-| `LUPIN_TEST_EMAIL` | General test email for integration tests |
-| `LUPIN_TEST_PASSWORD` | General test password for integration tests |
 
 ---
 
@@ -3831,9 +3829,7 @@ All notification tests that hit authenticated endpoints require credentials:
 export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL="your@email.com"
 export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD="yourpassword"
 
-# For integration tests
-export LUPIN_TEST_EMAIL="your@email.com"
-export LUPIN_TEST_PASSWORD="yourpassword"
+# All test types use the unified prefix (Session 267 unification)
 ```
 
 **Critical**: Never hardcode credentials. Tests that find empty env vars

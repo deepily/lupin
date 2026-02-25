@@ -53,7 +53,7 @@ A fifth tier for **end-to-end live LLM validation** — submits real queries thr
 | Location | `src/tests/smoke/` (named `test_*_live_pipeline.py`) |
 | Speed | 10-120s per query (LLM inference) |
 | Requires | Running server + LLM backend |
-| Credentials | `LUPIN_TEST_EMAIL` / `LUPIN_TEST_PASSWORD` |
+| Credentials | `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` / `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD` |
 
 ```bash
 # Calculator 6-query live pipeline test

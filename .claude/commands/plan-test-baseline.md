@@ -39,7 +39,7 @@ arguments:
 
 **Health Checks**: curl http://localhost:7999/health
 
-**Environment**: LUPIN_ROOT, PYTHONPATH, LUPIN_TEST_EMAIL, LUPIN_TEST_PASSWORD
+**Environment**: LUPIN_ROOT, PYTHONPATH, LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL, LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD
 
 ---
 
@@ -62,7 +62,7 @@ arguments:
      - Integration: ./src/tests/run-integration-tests.sh -v
      - WebSocket: ./src/scripts/run-websocket-smoke-tests.sh
    - **Health Checks**: curl http://localhost:7999/health
-   - **Environment**: LUPIN_ROOT, PYTHONPATH, LUPIN_TEST_EMAIL, LUPIN_TEST_PASSWORD
+   - **Environment**: LUPIN_ROOT, PYTHONPATH, LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL, LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD
    - Do NOT proceed without these parameters
 
 2. **MUST read the canonical workflow document**:

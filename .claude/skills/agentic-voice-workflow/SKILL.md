@@ -151,7 +151,7 @@ Usage:
 
 Requires:
     - Server running on localhost:7999
-    - LUPIN_TEST_EMAIL / LUPIN_TEST_PASSWORD
+    - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD
 """
 
 import os

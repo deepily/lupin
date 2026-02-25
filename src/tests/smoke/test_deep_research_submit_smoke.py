@@ -6,8 +6,8 @@ NON-DESTRUCTIVE: Uses existing user from development database.
 Run with: python -m tests.smoke.test_deep_research_submit_smoke
 
 Requires environment variables:
-    LUPIN_TEST_EMAIL    - Email for login
-    LUPIN_TEST_PASSWORD - Password for login
+    LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL    - Email for login
+    LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD - Password for login
 
 Created: 2026-01-20
 """
@@ -30,7 +30,7 @@ def quick_smoke_test():
 
     Requires:
         - Server running on port 7999
-        - LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables set
+        - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD environment variables set
         - User account exists in development database
 
     Ensures:
@@ -41,13 +41,13 @@ def quick_smoke_test():
     cu.print_banner( "Deep Research Submit Smoke Test", prepend_nl=True )
 
     # Get credentials from environment
-    email = os.environ.get( "LUPIN_TEST_EMAIL" )
-    password = os.environ.get( "LUPIN_TEST_PASSWORD" )
+    email = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
     if not email or not password:
         print( "✗ Missing environment variables:" )
-        print( "  export LUPIN_TEST_EMAIL='your@email.com'" )
-        print( "  export LUPIN_TEST_PASSWORD='yourpassword'" )
+        print( "  export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL='your@email.com'" )
+        print( "  export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD='yourpassword'" )
         return False
 
     try:

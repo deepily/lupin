@@ -22,7 +22,7 @@ Usage:
 
 Requires:
     - Server running on localhost:7999
-    - Environment variables: LUPIN_TEST_EMAIL, LUPIN_TEST_PASSWORD
+    - Environment variables: LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL, LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD
 
 Created: 2026-02-16
 """
@@ -371,7 +371,7 @@ def quick_smoke_test():
 
     Requires:
         - Server running on localhost:7999
-        - LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD set
+        - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD set
 
     Ensures:
         - Returns True if all 6 scenarios pass

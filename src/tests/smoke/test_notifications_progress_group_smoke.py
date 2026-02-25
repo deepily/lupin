@@ -10,8 +10,8 @@ End-to-end test of progress_group_id notification grouping:
 - Backward compatibility (no progress_group_id)
 
 Requires environment variables:
-    LUPIN_TEST_EMAIL    - Email for login
-    LUPIN_TEST_PASSWORD - Password for login
+    LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL    - Email for login
+    LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD - Password for login
 
 Run: python src/tests/smoke/test_notifications_progress_group_smoke.py
 """
@@ -49,10 +49,10 @@ def print_test_header( test_name ):
 
 def login_and_get_auth():
     """
-    Login with LUPIN_TEST_EMAIL / LUPIN_TEST_PASSWORD and return auth header + email.
+    Login with LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD and return auth header + email.
 
     Requires:
-        - LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables set
+        - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD environment variables set
         - Server running on BASE_URL
 
     Ensures:
@@ -62,13 +62,13 @@ def login_and_get_auth():
     Raises:
         - Prints error details to stdout on failure
     """
-    email    = os.environ.get( "LUPIN_TEST_EMAIL" )
-    password = os.environ.get( "LUPIN_TEST_PASSWORD" )
+    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
     if not email or not password:
         print( "✗ Missing environment variables:" )
-        print( "  export LUPIN_TEST_EMAIL='your@email.com'" )
-        print( "  export LUPIN_TEST_PASSWORD='yourpassword'" )
+        print( "  export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL='your@email.com'" )
+        print( "  export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD='yourpassword'" )
         return None, None
 
     try:
@@ -429,7 +429,7 @@ def quick_smoke_test():
 
     Requires:
         - Server running on BASE_URL (localhost:7999)
-        - LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables set
+        - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD environment variables set
 
     Ensures:
         - Returns True if all 5 notification tests pass

@@ -3294,7 +3294,7 @@ POST /api/mock-job/submit
 # 1. Login and get token
 TOKEN=$(curl -s -X POST http://localhost:7999/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email": "'$LUPIN_TEST_EMAIL'", "password": "'$LUPIN_TEST_PASSWORD'"}' \
+  -d '{"email": "'$LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL'", "password": "'$LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD'"}' \
   | python3 -c "import sys, json; print(json.load(sys.stdin)['tokens']['access_token'])")
 
 # 2. Submit mock job with voice command

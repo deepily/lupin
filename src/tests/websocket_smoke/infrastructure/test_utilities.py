@@ -189,7 +189,7 @@ class WebSocketTestUtilities:
         Requires:
             - FastAPI server must be running with /auth/login endpoint
             - Valid user credentials (from parameters or environment variables)
-            - LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD env vars if not provided
+            - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD env vars if not provided
 
         Ensures:
             - Returns tuple of (success: bool, token_or_error: str)
@@ -199,8 +199,8 @@ class WebSocketTestUtilities:
             - Logs authentication attempt and result
 
         Args:
-            email: User email for login (uses LUPIN_TEST_EMAIL if not provided)
-            password: User password for login (uses LUPIN_TEST_PASSWORD if not provided)
+            email: User email for login (uses LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL if not provided)
+            password: User password for login (uses LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD if not provided)
 
         Returns:
             Tuple[bool, str]: (True, token) on success, (False, error_message) on failure
@@ -214,14 +214,14 @@ class WebSocketTestUtilities:
             return True, self._cached_jwt_token
 
         # Get credentials from parameters or environment
-        email = email or os.environ.get( "LUPIN_TEST_EMAIL" )
-        password = password or os.environ.get( "LUPIN_TEST_PASSWORD" )
+        email = email or os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+        password = password or os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
         if not email or not password:
             error_msg = (
                 "JWT authentication requires credentials. Either:\n"
                 "  - Pass email and password parameters, OR\n"
-                "  - Set LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables"
+                "  - Set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD environment variables"
             )
             self.log( error_msg, "ERROR" )
             return False, error_msg
@@ -572,7 +572,7 @@ class WebSocketTestUtilities:
             - user_id must be valid non-empty string identifier
             - duration must be positive number of seconds
             - WebSocket server must be running and accessible
-            - For JWT auth: LUPIN_TEST_EMAIL/PASSWORD env vars or credentials
+            - For JWT auth: LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/PASSWORD env vars or credentials
 
         Ensures:
             - Performs full connection, authentication, and event collection cycle
@@ -777,7 +777,7 @@ async def quick_websocket_test( endpoint: str = "queue", user_id: str = "test", 
         - endpoint must be 'queue' or 'audio'
         - user_id must be valid non-empty string identifier
         - WebSocket server must be running at default location
-        - For JWT auth: LUPIN_TEST_EMAIL/PASSWORD env vars set
+        - For JWT auth: LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/PASSWORD env vars set
 
     Ensures:
         - Creates temporary WebSocketTestUtilities instance with default config

@@ -698,18 +698,16 @@ pytest src/tests/smoke/test_proxy_integration.py -v
 | Variable | Purpose | Required When |
 |----------|---------|---------------|
 | `LUPIN_ROOT` | Project root directory | Always (for PYTHONPATH setup) |
-| `LUPIN_TEST_EMAIL` | Standard test account email | Calculator + CRUD tests |
-| `LUPIN_TEST_PASSWORD` | Standard test account password | Calculator + CRUD tests |
-| `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` | Interactive test account email | Expediter tests |
-| `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD` | Interactive test account password | Expediter tests |
+| `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` | Unified test account email | All test types |
+| `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD` | Unified test account password | All test types |
 | `LUPIN_INTERACTIVE_TESTS` | Set to `"true"` to enable expediter scenarios | Expediter tests |
 | `ANTHROPIC_API_KEY` | Anthropic API key (for Tier 3 cloud LLM fallback) | Only if Tier 3 needed |
 
 **Credential priority** for proxy authentication: CLI args → environment variables → config defaults.
 
-**Test credential priority**: When `LUPIN_INTERACTIVE_TESTS=true`, the integration test
-prefers `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` credentials; otherwise falls back to
-`LUPIN_TEST_*`.
+**Unified credentials** (Session 267): All test types — Calculator, CRUD, Expediter, and proxy — use the
+`LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` prefix. This ensures test runner and proxy authenticate as the same user
+(same WebSocket channel), preventing proxy notification delivery failures.
 
 ---
 

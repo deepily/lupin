@@ -340,20 +340,24 @@ pytest src/tests/unit/ -v && \
 ### Required Environment Variables
 
 ```bash
-export LUPIN_TEST_EMAIL="your@email.com"
-export LUPIN_TEST_PASSWORD="yourpassword"
+export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL="your@email.com"
+export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD="yourpassword"
 ```
+
+> **Session 267 unification**: All smoke tests, proxy tests, and pipeline tests now use the
+> `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` prefix. This ensures test and proxy authenticate as the
+> same user (same WebSocket channel), preventing "Operation cancelled" failures.
 
 ### Usage Pattern (Python)
 
 ```python
 import os
 
-email    = os.environ.get( "LUPIN_TEST_EMAIL" )
-password = os.environ.get( "LUPIN_TEST_PASSWORD" )
+email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
 if not email or not password:
-    raise ValueError( "Set LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables" )
+    raise ValueError( "Set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD environment variables" )
 ```
 
 ### When to Use
