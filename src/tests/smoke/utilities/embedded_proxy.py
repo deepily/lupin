@@ -91,7 +91,7 @@ class EmbeddedProxyMixin:
         except Exception:
             pass  # Process died or pipe closed
 
-    def _start_proxy( self, profile=None, strategy=None, debug=False ):
+    def _start_proxy( self, profile=None, strategy=None, debug=False, email=None, password=None ):
         """
         Launch notification proxy as a subprocess.
 
@@ -102,6 +102,7 @@ class EmbeddedProxyMixin:
         Ensures:
             - Proxy subprocess is started and given time to connect
             - self._proxy_process holds the Popen handle
+            - If email/password provided, proxy authenticates as that user
         """
         if self.proxy_running:
             print( "  Proxy already running, skipping launch." )
@@ -119,6 +120,10 @@ class EmbeddedProxyMixin:
         ]
         if debug:
             cmd.append( "--debug" )
+        if email:
+            cmd.extend( [ "--email", email ] )
+        if password:
+            cmd.extend( [ "--password", password ] )
 
         # Ensure PYTHONPATH includes src/
         env = os.environ.copy()

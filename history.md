@@ -1,5 +1,26 @@
 # Lupin Project History
 
+### 2026.02.24 - Session 267 | Fix: Unify Test Credentials for Proxy Integration
+
+#### Checkpoint | 2026.02.24 15:45 | Unify CREDENTIAL_ENV_PREFIX across test classes
+
+**Accomplishments**:
+- Fixed CRUD DELETE_TODO "Operation cancelled" bug — root cause was test and proxy authenticating as different users (different WebSocket channels, so proxy never saw the notification)
+- Changed `LivePipelineTestBase.CREDENTIAL_ENV_PREFIX` from `"LUPIN_TEST"` to `"LUPIN_TEST_INTERACTIVE_MOCK_JOBS"` — single source of truth, all subclasses inherit
+- Deleted 3 redundant `_get_credentials()` overrides from subclasses (test_proxy_integration, test_expeditor_mock_job_smoke, test_swe_team_proxy)
+- Deleted `CREDENTIAL_ENV_PREFIX = "LUPIN_TEST"` override from ExpeditorSmokeTest
+- Updated docstrings to remove stale fallback credential references
+
+**Files Modified (Lupin — 4 files)**:
+- `src/tests/smoke/utilities/live_pipeline_base.py` — CREDENTIAL_ENV_PREFIX default changed
+- `src/tests/smoke/test_proxy_integration.py` — Deleted _get_credentials() override + docstring update
+- `src/tests/smoke/test_expeditor_mock_job_smoke.py` — Deleted CREDENTIAL_ENV_PREFIX + _get_credentials() + docstring update
+- `src/tests/smoke/test_swe_team_proxy.py` — Deleted _get_credentials() override + docstring update
+
+**Commit**: 245ddd5
+
+---
+
 ### 2026.02.24 - Session 266 | Phase 3: Conformal Guarantees + ICRL Implementation
 
 #### Checkpoint 1 | 2026.02.24 | Implement Phase 3 — Conformal Prediction + ICRL
