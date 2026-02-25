@@ -1,5 +1,42 @@
 # Lupin Project History
 
+### 2026.02.24 - Session 266 | Phase 3: Conformal Guarantees + ICRL Implementation
+
+#### Checkpoint 1 | 2026.02.24 | Implement Phase 3 — Conformal Prediction + ICRL
+
+**Accomplishments**:
+- Step 1: Added 4 new config keys (conformal_enabled, conformal_alpha, icrl_enabled, icrl_top_k) — updated config.py factory (32→36 keys), both INI files, splainer, and config test.
+- Step 2: Created `ConformalDecisionWrapper` (~80 lines) — split conformal inference with nonconformity scores, quantile calibration, prediction sets, deferral on ambiguity. 10 new unit tests including coverage guarantee simulation.
+- Step 3: Integrated conformal into `EngineeringStrategy.gate()` — defers when BLR prediction is ambiguous under calibrated conformal sets. Added `calibrate_conformal()` and lazy wrapper init. 6 new unit tests.
+- Step 4: Created ICRL prompt template package (`decision_proxy/prompts/`) — `ICRL_DECISION_PROMPT`, `format_case_history()`, `build_icrl_prompt()`. 6 new unit tests.
+- Step 5: Integrated ICRL into `EngineeringStrategy.decide()` — `_has_mixed_verdicts()` and `_get_icrl_decision()` with graceful degradation. Triggers only on low-confidence mixed-verdict CBR. 10 new unit tests with realistic scenarios.
+- Step 6: Extended `DecisionResponder.get_decision_diagnostics()` with conformal status. Created E2E smoke test (4 tests). Full regression: 1645 unit tests pass.
+- Zero behavior change until operator enables: `conformal_enabled=false` and `icrl_enabled=false` remain defaults.
+
+**Files Created (CoSA — 3 files)**:
+- `src/cosa/agents/decision_proxy/conformal_wrapper.py` — ConformalDecisionWrapper class
+- `src/cosa/agents/decision_proxy/prompts/__init__.py` — Package init
+- `src/cosa/agents/decision_proxy/prompts/icrl_decision.py` — ICRL prompt template + formatters
+
+**Files Created (Lupin — 5 files)**:
+- `src/tests/unit/test_conformal_wrapper.py` — 10 conformal wrapper unit tests
+- `src/tests/unit/test_conformal_gate.py` — 6 conformal gate integration tests
+- `src/tests/unit/test_icrl_prompt.py` — 6 ICRL prompt formatting tests
+- `src/tests/unit/test_icrl_integration.py` — 10 ICRL integration tests (realistic scenarios)
+- `src/tests/smoke/test_conformal_icrl_flow.py` — 4 E2E smoke tests
+
+**Files Modified (CoSA — 2 files)**:
+- `src/cosa/agents/decision_proxy/config.py` — 4 new defaults + 4 factory entries (32→36 keys)
+- `src/cosa/agents/swe_team/proxy/engineering_strategy.py` — Conformal gate, ICRL fallback, 5 new methods
+- `src/cosa/agents/decision_proxy/responder.py` — Conformal status in diagnostics
+
+**Files Modified (Lupin — 3 files)**:
+- `src/conf/lupin-app.ini` — 4 new Phase 3 config keys
+- `src/conf/lupin-app-splainer.ini` — 4 matching explanations
+- `src/tests/unit/test_swe_team_config.py` — Updated expected key count 32→36
+
+---
+
 ### 2026.02.24 - Session 265 | Seed Proxy Decisions + CPU Embedding Fallback
 
 #### Checkpoint 2 | 2026.02.25 | Embedding API endpoint + seed script refactor
