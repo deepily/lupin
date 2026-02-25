@@ -2,6 +2,22 @@
 
 ### 2026.02.24 - Session 265 | Seed Proxy Decisions + CPU Embedding Fallback
 
+#### Checkpoint 2 | 2026.02.25 | Embedding API endpoint + seed script refactor
+
+**Accomplishments**:
+- Created `POST /api/embeddings/generate`, `POST /api/embeddings/batch`, and `GET /api/embeddings/info` endpoints — exposes the server's already-warm GPU embedding model via HTTP, eliminating CUDA OOM when external scripts load a second model instance
+- Refactored `seed_proxy_decisions.py` to call the new HTTP API instead of importing `EmbeddingProvider` directly — added `_login()` and `generate_embedding_via_api()` helpers, removed direct provider import
+- Re-ran full seed pipeline (clean → seed → ratify → verify) successfully via the API: 50 decisions seeded, 25 approved / 25 rejected, CBR returns `auto_approved` (0.646 confidence)
+- No `CUDA_VISIBLE_DEVICES=""` prefix needed anymore — script uses server's GPU singleton
+- 1635 unit tests pass, zero regressions
+
+**Files Created (CoSA — 1 file)**:
+- `src/cosa/rest/routers/embeddings.py` — New router with 3 auth-protected endpoints + Pydantic models + smoke test
+
+**Files Modified (Lupin — 2 files)**:
+- `src/fastapi_app/main.py` — Added embeddings router import + registration
+- `src/scripts/seed_proxy_decisions.py` — Replaced direct EmbeddingProvider import with HTTP API calls (`_login()`, `generate_embedding_via_api()`)
+
 #### Checkpoint 1 | 2026.02.24 | Seed 50 decisions, ratify, verify CBR
 
 **Accomplishments**:

@@ -30,6 +30,7 @@ Ensures:
 import sys
 import os
 import argparse
+import requests
 from uuid import uuid4
 from datetime import datetime, timezone
 
@@ -58,7 +59,67 @@ from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.proxy_decision_repository import ProxyDecisionRepository
 from cosa.agents.decision_proxy.proxy_decision_embeddings import ProxyDecisionEmbeddings
 from cosa.agents.decision_proxy.cbr_decision_store import CBRDecisionStore
-from cosa.memory.embedding_provider import get_embedding_provider
+
+# ---------------------------------------------------------------------------
+# Embedding via HTTP API (reuses the server's warm GPU model)
+# ---------------------------------------------------------------------------
+BASE_URL = os.environ.get( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
+
+
+def _login():
+    """
+    Login via /auth/login and return auth headers dict.
+
+    Requires:
+        - LUPIN_TEST_EMAIL environment variable is set
+        - LUPIN_TEST_PASSWORD environment variable is set
+        - FastAPI server is running at BASE_URL
+
+    Ensures:
+        - Returns dict with Authorization Bearer header
+
+    Raises:
+        - ValueError if environment variables are missing
+        - requests.HTTPError if login fails
+    """
+    email    = os.environ.get( "LUPIN_TEST_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_PASSWORD" )
+    if not email or not password:
+        raise ValueError( "Set LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables" )
+
+    resp = requests.post(
+        f"{BASE_URL}/auth/login",
+        json={ "email": email, "password": password },
+        timeout=30
+    )
+    resp.raise_for_status()
+    token = resp.json()[ "tokens" ][ "access_token" ]
+    return { "Authorization": f"Bearer {token}" }
+
+
+def generate_embedding_via_api( text, headers, content_type="prose" ):
+    """
+    Generate embedding via the running FastAPI server's GPU model.
+
+    Requires:
+        - text is a non-empty string
+        - headers contains valid Authorization Bearer token
+        - FastAPI server is running at BASE_URL with /api/embeddings/generate
+
+    Ensures:
+        - Returns list[float] embedding vector
+
+    Raises:
+        - requests.HTTPError if request fails
+    """
+    resp = requests.post(
+        f"{BASE_URL}/api/embeddings/generate",
+        json={ "text": text, "content_type": content_type },
+        headers=headers,
+        timeout=30
+    )
+    resp.raise_for_status()
+    return resp.json()[ "embedding" ]
 
 # ---------------------------------------------------------------------------
 # Scenario Catalog — 50 scenarios across 6 categories
@@ -718,9 +779,9 @@ def seed_decisions( scenarios, dry_run=False, category_filter=None ):
             print( f"  {s[ 'id' ]:<20} [{s[ 'category' ]:<13}] {s[ 'suggested_ratification' ]:<7}  {s[ 'question' ][:70]}" )
         return []
 
-    # Initialize embedding provider
-    provider = get_embedding_provider( debug=True )
-    store    = _get_embedding_store()
+    # Login to get auth headers for embedding API
+    headers = _login()
+    store   = _get_embedding_store()
 
     results = []
     now_iso = datetime.now( timezone.utc ).isoformat()
@@ -751,8 +812,8 @@ def seed_decisions( scenarios, dry_run=False, category_filter=None ):
                 },
             )
 
-            # Step 2: Generate embedding
-            embedding = provider.generate_embedding( scenario[ "question" ], content_type="prose" )
+            # Step 2: Generate embedding via server API
+            embedding = generate_embedding_via_api( scenario[ "question" ], headers )
 
             # Step 3: Store in LanceDB
             store.add_decision(
@@ -851,8 +912,8 @@ def verify():
         - Tests CBR prediction returns non-None verdict (if ratified data exists)
         - Prints verification results
     """
-    store    = _get_embedding_store()
-    provider = get_embedding_provider( debug=True )
+    store   = _get_embedding_store()
+    headers = _login()
 
     print( "\n=== Seed Data Verification ===" )
 
@@ -883,7 +944,7 @@ def verify():
     # Check 2: LanceDB similarity search
     print( "\n--- LanceDB Similarity Search ---" )
     test_query   = "Should I run the pytest suite?"
-    test_embed   = provider.generate_embedding( test_query, content_type="prose" )
+    test_embed   = generate_embedding_via_api( test_query, headers )
     similar      = store.find_similar( test_embed, category="testing", limit=3, threshold=0.0 )
 
     if similar:
@@ -899,8 +960,8 @@ def verify():
     print( "\n--- Semantic Pair Verification ---" )
     pair_a = "Should I run the full pytest regression suite before merging this PR?"
     pair_b = "Should I execute the complete test suite as a pre-merge gate?"
-    emb_a  = provider.generate_embedding( pair_a, content_type="prose" )
-    emb_b  = provider.generate_embedding( pair_b, content_type="prose" )
+    emb_a  = generate_embedding_via_api( pair_a, headers )
+    emb_b  = generate_embedding_via_api( pair_b, headers )
 
     # Compute cosine similarity
     dot_product = sum( a * b for a, b in zip( emb_a, emb_b ) )
