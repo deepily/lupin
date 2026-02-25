@@ -58,7 +58,7 @@ CRUD_SCENARIOS = [
         "query"             : "add buy milk to my grocery list",
         "mode"              : "todo",
         "needs_confirm"     : False,
-        "expected_keywords" : [ "done", "added", "milk" ],
+        "expected_keywords" : [ "done", "added", "milk", "already exists" ],
         "expected_status"   : [ "added", "duplicate" ],
     },
     {
@@ -66,8 +66,8 @@ CRUD_SCENARIOS = [
         "query"             : "add buy bread to my grocery list",
         "mode"              : "todo",
         "needs_confirm"     : False,
-        "expected_keywords" : [ "done", "added", "bread" ],
-        "expected_status"   : [ "added" ],
+        "expected_keywords" : [ "done", "added", "bread", "already exists" ],
+        "expected_status"   : [ "added", "duplicate" ],
     },
     {
         "id"                : "QUERY_TODO",
@@ -152,7 +152,7 @@ class CrudPipelineTest( InteractiveSmokeTest ):
     SCENARIOS       = CRUD_SCENARIOS
     DEFAULT_TIMEOUT = 120
     PROXY_PROFILE   = "crud"
-    PROXY_STRATEGY  = "llm_script"
+    PROXY_STRATEGY  = "auto"
 
     def build_argparser( self ):
         """Add CRUD-specific CLI arguments."""

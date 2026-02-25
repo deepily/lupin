@@ -17,7 +17,7 @@
 - `src/tests/smoke/test_expeditor_mock_job_smoke.py` — Deleted CREDENTIAL_ENV_PREFIX + _get_credentials() + docstring update
 - `src/tests/smoke/test_swe_team_proxy.py` — Deleted _get_credentials() override + docstring update
 
-**Commit**: 245ddd5
+**Commit**: 530abe3
 
 ---
 
