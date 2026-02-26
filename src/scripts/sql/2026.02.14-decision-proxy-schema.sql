@@ -44,6 +44,9 @@ CREATE TABLE IF NOT EXISTS proxy_decisions (
     -- Extensible metadata
     metadata_json           JSONB,
 
+    -- Data provenance
+    data_origin             VARCHAR(50)     NOT NULL DEFAULT 'organic',
+
     -- Timestamps
     created_at              TIMESTAMPTZ     NOT NULL DEFAULT NOW()
 );
@@ -72,6 +75,9 @@ CREATE INDEX IF NOT EXISTS idx_proxy_decisions_created_at
 
 CREATE INDEX IF NOT EXISTS idx_proxy_decisions_domain_category
     ON proxy_decisions ( domain, category );
+
+CREATE INDEX IF NOT EXISTS idx_proxy_decisions_data_origin
+    ON proxy_decisions ( data_origin );
 
 
 -- =============================================================================

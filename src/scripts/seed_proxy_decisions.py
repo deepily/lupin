@@ -810,6 +810,7 @@ def seed_decisions( scenarios, dry_run=False, category_filter=None ):
                     "seed_id"         : scenario[ "id" ],
                     "semantic_group"  : scenario[ "semantic_group" ],
                 },
+                data_origin           = "synthetic_seed",
             )
 
             # Step 2: Generate embedding via server API
@@ -824,6 +825,7 @@ def seed_decisions( scenarios, dry_run=False, category_filter=None ):
                 ratification_state = "pending",
                 question_embedding = embedding,
                 created_at         = now_iso,
+                data_origin        = "synthetic_seed",
             )
 
             results.append( ( str( decision.id ), scenario[ "id" ] ) )

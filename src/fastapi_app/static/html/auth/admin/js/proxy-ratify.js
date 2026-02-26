@@ -183,6 +183,7 @@ function renderTable( decisions ) {
 
         row.innerHTML = `
             <td><input type="checkbox" ${isChecked} onclick="event.stopPropagation(); toggleSelect( '${escapeHtml( decision.id )}' )"></td>
+            <td>${getDataOriginBadge( decision.data_origin )}</td>
             <td><span class="badge badge-shadow">${escapeHtml( decision.category )}</span></td>
             <td class="question-text" title="${escapeHtml( decision.question || '' )}">${escapeHtml( truncate( decision.question || '', 80 ) )}</td>
             <td>${getActionBadge( decision.action )}</td>
@@ -227,6 +228,19 @@ function getActionBadge( action ) {
     };
     const cls = classes[ action ] || "badge-shadow";
     return `<span class="${cls}">${escapeHtml( action || "unknown" )}</span>`;
+}
+
+/**
+ * Get HTML for a data origin badge.
+ */
+function getDataOriginBadge( origin ) {
+    const config = {
+        organic             : { cls: "badge-organic",   label: "Organic" },
+        synthetic_seed      : { cls: "badge-seed",      label: "Seed" },
+        synthetic_generated : { cls: "badge-generated",  label: "Generated" }
+    };
+    const c = config[ origin ] || { cls: "badge-shadow", label: origin || "unknown" };
+    return `<span class="${c.cls}">${escapeHtml( c.label )}</span>`;
 }
 
 /**

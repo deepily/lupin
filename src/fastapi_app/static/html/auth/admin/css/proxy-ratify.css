@@ -116,6 +116,46 @@
 }
 
 /* ============================================================================
+   Data Origin Badges
+   ============================================================================ */
+
+.badge-organic {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #b2f5ea;
+    color: #234e52;
+}
+
+.badge-seed {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #feebc8;
+    color: #c05621;
+}
+
+.badge-generated {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #e9d8fd;
+    color: #553c9a;
+}
+
+/* ============================================================================
    Trust Level Badges
    ============================================================================ */
 

@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.02.26 - Session 271 | Fix: Mislabeled Seed Data — data_origin 'organic' → 'synthetic_seed'
+
+**Accomplishments**:
+- Truncated `proxy_decisions` table (132 rows: 60 organic + 22 synthetic_generated + 50 synthetic_seed — all synthetic, zero live usage)
+- Dropped and recreated LanceDB `proxy_decisions` table to add missing `data_origin` field to schema (old table created before column was added to `_get_schema()`)
+- Reseeded 50 decisions into both PostgreSQL and LanceDB with `data_origin='synthetic_seed'`
+- Verified: PG shows `synthetic_seed: 50, organic: 0`; LanceDB schema now includes 8 fields (was 7); CBR prediction functional
+
+**Root Cause**: Seed script ran at Session 265 before `data_origin="synthetic_seed"` parameter was added. The `proxy_decisions.data_origin` column defaults to `'organic'`, so all seed rows received the wrong label. LanceDB table also lacked the `data_origin` field entirely (schema mismatch).
+
+**No code changes** — all fixes were data-only (truncate + reseed). The corrected seed script (`data_origin` lines) was already present as uncommitted changes from Session 270.
+
+---
+
 ### 2026.02.25 - Session 270 | Feature: Add Data Origin Filter to Pending Ratification Page
 
 **Accomplishments**:

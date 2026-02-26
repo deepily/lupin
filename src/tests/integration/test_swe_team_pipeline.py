@@ -1,0 +1,270 @@
+#!/usr/bin/env python3
+"""
+Integration tests for SWE Team pipeline — end-to-end dry-run validation.
+
+Submits catalog tasks via POST /api/swe-team/submit with dry_run=true, polls
+for completion, and validates:
+    1. CJ Flow lifecycle (todo → running → done)
+    2. Proxy decisions are created with correct data_origin
+    3. Classifications map to expected categories
+    4. Decision metadata contains expected fields
+
+Requires:
+    - FastAPI server running on localhost:7999
+    - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and _PASSWORD set
+    - PostgreSQL running with proxy_decisions table
+
+Session 268: Work Item 2, Step 2.4.
+"""
+
+import os
+import time
+
+import pytest
+import requests
+
+# Server configuration
+BASE_URL = "http://localhost:7999"
+
+
+# =============================================================================
+# Fixtures
+# =============================================================================
+
+@pytest.fixture( scope="module" )
+def auth_headers():
+    """
+    Authenticate and return headers with Bearer token.
+
+    Requires:
+        - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and _PASSWORD env vars set
+        - Server running on BASE_URL
+    """
+    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
+
+    if not email or not password:
+        pytest.skip( "Test credentials not set (LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*)" )
+
+    resp = requests.post(
+        f"{BASE_URL}/auth/login",
+        json={ "email": email, "password": password },
+        timeout=30
+    )
+    if resp.status_code != 200:
+        pytest.skip( f"Login failed: {resp.status_code}" )
+
+    token = resp.json()[ "tokens" ][ "access_token" ]
+    return { "Authorization": f"Bearer {token}" }
+
+
+@pytest.fixture( scope="module" )
+def ws_session_id( auth_headers ):
+    """Get a WebSocket session ID for notifications."""
+    try:
+        resp = requests.get(
+            f"{BASE_URL}/api/ws/session",
+            headers=auth_headers,
+            timeout=10
+        )
+        if resp.status_code == 200:
+            return resp.json().get( "session_id", "test-pipeline" )
+    except Exception:
+        pass
+    return "test-pipeline"
+
+
+def submit_and_wait( task_text, auth_headers, ws_session_id, timeout=120 ):
+    """
+    Submit a dry-run SWE team task and poll until done.
+
+    Returns:
+        ( job_id, job_data ) on success, or pytest.fail on error
+    """
+    resp = requests.post(
+        f"{BASE_URL}/api/swe-team/submit",
+        json={
+            "task"         : task_text,
+            "dry_run"      : True,
+            "websocket_id" : ws_session_id,
+        },
+        headers=auth_headers,
+        timeout=60
+    )
+    assert resp.status_code == 200, f"Submit failed: {resp.status_code} {resp.text[ :200 ]}"
+
+    data   = resp.json()
+    job_id = data[ "job_id" ]
+    assert job_id, "No job_id in response"
+
+    # Poll done queue
+    elapsed = 0
+    while elapsed < timeout:
+        done_resp = requests.get(
+            f"{BASE_URL}/api/get-queue/done",
+            headers=auth_headers,
+            timeout=30
+        )
+        if done_resp.status_code == 200:
+            for job in done_resp.json().get( "done_jobs_metadata", [] ):
+                if job.get( "job_id" ) == job_id:
+                    return job_id, job
+
+        time.sleep( 2 )
+        elapsed += 2
+
+    pytest.fail( f"Timeout after {timeout}s waiting for job_id={job_id}" )
+
+
+def get_decisions_for_job( job_id ):
+    """
+    Query PostgreSQL for proxy decisions created by a specific job.
+
+    Returns:
+        list of decision row dicts
+    """
+    from cosa.rest.db.database import get_db
+    from sqlalchemy import text
+
+    with get_db() as session:
+        result = session.execute(
+            text( """
+                SELECT id, category, question, action, decision_value,
+                       confidence, trust_level, data_origin, metadata_json,
+                       created_at
+                FROM proxy_decisions
+                WHERE metadata_json->>'job_id' = :job_id
+                ORDER BY created_at ASC
+            """ ),
+            { "job_id": job_id }
+        )
+        return [ dict( row._mapping ) for row in result ]
+
+
+# =============================================================================
+# Tests
+# =============================================================================
+
+class TestSweTeamDryRunPipeline:
+    """End-to-end tests for SWE team dry-run pipeline with proxy decisions."""
+
+    def test_dry_run_completes_successfully( self, auth_headers, ws_session_id ):
+        """A dry-run task should complete and appear in the done queue."""
+        job_id, job_data = submit_and_wait(
+            "Add a health check endpoint",
+            auth_headers, ws_session_id
+        )
+
+        assert job_data is not None
+        assert job_data.get( "agent_type" ) == "swe_team"
+
+    def test_dry_run_produces_proxy_decisions( self, auth_headers, ws_session_id ):
+        """Dry-run should generate proxy decisions via the real classifier pipeline."""
+        job_id, job_data = submit_and_wait(
+            "Run the pytest test suite before merging changes",
+            auth_headers, ws_session_id
+        )
+
+        decisions = get_decisions_for_job( job_id )
+        assert len( decisions ) > 0, "Expected at least 1 proxy decision from dry-run"
+
+    def test_dry_run_decisions_have_synthetic_generated_origin( self, auth_headers, ws_session_id ):
+        """All dry-run proxy decisions should have data_origin='synthetic_generated'."""
+        job_id, job_data = submit_and_wait(
+            "Deploy the authentication service to staging",
+            auth_headers, ws_session_id
+        )
+
+        decisions = get_decisions_for_job( job_id )
+        assert len( decisions ) > 0
+
+        for dec in decisions:
+            assert dec[ "data_origin" ] == "synthetic_generated", \
+                f"Expected synthetic_generated, got {dec[ 'data_origin' ]} for {dec[ 'category' ]}"
+
+    def test_dry_run_decisions_have_classified_metadata( self, auth_headers, ws_session_id ):
+        """Decisions should have metadata indicating they were classified by the pipeline."""
+        job_id, job_data = submit_and_wait(
+            "Refactor the notification module using the observer pattern",
+            auth_headers, ws_session_id
+        )
+
+        decisions = get_decisions_for_job( job_id )
+        assert len( decisions ) > 0
+
+        for dec in decisions:
+            meta = dec[ "metadata_json" ]
+            assert meta is not None
+            assert meta.get( "dry_run" ) is True
+            assert meta.get( "job_id" ) == job_id
+            assert meta.get( "classified" ) is True
+            assert "phase" in meta
+
+    def test_dry_run_decisions_span_multiple_categories( self, auth_headers, ws_session_id ):
+        """Dry-run should produce decisions across at least 2 different categories."""
+        job_id, job_data = submit_and_wait(
+            "Add input validation and deploy to staging",
+            auth_headers, ws_session_id
+        )
+
+        decisions = get_decisions_for_job( job_id )
+        categories = set( dec[ "category" ] for dec in decisions )
+
+        # The phase questions exercise testing, deployment, architecture, deps, destructive
+        assert len( categories ) >= 2, \
+            f"Expected at least 2 categories, got {categories}"
+
+    def test_dry_run_cj_flow_lifecycle( self, auth_headers, ws_session_id ):
+        """Job should go through CJ Flow: submit returns queued, poll returns done."""
+        # Submit
+        resp = requests.post(
+            f"{BASE_URL}/api/swe-team/submit",
+            json={
+                "task"         : "Fix the pagination off-by-one error",
+                "dry_run"      : True,
+                "websocket_id" : ws_session_id,
+            },
+            headers=auth_headers,
+            timeout=60
+        )
+        assert resp.status_code == 200
+
+        data = resp.json()
+        assert data[ "status" ] == "queued"
+        assert data[ "queue_position" ] >= 0
+
+        job_id = data[ "job_id" ]
+        assert job_id.startswith( "swe-" )
+
+        # Poll until complete
+        elapsed = 0
+        while elapsed < 120:
+            done_resp = requests.get(
+                f"{BASE_URL}/api/get-queue/done",
+                headers=auth_headers,
+                timeout=30
+            )
+            if done_resp.status_code == 200:
+                for job in done_resp.json().get( "done_jobs_metadata", [] ):
+                    if job.get( "job_id" ) == job_id:
+                        return  # Success — job appeared in done queue
+
+            time.sleep( 2 )
+            elapsed += 2
+
+        pytest.fail( f"Job {job_id} never appeared in done queue" )
+
+    def test_dry_run_confidence_values_are_valid( self, auth_headers, ws_session_id ):
+        """All proxy decision confidence values should be between 0.0 and 1.0."""
+        job_id, job_data = submit_and_wait(
+            "Upgrade the requests package to the latest version",
+            auth_headers, ws_session_id
+        )
+
+        decisions = get_decisions_for_job( job_id )
+        assert len( decisions ) > 0
+
+        for dec in decisions:
+            conf = dec[ "confidence" ]
+            assert 0.0 <= conf <= 1.0, \
+                f"Confidence {conf} out of range for {dec[ 'category' ]}"
