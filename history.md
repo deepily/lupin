@@ -1,5 +1,20 @@
 # Lupin Project History
 
+### 2026.02.26 - Session 272 | Docs: Serialize Voice I/O Hook Integration Plan
+
+**Accomplishments**:
+- Serialized the voice I/O integration plan from plan mode into `src/rnd/` as a permanent research artifact
+- Created directory `src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/` to house both the research doc and the plan
+- Moved and renamed research document into the new directory (was `2026.02.25-voice-io-integration-with-cc-system-hooks.md`, now `2026.02.25-voice-io-integration-with-cc-system-hooks-research.md`)
+- Wrote full plan document (`2026.02.25-opportunistic-voice-hook-integration-plan.md`) — 8 phases, 7 architecture decisions, hook-by-hook suitability matrix (3 tiers), opportunistic voice drain architecture, risk assessment, Mermaid data flow diagram
+- Updated `src/rnd/README.md` with links to both documents
+- Added TODO item to return to draft plan for review and Phase 0 execution
+
+**Files Created**: 1 new file, 1 moved+renamed, 1 new directory
+**Files Modified**: `src/rnd/README.md`, `TODO.md`
+
+---
+
 ### 2026.02.26 - Session 271 | Fix: Mislabeled Seed Data — data_origin 'organic' → 'synthetic_seed'
 
 **Accomplishments**:

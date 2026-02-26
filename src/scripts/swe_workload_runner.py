@@ -5,7 +5,7 @@ SWE Team workload runner — submits catalog tasks and captures proxy decisions.
 Authenticates against the running server, submits tasks from the workload
 catalog sequentially via POST /api/swe-team/submit with dry_run=true, polls
 the done queue for completion, then queries PostgreSQL for all proxy decisions
-created by each job. Writes a JSONL manifest to io/decision_proxies/ for
+created by each job. Writes a JSONL manifest to io/decision-proxies/ for
 downstream analysis and integration test fixture generation.
 
 Usage:
@@ -16,7 +16,7 @@ Usage:
     python src/scripts/swe_workload_runner.py --trust-mode shadow  # Set trust mode
 
 Output:
-    io/decision_proxies/workload-manifest-swe-team-catalog-{category|all}-{dry-run|live}-{timestamp}.jsonl
+    io/decision-proxies/workload-manifest-swe-team-catalog-{category|all}-{dry-run|live}-{timestamp}.jsonl
 
 Requires:
     - LUPIN_ROOT environment variable set
@@ -306,7 +306,7 @@ def run_workload( tasks, dry_run=True, trust_mode=None, manifest_path=None, cate
         timestamp     = datetime.now().strftime( "%Y%m%d-%H%M%S" )
         mode_label    = "dry-run" if dry_run else "live"
         source_name   = f"swe-team-catalog-{category or 'all'}"
-        manifest_dir  = os.path.join( lupin_root, "io", "decision_proxies" )
+        manifest_dir  = os.path.join( lupin_root, "io", "decision-proxies" )
         os.makedirs( manifest_dir, exist_ok=True )
         manifest_path = os.path.join(
             manifest_dir,

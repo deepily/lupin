@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-26 (Session 271)
+Last updated: 2026-02-26 (Session 272)
 
 ## v0.1.6 — FUTURE DEVELOPMENT
 
@@ -66,6 +66,12 @@ Last updated: 2026-02-26 (Session 271)
 ---
 
 ## v0.1.5 — HIGH PRIORITY
+
+### Voice I/O Integration with Claude Code System Hooks (Session 272)
+
+- [ ] **[LUPIN] Review and finalize voice hook integration draft plan** — Return to `src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-opportunistic-voice-hook-integration-plan.md` for review, refinement, and begin Phase 0 (Hook Contract Validation). 8-phase plan, 6-8 weeks estimated.
+  - **Research doc**: [`2026.02.25-voice-io-integration-with-cc-system-hooks-research.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-voice-io-integration-with-cc-system-hooks-research.md)
+  - **Draft plan**: [`2026.02.25-opportunistic-voice-hook-integration-plan.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-opportunistic-voice-hook-integration-plan.md)
 
 ---
 
