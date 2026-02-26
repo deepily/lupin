@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-26 (Session 272)
+Last updated: 2026-02-26 (Session 273)
 
 ## v0.1.6 — FUTURE DEVELOPMENT
 
@@ -76,6 +76,15 @@ Last updated: 2026-02-26 (Session 272)
 ---
 
 ## Pending
+
+### SWE Team Proxy: Workload Generator + Shadow-Mode Capture (HIGH PRIORITY)
+
+- [x] **[LUPIN] Layer 1: Enhanced dry-run + capture harness** — Session 268: 18-task catalog, JSONL capture harness, 7 integration tests, `data_origin` column. Validated Session 273: manifest path corrected to `io/decision-proxies/`.
+- [ ] **[LUPIN] Layer 1 output review** — Return to review dry-run JSONL output at `io/decision-proxies/`. Validate classifier accuracy, confidence distributions, and category coverage across full 18-task catalog run.
+- [ ] **[LUPIN] Layer 2: Live shadow-mode capture** — Run real SWE Team pipeline with `--live --trust-mode shadow`. Requires architectural decision: sandboxed execution (worktree/Docker) vs planning-only mode (stop before coder writes code). Deferred until Layer 1 output is reviewed.
+  - **R&D doc**: [`src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md`](src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md)
+  - **Runner**: `src/scripts/swe_workload_runner.py` (supports `--live --trust-mode shadow`)
+  - **Integration tests**: `src/tests/integration/test_swe_team_pipeline.py` (7 tests)
 
 ### SWE Team Proxy Simulation (HIGH PRIORITY)
 

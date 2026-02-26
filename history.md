@@ -1,5 +1,26 @@
 # Lupin Project History
 
+### 2026.02.26 - Session 273 | SWE Proxy: Fix Workload Manifest Path + Shadow-Mode Walkthrough
+
+**Accomplishments**:
+- Fixed workload manifest output path: `src/rnd/` → `io/decision-proxies/` with source-name in filename
+- New filename pattern: `workload-manifest-swe-team-catalog-{category|all}-{dry-run|live}-{timestamp}.jsonl`
+- Added `category` parameter threading from CLI → `main()` → `run_workload()` for source-name construction
+- Updated docstring with new output path and filename pattern documentation
+- Validated dry-run: 1 task submitted, 7 proxy decisions captured across 5 categories, manifest written to correct path
+- Updated R&D doc (`2026.02.25-swe-proxy-data-origin-and-workload-generator.md`) with corrected path reference
+- Added TODO items for Layer 1 output review and Layer 2 live shadow-mode capture (architectural decision deferred)
+- Explained trust mode shadow vs suggest gating logic from `EngineeringStrategy.gate()`
+
+**Files Modified**: 2 files
+- `src/scripts/swe_workload_runner.py` — manifest path logic, category param, docstring
+- `src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md` — path reference update
+
+**Files Created**: 1 directory
+- `io/decision-proxies/` — new output directory for workload manifests
+
+---
+
 ### 2026.02.26 - Session 272 | Docs: Serialize Voice I/O Hook Integration Plan
 
 **Accomplishments**:
