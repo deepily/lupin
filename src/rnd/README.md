@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.26 - Voice Hook Phase 0 Implementation
+- **Plan**: [2026.02.26-voice-hook-phase-0-implementation.md](2026.02.26-voice-hook-phase-0-implementation.md) - Phase 0 execution plan: 5 test hooks (SessionStart, PostToolUse, PreToolUse, Stop, Notification), shared `hook_common.py` library with TTS via `lupin_cli.notifications`, PPID-based session bridge (`session_bridge.py`), and hook registration in `settings.local.json`. Validates research claims empirically. Review decisions: AD-5 all boundaries drain, AD-6 PPID session bridge, AD-2 `lupin_cli.notifications` package.
+
 ### 2026.02.25 - Voice I/O Integration with Claude Code System Hooks
 - **Directory**: [2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/](2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/) - Research + implementation plan for full bidirectional voice loop via Claude Code's 18 system hook events. Opportunistic voice drain architecture: speech captured between tool calls, accumulated in existing notification API as `VOICE_INPUT` type, drained at hook boundaries (PostToolUse primary, Stop secondary) and injected as `additionalContext`. Voice-driven approvals via PermissionRequest hook. 8 implementation phases over 6-8 weeks.
   - **Research**: [2026.02.25-voice-io-integration-with-cc-system-hooks-research.md](2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-voice-io-integration-with-cc-system-hooks-research.md) - Complete I/O contract reference for all 18 hook events: exit codes, JSON schemas, blocking semantics, injection surfaces.

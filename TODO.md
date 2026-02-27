@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-26 (Session 273)
+Last updated: 2026-02-26 (Session 276)
 
 ## v0.1.6 — FUTURE DEVELOPMENT
 
@@ -67,11 +67,17 @@ Last updated: 2026-02-26 (Session 273)
 
 ## v0.1.5 — HIGH PRIORITY
 
-### Voice I/O Integration with Claude Code System Hooks (Session 272)
+### Voice I/O Integration with Claude Code System Hooks (Sessions 272-276)
 
-- [ ] **[LUPIN] Review and finalize voice hook integration draft plan** — Return to `src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-opportunistic-voice-hook-integration-plan.md` for review, refinement, and begin Phase 0 (Hook Contract Validation). 8-phase plan, 6-8 weeks estimated.
-  - **Research doc**: [`2026.02.25-voice-io-integration-with-cc-system-hooks-research.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-voice-io-integration-with-cc-system-hooks-research.md)
-  - **Draft plan**: [`2026.02.25-opportunistic-voice-hook-integration-plan.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-opportunistic-voice-hook-integration-plan.md)
+- [x] **[LUPIN] Review and finalize voice hook integration draft plan** — Session 276: Plan reviewed, 3 ADs confirmed (AD-2, AD-5, AD-6), master plan updated.
+- [x] **[LUPIN] Phase 0: Hook Contract Validation** — Session 276: 5 test hooks live, shared library + session bridge implemented, hooks capturing real CC payloads.
+- [ ] **[LUPIN] Phase 0 validation: Analyze captured payloads** — Review logs from live session, document actual JSON schemas vs research claims, measure hook latency, verify session bridge file at next restart. **RESUME TOMORROW MORNING.**
+  - **Logs dir**: `src/lupin_cli/claude_code/hooks/logs/`
+  - **Session bridge file**: `~/.claude/sessions/cc-{PID}.json`
+- [ ] **[LUPIN] Phase 1: Notification System Extensions** — Add `VOICE_INPUT` to NotificationType, voice sender_id convention, test voice input flow end-to-end.
+- [ ] **[LUPIN] Phase 2-7: Remaining voice hook phases** — Hook infrastructure, TTS output, voice drain + injection, voice approvals, browser capture, testing + polish.
+  - **Master plan**: [`2026.02.25-opportunistic-voice-hook-integration-plan.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-opportunistic-voice-hook-integration-plan.md)
+  - **Phase 0 plan**: [`2026.02.26-voice-hook-phase-0-implementation.md`](src/rnd/2026.02.26-voice-hook-phase-0-implementation.md)
 
 ---
 
@@ -96,13 +102,6 @@ Last updated: 2026-02-26 (Session 273)
 - [x] **[LUPIN] Phase 7: Real-Time Proxy Summary Notifications** - Session 248: 10 tasks, 7 new tests, 1 E2E smoke. Batch lifecycle, proxy summary emission, trust mode dropdown, circuit breaker alerts. 1518 pass.
 - [x] **[LUPIN] Phase 8: Hot-Reload Trust Mode** - Session 248: REST endpoint + UI dropdown on Trust Dashboard, 16 new tests, 1534 pass
 - [ ] **[LUPIN] Test SWE agent team with small jobs** - Validate SWE team end-to-end with small, scoped tasks to verify orchestration and proxy behavior
-- [ ] **[LUPIN] Commit CoSA changes for proxy activation** — 2 CoSA files modified (config.py, orchestrator.py). Must commit in CoSA context separately
-
-### Slash Command Cleanup (LOW)
-
-- [ ] **[LUPIN] Deprecate old standalone test commands** - Remove `smoke-test-baseline.md`, `smoke-test-remediation.md`, `lupin-test-harness-update.md` from `.claude/commands/`. They use deprecated `notify-claude-async` and duplicate the new `plan-*` commands.
-- [ ] **[LUPIN] Audit other repos for verbatim-copy slash command bug** - Check if any other projects have planning-is-prompting config in their test slash commands (same bug fixed in Session 222 for Lupin).
-- [ ] **[LUPIN] Update install wizard to generate from templates** - Instead of copying planning-is-prompting versions verbatim, the wizard should use `workflow/slash-command-templates/` and prompt for project-specific values.
 
 ### Before Branch Merge
 

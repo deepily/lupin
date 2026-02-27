@@ -96,3 +96,6 @@ src/lupin-plugin-firefox/
 
 # Migration archives - historical artifacts not for tracking
 history/migrations/
+
+# Claude Code hook logs - empirical payload captures
+src/lupin_cli/claude_code/hooks/logs/
