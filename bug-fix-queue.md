@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-26T12:00:00
+**Last Updated**: 2026-02-27T09:00:00
 
 ---
 
@@ -27,7 +27,8 @@
 | ff1fffd0 | 2026-02-21T00:00:00 | 2026-02-21T00:00:00 | stale |
 | e7bfdd1d | 2026-02-23T12:00:00 | 2026-02-23T21:20:00 | closed |
 | e10e0f35 | 2026-02-24T00:00:00 | 2026-02-24T20:15:00 | closed |
-| 7f9787a4 | 2026-02-26T12:00:00 | 2026-02-26T12:00:00 | active |
+| 7f9787a4 | 2026-02-26T12:20:00 | 2026-02-26T12:30:00 | closed |
+| b6e79902 | 2026-02-27T09:00:00 | 2026-02-27T09:00:00 | active |
 
 ---
 
@@ -48,6 +49,11 @@
 ---
 
 ### Completed
+
+- [x] **SWE Team output path uses underscores instead of dashes** → pending commit | By: 7f9787a4
+  - **Symptom**: Artifacts written to `io/swe_team/` but Lupin convention uses dashes for non-Python files/dirs
+  - **Fix**: `orchestrator.py:853` path string, `state_files.py:9` docstring, filesystem rename `io/swe_team/` → `io/swe-team/`
+  - **Files (CoSA)**: `src/cosa/agents/swe_team/orchestrator.py`, `src/cosa/agents/swe_team/state_files.py`
 
 - [x] **QueryLogTable gist embedding dimension mismatch (ArrowInvalid)** → commit: 922f503 (docs), CoSA pending | By: e10e0f35
   - **Root Cause**: Schema kept 768-dim `embedding_gist` after gist embeddings jettisoned (38f9704)

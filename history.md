@@ -1,5 +1,18 @@
 # Lupin Project History
 
+### 2026.02.27 - Session 277 | Bug Fix Mode — Permission Prompt Accumulation
+
+**Accomplishments**:
+- Fixed repeated permission prompts for `.claude-session.md` heredoc append commands
+- Root cause: `Bash(prefix:*)` patterns don't match multi-line heredoc commands; each session creates unique command strings
+- Added MANDATE to `~/.claude/CLAUDE.md` — use Edit/Write tools (never Bash heredocs) for manifest operations
+- Added catch-all patterns to `~/.claude/settings.json` as backup
+- Cleaned up 5 accumulated one-off heredoc entries from `.claude/settings.local.json`
+
+**Files Modified**: 3 files (+ 2 global config files outside repo)
+
+---
+
 ### 2026.02.26 - Session 276 | Voice Hook Integration — Plan Review + Phase 0 Execution
 
 #### Checkpoint | 2026.02.26 22:50 | Phase 0 hooks live and capturing payloads
