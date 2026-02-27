@@ -14,7 +14,7 @@ Converted to Pattern A: 2026-02-17 (Session 222 — Consistency Cleanup)
 import json
 from unittest.mock import MagicMock, patch
 
-from cosa.cli.notification_models import NotificationResponse
+from lupin_cli.notifications.notification_models import NotificationResponse
 from cosa.rest.todo_fifo_queue import TodoFifoQueue
 
 

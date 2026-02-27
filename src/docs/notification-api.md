@@ -413,12 +413,12 @@ curl -X POST "http://localhost:7999/api/notify" \
 **Python ( CLI )**:
 
 ```python
-from cosa.cli.notification_models import (
+from lupin_cli.notifications.notification_models import (
     AsyncNotificationRequest,
     NotificationType,
     NotificationPriority
 )
-from cosa.cli.notify_user_async import notify_user_async
+from lupin_cli.notifications.notify_user_async import notify_user_async
 
 request = AsyncNotificationRequest(
     message           = "Build completed successfully",
@@ -471,8 +471,8 @@ data: {"status": "expired", "response": "no", "default_used": true}
 **Python ( CLI )**:
 
 ```python
-from cosa.cli.notification_models import NotificationRequest, ResponseType
-from cosa.cli.notify_user_sync import notify_user_sync
+from lupin_cli.notifications.notification_models import NotificationRequest, ResponseType
+from lupin_cli.notifications.notify_user_sync import notify_user_sync
 
 request = NotificationRequest(
     message          = "Deploy to production?",
@@ -524,7 +524,7 @@ curl -N -X POST "http://localhost:7999/api/notify" \
 **Python ( CLI )**:
 
 ```python
-from cosa.cli.notification_models import NotificationRequest, ResponseType
+from lupin_cli.notifications.notification_models import NotificationRequest, ResponseType
 
 request = NotificationRequest(
     message          = "How should we handle the migration?",
@@ -2829,8 +2829,8 @@ responds, the timeout expires, or the user is detected as offline.
 **Python API**:
 
 ```python
-from cosa.cli.notify_user_sync import notify_user_sync
-from cosa.cli.notification_models import (
+from lupin_cli.notifications.notify_user_sync import notify_user_sync
+from lupin_cli.notifications.notification_models import (
     NotificationRequest, NotificationResponse,
     NotificationType, NotificationPriority, ResponseType
 )
@@ -2883,7 +2883,7 @@ def notify_user_sync(
 **CLI usage**:
 
 ```bash
-python3 -m cosa.cli.notify_user_sync "Approve deployment?" \
+python3 -m lupin_cli.notifications.notify_user_sync "Approve deployment?" \
     --response-type yes_no \
     --response-default no \
     --timeout 120
@@ -2903,8 +2903,8 @@ confirmation. Uses adaptive retry to handle the WebSocket authentication window.
 **Python API**:
 
 ```python
-from cosa.cli.notify_user_async import notify_user_async
-from cosa.cli.notification_models import (
+from lupin_cli.notifications.notify_user_async import notify_user_async
+from lupin_cli.notifications.notification_models import (
     AsyncNotificationRequest, AsyncNotificationResponse,
     NotificationType, NotificationPriority
 )
@@ -2953,7 +2953,7 @@ retry patterns based on the timeout budget:
 **CLI usage**:
 
 ```bash
-python3 -m cosa.cli.notify_user_async "Build completed" \
+python3 -m lupin_cli.notifications.notify_user_async "Build completed" \
     --type task \
     --priority high
 ```

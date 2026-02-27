@@ -1,5 +1,44 @@
 # Lupin Project History
 
+### 2026.02.26 - Session 275 | Move cosa.cli → lupin_cli.notifications
+
+#### Checkpoint | 2026.02.26 22:15 | Complete migration of notification infrastructure
+
+**Accomplishments**:
+- Extracted notification infrastructure from CoSA submodule (`src/cosa/cli/`) to Lupin-owned package (`src/lupin_cli/notifications/`)
+- Created new `lupin_cli` package root with `notifications` subpackage (8 files)
+- Updated 18 consumer files (7 Lupin-owned + 11 CoSA-internal) with new import paths
+- Moved 2 CoSA test files to Lupin test suite (`src/tests/unit/`)
+- Fixed pre-existing test assertion bug in `test_notification_types.py` (ENV_SERVER_URL prefix check)
+- Updated 3 documentation files (notification-api.md, agentic-voice-workflow.md, lupin_mcp/README.md)
+- Deleted old `src/cosa/cli/` directory (7 files) and `src/cosa/tests/unit/cli/` (2 files)
+- Verified: all new imports work, old imports correctly fail with ModuleNotFoundError
+- Unit tests: 1687 passed (10 more than before due to moved tests), 1 pre-existing failure
+- WebSocket tests: 50/50 passed
+- Integration tests: no `cosa.cli` related failures
+
+**Files**: src/lupin_cli/ (8 new), 18 consumers, 3 docs (+28 more)
+**Commit**: [pending]
+
+---
+
+### 2026.02.26 - Session 274 | Bug Fix: SWE Team Output Path — Underscores to Dashes
+
+**Accomplishments**:
+- Fixed SWE Team artifact output path from `io/swe_team/` to `io/swe-team/` to match Lupin file naming convention (dashes for non-Python files/directories)
+- Updated hardcoded path in `orchestrator.py:853` (`os.path.join` call)
+- Updated docstring path reference in `state_files.py:9`
+- Renamed existing `io/swe_team/` directory on filesystem, preserving 2 session artifact subdirectories
+- Verified no remaining `io/swe_team` references in `src/`
+- All 259 SWE Team unit tests pass
+
+**Files Modified**: 2 files + 1 directory rename
+- `src/cosa/agents/swe_team/orchestrator.py` — path string `swe_team` → `swe-team`
+- `src/cosa/agents/swe_team/state_files.py` — docstring path reference
+- `io/swe_team/` → `io/swe-team/` (filesystem rename)
+
+---
+
 ### 2026.02.26 - Session 273 | SWE Proxy: Fix Workload Manifest Path + Shadow-Mode Walkthrough
 
 **Accomplishments**:

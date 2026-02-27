@@ -40,8 +40,8 @@ from typing import Optional
 from pydantic import ValidationError
 from fastmcp import FastMCP
 
-# Import from cosa.cli (the notification library)
-from cosa.cli.notification_models import (
+# Import from lupin_cli.notifications (the notification library)
+from lupin_cli.notifications.notification_models import (
     NotificationRequest,
     AsyncNotificationRequest,
     NotificationResponse,
@@ -50,8 +50,8 @@ from cosa.cli.notification_models import (
     NotificationPriority,
     ResponseType
 )
-from cosa.cli.notify_user_sync import notify_user_sync
-from cosa.cli.notify_user_async import notify_user_async
+from lupin_cli.notifications.notify_user_sync import notify_user_sync
+from lupin_cli.notifications.notify_user_async import notify_user_async
 from cosa.utils.notification_utils import (
     format_questions_for_tts,
     convert_questions_for_api,

@@ -12,7 +12,7 @@ Tests validation logic, field validators, and model methods for:
 import pytest
 from pydantic import ValidationError
 
-from cosa.cli.notification_models import (
+from lupin_cli.notifications.notification_models import (
     NotificationRequest,
     NotificationResponse,
     RespondedEvent,
