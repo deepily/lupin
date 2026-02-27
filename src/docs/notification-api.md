@@ -753,7 +753,7 @@ Environment Variables  >  Config File  >  Hardcoded Defaults
 | `LUPIN_API_URL`               | Server base URL                  | `http://localhost:7999`    |
 | `LUPIN_APP_SERVER_URL`        | Server base URL ( legacy alias ) | `http://localhost:7999`    |
 | `LUPIN_API_KEY_FILE`          | Path to file containing API key  | From config                |
-| `LUPIN_NOTIFICATION_RECIPIENT`| Default target user email        | From config                |
+| `LUPIN_DEV_EMAIL`             | Default target user email        | From config                |
 | `LUPIN_ENV`                   | Environment name for config      | `local`                    |
 
 #### Config File
@@ -1927,7 +1927,7 @@ class NotificationRequest( BaseModel ):
 | `response_type`     | `ResponseType`                | *required*                           | Enum validation                       |
 | `notification_type` | `NotificationType`            | `NotificationType.CUSTOM`            | Enum validation                       |
 | `priority`          | `NotificationPriority`        | `NotificationPriority.MEDIUM`        | Enum validation                       |
-| `target_user`       | `str`                         | `"ricardo.felipe.ruiz@gmail.com"`    | Email address of recipient            |
+| `target_user`       | `Optional[str]`               | `None`                               | Resolved from config/env at dispatch time |
 | `timeout_seconds`   | `int`                         | `120`                                | ge=1, le=600                          |
 | `response_default`  | `Optional[str]`               | `None`                               | `validate_yes_no_default` validator   |
 | `title`             | `Optional[str]`               | `None`                               | min_length=1, max_length=100          |
@@ -1967,7 +1967,7 @@ class AsyncNotificationRequest( BaseModel ):
 | `message`           | `str`                         | *required*                           | min_length=1, max_length=5000, `message_not_whitespace` validator |
 | `notification_type` | `NotificationType`            | `NotificationType.CUSTOM`            | Enum validation                       |
 | `priority`          | `NotificationPriority`        | `NotificationPriority.MEDIUM`        | Enum validation                       |
-| `target_user`       | `str`                         | `"ricardo.felipe.ruiz@gmail.com"`    | Email address of recipient            |
+| `target_user`       | `Optional[str]`               | `None`                               | Resolved from config/env at dispatch time |
 | `timeout`           | `int`                         | `5`                                  | ge=1, le=30 (HTTP request timeout)    |
 | `sender_id`         | `Optional[str]`               | `None`                               | Regex pattern (see Section 5.5)       |
 | `abstract`          | `Optional[str]`               | `None`                               | max_length=5000                       |

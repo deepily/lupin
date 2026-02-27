@@ -33,39 +33,39 @@ def notify_user(
     message: str,
     notification_type: str = DEFAULT_TYPE,
     priority: str = DEFAULT_PRIORITY,
-    target_user: str = "ricardo.felipe.ruiz@gmail.com",
+    target_user: str = None,
     server_url: Optional[str] = None,
     timeout: int = 5
 ) -> bool:
     """
     Send notification to user via Lupin API.
-    
+
     Requires:
         - message is a non-empty string
         - notification_type is one of: task, progress, alert, custom
         - priority is one of: low, medium, high, urgent
-        - target_user is a valid email address format
+        - target_user is a valid email address format or None (resolved at dispatch)
         - server_url is None or a valid HTTP/HTTPS URL
         - timeout is a positive integer
-        
+
     Ensures:
         - Returns True if notification sent successfully
         - Returns False if validation fails or network error occurs
         - Validates notification_type and priority against allowed values
         - Uses environment variable or default server URL if not provided
         - Prints status messages for debugging
-        
+
     Raises:
         - None (handles all exceptions gracefully)
-        
+
     Args:
         message: The notification message text
         notification_type: Type of notification (task, progress, alert, custom)
         priority: Priority level (low, medium, high, urgent)
-        target_user: Target user email address (default: ricardo.felipe.ruiz@gmail.com)
+        target_user: Target user email address (resolved from config/env if None)
         server_url: Override server URL (uses env var if None)
         timeout: Request timeout in seconds
-        
+
     Returns:
         bool: True if notification sent successfully, False otherwise
     """
@@ -81,7 +81,12 @@ def notify_user(
         print( f"✗ Invalid priority: {priority}" )
         print( f"  Valid priorities: {', '.join( NotificationPriority.values() )}" )
         return False
-    
+
+    # Resolve target_user if not explicitly set
+    if target_user is None:
+        from lupin_cli.notifications.notification_models import resolve_target_user
+        target_user = resolve_target_user()
+
     # Determine server URL
     base_url = server_url or os.getenv( ENV_SERVER_URL, DEFAULT_SERVER_URL )
     
@@ -243,8 +248,8 @@ Environment Variables:
     
     parser.add_argument(
         "--target-user",
-        default="ricardo.felipe.ruiz@gmail.com",
-        help="Target user email address (default: ricardo.felipe.ruiz@gmail.com)"
+        default=None,
+        help="Target user email address (resolved from LUPIN_DEV_EMAIL or config if not provided)"
     )
     
     parser.add_argument(

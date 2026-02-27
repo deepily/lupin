@@ -150,6 +150,11 @@ def notify_user_async(
         base_url = base_url.rstrip( '/' )
         api_key = None  # Will cause authentication error (intentional - forces user to fix config)
 
+    # Resolve target_user if not explicitly set
+    if request.target_user is None:
+        from lupin_cli.notifications.notification_models import resolve_target_user
+        request = request.model_copy( update={ "target_user": resolve_target_user() } )
+
     # Calculate retry intervals based on timeout (Phase 2.7 - adaptive retry for WebSocket auth)
     retry_intervals = calculate_retry_intervals( request.timeout )
     all_delays = [ 0 ] + retry_intervals  # First attempt immediate, then configured delays
@@ -370,7 +375,7 @@ Exit Codes:
 Environment Variables:
   LUPIN_APP_SERVER_URL            Server URL (default: http://localhost:7999)
   LUPIN_ENV                      Environment name (default: local)
-  LUPIN_NOTIFICATION_RECIPIENT   Global notification recipient email (overrides config file)
+  LUPIN_DEV_EMAIL                Global notification recipient email (overrides config file)
         """
     )
 

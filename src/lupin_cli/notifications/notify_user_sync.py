@@ -419,6 +419,11 @@ def notify_user_sync(
         api_key = None  # Will cause authentication error (intentional - forces user to fix config)
         env = "fallback"
 
+    # Resolve target_user if not explicitly set
+    if request.target_user is None:
+        from lupin_cli.notifications.notification_models import resolve_target_user
+        request = request.model_copy( update={ "target_user": resolve_target_user() } )
+
     # Track current timeout for exponential backoff
     current_timeout = request.timeout_seconds
     attempts_made = 0
@@ -510,7 +515,7 @@ Exit Codes:
 Environment Variables:
   LUPIN_APP_SERVER_URL            Server URL (default: http://localhost:7999)
   LUPIN_ENV                      Environment name (default: local)
-  LUPIN_NOTIFICATION_RECIPIENT   Global notification recipient email (overrides config file)
+  LUPIN_DEV_EMAIL                Global notification recipient email (overrides config file)
         """
     )
 

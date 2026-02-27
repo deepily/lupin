@@ -23,7 +23,8 @@ from lupin_cli.notifications.notification_models import (
     AsyncNotificationResponse,
     NotificationType,
     NotificationPriority,
-    ResponseType
+    ResponseType,
+    resolve_target_user
 )
 
 
@@ -155,6 +156,7 @@ class TestNotificationRequestValidation:
             response_type=ResponseType.YES_NO,
             notification_type=NotificationType.TASK,
             priority=NotificationPriority.HIGH,
+            target_user="test@example.com",
             timeout_seconds=60,
             response_default="yes",
             title="Test Title"
@@ -166,6 +168,7 @@ class TestNotificationRequestValidation:
         assert params["message"] == "Test notification"
         assert params["type"] == "task"
         assert params["priority"] == "high"
+        assert params["target_user"] == "test@example.com"
         assert params["response_requested"] == "true"
         assert params["response_type"] == "yes_no"
         assert params["timeout_seconds"] == 60
@@ -177,7 +180,8 @@ class TestNotificationRequestValidation:
         """Test that None optional fields are excluded from params."""
         request = NotificationRequest(
             message="Test",
-            response_type=ResponseType.YES_NO
+            response_type=ResponseType.YES_NO,
+            target_user="test@example.com"
             # response_default and title are None
         )
 
@@ -187,6 +191,17 @@ class TestNotificationRequestValidation:
         assert "response_default" not in params
         assert "title" not in params
         assert "api_key" not in params  # Now in HTTP headers
+
+    def test_to_api_params_raises_when_target_user_none( self ):
+        """Test that to_api_params() raises ValueError when target_user is None."""
+        request = NotificationRequest(
+            message="Test",
+            response_type=ResponseType.YES_NO
+            # target_user defaults to None
+        )
+
+        with pytest.raises( ValueError, match="target_user is None" ):
+            request.to_api_params()
 
 
 # ============================================================================
@@ -363,7 +378,7 @@ class TestAsyncNotificationRequestValidation:
         assert request.message == "Build completed successfully"
         assert request.notification_type == NotificationType.TASK
         assert request.priority == NotificationPriority.MEDIUM
-        assert request.target_user == "ricardo.felipe.ruiz@gmail.com"  # default
+        assert request.target_user is None  # default (resolved at dispatch time)
         assert request.timeout == 5  # default
 
     def test_message_required( self ):
@@ -478,7 +493,7 @@ class TestAsyncNotificationRequestValidation:
 
     def test_to_api_params_no_response_fields( self ):
         """Test that async params don't include sync response fields."""
-        request = AsyncNotificationRequest( message="Test" )
+        request = AsyncNotificationRequest( message="Test", target_user="test@example.com" )
         # Phase 2.5: API key moved to X-API-Key header, not in params
         params = request.to_api_params()
 
@@ -689,6 +704,7 @@ class TestProgressGroupId:
         """Test that progress_group_id is included in to_api_params() when set."""
         req = AsyncNotificationRequest(
             message="Test progress",
+            target_user="test@example.com",
             progress_group_id="pg-a1b2c3d4"
         )
         params = req.to_api_params()
@@ -697,7 +713,7 @@ class TestProgressGroupId:
 
     def test_excluded_from_to_api_params_when_none( self ):
         """Test that progress_group_id is excluded from to_api_params() when None."""
-        req = AsyncNotificationRequest( message="Test no progress" )
+        req = AsyncNotificationRequest( message="Test no progress", target_user="test@example.com" )
         params = req.to_api_params()
         assert "progress_group_id" not in params
 
@@ -705,6 +721,7 @@ class TestProgressGroupId:
         """Test that progress_group_id works alongside job_id."""
         req = AsyncNotificationRequest(
             message="Test",
+            target_user="test@example.com",
             job_id="dr-a1b2c3d4",
             progress_group_id="pg-12345678"
         )
@@ -788,6 +805,40 @@ class TestAgenticJobBaseProgressGroup:
         job = _TestJob()
         ids = { job.create_progress_group() for _ in range( 20 ) }
         assert len( ids ) == 20  # All unique
+
+
+# ============================================================================
+# resolve_target_user Tests
+# ============================================================================
+
+class TestResolveTargetUser:
+    """Test resolve_target_user() precedence chain."""
+
+    def test_explicit_value_takes_priority( self ):
+        """Test that explicit value is returned immediately."""
+        result = resolve_target_user( "explicit@example.com" )
+        assert result == "explicit@example.com"
+
+    def test_env_var_used_when_no_explicit( self, monkeypatch ):
+        """Test LUPIN_DEV_EMAIL env var is used when no explicit value."""
+        monkeypatch.setenv( "LUPIN_DEV_EMAIL", "env@example.com" )
+        result = resolve_target_user()
+        assert result == "env@example.com"
+
+    def test_explicit_beats_env_var( self, monkeypatch ):
+        """Test explicit value takes priority over env var."""
+        monkeypatch.setenv( "LUPIN_DEV_EMAIL", "env@example.com" )
+        result = resolve_target_user( "explicit@example.com" )
+        assert result == "explicit@example.com"
+
+    def test_raises_when_no_source( self, monkeypatch ):
+        """Test ValueError raised when no source provides email."""
+        from unittest.mock import patch
+        monkeypatch.delenv( "LUPIN_DEV_EMAIL", raising=False )
+        # Mock config loader to return no global_notification_recipient
+        with patch( "cosa.utils.config_loader.get_api_config", return_value={ "api_url": "x", "api_key_file": "y" } ):
+            with pytest.raises( ValueError, match="Cannot resolve target_user" ):
+                resolve_target_user()
 
 
 # ============================================================================

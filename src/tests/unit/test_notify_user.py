@@ -96,29 +96,30 @@ class TestNotifyUser( unittest.TestCase ):
             - Prints success message
         """
         with patch( 'lupin_cli.notifications.notify_user.requests.post' ) as mock_post, \
-             patch( 'builtins.print' ) as mock_print:
-            
+             patch( 'builtins.print' ) as mock_print, \
+             patch( 'lupin_cli.notifications.notification_models.resolve_target_user', return_value="resolved@example.com" ):
+
             mock_post.return_value = self.mock_success_response
-            
+
             result = notify_user( self.test_message )
-            
+
             # Verify return value
             self.assertTrue( result )
-            
+
             # Verify HTTP request
             mock_post.assert_called_once()
             call_args = mock_post.call_args
-            
+
             # Verify URL (first positional argument)
             expected_url = f"{self.test_server_url}/api/notify"
             self.assertEqual( call_args[0][0], expected_url )
-            
+
             # Verify parameters
             params = call_args[1]['params']
             self.assertEqual( params['message'], self.test_message )
             self.assertEqual( params['type'], "custom" )  # Default type
             self.assertEqual( params['priority'], "medium" )  # Default priority
-            self.assertEqual( params['target_user'], "ricardo.felipe.ruiz@gmail.com" )  # Default user
+            self.assertEqual( params['target_user'], "resolved@example.com" )  # Resolved user
             self.assertEqual( params['api_key'], self.test_api_key )
             
             # Verify timeout
@@ -488,7 +489,7 @@ class TestNotifyUser( unittest.TestCase ):
                 message="Test CLI message",
                 notification_type="custom",  # Default
                 priority="medium",  # Default
-                target_user="ricardo.felipe.ruiz@gmail.com",  # Default
+                target_user=None,  # Default (resolved at dispatch time)
                 server_url=None,  # Default
                 timeout=5  # Default
             )

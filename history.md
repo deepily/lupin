@@ -1,8 +1,65 @@
 # Lupin Project History
 
+### 2026.02.26 - Session 276 | Voice Hook Integration — Plan Review + Phase 0 Execution
+
+#### Checkpoint | 2026.02.26 22:50 | Phase 0 hooks live and capturing payloads
+
+**Accomplishments**:
+- Reviewed and refined 8-phase voice hook integration plan from Session 272
+- Confirmed 3 architecture decisions: AD-2 (lupin_cli.notifications package), AD-5 (all boundaries drain), AD-6 (PPID-based session bridge)
+- Updated master plan document with all review decisions (AD-1/2/5/6, Phase 0/1/2/6 descriptions, file organization, path references)
+- Serialized session plan to `src/rnd/2026.02.26-voice-hook-phase-0-implementation.md`
+- Created `src/lupin_cli/claude_code/hooks/` package with `lib/` shared library
+- Wrote `lib/hook_common.py` — read stdin, log payloads, emit JSON, send TTS via `lupin_cli.notifications`
+- Wrote `lib/session_bridge.py` — three-tier CC session_id resolution (env > file > fallback), adapted from research
+- Wrote 5 test hooks: test_register_session.py (SessionStart), test_post_tool_use.py, test_pre_tool_use.py, test_stop.py, test_notification.py
+- Registered all 5 hooks in `.claude/settings.local.json` (correct nested `hooks` schema)
+- Added `hooks/logs/` to `.gitignore`
+- **Hooks fired live immediately** — captured real CC payloads confirming: session_id is full UUID, tool_input includes full command, tool_response includes full output, hook_event_name field present
+- `HOOK_TTS_ENABLED` env var toggle for noise management
+
+**Empirical findings from live payloads**:
+- `session_id`: `bbd0e94b-cdf0-4766-a16d-16fe116125ef` (full UUID, not 8-char hex)
+- `tool_input`: Complete tool input (file paths, commands, etc.)
+- `tool_response`: Complete tool output (including file contents in PostToolUse)
+- Fields present: `hook_event_name`, `permission_mode`, `tool_use_id`, `transcript_path`, `cwd`
+
+**Files Created**: 10 files
+- `src/lupin_cli/claude_code/__init__.py`
+- `src/lupin_cli/claude_code/hooks/__init__.py`
+- `src/lupin_cli/claude_code/hooks/lib/__init__.py`
+- `src/lupin_cli/claude_code/hooks/lib/hook_common.py`
+- `src/lupin_cli/claude_code/hooks/lib/session_bridge.py`
+- `src/lupin_cli/claude_code/hooks/test_register_session.py`
+- `src/lupin_cli/claude_code/hooks/test_post_tool_use.py`
+- `src/lupin_cli/claude_code/hooks/test_pre_tool_use.py`
+- `src/lupin_cli/claude_code/hooks/test_stop.py`
+- `src/lupin_cli/claude_code/hooks/test_notification.py`
+- `src/rnd/2026.02.26-voice-hook-phase-0-implementation.md`
+
+**Files Modified**: 3 files
+- `src/rnd/.../2026.02.25-opportunistic-voice-hook-integration-plan.md` (AD-1/2/5/6, phases, file org)
+- `src/rnd/README.md` (added Phase 0 plan link)
+- `.gitignore` (added hooks logs dir)
+
+---
+
 ### 2026.02.26 - Session 275 | Move cosa.cli → lupin_cli.notifications
 
-#### Checkpoint | 2026.02.26 22:15 | Complete migration of notification infrastructure
+#### Checkpoint 2 | 2026.02.27 00:15 | Remove hardcoded default email from notification models
+
+**Accomplishments**:
+- Removed hardcoded personal email (`ricardo.felipe.ruiz@gmail.com`) from Pydantic models `NotificationRequest` and `AsyncNotificationRequest` — default changed to `None`
+- Added `resolve_target_user()` helper with precedence chain: explicit value → `LUPIN_DEV_EMAIL` env var → config file → ValueError (fail loud)
+- Wired resolution into all 4 dispatch functions: `notify_user_sync()`, `notify_user_async()`, `notify_user()` (legacy), `sync_notify.notify()`
+- Added safety nets in `to_api_params()` — raises `ValueError` if `target_user` still `None` at serialization time
+- Renamed env var: `LUPIN_NOTIFICATION_RECIPIENT` → `LUPIN_DEV_EMAIL` (clean break, no deprecation shims)
+- Removed `LUPIN_TARGET_USER` deprecation code from `config_loader.py`
+- Updated config files, docs, and all tests; 1692 passed, 0 new failures
+
+**Files Modified**: 14 files (12 Lupin-owned + 2 CoSA nested repo)
+
+#### Checkpoint 1 | 2026.02.26 22:15 | Complete migration of notification infrastructure
 
 **Accomplishments**:
 - Extracted notification infrastructure from CoSA submodule (`src/cosa/cli/`) to Lupin-owned package (`src/lupin_cli/notifications/`)
@@ -18,7 +75,7 @@
 - Integration tests: no `cosa.cli` related failures
 
 **Files**: src/lupin_cli/ (8 new), 18 consumers, 3 docs (+28 more)
-**Commit**: [pending]
+**Commit**: `2a9b545`
 
 ---
 

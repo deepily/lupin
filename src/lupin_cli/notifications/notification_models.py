@@ -186,9 +186,9 @@ class NotificationRequest(BaseModel):
         description="Priority level"
     )
 
-    target_user: str = Field(
-        default="ricardo.felipe.ruiz@gmail.com",
-        description="Target user email address"
+    target_user: Optional[str] = Field(
+        default=None,
+        description="Target user email address. Resolved from config/env at dispatch time if not set."
     )
 
     timeout_seconds: int = Field(
@@ -362,6 +362,12 @@ class NotificationRequest(BaseModel):
         Returns:
             dict: Query parameters for requests.post()
         """
+        if self.target_user is None:
+            raise ValueError(
+                "target_user is None at serialization time. "
+                "Resolve via resolve_target_user() before calling to_api_params()."
+            )
+
         params = {
             "message"            : self.message,
             "type"               : self.notification_type.value,
@@ -598,9 +604,9 @@ class AsyncNotificationRequest(BaseModel):
         description="Priority level"
     )
 
-    target_user: str = Field(
-        default="ricardo.felipe.ruiz@gmail.com",
-        description="Target user email address"
+    target_user: Optional[str] = Field(
+        default=None,
+        description="Target user email address. Resolved from config/env at dispatch time if not set."
     )
 
     timeout: int = Field(
@@ -690,6 +696,12 @@ class AsyncNotificationRequest(BaseModel):
         Returns:
             dict: Query parameters for requests.post()
         """
+        if self.target_user is None:
+            raise ValueError(
+                "target_user is None at serialization time. "
+                "Resolve via resolve_target_user() before calling to_api_params()."
+            )
+
         params = {
             "message"     : self.message,
             "type"        : self.notification_type.value,
@@ -811,6 +823,67 @@ class AsyncNotificationResponse(BaseModel):
             bool: True if error occurred
         """
         return self.status in ("error", "connection_error", "timeout")
+
+
+# ============================================================================
+# Target User Resolution
+# ============================================================================
+
+def resolve_target_user( explicit_value: Optional[str] = None ) -> str:
+    """
+    Resolve target user email using precedence chain.
+
+    Requires:
+        - At least one source provides a non-empty email
+
+    Ensures:
+        - Returns email string from highest-priority source
+        - Raises ValueError if no source provides an email
+
+    Precedence:
+        1. explicit_value (caller-provided)
+        2. LUPIN_DEV_EMAIL env var
+        3. ~/.notifications/config -> global_notification_recipient
+        4. ValueError (fail loud)
+
+    Args:
+        explicit_value: Caller-provided email (highest priority)
+
+    Returns:
+        str: Resolved email address
+
+    Raises:
+        ValueError: If no source provides an email
+    """
+    import os
+
+    # 1. Explicit value from caller
+    if explicit_value:
+        return explicit_value
+
+    # 2. Environment variable
+    env_email = os.getenv( "LUPIN_DEV_EMAIL" )
+    if env_email:
+        return env_email
+
+    # 3. Config file via config_loader
+    try:
+        from cosa.utils.config_loader import get_api_config
+        env = os.getenv( "LUPIN_ENV", "local" )
+        config = get_api_config( env )
+        config_email = config.get( "global_notification_recipient" )
+        if config_email:
+            return config_email
+    except Exception:
+        pass  # Config loading failed — fall through to error
+
+    # 4. Fail loud
+    raise ValueError(
+        "Cannot resolve target_user. Set one of:\n"
+        "  1. Pass target_user explicitly\n"
+        "  2. Set LUPIN_DEV_EMAIL environment variable\n"
+        "  3. Configure global_notification_recipient in ~/.notifications/config"
+    )
 
 
 # ============================================================================
@@ -966,6 +1039,7 @@ def quick_smoke_test():
         req_with_job = NotificationRequest(
             message="Test with job_id",
             response_type=ResponseType.YES_NO,
+            target_user="test@example.com",
             job_id="dr-a1b2c3d4"
         )
         params = req_with_job.to_api_params()
@@ -976,6 +1050,7 @@ def quick_smoke_test():
         # Test AsyncNotificationRequest
         async_req_with_job = AsyncNotificationRequest(
             message="Async test with job_id",
+            target_user="test@example.com",
             job_id="pod-12345678"
         )
         async_params = async_req_with_job.to_api_params()
@@ -986,7 +1061,8 @@ def quick_smoke_test():
         # Test None job_id is excluded
         req_no_job = NotificationRequest(
             message="Test without job_id",
-            response_type=ResponseType.YES_NO
+            response_type=ResponseType.YES_NO,
+            target_user="test@example.com"
         )
         params_no_job = req_no_job.to_api_params()
         assert "job_id" not in params_no_job, "job_id should not be in params when None"

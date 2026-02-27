@@ -12,6 +12,7 @@ Usage:
     pytest src/tests/integration/test_notify_user_sync_integration.py -v
 """
 
+import os
 import pytest
 import subprocess
 import time
@@ -117,7 +118,7 @@ class TestSSENotificationAPI:
             response_type=ResponseType.YES_NO,
             response_default="no",
             timeout_seconds=10,  # Short timeout for testing
-            target_user="ricardo.felipe.ruiz@gmail.com"
+            target_user=os.environ.get( "LUPIN_DEV_EMAIL", "test@example.com" )
         )
 
         response = sync_module.notify_user_sync( request, debug=True )

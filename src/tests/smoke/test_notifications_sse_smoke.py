@@ -34,7 +34,7 @@ import cosa.utils.util as cu
 # Configuration
 BASE_URL = "http://localhost:7999"
 API_KEY  = "claude_code_simple_key"
-TEST_USER = "ricardo.felipe.ruiz@gmail.com"  # Default test user (must exist in user database)
+TEST_USER = os.environ.get( "LUPIN_DEV_EMAIL", "test@example.com" )  # From env or fallback for smoke tests
 
 
 def print_test_header( test_name ):

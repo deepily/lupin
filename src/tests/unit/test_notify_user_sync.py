@@ -155,6 +155,7 @@ class TestNotifyUserSync:
         request = NotificationRequest(
             message="Approve?",
             response_type=ResponseType.YES_NO,
+            target_user="test@example.com",
             response_default="no"
         )
 
@@ -180,6 +181,7 @@ class TestNotifyUserSync:
         request = NotificationRequest(
             message="Approve?",
             response_type=ResponseType.YES_NO,
+            target_user="test@example.com",
             response_default="no"
         )
 
@@ -204,6 +206,7 @@ class TestNotifyUserSync:
         request = NotificationRequest(
             message="Approve?",
             response_type=ResponseType.YES_NO,
+            target_user="test@example.com",
             response_default="yes"
         )
 
@@ -224,7 +227,8 @@ class TestNotifyUserSync:
 
         request = NotificationRequest(
             message="Test",
-            response_type=ResponseType.YES_NO
+            response_type=ResponseType.YES_NO,
+            target_user="test@example.com"
         )
 
         response = notify_user_sync( request )
@@ -242,7 +246,8 @@ class TestNotifyUserSync:
 
         request = NotificationRequest(
             message="Test",
-            response_type=ResponseType.YES_NO
+            response_type=ResponseType.YES_NO,
+            target_user="test@example.com"
         )
 
         response = notify_user_sync( request )
@@ -259,7 +264,8 @@ class TestNotifyUserSync:
 
         request = NotificationRequest(
             message="Test",
-            response_type=ResponseType.YES_NO
+            response_type=ResponseType.YES_NO,
+            target_user="test@example.com"
         )
 
         response = notify_user_sync( request )
@@ -281,7 +287,8 @@ class TestNotifyUserSync:
 
         request = NotificationRequest(
             message="Test",
-            response_type=ResponseType.YES_NO
+            response_type=ResponseType.YES_NO,
+            target_user="test@example.com"
         )
 
         response = notify_user_sync( request )
@@ -325,7 +332,8 @@ class TestNotifyUserSync:
 
         request = NotificationRequest(
             message="Enter text",
-            response_type=ResponseType.OPEN_ENDED
+            response_type=ResponseType.OPEN_ENDED,
+            target_user="test@example.com"
         )
 
         response = notify_user_sync( request )
@@ -353,6 +361,7 @@ def quick_smoke_test():
         request = NotificationRequest(
             message="Test notification",
             response_type=ResponseType.YES_NO,
+            target_user="test@example.com",
             response_default="yes"
         )
         print( "✓ Request created successfully" )
