@@ -15,7 +15,8 @@ Adapted from research at:
 
 Usage from hook scripts:
     from lupin_cli.claude_code.hooks.lib.session_bridge import (
-        get_claude_session_id, wait_for_session_id, get_session_metadata
+        get_claude_session_id, wait_for_session_id, get_session_metadata,
+        build_sender_id_for_cc
     )
 
     # Non-blocking (returns fallback immediately if not yet available)
@@ -203,6 +204,47 @@ def wait_for_session_id( timeout: float = 10.0, poll_interval: float = 0.5 ) -> 
     return _fallback_session_id
 
 
+def build_sender_id_for_cc( session_id: Optional[str] = None ) -> Optional[str]:
+    """
+    Build a Claude Code sender_id for notification routing.
+
+    Uses the CC session_id (truncated to first 8 hex chars) as the suffix,
+    producing sender_ids like: claude.code@lupin.deepily.ai#a1b2c3d4
+
+    This ensures hooks and MCP server produce identical sender_ids when
+    they share the same CC session.
+
+    Requires:
+        - cosa.agents.utils.sender_id must be importable
+
+    Ensures:
+        - Returns sender_id string if session_id can be resolved
+        - Returns None on any failure (import error, resolution failure)
+        - When session_id arg is provided, uses it directly (for SessionStart hook)
+        - When session_id arg is None, resolves via get_claude_session_id()
+
+    Args:
+        session_id: Optional explicit CC session_id (full UUID from hook payload).
+                    If None, resolves via 3-tier get_claude_session_id().
+
+    Returns:
+        str or None: Fully-qualified sender_id, or None on failure
+    """
+    try:
+        from cosa.agents.utils.sender_id import build_sender_id
+
+        if session_id is None:
+            session_id = get_claude_session_id()
+
+        # Truncate to first 8 chars — UUID hex guarantees [a-f0-9]
+        suffix = session_id[:8] if session_id else None
+
+        return build_sender_id( "claude.code", suffix=suffix )
+
+    except Exception:
+        return None
+
+
 def get_session_metadata() -> dict:
     """
     Get full session metadata (session_id + transcript_path + cwd + source).
@@ -243,6 +285,8 @@ def get_session_metadata() -> dict:
 
 if __name__ == "__main__":
     print( f"Session ID (non-blocking): {get_claude_session_id()}" )
+    print( f"Sender ID (auto-resolve): {build_sender_id_for_cc()}" )
+    print( f"Sender ID (explicit):     {build_sender_id_for_cc( 'bbd0e94b-cdf0-4766-a16d-16fe116125ef' )}" )
     print( f"Metadata: {json.dumps( get_session_metadata(), indent=2 )}" )
     print( f"Session dir: {SESSION_DIR}" )
     print( f"Fallback ID: {_fallback_session_id}" )

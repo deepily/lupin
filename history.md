@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.02.27 - Session 278 | Align Hook & MCP Sender ID for Per-Session Routing
+
+**Accomplishments**:
+- Solved sender_id mismatch between CC system hooks and MCP server notifications
+- Added `build_sender_id_for_cc()` to session bridge — truncates CC session UUID to first 8 hex chars, delegates to shared `build_sender_id()` utility
+- Updated `send_tts()` in hook_common.py with `sender_id` parameter — auto-resolves from session bridge when not explicitly provided, backward-compatible with existing hook callers
+- Updated SessionStart hook to pass explicit sender_id from payload (can't read session file it just wrote), added stale session file cleanup (>24h)
+- Replaced `uuid.uuid4().hex[:8]` in MCP server with `get_claude_session_id()[:8]` from session bridge — same 3-tier resolution (env > file > fallback)
+- Added background daemon thread in MCP server that polls for real CC session_id and upgrades module-level globals once SessionStart hook fires
+- Enhanced `get_session_info()` MCP tool with `claude_code` metadata from session bridge
+
+**Files Modified**: 4 files
+- `src/lupin_cli/claude_code/hooks/lib/session_bridge.py` (added `build_sender_id_for_cc()`)
+- `src/lupin_cli/claude_code/hooks/lib/hook_common.py` (sender_id param on `send_tts()`)
+- `src/lupin_cli/claude_code/hooks/test_register_session.py` (explicit sender_id + stale cleanup)
+- `src/lupin_mcp/cosa_voice_mcp.py` (session bridge integration + upgrade thread)
+
+---
+
 ### 2026.02.27 - Session 277 | Bug Fix Mode — Permission Prompt Accumulation
 
 **Accomplishments**:

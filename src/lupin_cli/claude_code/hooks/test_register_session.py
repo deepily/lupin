@@ -9,9 +9,10 @@ Actions:
     1. Extract session_id, transcript_path, cwd from stdin
     2. Write ~/.claude/sessions/cc-{PPID}.json (for MCP server polling)
     3. Write CLAUDE_SESSION_ID to CLAUDE_ENV_FILE (for Bash access)
-    4. Send TTS notification: "Hook fired: SessionStart"
-    5. Emit additionalContext with session ID
+    4. Purge stale session files (>24h old)
+    5. Send TTS notification with per-session sender_id
     6. Log full payload
+    7. Emit additionalContext with session ID
 
 Install in .claude/settings.local.json:
     "hooks": {
@@ -33,6 +34,7 @@ if _src_path not in sys.path:
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts
 )
+from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
 
 
 def main():
@@ -48,11 +50,13 @@ def main():
     cwd             = payload.get( "cwd", "" )
 
     # ── Phase 2: Write session bridge file ────────────────────────────────
+    session_dir  = os.path.expanduser( "~/.claude/sessions" )
+    session_file = None
+
     if session_id:
-        session_dir = os.path.expanduser( "~/.claude/sessions" )
         os.makedirs( session_dir, exist_ok=True )
 
-        ppid = os.getppid()
+        ppid         = os.getppid()
         session_file = os.path.join( session_dir, f"cc-{ppid}.json" )
 
         session_data = {
@@ -79,14 +83,29 @@ def main():
             except OSError:
                 pass  # Best-effort
 
-    # ── Phase 4: Send TTS notification ────────────────────────────────────
-    short_id = session_id[:8] if session_id else "unknown"
-    send_tts( f"Hook fired: SessionStart — session {short_id}" )
+    # ── Phase 4: Purge stale session files (>24h old) ─────────────────────
+    try:
+        import time
+        now = time.time()
+        for entry in os.listdir( session_dir ) if os.path.isdir( session_dir ) else []:
+            if entry.startswith( "cc-" ) and entry.endswith( ".json" ):
+                fpath = os.path.join( session_dir, entry )
+                if fpath != session_file and ( now - os.path.getmtime( fpath ) ) > 86400:
+                    os.remove( fpath )
+    except Exception:
+        pass  # Best-effort cleanup
 
-    # ── Phase 5: Log full payload ─────────────────────────────────────────
+    # ── Phase 5: Send TTS notification (with explicit sender_id) ────────
+    short_id = session_id[:8] if session_id else "unknown"
+    # SessionStart hook has session_id from payload — build sender_id directly
+    # (can't rely on session file yet; this hook is the one writing it)
+    hook_sender_id = build_sender_id_for_cc( session_id=session_id ) if session_id else None
+    send_tts( f"Hook fired: SessionStart — session {short_id}", sender_id=hook_sender_id )
+
+    # ── Phase 6: Log full payload ─────────────────────────────────────────
     log_payload( "session_start", payload )
 
-    # ── Phase 6: Emit response ────────────────────────────────────────────
+    # ── Phase 7: Emit response ────────────────────────────────────────────
     if session_id:
         emit_json( {
             "additionalContext": f"Session ID: {session_id}"

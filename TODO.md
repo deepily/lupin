@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-26 (Session 276)
+Last updated: 2026-02-27 (Session 278)
 
 ## v0.1.6 — FUTURE DEVELOPMENT
 
@@ -67,17 +67,18 @@ Last updated: 2026-02-26 (Session 276)
 
 ## v0.1.5 — HIGH PRIORITY
 
-### Voice I/O Integration with Claude Code System Hooks (Sessions 272-276)
+### Voice I/O Integration with Claude Code System Hooks (Sessions 272-278)
 
 - [x] **[LUPIN] Review and finalize voice hook integration draft plan** — Session 276: Plan reviewed, 3 ADs confirmed (AD-2, AD-5, AD-6), master plan updated.
 - [x] **[LUPIN] Phase 0: Hook Contract Validation** — Session 276: 5 test hooks live, shared library + session bridge implemented, hooks capturing real CC payloads.
-- [ ] **[LUPIN] Phase 0 validation: Analyze captured payloads** — Review logs from live session, document actual JSON schemas vs research claims, measure hook latency, verify session bridge file at next restart. **RESUME TOMORROW MORNING.**
+- [x] **[LUPIN] Align hook & MCP sender_id for per-session routing** — Session 278: `build_sender_id_for_cc()` in session bridge, `send_tts()` auto-resolves sender_id, MCP server uses session bridge instead of random UUID, background upgrade thread. 1692 unit tests pass.
+- [ ] **[LUPIN] Phase 0 validation: Analyze captured payloads** — Review logs from live session, document actual JSON schemas vs research claims, measure hook latency, verify session bridge file at next restart.
   - **Logs dir**: `src/lupin_cli/claude_code/hooks/logs/`
   - **Session bridge file**: `~/.claude/sessions/cc-{PID}.json`
-- [ ] **[LUPIN] Phase 1: Notification System Extensions** — Add `VOICE_INPUT` to NotificationType, voice sender_id convention, test voice input flow end-to-end.
+- [ ] **[LUPIN] Phase 1: Notification System Extensions** — Add `VOICE_INPUT` to NotificationType, test voice input flow end-to-end.
 - [ ] **[LUPIN] Phase 2-7: Remaining voice hook phases** — Hook infrastructure, TTS output, voice drain + injection, voice approvals, browser capture, testing + polish.
   - **Master plan**: [`2026.02.25-opportunistic-voice-hook-integration-plan.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-opportunistic-voice-hook-integration-plan.md)
-  - **Phase 0 plan**: [`2026.02.26-voice-hook-phase-0-implementation.md`](src/rnd/2026.02.26-voice-hook-phase-0-implementation.md)
+  - **Phase 0 plan**: [`2026.02.26-voice-hook-phase-0-implementation.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.26-voice-hook-phase-0-implementation.md)
 
 ---
 

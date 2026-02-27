@@ -10,7 +10,9 @@ Provides five tools:
   - get_session_info(): Get current session identification
 
 Sender ID Format: claude.code@{project}.deepily.ai#{session_id}
-    - session_id is an 8-character hex string unique to each MCP server instance
+    - session_id is the first 8 chars of the Claude Code session UUID
+    - Derived from the session bridge (env > file > fallback), shared with hooks
+    - A background thread upgrades the ID once the SessionStart hook writes it
 
 Project Detection (automatic):
     1. Auto-detects from current working directory (checked in order):
@@ -34,7 +36,7 @@ import logging
 import os
 import signal
 import sys
-import uuid
+import threading
 from typing import Optional
 
 from pydantic import ValidationError
@@ -60,6 +62,9 @@ from cosa.utils.notification_utils import (
     normalize_abstract as _normalize_abstract
 )
 from cosa.agents.utils.sender_id import detect_project as _detect_project_shared
+from lupin_cli.claude_code.hooks.lib.session_bridge import (
+    get_claude_session_id, wait_for_session_id, get_session_metadata as _get_cc_metadata
+)
 
 
 # ============================================================================
@@ -175,7 +180,7 @@ signal.signal( signal.SIGTERM, _handle_sigterm )
 # ============================================================================
 
 PROJECT    = _get_project()
-SESSION_ID = uuid.uuid4().hex[:8]  # 8-char hex, e.g., "a1b2c3d4"
+SESSION_ID = get_claude_session_id()[:8]  # 8-char hex from session bridge (env > file > fallback)
 SENDER_ID  = _get_sender_id( PROJECT, SESSION_ID )
 SERVER_URL = _get_server_url()
 
@@ -183,6 +188,38 @@ logger.info( f"Project: {PROJECT}" )
 logger.info( f"Session ID: {SESSION_ID}" )
 logger.info( f"Sender ID: {SENDER_ID}" )
 logger.info( f"Server URL: {SERVER_URL}" )
+
+
+def _upgrade_session_id_background():
+    """
+    Background daemon thread that polls for the real CC session_id.
+
+    At MCP module load time, the SessionStart hook may not have fired yet,
+    so SESSION_ID may be a fallback UUID. This thread waits for the real
+    CC session_id (written by the SessionStart hook) and upgrades the
+    module-level SESSION_ID and SENDER_ID globals in place.
+
+    The window of misalignment is ~0.4s — no MCP tool calls happen during
+    CC startup, so this is safe.
+    """
+    global SESSION_ID, SENDER_ID
+
+    real_id = wait_for_session_id( timeout=10.0, poll_interval=1.0 )
+    new_suffix = real_id[:8]
+
+    if new_suffix != SESSION_ID:
+        old_sender = SENDER_ID
+        SESSION_ID = new_suffix
+        SENDER_ID  = _get_sender_id( PROJECT, SESSION_ID )
+        logger.info( f"Session ID upgraded: {old_sender} -> {SENDER_ID}" )
+
+
+_upgrade_thread = threading.Thread(
+    target=_upgrade_session_id_background,
+    name="session-id-upgrade",
+    daemon=True
+)
+_upgrade_thread.start()
 
 # ============================================================================
 # MCP Server
@@ -644,15 +681,28 @@ def get_session_info() -> dict:
     Get current session identification and server info.
 
     Returns:
-        dict with project name, session_id, sender_id, server_url, and version
+        dict with project name, session_id, sender_id, server_url, version,
+        and claude_code metadata from the session bridge
     """
-    return {
+    info = {
         "project"    : PROJECT,
         "session_id" : SESSION_ID,
         "sender_id"  : SENDER_ID,
         "server_url" : SERVER_URL,
         "version"    : __version__
     }
+
+    # Include CC session bridge metadata when available
+    try:
+        cc_meta = _get_cc_metadata()
+        info["claude_code"] = {
+            "session_id" : cc_meta.get( "session_id", "" ),
+            "source"     : cc_meta.get( "source", "unknown" )
+        }
+    except Exception:
+        pass
+
+    return info
 
 
 if __name__ == "__main__":

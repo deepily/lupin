@@ -150,7 +150,7 @@ def is_tts_enabled():
     return value != "false"
 
 
-def send_tts( message, priority="low" ):
+def send_tts( message, priority="low", sender_id=None ):
     """
     Send fire-and-forget TTS notification via lupin_cli.notifications.
 
@@ -165,12 +165,14 @@ def send_tts( message, priority="low" ):
 
     Ensures:
         - Sends TTS notification if TTS is enabled and target email is available
+        - Auto-resolves sender_id via session bridge when not explicitly provided
         - Returns silently on any failure (non-blocking)
         - Never raises exceptions
 
     Args:
         message: TTS message text
         priority: Notification priority (default: "low")
+        sender_id: Explicit sender_id string (default: None = auto-resolve from session bridge)
     """
     if not is_tts_enabled():
         return
@@ -187,11 +189,20 @@ def send_tts( message, priority="low" ):
         )
         from lupin_cli.notifications.notify_user_async import notify_user_async
 
+        # Auto-resolve sender_id from session bridge when not explicitly provided
+        if sender_id is None:
+            try:
+                from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
+                sender_id = build_sender_id_for_cc()
+            except Exception:
+                pass  # Graceful degradation — notification fires without sender_id
+
         request = AsyncNotificationRequest(
             message           = message,
             notification_type = NotificationType.PROGRESS,
             priority          = NotificationPriority( priority ),
             target_user       = target_email,
+            sender_id         = sender_id,
             timeout           = 3
         )
 
