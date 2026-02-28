@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.28 - Phase 0 Validation Report: Hook Contract Validation
+- **Report**: [2026.02.27-phase-0-validation-report.md](2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.27-phase-0-validation-report.md) - Empirical validation of all 5 hook types from 3,430 captured payloads over ~22.5 hours. Documents JSON schemas per hook type (PreToolUse, PostToolUse, Stop, Notification, SessionStart), validates 12 research claims (all PASS), identifies 7 surprises/deviations (model field in SessionStart, source field, MCP response type difference, pre/post count delta). Tool usage frequency analysis (Read 35.5%, Bash 22.1%, Edit 8.2%). Session bridge file verification (26 files created). Phase 0 gate: 12/12 checks passed.
+
 ### 2026.02.27 - Universal Decision Proxy: Multi-Response-Type Prediction Engine
 - **Plan**: [2026.02.27-universal-prediction-engine-plan.md](2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md) - Approved implementation plan for extending the trust proxy system to handle ALL notification response types (yes_no, multiple_choice, open_ended, open_ended_batch) with prediction hints, accuracy tracking, and progressive learning. Vertical slice architecture: Slice 0 (foundation infrastructure — PredictionEngine singleton, prediction_log table, NotificationCategoryClassifier with 6 fixed categories), Slice 1 (yes_no simple binary via CBR majority vote), future slices for qualified yes_no, multiple_choice variants, and open_ended. Reuses CBRDecisionStore, ProxyDecisionEmbeddings, CategoryClassifier ABC, and EmbeddingProvider. Performance budget: 15-40ms total prediction latency. Progressive learning timeline from cold start (day 1) to autonomous responses (day 30+). SWE team decision proxy becomes a future consumer of the same engine.
 
