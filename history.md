@@ -13,7 +13,7 @@
 **Files Modified**: 1 file
 - `src/lupin_mcp/cosa_voice_mcp.py` (session gate + fail-loud + all tool sender_id references)
 
-**Commit**: d8d2462
+**Commit**: f4d73d7
 
 ---
 

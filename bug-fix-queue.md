@@ -51,7 +51,7 @@
 
 ### Completed
 
-- [x] **Orphaned session ID race in COSA Voice MCP server** → commit: d8d2462 | By: 10ff1e2a
+- [x] **Orphaned session ID race in COSA Voice MCP server** → commit: f4d73d7 | By: 10ff1e2a
   - **Symptom**: MCP tool calls during 1-10s startup window used random fallback session ID, causing orphaned notifications
   - **Fix**: `threading.Event` gate blocks tool calls until real session ID resolves; fail-loud `os._exit(1)` if fallback only
   - **File**: `src/lupin_mcp/cosa_voice_mcp.py`
