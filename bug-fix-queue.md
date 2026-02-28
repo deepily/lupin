@@ -57,7 +57,7 @@
 
 ### Completed
 
-- [x] **Session ID cross-project contamination** → commit: 17526a3 | By: 0e73eb8e
+- [x] **Session ID cross-project contamination** → commit: 495cdfd | By: 0e73eb8e
   - **Symptom**: Two CC instances (Lupin + planning-is-prompting) both reported same session ID `#0e73eb8e`, breaking parallel session isolation
   - **Root Cause**: 3 compounding failures — PPID mismatch (bash wrapper vs claude PID), unsafe "most recent file" fallback, hooks project-local
   - **Fix**: (1) Grandparent PID walk in hook, (2) CWD-scoped fallback in session bridge, (3) Soft fallback for hookless projects, (4) Global hooks

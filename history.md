@@ -18,12 +18,12 @@
 - `~/.claude/settings.json` (global hooks added)
 - `.claude/settings.local.json` (project hooks removed)
 
-**Commit**: 17526a3
+**Commit**: 495cdfd
 
 #### Session Summary
 - **Total Fixes**: 1 (4 sub-fixes addressing 3 compounding root causes)
 - **Files Changed**: 5 (3 tracked in git + 2 local config files)
-- **Commits**: 17526a3
+- **Commits**: 495cdfd
 
 **Status**: Session closed 2026.02.28
 
