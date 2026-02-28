@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-27T09:00:00
+**Last Updated**: 2026-02-28T21:00:00
 
 ---
 
@@ -30,6 +30,7 @@
 | 7f9787a4 | 2026-02-26T12:20:00 | 2026-02-26T12:30:00 | closed |
 | b6e79902 | 2026-02-27T09:00:00 | 2026-02-27T09:00:00 | stale |
 | 10ff1e2a | 2026-02-28T10:00:00 | 2026-02-28T14:30:00 | closed |
+| 0e73eb8e | 2026-02-28T21:00:00 | 2026-02-28T22:00:00 | closed |
 
 ---
 
@@ -37,7 +38,12 @@
 
 (Available for any session to claim)
 
-(empty)
+- [ ] **target_user "Cannot resolve" error in Docker** — Code plumbing done (7 CoSA files), error persists in Docker. Next: write `test_target_user_dispatch.py` to reproduce. Key suspects: Docker env isolation, notification paths bypassing patched dispatcher. Plan: `src/rnd/2026.02.27-target-user-notification-dispatch-bug-fix.md` (HIGH)
+- [ ] **Fuzzy matching via voice** — Podcast generator: vocal paraphrase can't generate file list for podcast source. Voice input produces approximate matches that don't resolve to valid file paths. (HIGH)
+- [ ] **Job card contact failure** — Podcast generator: job fails to contact job card while in running bucket. UI shows no progress updates during execution. (HIGH)
+- [ ] **Audio segment upload** — Podcast generator: fails to properly process/upload audio segments. Final audio stitching or upload step breaks. (HIGH)
+- [ ] **History archive needed** — history.md at 18,951 tokens (75.8%). Archive sessions older than 14 days to stay below 17k threshold. (MEDIUM)
+- [ ] **TTS focus mode 60s safety timeout** — Prevent permanent stuck state when TTS queue items fail to play. Partially addressed (Session 164): staleness check on restore. Still need: runtime 60s timeout. File: `src/fastapi_app/static/js/notifications.js:9374-9393` (LOW)
 
 ---
 
@@ -50,6 +56,12 @@
 ---
 
 ### Completed
+
+- [x] **Session ID cross-project contamination** → commit: 17526a3 | By: 0e73eb8e
+  - **Symptom**: Two CC instances (Lupin + planning-is-prompting) both reported same session ID `#0e73eb8e`, breaking parallel session isolation
+  - **Root Cause**: 3 compounding failures — PPID mismatch (bash wrapper vs claude PID), unsafe "most recent file" fallback, hooks project-local
+  - **Fix**: (1) Grandparent PID walk in hook, (2) CWD-scoped fallback in session bridge, (3) Soft fallback for hookless projects, (4) Global hooks
+  - **Files**: `test_register_session.py`, `session_bridge.py`, `cosa_voice_mcp.py`, `~/.claude/settings.json`, `.claude/settings.local.json`
 
 - [x] **Orphaned session ID race in COSA Voice MCP server** → commit: f4d73d7 | By: 10ff1e2a
   - **Symptom**: MCP tool calls during 1-10s startup window used random fallback session ID, causing orphaned notifications

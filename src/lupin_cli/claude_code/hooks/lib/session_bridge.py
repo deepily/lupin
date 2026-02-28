@@ -54,7 +54,7 @@ def _find_session_file() -> Optional[Path]:
     Ensures:
         - Returns Path to session file if found
         - Returns None if no matching file exists
-        - Checks: own PPID → grandparent PID → most recent file (fallback)
+        - Checks: own PPID → grandparent PID → CWD-matching file (fallback)
 
     Returns:
         Path or None: Path to session file
@@ -71,22 +71,31 @@ def _find_session_file() -> Optional[Path]:
     # Try grandparent (hook script → wrapper → Claude Code)
     try:
         with open( f"/proc/{ppid}/stat" ) as f:
-            fields = f.read().split()
-            gppid = int( fields[3] )  # 4th field = parent PID
+            stat_line = f.read()
+        # Safe parsing: comm field is in parens and may contain spaces/parens
+        # Format: pid (comm) state ppid ...
+        # Find the LAST ")" to skip past comm field safely
+        comm_end = stat_line.rindex( ")" )
+        fields_after_comm = stat_line[comm_end + 2:].split()
+        # fields_after_comm[0] = state, fields_after_comm[1] = ppid
+        gppid = int( fields_after_comm[1] )
         grandparent = SESSION_DIR / f"cc-{gppid}.json"
         if grandparent.exists():
             return grandparent
-    except ( FileNotFoundError, IndexError, ValueError, PermissionError ):
+    except ( FileNotFoundError, IndexError, ValueError, PermissionError, OSError ):
         pass
 
-    # Fallback: find most recent session file (for single-instance case)
-    session_files = sorted(
-        SESSION_DIR.glob( "cc-*.json" ),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True
-    )
-    if session_files:
-        return session_files[0]
+    # Fallback: find most recent session file scoped to same CWD (project)
+    my_cwd = os.getcwd()
+    for path in sorted( SESSION_DIR.glob( "cc-*.json" ),
+                        key=lambda p: p.stat().st_mtime, reverse=True ):
+        try:
+            with open( path ) as f:
+                data = json.load( f )
+            if data.get( "cwd", "" ) == my_cwd:
+                return path
+        except ( json.JSONDecodeError, OSError ):
+            continue
 
     return None
 

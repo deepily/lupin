@@ -1,5 +1,34 @@
 # Lupin Project History
 
+### 2026.02.28 - Session 288 | Bug Fix: Session ID Cross-Project Contamination
+
+**Accomplishments**:
+- Fixed cross-project session ID contamination where two CC instances (Lupin + planning-is-prompting) both reported the same 8-char session ID `#0e73eb8e`, breaking parallel session safety
+- Root cause: three compounding failures — PPID mismatch (hook writes bash wrapper PID, MCP looks for claude PID), unsafe "most recent file" fallback grabbing any project's session file, and hooks being project-local (only Lupin had them)
+- Fix 1: Added `_resolve_cc_pid()` to `test_register_session.py` — walks `/proc/{ppid}/stat` grandparent to find Claude Code's actual PID; session file now written as `cc-{cc_pid}.json`
+- Fix 2: Replaced "most recent file" fallback in `session_bridge.py` with CWD-scoped matching — only returns session files whose `cwd` matches current project; fixed `/proc` stat parsing with safe `rindex(")")` for process names with spaces
+- Fix 3: Softened fail-loud behavior in `cosa_voice_mcp.py` — hookless projects get stable fallback UUID with warning instead of MCP server crash via `os._exit(1)`
+- Fix 4: Moved all 5 hooks from Lupin's project-level `.claude/settings.local.json` to global `~/.claude/settings.json` — every CC instance now fires hooks regardless of project
+- Unit tests: 1712 pass (1 pre-existing flaky failure unrelated to changes)
+
+**Files Modified**: 5 files
+- `src/lupin_cli/claude_code/hooks/test_register_session.py` (grandparent PID resolution)
+- `src/lupin_cli/claude_code/hooks/lib/session_bridge.py` (CWD-scoped fallback + safe /proc parsing)
+- `src/lupin_mcp/cosa_voice_mcp.py` (softened fallback behavior)
+- `~/.claude/settings.json` (global hooks added)
+- `.claude/settings.local.json` (project hooks removed)
+
+**Commit**: 17526a3
+
+#### Session Summary
+- **Total Fixes**: 1 (4 sub-fixes addressing 3 compounding root causes)
+- **Files Changed**: 5 (3 tracked in git + 2 local config files)
+- **Commits**: 17526a3
+
+**Status**: Session closed 2026.02.28
+
+---
+
 ### 2026.02.28 - Session 287 | Bug Fix: Orphaned Session ID in COSA Voice MCP Server
 
 **Accomplishments**:

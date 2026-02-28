@@ -37,6 +37,41 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
 from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
 
 
+def _resolve_cc_pid( hook_ppid ):
+    """
+    Walk up from the hook's parent (bash wrapper) to find Claude Code's PID.
+
+    The hook process tree is always: claude → bash -c "..." → python hook.py
+    So hook's PPID is bash, and bash's PPID is Claude Code.
+
+    Requires:
+        - hook_ppid is a valid PID (the bash wrapper's PID)
+
+    Ensures:
+        - Returns the grandparent PID (Claude Code) on success
+        - Returns hook_ppid unchanged on any error (safe fallback)
+
+    Args:
+        hook_ppid: PID of the hook's immediate parent (bash wrapper)
+
+    Returns:
+        int: Claude Code PID (grandparent), or hook_ppid on failure
+    """
+    try:
+        with open( f"/proc/{hook_ppid}/stat" ) as f:
+            stat_line = f.read()
+        # Safe parsing: comm field is in parens and may contain spaces/parens
+        # Format: pid (comm) state ppid ...
+        # Find the LAST ")" to skip past comm field safely
+        comm_end = stat_line.rindex( ")" )
+        fields_after_comm = stat_line[comm_end + 2:].split()
+        # fields_after_comm[0] = state, fields_after_comm[1] = ppid
+        cc_pid = int( fields_after_comm[1] )
+        return cc_pid
+    except ( FileNotFoundError, IndexError, ValueError, PermissionError, OSError ):
+        return hook_ppid
+
+
 def main():
 
     # ── Phase 1: Read hook input ──────────────────────────────────────────
@@ -56,14 +91,16 @@ def main():
     if session_id:
         os.makedirs( session_dir, exist_ok=True )
 
-        ppid         = os.getppid()
-        session_file = os.path.join( session_dir, f"cc-{ppid}.json" )
+        hook_ppid    = os.getppid()
+        cc_pid       = _resolve_cc_pid( hook_ppid )
+        session_file = os.path.join( session_dir, f"cc-{cc_pid}.json" )
 
         session_data = {
             "session_id"      : session_id,
             "transcript_path" : transcript_path,
             "cwd"             : cwd,
-            "ppid"            : ppid
+            "ppid"            : cc_pid,
+            "hook_ppid"       : hook_ppid
         }
 
         try:

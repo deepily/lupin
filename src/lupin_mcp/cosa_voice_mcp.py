@@ -198,7 +198,7 @@ def _upgrade_session_id_background():
 
     After resolution completes, signals _session_ready so gated tool calls
     can proceed. If only the fallback UUID was found (no session bridge file),
-    sets _session_failed so tool calls will trigger a loud failure and exit.
+    logs a warning but continues — this is expected for hookless projects.
     """
     global SESSION_ID, SENDER_ID, _session_failed
 
@@ -215,8 +215,10 @@ def _upgrade_session_id_background():
         # Verify we got a real session ID, not the fallback
         meta = _get_cc_metadata()
         if meta.get( "source" ) == "fallback":
-            _session_failed = True
-            logger.critical( "Real session ID never arrived — only fallback UUID available" )
+            # No session bridge file found — this is expected for hookless projects.
+            # Fallback UUID is unique per process and never changes — no orphan risk.
+            logger.warning( "No session bridge file found for this project" )
+            logger.warning( f"Using stable fallback sender_id: {SENDER_ID}" )
         else:
             logger.info( f"Session ready (sender_id={SENDER_ID})" )
 
