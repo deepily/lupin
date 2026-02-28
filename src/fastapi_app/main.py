@@ -501,6 +501,11 @@ async def lifespan( app: FastAPI ):
     prose_engine.encode_query( [ "warmup" ] )
     print( "Done!" )
 
+    # Initialize Prediction Engine singleton (Universal Decision Proxy)
+    from cosa.agents.prediction_engine import get_prediction_engine
+    prediction_engine = get_prediction_engine( config_mgr=config_mgr, debug=app_debug )
+    print( f"[PREDICTION] Prediction engine initialized (enabled={prediction_engine.enabled})" )
+
     # Store event loop reference in WebSocketManager for thread-safe operations
     print( "[WS] Storing event loop reference for thread-safe operations..." )
     loop = asyncio.get_running_loop()

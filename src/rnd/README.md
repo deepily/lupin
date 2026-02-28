@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.27 - Universal Decision Proxy: Multi-Response-Type Prediction Engine
+- **Plan**: [2026.02.27-universal-prediction-engine-plan.md](2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md) - Approved implementation plan for extending the trust proxy system to handle ALL notification response types (yes_no, multiple_choice, open_ended, open_ended_batch) with prediction hints, accuracy tracking, and progressive learning. Vertical slice architecture: Slice 0 (foundation infrastructure — PredictionEngine singleton, prediction_log table, NotificationCategoryClassifier with 6 fixed categories), Slice 1 (yes_no simple binary via CBR majority vote), future slices for qualified yes_no, multiple_choice variants, and open_ended. Reuses CBRDecisionStore, ProxyDecisionEmbeddings, CategoryClassifier ABC, and EmbeddingProvider. Performance budget: 15-40ms total prediction latency. Progressive learning timeline from cold start (day 1) to autonomous responses (day 30+). SWE team decision proxy becomes a future consumer of the same engine.
+
 ### 2026.02.26 - Voice Hook Phase 0 Implementation
 - **Plan**: [2026.02.26-voice-hook-phase-0-implementation.md](2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.26-voice-hook-phase-0-implementation.md) - Phase 0 execution plan: 5 test hooks (SessionStart, PostToolUse, PreToolUse, Stop, Notification), shared `hook_common.py` library with TTS via `lupin_cli.notifications`, PPID-based session bridge (`session_bridge.py`), and hook registration in `settings.local.json`. Validates research claims empirically. Review decisions: AD-5 all boundaries drain, AD-6 PPID session bridge, AD-2 `lupin_cli.notifications` package.
 
