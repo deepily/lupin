@@ -28,7 +28,8 @@
 | e7bfdd1d | 2026-02-23T12:00:00 | 2026-02-23T21:20:00 | closed |
 | e10e0f35 | 2026-02-24T00:00:00 | 2026-02-24T20:15:00 | closed |
 | 7f9787a4 | 2026-02-26T12:20:00 | 2026-02-26T12:30:00 | closed |
-| b6e79902 | 2026-02-27T09:00:00 | 2026-02-27T09:00:00 | active |
+| b6e79902 | 2026-02-27T09:00:00 | 2026-02-27T09:00:00 | stale |
+| 10ff1e2a | 2026-02-28T10:00:00 | 2026-02-28T14:15:00 | active |
 
 ---
 
@@ -49,6 +50,11 @@
 ---
 
 ### Completed
+
+- [x] **Orphaned session ID race in COSA Voice MCP server** → commit: d8d2462 | By: 10ff1e2a
+  - **Symptom**: MCP tool calls during 1-10s startup window used random fallback session ID, causing orphaned notifications
+  - **Fix**: `threading.Event` gate blocks tool calls until real session ID resolves; fail-loud `os._exit(1)` if fallback only
+  - **File**: `src/lupin_mcp/cosa_voice_mcp.py`
 
 - [x] **SWE Team output path uses underscores instead of dashes** → pending commit | By: 7f9787a4
   - **Symptom**: Artifacts written to `io/swe_team/` but Lupin convention uses dashes for non-Python files/dirs

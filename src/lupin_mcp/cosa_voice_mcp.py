@@ -179,10 +179,12 @@ signal.signal( signal.SIGTERM, _handle_sigterm )
 # Initialize at module load
 # ============================================================================
 
-PROJECT    = _get_project()
-SESSION_ID = get_claude_session_id()[:8]  # 8-char hex from session bridge (env > file > fallback)
-SENDER_ID  = _get_sender_id( PROJECT, SESSION_ID )
-SERVER_URL = _get_server_url()
+PROJECT         = _get_project()
+SESSION_ID      = get_claude_session_id()[:8]  # 8-char hex from session bridge (env > file > fallback)
+SENDER_ID       = _get_sender_id( PROJECT, SESSION_ID )
+SERVER_URL      = _get_server_url()
+_session_ready  = threading.Event()   # Gate: blocks tool calls until session ID resolved
+_session_failed = False               # True if real ID never arrived (fallback only)
 
 logger.info( f"Project: {PROJECT}" )
 logger.info( f"Session ID: {SESSION_ID}" )
@@ -194,24 +196,36 @@ def _upgrade_session_id_background():
     """
     Background daemon thread that polls for the real CC session_id.
 
-    At MCP module load time, the SessionStart hook may not have fired yet,
-    so SESSION_ID may be a fallback UUID. This thread waits for the real
-    CC session_id (written by the SessionStart hook) and upgrades the
-    module-level SESSION_ID and SENDER_ID globals in place.
-
-    The window of misalignment is ~0.4s — no MCP tool calls happen during
-    CC startup, so this is safe.
+    After resolution completes, signals _session_ready so gated tool calls
+    can proceed. If only the fallback UUID was found (no session bridge file),
+    sets _session_failed so tool calls will trigger a loud failure and exit.
     """
-    global SESSION_ID, SENDER_ID
+    global SESSION_ID, SENDER_ID, _session_failed
 
-    real_id = wait_for_session_id( timeout=10.0, poll_interval=1.0 )
-    new_suffix = real_id[:8]
+    try:
+        real_id    = wait_for_session_id( timeout=10.0, poll_interval=1.0 )
+        new_suffix = real_id[:8]
 
-    if new_suffix != SESSION_ID:
-        old_sender = SENDER_ID
-        SESSION_ID = new_suffix
-        SENDER_ID  = _get_sender_id( PROJECT, SESSION_ID )
-        logger.info( f"Session ID upgraded: {old_sender} -> {SENDER_ID}" )
+        if new_suffix != SESSION_ID:
+            old_sender = SENDER_ID
+            SESSION_ID = new_suffix
+            SENDER_ID  = _get_sender_id( PROJECT, SESSION_ID )
+            logger.info( f"Session ID upgraded: {old_sender} -> {SENDER_ID}" )
+
+        # Verify we got a real session ID, not the fallback
+        meta = _get_cc_metadata()
+        if meta.get( "source" ) == "fallback":
+            _session_failed = True
+            logger.critical( "Real session ID never arrived — only fallback UUID available" )
+        else:
+            logger.info( f"Session ready (sender_id={SENDER_ID})" )
+
+    except Exception as e:
+        _session_failed = True
+        logger.critical( f"Session ID resolution failed: {e}" )
+
+    finally:
+        _session_ready.set()
 
 
 _upgrade_thread = threading.Thread(
@@ -220,6 +234,61 @@ _upgrade_thread = threading.Thread(
     daemon=True
 )
 _upgrade_thread.start()
+
+
+def _die_no_session_id():
+    """
+    Send error notification and hard-exit — real session ID never arrived.
+
+    Requires:
+        - Lupin FastAPI server is running (for notification delivery)
+
+    Ensures:
+        - Sends high-priority alert from sender_id claude.code@{PROJECT}.deepily.ai#mcp-error
+        - Terminates MCP server process via os._exit( 1 )
+        - Never returns
+    """
+    error_sender = f"claude.code@{PROJECT}.deepily.ai#mcp-error"
+    logger.critical( "Sending error notification and terminating MCP server" )
+
+    try:
+        request = AsyncNotificationRequest(
+            message           = "MCP server failed: Claude Code session ID not found. "
+                                "No session bridge file detected. Restart Claude Code to fix.",
+            notification_type = NotificationType.ALERT,
+            priority          = NotificationPriority( "high" ),
+            sender_id         = error_sender
+        )
+        notify_user_async( request=request, debug=False )
+    except Exception as e:
+        logger.error( f"Failed to send error notification: {e}" )
+
+    os._exit( 1 )
+
+
+def _wait_for_sender_id( timeout: float = 12.0 ) -> str:
+    """
+    Block until the session ID is resolved, then return SENDER_ID.
+    If resolution failed (fallback only), send error notification and exit.
+
+    Requires:
+        - _session_ready is a threading.Event set by _upgrade_session_id_background
+        - _session_failed is a bool set by _upgrade_session_id_background
+        - timeout exceeds background thread's 10s wait
+
+    Ensures:
+        - Returns SENDER_ID with real session ID on success
+        - Calls _die_no_session_id() and never returns on failure
+        - Zero overhead after first resolution (Event.wait on set event returns instantly)
+    """
+    if not _session_ready.wait( timeout=timeout ):
+        _die_no_session_id()
+
+    if _session_failed:
+        _die_no_session_id()
+
+    return SENDER_ID
+
 
 # ============================================================================
 # MCP Server
@@ -278,7 +347,7 @@ def converse(
             timeout_seconds=timeout_seconds,
             response_default=response_default,
             title=title,
-            sender_id=SENDER_ID,
+            sender_id=_wait_for_sender_id(),
             abstract=_normalize_abstract( abstract ),
             job_id=job_id
         )
@@ -342,7 +411,7 @@ def notify(
             message=message,
             notification_type=NotificationType( notification_type ),
             priority=NotificationPriority( priority ),
-            sender_id=SENDER_ID,
+            sender_id=_wait_for_sender_id(),
             abstract=_normalize_abstract( abstract ),
             job_id=job_id,
             suppress_ding=suppress_ding,
@@ -409,7 +478,7 @@ def ask_yes_no(
             priority=NotificationPriority( priority ),
             timeout_seconds=timeout_seconds,
             response_default=default,
-            sender_id=SENDER_ID,
+            sender_id=_wait_for_sender_id(),
             abstract=_normalize_abstract( abstract ),
             job_id=job_id
         )
@@ -508,7 +577,7 @@ def ask_multiple_choice(
             priority=NotificationPriority( priority ),
             timeout_seconds=timeout_seconds,
             title=title,
-            sender_id=SENDER_ID,
+            sender_id=_wait_for_sender_id(),
             response_options=response_options,
             abstract=_normalize_abstract( abstract ),
             job_id=job_id
@@ -625,7 +694,7 @@ def ask_open_ended_batch(
             priority         = NotificationPriority( priority ),
             timeout_seconds  = timeout_seconds,
             title            = title,
-            sender_id        = SENDER_ID,
+            sender_id        = _wait_for_sender_id(),
             response_options = response_options,
             abstract         = _normalize_abstract( abstract ),
             job_id           = job_id
@@ -684,10 +753,11 @@ def get_session_info() -> dict:
         dict with project name, session_id, sender_id, server_url, version,
         and claude_code metadata from the session bridge
     """
+    resolved_sender = _wait_for_sender_id()
     info = {
         "project"    : PROJECT,
         "session_id" : SESSION_ID,
-        "sender_id"  : SENDER_ID,
+        "sender_id"  : resolved_sender,
         "server_url" : SERVER_URL,
         "version"    : __version__
     }

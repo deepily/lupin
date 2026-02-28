@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.02.28 - Session 287 | Bug Fix: Orphaned Session ID in COSA Voice MCP Server
+
+**Accomplishments**:
+- Fixed race condition where MCP tool calls during the 1-10s startup window used a random fallback session ID, causing orphaned notifications tagged with a UUID that gets superseded once the real session ID arrives
+- Added `threading.Event` gate (`_session_ready`) that blocks all tool calls until the background thread resolves the real CC session ID from the session bridge file
+- Added fail-loud behavior: if the real session ID never arrives (only fallback UUID), sends high-priority error notification from `#mcp-error` sender and hard-exits via `os._exit(1)`
+- Replaced bare `sender_id=SENDER_ID` with gated `sender_id=_wait_for_sender_id()` in all 5 tool functions + `get_session_info()` (6 call sites total)
+- Removed misleading "~0.4s window is safe" docstring that understated the race window
+- Unit tests: 1712/1713 pass (1 pre-existing flaky failure unrelated to changes)
+
+**Files Modified**: 1 file
+- `src/lupin_mcp/cosa_voice_mcp.py` (session gate + fail-loud + all tool sender_id references)
+
+**Commit**: d8d2462
+
+---
+
 ### 2026.02.28 - Session 286 | Bug Fix: target_user Notification Dispatch (IN PROGRESS)
 
 **Accomplishments**:
