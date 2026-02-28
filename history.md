@@ -1,5 +1,44 @@
 # Lupin Project History
 
+### 2026.02.28 - Session 285 | Hook Progress Group Taxonomy — Counters per Hook Type
+
+**Accomplishments**:
+- Implemented progress_group_id taxonomy for PreToolUse and PostToolUse hooks to collapse 100+ individual notification entries into 2 grouped counters with badge + accordion
+- Added `build_progress_group_id( prefix, session_id )` helper to hook_common.py — extensible for all 18 CC hook types via 2-3 char prefix taxonomy
+- Added `progress_group_id` parameter to `send_tts()`, passing through to `AsyncNotificationRequest` (infrastructure already wired end-to-end)
+- Wired PreToolUse (`pt-{hex8}`) and PostToolUse (`pu-{hex8}`) hooks with session_id resolution: payload first (future-proof) → session bridge fallback
+- Shortened hook messages from verbose `"Hook fired: PreToolUse — tool {name}"` to compact `"Pre: {name}"` / `"Post: {name}"`
+- SessionStart, Stop, Notification hooks unchanged (low volume, no grouping needed)
+
+**Files Modified**: 3 files
+- `src/lupin_cli/claude_code/hooks/lib/hook_common.py` (+build_progress_group_id, +progress_group_id param)
+- `src/lupin_cli/claude_code/hooks/test_pre_tool_use.py` (progress grouping + compact message)
+- `src/lupin_cli/claude_code/hooks/test_post_tool_use.py` (progress grouping + compact message)
+
+---
+
+### 2026.02.28 - Session 283 | Phase 0 Validation Report + Closeout
+
+**Accomplishments**:
+- Created comprehensive Phase 0 validation report analyzing 3,430 hook log payloads (1,686 pre_tool_use, 1,620 post_tool_use, 69 notification, 28 stop, 26 session_start)
+- Documented JSON schemas for all 5 hook types with field-level required/optional analysis
+- Validated 12 research claims (all PASS): session_id UUID format, stop_hook_active behavior, tool_input/response completeness, MCP tool capture, session bridge files
+- Identified 7 surprises/deviations: `model` field in SessionStart, `source` field (startup/clear/compact), MCP string vs dict responses, pre/post count delta
+- Tool usage frequency analysis: Read 35.5%, Bash 22.1%, Edit 8.2%, MCP tools 6.2%
+- Marked Phase 0 as COMPLETE in master plan with session references
+- Updated README.md with validation report link
+- Updated TODO.md: Phase 0 marked complete, RESUME HERE breadcrumb moved to Phase 1
+
+**Files Created**: 1 file
+- `src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.27-phase-0-validation-report.md`
+
+**Files Modified**: 3 files
+- `src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-opportunistic-voice-hook-integration-plan.md` (Phase 0 → COMPLETE)
+- `src/rnd/README.md` (added validation report link)
+- `TODO.md` (Phase 0 completion, RESUME HERE → Phase 1)
+
+---
+
 ### 2026.02.27 - Session 284 | Universal Prediction Engine — Slice 1.5 (Qualified yes/no)
 
 **Accomplishments**:

@@ -10,7 +10,8 @@ Usage from hook scripts:
     import os
     sys.path.insert( 0, os.path.join( os.environ.get( "LUPIN_ROOT", "" ), "src" ) )
     from lupin_cli.claude_code.hooks.lib.hook_common import (
-        read_hook_input, log_payload, emit_json, send_tts, get_target_email, is_tts_enabled
+        read_hook_input, log_payload, emit_json, send_tts, get_target_email,
+        is_tts_enabled, build_progress_group_id
     )
 """
 import json
@@ -153,7 +154,34 @@ def is_tts_enabled():
     return value != "false"
 
 
-def send_tts( message, priority="low", sender_id=None ):
+def build_progress_group_id( prefix, session_id ):
+    """
+    Build progress_group_id from hook prefix and session ID.
+
+    Produces IDs like "pt-6c54ecc2" for in-place DOM counter updates.
+    Extensible: any hook can call with its own prefix.
+
+    Requires:
+        - prefix is a 2-3 char lowercase string (e.g., "pt", "pu", "ss")
+        - session_id is a string (may be full UUID or truncated hex)
+
+    Ensures:
+        - Returns string matching regex ^[a-z]{2,3}-[a-f0-9]{6,8}(-\\d+)?$
+        - Truncates session_id to first 8 chars
+        - Falls back to "00000000" if session_id is falsy
+
+    Args:
+        prefix: Hook type prefix (e.g., "pt" for PreToolUse, "pu" for PostToolUse)
+        session_id: Claude Code session ID (full or truncated)
+
+    Returns:
+        str: Progress group ID (e.g., "pt-6c54ecc2")
+    """
+    hex_part = session_id[:8] if session_id else "00000000"
+    return f"{prefix}-{hex_part}"
+
+
+def send_tts( message, priority="low", sender_id=None, progress_group_id=None ):
     """
     Send fire-and-forget TTS notification via lupin_cli.notifications.
 
@@ -169,6 +197,7 @@ def send_tts( message, priority="low", sender_id=None ):
     Ensures:
         - Sends TTS notification if TTS is enabled and target email is available
         - Auto-resolves sender_id via session bridge when not explicitly provided
+        - Passes progress_group_id through to AsyncNotificationRequest for counter grouping
         - Returns silently on any failure (non-blocking)
         - Never raises exceptions
 
@@ -176,6 +205,7 @@ def send_tts( message, priority="low", sender_id=None ):
         message: TTS message text
         priority: Notification priority (default: "low")
         sender_id: Explicit sender_id string (default: None = auto-resolve from session bridge)
+        progress_group_id: Progress group ID for in-place DOM updates (default: None)
     """
     if not is_tts_enabled():
         return
@@ -201,12 +231,13 @@ def send_tts( message, priority="low", sender_id=None ):
                 pass  # Graceful degradation — notification fires without sender_id
 
         request = AsyncNotificationRequest(
-            message           = message,
-            notification_type = NotificationType.PROGRESS,
-            priority          = NotificationPriority( priority ),
-            target_user       = target_email,
-            sender_id         = sender_id,
-            timeout           = 3
+            message            = message,
+            notification_type  = NotificationType.PROGRESS,
+            priority           = NotificationPriority( priority ),
+            target_user        = target_email,
+            sender_id          = sender_id,
+            progress_group_id  = progress_group_id,
+            timeout            = 3
         )
 
         notify_user_async( request=request )
