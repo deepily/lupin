@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-27 (Session 280)
+Last updated: 2026-02-27 (Session 282)
 
 ## v0.1.6 — FUTURE DEVELOPMENT
 
@@ -75,7 +75,7 @@ Last updated: 2026-02-27 (Session 280)
 - [ ] **[LUPIN] Phase 0 validation: Analyze captured payloads** — Review logs from live session, document actual JSON schemas vs research claims, measure hook latency, verify session bridge file at next restart.
   - **Logs dir**: `io/claude_code_hooks/logs/` (moved from `src/lupin_cli/claude_code/hooks/logs/` — Session 279)
   - **Session bridge file**: `~/.claude/sessions/cc-{PID}.json`
-  - **RESUME HERE (Session 279)**: Steps 1-3 of Phase 0 plan COMPLETE (hook_common.py LOGS_DIR updated, .gitignore updated, 1450 log files moved). Steps 4-6 remain: create validation report analyzing ~1477 payloads (717 pre_tool_use, 686 post_tool_use, 40 notification, 17 stop, 16 session_start), update master plan + README, update TODO.md. Session crashed due to CWD corruption from Bash `cd` — hooks use relative paths in settings.local.json. **Fix hooks to use absolute paths before resuming.**
+  - **RESUME HERE (Session 282)**: Steps 1-3 of Phase 0 plan COMPLETE (hook_common.py LOGS_DIR updated, .gitignore updated, 1450 log files moved). Steps 4-6 remain: create validation report analyzing ~1477 payloads (717 pre_tool_use, 686 post_tool_use, 40 notification, 17 stop, 16 session_start), update master plan + README, update TODO.md. ~~Session 279 CWD corruption bug~~ **FIXED Session 282**: hooks now use `$LUPIN_ROOT` absolute paths.
 - [ ] **[LUPIN] Phase 1: Notification System Extensions** — Add `VOICE_INPUT` to NotificationType, test voice input flow end-to-end.
 - [ ] **[LUPIN] Phase 2-7: Remaining voice hook phases** — Hook infrastructure, TTS output, voice drain + injection, voice approvals, browser capture, testing + polish.
   - **Master plan**: [`2026.02.25-opportunistic-voice-hook-integration-plan.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-opportunistic-voice-hook-integration-plan.md)

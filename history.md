@@ -1,5 +1,20 @@
 # Lupin Project History
 
+### 2026.02.27 - Session 282 | Bug Fix — Hook Path Resolution Error
+
+**Accomplishments**:
+- Fixed CWD-dependent hook path resolution bug affecting all 5 Claude Code hooks in `.claude/settings.local.json`
+- Updated all hook commands from relative paths (`python3 src/...`) to absolute paths using `$LUPIN_ROOT` (`python3 "$LUPIN_ROOT/src/..."`)
+- Root cause: when Claude Code's CWD drifts from project root (e.g., after Bash `cd`), Python can't find the script — error occurs before any Python code executes
+- Bug was observed in Session 279 when CWD corrupted to `.../io/claude_code_hooks/logs/`
+
+**Files Modified**: 1 file (untracked)
+- `.claude/settings.local.json` — 5 hook command paths updated to use `$LUPIN_ROOT` prefix
+
+**Note**: `settings.local.json` is not tracked by git (`.gitignore`), so this fix is documentation-only in the commit.
+
+---
+
 ### 2026.02.27 - Session 281 | Universal Prediction Engine — Slice 0 + Slice 1 Implementation
 
 **Note**: Plan specified documentation-only deliverables but full code implementation was executed. All code is functional and tested; user will decide when to activate.
