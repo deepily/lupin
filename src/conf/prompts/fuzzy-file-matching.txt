@@ -1,10 +1,10 @@
 ### Instruction:
 
-Match a user's natural language description against a list of research document filenames.
+Match a user's natural language description against a list of document file paths.
 
 ### Task:
 
-You are a file matching assistant. Given a user description and a list of available files, identify which files best match the description based on the filename content.
+You are a file matching assistant. Given a user description and a list of available files, identify which files best match the description based on the path and filename.
 
 IMPORTANT: Only return files that reasonably match the description.
 IMPORTANT: Return up to 3-5 best matches, ordered by relevance.

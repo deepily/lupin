@@ -1,5 +1,26 @@
 # Lupin Project History
 
+### 2026.02.27 - Session 280 | Expand Podcast Generator Source File Access
+
+**Accomplishments**:
+- Expanded podcast generator input detection beyond `/io/deep-research/` to accept any `.md`/`.txt`/`.html` file path within the repo
+- Added `validate_source_path()` security function to prevent directory traversal attacks
+- Expanded `match_research_docs()` to search additional dirs from config key using recursive `os.walk()`; return type changed from `List[str]` to `List[dict]` with `filename`/`relative_path` keys
+- Updated `get_user_document_selection()` to display relative paths and return dict
+- Fixed Flow B path reconstruction — uses `relative_path` from match result instead of hardcoded deep-research path template
+- Expanded expeditor `_handle_fuzzy_file_match()` with same multi-directory search pattern
+- Updated fuzzy-file-matching prompt to reference "file paths" instead of "filenames"
+- All smoke tests pass, 135 expeditor unit tests pass
+
+**Files Modified**: 5 files
+- `src/conf/lupin-app.ini` (added `podcast generator source search paths` key)
+- `src/conf/lupin-app-splainer.ini` (added matching explainer)
+- `src/conf/prompts/fuzzy-file-matching.txt` (filenames → file paths)
+- `src/cosa/rest/routers/podcast_generator.py` (is_research_path, validate_source_path, match_research_docs, get_user_document_selection, Flow A/B security)
+- `src/cosa/agents/runtime_argument_expeditor/expeditor.py` (_handle_fuzzy_file_match multi-dir search)
+
+---
+
 ### 2026.02.27 - Session 279 | Serialize Trust Proxy End-to-End Overview Document
 
 **Accomplishments**:

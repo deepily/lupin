@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-27 (Session 278)
+Last updated: 2026-02-27 (Session 280)
 
 ## v0.1.6 — FUTURE DEVELOPMENT
 
@@ -84,6 +84,10 @@ Last updated: 2026-02-27 (Session 278)
 ---
 
 ## Pending
+
+### History Archive (Session 280)
+
+- [ ] **[LUPIN] Archive history.md** — At 18,951 tokens (75.8%). Archive sessions older than 14 days to stay below 17k threshold.
 
 ### SWE Team Proxy: Workload Generator + Shadow-Mode Capture (HIGH PRIORITY)
 
