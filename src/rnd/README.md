@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.27 - Bug Fix: target_user Notification Dispatch (IN PROGRESS)
+- **Plan**: [2026.02.27-target-user-notification-dispatch-bug-fix.md](2026.02.27-target-user-notification-dispatch-bug-fix.md) - Investigation and partial fix for "Cannot resolve target_user" errors during podcast generator job execution. Session 283 implemented target_user plumbing through 7 files (dispatcher, 4 cosa_interfaces, 2 jobs). Error persists after server restart — investigation traced full 13-step call chain from API submission through Docker-isolated execution. Key finding: Docker container doesn't inherit host env vars (LUPIN_DEV_EMAIL) or config files (~/.notifications/config). Next step: test-first approach to reproduce and verify fix.
+
 ### 2026.02.28 - Phase 0 Validation Report: Hook Contract Validation
 - **Report**: [2026.02.27-phase-0-validation-report.md](2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.27-phase-0-validation-report.md) - Empirical validation of all 5 hook types from 3,430 captured payloads over ~22.5 hours. Documents JSON schemas per hook type (PreToolUse, PostToolUse, Stop, Notification, SessionStart), validates 12 research claims (all PASS), identifies 7 surprises/deviations (model field in SessionStart, source field, MCP response type difference, pre/post count delta). Tool usage frequency analysis (Read 35.5%, Bash 22.1%, Edit 8.2%). Session bridge file verification (26 files created). Phase 0 gate: 12/12 checks passed.
 

@@ -1,6 +1,12 @@
 # TODO
 
-Last updated: 2026-02-28 (Session 285)
+Last updated: 2026-02-28 (Session 286)
+
+## HIGH PRIORITY — target_user Notification Dispatch Bug (Session 286)
+
+- [ ] **[LUPIN] Fix target_user "Cannot resolve" error in Docker** — Code plumbing done (7 files), error persists. Next: write `test_target_user_dispatch.py` to reproduce the exact failure, then iterate. Key suspects: Docker env isolation, notification paths bypassing patched dispatcher.
+  - **Bug fix doc**: [`src/rnd/2026.02.27-target-user-notification-dispatch-bug-fix.md`](src/rnd/2026.02.27-target-user-notification-dispatch-bug-fix.md)
+  - **CoSA files modified**: `agent_notification_dispatcher.py`, 4x `cosa_interface.py`, 2x `job.py`
 
 ## HIGH PRIORITY — Podcast Generator Bugs (Session 283)
 

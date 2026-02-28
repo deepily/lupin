@@ -1,5 +1,26 @@
 # Lupin Project History
 
+### 2026.02.28 - Session 286 | Bug Fix: target_user Notification Dispatch (IN PROGRESS)
+
+**Accomplishments**:
+- Implemented `target_user` plumbing through 7 CoSA files following existing `sender_id`/`session_name` pattern: dispatcher (+`self.target_user` attr, pass-through in 4 methods), 4x `cosa_interface.py` (+`TARGET_USER` module var + wiring), 2x `job.py` (+`cosa_interface.TARGET_USER = self.user_email`)
+- Ran smoke tests (3/3 pass) and unit tests (1712/1712 pass, 1 pre-existing failure from parallel session)
+- Investigated persistent "Cannot resolve target_user" error — traced full 13-step call chain from API submission through Docker-isolated execution
+- Key finding: Docker container doesn't inherit host env vars (`LUPIN_DEV_EMAIL`) or config files (`~/.notifications/config`). Also found 13 different files create notification requests — some may bypass patched dispatcher chain
+- Serialized investigation plan to `src/rnd/` with test-first approach for next session
+- Added 3 podcast generator bugs to TODO.md (fuzzy matching, job card contact, audio segment upload)
+
+**Status**: Investigation paused. Next session: write `test_target_user_dispatch.py` to reproduce error, then iterate to fix.
+
+**Files Modified (Lupin)**: 2 files
+- `src/rnd/2026.02.27-target-user-notification-dispatch-bug-fix.md` (new — serialized investigation plan)
+- `src/rnd/README.md` (added link to bug fix doc)
+
+**Files Modified (CoSA — uncommitted, separate repo)**: 7 files
+- `agents/utils/agent_notification_dispatcher.py`, 4x `cosa_interface.py`, 2x `job.py`
+
+---
+
 ### 2026.02.28 - Session 285 | Hook Progress Group Taxonomy — Counters per Hook Type
 
 **Accomplishments**:
