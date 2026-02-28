@@ -4043,3 +4043,4 @@ if __name__ == "__main__":
 | [`src/tests/README.md`](../tests/README.md) | Lupin 5-tier testing strategy overview |
 | [`src/tests/AUTH-TESTING-GUIDE.md`](../tests/AUTH-TESTING-GUIDE.md) | Test credential management patterns |
 | [`src/docs/proxy-admin-guide.md`](proxy-admin-guide.md) | Decision Proxy admin how-to — Trust Dashboard, Ratification page, trust feedback loop |
+| [`src/rnd/.../2026.02.27-end-to-end-trust-proxy-overview.md`](../rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-end-to-end-trust-proxy-overview.md) | End-to-end conceptual overview — 5 stages from cold start to autonomous proxy, CBR engine, trust models, component map |

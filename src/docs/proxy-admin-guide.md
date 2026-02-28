@@ -5,6 +5,8 @@
 > **Pages covered**: `/app/admin/proxy-dashboard` and `/app/admin/proxy-ratify`
 >
 > **Last Updated**: 2026-02-23
+>
+> **See Also**: [End-to-End Trust Proxy Overview](../rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-end-to-end-trust-proxy-overview.md) — full conceptual walkthrough from cold start to autonomous predictions
 
 ---
 
