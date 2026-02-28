@@ -98,4 +98,4 @@ src/lupin-plugin-firefox/
 history/migrations/
 
 # Claude Code hook logs - empirical payload captures
-src/lupin_cli/claude_code/hooks/logs/
+io/claude_code_hooks/

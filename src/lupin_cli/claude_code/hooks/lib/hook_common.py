@@ -22,8 +22,11 @@ from pathlib import Path
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-HOOKS_DIR  = Path( __file__ ).parent.parent
-LOGS_DIR   = HOOKS_DIR / "logs"
+# Canonical path resolution via cu.get_project_root() — keeps runtime output
+# in io/ directory, consistent with existing io/log/ convention.
+import cosa.utils.util as cu
+
+LOGS_DIR = Path( cu.get_project_root() ) / "io" / "claude_code_hooks" / "logs"
 
 
 # ── Core Functions ────────────────────────────────────────────────────────────
@@ -216,7 +219,6 @@ def send_tts( message, priority="low", sender_id=None ):
 
 if __name__ == "__main__":
 
-    print( f"HOOKS_DIR: {HOOKS_DIR}" )
     print( f"LOGS_DIR:  {LOGS_DIR}" )
     print( f"TTS enabled: {is_tts_enabled()}" )
     print( f"Target email: {get_target_email()}" )
