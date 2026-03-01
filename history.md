@@ -1,5 +1,42 @@
 # Lupin Project History
 
+### 2026.02.28 - Session 290 | Phase 1 Voice I/O: CC Notification Listener + Design Revisions
+
+**Accomplishments**:
+- Implemented 4 architectural revisions to the voice hook integration master plan, simplifying Phase 1 before coding
+- Added `user_initiated_message` to server `valid_types` whitelist in `POST /api/notify` (replaces proposed `VOICE_INPUT` type)
+- Added `USER_INITIATED_MESSAGE` enum value to both CLI notification type enums (`notification_types.py` + `notification_models.py`)
+- Built `CCNotificationListener` — subclasses `BaseWebSocketListener`, filters `user_initiated_message` by `job_id` matching CC session hash, buffers to JSONL file
+- Created INI-based credential infrastructure (`~/.claude/notification-hooks-credentials.ini`) with per-project sections and project name derivation
+- Added `drain_voice_buffer()` to `hook_common.py` — atomic rename-read-delete pattern for concurrent-safe buffer consumption
+- Extended SessionStart hook to spawn CC Notification Listener as background subprocess with `HOOK_LISTENER_DEBUG/VERBOSE/LOG` env var passthrough
+- Created SessionEnd hook — stops listener via SIGTERM, cleans up empty buffer files, registered globally in `~/.claude/settings.json`
+- Serialized design revision document to R&D directory
+- Created 35 new automated tests (buffer path, drain atomicity, credentials, listener init, event filtering, SessionEnd)
+- Updated 2 existing unit tests for new enum value (notification types + notify user)
+- Unit tests: 1712/1713 pass (1 pre-existing flaky failure unchanged)
+
+**Files Created**: 5 files
+- `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` (CC Notification Listener)
+- `src/lupin_cli/claude_code/hooks/lib/hook_credentials.py` (INI credential reader)
+- `src/lupin_cli/claude_code/hooks/test_session_end.py` (SessionEnd hook)
+- `src/tests/smoke/test_cc_notification_listener.py` (35 tests)
+- `src/rnd/.../2026.02.28-design-doc-revisions-session-290.md` (revision document)
+
+**Files Modified**: 7 files
+- `src/cosa/rest/routers/notifications.py` (added user_initiated_message to valid_types — CoSA submodule)
+- `src/lupin_cli/notifications/notification_types.py` (added USER_INITIATED_MESSAGE enum)
+- `src/lupin_cli/notifications/notification_models.py` (added USER_INITIATED_MESSAGE enum)
+- `src/lupin_cli/claude_code/hooks/lib/hook_common.py` (added drain_voice_buffer + get_buffer_path)
+- `src/lupin_cli/claude_code/hooks/test_register_session.py` (spawn listener in Phase 5.5)
+- `src/tests/unit/test_notification_types.py` (updated for 5 enum values)
+- `src/tests/unit/test_notify_user.py` (updated valid types string)
+
+**Config Modified**: 1 file
+- `~/.claude/settings.json` (registered SessionEnd hook globally)
+
+---
+
 ### 2026.02.28 - Session 289 | Create Global Notification CLI Bash Wrappers
 
 **Accomplishments**:

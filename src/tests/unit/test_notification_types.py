@@ -86,13 +86,15 @@ class TestNotificationTypes( unittest.TestCase ):
         self.assertEqual( NotificationType.ALERT.value, "alert" )
         self.assertEqual( NotificationType.CUSTOM.value, "custom" )
         
+        self.assertEqual( NotificationType.USER_INITIATED_MESSAGE.value, "user_initiated_message" )
+
         # Test enum completeness
-        expected_types = {"task", "progress", "alert", "custom"}
+        expected_types = {"task", "progress", "alert", "custom", "user_initiated_message"}
         actual_types = {item.value for item in NotificationType}
         self.assertEqual( actual_types, expected_types )
-        
+
         # Verify enum count
-        self.assertEqual( len( NotificationType ), 4 )
+        self.assertEqual( len( NotificationType ), 5 )
     
     def test_notification_type_values_method( self ):
         """
@@ -108,10 +110,10 @@ class TestNotificationTypes( unittest.TestCase ):
         
         # Test return type and content
         self.assertIsInstance( values, list )
-        self.assertEqual( len( values ), 4 )
-        
+        self.assertEqual( len( values ), 5 )
+
         # Test expected values in order
-        expected_values = ["task", "progress", "alert", "custom"]
+        expected_values = ["task", "progress", "alert", "custom", "user_initiated_message"]
         self.assertEqual( values, expected_values )
         
         # Test all values are strings
@@ -300,10 +302,11 @@ class TestNotificationTypes( unittest.TestCase ):
         """
         # Test NotificationType string consistency
         type_mappings = {
-            "TASK": "task",
-            "PROGRESS": "progress", 
-            "ALERT": "alert",
-            "CUSTOM": "custom"
+            "TASK"                   : "task",
+            "PROGRESS"               : "progress",
+            "ALERT"                  : "alert",
+            "CUSTOM"                 : "custom",
+            "USER_INITIATED_MESSAGE" : "user_initiated_message",
         }
         
         for attr_name, expected_value in type_mappings.items():

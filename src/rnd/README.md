@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.02.28 - Design Doc Revisions: Voice I/O Phase 1 (Session 290)
+- **Revisions**: [2026.02.28-design-doc-revisions-session-290.md](2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.28-design-doc-revisions-session-290.md) - Four architectural revisions to the voice hook integration master plan before Phase 1 implementation. (1) No new VOICE_INPUT type — reuses existing `user_initiated_message`. (2) Simplified sender ID — user's email, no fancy convention. (3) Stateful WebSocket listener replaces ephemeral DB queries — `CCNotificationListener` subclasses `BaseWebSocketListener`, buffers to JSONL, atomic drain. (4) Phase 1 simplified to 7 steps. New components: credentials INI infrastructure, CC Notification Listener, SessionEnd hook, 35 automated tests.
+
 ### 2026.02.27 - Bug Fix: target_user Notification Dispatch (IN PROGRESS)
 - **Plan**: [2026.02.27-target-user-notification-dispatch-bug-fix.md](2026.02.27-target-user-notification-dispatch-bug-fix.md) - Investigation and partial fix for "Cannot resolve target_user" errors during podcast generator job execution. Session 283 implemented target_user plumbing through 7 files (dispatcher, 4 cosa_interfaces, 2 jobs). Error persists after server restart — investigation traced full 13-step call chain from API submission through Docker-isolated execution. Key finding: Docker container doesn't inherit host env vars (LUPIN_DEV_EMAIL) or config files (~/.notifications/config). Next step: test-first approach to reproduce and verify fix.
 

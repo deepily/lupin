@@ -25,24 +25,25 @@ class NotificationType(Enum):
         - Maintains type safety for notification categories
     """
     
-    TASK = "task"           # Task completion (success/failure)
-    PROGRESS = "progress"   # Progress updates during long operations  
-    ALERT = "alert"         # Warnings and important messages
-    CUSTOM = "custom"       # User-defined messages
+    TASK = "task"                                       # Task completion (success/failure)
+    PROGRESS = "progress"                               # Progress updates during long operations
+    ALERT = "alert"                                     # Warnings and important messages
+    CUSTOM = "custom"                                   # User-defined messages
+    USER_INITIATED_MESSAGE = "user_initiated_message"   # User-to-session voice/text input
     
     @classmethod
     def values(cls) -> List[str]:
         """
         Get list of all notification type values.
-        
+
         Requires:
             - None
-            
+
         Ensures:
             - Returns list of all enum values as strings
             - Order matches enum declaration order
-            - List contains exactly 4 elements
-            
+            - List contains exactly 5 elements
+
         Raises:
             - None
         """

@@ -196,7 +196,7 @@ class TestNotifyUser( unittest.TestCase ):
             
             # Verify error messages
             mock_print.assert_any_call( "✗ Invalid notification type: invalid_type" )
-            expected_types = "task, progress, alert, custom"
+            expected_types = "task, progress, alert, custom, user_initiated_message"
             mock_print.assert_any_call( f"  Valid types: {expected_types}" )
     
     def test_notify_user_invalid_priority( self ):

@@ -120,10 +120,11 @@ def parse_sender_id( sender_id: str ) -> dict:
 
 class NotificationType(str, Enum):
     """Notification type enumeration."""
-    TASK = "task"
-    PROGRESS = "progress"
-    ALERT = "alert"
-    CUSTOM = "custom"
+    TASK                   = "task"
+    PROGRESS               = "progress"
+    ALERT                  = "alert"
+    CUSTOM                 = "custom"
+    USER_INITIATED_MESSAGE = "user_initiated_message"
 
 
 class NotificationPriority(str, Enum):

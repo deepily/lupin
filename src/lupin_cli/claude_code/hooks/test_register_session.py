@@ -24,6 +24,7 @@ Install in .claude/settings.local.json:
 """
 import json
 import os
+import subprocess
 import sys
 
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
@@ -70,6 +71,96 @@ def _resolve_cc_pid( hook_ppid ):
         return cc_pid
     except ( FileNotFoundError, IndexError, ValueError, PermissionError, OSError ):
         return hook_ppid
+
+
+def _spawn_listener( session_id, session_data, session_file ):
+    """
+    Spawn the CC Notification Listener as a background subprocess.
+
+    The listener connects via WebSocket and buffers user_initiated_message
+    notifications targeted at this CC session.
+
+    Requires:
+        - session_id is a non-empty string
+        - LUPIN_ROOT environment variable is set (for PYTHONPATH)
+
+    Ensures:
+        - Spawns listener subprocess in background (detached from hook lifecycle)
+        - Records listener PID in session bridge file for SessionEnd cleanup
+        - Respects HOOK_LISTENER_DEBUG/VERBOSE/LOG env vars
+        - Returns listener PID on success, None on failure
+        - Never raises exceptions (spawn failure is non-fatal)
+
+    Args:
+        session_id: Full CC session ID
+        session_data: Session bridge data dict (updated in-place with listener_pid)
+        session_file: Path to session bridge JSON file
+
+    Returns:
+        int or None: Listener subprocess PID, or None on failure
+    """
+    if not session_id:
+        return None
+
+    # Check if listener spawning is disabled
+    if os.environ.get( "HOOK_LISTENER_ENABLED", "true" ).strip().lower() == "false":
+        return None
+
+    short_id = session_id[:8]
+
+    cmd = [
+        sys.executable, "-m",
+        "lupin_cli.claude_code.hooks.lib.cc_notification_listener",
+        "--session-id", short_id,
+    ]
+
+    # Pass debug/verbose/log flags from env vars
+    if os.environ.get( "HOOK_LISTENER_DEBUG", "" ).strip().lower() == "true":
+        cmd.append( "--debug" )
+
+    if os.environ.get( "HOOK_LISTENER_VERBOSE", "" ).strip().lower() == "true":
+        cmd.append( "--verbose" )
+
+    if os.environ.get( "HOOK_LISTENER_LOG", "" ).strip().lower() == "true":
+        log_dir  = os.path.expanduser( "~/.claude/sessions" )
+        log_path = os.path.join( log_dir, f"cc-listener-{short_id}.log" )
+        cmd.extend( [ "--log-file", log_path ] )
+
+    # Ensure PYTHONPATH includes src/
+    env = os.environ.copy()
+    lupin_root = env.get( "LUPIN_ROOT", "" )
+    src_path   = os.path.join( lupin_root, "src" ) if lupin_root else ""
+    if src_path and src_path not in env.get( "PYTHONPATH", "" ):
+        env[ "PYTHONPATH" ] = src_path + ":" + env.get( "PYTHONPATH", "" )
+
+    # Force line-buffered stdout
+    env[ "PYTHONUNBUFFERED" ] = "1"
+
+    try:
+        # Spawn detached — listener outlives the hook subprocess
+        proc = subprocess.Popen(
+            cmd,
+            stdout = subprocess.DEVNULL,
+            stderr = subprocess.DEVNULL,
+            env    = env,
+            start_new_session = True,
+        )
+
+        listener_pid = proc.pid
+
+        # Record listener PID in session bridge file for SessionEnd cleanup
+        if session_data is not None and session_file:
+            session_data[ "listener_pid" ] = listener_pid
+            try:
+                with open( session_file, "w" ) as f:
+                    json.dump( session_data, f, indent=2 )
+            except OSError:
+                pass  # Best-effort
+
+        return listener_pid
+
+    except Exception:
+        return None  # Spawn failure is non-fatal
 
 
 def main():
@@ -138,6 +229,9 @@ def main():
     # (can't rely on session file yet; this hook is the one writing it)
     hook_sender_id = build_sender_id_for_cc( session_id=session_id ) if session_id else None
     send_tts( f"Hook fired: SessionStart — session {short_id}", sender_id=hook_sender_id )
+
+    # ── Phase 5.5: Spawn CC Notification Listener ──────────────────────
+    listener_pid = _spawn_listener( session_id, session_data if session_id else None, session_file )
 
     # ── Phase 6: Log full payload ─────────────────────────────────────────
     log_payload( "session_start", payload )

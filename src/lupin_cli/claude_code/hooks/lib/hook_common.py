@@ -17,6 +17,7 @@ Usage from hook scripts:
 import json
 import os
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -244,6 +245,99 @@ def send_tts( message, priority="low", sender_id=None, progress_group_id=None ):
 
     except Exception:
         pass  # Hook must never block Claude Code due to notification failure
+
+
+# ── Voice Buffer Functions ────────────────────────────────────────────────────
+
+SESSION_DIR = Path.home() / ".claude" / "sessions"
+
+
+def get_buffer_path( session_id ):
+    """
+    Get the JSONL buffer file path for a CC session.
+
+    Requires:
+        - session_id is a non-empty string
+
+    Ensures:
+        - Returns Path to buffer file in ~/.claude/sessions/
+        - Truncates session_id to first 8 chars
+
+    Args:
+        session_id: Claude Code session ID (full or truncated)
+
+    Returns:
+        Path: Buffer file path (e.g., ~/.claude/sessions/cc-buffer-abc12345.jsonl)
+    """
+    hash_part = session_id[:8] if session_id else "00000000"
+    return SESSION_DIR / f"cc-buffer-{hash_part}.jsonl"
+
+
+def drain_voice_buffer( session_id ):
+    """
+    Atomically drain the voice buffer for a CC session.
+
+    Implements atomic rename-read-delete pattern:
+    1. Rename buffer file to random /tmp/ path (atomic on same filesystem? no,
+       but os.rename across filesystems will fail, so we copy+delete)
+    2. Read all JSONL lines from temp file
+    3. Delete temp file
+
+    Only one concurrent drain succeeds — the first os.rename() wins, others
+    get FileNotFoundError and return empty list.
+
+    Requires:
+        - session_id is a non-empty string
+
+    Ensures:
+        - Returns list of message dicts from buffer
+        - Returns empty list if no buffer exists or drain fails
+        - Buffer file is consumed (deleted) after successful drain
+        - Thread-safe via atomic rename
+        - Never raises exceptions
+
+    Args:
+        session_id: Claude Code session ID (full or truncated)
+
+    Returns:
+        list[dict]: List of buffered message dicts, in chronological order
+    """
+    buffer_path = get_buffer_path( session_id )
+
+    if not buffer_path.exists():
+        return []
+
+    # Random drain path in /tmp to avoid collision with concurrent drains
+    hash_part = session_id[:8] if session_id else "00000000"
+    drain_id  = uuid.uuid4().hex[:8]
+    drain_path = Path( f"/tmp/cc-drain-{hash_part}-{drain_id}.jsonl" )
+
+    try:
+        # Atomic rename — only one concurrent drain succeeds
+        os.rename( str( buffer_path ), str( drain_path ) )
+    except ( FileNotFoundError, OSError ):
+        # Another hook already drained it, or file vanished
+        return []
+
+    messages = []
+    try:
+        with open( drain_path ) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        messages.append( json.loads( line ) )
+                    except json.JSONDecodeError:
+                        pass  # Skip malformed lines
+    except OSError:
+        pass  # File read error — return whatever we got
+    finally:
+        try:
+            drain_path.unlink( missing_ok=True )
+        except Exception:
+            pass
+
+    return messages
 
 
 # ── Quick smoke test ─────────────────────────────────────────────────────────

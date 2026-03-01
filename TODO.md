@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-28 (Session 286)
+Last updated: 2026-02-28 (Session 290)
 
 ## HIGH PRIORITY — target_user Notification Dispatch Bug (Session 286)
 
@@ -89,11 +89,12 @@ Last updated: 2026-02-28 (Session 286)
 - [x] **[LUPIN] Phase 0 validation: Analyze captured payloads** — Session 283: Validation report created from 3,430 payloads (1,686 pre_tool_use, 1,620 post_tool_use, 69 notification, 28 stop, 26 session_start). All 12 gate checks passed. Report at `src/rnd/.../2026.02.27-phase-0-validation-report.md`.
   - **Logs dir**: `io/claude_code_hooks/logs/`
   - **Session bridge file**: `~/.claude/sessions/cc-{PID}.json` — 26 files verified
-- [ ] **[LUPIN] Phase 1: Notification System Extensions** — Add `VOICE_INPUT` to NotificationType, test voice input flow end-to-end. **RESUME HERE (Session 283)**: Phase 0 fully validated — see [Phase 0 Validation Report](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.27-phase-0-validation-report.md) for JSON schemas, research claim validation (12/12 PASS), tool frequency data, and 6 recommendations for Phase 1+.
-- [ ] **[LUPIN] Phase 2-7: Remaining voice hook phases** — Hook infrastructure, TTS output, voice drain + injection, voice approvals, browser capture, testing + polish.
+- [x] **[LUPIN] Phase 1: Notification System Extensions** — Session 290: Revised architecture — `user_initiated_message` type (not VOICE_INPUT), stateful WebSocket listener (CCNotificationListener subclassing BaseWebSocketListener), INI-based credentials, atomic JSONL buffer drain. 5 new files, 7 modified, 35 new tests (all pass). See [Design Doc Revisions](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.28-design-doc-revisions-session-290.md).
+- [ ] **[LUPIN] Phase 2-7: Remaining voice hook phases** — TTS output, voice drain + injection, voice approvals, browser capture, testing + polish. **RESUME HERE (Session 290)**: Phase 1 complete — listener spawns/stops, buffer drains atomically. Next: integrate drain into pre_tool_use hook, wire voice input into CC prompt injection.
   - **Master plan**: [`2026.02.25-opportunistic-voice-hook-integration-plan.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-opportunistic-voice-hook-integration-plan.md)
   - **Phase 0 plan**: [`2026.02.26-voice-hook-phase-0-implementation.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.26-voice-hook-phase-0-implementation.md)
   - **Phase 0 validation**: [`2026.02.27-phase-0-validation-report.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.27-phase-0-validation-report.md)
+  - **Phase 1 design revisions**: [`2026.02.28-design-doc-revisions-session-290.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.28-design-doc-revisions-session-290.md)
 
 ---
 
