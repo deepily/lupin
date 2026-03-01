@@ -2958,6 +2958,55 @@ python3 -m lupin_cli.notifications.notify_user_async "Build completed" \
     --priority high
 ```
 
+#### Bash Wrapper Scripts ( Global CLI Commands )
+
+The Python CLI tools above are wrapped by bash scripts installed at `~/.local/bin/`
+for convenient command-line access from any directory. The canonical copies live in
+`src/scripts/` for version control and easy reinstallation.
+
+**Installation** ( from project root ):
+
+```bash
+cp src/scripts/notify-claude-async ~/.local/bin/
+cp src/scripts/notify-claude-sync  ~/.local/bin/
+chmod +x ~/.local/bin/notify-claude-async ~/.local/bin/notify-claude-sync
+```
+
+**How they work**:
+
+1. Resolve `LUPIN_ROOT` ( from env var, `DEEPILY_PROJECTS_DIR` fallback, or hardcoded path )
+2. Validate the directory exists
+3. Use the CoSA venv Python ( `$LUPIN_ROOT/src/cosa/.venv/bin/python3` ) which has `requests` + `pydantic`
+4. Set `PYTHONPATH` to include `$LUPIN_ROOT/src`
+5. `exec` the Python CLI module with all args passed through ( `"$@"` )
+
+**Fire-and-forget** ( async ):
+
+```bash
+notify-claude-async "Build completed" --type task --priority medium
+notify-claude-async "Deploying..." --type progress --priority low --debug
+```
+
+**Response-required** ( sync, SSE blocking ):
+
+```bash
+notify-claude-sync "Approve deployment?" --response-type yes_no --response-default no
+notify-claude-sync "Enter API key" --response-type open_ended --timeout 60
+```
+
+**Deprecated wrapper**: `~/.local/bin/notify-claude` prints a deprecation warning
+and chains to `notify-claude-async` via `exec`. A per-project `src/scripts/notify.sh`
+does the same.
+
+| Command | Script | Delegates To |
+|---------|--------|-------------|
+| `notify-claude-async` | `~/.local/bin/notify-claude-async` | `lupin_cli.notifications.notify_user_async` |
+| `notify-claude-sync` | `~/.local/bin/notify-claude-sync` | `lupin_cli.notifications.notify_user_sync` |
+| `notify-claude` | `~/.local/bin/notify-claude` *(deprecated)* | chains → `notify-claude-async` |
+| `src/scripts/notify.sh` | per-project *(deprecated)* | chains → `notify-claude-async` |
+
+**Canonical copies**: `src/scripts/notify-claude-async`, `src/scripts/notify-claude-sync`
+
 ---
 
 ### 8.4 Tier 4 -- Direct HTTP

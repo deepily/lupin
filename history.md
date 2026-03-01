@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.02.28 - Session 289 | Create Global Notification CLI Bash Wrappers
+
+**Accomplishments**:
+- Created `~/.local/bin/notify-claude-async` and `~/.local/bin/notify-claude-sync` bash wrapper scripts that delegate to existing Python CLI tools via `exec`
+- Fixed silent failure: the deprecated `notify-claude` command was `exec`ing `notify-claude-async` which didn't exist — now the full chain works end-to-end
+- Added canonical copies in `src/scripts/` for version control and easy reinstallation
+- Documented bash wrapper CLI in `src/docs/notification-api.md` section 8.3 (installation, usage, delegation table)
+- Verified all three commands: async (queued, 3 connections), sync (--help resolves), deprecated chain (deprecation banner + delivery)
+
+**Files Created**: 4 files
+- `~/.local/bin/notify-claude-async` (installed globally)
+- `~/.local/bin/notify-claude-sync` (installed globally)
+- `src/scripts/notify-claude-async` (canonical repo copy)
+- `src/scripts/notify-claude-sync` (canonical repo copy)
+
+**Files Modified**: 1 file
+- `src/docs/notification-api.md` (added bash wrapper documentation to section 8.3)
+
 ### 2026.02.28 - Session 288 | Bug Fix: Session ID Cross-Project Contamination
 
 **Accomplishments**:
