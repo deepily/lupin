@@ -1,5 +1,43 @@
 # Lupin Project History
 
+### 2026.03.01 - Session 293 | Fix Thread-Safety Race Condition in Embedding Engine
+
+**Bug**: `RuntimeError: The size of tensor a (N) must match the size of tensor b (M)` — crashed repeatedly in async embedding generation threads. Root cause: `ProseEmbeddingEngine._encode_batch()` called concurrently from multiple daemon threads (spawned by `insert_io_row()`) with no synchronization. The singleton's shared tokenizer + model were accessed simultaneously, causing attention_mask/model_output cross-contamination in `_mean_pooling()`.
+
+**Fix**: Added `_inference_lock = Lock()` class variable to both `CodeEmbeddingEngine` and `ProseEmbeddingEngine`. Applied double-checked locking to `_load_model()`, wrapped all public inference methods (`encode_query`, `encode_document`, `encode_code`) and `unload()` with the lock. Lock acquired in public methods (not `_encode_batch`) to avoid deadlock with non-reentrant `Lock()`.
+
+**Verification**: All 58 embedding unit tests pass.
+
+**Files Modified** (CoSA nested repo): 1 file
+- `src/cosa/memory/local_embedding_engine.py` — added `_inference_lock` to both engine classes
+
+---
+
+### 2026.03.01 - Session 294 | PredictionEngine HTTP Embedding Fallback + Warm E2E Tests
+
+#### Checkpoint | 2026.03.01 15:00 | HTTP embedding fallback + warm E2E tests
+
+**Accomplishments**:
+- Added HTTP embedding fallback to PredictionEngine — when local GPU fails (CUDA OOM from external processes), falls back to `POST /api/embeddings/generate` using existing service API key
+- Updated embeddings router auth from `get_current_user` (JWT-only) to `require_api_key_or_jwt` (API key OR JWT) on all 3 endpoints, enabling service-to-service calls
+- Added `DEFAULT_EMBEDDING_FALLBACK_PORT` config constant and INI config key (`prediction engine embedding fallback port`)
+- Added `TestPredictionEngineWarm` class with 5 warm E2E test scenarios: CBR yes/no, qualifier, accuracy correct/incorrect, MC warm
+- Added LanceDB test isolation via `prediction_decisions_test` table with cleanup fixture
+- Added smoke test #7 validating HTTP fallback returns 768-dim vector
+- All 39 existing unit tests pass (zero regressions)
+
+**Files Modified**: 6 files
+- `src/cosa/agents/prediction_engine/prediction_engine.py` (added `_generate_embedding_via_http()`, modified `_generate_embedding()` fallback chain, smoke test #7)
+- `src/cosa/agents/prediction_engine/config.py` (added `DEFAULT_EMBEDDING_FALLBACK_PORT`)
+- `src/cosa/rest/routers/embeddings.py` (auth: `get_current_user` → `require_api_key_or_jwt`)
+- `src/conf/lupin-app.ini` (added `prediction engine embedding fallback port`)
+- `src/conf/lupin-app-splainer.ini` (added matching splainer entry)
+- `src/tests/integration/test_prediction_engine_e2e.py` (added `TestPredictionEngineWarm` with 5 scenarios)
+
+**Commit**: c7a0950 (parent repo only; CoSA submodule changes pending separate commit)
+
+---
+
 ### 2026.03.01 - Session 292 | Evolve 4 Hook Scripts from Phase 0 to Phase 1 Production
 
 #### Checkpoint | 2026.03.01 11:30 | Smart TTS, voice drain, 47 new tests
