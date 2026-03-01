@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 """
-PreToolUse hook: logs pending tool call and sends TTS notification.
+PreToolUse hook: voice buffer drain before tool execution.
 
-Phase 0 test hook — validates PreToolUse payload structure, logs the
-full payload for empirical analysis, and sends hello-world TTS.
+Fires before every tool call. Does NOT announce tools via TTS (PostToolUse
+handles that). Only drains the voice buffer and acknowledges buffered messages.
 
-This hook fires BEFORE every tool call. Phase 0 emits {} (passthrough)
-to allow all tool calls without interference.
-
-Install in .claude/settings.local.json:
+Install in ~/.claude/settings.json:
     "hooks": {
         "PreToolUse": [{
             "type": "command",
-            "command": "python3 src/lupin_cli/claude_code/hooks/test_pre_tool_use.py"
+            "command": "python3 \"$LUPIN_ROOT/src/lupin_cli/claude_code/hooks/pre_tool_use.py\""
         }]
     }
 """
@@ -25,7 +22,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
-    read_hook_input, log_payload, emit_json, send_tts, build_progress_group_id
+    read_hook_input, log_payload, emit_json, drain_and_acknowledge
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id
 
@@ -37,20 +34,17 @@ def main():
         emit_json( {} )
         sys.exit( 0 )
 
-    # Extract tool information for TTS
-    tool_name = payload.get( "tool_name", "unknown" )
-
     # Log full payload for empirical analysis
     log_payload( "pre_tool_use", payload )
 
     # Resolve session_id: payload first (future-proof), then session bridge fallback
     session_id = payload.get( "session_id", "" ) or get_claude_session_id()
-    pg_id      = build_progress_group_id( "pt", session_id )
 
-    # Send TTS notification with progress grouping (respects HOOK_TTS_ENABLED)
-    send_tts( f"Pre: {tool_name}", progress_group_id=pg_id )
+    # Drain voice buffer and acknowledge buffered messages
+    # No tool TTS — PostToolUse handles announcements
+    drain_and_acknowledge( session_id )
 
-    # Passthrough — no permission decision yet (Phase 0)
+    # Passthrough — no permission decision
     emit_json( {} )
 
 

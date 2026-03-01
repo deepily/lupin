@@ -20,7 +20,7 @@ Install in ~/.claude/settings.json:
             "hooks": [{
                 "type": "command",
                 "timeout": 30000,
-                "command": "python3 \"$LUPIN_ROOT/src/lupin_cli/claude_code/hooks/test_permission_request.py\""
+                "command": "python3 \"$LUPIN_ROOT/src/lupin_cli/claude_code/hooks/permission_request.py\""
             }]
         }]
     }
@@ -121,7 +121,7 @@ def _acknowledge_buffered_messages( messages ):
         text = msg.get( "message", msg.get( "text", "" ) )
         truncated = text[:32] + "..." if len( text ) > 32 else text
         try:
-            send_tts( f"Received: {truncated} TODO: Implement handler logic", priority="low" )
+            send_tts( f"Received: {truncated}", priority="low" )
         except Exception:
             pass  # Acknowledgment failure is non-fatal
 

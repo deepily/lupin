@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-02-28 (Session 290)
+Last updated: 2026-03-01 (Session 292)
 
 ## HIGH PRIORITY — target_user Notification Dispatch Bug (Session 286)
 
@@ -90,7 +90,7 @@ Last updated: 2026-02-28 (Session 290)
   - **Logs dir**: `io/claude_code_hooks/logs/`
   - **Session bridge file**: `~/.claude/sessions/cc-{PID}.json` — 26 files verified
 - [x] **[LUPIN] Phase 1: Notification System Extensions** — Session 290: Revised architecture — `user_initiated_message` type (not VOICE_INPUT), stateful WebSocket listener (CCNotificationListener subclassing BaseWebSocketListener), INI-based credentials, atomic JSONL buffer drain. 5 new files, 7 modified, 35 new tests (all pass). See [Design Doc Revisions](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.28-design-doc-revisions-session-290.md).
-- [ ] **[LUPIN] Phase 2-7: Remaining voice hook phases** — TTS output, voice drain + injection, voice approvals, browser capture, testing + polish. **RESUME HERE (Session 290)**: Phase 1 complete — listener spawns/stops, buffer drains atomically. Next: integrate drain into pre_tool_use hook, wire voice input into CC prompt injection.
+- [ ] **[LUPIN] Phase 2-7: Remaining voice hook phases** — Voice approvals, browser capture, testing + polish. **RESUME HERE (Session 292)**: Phase 1 complete. All 7 hooks renamed to production (dropped `test_` prefix). 4 passthrough hooks evolved to Phase 1: smart TTS (silent/announce/default), voice buffer drain + acknowledge. 47 new unit tests (82 total hook tests). Next: voice input injection into CC prompt, voice approvals.
   - **Master plan**: [`2026.02.25-opportunistic-voice-hook-integration-plan.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-opportunistic-voice-hook-integration-plan.md)
   - **Phase 0 plan**: [`2026.02.26-voice-hook-phase-0-implementation.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.26-voice-hook-phase-0-implementation.md)
   - **Phase 0 validation**: [`2026.02.27-phase-0-validation-report.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.27-phase-0-validation-report.md)

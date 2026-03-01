@@ -1,6 +1,6 @@
 """
 Claude Code system hook scripts for voice I/O integration.
 
-Phase 0 test hooks validate the hook contract empirically.
-Production hooks (Phase 3+) will replace test hooks.
+Production hooks with voice buffer drain, TTS notifications, and
+smart tool filtering. See lib/hook_common.py for shared infrastructure.
 """

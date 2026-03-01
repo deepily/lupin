@@ -1,5 +1,44 @@
 # Lupin Project History
 
+### 2026.03.01 - Session 292 | Evolve 4 Hook Scripts from Phase 0 to Phase 1 Production
+
+#### Checkpoint | 2026.03.01 11:30 | Smart TTS, voice drain, 47 new tests
+
+**Accomplishments**:
+- Evolved 4 passthrough hooks (PostToolUse, PreToolUse, Stop, Notification) from Phase 0 to Phase 1 production
+- Added smart TTS filtering to PostToolUse: silent (Read/Grep/Glob/Task*), announce with detail (Bash/Write/Edit), default name-only (MCP/unknown)
+- Removed tool TTS from PreToolUse (PostToolUse handles announcements, avoids double-announce)
+- Enhanced Notification hook with type-specific TTS: permission_prompt (full message), idle_prompt (idle state), other (truncated at 80 chars)
+- Added voice buffer drain + acknowledge to all 4 hooks via new `drain_and_acknowledge()` convenience wrapper
+- Added `TOOLS_SILENT`, `TOOLS_ANNOUNCE` frozensets + `format_tool_summary()`, `acknowledge_drained()`, `drain_and_acknowledge()` to hook_common.py
+- Fixed 35 `@patch` decorator paths in test_permission_request_hook.py (dropped `test_` prefix)
+- Removed TODO placeholder text from permission_request.py `_acknowledge_buffered_messages()`
+- Updated all 5 hook docstrings + `__init__.py` docstring (removed "Phase 0 test hook" language)
+- Cleaned stale `__pycache__` directories
+- Created 47 new unit tests across 5 test files; 82 total hook tests pass
+- Full unit suite: 1813 pass (1 pre-existing failure)
+
+**Files Created**: 5 files
+- `src/tests/unit/test_hook_voice_helpers.py` (20 tests — tool classification, format_tool_summary, acknowledge_drained, drain_and_acknowledge)
+- `src/tests/unit/test_post_tool_use_hook.py` (8 tests — smart TTS, voice drain, empty payload)
+- `src/tests/unit/test_pre_tool_use_hook.py` (5 tests — no tool TTS, voice drain, empty payload)
+- `src/tests/unit/test_stop_hook.py` (5 tests — stop_hook_active TTS, voice drain, empty payload)
+- `src/tests/unit/test_notification_hook.py` (9 tests — type-specific TTS, truncation, voice drain, empty payload)
+
+**Files Modified**: 8 files
+- `src/lupin_cli/claude_code/hooks/lib/hook_common.py` (added TOOLS_SILENT, TOOLS_ANNOUNCE, format_tool_summary, acknowledge_drained, drain_and_acknowledge)
+- `src/lupin_cli/claude_code/hooks/post_tool_use.py` (smart TTS + drain)
+- `src/lupin_cli/claude_code/hooks/pre_tool_use.py` (drain only, removed tool TTS)
+- `src/lupin_cli/claude_code/hooks/stop.py` (drain + observability)
+- `src/lupin_cli/claude_code/hooks/notification.py` (message-aware TTS + drain)
+- `src/lupin_cli/claude_code/hooks/permission_request.py` (removed TODO placeholder)
+- `src/lupin_cli/claude_code/hooks/__init__.py` (updated docstring)
+- `src/tests/unit/test_permission_request_hook.py` (fixed 35 import paths)
+
+**Commit**: df59eb1
+
+---
+
 ### 2026.03.01 - Session 291 | PermissionRequest Hook: Voice Buffer Drain + Sync Notification Forwarding
 
 **Accomplishments**:

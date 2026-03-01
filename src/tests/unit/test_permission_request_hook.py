@@ -21,7 +21,7 @@ from unittest.mock import patch, MagicMock, call
 from lupin_cli.claude_code.hooks.lib.hook_common import build_permission_decision
 
 # Import hook module functions directly
-from lupin_cli.claude_code.hooks.test_permission_request import (
+from lupin_cli.claude_code.hooks.permission_request import (
     _format_tool_description,
     _acknowledge_buffered_messages,
     _forward_to_user,
@@ -162,22 +162,21 @@ class TestFormatToolDescription:
 class TestAcknowledgeBufferedMessages:
     """Tests for _acknowledge_buffered_messages()."""
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.send_tts" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
     def test_empty_list_does_nothing( self, mock_send ):
         """Empty message list sends no TTS."""
         _acknowledge_buffered_messages( [] )
         mock_send.assert_not_called()
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.send_tts" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
     def test_single_message( self, mock_send ):
         """Single buffered message sends one TTS."""
         _acknowledge_buffered_messages( [ { "message": "Hello world" } ] )
         mock_send.assert_called_once()
         call_msg = mock_send.call_args[ 0 ][ 0 ]
         assert "Received: Hello world" in call_msg
-        assert "TODO: Implement handler logic" in call_msg
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.send_tts" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
     def test_multiple_messages( self, mock_send ):
         """Multiple buffered messages send one TTS per message."""
         msgs = [
@@ -188,7 +187,7 @@ class TestAcknowledgeBufferedMessages:
         _acknowledge_buffered_messages( msgs )
         assert mock_send.call_count == 3
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.send_tts" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
     def test_message_truncated_at_32_chars( self, mock_send ):
         """Long messages are truncated at 32 chars in acknowledgment."""
         long_text = "A" * 50
@@ -196,15 +195,15 @@ class TestAcknowledgeBufferedMessages:
         call_msg = mock_send.call_args[ 0 ][ 0 ]
         assert "A" * 32 + "..." in call_msg
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.send_tts" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
     def test_short_message_not_truncated( self, mock_send ):
         """Short messages are not truncated."""
         _acknowledge_buffered_messages( [ { "message": "Short" } ] )
         call_msg = mock_send.call_args[ 0 ][ 0 ]
-        assert "Received: Short TODO" in call_msg
-        assert "..." not in call_msg.split( "Short" )[ 0 ] + "Short"
+        assert "Received: Short" in call_msg
+        assert "..." not in call_msg
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.send_tts", side_effect=Exception( "TTS failed" ) )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts", side_effect=Exception( "TTS failed" ) )
     def test_tts_failure_non_fatal( self, mock_send ):
         """TTS failure does not crash the acknowledgment loop."""
         msgs = [ { "message": "First" }, { "message": "Second" } ]
@@ -212,7 +211,7 @@ class TestAcknowledgeBufferedMessages:
         _acknowledge_buffered_messages( msgs )
         assert mock_send.call_count == 2
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.send_tts" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
     def test_text_key_fallback( self, mock_send ):
         """Falls back to 'text' key when 'message' key is missing."""
         _acknowledge_buffered_messages( [ { "text": "Via text key" } ] )
@@ -227,11 +226,11 @@ class TestAcknowledgeBufferedMessages:
 class TestForwardToUser:
     """Tests for _forward_to_user() with mocked notification infrastructure."""
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.notify_user_sync" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.build_sender_id_for_cc" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.NotificationRequest" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.ResponseType" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.NotificationPriority" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.notify_user_sync" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.build_sender_id_for_cc" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationRequest" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.ResponseType" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationPriority" )
     def test_user_yes_returns_allow( self, mock_priority, mock_rtype, mock_req_cls, mock_sender, mock_sync ):
         """User responding 'yes' returns 'allow'."""
         mock_response = MagicMock()
@@ -241,11 +240,11 @@ class TestForwardToUser:
         result = _forward_to_user( "Bash: npm test", "abc12345" )
         assert result == "allow"
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.notify_user_sync" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.build_sender_id_for_cc" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.NotificationRequest" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.ResponseType" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.NotificationPriority" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.notify_user_sync" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.build_sender_id_for_cc" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationRequest" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.ResponseType" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationPriority" )
     def test_user_no_returns_deny( self, mock_priority, mock_rtype, mock_req_cls, mock_sender, mock_sync ):
         """User responding 'no' returns 'deny'."""
         mock_response = MagicMock()
@@ -255,11 +254,11 @@ class TestForwardToUser:
         result = _forward_to_user( "Write: config.py", "abc12345" )
         assert result == "deny"
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.notify_user_sync" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.build_sender_id_for_cc" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.NotificationRequest" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.ResponseType" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.NotificationPriority" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.notify_user_sync" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.build_sender_id_for_cc" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationRequest" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.ResponseType" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationPriority" )
     def test_timeout_returns_deny( self, mock_priority, mock_rtype, mock_req_cls, mock_sender, mock_sync ):
         """Timeout (None response) returns 'deny'."""
         mock_response = MagicMock()
@@ -269,11 +268,11 @@ class TestForwardToUser:
         result = _forward_to_user( "Edit: main.py", "abc12345" )
         assert result == "deny"
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.notify_user_sync" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.build_sender_id_for_cc" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.NotificationRequest" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.ResponseType" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.NotificationPriority" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.notify_user_sync" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.build_sender_id_for_cc" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationRequest" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.ResponseType" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.NotificationPriority" )
     def test_exception_returns_deny( self, mock_priority, mock_rtype, mock_req_cls, mock_sender, mock_sync ):
         """Exception during notification returns 'deny'."""
         mock_sync.side_effect = Exception( "Connection refused" )
@@ -287,7 +286,7 @@ class TestForwardToUser:
             # The function catches all exceptions including ImportError
             # We'll test by patching the imports inside the function to fail
             with patch(
-                "lupin_cli.claude_code.hooks.test_permission_request.NotificationRequest",
+                "lupin_cli.claude_code.hooks.permission_request.NotificationRequest",
                 side_effect=ImportError( "No module" )
             ):
                 result = _forward_to_user( "Read: file.py", "abc12345" )
@@ -301,12 +300,12 @@ class TestForwardToUser:
 class TestMainFlow:
     """Tests for main() — full hook flow with mocked I/O."""
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.emit_json" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request._forward_to_user", return_value="allow" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.drain_voice_buffer", return_value=[] )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.get_claude_session_id", return_value="abc12345" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.log_payload" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.read_hook_input" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value="allow" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.drain_voice_buffer", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input" )
     def test_full_flow_empty_buffer_allow( self, mock_read, mock_log, mock_session,
                                             mock_drain, mock_forward, mock_emit ):
         """Full flow: empty buffer, user allows."""
@@ -328,13 +327,13 @@ class TestMainFlow:
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "hookSpecificOutput" ][ "decision" ][ "behavior" ] == "allow"
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.emit_json" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request._forward_to_user", return_value="deny" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request._acknowledge_buffered_messages" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.drain_voice_buffer" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.get_claude_session_id", return_value="abc12345" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.log_payload" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.read_hook_input" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value="deny" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request._acknowledge_buffered_messages" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.drain_voice_buffer" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input" )
     def test_full_flow_with_buffered_messages( self, mock_read, mock_log, mock_session,
                                                 mock_drain, mock_ack, mock_forward, mock_emit ):
         """Full flow: buffered messages acknowledged, then user denies."""
@@ -359,8 +358,8 @@ class TestMainFlow:
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "hookSpecificOutput" ][ "decision" ][ "behavior" ] == "deny"
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.emit_json" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.read_hook_input", return_value={} )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input", return_value={} )
     def test_empty_payload_denies( self, mock_read, mock_emit ):
         """Empty payload results in deny with message."""
         with pytest.raises( SystemExit ):
@@ -370,12 +369,12 @@ class TestMainFlow:
         assert emitted[ "hookSpecificOutput" ][ "decision" ][ "behavior" ] == "deny"
         assert "Empty hook payload" in emitted[ "hookSpecificOutput" ][ "decision" ][ "message" ]
 
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.emit_json" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request._forward_to_user", return_value="allow" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.drain_voice_buffer", return_value=[] )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.get_claude_session_id", return_value="fallback1" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.log_payload" )
-    @patch( "lupin_cli.claude_code.hooks.test_permission_request.read_hook_input" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value="allow" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.drain_voice_buffer", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.get_claude_session_id", return_value="fallback1" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input" )
     def test_session_id_fallback( self, mock_read, mock_log, mock_session,
                                    mock_drain, mock_forward, mock_emit ):
         """When payload has no session_id, falls back to session bridge."""

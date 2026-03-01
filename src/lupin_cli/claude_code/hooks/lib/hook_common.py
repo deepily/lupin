@@ -30,6 +30,10 @@ import cosa.utils.util as cu
 
 LOGS_DIR = Path( cu.get_project_root() ) / "io" / "claude_code_hooks" / "logs"
 
+# Tool classification for smart TTS filtering (PostToolUse)
+TOOLS_SILENT   = frozenset( { "Read", "Grep", "Glob", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList" } )
+TOOLS_ANNOUNCE = frozenset( { "Bash", "Write", "Edit" } )
+
 
 # ── Core Functions ────────────────────────────────────────────────────────────
 
@@ -245,6 +249,98 @@ def send_tts( message, priority="low", sender_id=None, progress_group_id=None ):
 
     except Exception:
         pass  # Hook must never block Claude Code due to notification failure
+
+
+# ── Tool Summary + Voice Drain Helpers ────────────────────────────────────────
+
+def format_tool_summary( tool_name, tool_input ):
+    """
+    Build a concise one-liner for TTS announcements in PostToolUse.
+
+    Requires:
+        - tool_name is a string
+        - tool_input is a dict or None
+
+    Ensures:
+        - Bash: "Bash: <command>" (truncated at 60 chars)
+        - Write/Edit: "Write: <basename>" or "Edit: <basename>"
+        - Other: just tool_name
+
+    Args:
+        tool_name: Name of the tool (e.g., "Bash", "Write")
+        tool_input: Tool input dict from hook payload
+
+    Returns:
+        str: TTS-friendly tool summary
+    """
+    if tool_input is None:
+        tool_input = {}
+
+    if tool_name == "Bash":
+        command = tool_input.get( "command", "" )
+        if len( command ) > 60:
+            command = command[:60] + "..."
+        return f"Bash: {command}" if command else "Bash"
+
+    if tool_name in ( "Write", "Edit" ):
+        file_path = tool_input.get( "file_path", "" )
+        basename  = os.path.basename( file_path ) if file_path else ""
+        return f"{tool_name}: {basename}" if basename else tool_name
+
+    return tool_name
+
+
+def acknowledge_drained( messages ):
+    """
+    Send low-priority TTS acknowledgment for each drained voice buffer message.
+
+    Requires:
+        - messages is a list of dicts (from drain_voice_buffer)
+
+    Ensures:
+        - Sends one low-priority TTS per message
+        - Message text truncated at 32 chars
+        - Never raises exceptions
+        - Does nothing if messages is empty
+
+    Args:
+        messages: List of buffered message dicts from voice buffer drain
+    """
+    for msg in messages:
+        text      = msg.get( "message", msg.get( "text", "" ) )
+        truncated = text[:32] + "..." if len( text ) > 32 else text
+        try:
+            send_tts( f"Received: {truncated}", priority="low" )
+        except Exception:
+            pass  # Acknowledgment failure is non-fatal
+
+
+def drain_and_acknowledge( session_id ):
+    """
+    Convenience wrapper: drain voice buffer then acknowledge messages.
+
+    Requires:
+        - session_id is a non-empty string
+
+    Ensures:
+        - Calls drain_voice_buffer( session_id )
+        - Calls acknowledge_drained( messages ) for any buffered messages
+        - Returns the list of drained messages
+        - Never raises exceptions
+
+    Args:
+        session_id: Claude Code session ID
+
+    Returns:
+        list[dict]: Drained messages (may be empty)
+    """
+    try:
+        messages = drain_voice_buffer( session_id )
+        if messages:
+            acknowledge_drained( messages )
+        return messages
+    except Exception:
+        return []
 
 
 # ── Voice Buffer Functions ────────────────────────────────────────────────────
