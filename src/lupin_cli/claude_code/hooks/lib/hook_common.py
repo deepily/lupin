@@ -340,6 +340,49 @@ def drain_voice_buffer( session_id ):
     return messages
 
 
+# ── Permission Decision Builder ──────────────────────────────────────────────
+
+def build_permission_decision( behavior, message=None, interrupt=False ):
+    """
+    Build the hookSpecificOutput dict for a PermissionRequest hook.
+
+    Constructs the JSON structure that Claude Code expects from a
+    PermissionRequest hook to allow or deny a tool call.
+
+    Requires:
+        - behavior is "allow" or "deny"
+        - message is a string or None (only used for deny)
+        - interrupt is a bool (only used for deny)
+
+    Ensures:
+        - Returns dict with hookSpecificOutput.decision.behavior
+        - For "allow": ignores message and interrupt
+        - For "deny": includes message and interrupt if provided
+        - Structure: { "hookSpecificOutput": { "decision": { ... } } }
+
+    Args:
+        behavior: "allow" or "deny"
+        message: Optional denial reason (ignored for allow)
+        interrupt: Whether to interrupt Claude Code (ignored for allow)
+
+    Returns:
+        dict: Hook output ready for emit_json()
+    """
+    decision = { "behavior": behavior }
+
+    if behavior == "deny":
+        if message is not None:
+            decision[ "message" ] = message
+        if interrupt:
+            decision[ "interrupt" ] = True
+
+    return {
+        "hookSpecificOutput": {
+            "decision": decision
+        }
+    }
+
+
 # ── Quick smoke test ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

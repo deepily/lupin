@@ -1,5 +1,19 @@
 # Lupin Project History
 
+#### Checkpoint | 2026.03.01 01:30 | Session 291: PermissionRequest hook — voice buffer drain + sync notification forwarding
+
+**Files**: hook_common.py, test_permission_request.py (new), test_permission_request_hook.py (new)
+**Commit**: 7229eb7
+
+**Accomplishments**:
+- Added `build_permission_decision()` helper to `hook_common.py` — constructs `hookSpecificOutput` dict for allow/deny decisions
+- Created `test_permission_request.py` — PermissionRequest hook with 6-phase flow: read input → log → format tool description → drain voice buffer (acknowledge only) → forward to user via `notify_user_sync()` blocking yes/no → emit decision
+- Registered PermissionRequest hook in `~/.claude/settings.json` with 30s timeout
+- Created 35 unit tests across 6 test classes (build_permission_decision, format_tool_description, acknowledge_buffered, forward_to_user, main flow, constants)
+- All 35 new tests pass; 1747/1748 full suite pass (1 pre-existing ordering issue)
+
+---
+
 ### 2026.02.28 - Session 290 | Phase 1 Voice I/O: CC Notification Listener + Design Revisions
 
 **Accomplishments**:
