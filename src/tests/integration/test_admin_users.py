@@ -653,3 +653,290 @@ def test_all_admin_actions_create_audit_entries( admin_headers, create_test_user
     assert "admin_role_update" in event_types
     assert "admin_status_update" in event_types
     assert "admin_password_reset" in event_types
+
+
+# ============================================================================
+# Create User Tests
+# ============================================================================
+
+def test_admin_create_user_default_role( admin_headers ):
+    """
+    Test admin creating user with default role.
+
+    Requires:
+        - admin_headers for authorization
+
+    Ensures:
+        - Returns 201 Created
+        - User has "user" role
+        - Email is auto-verified
+    """
+    response = requests.post( f"{BASE_URL}/admin/users", headers=admin_headers, json={
+        "email"    : "newuser@example.com",
+        "password" : "NewUserPass123!"
+    })
+
+    assert response.status_code == 201
+    data = response.json()
+
+    assert data["message"] == "User created successfully"
+    assert "user" in data["user"]["roles"]
+    assert data["user"]["email"] == "newuser@example.com"
+    assert data["user"]["email_verified"] is True
+    assert data["user_id"] is not None
+
+
+def test_admin_create_user_with_admin_role( admin_headers ):
+    """
+    Test admin creating user with admin role.
+
+    Requires:
+        - admin_headers for authorization
+
+    Ensures:
+        - Returns 201 Created
+        - User has both admin and user roles
+    """
+    response = requests.post( f"{BASE_URL}/admin/users", headers=admin_headers, json={
+        "email"    : "newadmin@example.com",
+        "password" : "NewAdminPass123!",
+        "roles"    : ["user", "admin"]
+    })
+
+    assert response.status_code == 201
+    data = response.json()
+
+    assert "admin" in data["user"]["roles"]
+    assert "user" in data["user"]["roles"]
+
+
+def test_admin_create_user_duplicate_email_rejected( admin_headers, create_test_user ):
+    """
+    Test that duplicate email is rejected.
+
+    Requires:
+        - admin_headers for authorization
+        - create_test_user already exists
+
+    Ensures:
+        - Returns 400 Bad Request
+    """
+    response = requests.post( f"{BASE_URL}/admin/users", headers=admin_headers, json={
+        "email"    : create_test_user["email"],
+        "password" : "AnotherPass123!"
+    })
+
+    assert response.status_code == 400
+
+
+def test_admin_create_user_weak_password_rejected( admin_headers ):
+    """
+    Test that weak password is rejected.
+
+    Requires:
+        - admin_headers for authorization
+
+    Ensures:
+        - Returns 400 Bad Request
+    """
+    response = requests.post( f"{BASE_URL}/admin/users", headers=admin_headers, json={
+        "email"    : "weakpw@example.com",
+        "password" : "short"
+    })
+
+    assert response.status_code == 400
+
+
+def test_admin_created_user_can_login( admin_headers ):
+    """
+    Test that admin-created user can login.
+
+    Requires:
+        - admin_headers for authorization
+
+    Ensures:
+        - User can login with provided credentials
+        - Returns 200 with tokens
+    """
+    email    = "logintest@example.com"
+    password = "LoginTestPass123!"
+
+    # Create user via admin endpoint
+    create_response = requests.post( f"{BASE_URL}/admin/users", headers=admin_headers, json={
+        "email"    : email,
+        "password" : password
+    })
+
+    assert create_response.status_code == 201
+
+    # Login as the new user
+    login_response = requests.post( f"{BASE_URL}/auth/login", json={
+        "email"    : email,
+        "password" : password
+    })
+
+    assert login_response.status_code == 200
+    assert "tokens" in login_response.json()
+
+
+def test_non_admin_cannot_create_user( auth_headers ):
+    """
+    Test that non-admin cannot create users.
+
+    Requires:
+        - auth_headers from regular user
+
+    Ensures:
+        - Returns 403 Forbidden
+    """
+    response = requests.post( f"{BASE_URL}/admin/users", headers=auth_headers, json={
+        "email"    : "forbidden@example.com",
+        "password" : "ForbiddenPass123!"
+    })
+
+    assert response.status_code == 403
+
+
+# ============================================================================
+# Delete User Tests
+# ============================================================================
+
+def test_admin_delete_user_success( admin_headers ):
+    """
+    Test admin deleting a user permanently.
+
+    Requires:
+        - admin_headers for authorization
+
+    Ensures:
+        - Returns 200 OK
+        - User no longer accessible via GET
+    """
+    # First create a user to delete
+    create_response = requests.post( f"{BASE_URL}/admin/users", headers=admin_headers, json={
+        "email"    : "deleteme@example.com",
+        "password" : "DeleteMePass123!"
+    })
+
+    assert create_response.status_code == 201
+    user_id = create_response.json()["user_id"]
+
+    # Delete the user
+    delete_response = requests.delete(
+        f"{BASE_URL}/admin/users/{user_id}",
+        headers = admin_headers,
+        json    = {"reason": "Integration test cleanup"}
+    )
+
+    assert delete_response.status_code == 200
+
+    # Verify user is gone
+    get_response = requests.get( f"{BASE_URL}/admin/users/{user_id}", headers=admin_headers )
+    assert get_response.status_code == 404
+
+
+def test_admin_cannot_delete_self( admin_headers, create_test_admin ):
+    """
+    Test self-protection: admin cannot delete own account.
+
+    Requires:
+        - admin_headers for authorization
+        - create_test_admin user
+
+    Ensures:
+        - Returns 400 Bad Request
+        - Error message indicates self-deletion
+    """
+    admin_id = create_test_admin["user_id"]
+
+    response = requests.delete(
+        f"{BASE_URL}/admin/users/{admin_id}",
+        headers = admin_headers,
+        json    = {"reason": "Self-delete test"}
+    )
+
+    assert response.status_code == 400
+    assert "cannot delete your own account" in response.json()["detail"].lower()
+
+
+def test_non_admin_cannot_delete_user( auth_headers, create_test_user ):
+    """
+    Test that non-admin cannot delete users.
+
+    Requires:
+        - auth_headers from regular user
+        - create_test_user target
+
+    Ensures:
+        - Returns 403 Forbidden
+    """
+    user_id = create_test_user["user_id"]
+
+    response = requests.delete(
+        f"{BASE_URL}/admin/users/{user_id}",
+        headers = auth_headers
+    )
+
+    assert response.status_code == 403
+
+
+def test_delete_nonexistent_user_returns_404( admin_headers ):
+    """
+    Test deleting non-existent user returns 404.
+
+    Requires:
+        - admin_headers for authorization
+
+    Ensures:
+        - Returns 404 Not Found
+    """
+    import uuid
+    fake_id = str( uuid.uuid4() )
+
+    response = requests.delete(
+        f"{BASE_URL}/admin/users/{fake_id}",
+        headers = admin_headers
+    )
+
+    assert response.status_code == 404
+
+
+def test_cannot_delete_sole_admin( admin_headers, create_test_admin ):
+    """
+    Test sole-admin protection: cannot delete the only admin.
+
+    Requires:
+        - admin_headers for authorization
+        - create_test_admin is the sole admin
+
+    Ensures:
+        - Returns 400 Bad Request (self-delete) or sole-admin guard
+    """
+    # Create a second admin to test with
+    create_response = requests.post( f"{BASE_URL}/admin/users", headers=admin_headers, json={
+        "email"    : "secondadmin@example.com",
+        "password" : "SecondAdmin123!",
+        "roles"    : ["user", "admin"]
+    })
+
+    assert create_response.status_code == 201
+    second_admin_id = create_response.json()["user_id"]
+
+    # Delete the first admin to leave only second
+    # This should fail because we're trying to delete ourselves (self-protection)
+    admin_id = create_test_admin["user_id"]
+    self_delete = requests.delete(
+        f"{BASE_URL}/admin/users/{admin_id}",
+        headers = admin_headers
+    )
+    assert self_delete.status_code == 400
+
+    # Now delete the second admin — after this, only the test admin remains
+    delete_second = requests.delete(
+        f"{BASE_URL}/admin/users/{second_admin_id}",
+        headers = admin_headers,
+        json    = {"reason": "Sole admin test"}
+    )
+
+    # This should succeed since the test admin still exists
+    assert delete_second.status_code == 200

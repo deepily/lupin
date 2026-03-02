@@ -118,6 +118,32 @@ async function resetUserPassword( userId, reason = '' ) {
     }
 }
 
+/**
+ * Create a new user (admin)
+ */
+async function createUser( email, password, roles ) {
+    try {
+        const response = await apiCall( '/admin/users', 'POST', { email, password, roles } );
+        return response;
+    } catch ( error ) {
+        showError( 'error-message', 'Failed to create user: ' + error.message );
+        throw error;
+    }
+}
+
+/**
+ * Delete a user permanently (admin)
+ */
+async function deleteUser( userId, reason = '' ) {
+    try {
+        const response = await apiCall( `/admin/users/${userId}`, 'DELETE', { reason } );
+        return response;
+    } catch ( error ) {
+        showError( 'error-message', 'Failed to delete user: ' + error.message );
+        throw error;
+    }
+}
+
 // ============================================================================
 // UI Rendering
 // ============================================================================
@@ -416,6 +442,126 @@ function copyPassword() {
     input.select();
     document.execCommand( 'copy' );
     showSuccess( 'success-message', 'Password copied to clipboard!' );
+}
+
+// ============================================================================
+// Create User Modal
+// ============================================================================
+
+/**
+ * Show create user modal
+ */
+function showCreateUserModal() {
+    // Clear form
+    document.getElementById( 'create-email' ).value = '';
+    document.getElementById( 'create-password' ).value = '';
+    document.getElementById( 'create-role-user' ).checked = true;
+    document.getElementById( 'create-role-admin' ).checked = false;
+
+    showElement( 'create-user-modal' );
+}
+
+/**
+ * Close create user modal
+ */
+function closeCreateUserModal() {
+    hideElement( 'create-user-modal' );
+}
+
+/**
+ * Submit create user form
+ */
+async function submitCreateUser() {
+    const email    = document.getElementById( 'create-email' ).value.trim();
+    const password = document.getElementById( 'create-password' ).value;
+
+    // Validate inputs
+    if ( !email || !email.includes( '@' ) ) {
+        showError( 'error-message', 'Please enter a valid email address' );
+        return;
+    }
+
+    if ( !password || password.length < 8 ) {
+        showError( 'error-message', 'Password must be at least 8 characters' );
+        return;
+    }
+
+    // Collect roles
+    const roles = [];
+    if ( document.getElementById( 'create-role-user' ).checked ) roles.push( 'user' );
+    if ( document.getElementById( 'create-role-admin' ).checked ) roles.push( 'admin' );
+
+    if ( roles.length === 0 ) {
+        showError( 'error-message', 'Please select at least one role' );
+        return;
+    }
+
+    try {
+        await createUser( email, password, roles );
+        showSuccess( 'success-message', `User ${email} created successfully` );
+        closeCreateUserModal();
+        await loadUsers( currentPage );
+    } catch ( error ) {
+        console.error( 'Error creating user:', error );
+    }
+}
+
+// ============================================================================
+// Delete User
+// ============================================================================
+
+/**
+ * Show delete confirmation modal
+ */
+function confirmDeleteUser() {
+    if ( !currentUser ) return;
+
+    // Show target email for confirmation
+    document.getElementById( 'delete-target-email' ).textContent = currentUser.email;
+    document.getElementById( 'delete-email-confirm' ).value = '';
+    document.getElementById( 'delete-confirm-btn' ).disabled = true;
+
+    hideElement( 'user-modal' );
+    showElement( 'delete-confirm-modal' );
+}
+
+/**
+ * Close delete confirmation modal
+ */
+function closeDeleteConfirmModal() {
+    hideElement( 'delete-confirm-modal' );
+    if ( currentUser ) showElement( 'user-modal' );
+}
+
+/**
+ * Validate delete email confirmation input
+ */
+function validateDeleteConfirmation() {
+    if ( !currentUser ) return;
+
+    const typed    = document.getElementById( 'delete-email-confirm' ).value.trim();
+    const expected = currentUser.email;
+    const btn      = document.getElementById( 'delete-confirm-btn' );
+
+    btn.disabled = ( typed !== expected );
+}
+
+/**
+ * Submit user deletion
+ */
+async function submitDeleteUser() {
+    if ( !selectedUserId || !currentUser ) return;
+
+    try {
+        await deleteUser( selectedUserId, 'Admin UI deletion' );
+        showSuccess( 'success-message', `User ${currentUser.email} deleted permanently` );
+        closeDeleteConfirmModal();
+        currentUser    = null;
+        selectedUserId = null;
+        await loadUsers( currentPage );
+    } catch ( error ) {
+        console.error( 'Error deleting user:', error );
+    }
 }
 
 // ============================================================================

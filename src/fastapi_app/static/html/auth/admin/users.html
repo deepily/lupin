@@ -14,6 +14,9 @@
         <div class="admin-header">
             <h1>👥 User Management</h1>
             <div class="admin-actions">
+                <button class="btn btn-primary btn-small" onclick="showCreateUserModal()">
+                    + Create User
+                </button>
                 <button class="btn btn-secondary btn-small" onclick="window.location.href='/app/auth/profile'">
                     ← Back to Profile
                 </button>
@@ -114,6 +117,9 @@
                 <button class="btn btn-danger" onclick="confirmResetPassword()">
                     Reset Password
                 </button>
+                <button class="btn btn-danger btn-delete-user" onclick="confirmDeleteUser()">
+                    Delete User
+                </button>
             </div>
         </div>
     </div>
@@ -194,6 +200,81 @@
                     Confirm
                 </button>
                 <button class="btn btn-secondary" onclick="closeConfirmModal()">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create User Modal -->
+    <div id="create-user-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeCreateUserModal()">&times;</span>
+            <h2>Create New User</h2>
+
+            <div class="create-user-form">
+                <div class="form-group">
+                    <label for="create-email">Email Address</label>
+                    <input type="email" id="create-email" class="form-input" placeholder="user@example.com">
+                </div>
+
+                <div class="form-group">
+                    <label for="create-password">Password</label>
+                    <input type="password" id="create-password" class="form-input" placeholder="Minimum 8 characters with uppercase, number, special char">
+                </div>
+
+                <div class="form-group">
+                    <label>Roles</label>
+                    <label class="role-checkbox">
+                        <input type="checkbox" id="create-role-user" value="user" checked>
+                        <span>User (Standard access)</span>
+                    </label>
+                    <label class="role-checkbox">
+                        <input type="checkbox" id="create-role-admin" value="admin">
+                        <span>Admin (Superuser privileges)</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-primary" onclick="submitCreateUser()">
+                    Create User
+                </button>
+                <button class="btn btn-secondary" onclick="closeCreateUserModal()">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="delete-confirm-modal" class="modal">
+        <div class="modal-content modal-confirm">
+            <h2>Permanently Delete User</h2>
+
+            <div class="delete-confirm-body">
+                <p class="warning-text">
+                    <strong>WARNING:</strong> This action is permanent and cannot be undone.
+                    All user data will be permanently removed.
+                </p>
+
+                <p>To confirm, type the user's email address:</p>
+                <p class="delete-target-email" id="delete-target-email"></p>
+
+                <input
+                    type="text"
+                    id="delete-email-confirm"
+                    class="form-input"
+                    placeholder="Type email to confirm"
+                    oninput="validateDeleteConfirmation()"
+                >
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-danger" id="delete-confirm-btn" onclick="submitDeleteUser()" disabled>
+                    Delete Permanently
+                </button>
+                <button class="btn btn-secondary" onclick="closeDeleteConfirmModal()">
                     Cancel
                 </button>
             </div>

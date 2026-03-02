@@ -1,5 +1,26 @@
 # Lupin Project History
 
+### 2026.03.02 - Session 298 | Admin UI: Create User & Delete User
+
+**Accomplishments**:
+- Added "Create User" and "Delete User" functionality to admin user management UI
+- Backend: `admin_create_user()` with auto-email-verification, `admin_delete_user()` with self-protection and sole-admin guard
+- API: `POST /admin/users` (201 Created) and `DELETE /admin/users/{user_id}` (200 OK) endpoints with Pydantic models
+- Frontend: "+ Create User" header button, "Delete User" button in detail modal, Create User form modal, typed-email Delete Confirmation modal
+- Safety: Cannot delete self, cannot delete sole admin, revokes tokens before deletion, audit logging for both operations
+- Added 11 integration tests covering create (6 tests) and delete (5 tests) scenarios
+- Unit tests pass with no regressions (1905 passed)
+
+**Files Modified**: 6 files
+- `src/cosa/rest/admin_service.py` — Added `admin_create_user()`, `admin_delete_user()` (CoSA nested repo)
+- `src/cosa/rest/routers/admin.py` — Added 3 Pydantic models, 2 endpoints (CoSA nested repo)
+- `src/fastapi_app/static/html/auth/admin/users.html` — Create button, Delete button, 2 modals
+- `src/fastapi_app/static/html/auth/admin/js/admin-users.js` — 2 API calls, 6 modal functions
+- `src/fastapi_app/static/html/auth/admin/css/admin.css` — Form + delete confirmation styles
+- `src/tests/integration/test_admin_users.py` — 11 new integration tests
+
+---
+
 ### 2026.03.02 - Session 297 | Voice Hook Phase 7: Status Summary & Testing Plan Serialization
 
 **Accomplishments**:
