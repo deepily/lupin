@@ -1,5 +1,33 @@
 # Lupin Project History
 
+### 2026.03.02 - Session 295 | Slice 3: Multi-Select Multiple Choice Prediction
+
+**Accomplishments**:
+- Implemented Slice 3 of the Universal Prediction Engine — multi-select (inclusive) multiple choice prediction
+- Added `_tally_multi_select_votes()` method with >= 50% threshold + highest-count fallback
+- Made vote loop type-aware: detects `isinstance(option, list)` and branches to multi-select path
+- Renamed `_predict_multiple_choice_single()` → `_predict_multiple_choice()` (unified single+multi handling)
+- Updated `get_comparator()` with data-driven dispatch via optional `actual_value` parameter
+- Updated `record_outcome()` to pass `actual_dict` to comparator for correct multi-select dispatch
+- Added ~10 unit tests for multi-select vote logic + comparator dispatch
+- Added 2 warm E2E tests for multi-select prediction + accuracy (Jaccard)
+- Updated smoke test in `accuracy_comparators.py` for data-driven dispatch
+
+**Files Modified**: 4 files
+- `src/cosa/agents/prediction_engine/prediction_engine.py` — `_tally_multi_select_votes()`, type-aware vote loop, method rename
+- `src/cosa/agents/prediction_engine/accuracy_comparators.py` — `actual_value` param on `get_comparator()`
+- `src/tests/unit/test_prediction_engine_multiple_choice.py` — ~10 new multi-select tests
+- `src/tests/integration/test_prediction_engine_e2e.py` — 2 warm multi-select E2E tests
+
+**Plan doc**: `src/rnd/2026.03.02-slice-3-multi-select-mc-prediction.md`
+
+#### Checkpoint | 2026.03.02 10:15 | Slice 3 multi-select MC prediction
+
+**Files**: prediction_engine.py, accuracy_comparators.py, test_prediction_engine_multiple_choice.py (+5 more)
+**Commit**: 709ffc2
+
+---
+
 ### 2026.03.01 - Session 293 | Fix Thread-Safety Race Condition in Embedding Engine
 
 **Bug**: `RuntimeError: The size of tensor a (N) must match the size of tensor b (M)` — crashed repeatedly in async embedding generation threads. Root cause: `ProseEmbeddingEngine._encode_batch()` called concurrently from multiple daemon threads (spawned by `insert_io_row()`) with no synchronization. The singleton's shared tokenizer + model were accessed simultaneously, causing attention_mask/model_output cross-contamination in `_mean_pooling()`.

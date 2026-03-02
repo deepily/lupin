@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.02 - Slice 3: Multi-Select Multiple Choice Prediction
+- **Plan**: [2026.03.02-slice-3-multi-select-mc-prediction.md](2026.03.02-slice-3-multi-select-mc-prediction.md) - Extending PredictionEngine to handle `multiSelect: true` from cosa-voice `ask_multiple_choice()`. Fixes TypeError on list-as-dict-key in vote tallying, adds data-driven comparator dispatch, ~10 unit tests + 2 warm E2E tests.
+
 ### 2026.02.28 - Design Doc Revisions: Voice I/O Phase 1 (Session 290)
 - **Revisions**: [2026.02.28-design-doc-revisions-session-290.md](2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.28-design-doc-revisions-session-290.md) - Four architectural revisions to the voice hook integration master plan before Phase 1 implementation. (1) No new VOICE_INPUT type — reuses existing `user_initiated_message`. (2) Simplified sender ID — user's email, no fancy convention. (3) Stateful WebSocket listener replaces ephemeral DB queries — `CCNotificationListener` subclasses `BaseWebSocketListener`, buffers to JSONL, atomic drain. (4) Phase 1 simplified to 7 steps. New components: credentials INI infrastructure, CC Notification Listener, SessionEnd hook, 35 automated tests.
 

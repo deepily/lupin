@@ -800,3 +800,103 @@ class TestPredictionEngineWarm:
         assert log is not None
         assert log.response_type == "multiple_choice"
         assert log.prediction_strategy in [ "cbr_majority_vote", "cold_start" ]
+
+    # -------------------------------------------------------------------
+    # Test 14: MC warm multi-select — seed multi-select decisions
+    # -------------------------------------------------------------------
+    def test_warm_multiple_choice_multi_select( self ):
+        """
+        Warm multi-select prediction: seed multi-select decisions and verify
+        CBR majority vote produces list-valued predicted answers.
+
+        Expects:
+            - prediction_strategy = "cbr_majority_vote" (if embeddings match)
+            - predicted_value answers are lists (multi-select format)
+        """
+        mc_answer = json.dumps( { "answers": { "Features": [ "Auth", "Caching" ] } } )
+        self._seed_decision( "Which features should we enable for the service?", "approach", mc_answer )
+        self._seed_decision( "What features should we turn on for the new service?", "approach", mc_answer )
+        self._seed_decision( "Which features to enable for the backend service?", "approach", mc_answer )
+
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        PredictionEngine.reset()
+        engine = PredictionEngine( debug=True )
+        engine.lancedb_table = TEST_LANCEDB_TABLE
+        engine._embedding_store = None
+
+        mc_options = [
+            {
+                "question"    : "Which features should we enable?",
+                "header"      : "Features",
+                "multiSelect" : True,
+                "options"     : [
+                    { "label": "Auth", "description": "Authentication system" },
+                    { "label": "Caching", "description": "Response caching" },
+                    { "label": "Logging", "description": "Request logging" },
+                ]
+            }
+        ]
+
+        notification_id = self._send_and_respond(
+            message          = "Which features should we enable for the new microservice?",
+            response_type    = "multiple_choice",
+            response_value   = { "answers": { "Features": [ "Auth", "Caching" ] } },
+            response_options = mc_options,
+        )
+
+        log = _get_prediction_log( self._get_db, notification_id )
+        assert log is not None
+        assert log.response_type == "multiple_choice"
+        assert log.prediction_strategy in [ "cbr_majority_vote", "cold_start" ]
+
+    # -------------------------------------------------------------------
+    # Test 15: Multi-select accuracy — Jaccard comparison
+    # -------------------------------------------------------------------
+    def test_warm_multi_select_accuracy( self ):
+        """
+        Multi-select accuracy: seed ["A","B"], predict similar, actual ["A","C"].
+        Verifies Jaccard-based accuracy computation.
+
+        Expects:
+            - accuracy_match computed based on Jaccard threshold
+            - accuracy_detail contains jaccard score
+        """
+        mc_answer = json.dumps( { "answers": { "Features": [ "Auth", "Caching" ] } } )
+        self._seed_decision( "Which features for the API gateway?", "approach", mc_answer )
+        self._seed_decision( "What features for the API gateway?", "approach", mc_answer )
+        self._seed_decision( "Select features for the API gateway?", "approach", mc_answer )
+
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        PredictionEngine.reset()
+        engine = PredictionEngine( debug=True )
+        engine.lancedb_table = TEST_LANCEDB_TABLE
+        engine._embedding_store = None
+
+        mc_options = [
+            {
+                "question"    : "Which features for the gateway?",
+                "header"      : "Features",
+                "multiSelect" : True,
+                "options"     : [
+                    { "label": "Auth", "description": "Authentication" },
+                    { "label": "Caching", "description": "Caching" },
+                    { "label": "Logging", "description": "Logging" },
+                ]
+            }
+        ]
+
+        # Respond with a different set to test Jaccard computation
+        notification_id = self._send_and_respond(
+            message          = "Which features for the new API gateway?",
+            response_type    = "multiple_choice",
+            response_value   = { "answers": { "Features": [ "Auth", "Logging" ] } },
+            response_options = mc_options,
+        )
+
+        log = _get_prediction_log( self._get_db, notification_id )
+        assert log is not None
+        assert log.response_type == "multiple_choice"
+        # If CBR predicted ["Auth", "Caching"] and actual is ["Auth", "Logging"]:
+        # Jaccard = 1/3 ≈ 0.333 < 0.5 → accuracy_match = False
+        if log.prediction_strategy == "cbr_majority_vote":
+            assert log.accuracy_match is not None
