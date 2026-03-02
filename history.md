@@ -1,5 +1,55 @@
 # Lupin Project History
 
+### 2026.03.02 - Session 297 | Voice Hook Phase 7: Status Summary & Testing Plan Serialization
+
+**Accomplishments**:
+- Serialized Voice Hook Integration Status Summary & Testing Plan to `src/rnd/` master plan directory
+- Document covers: phase status (6/7 complete), test inventory (430+ tests), E2E gap analysis (10 scenarios), pre-merge gate requirements
+- Added link entry to `src/rnd/README.md`
+
+**Files Modified**: 2 files
+- `src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.03.02-status-summary-and-testing-plan.md` — NEW: Phase 7 status summary
+- `src/rnd/README.md` — Added link to status summary document
+
+---
+
+### 2026.03.02 - Session 296 | Slices 4+5: Open-Ended Prediction (Two-Tier Retrieval + LLM Synthesis)
+
+**Accomplishments**:
+- Implemented Slices 4+5 of the Universal Prediction Engine — open-ended and open-ended batch prediction
+- Two-tier strategy: Tier 1 exact normalized question match (`STRATEGY_CBR_RETRIEVAL`), Tier 2 LLM synthesis via local Phi-4 14B (`STRATEGY_LLM_SYNTHESIS`)
+- Added `_predict_open_ended()` and `_predict_open_ended_batch()` with 3 cold-start guards each
+- Added `_build_synthesis_prompt()` — loads template, injects `{{PYDANTIC_XML_EXAMPLE}}`, formats past cases as numbered XML blocks
+- Added `_get_llm_client()` lazy loader via `LlmClientFactory`
+- Added `_cosine_similarity()` static helper (dot product for L2-normalized vectors)
+- Added `_enrich_with_embedding_similarity()` — injects transient `_embedding_similarity` key for accuracy comparison, stripped before DB write
+- Created `OpenEndedSynthesisResponse` BaseXMLModel (`xml_models.py`) for structured LLM I/O
+- Created prompt template `prediction-engine-open-ended-synthesis.txt`
+- Upgraded `compare_open_ended()` with dual strategy: embedding similarity + exact match fallback
+- Added `compare_open_ended_batch()` per-header comparator with average threshold
+- Updated `record_outcome()` to strip transient `_` prefixed keys before DB write
+- Added 36 unit tests (8 test classes) and 6 E2E integration tests
+- All 87 prediction engine unit tests pass (36 new + 31 MC + 20 qualifier), 1905 total unit tests pass
+
+**Files Modified**: 9 files (8 committed to Lupin, 4 pending in CoSA nested repo)
+- `src/cosa/agents/prediction_engine/prediction_engine.py` — 7 new methods, updated dispatcher + `__init__()` + `record_outcome()`
+- `src/cosa/agents/prediction_engine/accuracy_comparators.py` — upgraded comparators, new batch comparator
+- `src/cosa/agents/prediction_engine/config.py` — `STRATEGY_LLM_SYNTHESIS`, open-ended defaults
+- `src/cosa/agents/prediction_engine/xml_models.py` — NEW: `OpenEndedSynthesisResponse`
+- `src/conf/prompts/prediction-engine-open-ended-synthesis.txt` — NEW: LLM synthesis prompt template
+- `src/conf/lupin-app.ini` — 4 new open-ended config keys
+- `src/conf/lupin-app-splainer.ini` — 4 matching explainer entries
+- `src/tests/unit/test_prediction_engine_open_ended.py` — NEW: 36 unit tests
+- `src/tests/integration/test_prediction_engine_e2e.py` — 6 new E2E tests
+
+**Plan doc**: `src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.02-slices-4-5-open-ended-prediction.md`
+
+#### Checkpoint | 2026.03.02 | Slices 4+5 open-ended prediction
+
+**Commit**: e05f63e
+
+---
+
 ### 2026.03.02 - Session 295 | Slice 3: Multi-Select Multiple Choice Prediction
 
 **Accomplishments**:

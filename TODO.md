@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-02 (Session 295)
+Last updated: 2026-03-02 (Session 297)
 
 ## HIGH PRIORITY — target_user Notification Dispatch Bug (Session 286)
 
@@ -131,12 +131,12 @@ Last updated: 2026-03-02 (Session 295)
 - [ ] **[LUPIN] End-to-end test Slices 0 + 1 + 1.5** — With FastAPI server running, trigger `ask_yes_no` notifications via cosa-voice MCP. Verify: (1) prediction hints appear in WebSocket push, (2) after accumulating responses with qualifiers, `predicted_qualifier` field appears in hints, (3) `prediction_log` table records predictions + outcomes with accuracy tracking.
   - **Plan doc**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md)
   - **Slices implemented**: 0 (foundation), 1 (binary yes/no), 1.5 (qualified yes/no), 2 (MC exclusive), 3 (MC inclusive)
-  - **Slices 4+5 (IN-PROGRESS)**: open_ended + open_ended_batch — LLM synthesis via Phi-4 14B
+  - **Slices 4+5 (CODE COMPLETE)**: open_ended + open_ended_batch — two-tier retrieval + LLM synthesis via Phi-4 14B. 36 unit tests pass. Needs live E2E validation.
   - **Slice 3 plan**: [`src/rnd/2026.03.02-slice-3-multi-select-mc-prediction.md`](src/rnd/2026.03.02-slice-3-multi-select-mc-prediction.md)
-  - **Slices 4+5 plan**: [`src/rnd/2026.03.02-slices-4-5-open-ended-prediction.md`](src/rnd/2026.03.02-slices-4-5-open-ended-prediction.md)
+  - **Slices 4+5 plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.02-slices-4-5-open-ended-prediction.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.02-slices-4-5-open-ended-prediction.md)
   - **HTTP embedding fallback**: Session 293 — PredictionEngine now falls back to `/api/embeddings/generate` when local GPU unavailable (unblocks test-process embedding generation)
   - **Warm E2E tests**: 5 new scenarios (9-13) in `test_prediction_engine_e2e.py` — CBR yes/no, qualifier, accuracy correct/incorrect, MC warm
-  - **Unit tests**: 39 pass (qualifier + MC)
+  - **Unit tests**: 87 pass (36 open-ended + 31 MC + 20 qualifier)
 
 ### Before Branch Merge
 
