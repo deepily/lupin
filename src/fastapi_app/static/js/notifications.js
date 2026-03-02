@@ -1385,6 +1385,9 @@ class NotificationsUI {
         // Claude Code Dispatcher event listeners
         this.setupClaudeCodeEventListeners();
 
+        // CC Session voice input (sender card delegation)
+        this._setupCCSessionVoiceDelegation();
+
         // Job Submission (Research + Podcast) event listeners
         this.setupJobSubmitEventListeners();
 
@@ -1493,6 +1496,131 @@ class NotificationsUI {
         }
 
         this.log( "Agent mode selector event listeners setup complete" );
+    }
+
+    // ========================================
+    // CC SESSION VOICE INPUT (Phase 6)
+    // ========================================
+
+    _setupCCSessionVoiceDelegation() {
+        /**
+         * Setup event delegation for CC session voice input in sender cards.
+         *
+         * Sender cards for claude.code sessions include a voice input row
+         * (STT button + text input + Send button). Since sender cards are
+         * created dynamically, we use delegation on the notifications-list
+         * container.
+         *
+         * Ensures:
+         *     - STT button → handleSTTButtonClick (same as job cards)
+         *     - Send button → sendCCSessionMessage
+         *     - Enter key in input → sendCCSessionMessage
+         */
+        const container = document.getElementById( 'notifications-list' );
+        if ( !container ) return;
+
+        container.addEventListener( 'click', ( e ) => {
+            // CC session STT button click
+            const sttBtn = e.target.closest( '.cc-voice-input .cc-session-stt' );
+            if ( sttBtn ) {
+                const sessionHash = sttBtn.id.replace( 'cc-session-stt-', '' );
+                this.handleSTTButtonClick( `cc-session-input-${sessionHash}`, sttBtn );
+                return;
+            }
+
+            // CC session Send button click
+            const sendBtn = e.target.closest( '.cc-voice-input .cc-session-send' );
+            if ( sendBtn ) {
+                const sessionHash = sendBtn.id.replace( 'cc-session-send-', '' );
+                this.sendCCSessionMessage( sessionHash );
+                return;
+            }
+        } );
+
+        container.addEventListener( 'keydown', ( e ) => {
+            if ( e.key !== 'Enter' ) return;
+            const input = e.target.closest( '.cc-session-msg-input' );
+            if ( input ) {
+                e.preventDefault();
+                const sessionHash = input.id.replace( 'cc-session-input-', '' );
+                this.sendCCSessionMessage( sessionHash );
+            }
+        } );
+
+        this.log( 'CC session voice input delegation setup complete' );
+    }
+
+    async sendCCSessionMessage( sessionHash ) {
+        /**
+         * Send a user message to a CC session via POST /api/notify.
+         *
+         * Unlike CJ Flow job cards which use /api/jobs/{jobId}/message,
+         * CC hook sessions have no job_id in the queue system. Instead,
+         * we POST to /api/notify with type=user_initiated_message and
+         * job_id=sessionHash so the CCNotificationListener can filter
+         * and buffer it for hook drain.
+         *
+         * Requires:
+         *     - sessionHash is the 8-char CC session hash
+         *     - DOM elements cc-session-input-{hash} and cc-session-send-{hash} exist
+         *     - User is authenticated (authToken available)
+         *
+         * Ensures:
+         *     - Message sent to /api/notify on valid input
+         *     - Input cleared on success
+         *     - Error shown inline on failure
+         */
+        const input   = document.getElementById( `cc-session-input-${sessionHash}` );
+        const sendBtn = document.getElementById( `cc-session-send-${sessionHash}` );
+
+        if ( !input ) return;
+
+        const message = input.value.trim();
+        if ( !message ) {
+            input.focus();
+            return;
+        }
+
+        // Disable controls and clear input immediately
+        input.disabled   = true;
+        sendBtn.disabled = true;
+        input.value      = '';
+
+        try {
+            await this.ensureValidToken();
+
+            const params = new URLSearchParams( {
+                message     : message,
+                type        : 'user_initiated_message',
+                priority    : 'medium',
+                target_user : this.currentUserEmail,
+                sender_id   : `user@${this.currentUserEmail}`,
+                job_id      : sessionHash,
+            } );
+
+            const response = await fetch( `/api/notify?${params.toString()}`, {
+                method  : 'POST',
+                headers : {
+                    'Authorization' : this.getAuthHeader(),
+                },
+            } );
+
+            if ( !response.ok ) {
+                const errData = await response.json().catch( () => ( {} ) );
+                throw new Error( errData.detail || `HTTP ${response.status}` );
+            }
+
+            this.log( `[CC-VOICE] Sent to session ${sessionHash}: ${message.substring( 0, 80 )}` );
+
+        } catch ( error ) {
+            this.error( `[CC-VOICE] Failed to send to session ${sessionHash}:`, error );
+            input.style.borderColor = '#dc3545';
+            setTimeout( () => { input.style.borderColor = ''; }, 3000 );
+        } finally {
+            input.disabled   = false;
+            sendBtn.disabled = false;
+            input.focus();
+        }
     }
 
     // ========================================
@@ -7359,6 +7487,23 @@ class NotificationsUI {
         card.className = `sender-card${activeClass}`;
         card.setAttribute( 'data-project', parsed.project );
         card.setAttribute( 'data-session-id', sessionId || '' );
+        // Build CC voice input row (only for claude.code sessions with a session ID)
+        const isCCSession  = parsed.agentType === 'claude.code' && sessionId;
+        const ccVoiceInput = isCCSession ? `
+            <div class="cc-voice-input" data-session-hash="${sessionId}">
+                <div class="cc-voice-input-row">
+                    <button type="button" class="stt-button cc-session-stt"
+                            id="cc-session-stt-${sessionId}"
+                            title="Click to record (30s max, ESC to cancel)">🎤</button>
+                    <input type="text" class="cc-session-msg-input"
+                           id="cc-session-input-${sessionId}"
+                           placeholder="Send voice/text to CC session..." />
+                    <button type="button" class="response-submit-button cc-session-send"
+                            id="cc-session-send-${sessionId}">Send</button>
+                </div>
+            </div>
+        ` : '';
+
         card.innerHTML = `
             <div class="sender-card-header" onclick="window.notificationsUI.toggleSenderCard('${escapedSenderId}')">
                 <span class="sender-active-indicator" title="${activeTitle}">${activeIndicator}</span>
@@ -7373,6 +7518,7 @@ class NotificationsUI {
                 <button class="sender-delete-btn" onclick="event.stopPropagation(); window.notificationsUI.deleteSenderConversation('${escapedSenderId}')" title="Delete all">×</button>
                 <span class="sender-toggle">▼</span>
             </div>
+            ${ccVoiceInput}
             <div class="sender-card-dates" id="sender-dates-${senderId.replace( /[@.#]/g, '-' )}">
                 <!-- Date accordions will be added here -->
             </div>

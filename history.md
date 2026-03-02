@@ -66,6 +66,41 @@
 
 ---
 
+### 2026.03.02 - Session 296 | Phases 4-6: Voice Context Injection, Approvals, Browser Capture
+
+#### Checkpoint | 2026.03.02 11:00 | Phases 4-6 voice hook injection + browser capture
+
+**Accomplishments**:
+- **Phase 4 (Voice Input Injection)**: Replaced `emit_json({})` passthrough with `additionalContext` injection in PostToolUse and PreToolUse hooks; Stop hook now blocks with voice content as reason
+- Added 8 new functions to `hook_common.py`: `format_voice_context`, `build_additional_context`, `build_stop_block`, `is_mcp_voice_tool`, stop block counter helpers (`get/increment/reset_stop_block_count`)
+- MCP voice tool bypass — hooks skip drain when Claude is already talking to user via `mcp__cosa-voice__*` tools
+- Stop hook safety valve: file-based counter (MAX_STOP_BLOCKS=3) prevents infinite blocking loops
+- **Phase 5 (Voice-Driven Approvals)**: Rewrote PermissionRequest with 3-path flow: Path A (auto-allow Read/Grep/Glob), Path B (buffer-redirect — deny + course-change message), Path C (sync forward to user)
+- **Phase 6 (Browser Capture)**: Added CC session voice input UI to sender cards in notifications.js with event delegation for STT, Send, Enter key; POST to `/api/notify` with `job_id=sessionHash` for CCNotificationListener routing
+- Added CSS for `.cc-voice-input` matching existing job card pattern
+- Verified CCNotificationListener already handles `user_initiated_message` type (no changes needed)
+- 126/126 hook tests passing (up from 82 in Phase 3)
+
+**Files Modified**: 12 files
+- `src/lupin_cli/claude_code/hooks/lib/hook_common.py` — 8 new functions + 2 constants
+- `src/lupin_cli/claude_code/hooks/post_tool_use.py` — MCP bypass + additionalContext injection
+- `src/lupin_cli/claude_code/hooks/pre_tool_use.py` — MCP bypass + additionalContext injection
+- `src/lupin_cli/claude_code/hooks/stop.py` — blocking logic + counter safety valve
+- `src/lupin_cli/claude_code/hooks/permission_request.py` — 3-path flow + AUTO_ALLOW_TOOLS
+- `src/tests/unit/test_hook_voice_helpers.py` — +20 tests (context, stop block, MCP bypass)
+- `src/tests/unit/test_post_tool_use_hook.py` — +4 tests (context injection, MCP bypass)
+- `src/tests/unit/test_pre_tool_use_hook.py` — +4 tests (context injection, MCP bypass)
+- `src/tests/unit/test_stop_hook.py` — +5 tests (blocking, counter, loop prevention)
+- `src/tests/unit/test_permission_request_hook.py` — +7 tests (auto-allow, buffer-redirect)
+- `src/fastapi_app/static/js/notifications.js` — CC session voice input UI + event delegation
+- `src/fastapi_app/static/css/notifications.css` — CC voice input styles
+
+**Commit**: 9caa23e
+
+**Plan doc**: [`2026.02.25-opportunistic-voice-hook-integration-plan.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-opportunistic-voice-hook-integration-plan.md)
+
+---
+
 ### 2026.03.01 - Session 292 | Evolve 4 Hook Scripts from Phase 0 to Phase 1 Production
 
 #### Checkpoint | 2026.03.01 11:30 | Smart TTS, voice drain, 47 new tests

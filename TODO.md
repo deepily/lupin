@@ -90,7 +90,9 @@ Last updated: 2026-03-02 (Session 295)
   - **Logs dir**: `io/claude_code_hooks/logs/`
   - **Session bridge file**: `~/.claude/sessions/cc-{PID}.json` — 26 files verified
 - [x] **[LUPIN] Phase 1: Notification System Extensions** — Session 290: Revised architecture — `user_initiated_message` type (not VOICE_INPUT), stateful WebSocket listener (CCNotificationListener subclassing BaseWebSocketListener), INI-based credentials, atomic JSONL buffer drain. 5 new files, 7 modified, 35 new tests (all pass). See [Design Doc Revisions](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.28-design-doc-revisions-session-290.md).
-- [ ] **[LUPIN] Phase 2-7: Remaining voice hook phases** — Voice approvals, browser capture, testing + polish. **RESUME HERE (Session 292)**: Phase 1 complete. All 7 hooks renamed to production (dropped `test_` prefix). 4 passthrough hooks evolved to Phase 1: smart TTS (silent/announce/default), voice buffer drain + acknowledge. 47 new unit tests (82 total hook tests). Next: voice input injection into CC prompt, voice approvals.
+- [x] **[LUPIN] Phases 2-3: Hook infrastructure + voice output** — Session 292: 7 hooks renamed to production, smart TTS (silent/announce/default), voice buffer drain + acknowledge. 82 hook tests.
+- [x] **[LUPIN] Phases 4-6: Voice injection, approvals, browser capture** — Session 296: additionalContext injection (Pre/PostToolUse), Stop hook blocking with counter safety valve, MCP voice bypass, PermissionRequest 3-path flow (auto-allow, buffer-redirect, sync), CC session voice capture UI. 126 hook tests.
+- [ ] **[LUPIN] Phase 7: E2E testing + polish** — Manual E2E verification of voice pipeline (browser 🎤 → STT → notify → buffer → hook drain → additionalContext). Polish remaining rough edges.
   - **Master plan**: [`2026.02.25-opportunistic-voice-hook-integration-plan.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-opportunistic-voice-hook-integration-plan.md)
   - **Phase 0 plan**: [`2026.02.26-voice-hook-phase-0-implementation.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.26-voice-hook-phase-0-implementation.md)
   - **Phase 0 validation**: [`2026.02.27-phase-0-validation-report.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.27-phase-0-validation-report.md)
@@ -128,8 +130,10 @@ Last updated: 2026-03-02 (Session 295)
 
 - [ ] **[LUPIN] End-to-end test Slices 0 + 1 + 1.5** — With FastAPI server running, trigger `ask_yes_no` notifications via cosa-voice MCP. Verify: (1) prediction hints appear in WebSocket push, (2) after accumulating responses with qualifiers, `predicted_qualifier` field appears in hints, (3) `prediction_log` table records predictions + outcomes with accuracy tracking.
   - **Plan doc**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md)
-  - **Slices implemented**: 0 (foundation), 1 (binary yes/no), 1.5 (qualified yes/no), 2 (MC exclusive), 3 (MC inclusive — IN-PROGRESS)
+  - **Slices implemented**: 0 (foundation), 1 (binary yes/no), 1.5 (qualified yes/no), 2 (MC exclusive), 3 (MC inclusive)
+  - **Slices 4+5 (IN-PROGRESS)**: open_ended + open_ended_batch — LLM synthesis via Phi-4 14B
   - **Slice 3 plan**: [`src/rnd/2026.03.02-slice-3-multi-select-mc-prediction.md`](src/rnd/2026.03.02-slice-3-multi-select-mc-prediction.md)
+  - **Slices 4+5 plan**: [`src/rnd/2026.03.02-slices-4-5-open-ended-prediction.md`](src/rnd/2026.03.02-slices-4-5-open-ended-prediction.md)
   - **HTTP embedding fallback**: Session 293 — PredictionEngine now falls back to `/api/embeddings/generate` when local GPU unavailable (unblocks test-process embedding generation)
   - **Warm E2E tests**: 5 new scenarios (9-13) in `test_prediction_engine_e2e.py` — CBR yes/no, qualifier, accuracy correct/incorrect, MC warm
   - **Unit tests**: 39 pass (qualifier + MC)

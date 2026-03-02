@@ -34,6 +34,12 @@ LOGS_DIR = Path( cu.get_project_root() ) / "io" / "claude_code_hooks" / "logs"
 TOOLS_SILENT   = frozenset( { "Read", "Grep", "Glob", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList" } )
 TOOLS_ANNOUNCE = frozenset( { "Bash", "Write", "Edit" } )
 
+# MCP voice tool prefix — skip drain when Claude is already talking to user
+MCP_VOICE_PREFIX = "mcp__cosa-voice__"
+
+# Stop hook safety valve — max consecutive blocks before allowing stop
+MAX_STOP_BLOCKS = 3
+
 
 # ── Core Functions ────────────────────────────────────────────────────────────
 
@@ -341,6 +347,202 @@ def drain_and_acknowledge( session_id ):
         return messages
     except Exception:
         return []
+
+
+# ── Voice Context Injection Helpers ───────────────────────────────────────────
+
+def format_voice_context( messages ):
+    """
+    Format drained voice messages into a [Voice] context string for CC injection.
+
+    Requires:
+        - messages is a list of dicts (from drain_voice_buffer)
+
+    Ensures:
+        - Returns empty string if messages is empty or all messages are blank
+        - Each non-empty message gets a "[Voice]: " prefix
+        - Messages are joined with newlines
+        - Whitespace is stripped from each message
+
+    Args:
+        messages: List of buffered message dicts from voice buffer drain
+
+    Returns:
+        str: Newline-joined "[Voice]: ..." context string, or ""
+    """
+    if not messages:
+        return ""
+    lines = []
+    for msg in messages:
+        text = msg.get( "message", msg.get( "text", "" ) ).strip()
+        if text:
+            lines.append( f"[Voice]: {text}" )
+    return "\n".join( lines )
+
+
+def build_additional_context( context_text ):
+    """
+    Build hookSpecificOutput dict with additionalContext for PostToolUse/PreToolUse.
+
+    Requires:
+        - context_text is a string
+
+    Ensures:
+        - Returns {} when context_text is empty or falsy (passthrough)
+        - Returns { "hookSpecificOutput": { "additionalContext": ... } } when non-empty
+
+    Args:
+        context_text: Formatted voice context string
+
+    Returns:
+        dict: Hook output ready for emit_json(), or empty dict
+    """
+    if not context_text:
+        return {}
+    return {
+        "hookSpecificOutput": {
+            "additionalContext": context_text
+        }
+    }
+
+
+def build_stop_block( reason ):
+    """
+    Build top-level decision block for Stop hook.
+
+    The Stop hook uses a different structure than PreToolUse/PostToolUse —
+    it emits a top-level "decision" + "reason" dict (NOT wrapped in
+    hookSpecificOutput).
+
+    Requires:
+        - reason is a non-empty string
+
+    Ensures:
+        - Returns { "decision": "block", "reason": reason }
+
+    Args:
+        reason: Human-readable reason for blocking the stop
+
+    Returns:
+        dict: Stop hook decision block ready for emit_json()
+    """
+    return { "decision": "block", "reason": reason }
+
+
+def is_mcp_voice_tool( tool_name ):
+    """
+    Check if tool_name is a cosa-voice MCP tool (direct user communication).
+
+    When Claude calls cosa-voice MCP tools, the LLM is already communicating
+    directly with the user. Hooks should NOT drain the buffer or inject context
+    during those calls — it would interfere with an active voice conversation.
+
+    Requires:
+        - tool_name is a string or None
+
+    Ensures:
+        - Returns True if tool_name starts with MCP_VOICE_PREFIX
+        - Returns False if tool_name is empty, None, or doesn't match
+
+    Args:
+        tool_name: Name of the tool being called
+
+    Returns:
+        bool: True if this is a cosa-voice MCP tool
+    """
+    return tool_name.startswith( MCP_VOICE_PREFIX ) if tool_name else False
+
+
+# ── Stop Block Counter (safety valve) ────────────────────────────────────────
+
+def _stop_counter_path( session_id ):
+    """
+    Get the path to the stop block counter file for a CC session.
+
+    Args:
+        session_id: Claude Code session ID
+
+    Returns:
+        Path: Counter file path in /tmp/
+    """
+    hash_part = session_id[:8] if session_id else "00000000"
+    return Path( f"/tmp/claude-hook-stop-count-{hash_part}" )
+
+
+def get_stop_block_count( session_id ):
+    """
+    Read the current block count from the stop counter file.
+
+    Requires:
+        - session_id is a string
+
+    Ensures:
+        - Returns integer count (0 if file doesn't exist or is unreadable)
+        - Never raises exceptions
+
+    Args:
+        session_id: Claude Code session ID
+
+    Returns:
+        int: Current block count
+    """
+    try:
+        path = _stop_counter_path( session_id )
+        if path.exists():
+            return int( path.read_text().strip() )
+    except ( ValueError, OSError ):
+        pass
+    return 0
+
+
+def increment_stop_block_count( session_id ):
+    """
+    Increment and persist the stop block count. Returns the new count.
+
+    Requires:
+        - session_id is a string
+
+    Ensures:
+        - Increments count by 1
+        - Persists to file
+        - Returns new count
+        - Returns 1 on first call (file created)
+        - Never raises exceptions (returns 0 on failure)
+
+    Args:
+        session_id: Claude Code session ID
+
+    Returns:
+        int: New block count after increment
+    """
+    try:
+        count = get_stop_block_count( session_id ) + 1
+        path  = _stop_counter_path( session_id )
+        path.write_text( str( count ) )
+        return count
+    except OSError:
+        return 0
+
+
+def reset_stop_block_count( session_id ):
+    """
+    Reset the stop block count to 0 (deletes the counter file).
+
+    Requires:
+        - session_id is a string
+
+    Ensures:
+        - Counter file is deleted if it exists
+        - Never raises exceptions
+
+    Args:
+        session_id: Claude Code session ID
+    """
+    try:
+        path = _stop_counter_path( session_id )
+        path.unlink( missing_ok=True )
+    except OSError:
+        pass
 
 
 # ── Voice Buffer Functions ────────────────────────────────────────────────────

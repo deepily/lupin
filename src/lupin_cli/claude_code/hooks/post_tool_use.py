@@ -27,7 +27,8 @@ if _src_path not in sys.path:
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts, build_progress_group_id,
-    format_tool_summary, drain_and_acknowledge,
+    format_tool_summary, drain_and_acknowledge, format_voice_context,
+    build_additional_context, is_mcp_voice_tool,
     TOOLS_SILENT, TOOLS_ANNOUNCE
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id
@@ -47,6 +48,11 @@ def main():
     # Log full payload for empirical analysis
     log_payload( "post_tool_use", payload )
 
+    # MCP voice bypass — Claude is already talking to user
+    if is_mcp_voice_tool( tool_name ):
+        emit_json( {} )
+        sys.exit( 0 )
+
     # Resolve session_id: payload first (future-proof), then session bridge fallback
     session_id = payload.get( "session_id", "" ) or get_claude_session_id()
     pg_id      = build_progress_group_id( "pu", session_id )
@@ -59,11 +65,11 @@ def main():
     else:
         send_tts( f"Done: {tool_name}", progress_group_id=pg_id )
 
-    # Drain voice buffer and acknowledge buffered messages
-    drain_and_acknowledge( session_id )
-
-    # Passthrough — no additionalContext injection
-    emit_json( {} )
+    # Drain voice buffer, acknowledge, and inject as additionalContext
+    messages  = drain_and_acknowledge( session_id )
+    voice_ctx = format_voice_context( messages )
+    emit_json( build_additional_context( voice_ctx ) )
+    # build_additional_context returns {} when voice_ctx is empty → passthrough
 
 
 if __name__ == "__main__":

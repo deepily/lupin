@@ -3840,6 +3840,54 @@
     border-top: none;
 }
 
+/* ========================================
+   CC SESSION VOICE INPUT — Browser → Hook Buffer (Phase 6)
+   Appears on sender cards for claude.code sessions to allow
+   users to send voice/text directly to CC session hooks.
+   ======================================== */
+
+.cc-voice-input {
+    padding: 8px 12px;
+    border-bottom: 1px dashed #dee2e6;
+    background: #f0f7ff;
+}
+
+.cc-voice-input-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.cc-voice-input .stt-button {
+    align-self: center;
+    height: 34px;
+    min-width: 40px;
+    padding: 4px 8px;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.cc-session-msg-input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.cc-session-msg-input:focus {
+    border-color: #007bff;
+}
+
+.cc-voice-input .response-submit-button {
+    padding: 6px 14px;
+    font-size: 13px;
+    height: 34px;
+    flex-shrink: 0;
+}
+
 /* ==========================================================================
    Proxy Ratification Link + Retired Batch (Phase 7)
    ========================================================================== */
