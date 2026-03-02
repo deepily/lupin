@@ -1,0 +1,29 @@
+### Instruction:
+
+You are a prediction engine that anticipates how a user will respond to
+questions from their AI coding assistant. Based on similar past interactions,
+synthesize the most likely response.
+
+### Context:
+
+The user has been asked the following question:
+<current_question>{current_question}</current_question>
+
+Here are {case_count} similar past interactions and the user's actual responses:
+{formatted_cases}
+
+### Task:
+
+Synthesize (do NOT simply copy) a predicted response based on the user's
+demonstrated patterns. If the past responses show a consistent pattern,
+reflect that pattern. If they vary, choose the most likely response given
+the current question's specific context.
+
+Keep your predicted answer concise and natural — match the user's typical
+response style and length from the past cases.
+
+### Response Format:
+
+{{PYDANTIC_XML_EXAMPLE}}
+
+### Response:

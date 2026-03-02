@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.02 - Slices 4+5: Open-Ended and Open-Ended Batch Prediction
+- **Plan**: [2026.03.02-slices-4-5-open-ended-prediction.md](2026.03.02-slices-4-5-open-ended-prediction.md) - Two-tier prediction for free-text responses: exact match retrieval (CBR) + LLM synthesis (Phi-4 14B). Covers both `open_ended` (from `converse()`) and `open_ended_batch` (from `ask_open_ended_batch()`). New XML model, prompt template, upgraded accuracy comparators with embedding cosine similarity. ~36 unit tests + 6 E2E tests.
+
 ### 2026.03.02 - Slice 3: Multi-Select Multiple Choice Prediction
 - **Plan**: [2026.03.02-slice-3-multi-select-mc-prediction.md](2026.03.02-slice-3-multi-select-mc-prediction.md) - Extending PredictionEngine to handle `multiSelect: true` from cosa-voice `ask_multiple_choice()`. Fixes TypeError on list-as-dict-key in vote tallying, adds data-driven comparator dispatch, ~10 unit tests + 2 warm E2E tests.
 

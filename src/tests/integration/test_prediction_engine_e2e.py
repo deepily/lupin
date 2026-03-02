@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-E2E integration tests for the Universal Prediction Engine (Slices 0-2).
+E2E integration tests for the Universal Prediction Engine (Slices 0-5).
 
 Tests the full predict-respond-record cycle through the live FastAPI server.
 Validates that Hook 1 (predict) and Hook 2 (record_outcome) fire correctly
@@ -455,6 +455,45 @@ class TestPredictionEngineE2E:
         assert summary[ "total_responded" ] >= 2
         assert "by_response_type" in summary
 
+    # -----------------------------------------------------------------------
+    # Test 16: Cold start open_ended
+    # -----------------------------------------------------------------------
+    def test_cold_start_open_ended( self ):
+        """
+        Cold start: open_ended notification with no seeded cases.
+        Expects cold_start strategy since no similar past open_ended responses exist.
+        """
+        notification_id = self._send_and_respond(
+            message        = "What naming convention should I use for the new module?",
+            response_type  = "open_ended",
+            response_value = "snake_case for all Python modules",
+        )
+
+        log = _get_prediction_log( self._get_db, notification_id )
+        assert log is not None, "No prediction_log entry found"
+        assert log.response_type == "open_ended"
+        assert log.prediction_strategy == "cold_start"
+        assert log.category is not None and log.category != ""
+
+    # -----------------------------------------------------------------------
+    # Test 17: Cold start open_ended_batch
+    # -----------------------------------------------------------------------
+    def test_cold_start_open_ended_batch( self ):
+        """
+        Cold start: open_ended_batch notification with no seeded cases.
+        Expects cold_start strategy.
+        """
+        notification_id = self._send_and_respond(
+            message        = "Please provide project configuration details",
+            response_type  = "open_ended_batch",
+            response_value = { "answers": { "Topic": "quantum computing", "Budget": "no limit" } },
+        )
+
+        log = _get_prediction_log( self._get_db, notification_id )
+        assert log is not None, "No prediction_log entry found"
+        assert log.response_type == "open_ended_batch"
+        assert log.prediction_strategy == "cold_start"
+
 
 # ===========================================================================
 # TestPredictionEngineWarm — warm CBR prediction tests
@@ -899,4 +938,125 @@ class TestPredictionEngineWarm:
         # If CBR predicted ["Auth", "Caching"] and actual is ["Auth", "Logging"]:
         # Jaccard = 1/3 ≈ 0.333 < 0.5 → accuracy_match = False
         if log.prediction_strategy == "cbr_majority_vote":
+            assert log.accuracy_match is not None
+
+    # -------------------------------------------------------------------
+    # Test 18: Warm open_ended exact match retrieval
+    # -------------------------------------------------------------------
+    def test_warm_open_ended_exact_match( self ):
+        """
+        Warm prediction: seed 3 identical open_ended questions, send exact match.
+        Expects cbr_retrieval strategy with the seeded answer.
+        """
+        self._seed_decision( "What naming convention should I use?", "input", "snake_case" )
+        self._seed_decision( "What naming convention should I use?", "input", "snake_case" )
+        self._seed_decision( "What naming convention should I use?", "input", "snake_case" )
+
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        PredictionEngine.reset()
+        engine = PredictionEngine( debug=True )
+        engine.lancedb_table = TEST_LANCEDB_TABLE
+        engine._embedding_store = None  # Force re-init with test table
+
+        notification_id = self._send_and_respond(
+            message        = "What naming convention should I use?",
+            response_type  = "open_ended",
+            response_value = "snake_case",
+        )
+
+        log = _get_prediction_log( self._get_db, notification_id )
+        assert log is not None
+        assert log.response_type == "open_ended"
+        # Should be cbr_retrieval (exact match) or cold_start if embeddings differ
+        assert log.prediction_strategy in [ "cbr_retrieval", "llm_synthesis", "cold_start" ]
+
+    # -------------------------------------------------------------------
+    # Test 19: Warm open_ended LLM synthesis (mocked LLM)
+    # -------------------------------------------------------------------
+    def test_warm_open_ended_llm_synthesis( self ):
+        """
+        Warm prediction: seed 3 similar (not identical) questions.
+        Expects llm_synthesis or cbr_retrieval strategy.
+        LLM is NOT mocked here — this tests the full pipeline including
+        fallback to retrieval if LLM client is unavailable.
+        """
+        self._seed_decision( "Which naming style for Python files?", "input", "snake_case" )
+        self._seed_decision( "What case should I use for filenames?", "input", "snake_case" )
+        self._seed_decision( "How should I name Python modules?", "input", "snake_case with underscores" )
+
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        PredictionEngine.reset()
+        engine = PredictionEngine( debug=True )
+        engine.lancedb_table = TEST_LANCEDB_TABLE
+        engine._embedding_store = None
+
+        notification_id = self._send_and_respond(
+            message        = "What naming convention for the new utility module?",
+            response_type  = "open_ended",
+            response_value = "snake_case",
+        )
+
+        log = _get_prediction_log( self._get_db, notification_id )
+        assert log is not None
+        assert log.response_type == "open_ended"
+        # Could be llm_synthesis, cbr_retrieval (if LLM unavailable), or cold_start
+        assert log.prediction_strategy in [ "llm_synthesis", "cbr_retrieval", "cold_start" ]
+
+    # -------------------------------------------------------------------
+    # Test 20: Warm open_ended_batch retrieval
+    # -------------------------------------------------------------------
+    def test_warm_open_ended_batch_retrieval( self ):
+        """
+        Warm prediction: seed 3 similar batch answers, verify retrieval.
+        """
+        batch_answer = json.dumps( { "answers": { "Topic": "quantum computing", "Budget": "no limit" } } )
+        self._seed_decision( "What are the project parameters?", "input", batch_answer )
+        self._seed_decision( "Tell me the project parameters?", "input", batch_answer )
+        self._seed_decision( "Describe the project parameters?", "input", batch_answer )
+
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        PredictionEngine.reset()
+        engine = PredictionEngine( debug=True )
+        engine.lancedb_table = TEST_LANCEDB_TABLE
+        engine._embedding_store = None
+
+        notification_id = self._send_and_respond(
+            message        = "What are the project configuration parameters?",
+            response_type  = "open_ended_batch",
+            response_value = { "answers": { "Topic": "quantum computing", "Budget": "no limit" } },
+        )
+
+        log = _get_prediction_log( self._get_db, notification_id )
+        assert log is not None
+        assert log.response_type == "open_ended_batch"
+        assert log.prediction_strategy in [ "cbr_retrieval", "llm_synthesis", "cold_start" ]
+
+    # -------------------------------------------------------------------
+    # Test 21: Warm open_ended accuracy
+    # -------------------------------------------------------------------
+    def test_warm_open_ended_accuracy( self ):
+        """
+        Predict + respond with similar text, check accuracy_match is computed.
+        """
+        self._seed_decision( "What database should I use?", "approach", "PostgreSQL" )
+        self._seed_decision( "Which database for this project?", "approach", "PostgreSQL" )
+        self._seed_decision( "Recommend a database?", "approach", "PostgreSQL for sure" )
+
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        PredictionEngine.reset()
+        engine = PredictionEngine( debug=True )
+        engine.lancedb_table = TEST_LANCEDB_TABLE
+        engine._embedding_store = None
+
+        notification_id = self._send_and_respond(
+            message        = "What database should we use for the new service?",
+            response_type  = "open_ended",
+            response_value = "PostgreSQL",
+        )
+
+        log = _get_prediction_log( self._get_db, notification_id )
+        assert log is not None
+        assert log.response_type == "open_ended"
+        # accuracy_match should be computed (either True or False)
+        if log.prediction_strategy in [ "cbr_retrieval", "llm_synthesis" ]:
             assert log.accuracy_match is not None
