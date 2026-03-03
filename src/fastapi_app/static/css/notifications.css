@@ -751,6 +751,44 @@
             font-weight: 600;
         }
 
+        /* Prediction engine hint section */
+        .prediction-hint {
+            font-size: 0.85em;
+            color: #5a4e8c;
+            margin-top: 4px;
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            background: #f3f0ff;
+            border-left: 3px solid #7c6bc4;
+            border-radius: 4px;
+            line-height: 1.5;
+        }
+
+        .prediction-hint-label {
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+
+        .prediction-hint-strategy {
+            font-size: 0.9em;
+            color: #7c6bc4;
+            font-style: italic;
+        }
+
+        .prediction-hint-cold {
+            background: #faf9ff;
+            border-left: 3px dashed #b8b0d8;
+            color: #9990b3;
+        }
+
+        .prediction-hint-cold .prediction-hint-label {
+            font-weight: 500;
+        }
+
+        .prediction-hint-cold .prediction-hint-strategy {
+            color: #b8b0d8;
+        }
+
         .action-required-progress-bar {
             width: 100%;
             height: 8px;

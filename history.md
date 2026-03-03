@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.03.03 - Session 302 | Slice 6: Prediction Hint UI Rendering — Implementation
+
+#### Checkpoint | 2026.03.03 09:55 | Slice 6 prediction hint UI complete
+
+**Accomplishments**:
+- Implemented `buildPredictionHintSection()` — formats prediction hints by response type (yes_no, multiple_choice, open_ended, open_ended_batch)
+- Implemented `formatStrategyLabel()` — maps strategy constants to human-readable labels
+- Injected `${predictionHintSection}` into `renderActionRequiredNotification()` card template between abstract and progress bar
+- Added purple-toned CSS styling (`.prediction-hint`, `.prediction-hint-label`, `.prediction-hint-strategy`)
+- Added cold-start ghost hint box (`.prediction-hint-cold`) — dashed border, muted text: "Learning, no prediction yet"
+- Unit tests: 1900 passed, no new regressions
+
+**Files**: `src/fastapi_app/static/js/notifications.js`, `src/fastapi_app/static/css/notifications.css`
+**Commit**: 7554e97
+
+---
+
 ### 2026.03.02 - Session 301 | Slice 6: Prediction Hint UI Rendering — Plan Serialization
 
 **Accomplishments**:

@@ -10658,6 +10658,8 @@ class NotificationsUI {
             <div class="action-required-abstract">${this.renderMarkdown( notification.abstract )}</div>
         ` : '';
 
+        const predictionHintSection = this.buildPredictionHintSection( notification );
+
         card.innerHTML = `
             <div class="action-required-header">
                 <button class="action-required-cancel-btn" data-notification-id="${notification.id}" title="Cancel and use default (Esc)">
@@ -10673,6 +10675,7 @@ class NotificationsUI {
             </div>
             <div class="action-required-message">${notification.message}</div>
             ${abstractSection}
+            ${predictionHintSection}
             <div class="action-required-progress-bar">
                 <div class="action-required-progress-fill" id="progress-${notification.id}" style="width: 100%;"></div>
             </div>
@@ -10853,6 +10856,98 @@ class NotificationsUI {
                 </div>
             </div>
         `;
+    }
+
+    /**
+     * Builds prediction hint HTML section for action-required notification cards.
+     *
+     * Requires:
+     *   - notification object with optional prediction_hint field
+     *   - notification.response_type indicates the type of response expected
+     *
+     * Ensures:
+     *   - Returns ghost hint box if prediction_hint is null/undefined (cold start)
+     *   - Returns formatted HTML div for yes_no, multiple_choice, open_ended, open_ended_batch
+     *   - Displays predicted value, confidence percentage, and strategy label
+     */
+    buildPredictionHintSection( notification ) {
+        const hint = notification.prediction_hint;
+        if ( !hint ) {
+            return `
+                <div class="prediction-hint prediction-hint-cold">
+                    <div class="prediction-hint-label">Learning, no prediction yet</div>
+                </div>
+            `;
+        }
+
+        const confidence   = Math.round( hint.confidence * 100 );
+        const strategy     = this.formatStrategyLabel( hint.strategy );
+        const responseType = notification.response_type;
+
+        let predictedText = '';
+
+        if ( responseType === 'yes_no' ) {
+            const value = typeof hint.predicted_value === 'string'
+                ? hint.predicted_value.charAt( 0 ).toUpperCase() + hint.predicted_value.slice( 1 )
+                : hint.predicted_value;
+            predictedText = hint.predicted_qualifier
+                ? `Predicted: ${value} — "${hint.predicted_qualifier}" (${confidence}%)`
+                : `Predicted: ${value} (${confidence}%)`;
+
+        } else if ( responseType === 'multiple_choice' ) {
+            const answers = hint.predicted_value?.answers;
+            if ( answers ) {
+                const parts = Object.entries( answers ).map( ( [ header, val ] ) => {
+                    return Array.isArray( val ) ? `${header}: [${val.join( ', ' )}]` : `${header}: ${val}`;
+                } );
+                predictedText = `Predicted: ${parts.join( '; ' )} (${confidence}%)`;
+            }
+
+        } else if ( responseType === 'open_ended' ) {
+            const value = typeof hint.predicted_value === 'string'
+                ? hint.predicted_value
+                : JSON.stringify( hint.predicted_value );
+            predictedText = `Predicted: "${value}" (${confidence}%)`;
+
+        } else if ( responseType === 'open_ended_batch' ) {
+            const answers = hint.predicted_value?.answers;
+            if ( answers ) {
+                const parts = Object.entries( answers ).map( ( [ header, val ] ) =>
+                    `${header}: "${val}"`
+                );
+                predictedText = `Predicted: ${parts.join( '; ' )} (${confidence}%)`;
+            }
+        }
+
+        if ( !predictedText ) return '';
+
+        return `
+            <div class="prediction-hint">
+                <div class="prediction-hint-label">${predictedText}</div>
+                <div class="prediction-hint-strategy">${strategy}</div>
+            </div>
+        `;
+    }
+
+    /**
+     * Maps prediction strategy constants to human-readable labels.
+     *
+     * Requires:
+     *   - strategy is a string constant from PredictionEngine
+     *
+     * Ensures:
+     *   - Returns human-readable label for known strategies
+     *   - Returns raw strategy string as fallback for unknown strategies
+     */
+    formatStrategyLabel( strategy ) {
+        const labels = {
+            'cbr_majority_vote'       : 'Based on majority vote',
+            'cbr_retrieval'           : 'Based on exact match retrieval',
+            'llm_synthesis'           : 'Based on LLM synthesis',
+            'option_embedding_scoring': 'Based on option scoring',
+            'cold_start'              : 'No prediction data'
+        };
+        return labels[ strategy ] || strategy;
     }
 
     /**
