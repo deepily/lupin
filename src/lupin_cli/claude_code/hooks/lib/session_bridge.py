@@ -9,6 +9,11 @@ from hook scripts and MCP server processes:
     2. Session file written by SessionStart hook (~/.claude/sessions/cc-{ppid}.json)
     3. Fallback to self-generated UUID (backward compatible)
 
+CWD fallback safety:
+    - PPID/grandparent matches are the definitive session file → cached
+    - CWD fallback is a best-guess from another session → NOT cached
+    - Dead PIDs (from exited CC processes) are skipped in CWD fallback
+
 Adapted from research at:
     src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/
     creating-unique-session-id/session_bridge.py
@@ -16,7 +21,7 @@ Adapted from research at:
 Usage from hook scripts:
     from lupin_cli.claude_code.hooks.lib.session_bridge import (
         get_claude_session_id, wait_for_session_id, get_session_metadata,
-        build_sender_id_for_cc
+        build_sender_id_for_cc, clear_cached_session_id
     )
 
     # Non-blocking (returns fallback immediately if not yet available)
@@ -24,13 +29,17 @@ Usage from hook scripts:
 
     # Blocking with timeout (waits for SessionStart hook to fire)
     session_id = wait_for_session_id( timeout=10.0 )
+
+    # Force re-resolution (e.g., after context clear)
+    clear_cached_session_id()
 """
 import json
 import os
+import re
 import time
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 
 SESSION_DIR = Path.home() / ".claude" / "sessions"
@@ -39,8 +48,76 @@ SESSION_DIR = Path.home() / ".claude" / "sessions"
 _cached_session_id: Optional[str] = None
 _fallback_session_id: str = uuid.uuid4().hex[:8]
 
+# Resolution source constants
+SOURCE_PPID         = "ppid"
+SOURCE_GRANDPARENT  = "grandparent"
+SOURCE_CWD_FALLBACK = "cwd_fallback"
 
-def _find_session_file() -> Optional[Path]:
+
+def _is_pid_alive( pid: int ) -> bool:
+    """
+    Check if a process with the given PID is alive.
+
+    Requires:
+        - pid is a positive integer
+
+    Ensures:
+        - Returns True if the process exists and is signalable
+        - Returns False if the process is dead or inaccessible
+
+    Args:
+        pid: Process ID to check
+
+    Returns:
+        bool: True if process is alive
+    """
+    try:
+        os.kill( pid, 0 )
+        return True
+    except ( ProcessLookupError, PermissionError, OSError ):
+        return False
+
+
+def _extract_pid_from_filename( filename: str ) -> Optional[int]:
+    """
+    Extract PID from a session bridge filename like 'cc-12345.json'.
+
+    Requires:
+        - filename is a string
+
+    Ensures:
+        - Returns int PID if filename matches cc-{digits}.json pattern
+        - Returns None if filename doesn't match
+
+    Args:
+        filename: Session file name (not full path)
+
+    Returns:
+        int or None: Extracted PID
+    """
+    match = re.match( r"^cc-(\d+)\.json$", filename )
+    if match:
+        return int( match.group( 1 ) )
+    return None
+
+
+def clear_cached_session_id():
+    """
+    Reset the cached session ID, forcing re-resolution on next call.
+
+    Use this when the session bridge file has been overwritten (e.g.,
+    after a context clear) and the MCP server needs to pick up the
+    new session ID.
+
+    Ensures:
+        - _cached_session_id is set to None
+        - Next call to get_claude_session_id() will re-read from file
+    """
+    global _cached_session_id
+    _cached_session_id = None
+
+
+def _find_session_file() -> Optional[ Tuple[ Path, str ] ]:
     """
     Find the session file for the current process's parent (Claude Code).
 
@@ -48,16 +125,22 @@ def _find_session_file() -> Optional[Path]:
     Hook scripts are spawned by Claude Code, so PPID points to CC.
     MCP servers may have an intermediate wrapper, so grandparent is checked too.
 
+    Returns a (path, source) tuple where source indicates how the file was
+    found. This distinction is critical for caching safety:
+        - "ppid" / "grandparent": definitive match → safe to cache
+        - "cwd_fallback": best-guess from another session → NOT cached
+
     Requires:
         - SESSION_DIR may or may not exist
 
     Ensures:
-        - Returns Path to session file if found
+        - Returns ( Path, source_str ) if a session file is found
         - Returns None if no matching file exists
         - Checks: own PPID → grandparent PID → CWD-matching file (fallback)
+        - CWD fallback skips files from dead PIDs
 
     Returns:
-        Path or None: Path to session file
+        Tuple[ Path, str ] or None: ( path, source ) or None
     """
     if not SESSION_DIR.exists():
         return None
@@ -66,7 +149,7 @@ def _find_session_file() -> Optional[Path]:
     ppid = os.getppid()
     direct = SESSION_DIR / f"cc-{ppid}.json"
     if direct.exists():
-        return direct
+        return ( direct, SOURCE_PPID )
 
     # Try grandparent (hook script → wrapper → Claude Code)
     try:
@@ -81,19 +164,25 @@ def _find_session_file() -> Optional[Path]:
         gppid = int( fields_after_comm[1] )
         grandparent = SESSION_DIR / f"cc-{gppid}.json"
         if grandparent.exists():
-            return grandparent
+            return ( grandparent, SOURCE_GRANDPARENT )
     except ( FileNotFoundError, IndexError, ValueError, PermissionError, OSError ):
         pass
 
     # Fallback: find most recent session file scoped to same CWD (project)
+    # Skip files whose PID is dead (stale bridge files from exited CC processes)
     my_cwd = os.getcwd()
     for path in sorted( SESSION_DIR.glob( "cc-*.json" ),
                         key=lambda p: p.stat().st_mtime, reverse=True ):
         try:
+            # PID liveness check: skip bridge files from dead processes
+            file_pid = _extract_pid_from_filename( path.name )
+            if file_pid is not None and not _is_pid_alive( file_pid ):
+                continue
+
             with open( path ) as f:
                 data = json.load( f )
             if data.get( "cwd", "" ) == my_cwd:
-                return path
+                return ( path, SOURCE_CWD_FALLBACK )
         except ( json.JSONDecodeError, OSError ):
             continue
 
@@ -135,9 +224,13 @@ def get_claude_session_id() -> str:
         3. Session file from SessionStart hook
         4. Self-generated fallback UUID
 
+    Caching safety:
+        - Tier 1 (env var) and Tier 2 (PPID/grandparent match) → cached
+        - CWD fallback → NOT cached (could be from another session)
+
     Ensures:
         - Always returns a string (never None)
-        - Caches resolved value for subsequent calls
+        - Caches resolved value for PPID/grandparent matches only
 
     Returns:
         str: Session ID (8-char hex fallback, or full ID from Claude Code)
@@ -154,11 +247,14 @@ def get_claude_session_id() -> str:
         return env_id
 
     # Tier 2: Session file from hook
-    session_file = _find_session_file()
-    if session_file:
+    result = _find_session_file()
+    if result:
+        session_file, source = result
         file_id = _read_session_file( session_file )
         if file_id:
-            _cached_session_id = file_id
+            # Only cache definitive matches — CWD fallback is a guess
+            if source != SOURCE_CWD_FALLBACK:
+                _cached_session_id = file_id
             return file_id
 
     # Tier 3: Fallback
@@ -172,6 +268,9 @@ def wait_for_session_id( timeout: float = 10.0, poll_interval: float = 0.5 ) -> 
     Blocks until SessionStart hook writes the session file, or timeout.
     Useful for MCP server initialization where you want the real ID.
 
+    Always bypasses the cache to ensure fresh resolution — this function
+    is specifically for waiting on the real session file to appear.
+
     Requires:
         - timeout is a positive float
         - poll_interval is a positive float less than timeout
@@ -179,7 +278,7 @@ def wait_for_session_id( timeout: float = 10.0, poll_interval: float = 0.5 ) -> 
     Ensures:
         - Returns real session ID if found within timeout
         - Returns fallback UUID if timeout expires
-        - Caches resolved value
+        - Caches resolved value (PPID/grandparent matches only)
 
     Args:
         timeout: Max seconds to wait (default 10)
@@ -190,23 +289,22 @@ def wait_for_session_id( timeout: float = 10.0, poll_interval: float = 0.5 ) -> 
     """
     global _cached_session_id
 
-    # Already resolved?
-    if _cached_session_id:
-        return _cached_session_id
-
+    # Always check env var first (no polling needed)
     env_id = os.getenv( "CLAUDE_SESSION_ID" )
     if env_id:
         _cached_session_id = env_id
         return env_id
 
-    # Poll for session file
+    # Poll for session file — bypass cache for fresh resolution
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        session_file = _find_session_file()
-        if session_file:
+        result = _find_session_file()
+        if result:
+            session_file, source = result
             file_id = _read_session_file( session_file )
             if file_id:
-                _cached_session_id = file_id
+                if source != SOURCE_CWD_FALLBACK:
+                    _cached_session_id = file_id
                 return file_id
         time.sleep( poll_interval )
 
@@ -261,6 +359,7 @@ def get_session_metadata() -> dict:
     Ensures:
         - Returns dict with at least session_id and source keys
         - source indicates resolution tier: "env_var", "session_file", or "fallback"
+        - resolution_source indicates how the file was found (ppid, grandparent, cwd_fallback)
 
     Returns:
         dict: Session metadata with session_id, transcript_path, cwd, source
@@ -274,12 +373,14 @@ def get_session_metadata() -> dict:
             "source"          : "env_var"
         }
 
-    session_file = _find_session_file()
-    if session_file:
+    result = _find_session_file()
+    if result:
+        session_file, resolution_source = result
         try:
             with open( session_file ) as f:
                 data = json.load( f )
-            data["source"] = "session_file"
+            data["source"]            = "session_file"
+            data["resolution_source"] = resolution_source
             return data
         except ( json.JSONDecodeError, OSError ):
             pass

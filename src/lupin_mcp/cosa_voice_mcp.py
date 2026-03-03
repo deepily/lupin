@@ -36,6 +36,7 @@ import logging
 import os
 import signal
 import sys
+import time
 import threading
 from typing import Optional
 
@@ -63,7 +64,8 @@ from cosa.utils.notification_utils import (
 )
 from cosa.agents.utils.sender_id import detect_project as _detect_project_shared
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
-    get_claude_session_id, wait_for_session_id, get_session_metadata as _get_cc_metadata
+    get_claude_session_id, wait_for_session_id, get_session_metadata as _get_cc_metadata,
+    clear_cached_session_id, _find_session_file, _read_session_file
 )
 
 
@@ -192,16 +194,26 @@ logger.info( f"Sender ID: {SENDER_ID}" )
 logger.info( f"Server URL: {SERVER_URL}" )
 
 
-def _upgrade_session_id_background():
+def _session_watcher_thread():
     """
-    Background daemon thread that polls for the real CC session_id.
+    Persistent daemon thread that resolves and monitors the CC session_id.
 
-    After resolution completes, signals _session_ready so gated tool calls
-    can proceed. If only the fallback UUID was found (no session bridge file),
-    logs a warning but continues — this is expected for hookless projects.
+    Phase 1 (Initial resolution):
+        Polls for the real CC session_id via wait_for_session_id(). Signals
+        _session_ready so gated tool calls can proceed.
+
+    Phase 2 (Continuous monitoring):
+        Watches the resolved bridge file for changes (mtime check every 2s).
+        If the session ID changes (context clear), updates SESSION_ID and
+        SENDER_ID atomically. Clears the session bridge cache before each
+        poll to ensure fresh resolution.
+
+    This replaces the one-shot _upgrade_session_id_background() to handle
+    context clears that overwrite the bridge file mid-session.
     """
     global SESSION_ID, SENDER_ID, _session_failed
 
+    # ── Phase 1: Initial resolution ─────────────────────────────────────
     try:
         real_id    = wait_for_session_id( timeout=10.0, poll_interval=1.0 )
         new_suffix = real_id[:8]
@@ -215,8 +227,6 @@ def _upgrade_session_id_background():
         # Verify we got a real session ID, not the fallback
         meta = _get_cc_metadata()
         if meta.get( "source" ) == "fallback":
-            # No session bridge file found — this is expected for hookless projects.
-            # Fallback UUID is unique per process and never changes — no orphan risk.
             logger.warning( "No session bridge file found for this project" )
             logger.warning( f"Using stable fallback sender_id: {SENDER_ID}" )
         else:
@@ -229,13 +239,64 @@ def _upgrade_session_id_background():
     finally:
         _session_ready.set()
 
+    # ── Phase 2: Persistent bridge file watcher ─────────────────────────
+    # Track the last-seen mtime and session ID for change detection
+    last_mtime      = 0.0
+    last_session_id = SESSION_ID
+    poll_interval   = 2.0  # seconds
 
-_upgrade_thread = threading.Thread(
-    target=_upgrade_session_id_background,
-    name="session-id-upgrade",
+    logger.info( "Session watcher: entering persistent monitoring loop" )
+
+    while True:
+        try:
+            time.sleep( poll_interval )
+
+            # Clear cache so _find_session_file() does a fresh lookup
+            clear_cached_session_id()
+
+            result = _find_session_file()
+            if result is None:
+                continue
+
+            bridge_path, _source = result
+
+            # Check if file was modified
+            try:
+                current_mtime = bridge_path.stat().st_mtime
+            except OSError:
+                continue
+
+            if current_mtime <= last_mtime:
+                continue
+
+            last_mtime = current_mtime
+
+            # Re-read the session ID
+            file_id = _read_session_file( bridge_path )
+            if not file_id:
+                continue
+
+            new_suffix = file_id[:8]
+            if new_suffix != last_session_id:
+                old_sender     = SENDER_ID
+                SESSION_ID     = new_suffix
+                SENDER_ID      = _get_sender_id( PROJECT, SESSION_ID )
+                last_session_id = new_suffix
+                logger.info(
+                    f"Session ID changed: {old_sender} -> {SENDER_ID} "
+                    f"(context clear detected)"
+                )
+
+        except Exception as e:
+            logger.error( f"Session watcher error: {e}" )
+
+
+_watcher_thread = threading.Thread(
+    target=_session_watcher_thread,
+    name="session-id-watcher",
     daemon=True
 )
-_upgrade_thread.start()
+_watcher_thread.start()
 
 
 def _die_no_session_id():

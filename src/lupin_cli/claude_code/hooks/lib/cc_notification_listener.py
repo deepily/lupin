@@ -278,9 +278,18 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     async def run( self ):
         """
-        Start the listener with logging setup and shutdown stats.
+        Start the listener with logging setup, shutdown stats, and infinite restart.
 
-        Overrides base to add log file handling and statistics.
+        Wraps super().run() in an outer restart loop: if the base listener
+        exhausts its RECONNECT_MAX_ATTEMPTS (10), this method waits 60 seconds
+        and restarts the connection cycle. This prevents voice input from being
+        silently dropped when the Lupin server is temporarily down.
+
+        The restart loop only exits on explicit shutdown (SIGTERM/SIGINT via
+        self._running = False). It does NOT modify RECONNECT_MAX_ATTEMPTS
+        (other proxy agents use it).
+
+        Overrides base to add log file handling, statistics, and restart resilience.
         """
         self._setup_logging()
 
@@ -290,8 +299,33 @@ class CCNotificationListener( BaseWebSocketListener ):
         self._log( f"{self.LOG_PREFIX} Debug        : {self.debug}" )
         self._log( f"{self.LOG_PREFIX} Verbose      : {self.verbose}" )
 
+        restart_cycle   = 0
+        restart_cooldown = 60  # seconds
+
         try:
-            await super().run()
+            while self._running:
+                restart_cycle += 1
+                if restart_cycle > 1:
+                    self._log(
+                        f"{self.LOG_PREFIX} Restarting after reconnect exhaustion "
+                        f"(cycle {restart_cycle})"
+                    )
+
+                # Reset the attempt counter so base listener gets a fresh set
+                self._attempt  = 0
+                self._connected = False
+
+                await super().run()
+
+                # If we're still running, super().run() returned because it
+                # exhausted RECONNECT_MAX_ATTEMPTS — wait and retry
+                if self._running:
+                    self._log(
+                        f"{self.LOG_PREFIX} Reconnects exhausted. "
+                        f"Cooling down for {restart_cooldown}s before restart..."
+                    )
+                    await asyncio.sleep( restart_cooldown )
+
         finally:
             self._print_stats()
             if self._log_file:

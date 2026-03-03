@@ -24,8 +24,10 @@ Install in .claude/settings.local.json:
 """
 import json
 import os
+import signal
 import subprocess
 import sys
+import time
 
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
 _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
@@ -163,6 +165,91 @@ def _spawn_listener( session_id, session_data, session_file ):
         return None  # Spawn failure is non-fatal
 
 
+def _cleanup_old_listener( old_session_data, new_session_id ):
+    """
+    Kill old listener and forward buffer messages on context clear.
+
+    When CC performs a context clear, the same PID gets a new session ID.
+    The old listener is still running and filtering for the old session hash.
+    This function:
+        1. Sends SIGTERM to the old listener (3s timeout, then SIGKILL)
+        2. Forwards any remaining messages from old buffer to new buffer
+        3. Deletes the old buffer file
+
+    Requires:
+        - old_session_data is a dict with listener_pid and session_id keys
+        - new_session_id is a non-empty string
+
+    Ensures:
+        - Old listener process is terminated
+        - Buffer messages are forwarded (best-effort)
+        - Old buffer file is deleted
+        - Never raises exceptions (all errors are logged but non-fatal)
+
+    Args:
+        old_session_data: Session bridge data from previous session
+        new_session_id: New session ID after context clear
+    """
+    old_listener_pid = old_session_data.get( "listener_pid" )
+    old_session_id   = old_session_data.get( "session_id", "" )
+    old_hash         = old_session_id[:8] if old_session_id else ""
+    new_hash         = new_session_id[:8] if new_session_id else ""
+
+    session_dir = os.path.expanduser( "~/.claude/sessions" )
+
+    # Step 1: Kill old listener
+    if old_listener_pid:
+        try:
+            os.kill( old_listener_pid, 0 )  # Check if alive
+            os.kill( old_listener_pid, signal.SIGTERM )
+
+            # Wait up to 3 seconds for graceful shutdown
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                try:
+                    os.kill( old_listener_pid, 0 )
+                    time.sleep( 0.2 )
+                except ProcessLookupError:
+                    break
+            else:
+                # Still alive after 3s — force kill
+                try:
+                    os.kill( old_listener_pid, signal.SIGKILL )
+                except ProcessLookupError:
+                    pass
+
+        except ProcessLookupError:
+            pass  # Already dead
+        except ( PermissionError, OSError ):
+            pass  # Can't signal it
+
+    # Step 2: Forward buffer messages from old hash to new hash
+    if old_hash and new_hash and old_hash != new_hash:
+        old_buffer = os.path.join( session_dir, f"cc-buffer-{old_hash}.jsonl" )
+        new_buffer = os.path.join( session_dir, f"cc-buffer-{new_hash}.jsonl" )
+
+        if os.path.exists( old_buffer ):
+            try:
+                with open( old_buffer, "r" ) as f_old:
+                    lines = f_old.readlines()
+
+                if lines:
+                    with open( new_buffer, "a" ) as f_new:
+                        for line in lines:
+                            try:
+                                entry = json.loads( line.strip() )
+                                entry[ "job_id" ]       = new_hash
+                                entry[ "forwarded_from" ] = old_hash
+                                f_new.write( json.dumps( entry ) + "\n" )
+                            except ( json.JSONDecodeError, KeyError ):
+                                f_new.write( line )
+
+                os.remove( old_buffer )
+
+            except OSError:
+                pass  # Best-effort
+
+
 def main():
 
     # ── Phase 1: Read hook input ──────────────────────────────────────────
@@ -178,6 +265,7 @@ def main():
     # ── Phase 2: Write session bridge file ────────────────────────────────
     session_dir  = os.path.expanduser( "~/.claude/sessions" )
     session_file = None
+    is_context_clear = False
 
     if session_id:
         os.makedirs( session_dir, exist_ok=True )
@@ -185,6 +273,19 @@ def main():
         hook_ppid    = os.getppid()
         cc_pid       = _resolve_cc_pid( hook_ppid )
         session_file = os.path.join( session_dir, f"cc-{cc_pid}.json" )
+
+        # ── Context clear detection ──────────────────────────────────
+        # Same PID but different session ID → context clear happened
+        if os.path.exists( session_file ):
+            try:
+                with open( session_file ) as f:
+                    old_data = json.load( f )
+                old_session_id = old_data.get( "session_id", "" )
+                if old_session_id and old_session_id != session_id:
+                    is_context_clear = True
+                    _cleanup_old_listener( old_data, session_id )
+            except ( json.JSONDecodeError, OSError ):
+                pass  # Can't read old data, proceed normally
 
         session_data = {
             "session_id"      : session_id,
@@ -213,7 +314,6 @@ def main():
 
     # ── Phase 4: Purge stale session files (>24h old) ─────────────────────
     try:
-        import time
         now = time.time()
         for entry in os.listdir( session_dir ) if os.path.isdir( session_dir ) else []:
             if entry.startswith( "cc-" ) and entry.endswith( ".json" ):
@@ -228,7 +328,10 @@ def main():
     # SessionStart hook has session_id from payload — build sender_id directly
     # (can't rely on session file yet; this hook is the one writing it)
     hook_sender_id = build_sender_id_for_cc( session_id=session_id ) if session_id else None
-    send_tts( f"Hook fired: SessionStart — session {short_id}", sender_id=hook_sender_id )
+    if is_context_clear:
+        send_tts( f"Hook fired: SessionStart (context clear) — new session {short_id}", sender_id=hook_sender_id )
+    else:
+        send_tts( f"Hook fired: SessionStart — session {short_id}", sender_id=hook_sender_id )
 
     # ── Phase 5.5: Spawn CC Notification Listener ──────────────────────
     listener_pid = _spawn_listener( session_id, session_data if session_id else None, session_file )

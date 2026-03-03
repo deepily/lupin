@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.03.03 - Session 305 | CC Session Routing — 5 Root Cause Fixes for Context Clear Mis-routing
+
+**Accomplishments**:
+- **Fix 1+5 (session_bridge.py)**: `_find_session_file()` now returns `(path, source)` tuple — CWD fallback results are NOT cached (only PPID/grandparent matches). Added PID liveness check (`os.kill(pid, 0)`) to skip bridge files from dead CC processes. Added `clear_cached_session_id()` export. `wait_for_session_id()` bypasses cache for fresh resolution.
+- **Fix 2 (cosa_voice_mcp.py)**: Replaced one-shot `_upgrade_session_id_background()` with persistent `_session_watcher_thread()` daemon — polls bridge file every 2s for mtime changes, updates `SESSION_ID`/`SENDER_ID` atomically on context clear detection.
+- **Fix 3 (cc_notification_listener.py)**: Wrapped `super().run()` in infinite restart loop with 60s cooling period — listener now recovers after exhausting 10 reconnect attempts instead of dying permanently.
+- **Fix 4 (register_session.py)**: Context clear detection (same PID, different session ID) triggers `_cleanup_old_listener()` — SIGTERM with 3s grace → SIGKILL, buffer message forwarding from old to new hash, then new listener spawn.
+- Unit tests: 1910 passed, 0 new regressions
+
+**Files Modified**: 4 files
+- `src/lupin_cli/claude_code/hooks/lib/session_bridge.py` — Fixes 1+5
+- `src/lupin_mcp/cosa_voice_mcp.py` — Fix 2
+- `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` — Fix 3
+- `src/lupin_cli/claude_code/hooks/register_session.py` — Fix 4
+
+**Plan doc**: `~/.claude/plans/vivid-exploring-nebula.md` (plan mode transcript)
+
+---
+
 ### 2026.03.03 - Session 304 | Podcast Generator — 3 Bug Fixes (Session 283 Bugs)
 
 #### Checkpoint | 2026.03.03 | All 3 podcast generator bugs + target_user dispatch fixed
