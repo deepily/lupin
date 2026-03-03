@@ -95,7 +95,7 @@ async function apiCall( endpoint, method = 'GET', data = null, includeAuth = tru
         headers: headers
     };
 
-    if ( data && ( method === 'POST' || method === 'PUT' ) ) {
+    if ( data && ( method === 'POST' || method === 'PUT' || method === 'DELETE' ) ) {
         options.body = JSON.stringify( data );
     }
 

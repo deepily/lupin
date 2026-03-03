@@ -940,3 +940,197 @@ def test_cannot_delete_sole_admin( admin_headers, create_test_admin ):
 
     # This should succeed since the test admin still exists
     assert delete_second.status_code == 200
+
+
+# ============================================================================
+# Batch Delete Tests
+# ============================================================================
+
+def test_batch_delete_multiple_users( admin_headers ):
+    """
+    Test batch deleting multiple users.
+
+    Requires:
+        - admin_headers for authorization
+
+    Ensures:
+        - Returns 200 OK
+        - All users successfully deleted
+        - total_deleted matches count
+        - Deleted users no longer accessible
+    """
+    # Create 3 users to delete
+    user_ids = []
+    for i in range( 3 ):
+        create_response = requests.post( f"{BASE_URL}/admin/users", headers=admin_headers, json={
+            "email"    : f"batchdel{i}@example.com",
+            "password" : f"BatchDel{i}Pass123!"
+        })
+        assert create_response.status_code == 201
+        user_ids.append( create_response.json()["user_id"] )
+
+    # Batch delete
+    response = requests.post( f"{BASE_URL}/admin/users/batch-delete", headers=admin_headers, json={
+        "user_ids" : user_ids,
+        "reason"   : "Integration test batch delete"
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["total_deleted"] == 3
+    assert data["total_failed"] == 0
+    assert len( data["results"] ) == 3
+
+    for result in data["results"]:
+        assert result["success"] is True
+
+    # Verify all users are gone
+    for uid in user_ids:
+        get_response = requests.get( f"{BASE_URL}/admin/users/{uid}", headers=admin_headers )
+        assert get_response.status_code == 404
+
+
+def test_batch_delete_cannot_delete_self( admin_headers, create_test_admin ):
+    """
+    Test self-protection in batch delete.
+
+    Requires:
+        - admin_headers for authorization
+        - create_test_admin user
+
+    Ensures:
+        - Self-delete fails in the results
+        - Other users in batch still get deleted
+    """
+    admin_id = create_test_admin["user_id"]
+
+    # Create a user to include alongside self
+    create_response = requests.post( f"{BASE_URL}/admin/users", headers=admin_headers, json={
+        "email"    : "batchself@example.com",
+        "password" : "BatchSelfPass123!"
+    })
+    assert create_response.status_code == 201
+    other_user_id = create_response.json()["user_id"]
+
+    # Batch delete with self included
+    response = requests.post( f"{BASE_URL}/admin/users/batch-delete", headers=admin_headers, json={
+        "user_ids" : [ admin_id, other_user_id ],
+        "reason"   : "Self-protection test"
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["total_failed"] >= 1
+
+    # Find self-delete result
+    self_result = next( r for r in data["results"] if r["user_id"] == admin_id )
+    assert self_result["success"] is False
+
+    # Other user should be deleted
+    other_result = next( r for r in data["results"] if r["user_id"] == other_user_id )
+    assert other_result["success"] is True
+
+
+def test_batch_delete_empty_list_rejected( admin_headers ):
+    """
+    Test that empty user_ids list is rejected.
+
+    Requires:
+        - admin_headers for authorization
+
+    Ensures:
+        - Returns 422 Unprocessable Entity (Pydantic validation)
+    """
+    response = requests.post( f"{BASE_URL}/admin/users/batch-delete", headers=admin_headers, json={
+        "user_ids" : []
+    })
+
+    assert response.status_code == 422
+
+
+def test_batch_delete_nonexistent_users_partial_failure( admin_headers ):
+    """
+    Test batch delete with mix of valid and nonexistent user IDs.
+
+    Requires:
+        - admin_headers for authorization
+
+    Ensures:
+        - Valid users deleted
+        - Nonexistent users reported as failures
+        - Both results returned
+    """
+    import uuid
+
+    # Create one real user
+    create_response = requests.post( f"{BASE_URL}/admin/users", headers=admin_headers, json={
+        "email"    : "batchpartial@example.com",
+        "password" : "BatchPartialPass123!"
+    })
+    assert create_response.status_code == 201
+    real_user_id = create_response.json()["user_id"]
+
+    fake_id = str( uuid.uuid4() )
+
+    response = requests.post( f"{BASE_URL}/admin/users/batch-delete", headers=admin_headers, json={
+        "user_ids" : [ real_user_id, fake_id ]
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["total_deleted"] == 1
+    assert data["total_failed"] == 1
+
+    real_result = next( r for r in data["results"] if r["user_id"] == real_user_id )
+    assert real_result["success"] is True
+
+    fake_result = next( r for r in data["results"] if r["user_id"] == fake_id )
+    assert fake_result["success"] is False
+
+
+def test_batch_delete_non_admin_rejected( auth_headers ):
+    """
+    Test that non-admin cannot use batch delete endpoint.
+
+    Requires:
+        - auth_headers from regular user
+
+    Ensures:
+        - Returns 403 Forbidden
+    """
+    response = requests.post( f"{BASE_URL}/admin/users/batch-delete", headers=auth_headers, json={
+        "user_ids" : [ "some-id" ]
+    })
+
+    assert response.status_code == 403
+
+
+def test_batch_delete_sole_admin_guard( admin_headers, create_test_admin ):
+    """
+    Test sole-admin guard works in batch context.
+
+    Requires:
+        - admin_headers for authorization
+        - create_test_admin is the sole admin
+
+    Ensures:
+        - Self-protection prevents deleting self (which is the sole admin)
+    """
+    admin_id = create_test_admin["user_id"]
+
+    response = requests.post( f"{BASE_URL}/admin/users/batch-delete", headers=admin_headers, json={
+        "user_ids" : [ admin_id ],
+        "reason"   : "Sole admin guard test"
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["total_failed"] == 1
+    assert data["total_deleted"] == 0
+
+    result = data["results"][ 0 ]
+    assert result["success"] is False

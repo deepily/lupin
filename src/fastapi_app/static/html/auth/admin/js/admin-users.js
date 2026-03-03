@@ -20,6 +20,10 @@ let currentUser = null;
 let selectedUserId = null;
 let confirmCallback = null;
 
+// Batch selection state
+let selectedUserIds  = new Set();
+let currentPageUsers = [];
+
 // ============================================================================
 // API Calls
 // ============================================================================
@@ -149,33 +153,58 @@ async function deleteUser( userId, reason = '' ) {
 // ============================================================================
 
 /**
- * Render users table
+ * Render users table with checkboxes and inline action buttons
  */
 function renderUsersTable( users ) {
     const tbody = document.getElementById( 'users-tbody' );
     tbody.innerHTML = '';
 
+    currentPageUsers = users;
+
     users.forEach( user => {
-        const row = document.createElement( 'tr' );
-        row.className = 'user-row';
-        row.onclick = () => showUserDetails( user.id );
+        const row       = document.createElement( 'tr' );
+        const isChecked = selectedUserIds.has( user.id );
+        row.className   = 'user-row';
+        row.onclick     = () => showUserDetails( user.id );
+
+        const statusIcon = user.is_active ? '⏸️' : '▶️';
+        const statusTip  = user.is_active ? 'Deactivate' : 'Activate';
 
         row.innerHTML = `
+            <td class="checkbox-col" onclick="event.stopPropagation()">
+                <input type="checkbox" ${isChecked ? 'checked' : ''}
+                    onchange="toggleUserSelection( '${user.id}', '${escapeHtml( user.email )}', this.checked )"
+                >
+            </td>
             <td>${escapeHtml( user.email )}</td>
             <td>${getRoleBadges( user.roles )}</td>
             <td>${getStatusBadge( user.is_active )}</td>
             <td>${getVerifiedBadge( user.email_verified )}</td>
             <td>${formatDate( user.created_at )}</td>
             <td>${user.last_login_at ? formatDate( user.last_login_at ) : 'Never'}</td>
-            <td>
-                <button class="btn-icon" onclick="event.stopPropagation(); showUserDetails( '${user.id}' )" title="View Details">
+            <td class="actions-cell" onclick="event.stopPropagation()">
+                <button class="btn-icon" onclick="showUserDetails( '${user.id}' )" title="View Details">
                     👁️
+                </button>
+                <button class="btn-icon-action action-roles" onclick="showRoleEditorForUser( '${user.id}' )" title="Edit Roles">
+                    🛡️
+                </button>
+                <button class="btn-icon-action action-status" onclick="confirmToggleStatusForUser( '${user.id}' )" title="${statusTip}">
+                    ${statusIcon}
+                </button>
+                <button class="btn-icon-action action-reset" onclick="confirmResetPasswordForUser( '${user.id}' )" title="Reset Password">
+                    🔑
+                </button>
+                <button class="btn-icon-action action-delete" onclick="confirmDeleteUserForUser( '${user.id}' )" title="Delete User">
+                    🗑️
                 </button>
             </td>
         `;
 
         tbody.appendChild( row );
     });
+
+    updateSelectAllCheckbox();
 }
 
 /**
@@ -666,6 +695,259 @@ function debounce( func, wait ) {
         clearTimeout( timeout );
         timeout = setTimeout( later, wait );
     };
+}
+
+// ============================================================================
+// Inline Action Wrappers (fetch user details, then delegate to existing handlers)
+// ============================================================================
+
+/**
+ * Show role editor for a user directly from table row
+ */
+async function showRoleEditorForUser( userId ) {
+    try {
+        const user = await getUserDetails( userId );
+        currentUser    = user;
+        selectedUserId = userId;
+        showRoleEditor();
+    } catch ( error ) {
+        console.error( 'Error loading user for role edit:', error );
+    }
+}
+
+/**
+ * Confirm status toggle for a user directly from table row
+ */
+async function confirmToggleStatusForUser( userId ) {
+    try {
+        const user = await getUserDetails( userId );
+        currentUser    = user;
+        selectedUserId = userId;
+        confirmToggleStatus();
+    } catch ( error ) {
+        console.error( 'Error loading user for status toggle:', error );
+    }
+}
+
+/**
+ * Confirm password reset for a user directly from table row
+ */
+async function confirmResetPasswordForUser( userId ) {
+    try {
+        const user = await getUserDetails( userId );
+        currentUser    = user;
+        selectedUserId = userId;
+        confirmResetPassword();
+    } catch ( error ) {
+        console.error( 'Error loading user for password reset:', error );
+    }
+}
+
+/**
+ * Confirm deletion for a user directly from table row
+ */
+async function confirmDeleteUserForUser( userId ) {
+    try {
+        const user = await getUserDetails( userId );
+        currentUser    = user;
+        selectedUserId = userId;
+        confirmDeleteUser();
+    } catch ( error ) {
+        console.error( 'Error loading user for deletion:', error );
+    }
+}
+
+// ============================================================================
+// Batch Selection
+// ============================================================================
+
+/**
+ * Toggle selection for a single user
+ */
+function toggleUserSelection( userId, email, isChecked ) {
+    if ( isChecked ) {
+        selectedUserIds.add( userId );
+    } else {
+        selectedUserIds.delete( userId );
+    }
+    updateSelectAllCheckbox();
+    updateBatchActionBar();
+}
+
+/**
+ * Toggle Select All checkbox (current page only)
+ */
+function toggleSelectAll() {
+    const selectAll = document.getElementById( 'select-all-checkbox' );
+    const checkboxes = document.querySelectorAll( '#users-tbody input[type="checkbox"]' );
+
+    checkboxes.forEach( ( cb, index ) => {
+        cb.checked = selectAll.checked;
+        const user = currentPageUsers[ index ];
+        if ( user ) {
+            if ( selectAll.checked ) {
+                selectedUserIds.add( user.id );
+            } else {
+                selectedUserIds.delete( user.id );
+            }
+        }
+    });
+
+    updateBatchActionBar();
+}
+
+/**
+ * Update Select All checkbox state (checked, unchecked, indeterminate)
+ */
+function updateSelectAllCheckbox() {
+    const selectAll = document.getElementById( 'select-all-checkbox' );
+    if ( !selectAll || currentPageUsers.length === 0 ) return;
+
+    const pageIds       = currentPageUsers.map( u => u.id );
+    const selectedCount = pageIds.filter( id => selectedUserIds.has( id ) ).length;
+
+    if ( selectedCount === 0 ) {
+        selectAll.checked       = false;
+        selectAll.indeterminate = false;
+    } else if ( selectedCount === pageIds.length ) {
+        selectAll.checked       = true;
+        selectAll.indeterminate = false;
+    } else {
+        selectAll.checked       = false;
+        selectAll.indeterminate = true;
+    }
+}
+
+/**
+ * Show/hide batch action bar based on selection count
+ */
+function updateBatchActionBar() {
+    const bar   = document.getElementById( 'batch-action-bar' );
+    const count = document.getElementById( 'batch-count' );
+
+    if ( selectedUserIds.size > 0 ) {
+        count.textContent = `${selectedUserIds.size} user${selectedUserIds.size > 1 ? 's' : ''} selected`;
+        bar.style.display = 'flex';
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+/**
+ * Clear all selections
+ */
+function clearSelection() {
+    selectedUserIds.clear();
+
+    const checkboxes = document.querySelectorAll( '#users-tbody input[type="checkbox"]' );
+    checkboxes.forEach( cb => cb.checked = false );
+
+    updateSelectAllCheckbox();
+    updateBatchActionBar();
+}
+
+// ============================================================================
+// Batch Delete
+// ============================================================================
+
+/**
+ * Show batch delete confirmation modal
+ */
+function confirmBatchDelete() {
+    if ( selectedUserIds.size === 0 ) return;
+
+    // Build email list from currentPageUsers + any persisted selections
+    const emailList = document.getElementById( 'batch-email-list' );
+    emailList.innerHTML = '';
+
+    // Get emails for selected users (from current page data)
+    const selectedEmails = [];
+    currentPageUsers.forEach( user => {
+        if ( selectedUserIds.has( user.id ) ) {
+            selectedEmails.push( user.email );
+        }
+    });
+
+    // Add any IDs not on this page (just show the ID)
+    selectedUserIds.forEach( id => {
+        const found = currentPageUsers.find( u => u.id === id );
+        if ( !found ) {
+            selectedEmails.push( `User ID: ${id}` );
+        }
+    });
+
+    selectedEmails.forEach( email => {
+        const li = document.createElement( 'li' );
+        li.textContent = email;
+        emailList.appendChild( li );
+    });
+
+    // Reset confirmation input
+    document.getElementById( 'batch-delete-confirm-input' ).value = '';
+    document.getElementById( 'batch-delete-confirm-btn' ).disabled = true;
+
+    showElement( 'batch-delete-modal' );
+}
+
+/**
+ * Close batch delete modal
+ */
+function closeBatchDeleteModal() {
+    hideElement( 'batch-delete-modal' );
+}
+
+/**
+ * Validate batch delete confirmation input (must type DELETE)
+ */
+function validateBatchDeleteConfirmation() {
+    const typed = document.getElementById( 'batch-delete-confirm-input' ).value.trim();
+    const btn   = document.getElementById( 'batch-delete-confirm-btn' );
+    btn.disabled = ( typed !== 'DELETE' );
+}
+
+/**
+ * Submit batch delete to API
+ */
+async function submitBatchDelete() {
+    if ( selectedUserIds.size === 0 ) return;
+
+    const userIds = Array.from( selectedUserIds );
+
+    try {
+        const response = await apiCall( '/admin/users/batch-delete', 'POST', {
+            user_ids : userIds,
+            reason   : 'Batch delete from admin UI'
+        });
+
+        // Process results
+        const successCount = response.total_deleted || 0;
+        const failCount    = response.total_failed || 0;
+
+        let message = `Batch delete complete: ${successCount} deleted`;
+        if ( failCount > 0 ) {
+            message += `, ${failCount} failed`;
+            // Show failure details
+            const failures = ( response.results || [] ).filter( r => !r.success );
+            if ( failures.length > 0 ) {
+                const failMessages = failures.map( f => f.message ).join( '; ' );
+                message += ` (${failMessages})`;
+            }
+        }
+
+        if ( failCount > 0 ) {
+            showError( 'error-message', message );
+        } else {
+            showSuccess( 'success-message', message );
+        }
+
+        closeBatchDeleteModal();
+        clearSelection();
+        await loadUsers( currentPage );
+
+    } catch ( error ) {
+        showError( 'error-message', 'Batch delete failed: ' + error.message );
+        console.error( 'Batch delete error:', error );
+    }
 }
 
 // ============================================================================

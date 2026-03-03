@@ -59,11 +59,25 @@
             <p class="mt-2">Loading users...</p>
         </div>
 
+        <!-- Batch Action Bar (hidden until selection) -->
+        <div id="batch-action-bar" class="batch-action-bar" style="display: none;">
+            <span class="batch-count" id="batch-count">0 users selected</span>
+            <button class="btn btn-danger btn-small" onclick="confirmBatchDelete()">
+                Delete Selected
+            </button>
+            <button class="btn btn-secondary btn-small" onclick="clearSelection()">
+                Cancel
+            </button>
+        </div>
+
         <!-- Users Table -->
         <div id="users-table-container" style="display: none;">
             <table class="users-table">
                 <thead>
                     <tr>
+                        <th class="checkbox-col">
+                            <input type="checkbox" id="select-all-checkbox" onclick="toggleSelectAll()" title="Select All">
+                        </th>
                         <th>Email</th>
                         <th>Roles</th>
                         <th>Status</th>
@@ -275,6 +289,43 @@
                     Delete Permanently
                 </button>
                 <button class="btn btn-secondary" onclick="closeDeleteConfirmModal()">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Batch Delete Confirmation Modal -->
+    <div id="batch-delete-modal" class="modal">
+        <div class="modal-content modal-confirm">
+            <h2>Batch Delete Users</h2>
+
+            <div class="delete-confirm-body">
+                <p class="warning-text">
+                    <strong>WARNING:</strong> This will permanently delete the following users.
+                    This action cannot be undone.
+                </p>
+
+                <p>Users to delete:</p>
+                <ul class="batch-email-list" id="batch-email-list">
+                    <!-- Populated by JavaScript -->
+                </ul>
+
+                <p>Type <strong>DELETE</strong> to confirm:</p>
+                <input
+                    type="text"
+                    id="batch-delete-confirm-input"
+                    class="form-input"
+                    placeholder="Type DELETE to confirm"
+                    oninput="validateBatchDeleteConfirmation()"
+                >
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-danger" id="batch-delete-confirm-btn" onclick="submitBatchDelete()" disabled>
+                    Delete All Selected
+                </button>
+                <button class="btn btn-secondary" onclick="closeBatchDeleteModal()">
                     Cancel
                 </button>
             </div>

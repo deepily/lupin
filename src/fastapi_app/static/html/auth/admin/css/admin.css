@@ -446,6 +446,144 @@
 }
 
 /* ============================================================================
+   Inline Action Buttons
+   ============================================================================ */
+
+.actions-cell {
+    white-space: nowrap;
+    min-width: 180px;
+}
+
+.btn-icon-action {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    opacity: 0.7;
+}
+
+.btn-icon-action:hover {
+    opacity: 1;
+}
+
+.btn-icon-action.action-roles:hover {
+    background-color: #ebf5fb;
+}
+
+.btn-icon-action.action-status:hover {
+    background-color: #fef9e7;
+}
+
+.btn-icon-action.action-reset:hover {
+    background-color: #fdf2e9;
+}
+
+.btn-icon-action.action-delete:hover {
+    background-color: #fdedec;
+}
+
+/* ============================================================================
+   Warning Button (referenced but never defined)
+   ============================================================================ */
+
+.btn-warning {
+    background-color: #f59e0b;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: background-color 0.2s;
+}
+
+.btn-warning:hover {
+    background-color: #d97706;
+}
+
+/* ============================================================================
+   Batch Selection & Action Bar
+   ============================================================================ */
+
+.checkbox-col {
+    width: 40px;
+    text-align: center;
+}
+
+.checkbox-col input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.users-table td.checkbox-col,
+.users-table th.checkbox-col {
+    padding: 12px 8px;
+    text-align: center;
+}
+
+.batch-action-bar {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 12px 20px;
+    background: linear-gradient( 135deg, #fef3c7 0%, #fde68a 100% );
+    border: 1px solid #f59e0b;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY( -10px );
+    }
+    to {
+        opacity: 1;
+        transform: translateY( 0 );
+    }
+}
+
+.batch-action-bar .batch-count {
+    font-weight: 600;
+    color: #92400e;
+    font-size: 14px;
+}
+
+.batch-action-bar .btn {
+    font-size: 13px;
+    padding: 6px 14px;
+}
+
+.batch-email-list {
+    max-height: 200px;
+    overflow-y: auto;
+    background: #f7fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 10px;
+    margin: 10px 0;
+    font-size: 13px;
+    text-align: left;
+}
+
+.batch-email-list li {
+    padding: 4px 0;
+    color: #4a5568;
+    list-style: none;
+    border-bottom: 1px solid #edf2f7;
+}
+
+.batch-email-list li:last-child {
+    border-bottom: none;
+}
+
+/* ============================================================================
    Delete User Confirmation
    ============================================================================ */
 
@@ -532,5 +670,18 @@
 
     .modal-actions .btn {
         width: 100%;
+    }
+
+    .actions-cell {
+        min-width: 120px;
+    }
+
+    .btn-icon-action {
+        font-size: 14px;
+        padding: 3px 4px;
+    }
+
+    .batch-action-bar {
+        flex-wrap: wrap;
     }
 }

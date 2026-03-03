@@ -1,5 +1,26 @@
 # Lupin Project History
 
+### 2026.03.02 - Session 299 | Admin UI: Batch Delete + Promoted Action Buttons
+
+**Accomplishments**:
+- Added batch delete endpoint `POST /admin/users/batch-delete` — reuses existing `admin_delete_user()` per user for full safety (self-protection, sole-admin guard, token revocation, audit logging)
+- Promoted 4 action buttons (Edit Roles, Toggle Status, Reset Password, Delete) from detail modal to inline icons on each table row
+- Added checkbox-based batch selection with Select All (indeterminate state), persistent selections across page navigation, and batch action bar
+- Added batch delete confirmation modal requiring user to type "DELETE" to confirm
+- Fixed bug in `apiCall()` — DELETE requests were silently dropping request body (only POST/PUT sent body)
+- Added `.btn-warning` CSS class (was referenced but never defined)
+- Added 6 new integration tests for batch delete scenarios (happy path, self-protection, empty list, partial failure, non-admin rejection, sole-admin guard)
+
+**Files Modified**: 6 files
+- `src/cosa/rest/routers/admin.py` — +3 Pydantic models, +1 batch delete endpoint (CoSA nested repo)
+- `src/fastapi_app/static/html/auth/js/auth.js` — Bug fix: DELETE body inclusion
+- `src/fastapi_app/static/html/auth/admin/users.html` — Checkbox th, batch bar, batch delete modal
+- `src/fastapi_app/static/html/auth/admin/js/admin-users.js` — Inline actions, selection mgmt, batch delete
+- `src/fastapi_app/static/html/auth/admin/css/admin.css` — Action cells, batch bar, checkbox, btn-warning
+- `src/tests/integration/test_admin_users.py` — 6 batch delete integration tests
+
+---
+
 ### 2026.03.02 - Session 298 | Admin UI: Create User & Delete User
 
 **Accomplishments**:
