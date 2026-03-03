@@ -1,5 +1,38 @@
 # Lupin Project History
 
+### 2026.03.03 - Session 306 | Podcast Notification Routing + Silent TTS Failure Visibility
+
+#### Checkpoint 1 | 2026.03.03 | job_id auto-injection + TTS error visibility
+
+**Accomplishments**:
+
+**Bug Fix 1 — Notifications routing to CC Session card instead of job card**:
+- Root cause: `PodcastOrchestratorAgent` has 41+ `notify()` calls, none pass `job_id`. Frontend routes to CC session card when `job_id` is missing.
+- Fix: Added `_job_id` module-level state to `voice_io.py` with `set_job_id()`/`clear_job_id()`. `notify()` auto-injects `_job_id` when caller doesn't provide one. `job.py` sets it once before orchestrator launch, clears in `finally`.
+- Re-exported `set_job_id`/`clear_job_id` from 3 wrapper modules (podcast, deep_research, swe_team).
+- 7 new unit tests in `TestJobIdAutoInjection`: auto-injection, explicit override, clear, configure integration.
+
+**Bug Fix 2 — Silent TTS segment failures**:
+- Root cause: TTS errors logged via `logger.warning()` (invisible on console) + debug-gated `print()`. The "N segments failed" notification showed counts but no error message.
+- Fix: Always `print()` each attempt failure, final failure summary, and completion stats in `tts_client.py`. Added `**Error**: {first_error}` to both single-language and multi-language `ask_yes_no` abstracts in `orchestrator.py`. Added always-on failure logging in `_generate_audio_async()`.
+
+**Test Results**: 1942 unit tests pass (20/20 voice_io), 0 regressions
+
+**Files** (CoSA nested repo — 9 files):
+- `src/cosa/agents/utils/voice_io.py` — `_job_id`, `set_job_id()`, `clear_job_id()`, auto-inject in `notify()`
+- `src/cosa/agents/podcast_generator/voice_io.py` — re-export set/clear_job_id
+- `src/cosa/agents/deep_research/voice_io.py` — re-export set/clear_job_id
+- `src/cosa/agents/swe_team/voice_io.py` — re-export set/clear_job_id
+- `src/cosa/agents/podcast_generator/job.py` — set_job_id + finally clear
+- `src/cosa/agents/deep_research/job.py` — set_job_id + finally clear
+- `src/cosa/agents/podcast_generator/tts_client.py` — always-visible error prints
+- `src/cosa/agents/podcast_generator/orchestrator.py` — error context in notifications + _generate_audio_async logging
+
+**Files** (Lupin repo — 1 file, committed as 3a8207c):
+- `src/tests/unit/test_voice_io_non_interactive.py` — 7 new TestJobIdAutoInjection tests
+
+---
+
 ### 2026.03.03 - Session 305 | CC Session Routing — 5 Root Cause Fixes for Context Clear Mis-routing
 
 **Accomplishments**:
