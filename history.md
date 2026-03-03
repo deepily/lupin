@@ -1,5 +1,26 @@
 # Lupin Project History
 
+### 2026.03.03 - Session 303 | Notification Recipient Debugging & Listener Lifecycle Visibility
+
+#### Checkpoint | 2026.03.03 14:15 | Notification debugging logging enhancements
+
+**Accomplishments**:
+- Added `user_to_email` cache to `WebSocketManager` — recipient email now appears alongside UUID in all emission logs
+- Added session-type classification (`browser` vs `listener`) to connect, disconnect, and auth success log lines — instantly identifies CC listener sessions
+- Added browser/listener session breakdown in notification dispatch — when a notification fires, log shows exactly which session types are among the recipients
+- Standardized 6 debug log lines in `NotificationFifoQueue` with `[NOTIFY-QUEUE]` prefix for grep-ability
+- Unit tests: 1896 passed, 5 failed + 5 errors (all pre-existing, zero new regressions)
+
+**Files** (all CoSA nested repo):
+- `src/cosa/rest/websocket_manager.py` — email cache, session-type classification, disconnect logging
+- `src/cosa/rest/routers/websocket.py` — pass email to connect(), enhanced auth/disconnect logs
+- `src/cosa/rest/routers/notifications.py` — browser/listener session breakdown block
+- `src/cosa/rest/notification_fifo_queue.py` — `[NOTIFY-QUEUE]` prefix standardization
+
+**Commit**: cc7792b (Lupin tracking); CoSA files pending separate commit
+
+---
+
 ### 2026.03.03 - Session 302 | Slice 6: Prediction Hint UI Rendering — Implementation
 
 #### Checkpoint | 2026.03.03 09:55 | Slice 6 prediction hint UI complete
