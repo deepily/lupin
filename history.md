@@ -2,6 +2,32 @@
 
 ### 2026.03.03 - Session 306 | Podcast Notification Routing + Silent TTS Failure Visibility
 
+#### Checkpoint 2 | 2026.03.03 | Bug 4/5/3b — Initializing ping + progress dedup + cosa_interface job_id
+
+**Accomplishments**:
+
+**Bug Fix 4 — "Initializing..." notification missing job_id**:
+- Root cause: `is_voice_available()` pings voice service by calling `_cosa_interface.notify_progress()` directly, bypassing the `notify()` auto-injection. Even though `_job_id` is set before the first call, the ping test didn't pass it.
+- Fix: Added `job_id=_job_id` to the ping test call in `voice_io.py:214`. Safe when no job_id set (defaults to `None`).
+
+**Bug Fix 5 — Progress group notifications rendered separately in DONE card**:
+- Root cause: `/api/get-job-interactions/{job_id}` endpoint returned all notifications as individual items without deduplicating by `progress_group_id`. RUNNING card collapses them (in-place DOM updates), but DONE card rendered each one separately.
+- Fix: Added Python-side deduplication in `queues.py` before serialization — keeps only the latest notification per `progress_group_id` (ordered newest-first). DONE card now shows "100% (18/18 segments)" once instead of 10+ intermediate updates.
+
+**Bug Fix 3b (Latent) — cosa_interface wrappers missing job_id parameter**:
+- Root cause: Previous session's Bug 3 fix added `job_id=job_id` pass-through from `voice_io` to `_cosa_interface.*()` calls, but the wrapper functions in `cosa_interface.py` don't accept `job_id`. Would raise `TypeError: unexpected keyword argument 'job_id'` at runtime for any interactive prompt.
+- Fix: Added `job_id: Optional[str] = None` to `ask_confirmation()`, `get_feedback()`, `present_choices()` in both `podcast_generator/cosa_interface.py` and `deep_research/cosa_interface.py`, with pass-through to dispatcher.
+
+**Test Results**: 1942 unit tests pass, 0 new regressions (6 pre-existing failures unrelated)
+
+**Files** (CoSA nested repo — 4 files):
+- `src/cosa/agents/utils/voice_io.py` — Bug 4: `job_id=_job_id` on ping test
+- `src/cosa/rest/routers/queues.py` — Bug 5: progress_group_id deduplication
+- `src/cosa/agents/podcast_generator/cosa_interface.py` — Bug 3b: `job_id` param on 3 wrappers
+- `src/cosa/agents/deep_research/cosa_interface.py` — Bug 3b: `job_id` param on 3 wrappers
+
+---
+
 #### Checkpoint 1 | 2026.03.03 | job_id auto-injection + TTS error visibility
 
 **Accomplishments**:
