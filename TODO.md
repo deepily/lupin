@@ -142,6 +142,7 @@ Last updated: 2026-03-02 (Session 300)
   - **HTTP embedding fallback**: Session 293 — PredictionEngine now falls back to `/api/embeddings/generate` when local GPU unavailable (unblocks test-process embedding generation)
   - **Warm E2E tests**: 5 new scenarios (9-13) in `test_prediction_engine_e2e.py` — CBR yes/no, qualifier, accuracy correct/incorrect, MC warm
   - **Unit tests**: 87 pass (36 open-ended + 31 MC + 20 qualifier)
+  - **Slice 6 (PLAN SERIALIZED, IMPLEMENTATION NEXT)**: Prediction hint UI rendering — `buildPredictionHintSection()`, `formatStrategyLabel()`, CSS styling. Plan doc at [`2026.03.02-slice-6-prediction-hint-ui-rendering.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.02-slice-6-prediction-hint-ui-rendering.md). Pick up first thing in the morning — Session 301 will implement Steps 1–4 (JS + CSS, zero Python).
 
 ### Before Branch Merge
 

@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.02 - Slice 6: Prediction Hint UI Rendering
+- **Plan**: [2026.03.02-slice-6-prediction-hint-ui-rendering.md](2026.02.23-trust-proxy-preference-learning/2026.03.02-slice-6-prediction-hint-ui-rendering.md) - Render prediction hints inside response-required notification cards in the browser. Adds `buildPredictionHintSection()` and `formatStrategyLabel()` to `notifications.js`, injects hint between abstract and progress bar, purple-themed CSS styling. Zero Python changes — purely frontend. Closes the "full stack per type" architecture gap.
+
 ### 2026.03.02 - Slices 4+5: Open-Ended and Open-Ended Batch Prediction
 - **Plan**: [2026.03.02-slices-4-5-open-ended-prediction.md](2026.02.23-trust-proxy-preference-learning/2026.03.02-slices-4-5-open-ended-prediction.md) - Two-tier prediction for free-text responses: exact match retrieval (CBR) + LLM synthesis (Phi-4 14B). Covers both `open_ended` (from `converse()`) and `open_ended_batch` (from `ask_open_ended_batch()`). New XML model, prompt template, upgraded accuracy comparators with embedding cosine similarity. ~36 unit tests + 6 E2E tests.
 
