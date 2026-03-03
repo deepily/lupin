@@ -21,7 +21,20 @@
 
 ### 2026.03.03 - Session 304 | Podcast Generator — 3 Bug Fixes (Session 283 Bugs)
 
-#### Checkpoint | 2026.03.03 | All 3 podcast generator bugs + target_user dispatch fixed
+#### Checkpoint 2 | 2026.03.03 | Fuzzy matching pre-filter + present_choices/target_user router fixes
+
+**Accomplishments**:
+- **Keyword pre-filter**: Added pre-filtering step in `match_research_docs()` — narrows 1,001 candidate files to top 50 by keyword scoring before sending to LLM. Fixes voice transcription failing to match in large search space.
+- **deep_research cosa_interface**: Added missing `title` and `abstract` params to `present_choices()` — was causing `got an unexpected keyword argument 'title'` error
+- **Router target_user**: Set `cosa_interface.TARGET_USER = user_email` in `get_user_document_selection()` before `present_choices()` — fixes "Cannot resolve target_user" during submit phase
+- 3 new pre-filter unit tests added to `test_fuzzy_file_matching.py` (17 total)
+
+**Files** (CoSA nested repo): `podcast_generator.py` (router), `deep_research/cosa_interface.py`
+**Files** (Lupin repo): `test_fuzzy_file_matching.py` (3 new tests)
+
+---
+
+#### Checkpoint 1 | 2026.03.03 | All 3 podcast generator bugs + target_user dispatch fixed
 
 **Accomplishments**:
 - **Bug #1 (Fuzzy Matching)**: Added `difflib.get_close_matches()` as 3rd validation tier in `match_research_docs()` — voice-transcribed paraphrases now resolve to valid file paths
