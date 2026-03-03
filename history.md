@@ -1,5 +1,35 @@
 # Lupin Project History
 
+### 2026.03.03 - Session 304 | Podcast Generator — 3 Bug Fixes (Session 283 Bugs)
+
+#### Checkpoint | 2026.03.03 | All 3 podcast generator bugs + target_user dispatch fixed
+
+**Accomplishments**:
+- **Bug #1 (Fuzzy Matching)**: Added `difflib.get_close_matches()` as 3rd validation tier in `match_research_docs()` — voice-transcribed paraphrases now resolve to valid file paths
+- **Bug #2 (Job Card Contact / sender_id)**: Root cause was double-hash in sender_id (`#cli#pg-xxx`) failing Pydantic regex. Fixed `_get_sender_id()` to accept optional `suffix` param across podcast_generator, deep_research, and deep_research_to_podcast
+- **Bug #3 (Audio Segment Upload / Non-Interactive Hang)**: Three sub-fixes — (1) `_is_interactive()` guard prevents `input()` blocking in Docker/queue contexts, (2) fixed TTS cost key `tts_results` → `tts_results_en`, (3) pre-stitching guard when all segments fail
+- 37 new unit tests: `test_fuzzy_file_matching.py` (14), `test_target_user_dispatch.py` (10), `test_voice_io_non_interactive.py` (13)
+- Full test suite: 1932 passed, 0 new regressions
+
+**Files** (CoSA nested repo — pending separate commit):
+- `src/cosa/rest/routers/podcast_generator.py` — difflib fuzzy matching
+- `src/cosa/agents/podcast_generator/cosa_interface.py` — suffix param
+- `src/cosa/agents/podcast_generator/job.py` — sender_id fix
+- `src/cosa/agents/podcast_generator/orchestrator.py` — TTS cost key + pre-stitching guards
+- `src/cosa/agents/deep_research/cosa_interface.py` — suffix param
+- `src/cosa/agents/deep_research/job.py` — sender_id fix
+- `src/cosa/agents/deep_research_to_podcast/job.py` — sender_id fix
+- `src/cosa/agents/utils/voice_io.py` — `_is_interactive()` + non-interactive guards
+
+**Files** (Lupin repo — test files):
+- `src/tests/unit/test_fuzzy_file_matching.py` — NEW
+- `src/tests/unit/test_target_user_dispatch.py` — NEW
+- `src/tests/unit/test_voice_io_non_interactive.py` — NEW
+
+**Plan doc**: `~/.claude/plans/vivid-puzzling-quasar.md`
+
+---
+
 ### 2026.03.03 - Session 303 | Notification Recipient Debugging & Listener Lifecycle Visibility
 
 #### Checkpoint | 2026.03.03 14:15 | Notification debugging logging enhancements

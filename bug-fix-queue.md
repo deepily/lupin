@@ -39,10 +39,10 @@
 
 (Available for any session to claim)
 
-- [ ] **target_user "Cannot resolve" error in Docker** — Code plumbing done (7 CoSA files), error persists in Docker. Next: write `test_target_user_dispatch.py` to reproduce. Key suspects: Docker env isolation, notification paths bypassing patched dispatcher. Plan: `src/rnd/2026.02.27-target-user-notification-dispatch-bug-fix.md` (HIGH)
-- [ ] **Fuzzy matching via voice** — Podcast generator: vocal paraphrase can't generate file list for podcast source. Voice input produces approximate matches that don't resolve to valid file paths. (HIGH)
-- [ ] **Job card contact failure** — Podcast generator: job fails to contact job card while in running bucket. UI shows no progress updates during execution. (HIGH)
-- [ ] **Audio segment upload** — Podcast generator: fails to properly process/upload audio segments. Final audio stitching or upload step breaks. (HIGH)
+- [x] ~~**target_user "Cannot resolve" error in Docker**~~ → Session 304 | By: 05faae8b
+- [x] ~~**Fuzzy matching via voice**~~ → Session 304 | By: 05faae8b
+- [x] ~~**Job card contact failure**~~ → Session 304 | By: 05faae8b
+- [x] ~~**Audio segment upload**~~ → Session 304 | By: 05faae8b
 - [ ] **History archive needed** — history.md at 18,951 tokens (75.8%). Archive sessions older than 14 days to stay below 17k threshold. (MEDIUM)
 - [ ] **TTS focus mode 60s safety timeout** — Prevent permanent stuck state when TTS queue items fail to play. Partially addressed (Session 164): staleness check on restore. Still need: runtime 60s timeout. File: `src/fastapi_app/static/js/notifications.js:9374-9393` (LOW)
 
@@ -57,6 +57,12 @@
 ---
 
 ### Completed
+
+- [x] **Podcast Generator — 3 Bugs + target_user dispatch** → CoSA pending commit | By: 05faae8b (Session 304)
+  - **Bug #1 — Fuzzy matching via voice**: Added `difflib.get_close_matches()` 3rd tier in `match_research_docs()`. File: `podcast_generator.py` router
+  - **Bug #2 — Job card contact / sender_id double-hash**: Fixed `_get_sender_id()` suffix param. Files: `cosa_interface.py` + `job.py` (podcast_generator, deep_research, deep_research_to_podcast)
+  - **Bug #3 — Audio segment upload / non-interactive hang**: Added `_is_interactive()` guard in `voice_io.py`, fixed TTS cost key, pre-stitching guards in `orchestrator.py`
+  - **Tests**: 37 new unit tests (`test_fuzzy_file_matching.py`, `test_target_user_dispatch.py`, `test_voice_io_non_interactive.py`)
 
 - [x] **Session ID cross-project contamination** → commit: 495cdfd | By: 0e73eb8e
   - **Symptom**: Two CC instances (Lupin + planning-is-prompting) both reported same session ID `#0e73eb8e`, breaking parallel session isolation

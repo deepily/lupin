@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-03 (Session 302)
+Last updated: 2026-03-03 (Session 304)
 
 ## HIGH PRIORITY — CC Session Voice Input Bugs (Session 300)
 
@@ -9,15 +9,14 @@ Last updated: 2026-03-03 (Session 302)
 
 ## HIGH PRIORITY — target_user Notification Dispatch Bug (Session 286)
 
-- [ ] **[LUPIN] Fix target_user "Cannot resolve" error in Docker** — Code plumbing done (7 files), error persists. Next: write `test_target_user_dispatch.py` to reproduce the exact failure, then iterate. Key suspects: Docker env isolation, notification paths bypassing patched dispatcher.
+- [x] **[LUPIN] Fix target_user "Cannot resolve" error in Docker** — Session 304: Root cause was sender_id double-hash (`#cli#pg-xxx`). Fixed `_get_sender_id()` suffix param in both podcast_generator and deep_research cosa_interface + job files. 10 unit tests written.
   - **Bug fix doc**: [`src/rnd/2026.02.27-target-user-notification-dispatch-bug-fix.md`](src/rnd/2026.02.27-target-user-notification-dispatch-bug-fix.md)
-  - **CoSA files modified**: `agent_notification_dispatcher.py`, 4x `cosa_interface.py`, 2x `job.py`
 
 ## HIGH PRIORITY — Podcast Generator Bugs (Session 283)
 
-- [ ] **[LUPIN] Fuzzy matching via voice** — Vocal paraphrase can't generate file list for podcast source. Voice input produces approximate matches that don't resolve to valid file paths.
-- [ ] **[LUPIN] Job card contact failure** — Podcast generator job fails to contact job card while in running bucket. UI shows no progress updates during execution.
-- [ ] **[LUPIN] Audio segment upload** — Podcast generator fails to properly process/upload audio segments. Final audio stitching or upload step breaks.
+- [x] **[LUPIN] Fuzzy matching via voice** — Session 304: Added `difflib.get_close_matches()` as 3rd validation tier in `match_research_docs()`. 14 unit tests written.
+- [x] **[LUPIN] Job card contact failure** — Session 304: Fixed sender_id double-hash in `_get_sender_id()` suffix param. Same root cause as target_user bug above.
+- [x] **[LUPIN] Audio segment upload** — Session 304: 3 sub-fixes: (1) non-interactive `_is_interactive()` guard on all `input()` CLI fallbacks in voice_io.py, (2) fixed TTS cost key `tts_results` → `tts_results_en` in orchestrator.py, (3) pre-stitching guard when all segments fail. 13 unit tests written.
 
 ---
 
