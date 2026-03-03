@@ -1612,6 +1612,22 @@ class NotificationsUI {
 
             this.log( `[CC-VOICE] Sent to session ${sessionHash}: ${message.substring( 0, 80 )}` );
 
+            // Show outgoing blue bubble in sender card conversation
+            const voiceDiv   = document.querySelector( `.cc-voice-input[data-session-hash="${sessionHash}"]` );
+            const ccSenderId = voiceDiv?.getAttribute( 'data-sender-id' );
+
+            if ( ccSenderId ) {
+                const outgoing = {
+                    id           : `cc-voice-${sessionHash}-${Date.now()}`,
+                    sender_id    : ccSenderId,
+                    message      : message,
+                    timestamp    : new Date().toISOString(),
+                    time_display : this.getLocalTimeDisplay(),
+                    state        : 'delivered'
+                };
+                this.addNotificationToSenderGroup( outgoing, true );
+            }
+
         } catch ( error ) {
             this.error( `[CC-VOICE] Failed to send to session ${sessionHash}:`, error );
             input.style.borderColor = '#dc3545';
@@ -7490,7 +7506,7 @@ class NotificationsUI {
         // Build CC voice input row (only for claude.code sessions with a session ID)
         const isCCSession  = parsed.agentType === 'claude.code' && sessionId;
         const ccVoiceInput = isCCSession ? `
-            <div class="cc-voice-input" data-session-hash="${sessionId}">
+            <div class="cc-voice-input" data-session-hash="${sessionId}" data-sender-id="${senderId}">
                 <div class="cc-voice-input-row">
                     <button type="button" class="stt-button cc-session-stt"
                             id="cc-session-stt-${sessionId}"

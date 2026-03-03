@@ -1,5 +1,18 @@
 # Lupin Project History
 
+### 2026.03.02 - Session 300 | CC Session Voice Input: Outgoing Blue Bubble
+
+**Accomplishments**:
+- Added outgoing blue bubble rendering for messages sent from the CC session voice input widget in the Notifications UI
+- Root cause: `sendCCSessionMessage()` successfully POSTed to `/api/notify` but never inserted the sent message into the sender card's conversation history
+- Fix: After successful POST, construct a notification object and call `addNotificationToSenderGroup( outgoing, true )` which renders a right-justified blue bubble with timestamp
+- Added `data-sender-id` attribute to `.cc-voice-input` div to enable sender ID lookup from the send function
+
+**Files Modified**: 1 file
+- `src/fastapi_app/static/js/notifications.js` — Added `data-sender-id` attr (~line 7509), added bubble insertion after POST success (~line 1615-1629)
+
+---
+
 ### 2026.03.02 - Session 299 | Admin UI: Batch Delete + Promoted Action Buttons
 
 **Accomplishments**:
