@@ -1,5 +1,61 @@
 # Lupin Project History
 
+### 2026.03.04 - Session 308 | Fix Shared Mutable Global in Core voice_io
+
+**Accomplishments**:
+- Fixed "Cannot resolve target_user" notification dispatch failures caused by shared mutable `_cosa_interface` global in consolidated `voice_io.py`
+- Added `reconfigure()` function to all 3 voice_io wrappers (podcast_generator, deep_research, swe_team) that re-asserts the correct cosa_interface binding
+- Added `_voice_available` reset in `configure()` so the "Initializing..." ping re-runs with the correct cosa_interface/TARGET_USER after reconfigure
+- Called `reconfigure()` at the start of `_execute()` in all 3 job files (podcast_generator, deep_research, swe_team)
+- Called `reconfigure()` in podcast_generator router description mode (2 locations: `submit_podcast_job()` and `get_user_document_selection()`)
+- Called `reconfigure()` in deep_research_to_podcast agent before each pipeline phase (DR phase + PG phase)
+- All 9 smoke tests pass, 1943 unit tests pass (5 pre-existing failures unrelated)
+
+**Files Modified** (9 files, all in CoSA nested repo):
+- `src/cosa/agents/utils/voice_io.py` — Reset `_voice_available` cache on `configure()`
+- `src/cosa/agents/podcast_generator/voice_io.py` — Added `reconfigure()` function
+- `src/cosa/agents/deep_research/voice_io.py` — Added `reconfigure()` function
+- `src/cosa/agents/swe_team/voice_io.py` — Added `reconfigure()` function
+- `src/cosa/agents/podcast_generator/job.py` — Call `reconfigure()` in `_execute()`
+- `src/cosa/agents/deep_research/job.py` — Call `reconfigure()` in `_execute()`
+- `src/cosa/agents/swe_team/job.py` — Call `reconfigure()` in `_execute()`
+- `src/cosa/rest/routers/podcast_generator.py` — Call `reconfigure()` in description mode (2 locations)
+- `src/cosa/agents/deep_research_to_podcast/agent.py` — Call `reconfigure()` before each pipeline phase
+
+---
+
+### 2026.03.04 - Session 306 Checkpoint 4 | Route Completed Notifications to Job Card
+
+**Accomplishments**:
+- Added `routeCompletedNotification()` helper that routes completed response-required Q&A pairs to job card (via `appendNotificationToJobCard()`) when `job_id` exists, falls back to sender card
+- Updated `showConfirmation()` — skips sender card creation when `job_id` present, routes via new helper
+- Updated `handleGracePeriodExceeded()` — routes expired defaults to job card when `job_id` present
+- Updated `handleLocalTimeout()` — animation destination targets job card, routes via new helper
+- Fixed missing `'status': 'pending'` in `todo_fifo_queue.py` expeditor speculative metadata (same bug previously fixed in podcast_generator.py)
+
+**Files Modified** (1 Lupin file + 1 CoSA file):
+- `src/fastapi_app/static/js/notifications.js` — `routeCompletedNotification()` + 4 caller updates
+- `src/cosa/rest/todo_fifo_queue.py` — Added `'status': 'pending'` to speculative metadata (CoSA nested repo)
+
+**Commit**: d1a5e16
+
+---
+
+### 2026.03.04 - Session 307 | CJ Flow Job Card UX Consistency Fixes
+
+**Accomplishments**:
+- Fixed user responses in interaction panes to render as blue outgoing chat bubbles (`.sender-message.outgoing`) instead of flat inline gray/green text
+- Fixed cancel button in job card headers to use absolute left-aligned positioning (matching `.action-required-cancel-btn` pattern) instead of floating inline in flex flow
+- Added `.has-cancel` modifier class for conditional `padding-left: 36px` on headers with cancel buttons
+- Removed unused CSS classes: `.interaction-response`, `.response-label`, `.response-value`
+- Moved `responseHtml` outside `.interaction-item` div to render as sibling (proper chat bubble layout)
+
+**Files Modified** (2 files):
+- `src/fastapi_app/static/js/notifications.js` — `renderInteractionItem()` bubble fix + `renderJobCard()` cancel button restructure
+- `src/fastapi_app/static/css/notifications.css` — Cancel button absolute positioning + removed unused response classes
+
+---
+
 ### 2026.03.03 - Session 306 | Podcast Notification Routing + Silent TTS Failure Visibility
 
 #### Checkpoint 3 | 2026.03.03 | Graceful job cancellation for agentic jobs
@@ -27,7 +83,7 @@
 - `src/fastapi_app/static/js/notifications.js` — Cancel button HTML + `cancelJob()` method
 - `src/fastapi_app/static/css/notifications.css` — Cancel button styling
 
-**Commit**: 05a7a51
+**Commit**: 148132b
 
 ---
 
