@@ -2944,6 +2944,11 @@
     padding: 8px 12px;
     cursor: pointer;
     gap: 8px;
+    position: relative;
+}
+
+.job-card-header.has-cancel {
+    padding-left: 36px;
 }
 
 .job-card-header:hover {
@@ -3157,22 +3162,6 @@
     word-break: break-word;
 }
 
-.interaction-response {
-    margin-top: 4px;
-    padding-top: 4px;
-    border-top: 1px solid #e9ecef;
-    font-size: 11px;
-}
-
-.response-label {
-    color: #6c757d;
-    margin-right: 6px;
-}
-
-.response-value {
-    color: #28a745;
-    font-weight: 500;
-}
 
 .no-interactions,
 .interactions-loading,
@@ -3880,31 +3869,39 @@
 
 /* ========================================
    JOB CANCEL BUTTON — Graceful agentic job cancellation
-   Appears below the send-message row on running job cards.
+   Appears in the title bar of running/todo job cards.
    ======================================== */
 
-.job-cancel-row {
-    margin-top: 6px;
-    text-align: right;
-}
-
 .job-cancel-button {
-    background-color: #dc3545;
-    color: white;
-    border: none;
-    padding: 4px 12px;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 2px solid #6c757d;
     border-radius: 4px;
+    background-color: white;
+    color: #6c757d;
+    font-size: 14px;
     cursor: pointer;
-    font-size: 0.85em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    z-index: 10;
 }
 
 .job-cancel-button:hover {
-    background-color: #c82333;
+    background-color: #6c757d;
+    color: white;
 }
 
 .job-cancel-button:disabled {
     background-color: #6c757d;
+    color: white;
     cursor: not-allowed;
+    opacity: 0.6;
 }
 
 /* ========================================

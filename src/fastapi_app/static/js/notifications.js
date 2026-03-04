@@ -5649,9 +5649,16 @@ class NotificationsUI {
         // Session 107: Removed provisionalAttr - no longer using provisional registration
         // ═══════════════════════════════════════════════════════════════════
 
+        const hasCancelBtn = ( queueName === 'run' || queueName === 'todo' );
+        const cancelBtnHtml = hasCancelBtn
+            ? `<button type="button" class="job-cancel-button" id="job-cancel-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.cancelJob('${jobId}')" title="Cancel this job">✕</button>`
+            : '';
+        const headerCancelClass = hasCancelBtn ? ' has-cancel' : '';
+
         return `
             <div class="job-card ${statusClass}" id="job-card-${jobId}" data-job-id="${jobId}">
-                <div class="job-card-header" onclick="window.notificationsUI.toggleJobCard('${jobId}', '${queueName}')">
+                <div class="job-card-header${headerCancelClass}" onclick="window.notificationsUI.toggleJobCard('${jobId}', '${queueName}')">
+                    ${cancelBtnHtml}
                     ${agentBadge}${cacheHitBadge}${completionBadge}
                     <span class="job-question">${this.escapeHtml( truncatedQuestion )}</span>
                     ${statusIndicator}${interactionIndicator}
@@ -5700,11 +5707,6 @@ class NotificationsUI {
                                 </label>
                                 <button type="button" class="response-submit-button"
                                         id="job-msg-submit-${jobId}">Send</button>
-                            </div>
-                            <div class="job-cancel-row">
-                                <button type="button" class="job-cancel-button"
-                                        id="job-cancel-${jobId}"
-                                        onclick="window.notificationsUI.cancelJob('${jobId}')">Cancel Job</button>
                             </div>
                         </div>
                         <div class="interactions-content collapsed" id="interactions-content-${jobId}">
@@ -6107,9 +6109,9 @@ class NotificationsUI {
         if ( interaction.response_requested && interaction.response_value ) {
             const responseStr = this.formatResponseValue( interaction.response_value );
             responseHtml = `
-                <div class="interaction-response">
-                    <span class="response-label">Your response:</span>
-                    <span class="response-value">${responseStr}</span>
+                <div class="sender-message outgoing">
+                    <span class="message-time">${timestamp}</span>
+                    <span class="message-text">${responseStr}</span>
                 </div>
             `;
         }
@@ -6127,8 +6129,8 @@ class NotificationsUI {
                     <span class="interaction-time">${timestamp}</span>
                 </div>
                 <div class="interaction-message">${this.escapeHtml( interaction.message || '' )}${abstractIndicator}</div>
-                ${responseHtml}
             </div>
+            ${responseHtml}
         `;
     }
 
@@ -11726,9 +11728,9 @@ class NotificationsUI {
             card.addEventListener( 'animationend', () => {
                 card.remove();
 
-                // Add to conversation with default indicator
+                // Route to conversation with default indicator
                 const defaultValue = state.notification.response_default || '(no response)';
-                this.addConversationPair( senderId, state.notification, `[Default] ${defaultValue}`, true );
+                this.routeCompletedNotification( state.notification, defaultValue, true );
 
                 // Cleanup
                 this.actionRequiredNotifications.delete( notificationId );
@@ -11754,12 +11756,15 @@ class NotificationsUI {
         // Get sender ID from notification
         const senderId = state.notification?.sender_id || this.UNKNOWN_SENDER;
 
-        // Ensure sender card exists for the conversation
-        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
-        let senderCard = document.getElementById( cardId );
-        if ( !senderCard ) {
-            this.createSenderCard( senderId );
+        // Ensure sender card exists for the conversation (skip if routing to job card)
+        let senderCard = null;
+        if ( !state.notification.job_id ) {
+            const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
             senderCard = document.getElementById( cardId );
+            if ( !senderCard ) {
+                this.createSenderCard( senderId );
+                senderCard = document.getElementById( cardId );
+            }
         }
 
         // Simple shrink-fade animation in place (no flying)
@@ -11770,16 +11775,16 @@ class NotificationsUI {
             // Remove the action-required card from DOM
             card.remove();
 
-            // Add conversation pair to sender card (with pulsing highlight)
-            this.addConversationPair( senderId, state.notification, response, false, serverTimeDisplay, serverDateDisplay );
+            // Route completed Q&A to job card or sender card
+            this.routeCompletedNotification( state.notification, response, false, serverTimeDisplay, serverDateDisplay );
 
             // Cleanup action-required state
             this.actionRequiredNotifications.delete( notificationId );
             this.updateActionRequiredCount();
             this.saveActionRequiredState();  // Persist removal
 
-            // Scroll sender card into view
-            if ( senderCard ) {
+            // Scroll sender card into view (job card scroll handled by routeCompletedNotification)
+            if ( !state.notification.job_id && senderCard ) {
                 senderCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
             }
 
@@ -11800,7 +11805,7 @@ class NotificationsUI {
         setTimeout( () => {
             if ( card.parentElement ) {
                 card.remove();
-                this.addConversationPair( senderId, state.notification, response, false, serverTimeDisplay, serverDateDisplay );
+                this.routeCompletedNotification( state.notification, response, false, serverTimeDisplay, serverDateDisplay );
                 this.actionRequiredNotifications.delete( notificationId );
                 this.updateActionRequiredCount();
                 this.saveActionRequiredState();  // Persist removal
@@ -11895,25 +11900,40 @@ class NotificationsUI {
         // Get sender ID from notification
         const senderId = state.notification?.sender_id || this.UNKNOWN_SENDER;
 
-        // Calculate destination for animation
-        const destination = this.calculateDestination( senderId );
+        // Calculate destination for animation (prefer job card when job_id exists)
+        let destination;
+        if ( state.notification.job_id ) {
+            const jobCard = document.getElementById( `job-card-${state.notification.job_id}` );
+            if ( jobCard ) {
+                const header = jobCard.querySelector( '.job-card-header' );
+                const rect = ( header || jobCard ).getBoundingClientRect();
+                destination = {
+                    cardId   : `job-card-${state.notification.job_id}`,
+                    senderId : senderId,
+                    rect     : rect
+                };
+            }
+        }
+        if ( !destination ) {
+            destination = this.calculateDestination( senderId );
+        }
 
         if ( destination ) {
             // Start genie animation for expired notification
             this.startGenieAnimation( notificationId, card, destination, () => {
-                // On animation complete: add conversation pair (marked as expired)
+                // On animation complete: route to job card or sender card (marked as expired)
                 // Use client-generated time/date since there's no server call for timeout
-                this.addConversationPair( senderId, state.notification, defaultValue, true, this.getLocalTimeDisplay(), this.getLocalDateDisplay() );
+                this.routeCompletedNotification( state.notification, defaultValue, true, this.getLocalTimeDisplay(), this.getLocalDateDisplay() );
 
                 // Cleanup action-required state
                 this.actionRequiredNotifications.delete( notificationId );
                 this.updateActionRequiredCount();
                 this.saveActionRequiredState();  // Persist removal
 
-                // Scroll sender card into view after DOM changes (moveSenderCardToTop shifts layout)
-                const senderCard = document.getElementById( destination.cardId );
-                if ( senderCard ) {
-                    senderCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
+                // Scroll target card into view after DOM changes
+                const targetCard = document.getElementById( destination.cardId );
+                if ( targetCard ) {
+                    targetCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
                 }
 
                 // QUEUE SYSTEM: Promote next pending notification
@@ -12904,6 +12924,55 @@ class NotificationsUI {
         this.moveSenderCardToTop( senderId );
 
         this.log( `Added conversation pair for ${senderId}: "${notification.message?.substring( 0, 30 )}..." → "${response}"` );
+    }
+
+    /**
+     * Route a completed response-required notification to the correct UI container.
+     *
+     * When notification has job_id: routes to job card's interactions area.
+     * When no job_id: routes to sender card's conversation history.
+     *
+     * @param {Object} notification - The original notification object
+     * @param {string} response - The user's response text
+     * @param {boolean} wasExpired - Whether the notification expired (default used)
+     * @param {string|null} serverTimeDisplay - Server time string for display
+     * @param {string|null} serverDateDisplay - Server date string for display
+     */
+    routeCompletedNotification( notification, response, wasExpired = false, serverTimeDisplay = null, serverDateDisplay = null ) {
+        const jobId = notification.job_id;
+
+        if ( jobId ) {
+            const contentEl = document.getElementById( `interactions-content-${jobId}` );
+            if ( contentEl ) {
+                // Route to job card: append Q (original notification) then A (response)
+                this.appendNotificationToJobCard( jobId, notification );
+
+                const responseMessage = wasExpired
+                    ? `[Default: ${response}]`
+                    : ( notification.response_type === 'multiple_choice' || notification.response_type === 'open_ended_batch' )
+                        ? this.formatMultipleChoiceResponse( response )
+                        : response;
+
+                const responseNotif = {
+                    message   : `↳ ${responseMessage}`,
+                    priority  : 'low',
+                    timestamp : new Date().toISOString()
+                };
+                this.appendNotificationToJobCard( jobId, responseNotif );
+
+                // Scroll job card into view
+                const jobCard = document.getElementById( `job-card-${jobId}` );
+                if ( jobCard ) {
+                    jobCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
+                }
+                return;
+            }
+            // Fall through to sender card if job card not found
+        }
+
+        // Default: route to sender card
+        const senderId = notification.sender_id || this.UNKNOWN_SENDER;
+        this.addConversationPair( senderId, notification, response, wasExpired, serverTimeDisplay, serverDateDisplay );
     }
 
     /**
