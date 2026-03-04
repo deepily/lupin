@@ -3879,6 +3879,35 @@
 }
 
 /* ========================================
+   JOB CANCEL BUTTON — Graceful agentic job cancellation
+   Appears below the send-message row on running job cards.
+   ======================================== */
+
+.job-cancel-row {
+    margin-top: 6px;
+    text-align: right;
+}
+
+.job-cancel-button {
+    background-color: #dc3545;
+    color: white;
+    border: none;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85em;
+}
+
+.job-cancel-button:hover {
+    background-color: #c82333;
+}
+
+.job-cancel-button:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+}
+
+/* ========================================
    CC SESSION VOICE INPUT — Browser → Hook Buffer (Phase 6)
    Appears on sender cards for claude.code sessions to allow
    users to send voice/text directly to CC session hooks.

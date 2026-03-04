@@ -2,6 +2,35 @@
 
 ### 2026.03.03 - Session 306 | Podcast Notification Routing + Silent TTS Failure Visibility
 
+#### Checkpoint 3 | 2026.03.03 | Graceful job cancellation for agentic jobs
+
+**Accomplishments**:
+- Implemented full-stack graceful cancellation for long-running agentic jobs (podcast generator, deep research)
+- Added `_cancel_requested` flag, `_orchestrator` ref, and `request_cancel()` method to `AgenticJobBase`
+- Wired orchestrator reference storage in `PodcastGeneratorJob._execute()` for cancel signal propagation
+- Added `cancel_check` callback parameter to `run_research()` with 4 checkpoint calls (between clarification, planning, each research topic, and synthesis steps)
+- Added `POST /api/jobs/{job_id}/cancel` endpoint with auth, ownership, and type validation
+- Added Cancel Job button to running job cards with confirmation dialog, disabled state, and "Cancelling..." feedback
+- Cancel flow: Browser button → API endpoint → job flag → orchestrator stop → dead queue → WebSocket transition
+- Thread-safe: boolean assignment atomic under CPython GIL, no locks needed
+
+**Test Results**: 1942 unit tests pass, 0 regressions (verified against clean HEAD)
+
+**Files** (CoSA nested repo — 5 files):
+- `src/cosa/agents/agentic_job_base.py` — `_cancel_requested`, `_orchestrator`, `request_cancel()`
+- `src/cosa/agents/podcast_generator/job.py` — orchestrator ref + cancel check in `do_all()`
+- `src/cosa/agents/deep_research/job.py` — cancel_check callback + cancel check in `do_all()`
+- `src/cosa/agents/deep_research/cli.py` — `cancel_check` param + 4 checkpoint calls
+- `src/cosa/rest/routers/queues.py` — `POST /api/jobs/{job_id}/cancel` endpoint
+
+**Files** (Lupin repo — 2 files):
+- `src/fastapi_app/static/js/notifications.js` — Cancel button HTML + `cancelJob()` method
+- `src/fastapi_app/static/css/notifications.css` — Cancel button styling
+
+**Commit**: 05a7a51
+
+---
+
 #### Checkpoint 2 | 2026.03.03 | Bug 4/5/3b — Initializing ping + progress dedup + cosa_interface job_id
 
 **Accomplishments**:

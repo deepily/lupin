@@ -5701,6 +5701,11 @@ class NotificationsUI {
                                 <button type="button" class="response-submit-button"
                                         id="job-msg-submit-${jobId}">Send</button>
                             </div>
+                            <div class="job-cancel-row">
+                                <button type="button" class="job-cancel-button"
+                                        id="job-cancel-${jobId}"
+                                        onclick="window.notificationsUI.cancelJob('${jobId}')">Cancel Job</button>
+                            </div>
                         </div>
                         <div class="interactions-content collapsed" id="interactions-content-${jobId}">
                         </div>
@@ -5831,6 +5836,53 @@ class NotificationsUI {
             input.disabled  = false;
             sendBtn.disabled = false;
             input.focus();
+        }
+    }
+
+    async cancelJob( jobId ) {
+        /**
+         * Request graceful cancellation of a running agentic job.
+         *
+         * POSTs to /api/jobs/{jobId}/cancel. On success, the job stops at the
+         * next checkpoint and transitions to the dead queue via WebSocket.
+         *
+         * Requires:
+         *     - jobId is a valid running agentic job ID
+         *
+         * Ensures:
+         *     - Confirmation dialog shown before cancel
+         *     - Button disabled while request is in-flight
+         *     - Card moves to dead queue via normal WebSocket transition on success
+         */
+        if ( !confirm( 'Cancel this job? It will stop at the next checkpoint.' ) ) return;
+
+        const cancelBtn = document.getElementById( `job-cancel-${jobId}` );
+        if ( cancelBtn ) {
+            cancelBtn.disabled  = true;
+            cancelBtn.innerText = 'Cancelling...';
+        }
+
+        try {
+            const response = await fetch( `/api/jobs/${jobId}/cancel`, {
+                method  : 'POST',
+                headers : { 'Authorization': this.getAuthHeader() },
+            } );
+
+            if ( !response.ok ) {
+                const errData = await response.json().catch( () => ( {} ) );
+                throw new Error( errData.detail || `HTTP ${response.status}` );
+            }
+
+            this.log( `[JOB-CANCEL] Cancel requested for ${jobId}` );
+            // On success, WebSocket state transition will move card to dead queue
+
+        } catch ( error ) {
+            this.error( `[JOB-CANCEL] Failed to cancel ${jobId}:`, error );
+            alert( `Cancel failed: ${error.message}` );
+            if ( cancelBtn ) {
+                cancelBtn.disabled  = false;
+                cancelBtn.innerText = 'Cancel Job';
+            }
         }
     }
 
