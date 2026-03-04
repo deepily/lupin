@@ -298,49 +298,12 @@ def format_tool_summary( tool_name, tool_input ):
 
 def acknowledge_drained( messages ):
     """
-    Send gist-based auto-response for each drained voice buffer message.
+    No-op — gist auto-response is now handled by CCNotificationListener
+    at message receipt time, not at drain time.
 
-    Uses Gister (local LLM) to generate a 3-5 word summary that renders
-    in the session card UI as an auto-acknowledgment. The full message
-    content is separately injected into Claude's context via additionalContext.
-
-    Requires:
-        - messages is a list of dicts (from drain_voice_buffer)
-
-    Ensures:
-        - Generates concise gist for each message via Gister
-        - Sends gist as low-priority notification (renders in session card)
-        - Falls back to first 5 words if Gister fails
-        - Never raises exceptions
-        - Does nothing if messages is empty
-
-    Args:
-        messages: List of buffered message dicts from voice buffer drain
+    Kept for API compatibility with drain_and_acknowledge().
     """
-    if not messages:
-        return
-
-    try:
-        from cosa.memory.gister import Gister
-        gister = Gister( debug=False, verbose=False )
-    except Exception:
-        gister = None
-
-    for msg in messages:
-        text = msg.get( "message", msg.get( "text", "" ) )
-        try:
-            if gister and " " in text.strip():
-                gist = gister.get_gist( text, prompt_key="prompt template for session title" )
-            else:
-                gist = text.strip()
-
-            # Fallback: first 5 words if gist is empty
-            if not gist:
-                gist = " ".join( text.split()[ :5 ] )
-
-            send_tts( gist, priority="low" )
-        except Exception:
-            pass  # Auto-response failure is non-fatal
+    pass
 
 
 def drain_and_acknowledge( session_id ):

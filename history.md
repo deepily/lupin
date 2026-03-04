@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.03.04 - Session 312 Checkpoint 1 | Move Gist Auto-Response to Listener + Fix Drain-Only Hook Ack
+
+**Accomplishments**:
+- Moved gist auto-response from hook drain time to listener message receipt time for immediate feedback
+- Added `_send_gist_response()` to `CCNotificationListener` — generates 3-5 word gist via Gister, sends as low-priority notification back to browser user immediately upon buffering
+- Replaced `acknowledge_drained()` in `hook_common.py` with no-op — listener now handles auto-response, drain only injects full message as `additionalContext`
+- Simplified JS `sender_id` from `user@{email}` prefix to plain email address — removes artificial prefix, fixes "Unknown" sender card on reload
+- Updated test fixture sender_id to match new plain email format
+
+**Files**:
+- `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` — `_send_gist_response()` + call after `_buffer_message()`
+- `src/lupin_cli/claude_code/hooks/lib/hook_common.py` — `acknowledge_drained()` → no-op
+- `src/fastapi_app/static/js/notifications.js` — sender_id simplified to plain email
+- `src/tests/smoke/test_cc_notification_listener.py` — sender_id updated to plain email
+
+**Commit**: 2816557
+
+---
+
 ### 2026.03.04 - Session 309 Checkpoint 1 | Fix Headless CC Notification Listener
 
 **Accomplishments**:

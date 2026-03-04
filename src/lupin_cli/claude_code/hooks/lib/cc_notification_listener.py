@@ -215,6 +215,68 @@ class CCNotificationListener( BaseWebSocketListener ):
 
         # Match — buffer it
         self._buffer_message( notification )
+        self._send_gist_response( notification )
+
+    def _send_gist_response( self, notification ):
+        """
+        Generate a 3-5 word gist and send it as an immediate auto-response
+        notification back to the browser user. Renders in the session card UI.
+
+        Requires:
+            - notification dict contains "message" and "sender_id" keys
+            - sender_id is a plain email address
+
+        Ensures:
+            - Uses sender_id as target email (reply-to sender)
+            - Generates gist via Gister with session-title prompt
+            - Sends low-priority notification to browser user
+            - Falls back to first 5 words if Gister fails
+            - Never raises exceptions (auto-response is non-fatal)
+        """
+        text = notification.get( "message", "" )
+        if not text.strip():
+            return
+
+        # Target email is the sender_id (plain email, set by sendCCSessionMessage)
+        target_email = notification.get( "sender_id", "" )
+        if not target_email or "@" not in target_email:
+            self._log( f"{self.LOG_PREFIX} No valid sender_id email — skipping gist response" )
+            return
+
+        try:
+            from cosa.memory.gister import Gister
+            gister = Gister( debug=False, verbose=False )
+            gist   = gister.get_gist( text, prompt_key="prompt template for session title" )
+        except Exception as e:
+            self._log( f"{self.LOG_PREFIX} Gister failed: {e}" )
+            gist = None
+
+        # Fallback: first 5 words
+        if not gist:
+            gist = " ".join( text.split()[ :5 ] )
+
+        try:
+            from lupin_cli.notifications.notification_models import (
+                AsyncNotificationRequest, NotificationType, NotificationPriority
+            )
+            from lupin_cli.notifications.notify_user_async import notify_user_async
+
+            # Build sender_id matching the CC session format
+            sender_id = f"claude.code@lupin.deepily.ai#{self.session_id_hash}"
+
+            request = AsyncNotificationRequest(
+                message           = gist,
+                notification_type = NotificationType.PROGRESS,
+                priority          = NotificationPriority.LOW,
+                target_user       = target_email,
+                sender_id         = sender_id,
+                timeout           = 3
+            )
+            notify_user_async( request=request )
+            self._log( f"{self.LOG_PREFIX} Gist response sent: \"{gist}\"" )
+
+        except Exception as e:
+            self._log( f"{self.LOG_PREFIX} Failed to send gist response: {e}" )
 
     def _buffer_message( self, notification ):
         """

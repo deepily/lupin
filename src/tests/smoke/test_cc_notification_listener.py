@@ -459,7 +459,7 @@ class TestEventHandling:
                 "job_id"    : "sess1234",
                 "message"   : "Check fields",
                 "priority"  : "urgent",
-                "sender_id" : "user@test.com",
+                "sender_id" : "test@test.com",
                 "id"        : "notif-42",
                 "timestamp" : "2026-02-28T12:00:00Z",
             }
@@ -471,7 +471,7 @@ class TestEventHandling:
         assert entry[ "message" ] == "Check fields"
         assert entry[ "priority" ] == "urgent"
         assert entry[ "job_id" ] == "sess1234"
-        assert entry[ "sender_id" ] == "user@test.com"
+        assert entry[ "sender_id" ] == "test@test.com"
         assert entry[ "notification_id" ] == "notif-42"
         assert entry[ "timestamp" ] == "2026-02-28T12:00:00Z"
         assert "buffered_at" in entry

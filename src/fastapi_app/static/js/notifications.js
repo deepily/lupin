@@ -1603,7 +1603,7 @@ class NotificationsUI {
                 type        : 'user_initiated_message',
                 priority    : 'medium',
                 target_user : listenerEmail,
-                sender_id   : `user@${this.currentUserEmail}`,
+                sender_id   : this.currentUserEmail,
                 job_id      : sessionHash,
             } );
 
