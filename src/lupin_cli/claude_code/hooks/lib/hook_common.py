@@ -391,6 +391,77 @@ def build_additional_context( context_text ):
     }
 
 
+def enrich_voice_context( voice_ctx ):
+    """
+    Append notification reminder suffix to voice context string.
+
+    Used by all hooks (PreToolUse, PostToolUse, Stop) to ensure Claude
+    always gets the cosa-voice acknowledgment instruction alongside
+    voice content.
+
+    Requires:
+        - voice_ctx is a string (may be empty)
+
+    Ensures:
+        - Returns empty string if voice_ctx is empty/falsy (passthrough)
+        - Returns voice_ctx + notification reminder when non-empty
+
+    Args:
+        voice_ctx: Formatted voice context string from format_voice_context()
+
+    Returns:
+        str: Enriched voice context with reminder, or ""
+    """
+    if not voice_ctx:
+        return ""
+    return (
+        f"{voice_ctx}\n\n"
+        "IMPORTANT: You MUST acknowledge the user's voice message by sending "
+        "a high-priority notification via mcp__cosa-voice__notify() or "
+        "mcp__cosa-voice__converse() so the user receives immediate audio "
+        "feedback that their query is being attended to. Do NOT rely on "
+        "terminal text output alone — the user is not watching the terminal."
+    )
+
+
+def build_voice_deny_response( voice_ctx ):
+    """
+    Build PreToolUse deny response when voice buffer has content.
+
+    Combines permissionDecision deny (blocks tool, forces attention)
+    with additionalContext (persists voice message into subsequent turns).
+
+    Requires:
+        - voice_ctx is a non-empty string containing formatted voice messages
+
+    Ensures:
+        - Returns dict with hookSpecificOutput containing:
+          - hookEventName: "PreToolUse"
+          - permissionDecision: "deny"
+          - permissionDecisionReason: instruction to address voice message first
+          - additionalContext: voice content + notification reminder
+        - Structure is ready for emit_json()
+
+    Args:
+        voice_ctx: Formatted voice context string from format_voice_context()
+
+    Returns:
+        dict: Hook output that denies the tool call and injects voice context
+    """
+    return {
+        "hookSpecificOutput": {
+            "hookEventName"            : "PreToolUse",
+            "permissionDecision"       : "deny",
+            "permissionDecisionReason" : (
+                "A user-initiated voice message was received and takes precedence "
+                "over this tool call. You must address the user's message before "
+                "continuing. You may re-run this tool afterward if still needed."
+            ),
+            "additionalContext"        : enrich_voice_context( voice_ctx )
+        }
+    }
+
+
 def build_stop_block( reason ):
     """
     Build top-level decision block for Stop hook.

@@ -28,7 +28,7 @@ if _src_path not in sys.path:
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts, build_progress_group_id,
     format_tool_summary, drain_and_acknowledge, format_voice_context,
-    build_additional_context,
+    build_additional_context, enrich_voice_context,
     TOOLS_SILENT, TOOLS_ANNOUNCE
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id
@@ -66,8 +66,8 @@ def main():
     # Drain voice buffer, acknowledge, and inject as additionalContext
     messages  = drain_and_acknowledge( session_id )
     voice_ctx = format_voice_context( messages )
-    emit_json( build_additional_context( voice_ctx ) )
-    # build_additional_context returns {} when voice_ctx is empty → passthrough
+    emit_json( build_additional_context( enrich_voice_context( voice_ctx ) ) )
+    # enrich returns "" when empty → build_additional_context returns {} → passthrough
 
 
 if __name__ == "__main__":

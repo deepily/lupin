@@ -28,7 +28,7 @@ if _src_path not in sys.path:
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts, drain_and_acknowledge,
-    format_voice_context, build_stop_block,
+    format_voice_context, build_stop_block, enrich_voice_context,
     get_stop_block_count, increment_stop_block_count, reset_stop_block_count,
     MAX_STOP_BLOCKS
 )
@@ -71,7 +71,7 @@ def main():
         else:
             increment_stop_block_count( session_id )
             send_tts( "Stop — blocking with voice input" )
-            emit_json( build_stop_block( voice_ctx ) )
+            emit_json( build_stop_block( enrich_voice_context( voice_ctx ) ) )
     else:
         # No voice input → allow stop
         reset_stop_block_count( session_id )

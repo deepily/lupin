@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.03.04 - Session 313 Checkpoint 1 | Voice Buffer Deny + Generalized Notification Reminder
+
+**Accomplishments**:
+- Implemented PreToolUse voice buffer deny: when voice buffer has content, hook denies the tool call with `permissionDecision: "deny"` + `additionalContext`, forcing Claude to address the user's voice message before continuing
+- Extracted shared `enrich_voice_context()` helper that appends the "MUST acknowledge via cosa-voice" notification reminder to any voice context string
+- Generalized notification reminder across all three hooks: PreToolUse (deny + context), PostToolUse (additionalContext), Stop (block reason)
+- Refactored `build_voice_deny_response()` to use `enrich_voice_context()` internally, eliminating duplicated reminder text
+- Live-tested full deny → address → retry cycle: voice message blocked tool call, Claude responded via converse(), subsequent tool call passed through
+
+**Files**:
+- `src/lupin_cli/claude_code/hooks/lib/hook_common.py` — Added `enrich_voice_context()`, `build_voice_deny_response()`; refactored deny response to use shared enricher
+- `src/lupin_cli/claude_code/hooks/pre_tool_use.py` — Deny when buffer has content instead of passthrough additionalContext
+- `src/lupin_cli/claude_code/hooks/post_tool_use.py` — Enriched voice context with notification reminder
+- `src/lupin_cli/claude_code/hooks/stop.py` — Enriched block reason with notification reminder
+
+---
+
 ### 2026.03.04 - Session 312 Checkpoint 1 | Move Gist Auto-Response to Listener + Fix Drain-Only Hook Ack
 
 **Accomplishments**:

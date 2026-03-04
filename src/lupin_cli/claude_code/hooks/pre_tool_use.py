@@ -23,7 +23,7 @@ if _src_path not in sys.path:
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, drain_and_acknowledge,
-    format_voice_context, build_additional_context
+    format_voice_context, build_voice_deny_response
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id
 
@@ -48,8 +48,11 @@ def main():
     # No tool TTS — PostToolUse handles announcements
     messages  = drain_and_acknowledge( session_id )
     voice_ctx = format_voice_context( messages )
-    emit_json( build_additional_context( voice_ctx ) )
-    # build_additional_context returns {} when voice_ctx is empty → passthrough
+
+    if voice_ctx:
+        emit_json( build_voice_deny_response( voice_ctx ) )
+    else:
+        emit_json( {} )
 
 
 if __name__ == "__main__":
