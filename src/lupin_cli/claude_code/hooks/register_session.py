@@ -139,16 +139,39 @@ def _spawn_listener( session_id, session_data, session_file ):
     env[ "PYTHONUNBUFFERED" ] = "1"
 
     try:
+        # Always capture stderr for startup crash diagnostics
+        session_dir = os.path.expanduser( "~/.claude/sessions" )
+        stderr_path = os.path.join( session_dir, f"cc-listener-{short_id}.stderr" )
+        stderr_file = open( stderr_path, "w" )
+
         # Spawn detached — listener outlives the hook subprocess
         proc = subprocess.Popen(
             cmd,
             stdout = subprocess.DEVNULL,
-            stderr = subprocess.DEVNULL,
+            stderr = stderr_file,
             env    = env,
             start_new_session = True,
         )
 
         listener_pid = proc.pid
+
+        # Brief liveness check — detect immediate crashes (e.g., missing credentials)
+        time.sleep( 0.3 )
+        try:
+            os.kill( listener_pid, 0 )
+        except ProcessLookupError:
+            # Listener died immediately — read stderr for diagnostics
+            stderr_file.close()
+            try:
+                with open( stderr_path, "r" ) as f:
+                    stderr_contents = f.read().strip()
+                if stderr_contents:
+                    print( f"[SessionStart] WARNING: Listener died immediately. stderr:\n{stderr_contents}", file=sys.stderr )
+                else:
+                    print( f"[SessionStart] WARNING: Listener (PID {listener_pid}) died immediately with no stderr output", file=sys.stderr )
+            except OSError:
+                print( f"[SessionStart] WARNING: Listener (PID {listener_pid}) died immediately, could not read stderr", file=sys.stderr )
+            return None
 
         # Record listener PID in session bridge file for SessionEnd cleanup
         if session_data is not None and session_file:

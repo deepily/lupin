@@ -9,7 +9,7 @@ buffer file that hooks drain atomically.
 
 Lifecycle:
     1. SessionStart hook spawns this as a background subprocess
-    2. Authenticates via JWT (credentials from ~/.claude/notification-hooks-credentials.ini)
+    2. Authenticates via JWT (credentials from ~/.lupin/credentials.ini)
     3. Connects via WebSocket, subscribes to notification_queue_update
     4. Filters by job_id matching CC session hash
     5. Appends matching messages to ~/.claude/sessions/cc-buffer-{session_id[:8]}.jsonl
@@ -299,8 +299,9 @@ class CCNotificationListener( BaseWebSocketListener ):
         self._log( f"{self.LOG_PREFIX} Debug        : {self.debug}" )
         self._log( f"{self.LOG_PREFIX} Verbose      : {self.verbose}" )
 
-        restart_cycle   = 0
+        restart_cycle    = 0
         restart_cooldown = 60  # seconds
+        self._running    = True
 
         try:
             while self._running:

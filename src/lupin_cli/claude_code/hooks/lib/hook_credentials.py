@@ -2,7 +2,7 @@
 """
 Credential resolution for Claude Code hook infrastructure.
 
-Reads per-project credentials from ~/.claude/notification-hooks-credentials.ini.
+Reads per-project credentials from ~/.lupin/credentials.ini.
 Used by the CC Notification Listener and hook scripts that need authenticated
 access to the Lupin API.
 
@@ -33,7 +33,7 @@ from typing import Tuple, Optional
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-CREDENTIALS_FILE = Path.home() / ".claude" / "notification-hooks-credentials.ini"
+CREDENTIALS_FILE = Path.home() / ".lupin" / "credentials.ini"
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ def get_hook_credentials( project: Optional[str] = None ) -> Tuple[str, str]:
     Resolve hook credentials from INI file for the current project.
 
     Requires:
-        - ~/.claude/notification-hooks-credentials.ini exists
+        - ~/.lupin/credentials.ini exists
         - INI file has a section matching the project name
 
     Ensures:
@@ -65,7 +65,7 @@ def get_hook_credentials( project: Optional[str] = None ) -> Tuple[str, str]:
         raise FileNotFoundError(
             f"Credentials file not found: {CREDENTIALS_FILE}\n"
             f"Create it with:\n"
-            f"  mkdir -p ~/.claude\n"
+            f"  mkdir -p ~/.lupin\n"
             f"  cat > {CREDENTIALS_FILE} << 'EOF'\n"
             f"  [lupin]\n"
             f"  email = claude.code@lupin.deepily.ai\n"

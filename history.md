@@ -1,5 +1,30 @@
 # Lupin Project History
 
+### 2026.03.04 - Session 309 Checkpoint 1 | Fix Headless CC Notification Listener
+
+**Accomplishments**:
+- Fixed 3 bugs preventing the CC Notification Listener from receiving user-initiated voice messages
+- **Bug 1**: `self._running` not set before outer restart loop in `CCNotificationListener.run()` — loop body never executed, listener exited silently
+- **Bug 2**: `is_valid_session_id()` regex only accepted "adjective noun" format, rejecting `cc-listener-{hash}` with HTTP 403. Extended with programmatic session pattern
+- **Bug 3**: Credentials file path `~/.claude/notification-hooks-credentials.ini` did not exist. Renamed all references to `~/.lupin/credentials.ini` and created the file
+- Added stderr capture + 300ms liveness check in `_spawn_listener()` to surface future silent crashes
+- Created `check-cc-listener-status.sh` script for reproducible listener monitoring (process + server WebSocket sessions)
+- Purged 8 stale session bridge files from dead CC processes
+- E2E verified: notification sent → WebSocket → listener → buffer file
+
+**Files Modified** (Lupin repo):
+- `src/lupin_cli/claude_code/hooks/lib/hook_credentials.py` — Credential path constant + docstrings (`~/.lupin/credentials.ini`)
+- `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` — `self._running = True` fix + docstring path update
+- `src/lupin_cli/claude_code/hooks/register_session.py` — stderr capture to file + liveness check in `_spawn_listener()`
+- `src/rnd/.../2026.02.28-design-doc-revisions-session-290.md` — Path references updated
+- `src/rnd/.../2026.03.01-evolve-hooks-test-to-production.md` — Path reference updated
+- `src/scripts/check-cc-listener-status.sh` — New monitoring script
+
+**Files Modified** (CoSA nested repo — NOT committed here):
+- `src/cosa/rest/routers/websocket.py` — `is_valid_session_id()` extended for programmatic sessions
+
+---
+
 ### 2026.03.04 - Session 308 | Fix Shared Mutable Global in Core voice_io
 
 **Accomplishments**:
