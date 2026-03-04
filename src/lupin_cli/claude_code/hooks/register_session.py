@@ -89,7 +89,8 @@ def _spawn_listener( session_id, session_data, session_file ):
     Ensures:
         - Spawns listener subprocess in background (detached from hook lifecycle)
         - Records listener PID in session bridge file for SessionEnd cleanup
-        - Respects HOOK_LISTENER_DEBUG/VERBOSE/LOG env vars
+        - Always writes log file to ~/.claude/sessions/cc-listener-{hash}.log
+        - Respects LUPIN_CC_HOOK_LISTENER_DEBUG/VERBOSE env vars
         - Returns listener PID on success, None on failure
         - Never raises exceptions (spawn failure is non-fatal)
 
@@ -105,7 +106,7 @@ def _spawn_listener( session_id, session_data, session_file ):
         return None
 
     # Check if listener spawning is disabled
-    if os.environ.get( "HOOK_LISTENER_ENABLED", "true" ).strip().lower() == "false":
+    if os.environ.get( "LUPIN_CC_HOOK_LISTENER_ENABLED", "true" ).strip().lower() == "false":
         return None
 
     short_id = session_id[:8]
@@ -117,16 +118,16 @@ def _spawn_listener( session_id, session_data, session_file ):
     ]
 
     # Pass debug/verbose/log flags from env vars
-    if os.environ.get( "HOOK_LISTENER_DEBUG", "" ).strip().lower() == "true":
+    if os.environ.get( "LUPIN_CC_HOOK_LISTENER_DEBUG", "" ).strip().lower() == "true":
         cmd.append( "--debug" )
 
-    if os.environ.get( "HOOK_LISTENER_VERBOSE", "" ).strip().lower() == "true":
+    if os.environ.get( "LUPIN_CC_HOOK_LISTENER_VERBOSE", "" ).strip().lower() == "true":
         cmd.append( "--verbose" )
 
-    if os.environ.get( "HOOK_LISTENER_LOG", "" ).strip().lower() == "true":
-        log_dir  = os.path.expanduser( "~/.claude/sessions" )
-        log_path = os.path.join( log_dir, f"cc-listener-{short_id}.log" )
-        cmd.extend( [ "--log-file", log_path ] )
+    # Always write log files — enables tail-cc-listeners.sh aggregator
+    log_dir  = os.path.expanduser( "~/.claude/sessions" )
+    log_path = os.path.join( log_dir, f"cc-listener-{short_id}.log" )
+    cmd.extend( [ "--log-file", log_path ] )
 
     # Ensure PYTHONPATH includes src/
     env = os.environ.copy()
