@@ -28,7 +28,7 @@ if _src_path not in sys.path:
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts, build_progress_group_id,
     format_tool_summary, drain_and_acknowledge, format_voice_context,
-    build_additional_context, is_mcp_voice_tool,
+    build_additional_context,
     TOOLS_SILENT, TOOLS_ANNOUNCE
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id
@@ -48,10 +48,8 @@ def main():
     # Log full payload for empirical analysis
     log_payload( "post_tool_use", payload )
 
-    # MCP voice bypass — Claude is already talking to user
-    if is_mcp_voice_tool( tool_name ):
-        emit_json( {} )
-        sys.exit( 0 )
+    # No MCP voice bypass — drain fires after every tool call (including voice tools)
+    # to catch any messages that arrived during tool execution
 
     # Resolve session_id: payload first (future-proof), then session bridge fallback
     session_id = payload.get( "session_id", "" ) or get_claude_session_id()

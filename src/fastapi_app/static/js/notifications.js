@@ -1589,11 +1589,20 @@ class NotificationsUI {
         try {
             await this.ensureValidToken();
 
+            // Extract listener email from CC session sender_id (format: email#hash)
+            const voiceDiv   = document.querySelector( `.cc-voice-input[data-session-hash="${sessionHash}"]` );
+            const ccSenderId = voiceDiv?.getAttribute( 'data-sender-id' ) || '';
+
+            if ( !ccSenderId.includes( '#' ) ) {
+                throw new Error( `Cannot send CC session message: missing or malformed data-sender-id on voice input for session ${sessionHash}` );
+            }
+            const listenerEmail = ccSenderId.split( '#' )[ 0 ];
+
             const params = new URLSearchParams( {
                 message     : message,
                 type        : 'user_initiated_message',
                 priority    : 'medium',
-                target_user : this.currentUserEmail,
+                target_user : listenerEmail,
                 sender_id   : `user@${this.currentUserEmail}`,
                 job_id      : sessionHash,
             } );
@@ -1611,10 +1620,6 @@ class NotificationsUI {
             }
 
             this.log( `[CC-VOICE] Sent to session ${sessionHash}: ${message.substring( 0, 80 )}` );
-
-            // Show outgoing blue bubble in sender card conversation
-            const voiceDiv   = document.querySelector( `.cc-voice-input[data-session-hash="${sessionHash}"]` );
-            const ccSenderId = voiceDiv?.getAttribute( 'data-sender-id' );
 
             if ( ccSenderId ) {
                 const outgoing = {
