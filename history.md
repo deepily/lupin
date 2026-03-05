@@ -1,5 +1,26 @@
 # Lupin Project History
 
+### 2026.03.05 - Session 315 Checkpoint 1 | Stop Hook notify_user_sync + display_qualifier_widget
+
+**Accomplishments**:
+- Implemented Phase 2 stop hook behavior: when no voice buffer content, asks user "Anything else?" via `notify_user_sync` with 5-minute timeout and default "no"
+- Added `extract_qualifier_comment()` regex parser for "yes [comment: ...]" response format — extracts qualifier text and includes it in the stop block reason
+- Added `_ask_anything_else()` helper that builds the NotificationRequest, calls `notify_user_sync`, and returns appropriate stop hook JSON
+- Threaded `display_qualifier_widget` boolean flag through full notification stack: NotificationRequest model → `to_api_params()` → FastAPI query parameter → NotificationItem → `to_dict()` → JavaScript renderer
+- JS renderer conditionally renders yes/no comment widget expanded with softer hint text ("You may comment on your answer here if you wish") when flag is True
+
+**Files**:
+- `src/lupin_cli/claude_code/hooks/stop.py` — Phase 2 `notify_user_sync` call, `extract_qualifier_comment()`, `_ask_anything_else()`
+- `src/lupin_cli/notifications/notification_models.py` — `display_qualifier_widget` field on `NotificationRequest` + `to_api_params()`
+- `src/cosa/rest/routers/notifications.py` — `display_qualifier_widget` query parameter, pass-through to both push_notification calls
+- `src/cosa/rest/notification_fifo_queue.py` — `display_qualifier_widget` in `NotificationItem.__init__()`, `to_dict()`, `push_notification()`
+- `src/fastapi_app/static/js/notifications.js` — Conditional expanded class + alternate hint text
+- `src/tests/unit/test_stop_hook.py` — 22 tests (8 new for notify_user_sync + qualifier extraction)
+
+**Commit**: 3001997
+
+---
+
 ### 2026.03.04 - Session 314 | CJ Flow Cancel Button: Disable in Done/Dead + Padding Fix
 
 **Accomplishments**:

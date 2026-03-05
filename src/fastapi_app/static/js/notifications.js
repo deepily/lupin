@@ -10698,9 +10698,9 @@ class NotificationsUI {
                     </button>
                 </div>
                 <div class="yes-no-comment-hint" data-notification-id="${notification.id}">
-                    Press C to add comment
+                    ${notification.display_qualifier_widget ? 'You may comment on your answer here if you wish' : 'Press C to add comment'}
                 </div>
-                <div class="yes-no-comment-container" id="yn-comment-container-${notification.id}">
+                <div class="yes-no-comment-container${notification.display_qualifier_widget ? ' expanded' : ''}" id="yn-comment-container-${notification.id}">
                     <div class="yes-no-comment-input-row">
                         <button class="response-mic-button yes-no-comment-mic" data-notification-id="${notification.id}" title="Record voice comment">
                             🎤

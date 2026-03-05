@@ -245,6 +245,11 @@ class NotificationRequest(BaseModel):
         description="Suppress notification sound (ding) while still speaking message via TTS. Used for conversational TTS from queue operations where interruption ding is undesirable."
     )
 
+    display_qualifier_widget: bool = Field(
+        default=False,
+        description="When True, render the yes/no qualifier comment widget expanded by default with softer instructional text."
+    )
+
     @field_validator( 'message' )
     @classmethod
     def message_not_whitespace( cls, v: str ) -> str:
@@ -413,6 +418,10 @@ class NotificationRequest(BaseModel):
         # Add suppress_ding for conversational TTS (skip notification sound)
         if self.suppress_ding:
             params["suppress_ding"] = "true"
+
+        # Add display_qualifier_widget for expanded comment widget
+        if self.display_qualifier_widget:
+            params["display_qualifier_widget"] = "true"
 
         return params
 
