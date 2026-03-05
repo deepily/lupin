@@ -1497,6 +1497,12 @@
             margin-left: 4px;
         }
 
+        .sender-session-copy {
+            font-size: 11px;
+            margin-left: 0;
+            margin-right: 2px;
+        }
+
         /* Session name (auto-generated from first message, editable on click) */
         .sender-session-name {
             font-style: italic;

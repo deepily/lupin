@@ -1209,6 +1209,28 @@ class NotificationsUI {
         } );
     }
 
+    copySenderSessionId( btnElement ) {
+        /**
+         * Copy a sender session ID (without # prefix) to the clipboard.
+         *
+         * Requires:
+         *     - btnElement is the 📋 span immediately after a .sender-session-id span
+         *
+         * Ensures:
+         *     - copies hex session ID to clipboard (without # prefix)
+         *     - shows brief checkmark feedback on the copy button
+         */
+        const idSpan = btnElement.previousElementSibling;
+        if ( !idSpan ) return;
+        const text = idSpan.textContent.trim().replace( /^#/, '' );
+        if ( !text ) return;
+        navigator.clipboard.writeText( text ).then( () => {
+            const original = btnElement.textContent;
+            btnElement.textContent = '✅';
+            setTimeout( () => { btnElement.textContent = original; }, 1200 );
+        } );
+    }
+
     createAudioElement() {
         const audio = document.createElement( 'audio' );
         audio.controls = false; // Hidden for UI cleanliness
@@ -7565,7 +7587,10 @@ class NotificationsUI {
         // Build session display string (only if session_id present)
         // Session name is clickable for inline editing, gist button triggers LLM summary
         const sessionDisplay = sessionId
-            ? `<span class="sender-session-id">#${sessionId}</span>
+            ? `<span class="sender-session-id"
+                     onclick="event.stopPropagation();">#${sessionId}</span><span class="sender-session-copy copy-btn"
+                     onclick="event.stopPropagation(); window.notificationsUI.copySenderSessionId( this )"
+                     title="Copy session ID">📋</span>
                <button class="sender-gist-btn"
                        onclick="event.stopPropagation(); window.notificationsUI.generateSessionGist('${escapedSenderId}')"
                        title="Generate smart gist from conversation">✨</button>
