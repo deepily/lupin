@@ -300,6 +300,7 @@ def main():
 
         # ── Context clear detection ──────────────────────────────────
         # Same PID but different session ID → context clear happened
+        stable_session_id = session_id  # Default: first session start
         if os.path.exists( session_file ):
             try:
                 with open( session_file ) as f:
@@ -307,16 +308,22 @@ def main():
                 old_session_id = old_data.get( "session_id", "" )
                 if old_session_id and old_session_id != session_id:
                     is_context_clear = True
+                    # Carry forward the ORIGINAL stable ID (never changes for this PID)
+                    stable_session_id = old_data.get( "stable_session_id", old_session_id )
                     _cleanup_old_listener( old_data, session_id )
+                else:
+                    # Resuming same session — preserve existing stable ID
+                    stable_session_id = old_data.get( "stable_session_id", session_id )
             except ( json.JSONDecodeError, OSError ):
                 pass  # Can't read old data, proceed normally
 
         session_data = {
-            "session_id"      : session_id,
-            "transcript_path" : transcript_path,
-            "cwd"             : cwd,
-            "ppid"            : cc_pid,
-            "hook_ppid"       : hook_ppid
+            "session_id"        : session_id,
+            "stable_session_id" : stable_session_id,
+            "transcript_path"   : transcript_path,
+            "cwd"               : cwd,
+            "ppid"              : cc_pid,
+            "hook_ppid"         : hook_ppid
         }
 
         try:
@@ -349,11 +356,12 @@ def main():
 
     # ── Phase 5: Send TTS notification (with explicit sender_id) ────────
     short_id = session_id[:8] if session_id else "unknown"
-    # SessionStart hook has session_id from payload — build sender_id directly
-    # (can't rely on session file yet; this hook is the one writing it)
-    hook_sender_id = build_sender_id_for_cc( session_id=session_id ) if session_id else None
+    # Use stable_session_id for sender_id — stays consistent across context clears
+    stable_id = session_data.get( "stable_session_id", session_id ) if session_id else session_id
+    hook_sender_id = build_sender_id_for_cc( session_id=stable_id ) if session_id else None
     if is_context_clear:
-        send_tts( f"Hook fired: SessionStart (context clear) — new session {short_id}", sender_id=hook_sender_id )
+        stable_short = stable_id[:8] if stable_id else "unknown"
+        send_tts( f"Hook fired: SessionStart (context clear) — stable session {stable_short}", sender_id=hook_sender_id )
     else:
         send_tts( f"Hook fired: SessionStart — session {short_id}", sender_id=hook_sender_id )
 

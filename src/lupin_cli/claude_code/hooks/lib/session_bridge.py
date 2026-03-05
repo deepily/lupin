@@ -191,25 +191,30 @@ def _find_session_file() -> Optional[ Tuple[ Path, str ] ]:
 
 def _read_session_file( path: Path ) -> Optional[str]:
     """
-    Read session_id from a session file.
+    Read the stable session_id from a session file.
+
+    Prefers stable_session_id (survives context clears) over session_id.
+    Falls back to session_id for backward compatibility with bridge files
+    written before stable_session_id was introduced.
 
     Requires:
         - path is a valid Path to a JSON file
 
     Ensures:
-        - Returns session_id string if file is valid JSON with session_id key
+        - Returns stable_session_id if present, else session_id
         - Returns None on any read/parse error
 
     Args:
         path: Path to session file
 
     Returns:
-        str or None: Session ID from file
+        str or None: Stable session ID from file
     """
     try:
         with open( path ) as f:
             data = json.load( f )
-        return data.get( "session_id" )
+        # Prefer stable ID (survives context clears)
+        return data.get( "stable_session_id", data.get( "session_id" ) )
     except ( json.JSONDecodeError, OSError ):
         return None
 
@@ -381,13 +386,17 @@ def get_session_metadata() -> dict:
                 data = json.load( f )
             data["source"]            = "session_file"
             data["resolution_source"] = resolution_source
+            # Ensure stable_session_id is always present (backward compat)
+            if "stable_session_id" not in data:
+                data["stable_session_id"] = data.get( "session_id" )
             return data
         except ( json.JSONDecodeError, OSError ):
             pass
 
     return {
-        "session_id" : _fallback_session_id,
-        "source"     : "fallback"
+        "session_id"        : _fallback_session_id,
+        "stable_session_id" : _fallback_session_id,
+        "source"            : "fallback"
     }
 
 
