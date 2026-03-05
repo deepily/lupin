@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.03.04 - Session 314 | CJ Flow Cancel Button: Disable in Done/Dead + Padding Fix
+
+**Accomplishments**:
+- Fixed cancel button remaining clickable after job cards transition from run → done/dead via DOM reparenting in `handleJobStateTransition()`
+- Added cancel button disabling logic for both `done` and `dead` queue transitions: sets `disabled = true`, nulls onclick handler, removes `.has-cancel` class from header
+- Fixed cancel button visual positioning: moved from flush `top: 0; left: 0` to `top: 4px; left: 6px` for proper breathing room matching header padding
+- Added `.job-cancel-button:disabled:hover` CSS override to prevent hover highlight on disabled buttons
+
+**Files**:
+- `src/fastapi_app/static/js/notifications.js` — Cancel button disabling in `handleJobStateTransition()` for done + dead transitions
+- `src/fastapi_app/static/css/notifications.css` — Button positioning fix + disabled hover override
+
+---
+
 ### 2026.03.04 - Session 313 Checkpoint 1 | Voice Buffer Deny + Generalized Notification Reminder
 
 **Accomplishments**:

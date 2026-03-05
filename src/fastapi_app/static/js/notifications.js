@@ -4444,7 +4444,16 @@ class NotificationsUI {
                     this.log( `[JOB-TRANSITION] Removed send-message UI for ${jobId}` );
                 }
 
-                // 6. Convert live interactions to done-queue lazy-load pattern
+                // 6. Disable cancel button (no cancelling completed jobs)
+                const cancelBtn = header.querySelector( '.job-cancel-button' );
+                if ( cancelBtn ) {
+                    cancelBtn.disabled = true;
+                    cancelBtn.onclick  = null;
+                    header.classList.remove( 'has-cancel' );
+                    this.log( `[JOB-TRANSITION] Disabled cancel button for completed ${jobId}` );
+                }
+
+                // 7. Convert live interactions to done-queue lazy-load pattern
                 const interactionsSection = card.querySelector( '.job-interactions-section' );
                 if ( interactionsSection ) {
                     interactionsSection.classList.remove( 'live-interactions' );
@@ -4460,6 +4469,20 @@ class NotificationsUI {
                     // Reset expand button
                     const expandBtn = interactionsSection.querySelector( '.interactions-expand-btn' );
                     if ( expandBtn ) expandBtn.textContent = '▶';
+                }
+            }
+        }
+
+        // Disable cancel button when transitioning to dead queue
+        if ( toQueue === 'dead' ) {
+            const header = card.querySelector( '.job-card-header' );
+            if ( header ) {
+                const cancelBtn = header.querySelector( '.job-cancel-button' );
+                if ( cancelBtn ) {
+                    cancelBtn.disabled = true;
+                    cancelBtn.onclick  = null;
+                    header.classList.remove( 'has-cancel' );
+                    this.log( `[JOB-TRANSITION] Disabled cancel button for dead ${jobId}` );
                 }
             }
         }
