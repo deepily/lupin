@@ -246,7 +246,7 @@ class CCNotificationListener( BaseWebSocketListener ):
         try:
             from cosa.memory.gister import Gister
             gister = Gister( debug=False, verbose=False )
-            gist   = gister.get_gist( text, prompt_key="prompt template for session title" )
+            gist   = gister.get_gist( text )
         except Exception as e:
             self._log( f"{self.LOG_PREFIX} Gister failed: {e}" )
             gist = None
@@ -265,7 +265,7 @@ class CCNotificationListener( BaseWebSocketListener ):
             sender_id = f"claude.code@lupin.deepily.ai#{self.session_id_hash}"
 
             request = AsyncNotificationRequest(
-                message           = gist,
+                message           = f"Received: {gist}",
                 notification_type = NotificationType.PROGRESS,
                 priority          = NotificationPriority.LOW,
                 target_user       = target_email,

@@ -12,13 +12,18 @@ Tests cover:
     - Phase 4: block counter increments on each block
     - Phase 5: notify_user_sync "Anything else?" flow
     - Phase 5: extract_qualifier_comment regex parsing
+    - Gister-powered task summarization (_summarize_task)
+    - LLM-based qualifier classification (classify_qualifier)
+    - Qualifier routing: question vs instruction
 """
 
 import sys
 import pytest
 from unittest.mock import patch, MagicMock, call
 
-from lupin_cli.claude_code.hooks.stop import main, extract_qualifier_comment
+from lupin_cli.claude_code.hooks.stop import (
+    main, extract_qualifier_comment, _summarize_task, classify_qualifier
+)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -78,6 +83,142 @@ class TestExtractQualifierComment:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# TestSummarizeTask
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestSummarizeTask:
+    """Tests for _summarize_task() Gister integration."""
+
+    def test_none_input( self ):
+        """None input → None."""
+        assert _summarize_task( None ) is None
+
+    def test_empty_string( self ):
+        """Empty string → None."""
+        assert _summarize_task( "" ) is None
+
+    def test_whitespace_only( self ):
+        """Whitespace-only → None."""
+        assert _summarize_task( "   " ) is None
+
+    @patch( "lupin_cli.claude_code.hooks.stop.Gister", create=True )
+    def test_returns_gist( self, MockGisterClass ):
+        """Mock Gister returns gist → returns that gist."""
+        # We need to patch at the import site inside the function
+        with patch( "cosa.memory.gister.Gister" ) as MockGister:
+            mock_instance = MagicMock()
+            mock_instance.get_gist.return_value = "fixed linting errors"
+            MockGister.return_value = mock_instance
+
+            result = _summarize_task( "I fixed all the linting errors in the codebase" )
+            assert result == "fixed linting errors"
+
+    def test_gister_exception_returns_none( self ):
+        """Mock Gister exception → returns None."""
+        with patch( "cosa.memory.gister.Gister", side_effect=RuntimeError( "LLM down" ) ):
+            result = _summarize_task( "Some assistant message" )
+            assert result is None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestClassifyQualifier
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestClassifyQualifier:
+    """Tests for classify_qualifier() LLM intent classification."""
+
+    @patch( "cosa.agents.llm_client_factory.LlmClientFactory" )
+    @patch( "cosa.agents.io_models.utils.prompt_template_processor.PromptTemplateProcessor" )
+    @patch( "cosa.utils.util.get_file_as_string", return_value="template {utterance}" )
+    @patch( "cosa.utils.util.get_project_root", return_value="/mock/root" )
+    @patch( "cosa.config.configuration_manager.ConfigurationManager" )
+    def test_returns_question_classification( self, MockConfig, mock_root, mock_file,
+                                               MockProcessor, MockFactory ):
+        """Full chain mock → returns QualifierClassification with intent=question."""
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key, **kw: {
+            "prompt template for qualifier classification" : "/src/conf/prompts/agents/qualifier-classification.txt",
+            "llm spec key for qualifier classification"    : "kaitchup/phi_4_14b"
+        }.get( key, "" )
+        MockConfig.return_value = mock_cfg
+
+        mock_proc = MagicMock()
+        mock_proc.process_template.return_value = "processed {utterance}"
+        MockProcessor.return_value = mock_proc
+
+        mock_client = MagicMock()
+        mock_client.run.return_value = '<response><intent>question</intent><confidence>0.9</confidence><reasoning>Asking about results</reasoning></response>'
+        mock_factory = MagicMock()
+        mock_factory.get_client.return_value = mock_client
+        MockFactory.return_value = mock_factory
+
+        result = classify_qualifier( "how many tests passed?" )
+        assert result is not None
+        assert result.is_question() is True
+        assert result.is_instruction() is False
+
+    @patch( "cosa.agents.llm_client_factory.LlmClientFactory" )
+    @patch( "cosa.agents.io_models.utils.prompt_template_processor.PromptTemplateProcessor" )
+    @patch( "cosa.utils.util.get_file_as_string", return_value="template {utterance}" )
+    @patch( "cosa.utils.util.get_project_root", return_value="/mock/root" )
+    @patch( "cosa.config.configuration_manager.ConfigurationManager" )
+    def test_returns_instruction_classification( self, MockConfig, mock_root, mock_file,
+                                                  MockProcessor, MockFactory ):
+        """LLM returns instruction → QualifierClassification with intent=instruction."""
+        mock_cfg = MagicMock()
+        mock_cfg.get.side_effect = lambda key, **kw: {
+            "prompt template for qualifier classification" : "/path",
+            "llm spec key for qualifier classification"    : "key"
+        }.get( key, "" )
+        MockConfig.return_value = mock_cfg
+
+        mock_proc = MagicMock()
+        mock_proc.process_template.return_value = "processed {utterance}"
+        MockProcessor.return_value = mock_proc
+
+        mock_client = MagicMock()
+        mock_client.run.return_value = '<response><intent>instruction</intent><confidence>0.8</confidence><reasoning>Requesting action</reasoning></response>'
+        mock_factory = MagicMock()
+        mock_factory.get_client.return_value = mock_client
+        MockFactory.return_value = mock_factory
+
+        result = classify_qualifier( "fix the linting errors" )
+        assert result is not None
+        assert result.is_instruction() is True
+
+    def test_llm_failure_returns_none( self ):
+        """LLM failure → returns None."""
+        with patch( "cosa.config.configuration_manager.ConfigurationManager", side_effect=RuntimeError( "config error" ) ):
+            result = classify_qualifier( "some qualifier" )
+            assert result is None
+
+    @patch( "cosa.agents.llm_client_factory.LlmClientFactory" )
+    @patch( "cosa.agents.io_models.utils.prompt_template_processor.PromptTemplateProcessor" )
+    @patch( "cosa.utils.util.get_file_as_string", return_value="template {utterance}" )
+    @patch( "cosa.utils.util.get_project_root", return_value="/mock/root" )
+    @patch( "cosa.config.configuration_manager.ConfigurationManager" )
+    def test_xml_parse_error_returns_none( self, MockConfig, mock_root, mock_file,
+                                            MockProcessor, MockFactory ):
+        """XMLParsingError → returns None."""
+        mock_cfg = MagicMock()
+        mock_cfg.get.return_value = "/path"
+        MockConfig.return_value = mock_cfg
+
+        mock_proc = MagicMock()
+        mock_proc.process_template.return_value = "processed {utterance}"
+        MockProcessor.return_value = mock_proc
+
+        mock_client = MagicMock()
+        mock_client.run.return_value = "not valid xml at all"
+        mock_factory = MagicMock()
+        mock_factory.get_client.return_value = mock_client
+        MockFactory.return_value = mock_factory
+
+        result = classify_qualifier( "whatever" )
+        assert result is None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # TestVoiceDrain
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -120,7 +261,7 @@ class TestVoiceDrain:
         main()
 
         mock_drain.assert_called_once_with( "abc12345" )
-        mock_ask.assert_called_once_with( "abc12345" )
+        mock_ask.assert_called_once_with( "abc12345", None )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -189,7 +330,7 @@ class TestVoiceBlocking:
         main()
 
         mock_reset.assert_called_once_with( "abc12345" )
-        mock_ask.assert_called_once_with( "abc12345" )
+        mock_ask.assert_called_once_with( "abc12345", None )
         mock_emit.assert_called_once_with( {} )
 
 
@@ -285,6 +426,7 @@ class TestBlockCounter:
 class TestNotifyUserSync:
     """Tests for the notify_user_sync 'Anything else?' branch."""
 
+    @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
@@ -294,21 +436,22 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
     def test_user_says_yes_blocks_stop( self, mock_notify, mock_sender, mock_read,
-                                         mock_log, mock_session, mock_drain, mock_emit, mock_reset ):
+                                         mock_log, mock_session, mock_drain, mock_emit,
+                                         mock_reset, mock_summarize ):
         """User says 'yes' → block with continuation reason."""
         mock_response = MagicMock()
         mock_response.response_value = "yes"
         mock_notify.return_value = mock_response
         mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }
 
-        # Need to unpatch _ask_anything_else so it runs the real code
-        # which calls notify_user_sync (which we've patched)
         main()
 
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "decision" ] == "block"
         assert "continue working" in emitted[ "reason" ]
 
+    @patch( "lupin_cli.claude_code.hooks.stop.classify_qualifier" )
+    @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
@@ -317,9 +460,97 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
-    def test_user_says_yes_with_qualifier( self, mock_notify, mock_sender, mock_read,
-                                            mock_log, mock_session, mock_drain, mock_emit, mock_reset ):
-        """User says 'yes [comment: fix tests]' → block with qualifier in reason."""
+    def test_qualifier_question_routes_to_converse( self, mock_notify, mock_sender, mock_read,
+                                                      mock_log, mock_session, mock_drain, mock_emit,
+                                                      mock_reset, mock_summarize, mock_classify ):
+        """Qualifier classified as question → reason mentions converse()."""
+        mock_response = MagicMock()
+        mock_response.response_value = "yes [comment: how many tests passed?]"
+        mock_notify.return_value = mock_response
+        mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }
+
+        mock_classification = MagicMock()
+        mock_classification.is_question.return_value = True
+        mock_classify.return_value = mock_classification
+
+        main()
+
+        emitted = mock_emit.call_args[ 0 ][ 0 ]
+        assert emitted[ "decision" ] == "block"
+        assert "question" in emitted[ "reason" ].lower()
+        assert "converse" in emitted[ "reason" ]
+        assert "how many tests passed?" in emitted[ "reason" ]
+
+    @patch( "lupin_cli.claude_code.hooks.stop.classify_qualifier" )
+    @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
+    def test_qualifier_instruction_routes_to_notify( self, mock_notify, mock_sender, mock_read,
+                                                       mock_log, mock_session, mock_drain, mock_emit,
+                                                       mock_reset, mock_summarize, mock_classify ):
+        """Qualifier classified as instruction → reason mentions notify()."""
+        mock_response = MagicMock()
+        mock_response.response_value = "yes [comment: fix the linting errors]"
+        mock_notify.return_value = mock_response
+        mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }
+
+        mock_classification = MagicMock()
+        mock_classification.is_question.return_value = False
+        mock_classify.return_value = mock_classification
+
+        main()
+
+        emitted = mock_emit.call_args[ 0 ][ 0 ]
+        assert emitted[ "decision" ] == "block"
+        assert "fix the linting errors" in emitted[ "reason" ]
+        assert "notify" in emitted[ "reason" ]
+
+    @patch( "lupin_cli.claude_code.hooks.stop.classify_qualifier", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
+    def test_classifier_fails_falls_back_to_question_mark( self, mock_notify, mock_sender, mock_read,
+                                                             mock_log, mock_session, mock_drain, mock_emit,
+                                                             mock_reset, mock_summarize, mock_classify ):
+        """Classifier returns None + qualifier ends with '?' → treats as question."""
+        mock_response = MagicMock()
+        mock_response.response_value = "yes [comment: how many tests passed?]"
+        mock_notify.return_value = mock_response
+        mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }
+
+        main()
+
+        emitted = mock_emit.call_args[ 0 ][ 0 ]
+        assert emitted[ "decision" ] == "block"
+        assert "question" in emitted[ "reason" ].lower()
+        assert "converse" in emitted[ "reason" ]
+
+    @patch( "lupin_cli.claude_code.hooks.stop.classify_qualifier", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
+    def test_classifier_fails_no_question_mark_defaults_to_instruction( self, mock_notify, mock_sender, mock_read,
+                                                                          mock_log, mock_session, mock_drain, mock_emit,
+                                                                          mock_reset, mock_summarize, mock_classify ):
+        """Classifier returns None + no '?' → treats as instruction."""
         mock_response = MagicMock()
         mock_response.response_value = "yes [comment: fix the tests]"
         mock_notify.return_value = mock_response
@@ -330,8 +561,56 @@ class TestNotifyUserSync:
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "decision" ] == "block"
         assert "fix the tests" in emitted[ "reason" ]
-        assert "They said" in emitted[ "reason" ]
+        assert "notify" in emitted[ "reason" ]
 
+    @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value="fixed linting errors" )
+    @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
+    def test_notify_message_includes_gist( self, mock_notify, mock_sender, mock_read,
+                                             mock_log, mock_session, mock_drain, mock_emit,
+                                             mock_reset, mock_summarize ):
+        """When _summarize_task returns a gist, notification message includes it."""
+        mock_response = MagicMock()
+        mock_response.response_value = "no"
+        mock_notify.return_value = mock_response
+        mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }
+
+        main()
+
+        request = mock_notify.call_args[ 0 ][ 0 ]
+        assert "fixed linting errors" in request.message
+        assert "I'm finished" in request.message
+
+    @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
+    def test_notify_message_fallback( self, mock_notify, mock_sender, mock_read,
+                                        mock_log, mock_session, mock_drain, mock_emit,
+                                        mock_reset, mock_summarize ):
+        """When _summarize_task returns None, falls back to generic message."""
+        mock_response = MagicMock()
+        mock_response.response_value = "no"
+        mock_notify.return_value = mock_response
+        mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }
+
+        main()
+
+        request = mock_notify.call_args[ 0 ][ 0 ]
+        assert "finished the current task" in request.message
+
+    @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
@@ -341,7 +620,8 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
     def test_user_says_no_allows_stop( self, mock_notify, mock_sender, mock_read,
-                                        mock_log, mock_session, mock_drain, mock_emit, mock_reset ):
+                                        mock_log, mock_session, mock_drain, mock_emit,
+                                        mock_reset, mock_summarize ):
         """User says 'no' → allow stop (emit {})."""
         mock_response = MagicMock()
         mock_response.response_value = "no"
@@ -352,6 +632,7 @@ class TestNotifyUserSync:
 
         mock_emit.assert_called_once_with( {} )
 
+    @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
@@ -361,7 +642,8 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
     def test_timeout_allows_stop( self, mock_notify, mock_sender, mock_read,
-                                   mock_log, mock_session, mock_drain, mock_emit, mock_reset ):
+                                   mock_log, mock_session, mock_drain, mock_emit,
+                                   mock_reset, mock_summarize ):
         """Timeout (default 'no') → allow stop (emit {})."""
         mock_response = MagicMock()
         mock_response.response_value = "no"  # Default on timeout
@@ -391,6 +673,7 @@ class TestNotifyUserSync:
 
         mock_emit.assert_called_once_with( {} )
 
+    @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
@@ -400,7 +683,8 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
     def test_notify_called_with_correct_params( self, mock_notify, mock_sender, mock_read,
-                                                 mock_log, mock_session, mock_drain, mock_emit, mock_reset ):
+                                                 mock_log, mock_session, mock_drain, mock_emit,
+                                                 mock_reset, mock_summarize ):
         """Verify notify_user_sync is called with 5min timeout, default 'no', display_qualifier_widget=True."""
         mock_response = MagicMock()
         mock_response.response_value = "no"

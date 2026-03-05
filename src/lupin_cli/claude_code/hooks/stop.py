@@ -71,7 +71,78 @@ def extract_qualifier_comment( response_value ):
     return ( response_value.strip().lower(), None )
 
 
-def _ask_anything_else( session_id ):
+def _summarize_task( last_assistant_message ):
+    """
+    Summarize the last assistant message using Gister (default mode).
+
+    Requires:
+        - last_assistant_message is a string or None
+
+    Ensures:
+        - Returns a concise gist string on success
+        - Returns None on any failure or empty input
+    """
+    if not last_assistant_message or not last_assistant_message.strip():
+        return None
+
+    try:
+        from cosa.memory.gister import Gister
+        gister = Gister( debug=False, verbose=False )
+        gist   = gister.get_gist( last_assistant_message )
+        return gist if gist else None
+    except Exception:
+        return None
+
+
+def classify_qualifier( qualifier ):
+    """
+    Classify a user qualifier as 'question' or 'instruction' via phi4 LLM.
+
+    Follows the established agent pattern:
+        1. Load prompt template path from config
+        2. Process template via PromptTemplateProcessor (injects XML example)
+        3. Format with utterance
+        4. Call LLM via LlmClientFactory
+        5. Parse response via QualifierClassification.from_xml()
+
+    Requires:
+        - qualifier is a non-empty string
+
+    Ensures:
+        - Returns QualifierClassification instance on success
+        - Returns None on any failure (LLM unreachable, parse error, etc.)
+    """
+    try:
+        import cosa.utils.util as du
+        from cosa.config.configuration_manager import ConfigurationManager
+        from cosa.agents.llm_client_factory import LlmClientFactory
+        from cosa.agents.io_models.xml_models import QualifierClassification
+        from cosa.agents.io_models.utils.util_xml_pydantic import XMLParsingError
+        from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
+
+        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+
+        # Load and process prompt template
+        prompt_template_path = config_mgr.get( "prompt template for qualifier classification" )
+        prompt_template      = du.get_file_as_string( du.get_project_root() + prompt_template_path )
+
+        processor       = PromptTemplateProcessor()
+        prompt_template = processor.process_template( prompt_template, "qualifier classification" )
+        prompt          = prompt_template.format( utterance=qualifier )
+
+        # Call LLM
+        llm_spec_key = config_mgr.get( "llm spec key for qualifier classification" )
+        llm_client   = LlmClientFactory().get_client( llm_spec_key )
+        raw_response = llm_client.run( prompt )
+
+        # Parse structured XML response
+        return QualifierClassification.from_xml( raw_response )
+
+    except ( XMLParsingError, Exception ):
+        return None
+
+
+def _ask_anything_else( session_id, last_assistant_message=None ):
     """
     Ask the user "Anything else?" via notify_user_sync with a 5-minute timeout.
 
@@ -80,16 +151,25 @@ def _ask_anything_else( session_id ):
 
     Requires:
         - session_id is a string for sender_id resolution
+        - last_assistant_message is a string or None
 
     Ensures:
         - Returns dict suitable for emit_json()
+        - Notification message includes Gister summary when available
+        - Qualifier is classified as question or instruction via LLM
         - On any exception, returns {} (allow stop gracefully)
     """
     try:
         sender_id = build_sender_id_for_cc( session_id )
 
+        gist = _summarize_task( last_assistant_message )
+        if gist:
+            message = f"[LUPIN] I'm finished *{gist}*. Is there anything else you want me to do?"
+        else:
+            message = "[LUPIN] I've finished the current task. Is there anything else you'd like me to do?"
+
         request = NotificationRequest(
-            message                  = "[LUPIN] I've finished the current task. Is there anything else you'd like me to do?",
+            message                  = message,
             response_type            = ResponseType.YES_NO,
             priority                 = NotificationPriority.HIGH,
             timeout_seconds          = 300,
@@ -105,7 +185,26 @@ def _ask_anything_else( session_id ):
 
         if answer == "yes":
             if qualifier:
-                reason = f"The user wants to continue working. They said: {qualifier}. Address their comment and then ask if there's anything else."
+                classification = classify_qualifier( qualifier )
+                qualifier_is_question = (
+                    classification.is_question() if classification
+                    else qualifier.rstrip().endswith( "?" )
+                )
+
+                if qualifier_is_question:
+                    reason = (
+                        f'The user has a question: "{qualifier}". '
+                        "Answer their question using mcp__cosa-voice__converse() with priority='medium' "
+                        "so they hear the response via audio. After answering, ask if there's anything else "
+                        "using mcp__cosa-voice__ask_yes_no() with priority='high'."
+                    )
+                else:
+                    reason = (
+                        f"The user wants you to: {qualifier}. "
+                        "First, acknowledge receipt by calling mcp__cosa-voice__notify() with "
+                        "a brief confirmation message at priority='medium'. "
+                        "Then carry out their instruction."
+                    )
             else:
                 reason = "The user wants to continue working. Ask them what they'd like done next."
             return build_stop_block( reason )
@@ -159,7 +258,8 @@ def main():
     else:
         # No voice input → Phase 2: ask user "Anything else?" via notification
         reset_stop_block_count( session_id )
-        result = _ask_anything_else( session_id )
+        last_assistant_message = payload.get( "last_assistant_message" )
+        result = _ask_anything_else( session_id, last_assistant_message )
         emit_json( result )
 
 

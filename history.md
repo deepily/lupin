@@ -1,5 +1,29 @@
 # Lupin Project History
 
+### 2026.03.05 - Session 318 Checkpoint 1 | Stop Hook Gister Summary + LLM Intent Classification
+
+**Accomplishments**:
+- Added Gister-powered task summarization to stop hook "Anything else?" notification — user hears *what* was finished (e.g., "I'm finished *fixing linting errors*") instead of generic message
+- Implemented LLM-based qualifier intent classification via phi4 + `QualifierClassification` BaseXMLModel — classifies user qualifiers as "question" (routes to `converse()`) or "instruction" (routes to `notify()` + action)
+- Added `_summarize_task()` using Gister default mode (cache-enabled) for `last_assistant_message` from stop hook payload
+- Added `classify_qualifier()` following established agent pattern: config-driven prompt template + PromptTemplateProcessor + LlmClientFactory + Pydantic XML parsing
+- Fixed auto-response Gister in `cc_notification_listener.py`: switched from session-title prompt key to default mode, prefixed message with "Received:"
+- Fallback: when LLM classifier unavailable, uses `?` suffix heuristic for question detection
+
+**Files**:
+- `src/cosa/agents/io_models/xml_models.py` — Added `QualifierClassification` model with `is_question()`, `is_instruction()`, None coercion, smoke test
+- `src/cosa/agents/io_models/utils/prompt_template_processor.py` — Registered `QualifierClassification` in MODEL_MAPPING
+- `src/conf/prompts/agents/qualifier-classification.txt` — **NEW** prompt template for intent classification
+- `src/conf/lupin-app.ini` — Config keys for qualifier classification prompt + LLM spec
+- `src/conf/lupin-app-splainer.ini` — Matching splainer entries
+- `src/lupin_cli/claude_code/hooks/stop.py` — `_summarize_task()`, `classify_qualifier()`, updated `_ask_anything_else()` + `main()`
+- `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` — Default Gister mode, "Received:" prefix
+- `src/tests/unit/test_stop_hook.py` — 36 tests (was 19): +5 summarize, +4 classify, +8 qualifier routing/gist
+
+**Commit**: b79b6f5
+
+---
+
 ### 2026.03.05 - Session 317 Checkpoint 1 | Session ID + Copy Icon Spacing Fix
 
 **Accomplishments**:
