@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.03.05 - Session 319 | Render Markdown in Response-Requested Card Title & Message
+
+**Accomplishments**:
+- Fixed raw markdown rendering in "response requested" notification cards (yes/no, open-ended, multiple choice) — title and message fields now pass through `renderMarkdown()` (marked.js + DOMPurify), matching existing `abstract` field behavior
+
+**Files**:
+- `src/fastapi_app/static/js/notifications.js` — Wrapped title (line 10775) and message (line 10783) in `this.renderMarkdown()`
+
+**Commit**: 105a6cc
+
+**Status**: Session closed 2026.03.05
+
+---
+
 ### 2026.03.05 - Session 318 Checkpoint 1 | Stop Hook Gister Summary + LLM Intent Classification
 
 **Accomplishments**:

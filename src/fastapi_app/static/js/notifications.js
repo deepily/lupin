@@ -10772,7 +10772,7 @@ class NotificationsUI {
                 <button class="action-required-cancel-btn" data-notification-id="${notification.id}" title="Cancel and use default (Esc)">
                     ✕
                 </button>
-                <div class="action-required-title">${notification.title || notification.message}</div>
+                <div class="action-required-title">${this.renderMarkdown( notification.title || notification.message )}</div>
                 <div class="action-required-timer-controls">
                     <button class="action-required-pause-btn" id="pause-btn-${notification.id}" title="Pause timer and audio (P)">
                         \u23F8\uFE0F
@@ -10780,7 +10780,7 @@ class NotificationsUI {
                     <div class="action-required-timer" id="timer-${notification.id}">--:--</div>
                 </div>
             </div>
-            <div class="action-required-message">${notification.message}</div>
+            <div class="action-required-message">${this.renderMarkdown( notification.message )}</div>
             ${abstractSection}
             ${predictionHintSection}
             <div class="action-required-progress-bar">
