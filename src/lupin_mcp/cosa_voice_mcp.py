@@ -34,6 +34,7 @@ Usage:
 
 import logging
 import os
+import re
 import signal
 import sys
 import time
@@ -492,6 +493,53 @@ def notify(
         return f"Failed: {response.message}"
 
 
+def _extract_qualifier( response_value ):
+    """
+    Extract qualifier comment from a yes/no response value.
+
+    Requires:
+        - response_value is a string or None
+
+    Ensures:
+        - Returns ( answer, qualifier ) tuple
+        - answer is "yes" or "no" (lowercase), or None if empty
+        - qualifier is the comment text or None
+
+    Examples:
+        "yes [comment: fix the tests]" -> ( "yes", "fix the tests" )
+        "no [comment: not ready]"      -> ( "no", "not ready" )
+        "yes"                          -> ( "yes", None )
+    """
+    if not response_value:
+        return ( None, None )
+
+    match = re.match( r'^(yes|no)\s*(?:\[comment:\s*(.+)\])?$', response_value.strip(), re.IGNORECASE )
+    if match:
+        return ( match.group( 1 ).lower(), match.group( 2 ) )
+
+    return ( response_value.strip().lower(), None )
+
+
+def _format_qualified_response( answer, qualifier ):
+    """
+    Format a yes/no answer with qualifier into an enriched string that Claude will act on.
+
+    Requires:
+        - answer is "yes" or "no"
+        - qualifier is a non-empty string
+
+    Ensures:
+        - Returns a multi-line string with explicit instructions for Claude
+    """
+    return (
+        f"{answer}\n\n"
+        f"IMPORTANT — The user attached a comment to their {answer} response:\n"
+        f'"{qualifier}"\n\n'
+        "You MUST act on this comment. It is a direct instruction or question from the user. "
+        "Do NOT ignore it. If it is a question, answer it. If it is an instruction, carry it out."
+    )
+
+
 @mcp.tool
 def ask_yes_no(
     question: str,
@@ -551,7 +599,11 @@ def ask_yes_no(
     response: NotificationResponse = notify_user_sync( request=request, debug=False )
 
     if response.exit_code == 0 and response.response_value:
-        return response.response_value.strip()
+        raw_value = response.response_value.strip()
+        answer, qualifier = _extract_qualifier( raw_value )
+        if qualifier:
+            return _format_qualified_response( answer, qualifier )
+        return raw_value
 
     return default
 

@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.03.06 - Session 323 Checkpoint 3 | Fix MCP ask_yes_no() Silently Discarding Qualifier Comments
+
+**Accomplishments**:
+- Fixed bug where `ask_yes_no()` in cosa_voice_mcp.py returned raw `"yes [comment: ...]"` string — Claude treated it as simple "yes" and ignored the user's comment
+- Added `_extract_qualifier()` helper (duplicated regex from stop.py — separate packages, no cross-import) to parse `[comment: ...]` from response
+- Added `_format_qualified_response()` helper to enrich return value with explicit `IMPORTANT` instruction block that Claude cannot ignore
+- Plain yes/no responses pass through unchanged (no regression)
+- 19 new tests all passing: 10 `_extract_qualifier` parsing, 3 `_format_qualified_response` output, 6 `ask_yes_no` integration with mocked backend
+
+**Files**:
+- `src/lupin_mcp/cosa_voice_mcp.py` — Added `import re`, `_extract_qualifier()`, `_format_qualified_response()`, modified `ask_yes_no()` return logic
+- `src/tests/unit/test_cosa_voice_mcp_qualifier.py` — **NEW** 19 tests across 3 classes
+
+**Commit**: b3ac02e
+
+---
+
 ### 2026.03.06 - Session 323 Checkpoint 2 | Fix Stop Hook Discarding "no + qualifier" Comments
 
 **Accomplishments**:
