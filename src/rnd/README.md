@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.05 - Voice Injection: Listener + tmux + UserPromptSubmit Hook Plan
+- **Plan**: [2026.03.05-voice-injection-listener-tmux-hook-plan.md](2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.03.05-voice-injection-listener-tmux-hook-plan.md) - Implementation plan for direct voice injection into idle Claude Code sessions. Reuses existing notification -> listener -> JSONL buffer pipeline, adds tmux session discovery in register_session.py, tmux Enter trigger in CCNotificationListener after buffering, and new UserPromptSubmit hook that drains buffer and injects as additionalContext. 6 phases, 10 files (3 new, 7 modified), ~24 unit tests + E2E smoke test.
+
 ### 2026.03.02 - Slice 6: Prediction Hint UI Rendering
 - **Plan**: [2026.03.02-slice-6-prediction-hint-ui-rendering.md](2026.02.23-trust-proxy-preference-learning/2026.03.02-slice-6-prediction-hint-ui-rendering.md) - Render prediction hints inside response-required notification cards in the browser. Adds `buildPredictionHintSection()` and `formatStrategyLabel()` to `notifications.js`, injects hint between abstract and progress bar, purple-themed CSS styling. Zero Python changes — purely frontend. Closes the "full stack per type" architecture gap.
 

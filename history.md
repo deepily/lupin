@@ -1,5 +1,18 @@
 # Lupin Project History
 
+### 2026.03.05 - Session 321 | Voice Injection Plan Serialization (Phase 0)
+
+**Accomplishments**:
+- Serialized voice injection implementation plan (listener + tmux + UserPromptSubmit hook) to R&D directory — 6-phase plan covering tmux discovery, listener trigger, new hook, shell scripts, registration, and tests (~24 unit + E2E)
+- Added TODO item referencing plan and research docs for next-session pickup
+
+**Files**:
+- `src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.03.05-voice-injection-listener-tmux-hook-plan.md` — **NEW** Implementation plan
+- `src/rnd/README.md` — Added index entry
+- `TODO.md` — Added voice injection TODO item
+
+---
+
 ### 2026.03.05 - Session 320 Checkpoint 1 | Skills Encyclopedia Plan
 
 **Accomplishments**:
