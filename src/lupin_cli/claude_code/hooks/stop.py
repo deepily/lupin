@@ -142,6 +142,43 @@ def classify_qualifier( qualifier ):
         return None
 
 
+def _build_qualifier_reason( qualifier, question_context, instruction_context ):
+    """
+    Classify a qualifier and build a formatted reason string.
+
+    Requires:
+        - qualifier is a non-empty string
+        - question_context is a string prefix for the question case
+          (e.g., 'The user has a question')
+        - instruction_context is a string prefix for the instruction case
+          (e.g., 'The user wants you to')
+
+    Ensures:
+        - Returns a reason string with cosa-voice instructions
+        - Classifies qualifier as question or instruction via LLM (with ? fallback)
+    """
+    classification = classify_qualifier( qualifier )
+    qualifier_is_question = (
+        classification.is_question() if classification
+        else qualifier.rstrip().endswith( "?" )
+    )
+
+    if qualifier_is_question:
+        return (
+            f'{question_context}: "{qualifier}". '
+            "Answer their question using mcp__cosa-voice__converse() with priority='medium' "
+            "so they hear the response via audio. After answering, ask if there's anything else "
+            "using mcp__cosa-voice__ask_yes_no() with priority='high'."
+        )
+    else:
+        return (
+            f'{instruction_context}: "{qualifier}". '
+            "First, acknowledge receipt by calling mcp__cosa-voice__notify() with "
+            "a brief confirmation message at priority='medium'. "
+            "Then carry out their instruction."
+        )
+
+
 def _ask_anything_else( session_id, last_assistant_message=None ):
     """
     Ask the user "Anything else?" via notify_user_sync with a 5-minute timeout.
@@ -157,6 +194,9 @@ def _ask_anything_else( session_id, last_assistant_message=None ):
         - Returns dict suitable for emit_json()
         - Notification message includes Gister summary when available
         - Qualifier is classified as question or instruction via LLM
+        - "yes" blocks stop (with or without qualifier)
+        - "no + qualifier" blocks stop and passes the qualifier as new work
+        - Plain "no", timeout, error → allows stop ({})
         - On any exception, returns {} (allow stop gracefully)
     """
     try:
@@ -183,33 +223,29 @@ def _ask_anything_else( session_id, last_assistant_message=None ):
 
         answer, qualifier = extract_qualifier_comment( response.response_value )
 
+        print( f"[STOP] response: exit_code={response.exit_code}, value='{response.response_value}'", file=sys.stderr )
+        print( f"[STOP] parsed: answer='{answer}', qualifier='{qualifier}'", file=sys.stderr )
+
         if answer == "yes":
             if qualifier:
-                classification = classify_qualifier( qualifier )
-                qualifier_is_question = (
-                    classification.is_question() if classification
-                    else qualifier.rstrip().endswith( "?" )
+                reason = _build_qualifier_reason(
+                    qualifier,
+                    "The user has a question",
+                    "The user wants you to"
                 )
-
-                if qualifier_is_question:
-                    reason = (
-                        f'The user has a question: "{qualifier}". '
-                        "Answer their question using mcp__cosa-voice__converse() with priority='medium' "
-                        "so they hear the response via audio. After answering, ask if there's anything else "
-                        "using mcp__cosa-voice__ask_yes_no() with priority='high'."
-                    )
-                else:
-                    reason = (
-                        f"The user wants you to: {qualifier}. "
-                        "First, acknowledge receipt by calling mcp__cosa-voice__notify() with "
-                        "a brief confirmation message at priority='medium'. "
-                        "Then carry out their instruction."
-                    )
             else:
                 reason = "The user wants to continue working. Ask them what they'd like done next."
             return build_stop_block( reason )
 
-        # "no", timeout, error → allow stop
+        if answer == "no" and qualifier:
+            reason = _build_qualifier_reason(
+                qualifier,
+                'The user said "no" to continuing, but has a new question',
+                'The user said "no" to continuing, but has a new instruction'
+            )
+            return build_stop_block( reason )
+
+        # Plain "no", timeout, error → allow stop
         return {}
 
     except Exception as e:

@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.03.06 - Session 323 Checkpoint 2 | Fix Stop Hook Discarding "no + qualifier" Comments
+
+**Accomplishments**:
+- Fixed bug where `_ask_anything_else()` in stop.py silently discarded user qualifier when answer was "no" — "no [comment: say hi]" now blocks stop and passes the instruction to Claude
+- Extracted `_build_qualifier_reason()` shared helper used by both "yes + qualifier" and "no + qualifier" branches, taking separate `question_context` and `instruction_context` prefixes for grammatically correct output
+- Added debug logging to stderr (`[STOP] response:` and `[STOP] parsed:`) for stop hook observability
+- 6 new tests (42 total in test_stop_hook.py): 4 for `_build_qualifier_reason` unit tests + 2 end-to-end "no + qualifier" tests (instruction and question paths)
+
+**Files**:
+- `src/lupin_cli/claude_code/hooks/stop.py` — New `_build_qualifier_reason()` helper, "no + qualifier" branch at line 240, debug logging at lines 226-227
+- `src/tests/unit/test_stop_hook.py` — 6 new tests in `TestBuildQualifierReason` class + `test_no_with_qualifier_*` in `TestNotifyUserSync`
+
+---
+
 ### 2026.03.06 - Session 323 Checkpoint 1 | Voice Injection into Idle CC Sessions + Permission Prompt High Priority
 
 **Accomplishments**:
@@ -39,6 +53,10 @@
 
 **Files**:
 - `src/fastapi_app/static/js/notifications.js` — `renderMarkdownInline()` method + 6 call sites, 3 truncation removals, 1 `textContent` → `innerHTML` fix, 1 "already responded" error handler
+
+**Commit**: de59952
+
+**Status**: Session closed 2026.03.06
 
 ---
 

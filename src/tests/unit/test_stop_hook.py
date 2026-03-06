@@ -22,7 +22,8 @@ import pytest
 from unittest.mock import patch, MagicMock, call
 
 from lupin_cli.claude_code.hooks.stop import (
-    main, extract_qualifier_comment, _summarize_task, classify_qualifier
+    main, extract_qualifier_comment, _summarize_task, classify_qualifier,
+    _build_qualifier_reason
 )
 
 
@@ -80,6 +81,50 @@ class TestExtractQualifierComment:
         answer, qualifier = extract_qualifier_comment( "" )
         assert answer is None
         assert qualifier is None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestBuildQualifierReason
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestBuildQualifierReason:
+    """Tests for _build_qualifier_reason() shared helper."""
+
+    @patch( "lupin_cli.claude_code.hooks.stop.classify_qualifier" )
+    def test_question_uses_question_context( self, mock_classify ):
+        """Question qualifier → uses question_context prefix."""
+        mock_classification = MagicMock()
+        mock_classification.is_question.return_value = True
+        mock_classify.return_value = mock_classification
+
+        reason = _build_qualifier_reason( "what time is it?", "Q_CTX", "I_CTX" )
+        assert reason.startswith( 'Q_CTX: "what time is it?"' )
+        assert "converse" in reason
+
+    @patch( "lupin_cli.claude_code.hooks.stop.classify_qualifier" )
+    def test_instruction_uses_instruction_context( self, mock_classify ):
+        """Instruction qualifier → uses instruction_context prefix."""
+        mock_classification = MagicMock()
+        mock_classification.is_question.return_value = False
+        mock_classify.return_value = mock_classification
+
+        reason = _build_qualifier_reason( "fix the tests", "Q_CTX", "I_CTX" )
+        assert reason.startswith( 'I_CTX: "fix the tests"' )
+        assert "notify" in reason
+
+    @patch( "lupin_cli.claude_code.hooks.stop.classify_qualifier", return_value=None )
+    def test_fallback_question_mark( self, mock_classify ):
+        """Classifier returns None + '?' → question path."""
+        reason = _build_qualifier_reason( "how many?", "Q_CTX", "I_CTX" )
+        assert reason.startswith( 'Q_CTX' )
+        assert "converse" in reason
+
+    @patch( "lupin_cli.claude_code.hooks.stop.classify_qualifier", return_value=None )
+    def test_fallback_no_question_mark( self, mock_classify ):
+        """Classifier returns None + no '?' → instruction path."""
+        reason = _build_qualifier_reason( "do the thing", "Q_CTX", "I_CTX" )
+        assert reason.startswith( 'I_CTX' )
+        assert "notify" in reason
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -622,7 +667,7 @@ class TestNotifyUserSync:
     def test_user_says_no_allows_stop( self, mock_notify, mock_sender, mock_read,
                                         mock_log, mock_session, mock_drain, mock_emit,
                                         mock_reset, mock_summarize ):
-        """User says 'no' → allow stop (emit {})."""
+        """User says plain 'no' → allow stop (emit {})."""
         mock_response = MagicMock()
         mock_response.response_value = "no"
         mock_notify.return_value = mock_response
@@ -631,6 +676,70 @@ class TestNotifyUserSync:
         main()
 
         mock_emit.assert_called_once_with( {} )
+
+    @patch( "lupin_cli.claude_code.hooks.stop.classify_qualifier" )
+    @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
+    def test_no_with_qualifier_instruction_blocks_stop( self, mock_notify, mock_sender, mock_read,
+                                                          mock_log, mock_session, mock_drain, mock_emit,
+                                                          mock_reset, mock_summarize, mock_classify ):
+        """'no [comment: say hi]' → blocks stop, reason includes instruction."""
+        mock_response = MagicMock()
+        mock_response.exit_code      = 0
+        mock_response.response_value = "no [comment: say hi using a high-priority notification]"
+        mock_notify.return_value = mock_response
+        mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }
+
+        mock_classification = MagicMock()
+        mock_classification.is_question.return_value = False
+        mock_classify.return_value = mock_classification
+
+        main()
+
+        emitted = mock_emit.call_args[ 0 ][ 0 ]
+        assert emitted[ "decision" ] == "block"
+        assert "say hi using a high-priority notification" in emitted[ "reason" ]
+        assert "no" in emitted[ "reason" ].lower()
+        assert "notify" in emitted[ "reason" ]
+
+    @patch( "lupin_cli.claude_code.hooks.stop.classify_qualifier" )
+    @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
+    def test_no_with_qualifier_question_blocks_stop( self, mock_notify, mock_sender, mock_read,
+                                                        mock_log, mock_session, mock_drain, mock_emit,
+                                                        mock_reset, mock_summarize, mock_classify ):
+        """'no [comment: what time is it?]' → blocks stop, reason includes question."""
+        mock_response = MagicMock()
+        mock_response.exit_code      = 0
+        mock_response.response_value = "no [comment: what time is it?]"
+        mock_notify.return_value = mock_response
+        mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }
+
+        mock_classification = MagicMock()
+        mock_classification.is_question.return_value = True
+        mock_classify.return_value = mock_classification
+
+        main()
+
+        emitted = mock_emit.call_args[ 0 ][ 0 ]
+        assert emitted[ "decision" ] == "block"
+        assert "what time is it?" in emitted[ "reason" ]
+        assert "no" in emitted[ "reason" ].lower()
+        assert "converse" in emitted[ "reason" ]
 
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
