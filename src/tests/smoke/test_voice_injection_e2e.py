@@ -119,57 +119,42 @@ def test_e2e_empty_prompt_passthrough():
     print( "E2E empty prompt passthrough test PASSED" )
 
 
-def test_listener_tmux_trigger_mocked():
-    """Listener buffers message and calls tmux trigger (mocked subprocess)."""
+def test_listener_tmux_inject_mocked():
+    """Listener injects message text via tmux (literal + Enter, mocked subprocess)."""
     from lupin_cli.claude_code.hooks.lib.cc_notification_listener import CCNotificationListener
 
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        sessions_dir = Path( tmp_dir )
-        buffer_path  = sessions_dir / "cc-buffer-abc12345.jsonl"
+    listener = CCNotificationListener.__new__( CCNotificationListener )
+    listener.session_id_hash   = "abc12345"
+    listener._tmux_session_arg = "test-project"
+    listener._tmux_session     = None
+    listener.log_file_path     = None
+    listener._log_file         = None
+    listener._centralized_log  = None
+    listener.LOG_PREFIX        = "[CC-Listener]"
+    listener.verbose           = False
+    listener.debug             = False
 
-        listener = CCNotificationListener.__new__( CCNotificationListener )
-        listener.session_id_hash   = "abc12345"
-        listener.buffer_path       = buffer_path
-        listener._tmux_session_arg = "test-project"
-        listener._tmux_session     = None
-        listener.log_file_path     = None
-        listener._log_file         = None
-        listener._message_count    = 0
-        listener.LOG_PREFIX        = "[CC-Listener]"
-        listener.verbose           = False
-        listener.debug             = False
+    with patch( "subprocess.run" ) as mock_run, \
+         patch( "time.sleep" ) as mock_sleep:
+        listener._inject_via_tmux( "run the tests" )
 
-        notification = {
-            "message"   : "run the tests",
-            "job_id"    : "abc12345",
-            "sender_id" : "user@test.com",
-            "priority"  : "normal",
-            "id"        : "notif-001",
-        }
+    # Verify two subprocess calls: literal text then Enter
+    assert mock_run.call_count == 2
+    mock_run.assert_any_call(
+        [ "tmux", "send-keys", "-t", "test-project", "-l", "run the tests" ],
+        capture_output=True, timeout=2
+    )
+    mock_run.assert_any_call(
+        [ "tmux", "send-keys", "-t", "test-project", "Enter" ],
+        capture_output=True, timeout=2
+    )
+    mock_sleep.assert_called_once_with( 0.25 )
 
-        with patch( "subprocess.run" ) as mock_run:
-            listener._buffer_message( notification )
-            listener._trigger_tmux_enter()
-
-        # Verify buffer written
-        assert buffer_path.exists()
-        with open( buffer_path ) as f:
-            lines = f.readlines()
-        assert len( lines ) == 1
-        entry = json.loads( lines[0] )
-        assert entry[ "message" ] == "run the tests"
-
-        # Verify tmux trigger called
-        mock_run.assert_called_once_with(
-            [ "tmux", "send-keys", "-t", "test-project", "Enter" ],
-            capture_output=True, timeout=2
-        )
-
-    print( "Listener tmux trigger test PASSED" )
+    print( "Listener tmux inject test PASSED" )
 
 
 if __name__ == "__main__":
     test_e2e_voice_injection()
     test_e2e_empty_prompt_passthrough()
-    test_listener_tmux_trigger_mocked()
+    test_listener_tmux_inject_mocked()
     print( "\nAll voice injection E2E smoke tests PASSED" )

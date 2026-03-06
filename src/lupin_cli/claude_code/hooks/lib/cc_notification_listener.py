@@ -34,6 +34,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -258,9 +259,10 @@ class CCNotificationListener( BaseWebSocketListener ):
                 self._log( f"{self.LOG_PREFIX} Skipping: job_id={job_id} != {self.session_id_hash}" )
             return
 
-        # Match — buffer it, then trigger tmux Enter to wake idle CC
-        self._buffer_message( notification )
-        self._trigger_tmux_enter()
+        # Match — inject directly into tmux prompt (skip buffer for idle injection)
+        message_text = notification.get( "message", "" ).strip()
+        if message_text:
+            self._inject_via_tmux( message_text )
         self._send_gist_response( notification )
 
     def _resolve_tmux_session( self ):
@@ -298,33 +300,49 @@ class CCNotificationListener( BaseWebSocketListener ):
 
         return None
 
-    def _trigger_tmux_enter( self ):
+    def _inject_via_tmux( self, message_text ):
         """
-        Send bare Enter keystroke to the CC session's tmux pane.
+        Type the voice message into the CC session's tmux pane, then press Enter.
 
-        This wakes the UserPromptSubmit hook when Claude Code is idle at
-        the prompt, allowing buffered voice messages to be injected.
+        Uses tmux send-keys -l (literal) to avoid key interpretation of special
+        characters. Sends Enter separately after a brief delay — tmux cannot
+        reliably combine literal text + Enter in a single call.
+
+        Requires:
+            - message_text is a non-empty string
+            - tmux session is resolvable
 
         Ensures:
-            - Sends Enter to resolved tmux session
-            - Logs success or failure
-            - Never raises exceptions (trigger failure is non-fatal)
+            - Types message text into the CC prompt
+            - Presses Enter after 250ms delay
+            - CC receives a non-empty prompt and processes it
+            - Never raises exceptions (injection failure is non-fatal)
         """
         tmux_session = self._resolve_tmux_session()
         if not tmux_session:
-            self._log( f"{self.LOG_PREFIX} No tmux session found -- skipping Enter trigger" )
+            self._log( f"{self.LOG_PREFIX} No tmux session found -- skipping injection" )
             return
 
         try:
+            # Step 1: Type the message text (literal mode — no key interpretation)
+            subprocess.run(
+                [ "tmux", "send-keys", "-t", tmux_session, "-l", message_text ],
+                capture_output=True, timeout=2
+            )
+
+            # Step 2: Brief delay — tmux needs separation between text and Enter
+            time.sleep( 0.25 )
+
+            # Step 3: Press Enter separately
             subprocess.run(
                 [ "tmux", "send-keys", "-t", tmux_session, "Enter" ],
                 capture_output=True, timeout=2
             )
-            self._log( f"{self.LOG_PREFIX} Sent Enter to tmux session '{tmux_session}'" )
-        except ( subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError ) as e:
-            self._log( f"{self.LOG_PREFIX} tmux Enter failed: {e}" )
-        except OSError as e:
-            self._log( f"{self.LOG_PREFIX} tmux Enter failed: {e}" )
+
+            self._log( f"{self.LOG_PREFIX} Injected message via tmux '{tmux_session}'" )
+
+        except ( subprocess.TimeoutExpired, FileNotFoundError, OSError ) as e:
+            self._log( f"{self.LOG_PREFIX} tmux injection failed: {e}" )
 
     def _send_gist_response( self, notification ):
         """

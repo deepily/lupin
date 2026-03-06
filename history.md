@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.03.06 - Session 326 Checkpoint 1 | Fix tmux Voice Injection — Type Message Text Instead of Bare Enter
+
+**Accomplishments**:
+- Fixed voice injection to idle CC sessions: replaced bare `Enter` keystroke with actual message text typed via `tmux send-keys -l` (literal mode), followed by `Enter` after 250ms delay
+- Root cause: CC ignores empty Enter presses — `UserPromptSubmit` hook never fires for empty input, so buffered messages were never drained
+- Renamed `_trigger_tmux_enter()` → `_inject_via_tmux( message_text )` — message goes directly into CC prompt as visible typed input, bypassing the JSONL buffer intermediary
+- Commented out `_buffer_message()` call in `_handle_event()` — no longer needed for idle injection path
+- Updated 3 unit tests and 1 smoke test to verify new two-call subprocess pattern (literal text + Enter)
+- All 18 unit tests and 3 smoke tests pass
+
+**Files**:
+- `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` — `import time`, `_inject_via_tmux()`, updated `_handle_event()`
+- `src/tests/unit/test_session_bridge_lookup.py` — 3 tests updated in `TestListenerTmuxTrigger`
+- `src/tests/smoke/test_voice_injection_e2e.py` — `test_listener_tmux_inject_mocked()` replaces old trigger test
+
+---
+
 ### 2026.03.06 - Session 325 Checkpoint 1 | Centralized CC Notification Listener Logging
 
 **Accomplishments**:

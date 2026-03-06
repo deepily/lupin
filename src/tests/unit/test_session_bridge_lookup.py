@@ -241,8 +241,8 @@ class TestFindTmuxSession:
 
 class TestListenerTmuxTrigger:
 
-    def test_trigger_calls_subprocess( self ):
-        """_trigger_tmux_enter calls tmux send-keys."""
+    def test_inject_calls_subprocess_literal_then_enter( self ):
+        """_inject_via_tmux sends literal text then Enter with delay."""
         from lupin_cli.claude_code.hooks.lib.cc_notification_listener import CCNotificationListener
 
         listener = CCNotificationListener.__new__( CCNotificationListener )
@@ -255,15 +255,22 @@ class TestListenerTmuxTrigger:
         listener.LOG_PREFIX        = "[CC-Listener]"
         listener.verbose           = False
 
-        with patch( "subprocess.run" ) as mock_run:
-            listener._trigger_tmux_enter()
-            mock_run.assert_called_once_with(
+        with patch( "subprocess.run" ) as mock_run, \
+             patch( "time.sleep" ) as mock_sleep:
+            listener._inject_via_tmux( "run the tests" )
+            assert mock_run.call_count == 2
+            mock_run.assert_any_call(
+                [ "tmux", "send-keys", "-t", "test-session", "-l", "run the tests" ],
+                capture_output=True, timeout=2
+            )
+            mock_run.assert_any_call(
                 [ "tmux", "send-keys", "-t", "test-session", "Enter" ],
                 capture_output=True, timeout=2
             )
+            mock_sleep.assert_called_once_with( 0.25 )
 
-    def test_trigger_handles_missing_tmux( self ):
-        """_trigger_tmux_enter handles missing tmux gracefully."""
+    def test_inject_handles_missing_tmux( self ):
+        """_inject_via_tmux handles missing tmux gracefully."""
         from lupin_cli.claude_code.hooks.lib.cc_notification_listener import CCNotificationListener
 
         listener = CCNotificationListener.__new__( CCNotificationListener )
@@ -278,10 +285,10 @@ class TestListenerTmuxTrigger:
 
         with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id", return_value=None ):
             # Should not raise
-            listener._trigger_tmux_enter()
+            listener._inject_via_tmux( "hello world" )
 
-    def test_trigger_skips_when_no_session( self ):
-        """_trigger_tmux_enter skips when no tmux session resolved."""
+    def test_inject_skips_when_no_session( self ):
+        """_inject_via_tmux skips when no tmux session resolved."""
         from lupin_cli.claude_code.hooks.lib.cc_notification_listener import CCNotificationListener
 
         listener = CCNotificationListener.__new__( CCNotificationListener )
@@ -296,7 +303,7 @@ class TestListenerTmuxTrigger:
 
         with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id", return_value=None ), \
              patch( "subprocess.run" ) as mock_run:
-            listener._trigger_tmux_enter()
+            listener._inject_via_tmux( "hello world" )
             mock_run.assert_not_called()
 
 
