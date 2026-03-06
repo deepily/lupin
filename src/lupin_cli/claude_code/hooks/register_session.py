@@ -40,6 +40,70 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
 from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
 
 
+def _find_tmux_session( cc_pid ):
+    """
+    Find the tmux session containing the given PID.
+
+    Calls `tmux list-panes -a -F "#{session_name} #{pane_pid}"` and matches
+    cc_pid against pane PIDs. Falls back to grandparent PID check for shell
+    wrappers (e.g., start-cc-with-tmux.sh spawns bash -> claude).
+
+    Requires:
+        - cc_pid is a positive integer
+
+    Ensures:
+        - Returns tmux session name if cc_pid (or its parent) is found in a pane
+        - Returns None if tmux is not installed or no match is found
+        - Never raises exceptions (graceful when tmux unavailable)
+
+    Args:
+        cc_pid: PID of the Claude Code process
+
+    Returns:
+        str or None: tmux session name, or None
+    """
+    try:
+        result = subprocess.run(
+            [ "tmux", "list-panes", "-a", "-F", "#{session_name} #{pane_pid}" ],
+            capture_output=True, text=True, timeout=2
+        )
+        if result.returncode != 0:
+            return None
+
+        # Build pid -> session_name mapping
+        pid_to_session = {}
+        for line in result.stdout.strip().splitlines():
+            parts = line.strip().split( " ", 1 )
+            if len( parts ) == 2:
+                session_name, pane_pid_str = parts
+                try:
+                    pid_to_session[ int( pane_pid_str ) ] = session_name
+                except ValueError:
+                    continue
+
+        # Direct match: CC process is the pane process
+        if cc_pid in pid_to_session:
+            return pid_to_session[ cc_pid ]
+
+        # Grandparent check: pane runs shell -> shell runs claude
+        # Check if cc_pid's parent is a pane PID
+        try:
+            with open( f"/proc/{cc_pid}/stat" ) as f:
+                stat_line = f.read()
+            comm_end = stat_line.rindex( ")" )
+            fields   = stat_line[comm_end + 2:].split()
+            parent_pid = int( fields[1] )
+            if parent_pid in pid_to_session:
+                return pid_to_session[ parent_pid ]
+        except ( FileNotFoundError, IndexError, ValueError, PermissionError, OSError ):
+            pass
+
+        return None
+
+    except ( FileNotFoundError, subprocess.TimeoutExpired, OSError ):
+        return None
+
+
 def _resolve_cc_pid( hook_ppid ):
     """
     Walk up from the hook's parent (bash wrapper) to find Claude Code's PID.
@@ -317,13 +381,16 @@ def main():
             except ( json.JSONDecodeError, OSError ):
                 pass  # Can't read old data, proceed normally
 
+        tmux_session = _find_tmux_session( cc_pid )
+
         session_data = {
             "session_id"        : session_id,
             "stable_session_id" : stable_session_id,
             "transcript_path"   : transcript_path,
             "cwd"               : cwd,
             "ppid"              : cc_pid,
-            "hook_ppid"         : hook_ppid
+            "hook_ppid"         : hook_ppid,
+            "tmux_session"      : tmux_session,
         }
 
         try:
@@ -340,6 +407,7 @@ def main():
                 with open( env_file, "a" ) as f:
                     f.write( f"export CLAUDE_SESSION_ID='{session_id}'\n" )
                     f.write( f"export CLAUDE_TRANSCRIPT_PATH='{transcript_path}'\n" )
+                    f.write( f"export CLAUDE_TMUX_SESSION='{tmux_session or ''}'\n" )
             except OSError:
                 pass  # Best-effort
 

@@ -52,18 +52,23 @@ def main():
     drain_and_acknowledge( session_id )
 
     # Type-specific TTS content (respects HOOK_TTS_ENABLED)
+    # Permission prompts use high priority so TTS speaks them aloud —
+    # the user needs to hear these to know Claude needs approval.
     if notification_type == "permission_prompt":
-        tts_msg = f"Permission prompt: {message}" if message else "Permission prompt"
+        tts_msg      = f"Permission prompt: {message}" if message else "Permission prompt"
+        tts_priority = "high"
     elif notification_type == "idle_prompt":
-        tts_msg = f"Idle: {message}" if message else "Claude is waiting for input"
+        tts_msg      = f"Idle: {message}" if message else "Claude is waiting for input"
+        tts_priority = "low"
     else:
         if message:
             truncated = message[:80] + "..." if len( message ) > 80 else message
             tts_msg   = f"Notification ({notification_type}): {truncated}"
         else:
             tts_msg = f"Notification: {notification_type}"
+        tts_priority = "low"
 
-    send_tts( tts_msg )
+    send_tts( tts_msg, priority=tts_priority )
 
     # Observation-only — output is ignored by CC
     emit_json( {} )

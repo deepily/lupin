@@ -30,7 +30,7 @@ class TestTypeSpecificTTS:
     @patch( "lupin_cli.claude_code.hooks.notification.read_hook_input" )
     def test_permission_prompt_with_message( self, mock_read, mock_log, mock_session,
                                               mock_drain, mock_send, mock_emit ):
-        """permission_prompt includes the full message text."""
+        """permission_prompt includes the full message text with high priority."""
         mock_read.return_value = {
             "type"       : "permission_prompt",
             "message"    : "Claude Code needs your attention",
@@ -41,6 +41,7 @@ class TestTypeSpecificTTS:
 
         call_msg = mock_send.call_args[ 0 ][ 0 ]
         assert call_msg == "Permission prompt: Claude Code needs your attention"
+        assert mock_send.call_args[ 1 ][ "priority" ] == "high"
 
     @patch( "lupin_cli.claude_code.hooks.notification.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.notification.send_tts" )
@@ -50,7 +51,7 @@ class TestTypeSpecificTTS:
     @patch( "lupin_cli.claude_code.hooks.notification.read_hook_input" )
     def test_permission_prompt_no_message( self, mock_read, mock_log, mock_session,
                                             mock_drain, mock_send, mock_emit ):
-        """permission_prompt without message uses generic fallback."""
+        """permission_prompt without message uses generic fallback with high priority."""
         mock_read.return_value = {
             "type"       : "permission_prompt",
             "session_id" : "abc12345"
@@ -60,6 +61,7 @@ class TestTypeSpecificTTS:
 
         call_msg = mock_send.call_args[ 0 ][ 0 ]
         assert call_msg == "Permission prompt"
+        assert mock_send.call_args[ 1 ][ "priority" ] == "high"
 
     @patch( "lupin_cli.claude_code.hooks.notification.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.notification.send_tts" )

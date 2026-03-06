@@ -400,6 +400,100 @@ def get_session_metadata() -> dict:
     }
 
 
+def find_session_by_id( session_id ):
+    """
+    Scan ~/.claude/sessions/cc-*.json for a session_id match.
+
+    Supports both full UUID and 8-char prefix matching. Skips files
+    from dead PIDs to avoid returning stale sessions.
+
+    Requires:
+        - session_id is a non-empty string
+
+    Ensures:
+        - Returns full session data dict if a match is found
+        - Returns None if no match or session_id is empty
+        - Skips bridge files whose PID is dead
+        - Never raises exceptions
+
+    Args:
+        session_id: Full session UUID or 8-char prefix to match
+
+    Returns:
+        dict or None: Session data dict, or None
+    """
+    if not session_id or not SESSION_DIR.exists():
+        return None
+
+    for path in SESSION_DIR.glob( "cc-*.json" ):
+        # Skip non-bridge files (buffers, listeners, etc.)
+        if "buffer" in path.name or "listener" in path.name:
+            continue
+
+        # PID liveness check
+        file_pid = _extract_pid_from_filename( path.name )
+        if file_pid is not None and not _is_pid_alive( file_pid ):
+            continue
+
+        try:
+            with open( path ) as f:
+                data = json.load( f )
+
+            file_sid = data.get( "session_id", "" )
+            # Full match or 8-char prefix match
+            if file_sid == session_id or file_sid[:8] == session_id[:8]:
+                return data
+        except ( json.JSONDecodeError, OSError ):
+            continue
+
+    return None
+
+
+def find_session_by_tmux( tmux_session ):
+    """
+    Scan ~/.claude/sessions/cc-*.json for a tmux_session match.
+
+    Finds the session bridge file whose tmux_session field matches
+    the given tmux session name. Skips dead PIDs.
+
+    Requires:
+        - tmux_session is a non-empty string
+
+    Ensures:
+        - Returns full session data dict if a match is found
+        - Returns None if no match or tmux_session is empty
+        - Skips bridge files whose PID is dead
+        - Never raises exceptions
+
+    Args:
+        tmux_session: tmux session name to match
+
+    Returns:
+        dict or None: Session data dict, or None
+    """
+    if not tmux_session or not SESSION_DIR.exists():
+        return None
+
+    for path in SESSION_DIR.glob( "cc-*.json" ):
+        if "buffer" in path.name or "listener" in path.name:
+            continue
+
+        file_pid = _extract_pid_from_filename( path.name )
+        if file_pid is not None and not _is_pid_alive( file_pid ):
+            continue
+
+        try:
+            with open( path ) as f:
+                data = json.load( f )
+
+            if data.get( "tmux_session" ) == tmux_session:
+                return data
+        except ( json.JSONDecodeError, OSError ):
+            continue
+
+    return None
+
+
 # ── Quick smoke test ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

@@ -32,6 +32,7 @@ import asyncio
 import json
 import os
 import signal
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -78,6 +79,7 @@ class CCNotificationListener( BaseWebSocketListener ):
         password,
         session_id_hash,
         buffer_path   = None,
+        tmux_session  = None,
         host          = DEFAULT_SERVER_HOST,
         port          = DEFAULT_SERVER_PORT,
         debug         = False,
@@ -102,6 +104,7 @@ class CCNotificationListener( BaseWebSocketListener ):
             password: User password for JWT authentication
             session_id_hash: 8-char CC session hash for filtering
             buffer_path: Path to JSONL buffer file (default: auto-computed)
+            tmux_session: Explicit tmux session name override (default: auto-resolve)
             host: Server hostname (default: localhost)
             port: Server port (default: 7999)
             debug: Enable debug output
@@ -122,11 +125,13 @@ class CCNotificationListener( BaseWebSocketListener ):
             verbose           = verbose,
         )
 
-        self.session_id_hash = session_id_hash
-        self.buffer_path     = Path( buffer_path ) if buffer_path else self._default_buffer_path()
-        self.log_file_path   = Path( log_file_path ) if log_file_path else None
-        self._log_file       = None
-        self._message_count  = 0
+        self.session_id_hash   = session_id_hash
+        self.buffer_path       = Path( buffer_path ) if buffer_path else self._default_buffer_path()
+        self._tmux_session_arg = tmux_session  # CLI override
+        self._tmux_session     = None          # Cached resolved value
+        self.log_file_path     = Path( log_file_path ) if log_file_path else None
+        self._log_file         = None
+        self._message_count    = 0
 
     def _default_buffer_path( self ) -> Path:
         """
@@ -213,9 +218,73 @@ class CCNotificationListener( BaseWebSocketListener ):
                 self._log( f"{self.LOG_PREFIX} Skipping: job_id={job_id} != {self.session_id_hash}" )
             return
 
-        # Match — buffer it
+        # Match — buffer it, then trigger tmux Enter to wake idle CC
         self._buffer_message( notification )
+        self._trigger_tmux_enter()
         self._send_gist_response( notification )
+
+    def _resolve_tmux_session( self ):
+        """
+        Resolve the tmux session name for this CC session.
+
+        Priority: CLI arg override > cached value > session bridge file lookup.
+        Caches the result after first successful resolution.
+
+        Ensures:
+            - Returns tmux session name string or None
+            - Caches result for subsequent calls
+            - Never raises exceptions
+
+        Returns:
+            str or None: tmux session name
+        """
+        if self._tmux_session is not None:
+            return self._tmux_session
+
+        if self._tmux_session_arg:
+            self._tmux_session = self._tmux_session_arg
+            return self._tmux_session
+
+        try:
+            from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_id
+            data = find_session_by_id( self.session_id_hash )
+            if data:
+                tmux = data.get( "tmux_session" )
+                if tmux:
+                    self._tmux_session = tmux
+                    return self._tmux_session
+        except Exception as e:
+            self._log( f"{self.LOG_PREFIX} tmux session lookup failed: {e}" )
+
+        return None
+
+    def _trigger_tmux_enter( self ):
+        """
+        Send bare Enter keystroke to the CC session's tmux pane.
+
+        This wakes the UserPromptSubmit hook when Claude Code is idle at
+        the prompt, allowing buffered voice messages to be injected.
+
+        Ensures:
+            - Sends Enter to resolved tmux session
+            - Logs success or failure
+            - Never raises exceptions (trigger failure is non-fatal)
+        """
+        tmux_session = self._resolve_tmux_session()
+        if not tmux_session:
+            self._log( f"{self.LOG_PREFIX} No tmux session found -- skipping Enter trigger" )
+            return
+
+        try:
+            subprocess.run(
+                [ "tmux", "send-keys", "-t", tmux_session, "Enter" ],
+                capture_output=True, timeout=2
+            )
+            self._log( f"{self.LOG_PREFIX} Sent Enter to tmux session '{tmux_session}'" )
+        except ( subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError ) as e:
+            self._log( f"{self.LOG_PREFIX} tmux Enter failed: {e}" )
+        except OSError as e:
+            self._log( f"{self.LOG_PREFIX} tmux Enter failed: {e}" )
 
     def _send_gist_response( self, notification ):
         """
@@ -423,6 +492,11 @@ def parse_args():
         help    = "Path to JSONL buffer file (default: ~/.claude/sessions/cc-buffer-{hash}.jsonl)"
     )
     parser.add_argument(
+        "--tmux-session",
+        default = None,
+        help    = "Explicit tmux session name for Enter trigger (default: auto-resolve from session bridge)"
+    )
+    parser.add_argument(
         "--host",
         default = DEFAULT_SERVER_HOST,
         help    = f"Server hostname (default: {DEFAULT_SERVER_HOST})"
@@ -511,6 +585,7 @@ async def main():
         password        = password,
         session_id_hash = args.session_id,
         buffer_path     = args.buffer_path,
+        tmux_session    = args.tmux_session,
         host            = args.host,
         port            = args.port,
         debug           = args.debug,

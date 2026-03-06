@@ -1,5 +1,33 @@
 # Lupin Project History
 
+### 2026.03.06 - Session 323 Checkpoint 1 | Voice Injection into Idle CC Sessions + Permission Prompt High Priority
+
+**Accomplishments**:
+- Implemented all 6 phases of voice injection plan: tmux discovery in register_session.py, session lookup utilities (`find_session_by_id`, `find_session_by_tmux`), listener tmux Enter trigger, UserPromptSubmit hook, shell scripts (`start-cc-with-tmux.sh`, `voice-send.sh`), hook registration in `~/.claude/settings.json`
+- Added `_find_tmux_session()` to register_session.py — scans `tmux list-panes` for CC PID match with grandparent fallback
+- Added `_resolve_tmux_session()` and `_trigger_tmux_enter()` to CCNotificationListener — sends bare Enter keystroke after buffering to wake idle CC
+- Created UserPromptSubmit hook — drains JSONL buffer, formats as `[Voice]: ...` context, emits additionalContext
+- Changed permission_prompt notification TTS from low to high priority so user hears approval requests spoken aloud
+- 29 new tests all passing (8 UserPromptSubmit + 18 session bridge lookup/tmux + 3 E2E smoke)
+
+**Files**:
+- `src/lupin_cli/claude_code/hooks/register_session.py` — Added `_find_tmux_session()`, `tmux_session` in bridge JSON + env file
+- `src/lupin_cli/claude_code/hooks/lib/session_bridge.py` — Added `find_session_by_id()`, `find_session_by_tmux()`
+- `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` — Added `_resolve_tmux_session()`, `_trigger_tmux_enter()`, `--tmux-session` CLI arg
+- `src/lupin_cli/claude_code/hooks/user_prompt_submit.py` — **NEW** UserPromptSubmit hook
+- `src/lupin_cli/claude_code/hooks/notification.py` — `permission_prompt` TTS now `priority="high"`
+- `src/scripts/start-cc-with-tmux.sh` — **NEW** tmux launcher for CC
+- `src/scripts/voice-send.sh` — **NEW** manual testing utility
+- `~/.claude/settings.json` — Added `UserPromptSubmit` hook entry
+- `src/tests/unit/test_user_prompt_submit_hook.py` — **NEW** 8 tests
+- `src/tests/unit/test_session_bridge_lookup.py` — **NEW** 18 tests
+- `src/tests/smoke/test_voice_injection_e2e.py` — **NEW** 3 tests
+- `src/tests/unit/test_notification_hook.py` — Added priority assertions for permission_prompt
+
+**Commit**: faff65f
+
+---
+
 ### 2026.03.06 - Session 323 | Markdown in Conversation History + Cancel Expired Notification Fix
 
 **Accomplishments**:
