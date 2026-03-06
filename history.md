@@ -1,5 +1,20 @@
 # Lupin Project History
 
+### 2026.03.05 - Session 320 Checkpoint 1 | Skills Encyclopedia Plan
+
+**Accomplishments**:
+- Surveyed entire Lupin + CoSA repo documentation (~200+ files) and identified 10-11 canonical implementation patterns that Claude Code repeatedly reinvents
+- Created comprehensive skills encyclopedia master plan documenting all patterns to be captured as auto-activating Claude Code skills
+- Identified 4 tiers of skills: ConfigurationManager, XML/Pydantic serialization, Notification API, CJ Flow queue (Tier 1); agent-creation, FastAPI routers, WebSocket, storage patterns (Tier 2); Claude Agent SDK, nested git repos (Tier 3)
+- Designed 7-session phased execution timeline for creating all skills
+
+**Files**:
+- `src/rnd/2026.03.05-skills-encyclopedia-plan.md` — **NEW** Master plan for skills encyclopedia (Tier 1-3 skill specs, execution timeline, design decisions)
+
+**Commit**: baa25cf
+
+---
+
 ### 2026.03.05 - Session 319 | Render Markdown in Response-Requested Card Title & Message
 
 **Accomplishments**:
