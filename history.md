@@ -1,5 +1,15 @@
 # Lupin Project History
 
+### 2026.03.05 - Session 322 | Fix deleteSenderConversation() Runtime Error
+
+**Accomplishments**:
+- Fixed runtime error in restored `deleteSenderConversation()` method — changed `group.notifications.length` → `group.totalCount` to match current sender group data structure (dateGroups Map replaced flat notifications array)
+
+**Files**:
+- `src/fastapi_app/static/js/notifications.js` — Line 8981: `group.totalCount` replaces `group.notifications.length`
+
+---
+
 ### 2026.03.05 - Session 321 | Voice Injection Plan Serialization (Phase 0)
 
 **Accomplishments**:

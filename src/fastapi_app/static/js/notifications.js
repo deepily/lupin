@@ -7679,7 +7679,7 @@ class NotificationsUI {
             <div class="date-accordion-header" onclick="window.notificationsUI.toggleDateAccordion('${escapedSenderId}', '${dateString}')">
                 <span class="date-text">${dateString}</span>
                 <span class="date-count">(0)</span>
-                <button class="date-delete-btn" onclick="event.stopPropagation(); window.notificationsUI.softDeleteByDate('${escapedSenderId}', '${dateString}')" title="Hide this day">🗑️</button>
+                <button class="date-delete-btn" onclick="event.stopPropagation(); window.notificationsUI.softDeleteByDate('${escapedSenderId}', '${dateString}')" title="Delete this day">×</button>
                 <span class="date-toggle">▼</span>
             </div>
             <div class="date-accordion-messages" id="date-messages-${senderId.replace( /[@.#]/g, '-' )}-${dateString}">
@@ -8978,7 +8978,7 @@ class NotificationsUI {
             return;
         }
 
-        const count = group.notifications.length;
+        const count = group.totalCount;
 
         // Confirm before clearing (destructive action)
         if ( !confirm( `Delete all ${count} message${count !== 1 ? 's' : ''} from ${projectName}? This cannot be undone.` ) ) {

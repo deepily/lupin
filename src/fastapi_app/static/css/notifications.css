@@ -1461,12 +1461,6 @@
             font-style: italic;
         }
 
-        .sender-toggle {
-            font-size: 12px;
-            color: #6c757d;
-            margin-left: 8px;
-        }
-
         .sender-delete-btn {
             background: none;
             border: none;
@@ -1484,6 +1478,13 @@
             background-color: #dc3545;
             color: white;
         }
+
+        .sender-toggle {
+            font-size: 12px;
+            color: #6c757d;
+            margin-left: 8px;
+        }
+
 
         /* ========================================
            SESSION IDENTITY STYLES (Conversation Identity Phase 3)
