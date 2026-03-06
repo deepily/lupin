@@ -5954,7 +5954,7 @@ class NotificationsUI {
         const itemHtml = `
             <div class="sender-message outgoing animated-in${priority === 'urgent' ? ' priority-urgent' : ''}">
                 <span class="message-time">${timestamp}${priorityBadge}</span>
-                <span class="message-text">${this.escapeHtml( message )}</span>
+                <span class="message-text">${this.renderMarkdownInline( message )}</span>
             </div>
         `;
 
@@ -6141,7 +6141,7 @@ class NotificationsUI {
             return `
                 <div class="sender-message outgoing${urgentClass}">
                     <span class="message-time">${timestamp}${priorityBadge}</span>
-                    <span class="message-text">${this.escapeHtml( interaction.message || '' )}</span>
+                    <span class="message-text">${this.renderMarkdownInline( interaction.message )}</span>
                 </div>
             `;
         }
@@ -7821,12 +7821,6 @@ class NotificationsUI {
             cleanMessage = this.formatMultipleChoiceResponse( cleanMessage );
         }
 
-        // Truncate long messages
-        const maxLength = 120;
-        const displayMessage = cleanMessage.length > maxLength
-            ? cleanMessage.substring( 0, maxLength ) + '...'
-            : cleanMessage;
-
         // Build CSS class - add expired-response if notification was expired
         const isExpired = notification.was_expired === true;
         let cssClass = `sender-message ${isResponse ? 'outgoing' : 'incoming'}`;
@@ -7857,7 +7851,7 @@ class NotificationsUI {
             messageDiv.innerHTML = `
                 <div class="progress-group-head">
                     <span class="message-time">${timeStr}</span>
-                    <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}${expiredBadge}${abstractIndicator}</span>
+                    <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${this.renderMarkdownInline( cleanMessage )}${expiredBadge}${abstractIndicator}</span>
                 </div>
             `;
 
@@ -7869,7 +7863,7 @@ class NotificationsUI {
         } else {
             messageDiv.innerHTML = `
                 <span class="message-time">${timeStr}</span>
-                <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}${expiredBadge}${abstractIndicator}</span>
+                <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${this.renderMarkdownInline( cleanMessage )}${expiredBadge}${abstractIndicator}</span>
             `;
         }
 
@@ -7928,14 +7922,9 @@ class NotificationsUI {
         let cleanMessage = notification.message || '';
         cleanMessage = cleanMessage.replace( /^\[[A-Z]+\]\s*/, '' );
 
-        const maxLength = 120;
-        const displayMessage = cleanMessage.length > maxLength
-            ? cleanMessage.substring( 0, maxLength ) + '...'
-            : cleanMessage;
-
         // Update head with new notification values
         if ( oldMessageSpan ) {
-            oldMessageSpan.textContent = displayMessage;
+            oldMessageSpan.innerHTML = this.renderMarkdownInline( cleanMessage );
             oldMessageSpan.title = cleanMessage.replace( /"/g, '&quot;' );
         }
         if ( oldTimeSpan ) {
@@ -8121,16 +8110,11 @@ class NotificationsUI {
             displayMessage = prefixMatch[2];  // Remove prefix
         }
 
-        // Truncate long messages
-        const truncatedMessage = displayMessage.length > 120
-            ? displayMessage.substring( 0, 117 ) + '...'
-            : displayMessage;
-
         const messageDiv = document.createElement( 'div' );
         messageDiv.className = `sender-message ${isResponse ? 'outgoing' : 'incoming'}`;
         messageDiv.innerHTML = `
             <span class="message-time">${time}${isResponse ? ' →' : ''}</span>
-            <span class="message-text" title="${displayMessage}">${truncatedMessage}</span>
+            <span class="message-text" title="${displayMessage}">${this.renderMarkdownInline( displayMessage )}</span>
         `;
 
         // Prepend to container so newest messages always appear at top
@@ -9364,6 +9348,68 @@ class NotificationsUI {
             return tempDiv.innerHTML;
         } catch ( error ) {
             this.error( `Markdown rendering failed: ${error.message}` );
+            return this.escapeHtml( text );
+        }
+    }
+
+    /**
+     * Render markdown text to sanitized inline HTML (no block elements).
+     * Uses marked.parseInline() to avoid wrapping output in <p> tags,
+     * making it safe for use inside <span> elements (chat bubbles).
+     *
+     * Requires:
+     *     - marked.js loaded globally (window.marked)
+     *     - DOMPurify loaded globally (window.DOMPurify)
+     *     - text is a string (can be empty/null)
+     *
+     * Ensures:
+     *     - Returns sanitized inline HTML string safe for innerHTML inside <span>
+     *     - Returns empty string if text is null/undefined/empty
+     *     - Only inline elements rendered: bold, italic, code, links, strikethrough
+     *     - All block elements and dangerous HTML/JS removed
+     *
+     * @param {string} text - Raw markdown text to render
+     * @returns {string} - Sanitized inline HTML string
+     */
+    renderMarkdownInline( text ) {
+        if ( !text ) return '';
+
+        // Normalize escaped newlines to actual newlines
+        text = text.replace( /\\n/g, '\n' );
+
+        // Check if libraries are available
+        if ( typeof marked === 'undefined' || typeof DOMPurify === 'undefined' ) {
+            return this.escapeHtml( text );
+        }
+
+        try {
+            marked.setOptions( {
+                gfm    : true,
+                breaks : true
+            } );
+
+            // parseInline() produces NO wrapping <p> tags
+            const rawHtml = marked.parseInline( text );
+
+            const sanitizedHtml = DOMPurify.sanitize( rawHtml, {
+                ALLOWED_TAGS : [ 'strong', 'b', 'em', 'i', 'u', 's', 'del', 'a', 'code', 'br' ],
+                ALLOWED_ATTR : [ 'href', 'target', 'rel', 'title' ],
+                ADD_ATTR     : [ 'target', 'rel' ],
+                FORBID_TAGS  : [ 'script', 'style', 'iframe', 'form', 'input', 'img', 'p', 'div' ],
+                FORBID_ATTR  : [ 'onerror', 'onclick', 'onload', 'onmouseover' ]
+            } );
+
+            // Post-process: add target="_blank" and rel="noopener" to all links
+            const tempDiv = document.createElement( 'div' );
+            tempDiv.innerHTML = sanitizedHtml;
+            tempDiv.querySelectorAll( 'a' ).forEach( link => {
+                link.setAttribute( 'target', '_blank' );
+                link.setAttribute( 'rel', 'noopener noreferrer' );
+            } );
+
+            return tempDiv.innerHTML;
+        } catch ( error ) {
+            this.error( `Inline markdown rendering failed: ${error.message}` );
             return this.escapeHtml( text );
         }
     }
@@ -11711,6 +11757,12 @@ class NotificationsUI {
 
                 // Special handling for grace period exceeded (rare with 5-minute window)
                 if ( apiResponse.status === 400 && errorData.detail?.includes( 'grace period exceeded' ) ) {
+                    this.handleGracePeriodExceeded( notificationId, state );
+                    return;
+                }
+
+                // Already responded/expired server-side — dismiss card gracefully
+                if ( apiResponse.status === 400 && errorData.detail?.includes( 'already responded' ) ) {
                     this.handleGracePeriodExceeded( notificationId, state );
                     return;
                 }

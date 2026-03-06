@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.03.06 - Session 323 | Markdown in Conversation History + Cancel Expired Notification Fix
+
+**Accomplishments**:
+- Added `renderMarkdownInline()` method using `marked.parseInline()` for inline-only markdown rendering (no `<p>` wrapping) — safe inside `<span>` chat bubble elements
+- Replaced `escapeHtml()` with `renderMarkdownInline()` at 6 message-text locations: live outgoing chat bubble, history user-initiated message, progress group head, non-grouped message, progress group update, and date accordion messages
+- Removed 120-char message truncation at 3 locations (`addNotificationToSenderCard`, `updateSenderProgressGroupEntry`, `addMessageToSenderCard`) — messages now display in full
+- Fixed `textContent` → `innerHTML` for progress group head updates to preserve rendered markdown
+- Fixed stuck card bug: cancelling an already-expired response-requested notification now gracefully dismisses via `handleGracePeriodExceeded()` instead of throwing an unrecoverable error
+
+**Files**:
+- `src/fastapi_app/static/js/notifications.js` — `renderMarkdownInline()` method + 6 call sites, 3 truncation removals, 1 `textContent` → `innerHTML` fix, 1 "already responded" error handler
+
+---
+
 ### 2026.03.05 - Session 322 | Fix deleteSenderConversation() Runtime Error
 
 **Accomplishments**:
