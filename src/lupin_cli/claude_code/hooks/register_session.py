@@ -28,6 +28,7 @@ import signal
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
 _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
@@ -188,10 +189,12 @@ def _spawn_listener( session_id, session_data, session_file ):
     if os.environ.get( "LUPIN_CC_HOOK_LISTENER_VERBOSE", "" ).strip().lower() == "true":
         cmd.append( "--verbose" )
 
-    # Always write log files — enables tail-cc-listeners.sh aggregator
-    log_dir  = os.path.expanduser( "~/.claude/sessions" )
-    log_path = os.path.join( log_dir, f"cc-listener-{short_id}.log" )
+    # Always write per-session log files (backward compat) + centralized log
+    log_dir          = os.path.expanduser( "~/.claude/sessions" )
+    log_path         = os.path.join( log_dir, f"cc-listener-{short_id}.log" )
+    centralized_path = os.path.join( log_dir, "cc-listeners.log" )
     cmd.extend( [ "--log-file", log_path ] )
+    cmd.extend( [ "--centralized-log", centralized_path ] )
 
     # Ensure PYTHONPATH includes src/
     env = os.environ.copy()
@@ -209,10 +212,13 @@ def _spawn_listener( session_id, session_data, session_file ):
         stderr_path = os.path.join( session_dir, f"cc-listener-{short_id}.stderr" )
         stderr_file = open( stderr_path, "w" )
 
+        # Redirect stdout to centralized log — captures base class print() calls
+        stdout_file = open( centralized_path, "a" )
+
         # Spawn detached — listener outlives the hook subprocess
         proc = subprocess.Popen(
             cmd,
-            stdout = subprocess.DEVNULL,
+            stdout = stdout_file,
             stderr = stderr_file,
             env    = env,
             start_new_session = True,
@@ -251,6 +257,34 @@ def _spawn_listener( session_id, session_data, session_file ):
 
     except Exception:
         return None  # Spawn failure is non-fatal
+
+
+def _log_session_transition( old_hash, new_hash, stable_hash ):
+    """
+    Append a session transition marker to the centralized listener log.
+
+    Requires:
+        - old_hash and new_hash are non-empty strings
+
+    Ensures:
+        - Writes a single line to ~/.claude/sessions/cc-listeners.log
+        - Uses [--------] pseudo-hash since this comes from the hook, not a listener
+        - Never raises exceptions (best-effort)
+
+    Args:
+        old_hash: 8-char hash of the old session
+        new_hash: 8-char hash of the new session
+        stable_hash: 8-char hash of the stable (original) session
+    """
+    try:
+        log_path  = os.path.expanduser( "~/.claude/sessions/cc-listeners.log" )
+        timestamp = datetime.now( timezone.utc ).strftime( "%Y-%m-%dT%H:%M:%S%z" )
+        line      = f"{timestamp} [--------] === SESSION TRANSITION: {old_hash} -> {new_hash} (stable: {stable_hash}) ===\n"
+        with open( log_path, "a" ) as f:
+            f.write( line )
+            f.flush()
+    except Exception:
+        pass  # Best-effort
 
 
 def _cleanup_old_listener( old_session_data, new_session_id ):
@@ -310,6 +344,11 @@ def _cleanup_old_listener( old_session_data, new_session_id ):
             pass  # Already dead
         except ( PermissionError, OSError ):
             pass  # Can't signal it
+
+    # Step 1.5: Log session transition to centralized log
+    stable_hash = old_session_data.get( "stable_session_id", old_session_id )[:8] if old_session_data.get( "stable_session_id", old_session_id ) else old_hash
+    if old_hash and new_hash:
+        _log_session_transition( old_hash, new_hash, stable_hash )
 
     # Step 2: Forward buffer messages from old hash to new hash
     if old_hash and new_hash and old_hash != new_hash:

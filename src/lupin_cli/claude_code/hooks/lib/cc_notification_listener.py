@@ -47,7 +47,8 @@ from cosa.agents.utils.proxy_agents.base_config import (
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-SESSION_DIR     = Path.home() / ".claude" / "sessions"
+SESSION_DIR       = Path.home() / ".claude" / "sessions"
+CENTRALIZED_LOG   = SESSION_DIR / "cc-listeners.log"
 SUBSCRIBED_EVENTS = [ "notification_queue_update" ]
 
 
@@ -78,13 +79,14 @@ class CCNotificationListener( BaseWebSocketListener ):
         email,
         password,
         session_id_hash,
-        buffer_path   = None,
-        tmux_session  = None,
-        host          = DEFAULT_SERVER_HOST,
-        port          = DEFAULT_SERVER_PORT,
-        debug         = False,
-        verbose       = False,
-        log_file_path = None,
+        buffer_path        = None,
+        tmux_session       = None,
+        host               = DEFAULT_SERVER_HOST,
+        port               = DEFAULT_SERVER_PORT,
+        debug              = False,
+        verbose            = False,
+        log_file_path      = None,
+        centralized_log_path = None,
     ):
         """
         Initialize the CC Notification Listener.
@@ -110,6 +112,7 @@ class CCNotificationListener( BaseWebSocketListener ):
             debug: Enable debug output
             verbose: Enable verbose output (implies debug)
             log_file_path: Optional path to tee all output to a log file
+            centralized_log_path: Path to centralized log (default: CENTRALIZED_LOG)
         """
         ws_session_name = f"cc-listener-{session_id_hash}"
 
@@ -125,13 +128,15 @@ class CCNotificationListener( BaseWebSocketListener ):
             verbose           = verbose,
         )
 
-        self.session_id_hash   = session_id_hash
-        self.buffer_path       = Path( buffer_path ) if buffer_path else self._default_buffer_path()
-        self._tmux_session_arg = tmux_session  # CLI override
-        self._tmux_session     = None          # Cached resolved value
-        self.log_file_path     = Path( log_file_path ) if log_file_path else None
-        self._log_file         = None
-        self._message_count    = 0
+        self.session_id_hash       = session_id_hash
+        self.buffer_path           = Path( buffer_path ) if buffer_path else self._default_buffer_path()
+        self._tmux_session_arg     = tmux_session  # CLI override
+        self._tmux_session         = None          # Cached resolved value
+        self.log_file_path         = Path( log_file_path ) if log_file_path else None
+        self._log_file             = None
+        self._centralized_log_path = Path( centralized_log_path ) if centralized_log_path else CENTRALIZED_LOG
+        self._centralized_log      = None
+        self._message_count        = 0
 
     def _default_buffer_path( self ) -> Path:
         """
@@ -148,19 +153,43 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     def _setup_logging( self ):
         """
-        Set up log file output if log_file_path was specified.
+        Set up log file output and centralized log.
 
         Ensures:
-            - Opens log file in append mode
-            - Redirects stdout and stderr to tee to both console and file
+            - Opens per-session log file in append mode (if log_file_path specified)
+            - Opens centralized log in append mode (line-buffered for tail -f)
         """
         if self.log_file_path:
             self.log_file_path.parent.mkdir( parents=True, exist_ok=True )
             self._log_file = open( self.log_file_path, "a", buffering=1 )
 
+        try:
+            self._centralized_log_path.parent.mkdir( parents=True, exist_ok=True )
+            self._centralized_log = open( self._centralized_log_path, "a", buffering=1 )
+        except Exception:
+            self._centralized_log = None
+
+    def _timestamp( self ):
+        """Return ISO timestamp for centralized log lines."""
+        return datetime.now( timezone.utc ).strftime( "%Y-%m-%dT%H:%M:%S%z" )
+
+    def _write_central( self, line ):
+        """
+        Write a single line to centralized log (best-effort).
+
+        Args:
+            line: Pre-formatted log line (no trailing newline)
+        """
+        if self._centralized_log:
+            try:
+                self._centralized_log.write( line + "\n" )
+                self._centralized_log.flush()
+            except Exception:
+                pass
+
     def _log( self, message ):
         """
-        Print a message and optionally write to log file.
+        Print a message, write to per-session log, and write to centralized log.
 
         Args:
             message: Message string to output
@@ -172,6 +201,17 @@ class CCNotificationListener( BaseWebSocketListener ):
                 self._log_file.flush()
             except Exception:
                 pass
+
+        self._write_central( f"{self._timestamp()} [{self.session_id_hash}] {message}" )
+
+    def _log_central( self, message ):
+        """
+        Write a lifecycle marker to centralized log only (not per-session log).
+
+        Args:
+            message: Marker string (e.g., "=== LISTENER STARTED ===")
+        """
+        self._write_central( f"{self._timestamp()} [{self.session_id_hash}] {message}" )
 
     async def _handle_event( self, event_type, event_data ):
         """
@@ -429,6 +469,7 @@ class CCNotificationListener( BaseWebSocketListener ):
         self._log( f"{self.LOG_PREFIX} Buffer path  : {self.buffer_path}" )
         self._log( f"{self.LOG_PREFIX} Debug        : {self.debug}" )
         self._log( f"{self.LOG_PREFIX} Verbose      : {self.verbose}" )
+        self._log_central( "=== LISTENER STARTED ===" )
 
         restart_cycle    = 0
         restart_cooldown = 60  # seconds
@@ -459,7 +500,10 @@ class CCNotificationListener( BaseWebSocketListener ):
                     await asyncio.sleep( restart_cooldown )
 
         finally:
+            self._log_central( "=== LISTENER STOPPED ===" )
             self._print_stats()
+            if self._centralized_log:
+                self._centralized_log.close()
             if self._log_file:
                 self._log_file.close()
 
@@ -532,6 +576,11 @@ def parse_args():
         default = None,
         help    = "Path to log file (default: stdout only)"
     )
+    parser.add_argument(
+        "--centralized-log",
+        default = None,
+        help    = f"Path to centralized log file (default: {CENTRALIZED_LOG})"
+    )
 
     return parser.parse_args()
 
@@ -581,16 +630,17 @@ async def main():
     email, password = _resolve_credentials( args )
 
     listener = CCNotificationListener(
-        email           = email,
-        password        = password,
-        session_id_hash = args.session_id,
-        buffer_path     = args.buffer_path,
-        tmux_session    = args.tmux_session,
-        host            = args.host,
-        port            = args.port,
-        debug           = args.debug,
-        verbose         = args.verbose,
-        log_file_path   = args.log_file,
+        email                = email,
+        password             = password,
+        session_id_hash      = args.session_id,
+        buffer_path          = args.buffer_path,
+        tmux_session         = args.tmux_session,
+        host                 = args.host,
+        port                 = args.port,
+        debug                = args.debug,
+        verbose              = args.verbose,
+        log_file_path        = args.log_file,
+        centralized_log_path = args.centralized_log,
     )
 
     # Graceful shutdown on SIGTERM

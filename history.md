@@ -1,5 +1,25 @@
 # Lupin Project History
 
+### 2026.03.06 - Session 325 Checkpoint 1 | Centralized CC Notification Listener Logging
+
+**Accomplishments**:
+- Added centralized log file (`~/.claude/sessions/cc-listeners.log`) — all listener instances append to a single file, supporting `tail -f` across context clears and parallel sessions
+- Each log line prefixed with `{ISO_TIMESTAMP} [{8-char hash}]` for easy filtering
+- Lifecycle markers: `=== LISTENER STARTED ===`, `=== LISTENER STOPPED ===`, `=== SESSION TRANSITION: old -> new (stable: X) ===`
+- Session transition markers written by `register_session.py` after killing old listener on context clear
+- Listener stdout redirected to centralized log to capture base class `print()` calls
+- Simplified `tail-cc-listeners.sh` from 216 lines to 66 lines — now a thin wrapper around `tail -f`
+- Per-session log files (`cc-listener-{hash}.log`) kept for backward compatibility
+- Fixed 3 test fixtures using `__new__` that needed new `_centralized_log` attribute
+
+**Files**:
+- `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` — CENTRALIZED_LOG constant, `--centralized-log` CLI arg, `_write_central()`, `_log_central()`, lifecycle markers in `run()`
+- `src/lupin_cli/claude_code/hooks/register_session.py` — `_log_session_transition()`, stdout redirect, `--centralized-log` passthrough
+- `src/scripts/tail-cc-listeners.sh` — Simplified to ~66 lines wrapping `tail -f`
+- `src/tests/unit/test_session_bridge_lookup.py` — Added `_centralized_log = None` to 3 `__new__` fixtures
+
+---
+
 ### 2026.03.06 - Session 323 Checkpoint 3 | Fix MCP ask_yes_no() Silently Discarding Qualifier Comments
 
 **Accomplishments**:

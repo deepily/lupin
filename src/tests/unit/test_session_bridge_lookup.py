@@ -251,6 +251,7 @@ class TestListenerTmuxTrigger:
         listener._tmux_session     = None
         listener.log_file_path     = None
         listener._log_file         = None
+        listener._centralized_log  = None
         listener.LOG_PREFIX        = "[CC-Listener]"
         listener.verbose           = False
 
@@ -271,6 +272,7 @@ class TestListenerTmuxTrigger:
         listener._tmux_session     = None
         listener.log_file_path     = None
         listener._log_file         = None
+        listener._centralized_log  = None
         listener.LOG_PREFIX        = "[CC-Listener]"
         listener.verbose           = False
 
@@ -288,6 +290,7 @@ class TestListenerTmuxTrigger:
         listener._tmux_session     = None
         listener.log_file_path     = None
         listener._log_file         = None
+        listener._centralized_log  = None
         listener.LOG_PREFIX        = "[CC-Listener]"
         listener.verbose           = False
 
