@@ -28,10 +28,10 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
-    read_hook_input, log_payload, emit_json, send_tts, drain_and_acknowledge,
-    format_voice_context, build_stop_block, enrich_voice_context,
-    get_stop_block_count, increment_stop_block_count, reset_stop_block_count,
-    MAX_STOP_BLOCKS
+    read_hook_input, log_payload, log_to_stream, emit_json, send_tts,
+    drain_and_acknowledge, format_voice_context, build_stop_block,
+    enrich_voice_context, get_stop_block_count, increment_stop_block_count,
+    reset_stop_block_count, MAX_STOP_BLOCKS
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, build_sender_id_for_cc
@@ -94,57 +94,61 @@ def _summarize_task( last_assistant_message ):
         return None
 
 
-def classify_qualifier( qualifier ):
-    """
-    Classify a user qualifier as 'question' or 'instruction' via phi4 LLM.
-
-    Follows the established agent pattern:
-        1. Load prompt template path from config
-        2. Process template via PromptTemplateProcessor (injects XML example)
-        3. Format with utterance
-        4. Call LLM via LlmClientFactory
-        5. Parse response via QualifierClassification.from_xml()
-
-    Requires:
-        - qualifier is a non-empty string
-
-    Ensures:
-        - Returns QualifierClassification instance on success
-        - Returns None on any failure (LLM unreachable, parse error, etc.)
-    """
-    try:
-        import cosa.utils.util as du
-        from cosa.config.configuration_manager import ConfigurationManager
-        from cosa.agents.llm_client_factory import LlmClientFactory
-        from cosa.agents.io_models.xml_models import QualifierClassification
-        from cosa.agents.io_models.utils.util_xml_pydantic import XMLParsingError
-        from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
-
-        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-
-        # Load and process prompt template
-        prompt_template_path = config_mgr.get( "prompt template for qualifier classification" )
-        prompt_template      = du.get_file_as_string( du.get_project_root() + prompt_template_path )
-
-        processor       = PromptTemplateProcessor()
-        prompt_template = processor.process_template( prompt_template, "qualifier classification" )
-        prompt          = prompt_template.format( utterance=qualifier )
-
-        # Call LLM
-        llm_spec_key = config_mgr.get( "llm spec key for qualifier classification" )
-        llm_client   = LlmClientFactory().get_client( llm_spec_key )
-        raw_response = llm_client.run( prompt )
-
-        # Parse structured XML response
-        return QualifierClassification.from_xml( raw_response )
-
-    except ( XMLParsingError, Exception ):
-        return None
+# NOTE: classify_qualifier() is commented out because its synchronous LLM
+# call to phi4 exceeds Claude Code's stop hook subprocess timeout (~5-10s).
+# Preserved for future use in non-time-critical contexts.
+#
+# def classify_qualifier( qualifier ):
+#     """
+#     Classify a user qualifier as 'question' or 'instruction' via phi4 LLM.
+#
+#     Follows the established agent pattern:
+#         1. Load prompt template path from config
+#         2. Process template via PromptTemplateProcessor (injects XML example)
+#         3. Format with utterance
+#         4. Call LLM via LlmClientFactory
+#         5. Parse response via QualifierClassification.from_xml()
+#
+#     Requires:
+#         - qualifier is a non-empty string
+#
+#     Ensures:
+#         - Returns QualifierClassification instance on success
+#         - Returns None on any failure (LLM unreachable, parse error, etc.)
+#     """
+#     try:
+#         import cosa.utils.util as du
+#         from cosa.config.configuration_manager import ConfigurationManager
+#         from cosa.agents.llm_client_factory import LlmClientFactory
+#         from cosa.agents.io_models.xml_models import QualifierClassification
+#         from cosa.agents.io_models.utils.util_xml_pydantic import XMLParsingError
+#         from cosa.agents.io_models.utils.prompt_template_processor import PromptTemplateProcessor
+#
+#         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+#
+#         # Load and process prompt template
+#         prompt_template_path = config_mgr.get( "prompt template for qualifier classification" )
+#         prompt_template      = du.get_file_as_string( du.get_project_root() + prompt_template_path )
+#
+#         processor       = PromptTemplateProcessor()
+#         prompt_template = processor.process_template( prompt_template, "qualifier classification" )
+#         prompt          = prompt_template.format( utterance=qualifier )
+#
+#         # Call LLM
+#         llm_spec_key = config_mgr.get( "llm spec key for qualifier classification" )
+#         llm_client   = LlmClientFactory().get_client( llm_spec_key )
+#         raw_response = llm_client.run( prompt )
+#
+#         # Parse structured XML response
+#         return QualifierClassification.from_xml( raw_response )
+#
+#     except ( XMLParsingError, Exception ):
+#         return None
 
 
 def _build_qualifier_reason( qualifier, question_context, instruction_context ):
     """
-    Classify a qualifier and build a formatted reason string.
+    Build a formatted reason string using '?' heuristic for classification.
 
     Requires:
         - qualifier is a non-empty string
@@ -155,24 +159,24 @@ def _build_qualifier_reason( qualifier, question_context, instruction_context ):
 
     Ensures:
         - Returns a reason string with cosa-voice instructions
-        - Classifies qualifier as question or instruction via LLM (with ? fallback)
+        - Classifies qualifier as question or instruction via '?' heuristic
     """
-    classification = classify_qualifier( qualifier )
-    qualifier_is_question = (
-        classification.is_question() if classification
-        else qualifier.rstrip().endswith( "?" )
-    )
+    qualifier_is_question = qualifier.rstrip().endswith( "?" )
 
     if qualifier_is_question:
         return (
-            f'{question_context}: "{qualifier}". '
+            f"IMPORTANT — The user attached a comment to their response:\n"
+            f'"{qualifier}"\n\n'
+            f'{question_context}. '
             "Answer their question using mcp__cosa-voice__converse() with priority='medium' "
             "so they hear the response via audio. After answering, ask if there's anything else "
             "using mcp__cosa-voice__ask_yes_no() with priority='high'."
         )
     else:
         return (
-            f'{instruction_context}: "{qualifier}". '
+            f"IMPORTANT — The user attached a comment to their response:\n"
+            f'"{qualifier}"\n\n'
+            f'{instruction_context}. '
             "First, acknowledge receipt by calling mcp__cosa-voice__notify() with "
             "a brief confirmation message at priority='medium'. "
             "Then carry out their instruction."
@@ -226,6 +230,14 @@ def _ask_anything_else( session_id, last_assistant_message=None ):
         print( f"[STOP] response: exit_code={response.exit_code}, value='{response.response_value}'", file=sys.stderr )
         print( f"[STOP] parsed: answer='{answer}', qualifier='{qualifier}'", file=sys.stderr )
 
+        log_to_stream( "stop", {}, extra={
+            "phase"     : "ask_anything_else",
+            "answer"    : answer,
+            "qualifier" : qualifier,
+            "raw_value" : response.response_value,
+            "exit_code" : response.exit_code
+        } )
+
         if answer == "yes":
             if qualifier:
                 reason = _build_qualifier_reason(
@@ -235,6 +247,11 @@ def _ask_anything_else( session_id, last_assistant_message=None ):
                 )
             else:
                 reason = "The user wants to continue working. Ask them what they'd like done next."
+            log_to_stream( "stop", {}, extra={
+                "phase"  : "qualifier_block",
+                "answer" : answer,
+                "reason" : reason[ :120 ]
+            } )
             return build_stop_block( reason )
 
         if answer == "no" and qualifier:
@@ -243,6 +260,11 @@ def _ask_anything_else( session_id, last_assistant_message=None ):
                 'The user said "no" to continuing, but has a new question',
                 'The user said "no" to continuing, but has a new instruction'
             )
+            log_to_stream( "stop", {}, extra={
+                "phase"  : "qualifier_block",
+                "answer" : answer,
+                "reason" : reason[ :120 ]
+            } )
             return build_stop_block( reason )
 
         # Plain "no", timeout, error → allow stop
