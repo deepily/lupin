@@ -1,5 +1,20 @@
 # Lupin Project History
 
+### 2026.03.06 - Session 327 | Housekeeping — Commit Stray Files from Sessions 325-326
+
+**Accomplishments**:
+- Added `log_to_stream()` JSONL stream logger to hook_common.py — single-line JSON entries to `hook-events.jsonl` for `tail -f` debugging across all hooks
+- Added JSONL logging to `ask_yes_no()` in cosa_voice_mcp.py — captures raw_value, parsed answer, qualifier, and enriched flag for debugging qualifier flow
+- Changed tmux session naming in start-cc-with-tmux.sh to use unique hash-based names (`cc-tmux-session-{8-char-hash}`) instead of fixed `claude-code` name
+- Committed + pushed 7 pending local commits to remote
+
+**Files**: 3 modified (+62/-59 lines)
+- `src/lupin_cli/claude_code/hooks/lib/hook_common.py` — `STREAM_LOG`, `log_to_stream()`, wired into `log_payload()`
+- `src/lupin_mcp/cosa_voice_mcp.py` — `log_to_stream` import, JSONL logging in `ask_yes_no()`
+- `src/scripts/start-cc-with-tmux.sh` — Unique session name generation
+
+---
+
 ### 2026.03.06 - Session 326 Checkpoint 1 | Fix tmux Voice Injection — Type Message Text Instead of Bare Enter
 
 **Accomplishments**:

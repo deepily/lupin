@@ -16,7 +16,8 @@
 
 set -euo pipefail
 
-SESSION_NAME="${1:-claude-code}"
+#SESSION_NAME="${1:-claude-code}"
+SESSION_NAME="${1:-cc-tmux-session-$(date +%s | md5sum | cut -c1-8)}"
 shift 2>/dev/null || true  # Shift past session name if provided
 
 # Check if session already exists

@@ -68,6 +68,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, wait_for_session_id, get_session_metadata as _get_cc_metadata,
     clear_cached_session_id, _find_session_file, _read_session_file
 )
+from lupin_cli.claude_code.hooks.lib.hook_common import log_to_stream
 
 
 # ============================================================================
@@ -601,9 +602,15 @@ def ask_yes_no(
     if response.exit_code == 0 and response.response_value:
         raw_value = response.response_value.strip()
         answer, qualifier = _extract_qualifier( raw_value )
-        if qualifier:
-            return _format_qualified_response( answer, qualifier )
-        return raw_value
+        result = _format_qualified_response( answer, qualifier ) if qualifier else raw_value
+        log_to_stream( "mcp_ask_yes_no", {}, extra={
+            "raw_value"  : raw_value,
+            "answer"     : answer,
+            "qualifier"  : qualifier,
+            "enriched"   : bool( qualifier ),
+            "return_len" : len( result )
+        } )
+        return result
 
     return default
 

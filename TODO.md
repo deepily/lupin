@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-03 (Session 305)
+Last updated: 2026-03-06 (Session 327)
 
 ## HIGH PRIORITY — CC Session Voice Input Bugs (Session 300)
 
@@ -111,7 +111,7 @@ Last updated: 2026-03-03 (Session 305)
 
 ### History Archive (Session 280)
 
-- [ ] **[LUPIN] Archive history.md** — At 18,951 tokens (75.8%). Archive sessions older than 14 days to stay below 17k threshold.
+- [ ] **[LUPIN] Archive history.md** — At 17,831 tokens (71.3%). Archive sessions older than 14 days to stay below 17k threshold. (Updated Session 327)
 
 ### SWE Team Proxy: Workload Generator + Shadow-Mode Capture (HIGH PRIORITY)
 

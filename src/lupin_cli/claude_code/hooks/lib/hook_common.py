@@ -28,7 +28,8 @@ from pathlib import Path
 # in io/ directory, consistent with existing io/log/ convention.
 import cosa.utils.util as cu
 
-LOGS_DIR = Path( cu.get_project_root() ) / "io" / "claude_code_hooks" / "logs"
+LOGS_DIR    = Path( cu.get_project_root() ) / "io" / "claude_code_hooks" / "logs"
+STREAM_LOG  = LOGS_DIR / "hook-events.jsonl"
 
 # Tool classification for smart TTS filtering (PostToolUse)
 TOOLS_SILENT   = frozenset( { "Read", "Grep", "Glob", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList" } )
@@ -63,6 +64,46 @@ def read_hook_input():
         return {}
 
 
+def log_to_stream( hook_name, payload, extra=None ):
+    """
+    Append single-line JSON entry to hook-events.jsonl for tail -f debugging.
+
+    Requires:
+        - hook_name is a non-empty string
+        - payload is a dict or None
+
+    Ensures:
+        - Creates logs directory if it doesn't exist
+        - Appends one compact JSON line to STREAM_LOG
+        - Includes hook name, timestamp, PID, and compact payload summary
+        - Extra dict fields are merged into the entry when provided
+        - Never raises exceptions (logging failure is non-fatal)
+
+    Args:
+        hook_name: Name of the hook (e.g., "stop", "mcp_ask_yes_no")
+        payload: Hook input dict (only summary fields extracted)
+        extra: Optional dict of hook-specific fields to merge into entry
+    """
+    try:
+        LOGS_DIR.mkdir( parents=True, exist_ok=True )
+        entry = {
+            "ts"   : get_timestamp(),
+            "hook" : hook_name,
+            "pid"  : os.getpid(),
+        }
+        # Compact payload summary (avoid multi-MB last_assistant_message dumps)
+        if isinstance( payload, dict ):
+            entry[ "event" ]      = payload.get( "hook_event_name", "" )
+            entry[ "session_id" ] = payload.get( "session_id", "" )[:8]
+            entry[ "tool" ]       = payload.get( "tool_name", "" )
+        if extra:
+            entry.update( extra )
+        with open( STREAM_LOG, "a" ) as f:
+            f.write( json.dumps( entry, default=str ) + "\n" )
+    except Exception:
+        pass  # Logging failure is non-fatal
+
+
 def log_payload( hook_name, payload ):
     """
     Write timestamped JSON payload to logs directory for empirical analysis.
@@ -74,6 +115,7 @@ def log_payload( hook_name, payload ):
     Ensures:
         - Creates logs directory if it doesn't exist
         - Writes payload to logs/{hook_name}-{timestamp}.json
+        - Appends compact summary to JSONL stream (via log_to_stream)
         - Never raises exceptions (logging failure is non-fatal)
 
     Args:
@@ -98,6 +140,8 @@ def log_payload( hook_name, payload ):
 
     except Exception:
         pass  # Logging failure is non-fatal
+
+    log_to_stream( hook_name, payload )
 
 
 def emit_json( data ):
