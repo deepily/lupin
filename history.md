@@ -1,5 +1,25 @@
 # Lupin Project History
 
+### 2026.03.08 - Session 329 Checkpoint 1 | R2P Notification Delivery Diagnostics + Fix
+
+**Accomplishments**:
+- Added diagnostic logging to `WebSocketManager.emit_to_user()` — exposed three silent failure points (user not in sessions, `send_json()` exceptions, zero-delivery outcomes) that were previously invisible
+- Fixed missing `self.debug` attribute in `WebSocketManager.__init__()` — was causing `AttributeError` crashes on `active_conversation_changed` emission. Now reads `app_debug` config key
+- Added `job_id=self.id_hash` and `queue_name="run"` to all 14 `voice_io.notify()` calls in R2P job.py — matching the pattern used by standalone DeepResearchJob
+- Added `voice_io.set_job_id()` / `voice_io.clear_job_id()` to R2P `_execute()` and `_execute_dry_run()` — enables auto-injection of job_id into all downstream notifications from `run_research()` internals (e.g., "Topic 1/5 complete")
+- Discovered `active_conversation_changed` event was slipstreamed in by a prior session — not in `websocket available events` config, not in client subscription list. Deferred for review.
+
+**Root cause chain**:
+1. Diagnostic logging revealed all browser sessions were "not subscribed" to key events
+2. Deeper analysis showed R2P notifications were missing `job_id`/`queue_name` (the JS UI needs these to route to job cards)
+3. Even after adding explicit params to job.py, internal `run_research()` notifications still lacked `job_id` because `voice_io.set_job_id()` was never called (standalone DR job does this, R2P did not)
+
+**Files** (all in CoSA submodule):
+- `rest/websocket_manager.py` — `emit_to_user()` diagnostic logging, `self.debug` init, simplified `hasattr` guard
+- `agents/deep_research_to_podcast/job.py` — `job_id`/`queue_name` on all notify calls, `set_job_id`/`clear_job_id` lifecycle
+
+---
+
 ### 2026.03.07 - Session 328 Checkpoint 2 | Fix Missing TARGET_USER in R2P Job
 
 **Accomplishments**:

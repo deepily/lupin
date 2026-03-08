@@ -1,11 +1,15 @@
 # TODO
 
-Last updated: 2026-03-06 (Session 327)
+Last updated: 2026-03-08 (Session 329)
 
 ## HIGH PRIORITY — CC Session Voice Input Bugs (Session 300)
 
 - [ ] **[LUPIN] Fix date off-by-one in CC session outgoing bubble** — Messages sent at e.g. 10:36 PM EST March 2 render under the March 3 date accordion. Likely cause: `new Date().toISOString()` returns UTC which is already March 3 when EST is late evening March 2, and `extractDateFromTimestamp()` uses the UTC date string directly instead of converting to local/server timezone. Fix should mirror how server-side notifications resolve dates (using `appTimezone`).
 - [ ] **[LUPIN] Fix CC session messages loading into "Unknown" sender card after refresh** — After page refresh, user-initiated messages sent from the CC session voice input widget load from the database into a separate sender card labeled "Unknown" instead of grouping under the correct CC session sender card. Likely cause: the notification stored in the DB has `sender_id` set to `user@{email}` (line 1597) rather than the CC session's sender ID (`claude.code@host#hash`), so on reload `resolveSenderId()` can't match it to the CC session card.
+
+## HIGH PRIORITY — Review `active_conversation_changed` Event Origin (Session 329)
+
+- [ ] **[LUPIN] Investigate `active_conversation_changed` WebSocket event** — This event was slipstreamed in by a prior Claude session. It's emitted in `notifications.py` (lines 454-465, 564-575) but NOT in `websocket available events` config and NOT in the JS client subscription list. All sessions reject it silently. Determine: (1) which session introduced it, (2) what problem it was supposed to solve, (3) whether to properly integrate or remove it.
 
 ## HIGH PRIORITY — target_user Notification Dispatch Bug (Session 286)
 
