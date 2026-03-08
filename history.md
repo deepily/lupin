@@ -1,5 +1,15 @@
 # Lupin Project History
 
+### 2026.03.07 - Session 328 Checkpoint 2 | Fix Missing TARGET_USER in R2P Job
+
+**Accomplishments**:
+- Fixed "Cannot resolve target_user" error in DeepResearchToPodcastJob — added `cosa_interface.TARGET_USER = self.user_email` in both `_execute()` and `_execute_dry_run()`, matching the pattern used by deep_research and podcast_generator jobs
+
+**Files**:
+- `src/cosa/agents/deep_research_to_podcast/job.py` — Added `TARGET_USER` assignment in 2 locations
+
+---
+
 ### 2026.03.07 - Session 328 Checkpoint 1 | CJ Flow Job Card Bug Fixes + Packaging Guide Documentation
 
 **Accomplishments**:
