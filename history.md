@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.03.07 - Session 328 Checkpoint 1 | CJ Flow Job Card Bug Fixes + Packaging Guide Documentation
+
+**Accomplishments**:
+- Fixed user messages in running job cards rendering as gray `activity-log-entry` instead of right-justified blue chat bubbles — added `user_initiated_message` type check in `appendNotificationToJobCard()` to use `sender-message outgoing` pattern
+- Fixed cancel button not removed on job card transition from running to done/dead — changed `cancelBtn.disabled = true` to `cancelBtn.remove()` for both `done` and `dead` queue transitions
+- Fixed `DeepResearchToPodcastJob` sender_id validation error — changed `self.id_hash` to `self.base_id` for sender_id construction (id_hash includes `::user_uuid` after `register_scoped_job()`, breaking the regex pattern)
+- Documented sender_id scoping pitfall as Pitfall 6.4 in CJ Flow Packaging Guide with symptom, root cause, and correct pattern
+- Added sender identity setup block to Packaging Guide notification section showing `self.base_id` usage
+- Removed double truncation in job card `job-full-question` — Python-side `last_question_asked` no longer truncates query text; JS header `truncateText()` handles display truncation independently
+
+**Files**:
+- `src/fastapi_app/static/js/notifications.js` — `appendNotificationToJobCard()` user message bubble, cancel button `.remove()` for done/dead
+- `src/cosa/agents/deep_research_to_podcast/job.py` — `self.base_id` for sender_id (2 sites), removed query truncation in `last_question_asked`
+- `src/cosa/agents/deep_research/job.py` — Removed query truncation in `last_question_asked`
+- `src/cosa/agents/podcast_generator/job.py` — Removed filename truncation in `last_question_asked`
+- `src/rnd/2026.02.12-cj-flow-bounded-job-packaging-guide.md` — Pitfall 6.4 + sender identity setup block
+
+---
+
 ### 2026.03.06 - Session 327 | Housekeeping — Commit Stray Files from Sessions 325-326
 
 **Accomplishments**:

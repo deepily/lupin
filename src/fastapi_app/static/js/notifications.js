@@ -4466,13 +4466,12 @@ class NotificationsUI {
                     this.log( `[JOB-TRANSITION] Removed send-message UI for ${jobId}` );
                 }
 
-                // 6. Disable cancel button (no cancelling completed jobs)
+                // 6. Remove cancel button (no cancelling completed jobs)
                 const cancelBtn = header.querySelector( '.job-cancel-button' );
                 if ( cancelBtn ) {
-                    cancelBtn.disabled = true;
-                    cancelBtn.onclick  = null;
+                    cancelBtn.remove();
                     header.classList.remove( 'has-cancel' );
-                    this.log( `[JOB-TRANSITION] Disabled cancel button for completed ${jobId}` );
+                    this.log( `[JOB-TRANSITION] Removed cancel button for completed ${jobId}` );
                 }
 
                 // 7. Convert live interactions to done-queue lazy-load pattern
@@ -4495,16 +4494,15 @@ class NotificationsUI {
             }
         }
 
-        // Disable cancel button when transitioning to dead queue
+        // Remove cancel button when transitioning to dead queue
         if ( toQueue === 'dead' ) {
             const header = card.querySelector( '.job-card-header' );
             if ( header ) {
                 const cancelBtn = header.querySelector( '.job-cancel-button' );
                 if ( cancelBtn ) {
-                    cancelBtn.disabled = true;
-                    cancelBtn.onclick  = null;
+                    cancelBtn.remove();
                     header.classList.remove( 'has-cancel' );
-                    this.log( `[JOB-TRANSITION] Disabled cancel button for dead ${jobId}` );
+                    this.log( `[JOB-TRANSITION] Removed cancel button for dead ${jobId}` );
                 }
             }
         }
@@ -5296,6 +5294,29 @@ class NotificationsUI {
                 this.updateProgressGroupEntry( existing, notification );
                 return;
             }
+        }
+
+        // User-initiated messages → right-justified blue chat bubble (same as appendJobUserMessage)
+        const notifType = notification.type || notification.notification_type;
+        if ( notifType === 'user_initiated_message' ) {
+            const ts = notification.timestamp
+                ? new Date( notification.timestamp ).toLocaleTimeString()
+                : new Date().toLocaleTimeString();
+            const urgentClass = notification.priority === 'urgent' ? ' priority-urgent' : '';
+            const priorityBadge = notification.priority === 'urgent' ? ' <strong>[URGENT]</strong>' : '';
+            const entry = document.createElement( 'div' );
+            entry.className = `sender-message outgoing${urgentClass}`;
+            entry.innerHTML = `
+                <span class="message-time">${ts}${priorityBadge}</span>
+                <span class="message-text">${this.renderMarkdownInline( notification.message )}</span>
+            `;
+            contentEl.insertBefore( entry, contentEl.firstChild );
+            if ( !this.expandedJobCards.has( jobId ) ) {
+                this.expandJobCard( jobId );
+            }
+            entry.scrollIntoView( { behavior: 'smooth', block: 'nearest' } );
+            this.log( `[Phase 6] User message appended to job ${jobId}: ${notification.message.substring( 0, 50 )}...` );
+            return;
         }
 
         // Create notification entry
