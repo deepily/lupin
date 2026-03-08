@@ -1,5 +1,18 @@
 # Lupin Project History
 
+### 2026.03.08 - Session 329 Checkpoint 2 | Fix R2P → PG Handoff Missing TARGET_USER on Agent
+
+**Accomplishments**:
+- Fixed "Cannot resolve target_user" crash during R2P → PG handoff in `agent.py` — added `pg_cosa_interface.TARGET_USER = self.user_email` before PG phase starts (the standalone PG job sets this, but the chained agent never did)
+- Added defensive `dr_cosa_interface.TARGET_USER = self.user_email` in `_run_deep_research()` — currently works because job.py sets it, but agent should be self-sufficient
+- Replaced bare "Deep Research complete!" notification with rich checkpoint showing report path, abstract preview, cost, token count, and duration
+- Added `**kwargs` pass-through to `_notify()` helper so `abstract=` reaches `voice_io.notify()`
+
+**Files** (all in CoSA submodule):
+- `agents/deep_research_to_podcast/agent.py` — TARGET_USER on both cosa_interfaces, rich DR checkpoint notification, `_notify()` kwargs
+
+---
+
 ### 2026.03.08 - Session 329 Checkpoint 1 | R2P Notification Delivery Diagnostics + Fix
 
 **Accomplishments**:
