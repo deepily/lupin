@@ -1,5 +1,15 @@
 # Lupin Project History
 
+### 2026.03.08 - Session 330 | Fix PG Audio Progress Not Updating In-Place
+
+**Accomplishments**:
+- Fixed Podcast Generator audio progress notifications appearing as separate entries instead of updating in-place — added `progress_group_id = self._audio_progress_group_id` to the Phase 5 English-only start notification in `orchestrator.py` (line 951-954), matching the pattern already used by the Phase 2 multi-language path and milestone callbacks
+
+**Files** (CoSA submodule):
+- `agents/podcast_generator/orchestrator.py` — Added `progress_group_id` to English audio start notification
+
+---
+
 ### 2026.03.08 - Session 329 Checkpoint 2 | Fix R2P → PG Handoff Missing TARGET_USER on Agent
 
 **Accomplishments**:

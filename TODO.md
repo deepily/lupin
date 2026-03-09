@@ -1,11 +1,15 @@
 # TODO
 
-Last updated: 2026-03-08 (Session 329)
+Last updated: 2026-03-08 (Session 330)
 
 ## HIGH PRIORITY — CC Session Voice Input Bugs (Session 300)
 
 - [ ] **[LUPIN] Fix date off-by-one in CC session outgoing bubble** — Messages sent at e.g. 10:36 PM EST March 2 render under the March 3 date accordion. Likely cause: `new Date().toISOString()` returns UTC which is already March 3 when EST is late evening March 2, and `extractDateFromTimestamp()` uses the UTC date string directly instead of converting to local/server timezone. Fix should mirror how server-side notifications resolve dates (using `appTimezone`).
 - [ ] **[LUPIN] Fix CC session messages loading into "Unknown" sender card after refresh** — After page refresh, user-initiated messages sent from the CC session voice input widget load from the database into a separate sender card labeled "Unknown" instead of grouping under the correct CC session sender card. Likely cause: the notification stored in the DB has `sender_id` set to `user@{email}` (line 1597) rather than the CC session's sender ID (`claude.code@host#hash`), so on reload `resolveSenderId()` can't match it to the CC session card.
+
+## HIGH PRIORITY — PG Audio Progress Not Updating In-Place (Session 329)
+
+- [x] **[LUPIN] Fix PG audio progress notifications not using progress_group_id** — Session 330: Added `progress_group_id = self._audio_progress_group_id` to Phase 5 English audio start notification in `orchestrator.py`. The first notification now establishes the DOM tag so subsequent milestone notifications update in-place.
 
 ## HIGH PRIORITY — Review `active_conversation_changed` Event Origin (Session 329)
 
@@ -115,7 +119,7 @@ Last updated: 2026-03-08 (Session 329)
 
 ### History Archive (Session 280)
 
-- [ ] **[LUPIN] Archive history.md** — At 17,831 tokens (71.3%). Archive sessions older than 14 days to stay below 17k threshold. (Updated Session 327)
+- [ ] **[LUPIN] Archive history.md** — At 18,790 tokens (75.1%). Archive sessions older than 14 days to stay below 17k threshold. (Updated Session 330)
 
 ### SWE Team Proxy: Workload Generator + Shadow-Mode Capture (HIGH PRIORITY)
 
