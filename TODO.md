@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-08 (Session 330)
+Last updated: 2026-03-09 (Session 331)
 
 ## HIGH PRIORITY — CC Session Voice Input Bugs (Session 300)
 
@@ -11,9 +11,10 @@ Last updated: 2026-03-08 (Session 330)
 
 - [x] **[LUPIN] Fix PG audio progress notifications not using progress_group_id** — Session 330: Added `progress_group_id = self._audio_progress_group_id` to Phase 5 English audio start notification in `orchestrator.py`. The first notification now establishes the DOM tag so subsequent milestone notifications update in-place.
 
-## HIGH PRIORITY — Review `active_conversation_changed` Event Origin (Session 329)
+## COMPLETED — Review `active_conversation_changed` + JS Event Anomalies (Sessions 329, 331)
 
-- [ ] **[LUPIN] Investigate `active_conversation_changed` WebSocket event** — This event was slipstreamed in by a prior Claude session. It's emitted in `notifications.py` (lines 454-465, 564-575) but NOT in `websocket available events` config and NOT in the JS client subscription list. All sessions reject it silently. Determine: (1) which session introduced it, (2) what problem it was supposed to solve, (3) whether to properly integrate or remove it.
+- [x] **[LUPIN] Investigate `active_conversation_changed` WebSocket event** — Session 331: Removed dead code. Server emitted it but never in INI available events or JS subscriptions. Both emission blocks removed from `notifications.py`, unreachable JS handler removed from `notifications.js`.
+- [x] **[LUPIN] Investigate oddly named event type in JS notification API** — Session 331: Two events (`notification_play_sound`, `audio_streaming_chunk`) were subscribed but had no `case` handler, falling through to "Unhandled message type" default. Added no-op log handlers to both.
 
 ## HIGH PRIORITY — target_user Notification Dispatch Bug (Session 286)
 

@@ -3128,7 +3128,6 @@ with the full notification payload.
 | `notification_responded` | Server -> Client | User submitted a response. Contains `notification_id`, `response_value`, `timestamp`, `time_display`, `date_display`. |
 | `notification_expired` | Server -> Client | Notification timed out. Contains `notification_id`, `default_used`, `timeout` flag, `timestamp`. |
 | `notification_play_sound` | Server -> Client | Instructs client to play notification sound. Carries priority for sound selection. |
-| `active_conversation_changed` | Server -> Client | Active conversation context changed. Used for project/session grouping updates. |
 
 ---
 

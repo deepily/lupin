@@ -2157,9 +2157,9 @@ class NotificationsUI {
                     this.handleNotificationExpired( envelope );
                     break;
 
-                case "active_conversation_changed":
-                    // Conversation Identity Phase 3 - Update active sender indicator
-                    this.handleActiveConversationChanged( envelope );
+                case "notification_play_sound":
+                    // Subscribed event — no-op handler to prevent "Unhandled message type" console noise
+                    this.log( `[QUEUE WS] notification_play_sound received (priority: ${envelope.priority || 'default'})` );
                     break;
 
                 case "sys_time_update":
@@ -2233,6 +2233,11 @@ class NotificationsUI {
                     
                 case "audio_streaming_complete":
                     this.handleAudioComplete( envelope );
+                    break;
+
+                case "audio_streaming_chunk":
+                    // Subscribed event — binary audio handled in Blob branch above; text fallback is no-op
+                    this.log( `[AUDIO WS] audio_streaming_chunk received (text envelope fallback)` );
                     break;
 
                 case "tts_error":
@@ -12237,57 +12242,6 @@ class NotificationsUI {
 
         // Server timeout occurred
         this.handleLocalTimeout( notificationId );
-    }
-
-    /**
-     * Handle active_conversation_changed WebSocket event.
-     * Updates the active indicator on sender cards.
-     * (Conversation Identity Phase 3)
-     *
-     * @param {Object} data - { active_sender_id, timestamp }
-     */
-    handleActiveConversationChanged( data ) {
-        const activeSenderId = data.active_sender_id;
-        this.log( `Active conversation changed to: ${activeSenderId}` );
-
-        // Update all sender groups
-        for ( const [ senderId, group ] of this.senderGroups ) {
-            const wasActive = group.isActive;
-            group.isActive = ( senderId === activeSenderId );
-
-            // Update UI if state changed
-            if ( wasActive !== group.isActive ) {
-                this.updateSenderActiveIndicator( senderId, group.isActive );
-            }
-        }
-    }
-
-    /**
-     * Update the active indicator on a sender card.
-     * (Conversation Identity Phase 3)
-     *
-     * @param {string} senderId - Sender ID
-     * @param {boolean} isActive - Whether this sender is now active
-     */
-    updateSenderActiveIndicator( senderId, isActive ) {
-        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
-        const card = document.getElementById( cardId );
-        if ( !card ) return;
-
-        const indicator = card.querySelector( '.sender-active-indicator' );
-        if ( indicator ) {
-            indicator.textContent = isActive ? '●' : '○';
-            indicator.title = isActive ? 'Active session' : 'Inactive session';
-        }
-
-        // Add/remove CSS class for styling
-        if ( isActive ) {
-            card.classList.add( 'sender-card-active' );
-        } else {
-            card.classList.remove( 'sender-card-active' );
-        }
-
-        this.log( `Updated active indicator for ${senderId}: ${isActive ? 'active' : 'inactive'}` );
     }
 
     stopCountdownTimer( notificationId ) {

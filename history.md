@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.03.09 - Session 331 | Remove Dead `active_conversation_changed` Event + Fix Unhandled WS Events
+
+**Accomplishments**:
+- Removed dead `active_conversation_changed` WebSocket event — server emitted it but it was never in INI available events or JS subscriptions, so all clients silently rejected it. Removed both emission blocks (fire-and-forget + response-required paths) from `notifications.py` and the unreachable JS handler + methods from `notifications.js`
+- Added missing `case "notification_play_sound"` handler to queue WS switch — was subscribed but fell through to "Unhandled message type" default
+- Added missing `case "audio_streaming_chunk"` handler to audio WS switch — same issue
+- Removed `active_conversation_changed` row from `notification-api.md` events table
+- Original design doc (`src/rnd/2026.01.13-conversation-identity-phases-1-3.md`) preserved for future reference
+
+**Files Modified**:
+- `src/cosa/rest/routers/notifications.py` — Removed 2 emission blocks (~24 lines)
+- `src/fastapi_app/static/js/notifications.js` — Removed case + 2 methods (~44 lines), added 2 no-op case handlers
+- `src/docs/notification-api.md` — Removed 1 event table row
+
+**Verification**: `grep active_conversation_changed` only matches history/TODO/R&D docs. Unit tests: 2008 pass (4 pre-existing failures unrelated).
+
+---
+
 ### 2026.03.08 - Session 330 | Fix PG Audio Progress Not Updating In-Place
 
 **Accomplishments**:
