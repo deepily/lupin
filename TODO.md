@@ -1,16 +1,12 @@
 # TODO
 
-Last updated: 2026-03-10 (Session 335)
+Last updated: 2026-03-10 (Session 336)
 
-## HIGH PRIORITY — Stop Hook Qualifier Not Acted On (Sessions 332-333)
+## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 
-- [ ] **[LUPIN] Fix stop hook qualifier: Claude Code ignores qualifier text** — User attaches a comment via `[comment: ...]` to their yes/no response in the stop hook "Anything else?" prompt. The qualifier text reaches the hook correctly (extraction, formatting, logging all work), but Claude Code does not act on it.
-  - **Phase 1 (Session 332)**: Consolidated qualifier extraction/formatting into `notification_utils.py`, adopted "MUST act" language in `reason` field. Tests pass but live test fails — Claude ignores `reason` content.
-  - **Phase 2 (Session 333)**: Added `systemMessage` field alongside `reason` (hypothesis: systemMessage is injected into conversation context). Tests pass but **live test fails again** — Claude still ignores the qualifier.
-  - **Root cause confirmed**: The Stop hook response only supports `{"decision": "block", "reason": "..."}`. The `reason` field is hook metadata/logging, NOT injected into the model's conversation context. `systemMessage` is silently ignored by the Stop hook (may only work for PreToolUse hooks).
-  - **Next approach to investigate**: Write qualifier to the voice buffer (`cc-buffer-{hash}.jsonl`) from the stop hook. When Claude resumes after the block, the next PreToolUse hook drain picks it up and injects it via `additionalContext` — which IS reliably acted on. This leverages the existing voice injection pipeline that already works.
-  - **Files modified so far**: `hook_common.py` (added `build_stop_block_with_system_message()`), `stop.py` (removed `_enrich_qualifier_for_stop_hook()`, uses systemMessage at qualifier call sites), `test_stop_hook.py` (assertions on `systemMessage`)
-  - **Decision needed**: Revert Phase 2 systemMessage changes (dead code) before implementing voice buffer approach, or keep as-is since tests pass?
+- [x] **[LUPIN] Fix stop hook qualifier: Claude Code ignores qualifier text** — Session 336: Replaced broken `systemMessage` approach with tmux injection. `inject_qualifier_via_tmux()` spawns detached background process that injects qualifier text directly into CC's tmux input after stop block. Uses bash positional args for shell-safe text passing. 36/36 tests pass. Needs manual E2E verification (Phase 4).
+  - **Phases 1-2 (Sessions 332-333)**: `reason` and `systemMessage` both silently ignored by CC Stop hooks
+  - **Phase 3 (Session 336)**: tmux injection — proven technique from `CCNotificationListener._inject_via_tmux()`
 
 ## COMPLETED — CC Listener Session ID Drift (Session 335)
 

@@ -29,7 +29,7 @@ if _src_path not in sys.path:
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, log_to_stream, emit_json, send_tts,
     drain_and_acknowledge, format_voice_context, build_stop_block,
-    build_stop_block_with_system_message,
+    inject_qualifier_via_tmux,
     enrich_voice_context, get_stop_block_count, increment_stop_block_count,
     reset_stop_block_count, MAX_STOP_BLOCKS
 )
@@ -40,9 +40,7 @@ from lupin_cli.notifications.notify_user_sync import notify_user_sync
 from lupin_cli.notifications.notification_models import (
     NotificationRequest, ResponseType, NotificationPriority
 )
-from cosa.utils.notification_utils import (
-    extract_qualifier_comment, format_qualified_response
-)
+from cosa.utils.notification_utils import extract_qualifier_comment
 
 
 def _summarize_task( last_assistant_message ):
@@ -177,13 +175,13 @@ def _ask_anything_else( session_id, last_assistant_message=None ):
 
         if answer == "yes":
             if qualifier:
-                system_msg = format_qualified_response( answer, qualifier )
+                inject_qualifier_via_tmux( session_id, qualifier )
                 log_to_stream( "stop", {}, extra={
-                    "phase"  : "qualifier_block",
+                    "phase"  : "qualifier_tmux_inject",
                     "answer" : answer,
-                    "reason" : f"User qualifier: {qualifier}"[ :120 ]
+                    "text"   : qualifier
                 } )
-                return build_stop_block_with_system_message( f"User qualifier: {qualifier}", system_msg )
+                return build_stop_block( f"User wants to continue. Qualifier injected via tmux: {qualifier}" )
             else:
                 reason = "The user wants to continue working. Ask them what they'd like done next."
                 log_to_stream( "stop", {}, extra={
@@ -194,13 +192,13 @@ def _ask_anything_else( session_id, last_assistant_message=None ):
                 return build_stop_block( reason )
 
         if answer == "no" and qualifier:
-            system_msg = format_qualified_response( answer, qualifier )
+            inject_qualifier_via_tmux( session_id, qualifier )
             log_to_stream( "stop", {}, extra={
-                "phase"  : "qualifier_block",
+                "phase"  : "qualifier_tmux_inject",
                 "answer" : answer,
-                "reason" : f"User qualifier: {qualifier}"[ :120 ]
+                "text"   : qualifier
             } )
-            return build_stop_block_with_system_message( f"User qualifier: {qualifier}", system_msg )
+            return build_stop_block( f"User said no but attached work. Qualifier injected via tmux: {qualifier}" )
 
         # Plain "no", timeout, error → allow stop
         return {}

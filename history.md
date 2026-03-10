@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.03.10 - Session 336 | Stop Hook Qualifier → TMUX Injection
+
+**Accomplishments**:
+- Replaced broken `systemMessage` approach (Sessions 332-333) with tmux injection for stop hook qualifiers — when user attaches `[comment: ...]` to yes/no response, qualifier text is now injected directly into Claude Code's tmux input as first-class user input
+- Added `inject_qualifier_via_tmux()` to `hook_common.py` — lazy-imports `find_session_by_id`, resolves tmux session name, spawns detached background process using bash positional args (`$1`, `$2`, `$3`) for safe text passing without shell escaping
+- Added `TMUX_INJECTION_DELAY = 0.25` constant, deprecation comment on `build_stop_block_with_system_message()`
+- Updated both qualifier branches in `stop.py` (yes+qualifier, no+qualifier) to use tmux injection instead of systemMessage
+- Removed unused `format_qualified_response` import from stop.py
+- 36/36 stop hook unit tests pass: 4 existing tests updated (systemMessage → tmux assertions), 4 new tests added (plain yes no-inject, Popen spawn, no-session skip, special chars safety)
+
+**Files Modified**:
+- `src/lupin_cli/claude_code/hooks/lib/hook_common.py` — Added `subprocess` import, `TMUX_INJECTION_DELAY`, `inject_qualifier_via_tmux()`, deprecation comment
+- `src/lupin_cli/claude_code/hooks/stop.py` — Replaced systemMessage branches with tmux injection, removed `format_qualified_response` import
+- `src/tests/unit/test_stop_hook.py` — Updated 4 qualifier tests, added 4 new tmux injection tests
+
+---
+
 ### 2026.03.10 - Session 335 | Stable Session ID Lockfile + Listener Drift Fix (Phases 1-4)
 
 **Accomplishments**:

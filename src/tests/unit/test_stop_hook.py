@@ -401,10 +401,11 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
-    def test_qualifier_question_routes_correctly( self, mock_notify, mock_sender, mock_read,
+    @patch( "lupin_cli.claude_code.hooks.stop.inject_qualifier_via_tmux" )
+    def test_qualifier_question_routes_correctly( self, mock_inject, mock_notify, mock_sender, mock_read,
                                                      mock_log, mock_session, mock_drain, mock_emit,
                                                      mock_reset, mock_summarize ):
-        """Qualifier ending with '?' → systemMessage includes MUST act directive."""
+        """Qualifier ending with '?' → injected via tmux, stop blocked."""
         mock_response = MagicMock()
         mock_response.response_value = "yes [comment: how many tests passed?]"
         mock_notify.return_value = mock_response
@@ -414,10 +415,7 @@ class TestNotifyUserSync:
 
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "decision" ] == "block"
-        assert "IMPORTANT" in emitted[ "systemMessage" ]
-        assert "MUST act" in emitted[ "systemMessage" ]
-        assert "how many tests passed?" in emitted[ "systemMessage" ]
-        assert "User qualifier:" in emitted[ "reason" ]
+        mock_inject.assert_called_once_with( "abc12345", "how many tests passed?" )
 
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
@@ -428,10 +426,11 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
-    def test_qualifier_instruction_routes_correctly( self, mock_notify, mock_sender, mock_read,
+    @patch( "lupin_cli.claude_code.hooks.stop.inject_qualifier_via_tmux" )
+    def test_qualifier_instruction_routes_correctly( self, mock_inject, mock_notify, mock_sender, mock_read,
                                                        mock_log, mock_session, mock_drain, mock_emit,
                                                        mock_reset, mock_summarize ):
-        """Qualifier without '?' → systemMessage includes MUST act directive."""
+        """Qualifier without '?' → injected via tmux, stop blocked."""
         mock_response = MagicMock()
         mock_response.response_value = "yes [comment: fix the linting errors]"
         mock_notify.return_value = mock_response
@@ -441,10 +440,7 @@ class TestNotifyUserSync:
 
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "decision" ] == "block"
-        assert "IMPORTANT" in emitted[ "systemMessage" ]
-        assert "fix the linting errors" in emitted[ "systemMessage" ]
-        assert "MUST act" in emitted[ "systemMessage" ]
-        assert "User qualifier:" in emitted[ "reason" ]
+        mock_inject.assert_called_once_with( "abc12345", "fix the linting errors" )
 
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value="fixed linting errors" )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
@@ -524,10 +520,11 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
-    def test_no_with_qualifier_instruction_blocks_stop( self, mock_notify, mock_sender, mock_read,
+    @patch( "lupin_cli.claude_code.hooks.stop.inject_qualifier_via_tmux" )
+    def test_no_with_qualifier_instruction_blocks_stop( self, mock_inject, mock_notify, mock_sender, mock_read,
                                                           mock_log, mock_session, mock_drain, mock_emit,
                                                           mock_reset, mock_summarize ):
-        """'no [comment: say hi]' → blocks stop, systemMessage includes instruction."""
+        """'no [comment: say hi]' → blocks stop, qualifier injected via tmux."""
         mock_response = MagicMock()
         mock_response.exit_code      = 0
         mock_response.response_value = "no [comment: say hi using a high-priority notification]"
@@ -538,11 +535,7 @@ class TestNotifyUserSync:
 
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "decision" ] == "block"
-        assert "IMPORTANT" in emitted[ "systemMessage" ]
-        assert "say hi using a high-priority notification" in emitted[ "systemMessage" ]
-        assert "no" in emitted[ "systemMessage" ].lower()
-        assert "MUST act" in emitted[ "systemMessage" ]
-        assert "User qualifier:" in emitted[ "reason" ]
+        mock_inject.assert_called_once_with( "abc12345", "say hi using a high-priority notification" )
 
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
@@ -553,10 +546,11 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
-    def test_no_with_qualifier_question_blocks_stop( self, mock_notify, mock_sender, mock_read,
+    @patch( "lupin_cli.claude_code.hooks.stop.inject_qualifier_via_tmux" )
+    def test_no_with_qualifier_question_blocks_stop( self, mock_inject, mock_notify, mock_sender, mock_read,
                                                         mock_log, mock_session, mock_drain, mock_emit,
                                                         mock_reset, mock_summarize ):
-        """'no [comment: what time is it?]' → blocks stop, systemMessage includes question."""
+        """'no [comment: what time is it?]' → blocks stop, qualifier injected via tmux."""
         mock_response = MagicMock()
         mock_response.exit_code      = 0
         mock_response.response_value = "no [comment: what time is it?]"
@@ -567,11 +561,7 @@ class TestNotifyUserSync:
 
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "decision" ] == "block"
-        assert "IMPORTANT" in emitted[ "systemMessage" ]
-        assert "what time is it?" in emitted[ "systemMessage" ]
-        assert "no" in emitted[ "systemMessage" ].lower()
-        assert "MUST act" in emitted[ "systemMessage" ]
-        assert "User qualifier:" in emitted[ "reason" ]
+        mock_inject.assert_called_once_with( "abc12345", "what time is it?" )
 
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
@@ -641,3 +631,84 @@ class TestNotifyUserSync:
         assert request.response_default == "no"
         assert request.display_qualifier_widget is True
         assert request.title == "Continue Session?"
+
+    @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
+    @patch( "lupin_cli.claude_code.hooks.stop.inject_qualifier_via_tmux" )
+    def test_plain_yes_does_not_inject( self, mock_inject, mock_notify, mock_sender, mock_read,
+                                          mock_log, mock_session, mock_drain, mock_emit,
+                                          mock_reset, mock_summarize ):
+        """Plain 'yes' (no qualifier) → blocks stop, does NOT inject via tmux."""
+        mock_response = MagicMock()
+        mock_response.response_value = "yes"
+        mock_notify.return_value = mock_response
+        mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }
+
+        main()
+
+        emitted = mock_emit.call_args[ 0 ][ 0 ]
+        assert emitted[ "decision" ] == "block"
+        assert "continue working" in emitted[ "reason" ]
+        mock_inject.assert_not_called()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestInjectQualifierViaTmux
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestInjectQualifierViaTmux:
+    """Tests for inject_qualifier_via_tmux() in hook_common."""
+
+    @patch( "subprocess.Popen" )
+    @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id" )
+    def test_spawns_popen( self, mock_find, mock_popen ):
+        """Valid session → spawns Popen with tmux send-keys command."""
+        mock_find.return_value = { "tmux_session": "lupin", "session_id": "abc12345" }
+
+        from lupin_cli.claude_code.hooks.lib.hook_common import inject_qualifier_via_tmux
+        inject_qualifier_via_tmux( "abc12345", "fix the tests" )
+
+        mock_popen.assert_called_once()
+        args = mock_popen.call_args[ 0 ][ 0 ]
+        # Verify bash positional args structure
+        assert args[ 0 ] == "bash"
+        assert args[ 1 ] == "-c"
+        assert "tmux send-keys" in args[ 2 ]
+        assert args[ 5 ] == "lupin"      # $2 = tmux_session
+        assert args[ 6 ] == "fix the tests"  # $3 = text
+        # Verify detached
+        assert mock_popen.call_args[ 1 ][ "start_new_session" ] is True
+
+    @patch( "subprocess.Popen" )
+    @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id" )
+    def test_no_session_skips( self, mock_find, mock_popen ):
+        """No session found → Popen NOT called, no exception."""
+        mock_find.return_value = None
+
+        from lupin_cli.claude_code.hooks.lib.hook_common import inject_qualifier_via_tmux
+        inject_qualifier_via_tmux( "abc12345", "fix the tests" )
+
+        mock_popen.assert_not_called()
+
+    @patch( "subprocess.Popen" )
+    @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id" )
+    def test_special_chars_safe( self, mock_find, mock_popen ):
+        """Special chars in text → passed as separate positional arg, not embedded in shell."""
+        mock_find.return_value = { "tmux_session": "lupin", "session_id": "abc12345" }
+
+        from lupin_cli.claude_code.hooks.lib.hook_common import inject_qualifier_via_tmux
+        inject_qualifier_via_tmux( "abc12345", "it's a test; echo pwned" )
+
+        mock_popen.assert_called_once()
+        args = mock_popen.call_args[ 0 ][ 0 ]
+        # Text is a separate positional arg ($3), NOT embedded in the shell string
+        assert args[ 6 ] == "it's a test; echo pwned"
+        # The shell command template does NOT contain the text
+        assert "it's a test" not in args[ 2 ]

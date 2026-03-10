@@ -16,6 +16,7 @@ Usage from hook scripts:
 """
 import json
 import os
+import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -40,6 +41,9 @@ MCP_VOICE_PREFIX = "mcp__cosa-voice__"
 
 # Stop hook safety valve — max consecutive blocks before allowing stop
 MAX_STOP_BLOCKS = 3
+
+# Delay before tmux injection after stop block (seconds)
+TMUX_INJECTION_DELAY = 0.25
 
 
 # ── Core Functions ────────────────────────────────────────────────────────────
@@ -533,6 +537,9 @@ def build_stop_block_with_system_message( reason, system_message ):
     """
     Build top-level decision block for Stop hook with systemMessage injection.
 
+    DEPRECATED (Session 336): systemMessage is silently ignored by CC Stop hooks.
+    Qualifier injection now uses inject_qualifier_via_tmux(). Kept for test compatibility.
+
     When a qualifier is present, the stop hook needs BOTH:
     - "reason" for hook logging/metadata (low salience, not reliably acted on)
     - "systemMessage" for conversation injection (high salience, visible to model)
@@ -556,6 +563,70 @@ def build_stop_block_with_system_message( reason, system_message ):
         "reason"        : reason,
         "systemMessage" : system_message
     }
+
+
+def inject_qualifier_via_tmux( session_id, text, delay=TMUX_INJECTION_DELAY ):
+    """
+    Inject qualifier text into Claude Code's tmux input via detached background process.
+
+    After a stop block, CC enters "waiting for user input" state. This spawns a
+    background process that sleeps briefly, then uses tmux send-keys to inject the
+    qualifier text as first-class user input. Uses bash positional args ($1, $2, $3)
+    to safely pass text without shell escaping.
+
+    Requires:
+        - session_id is a non-empty string
+        - text is a non-empty string (the qualifier to inject)
+        - delay is a positive float (seconds before injection)
+
+    Ensures:
+        - Resolves tmux session name from session_id via find_session_by_id()
+        - Spawns detached subprocess (start_new_session=True)
+        - Background process: sleep → tmux send-keys -l → Enter
+        - Returns silently if session not found or on any failure
+        - Never raises exceptions
+
+    Args:
+        session_id: Claude Code session ID (full or truncated)
+        text: Qualifier text to inject into CC's input
+        delay: Seconds to wait before tmux injection (default: TMUX_INJECTION_DELAY)
+    """
+    try:
+        from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_id
+
+        session_data = find_session_by_id( session_id )
+        if not session_data:
+            log_to_stream( "stop", {}, extra={
+                "phase"   : "qualifier_tmux_inject_skip",
+                "reason"  : "no session found",
+                "session" : session_id[:8] if session_id else ""
+            } )
+            return
+
+        tmux_session = session_data.get( "tmux_session" )
+        if not tmux_session:
+            log_to_stream( "stop", {}, extra={
+                "phase"   : "qualifier_tmux_inject_skip",
+                "reason"  : "no tmux_session in bridge data",
+                "session" : session_id[:8] if session_id else ""
+            } )
+            return
+
+        subprocess.Popen(
+            [ "bash", "-c",
+              'sleep "$1" && tmux send-keys -t "$2" -l -- "$3" && sleep 0.25 && tmux send-keys -t "$2" Enter',
+              "_",              # $0 placeholder
+              str( delay ),    # $1
+              tmux_session,    # $2
+              text             # $3
+            ],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+    except Exception:
+        pass  # Hook must never block Claude Code
 
 
 def is_mcp_voice_tool( tool_name ):
