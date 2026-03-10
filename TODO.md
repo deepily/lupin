@@ -120,7 +120,7 @@ Last updated: 2026-03-09 (Session 332)
 
 ### History Archive (Session 280)
 
-- [ ] **[LUPIN] Archive history.md** — At 18,790 tokens (75.1%). Archive sessions older than 14 days to stay below 17k threshold. (Updated Session 330)
+- [x] **[LUPIN] Archive history.md** — Session 332: Archived Sessions 260-303 (Feb 24 - Mar 3) to `history/2026-02-24-to-03-03-history.md`. Retained Sessions 304-331 (~11.9k tokens).
 
 ### SWE Team Proxy: Workload Generator + Shadow-Mode Capture (HIGH PRIORITY)
 
