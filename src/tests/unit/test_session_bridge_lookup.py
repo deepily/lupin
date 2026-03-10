@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -19,6 +20,7 @@ if _src_path not in sys.path:
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     find_session_by_id, find_session_by_tmux
 )
+from lupin_cli.claude_code.hooks.register_session import main
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -305,6 +307,335 @@ class TestListenerTmuxTrigger:
              patch( "subprocess.run" ) as mock_run:
             listener._inject_via_tmux( "hello world" )
             mock_run.assert_not_called()
+
+
+# ── Tests: stable ID lockfile (Phase 1) ──────────────────────────────────────
+
+class TestStableLockfile:
+
+    def test_lockfile_created_on_first_start( self ):
+        """First SessionStart creates cc-stable-{pid}.id with correct content."""
+        from lupin_cli.claude_code.hooks.register_session import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = tmp
+            session_id  = "aaaa1111-2222-3333-4444-555566667777"
+            cc_pid      = 12345
+
+            payload = { "session_id": session_id, "transcript_path": "/tmp/t", "cwd": "/tmp" }
+
+            with patch( "lupin_cli.claude_code.hooks.register_session.read_hook_input", return_value=payload ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.log_payload" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.emit_json" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.send_tts" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._spawn_listener", return_value=None ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._find_tmux_session", return_value=None ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._resolve_cc_pid", return_value=cc_pid ), \
+                 patch( "os.path.expanduser", return_value=session_dir ), \
+                 patch( "os.getppid", return_value=99999 ), \
+                 patch( "os.getenv", return_value=None ):
+                main()
+
+            lockfile = os.path.join( session_dir, f"cc-stable-{cc_pid}.id" )
+            assert os.path.exists( lockfile )
+            with open( lockfile ) as f:
+                assert f.read().strip() == session_id
+
+    def test_lockfile_atomic_no_overwrite( self ):
+        """Subsequent call with different session_id reads original lockfile value."""
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = tmp
+            cc_pid      = 12345
+            original_id = "orig1111-2222-3333-4444-555566667777"
+            new_id      = "new22222-3333-4444-5555-666677778888"
+
+            # Pre-create the lockfile with original ID
+            lockfile = os.path.join( session_dir, f"cc-stable-{cc_pid}.id" )
+            with open( lockfile, "w" ) as f:
+                f.write( original_id )
+
+            # Also create a bridge file with old session_id
+            bridge_file = os.path.join( session_dir, f"cc-{cc_pid}.json" )
+            bridge_data = { "session_id": original_id, "stable_session_id": original_id }
+            with open( bridge_file, "w" ) as f:
+                json.dump( bridge_data, f )
+
+            payload = { "session_id": new_id, "transcript_path": "/tmp/t", "cwd": "/tmp" }
+
+            captured_data = {}
+
+            def capture_spawn( sid, data, sfile, accepted_ids=None ):
+                captured_data[ "stable_session_id" ] = sid
+                captured_data[ "accepted_ids" ] = accepted_ids
+                return None
+
+            with patch( "lupin_cli.claude_code.hooks.register_session.read_hook_input", return_value=payload ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.log_payload" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.emit_json" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.send_tts" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._spawn_listener", side_effect=capture_spawn ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._find_tmux_session", return_value=None ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._resolve_cc_pid", return_value=cc_pid ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._cleanup_old_listener" ), \
+                 patch( "os.path.expanduser", return_value=session_dir ), \
+                 patch( "os.getppid", return_value=99999 ), \
+                 patch( "os.getenv", return_value=None ):
+                main()
+
+            # Lockfile should still contain original ID
+            with open( lockfile ) as f:
+                assert f.read().strip() == original_id
+
+            # Spawn should receive the original (stable) session ID
+            assert captured_data[ "stable_session_id" ] == original_id
+
+    def test_lockfile_read_failure_recovery( self ):
+        """Unreadable lockfile triggers stderr warning and overwrite recovery."""
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = tmp
+            cc_pid      = 12345
+            session_id  = "fail1111-2222-3333-4444-555566667777"
+
+            # Create lockfile but make it unreadable
+            lockfile = os.path.join( session_dir, f"cc-stable-{cc_pid}.id" )
+            with open( lockfile, "w" ) as f:
+                f.write( "corrupted" )
+            os.chmod( lockfile, 0o000 )
+
+            payload = { "session_id": session_id, "transcript_path": "/tmp/t", "cwd": "/tmp" }
+
+            import io
+            stderr_capture = io.StringIO()
+
+            try:
+                with patch( "lupin_cli.claude_code.hooks.register_session.read_hook_input", return_value=payload ), \
+                     patch( "lupin_cli.claude_code.hooks.register_session.log_payload" ), \
+                     patch( "lupin_cli.claude_code.hooks.register_session.emit_json" ), \
+                     patch( "lupin_cli.claude_code.hooks.register_session.send_tts" ), \
+                     patch( "lupin_cli.claude_code.hooks.register_session._spawn_listener", return_value=None ), \
+                     patch( "lupin_cli.claude_code.hooks.register_session._find_tmux_session", return_value=None ), \
+                     patch( "lupin_cli.claude_code.hooks.register_session._resolve_cc_pid", return_value=cc_pid ), \
+                     patch( "os.path.expanduser", return_value=session_dir ), \
+                     patch( "os.getppid", return_value=99999 ), \
+                     patch( "os.getenv", return_value=None ), \
+                     patch( "sys.stderr", stderr_capture ):
+                    main()
+            finally:
+                # Restore permissions for cleanup
+                os.chmod( lockfile, 0o644 )
+
+            # Should have logged a warning to stderr
+            assert "WARNING" in stderr_capture.getvalue()
+            assert "failed to read lockfile" in stderr_capture.getvalue()
+
+    def test_context_clear_detected_with_lockfile( self ):
+        """Different session_id in bridge file triggers is_context_clear = True."""
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = tmp
+            cc_pid      = 12345
+            old_id      = "old11111-2222-3333-4444-555566667777"
+            new_id      = "new22222-3333-4444-5555-666677778888"
+
+            # Pre-create lockfile with old stable ID
+            lockfile = os.path.join( session_dir, f"cc-stable-{cc_pid}.id" )
+            with open( lockfile, "w" ) as f:
+                f.write( old_id )
+
+            # Pre-create bridge file with old session_id
+            bridge_file = os.path.join( session_dir, f"cc-{cc_pid}.json" )
+            bridge_data = { "session_id": old_id, "stable_session_id": old_id }
+            with open( bridge_file, "w" ) as f:
+                json.dump( bridge_data, f )
+
+            payload = { "session_id": new_id, "transcript_path": "/tmp/t", "cwd": "/tmp" }
+
+            tts_messages = []
+            def capture_tts( msg, sender_id=None ):
+                tts_messages.append( msg )
+
+            with patch( "lupin_cli.claude_code.hooks.register_session.read_hook_input", return_value=payload ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.log_payload" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.emit_json" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.send_tts", side_effect=capture_tts ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._spawn_listener", return_value=None ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._find_tmux_session", return_value=None ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._resolve_cc_pid", return_value=cc_pid ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._cleanup_old_listener" ), \
+                 patch( "os.path.expanduser", return_value=session_dir ), \
+                 patch( "os.getppid", return_value=99999 ), \
+                 patch( "os.getenv", return_value=None ):
+                main()
+
+            # TTS message should indicate context clear
+            assert any( "context clear" in msg for msg in tts_messages )
+
+
+# ── Tests: stable ID passed to listener (Phase 2) ───────────────────────────
+
+class TestStableIdPassedToListener:
+
+    def test_stable_id_passed_to_listener( self ):
+        """_spawn_listener receives stable_session_id not transient session_id."""
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = tmp
+            cc_pid      = 12345
+            stable_id   = "stab1111-2222-3333-4444-555566667777"
+            new_id      = "new22222-3333-4444-5555-666677778888"
+
+            # Pre-create lockfile with stable ID
+            lockfile = os.path.join( session_dir, f"cc-stable-{cc_pid}.id" )
+            with open( lockfile, "w" ) as f:
+                f.write( stable_id )
+
+            # Pre-create bridge file with old session
+            bridge_file = os.path.join( session_dir, f"cc-{cc_pid}.json" )
+            bridge_data = { "session_id": stable_id, "stable_session_id": stable_id }
+            with open( bridge_file, "w" ) as f:
+                json.dump( bridge_data, f )
+
+            payload = { "session_id": new_id, "transcript_path": "/tmp/t", "cwd": "/tmp" }
+
+            captured = {}
+
+            def capture_spawn( sid, data, sfile, accepted_ids=None ):
+                captured[ "session_id" ] = sid
+                captured[ "accepted_ids" ] = accepted_ids
+                return None
+
+            with patch( "lupin_cli.claude_code.hooks.register_session.read_hook_input", return_value=payload ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.log_payload" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.emit_json" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.send_tts" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._spawn_listener", side_effect=capture_spawn ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._find_tmux_session", return_value=None ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._resolve_cc_pid", return_value=cc_pid ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._cleanup_old_listener" ), \
+                 patch( "os.path.expanduser", return_value=session_dir ), \
+                 patch( "os.getppid", return_value=99999 ), \
+                 patch( "os.getenv", return_value=None ):
+                main()
+
+            # Listener should receive the STABLE session ID, not the new transient one
+            assert captured[ "session_id" ] == stable_id
+            # accepted_ids should contain both stable and transient hashes
+            assert stable_id[:8] in captured[ "accepted_ids" ]
+            assert new_id[:8] in captured[ "accepted_ids" ]
+
+
+# ── Tests: accepted_ids parsing (Phase 3) ────────────────────────────────────
+
+class TestAcceptedIds:
+
+    def test_accepted_ids_parsed( self ):
+        """--accepted-ids 'abc,def' → self.accepted_ids == {'abc', 'def'}."""
+        from lupin_cli.claude_code.hooks.lib.cc_notification_listener import CCNotificationListener
+
+        listener = CCNotificationListener.__new__( CCNotificationListener )
+        listener.session_id_hash = "abc12345"
+        listener.accepted_ids    = set( [ "abc12345", "def67890" ] )
+
+        assert listener.accepted_ids == { "abc12345", "def67890" }
+
+    def test_accepted_ids_filter_match( self ):
+        """Notification with matching hash in accepted_ids is accepted."""
+        from lupin_cli.claude_code.hooks.lib.cc_notification_listener import CCNotificationListener
+
+        listener = CCNotificationListener.__new__( CCNotificationListener )
+        listener.session_id_hash   = "abc12345"
+        listener.accepted_ids      = { "abc12345", "def67890" }
+        listener._tmux_session_arg = "test"
+        listener._tmux_session     = None
+        listener.log_file_path     = None
+        listener._log_file         = None
+        listener._centralized_log  = None
+        listener.LOG_PREFIX        = "[CC-Listener]"
+        listener.debug             = False
+        listener.verbose           = False
+
+        event_data = {
+            "notification": {
+                "type"    : "user_initiated_message",
+                "job_id"  : "def67890",  # matches second accepted ID
+                "message" : "hello from browser",
+            }
+        }
+
+        import asyncio
+        with patch.object( listener, "_inject_via_tmux" ) as mock_inject, \
+             patch.object( listener, "_send_gist_response" ):
+            asyncio.run( listener._handle_event( "notification_queue_update", event_data ) )
+            mock_inject.assert_called_once_with( "hello from browser" )
+
+    def test_accepted_ids_filter_reject( self ):
+        """Notification with non-matching hash is rejected."""
+        from lupin_cli.claude_code.hooks.lib.cc_notification_listener import CCNotificationListener
+
+        listener = CCNotificationListener.__new__( CCNotificationListener )
+        listener.session_id_hash   = "abc12345"
+        listener.accepted_ids      = { "abc12345", "def67890" }
+        listener._tmux_session_arg = None
+        listener._tmux_session     = None
+        listener.log_file_path     = None
+        listener._log_file         = None
+        listener._centralized_log  = None
+        listener.LOG_PREFIX        = "[CC-Listener]"
+        listener.debug             = False
+        listener.verbose           = False
+
+        event_data = {
+            "notification": {
+                "type"    : "user_initiated_message",
+                "job_id"  : "xxxxxxxx",  # does NOT match any accepted ID
+                "message" : "should be rejected",
+            }
+        }
+
+        import asyncio
+        with patch.object( listener, "_inject_via_tmux" ) as mock_inject:
+            asyncio.run( listener._handle_event( "notification_queue_update", event_data ) )
+            mock_inject.assert_not_called()
+
+
+# ── Tests: stale lockfile cleanup (Phase 4) ──────────────────────────────────
+
+class TestStaleLockfileCleanup:
+
+    def test_stale_lockfile_dead_pid_purged( self ):
+        """Stale lockfile for dead PID is purged."""
+        from lupin_cli.claude_code.hooks.register_session import _is_live_cc_process
+        assert _is_live_cc_process( "99999999" ) is False
+
+    def test_current_lockfile_never_purged( self ):
+        """Current session's lockfile survives cleanup regardless of age."""
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = tmp
+            cc_pid      = 12345
+            session_id  = "keep1111-2222-3333-4444-555566667777"
+
+            payload = { "session_id": session_id, "transcript_path": "/tmp/t", "cwd": "/tmp" }
+
+            # Pre-create a stale lockfile for the SAME pid (old enough to purge)
+            lockfile = os.path.join( session_dir, f"cc-stable-{cc_pid}.id" )
+            with open( lockfile, "w" ) as f:
+                f.write( "old-stable-id" )
+            # Set mtime to 2 days ago
+            old_time = time.time() - 172800
+            os.utime( lockfile, ( old_time, old_time ) )
+
+            with patch( "lupin_cli.claude_code.hooks.register_session.read_hook_input", return_value=payload ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.log_payload" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.emit_json" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.send_tts" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._spawn_listener", return_value=None ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._find_tmux_session", return_value=None ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._resolve_cc_pid", return_value=cc_pid ), \
+                 patch( "os.path.expanduser", return_value=session_dir ), \
+                 patch( "os.getppid", return_value=99999 ), \
+                 patch( "os.getenv", return_value=None ):
+                main()
+
+            # Lockfile should still exist (it's our current lockfile — never purged)
+            assert os.path.exists( lockfile )
 
 
 # ── Standalone ───────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-10 (Session 334)
+Last updated: 2026-03-10 (Session 335)
 
 ## HIGH PRIORITY — Stop Hook Qualifier Not Acted On (Sessions 332-333)
 
@@ -12,11 +12,10 @@ Last updated: 2026-03-10 (Session 334)
   - **Files modified so far**: `hook_common.py` (added `build_stop_block_with_system_message()`), `stop.py` (removed `_enrich_qualifier_for_stop_hook()`, uses systemMessage at qualifier call sites), `test_stop_hook.py` (assertions on `systemMessage`)
   - **Decision needed**: Revert Phase 2 systemMessage changes (dead code) before implementing voice buffer approach, or keep as-is since tests pass?
 
-## HIGH PRIORITY — CC Listener Session ID Drift (Session 334)
+## COMPLETED — CC Listener Session ID Drift (Session 335)
 
-- [ ] **[LUPIN] Fix CC Notification Listener session ID drift after context clears** — After context clears, the listener filters by transient `session_id` but the MCP server uses `stable_session_id` for sender_id. Browser-originated `user_initiated_message` notifications set `job_id` from the sender card's hash (stable), but no listener matches. Fix: pass `--stable-id` to listener at spawn time, change filter from `job_id != session_id_hash` to `job_id not in accepted_ids` set. No polling needed.
-  - **Plan file**: `~/.claude/plans/splendid-doodling-rose.md`
-  - **Files to modify**: `cc_notification_listener.py` (accepted_ids set, --stable-id arg), `register_session.py` (pass --stable-id at spawn)
+- [x] **[LUPIN] Fix CC Notification Listener session ID drift after context clears** — Session 335: Implemented write-once lockfile (`cc-stable-{ppid}.id`) with atomic `open('x')`, passed `stable_session_id` to listener, added `accepted_ids` set for multi-hash filtering, extended stale cleanup with PID liveness check. 9 new tests, 28 total pass.
+  - **Design doc**: `src/rnd/.../2026.03.10-stable-session-id-lockfile-and-listener-drift-fix.md`
 
 ## HIGH PRIORITY — MCP Strict Project Detection + Repo Account Validation (Session 332)
 

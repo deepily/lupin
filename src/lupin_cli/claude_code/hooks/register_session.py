@@ -24,6 +24,7 @@ Install in .claude/settings.local.json:
 """
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -140,7 +141,7 @@ def _resolve_cc_pid( hook_ppid ):
         return hook_ppid
 
 
-def _spawn_listener( session_id, session_data, session_file ):
+def _spawn_listener( session_id, session_data, session_file, accepted_ids=None ):
     """
     Spawn the CC Notification Listener as a background subprocess.
 
@@ -160,9 +161,10 @@ def _spawn_listener( session_id, session_data, session_file ):
         - Never raises exceptions (spawn failure is non-fatal)
 
     Args:
-        session_id: Full CC session ID
+        session_id: Full CC session ID (stable_session_id after Phase 2)
         session_data: Session bridge data dict (updated in-place with listener_pid)
         session_file: Path to session bridge JSON file
+        accepted_ids: Comma-separated 8-char hashes for listener filtering (e.g., "stable,transient")
 
     Returns:
         int or None: Listener subprocess PID, or None on failure
@@ -181,6 +183,12 @@ def _spawn_listener( session_id, session_data, session_file ):
         "lupin_cli.claude_code.hooks.lib.cc_notification_listener",
         "--session-id", short_id,
     ]
+
+    # Pass accepted IDs for multi-hash filtering
+    # On first start, stable_session_id == session_id, so this deduplicates to one entry.
+    # On subsequent lifecycle events (compact, clear), they diverge and both are needed.
+    if accepted_ids:
+        cmd.extend( [ "--accepted-ids", accepted_ids ] )
 
     # Pass debug/verbose/log flags from env vars
     if os.environ.get( "LUPIN_CC_HOOK_LISTENER_DEBUG", "" ).strip().lower() == "true":
@@ -257,6 +265,33 @@ def _spawn_listener( session_id, session_data, session_file ):
 
     except Exception:
         return None  # Spawn failure is non-fatal
+
+
+def _is_live_cc_process( pid_str ):
+    """
+    Check if a PID corresponds to a live process.
+
+    Requires:
+        - pid_str is a string representation of a PID
+
+    Ensures:
+        - Returns True if the process exists and is signalable
+        - Returns True if the process exists but we lack permission (don't purge)
+        - Returns False if the process does not exist or pid_str is invalid
+
+    Args:
+        pid_str: String PID to check
+
+    Returns:
+        bool: True if process is alive, False otherwise
+    """
+    try:
+        os.kill( int( pid_str ), 0 )  # signal 0 = existence check, no signal sent
+        return True
+    except ( ProcessLookupError, ValueError ):
+        return False
+    except PermissionError:
+        return True  # Process exists but we can't signal it — don't purge
 
 
 def _log_session_transition( old_hash, new_hash, stable_hash ):
@@ -402,23 +437,52 @@ def main():
         session_file = os.path.join( session_dir, f"cc-{cc_pid}.json" )
 
         # ── Context clear detection ──────────────────────────────────
-        # Same PID but different session ID → context clear happened
+        # Write-once lockfile is the source of truth for stable ID.
+        # Uses open('x') (O_CREAT|O_EXCL) for atomic creation — safe against
+        # the documented double-fire on `--continue` (two concurrent SessionStart hooks).
+        stable_lockfile   = os.path.join( session_dir, f"cc-stable-{cc_pid}.id" )
         stable_session_id = session_id  # Default: first session start
-        if os.path.exists( session_file ):
+        try:
+            # Attempt atomic create — succeeds only for the first SessionStart of this PID
+            with open( stable_lockfile, "x" ) as f:
+                stable_session_id = session_id
+                f.write( stable_session_id )
+        except FileExistsError:
+            # Lockfile already exists — this is a subsequent lifecycle event (clear, compact, resume)
+            # or the second concurrent hook on --continue. Read the winner's stable ID.
             try:
-                with open( session_file ) as f:
-                    old_data = json.load( f )
-                old_session_id = old_data.get( "session_id", "" )
-                if old_session_id and old_session_id != session_id:
-                    is_context_clear = True
-                    # Carry forward the ORIGINAL stable ID (never changes for this PID)
-                    stable_session_id = old_data.get( "stable_session_id", old_session_id )
-                    _cleanup_old_listener( old_data, session_id )
-                else:
-                    # Resuming same session — preserve existing stable ID
-                    stable_session_id = old_data.get( "stable_session_id", session_id )
-            except ( json.JSONDecodeError, OSError ):
-                pass  # Can't read old data, proceed normally
+                with open( stable_lockfile ) as f:
+                    stable_session_id = f.read().strip()
+            except OSError as e:
+                # Lockfile exists but unreadable (corruption, permission denied).
+                # Log to stderr (hooks emit to stderr without polluting Claude's context),
+                # then establish a new stable anchor rather than silently diverging.
+                print( f"[register_session] WARNING: failed to read lockfile {stable_lockfile}: {e}",
+                       file=sys.stderr )
+                stable_session_id = session_id
+                try:
+                    with open( stable_lockfile, "w" ) as f:
+                        f.write( stable_session_id )
+                except OSError:
+                    pass  # Best-effort recovery
+
+            # Detect context clear by comparing transient IDs in the bridge file
+            if os.path.exists( session_file ):
+                try:
+                    with open( session_file ) as f:
+                        old_data = json.load( f )
+                    old_session_id = old_data.get( "session_id", "" )
+                    if old_session_id and old_session_id != session_id:
+                        is_context_clear = True
+                        _cleanup_old_listener( old_data, session_id )  # session_id = new transient UUID, keep its listener alive
+                except ( json.JSONDecodeError, OSError ):
+                    pass
+        except OSError as e:
+            # Cannot create lockfile at all (permissions, disk full).
+            # Fall back to transient session_id — stability guarantee lost for this session.
+            print( f"[register_session] WARNING: failed to create lockfile {stable_lockfile}: {e}",
+                   file=sys.stderr )
+            stable_session_id = session_id
 
         tmux_session = _find_tmux_session( cc_pid )
 
@@ -454,9 +518,16 @@ def main():
     try:
         now = time.time()
         for entry in os.listdir( session_dir ) if os.path.isdir( session_dir ) else []:
-            if entry.startswith( "cc-" ) and entry.endswith( ".json" ):
+            if entry.startswith( "cc-" ) and ( entry.endswith( ".json" ) or entry.endswith( ".id" ) ):
                 fpath = os.path.join( session_dir, entry )
-                if fpath != session_file and ( now - os.path.getmtime( fpath ) ) > 86400:
+                if fpath == session_file or fpath == stable_lockfile:
+                    continue  # Never purge our own files
+                if ( now - os.path.getmtime( fpath ) ) > 86400:
+                    # For lockfiles, check PID liveness before purging
+                    if entry.endswith( ".id" ):
+                        match = re.match( r"cc-stable-(\d+)\.id", entry )
+                        if match and _is_live_cc_process( match.group( 1 ) ):
+                            continue  # PID still alive — don't purge
                     os.remove( fpath )
     except Exception:
         pass  # Best-effort cleanup
@@ -473,7 +544,7 @@ def main():
         send_tts( f"Hook fired: SessionStart — session {short_id}", sender_id=hook_sender_id )
 
     # ── Phase 5.5: Spawn CC Notification Listener ──────────────────────
-    listener_pid = _spawn_listener( session_id, session_data if session_id else None, session_file )
+    listener_pid = _spawn_listener( stable_session_id, session_data if session_id else None, session_file, accepted_ids=f"{stable_session_id[:8]},{session_id[:8]}" )
 
     # ── Phase 6: Log full payload ─────────────────────────────────────────
     log_payload( "session_start", payload )

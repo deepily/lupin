@@ -80,13 +80,14 @@ class CCNotificationListener( BaseWebSocketListener ):
         email,
         password,
         session_id_hash,
-        buffer_path        = None,
-        tmux_session       = None,
-        host               = DEFAULT_SERVER_HOST,
-        port               = DEFAULT_SERVER_PORT,
-        debug              = False,
-        verbose            = False,
-        log_file_path      = None,
+        buffer_path          = None,
+        tmux_session         = None,
+        accepted_ids         = None,
+        host                 = DEFAULT_SERVER_HOST,
+        port                 = DEFAULT_SERVER_PORT,
+        debug                = False,
+        verbose              = False,
+        log_file_path        = None,
         centralized_log_path = None,
     ):
         """
@@ -99,6 +100,7 @@ class CCNotificationListener( BaseWebSocketListener ):
 
         Ensures:
             - Stores session hash for job_id filtering
+            - Builds accepted_ids set from explicit list or falls back to {session_id_hash}
             - Computes default buffer path if not provided
             - Does NOT connect (call run() to start)
 
@@ -108,6 +110,7 @@ class CCNotificationListener( BaseWebSocketListener ):
             session_id_hash: 8-char CC session hash for filtering
             buffer_path: Path to JSONL buffer file (default: auto-computed)
             tmux_session: Explicit tmux session name override (default: auto-resolve)
+            accepted_ids: Set of 8-char hashes to accept (default: {session_id_hash})
             host: Server hostname (default: localhost)
             port: Server port (default: 7999)
             debug: Enable debug output
@@ -130,6 +133,7 @@ class CCNotificationListener( BaseWebSocketListener ):
         )
 
         self.session_id_hash       = session_id_hash
+        self.accepted_ids          = set( accepted_ids ) if accepted_ids else { session_id_hash }
         self.buffer_path           = Path( buffer_path ) if buffer_path else self._default_buffer_path()
         self._tmux_session_arg     = tmux_session  # CLI override
         self._tmux_session         = None          # Cached resolved value
@@ -254,9 +258,9 @@ class CCNotificationListener( BaseWebSocketListener ):
                 self._log( f"{self.LOG_PREFIX} Skipping: type={notif_type} (not user_initiated_message)" )
             return
 
-        if job_id != self.session_id_hash:
+        if job_id not in self.accepted_ids:
             if self.debug:
-                self._log( f"{self.LOG_PREFIX} Skipping: job_id={job_id} != {self.session_id_hash}" )
+                self._log( f"{self.LOG_PREFIX} Skipping: job_id={job_id} not in {self.accepted_ids}" )
             return
 
         # Match — inject directly into tmux prompt (skip buffer for idle injection)
@@ -549,6 +553,11 @@ def parse_args():
         help     = "8-char CC session hash for filtering (e.g., 'abc12345')"
     )
     parser.add_argument(
+        "--accepted-ids",
+        default = None,
+        help    = "Comma-separated 8-char hashes to accept (default: session-id only)"
+    )
+    parser.add_argument(
         "--buffer-path",
         default = None,
         help    = "Path to JSONL buffer file (default: ~/.claude/sessions/cc-buffer-{hash}.jsonl)"
@@ -647,12 +656,18 @@ async def main():
 
     email, password = _resolve_credentials( args )
 
+    # Parse accepted IDs from comma-separated string
+    accepted_ids = None
+    if args.accepted_ids:
+        accepted_ids = set( h.strip() for h in args.accepted_ids.split( "," ) if h.strip() )
+
     listener = CCNotificationListener(
         email                = email,
         password             = password,
         session_id_hash      = args.session_id,
         buffer_path          = args.buffer_path,
         tmux_session         = args.tmux_session,
+        accepted_ids         = accepted_ids,
         host                 = args.host,
         port                 = args.port,
         debug                = args.debug,

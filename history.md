@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.03.10 - Session 335 | Stable Session ID Lockfile + Listener Drift Fix (Phases 1-4)
+
+**Accomplishments**:
+- Implemented write-once stable ID lockfile (`cc-stable-{ppid}.id`) using atomic `open('x')` (O_CREAT|O_EXCL) — replaces fragile "read old bridge file" chain for preserving `stable_session_id` across context clears
+- Fixed listener drift bug: `_spawn_listener()` now receives `stable_session_id` instead of transient `session_id`, so listener filters on the same hash the MCP server and browser use
+- Added `accepted_ids` set to CCNotificationListener — listener accepts notifications matching either stable or transient hash, with `--accepted-ids` CLI arg for comma-separated hashes
+- Extended stale file purge to clean up `.id` lockfiles with PID liveness check (`os.kill(pid, 0)`) before purging
+- All 5 code review issues incorporated (TOCTOU race, OSError recovery, PID reuse guard, argument clarity, duplicate hash comment)
+- 9 new unit tests (28 total in test file), all passing
+
+**Files Modified**:
+- `src/lupin_cli/claude_code/hooks/register_session.py` — Lockfile creation (Phase 1), pass stable ID to listener (Phase 2), `accepted_ids` param + `--accepted-ids` CLI forwarding (Phase 3B), stale cleanup extension (Phase 4), `_is_live_cc_process()` helper
+- `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` — `accepted_ids` param in `__init__()`, `--accepted-ids` CLI arg, filter change `!=` → `not in` (Phase 3A)
+- `src/tests/unit/test_session_bridge_lookup.py` — 9 new tests covering lockfile creation, atomicity, read failure recovery, context clear detection, stable ID passthrough, accepted_ids parsing/filtering, stale cleanup
+
+**Design docs**: `src/rnd/.../2026.03.10-stable-session-id-lockfile-and-listener-drift-fix.md`, `...-review.md`
+
+---
+
 ### 2026.03.10 - Session 334 | Remove Redundant "Important!" TTS Prefix + Plan CC Listener Session ID Drift Fix
 
 **Accomplishments**:
