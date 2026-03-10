@@ -55,10 +55,10 @@ def main():
     # Permission prompts use high priority so TTS speaks them aloud —
     # the user needs to hear these to know Claude needs approval.
     if notification_type == "permission_prompt":
-        tts_msg      = f"Permission prompt: {message}" if message else "Permission prompt"
+        tts_msg      = message if message else "Permission prompt"
         tts_priority = "high"
     elif notification_type == "idle_prompt":
-        tts_msg      = f"Idle: {message}" if message else "Claude is waiting for input"
+        tts_msg      = message if message else "Claude is waiting for input"
         tts_priority = "low"
     else:
         if message:

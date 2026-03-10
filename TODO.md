@@ -18,6 +18,12 @@ Last updated: 2026-03-10 (Session 334)
   - **Plan file**: `~/.claude/plans/splendid-doodling-rose.md`
   - **Files to modify**: `cc_notification_listener.py` (accepted_ids set, --stable-id arg), `register_session.py` (pass --stable-id at spawn)
 
+## HIGH PRIORITY — MCP Strict Project Detection + Repo Account Validation (Session 332)
+
+- [ ] **[LUPIN] cosa-voice MCP: strict project detection + per-repo account validation** — MCP server silently falls back to `"unknown"` project for unrecognized repos. Need: (1) remove `"unknown"` fallback, (2) validate per-repo Lupin account (`claude.code@{project}.deepily.ai`) at startup, (3) poison tool results with actionable setup instructions if validation fails (stderr is buried in stdio MCP).
+  - **Plan doc**: [`src/rnd/2026.03.09-mcp-strict-project-detection-account-validation.md`](src/rnd/2026.03.09-mcp-strict-project-detection-account-validation.md)
+  - **Files**: `cosa_voice_mcp.py`, `notification_utils.py`, new test file
+
 ## HIGH PRIORITY — CC Session Voice Input Bugs (Session 300)
 
 - [x] **[LUPIN] Fix date off-by-one in CC session outgoing bubble** — Session 332: Fixed. `extractDateFromTimestamp()` now parses through `appTimezone`.

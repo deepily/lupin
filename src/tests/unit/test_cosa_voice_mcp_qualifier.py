@@ -2,99 +2,99 @@
 Unit tests for cosa_voice_mcp qualifier extraction and formatting.
 
 Tests cover:
-    - _extract_qualifier() regex parsing for yes/no with optional [comment: ...]
-    - _format_qualified_response() enriched output generation
+    - extract_qualifier_comment() regex parsing for yes/no with optional [comment: ...]
+    - format_qualified_response() enriched output generation
     - ask_yes_no() integration: plain answers pass through, qualifiers get enriched
 """
 
 import pytest
 from unittest.mock import patch, MagicMock
 
-from lupin_mcp.cosa_voice_mcp import (
-    _extract_qualifier,
-    _format_qualified_response,
+from cosa.utils.notification_utils import (
+    extract_qualifier_comment,
+    format_qualified_response,
 )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# TestExtractQualifier
+# TestExtractQualifierComment
 # ═════════════════════════════════════════════════════════════════════════════
 
-class TestExtractQualifier:
-    """Tests for _extract_qualifier() regex parsing."""
+class TestExtractQualifierComment:
+    """Tests for extract_qualifier_comment() regex parsing."""
 
     def test_plain_yes( self ):
         """'yes' → ('yes', None)."""
-        answer, qualifier = _extract_qualifier( "yes" )
+        answer, qualifier = extract_qualifier_comment( "yes" )
         assert answer == "yes"
         assert qualifier is None
 
     def test_plain_no( self ):
         """'no' → ('no', None)."""
-        answer, qualifier = _extract_qualifier( "no" )
+        answer, qualifier = extract_qualifier_comment( "no" )
         assert answer == "no"
         assert qualifier is None
 
     def test_yes_with_comment( self ):
         """'yes [comment: fix tests]' → ('yes', 'fix tests')."""
-        answer, qualifier = _extract_qualifier( "yes [comment: fix tests]" )
+        answer, qualifier = extract_qualifier_comment( "yes [comment: fix tests]" )
         assert answer == "yes"
         assert qualifier == "fix tests"
 
     def test_no_with_comment( self ):
         """'no [comment: what time?]' → ('no', 'what time?')."""
-        answer, qualifier = _extract_qualifier( "no [comment: what time?]" )
+        answer, qualifier = extract_qualifier_comment( "no [comment: what time?]" )
         assert answer == "no"
         assert qualifier == "what time?"
 
     def test_case_insensitive_yes( self ):
         """'YES [comment: Do It Now]' → ('yes', 'Do It Now')."""
-        answer, qualifier = _extract_qualifier( "YES [comment: Do It Now]" )
+        answer, qualifier = extract_qualifier_comment( "YES [comment: Do It Now]" )
         assert answer == "yes"
         assert qualifier == "Do It Now"
 
     def test_case_insensitive_no( self ):
         """'NO' → ('no', None)."""
-        answer, qualifier = _extract_qualifier( "NO" )
+        answer, qualifier = extract_qualifier_comment( "NO" )
         assert answer == "no"
         assert qualifier is None
 
     def test_leading_trailing_whitespace( self ):
         """Whitespace around value is stripped."""
-        answer, qualifier = _extract_qualifier( "  yes [comment: fix tests]  " )
+        answer, qualifier = extract_qualifier_comment( "  yes [comment: fix tests]  " )
         assert answer == "yes"
         assert qualifier == "fix tests"
 
     def test_none_input( self ):
         """None → (None, None)."""
-        answer, qualifier = _extract_qualifier( None )
+        answer, qualifier = extract_qualifier_comment( None )
         assert answer is None
         assert qualifier is None
 
     def test_empty_string( self ):
         """'' → (None, None)."""
-        answer, qualifier = _extract_qualifier( "" )
+        answer, qualifier = extract_qualifier_comment( "" )
         assert answer is None
         assert qualifier is None
 
     def test_long_qualifier( self ):
         """Long comment text is preserved."""
         text = "document and checkpoint your work before continuing"
-        answer, qualifier = _extract_qualifier( f"yes [comment: {text}]" )
+        answer, qualifier = extract_qualifier_comment( f"yes [comment: {text}]" )
         assert answer == "yes"
         assert qualifier == text
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# TestFormatQualifiedResponse
+# TestFormatQualifiedResponseShared
 # ═════════════════════════════════════════════════════════════════════════════
 
-class TestFormatQualifiedResponse:
-    """Tests for _format_qualified_response() enriched output."""
+class TestFormatQualifiedResponseShared:
+    """Tests for format_qualified_response() enriched output."""
 
     def test_yes_with_instruction( self ):
         """Enriched response for 'yes' + instruction qualifier."""
-        result = _format_qualified_response( "yes", "fix the tests" )
+        result = format_qualified_response( "yes", "fix the tests" )
         assert result.startswith( "yes\n" )
         assert "IMPORTANT" in result
         assert "fix the tests" in result
@@ -102,7 +102,7 @@ class TestFormatQualifiedResponse:
 
     def test_no_with_question( self ):
         """Enriched response for 'no' + question qualifier."""
-        result = _format_qualified_response( "no", "what time is the meeting?" )
+        result = format_qualified_response( "no", "what time is the meeting?" )
         assert result.startswith( "no\n" )
         assert "IMPORTANT" in result
         assert "what time is the meeting?" in result
@@ -110,7 +110,7 @@ class TestFormatQualifiedResponse:
 
     def test_contains_action_mandate( self ):
         """Response includes strong action language."""
-        result = _format_qualified_response( "yes", "do X" )
+        result = format_qualified_response( "yes", "do X" )
         assert "Do NOT ignore it" in result
         assert "If it is a question, answer it" in result
         assert "If it is an instruction, carry it out" in result

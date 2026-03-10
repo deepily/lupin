@@ -34,7 +34,6 @@ Usage:
 
 import logging
 import os
-import re
 import signal
 import sys
 import time
@@ -61,7 +60,9 @@ from cosa.utils.notification_utils import (
     convert_questions_for_api,
     format_open_ended_batch_for_tts,
     convert_open_ended_batch_for_api,
-    normalize_abstract as _normalize_abstract
+    normalize_abstract as _normalize_abstract,
+    extract_qualifier_comment,
+    format_qualified_response
 )
 from cosa.agents.utils.sender_id import detect_project as _detect_project_shared
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
@@ -494,53 +495,6 @@ def notify(
         return f"Failed: {response.message}"
 
 
-def _extract_qualifier( response_value ):
-    """
-    Extract qualifier comment from a yes/no response value.
-
-    Requires:
-        - response_value is a string or None
-
-    Ensures:
-        - Returns ( answer, qualifier ) tuple
-        - answer is "yes" or "no" (lowercase), or None if empty
-        - qualifier is the comment text or None
-
-    Examples:
-        "yes [comment: fix the tests]" -> ( "yes", "fix the tests" )
-        "no [comment: not ready]"      -> ( "no", "not ready" )
-        "yes"                          -> ( "yes", None )
-    """
-    if not response_value:
-        return ( None, None )
-
-    match = re.match( r'^(yes|no)\s*(?:\[comment:\s*(.+)\])?$', response_value.strip(), re.IGNORECASE )
-    if match:
-        return ( match.group( 1 ).lower(), match.group( 2 ) )
-
-    return ( response_value.strip().lower(), None )
-
-
-def _format_qualified_response( answer, qualifier ):
-    """
-    Format a yes/no answer with qualifier into an enriched string that Claude will act on.
-
-    Requires:
-        - answer is "yes" or "no"
-        - qualifier is a non-empty string
-
-    Ensures:
-        - Returns a multi-line string with explicit instructions for Claude
-    """
-    return (
-        f"{answer}\n\n"
-        f"IMPORTANT — The user attached a comment to their {answer} response:\n"
-        f'"{qualifier}"\n\n'
-        "You MUST act on this comment. It is a direct instruction or question from the user. "
-        "Do NOT ignore it. If it is a question, answer it. If it is an instruction, carry it out."
-    )
-
-
 @mcp.tool
 def ask_yes_no(
     question: str,
@@ -601,8 +555,8 @@ def ask_yes_no(
 
     if response.exit_code == 0 and response.response_value:
         raw_value = response.response_value.strip()
-        answer, qualifier = _extract_qualifier( raw_value )
-        result = _format_qualified_response( answer, qualifier ) if qualifier else raw_value
+        answer, qualifier = extract_qualifier_comment( raw_value )
+        result = format_qualified_response( answer, qualifier ) if qualifier else raw_value
         log_to_stream( "mcp_ask_yes_no", {}, extra={
             "raw_value"  : raw_value,
             "answer"     : answer,
