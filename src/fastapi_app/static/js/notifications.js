@@ -7506,17 +7506,27 @@ class NotificationsUI {
     }
 
     /**
-     * Extract date string from ISO timestamp, preserving server timezone.
+     * Extract date string from ISO timestamp, resolved to appTimezone.
+     * Converts any ISO timestamp (UTC "Z" or offset-bearing) to the server's
+     * configured timezone before extracting the date portion.
      * Falls back to local date if timestamp is missing or invalid.
-     * @param {string|null} isoTimestamp - ISO 8601 timestamp (e.g., "2026-01-06T02:30:00-05:00")
-     * @returns {string} ISO date string (YYYY-MM-DD)
+     * @param {string|null} isoTimestamp - ISO 8601 timestamp (e.g., "2026-03-03T03:36:00.000Z")
+     * @returns {string} ISO date string (YYYY-MM-DD) in appTimezone
      */
     extractDateFromTimestamp( isoTimestamp ) {
         if ( isoTimestamp && typeof isoTimestamp === 'string' && isoTimestamp.includes( 'T' ) ) {
-            return isoTimestamp.split( 'T' )[ 0 ];
+            const parsed = new Date( isoTimestamp );
+            if ( !isNaN( parsed.getTime() ) ) {
+                return parsed.toLocaleDateString( 'en-CA', {
+                    timeZone : this.appTimezone,
+                    year     : 'numeric',
+                    month    : '2-digit',
+                    day      : '2-digit'
+                } );
+            }
         }
-        // Fallback: use local date (existing behavior for edge cases)
-        return this.getDateString( new Date() );
+        // Fallback: use appTimezone-aware local date
+        return this.getLocalDateDisplay();
     }
 
     /**
@@ -12754,12 +12764,11 @@ class NotificationsUI {
     }
 
     /**
-     * Get today's date string in YYYY-MM-DD format.
-     * @returns {string} - ISO date string
+     * Get today's date string in YYYY-MM-DD format, resolved to appTimezone.
+     * @returns {string} - ISO date string in appTimezone
      */
     getTodayDateString() {
-        const now = new Date();
-        return now.toISOString().split( 'T' )[ 0 ];
+        return this.getLocalDateDisplay();
     }
 
     /**

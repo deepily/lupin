@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-09 (Session 331)
+Last updated: 2026-03-09 (Session 332)
 
 ## HIGH PRIORITY — CC Session Voice Input Bugs (Session 300)
 
@@ -108,7 +108,7 @@ Last updated: 2026-03-09 (Session 331)
 - [x] **[LUPIN] Voice injection into idle CC sessions (tmux + UserPromptSubmit hook)** — Session 323: All 6 phases implemented. tmux discovery in register_session.py, `find_session_by_id/tmux()` in session_bridge.py, listener tmux Enter trigger, UserPromptSubmit hook, shell scripts, hook registration, 29 tests (8+18+3) all passing.
   - **Plan doc**: [`2026.03.05-voice-injection-listener-tmux-hook-plan.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.03.05-voice-injection-listener-tmux-hook-plan.md)
   - **Research doc**: [`2026.03.05-voice-injection-tmux-buffer-hook-design.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.03.05-voice-injection-tmux-buffer-hook-design.md)
-- [ ] **[LUPIN] Phase 7: E2E testing + polish** — Manual E2E verification of voice pipeline (browser 🎤 → STT → notify → buffer → hook drain → additionalContext). Polish remaining rough edges.
+- [x] **[LUPIN] Phase 7: E2E testing + polish** — Manual E2E verification of voice pipeline (browser 🎤 → STT → notify → buffer → hook drain → additionalContext). Polish remaining rough edges. Session 332: Completed.
   - **Master plan**: [`2026.02.25-opportunistic-voice-hook-integration-plan.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-opportunistic-voice-hook-integration-plan.md)
   - **Phase 0 plan**: [`2026.02.26-voice-hook-phase-0-implementation.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.26-voice-hook-phase-0-implementation.md)
   - **Phase 0 validation**: [`2026.02.27-phase-0-validation-report.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.27-phase-0-validation-report.md)

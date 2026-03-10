@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.03.09 - Session 332 | Fix Date Off-by-One + Mark Phase 7 Done
+
+#### Checkpoint | 2026.03.09 16:00 | Fix date off-by-one in CC session outgoing bubble
+
+**Accomplishments**:
+- Fixed date off-by-one bug where late-evening EST messages rendered under next day's date accordion — `extractDateFromTimestamp()` now parses timestamps through `appTimezone` (America/New_York) instead of naive `isoTimestamp.split('T')[0]` which returned UTC date
+- Fixed `getTodayDateString()` to delegate to `getLocalDateDisplay()` instead of using UTC-based `toISOString().split('T')[0]`
+- Marked Phase 7 (E2E testing + polish) as done in TODO.md — all 8 Voice I/O v0.1.5 phases now complete
+
+**Files**:
+- `src/fastapi_app/static/js/notifications.js` — `extractDateFromTimestamp()` + `getTodayDateString()` timezone fix
+- `TODO.md` — Phase 7 marked complete, session number updated
+
+**Commit**: 337f1d9
+
+---
+
 ### 2026.03.09 - Session 331 | Remove Dead `active_conversation_changed` Event + Fix Unhandled WS Events
 
 **Accomplishments**:
