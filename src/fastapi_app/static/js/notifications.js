@@ -3422,11 +3422,9 @@ class NotificationsUI {
         // Single source of truth for notification TTS message formatting
         let ttsMessage = `${notification.type} notification: ${notification.message}`;
 
-        // Add priority prefix for urgent/high priority notifications
+        // Add priority prefix for urgent notifications
         if ( notification.priority === "urgent" ) {
             ttsMessage = `Urgent! ${ttsMessage}`;
-        } else if ( notification.priority === "high" ) {
-            ttsMessage = `Important! ${ttsMessage}`;
         }
 
         return ttsMessage;
