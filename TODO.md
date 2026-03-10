@@ -1,10 +1,26 @@
 # TODO
 
-Last updated: 2026-03-09 (Session 332)
+Last updated: 2026-03-10 (Session 334)
+
+## HIGH PRIORITY — Stop Hook Qualifier Not Acted On (Sessions 332-333)
+
+- [ ] **[LUPIN] Fix stop hook qualifier: Claude Code ignores qualifier text** — User attaches a comment via `[comment: ...]` to their yes/no response in the stop hook "Anything else?" prompt. The qualifier text reaches the hook correctly (extraction, formatting, logging all work), but Claude Code does not act on it.
+  - **Phase 1 (Session 332)**: Consolidated qualifier extraction/formatting into `notification_utils.py`, adopted "MUST act" language in `reason` field. Tests pass but live test fails — Claude ignores `reason` content.
+  - **Phase 2 (Session 333)**: Added `systemMessage` field alongside `reason` (hypothesis: systemMessage is injected into conversation context). Tests pass but **live test fails again** — Claude still ignores the qualifier.
+  - **Root cause confirmed**: The Stop hook response only supports `{"decision": "block", "reason": "..."}`. The `reason` field is hook metadata/logging, NOT injected into the model's conversation context. `systemMessage` is silently ignored by the Stop hook (may only work for PreToolUse hooks).
+  - **Next approach to investigate**: Write qualifier to the voice buffer (`cc-buffer-{hash}.jsonl`) from the stop hook. When Claude resumes after the block, the next PreToolUse hook drain picks it up and injects it via `additionalContext` — which IS reliably acted on. This leverages the existing voice injection pipeline that already works.
+  - **Files modified so far**: `hook_common.py` (added `build_stop_block_with_system_message()`), `stop.py` (removed `_enrich_qualifier_for_stop_hook()`, uses systemMessage at qualifier call sites), `test_stop_hook.py` (assertions on `systemMessage`)
+  - **Decision needed**: Revert Phase 2 systemMessage changes (dead code) before implementing voice buffer approach, or keep as-is since tests pass?
+
+## HIGH PRIORITY — CC Listener Session ID Drift (Session 334)
+
+- [ ] **[LUPIN] Fix CC Notification Listener session ID drift after context clears** — After context clears, the listener filters by transient `session_id` but the MCP server uses `stable_session_id` for sender_id. Browser-originated `user_initiated_message` notifications set `job_id` from the sender card's hash (stable), but no listener matches. Fix: pass `--stable-id` to listener at spawn time, change filter from `job_id != session_id_hash` to `job_id not in accepted_ids` set. No polling needed.
+  - **Plan file**: `~/.claude/plans/splendid-doodling-rose.md`
+  - **Files to modify**: `cc_notification_listener.py` (accepted_ids set, --stable-id arg), `register_session.py` (pass --stable-id at spawn)
 
 ## HIGH PRIORITY — CC Session Voice Input Bugs (Session 300)
 
-- [ ] **[LUPIN] Fix date off-by-one in CC session outgoing bubble** — Messages sent at e.g. 10:36 PM EST March 2 render under the March 3 date accordion. Likely cause: `new Date().toISOString()` returns UTC which is already March 3 when EST is late evening March 2, and `extractDateFromTimestamp()` uses the UTC date string directly instead of converting to local/server timezone. Fix should mirror how server-side notifications resolve dates (using `appTimezone`).
+- [x] **[LUPIN] Fix date off-by-one in CC session outgoing bubble** — Session 332: Fixed. `extractDateFromTimestamp()` now parses through `appTimezone`.
 - [ ] **[LUPIN] Fix CC session messages loading into "Unknown" sender card after refresh** — After page refresh, user-initiated messages sent from the CC session voice input widget load from the database into a separate sender card labeled "Unknown" instead of grouping under the correct CC session sender card. Likely cause: the notification stored in the DB has `sender_id` set to `user@{email}` (line 1597) rather than the CC session's sender ID (`claude.code@host#hash`), so on reload `resolveSenderId()` can't match it to the CC session card.
 
 ## HIGH PRIORITY — PG Audio Progress Not Updating In-Place (Session 329)

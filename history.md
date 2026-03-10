@@ -1,5 +1,37 @@
 # Lupin Project History
 
+### 2026.03.10 - Session 334 | Remove Redundant "Important!" TTS Prefix + Plan CC Listener Session ID Drift Fix
+
+**Accomplishments**:
+- Removed redundant "Important!" TTS prefix on high-priority notifications — if a notification plays with high priority, it's already important by definition. Kept "Urgent!" prefix for urgent notifications (useful escalation signal)
+- Diagnosed CC Notification Listener session ID drift bug: after context clears, listeners filter by transient `session_id` but MCP server uses `stable_session_id` for `sender_id`, causing browser-originated `user_initiated_message` notifications to be rejected by all listeners. Root cause: `_spawn_listener()` passes transient hash but `_read_session_file()` returns stable hash
+- Planned fix: pass `--stable-id` to listener at spawn time, filter by `accepted_ids` set containing both transient and stable hashes. No polling needed — stable ID never changes by contract
+
+**Files Modified**:
+- `src/fastapi_app/static/js/notifications.js` — Removed `else if ( notification.priority === "high" )` block
+
+---
+
+### 2026.03.09 - Session 333 | Stop Hook Qualifier Phase 2 — systemMessage Attempt
+
+**Accomplishments**:
+- Added `build_stop_block_with_system_message()` to hook_common.py — emits `systemMessage` alongside `reason` in stop hook response, hypothesizing it would be injected into Claude's conversation context
+- Removed Phase 1 workaround `_enrich_qualifier_for_stop_hook()` from stop.py
+- Updated both qualifier call sites (yes+qualifier, no+qualifier) to use new function
+- Updated 4 unit tests to assert against `systemMessage` field
+- **Live test result**: `systemMessage` is also ignored by Claude Code — the Stop hook only supports `decision` + `reason`, both are metadata-only. Neither field is injected into the model's conversation context with high salience
+- **Next approach identified**: Write qualifier to voice buffer from stop hook; PreToolUse drain will inject it via `additionalContext` (proven mechanism). Documented in TODO.md for next session.
+
+**Files Modified**:
+- `src/lupin_cli/claude_code/hooks/lib/hook_common.py` — Added `build_stop_block_with_system_message()`
+- `src/lupin_cli/claude_code/hooks/stop.py` — Removed `_enrich_qualifier_for_stop_hook()`, updated qualifier call sites
+- `src/tests/unit/test_stop_hook.py` — Updated 4 qualifier tests (assert `systemMessage` instead of `reason`)
+- `TODO.md` — Added stop hook qualifier bug tracking with full context
+
+**Verification**: 32/32 stop hook tests pass, 19/19 qualifier MCP tests pass, 2002/2021 full suite pass (14 pre-existing failures unrelated)
+
+---
+
 ### 2026.03.09 - Session 332 | Fix Date Off-by-One + Mark Phase 7 Done
 
 #### Checkpoint | 2026.03.09 16:00 | Fix date off-by-one in CC session outgoing bubble

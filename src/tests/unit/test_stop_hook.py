@@ -21,10 +21,8 @@ import sys
 import pytest
 from unittest.mock import patch, MagicMock, call
 
-from lupin_cli.claude_code.hooks.stop import (
-    main, extract_qualifier_comment, _summarize_task,
-    _build_qualifier_reason
-)
+from lupin_cli.claude_code.hooks.stop import main, _summarize_task
+from cosa.utils.notification_utils import extract_qualifier_comment
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -81,44 +79,6 @@ class TestExtractQualifierComment:
         answer, qualifier = extract_qualifier_comment( "" )
         assert answer is None
         assert qualifier is None
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# TestBuildQualifierReason
-# ═════════════════════════════════════════════════════════════════════════════
-
-class TestBuildQualifierReason:
-    """Tests for _build_qualifier_reason() '?' heuristic classification."""
-
-    def test_question_uses_question_context( self ):
-        """Qualifier ending with '?' → uses question_context, mentions converse."""
-        reason = _build_qualifier_reason( "what time is it?", "Q_CTX", "I_CTX" )
-        assert reason.startswith( "IMPORTANT" )
-        assert "what time is it?" in reason
-        assert "Q_CTX" in reason
-        assert "converse" in reason
-
-    def test_instruction_uses_instruction_context( self ):
-        """Qualifier without '?' → uses instruction_context, mentions notify."""
-        reason = _build_qualifier_reason( "fix the tests", "Q_CTX", "I_CTX" )
-        assert reason.startswith( "IMPORTANT" )
-        assert "fix the tests" in reason
-        assert "I_CTX" in reason
-        assert "notify" in reason
-
-    def test_question_mark_with_trailing_spaces( self ):
-        """Trailing spaces after '?' still classified as question."""
-        reason = _build_qualifier_reason( "how many?   ", "Q_CTX", "I_CTX" )
-        assert reason.startswith( "IMPORTANT" )
-        assert "Q_CTX" in reason
-        assert "converse" in reason
-
-    def test_no_question_mark_defaults_to_instruction( self ):
-        """No '?' → instruction path."""
-        reason = _build_qualifier_reason( "do the thing", "Q_CTX", "I_CTX" )
-        assert reason.startswith( "IMPORTANT" )
-        assert "I_CTX" in reason
-        assert "notify" in reason
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -441,10 +401,10 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
-    def test_qualifier_question_routes_to_converse( self, mock_notify, mock_sender, mock_read,
-                                                      mock_log, mock_session, mock_drain, mock_emit,
-                                                      mock_reset, mock_summarize ):
-        """Qualifier ending with '?' → reason mentions converse()."""
+    def test_qualifier_question_routes_correctly( self, mock_notify, mock_sender, mock_read,
+                                                     mock_log, mock_session, mock_drain, mock_emit,
+                                                     mock_reset, mock_summarize ):
+        """Qualifier ending with '?' → systemMessage includes MUST act directive."""
         mock_response = MagicMock()
         mock_response.response_value = "yes [comment: how many tests passed?]"
         mock_notify.return_value = mock_response
@@ -454,10 +414,10 @@ class TestNotifyUserSync:
 
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "decision" ] == "block"
-        assert "IMPORTANT" in emitted[ "reason" ]
-        assert "question" in emitted[ "reason" ].lower()
-        assert "converse" in emitted[ "reason" ]
-        assert "how many tests passed?" in emitted[ "reason" ]
+        assert "IMPORTANT" in emitted[ "systemMessage" ]
+        assert "MUST act" in emitted[ "systemMessage" ]
+        assert "how many tests passed?" in emitted[ "systemMessage" ]
+        assert "User qualifier:" in emitted[ "reason" ]
 
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
@@ -468,10 +428,10 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="claude.code@lupin.deepily.ai#abc12345" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
-    def test_qualifier_instruction_routes_to_notify( self, mock_notify, mock_sender, mock_read,
+    def test_qualifier_instruction_routes_correctly( self, mock_notify, mock_sender, mock_read,
                                                        mock_log, mock_session, mock_drain, mock_emit,
                                                        mock_reset, mock_summarize ):
-        """Qualifier without '?' → reason mentions notify()."""
+        """Qualifier without '?' → systemMessage includes MUST act directive."""
         mock_response = MagicMock()
         mock_response.response_value = "yes [comment: fix the linting errors]"
         mock_notify.return_value = mock_response
@@ -481,9 +441,10 @@ class TestNotifyUserSync:
 
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "decision" ] == "block"
-        assert "IMPORTANT" in emitted[ "reason" ]
-        assert "fix the linting errors" in emitted[ "reason" ]
-        assert "notify" in emitted[ "reason" ]
+        assert "IMPORTANT" in emitted[ "systemMessage" ]
+        assert "fix the linting errors" in emitted[ "systemMessage" ]
+        assert "MUST act" in emitted[ "systemMessage" ]
+        assert "User qualifier:" in emitted[ "reason" ]
 
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value="fixed linting errors" )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
@@ -566,7 +527,7 @@ class TestNotifyUserSync:
     def test_no_with_qualifier_instruction_blocks_stop( self, mock_notify, mock_sender, mock_read,
                                                           mock_log, mock_session, mock_drain, mock_emit,
                                                           mock_reset, mock_summarize ):
-        """'no [comment: say hi]' → blocks stop, reason includes instruction."""
+        """'no [comment: say hi]' → blocks stop, systemMessage includes instruction."""
         mock_response = MagicMock()
         mock_response.exit_code      = 0
         mock_response.response_value = "no [comment: say hi using a high-priority notification]"
@@ -577,10 +538,11 @@ class TestNotifyUserSync:
 
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "decision" ] == "block"
-        assert "IMPORTANT" in emitted[ "reason" ]
-        assert "say hi using a high-priority notification" in emitted[ "reason" ]
-        assert "no" in emitted[ "reason" ].lower()
-        assert "notify" in emitted[ "reason" ]
+        assert "IMPORTANT" in emitted[ "systemMessage" ]
+        assert "say hi using a high-priority notification" in emitted[ "systemMessage" ]
+        assert "no" in emitted[ "systemMessage" ].lower()
+        assert "MUST act" in emitted[ "systemMessage" ]
+        assert "User qualifier:" in emitted[ "reason" ]
 
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
@@ -594,7 +556,7 @@ class TestNotifyUserSync:
     def test_no_with_qualifier_question_blocks_stop( self, mock_notify, mock_sender, mock_read,
                                                         mock_log, mock_session, mock_drain, mock_emit,
                                                         mock_reset, mock_summarize ):
-        """'no [comment: what time is it?]' → blocks stop, reason includes question."""
+        """'no [comment: what time is it?]' → blocks stop, systemMessage includes question."""
         mock_response = MagicMock()
         mock_response.exit_code      = 0
         mock_response.response_value = "no [comment: what time is it?]"
@@ -605,10 +567,11 @@ class TestNotifyUserSync:
 
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "decision" ] == "block"
-        assert "IMPORTANT" in emitted[ "reason" ]
-        assert "what time is it?" in emitted[ "reason" ]
-        assert "no" in emitted[ "reason" ].lower()
-        assert "converse" in emitted[ "reason" ]
+        assert "IMPORTANT" in emitted[ "systemMessage" ]
+        assert "what time is it?" in emitted[ "systemMessage" ]
+        assert "no" in emitted[ "systemMessage" ].lower()
+        assert "MUST act" in emitted[ "systemMessage" ]
+        assert "User qualifier:" in emitted[ "reason" ]
 
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )

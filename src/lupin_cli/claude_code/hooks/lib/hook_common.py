@@ -529,6 +529,35 @@ def build_stop_block( reason ):
     return { "decision": "block", "reason": reason }
 
 
+def build_stop_block_with_system_message( reason, system_message ):
+    """
+    Build top-level decision block for Stop hook with systemMessage injection.
+
+    When a qualifier is present, the stop hook needs BOTH:
+    - "reason" for hook logging/metadata (low salience, not reliably acted on)
+    - "systemMessage" for conversation injection (high salience, visible to model)
+
+    Requires:
+        - reason is a non-empty string (short metadata summary)
+        - system_message is a non-empty string (full instruction for the model)
+
+    Ensures:
+        - Returns { "decision": "block", "reason": reason, "systemMessage": system_message }
+
+    Args:
+        reason: Short metadata reason for blocking the stop
+        system_message: Full instruction injected into Claude's conversation context
+
+    Returns:
+        dict: Stop hook decision block with systemMessage, ready for emit_json()
+    """
+    return {
+        "decision"      : "block",
+        "reason"        : reason,
+        "systemMessage" : system_message
+    }
+
+
 def is_mcp_voice_tool( tool_name ):
     """
     Check if tool_name is a cosa-voice MCP tool (direct user communication).

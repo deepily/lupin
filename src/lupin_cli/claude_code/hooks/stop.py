@@ -19,7 +19,6 @@ Install in ~/.claude/settings.json:
     }
 """
 import os
-import re
 import sys
 
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
@@ -30,6 +29,7 @@ if _src_path not in sys.path:
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, log_to_stream, emit_json, send_tts,
     drain_and_acknowledge, format_voice_context, build_stop_block,
+    build_stop_block_with_system_message,
     enrich_voice_context, get_stop_block_count, increment_stop_block_count,
     reset_stop_block_count, MAX_STOP_BLOCKS
 )
@@ -40,35 +40,9 @@ from lupin_cli.notifications.notify_user_sync import notify_user_sync
 from lupin_cli.notifications.notification_models import (
     NotificationRequest, ResponseType, NotificationPriority
 )
-
-
-def extract_qualifier_comment( response_value ):
-    """
-    Extract qualifier comment from a yes/no response value.
-
-    Requires:
-        - response_value is a string or None
-
-    Ensures:
-        - Returns ( answer, qualifier ) tuple
-        - answer is "yes" or "no" (lowercase)
-        - qualifier is the comment text or None
-
-    Examples:
-        "yes [comment: fix the tests]" -> ( "yes", "fix the tests" )
-        "no [comment: not ready]"      -> ( "no", "not ready" )
-        "yes"                          -> ( "yes", None )
-        "no"                           -> ( "no", None )
-    """
-    if not response_value:
-        return ( None, None )
-
-    match = re.match( r'^(yes|no)\s*(?:\[comment:\s*(.+)\])?$', response_value.strip(), re.IGNORECASE )
-    if match:
-        return ( match.group( 1 ).lower(), match.group( 2 ) )
-
-    # Fallback: treat the whole string as the answer
-    return ( response_value.strip().lower(), None )
+from cosa.utils.notification_utils import (
+    extract_qualifier_comment, format_qualified_response
+)
 
 
 def _summarize_task( last_assistant_message ):
@@ -146,43 +120,6 @@ def _summarize_task( last_assistant_message ):
 #         return None
 
 
-def _build_qualifier_reason( qualifier, question_context, instruction_context ):
-    """
-    Build a formatted reason string using '?' heuristic for classification.
-
-    Requires:
-        - qualifier is a non-empty string
-        - question_context is a string prefix for the question case
-          (e.g., 'The user has a question')
-        - instruction_context is a string prefix for the instruction case
-          (e.g., 'The user wants you to')
-
-    Ensures:
-        - Returns a reason string with cosa-voice instructions
-        - Classifies qualifier as question or instruction via '?' heuristic
-    """
-    qualifier_is_question = qualifier.rstrip().endswith( "?" )
-
-    if qualifier_is_question:
-        return (
-            f"IMPORTANT — The user attached a comment to their response:\n"
-            f'"{qualifier}"\n\n'
-            f'{question_context}. '
-            "Answer their question using mcp__cosa-voice__converse() with priority='medium' "
-            "so they hear the response via audio. After answering, ask if there's anything else "
-            "using mcp__cosa-voice__ask_yes_no() with priority='high'."
-        )
-    else:
-        return (
-            f"IMPORTANT — The user attached a comment to their response:\n"
-            f'"{qualifier}"\n\n'
-            f'{instruction_context}. '
-            "First, acknowledge receipt by calling mcp__cosa-voice__notify() with "
-            "a brief confirmation message at priority='medium'. "
-            "Then carry out their instruction."
-        )
-
-
 def _ask_anything_else( session_id, last_assistant_message=None ):
     """
     Ask the user "Anything else?" via notify_user_sync with a 5-minute timeout.
@@ -240,32 +177,30 @@ def _ask_anything_else( session_id, last_assistant_message=None ):
 
         if answer == "yes":
             if qualifier:
-                reason = _build_qualifier_reason(
-                    qualifier,
-                    "The user has a question",
-                    "The user wants you to"
-                )
+                system_msg = format_qualified_response( answer, qualifier )
+                log_to_stream( "stop", {}, extra={
+                    "phase"  : "qualifier_block",
+                    "answer" : answer,
+                    "reason" : f"User qualifier: {qualifier}"[ :120 ]
+                } )
+                return build_stop_block_with_system_message( f"User qualifier: {qualifier}", system_msg )
             else:
                 reason = "The user wants to continue working. Ask them what they'd like done next."
-            log_to_stream( "stop", {}, extra={
-                "phase"  : "qualifier_block",
-                "answer" : answer,
-                "reason" : reason[ :120 ]
-            } )
-            return build_stop_block( reason )
+                log_to_stream( "stop", {}, extra={
+                    "phase"  : "qualifier_block",
+                    "answer" : answer,
+                    "reason" : reason[ :120 ]
+                } )
+                return build_stop_block( reason )
 
         if answer == "no" and qualifier:
-            reason = _build_qualifier_reason(
-                qualifier,
-                'The user said "no" to continuing, but has a new question',
-                'The user said "no" to continuing, but has a new instruction'
-            )
+            system_msg = format_qualified_response( answer, qualifier )
             log_to_stream( "stop", {}, extra={
                 "phase"  : "qualifier_block",
                 "answer" : answer,
-                "reason" : reason[ :120 ]
+                "reason" : f"User qualifier: {qualifier}"[ :120 ]
             } )
-            return build_stop_block( reason )
+            return build_stop_block_with_system_message( f"User qualifier: {qualifier}", system_msg )
 
         # Plain "no", timeout, error → allow stop
         return {}
