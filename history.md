@@ -13,7 +13,16 @@
 - Unit tests: 40/40 pass (test_config_loader + test_hook_credentials)
 
 **Files**: `~/.lupin/config` (modified)
-**Commit**: 3f80f2a
+**Commit**: 29fc69a
+
+**Post-checkpoint — Bug fix: Duplicate notification sessions after context clear**:
+- **Symptom**: Two notification session cards (25ca8c13 + 9f656de9) in UI from single TMUX-wrapped CC session
+- **Root Cause**: `register_session.py:511` wrote transient `session_id` to `CLAUDE_ENV_FILE` instead of `stable_session_id`. After context clear, `CLAUDE_SESSION_ID` env var contained the new transient ID (`25ca8c13`), which `get_claude_session_id()` reads as Tier 1 (highest priority), bypassing the bridge file's `stable_session_id` (`9f656de9`). All hooks then sent notifications as `#25ca8c13` — creating a second session card.
+- **Fix**: Changed `CLAUDE_ENV_FILE` write from `session_id` to `stable_session_id` (1 line)
+- **Test**: Added `test_env_file_writes_stable_session_id` — verifies env file contains stable ID, not transient. 29/29 pass.
+
+**Files**: `src/lupin_cli/claude_code/hooks/register_session.py`, `src/tests/unit/test_session_bridge_lookup.py`, `bug-fix-queue.md`
+**Commit**: 527b6e5
 
 ---
 

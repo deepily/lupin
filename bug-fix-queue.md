@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-02-28T21:00:00
+**Last Updated**: 2026-03-11T10:30:00
 
 ---
 
@@ -32,6 +32,7 @@
 | 10ff1e2a | 2026-02-28T10:00:00 | 2026-02-28T14:30:00 | closed |
 | 0e73eb8e | 2026-02-28T21:00:00 | 2026-02-28T22:00:00 | closed |
 | 98958f70 | 2026-02-28T23:00:00 | 2026-02-28T23:45:00 | closed |
+| 9f656de9 | 2026-03-11T10:00:00 | 2026-03-11T10:30:00 | active |
 
 ---
 
@@ -63,6 +64,13 @@
   - **Bug #2 — Job card contact / sender_id double-hash**: Fixed `_get_sender_id()` suffix param. Files: `cosa_interface.py` + `job.py` (podcast_generator, deep_research, deep_research_to_podcast)
   - **Bug #3 — Audio segment upload / non-interactive hang**: Added `_is_interactive()` guard in `voice_io.py`, fixed TTS cost key, pre-stitching guards in `orchestrator.py`
   - **Tests**: 37 new unit tests (`test_fuzzy_file_matching.py`, `test_target_user_dispatch.py`, `test_voice_io_non_interactive.py`)
+
+- [x] **Duplicate notification sessions after context clear** → commit: 527b6e5 | By: 9f656de9
+  - **Symptom**: Two session cards in notifications UI from single CC session after context clear
+  - **Root Cause**: `register_session.py` wrote transient session_id (not stable) to CLAUDE_ENV_FILE → hooks sent notifications as `#25ca8c13` instead of `#9f656de9`
+  - **Fix**: Changed env file write from `session_id` to `stable_session_id` (1 line)
+  - **Test**: `test_env_file_writes_stable_session_id` (29/29 pass)
+  - **Files**: `register_session.py`, `test_session_bridge_lookup.py`
 
 - [x] **Session ID cross-project contamination** → commit: 495cdfd | By: 0e73eb8e
   - **Symptom**: Two CC instances (Lupin + planning-is-prompting) both reported same session ID `#0e73eb8e`, breaking parallel session isolation

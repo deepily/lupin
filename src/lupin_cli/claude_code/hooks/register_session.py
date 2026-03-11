@@ -503,12 +503,14 @@ def main():
             pass  # Best-effort
 
     # ── Phase 3: Write to CLAUDE_ENV_FILE (for Bash commands) ─────────────
+    # Use stable_session_id so all hooks produce consistent sender_ids
+    # after context clears (avoids duplicate notification session cards)
     if session_id:
         env_file = os.getenv( "CLAUDE_ENV_FILE" )
         if env_file:
             try:
                 with open( env_file, "a" ) as f:
-                    f.write( f"export CLAUDE_SESSION_ID='{session_id}'\n" )
+                    f.write( f"export CLAUDE_SESSION_ID='{stable_session_id}'\n" )
                     f.write( f"export CLAUDE_TRANSCRIPT_PATH='{transcript_path}'\n" )
                     f.write( f"export CLAUDE_TMUX_SESSION='{tmux_session or ''}'\n" )
             except OSError:

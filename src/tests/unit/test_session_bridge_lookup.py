@@ -469,6 +469,54 @@ class TestStableLockfile:
             # TTS message should indicate context clear
             assert any( "context clear" in msg for msg in tts_messages )
 
+    def test_env_file_writes_stable_session_id( self ):
+        """CLAUDE_ENV_FILE gets stable_session_id, not transient — prevents duplicate UI sessions."""
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = tmp
+            cc_pid      = 12345
+            stable_id   = "stab1111-2222-3333-4444-555566667777"
+            new_id      = "new22222-3333-4444-5555-666677778888"
+
+            # Pre-create lockfile with stable ID
+            lockfile = os.path.join( session_dir, f"cc-stable-{cc_pid}.id" )
+            with open( lockfile, "w" ) as f:
+                f.write( stable_id )
+
+            # Pre-create bridge file with old session
+            bridge_file = os.path.join( session_dir, f"cc-{cc_pid}.json" )
+            bridge_data = { "session_id": stable_id, "stable_session_id": stable_id }
+            with open( bridge_file, "w" ) as f:
+                json.dump( bridge_data, f )
+
+            # Create env file to capture writes
+            env_file = os.path.join( tmp, "claude_env" )
+
+            payload = { "session_id": new_id, "transcript_path": "/tmp/t", "cwd": "/tmp" }
+
+            def mock_getenv( key, default=None ):
+                if key == "CLAUDE_ENV_FILE":
+                    return env_file
+                return None
+
+            with patch( "lupin_cli.claude_code.hooks.register_session.read_hook_input", return_value=payload ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.log_payload" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.emit_json" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session.send_tts" ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._spawn_listener", return_value=None ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._find_tmux_session", return_value=None ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._resolve_cc_pid", return_value=cc_pid ), \
+                 patch( "lupin_cli.claude_code.hooks.register_session._cleanup_old_listener" ), \
+                 patch( "os.path.expanduser", return_value=session_dir ), \
+                 patch( "os.getppid", return_value=99999 ), \
+                 patch( "os.getenv", side_effect=mock_getenv ):
+                main()
+
+            # Env file must contain STABLE session ID, not transient
+            with open( env_file ) as f:
+                env_contents = f.read()
+            assert stable_id in env_contents, f"Expected stable ID {stable_id} in env file, got: {env_contents}"
+            assert new_id not in env_contents, f"Transient ID {new_id} should NOT be in env file"
+
 
 # ── Tests: stable ID passed to listener (Phase 2) ───────────────────────────
 
