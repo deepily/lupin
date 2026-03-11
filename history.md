@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.03.11 - Session 338 | Credential Migration Step 7 + Duplicate Session Bug
+
+#### Checkpoint | 2026.03.11 | Credential migration executed on live system
+
+**Accomplishments**:
+- Executed Step 7 of credential consolidation: ran `lupin-config migrate` on actual system
+- Fixed stale `[local]` section in `~/.lupin/config` before migration (old `genie-in-the-box` path + deprecated `target_user` key)
+- Migration merged `[lupin]` credentials + `[development]` environment into unified `~/.lupin/config`
+- Verified: permissions `chmod 600`, backups created (`.bak`), all dependent systems operational
+- Smoke tests: hook_credentials reader, config_loader, cc-listener-status all pass
+- Unit tests: 40/40 pass (test_config_loader + test_hook_credentials)
+
+**Files**: `~/.lupin/config` (modified)
+**Commit**: 3f80f2a
+
+---
+
 ### 2026.03.10 - Session 337c | Consolidate Three Credential Stores
 
 **Accomplishments**:

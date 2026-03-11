@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-10 (Session 337c)
+Last updated: 2026-03-11 (Session 338)
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 
@@ -15,7 +15,7 @@ Last updated: 2026-03-10 (Session 337c)
 
 ## HIGH PRIORITY — Consolidate Credential Stores (Session 337)
 
-- [x] **[LUPIN] Consolidate three credential/config files into unified `~/.lupin/config`** — Session 337c: Steps 1-6 implemented (code + tests). 9 files modified, 1 new test file (16 tests), 40/40 pass. Remaining: run `lupin-config migrate` on actual system (Step 7).
+- [x] **[LUPIN] Consolidate three credential/config files into unified `~/.lupin/config`** — Session 337c: Steps 1-6 (code + tests). Session 338: Step 7 migration executed on live system. Fixed stale `[local]` section, merged credentials + environments, 40/40 tests pass, all dependent systems verified.
   - **Plan doc**: [`src/rnd/2026.03.10-consolidate-credential-stores.md`](src/rnd/2026.03.10-consolidate-credential-stores.md)
 
 ## HIGH PRIORITY — MCP Strict Project Detection + Repo Account Validation (Session 332)
