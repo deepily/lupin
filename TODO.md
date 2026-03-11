@@ -15,14 +15,13 @@ Last updated: 2026-03-10 (Session 336)
 
 ## HIGH PRIORITY — MCP Strict Project Detection + Repo Account Validation (Session 332)
 
-- [ ] **[LUPIN] cosa-voice MCP: strict project detection + per-repo account validation** — MCP server silently falls back to `"unknown"` project for unrecognized repos. Need: (1) remove `"unknown"` fallback, (2) validate per-repo Lupin account (`claude.code@{project}.deepily.ai`) at startup, (3) poison tool results with actionable setup instructions if validation fails (stderr is buried in stdio MCP).
-  - **Plan doc**: [`src/rnd/2026.03.09-mcp-strict-project-detection-account-validation.md`](src/rnd/2026.03.09-mcp-strict-project-detection-account-validation.md)
+- [ ] **[LUPIN] cosa-voice MCP: strict project detection + per-repo account validation** — MCP server silently falls back to `"unknown"` project for unrecognized repos. Need: (1) remove `"unknown"` fallback, (2) validate per-repo Lupin account (`claude.code@{project}.deepily.ai`) at startup, (3) send urgent notification via `claude.code@errors.deepily.ai` with setup instructions if validation fails. Revised Session 337: one-time notification instead of tool-result poisoning.
+  - **Plan doc**: [`src/rnd/2026.03.10-mcp-strict-project-detection-account-validation.md`](src/rnd/2026.03.10-mcp-strict-project-detection-account-validation.md)
   - **Files**: `cosa_voice_mcp.py`, `notification_utils.py`, new test file
 
 ## HIGH PRIORITY — CC Session Voice Input Bugs (Session 300)
 
 - [x] **[LUPIN] Fix date off-by-one in CC session outgoing bubble** — Session 332: Fixed. `extractDateFromTimestamp()` now parses through `appTimezone`.
-- [ ] **[LUPIN] Fix CC session messages loading into "Unknown" sender card after refresh** — After page refresh, user-initiated messages sent from the CC session voice input widget load from the database into a separate sender card labeled "Unknown" instead of grouping under the correct CC session sender card. Likely cause: the notification stored in the DB has `sender_id` set to `user@{email}` (line 1597) rather than the CC session's sender ID (`claude.code@host#hash`), so on reload `resolveSenderId()` can't match it to the CC session card.
 
 ## HIGH PRIORITY — PG Audio Progress Not Updating In-Place (Session 329)
 
@@ -189,6 +188,7 @@ Last updated: 2026-03-10 (Session 336)
 
 ## Completed (Recent)
 
+- [x] **[LUPIN] Fix CC session messages loading into "Unknown" sender card after refresh** — Completed Session 337.
 - [x] **Centralized Navigation & URL Naming Conventions** — Unified nav and URL patterns for entire suite of static HTML/plain vanilla JavaScript pages covering all user and admin tasks - Session 247
 - [x] **CRUD Live Pipeline Test** - `test_crud_live_pipeline.py --mode direct --auto-proxy` passing. Session 267 fixed credential mismatch (CREDENTIAL_ENV_PREFIX unified).
 - [x] **SWE Team Proxy: Preference Learning** - Sessions 258-266: Phases 0-3 complete. Embedding infrastructure, CBR + Beta-Bernoulli trust, seed data (50 decisions), BLR + Thompson Sampling, Conformal Guarantees + ICRL. 1645 total tests pass.

@@ -1,5 +1,16 @@
 # Lupin Project History
 
+### 2026.03.10 - Session 337b | MCP Strict Detection Plan Revision
+
+**Accomplishments**:
+- Revised MCP strict project detection plan after source code review — switched design from tool-result poisoning to one-time urgent notification via synthetic `claude.code@errors.deepily.ai` sender (follows `_die_no_session_id()` pattern)
+- Serialized updated plan: renamed `2026.03.09` → `2026.03.10-mcp-strict-project-detection-account-validation.md`
+- Updated TODO.md with revised plan doc link and description reflecting notification approach
+
+**Files**: `src/rnd/2026.03.10-mcp-strict-project-detection-account-validation.md` (overwrite), `TODO.md`
+
+---
+
 ### 2026.03.10 - Session 337 | Stop Hook Gist → Ultra-Short TTS Summaries
 
 #### Checkpoint | 2026.03.10 17:00 | Custom gist prompt for stop hook TTS
