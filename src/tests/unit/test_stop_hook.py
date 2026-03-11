@@ -111,6 +111,10 @@ class TestSummarizeTask:
 
             result = _summarize_task( "I fixed all the linting errors in the codebase" )
             assert result == "fixed linting errors"
+            mock_instance.get_gist.assert_called_once_with(
+                "I fixed all the linting errors in the codebase",
+                prompt_key="prompt template for stop hook gist"
+            )
 
     def test_gister_exception_returns_none( self ):
         """Mock Gister exception → returns None."""

@@ -60,7 +60,7 @@ def _summarize_task( last_assistant_message ):
     try:
         from cosa.memory.gister import Gister
         gister = Gister( debug=False, verbose=False )
-        gist   = gister.get_gist( last_assistant_message )
+        gist   = gister.get_gist( last_assistant_message, prompt_key="prompt template for stop hook gist" )
         return gist if gist else None
     except Exception:
         return None
@@ -143,7 +143,7 @@ def _ask_anything_else( session_id, last_assistant_message=None ):
 
         gist = _summarize_task( last_assistant_message )
         if gist:
-            message = f"[LUPIN] I'm finished *{gist}*. Is there anything else you want me to do?"
+            message = f'[LUPIN] I\'m finished *"...{gist}"*. Is there anything else you want me to do?'
         else:
             message = "[LUPIN] I've finished the current task. Is there anything else you'd like me to do?"
 

@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.03.10 - Session 337 | Stop Hook Gist → Ultra-Short TTS Summaries
+
+#### Checkpoint | 2026.03.10 17:00 | Custom gist prompt for stop hook TTS
+
+**Accomplishments**:
+- Created dedicated prompt template `gist-stop-hook.txt` for stop hook task summaries — constrains gist to 10 words max, gerund form ("Fixing...", "Adding..."), optimized for TTS readout after "I'm finished"
+- Wired `prompt_key="prompt template for stop hook gist"` into `_summarize_task()` — leverages existing Gister custom prompt infrastructure with automatic cache bypass
+- Diagnosed and fixed XML parsing failure: original prompt's competing "Write ONLY" directive caused phi4 to skip XML wrapping; rewrote to match proven `gist.txt` persona/structure
+- Updated notification message format to `*"...{gist}"*` for natural TTS flow: "I'm finished *"...fixing linting errors, updating unit tests"*"
+- Added config key + splainer explanation, updated unit test to verify prompt_key passthrough
+
+**Files**:
+- `src/conf/prompts/agents/gist-stop-hook.txt` (NEW), `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/lupin_cli/claude_code/hooks/stop.py`, `src/tests/unit/test_stop_hook.py`
+**Commit**: d9defba
+
+---
+
 ### 2026.03.10 - Session 336 | Stop Hook Qualifier → TMUX Injection
 
 **Accomplishments**:
