@@ -15,6 +15,7 @@ Usage:
     lupin-config add <env> [options]            # Add new environment
     lupin-config use <env>                      # Set default environment
     lupin-config test <env>                     # Test environment
+    lupin-config migrate                        # Migrate legacy config files into unified ~/.lupin/config
 """
 
 import os
@@ -107,35 +108,45 @@ def cmd_init( args ):
         print( f"To add environment: lupin-config add production" )
         return 0
 
-    # Create config with local environment
+    # Create config with credentials placeholder + local environment
     config = ConfigParser()
+
+    config['lupin'] = {
+        'email'    : 'claude.code@lupin.deepily.ai',
+        'password' : 'CHANGE-ME'
+    }
 
     config['environments'] = {
         'default': 'local'
     }
 
     config['local'] = {
-        'api_url': 'http://localhost:7999',
-        'api_key_file': f"{lupin_root}/src/conf/keys/notification-api-claude-code-dev",
-        'description': 'Local development server'
+        'api_url'      : 'http://localhost:7999',
+        'api_key_file' : f"{lupin_root}/src/conf/keys/notification-api-claude-code-dev",
+        'description'  : 'Local development server'
     }
 
-    # Write config file
+    # Write config file with restricted permissions
     try:
         with open( config_path, 'w' ) as f:
             config.write( f )
-        print_success( f"Created config file: {config_path}" )
+        os.chmod( config_path, 0o600 )
+        print_success( f"Created config file: {config_path} (chmod 600)" )
     except Exception as e:
         print_error( f"Failed to create config file: {e}" )
         return 1
 
+    print_success( "Added [lupin] credentials placeholder" )
     print_success( "Added [local] environment" )
 
     print( "\n✓ Configuration initialized successfully!" )
+    print( "\n⚠️  Update the [lupin] section with your actual credentials:" )
+    print( f"   {config_path}" )
     print( "\nNext steps:" )
-    print( "  1. Review config: lupin-config show" )
-    print( "  2. Add production environment: lupin-config add production" )
-    print( "  3. Test connection: lupin-config test local" )
+    print( "  1. Set credentials: edit ~/.lupin/config [lupin] section" )
+    print( "  2. Review config: lupin-config show" )
+    print( "  3. Add production environment: lupin-config add production" )
+    print( "  4. Test connection: lupin-config test local" )
 
     return 0
 
@@ -199,6 +210,22 @@ def cmd_show( args ):
         return 1
 
     print( "\n" + "═" * 60 )
+
+    # Show credentials status
+    print( "\nCredentials:" )
+    cred_sections = [ s for s in config.sections() if s not in ( 'environments', ) and 'email' in config[s] ]
+    if cred_sections:
+        for section_name in cred_sections:
+            email = config[section_name].get( 'email', '' )
+            has_password = bool( config[section_name].get( 'password', '' ) )
+            print( f"  [{section_name}] email={email}  password={'set' if has_password else 'MISSING'}" )
+    else:
+        legacy_creds = Path.home() / '.lupin' / 'credentials.ini'
+        if legacy_creds.exists():
+            print( f"  ⚠️  No credentials in unified config. Legacy file exists: {legacy_creds}" )
+            print( f"     Run 'lupin-config migrate' to consolidate." )
+        else:
+            print( "  (none configured)" )
 
     # Show environment variable overrides
     print( "\nEnvironment variable overrides:" )
@@ -496,6 +523,99 @@ def cmd_test( args ):
     return 0
 
 
+def cmd_migrate( args ):
+    """
+    Migrate legacy credential/config files into unified ~/.lupin/config.
+
+    Requires:
+        - At least one legacy file exists (~/.lupin/credentials.ini or ~/.notifications/config)
+
+    Ensures:
+        - Merges credential sections from ~/.lupin/credentials.ini
+        - Merges environment sections from ~/.notifications/config
+        - Backs up old files with .bak suffix
+        - Sets chmod 600 on unified file
+        - Returns 0 on success, 1 on error
+    """
+    config_path          = get_config_path()
+    legacy_creds_path    = Path.home() / '.lupin' / 'credentials.ini'
+    legacy_notif_path    = Path.home() / '.notifications' / 'config'
+
+    print_header( "Migrating to Unified Config" )
+    print( f"Target: {config_path}" )
+
+    # Load existing unified config (or start fresh)
+    unified = ConfigParser()
+    if config_path.exists():
+        unified.read( config_path )
+        print( f"  Existing config loaded: {config_path}" )
+
+    migrated_anything = False
+
+    # ── Migrate credentials from ~/.lupin/credentials.ini ────────────
+    if legacy_creds_path.exists():
+        print( f"\n  Reading credentials from: {legacy_creds_path}" )
+        creds_config = ConfigParser()
+        creds_config.read( str( legacy_creds_path ) )
+
+        for section in creds_config.sections():
+            if section in unified:
+                print( f"    [{section}] already exists in unified config — skipping" )
+            else:
+                unified[section] = dict( creds_config[section] )
+                print_success( f"  Migrated [{section}] credentials" )
+                migrated_anything = True
+    else:
+        print( f"\n  No legacy credentials file: {legacy_creds_path}" )
+
+    # ── Migrate environments from ~/.notifications/config ────────────
+    if legacy_notif_path.exists():
+        print( f"\n  Reading environments from: {legacy_notif_path}" )
+        notif_config = ConfigParser()
+        notif_config.read( str( legacy_notif_path ) )
+
+        for section in notif_config.sections():
+            if section in unified:
+                print( f"    [{section}] already exists in unified config — skipping" )
+            else:
+                unified[section] = dict( notif_config[section] )
+                print_success( f"  Migrated [{section}] section" )
+                migrated_anything = True
+    else:
+        print( f"\n  No legacy notifications config: {legacy_notif_path}" )
+
+    if not migrated_anything:
+        print( "\n  Nothing to migrate — all sections already present." )
+        return 0
+
+    # ── Write unified config ─────────────────────────────────────────
+    try:
+        config_path.parent.mkdir( parents=True, exist_ok=True )
+        with open( config_path, 'w' ) as f:
+            unified.write( f )
+        os.chmod( config_path, 0o600 )
+        print_success( f"\n  Wrote unified config: {config_path} (chmod 600)" )
+    except Exception as e:
+        print_error( f"Failed to write unified config: {e}" )
+        return 1
+
+    # ── Backup old files ─────────────────────────────────────────────
+    for legacy_path in [ legacy_creds_path, legacy_notif_path ]:
+        if legacy_path.exists():
+            backup_path = legacy_path.with_suffix( legacy_path.suffix + '.bak' )
+            try:
+                legacy_path.rename( backup_path )
+                print_success( f"  Backed up: {legacy_path} → {backup_path}" )
+            except Exception as e:
+                print_error( f"  Failed to backup {legacy_path}: {e}" )
+
+    print( "\n" + "═" * 60 )
+    print( "✓ Migration complete!" )
+    print( f"\nVerify: lupin-config show" )
+
+    return 0
+
+
 def main():
     """
     Main entry point for lupin-config CLI.
@@ -539,6 +659,10 @@ def main():
     parser_test = subparsers.add_parser( 'test', help='Test environment connectivity' )
     parser_test.add_argument( 'environment', help='Environment name' )
     parser_test.set_defaults( func=cmd_test )
+
+    # Command: migrate
+    parser_migrate = subparsers.add_parser( 'migrate', help='Migrate legacy config files into unified ~/.lupin/config' )
+    parser_migrate.set_defaults( func=cmd_migrate )
 
     # Parse arguments
     args = parser.parse_args()

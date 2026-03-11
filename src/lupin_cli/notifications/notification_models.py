@@ -853,7 +853,7 @@ def resolve_target_user( explicit_value: Optional[str] = None ) -> str:
     Precedence:
         1. explicit_value (caller-provided)
         2. LUPIN_DEV_EMAIL env var
-        3. ~/.notifications/config -> global_notification_recipient
+        3. ~/.lupin/config -> global_notification_recipient
         4. ValueError (fail loud)
 
     Args:
@@ -892,7 +892,7 @@ def resolve_target_user( explicit_value: Optional[str] = None ) -> str:
         "Cannot resolve target_user. Set one of:\n"
         "  1. Pass target_user explicitly\n"
         "  2. Set LUPIN_DEV_EMAIL environment variable\n"
-        "  3. Configure global_notification_recipient in ~/.notifications/config"
+        "  3. Configure global_notification_recipient in ~/.lupin/config"
     )
 
 

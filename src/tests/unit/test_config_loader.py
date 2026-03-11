@@ -379,3 +379,133 @@ api_url = http://localhost:7999
 
                     with pytest.raises( ValueError, match="Missing 'api_key_file'" ):
                         get_api_config()
+
+
+class TestUnifiedConfigFile:
+    """Test that credentials and API config coexist in one unified file."""
+
+    def test_unified_file_loads_api_config( self, monkeypatch, tmp_path ):
+        """Test that API config loads from unified file containing credentials + environments."""
+        monkeypatch.delenv( 'LUPIN_API_URL', raising=False )
+        monkeypatch.delenv( 'LUPIN_API_KEY_FILE', raising=False )
+        monkeypatch.delenv( 'LUPIN_ENV', raising=False )
+
+        # Create unified config with both credentials and environments
+        unified_content = """[lupin]
+email = claude.code@lupin.deepily.ai
+password = test-password
+
+[environments]
+default = local
+
+[local]
+api_url = http://localhost:7999
+api_key_file = /tmp/unified_key
+global_notification_recipient = test@example.com
+"""
+        with patch( 'cosa.utils.config_loader.Path.home', return_value=tmp_path.parent ):
+            with patch( 'cosa.utils.config_loader.Path.exists', return_value=True ):
+                with patch( 'cosa.utils.config_loader._load_config_file' ) as mock_load:
+                    from configparser import ConfigParser
+                    mock_config = ConfigParser()
+                    mock_config.read_string( unified_content )
+                    mock_load.return_value = mock_config
+
+                    config = get_api_config()
+
+                    assert config['api_url'] == 'http://localhost:7999'
+                    assert config['api_key_file'] == '/tmp/unified_key'
+                    assert config['global_notification_recipient'] == 'test@example.com'
+
+    def test_credential_sections_do_not_interfere_with_env_sections( self, tmp_path ):
+        """Test that [lupin]/[cosa] credential sections don't break _load_config_file."""
+        unified_file = tmp_path / 'config'
+        unified_file.write_text( """[lupin]
+email = test@example.com
+password = secret
+
+[cosa]
+email = cosa@example.com
+password = secret2
+
+[environments]
+default = local
+
+[local]
+api_url = http://localhost:7999
+api_key_file = /tmp/key
+""" )
+        config = _load_config_file( unified_file )
+        assert 'environments' in config
+        assert 'local' in config
+        assert 'lupin' in config
+        assert 'cosa' in config
+        assert config['local']['api_url'] == 'http://localhost:7999'
+
+
+class TestLegacyNotificationsConfigFallback:
+    """Test that legacy ~/.notifications/config is used with deprecation warning."""
+
+    def test_legacy_notifications_config_used_when_primary_missing( self, monkeypatch, tmp_path ):
+        """Test fallback to ~/.notifications/config when ~/.lupin/config doesn't exist."""
+        monkeypatch.delenv( 'LUPIN_API_URL', raising=False )
+        monkeypatch.delenv( 'LUPIN_API_KEY_FILE', raising=False )
+        monkeypatch.delenv( 'LUPIN_ENV', raising=False )
+
+        # Create directory structure
+        lupin_dir = tmp_path / '.lupin'
+        lupin_dir.mkdir()
+        notif_dir = tmp_path / '.notifications'
+        notif_dir.mkdir()
+
+        # Only legacy config exists (no ~/.lupin/config)
+        legacy_config = notif_dir / 'config'
+        legacy_config.write_text( """[environments]
+default = local
+
+[local]
+api_url = http://legacy-notifications:7999
+api_key_file = /tmp/legacy_key
+""" )
+
+        with patch( 'cosa.utils.config_loader.Path.home', return_value=tmp_path ):
+            config = get_api_config()
+
+            assert config['api_url'] == 'http://legacy-notifications:7999'
+            assert config['api_key_file'] == '/tmp/legacy_key'
+
+    def test_primary_config_takes_precedence_over_legacy( self, monkeypatch, tmp_path ):
+        """Test that ~/.lupin/config is used when both files exist."""
+        monkeypatch.delenv( 'LUPIN_API_URL', raising=False )
+        monkeypatch.delenv( 'LUPIN_API_KEY_FILE', raising=False )
+        monkeypatch.delenv( 'LUPIN_ENV', raising=False )
+
+        # Create both config files
+        lupin_dir = tmp_path / '.lupin'
+        lupin_dir.mkdir()
+        primary_config = lupin_dir / 'config'
+        primary_config.write_text( """[environments]
+default = local
+
+[local]
+api_url = http://primary:7999
+api_key_file = /tmp/primary_key
+""" )
+
+        notif_dir = tmp_path / '.notifications'
+        notif_dir.mkdir()
+        legacy_config = notif_dir / 'config'
+        legacy_config.write_text( """[environments]
+default = local
+
+[local]
+api_url = http://legacy:7999
+api_key_file = /tmp/legacy_key
+""" )
+
+        with patch( 'cosa.utils.config_loader.Path.home', return_value=tmp_path ):
+            config = get_api_config()
+
+            # Primary should win
+            assert config['api_url'] == 'http://primary:7999'
+            assert config['api_key_file'] == '/tmp/primary_key'

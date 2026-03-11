@@ -63,7 +63,7 @@ fi
 echo ""
 echo "── Server WebSocket Sessions (localhost:7999) ──"
 
-python3 - "$HOME/.lupin/credentials.ini" << 'PYEOF'
+python3 - "$HOME/.lupin/config" << 'PYEOF'
 import configparser, json, sys
 try:
     import requests

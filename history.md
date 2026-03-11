@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.03.10 - Session 337c | Consolidate Three Credential Stores
+
+**Accomplishments**:
+- Consolidated `~/.lupin/credentials.ini`, `~/.notifications/config`, and deprecated `~/.lupin/config` into unified `~/.lupin/config` — one file, one directory, `chmod 600`
+- Updated `config_loader.py`: swapped primary/legacy paths (`~/.lupin/config` now primary, `~/.notifications/config` now legacy with deprecation warning)
+- Rewrote `hook_credentials.py`: reads unified file first, falls back to legacy `credentials.ini` with deprecation warning, extracted `_read_credentials_from_file()` helper
+- Updated `check-cc-listener-status.sh`: changed credential file path argument
+- Added `cmd_migrate()` to `lupin_config.py`: reads both legacy files, merges into unified config, backs up old files with `.bak`, enforces `chmod 600`
+- Updated `cmd_init()` to include `[lupin]` credentials placeholder section
+- Updated `cmd_show()` to display credentials status (email, password set/missing)
+- Updated help text in `notify_user_async.py`, `notify_user_sync.py`, `notification_models.py` referencing `~/.notifications/config` → `~/.lupin/config`
+- Created 16 new unit tests (`test_hook_credentials.py`), added 4 tests to `test_config_loader.py` — 40/40 pass
+- Serialized plan to `src/rnd/2026.03.10-consolidate-credential-stores.md`, added TODO entry
+
+**Files**: `src/cosa/utils/config_loader.py`, `src/lupin_cli/claude_code/hooks/lib/hook_credentials.py`, `src/scripts/check-cc-listener-status.sh`, `src/scripts/lupin_config.py`, `src/lupin_cli/notifications/notify_user_async.py`, `src/lupin_cli/notifications/notify_user_sync.py`, `src/lupin_cli/notifications/notification_models.py`, `src/tests/unit/test_config_loader.py`, `src/tests/unit/test_hook_credentials.py` (NEW), `src/rnd/2026.03.10-consolidate-credential-stores.md` (NEW), `TODO.md`
+
+---
+
 ### 2026.03.10 - Session 337b | MCP Strict Detection Plan Revision
 
 **Accomplishments**:

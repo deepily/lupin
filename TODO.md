@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-10 (Session 336)
+Last updated: 2026-03-10 (Session 337c)
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 
@@ -12,6 +12,11 @@ Last updated: 2026-03-10 (Session 336)
 
 - [x] **[LUPIN] Fix CC Notification Listener session ID drift after context clears** — Session 335: Implemented write-once lockfile (`cc-stable-{ppid}.id`) with atomic `open('x')`, passed `stable_session_id` to listener, added `accepted_ids` set for multi-hash filtering, extended stale cleanup with PID liveness check. 9 new tests, 28 total pass.
   - **Design doc**: `src/rnd/.../2026.03.10-stable-session-id-lockfile-and-listener-drift-fix.md`
+
+## HIGH PRIORITY — Consolidate Credential Stores (Session 337)
+
+- [x] **[LUPIN] Consolidate three credential/config files into unified `~/.lupin/config`** — Session 337c: Steps 1-6 implemented (code + tests). 9 files modified, 1 new test file (16 tests), 40/40 pass. Remaining: run `lupin-config migrate` on actual system (Step 7).
+  - **Plan doc**: [`src/rnd/2026.03.10-consolidate-credential-stores.md`](src/rnd/2026.03.10-consolidate-credential-stores.md)
 
 ## HIGH PRIORITY — MCP Strict Project Detection + Repo Account Validation (Session 332)
 

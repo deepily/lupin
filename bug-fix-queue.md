@@ -45,7 +45,7 @@
 - [x] ~~**Audio segment upload**~~ → Session 304 | By: 05faae8b
 - [ ] **History archive needed** — history.md at 18,951 tokens (75.8%). Archive sessions older than 14 days to stay below 17k threshold. (MEDIUM)
 - [ ] **TTS focus mode 60s safety timeout** — Prevent permanent stuck state when TTS queue items fail to play. Partially addressed (Session 164): staleness check on restore. Still need: runtime 60s timeout. File: `src/fastapi_app/static/js/notifications.js:9374-9393` (LOW)
-- [ ] **Lupin/Notifications configuration** the use of `~/.notifications/config` and `~/.lupin/config` is ambiguous. Resolve.
+- [x] ~~**Lupin/Notifications configuration** the use of `~/.notifications/config` and `~/.lupin/config` is ambiguous. Resolve.~~ → Session 337c | By: e8036972
 ---
 
 ### In Progress

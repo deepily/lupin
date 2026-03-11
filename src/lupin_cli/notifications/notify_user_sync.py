@@ -550,7 +550,7 @@ Environment Variables:
     if default_target_user:
         target_user_help += f" (default from config: {default_target_user})"
     else:
-        target_user_help += " (required - configure in ~/.notifications/config or use --target-user)"
+        target_user_help += " (required - configure in ~/.lupin/config or use --target-user)"
 
     parser.add_argument(
         "--target-user",
