@@ -34,6 +34,7 @@ Usage:
 
 import logging
 import os
+import requests
 import signal
 import sys
 import time
@@ -62,7 +63,8 @@ from cosa.utils.notification_utils import (
     convert_open_ended_batch_for_api,
     normalize_abstract as _normalize_abstract,
     extract_qualifier_comment,
-    format_qualified_response
+    format_qualified_response,
+    is_known_project
 )
 from cosa.agents.utils.sender_id import detect_project as _detect_project_shared
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
@@ -113,45 +115,59 @@ def _detect_project_from_cwd() -> Optional[ str ]:
         return None
 
 
+_PROJECT_SOURCE = "unknown"  # Set by _get_project(): "known" | "basename" | "env_var"
+
+
 def _get_project() -> str:
-    """Get project name with dynamic detection and fallback.
+    """Get project name with dynamic detection — no silent fallback.
 
     Detection priority:
         1. Auto-detect from current working directory
         2. MCP_PROJECT environment variable
-        3. Fallback to "unknown" (with warning)
+        3. RuntimeError + os._exit(1) — refuses to run as "unknown"
+
+    Sets module-level _PROJECT_SOURCE to track how the project was resolved:
+        - "known"    : auto-detected and in KNOWN_PROJECTS registry
+        - "basename" : auto-detected as cwd basename (not in registry)
+        - "env_var"  : from MCP_PROJECT environment variable
 
     Note: MCP_PROJECT can be set in MCP JSON config's env section as a default,
     but dynamic detection from cwd takes precedence for multi-project support.
     """
+    global _PROJECT_SOURCE
+
     # Priority 1: Try dynamic detection from working directory
     detected = _detect_project_from_cwd()
     if detected:
-        logger.info( f"Project auto-detected from cwd: {detected}" )
+        if is_known_project( detected ):
+            _PROJECT_SOURCE = "known"
+            logger.info( f"Project auto-detected (known): {detected}" )
+        else:
+            _PROJECT_SOURCE = "basename"
+            logger.info( f"Project auto-detected (basename): {detected}" )
         return detected
 
     # Priority 2: Check environment variable
     project = os.getenv( "MCP_PROJECT", "" ).strip()
     if project:
+        _PROJECT_SOURCE = "env_var"
         logger.info( f"Project from MCP_PROJECT env var: {project.lower()}" )
         return project.lower()
 
-    # Priority 3: Fallback to unknown with prominent warning
-    logger.warning( "=" * 60 )
-    logger.warning( "⚠️  PROJECT DETECTION FAILED - USING 'unknown'" )
-    logger.warning( "=" * 60 )
-    logger.warning( f"Current working directory: {os.getcwd()}" )
-    logger.warning( "Could not detect project from path, and MCP_PROJECT env var not set." )
-    logger.warning( "" )
-    logger.warning( "Notifications will appear as: claude.code@unknown.deepily.ai" )
-    logger.warning( "" )
-    logger.warning( "To fix, either:" )
-    logger.warning( "  1. Run Claude Code from within a known project directory" )
-    logger.warning( "  2. Set MCP_PROJECT in your MCP config's env section:" )
-    logger.warning( '     "env": { "MCP_PROJECT": "your-project-name" }' )
-    logger.warning( "=" * 60 )
+    # Priority 3: Hard failure — refuse to run as "unknown"
+    logger.critical( "=" * 60 )
+    logger.critical( "PROJECT DETECTION FAILED — MCP SERVER CANNOT START" )
+    logger.critical( "=" * 60 )
+    logger.critical( f"Current working directory: {os.getcwd()}" )
+    logger.critical( "Could not detect project from path, and MCP_PROJECT env var not set." )
+    logger.critical( "" )
+    logger.critical( "To fix, either:" )
+    logger.critical( "  1. Run Claude Code from within a known project directory" )
+    logger.critical( "  2. Set MCP_PROJECT in your MCP config's env section:" )
+    logger.critical( '     "env": { "MCP_PROJECT": "your-project-name" }' )
+    logger.critical( "=" * 60 )
 
-    return "unknown"
+    os._exit( 1 )
 
 
 def _get_sender_id( project: str, session_id: str = None ) -> str:
@@ -166,6 +182,108 @@ def _get_sender_id( project: str, session_id: str = None ) -> str:
     """
     from cosa.agents.utils.sender_id import build_sender_id
     return build_sender_id( "claude.code", project=project, suffix=session_id )
+
+
+# ============================================================================
+# Repo Account Validation
+# ============================================================================
+
+ERROR_SENDER_ID = "claude.code@errors.deepily.ai"
+
+
+def _send_validation_error( detail: str ) -> None:
+    """
+    Send urgent notification about a validation failure.
+
+    Requires:
+        - Lupin FastAPI server is running (for notification delivery)
+
+    Ensures:
+        - Sends urgent-priority notification from ERROR_SENDER_ID
+        - Logs critical message regardless of notification success
+        - Never raises (all exceptions caught)
+    """
+    msg = f"COSA-VOICE MCP VALIDATION FAILED\n\n{detail}"
+    logger.critical( msg )
+    try:
+        request = AsyncNotificationRequest(
+            message           = msg,
+            notification_type = NotificationType.TASK,
+            priority          = NotificationPriority( "urgent" ),
+            sender_id         = ERROR_SENDER_ID
+        )
+        notify_user_async( request=request, debug=False )
+    except Exception as e:
+        logger.warning( f"Could not send validation error notification: {e}" )
+
+
+def _validate_repo_account( project: str ) -> None:
+    """
+    Validate that a Lupin service account exists for this project.
+
+    Checks:
+        1. Credentials exist in ~/.lupin/config for [project] section
+        2. Login succeeds via POST /auth/login
+
+    On failure, sends an urgent notification with setup instructions via
+    the synthetic claude.code@errors.deepily.ai sender. Tools continue
+    working in degraded mode — this does not crash the server.
+
+    Requires:
+        - SERVER_URL is set
+        - project is a non-empty string
+
+    Ensures:
+        - On success: logs confirmation, returns normally
+        - On failure: sends urgent notification, logs critical, returns normally
+    """
+    from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
+
+    expected_email = f"claude.code@{project}.deepily.ai"
+
+    # Check 1: Credentials exist in config file
+    try:
+        email, password = get_hook_credentials( project )
+    except ( FileNotFoundError, ValueError ) as e:
+        _send_validation_error(
+            f"No credentials for project '{project}'.\n{e}\n\n"
+            f"To fix:\n"
+            f"1. Open the Admin UI: {SERVER_URL}/app/admin/users\n"
+            f"2. Create a new user account with email: {expected_email}\n"
+            f"3. Add credentials to ~/.lupin/config:\n"
+            f"   [{project}]\n"
+            f"   email = {expected_email}\n"
+            f"   password = <the password you set in the admin UI>\n\n"
+            f"Once the account exists, the CC Notification Listener can authenticate\n"
+            f"via WebSocket and auto-start receiving hook events for this repo."
+        )
+        return
+
+    # Check 2: Login works
+    try:
+        resp = requests.post(
+            f"{SERVER_URL}/auth/login",
+            json={ "email": email, "password": password },
+            timeout=5
+        )
+        if resp.status_code != 200:
+            _send_validation_error(
+                f"Login failed for {email} (HTTP {resp.status_code}).\n"
+                f"Account may not exist or may be disabled.\n\n"
+                f"To fix:\n"
+                f"1. Open the Admin UI: {SERVER_URL}/app/admin/users\n"
+                f"2. Verify or create the user account: {expected_email}\n"
+                f"3. Check that the password in ~/.lupin/config [{project}] matches"
+            )
+            return
+    except requests.ConnectionError:
+        _send_validation_error(
+            f"Cannot reach Lupin server at {SERVER_URL}.\n"
+            f"Ensure FastAPI is running: src/scripts/run-fastapi-lupin.sh"
+        )
+        return
+
+    logger.info( f"Repo account validated: {email}" )
 
 
 # ============================================================================
@@ -191,10 +309,13 @@ SERVER_URL      = _get_server_url()
 _session_ready  = threading.Event()   # Gate: blocks tool calls until session ID resolved
 _session_failed = False               # True if real ID never arrived (fallback only)
 
-logger.info( f"Project: {PROJECT}" )
+logger.info( f"Project: {PROJECT} (source: {_PROJECT_SOURCE})" )
 logger.info( f"Session ID: {SESSION_ID}" )
 logger.info( f"Sender ID: {SENDER_ID}" )
 logger.info( f"Server URL: {SERVER_URL}" )
+
+# Validate repo service account (non-blocking — logs + notifies on failure)
+_validate_repo_account( PROJECT )
 
 
 def _session_watcher_thread():
@@ -831,11 +952,12 @@ def get_session_info() -> dict:
     """
     resolved_sender = _wait_for_sender_id()
     info = {
-        "project"    : PROJECT,
-        "session_id" : SESSION_ID,
-        "sender_id"  : resolved_sender,
-        "server_url" : SERVER_URL,
-        "version"    : __version__
+        "project"        : PROJECT,
+        "project_source" : _PROJECT_SOURCE,
+        "session_id"     : SESSION_ID,
+        "sender_id"      : resolved_sender,
+        "server_url"     : SERVER_URL,
+        "version"        : __version__
     }
 
     # Include CC session bridge metadata when available
