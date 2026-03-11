@@ -3420,7 +3420,7 @@ class NotificationsUI {
     formatNotificationTTSMessage( notification ) {
         // Format notification message for TTS with priority prefix
         // Single source of truth for notification TTS message formatting
-        let ttsMessage = `${notification.type} notification: ${notification.message}`;
+        let ttsMessage = notification.message;
 
         // Add priority prefix for urgent notifications
         if ( notification.priority === "urgent" ) {
@@ -10109,6 +10109,16 @@ class NotificationsUI {
         iconDiv.className = 'tts-type-icon';
         iconDiv.textContent = icon;
 
+        // Timestamp span (matches .message-time styling used by conversation elements)
+        const timeSpan = document.createElement( 'span' );
+        timeSpan.className = 'message-time';
+        if ( item.notification?.time_display ) {
+            timeSpan.textContent = item.notification.time_display;
+        } else {
+            const ts = new Date( item.addedAt );
+            timeSpan.textContent = ts.toLocaleTimeString( 'en-US', { hour: '2-digit', minute: '2-digit', hour12: false } );
+        }
+
         const messageDiv = document.createElement( 'div' );
         messageDiv.className = 'tts-message';
         messageDiv.textContent = truncatedText;
@@ -10128,6 +10138,7 @@ class NotificationsUI {
         };
 
         card.appendChild( iconDiv );
+        card.appendChild( timeSpan );
         card.appendChild( messageDiv );
         card.appendChild( stopBtn );
         card.appendChild( deleteBtn );
@@ -10167,6 +10178,16 @@ class NotificationsUI {
         badgeDiv.className = 'tts-type-badge';
         badgeDiv.textContent = icon;
 
+        // Timestamp span (matches .message-time styling used by conversation elements)
+        const timeSpan = document.createElement( 'span' );
+        timeSpan.className = 'message-time';
+        if ( item.notification?.time_display ) {
+            timeSpan.textContent = item.notification.time_display;
+        } else {
+            const ts = new Date( item.addedAt );
+            timeSpan.textContent = ts.toLocaleTimeString( 'en-US', { hour: '2-digit', minute: '2-digit', hour12: false } );
+        }
+
         const textDiv = document.createElement( 'div' );
         textDiv.className = 'tts-text';
         textDiv.textContent = truncatedText;
@@ -10182,10 +10203,14 @@ class NotificationsUI {
 
         card.appendChild( positionDiv );
         card.appendChild( badgeDiv );
+        card.appendChild( timeSpan );
         card.appendChild( textDiv );
         card.appendChild( deleteBtn );
 
         container.appendChild( card );
+
+        // Re-order DOM to match ttsQueue array order (handles priority splice)
+        this.reorderTTSQueueDOM();
     }
 
     /**
@@ -10198,6 +10223,22 @@ class NotificationsUI {
                 badge.textContent = `${index + 1}`;
             }
         } );
+    }
+
+    /**
+     * Re-orders DOM children in tts-pending-queue to match ttsQueue array order.
+     * Leverages the fact that appendChild on an existing DOM node moves it.
+     */
+    reorderTTSQueueDOM() {
+        const container = document.getElementById( 'tts-pending-queue' );
+        if ( !container ) return;
+
+        this.ttsQueue.forEach( ( item ) => {
+            const card = document.getElementById( `tts-minimized-${item.id}` );
+            if ( card ) container.appendChild( card );
+        } );
+
+        this.updateTTSQueuePositions();
     }
 
     /**

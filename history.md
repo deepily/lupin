@@ -13,7 +13,14 @@
 
 **Files**:
 - `src/conf/prompts/agents/gist-stop-hook.txt` (NEW), `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/lupin_cli/claude_code/hooks/stop.py`, `src/tests/unit/test_stop_hook.py`
-**Commit**: d9defba
+**Commit**: 2840482
+
+**Post-checkpoint**:
+- Removed redundant `${notification.type} notification:` TTS prefix from `formatNotificationTTSMessage()` — message now speaks cleanly without preamble
+- Added timestamps to TTS queue cards (active + completed) using `message-time` CSS class
+- Cache-busted `notifications.js?v=20260310b`
+
+**Files**: `src/fastapi_app/static/js/notifications.js`, `src/fastapi_app/static/html/notifications.html`
 
 ---
 
