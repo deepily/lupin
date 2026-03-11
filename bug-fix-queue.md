@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-03-11T10:30:00
+**Last Updated**: 2026-03-11T11:30:00
 
 ---
 
@@ -44,8 +44,8 @@
 - [x] ~~**Fuzzy matching via voice**~~ → Session 304 | By: 05faae8b
 - [x] ~~**Job card contact failure**~~ → Session 304 | By: 05faae8b
 - [x] ~~**Audio segment upload**~~ → Session 304 | By: 05faae8b
-- [ ] **History archive needed** — history.md at 18,951 tokens (75.8%). Archive sessions older than 14 days to stay below 17k threshold. (MEDIUM)
-- [ ] **TTS focus mode 60s safety timeout** — Prevent permanent stuck state when TTS queue items fail to play. Partially addressed (Session 164): staleness check on restore. Still need: runtime 60s timeout. File: `src/fastapi_app/static/js/notifications.js:9374-9393` (LOW)
+- [x] ~~**History archive needed** — history.md at 18,951 tokens (75.8%). Archive sessions older than 14 days to stay below 17k threshold.~~ (MEDIUM) → Completed 2026-03-11
+- [x] ~~**TTS focus mode safety timeout** — Prevent permanent stuck state when TTS queue items fail to play. Implemented pause-aware safety timeout derived from notification's own `timeout_seconds` + 30s buffer.~~ → Completed 2026-03-11 | By: 9f656de9
 - [x] ~~**Lupin/Notifications configuration** the use of `~/.notifications/config` and `~/.lupin/config` is ambiguous. Resolve.~~ → Session 337c | By: e8036972
 ---
 
@@ -64,6 +64,13 @@
   - **Bug #2 — Job card contact / sender_id double-hash**: Fixed `_get_sender_id()` suffix param. Files: `cosa_interface.py` + `job.py` (podcast_generator, deep_research, deep_research_to_podcast)
   - **Bug #3 — Audio segment upload / non-interactive hang**: Added `_is_interactive()` guard in `voice_io.py`, fixed TTS cost key, pre-stitching guards in `orchestrator.py`
   - **Tests**: 37 new unit tests (`test_fuzzy_file_matching.py`, `test_target_user_dispatch.py`, `test_voice_io_non_interactive.py`)
+
+- [x] **History archive needed** — history.md at 18,951 tokens, archived to stay below 17k threshold → Completed 2026-03-11
+- [x] **TTS focus mode safety timeout** → pending commit | By: 9f656de9
+  - **Symptom**: Focus mode stays active forever if exit events never fire (server crash, network disconnect, stale WebSocket)
+  - **Root Cause**: No runtime timeout — only a staleness check on page restore (Session 164)
+  - **Fix**: Pause-aware `setTimeout`/`clearTimeout` safety timer, duration = `notification.timeout_seconds + 30s buffer` (fallback 150s). Timer pauses/resumes with notification pause button. Page restore recomputes remaining time.
+  - **File**: `src/fastapi_app/static/js/notifications.js` (7 touchpoints: constructor, enter/exit focus mode, save/restore state, pause/resume)
 
 - [x] **Duplicate notification sessions after context clear** → commit: 527b6e5 | By: 9f656de9
   - **Symptom**: Two session cards in notifications UI from single CC session after context clear

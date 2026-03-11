@@ -184,6 +184,12 @@ class NotificationsUI {
         // Focus Mode: Pause TTS queue while responding to action-required notification
         this.ttsFocusModeActive = false;         // True when queue is paused for response
         this.focusModeNotificationId = null;     // Which action-required triggered focus mode
+        this.focusModeTimeoutId = null;          // Safety timeout handle for focus mode
+        this.focusModeEnteredAt = null;          // Timestamp when focus mode entered
+        this.focusModeTimeoutMs = null;          // Duration of safety timeout (for restore)
+        this.focusModeElapsedBeforePause = null; // Elapsed ms before pause (for resume calc)
+        this.TTS_FOCUS_MODE_BUFFER_MS = 30000;   // 30s buffer beyond notification timeout
+        this.TTS_FOCUS_MODE_FALLBACK_MS = 150000; // 150s fallback if timeout_seconds unknown
 
         // Manual Pause: User-controlled pause of TTS playback (via pause button)
         this.isTTSPaused = false;                // True when user clicks pause button
@@ -10505,6 +10511,21 @@ class NotificationsUI {
         this.log( `TTS Focus Mode: ENTERING for notification ${notificationId}` );
         this.ttsFocusModeActive = true;
         this.focusModeNotificationId = notificationId;
+        this.focusModeEnteredAt = Date.now();
+
+        // Compute safety timeout from notification's own timeout + buffer
+        const state = this.actionRequiredNotifications.get( notificationId );
+        const notifTimeoutMs = state?.timeoutSeconds
+            ? state.timeoutSeconds * 1000 + this.TTS_FOCUS_MODE_BUFFER_MS
+            : this.TTS_FOCUS_MODE_FALLBACK_MS;
+        this.focusModeTimeoutMs = notifTimeoutMs;
+
+        this.log( `TTS Focus Mode: Safety timeout set to ${notifTimeoutMs / 1000}s` );
+        this.focusModeTimeoutId = setTimeout( () => {
+            this.log( `TTS Focus Mode: Safety timeout (${notifTimeoutMs / 1000}s) — auto-exiting` );
+            this.exitTTSFocusMode();
+        }, notifTimeoutMs );
+
         this.updateTTSQueueSection();
 
         // Persist focus mode state
@@ -10525,9 +10546,18 @@ class NotificationsUI {
             return;  // Not in focus mode, nothing to do
         }
 
+        // Clear safety timeout if still pending
+        if ( this.focusModeTimeoutId ) {
+            clearTimeout( this.focusModeTimeoutId );
+            this.focusModeTimeoutId = null;
+        }
+
         this.log( `TTS Focus Mode: EXITING (was for ${this.focusModeNotificationId})` );
         this.ttsFocusModeActive = false;
         this.focusModeNotificationId = null;
+        this.focusModeEnteredAt = null;
+        this.focusModeTimeoutMs = null;
+        this.focusModeElapsedBeforePause = null;
         this.updateTTSQueueSection();
 
         // Persist focus mode state change
@@ -10680,6 +10710,8 @@ class NotificationsUI {
                 queue                   : this.ttsQueue,
                 focusModeActive         : this.ttsFocusModeActive,
                 focusModeNotificationId : this.focusModeNotificationId,
+                focusModeEnteredAt      : this.focusModeEnteredAt || null,
+                focusModeTimeoutMs      : this.focusModeTimeoutMs || null,
                 isTTSPaused             : this.isTTSPaused
             };
 
@@ -10706,6 +10738,8 @@ class NotificationsUI {
             this.ttsQueue = parsed.queue || [];
             this.ttsFocusModeActive = parsed.focusModeActive || false;
             this.focusModeNotificationId = parsed.focusModeNotificationId || null;
+            this.focusModeEnteredAt = parsed.focusModeEnteredAt || null;
+            this.focusModeTimeoutMs = parsed.focusModeTimeoutMs || null;
             // NOTE: Don't restore isTTSPaused - page refresh resets audio context,
             // so we should auto-resume playback. User can pause again if needed.
             this.isTTSPaused = false;
@@ -10727,7 +10761,31 @@ class NotificationsUI {
                     this.log( `TTS Focus Mode: Stale — notification ${this.focusModeNotificationId} no longer exists, auto-exiting` );
                     this.ttsFocusModeActive = false;
                     this.focusModeNotificationId = null;
+                    this.focusModeEnteredAt = null;
+                    this.focusModeTimeoutMs = null;
                     this.saveTTSQueueState();
+                }
+            }
+
+            // Time-based staleness: if focus mode has exceeded its safety timeout, auto-exit
+            if ( this.ttsFocusModeActive && this.focusModeEnteredAt ) {
+                const elapsed = Date.now() - this.focusModeEnteredAt;
+                const timeoutMs = this.focusModeTimeoutMs || this.TTS_FOCUS_MODE_FALLBACK_MS;
+                if ( elapsed > timeoutMs ) {
+                    this.log( `TTS Focus Mode: Stale — entered ${Math.round( elapsed / 1000 )}s ago (limit: ${timeoutMs / 1000}s), auto-exiting` );
+                    this.ttsFocusModeActive = false;
+                    this.focusModeNotificationId = null;
+                    this.focusModeEnteredAt = null;
+                    this.focusModeTimeoutMs = null;
+                    this.saveTTSQueueState();
+                } else {
+                    // Still within timeout — restart timer for remaining time
+                    const remaining = timeoutMs - elapsed;
+                    this.log( `TTS Focus Mode: Restored with ${Math.round( remaining / 1000 )}s remaining on safety timeout` );
+                    this.focusModeTimeoutId = setTimeout( () => {
+                        this.log( `TTS Focus Mode: Safety timeout — auto-exiting after restore` );
+                        this.exitTTSFocusMode();
+                    }, remaining );
                 }
             }
 
@@ -12354,6 +12412,15 @@ class NotificationsUI {
         // 5. Persist state
         this.saveActionRequiredState();
 
+        // Pause focus mode safety timer if active
+        if ( this.ttsFocusModeActive && this.focusModeTimeoutId ) {
+            clearTimeout( this.focusModeTimeoutId );
+            this.focusModeTimeoutId = null;
+            // Record how much time has elapsed so we can compute remaining on resume
+            this.focusModeElapsedBeforePause = Date.now() - this.focusModeEnteredAt;
+            this.log( `TTS Focus Mode: Safety timer paused (${Math.round( this.focusModeElapsedBeforePause / 1000 )}s elapsed)` );
+        }
+
         this.log( `Pause: Notification ${notificationId} paused` );
     }
 
@@ -12408,6 +12475,23 @@ class NotificationsUI {
 
         // 6. Persist state
         this.saveActionRequiredState();
+
+        // Resume focus mode safety timer if active
+        if ( this.ttsFocusModeActive && this.focusModeTimeoutMs && !this.focusModeTimeoutId ) {
+            const elapsed = this.focusModeElapsedBeforePause || ( Date.now() - this.focusModeEnteredAt );
+            const remaining = this.focusModeTimeoutMs - elapsed;
+            if ( remaining > 0 ) {
+                this.log( `TTS Focus Mode: Safety timer resumed (${Math.round( remaining / 1000 )}s remaining)` );
+                this.focusModeTimeoutId = setTimeout( () => {
+                    this.log( `TTS Focus Mode: Safety timeout — auto-exiting` );
+                    this.exitTTSFocusMode();
+                }, remaining );
+            } else {
+                this.log( `TTS Focus Mode: Safety timeout already exceeded during pause — auto-exiting` );
+                this.exitTTSFocusMode();
+            }
+            this.focusModeElapsedBeforePause = null;
+        }
 
         this.log( `Resume: Notification ${notificationId} resumed, added ${pauseDuration}ms to timer` );
     }
