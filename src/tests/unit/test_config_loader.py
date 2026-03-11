@@ -67,31 +67,39 @@ api_key_file = /tmp/config_key_file
                     assert config['api_url'] == 'http://config-file:8888'
                     assert config['api_key_file'] == '/tmp/config_key_file'
 
-    def test_hardcoded_defaults_lowest_precedence( self, monkeypatch ):
-        """Test that hardcoded defaults are used when no other sources available."""
+    def test_raises_error_when_config_missing( self, monkeypatch ):
+        """Test that missing ~/.lupin/config raises FileNotFoundError."""
         # Ensure env vars are NOT set
         monkeypatch.delenv( 'LUPIN_API_URL', raising=False )
         monkeypatch.delenv( 'LUPIN_API_KEY_FILE', raising=False )
 
         # Mock no config file
-        with patch( 'cosa.utils.config_loader.Path.exists', return_value=False ):
-            config = get_api_config()
+        with patch( 'cosa.utils.config_loader.Path.home', return_value=Path( '/nonexistent' ) ):
+            with pytest.raises( FileNotFoundError, match="~/.lupin/config not found" ):
+                get_api_config()
 
-            assert config['api_url'] == 'http://localhost:7999'
-            assert 'notification-api-claude-code-dev' in config['api_key_file']
-
-    def test_partial_env_vars_falls_back( self, monkeypatch ):
-        """Test that partial env vars (only one set) falls back to next precedence."""
+    def test_partial_env_vars_falls_through_to_config( self, monkeypatch, tmp_path ):
+        """Test that partial env vars (only one set) falls through to config file."""
         # Only set API_URL, not KEY_FILE
         monkeypatch.setenv( 'LUPIN_API_URL', 'http://partial:7000' )
         monkeypatch.delenv( 'LUPIN_API_KEY_FILE', raising=False )
+        monkeypatch.delenv( 'LUPIN_ENV', raising=False )
 
-        # Should fall back to config file or defaults (not use partial env vars)
-        with patch( 'cosa.utils.config_loader.Path.exists', return_value=False ):
+        # Should fall through to config file (not use partial env vars)
+        with patch( 'cosa.utils.config_loader.Path.home', return_value=tmp_path ):
+            lupin_dir = tmp_path / '.lupin'
+            lupin_dir.mkdir()
+            config_file = lupin_dir / 'config'
+            config_file.write_text( """[environments]
+default = local
+
+[local]
+api_url = http://from-config:7999
+api_key_file = /tmp/config_key
+""" )
             config = get_api_config()
 
-            # Should use defaults (not partial env vars)
-            assert config['api_url'] == 'http://localhost:7999'
+            assert config['api_url'] == 'http://from-config:7999'
 
 
 class TestEnvironmentSwitching:
@@ -443,69 +451,31 @@ api_key_file = /tmp/key
         assert config['local']['api_url'] == 'http://localhost:7999'
 
 
-class TestLegacyNotificationsConfigFallback:
-    """Test that legacy ~/.notifications/config is used with deprecation warning."""
+class TestFailHardWhenConfigMissing:
+    """Test that missing ~/.lupin/config raises FileNotFoundError with migration instructions."""
 
-    def test_legacy_notifications_config_used_when_primary_missing( self, monkeypatch, tmp_path ):
-        """Test fallback to ~/.notifications/config when ~/.lupin/config doesn't exist."""
+    def test_raises_file_not_found_with_migration_message( self, monkeypatch ):
+        """Test FileNotFoundError includes lupin-config init/migrate instructions."""
         monkeypatch.delenv( 'LUPIN_API_URL', raising=False )
         monkeypatch.delenv( 'LUPIN_API_KEY_FILE', raising=False )
-        monkeypatch.delenv( 'LUPIN_ENV', raising=False )
 
-        # Create directory structure
-        lupin_dir = tmp_path / '.lupin'
-        lupin_dir.mkdir()
-        notif_dir = tmp_path / '.notifications'
-        notif_dir.mkdir()
+        with patch( 'cosa.utils.config_loader.Path.home', return_value=Path( '/nonexistent' ) ):
+            with pytest.raises( FileNotFoundError ) as exc_info:
+                get_api_config()
 
-        # Only legacy config exists (no ~/.lupin/config)
-        legacy_config = notif_dir / 'config'
-        legacy_config.write_text( """[environments]
-default = local
+            error_msg = str( exc_info.value )
+            assert "~/.lupin/config not found" in error_msg
+            assert "lupin-config init" in error_msg
+            assert "lupin-config migrate" in error_msg
 
-[local]
-api_url = http://legacy-notifications:7999
-api_key_file = /tmp/legacy_key
-""" )
+    def test_env_vars_bypass_config_file_requirement( self, monkeypatch ):
+        """Test that env vars work even when config file is missing."""
+        monkeypatch.setenv( 'LUPIN_API_URL', 'http://env-only:9000' )
+        monkeypatch.setenv( 'LUPIN_API_KEY_FILE', '/tmp/env_key' )
 
-        with patch( 'cosa.utils.config_loader.Path.home', return_value=tmp_path ):
+        # Even with no config file, env vars should work
+        with patch( 'cosa.utils.config_loader.Path.home', return_value=Path( '/nonexistent' ) ):
             config = get_api_config()
 
-            assert config['api_url'] == 'http://legacy-notifications:7999'
-            assert config['api_key_file'] == '/tmp/legacy_key'
-
-    def test_primary_config_takes_precedence_over_legacy( self, monkeypatch, tmp_path ):
-        """Test that ~/.lupin/config is used when both files exist."""
-        monkeypatch.delenv( 'LUPIN_API_URL', raising=False )
-        monkeypatch.delenv( 'LUPIN_API_KEY_FILE', raising=False )
-        monkeypatch.delenv( 'LUPIN_ENV', raising=False )
-
-        # Create both config files
-        lupin_dir = tmp_path / '.lupin'
-        lupin_dir.mkdir()
-        primary_config = lupin_dir / 'config'
-        primary_config.write_text( """[environments]
-default = local
-
-[local]
-api_url = http://primary:7999
-api_key_file = /tmp/primary_key
-""" )
-
-        notif_dir = tmp_path / '.notifications'
-        notif_dir.mkdir()
-        legacy_config = notif_dir / 'config'
-        legacy_config.write_text( """[environments]
-default = local
-
-[local]
-api_url = http://legacy:7999
-api_key_file = /tmp/legacy_key
-""" )
-
-        with patch( 'cosa.utils.config_loader.Path.home', return_value=tmp_path ):
-            config = get_api_config()
-
-            # Primary should win
-            assert config['api_url'] == 'http://primary:7999'
-            assert config['api_key_file'] == '/tmp/primary_key'
+            assert config['api_url'] == 'http://env-only:9000'
+            assert config['api_key_file'] == '/tmp/env_key'

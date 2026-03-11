@@ -3,7 +3,6 @@
 Credential resolution for Claude Code hook infrastructure.
 
 Reads per-project credentials from the unified config file ~/.lupin/config.
-Falls back to legacy ~/.lupin/credentials.ini with deprecation warning.
 
 Used by the CC Notification Listener and hook scripts that need authenticated
 access to the Lupin API.
@@ -26,7 +25,7 @@ INI Format (unified ~/.lupin/config):
 
 Resolution:
     1. Derive project name from cwd (basename of project root)
-    2. Try ~/.lupin/config first, then legacy ~/.lupin/credentials.ini
+    2. Read ~/.lupin/config (fail hard if missing)
     3. Read matching INI section
     4. Return (email, password) tuple
 
@@ -37,15 +36,13 @@ Usage:
 
 import configparser
 import os
-import sys
 from pathlib import Path
 from typing import Tuple, Optional
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-CREDENTIALS_FILE        = Path.home() / ".lupin" / "config"
-LEGACY_CREDENTIALS_FILE = Path.home() / ".lupin" / "credentials.ini"
+CREDENTIALS_FILE = Path.home() / ".lupin" / "config"
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -55,13 +52,12 @@ def get_hook_credentials( project: Optional[str] = None ) -> Tuple[str, str]:
     Resolve hook credentials from INI file for the current project.
 
     Requires:
-        - ~/.lupin/config or ~/.lupin/credentials.ini exists
+        - ~/.lupin/config exists
         - INI file has a section matching the project name
 
     Ensures:
         - Returns ( email, password ) tuple on success
-        - Tries ~/.lupin/config first, falls back to ~/.lupin/credentials.ini
-        - Raises FileNotFoundError if no credentials file found
+        - Raises FileNotFoundError if ~/.lupin/config not found
         - Raises ValueError if project section or required keys are missing
 
     Args:
@@ -77,46 +73,20 @@ def get_hook_credentials( project: Optional[str] = None ) -> Tuple[str, str]:
     if project is None:
         project = _derive_project_name()
 
-    # Try unified config file first
-    if CREDENTIALS_FILE.exists():
-        result = _read_credentials_from_file( CREDENTIALS_FILE, project )
-        if result is not None:
-            return result
-
-    # Fallback to legacy credentials.ini
-    if LEGACY_CREDENTIALS_FILE.exists():
-        print( f"⚠️  DEPRECATED: Reading credentials from legacy file: {LEGACY_CREDENTIALS_FILE}", file=sys.stderr )
-        print( f"   Please migrate to: {CREDENTIALS_FILE}", file=sys.stderr )
-        print( f"   Run: lupin-config migrate", file=sys.stderr )
-
-        result = _read_credentials_from_file( LEGACY_CREDENTIALS_FILE, project )
-        if result is not None:
-            return result
-
-    # Neither file exists or neither has the project section
-    if not CREDENTIALS_FILE.exists() and not LEGACY_CREDENTIALS_FILE.exists():
+    if not CREDENTIALS_FILE.exists():
         raise FileNotFoundError(
-            f"No credentials file found.\n"
-            f"Create {CREDENTIALS_FILE} with:\n"
-            f"  mkdir -p ~/.lupin\n"
-            f"  cat > {CREDENTIALS_FILE} << 'EOF'\n"
-            f"  [lupin]\n"
-            f"  email = claude.code@lupin.deepily.ai\n"
-            f"  password = your-password-here\n"
-            f"\n"
-            f"  [environments]\n"
-            f"  default = local\n"
-            f"\n"
-            f"  [local]\n"
-            f"  api_url = http://localhost:7999\n"
-            f"  api_key_file = /path/to/key\n"
-            f"  EOF\n"
-            f"  chmod 600 {CREDENTIALS_FILE}"
+            f"~/.lupin/config not found.\n"
+            f"Create it with: lupin-config init\n"
+            f"Or migrate from legacy files: lupin-config migrate"
         )
 
-    # Files exist but project section not found in either
+    result = _read_credentials_from_file( CREDENTIALS_FILE, project )
+    if result is not None:
+        return result
+
+    # File exists but project section not found
     raise ValueError(
-        f"No [{project}] section found in {CREDENTIALS_FILE} or {LEGACY_CREDENTIALS_FILE}\n"
+        f"No [{project}] section found in {CREDENTIALS_FILE}\n"
         f"Add a [{project}] section with 'email' and 'password' keys."
     )
 
@@ -186,10 +156,8 @@ def _derive_project_name() -> str:
 
 if __name__ == "__main__":
 
-    print( f"Primary credentials file: {CREDENTIALS_FILE}" )
+    print( f"Credentials file: {CREDENTIALS_FILE}" )
     print( f"  Exists: {CREDENTIALS_FILE.exists()}" )
-    print( f"Legacy credentials file: {LEGACY_CREDENTIALS_FILE}" )
-    print( f"  Exists: {LEGACY_CREDENTIALS_FILE.exists()}" )
     print( f"Derived project: {_derive_project_name()}" )
 
     try:

@@ -147,7 +147,7 @@ if [ "$TESTS_FAILED" -eq 0 ]; then
     echo "  Service URL: $SERVICE_URL"
     echo ""
     echo "Next steps:"
-    echo "  1. Update ~/.notifications/config with this URL"
+    echo "  1. Update ~/.lupin/config with this URL"
     echo "  2. Test notifications: notify-claude-async \"Test from local to Cloud Run\""
     echo "  3. Open Notifications UI: $SERVICE_URL/static/html/notifications.html"
 else

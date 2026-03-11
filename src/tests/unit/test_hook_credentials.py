@@ -15,7 +15,6 @@ from lupin_cli.claude_code.hooks.lib.hook_credentials import (
     _derive_project_name,
     _read_credentials_from_file,
     CREDENTIALS_FILE,
-    LEGACY_CREDENTIALS_FILE,
 )
 
 
@@ -61,73 +60,36 @@ password = cosa-pass
             assert email == "cosa@test.com"
             assert password == "cosa-pass"
 
-    def test_falls_back_to_legacy_credentials_ini( self, tmp_path ):
-        """Test fallback to ~/.lupin/credentials.ini when unified config missing."""
-        nonexistent = tmp_path / 'nonexistent'
-        legacy_file = tmp_path / 'credentials.ini'
-        legacy_file.write_text( """[lupin]
-email = legacy@test.com
-password = legacy-pass
-""" )
+    def test_raises_file_not_found_when_config_missing( self, tmp_path ):
+        """Test FileNotFoundError when ~/.lupin/config doesn't exist."""
+        nonexistent = tmp_path / 'config'
 
         with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.CREDENTIALS_FILE', nonexistent ):
-            with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.LEGACY_CREDENTIALS_FILE', legacy_file ):
-                email, password = get_hook_credentials( project="lupin" )
+            with pytest.raises( FileNotFoundError, match="~/.lupin/config not found" ):
+                get_hook_credentials( project="lupin" )
 
-                assert email == "legacy@test.com"
-                assert password == "legacy-pass"
+    def test_raises_file_not_found_with_migration_instructions( self, tmp_path ):
+        """Test FileNotFoundError includes lupin-config init/migrate instructions."""
+        nonexistent = tmp_path / 'config'
 
-    def test_falls_back_when_section_missing_in_unified( self, tmp_path ):
-        """Test fallback to legacy when unified file exists but lacks project section."""
-        unified_file = tmp_path / 'config'
-        unified_file.write_text( """[environments]
-default = local
+        with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.CREDENTIALS_FILE', nonexistent ):
+            with pytest.raises( FileNotFoundError ) as exc_info:
+                get_hook_credentials( project="lupin" )
 
-[local]
-api_url = http://localhost:7999
-api_key_file = /tmp/key
-""" )
+            error_msg = str( exc_info.value )
+            assert "lupin-config init" in error_msg
+            assert "lupin-config migrate" in error_msg
 
-        legacy_file = tmp_path / 'credentials.ini'
-        legacy_file.write_text( """[lupin]
-email = legacy@test.com
-password = legacy-pass
-""" )
-
-        with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.CREDENTIALS_FILE', unified_file ):
-            with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.LEGACY_CREDENTIALS_FILE', legacy_file ):
-                email, password = get_hook_credentials( project="lupin" )
-
-                assert email == "legacy@test.com"
-                assert password == "legacy-pass"
-
-    def test_raises_file_not_found_when_no_files( self, tmp_path ):
-        """Test FileNotFoundError when neither file exists."""
-        nonexistent1 = tmp_path / 'config'
-        nonexistent2 = tmp_path / 'credentials.ini'
-
-        with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.CREDENTIALS_FILE', nonexistent1 ):
-            with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.LEGACY_CREDENTIALS_FILE', nonexistent2 ):
-                with pytest.raises( FileNotFoundError, match="No credentials file found" ):
-                    get_hook_credentials( project="lupin" )
-
-    def test_raises_value_error_when_section_missing_everywhere( self, tmp_path ):
-        """Test ValueError when project section not found in any file."""
-        unified_file = tmp_path / 'config'
-        unified_file.write_text( """[environments]
+    def test_raises_value_error_when_section_missing( self, tmp_path ):
+        """Test ValueError when project section not found in config."""
+        config_file = tmp_path / 'config'
+        config_file.write_text( """[environments]
 default = local
 """ )
 
-        legacy_file = tmp_path / 'credentials.ini'
-        legacy_file.write_text( """[other_project]
-email = other@test.com
-password = pass
-""" )
-
-        with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.CREDENTIALS_FILE', unified_file ):
-            with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.LEGACY_CREDENTIALS_FILE', legacy_file ):
-                with pytest.raises( ValueError, match="No \\[lupin\\] section found" ):
-                    get_hook_credentials( project="lupin" )
+        with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.CREDENTIALS_FILE', config_file ):
+            with pytest.raises( ValueError, match="No \\[lupin\\] section found" ):
+                get_hook_credentials( project="lupin" )
 
     def test_raises_value_error_for_missing_email( self, tmp_path ):
         """Test ValueError when email key is missing."""
@@ -221,7 +183,3 @@ class TestConstants:
     def test_credentials_file_points_to_unified_config( self ):
         """Test that CREDENTIALS_FILE points to ~/.lupin/config."""
         assert CREDENTIALS_FILE == Path.home() / ".lupin" / "config"
-
-    def test_legacy_file_points_to_credentials_ini( self ):
-        """Test that LEGACY_CREDENTIALS_FILE points to ~/.lupin/credentials.ini."""
-        assert LEGACY_CREDENTIALS_FILE == Path.home() / ".lupin" / "credentials.ini"

@@ -1,5 +1,17 @@
 # Lupin Project History
 
+### 2026.03.11 - Session 339 | Harden Config Migration: Fail-Hard + Script Cleanup
+
+**Accomplishments**:
+- Removed legacy fallback from `config_loader.py`: deleted `~/.notifications/config` fallback, `target_user` deprecated key fallback, and Priority 3 hardcoded defaults. Missing `~/.lupin/config` now raises `FileNotFoundError` with `lupin-config init/migrate` instructions.
+- Removed legacy fallback from `hook_credentials.py`: deleted `LEGACY_CREDENTIALS_FILE` constant and `~/.lupin/credentials.ini` fallback. Simplified error messages to reference only `~/.lupin/config`.
+- Updated cloud-run scripts: `~/.notifications/config` → `~/.lupin/config` in both `cloud-run-deploy.sh` and `cloud-run-validate.sh`.
+- Rewrote unit tests: replaced 5 legacy fallback tests with 5 fail-hard tests across both test files. 38/38 pass (24 config_loader + 14 hook_credentials).
+
+**Files**: `src/cosa/utils/config_loader.py`, `src/lupin_cli/claude_code/hooks/lib/hook_credentials.py`, `src/scripts/cloud-run-deploy.sh`, `src/scripts/cloud-run-validate.sh`, `src/tests/unit/test_config_loader.py`, `src/tests/unit/test_hook_credentials.py`
+
+---
+
 ### 2026.03.11 - Session 338 | Credential Migration Step 7 + Duplicate Session Bug
 
 #### Checkpoint | 2026.03.11 | Credential migration executed on live system
