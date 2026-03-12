@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.12 - Integration Test Hot-Swap Config
+- **Plan + Implementation**: [2026.03.12-integration-test-hot-swap-config.md](2026.03.12-integration-test-hot-swap-config.md) - Hot-swap the running dev server between Development and Testing config blocks via `/api/init` + `swap_database()`. Eliminates need for separate test server (GPU RAM constraint). 6 phases: server-info endpoint, swap_database() function, /api/init config_block_id param, integration runner rewrite, smoke test validation, WebSocket guard. Phases 1-5 complete, Phase 6 (DB name disambiguation) deferred.
+
 ### 2026.03.11 - Integration Test Isolation Audit & Remediation Plan
 - **Audit**: [2026.03.11-integration-test-isolation-audit.md](2026.03.11-integration-test-isolation-audit.md) - Comprehensive audit of test tier architecture and database isolation gaps. Integration tests fail with "Email already registered" due to configuration boundary gap: dev-server tests and test-server tests share port 7999 with no config validation or database boundary checks. 5-phase remediation plan: server-info endpoint, pre-flight validation, post-startup verification, WebSocket guard, clean_test_db hardening.
 

@@ -54,6 +54,9 @@ class LupinTestClient:
         # Attempt real JWT login using environment credentials
         self.login()
 
+        # Warn if server is in Testing mode (smoke tests expect Development)
+        self._validate_server_config()
+
         if self.debug:
             print( f"[TEST CLIENT] Initialized with base_url={base_url}, session_id={self.session_id}" )
 
@@ -127,7 +130,31 @@ class LupinTestClient:
             - Returns string in format 'Bearer {token}'
         """
         return self.auth_token
-    
+
+    def _validate_server_config( self ):
+        """
+        Check server config block via /api/server-info and warn if in Testing mode.
+
+        Smoke tests expect the server to be in Development mode. If the server
+        is in Testing mode (e.g. left over from an integration test run),
+        results may be unreliable.
+
+        Ensures:
+            - Prints warning if server is in Testing mode
+            - Gracefully handles missing endpoint (older server versions)
+        """
+        try:
+            resp = requests.get( f"{self.base_url}/api/server-info", timeout=2 )
+            if resp.status_code == 200:
+                info         = resp.json()
+                config_block = info.get( "config_block_id", "" )
+                if "Testing" in config_block:
+                    print( f"[TEST CLIENT] ⚠ Server is in Testing mode ({config_block})" )
+                    print( f"[TEST CLIENT] ⚠ Smoke tests expect Development mode" )
+                    print( f"[TEST CLIENT] ⚠ Database: {info.get( 'database_url', 'unknown' )}" )
+        except Exception:
+            pass  # Endpoint may not exist on older server versions
+
     async def http_request(self, method: str, endpoint: str, **kwargs) -> httpx.Response:
         """
         Make HTTP request with automatic authentication.

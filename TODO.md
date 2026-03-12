@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-11 (Session 341)
+Last updated: 2026-03-12 (Session 343)
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 
@@ -55,6 +55,12 @@ Last updated: 2026-03-11 (Session 341)
 ---
 
 ## v0.1.6 — FUTURE DEVELOPMENT
+
+### Disambiguate Database Names (Session 343)
+
+- [ ] **[LUPIN] Phase 6: Rename lupin_db → lupin_db_dev and lupin_db_prod** — Development and production both default to `lupin_db`, which is ambiguous and risky. 67 references across project (3 code files, 2 config, 8 docs). Requires PostgreSQL `ALTER DATABASE RENAME` + full test suite validation.
+  - **Plan doc**: [`src/rnd/2026.03.12-integration-test-hot-swap-config.md`](src/rnd/2026.03.12-integration-test-hot-swap-config.md) (Phase 6 section)
+  - **Priority**: Medium — safety net from Phases 1-5 makes this safe to execute
 
 ### INI Config Key Naming Convention — Standardize on Spaces (Session 256)
 

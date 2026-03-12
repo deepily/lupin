@@ -94,7 +94,7 @@ EOF
 # Function to check if server is running
 check_server_health() {
     log_info "Checking FastAPI server health at $SERVER_URL..."
-    
+
     if command -v curl >/dev/null 2>&1; then
         # Use curl if available
         if curl -s -f "$HEALTH_ENDPOINT" >/dev/null; then
@@ -118,6 +118,47 @@ check_server_health() {
         log_warning "Assuming server is running on $SERVER_URL"
         return 0
     fi
+}
+
+# Function to check server config block (warn if in Testing mode)
+check_server_config() {
+    log_info "Checking server configuration..."
+
+    local server_info
+    server_info=$(python3 -c "
+import urllib.request, json, sys
+try:
+    resp = urllib.request.urlopen( '${SERVER_URL}/api/server-info', timeout=2 )
+    info = json.loads( resp.read() )
+    print( info.get( 'config_block_id', 'unknown' ) )
+    print( info.get( 'database_url', 'unknown' ) )
+except Exception:
+    print( 'unavailable' )
+    print( 'unavailable' )
+" 2>/dev/null)
+
+    local config_block
+    local database_url
+    config_block=$(echo "$server_info" | head -1)
+    database_url=$(echo "$server_info" | tail -1)
+
+    if [ "$config_block" = "unavailable" ]; then
+        log_warning "Could not query /api/server-info — skipping config check"
+        return 0
+    fi
+
+    log_info "Server config block: $config_block"
+    log_info "Server database: $database_url"
+
+    if echo "$config_block" | grep -qi "testing"; then
+        log_warning "Server is in TESTING mode — WebSocket smoke tests expect Development mode"
+        log_warning "Results may be unreliable. Swap back with:"
+        log_warning "  curl 'http://localhost:7999/api/init?config_block_id=Lupin:+Development'"
+    else
+        log_success "Server is in Development mode"
+    fi
+
+    return 0
 }
 
 # Function to check test credentials
@@ -333,6 +374,9 @@ main() {
         log_info "Run: cd src && python -m uvicorn fastapi_app.main:app --port 7999"
         exit 1
     fi
+
+    # Check server config (warn if in Testing mode, don't block)
+    check_server_config
 
     if ! check_python_deps; then
         log_error "Python dependencies not satisfied"

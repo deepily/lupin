@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.03.12 - Session 343 | Integration Test Isolation via Hot-Swap Config
+
+**Accomplishments**:
+- Implemented hot-swap config mechanism: running dev server can toggle between `[Lupin: Development]` and `[Lupin: Testing]` config blocks at runtime via `/api/init?config_block_id=...`
+- Added `GET /api/server-info` endpoint (no auth) returning config block, masked DB URL, and environment
+- Added `swap_database()` function to `database.py`: disposes old engine, recreates engine/SessionLocal/ScopedSession for new environment, verifies connectivity
+- Updated `/api/init` to accept optional `config_block_id` query param, update the singleton ConfigurationManager in-place, and call `swap_database()`
+- Rewrote `run-integration-tests.sh`: now hot-swaps running dev server instead of starting a separate test server (solves GPU RAM constraint); trap handler always restores Development config on exit
+- Hardened `clean_test_db` fixture: safety assertion verifies `lupin_db_test` in engine URL before destructive ops; verifies users table empty after reset
+- Added `_validate_server_config()` to `LupinTestClient` (warns if server in Testing mode during smoke tests)
+- Added `check_server_config()` to WebSocket smoke test runner (same pattern)
+- Verified full hot-swap cycle: Development → Testing → Development
+- Unit tests: 2075/2075 pass; Integration tests: 199/225 pass (12 pre-existing failures)
+- Serialized plan to `src/rnd/2026.03.12-integration-test-hot-swap-config.md`
+
+**Files**: `src/cosa/rest/routers/system.py`, `src/cosa/rest/db/database.py`, `src/tests/integration/conftest.py`, `src/tests/run-integration-tests.sh`, `src/tests/lupin_smoke/utilities.py`, `src/scripts/run-websocket-smoke-tests.sh`, `src/rnd/2026.03.12-integration-test-hot-swap-config.md` (NEW), `src/rnd/README.md`
+
+---
+
 ### 2026.03.12 - Session 342 | Fix Session ID Drift Across Hooks After Context Clear
 
 **Accomplishments**:

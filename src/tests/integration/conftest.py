@@ -37,26 +37,24 @@ BASE_URL = "http://localhost:7999"
 @pytest.fixture( scope="session", autouse=True )
 def verify_test_environment():
     """
-    One-time validation that server is running with correct Testing configuration.
+    One-time validation that server is running with Testing configuration.
 
     Runs once at start of entire test session (scope="session").
+    Checks /api/server-info to confirm the hot-swap to Testing config
+    has taken effect (database points to lupin_db_test).
 
     Requires:
         - Server running on port 7999
-        - Server started with [Lupin: Testing] config block
+        - Server hot-swapped to [Lupin: Testing] via /api/init
 
     Ensures:
         - Server is accessible and responsive
-        - Config environment variable set at module level (before imports)
-        - Prints clear startup message with configuration
+        - Config block is [Lupin: Testing]
+        - Database URL contains lupin_db_test
         - Aborts entire test suite if environment invalid
 
     Raises:
         - RuntimeError: Server not accessible or misconfigured
-
-    Note:
-        LUPIN_CONFIG_MGR_CLI_ARGS is set at module level (top of conftest.py)
-        to ensure config_mgr singleton initializes correctly before any imports.
     """
     print( "\n" + "="*60 )
     print( "INTEGRATION TEST ENVIRONMENT VALIDATION" )
@@ -69,11 +67,28 @@ def verify_test_environment():
             raise RuntimeError( f"Server health check failed: {health_response.status_code}" )
 
         print( f"✓ Server accessible at {BASE_URL}" )
-        print( f"✓ LUPIN_CONFIG_MGR_CLI_ARGS set to Testing block" )
-        print( "\nREQUIRED SERVER STARTUP:" )
-        print( "  export LUPIN_CONFIG_MGR_CLI_ARGS=\"config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing\"" )
-        print( "  ./src/scripts/run-fastapi-lupin.sh" )
-        print( "\nOR use automated test runner:" )
+
+        # Verify server is in Testing mode via /api/server-info
+        info_response = requests.get( f"{BASE_URL}/api/server-info", timeout=2 )
+        if info_response.status_code == 200:
+            info = info_response.json()
+            config_block = info.get( "config_block_id", "unknown" )
+            db_url       = info.get( "database_url", "unknown" )
+
+            print( f"✓ Config block: {config_block}" )
+            print( f"✓ Database URL: {db_url}" )
+
+            if "lupin_db_test" not in db_url:
+                raise RuntimeError(
+                    f"Server database is NOT lupin_db_test!\n"
+                    f"  Current: {db_url}\n\n"
+                    f"Run integration tests via:\n"
+                    f"  ./src/tests/run-integration-tests.sh -v"
+                )
+        else:
+            print( f"⚠ /api/server-info returned {info_response.status_code} — skipping config validation" )
+
+        print( "\nUse automated test runner:" )
         print( "  ./src/tests/run-integration-tests.sh -v" )
         print( "="*60 + "\n" )
 
@@ -81,10 +96,7 @@ def verify_test_environment():
         raise RuntimeError(
             f"\n{'='*60}\n"
             f"ERROR: Cannot connect to test server at {BASE_URL}\n\n"
-            f"Please start server with:\n"
-            f"  export LUPIN_CONFIG_MGR_CLI_ARGS=\"config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing\"\n"
-            f"  ./src/scripts/run-fastapi-lupin.sh\n\n"
-            f"OR use automated test runner:\n"
+            f"Please start the dev server, then run:\n"
             f"  ./src/tests/run-integration-tests.sh -v\n"
             f"{'='*60}\n"
         )
@@ -95,27 +107,33 @@ def clean_test_db():
     """
     Clean PostgreSQL test database before each test.
 
-    Uses LUPIN_ENV=testing environment variable (set by run-integration-tests.sh)
-    to automatically select the lupin_db_test database.
+    Uses hot-swap mechanism: the integration test runner calls /api/init
+    to swap the running dev server to [Lupin: Testing] config block,
+    which points to lupin_db_test.
 
     Safety Mechanism:
-        - LUPIN_ENV=testing ensures test database (lupin_db_test) is used
-        - Separate from development database (lupin_db)
+        - Asserts engine.url contains 'lupin_db_test' before any destructive ops
+        - Verifies users table is empty after schema reset
         - DROP/CREATE provides complete isolation between tests
 
     Requires:
         - PostgreSQL Docker container running (lupin-postgres-dev)
-        - LUPIN_ENV=testing environment variable set
-        - FastAPI server running with Testing config block
+        - Server hot-swapped to Testing config (lupin_db_test)
 
     Ensures:
         - Fresh database schema before each test
         - Complete isolation between tests
         - Tests never affect development database
     """
-    # Import PostgreSQL database engine and models
-    from cosa.rest.db.database import engine
+    # Re-import to get the current (possibly hot-swapped) engine
+    from cosa.rest.db import database as db_module
     from cosa.rest.postgres_models import Base
+    from sqlalchemy import text
+
+    engine = db_module.engine
+    db_url = str( engine.url )
+    assert "lupin_db_test" in db_url, \
+        f"SAFETY: clean_test_db must only run against lupin_db_test, got: {db_url}"
 
     # Drop all tables (complete cleanup)
     Base.metadata.drop_all( bind=engine )
@@ -123,11 +141,12 @@ def clean_test_db():
     # Recreate all tables with fresh schema
     Base.metadata.create_all( bind=engine )
 
-    yield
+    # Verify the reset worked
+    with engine.connect() as conn:
+        count = conn.execute( text( "SELECT count(*) FROM users" ) ).scalar()
+        assert count == 0, f"SAFETY: users table not empty after clean ({count} rows)"
 
-    # Optional: Cleanup after test
-    # (Next test will drop/create anyway, so this is redundant)
-    # Base.metadata.drop_all(bind=engine)
+    yield
 
 
 @pytest.fixture( scope="function" )
