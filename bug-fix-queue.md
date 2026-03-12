@@ -33,6 +33,7 @@
 | 0e73eb8e | 2026-02-28T21:00:00 | 2026-02-28T22:00:00 | closed |
 | 98958f70 | 2026-02-28T23:00:00 | 2026-02-28T23:45:00 | closed |
 | 9f656de9 | 2026-03-11T10:00:00 | 2026-03-11T10:30:00 | active |
+| 59afa5ba | 2026-03-12T17:25:00 | 2026-03-12T18:15:00 | committed |
 
 ---
 
@@ -47,6 +48,7 @@
 - [x] ~~**History archive needed** — history.md at 18,951 tokens (75.8%). Archive sessions older than 14 days to stay below 17k threshold.~~ (MEDIUM) → Completed 2026-03-11
 - [x] ~~**TTS focus mode safety timeout** — Prevent permanent stuck state when TTS queue items fail to play. Implemented pause-aware safety timeout derived from notification's own `timeout_seconds` + 30s buffer.~~ → Completed 2026-03-11 | By: 9f656de9
 - [x] ~~**Lupin/Notifications configuration** the use of `~/.notifications/config` and `~/.lupin/config` is ambiguous. Resolve.~~ → Session 337c | By: e8036972
+- [x] ~~**Session ID drift across hooks after context clear** — After context clear, hooks used transient CC session_id instead of stable lockfile ID, causing split identity in hook-events.jsonl, listener log, and MCP metadata.~~ → Session 342 | By: 59afa5ba
 ---
 
 ### In Progress
@@ -58,6 +60,13 @@
 ---
 
 ### Completed
+
+- [x] **Session ID drift across hooks after context clear** → commit: b7b1120 | By: 59afa5ba (Session 342)
+  - **Symptom**: After context clear, 3 different session IDs appear — hooks use transient `38984b97`, MCP/listener use stable `59afa5ba`
+  - **Root Cause**: `payload.get("session_id")` always returns non-empty transient ID, so `get_claude_session_id()` (stable) was never reached
+  - **Fix**: Added `resolve_stable_session_id()` to session_bridge.py; all 6 hooks + hook_common.py resolve transient→stable before use
+  - **Tests**: 18 test updates across 6 test files, 231/231 pass
+  - **Files**: `session_bridge.py`, `hook_common.py`, 6 hook files, `cosa_voice_mcp.py`, `register_session.py`
 
 - [x] **Podcast Generator — 3 Bugs + target_user dispatch** → CoSA pending commit | By: 05faae8b (Session 304)
   - **Bug #1 — Fuzzy matching via voice**: Added `difflib.get_close_matches()` 3rd tier in `match_research_docs()`. File: `podcast_generator.py` router

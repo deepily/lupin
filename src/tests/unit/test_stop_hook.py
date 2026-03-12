@@ -171,6 +171,7 @@ class TestSummarizeTask:
 class TestVoiceDrain:
     """Tests for voice buffer drain in Stop hook."""
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._ask_anything_else", return_value={} )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -179,7 +180,7 @@ class TestVoiceDrain:
     @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     def test_session_id_fallback( self, mock_read, mock_log, mock_session,
-                                   mock_drain, mock_emit, mock_reset, mock_ask ):
+                                   mock_drain, mock_emit, mock_reset, mock_ask, mock_resolve ):
         """When payload has no session_id, falls back to session bridge."""
         mock_read.return_value = { "stop_hook_active": False }
         mock_drain.return_value = []
@@ -188,6 +189,7 @@ class TestVoiceDrain:
 
         mock_drain.assert_called_once_with( "fallback1" )
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._ask_anything_else", return_value={} )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -196,7 +198,7 @@ class TestVoiceDrain:
     @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     def test_drain_before_ask( self, mock_read, mock_log, mock_session,
-                                mock_drain, mock_emit, mock_reset, mock_ask ):
+                                mock_drain, mock_emit, mock_reset, mock_ask, mock_resolve ):
         """Drain is called before _ask_anything_else when no voice input."""
         mock_read.return_value = {
             "stop_hook_active" : False,
@@ -234,6 +236,7 @@ class TestEmptyPayload:
 class TestVoiceBlocking:
     """Tests for voice-driven stop blocking."""
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_stop_block_count", return_value=1 )
     @patch( "lupin_cli.claude_code.hooks.stop.get_stop_block_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -244,7 +247,7 @@ class TestVoiceBlocking:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     def test_voice_input_blocks_stop( self, mock_read, mock_log, mock_session,
                                        mock_drain, mock_send, mock_emit,
-                                       mock_get_count, mock_inc ):
+                                       mock_get_count, mock_inc, mock_resolve ):
         """Voice input → decision: block with voice content as reason."""
         mock_read.return_value = {
             "stop_hook_active" : False,
@@ -258,6 +261,7 @@ class TestVoiceBlocking:
         assert emitted[ "decision" ] == "block"
         assert "[Voice]: focus on linting first" in emitted[ "reason" ]
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._ask_anything_else", return_value={} )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -266,7 +270,7 @@ class TestVoiceBlocking:
     @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     def test_no_voice_calls_ask_anything_else( self, mock_read, mock_log, mock_session,
-                                                mock_drain, mock_emit, mock_reset, mock_ask ):
+                                                mock_drain, mock_emit, mock_reset, mock_ask, mock_resolve ):
         """No voice input → calls _ask_anything_else and emits its result."""
         mock_read.return_value = {
             "stop_hook_active" : False,
@@ -314,6 +318,7 @@ class TestLoopPrevention:
 class TestBlockCounter:
     """Tests for stop block counter safety valve."""
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_stop_block_count", return_value=3 )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -323,7 +328,7 @@ class TestBlockCounter:
     @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     def test_max_blocks_allows_stop( self, mock_read, mock_log, mock_session,
-                                      mock_drain, mock_send, mock_emit, mock_get_count, mock_reset ):
+                                      mock_drain, mock_send, mock_emit, mock_get_count, mock_reset, mock_resolve ):
         """Block count at MAX → allow stop + reset counter."""
         mock_read.return_value = {
             "stop_hook_active" : False,
@@ -340,6 +345,7 @@ class TestBlockCounter:
         call_msg = mock_send.call_args[ 0 ][ 0 ]
         assert "max blocks reached" in call_msg
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_stop_block_count", return_value=2 )
     @patch( "lupin_cli.claude_code.hooks.stop.get_stop_block_count", return_value=1 )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -350,7 +356,7 @@ class TestBlockCounter:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     def test_counter_increments_on_block( self, mock_read, mock_log, mock_session,
                                            mock_drain, mock_send, mock_emit,
-                                           mock_get_count, mock_inc ):
+                                           mock_get_count, mock_inc, mock_resolve ):
         """Counter increments each time stop is blocked."""
         mock_read.return_value = {
             "stop_hook_active" : False,
@@ -372,6 +378,7 @@ class TestBlockCounter:
 class TestNotifyUserSync:
     """Tests for the notify_user_sync 'Anything else?' branch."""
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -383,7 +390,7 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
     def test_user_says_yes_blocks_stop( self, mock_notify, mock_sender, mock_read,
                                          mock_log, mock_session, mock_drain, mock_emit,
-                                         mock_reset, mock_summarize ):
+                                         mock_reset, mock_summarize, mock_resolve ):
         """User says 'yes' → block with continuation reason."""
         mock_response = MagicMock()
         mock_response.response_value = "yes"
@@ -396,6 +403,7 @@ class TestNotifyUserSync:
         assert emitted[ "decision" ] == "block"
         assert "continue working" in emitted[ "reason" ]
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -408,7 +416,7 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.inject_qualifier_via_tmux" )
     def test_qualifier_question_routes_correctly( self, mock_inject, mock_notify, mock_sender, mock_read,
                                                      mock_log, mock_session, mock_drain, mock_emit,
-                                                     mock_reset, mock_summarize ):
+                                                     mock_reset, mock_summarize, mock_resolve ):
         """Qualifier ending with '?' → injected via tmux, stop blocked."""
         mock_response = MagicMock()
         mock_response.response_value = "yes [comment: how many tests passed?]"
@@ -421,6 +429,7 @@ class TestNotifyUserSync:
         assert emitted[ "decision" ] == "block"
         mock_inject.assert_called_once_with( "abc12345", "how many tests passed?" )
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -433,7 +442,7 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.inject_qualifier_via_tmux" )
     def test_qualifier_instruction_routes_correctly( self, mock_inject, mock_notify, mock_sender, mock_read,
                                                        mock_log, mock_session, mock_drain, mock_emit,
-                                                       mock_reset, mock_summarize ):
+                                                       mock_reset, mock_summarize, mock_resolve ):
         """Qualifier without '?' → injected via tmux, stop blocked."""
         mock_response = MagicMock()
         mock_response.response_value = "yes [comment: fix the linting errors]"
@@ -446,6 +455,7 @@ class TestNotifyUserSync:
         assert emitted[ "decision" ] == "block"
         mock_inject.assert_called_once_with( "abc12345", "fix the linting errors" )
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value="fixed linting errors" )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -457,7 +467,7 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
     def test_notify_message_includes_gist( self, mock_notify, mock_sender, mock_read,
                                              mock_log, mock_session, mock_drain, mock_emit,
-                                             mock_reset, mock_summarize ):
+                                             mock_reset, mock_summarize, mock_resolve ):
         """When _summarize_task returns a gist, notification message includes it."""
         mock_response = MagicMock()
         mock_response.response_value = "no"
@@ -470,6 +480,7 @@ class TestNotifyUserSync:
         assert "fixed linting errors" in request.message
         assert "I'm finished" in request.message
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -481,7 +492,7 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
     def test_notify_message_fallback( self, mock_notify, mock_sender, mock_read,
                                         mock_log, mock_session, mock_drain, mock_emit,
-                                        mock_reset, mock_summarize ):
+                                        mock_reset, mock_summarize, mock_resolve ):
         """When _summarize_task returns None, falls back to generic message."""
         mock_response = MagicMock()
         mock_response.response_value = "no"
@@ -493,6 +504,7 @@ class TestNotifyUserSync:
         request = mock_notify.call_args[ 0 ][ 0 ]
         assert "finished the current task" in request.message
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -504,7 +516,7 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
     def test_user_says_no_allows_stop( self, mock_notify, mock_sender, mock_read,
                                         mock_log, mock_session, mock_drain, mock_emit,
-                                        mock_reset, mock_summarize ):
+                                        mock_reset, mock_summarize, mock_resolve ):
         """User says plain 'no' → allow stop (emit {})."""
         mock_response = MagicMock()
         mock_response.response_value = "no"
@@ -515,6 +527,7 @@ class TestNotifyUserSync:
 
         mock_emit.assert_called_once_with( {} )
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -527,7 +540,7 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.inject_qualifier_via_tmux" )
     def test_no_with_qualifier_instruction_blocks_stop( self, mock_inject, mock_notify, mock_sender, mock_read,
                                                           mock_log, mock_session, mock_drain, mock_emit,
-                                                          mock_reset, mock_summarize ):
+                                                          mock_reset, mock_summarize, mock_resolve ):
         """'no [comment: say hi]' → blocks stop, qualifier injected via tmux."""
         mock_response = MagicMock()
         mock_response.exit_code      = 0
@@ -541,6 +554,7 @@ class TestNotifyUserSync:
         assert emitted[ "decision" ] == "block"
         mock_inject.assert_called_once_with( "abc12345", "say hi using a high-priority notification" )
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -553,7 +567,7 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.inject_qualifier_via_tmux" )
     def test_no_with_qualifier_question_blocks_stop( self, mock_inject, mock_notify, mock_sender, mock_read,
                                                         mock_log, mock_session, mock_drain, mock_emit,
-                                                        mock_reset, mock_summarize ):
+                                                        mock_reset, mock_summarize, mock_resolve ):
         """'no [comment: what time is it?]' → blocks stop, qualifier injected via tmux."""
         mock_response = MagicMock()
         mock_response.exit_code      = 0
@@ -567,6 +581,7 @@ class TestNotifyUserSync:
         assert emitted[ "decision" ] == "block"
         mock_inject.assert_called_once_with( "abc12345", "what time is it?" )
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -578,7 +593,7 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
     def test_timeout_allows_stop( self, mock_notify, mock_sender, mock_read,
                                    mock_log, mock_session, mock_drain, mock_emit,
-                                   mock_reset, mock_summarize ):
+                                   mock_reset, mock_summarize, mock_resolve ):
         """Timeout (default 'no') → allow stop (emit {})."""
         mock_response = MagicMock()
         mock_response.response_value = "no"  # Default on timeout
@@ -589,6 +604,7 @@ class TestNotifyUserSync:
 
         mock_emit.assert_called_once_with( {} )
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -600,7 +616,7 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync", side_effect=ConnectionError( "server down" ) )
     def test_server_error_allows_stop( self, mock_notify, mock_sender, mock_read,
                                         mock_log, mock_session, mock_drain, mock_emit,
-                                        mock_reset, mock_tts ):
+                                        mock_reset, mock_tts, mock_resolve ):
         """Server error → allow stop gracefully (emit {})."""
         mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }
 
@@ -608,6 +624,7 @@ class TestNotifyUserSync:
 
         mock_emit.assert_called_once_with( {} )
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -619,7 +636,7 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
     def test_notify_called_with_correct_params( self, mock_notify, mock_sender, mock_read,
                                                  mock_log, mock_session, mock_drain, mock_emit,
-                                                 mock_reset, mock_summarize ):
+                                                 mock_reset, mock_summarize, mock_resolve ):
         """Verify notify_user_sync is called with 5min timeout, default 'no', display_qualifier_widget=True."""
         mock_response = MagicMock()
         mock_response.response_value = "no"
@@ -636,6 +653,7 @@ class TestNotifyUserSync:
         assert request.display_qualifier_widget is True
         assert request.title == "Continue Session?"
 
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._summarize_task", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -648,7 +666,7 @@ class TestNotifyUserSync:
     @patch( "lupin_cli.claude_code.hooks.stop.inject_qualifier_via_tmux" )
     def test_plain_yes_does_not_inject( self, mock_inject, mock_notify, mock_sender, mock_read,
                                           mock_log, mock_session, mock_drain, mock_emit,
-                                          mock_reset, mock_summarize ):
+                                          mock_reset, mock_summarize, mock_resolve ):
         """Plain 'yes' (no qualifier) → blocks stop, does NOT inject via tmux."""
         mock_response = MagicMock()
         mock_response.response_value = "yes"

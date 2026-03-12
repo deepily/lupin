@@ -98,7 +98,9 @@ def log_to_stream( hook_name, payload, extra=None ):
         # Compact payload summary (avoid multi-MB last_assistant_message dumps)
         if isinstance( payload, dict ):
             entry[ "event" ]      = payload.get( "hook_event_name", "" )
-            entry[ "session_id" ] = payload.get( "session_id", "" )[:8]
+            from lupin_cli.claude_code.hooks.lib.session_bridge import resolve_stable_session_id
+            raw_sid = payload.get( "session_id", "" )
+            entry[ "session_id" ] = resolve_stable_session_id( raw_sid )[:8]
             entry[ "tool" ]       = payload.get( "tool_name", "" )
         if extra:
             entry.update( extra )

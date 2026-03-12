@@ -25,7 +25,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, drain_and_acknowledge,
     format_voice_context, build_voice_deny_response
 )
-from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id
+from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id, resolve_stable_session_id
 
 
 def main():
@@ -42,7 +42,7 @@ def main():
     # calls a voice tool, the buffered message takes precedence
 
     # Resolve session_id: payload first (future-proof), then session bridge fallback
-    session_id = payload.get( "session_id", "" ) or get_claude_session_id()
+    session_id = resolve_stable_session_id( payload.get( "session_id", "" ) ) or get_claude_session_id()
 
     # Drain voice buffer, acknowledge, and inject as additionalContext
     # No tool TTS — PostToolUse handles announcements

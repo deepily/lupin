@@ -303,6 +303,7 @@ class TestForwardToUser:
 class TestMainFlow:
     """Tests for main() — full hook flow with mocked I/O."""
 
+    @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value="allow" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.drain_voice_buffer", return_value=[] )
@@ -310,7 +311,7 @@ class TestMainFlow:
     @patch( "lupin_cli.claude_code.hooks.permission_request.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input" )
     def test_full_flow_empty_buffer_allow( self, mock_read, mock_log, mock_session,
-                                            mock_drain, mock_forward, mock_emit ):
+                                            mock_drain, mock_forward, mock_emit, mock_resolve ):
         """Full flow: empty buffer, user allows."""
         mock_read.return_value = {
             "tool_name"  : "Bash",
@@ -330,6 +331,7 @@ class TestMainFlow:
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "hookSpecificOutput" ][ "decision" ][ "behavior" ] == "allow"
 
+    @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value="deny" )
@@ -340,7 +342,7 @@ class TestMainFlow:
     @patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input" )
     def test_full_flow_with_buffered_messages_redirects( self, mock_read, mock_log, mock_session,
                                                           mock_drain, mock_ack, mock_forward,
-                                                          mock_send, mock_emit ):
+                                                          mock_send, mock_emit, mock_resolve ):
         """Phase 5: buffered messages → deny + redirect (Path B), no sync forward."""
         mock_read.return_value = {
             "tool_name"  : "Write",
@@ -378,6 +380,7 @@ class TestMainFlow:
         assert emitted[ "hookSpecificOutput" ][ "decision" ][ "behavior" ] == "deny"
         assert "Empty hook payload" in emitted[ "hookSpecificOutput" ][ "decision" ][ "message" ]
 
+    @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value="allow" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.drain_voice_buffer", return_value=[] )
@@ -385,7 +388,7 @@ class TestMainFlow:
     @patch( "lupin_cli.claude_code.hooks.permission_request.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input" )
     def test_session_id_fallback( self, mock_read, mock_log, mock_session,
-                                   mock_drain, mock_forward, mock_emit ):
+                                   mock_drain, mock_forward, mock_emit, mock_resolve ):
         """When payload has no session_id, falls back to session bridge."""
         mock_read.return_value = {
             "tool_name"  : "Bash",
@@ -432,6 +435,7 @@ class TestConstants:
 class TestAutoAllow:
     """Tests for auto-allow of low-risk tools (Path A)."""
 
+    @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.drain_voice_buffer" )
@@ -439,7 +443,7 @@ class TestAutoAllow:
     @patch( "lupin_cli.claude_code.hooks.permission_request.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input" )
     def test_read_auto_allowed( self, mock_read, mock_log, mock_session,
-                                 mock_drain, mock_send, mock_emit ):
+                                 mock_drain, mock_send, mock_emit, mock_resolve ):
         """Read tool is auto-allowed without sync or drain."""
         mock_read.return_value = {
             "tool_name"  : "Read",
@@ -463,6 +467,7 @@ class TestAutoAllow:
         decision = emitted[ "hookSpecificOutput" ][ "decision" ]
         assert decision[ "behavior" ] == "allow"
 
+    @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.drain_voice_buffer" )
@@ -470,7 +475,7 @@ class TestAutoAllow:
     @patch( "lupin_cli.claude_code.hooks.permission_request.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input" )
     def test_grep_auto_allowed( self, mock_read, mock_log, mock_session,
-                                 mock_drain, mock_send, mock_emit ):
+                                 mock_drain, mock_send, mock_emit, mock_resolve ):
         """Grep tool is auto-allowed."""
         mock_read.return_value = {
             "tool_name"  : "Grep",
@@ -485,6 +490,7 @@ class TestAutoAllow:
         emitted = mock_emit.call_args[ 0 ][ 0 ]
         assert emitted[ "hookSpecificOutput" ][ "decision" ][ "behavior" ] == "allow"
 
+    @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value="allow" )
@@ -493,7 +499,7 @@ class TestAutoAllow:
     @patch( "lupin_cli.claude_code.hooks.permission_request.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input" )
     def test_bash_not_auto_allowed( self, mock_read, mock_log, mock_session,
-                                     mock_drain, mock_forward, mock_send, mock_emit ):
+                                     mock_drain, mock_forward, mock_send, mock_emit, mock_resolve ):
         """Bash tool is NOT auto-allowed — goes through sync flow."""
         mock_read.return_value = {
             "tool_name"  : "Bash",
@@ -515,6 +521,7 @@ class TestAutoAllow:
 class TestBufferRedirect:
     """Tests for buffer-redirect logic (Path B) — deny + course-change."""
 
+    @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user" )
@@ -525,7 +532,7 @@ class TestBufferRedirect:
     @patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input" )
     def test_buffer_content_denies_with_redirect( self, mock_read, mock_log, mock_session,
                                                     mock_drain, mock_ack, mock_forward,
-                                                    mock_send, mock_emit ):
+                                                    mock_send, mock_emit, mock_resolve ):
         """Buffer has content → deny with redirect message."""
         mock_read.return_value = {
             "tool_name"  : "Bash",
@@ -542,6 +549,7 @@ class TestBufferRedirect:
         assert decision[ "behavior" ] == "deny"
         assert "[Voice]: wait, check the config first" in decision[ "message" ]
 
+    @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user" )
@@ -552,7 +560,7 @@ class TestBufferRedirect:
     @patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input" )
     def test_buffer_content_skips_sync_forward( self, mock_read, mock_log, mock_session,
                                                   mock_drain, mock_ack, mock_forward,
-                                                  mock_send, mock_emit ):
+                                                  mock_send, mock_emit, mock_resolve ):
         """Buffer content short-circuits — sync forward NOT called."""
         mock_read.return_value = {
             "tool_name"  : "Write",
@@ -566,6 +574,7 @@ class TestBufferRedirect:
 
         mock_forward.assert_not_called()
 
+    @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user" )
@@ -576,7 +585,7 @@ class TestBufferRedirect:
     @patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input" )
     def test_buffer_content_sends_tts_confirmation( self, mock_read, mock_log, mock_session,
                                                       mock_drain, mock_ack, mock_forward,
-                                                      mock_send, mock_emit ):
+                                                      mock_send, mock_emit, mock_resolve ):
         """Buffer redirect sends TTS confirmation."""
         mock_read.return_value = {
             "tool_name"  : "Bash",
@@ -592,6 +601,7 @@ class TestBufferRedirect:
         tts_calls = [ c[ 0 ][ 0 ] for c in mock_send.call_args_list ]
         assert any( "redirecting" in msg.lower() for msg in tts_calls )
 
+    @patch( "lupin_cli.claude_code.hooks.permission_request.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.permission_request.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.permission_request._forward_to_user", return_value="allow" )
@@ -600,7 +610,7 @@ class TestBufferRedirect:
     @patch( "lupin_cli.claude_code.hooks.permission_request.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.permission_request.read_hook_input" )
     def test_empty_buffer_falls_through_to_sync( self, mock_read, mock_log, mock_session,
-                                                   mock_drain, mock_forward, mock_send, mock_emit ):
+                                                   mock_drain, mock_forward, mock_send, mock_emit, mock_resolve ):
         """Empty buffer → falls through to sync forward (existing Path C)."""
         mock_read.return_value = {
             "tool_name"  : "Bash",

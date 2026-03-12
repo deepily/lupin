@@ -23,13 +23,14 @@ from lupin_cli.claude_code.hooks.pre_tool_use import main
 class TestNoToolTTS:
     """PreToolUse should NOT announce tools — PostToolUse handles that."""
 
+    @patch( "lupin_cli.claude_code.hooks.pre_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.drain_and_acknowledge", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.get_claude_session_id", return_value="abc12345" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.read_hook_input" )
     def test_no_tts_for_bash( self, mock_read, mock_log, mock_session,
-                               mock_drain, mock_emit ):
+                               mock_drain, mock_emit, mock_resolve ):
         """Bash tool does NOT trigger TTS in PreToolUse."""
         mock_read.return_value = {
             "tool_name"  : "Bash",
@@ -42,13 +43,14 @@ class TestNoToolTTS:
         # send_tts is not even imported in pre_tool_use anymore
         mock_emit.assert_called_once_with( {} )
 
+    @patch( "lupin_cli.claude_code.hooks.pre_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.drain_and_acknowledge", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.get_claude_session_id", return_value="abc12345" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.read_hook_input" )
     def test_no_tts_for_write( self, mock_read, mock_log, mock_session,
-                                mock_drain, mock_emit ):
+                                mock_drain, mock_emit, mock_resolve ):
         """Write tool does NOT trigger TTS in PreToolUse."""
         mock_read.return_value = {
             "tool_name"  : "Write",
@@ -68,13 +70,14 @@ class TestNoToolTTS:
 class TestVoiceDrain:
     """Tests for voice buffer drain in PreToolUse."""
 
+    @patch( "lupin_cli.claude_code.hooks.pre_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.drain_and_acknowledge" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.get_claude_session_id", return_value="abc12345" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.read_hook_input" )
     def test_drain_called_with_payload_session_id( self, mock_read, mock_log, mock_session,
-                                                    mock_drain, mock_emit ):
+                                                    mock_drain, mock_emit, mock_resolve ):
         """Drain uses session_id from payload when available."""
         mock_read.return_value = {
             "tool_name"  : "Grep",
@@ -87,13 +90,14 @@ class TestVoiceDrain:
 
         mock_drain.assert_called_once_with( "payload99" )
 
+    @patch( "lupin_cli.claude_code.hooks.pre_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.drain_and_acknowledge" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.get_claude_session_id", return_value="fallback1" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.read_hook_input" )
     def test_session_id_fallback( self, mock_read, mock_log, mock_session,
-                                   mock_drain, mock_emit ):
+                                   mock_drain, mock_emit, mock_resolve ):
         """When payload has no session_id, falls back to session bridge."""
         mock_read.return_value = {
             "tool_name"  : "Read",
@@ -131,13 +135,14 @@ class TestEmptyPayload:
 class TestContextInjection:
     """Tests for additionalContext injection from drained voice messages."""
 
+    @patch( "lupin_cli.claude_code.hooks.pre_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.drain_and_acknowledge" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.get_claude_session_id", return_value="abc12345" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.read_hook_input" )
     def test_drained_messages_emit_additional_context( self, mock_read, mock_log, mock_session,
-                                                        mock_drain, mock_emit ):
+                                                        mock_drain, mock_emit, mock_resolve ):
         """Drained messages emit hookSpecificOutput.additionalContext."""
         mock_read.return_value = {
             "tool_name"  : "Bash",
@@ -152,13 +157,14 @@ class TestContextInjection:
         assert "hookSpecificOutput" in emitted
         assert "[Voice]: also check the tests" in emitted[ "hookSpecificOutput" ][ "additionalContext" ]
 
+    @patch( "lupin_cli.claude_code.hooks.pre_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.drain_and_acknowledge", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.get_claude_session_id", return_value="abc12345" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.read_hook_input" )
     def test_no_messages_emit_empty( self, mock_read, mock_log, mock_session,
-                                      mock_drain, mock_emit ):
+                                      mock_drain, mock_emit, mock_resolve ):
         """No drained messages emits {} (passthrough)."""
         mock_read.return_value = {
             "tool_name"  : "Read",
@@ -170,13 +176,14 @@ class TestContextInjection:
 
         mock_emit.assert_called_once_with( {} )
 
+    @patch( "lupin_cli.claude_code.hooks.pre_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.drain_and_acknowledge" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.get_claude_session_id", return_value="abc12345" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.pre_tool_use.read_hook_input" )
     def test_multiple_messages_joined( self, mock_read, mock_log, mock_session,
-                                        mock_drain, mock_emit ):
+                                        mock_drain, mock_emit, mock_resolve ):
         """Multiple drained messages are joined with newlines in additionalContext."""
         mock_read.return_value = {
             "tool_name"  : "Edit",

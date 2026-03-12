@@ -964,8 +964,9 @@ def get_session_info() -> dict:
     try:
         cc_meta = _get_cc_metadata()
         info["claude_code"] = {
-            "session_id" : cc_meta.get( "session_id", "" ),
-            "source"     : cc_meta.get( "source", "unknown" )
+            "session_id"        : cc_meta.get( "session_id", "" ),
+            "stable_session_id" : cc_meta.get( "stable_session_id", "" ),
+            "source"            : cc_meta.get( "source", "unknown" )
         }
     except Exception:
         pass

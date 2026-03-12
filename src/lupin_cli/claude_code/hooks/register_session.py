@@ -313,7 +313,8 @@ def _log_session_transition( old_hash, new_hash, stable_hash ):
     """
     try:
         log_path  = os.path.expanduser( "~/.claude/sessions/cc-listeners.log" )
-        timestamp = datetime.now( timezone.utc ).strftime( "%Y-%m-%dT%H:%M:%S%z" )
+        now       = datetime.now( timezone.utc )
+        timestamp = now.strftime( "%Y.%m.%d @ %H:%M %S" ) + f",{now.microsecond // 1000:03d}ms"
         line      = f"{timestamp} [--------] === SESSION TRANSITION: {old_hash} -> {new_hash} (stable: {stable_hash}) ===\n"
         with open( log_path, "a" ) as f:
             f.write( line )

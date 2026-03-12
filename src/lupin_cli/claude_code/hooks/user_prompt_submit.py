@@ -31,7 +31,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, drain_and_acknowledge,
     format_voice_context, enrich_voice_context, build_additional_context
 )
-from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id
+from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id, resolve_stable_session_id
 
 
 def main():
@@ -45,7 +45,7 @@ def main():
     log_payload( "user_prompt_submit", payload )
 
     # Resolve session_id: payload first (future-proof), then session bridge fallback
-    session_id = payload.get( "session_id", "" ) or get_claude_session_id()
+    session_id = resolve_stable_session_id( payload.get( "session_id", "" ) ) or get_claude_session_id()
 
     # Drain voice buffer and inject as additionalContext
     messages  = drain_and_acknowledge( session_id )

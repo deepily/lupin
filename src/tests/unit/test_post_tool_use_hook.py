@@ -24,6 +24,7 @@ from lupin_cli.claude_code.hooks.post_tool_use import main
 class TestSmartTTS:
     """Tests for smart TTS filtering in PostToolUse."""
 
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.drain_and_acknowledge", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.send_tts" )
@@ -31,7 +32,7 @@ class TestSmartTTS:
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input" )
     def test_silent_tool_no_tts( self, mock_read, mock_log, mock_session,
-                                  mock_send, mock_drain, mock_emit ):
+                                  mock_send, mock_drain, mock_emit, mock_resolve ):
         """Read tool (silent) does not send TTS."""
         mock_read.return_value = {
             "tool_name"  : "Read",
@@ -45,6 +46,7 @@ class TestSmartTTS:
         mock_drain.assert_called_once_with( "abc12345" )
         mock_emit.assert_called_once_with( {} )
 
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.drain_and_acknowledge", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.send_tts" )
@@ -52,7 +54,7 @@ class TestSmartTTS:
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input" )
     def test_grep_silent( self, mock_read, mock_log, mock_session,
-                           mock_send, mock_drain, mock_emit ):
+                           mock_send, mock_drain, mock_emit, mock_resolve ):
         """Grep tool (silent) does not send TTS."""
         mock_read.return_value = {
             "tool_name"  : "Grep",
@@ -64,6 +66,7 @@ class TestSmartTTS:
 
         mock_send.assert_not_called()
 
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.drain_and_acknowledge", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.send_tts" )
@@ -71,7 +74,7 @@ class TestSmartTTS:
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input" )
     def test_bash_announced_with_command( self, mock_read, mock_log, mock_session,
-                                          mock_send, mock_drain, mock_emit ):
+                                          mock_send, mock_drain, mock_emit, mock_resolve ):
         """Bash tool (announce) sends formatted TTS with command snippet."""
         mock_read.return_value = {
             "tool_name"  : "Bash",
@@ -84,6 +87,7 @@ class TestSmartTTS:
         call_msg = mock_send.call_args[ 0 ][ 0 ]
         assert call_msg == "Done: Bash: npm test"
 
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.drain_and_acknowledge", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.send_tts" )
@@ -91,7 +95,7 @@ class TestSmartTTS:
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input" )
     def test_write_announced_with_basename( self, mock_read, mock_log, mock_session,
-                                             mock_send, mock_drain, mock_emit ):
+                                             mock_send, mock_drain, mock_emit, mock_resolve ):
         """Write tool (announce) sends TTS with file basename."""
         mock_read.return_value = {
             "tool_name"  : "Write",
@@ -104,6 +108,7 @@ class TestSmartTTS:
         call_msg = mock_send.call_args[ 0 ][ 0 ]
         assert call_msg == "Done: Write: main.py"
 
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.drain_and_acknowledge", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.send_tts" )
@@ -111,7 +116,7 @@ class TestSmartTTS:
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input" )
     def test_non_voice_mcp_tool_announced_name_only( self, mock_read, mock_log, mock_session,
-                                                      mock_send, mock_drain, mock_emit ):
+                                                      mock_send, mock_drain, mock_emit, mock_resolve ):
         """Non-voice MCP/unknown tool sends TTS with name only."""
         mock_read.return_value = {
             "tool_name"  : "mcp__other-server__func",
@@ -132,6 +137,7 @@ class TestSmartTTS:
 class TestVoiceDrain:
     """Tests for voice buffer drain in PostToolUse."""
 
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.drain_and_acknowledge" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.send_tts" )
@@ -139,7 +145,7 @@ class TestVoiceDrain:
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input" )
     def test_session_id_fallback( self, mock_read, mock_log, mock_session,
-                                   mock_send, mock_drain, mock_emit ):
+                                   mock_send, mock_drain, mock_emit, mock_resolve ):
         """When payload has no session_id, falls back to session bridge."""
         mock_read.return_value = {
             "tool_name"  : "Bash",
@@ -152,6 +158,7 @@ class TestVoiceDrain:
 
         mock_drain.assert_called_once_with( "fallback1" )
 
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.drain_and_acknowledge" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.send_tts" )
@@ -159,7 +166,7 @@ class TestVoiceDrain:
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input" )
     def test_drain_uses_payload_session_id( self, mock_read, mock_log, mock_session,
-                                             mock_send, mock_drain, mock_emit ):
+                                             mock_send, mock_drain, mock_emit, mock_resolve ):
         """Drain uses session_id from payload when available."""
         mock_read.return_value = {
             "tool_name"  : "Read",
@@ -197,6 +204,7 @@ class TestEmptyPayload:
 class TestContextInjection:
     """Tests for additionalContext injection from drained voice messages."""
 
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.drain_and_acknowledge" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.send_tts" )
@@ -204,7 +212,7 @@ class TestContextInjection:
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input" )
     def test_drained_messages_emit_additional_context( self, mock_read, mock_log, mock_session,
-                                                        mock_send, mock_drain, mock_emit ):
+                                                        mock_send, mock_drain, mock_emit, mock_resolve ):
         """Drained messages emit hookSpecificOutput.additionalContext."""
         mock_read.return_value = {
             "tool_name"  : "Bash",
@@ -219,6 +227,7 @@ class TestContextInjection:
         assert "hookSpecificOutput" in emitted
         assert "[Voice]: also check the tests" in emitted[ "hookSpecificOutput" ][ "additionalContext" ]
 
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.drain_and_acknowledge", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.send_tts" )
@@ -226,7 +235,7 @@ class TestContextInjection:
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input" )
     def test_no_messages_emit_empty( self, mock_read, mock_log, mock_session,
-                                      mock_send, mock_drain, mock_emit ):
+                                      mock_send, mock_drain, mock_emit, mock_resolve ):
         """No drained messages emits {} (passthrough)."""
         mock_read.return_value = {
             "tool_name"  : "Bash",
@@ -238,6 +247,7 @@ class TestContextInjection:
 
         mock_emit.assert_called_once_with( {} )
 
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.drain_and_acknowledge" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.send_tts" )
@@ -245,7 +255,7 @@ class TestContextInjection:
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input" )
     def test_multiple_messages_joined( self, mock_read, mock_log, mock_session,
-                                        mock_send, mock_drain, mock_emit ):
+                                        mock_send, mock_drain, mock_emit, mock_resolve ):
         """Multiple drained messages are joined with newlines in additionalContext."""
         mock_read.return_value = {
             "tool_name"  : "Write",
@@ -264,5 +274,3 @@ class TestContextInjection:
         assert "[Voice]: first thing" in ctx
         assert "[Voice]: second thing" in ctx
         assert "\n" in ctx
-
-

@@ -62,7 +62,9 @@ def _run_hook_main( payload, tmp_dir, session_id="abc12345-fake-uuid" ):
          patch( "sys.stdout", captured ), \
          patch( "lupin_cli.claude_code.hooks.lib.hook_common.log_payload" ), \
          patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_claude_session_id",
-                return_value=session_id ):
+                return_value=session_id ), \
+         patch( "lupin_cli.claude_code.hooks.user_prompt_submit.resolve_stable_session_id",
+                side_effect=lambda x: x ):
         try:
             user_prompt_submit.main()
         except SystemExit:
@@ -90,6 +92,8 @@ class TestUserPromptSubmitHook:
              patch( "lupin_cli.claude_code.hooks.lib.hook_common.log_payload" ), \
              patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_claude_session_id",
                     return_value="abc12345" ), \
+             patch( "lupin_cli.claude_code.hooks.user_prompt_submit.resolve_stable_session_id",
+                    side_effect=lambda x: x ), \
              patch( "lupin_cli.claude_code.hooks.lib.hook_common.SESSION_DIR",
                     Path( "/nonexistent" ) ):
             try:

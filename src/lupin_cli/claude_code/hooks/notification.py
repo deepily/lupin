@@ -28,7 +28,7 @@ if _src_path not in sys.path:
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts, drain_and_acknowledge
 )
-from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id
+from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id, resolve_stable_session_id
 
 
 def main():
@@ -46,7 +46,7 @@ def main():
     log_payload( "notification", payload )
 
     # Resolve session_id: payload first, then session bridge fallback
-    session_id = payload.get( "session_id", "" ) or get_claude_session_id()
+    session_id = resolve_stable_session_id( payload.get( "session_id", "" ) ) or get_claude_session_id()
 
     # Drain voice buffer and acknowledge buffered messages
     drain_and_acknowledge( session_id )

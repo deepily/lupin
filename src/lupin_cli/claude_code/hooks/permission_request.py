@@ -34,7 +34,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     drain_voice_buffer, build_permission_decision, format_voice_context
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
-    get_claude_session_id, build_sender_id_for_cc
+    get_claude_session_id, build_sender_id_for_cc, resolve_stable_session_id
 )
 from lupin_cli.notifications.notification_models import (
     NotificationRequest,
@@ -208,7 +208,7 @@ def main():
         tool_desc  = _format_tool_description( tool_name, tool_input )
 
         # Resolve session_id: payload first, then session bridge fallback
-        session_id = payload.get( "session_id", "" ) or get_claude_session_id()
+        session_id = resolve_stable_session_id( payload.get( "session_id", "" ) ) or get_claude_session_id()
 
         # Path A: Auto-allow low-risk tools
         if tool_name in AUTO_ALLOW_TOOLS:

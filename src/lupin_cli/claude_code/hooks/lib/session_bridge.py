@@ -21,7 +21,8 @@ Adapted from research at:
 Usage from hook scripts:
     from lupin_cli.claude_code.hooks.lib.session_bridge import (
         get_claude_session_id, wait_for_session_id, get_session_metadata,
-        build_sender_id_for_cc, clear_cached_session_id
+        build_sender_id_for_cc, clear_cached_session_id,
+        resolve_stable_session_id
     )
 
     # Non-blocking (returns fallback immediately if not yet available)
@@ -264,6 +265,45 @@ def get_claude_session_id() -> str:
 
     # Tier 3: Fallback
     return _fallback_session_id
+
+
+def resolve_stable_session_id( transient_id: str ) -> str:
+    """
+    Resolve a transient CC session_id to its stable counterpart.
+
+    Looks up the session bridge file by PPID/grandparent, reads stable_session_id.
+    If the bridge file exists and contains a stable_session_id, returns that.
+    Otherwise returns the transient_id unchanged (safe fallback).
+
+    Requires:
+        - transient_id is a non-empty string
+
+    Ensures:
+        - Returns stable_session_id if bridge file found and contains it
+        - Returns transient_id unchanged if no bridge file or no stable field
+
+    Args:
+        transient_id: The session_id from Claude Code payload
+
+    Returns:
+        str: Stable session ID, or transient_id as fallback
+    """
+    if not transient_id:
+        return transient_id
+
+    result = _find_session_file()
+    if result:
+        path, _source = result
+        try:
+            with open( path ) as f:
+                data = json.load( f )
+            stable = data.get( "stable_session_id" )
+            if stable:
+                return stable
+        except ( json.JSONDecodeError, OSError ):
+            pass
+
+    return transient_id
 
 
 def wait_for_session_id( timeout: float = 10.0, poll_interval: float = 0.5 ) -> str:

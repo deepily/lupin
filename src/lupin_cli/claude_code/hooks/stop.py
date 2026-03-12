@@ -34,7 +34,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     reset_stop_block_count, MAX_STOP_BLOCKS
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
-    get_claude_session_id, build_sender_id_for_cc
+    get_claude_session_id, build_sender_id_for_cc, resolve_stable_session_id
 )
 from lupin_cli.notifications.notify_user_sync import notify_user_sync
 from lupin_cli.notifications.notification_models import (
@@ -223,7 +223,7 @@ def main():
     log_payload( "stop", payload )
 
     # Resolve session_id: payload first, then session bridge fallback
-    session_id = payload.get( "session_id", "" ) or get_claude_session_id()
+    session_id = resolve_stable_session_id( payload.get( "session_id", "" ) ) or get_claude_session_id()
 
     # Loop prevention: if stop_hook_active is True, we already blocked once —
     # don't block again (would create infinite loop)

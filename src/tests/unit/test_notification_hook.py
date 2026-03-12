@@ -22,6 +22,7 @@ from lupin_cli.claude_code.hooks.notification import main
 class TestTypeSpecificTTS:
     """Tests for type-specific TTS message formatting."""
 
+    @patch( "lupin_cli.claude_code.hooks.notification.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.notification.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.notification.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.notification.drain_and_acknowledge", return_value=[] )
@@ -29,7 +30,7 @@ class TestTypeSpecificTTS:
     @patch( "lupin_cli.claude_code.hooks.notification.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.notification.read_hook_input" )
     def test_permission_prompt_with_message( self, mock_read, mock_log, mock_session,
-                                              mock_drain, mock_send, mock_emit ):
+                                              mock_drain, mock_send, mock_emit, mock_resolve ):
         """permission_prompt includes the full message text with high priority."""
         mock_read.return_value = {
             "type"       : "permission_prompt",
@@ -43,6 +44,7 @@ class TestTypeSpecificTTS:
         assert call_msg == "Claude Code needs your attention"
         assert mock_send.call_args[ 1 ][ "priority" ] == "high"
 
+    @patch( "lupin_cli.claude_code.hooks.notification.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.notification.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.notification.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.notification.drain_and_acknowledge", return_value=[] )
@@ -50,7 +52,7 @@ class TestTypeSpecificTTS:
     @patch( "lupin_cli.claude_code.hooks.notification.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.notification.read_hook_input" )
     def test_permission_prompt_no_message( self, mock_read, mock_log, mock_session,
-                                            mock_drain, mock_send, mock_emit ):
+                                            mock_drain, mock_send, mock_emit, mock_resolve ):
         """permission_prompt without message uses generic fallback with high priority."""
         mock_read.return_value = {
             "type"       : "permission_prompt",
@@ -63,6 +65,7 @@ class TestTypeSpecificTTS:
         assert call_msg == "Permission prompt"
         assert mock_send.call_args[ 1 ][ "priority" ] == "high"
 
+    @patch( "lupin_cli.claude_code.hooks.notification.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.notification.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.notification.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.notification.drain_and_acknowledge", return_value=[] )
@@ -70,7 +73,7 @@ class TestTypeSpecificTTS:
     @patch( "lupin_cli.claude_code.hooks.notification.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.notification.read_hook_input" )
     def test_idle_prompt_with_message( self, mock_read, mock_log, mock_session,
-                                        mock_drain, mock_send, mock_emit ):
+                                        mock_drain, mock_send, mock_emit, mock_resolve ):
         """idle_prompt includes the message text."""
         mock_read.return_value = {
             "type"       : "idle_prompt",
@@ -83,6 +86,7 @@ class TestTypeSpecificTTS:
         call_msg = mock_send.call_args[ 0 ][ 0 ]
         assert call_msg == "Waiting for response"
 
+    @patch( "lupin_cli.claude_code.hooks.notification.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.notification.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.notification.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.notification.drain_and_acknowledge", return_value=[] )
@@ -90,7 +94,7 @@ class TestTypeSpecificTTS:
     @patch( "lupin_cli.claude_code.hooks.notification.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.notification.read_hook_input" )
     def test_idle_prompt_no_message( self, mock_read, mock_log, mock_session,
-                                      mock_drain, mock_send, mock_emit ):
+                                      mock_drain, mock_send, mock_emit, mock_resolve ):
         """idle_prompt without message uses generic fallback."""
         mock_read.return_value = {
             "type"       : "idle_prompt",
@@ -102,6 +106,7 @@ class TestTypeSpecificTTS:
         call_msg = mock_send.call_args[ 0 ][ 0 ]
         assert call_msg == "Claude is waiting for input"
 
+    @patch( "lupin_cli.claude_code.hooks.notification.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.notification.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.notification.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.notification.drain_and_acknowledge", return_value=[] )
@@ -109,7 +114,7 @@ class TestTypeSpecificTTS:
     @patch( "lupin_cli.claude_code.hooks.notification.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.notification.read_hook_input" )
     def test_default_type_with_message( self, mock_read, mock_log, mock_session,
-                                         mock_drain, mock_send, mock_emit ):
+                                         mock_drain, mock_send, mock_emit, mock_resolve ):
         """Default notification type includes message text."""
         mock_read.return_value = {
             "type"       : "info",
@@ -122,6 +127,7 @@ class TestTypeSpecificTTS:
         call_msg = mock_send.call_args[ 0 ][ 0 ]
         assert call_msg == "Notification (info): Build completed"
 
+    @patch( "lupin_cli.claude_code.hooks.notification.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.notification.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.notification.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.notification.drain_and_acknowledge", return_value=[] )
@@ -129,7 +135,7 @@ class TestTypeSpecificTTS:
     @patch( "lupin_cli.claude_code.hooks.notification.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.notification.read_hook_input" )
     def test_default_type_no_message( self, mock_read, mock_log, mock_session,
-                                       mock_drain, mock_send, mock_emit ):
+                                       mock_drain, mock_send, mock_emit, mock_resolve ):
         """Default notification type without message shows type only."""
         mock_read.return_value = {
             "type"       : "warning",
@@ -149,6 +155,7 @@ class TestTypeSpecificTTS:
 class TestMessageTruncation:
     """Tests for message truncation in default notification type."""
 
+    @patch( "lupin_cli.claude_code.hooks.notification.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.notification.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.notification.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.notification.drain_and_acknowledge", return_value=[] )
@@ -156,7 +163,7 @@ class TestMessageTruncation:
     @patch( "lupin_cli.claude_code.hooks.notification.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.notification.read_hook_input" )
     def test_long_message_truncated_at_80( self, mock_read, mock_log, mock_session,
-                                            mock_drain, mock_send, mock_emit ):
+                                            mock_drain, mock_send, mock_emit, mock_resolve ):
         """Messages longer than 80 chars are truncated with ellipsis."""
         long_msg = "X" * 100
         mock_read.return_value = {
@@ -179,6 +186,7 @@ class TestMessageTruncation:
 class TestVoiceDrain:
     """Tests for voice buffer drain in Notification hook."""
 
+    @patch( "lupin_cli.claude_code.hooks.notification.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.notification.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.notification.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.notification.drain_and_acknowledge" )
@@ -186,7 +194,7 @@ class TestVoiceDrain:
     @patch( "lupin_cli.claude_code.hooks.notification.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.notification.read_hook_input" )
     def test_drain_called( self, mock_read, mock_log, mock_session,
-                            mock_drain, mock_send, mock_emit ):
+                            mock_drain, mock_send, mock_emit, mock_resolve ):
         """Voice drain is called with resolved session_id."""
         mock_read.return_value = {
             "type"    : "info",

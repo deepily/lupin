@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.03.12 - Session 342 | Fix Session ID Drift Across Hooks After Context Clear
+
+**Accomplishments**:
+- Fixed session ID drift bug: after context clear, hooks used transient CC session_id (`38984b97`) instead of stable lockfile ID (`59afa5ba`), causing split identity across hooks, JSONL logs, and MCP
+- Root cause: all 6 hooks had `payload.get("session_id") or get_claude_session_id()` — the transient ID was always non-empty, so the stable fallback was never reached
+- Added `resolve_stable_session_id()` to `session_bridge.py`: looks up bridge file by PPID/grandparent, returns `stable_session_id` if found, otherwise passes through unchanged
+- Updated all 6 hooks to call `resolve_stable_session_id(payload.get("session_id", ""))` before the `or get_claude_session_id()` fallback
+- Updated `hook_common.py:log_to_stream()` to resolve stable ID before writing to hook-events.jsonl
+- Updated `cosa_voice_mcp.py:get_session_info()` to expose `stable_session_id` in `claude_code` metadata
+- Updated `register_session.py:_log_session_transition()` timestamp to human-readable format
+- Fixed 18 unit test failures caused by unpatched `resolve_stable_session_id` mock across 6 test files
+- All 231 hook/session tests pass (0 failures)
+
+**Files**: `src/lupin_cli/claude_code/hooks/lib/session_bridge.py`, `src/lupin_cli/claude_code/hooks/lib/hook_common.py`, `src/lupin_cli/claude_code/hooks/user_prompt_submit.py`, `src/lupin_cli/claude_code/hooks/pre_tool_use.py`, `src/lupin_cli/claude_code/hooks/post_tool_use.py`, `src/lupin_cli/claude_code/hooks/notification.py`, `src/lupin_cli/claude_code/hooks/stop.py`, `src/lupin_cli/claude_code/hooks/permission_request.py`, `src/lupin_cli/claude_code/hooks/register_session.py`, `src/lupin_mcp/cosa_voice_mcp.py`, `src/tests/unit/test_*_hook.py` (6 files)
+
+---
+
 ### 2026.03.11 - Session 341 | Smoke Test Remediation + Integration Test Isolation Audit
 
 **Accomplishments**:
