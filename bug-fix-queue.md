@@ -32,7 +32,7 @@
 | 10ff1e2a | 2026-02-28T10:00:00 | 2026-02-28T14:30:00 | closed |
 | 0e73eb8e | 2026-02-28T21:00:00 | 2026-02-28T22:00:00 | closed |
 | 98958f70 | 2026-02-28T23:00:00 | 2026-02-28T23:45:00 | closed |
-| 9f656de9 | 2026-03-11T10:00:00 | 2026-03-11T10:30:00 | active |
+| 9f656de9 | 2026-03-11T10:00:00 | 2026-03-12T17:30:00 | closed |
 | 59afa5ba | 2026-03-12T17:25:00 | 2026-03-12T18:15:00 | committed |
 
 ---
@@ -60,6 +60,13 @@
 ---
 
 ### Completed
+
+- [x] **UPE multiple-choice prediction ignores available options** → CoSA pending commit | By: 23f6d6de (Session 345)
+  - **Symptom**: MC predictions return free-text values like "Commit Scope: commit my files (76%)" instead of selecting from available options [Push, Done, Cancel, Other]
+  - **Root Cause**: (1) No `response_type` field in LanceDB schema → cross-type contamination, (2) `_predict_multiple_choice()` ignores `options` param, (3) bare MC strings stored unparseable
+  - **Fix**: Added `response_type` to LanceDB schema/filter, option validation in `_predict_multiple_choice()`, bare string wrapping for MC type, `response_type` filter in all 4 predict methods
+  - **Tests**: 17 new unit tests (2092 total pass), 48 in MC test file
+  - **Files (CoSA)**: `proxy_decision_embeddings.py`, `prediction_engine.py`; **(Lupin)**: `test_prediction_engine_multiple_choice.py`
 
 - [x] **Session ID drift across hooks after context clear** → commit: b7b1120 | By: 59afa5ba (Session 342)
   - **Symptom**: After context clear, 3 different session IDs appear — hooks use transient `38984b97`, MCP/listener use stable `59afa5ba`

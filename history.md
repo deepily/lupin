@@ -1,5 +1,21 @@
 # Lupin Project History
 
+### 2026.03.12 - Session 345 | Bug Fix: UPE MC Prediction Ignores Available Options
+
+**Accomplishments**:
+- Fixed UPE multiple-choice prediction generating free-text values instead of selecting from available options
+- Added `response_type` field to LanceDB schema (`proxy_decision_embeddings.py`) with filter support in `find_similar()`
+- All 4 predict methods (`_predict_yes_no`, `_predict_multiple_choice`, `_predict_open_ended`, `_predict_open_ended_batch`) now pass `response_type` filter to prevent cross-type contamination
+- Added `_extract_valid_options()` helper to parse notification options structure into validated label sets
+- Added option validation pass in `_predict_multiple_choice()`: invalid winners fall back to highest-voted valid option; empty results return cold_start
+- Fixed `_store_decision()`: MC bare strings wrapped as `{"answers": {"_other": value}}` for parseability; `response_type` passed through to LanceDB
+- 17 new unit tests across 4 test classes; 2092 total unit tests pass
+
+**Files (CoSA)**: `agents/decision_proxy/proxy_decision_embeddings.py`, `agents/prediction_engine/prediction_engine.py`
+**Files (Lupin)**: `src/tests/unit/test_prediction_engine_multiple_choice.py`, `bug-fix-queue.md`
+
+---
+
 ### 2026.03.12 - Session 344 | Integration Test Remediation + DB Disambiguation
 
 #### Checkpoint | 2026.03.12 20:15 | Disambiguate database names

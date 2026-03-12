@@ -507,3 +507,320 @@ class TestGetComparatorDispatch:
 
         comp = get_comparator( "yes_no", actual_value={ "value": "yes" } )
         assert comp is compare_yes_no
+
+
+# ===========================================================================
+# TestExtractValidOptions — options structure parsing
+# ===========================================================================
+
+class TestExtractValidOptions:
+    """Tests for _extract_valid_options() static method."""
+
+    def _extract( self, options ):
+        """Helper to call the static method."""
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        return PredictionEngine._extract_valid_options( options )
+
+    def test_valid_single_select_options( self ):
+        """Parse standard single-select options structure."""
+        options = {
+            "questions": [ {
+                "question" : "Select commit scope",
+                "header"   : "Commit Scope",
+                "multi_select" : False,
+                "options"  : [
+                    { "label": "Push", "description": "Push changes" },
+                    { "label": "Done", "description": "Mark done" },
+                    { "label": "Cancel", "description": "Cancel" },
+                    { "label": "Other", "description": "Other option" },
+                ]
+            } ]
+        }
+        result = self._extract( options )
+        assert result is not None
+        assert "Commit Scope" in result
+        assert result[ "Commit Scope" ][ "labels" ] == { "Push", "Done", "Cancel", "Other" }
+        assert result[ "Commit Scope" ][ "multi_select" ] is False
+
+    def test_valid_multi_select_options( self ):
+        """Parse multi-select options structure."""
+        options = {
+            "questions": [ {
+                "question"     : "Select features",
+                "header"       : "Features",
+                "multi_select" : True,
+                "options"      : [
+                    { "label": "Auth", "description": "Authentication" },
+                    { "label": "Caching", "description": "Cache layer" },
+                ]
+            } ]
+        }
+        result = self._extract( options )
+        assert result is not None
+        assert result[ "Features" ][ "multi_select" ] is True
+        assert result[ "Features" ][ "labels" ] == { "Auth", "Caching" }
+
+    def test_none_returns_none( self ):
+        """None input returns None."""
+        assert self._extract( None ) is None
+
+    def test_empty_questions_returns_none( self ):
+        """Empty questions list returns None."""
+        assert self._extract( { "questions": [] } ) is None
+
+    def test_no_options_key_returns_none( self ):
+        """Missing options key returns None."""
+        assert self._extract( { "questions": [ { "header": "H", "options": [] } ] } ) is None
+
+    def test_json_string_input( self ):
+        """JSON string input is parsed correctly."""
+        options = json.dumps( {
+            "questions": [ {
+                "header"       : "DB",
+                "multi_select" : False,
+                "options"      : [ { "label": "PG" }, { "label": "MySQL" } ]
+            } ]
+        } )
+        result = self._extract( options )
+        assert result is not None
+        assert result[ "DB" ][ "labels" ] == { "PG", "MySQL" }
+
+
+# ===========================================================================
+# TestPredictMCWithOptionsValidation — MC prediction constrained to valid options
+# ===========================================================================
+
+class TestPredictMCWithOptionsValidation:
+    """Tests for _predict_multiple_choice() option validation logic."""
+
+    def setup_method( self ):
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        PredictionEngine.reset()
+
+    def teardown_method( self ):
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        PredictionEngine.reset()
+
+    def _make_engine( self ):
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        engine = PredictionEngine( debug=True )
+        engine._embedding_store    = MagicMock()
+        engine._embedding_provider = MagicMock()
+        return engine
+
+    def _make_options( self, header, labels, multi_select=False ):
+        """Build an options structure for testing."""
+        return {
+            "questions": [ {
+                "header"       : header,
+                "multi_select" : multi_select,
+                "options"      : [ { "label": l, "description": "" } for l in labels ]
+            } ]
+        }
+
+    def test_valid_winner_passes_through( self ):
+        """Winner that matches a valid option is kept."""
+        engine  = self._make_engine()
+        options = self._make_options( "Action", [ "Push", "Done", "Cancel" ] )
+
+        engine._embedding_store.find_similar.return_value = [
+            ( 95.0, { "decision_value": json.dumps( { "answers": { "Action": "Push" } } ) } ),
+            ( 90.0, { "decision_value": json.dumps( { "answers": { "Action": "Push" } } ) } ),
+        ]
+
+        result = engine._predict_multiple_choice( "What to do?", "commit", [ 0.1 ] * 768, options=options )
+
+        assert result.strategy == "cbr_majority_vote"
+        assert result.predicted_value[ "answers" ][ "Action" ] == "Push"
+        assert result.metadata[ "constrained" ] is False
+
+    def test_invalid_winner_falls_back_to_valid( self ):
+        """Winner not in valid options falls back to highest-voted valid option."""
+        engine  = self._make_engine()
+        options = self._make_options( "Action", [ "Push", "Done", "Cancel" ] )
+
+        # "Commit Scope: commit my files" is NOT a valid option label
+        engine._embedding_store.find_similar.return_value = [
+            ( 95.0, { "decision_value": json.dumps( { "answers": { "Action": "Commit Scope: commit my files" } } ) } ),
+            ( 90.0, { "decision_value": json.dumps( { "answers": { "Action": "Commit Scope: commit my files" } } ) } ),
+            ( 85.0, { "decision_value": json.dumps( { "answers": { "Action": "Push" } } ) } ),
+        ]
+
+        result = engine._predict_multiple_choice( "What to do?", "commit", [ 0.1 ] * 768, options=options )
+
+        assert result.strategy == "cbr_majority_vote"
+        assert result.predicted_value[ "answers" ][ "Action" ] == "Push"
+        assert result.metadata[ "constrained" ] is True
+
+    def test_no_valid_votes_returns_cold_start( self ):
+        """All votes for invalid options → cold_start."""
+        engine  = self._make_engine()
+        options = self._make_options( "Action", [ "Push", "Done", "Cancel" ] )
+
+        engine._embedding_store.find_similar.return_value = [
+            ( 95.0, { "decision_value": json.dumps( { "answers": { "Action": "totally invalid" } } ) } ),
+            ( 90.0, { "decision_value": json.dumps( { "answers": { "Action": "also invalid" } } ) } ),
+        ]
+
+        result = engine._predict_multiple_choice( "What to do?", "commit", [ 0.1 ] * 768, options=options )
+
+        assert result.strategy == "cold_start"
+        assert result.metadata[ "reason" ] == "no_valid_options_after_filtering"
+
+    def test_multi_select_filters_invalid_options( self ):
+        """Multi-select: invalid options are filtered from prediction."""
+        engine  = self._make_engine()
+        options = self._make_options( "Features", [ "Auth", "Caching", "Logging" ], multi_select=True )
+
+        engine._embedding_store.find_similar.return_value = [
+            ( 95.0, { "decision_value": json.dumps( { "answers": { "Features": [ "Auth", "InvalidFeature" ] } } ) } ),
+            ( 90.0, { "decision_value": json.dumps( { "answers": { "Features": [ "Auth", "Caching" ] } } ) } ),
+            ( 85.0, { "decision_value": json.dumps( { "answers": { "Features": [ "Auth", "Caching" ] } } ) } ),
+        ]
+
+        result = engine._predict_multiple_choice( "Pick features", "approach", [ 0.1 ] * 768, options=options )
+
+        assert result.strategy == "cbr_majority_vote"
+        features = result.predicted_value[ "answers" ][ "Features" ]
+        assert "Auth" in features
+        assert "InvalidFeature" not in features
+
+    def test_no_options_skips_validation( self ):
+        """When options=None, validation is skipped (backward compat)."""
+        engine = self._make_engine()
+
+        engine._embedding_store.find_similar.return_value = [
+            ( 95.0, { "decision_value": json.dumps( { "answers": { "DB": "FreeFormText" } } ) } ),
+        ]
+
+        result = engine._predict_multiple_choice( "Pick DB", "approach", [ 0.1 ] * 768, options=None )
+
+        assert result.strategy == "cbr_majority_vote"
+        assert result.predicted_value[ "answers" ][ "DB" ] == "FreeFormText"
+
+    def test_options_determines_multi_select_mode( self ):
+        """multi_select from options overrides data-driven detection."""
+        engine  = self._make_engine()
+        options = self._make_options( "Features", [ "Auth", "Caching" ], multi_select=True )
+
+        # Data looks like single-select (string values) but options says multi_select
+        engine._embedding_store.find_similar.return_value = [
+            ( 95.0, { "decision_value": json.dumps( { "answers": { "Features": "Auth" } } ) } ),
+            ( 90.0, { "decision_value": json.dumps( { "answers": { "Features": "Auth" } } ) } ),
+        ]
+
+        result = engine._predict_multiple_choice( "Pick features", "approach", [ 0.1 ] * 768, options=options )
+
+        assert result.metadata[ "multi_select" ] is True
+
+
+# ===========================================================================
+# TestStoreDecisionMCWrapping — bare string wrapping for MC type
+# ===========================================================================
+
+class TestStoreDecisionMCWrapping:
+    """Tests for _store_decision() bare string wrapping for multiple_choice."""
+
+    def setup_method( self ):
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        PredictionEngine.reset()
+
+    def teardown_method( self ):
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        PredictionEngine.reset()
+
+    def _make_engine( self ):
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        engine = PredictionEngine( debug=True )
+        engine._embedding_store    = MagicMock()
+        engine._embedding_provider = MagicMock()
+        engine._embedding_provider.generate_embedding.return_value = [ 0.1 ] * 768
+        return engine
+
+    def _make_prediction_result( self, original_message="Test question" ):
+        from cosa.agents.prediction_engine.prediction_result import PredictionResult
+        return PredictionResult(
+            response_type = "multiple_choice",
+            category      = "approach",
+            strategy      = "cold_start",
+            metadata      = { "original_message": original_message }
+        )
+
+    def test_mc_bare_string_wrapped_as_other( self ):
+        """MC bare string is wrapped as {"answers": {"_other": value}}."""
+        engine = self._make_engine()
+        result = self._make_prediction_result()
+
+        engine._store_decision( "test-id-mc", result, "Commit Scope: commit my files", "multiple_choice" )
+
+        call_args      = engine._embedding_store.add_decision.call_args
+        decision_value = call_args.kwargs[ "decision_value" ]
+        parsed         = json.loads( decision_value )
+        assert parsed == { "answers": { "_other": "Commit Scope: commit my files" } }
+
+    def test_yes_no_bare_string_not_wrapped( self ):
+        """yes_no bare string is stored as-is (not wrapped)."""
+        engine = self._make_engine()
+        result = self._make_prediction_result()
+
+        engine._store_decision( "test-id-yn", result, "yes", "yes_no" )
+
+        call_args      = engine._embedding_store.add_decision.call_args
+        decision_value = call_args.kwargs[ "decision_value" ]
+        assert decision_value == "yes"
+
+    def test_response_type_passed_to_store( self ):
+        """response_type is passed through to add_decision()."""
+        engine = self._make_engine()
+        result = self._make_prediction_result()
+
+        engine._store_decision( "test-id-rt", result, { "answers": { "DB": "PG" } }, "multiple_choice" )
+
+        call_args     = engine._embedding_store.add_decision.call_args
+        response_type = call_args.kwargs[ "response_type" ]
+        assert response_type == "multiple_choice"
+
+
+# ===========================================================================
+# TestFindSimilarResponseTypeFilter — response_type filter in find_similar
+# ===========================================================================
+
+class TestFindSimilarResponseTypeFilter:
+    """Tests for response_type filter in ProxyDecisionEmbeddings.find_similar()."""
+
+    def setup_method( self ):
+        """Reset singleton before each test."""
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        PredictionEngine.reset()
+
+    def teardown_method( self ):
+        """Reset singleton after each test."""
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        PredictionEngine.reset()
+
+    def _make_engine( self ):
+        """Create a PredictionEngine with mocked store that tracks find_similar calls."""
+        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        engine = PredictionEngine( debug=True )
+        engine._embedding_store    = MagicMock()
+        engine._embedding_provider = MagicMock()
+        engine._embedding_store.find_similar.return_value = []
+        return engine
+
+    def test_mc_prediction_passes_response_type( self ):
+        """_predict_multiple_choice passes response_type='multiple_choice' to find_similar."""
+        engine = self._make_engine()
+
+        engine._predict_multiple_choice( "Pick DB", "approach", [ 0.1 ] * 768 )
+
+        call_args = engine._embedding_store.find_similar.call_args
+        assert call_args.kwargs[ "response_type" ] == "multiple_choice"
+
+    def test_yes_no_prediction_passes_response_type( self ):
+        """_predict_yes_no passes response_type='yes_no' to find_similar."""
+        engine = self._make_engine()
+
+        engine._predict_yes_no( "Approve?", "approval", [ 0.1 ] * 768 )
+
+        call_args = engine._embedding_store.find_similar.call_args
+        assert call_args.kwargs[ "response_type" ] == "yes_no"
