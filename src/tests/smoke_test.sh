@@ -18,6 +18,7 @@ PORT=7999
 BASE_URL="http://localhost:${PORT}"
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/../.." && pwd )"
+AUTH_TOKEN=""
 
 # Function to check if server is running
 check_server() {
@@ -56,23 +57,55 @@ start_server() {
     return 1
 }
 
+# Function to login and get real JWT token
+do_login() {
+    local email="${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL}"
+    local password="${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD}"
+
+    if [ -z "$email" ] || [ -z "$password" ]; then
+        echo -e "${YELLOW}⚠ No test credentials set. Auth-dependent tests will fail.${NC}"
+        echo "  Set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD"
+        return 1
+    fi
+
+    echo -n "Logging in as ${email}... "
+    local login_response
+    login_response=$(curl -s -X POST "${BASE_URL}/auth/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"email\": \"${email}\", \"password\": \"${password}\"}")
+
+    AUTH_TOKEN=$(echo "$login_response" | python3 -c "import sys, json; print(json.load(sys.stdin)['tokens']['access_token'])" 2>/dev/null)
+
+    if [ -n "$AUTH_TOKEN" ]; then
+        echo -e "${GREEN}✅ Login successful${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ Login failed${NC}"
+        return 1
+    fi
+}
+
 # Function to test endpoint
 test_endpoint() {
     local method=$1
     local endpoint=$2
     local expected_status=$3
     local auth_header=$4
-    
+
     echo -n "Testing ${method} ${endpoint}... "
-    
+
     if [ -n "$auth_header" ]; then
-        response=$(curl -s -w "\n%{http_code}" -X ${method} -H "Authorization: Bearer mock_token_test" "${BASE_URL}${endpoint}")
+        if [ -n "$AUTH_TOKEN" ]; then
+            response=$(curl -s -w "\n%{http_code}" -X ${method} -H "Authorization: Bearer ${AUTH_TOKEN}" "${BASE_URL}${endpoint}")
+        else
+            response=$(curl -s -w "\n%{http_code}" -X ${method} -H "Authorization: Bearer mock_token_test" "${BASE_URL}${endpoint}")
+        fi
     else
         response=$(curl -s -w "\n%{http_code}" -X ${method} "${BASE_URL}${endpoint}")
     fi
-    
+
     status_code=$(echo "$response" | tail -n1)
-    
+
     if [ "$status_code" == "$expected_status" ]; then
         echo -e "${GREEN}✅ (${status_code})${NC}"
         return 0
@@ -101,6 +134,11 @@ main() {
         fi
     fi
     
+    echo ""
+    echo "Authenticating..."
+    echo "========================"
+    do_login
+
     echo ""
     echo "Running endpoint tests..."
     echo "========================"

@@ -126,33 +126,29 @@ class TestAcknowledgeDrained:
 
     @patch( "lupin_cli.claude_code.hooks.lib.hook_common.send_tts" )
     def test_single_message( self, mock_send ):
-        """Single message sends one TTS with 'Received:' prefix."""
+        """Single message is a no-op (auto-response moved to CCNotificationListener)."""
         acknowledge_drained( [ { "message": "Hello world" } ] )
-        mock_send.assert_called_once()
-        call_msg = mock_send.call_args[ 0 ][ 0 ]
-        assert call_msg == "Received: Hello world"
+        mock_send.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.lib.hook_common.send_tts" )
     def test_truncation_at_32_chars( self, mock_send ):
-        """Long messages are truncated at 32 chars."""
+        """Long messages are a no-op (auto-response moved to CCNotificationListener)."""
         long_text = "A" * 50
         acknowledge_drained( [ { "message": long_text } ] )
-        call_msg = mock_send.call_args[ 0 ][ 0 ]
-        assert "A" * 32 + "..." in call_msg
+        mock_send.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.lib.hook_common.send_tts" )
     def test_text_key_fallback( self, mock_send ):
-        """Falls back to 'text' key when 'message' key is missing."""
+        """Text key messages are a no-op (auto-response moved to CCNotificationListener)."""
         acknowledge_drained( [ { "text": "Via text key" } ] )
-        call_msg = mock_send.call_args[ 0 ][ 0 ]
-        assert "Via text key" in call_msg
+        mock_send.assert_not_called()
 
-    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.send_tts", side_effect=Exception( "TTS failed" ) )
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.send_tts" )
     def test_tts_failure_non_fatal( self, mock_send ):
-        """TTS failure does not crash the acknowledgment loop."""
+        """Multiple messages are a no-op (auto-response moved to CCNotificationListener)."""
         msgs = [ { "message": "First" }, { "message": "Second" } ]
         acknowledge_drained( msgs )  # Should not raise
-        assert mock_send.call_count == 2
+        mock_send.assert_not_called()
 
 
 # ═════════════════════════════════════════════════════════════════════════════

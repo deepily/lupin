@@ -8,8 +8,10 @@ WebSocket connections, and common test patterns.
 
 import asyncio
 import json
+import os
 import time
 import httpx
+import requests
 import websockets
 from typing import Dict, Any, Optional, List
 from datetime import datetime
@@ -27,21 +29,104 @@ class LupinTestClient:
     with proper authentication and error handling.
     """
     
-    def __init__(self, base_url: str = "http://localhost:7999", debug: bool = False):
+    def __init__( self, base_url: str = "http://localhost:7999", debug: bool = False ):
         """
         Initialize test client.
-        
+
+        Requires:
+            - base_url is a valid HTTP URL
+            - Server is running at base_url for login to succeed
+
+        Ensures:
+            - self.auth_token contains a real JWT if credentials are available and login succeeds
+            - Falls back to mock token (will fail 401) if credentials missing or login fails
+
         Args:
             base_url: Base URL for HTTP requests
             debug: Enable debug output
         """
-        self.base_url = base_url
-        self.debug = debug
-        self.session_id = "test_session_" + str(int(time.time()))
+        self.base_url   = base_url
+        self.debug      = debug
+        self.session_id = "test_session_" + str( int( time.time() ) )
         self.auth_token = "Bearer mock_token_email_test@example.com"
-        
+        self._raw_token = "mock_token_email_test@example.com"
+
+        # Attempt real JWT login using environment credentials
+        self.login()
+
         if self.debug:
-            print(f"[TEST CLIENT] Initialized with base_url={base_url}, session_id={self.session_id}")
+            print( f"[TEST CLIENT] Initialized with base_url={base_url}, session_id={self.session_id}" )
+
+    def login( self, email=None, password=None ):
+        """
+        Authenticate with the server and store JWT token.
+
+        Requires:
+            - Server running at self.base_url
+            - Valid credentials via params or LUPIN_TEST_INTERACTIVE_MOCK_JOBS_* env vars
+
+        Ensures:
+            - Returns True and sets self.auth_token to real JWT on success
+            - Returns False and leaves existing token unchanged on failure
+
+        Args:
+            email: Override email (defaults to env var)
+            password: Override password (defaults to env var)
+
+        Returns:
+            True if login succeeded, False otherwise
+        """
+        if email is None:
+            email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+            password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
+
+        if not email or not password:
+            print( "[TEST CLIENT] ⚠ No test credentials set. Set:" )
+            print( "  export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL='...'" )
+            print( "  export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD='...'" )
+            return False
+
+        try:
+            resp = requests.post(
+                f"{self.base_url}/auth/login",
+                json={ "email": email, "password": password },
+                timeout=10
+            )
+        except ( requests.ConnectionError, requests.ReadTimeout ):
+            print( f"[TEST CLIENT] ⚠ Cannot connect to {self.base_url} for login" )
+            return False
+
+        if resp.status_code != 200:
+            print( f"[TEST CLIENT] ⚠ Login failed: {resp.status_code}" )
+            print( f"  Response: {resp.text[ :200 ]}" )
+            return False
+
+        token           = resp.json()[ "tokens" ][ "access_token" ]
+        self.auth_token = f"Bearer {token}"
+        self._raw_token = token
+
+        if self.debug:
+            print( f"[TEST CLIENT] ✅ Logged in as {email}" )
+
+        return True
+
+    def get_auth_token( self ):
+        """
+        Return raw JWT token (no Bearer prefix).
+
+        Ensures:
+            - Returns the token string suitable for WebSocket auth
+        """
+        return self._raw_token
+
+    def get_auth_header( self ):
+        """
+        Return full Authorization header value.
+
+        Ensures:
+            - Returns string in format 'Bearer {token}'
+        """
+        return self.auth_token
     
     async def http_request(self, method: str, endpoint: str, **kwargs) -> httpx.Response:
         """
@@ -66,7 +151,7 @@ class LupinTestClient:
         if self.debug:
             print(f"[HTTP] {method} {url}")
         
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient( timeout=30.0 ) as client:
             response = await client.request(method, url, **kwargs)
             
         if self.debug:
@@ -257,9 +342,9 @@ class NotificationTestHelper:
     def __init__(self, client: LupinTestClient):
         self.client = client
     
-    async def send_notification(self, message: str, priority: str = "medium", 
-                              notification_type: str = "custom", 
-                              target_user: str = "test@example.com") -> httpx.Response:
+    async def send_notification( self, message: str, priority: str = "medium",
+                               notification_type: str = "custom",
+                               target_user: str = None ) -> httpx.Response:
         """
         Send notification via API.
         
@@ -272,15 +357,18 @@ class NotificationTestHelper:
         Returns:
             API response
         """
+        if target_user is None:
+            target_user = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL", "test@example.com" )
+
         params = {
-            "message": message,
-            "type": notification_type,
-            "priority": priority,
-            "target_user": target_user,
-            "api_key": "claude_code_simple_key"
+            "message"     : message,
+            "type"        : notification_type,
+            "priority"    : priority,
+            "target_user" : target_user,
+            "api_key"     : "claude_code_simple_key"
         }
-        
-        return await self.client.http_request("POST", "/api/notify", params=params)
+
+        return await self.client.http_request( "POST", "/api/notify", params=params )
     
     async def get_user_notifications(self, user_id: str, include_played: bool = True, 
                                    limit: int = 50) -> httpx.Response:

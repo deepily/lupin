@@ -97,6 +97,7 @@ class TestNotifyUser( unittest.TestCase ):
         """
         with patch( 'lupin_cli.notifications.notify_user.requests.post' ) as mock_post, \
              patch( 'builtins.print' ) as mock_print, \
+             patch( 'lupin_cli.notifications.notify_user.debug', False ), \
              patch( 'lupin_cli.notifications.notification_models.resolve_target_user', return_value="resolved@example.com" ):
 
             mock_post.return_value = self.mock_success_response
@@ -121,10 +122,10 @@ class TestNotifyUser( unittest.TestCase ):
             self.assertEqual( params['priority'], "medium" )  # Default priority
             self.assertEqual( params['target_user'], "resolved@example.com" )  # Resolved user
             self.assertEqual( params['api_key'], self.test_api_key )
-            
+
             # Verify timeout
             self.assertEqual( call_args[1]['timeout'], 5 )
-            
+
             # Verify success message
             mock_print.assert_called_with( "✓ Notification sent: custom/medium" )
     

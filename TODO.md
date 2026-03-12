@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-11 (Session 339)
+Last updated: 2026-03-11 (Session 341)
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 
@@ -171,7 +171,9 @@ Last updated: 2026-03-11 (Session 339)
 
 ### Before Branch Merge
 
-- [~] **[LUPIN] Run and remediate full testing harness** - Unit, smoke, WebSocket, and integration tests. Fix any regressions before merge. **IN PROGRESS — Session 340**
+- [~] **[LUPIN] Run and remediate full testing harness** - Unit (2075/2075), smoke (27/27), WebSocket (49/50) pass. Integration tests blocked by database isolation issue. **IN PROGRESS — Session 341**
+  - **Blocker**: Integration test isolation — [`src/rnd/2026.03.11-integration-test-isolation-audit.md`](src/rnd/2026.03.11-integration-test-isolation-audit.md)
+  - **Next**: Implement 5-phase remediation plan (server-info endpoint → pre-flight validation → post-startup verification → WebSocket guard → clean_test_db hardening)
 - [x] **[LUPIN] CJ Flow verification: Dry run end-to-end testing for UNBOUNDED tasks** - Session 269: INTERACTIVE dry-run exercises MessageHistory + 6-scenario smoke test created. Needs live server validation.
 
 ### Future Considerations

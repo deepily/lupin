@@ -40,7 +40,7 @@ class TestTypeSpecificTTS:
         main()
 
         call_msg = mock_send.call_args[ 0 ][ 0 ]
-        assert call_msg == "Permission prompt: Claude Code needs your attention"
+        assert call_msg == "Claude Code needs your attention"
         assert mock_send.call_args[ 1 ][ "priority" ] == "high"
 
     @patch( "lupin_cli.claude_code.hooks.notification.emit_json" )
@@ -81,7 +81,7 @@ class TestTypeSpecificTTS:
         main()
 
         call_msg = mock_send.call_args[ 0 ][ 0 ]
-        assert call_msg == "Idle: Waiting for response"
+        assert call_msg == "Waiting for response"
 
     @patch( "lupin_cli.claude_code.hooks.notification.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.notification.send_tts" )

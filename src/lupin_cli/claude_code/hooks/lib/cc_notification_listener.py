@@ -9,7 +9,7 @@ buffer file that hooks drain atomically.
 
 Lifecycle:
     1. SessionStart hook spawns this as a background subprocess
-    2. Authenticates via JWT (credentials from ~/.lupin/credentials.ini)
+    2. Authenticates via JWT (credentials from ~/.lupin/config)
     3. Connects via WebSocket, subscribes to notification_queue_update
     4. Filters by job_id matching CC session hash
     5. Appends matching messages to ~/.claude/sessions/cc-buffer-{session_id[:8]}.jsonl

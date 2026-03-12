@@ -10,47 +10,39 @@ Created: 2025-10-17
 import pytest
 from fastapi.testclient import TestClient
 from fastapi_app.main import app
-from cosa.rest.user_service import create_user
+from cosa.rest.auth import get_current_user, get_current_user_id
 from cosa.rest.jwt_service import create_access_token
 from cosa.config.configuration_manager import ConfigurationManager
 
 
+MOCK_USER_ID = "test-config-endpoint-user-id"
+MOCK_EMAIL   = "test_config_endpoint@example.com"
+
+
+async def mock_get_current_user():
+    """Return mock user dict without database lookup."""
+    return { "id": MOCK_USER_ID, "email": MOCK_EMAIL, "roles": ["user"] }
+
+
+async def mock_get_current_user_id():
+    """Return mock user ID without database lookup."""
+    return MOCK_USER_ID
+
+
 @pytest.fixture
 def test_client():
-    """Create test client for FastAPI app."""
+    """Create plain test client (no auth overrides) for 401 tests."""
     return TestClient( app )
 
 
 @pytest.fixture
-def authenticated_user( test_client ):
-    """
-    Create test user and return authentication token.
-
-    Returns:
-        tuple: (user_id, access_token)
-    """
-    # Create unique test user
-    email = "test_config_endpoint@example.com"
-    password = "ConfigTest123!"
-
-    # Try to create user (may already exist from previous test runs)
-    try:
-        success, message, user_id = create_user( email, password, ["user"] )
-        if not success:
-            # User already exists - get user_id from database
-            from cosa.rest.user_service import get_user_by_email
-            existing_user = get_user_by_email( email )
-            user_id = existing_user["id"]
-    except Exception:
-        # Fallback - use existing user
-        from cosa.rest.user_service import get_user_by_email
-        existing_user = get_user_by_email( email )
-        user_id = existing_user["id"]
-
-    # Generate access token
-    access_token = create_access_token( user_id, email, ["user"] )
-
-    return user_id, access_token
+def authenticated_client():
+    """Create test client with auth dependencies overridden for authenticated endpoint tests."""
+    app.dependency_overrides[ get_current_user ]    = mock_get_current_user
+    app.dependency_overrides[ get_current_user_id ] = mock_get_current_user_id
+    client = TestClient( app )
+    yield client
+    app.dependency_overrides.clear()
 
 
 class TestConfigEndpointAuthentication:
@@ -100,7 +92,7 @@ class TestConfigEndpointAuthentication:
 class TestConfigEndpointResponse:
     """Test response structure and values from config endpoint."""
 
-    def test_endpoint_returns_correct_structure( self, test_client, authenticated_user ):
+    def test_endpoint_returns_correct_structure( self, authenticated_client ):
         """
         Test that endpoint returns all required fields.
 
@@ -110,12 +102,7 @@ class TestConfigEndpointResponse:
             - All values are integers
             - Values are positive (non-zero)
         """
-        user_id, access_token = authenticated_user
-
-        response = test_client.get(
-            "/api/config/client",
-            headers={"Authorization": f"Bearer {access_token}"}
-        )
+        response = authenticated_client.get( "/api/config/client" )
 
         assert response.status_code == 200
         data = response.json()
@@ -134,7 +121,7 @@ class TestConfigEndpointResponse:
                 f"Value for {key} should be integer, got {type( data[key] )}"
             assert data[key] > 0, f"Value for {key} should be positive"
 
-    def test_endpoint_returns_correct_values( self, test_client, authenticated_user ):
+    def test_endpoint_returns_correct_values( self, authenticated_client ):
         """
         Test that endpoint returns expected configuration values.
 
@@ -142,12 +129,7 @@ class TestConfigEndpointResponse:
             - Values match baseline configuration (or fallback defaults)
             - Timing values are reasonable for production use
         """
-        user_id, access_token = authenticated_user
-
-        response = test_client.get(
-            "/api/config/client",
-            headers={"Authorization": f"Bearer {access_token}"}
-        )
+        response = authenticated_client.get( "/api/config/client" )
 
         assert response.status_code == 200
         data = response.json()
@@ -162,7 +144,7 @@ class TestConfigEndpointResponse:
 class TestConfigUnitConversions:
     """Test mathematical correctness of unit conversions."""
 
-    def test_interval_conversion_mins_to_ms( self, test_client, authenticated_user ):
+    def test_interval_conversion_mins_to_ms( self, authenticated_client ):
         """
         Test: 10 minutes → 600000 milliseconds.
 
@@ -170,20 +152,14 @@ class TestConfigUnitConversions:
             - Conversion from minutes to milliseconds is correct
             - 10 mins * 60 secs/min * 1000 ms/sec = 600000 ms
         """
-        user_id, access_token = authenticated_user
-
-        response = test_client.get(
-            "/api/config/client",
-            headers={"Authorization": f"Bearer {access_token}"}
-        )
-
+        response = authenticated_client.get( "/api/config/client" )
         data = response.json()
 
         # Verify conversion: 10 mins = 600000 ms
         expected_ms = 10 * 60 * 1000
         assert data["token_refresh_check_interval_ms"] == expected_ms
 
-    def test_threshold_conversion_mins_to_secs( self, test_client, authenticated_user ):
+    def test_threshold_conversion_mins_to_secs( self, authenticated_client ):
         """
         Test: 5 minutes → 300 seconds.
 
@@ -191,20 +167,14 @@ class TestConfigUnitConversions:
             - Conversion from minutes to seconds is correct
             - 5 mins * 60 secs/min = 300 secs
         """
-        user_id, access_token = authenticated_user
-
-        response = test_client.get(
-            "/api/config/client",
-            headers={"Authorization": f"Bearer {access_token}"}
-        )
-
+        response = authenticated_client.get( "/api/config/client" )
         data = response.json()
 
         # Verify conversion: 5 mins = 300 secs
         expected_secs = 5 * 60
         assert data["token_expiry_threshold_secs"] == expected_secs
 
-    def test_dedup_conversion_secs_to_ms( self, test_client, authenticated_user ):
+    def test_dedup_conversion_secs_to_ms( self, authenticated_client ):
         """
         Test: 60 seconds → 60000 milliseconds.
 
@@ -212,13 +182,7 @@ class TestConfigUnitConversions:
             - Conversion from seconds to milliseconds is correct
             - 60 secs * 1000 ms/sec = 60000 ms
         """
-        user_id, access_token = authenticated_user
-
-        response = test_client.get(
-            "/api/config/client",
-            headers={"Authorization": f"Bearer {access_token}"}
-        )
-
+        response = authenticated_client.get( "/api/config/client" )
         data = response.json()
 
         # Verify conversion: 60 secs = 60000 ms

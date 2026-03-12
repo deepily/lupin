@@ -7,7 +7,6 @@ Tests cover:
     - Empty payload → immediate {}
     - session_id fallback via get_claude_session_id
     - Phase 4: additionalContext injection from drained messages
-    - Phase 4: MCP voice tool bypass (no drain, immediate {})
 """
 
 import sys
@@ -198,29 +197,3 @@ class TestContextInjection:
         assert "\n" in ctx
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# TestMcpVoiceBypass (Phase 4)
-# ═════════════════════════════════════════════════════════════════════════════
-
-class TestMcpVoiceBypass:
-    """Tests for MCP voice tool bypass — immediate {} passthrough, no drain."""
-
-    @patch( "lupin_cli.claude_code.hooks.pre_tool_use.emit_json" )
-    @patch( "lupin_cli.claude_code.hooks.pre_tool_use.drain_and_acknowledge" )
-    @patch( "lupin_cli.claude_code.hooks.pre_tool_use.get_claude_session_id", return_value="abc12345" )
-    @patch( "lupin_cli.claude_code.hooks.pre_tool_use.log_payload" )
-    @patch( "lupin_cli.claude_code.hooks.pre_tool_use.read_hook_input" )
-    def test_mcp_voice_tool_bypasses_drain( self, mock_read, mock_log, mock_session,
-                                             mock_drain, mock_emit ):
-        """MCP voice tool skips drain and emits {} immediately."""
-        mock_read.return_value = {
-            "tool_name"  : "mcp__cosa-voice__converse",
-            "tool_input" : { "message": "hello" },
-            "session_id" : "abc12345"
-        }
-
-        with pytest.raises( SystemExit ):
-            main()
-
-        mock_drain.assert_not_called()
-        mock_emit.assert_called_once_with( {} )

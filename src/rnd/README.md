@@ -4,6 +4,12 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.11 - Integration Test Isolation Audit & Remediation Plan
+- **Audit**: [2026.03.11-integration-test-isolation-audit.md](2026.03.11-integration-test-isolation-audit.md) - Comprehensive audit of test tier architecture and database isolation gaps. Integration tests fail with "Email already registered" due to configuration boundary gap: dev-server tests and test-server tests share port 7999 with no config validation or database boundary checks. 5-phase remediation plan: server-info endpoint, pre-flight validation, post-startup verification, WebSocket guard, clean_test_db hardening.
+
+### 2026.03.11 - Baseline Test Report
+- **Report**: [2026.03.11-baseline-test-report.md](2026.03.11-baseline-test-report.md) - Comprehensive baseline test results across all 5 test tiers before remediation.
+
 ### 2026.03.11 - Universal Prediction Engine: Live E2E Validation Plan
 - **Plan**: [2026.03.11-upe-live-e2e-validation-plan.md](2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md) - Comprehensive live validation of all 7 UPE slices against running FastAPI server. 5 phases: baseline (87 unit + 21 E2E tests), warm prediction threshold investigation, 6 new gap-filling E2E tests, browser visual QA for prediction hint rendering, and full cold-to-warm lifecycle validation with accuracy tracking.
 
