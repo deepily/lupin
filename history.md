@@ -16,6 +16,16 @@
 **Files**: `src/cosa/rest/db/database.py`, `docker-compose.yml`, `src/scripts/run-postgresql-dev.sh`, `src/scripts/backup-postgres.sh`, `src/docs/database-migrations.md`, `src/tests/AUTH-TESTING-GUIDE.md`, `src/fastapi_app/main.py`, `src/rnd/2026.03.12-integration-test-hot-swap-config.md`, `src/rnd/2026.03.11-integration-test-isolation-audit.md`, `alembic.ini`, `src/conf/lupin-app.ini`
 **Commit**: f4b955c
 
+#### Checkpoint | 2026.03.12 20:30 | Full test suite validation post-DB rename
+
+**Accomplishments**:
+- Ran full test suite after DB rename: unit 2075/2075, WS 50/50, integration 136 passed (0 failures)
+- Added `@pytest.mark.xfail` to `test_lancedb_local_isolation.py` (4 tests, known normalization bug)
+- Updated TODO.md with final post-rename test counts
+
+**Files**: `src/tests/integration/test_lancedb_local_isolation.py`, `TODO.md`
+**Commit**: 6d63d45
+
 ---
 
 ### 2026.03.12 - Session 343 | Integration Test Isolation via Hot-Swap Config

@@ -180,7 +180,7 @@ Last updated: 2026-03-12 (Session 344)
 
 ### Before Branch Merge
 
-- [x] **[LUPIN] Run and remediate full testing harness** — Session 344: All suites green. Unit **2075/2075**, smoke **27/27**, WebSocket **50/50**, integration **140 passed** (53 skipped, 20 xfailed, 12 xpassed). Fixed: notification auth assertions, admin fixture dependency, WS edge case expectation. Marked skip/xfail: prediction engine (20), deep research (10), queue filtering (5), dispatcher mock (4), job queue progressive (4), token refresh (4), SDK client (2), admin bcrypt (2), LanceDB normalization (1).
+- [x] **[LUPIN] Run and remediate full testing harness** — Session 344: All suites green after DB rename. Unit **2075/2075**, smoke **27/27**, WebSocket **50/50**, integration **136 passed** (53 skipped, 23 xfailed, 13 xpassed, 0 failures). Fixed: notification auth assertions, admin fixture dependency, WS edge case expectation. Marked skip/xfail: prediction engine (20), deep research (10), queue filtering (5), dispatcher mock (4), job queue progressive (4), token refresh (4), SDK client (2), admin bcrypt (2), LanceDB normalization (5).
   - **Plan doc**: [`src/rnd/2026.03.12-integration-test-remediation-and-db-disambiguation.md`](src/rnd/2026.03.12-integration-test-remediation-and-db-disambiguation.md)
   - **DB isolation**: Hot-swap infrastructure from Session 343 — [`src/rnd/2026.03.12-integration-test-hot-swap-config.md`](src/rnd/2026.03.12-integration-test-hot-swap-config.md)
 - [x] **[LUPIN] CJ Flow verification: Dry run end-to-end testing for UNBOUNDED tasks** - Session 269: INTERACTIVE dry-run exercises MessageHistory + 6-scenario smoke test created. Needs live server validation.
