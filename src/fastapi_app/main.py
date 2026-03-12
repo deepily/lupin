@@ -477,7 +477,7 @@ async def lifespan( app: FastAPI ):
 
     # Database initialization
     # PostgreSQL database selected via LUPIN_ENV environment variable:
-    #   - development: lupin_db (automatic schema creation via Alembic migrations)
+    #   - development: lupin_db_dev (automatic schema creation via Alembic migrations)
     #   - testing: lupin_db_test (automatic schema creation in tests)
     #   - production: Cloud SQL (automatic schema creation via Alembic migrations)
     print( "[AUTH] Using PostgreSQL authentication database" )

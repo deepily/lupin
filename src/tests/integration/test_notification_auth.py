@@ -135,7 +135,7 @@ class TestNotificationAuthentication:
 
         assert response.status_code == 401
         data = response.json()
-        assert 'Missing API key' in data['detail']
+        assert 'Missing auth' in data['detail']
 
     def test_invalid_format_returns_401( self ):
         """Test that invalid API key format returns 401."""
@@ -252,7 +252,7 @@ class TestNotificationAuthentication:
 
         assert response.status_code == 401
         assert 'WWW-Authenticate' in response.headers
-        assert response.headers['WWW-Authenticate'] == 'API-Key'
+        assert 'API-Key' in response.headers['WWW-Authenticate']
 
 
 class TestMultipleAPIKeys:

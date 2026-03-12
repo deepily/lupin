@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.12 - Integration Test Remediation & DB Disambiguation
+- **Plan**: [2026.03.12-integration-test-remediation-and-db-disambiguation.md](2026.03.12-integration-test-remediation-and-db-disambiguation.md) - 8-step plan: run & triage ~26 integration test failures (stubs, LanceDB normalization, external deps), fix 1 WebSocket failure, then rename `lupin_db` → `lupin_db_dev`/`lupin_db_prod` (67 references across 12 files), full test suite re-run.
+
 ### 2026.03.12 - Integration Test Hot-Swap Config
 - **Plan + Implementation**: [2026.03.12-integration-test-hot-swap-config.md](2026.03.12-integration-test-hot-swap-config.md) - Hot-swap the running dev server between Development and Testing config blocks via `/api/init` + `swap_database()`. Eliminates need for separate test server (GPU RAM constraint). 6 phases: server-info endpoint, swap_database() function, /api/init config_block_id param, integration runner rewrite, smoke test validation, WebSocket guard. Phases 1-5 complete, Phase 6 (DB name disambiguation) deferred.
 

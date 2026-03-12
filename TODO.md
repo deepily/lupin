@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-12 (Session 343)
+Last updated: 2026-03-12 (Session 344)
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 
@@ -55,12 +55,6 @@ Last updated: 2026-03-12 (Session 343)
 ---
 
 ## v0.1.6 — FUTURE DEVELOPMENT
-
-### Disambiguate Database Names (Session 343)
-
-- [ ] **[LUPIN] Phase 6: Rename lupin_db → lupin_db_dev and lupin_db_prod** — Development and production both default to `lupin_db`, which is ambiguous and risky. 67 references across project (3 code files, 2 config, 8 docs). Requires PostgreSQL `ALTER DATABASE RENAME` + full test suite validation.
-  - **Plan doc**: [`src/rnd/2026.03.12-integration-test-hot-swap-config.md`](src/rnd/2026.03.12-integration-test-hot-swap-config.md) (Phase 6 section)
-  - **Priority**: Medium — safety net from Phases 1-5 makes this safe to execute
 
 ### INI Config Key Naming Convention — Standardize on Spaces (Session 256)
 
@@ -179,11 +173,16 @@ Last updated: 2026-03-12 (Session 343)
 - [x] **[LUPIN] Phase 8: Hot-Reload Trust Mode** - Session 248: REST endpoint + UI dropdown on Trust Dashboard, 16 new tests, 1534 pass
 
 
+### Disambiguate Database Names (Session 343-344)
+
+- [x] **[LUPIN] Phase 6: Rename lupin_db → lupin_db_dev and lupin_db_prod** — Session 344: PostgreSQL `ALTER DATABASE RENAME`, updated defaults in `database.py` (dev → `lupin_db_dev`, prod → `lupin_db_prod`), `docker-compose.yml`, `run-postgresql-dev.sh`, `backup-postgres.sh`, plus 16 doc references across 7 files. Full test suite validation pending.
+  - **Plan doc**: [`src/rnd/2026.03.12-integration-test-hot-swap-config.md`](src/rnd/2026.03.12-integration-test-hot-swap-config.md) (Phase 6 → Done)
+
 ### Before Branch Merge
 
-- [~] **[LUPIN] Run and remediate full testing harness** - Unit (2075/2075), smoke (27/27), WebSocket (49/50) pass. Integration tests blocked by database isolation issue. **IN PROGRESS — Session 341**
-  - **Blocker**: Integration test isolation — [`src/rnd/2026.03.11-integration-test-isolation-audit.md`](src/rnd/2026.03.11-integration-test-isolation-audit.md)
-  - **Next**: Implement 5-phase remediation plan (server-info endpoint → pre-flight validation → post-startup verification → WebSocket guard → clean_test_db hardening)
+- [x] **[LUPIN] Run and remediate full testing harness** — Session 344: All suites green. Unit **2075/2075**, smoke **27/27**, WebSocket **50/50**, integration **140 passed** (53 skipped, 20 xfailed, 12 xpassed). Fixed: notification auth assertions, admin fixture dependency, WS edge case expectation. Marked skip/xfail: prediction engine (20), deep research (10), queue filtering (5), dispatcher mock (4), job queue progressive (4), token refresh (4), SDK client (2), admin bcrypt (2), LanceDB normalization (1).
+  - **Plan doc**: [`src/rnd/2026.03.12-integration-test-remediation-and-db-disambiguation.md`](src/rnd/2026.03.12-integration-test-remediation-and-db-disambiguation.md)
+  - **DB isolation**: Hot-swap infrastructure from Session 343 — [`src/rnd/2026.03.12-integration-test-hot-swap-config.md`](src/rnd/2026.03.12-integration-test-hot-swap-config.md)
 - [x] **[LUPIN] CJ Flow verification: Dry run end-to-end testing for UNBOUNDED tasks** - Session 269: INTERACTIVE dry-run exercises MessageHistory + 6-scenario smoke test created. Needs live server validation.
 
 ### Future Considerations

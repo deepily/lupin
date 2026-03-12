@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.03.12 - Session 344 | Integration Test Remediation + DB Disambiguation
+
+#### Checkpoint | 2026.03.12 20:15 | Disambiguate database names
+
+**Accomplishments**:
+- Renamed PostgreSQL database: `ALTER DATABASE lupin_db RENAME TO lupin_db_dev`
+- Updated `database.py` defaults: production → `lupin_db_prod`, development → `lupin_db_dev`
+- Updated `docker-compose.yml`: `POSTGRES_DB` + healthcheck
+- Updated shell scripts: `run-postgresql-dev.sh`, `backup-postgres.sh`
+- Updated 16 documentation references across 7 files (migrations guide, auth testing guide, alembic.ini, lupin-app.ini, main.py comments, 2 R&D docs)
+- Marked Phase 6 as Done in `src/rnd/2026.03.12-integration-test-hot-swap-config.md`
+- Dev server verified connecting to `lupin_db_dev` via `/api/server-info`
+
+**Files**: `src/cosa/rest/db/database.py`, `docker-compose.yml`, `src/scripts/run-postgresql-dev.sh`, `src/scripts/backup-postgres.sh`, `src/docs/database-migrations.md`, `src/tests/AUTH-TESTING-GUIDE.md`, `src/fastapi_app/main.py`, `src/rnd/2026.03.12-integration-test-hot-swap-config.md`, `src/rnd/2026.03.11-integration-test-isolation-audit.md`, `alembic.ini`, `src/conf/lupin-app.ini`
+**Commit**: f4b955c
+
+---
+
 ### 2026.03.12 - Session 343 | Integration Test Isolation via Hot-Swap Config
 
 **Accomplishments**:

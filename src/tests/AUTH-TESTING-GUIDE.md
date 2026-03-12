@@ -6,9 +6,9 @@
 
 | Test Type | Database | Safe to Run Anytime? |
 |-----------|----------|---------------------|
-| Smoke tests | Development (lupin_db) | ✅ YES - non-destructive |
-| Unit tests | Development (lupin_db) | ✅ YES - non-destructive |
-| Manual curl | Development (lupin_db) | ✅ YES - non-destructive |
+| Smoke tests | Development (lupin_db_dev) | ✅ YES - non-destructive |
+| Unit tests | Development (lupin_db_dev) | ✅ YES - non-destructive |
+| Manual curl | Development (lupin_db_dev) | ✅ YES - non-destructive |
 | Integration tests | Test DB (lupin_db_test) | ⚠️ Destructive - use runner script |
 
 ### Running Integration Tests (Destructive)

@@ -11,12 +11,12 @@
 # Output: src/conf/long-term-memory/postgresql-backup.sql
 #
 # Restore command:
-#   docker exec -i lupin-postgres-dev psql -U lupin_dev lupin_db < postgresql-backup.sql
+#   docker exec -i lupin-postgres-dev psql -U lupin_dev lupin_db_dev < postgresql-backup.sql
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 BACKUP_FILE="$SCRIPT_DIR/../conf/long-term-memory/postgresql-backup.sql"
 CONTAINER_NAME="lupin-postgres-dev"
-DB_NAME="lupin_db"
+DB_NAME="lupin_db_dev"
 DB_USER="lupin_dev"
 
 # Parse arguments
