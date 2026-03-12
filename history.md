@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.03.12 - Session 346 | TTS Race Condition: Stale handleAudioComplete + Focus Mode Analysis
+
+#### Checkpoint | 2026.03.12 22:30 | Partial fix + race condition documented
+
+**Accomplishments**:
+- Fixed stale `handleAudioComplete` clobbering next notification's TTS mode: added early-return guard when `currentTTSMode` is already null
+- Fixed premature `currentTTSMode = null` in `handleAudioComplete()` cleanup: instant mode now defers mode reset to PCM `onended` handler, preventing in-flight chunks from being dropped
+- Added race condition guard in `playPCMChunk()` after async `arrayBuffer()` await
+- Added `stopAudio()` call in `exitTTSFocusMode()` to ensure audio stops on dismiss
+- Enhanced debug logging (`stopAudio`, `exitTTSFocusMode`, `cancelActionRequired`, `handleAudioChunk`)
+- Documented remaining bug: Path B-2 race condition where user answers while audio still plays → `onended` enters focus mode for already-responded notification → queue permanently stuck
+- Serialized execution path analysis to `src/rnd/`
+
+**Open Bug**: TTS Focus Mode race — when user answers before audio finishes AND `onended` fires after `handleNotificationResponded`'s 1500ms setTimeout, focus mode is entered for an already-responded notification with no one to exit it
+
+**Files**: `src/fastapi_app/static/js/notifications.js`, `src/rnd/2026.03.12-tts-focus-mode-race-condition-analysis.md`, `src/rnd/README.md`
+
+---
+
 ### 2026.03.12 - Session 345 | Bug Fix: UPE MC Prediction Ignores Available Options
 
 **Accomplishments**:

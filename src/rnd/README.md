@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.12 - TTS Focus Mode Race Condition Analysis
+- **Analysis**: [2026.03.12-tts-focus-mode-race-condition-analysis.md](2026.03.12-tts-focus-mode-race-condition-analysis.md) - Execution path analysis of TTS state after action-required notification completion. Documents three paths (A: audio finishes before user answers, B: user answers while audio plays, C: dismiss/cancel) and identifies race condition where `onended` handler enters focus mode for an already-responded notification, permanently freezing the TTS queue.
+
 ### 2026.03.12 - Integration Test Remediation & DB Disambiguation
 - **Plan**: [2026.03.12-integration-test-remediation-and-db-disambiguation.md](2026.03.12-integration-test-remediation-and-db-disambiguation.md) - 8-step plan: run & triage ~26 integration test failures (stubs, LanceDB normalization, external deps), fix 1 WebSocket failure, then rename `lupin_db` → `lupin_db_dev`/`lupin_db_prod` (67 references across 12 files), full test suite re-run.
 

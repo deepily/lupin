@@ -3701,7 +3701,7 @@ class NotificationsUI {
     }
 
     handleAudioChunk( blobData ) {
-        if ( this.debug ) this.log( `Received audio chunk: ${blobData.size} bytes` );
+        this.log( `🔊 handleAudioChunk: ${blobData.size} bytes, currentTTSMode=${this.currentTTSMode}` );
 
         // TEMPORARY: Only collect chunks for reliable mode (MP3)
         // PCM caching disabled until quality validated
@@ -3721,6 +3721,15 @@ class NotificationsUI {
     }
     
     async handleAudioComplete( data ) {
+        this.log( `🔴 handleAudioComplete: currentTTSMode=${this.currentTTSMode} at ${Date.now()}` );
+
+        // Guard: if stopAudio() already ran (mode is null), skip cleanup
+        // to avoid clobbering a NEW notification's TTS mode that may have started
+        if ( this.currentTTSMode === null ) {
+            this.log( `🔴 handleAudioComplete: SKIPPING - stopAudio() already cleared mode (stale audio_complete from dismissed notification)` );
+            return;
+        }
+
         // Handle pulsing indicator based on TTS mode
         if ( this.currentTTSMode === this.TTS_MODE_INSTANT ) {
             // For instant mode: defer indicator stop until last chunk finishes playing
@@ -3757,17 +3766,16 @@ class NotificationsUI {
             this.playCollectedAudio();
         }
         
-        // Clean up
-        this.currentTTSMode = null;
+        // Clean up - for instant mode, defer mode reset to onended handler
+        // so in-flight chunks aren't dropped prematurely
+        if ( this.currentTTSMode !== this.TTS_MODE_INSTANT ) {
+            this.currentTTSMode = null;
+            this.firstChunkStartTime = null;
+            this.firstChunkPlayed = false;
+            this.currentTTSText = null;
+        }
         this.processedChunks = 0;
         this.sequentialChunksPlayed = 0;
-        
-        // Reset first chunk timing for next request
-        this.firstChunkStartTime = null;
-        this.firstChunkPlayed = false;
-        
-        // Clear current TTS text after caching is complete
-        this.currentTTSText = null;
     }
     
     async cacheGeneratedAudio( audioBlob = null ) {
@@ -3844,6 +3852,12 @@ class NotificationsUI {
         // Convert blob to ArrayBuffer
         const arrayBuffer = await blobData.arrayBuffer();
 
+        // Race condition guard: stopAudio() may have run during the await above
+        if ( this.currentTTSMode === null ) {
+            this.log( `🔴 playPCMChunk: RACE DETECTED - currentTTSMode went null during await, dropping chunk` );
+            return;
+        }
+
         // Convert PCM16 (Int16Array, signed 16-bit little-endian) to Float32Array
         // This is the same approach as Gemini Live
         const pcm16 = new Int16Array( arrayBuffer );
@@ -3883,6 +3897,11 @@ class NotificationsUI {
                 if ( this.debug ) this.log( "PCM playback complete - notifying TTS queue" );
                 this.pcmStreamComplete = false;
                 this.lastPCMSource = null;
+                // Deferred cleanup from handleAudioComplete (instant mode)
+                this.currentTTSMode = null;
+                this.firstChunkStartTime = null;
+                this.firstChunkPlayed = false;
+                this.currentTTSText = null;
                 // Notify TTS queue that playback is complete
                 this.onTTSPlaybackComplete();
             }
@@ -4198,7 +4217,7 @@ class NotificationsUI {
     }
     
     stopAudio() {
-        this.log( "Stopping all audio playback" );
+        this.log( `🔴 stopAudio() CALLED at ${Date.now()}` );
 
         // Stop pulsing indicator on notification card
         this.stopTTSPlayingIndicator( this.currentNotificationId );
@@ -4240,6 +4259,7 @@ class NotificationsUI {
         // Reset scheduling and state
         this.nextScheduledTime = null;
         this.isPlaying = false;
+        this.currentTTSMode = null;  // Prevent incoming WebSocket chunks from being played
         this.audioChunks = [];
         this.processedChunks = 0;
         
@@ -10542,9 +10562,13 @@ class NotificationsUI {
      *     - Queue resumes if items are waiting
      */
     exitTTSFocusMode() {
+        this.log( `🔴 exitTTSFocusMode() CALLED at ${Date.now()}` );
         if ( !this.ttsFocusModeActive ) {
             return;  // Not in focus mode, nothing to do
         }
+
+        // Stop any audio that was playing for this notification
+        this.stopAudio();
 
         // Clear safety timeout if still pending
         if ( this.focusModeTimeoutId ) {
@@ -12558,6 +12582,7 @@ class NotificationsUI {
      *   - Notification is dismissed same as a normal response
      */
     cancelActionRequired( notificationId ) {
+        this.log( `🔴 cancelActionRequired CALLED at ${Date.now()} for ${notificationId}` );
         const state = this.actionRequiredNotifications.get( notificationId );
         if ( !state ) {
             this.log( `cancelActionRequired: Notification ${notificationId} not found` );
