@@ -20,7 +20,7 @@ Last updated: 2026-03-11 (Session 339)
 
 ## HIGH PRIORITY — MCP Strict Project Detection + Repo Account Validation (Session 332)
 
-- [ ] **[LUPIN] cosa-voice MCP: strict project detection + per-repo account validation** — MCP server silently falls back to `"unknown"` project for unrecognized repos. Need: (1) remove `"unknown"` fallback, (2) validate per-repo Lupin account (`claude.code@{project}.deepily.ai`) at startup, (3) send urgent notification via `claude.code@errors.deepily.ai` with setup instructions if validation fails. Revised Session 337: one-time notification instead of tool-result poisoning.
+- [x] **[LUPIN] cosa-voice MCP: strict project detection + per-repo account validation** — Session 339: Implemented. MCP server no longer falls back to `"unknown"` project; validates per-repo Lupin account at startup; sends urgent notification on validation failure.
   - **Plan doc**: [`src/rnd/2026.03.10-mcp-strict-project-detection-account-validation.md`](src/rnd/2026.03.10-mcp-strict-project-detection-account-validation.md)
   - **Files**: `cosa_voice_mcp.py`, `notification_utils.py`, new test file
 
@@ -58,6 +58,14 @@ Last updated: 2026-03-11 (Session 339)
   - **Design doc**: [`src/rnd/2026.02.23-ini-config-key-naming-convention.md`](src/rnd/2026.02.23-ini-config-key-naming-convention.md)
   - **Scope**: ~98 keys, ~80 files (18 Lupin + 62 CoSA), both INI files + splainer
   - **Priority**: Medium — no functional impact, improves consistency and predictability
+
+### SWE Team Proxy: Validation + Shadow-Mode + Simulation
+
+- [ ] **[LUPIN] SWE Team Proxy end-to-end validation pipeline** — Review Layer 1 dry-run JSONL output (`io/decision-proxies/`), run Layer 2 live shadow-mode capture (`--live --trust-mode shadow`), and build fully automated simulation harness for repeatable E2E validation without manual intervention.
+  - **R&D doc**: [`src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md`](src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md)
+  - **Runner**: `src/scripts/swe_workload_runner.py`
+  - **Integration tests**: `src/tests/integration/test_swe_team_pipeline.py` (7 tests)
+- [ ] **[LUPIN] Test SWE agent team with small jobs** — Validate SWE team end-to-end with small, scoped tasks to verify orchestration and proxy behavior
 
 ### Config Migration — Claude Agent SDK
 
@@ -105,6 +113,13 @@ Last updated: 2026-03-11 (Session 339)
   - **Goal**: Durable storage for ClaudeCode Job tracking state
   - **Affects**: Job state survives server restarts, enables job history/resume
 
+### Universal Prediction Engine: Live E2E Validation (Session 340)
+
+- [ ] **[LUPIN] Live E2E validation of all 7 UPE slices** — All slices 0-6 code-complete (87 unit tests, 21 E2E tests). 5-phase validation plan: baseline test run, warm prediction threshold investigation, 6 new gap-filling E2E tests, browser visual QA for hint rendering, full cold-to-warm lifecycle with accuracy tracking.
+  - **Validation plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md)
+  - **Master plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md)
+  - **Progress**: Phase 0 (serialize) done, Phase 1.1 (unit baseline 87/87) done. Phases 1.2-5 pending.
+
 ### Trust Proxy Documentation Update
 
 - [ ] **[LUPIN] Update trust proxy documentation after Phases 3-4 of preference learning** — Revise `src/docs/proxy-admin-guide.md` and related docs to reflect preference learning algorithms, new trust escalation paths, and updated decision proxy behavior.
@@ -143,42 +158,20 @@ Last updated: 2026-03-11 (Session 339)
 
 - [x] **[LUPIN] Archive history.md** — Session 332: Archived Sessions 260-303 (Feb 24 - Mar 3) to `history/2026-02-24-to-03-03-history.md`. Retained Sessions 304-331 (~11.9k tokens).
 
-### SWE Team Proxy: Workload Generator + Shadow-Mode Capture (HIGH PRIORITY)
+### SWE Team Proxy: Workload Generator + Shadow-Mode Capture
 
 - [x] **[LUPIN] Layer 1: Enhanced dry-run + capture harness** — Session 268: 18-task catalog, JSONL capture harness, 7 integration tests, `data_origin` column. Validated Session 273: manifest path corrected to `io/decision-proxies/`.
-- [ ] **[LUPIN] Layer 1 output review** — Return to review dry-run JSONL output at `io/decision-proxies/`. Validate classifier accuracy, confidence distributions, and category coverage across full 18-task catalog run.
-- [ ] **[LUPIN] Layer 2: Live shadow-mode capture** — Run real SWE Team pipeline with `--live --trust-mode shadow`. Requires architectural decision: sandboxed execution (worktree/Docker) vs planning-only mode (stop before coder writes code). Deferred until Layer 1 output is reviewed.
-  - **R&D doc**: [`src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md`](src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md)
-  - **Runner**: `src/scripts/swe_workload_runner.py` (supports `--live --trust-mode shadow`)
-  - **Integration tests**: `src/tests/integration/test_swe_team_pipeline.py` (7 tests)
-
-### SWE Team Proxy Simulation (HIGH PRIORITY)
-
-- [ ] **[LUPIN] Create SWE team proxy simulation with fully automated interaction** — Build a simulation harness where all SWE team interactions (orchestrator → proxy → decision → feedback) are simulated and automated, enabling repeatable end-to-end validation without manual intervention.
 
 ### SWE Team Proxy Agent (HIGH PRIORITY)
 
 - [x] **[LUPIN] Finish implementing and testing first cut of SWE Team Proxy Agent** - Session 241: Activated proxy in shadow mode, wired trust feedback loop, 7 new tests. 1490 pass.
 - [x] **[LUPIN] Phase 7: Real-Time Proxy Summary Notifications** - Session 248: 10 tasks, 7 new tests, 1 E2E smoke. Batch lifecycle, proxy summary emission, trust mode dropdown, circuit breaker alerts. 1518 pass.
 - [x] **[LUPIN] Phase 8: Hot-Reload Trust Mode** - Session 248: REST endpoint + UI dropdown on Trust Dashboard, 16 new tests, 1534 pass
-- [ ] **[LUPIN] Test SWE agent team with small jobs** - Validate SWE team end-to-end with small, scoped tasks to verify orchestration and proxy behavior
 
-### Universal Prediction Engine: End-to-End Validation (HIGH PRIORITY)
-
-- [ ] **[LUPIN] End-to-end test Slices 0 + 1 + 1.5** — With FastAPI server running, trigger `ask_yes_no` notifications via cosa-voice MCP. Verify: (1) prediction hints appear in WebSocket push, (2) after accumulating responses with qualifiers, `predicted_qualifier` field appears in hints, (3) `prediction_log` table records predictions + outcomes with accuracy tracking.
-  - **Plan doc**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md)
-  - **Slices implemented**: 0 (foundation), 1 (binary yes/no), 1.5 (qualified yes/no), 2 (MC exclusive), 3 (MC inclusive)
-  - **Slices 4+5 (CODE COMPLETE)**: open_ended + open_ended_batch — two-tier retrieval + LLM synthesis via Phi-4 14B. 36 unit tests pass. Needs live E2E validation.
-  - **Slice 3 plan**: [`src/rnd/2026.03.02-slice-3-multi-select-mc-prediction.md`](src/rnd/2026.03.02-slice-3-multi-select-mc-prediction.md)
-  - **Slices 4+5 plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.02-slices-4-5-open-ended-prediction.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.02-slices-4-5-open-ended-prediction.md)
-  - **HTTP embedding fallback**: Session 293 — PredictionEngine now falls back to `/api/embeddings/generate` when local GPU unavailable (unblocks test-process embedding generation)
-  - **Warm E2E tests**: 5 new scenarios (9-13) in `test_prediction_engine_e2e.py` — CBR yes/no, qualifier, accuracy correct/incorrect, MC warm
-  - **Unit tests**: 87 pass (36 open-ended + 31 MC + 20 qualifier)
-  - **Slice 6 (IMPLEMENTED)**: Prediction hint UI rendering — `buildPredictionHintSection()`, `formatStrategyLabel()`, CSS styling, cold-start ghost hint box. Session 302.
 
 ### Before Branch Merge
 
-- [ ] **[LUPIN] Run and remediate full testing harness** - Unit, smoke, WebSocket, and integration tests. Fix any regressions before merge.
+- [~] **[LUPIN] Run and remediate full testing harness** - Unit, smoke, WebSocket, and integration tests. Fix any regressions before merge. **IN PROGRESS — Session 340**
 - [x] **[LUPIN] CJ Flow verification: Dry run end-to-end testing for UNBOUNDED tasks** - Session 269: INTERACTIVE dry-run exercises MessageHistory + 6-scenario smoke test created. Needs live server validation.
 
 ### Future Considerations

@@ -1,5 +1,18 @@
 # Lupin Project History
 
+### 2026.03.11 - Session 340 | UPE Live E2E Validation Plan + Baseline
+
+**Accomplishments**:
+- Planned comprehensive 5-phase live E2E validation for Universal Prediction Engine (all 7 slices code-complete, 87 unit + 21 integration tests)
+- Serialized plan to `src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md`
+- Ran Phase 1.1 unit test baseline: 87/87 pass (0.22s)
+- Moved UPE E2E validation TODO item from v0.1.5 to v0.1.6 with updated plan reference
+- Updated R&D README with new plan doc link
+
+**Files**: `src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md` (NEW), `src/rnd/README.md`, `TODO.md`
+
+---
+
 ### 2026.03.11 - Session 339 | Harden Config Migration: Fail-Hard + Script Cleanup
 
 **Accomplishments**:

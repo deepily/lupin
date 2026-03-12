@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.11 - Universal Prediction Engine: Live E2E Validation Plan
+- **Plan**: [2026.03.11-upe-live-e2e-validation-plan.md](2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md) - Comprehensive live validation of all 7 UPE slices against running FastAPI server. 5 phases: baseline (87 unit + 21 E2E tests), warm prediction threshold investigation, 6 new gap-filling E2E tests, browser visual QA for prediction hint rendering, and full cold-to-warm lifecycle validation with accuracy tracking.
+
 ### 2026.03.05 - Voice Injection: Listener + tmux + UserPromptSubmit Hook Plan
 - **Plan**: [2026.03.05-voice-injection-listener-tmux-hook-plan.md](2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.03.05-voice-injection-listener-tmux-hook-plan.md) - Implementation plan for direct voice injection into idle Claude Code sessions. Reuses existing notification -> listener -> JSONL buffer pipeline, adds tmux session discovery in register_session.py, tmux Enter trigger in CCNotificationListener after buffering, and new UserPromptSubmit hook that drains buffer and injects as additionalContext. 6 phases, 10 files (3 new, 7 modified), ~24 unit tests + E2E smoke test.
 
