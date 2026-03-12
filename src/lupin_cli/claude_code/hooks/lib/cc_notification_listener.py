@@ -175,8 +175,9 @@ class CCNotificationListener( BaseWebSocketListener ):
             self._centralized_log = None
 
     def _timestamp( self ):
-        """Return ISO timestamp for centralized log lines."""
-        return datetime.now( timezone.utc ).strftime( "%Y-%m-%dT%H:%M:%S%z" )
+        """Return human-readable timestamp for centralized log lines."""
+        now = datetime.now( timezone.utc )
+        return now.strftime( "%Y.%m.%d @ %H:%M %S" ) + f",{now.microsecond // 1000:03d}ms"
 
     def _write_central( self, line ):
         """

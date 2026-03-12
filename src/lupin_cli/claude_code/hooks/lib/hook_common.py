@@ -167,15 +167,16 @@ def emit_json( data ):
 
 def get_timestamp():
     """
-    Get current UTC timestamp in ISO format.
+    Get current UTC timestamp in human-readable format.
 
     Ensures:
-        - Returns ISO 8601 formatted string with timezone
+        - Returns formatted string with date, time, and milliseconds
 
     Returns:
-        str: ISO timestamp (e.g., "2026-02-26T14:30:00+00:00")
+        str: Formatted timestamp (e.g., "2026.03.12 @ 17:15 56,123ms")
     """
-    return datetime.now( timezone.utc ).isoformat()
+    now = datetime.now( timezone.utc )
+    return now.strftime( "%Y.%m.%d @ %H:%M %S" ) + f",{now.microsecond // 1000:03d}ms"
 
 
 def get_target_email():
