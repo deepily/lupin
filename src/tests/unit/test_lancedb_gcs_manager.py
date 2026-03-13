@@ -37,7 +37,7 @@ class TestLanceDBManagerPathResolution:
         Test that local backend with /src/ prefix applies get_project_root().
         """
         config = {
-            "storage_backend": "local",
+            "storage backend": "local",
             "db_path": "/src/conf/long-term-memory/test.lancedb",
             "table_name": "test_table"
         }
@@ -55,7 +55,7 @@ class TestLanceDBManagerPathResolution:
         Test that local backend with absolute path (not /src/) uses path as-is.
         """
         config = {
-            "storage_backend": "local",
+            "storage backend": "local",
             "db_path": "/absolute/path/to/test.lancedb",
             "table_name": "test_table"
         }
@@ -71,7 +71,7 @@ class TestLanceDBManagerPathResolution:
         Test that local backend without db_path config key raises ValueError.
         """
         config = {
-            "storage_backend": "local",
+            "storage backend": "local",
             # db_path intentionally missing
             "table_name": "test_table"
         }
@@ -86,7 +86,7 @@ class TestLanceDBManagerPathResolution:
         Test that local backend with non-existent parent directory raises ValueError.
         """
         config = {
-            "storage_backend": "local",
+            "storage backend": "local",
             "db_path": "/nonexistent/parent/test.lancedb",
             "table_name": "test_table"
         }
@@ -102,7 +102,7 @@ class TestLanceDBManagerPathResolution:
         Test that GCS backend with valid gs:// URI returns correctly.
         """
         config = {
-            "storage_backend": "gcs",
+            "storage backend": "gcs",
             "gcs_uri": "gs://test-bucket/path/to/db.lancedb",
             "table_name": "test_table"
         }
@@ -117,7 +117,7 @@ class TestLanceDBManagerPathResolution:
         Test that GCS backend without gcs_uri config key raises ValueError.
         """
         config = {
-            "storage_backend": "gcs",
+            "storage backend": "gcs",
             # gcs_uri intentionally missing
             "table_name": "test_table"
         }
@@ -133,7 +133,7 @@ class TestLanceDBManagerPathResolution:
         Test that GCS backend with URI missing gs:// prefix raises ValueError.
         """
         config = {
-            "storage_backend": "gcs",
+            "storage backend": "gcs",
             "gcs_uri": "s3://wrong-bucket/path/db.lancedb",  # Wrong prefix
             "table_name": "test_table"
         }
@@ -149,7 +149,7 @@ class TestLanceDBManagerPathResolution:
         Test that unknown storage_backend value raises ValueError.
         """
         config = {
-            "storage_backend": "s3",  # Not supported
+            "storage backend": "s3",  # Not supported
             "table_name": "test_table"
         }
 
@@ -182,7 +182,7 @@ class TestLanceDBManagerPathResolution:
         """
         # Test GCS missing URI
         config_gcs = {
-            "storage_backend": "gcs",
+            "storage backend": "gcs",
             "table_name": "test_table"
         }
 
@@ -195,7 +195,7 @@ class TestLanceDBManagerPathResolution:
 
         # Test local missing path
         config_local = {
-            "storage_backend": "local",
+            "storage backend": "local",
             "table_name": "test_table"
         }
 
@@ -211,7 +211,7 @@ class TestLanceDBManagerPathResolution:
         Test that GCS URI validation is case-sensitive for gs:// prefix.
         """
         config = {
-            "storage_backend": "gcs",
+            "storage backend": "gcs",
             "gcs_uri": "GS://test-bucket/path.lancedb",  # Uppercase
             "table_name": "test_table"
         }

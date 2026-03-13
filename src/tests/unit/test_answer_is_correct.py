@@ -105,7 +105,7 @@ class TestAnswerIsCorrectLanceDB:
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = {
-                "storage_backend" : "local",
+                "storage backend" : "local",
                 "db_path"         : f"{tmp_dir}/test.lancedb",
                 "table_name"      : "test_snapshots"
             }

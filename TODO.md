@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-12 (Session 348)
+Last updated: 2026-03-13 (Session 349)
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 
@@ -56,12 +56,12 @@ Last updated: 2026-03-12 (Session 348)
 
 ## v0.1.6 — FUTURE DEVELOPMENT
 
-### INI Config Key Naming Convention — Standardize on Spaces (Session 256)
+### INI Config Key Naming Convention — Standardize on Spaces (Sessions 256, 349)
 
-- [ ] **[LUPIN] Standardize ~98 underscore config keys to space-separated** — 6-phase migration: backward-compat shim → INI rename → Lupin code (18 files) → CoSA code (62 files) → remove shim + guardrail test. ~2 weeks estimated.
+- [x] **[LUPIN] Standardize ~91 underscore config keys to space-separated** — Session 349: Atomic rename of 91 keys in both INI files + 96 Python string literal updates across 59 files. No backward-compat shim needed. 5 key regroupings for better sort clustering. Removed 7 legacy splainer-only orphan keys. Added permanent guardrail test. Full regression green (2094 unit, 50 WS, 136 integration).
   - **Design doc**: [`src/rnd/2026.02.23-ini-config-key-naming-convention.md`](src/rnd/2026.02.23-ini-config-key-naming-convention.md)
-  - **Scope**: ~98 keys, ~80 files (18 Lupin + 62 CoSA), both INI files + splainer
-  - **Priority**: Medium — no functional impact, improves consistency and predictability
+  - **Migration map**: `src/conf/config-key-migration-map.json` (105 entries, archivable)
+  - **Guardrail**: `src/tests/unit/test_ini_key_naming.py` (prevents future underscore keys)
 
 ### SWE Team Proxy: Validation + Shadow-Mode + Simulation
 

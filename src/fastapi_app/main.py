@@ -393,9 +393,9 @@ async def lifespan( app: FastAPI ):
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
     # Get configuration flags (needed for debug output below)
-    app_debug   = config_mgr.get( "app_debug",   default=False, return_type="boolean" )
-    app_verbose = config_mgr.get( "app_verbose", default=False, return_type="boolean" )
-    app_silent  = config_mgr.get( "app_silent",  default=True,  return_type="boolean" )
+    app_debug   = config_mgr.get( "app debug",   default=False, return_type="boolean" )
+    app_verbose = config_mgr.get( "app verbose", default=False, return_type="boolean" )
+    app_silent  = config_mgr.get( "app silent",  default=True,  return_type="boolean" )
 
     # Suppress LanceDB cosmetic warnings if configured
     # These warnings are non-functional - queries execute correctly regardless
@@ -444,7 +444,7 @@ async def lifespan( app: FastAPI ):
             
     else:
         # # Use file-based backend (default)
-        # path_to_snapshots_dir_wo_root = config_mgr.get( "path_to_snapshots_dir_wo_root" )
+        # path_to_snapshots_dir_wo_root = config_mgr.get( "path to snapshots dir wo root" )
         # path_to_snapshots = du.get_project_root() + path_to_snapshots_dir_wo_root
         #
         # config = {"path": path_to_snapshots}
@@ -683,8 +683,8 @@ async def load_stt_model():
         KeyError: If required config values are missing
     """
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-    stt_device_id = config_mgr.get( "stt_device_id", default="cuda:0" )
-    stt_model_id = config_mgr.get( "stt_model_id" )
+    stt_device_id = config_mgr.get( "stt device id", default="cuda:0" )
+    stt_model_id = config_mgr.get( "stt model id" )
     
     pipe = pipeline(
         "automatic-speech-recognition",

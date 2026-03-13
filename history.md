@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.03.13 - Session 349 | Standardize ~91 Underscore Config Keys to Space-Separated
+
+**Accomplishments**:
+- Renamed all 91 underscore config keys to space-separated naming in `lupin-app.ini` (127 instances across 5 sections) and `lupin-app-splainer.ini` (102 instances)
+- Updated 96 Python string literals across 59 files (14 Lupin + 45 CoSA) using longest-match-first replacement
+- Created migration mapping file `src/conf/config-key-migration-map.json` (105 entries)
+- Applied 5 key regroupings for better alphabetical clustering: `auto_debug` → `debug auto`, `inject_bugs` → `debug inject bugs`, `database_path_wo_root` → `path to database wo root`, `code_execution_file_path` → `path to code execution file`, `audio_recording_file_path` → `path to audio recording file`
+- Caught and fixed 5 false positives where Python attribute names (`auto_debug`, `inject_bugs`) were incorrectly renamed as config keys in agent serialization/deserialization and constructor parameter introspection tests
+- Removed 7 legacy splainer-only keys with no main INI counterpart (`path_to_snapshots_dir_wo_root`, `path_to_prompt_generator_data_function_mapping_wo_root`, `router_and_vox_command_url`, `deepily_inference_chat_url`, `tgi_server_codegen_name`, `tgi_server_router_name`, `model_tokenizer_map`)
+- Added permanent guardrail test `test_ini_key_naming.py` (2 pass + 1 xfail parity check)
+- Full regression green: unit 2094/2094, WebSocket 50/50, integration 136 passed
+
+**Files (Lupin)**: `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/conf/config-key-migration-map.json`, `src/fastapi_app/main.py`, `src/scripts/init_test_database.py`, `src/scripts/migrate_synonymous_questions.py`, `src/tests/unit/test_ini_key_naming.py` (new), `src/tests/unit/test_answer_is_correct.py`, `src/tests/unit/test_crud_queue_integration.py`, `src/tests/unit/test_lancedb_gcs_manager.py`, `src/tests/unit/test_local_embedding_engine.py`, `src/tests/unit/test_running_queue_threshold.py`, `src/tests/integration/run_gcs_tests_standalone.py`, `src/tests/integration/test_lancedb_gcs_integration.py`, `src/tests/integration/test_lancedb_local_isolation.py`
+**Files (CoSA)**: 45 files across REST, agents, memory, training, utils, config, and tests directories
+**Design doc**: [`src/rnd/2026.02.23-ini-config-key-naming-convention.md`](src/rnd/2026.02.23-ini-config-key-naming-convention.md)
+
+---
+
 ### 2026.03.12 - Session 348 | v0.1.5 PR to Main + Branch Transition
 
 **Accomplishments**:

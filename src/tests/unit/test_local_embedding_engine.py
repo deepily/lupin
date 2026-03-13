@@ -76,7 +76,7 @@ def _make_fake_config( overrides=None ):
         "local embedding prose document prefix"  : "search_document:",
         "embedding provider"                     : "local",
         "embedding dimensions"                   : "768",
-        "debug_local_embedding"                  : "False",
+        "debug local embedding"                  : "False",
     }
     if overrides:
         defaults.update( overrides )

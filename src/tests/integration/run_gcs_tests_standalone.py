@@ -35,7 +35,7 @@ def run_gcs_tests():
     gcs_test_bucket_uri = f"gs://lupin-lancedb-test/integration-test-{int( time.time() )}.lancedb"
 
     gcs_config = {
-        "storage_backend": "gcs",
+        "storage backend": "gcs",
         "gcs_uri": gcs_test_bucket_uri,
         "table_name": "solution_snapshots"
     }

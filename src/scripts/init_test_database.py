@@ -59,7 +59,7 @@ def main():
     try:
         # Verify we're in test mode
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-        test_mode = config_mgr.get( "app_testing", default=False, return_type="boolean" )
+        test_mode = config_mgr.get( "app testing", default=False, return_type="boolean" )
 
         if not test_mode:
             print( "✗ ERROR: Not in test mode!" )

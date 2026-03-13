@@ -49,7 +49,7 @@ class TestLanceDBGCSIntegration:
     def gcs_config(self, gcs_test_bucket_uri):
         """Configuration for GCS-backed manager."""
         return {
-            "storage_backend": "gcs",
+            "storage backend": "gcs",
             "gcs_uri": gcs_test_bucket_uri,
             "table_name": "solution_snapshots"
         }
@@ -201,7 +201,7 @@ class TestLanceDBGCSIntegration:
             )
 
             # Verify backend configuration
-            backend = config_mgr.get( "storage_backend", default="local" )
+            backend = config_mgr.get( "storage backend", default="local" )
             assert backend == "gcs", f"Expected GCS backend, got: {backend}"
 
             # Verify GCS URI configuration
