@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.03.13 - Session 356 | Bug Fix: SWE Team Notifications Routing to Personal Email
+
+**Accomplishments**:
+- Fixed two compounding bugs causing SWE team test notifications to reach personal email instead of test account
+- Bug 1: `swe_team/job.py` never set `cosa_interface.TARGET_USER = self.user_email` (both live and dry-run paths)
+- Bug 2: `fifo_queue.py` hardcoded `ricardo.felipe.ruiz@gmail.com` as fallback — replaced with `LUPIN_DEV_EMAIL` env var, skips notification if unset
+- Cleaned up hardcoded email from 4 additional Python scripts/tests, replaced with env var lookups
+- Verification: 2094 unit tests pass, grep for hardcoded email returns only migration script (intentional seed user)
+- Commit: 44010fd (Lupin scripts/tests), CoSA changes (`swe_team/job.py`, `fifo_queue.py`) pending separate commit
+
+**Files Modified**: `src/cosa/agents/swe_team/job.py`, `src/cosa/rest/fifo_queue.py`, `src/scripts/debug/debug_crud_llm_call.py`, `src/scripts/reset_user_password.py`, `src/scripts/test_websocket_notification.py`, `src/tests/lupin_smoke/test_queue_filtering_smoke.py`, `src/scripts/auth_migration/migrate_mock_users.py`
+
+---
+
 ### 2026.03.13 - Session 355 | Playwright E2E Phase 7: WebSocket & Real-Time Tests (253 total passing)
 
 **Accomplishments**:

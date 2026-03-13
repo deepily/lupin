@@ -7,8 +7,8 @@ even when the user is logged into the Queue interface.
 
 Usage:
     python src/scripts/test_websocket_notification.py \
-        --email ricardo.felipe.ruiz@gmail.com \
-        --password "alolucy?" \
+        --email "$LUPIN_TEST_EMAIL" \
+        --password "$LUPIN_TEST_PASSWORD" \
         --server http://localhost:7999
 """
 

@@ -3,8 +3,8 @@
 Reset User Password - Simple password reset utility.
 
 Usage:
-    python src/scripts/reset_user_password.py ricardo.felipe.ruiz@gmail.com "NewPassword123!"
-    python src/scripts/reset_user_password.py --use-original ricardo.felipe.ruiz@gmail.com
+    python src/scripts/reset_user_password.py user@example.com "NewPassword123!"
+    python src/scripts/reset_user_password.py --use-original user@example.com
 """
 
 import sys
@@ -141,8 +141,8 @@ if __name__ == "__main__":
         print( "  python src/scripts/reset_user_password.py --use-original <email>" )
         print()
         print( "Examples:" )
-        print( '  python src/scripts/reset_user_password.py ricardo.felipe.ruiz@gmail.com "NewPass123!"' )
-        print( '  python src/scripts/reset_user_password.py --use-original ricardo.felipe.ruiz@gmail.com' )
+        print( '  python src/scripts/reset_user_password.py user@example.com "NewPass123!"' )
+        print( '  python src/scripts/reset_user_password.py --use-original user@example.com' )
         sys.exit( 1 )
 
     use_original = False
