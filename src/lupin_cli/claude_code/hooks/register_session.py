@@ -428,6 +428,7 @@ def main():
     # ── Phase 2: Write session bridge file ────────────────────────────────
     session_dir  = os.path.expanduser( "~/.claude/sessions" )
     session_file = None
+    old_data     = None
     is_context_clear = False
 
     if session_id:
@@ -487,9 +488,18 @@ def main():
 
         tmux_session = _find_tmux_session( cc_pid )
 
+        # Build session_ids list — accumulate across context clears
+        # old_data was already read at line 471-480 for context-clear detection
+        existing_ids = old_data.get( "session_ids", [] ) if old_data else []
+        if stable_session_id not in existing_ids:
+            existing_ids.append( stable_session_id )
+        if session_id not in existing_ids:
+            existing_ids.append( session_id )
+
         session_data = {
             "session_id"        : session_id,
             "stable_session_id" : stable_session_id,
+            "session_ids"       : existing_ids,
             "transcript_path"   : transcript_path,
             "cwd"               : cwd,
             "ppid"              : cc_pid,

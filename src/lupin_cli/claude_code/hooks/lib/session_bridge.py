@@ -479,10 +479,19 @@ def find_session_by_id( session_id ):
             with open( path ) as f:
                 data = json.load( f )
 
-            file_sid = data.get( "session_id", "" )
-            # Full match or 8-char prefix match
-            if file_sid == session_id or file_sid[:8] == session_id[:8]:
-                return data
+            # Check all known IDs: session_ids list (preferred), plus legacy fields
+            all_ids = list( data.get( "session_ids", [] ) )
+            # Backward compat: also check session_id and stable_session_id directly
+            for field in ( "session_id", "stable_session_id" ):
+                val = data.get( field, "" )
+                if val and val not in all_ids:
+                    all_ids.append( val )
+
+            # Full match or 8-char prefix match against any known ID
+            for known_id in all_ids:
+                if known_id == session_id or known_id[:8] == session_id[:8]:
+                    return data
+
         except ( json.JSONDecodeError, OSError ):
             continue
 

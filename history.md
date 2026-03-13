@@ -1,5 +1,17 @@
 # Lupin Project History
 
+### 2026.03.13 - Session 350 | Bug Fix: find_session_by_id() Session ID History List
+
+**Accomplishments**:
+- Fixed `find_session_by_id()` failing to match stable session IDs after context clears — qualifier text was silently dropped because the bridge file's `session_id` (latest transient UUID) diverged from the stable ID used by the stop hook
+- Added `session_ids` list to bridge file format that accumulates all transient UUIDs across context clears, built from `old_data` already loaded for context-clear detection (no extra file read)
+- Updated `find_session_by_id()` to check `session_ids` list with backward-compat fallback to `session_id` and `stable_session_id` fields for pre-existing bridge files
+- Initialized `old_data = None` at scope top to prevent `NameError` when bridge file doesn't exist
+
+**Files**: `src/lupin_cli/claude_code/hooks/register_session.py`, `src/lupin_cli/claude_code/hooks/lib/session_bridge.py`
+
+---
+
 ### 2026.03.13 - Session 349 | Standardize ~91 Underscore Config Keys to Space-Separated
 
 **Accomplishments**:
