@@ -1,16 +1,16 @@
 # Lupin Project History
 
-### 2026.03.12 - Session 348 | PR Prep: README Promotional Rewrite + CHANGELOG v0.1.5
+### 2026.03.12 - Session 348 | v0.1.5 PR to Main + Branch Transition
 
 **Accomplishments**:
-- Rewrote README.md with promotional tone for v0.1.5 PR to main
-- Added new "Human in the Loop, reimagined" section framing voice-first HITL thesis
-- Updated architecture diagram: 6 hooks, "Bayesian Trust · L1-L5" proxy label, "Claude Code Voice Loop" subgraph
-- Expanded Key Capabilities: voice-first everywhere, trust proxy with UPE/Thompson/conformal, battle-tested test suite table
-- Added tech badges (Bayesian Trust, MCP Protocol), version bump to v0.1.5
-- Fleshed out CHANGELOG.md v0.1.5 from 3 bullets to 7 categories with 30+ line items
+- Rewrote README.md with promotional tone for v0.1.5 PR
+- Added "Human in the Loop, reimagined" section, updated architecture diagram (6 hooks), expanded trust proxy, test suite table
+- Fleshed out CHANGELOG.md v0.1.5 from 3 bullets to 7 categories (30+ line items)
+- Created PR #15: "v0.1.5 — Voice-First Human in the Loop" (192 commits, 397 files, +69K/-9K lines)
+- PR merged to main (commit 949cf6e)
+- Created new branch: `wip-v0.1.6-2026.03.12-cjflow-upe-and-playwrite`
 
-**Files Modified**: `README.md`, `CHANGELOG.md`
+**Files Modified**: `README.md`, `CHANGELOG.md`, `history.md`, `TODO.md`
 
 ---
 
