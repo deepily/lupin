@@ -17,7 +17,7 @@
                 <button class="btn btn-primary btn-small" onclick="showCreateUserModal()">
                     + Create User
                 </button>
-                <button class="btn btn-secondary btn-small" onclick="window.location.href='/app/auth/profile'">
+                <button class="btn btn-secondary btn-small" data-testid="admin-users-back-btn" onclick="window.location.href='/app/auth/profile'">
                     ← Back to Profile
                 </button>
             </div>
@@ -31,24 +31,24 @@
         <div class="filter-bar">
             <input
                 type="search"
-                id="user-search"
+                id="user-search" data-testid="admin-users-search-input"
                 placeholder="Search by email..."
                 class="search-input"
             >
 
-            <select id="role-filter" class="filter-select">
+            <select id="role-filter" data-testid="admin-users-role-filter-select" class="filter-select">
                 <option value="">All Roles</option>
                 <option value="admin">Admin</option>
                 <option value="user">User</option>
             </select>
 
-            <select id="status-filter" class="filter-select">
+            <select id="status-filter" data-testid="admin-users-status-filter-select" class="filter-select">
                 <option value="">All Status</option>
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
             </select>
 
-            <button class="btn btn-secondary btn-small" onclick="clearFilters()">
+            <button class="btn btn-secondary btn-small" data-testid="admin-users-clear-filters-btn" onclick="clearFilters()">
                 Clear Filters
             </button>
         </div>
@@ -87,18 +87,18 @@
                         <th>Actions</th>
                     </tr>
                 </thead>
-                <tbody id="users-tbody">
+                <tbody id="users-tbody" data-testid="admin-users-table">
                     <!-- Populated by JavaScript -->
                 </tbody>
             </table>
 
             <!-- Pagination -->
             <div class="pagination">
-                <button id="prev-page" class="btn btn-secondary btn-small" onclick="previousPage()" disabled>
+                <button id="prev-page" data-testid="admin-users-prev-page-btn" class="btn btn-secondary btn-small" onclick="previousPage()" disabled>
                     ← Previous
                 </button>
-                <span id="page-info">Page 1</span>
-                <button id="next-page" class="btn btn-secondary btn-small" onclick="nextPage()">
+                <span id="page-info" data-testid="admin-users-page-info">Page 1</span>
+                <button id="next-page" data-testid="admin-users-next-page-btn" class="btn btn-secondary btn-small" onclick="nextPage()">
                     Next →
                 </button>
             </div>
@@ -112,7 +112,7 @@
     </div>
 
     <!-- User Detail Modal -->
-    <div id="user-modal" class="modal">
+    <div id="user-modal" data-testid="modal-user-detail" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeUserModal()">&times;</span>
             <h2>User Details</h2>
@@ -139,7 +139,7 @@
     </div>
 
     <!-- Role Editor Modal -->
-    <div id="role-modal" class="modal">
+    <div id="role-modal" data-testid="modal-role-editor" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeRoleModal()">&times;</span>
             <h2>Edit User Roles</h2>
@@ -148,12 +148,12 @@
                 <p class="mb-2">Select roles for <strong id="role-user-email">user</strong>:</p>
 
                 <label class="role-checkbox">
-                    <input type="checkbox" id="role-admin" value="admin">
+                    <input type="checkbox" id="role-admin" data-testid="modal-role-admin-checkbox" value="admin">
                     <span>⭐ Admin (Superuser privileges)</span>
                 </label>
 
                 <label class="role-checkbox">
-                    <input type="checkbox" id="role-user" value="user">
+                    <input type="checkbox" id="role-user" data-testid="modal-role-user-checkbox" value="user">
                     <span>👤 User (Standard access)</span>
                 </label>
             </div>
@@ -170,7 +170,7 @@
     </div>
 
     <!-- Password Reset Modal -->
-    <div id="password-modal" class="modal">
+    <div id="password-modal" data-testid="modal-password-reset" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closePasswordModal()">&times;</span>
             <h2>⚠️ Temporary Password Generated</h2>
@@ -183,7 +183,7 @@
                 <div class="password-display">
                     <input
                         type="text"
-                        id="temp-password"
+                        id="temp-password" data-testid="modal-password-reset-temp"
                         readonly
                         class="password-input"
                     >
@@ -204,7 +204,7 @@
     </div>
 
     <!-- Confirmation Dialog -->
-    <div id="confirm-modal" class="modal">
+    <div id="confirm-modal" data-testid="modal-user-confirm" class="modal">
         <div class="modal-content modal-confirm">
             <h2>Confirm Action</h2>
             <p id="confirm-message">Are you sure?</p>

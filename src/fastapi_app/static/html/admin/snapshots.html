@@ -14,15 +14,15 @@
         <!-- Header -->
         <header class="page-header">
             <div class="breadcrumb">
-                <a href="/app">Home</a>
+                <a href="/app" data-testid="snapshots-breadcrumb-home">Home</a>
                 <span class="separator">></span>
-                <a href="/app/admin">Admin</a>
+                <a href="/app/admin" data-testid="snapshots-breadcrumb-admin">Admin</a>
                 <span class="separator">></span>
                 <span class="current">Solution Snapshots</span>
             </div>
             <div class="user-info">
-                <span id="user-email"></span>
-                <button id="logout-btn" class="btn-secondary">Logout</button>
+                <span id="user-email" data-testid="snapshots-user-email"></span>
+                <button id="logout-btn" data-testid="snapshots-logout-btn" class="btn-secondary">Logout</button>
             </div>
         </header>
 
@@ -31,16 +31,16 @@
         <!-- Search Section -->
         <div class="search-section">
             <div class="search-bar">
-                <button id="search-stt-button" type="button" class="search-stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                <button id="search-stt-button" data-testid="snapshots-search-stt-btn" type="button" class="search-stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
                 <input
                     type="text"
-                    id="search-input"
+                    id="search-input" data-testid="snapshots-search-input"
                     placeholder="Search snapshots by question..."
                     autocomplete="off"
                 >
                 <!-- Filter Controls -->
                 <div class="filter-controls">
-                    <select id="threshold-select" title="Minimum similarity score">
+                    <select id="threshold-select" data-testid="snapshots-threshold-select" title="Minimum similarity score">
                         <option value="0">0%</option>
                         <option value="25">25%</option>
                         <option value="50">50%</option>
@@ -55,17 +55,17 @@
                         <option value="98">98%</option>
                         <option value="99">99%</option>
                     </select>
-                    <select id="limit-select" title="Maximum results">
+                    <select id="limit-select" data-testid="snapshots-limit-select" title="Maximum results">
                         <option value="10">Top 10</option>
                         <option value="25">Top 25</option>
                         <option value="50" selected>Top 50</option>
                         <option value="100">Top 100</option>
                     </select>
                 </div>
-                <button id="search-btn" class="btn-primary">Search</button>
+                <button id="search-btn" data-testid="snapshots-search-btn" class="btn-primary">Search</button>
             </div>
             <div id="search-info" class="search-info">
-                <span id="results-count"></span>
+                <span id="results-count" data-testid="snapshots-results-count"></span>
             </div>
             <div id="search-error" class="error-message" style="display: none;"></div>
         </div>
@@ -84,7 +84,7 @@
                         <th>Actions</th>
                     </tr>
                 </thead>
-                <tbody id="results-tbody">
+                <tbody id="results-tbody" data-testid="snapshots-results-table">
                     <!-- Populated dynamically -->
                 </tbody>
             </table>
@@ -101,7 +101,7 @@
         </div>
 
         <!-- Detail Modal -->
-        <div id="detail-modal" class="modal" style="display: none;">
+        <div id="detail-modal" data-testid="modal-snapshot-detail" class="modal" style="display: none;">
             <div class="modal-overlay"></div>
             <div class="modal-content">
                 <div class="modal-header">
@@ -115,11 +115,11 @@
                         <div class="detail-column-left">
                             <div class="detail-field">
                                 <label>Question (Normalized):</label>
-                                <div id="detail-question-normalized" class="detail-value"></div>
+                                <div id="detail-question-normalized" data-testid="modal-snapshot-question" class="detail-value"></div>
                             </div>
                             <div class="detail-field">
                                 <label>Question Gist:</label>
-                                <div id="detail-question-gist" class="detail-value"></div>
+                                <div id="detail-question-gist" data-testid="modal-snapshot-gist" class="detail-value"></div>
                             </div>
                         </div>
 
@@ -127,11 +127,11 @@
                         <div class="detail-column-right">
                             <div class="detail-field">
                                 <label>Answer:</label>
-                                <div id="detail-answer" class="detail-value"></div>
+                                <div id="detail-answer" data-testid="modal-snapshot-answer" class="detail-value"></div>
                             </div>
                             <div class="detail-field">
                                 <label>Answer (Conversational):</label>
-                                <div id="detail-answer-conversational" class="detail-value"></div>
+                                <div id="detail-answer-conversational" data-testid="modal-snapshot-conversational" class="detail-value"></div>
                             </div>
                         </div>
                     </div>
@@ -139,7 +139,7 @@
                     <div class="detail-field synonyms-section">
                         <div class="synonyms-header" onclick="toggleSynonyms()">
                             <label>Synonyms (<span id="synonyms-count">0</span>):</label>
-                            <button class="toggle-btn" id="synonyms-toggle">▶</button>
+                            <button class="toggle-btn" id="synonyms-toggle" data-testid="modal-snapshot-synonyms-toggle-btn">▶</button>
                         </div>
                         <div id="synonyms-content" class="synonyms-content collapsed">
                             <div id="synonyms-list"></div>
@@ -147,42 +147,42 @@
                     </div>
                     <div class="detail-field">
                         <label>Runtime Statistics:</label>
-                        <pre id="detail-runtime-stats" class="code-block"></pre>
+                        <pre id="detail-runtime-stats" data-testid="modal-snapshot-runtime-stats" class="code-block"></pre>
                     </div>
                     <div class="detail-field">
                         <label>Executable Code:</label>
-                        <pre id="detail-code" class="code-block"></pre>
+                        <pre id="detail-code" data-testid="modal-snapshot-code" class="code-block"></pre>
                     </div>
                     <div class="detail-field">
                         <label>Code Explanation:</label>
-                        <div id="detail-solution-summary" class="detail-value"></div>
+                        <div id="detail-solution-summary" data-testid="modal-snapshot-summary" class="detail-value"></div>
                     </div>
                     <div class="detail-field">
                         <label>Solution Summary Gist:</label>
-                        <div id="detail-solution-summary-gist" class="detail-value"></div>
+                        <div id="detail-solution-summary-gist" data-testid="modal-snapshot-summary-gist" class="detail-value"></div>
                     </div>
                     <div class="detail-field">
                         <label>ID Hash:</label>
-                        <div id="detail-id-hash" class="detail-value"></div>
+                        <div id="detail-id-hash" data-testid="modal-snapshot-id-hash" class="detail-value"></div>
                     </div>
                     <div class="detail-field">
                         <label>User ID:</label>
-                        <div id="detail-user-id" class="detail-value"></div>
+                        <div id="detail-user-id" data-testid="modal-snapshot-user-id" class="detail-value"></div>
                     </div>
                     <div class="detail-field">
                         <label>Created Date:</label>
-                        <div id="detail-created-date" class="detail-value"></div>
+                        <div id="detail-created-date" data-testid="modal-snapshot-created-date" class="detail-value"></div>
                     </div>
                     <!-- Find Similar Button -->
                     <div class="detail-field" style="margin-top: 20px; text-align: center;">
-                        <button id="find-similar-btn" class="btn-primary">🔍 Find Similar Snapshots</button>
+                        <button id="find-similar-btn" data-testid="modal-snapshot-find-similar-btn" class="btn-primary">🔍 Find Similar Snapshots</button>
                     </div>
                 </div>
             </div>
         </div>
 
         <!-- Similarity Modal -->
-        <div id="similarity-modal" class="modal" style="display: none;">
+        <div id="similarity-modal" data-testid="modal-snapshot-similarity" class="modal" style="display: none;">
             <div class="modal-overlay"></div>
             <div class="modal-content modal-large">
                 <div class="modal-header">
@@ -199,14 +199,14 @@
                             <div class="similarity-column">
                                 <h3>💻 Similar by Code</h3>
                                 <p class="similarity-description">Snapshots with similar executable code</p>
-                                <div id="code-similar-count" class="similarity-count"></div>
+                                <div id="code-similar-count" data-testid="modal-similarity-code-count" class="similarity-count"></div>
                                 <div id="code-similar-list" class="similarity-list"></div>
                             </div>
                             <!-- Column 2: Similar by Explanation -->
                             <div class="similarity-column">
                                 <h3>📝 Similar by Explanation</h3>
                                 <p class="similarity-description">Snapshots with similar solution explanations</p>
-                                <div id="explanation-similar-count" class="similarity-count"></div>
+                                <div id="explanation-similar-count" data-testid="modal-similarity-explanation-count" class="similarity-count"></div>
                                 <div id="explanation-similar-list" class="similarity-list"></div>
                             </div>
                         </div>
@@ -217,7 +217,7 @@
         </div>
 
         <!-- Delete Confirmation Modal -->
-        <div id="delete-modal" class="modal" style="display: none;">
+        <div id="delete-modal" data-testid="modal-snapshot-delete" class="modal" style="display: none;">
             <div class="modal-overlay"></div>
             <div class="modal-content modal-small">
                 <div class="modal-header">
@@ -230,8 +230,8 @@
                     <div id="delete-preview" class="delete-preview"></div>
                 </div>
                 <div class="modal-footer">
-                    <button id="confirm-delete-btn" class="btn-danger">Delete</button>
-                    <button id="cancel-delete-btn" class="btn-secondary">Cancel</button>
+                    <button id="confirm-delete-btn" data-testid="modal-snapshot-delete-confirm-btn" class="btn-danger">Delete</button>
+                    <button id="cancel-delete-btn" data-testid="modal-snapshot-delete-cancel-btn" class="btn-secondary">Cancel</button>
                 </div>
             </div>
         </div>

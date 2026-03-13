@@ -13,9 +13,9 @@
     <div class="admin-container">
         <!-- Breadcrumb -->
         <div class="breadcrumb">
-            <a href="/app">Home</a>
+            <a href="/app" data-testid="ratify-breadcrumb-home">Home</a>
             <span class="separator">></span>
-            <a href="/app/admin">Admin</a>
+            <a href="/app/admin" data-testid="ratify-breadcrumb-admin">Admin</a>
             <span class="separator">></span>
             <span class="current">Pending Ratification</span>
         </div>
@@ -24,7 +24,7 @@
         <div class="admin-header">
             <h1>Decision Proxy — Pending Ratification</h1>
             <div class="admin-actions">
-                <button class="btn btn-secondary btn-small"
+                <button class="btn btn-secondary btn-small" data-testid="ratify-back-btn"
                         onclick="window.location.href='/app/admin'">
                     ← Back to Admin
                 </button>
@@ -48,19 +48,19 @@
             <div class="summary-cards" id="summary-cards">
                 <div class="summary-card summary-card-pending">
                     <div class="card-label">Pending</div>
-                    <div class="card-value" id="stat-pending">0</div>
+                    <div class="card-value" id="stat-pending" data-testid="ratify-stat-pending">0</div>
                 </div>
                 <div class="summary-card summary-card-approved">
                     <div class="card-label">Approved Today</div>
-                    <div class="card-value" id="stat-approved">0</div>
+                    <div class="card-value" id="stat-approved" data-testid="ratify-stat-approved">0</div>
                 </div>
                 <div class="summary-card summary-card-rejected">
                     <div class="card-label">Rejected Today</div>
-                    <div class="card-value" id="stat-rejected">0</div>
+                    <div class="card-value" id="stat-rejected" data-testid="ratify-stat-rejected">0</div>
                 </div>
                 <div class="summary-card summary-card-oldest">
                     <div class="card-label">Oldest Pending</div>
-                    <div class="card-value" id="stat-oldest">—</div>
+                    <div class="card-value" id="stat-oldest" data-testid="ratify-stat-oldest">—</div>
                 </div>
             </div>
 
@@ -73,7 +73,7 @@
                     <option value="synthetic_generated">Synthetic (Generated)</option>
                 </select>
 
-                <select id="filter-category" class="filter-select">
+                <select id="filter-category" data-testid="ratify-filter-category-select" class="filter-select">
                     <option value="">All Categories</option>
                     <option value="deployment">Deployment</option>
                     <option value="testing">Testing</option>
@@ -83,7 +83,7 @@
                     <option value="general">General</option>
                 </select>
 
-                <select id="filter-trust-level" class="filter-select">
+                <select id="filter-trust-level" data-testid="ratify-filter-trust-select" class="filter-select">
                     <option value="">All Trust Levels</option>
                     <option value="1">L1 — Shadow</option>
                     <option value="2">L2 — Provisional</option>
@@ -92,7 +92,7 @@
                     <option value="5">L5 — Full Trust</option>
                 </select>
 
-                <select id="filter-action" class="filter-select">
+                <select id="filter-action" data-testid="ratify-filter-action-select" class="filter-select">
                     <option value="">All Actions</option>
                     <option value="shadow">Shadow</option>
                     <option value="suggest">Suggest</option>
@@ -100,18 +100,18 @@
                     <option value="defer">Defer</option>
                 </select>
 
-                <button class="btn btn-secondary btn-small" onclick="clearFilters()">
+                <button class="btn btn-secondary btn-small" data-testid="ratify-clear-filters-btn" onclick="clearFilters()">
                     Clear Filters
                 </button>
             </div>
 
             <!-- Bulk Actions -->
             <div class="bulk-actions" id="bulk-actions" style="display: none;">
-                <span class="selected-count" id="selected-count">0 selected</span>
-                <button class="btn btn-primary btn-small" onclick="bulkApprove()">
+                <span class="selected-count" id="selected-count" data-testid="ratify-selected-count">0 selected</span>
+                <button class="btn btn-primary btn-small" data-testid="ratify-bulk-approve-btn" onclick="bulkApprove()">
                     Approve Selected
                 </button>
-                <button class="btn btn-danger btn-small" onclick="bulkReject()">
+                <button class="btn btn-danger btn-small" data-testid="ratify-bulk-reject-btn" onclick="bulkReject()">
                     Reject Selected
                 </button>
                 <button class="btn btn-danger btn-small" onclick="bulkDelete()">
@@ -124,7 +124,7 @@
                 <table class="decisions-table">
                     <thead>
                         <tr>
-                            <th><input type="checkbox" id="select-all" onclick="toggleSelectAll()"></th>
+                            <th><input type="checkbox" id="select-all" data-testid="ratify-select-all-checkbox" onclick="toggleSelectAll()"></th>
                             <th>Source</th>
                             <th>Category</th>
                             <th>Question</th>
@@ -135,7 +135,7 @@
                             <th>Actions</th>
                         </tr>
                     </thead>
-                    <tbody id="decisions-tbody">
+                    <tbody id="decisions-tbody" data-testid="ratify-decisions-table">
                         <!-- Populated by JavaScript -->
                     </tbody>
                 </table>
@@ -149,11 +149,11 @@
 
             <!-- Pagination -->
             <div class="pagination" id="pagination-container">
-                <button id="prev-page" class="btn btn-secondary btn-small" onclick="previousPage()" disabled>
+                <button id="prev-page" data-testid="ratify-prev-page-btn" class="btn btn-secondary btn-small" onclick="previousPage()" disabled>
                     ← Previous
                 </button>
-                <span id="page-info">Page 1</span>
-                <button id="next-page" class="btn btn-secondary btn-small" onclick="nextPage()">
+                <span id="page-info" data-testid="ratify-page-info">Page 1</span>
+                <button id="next-page" data-testid="ratify-next-page-btn" class="btn btn-secondary btn-small" onclick="nextPage()">
                     Next →
                 </button>
             </div>
@@ -161,7 +161,7 @@
     </div>
 
     <!-- Decision Detail Modal -->
-    <div id="detail-modal" class="modal">
+    <div id="detail-modal" data-testid="modal-ratify-detail" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeDetailModal()">&times;</span>
             <h2>Decision Detail</h2>
@@ -172,15 +172,15 @@
 
             <div class="feedback-section">
                 <label for="feedback-text">Feedback (optional):</label>
-                <textarea id="feedback-text" class="feedback-textarea"
+                <textarea id="feedback-text" data-testid="modal-ratify-feedback-textarea" class="feedback-textarea"
                           placeholder="Add feedback about this decision..."></textarea>
             </div>
 
             <div class="modal-actions">
-                <button class="btn btn-primary" id="modal-approve-btn" onclick="modalApprove()">
+                <button class="btn btn-primary" id="modal-approve-btn" data-testid="modal-ratify-approve-btn" onclick="modalApprove()">
                     Approve
                 </button>
-                <button class="btn btn-danger" id="modal-reject-btn" onclick="modalReject()">
+                <button class="btn btn-danger" id="modal-reject-btn" data-testid="modal-ratify-reject-btn" onclick="modalReject()">
                     Reject
                 </button>
                 <button class="btn btn-secondary" onclick="closeDetailModal()">
@@ -191,13 +191,13 @@
     </div>
 
     <!-- Confirm Modal (generic — used for bulk reject and bulk delete) -->
-    <div id="confirm-modal" class="modal">
+    <div id="confirm-modal" data-testid="modal-ratify-confirm" class="modal">
         <div class="modal-content modal-confirm">
             <h2 id="confirm-title">Confirm Action</h2>
             <p id="confirm-message">Are you sure?</p>
 
             <div class="modal-actions">
-                <button class="btn btn-danger" id="confirm-yes">
+                <button class="btn btn-danger" id="confirm-yes" data-testid="modal-ratify-confirm-yes-btn">
                     Confirm
                 </button>
                 <button class="btn btn-secondary" onclick="closeConfirmModal()">

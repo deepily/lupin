@@ -10,6 +10,10 @@ pytest-cov>=2.12.0           # Coverage reporting (optional)
 websockets>=15.0.1           # WebSocket client for integration tests
 requests>=2.32.3             # HTTP client for API integration tests
 
+# Playwright E2E UI Testing (Phase 1, v0.1.6)
+pytest-playwright>=0.7.0             # Playwright integration for pytest
+# pytest-playwright-visual-snapshot  # Visual regression — deferred to Phase 8
+
 # Note: Main dependencies are in src/cosa/requirements.txt
 # Install both files for complete development environment:
 #   pip install -r src/cosa/requirements.txt

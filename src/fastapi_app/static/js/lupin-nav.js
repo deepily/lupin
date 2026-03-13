@@ -14,15 +14,15 @@
     // ========================================================================
 
     const NAV_ITEMS = [
-        { label : "Home",            url : "/app",                     icon : "home",   auth : false, admin : false },
-        { label : "Notifications",   url : "/app/notifications",       icon : "bell",   auth : true,  admin : false },
-        { label : "Profile",         url : "/app/auth/profile",        icon : "user",   auth : true,  admin : false },
-        { label : "Admin",           url : "/app/admin",               icon : "shield", auth : true,  admin : true  },
-        { label : "Users",           url : "/app/admin/users",         icon : "users",  auth : true,  admin : true  },
-        { label : "Snapshots",       url : "/app/admin/snapshots",     icon : "camera", auth : true,  admin : true  },
-        { label : "Ratification",    url : "/app/admin/proxy-ratify",  icon : "check",  auth : true,  admin : true  },
-        { label : "Trust",           url : "/app/admin/proxy-dashboard", icon : "chart", auth : true,  admin : true  },
-        { label : "Dev Tools",       url : "/app/admin/dev-tools",     icon : "wrench", auth : true,  admin : true  }
+        { label : "Home",            url : "/app",                       icon : "home",   auth : false, admin : false, testid : "nav-home-link"           },
+        { label : "Notifications",   url : "/app/notifications",         icon : "bell",   auth : true,  admin : false, testid : "nav-notifications-link"  },
+        { label : "Profile",         url : "/app/auth/profile",          icon : "user",   auth : true,  admin : false, testid : "nav-profile-link"        },
+        { label : "Admin",           url : "/app/admin",                 icon : "shield", auth : true,  admin : true,  testid : "nav-admin-link"          },
+        { label : "Users",           url : "/app/admin/users",           icon : "users",  auth : true,  admin : true,  testid : "nav-admin-users-link"    },
+        { label : "Snapshots",       url : "/app/admin/snapshots",       icon : "camera", auth : true,  admin : true,  testid : "nav-admin-snapshots-link"},
+        { label : "Ratification",    url : "/app/admin/proxy-ratify",    icon : "check",  auth : true,  admin : true,  testid : "nav-admin-ratify-link"   },
+        { label : "Trust",           url : "/app/admin/proxy-dashboard", icon : "chart",  auth : true,  admin : true,  testid : "nav-admin-trust-link"    },
+        { label : "Dev Tools",       url : "/app/admin/dev-tools",       icon : "wrench", auth : true,  admin : true,  testid : "nav-admin-devtools-link" }
     ];
 
     // ========================================================================
@@ -118,7 +118,7 @@
         html += '<a href="/app" class="lupin-nav-brand">Lupin</a>';
 
         // Hamburger toggle (mobile)
-        html += '<button class="lupin-nav-toggle" aria-label="Toggle navigation">' + ICONS.menu + '</button>';
+        html += '<button class="lupin-nav-toggle" aria-label="Toggle navigation" data-testid="nav-mobile-toggle-btn">' + ICONS.menu + '</button>';
 
         // Nav links
         html += '<div class="lupin-nav-links">';
@@ -135,7 +135,7 @@
 
             const active = isActivePage( item.url ) ? " lupin-nav-active" : "";
             const icon   = ICONS[ item.icon ] || "";
-            html += '<a href="' + item.url + '" class="lupin-nav-link' + active + '">' + icon + '<span>' + item.label + '</span></a>';
+            html += '<a href="' + item.url + '" class="lupin-nav-link' + active + '" data-testid="' + item.testid + '">' + icon + '<span>' + item.label + '</span></a>';
         } );
 
         html += '</div>'; // end .lupin-nav-links
@@ -143,10 +143,10 @@
         // Right side — user email + logout OR login
         html += '<div class="lupin-nav-right">';
         if ( authenticated && email ) {
-            html += '<span class="lupin-nav-email">' + email + '</span>';
-            html += '<button class="lupin-nav-logout" title="Logout">' + ICONS.logout + ' Logout</button>';
+            html += '<span class="lupin-nav-email" data-testid="nav-user-email">' + email + '</span>';
+            html += '<button class="lupin-nav-logout" title="Logout" data-testid="nav-logout-btn">' + ICONS.logout + ' Logout</button>';
         } else {
-            html += '<a href="/app/auth/login" class="lupin-nav-login">' + ICONS.login + ' Login</a>';
+            html += '<a href="/app/auth/login" class="lupin-nav-login" data-testid="nav-login-link">' + ICONS.login + ' Login</a>';
         }
         html += '</div>'; // end .lupin-nav-right
 

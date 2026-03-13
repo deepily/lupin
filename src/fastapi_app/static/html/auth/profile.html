@@ -13,17 +13,17 @@
         <div class="profile-header">
             <h1>Your Profile</h1>
             <div class="profile-header-actions">
-                <button class="btn btn-primary" onclick="window.location.href='/app/auth/change-password'">
+                <button class="btn btn-primary" data-testid="profile-change-pwd-btn" onclick="window.location.href='/app/auth/change-password'">
                     Change Password
                 </button>
-                <button class="btn btn-secondary" onclick="logout()">Logout</button>
+                <button class="btn btn-secondary" data-testid="profile-logout-btn" onclick="logout()">Logout</button>
             </div>
         </div>
 
-        <div class="error-message" id="error-message"></div>
-        <div class="success-message" id="success-message"></div>
+        <div class="error-message" id="error-message" data-testid="profile-error-message"></div>
+        <div class="success-message" id="success-message" data-testid="profile-success-message"></div>
 
-        <div class="loading" id="loading">
+        <div class="loading" id="loading" data-testid="profile-loading-spinner">
             <div class="spinner"></div>
             <p class="mt-2">Loading profile...</p>
         </div>
@@ -32,40 +32,40 @@
             <div class="profile-info">
                 <div class="info-row">
                     <span class="info-label">Email</span>
-                    <span class="info-value" id="user-email">-</span>
+                    <span class="info-value" id="user-email" data-testid="profile-user-email">-</span>
                 </div>
 
                 <div class="info-row">
                     <span class="info-label">User ID</span>
-                    <span class="info-value" id="user-id">-</span>
+                    <span class="info-value" id="user-id" data-testid="profile-user-id">-</span>
                 </div>
 
                 <div class="info-row">
                     <span class="info-label">Roles</span>
-                    <span class="info-value" id="user-roles">-</span>
+                    <span class="info-value" id="user-roles" data-testid="profile-user-roles">-</span>
                 </div>
 
                 <div class="info-row">
                     <span class="info-label">Email Verified</span>
-                    <span class="info-value" id="email-verified">-</span>
+                    <span class="info-value" id="email-verified" data-testid="profile-email-verified">-</span>
                 </div>
 
                 <div class="info-row">
                     <span class="info-label">Account Status</span>
-                    <span class="info-value" id="account-status">-</span>
+                    <span class="info-value" id="account-status" data-testid="profile-account-status">-</span>
                 </div>
             </div>
 
             <!-- Admin Section (only visible to admins) -->
-            <div class="admin-section" id="admin-section" style="display: none;">
+            <div class="admin-section" id="admin-section" data-testid="profile-admin-section" style="display: none;">
                 <h2>🔐 ADMIN ACCESS</h2>
                 <p>You have administrative privileges on this system.</p>
                 <div class="button-group">
-                    <button class="btn btn-primary" onclick="window.location.href='/app/admin'">🏠 Admin Dashboard</button>
-                    <button class="btn btn-secondary" onclick="window.location.href='/app/admin/users'">👥 Manage Users</button>
-                    <button class="btn btn-secondary" onclick="window.location.href='/app/admin/snapshots'">🔍 Solution Snapshots</button>
-                    <button class="btn btn-secondary" onclick="window.location.href='/app/admin/proxy-ratify'">Pending Ratification</button>
-                    <button class="btn btn-secondary" onclick="window.location.href='/app/admin/proxy-dashboard'">Trust Dashboard</button>
+                    <button class="btn btn-primary" data-testid="profile-admin-dashboard-btn" onclick="window.location.href='/app/admin'">🏠 Admin Dashboard</button>
+                    <button class="btn btn-secondary" data-testid="profile-admin-users-btn" onclick="window.location.href='/app/admin/users'">👥 Manage Users</button>
+                    <button class="btn btn-secondary" data-testid="profile-admin-snapshots-btn" onclick="window.location.href='/app/admin/snapshots'">🔍 Solution Snapshots</button>
+                    <button class="btn btn-secondary" data-testid="profile-admin-ratify-btn" onclick="window.location.href='/app/admin/proxy-ratify'">Pending Ratification</button>
+                    <button class="btn btn-secondary" data-testid="profile-admin-trust-btn" onclick="window.location.href='/app/admin/proxy-dashboard'">Trust Dashboard</button>
                 </div>
             </div>
 

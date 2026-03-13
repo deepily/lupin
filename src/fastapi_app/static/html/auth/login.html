@@ -16,16 +16,17 @@
             <p>Login to access your account</p>
         </div>
 
-        <div class="error-message" id="error-message"></div>
-        <div class="success-message" id="success-message"></div>
+        <div class="error-message" id="error-message" data-testid="login-error-message"></div>
+        <div class="success-message" id="success-message" data-testid="login-success-message"></div>
 
-        <form class="auth-form" id="login-form">
+        <form class="auth-form" id="login-form" data-testid="login-form">
             <div class="form-group">
                 <label for="email">Email Address</label>
                 <input
                     type="email"
                     id="email"
                     name="email"
+                    data-testid="login-email-input"
                     placeholder="ricardo.felipe.ruiz@gmail.com"
                     required
                     autocomplete="email"
@@ -38,24 +39,25 @@
                     type="password"
                     id="password"
                     name="password"
+                    data-testid="login-password-input"
                     placeholder="Enter your password"
                     required
                     autocomplete="current-password"
                 />
             </div>
 
-            <button type="submit" class="btn btn-primary" id="login-button">
+            <button type="submit" class="btn btn-primary" id="login-button" data-testid="login-submit-btn">
                 Login
             </button>
         </form>
 
-        <div class="loading" id="loading">
+        <div class="loading" id="loading" data-testid="login-loading-spinner">
             <div class="spinner"></div>
             <p class="mt-2">Authenticating...</p>
         </div>
 
         <div class="auth-link">
-            Don't have an account? <a href="/app/auth/register">Register</a>
+            Don't have an account? <a href="/app/auth/register" data-testid="login-register-link">Register</a>
         </div>
     </div>
 

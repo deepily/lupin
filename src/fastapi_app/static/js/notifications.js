@@ -5644,7 +5644,7 @@ class NotificationsUI {
      */
     renderReportLinkSection( reportPath ) {
         if ( !reportPath ) return '';
-        return `<a href="/api/io/file?path=${encodeURIComponent( reportPath )}" target="_blank" class="report-link-btn">📋 View Full Report</a>`;
+        return `<a href="/app/docs?path=${encodeURIComponent( reportPath )}" target="_blank" class="report-link-btn">📋 View Full Report</a>`;
     }
 
     /**
