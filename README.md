@@ -1,12 +1,22 @@
 # Lupin
 
-*Named after Arsene Lupin, the gentleman thief. More on that front once Lupin enters multi-user testing on Google Cloud*
+*Named after Arsene Lupin, the gentleman thief. More on that front once Lupin enters multi-user testing on Google Cloud.*
 
-**A voice-first AI agent platform that routes spoken commands to specialized agents, remembers what it has already solved, and talks back.**
+**A voice-first AI agent platform that closes the voice loop from browser UI through agent execution into developer tooling and back -- with Bayesian trust learning, fine-tuned intent routing, and solution caching built in.**
 
-`FastAPI` | `Voice I/O` | `PEFT/LoRA` | `LanceDB` | `Claude Agent SDK`
+`FastAPI` | `Voice I/O` | `PEFT/LoRA` | `LanceDB` | `Claude Agent SDK` | `Bayesian Trust` | `MCP Protocol`
 
-Current version: **v0.1.4** (v0.1.5 in progress) | License: [Apache 2.0](LICENSE)
+Current version: **v0.1.5** | License: [Apache 2.0](LICENSE)
+
+---
+
+## Human in the loop, reimagined
+
+Every agentic AI platform needs human oversight. Most implement it as a modal dialog: click approve, type feedback, wait. Lupin takes a fundamentally different approach -- **voice-first human-in-the-loop**.
+
+Agents speak to you. You speak back. A Bayesian trust engine learns your preferences over time, escalating only when confidence is low and auto-approving when it has earned your trust. The result: human oversight that works **from across the room**, while you're multitasking, or even from your phone -- no screen required.
+
+This is the missing piece in agentic AI: not just making agents smarter, but making **human oversight effortless**.
 
 ---
 
@@ -26,7 +36,7 @@ Even the simplest vox-in and vox-out UX -- especially when coupled with agentic 
 
 ### Lupin's approach
 
-Fine-tune small models for cheap, fast intent routing. Escalate to frontier models only for complex tasks. Cache prior solutions via vector search so agents stop reinventing the wheel. And voice-enable everything -- from the browser UI all the way into [developer tooling sessions](https://www.linkedin.com/pulse/slow-expensive-erratic-problem-whats-solution-r-p-ruiz/).
+Fine-tune small models for cheap, fast intent routing -- not prompt engineering, actual PEFT/LoRA fine-tuning. Escalate to frontier models only when complexity demands it. Cache solutions via vector search so agents never solve the same problem twice. Layer Bayesian trust learning so the system earns autonomy over time, minimizing human interruptions without sacrificing oversight. And voice-enable *everything* -- from the browser UI, through agent execution, into [Claude Code developer sessions](https://www.linkedin.com/pulse/slow-expensive-erratic-problem-whats-solution-r-p-ruiz/) via 6 system hooks and an MCP voice server, and back again.
 
 ---
 
@@ -51,14 +61,14 @@ flowchart TD
     end
 
     SYNC --> TTS
-    ASYNC --> PROXY["Decision Proxy<br/>(Bayesian Trust)"]
+    ASYNC --> PROXY["Decision Proxy<br/>(Bayesian Trust · L1-L5)"]
     PROXY --> TTS
 
     TTS --> WS["WebSocket<br/>(queue + audio channels)"]
     WS --> BROWSER["Browser UI"]
 
-    subgraph Claude Code Integration
-        HOOKS["System Hooks<br/>(PreToolUse · PostToolUse · Notification)"] --> MCP["cosa-voice<br/>MCP Server"]
+    subgraph Claude Code Voice Loop
+        HOOKS["6 System Hooks<br/>(PreToolUse · PostToolUse · Notification<br/>Stop · PermissionRequest · UserPromptSubmit)"] --> MCP["cosa-voice<br/>MCP Server"]
         MCP --> ROUTER
     end
 
@@ -66,11 +76,13 @@ flowchart TD
     style MCP fill:#f9f,stroke:#333,stroke-width:2px
 ```
 
-The highlighted path at the bottom is the **v0.1.5 novelty** -- it closes the voice loop *inside* Claude Code sessions via system hooks and the cosa-voice MCP server.
+Voice flows end-to-end: browser microphone through agent execution into Claude Code sessions and back via dual-channel WebSocket audio streaming.
 
 ---
 
 ## Agent ecosystem
+
+**17 specialized agents** -- from sub-second sync responders to long-running autonomous research pipelines -- all routed through fine-tuned small models and unified by a single voice-first queue system.
 
 ### Synchronous agents (respond in <1s via PEFT routing)
 
@@ -101,29 +113,35 @@ The highlighted path at the bottom is the **v0.1.5 novelty** -- it closes the vo
 | Agent | Purpose |
 |-------|---------|
 | NotificationProxyAgent | Phi-4 fuzzy script matching for automated interactive testing |
-| DecisionProxyAgent | Bayesian trust (L1-L5) + conformal prediction + circuit breaker |
+| DecisionProxyAgent | Universal Prediction Engine (7 slices) · Bayesian Beta-Bernoulli trust · Thompson Sampling · Conformal prediction · L1-L5 escalation · Circuit breaker |
 
 ---
 
 ## Key capabilities
 
-### Voice-first throughout
+### Voice-first everywhere -- browser to agents to developer tooling
 
-- Dual-channel WebSocket architecture (queue events + audio streaming)
-- ASR (Whisper) to intent routing to TTS pipeline, end to end
-- Claude Code system hooks integration closes the voice loop inside developer sessions (v0.1.5)
-- cosa-voice MCP server provides `notify`, `converse`, `ask_yes_no`, `ask_multiple_choice`, `ask_open_ended_batch`
+No other platform closes the voice loop this completely:
 
-### Intent routing via fine-tuned small models
+- **Browser to agents**: Dual-channel WebSocket architecture (queue events + audio streaming) with ASR (Whisper) to TTS pipeline, end to end
+- **Agents to developer tools**: 6 Claude Code system hooks (`PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `PermissionRequest`, `UserPromptSubmit`) bridge voice into every coding session
+- **Developer tools back to browser**: cosa-voice MCP server provides 5 voice tools (`notify`, `converse`, `ask_yes_no`, `ask_multiple_choice`, `ask_open_ended_batch`)
+- **Session continuity**: Stable session IDs survive context clears via write-once atomic lockfile -- no identity drift
+- **Stop hook gisting**: Ultra-short TTS summaries of completed work via frontier model distillation
+- **Voice injection**: tmux-based voice input into idle Claude Code sessions -- speak and it types
+
+### Intent routing via fine-tuned small models -- not prompt engineering
+
+While most platforms route via system prompts or keyword matching, Lupin fine-tunes:
 
 - 39,871 training examples across 35 command intents
-- PEFT/LoRA fine-tuning on Phi-4, Qwen, and Llama base models
-- Local GPU inference via vLLM -- no API calls for routing
-- GSM8K benchmarking to validate post-quantization math reasoning
+- PEFT/LoRA on Phi-4, Qwen, and Llama -- local GPU inference, zero API calls for routing
+- Sub-second classification with GSM8K-validated post-quantization math reasoning
+- Result: routing that is faster, cheaper, and more reliable than prompt-based alternatives
 
-### Solution snapshot memory
+### Solution snapshot memory -- agents that learn from their own work
 
-LanceDB vector search replaces file-based lookups for massive speedups:
+When an agent solves a problem, the solution is embedded and cached in LanceDB. Next time the same (or similar) question arrives, the answer comes from vector search -- not from re-running the agent.
 
 | Operation | File-Based | LanceDB | Speedup |
 |-----------|------------|---------|---------|
@@ -140,35 +158,47 @@ Local GPU embeddings (CodeRankEmbed + nomic-embed-text-v1.5) vs OpenAI API:
 | Batch (3) | prose | 8 ms | 2,989 ms | **374x** |
 | Batch (3) | code | 8 ms | 3,183 ms | **398x** |
 
-### Trust-aware decision proxy
+### Trust-aware decision proxy -- Bayesian autonomy that earns your confidence
 
-- L1-L5 trust levels learned per agent via Bayesian Beta-Bernoulli model
-- Conformal prediction wrapper for calibrated confidence intervals
-- Circuit breaker pattern -- auto-escalates to human review on trust degradation
-- "Morning coffee" batch review model for non-urgent decisions
-- Ratification API for post-hoc human approval with trust feedback loop
+The first decision proxy for AI agents with academic-grade statistical rigor:
 
-### cosa-voice MCP integration
+- **Universal Prediction Engine**: 7 prediction slices with 87 unit tests and 21 end-to-end tests
+- **Bayesian Beta-Bernoulli trust model**: Per-agent trust learning with conjugate prior updates
+- **Thompson Sampling**: Exploration-exploitation balance for when to auto-approve vs. escalate
+- **Conformal prediction**: Calibrated confidence intervals -- not guesses, statistical guarantees
+- **LanceDB-backed preference embeddings**: Semantic similarity with response_type filtering
+- **L1-L5 trust escalation**: Five trust levels from "always ask" to "full autonomy" with circuit breaker pattern
+- **Morning coffee batch review**: Non-urgent decisions queued for human review at your convenience
+- **Ratification API**: Post-hoc approval with trust feedback loop
 
-- Voice I/O for Claude Code via MCP server protocol
-- System hooks (`PreToolUse`, `PostToolUse`, `Notification`) bridge voice into every session
-- Session bridge for automatic registration and lifecycle management
-- Blocking and non-blocking notification patterns with priority routing
+### Battle-tested -- 2,075+ automated tests
+
+| Suite | Count | Coverage |
+|-------|-------|----------|
+| Unit tests | 2,075+ | Core logic, trust engine, hooks, credentials, prediction engine |
+| WebSocket tests | 50 | Connection, auth, event routing, session management |
+| Integration tests | 136+ | End-to-end API workflows with hot-swap test infrastructure |
+| Interactive proxy tests | 12 scenarios | Calculator, CRUD, and Expediter agents via auto-proxy |
+
+Built and maintained by a single engineer. Every PR must pass all three tiers before merge.
 
 ---
 
 ## Quick start
 
 ```bash
-# Prerequisites: Python 3.11+, GPU recommended, PostgreSQL or SQLite
+# Prerequisites: Python 3.11+, GPU recommended, PostgreSQL
 export LUPIN_ROOT=/path/to/lupin
+
+# Configure credentials
+src/scripts/lupin_config.py init
 
 # Start the server
 src/scripts/run-fastapi-lupin.sh          # FastAPI on port 7999
 src/scripts/run-lupin-gui.sh              # Browser GUI client
 
 # Run tests
-pytest src/tests/unit/                     # 915+ unit tests
+pytest src/tests/unit/                     # 2,075+ unit tests
 src/scripts/run-websocket-smoke-tests.sh   # 50 WebSocket tests
 src/tests/run-integration-tests.sh -v      # Integration gate
 
@@ -205,7 +235,7 @@ Over 130 dated planning and research documents in [`src/rnd/`](src/rnd/README.md
 
 ## Version history
 
-**v0.1.5** (in progress) — Claude Code system hooks for voice I/O, session bridge, hook library infrastructure
+**v0.1.5** (March 2026) — Voice-first human-in-the-loop. Full voice loop inside Claude Code via 6 system hooks + cosa-voice MCP. Trust-aware Decision Proxy with Universal Prediction Engine, Bayesian Beta-Bernoulli trust, Thompson Sampling, and conformal prediction. Credential consolidation. Stable session identity architecture. 2,075+ tests.
 
 **v0.1.4** — cosa-voice MCP server, SWE Team Agent, Calculator Agent, CRUD Agent, Notification Proxy, 881 to 1170 unit tests, 39,871 training examples, local GPU embeddings
 
@@ -217,9 +247,7 @@ Over 130 dated planning and research documents in [`src/rnd/`](src/rnd/README.md
 
 ## Project status
 
-Lupin is an active research platform at v0.1.4, with v0.1.5 in progress. It is developed by a solo engineer as an ongoing exploration of voice-first agent architectures, PEFT fine-tuning pipelines, and autonomous decision systems.
-
-The codebase reflects real engineering: 915+ tests, full CI discipline, and a production-grade FastAPI + PostgreSQL + LanceDB stack. Through a series of massive refactorings made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) repo, Lupin has evolved from a series of single-user PoC sketches to a multi-user GCP-based package entering testing phase RealSoonNow.
+Lupin is an active research platform at v0.1.5. Developed by a solo engineer, it combines voice-first agent orchestration, PEFT fine-tuning, and Bayesian decision theory into a production-grade stack backed by 2,075+ automated tests, full CI discipline, and a FastAPI + PostgreSQL + LanceDB architecture. Through a series of ambitious refactorings made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology, Lupin has evolved from single-user PoC sketches into a multi-user platform entering GCP testing.
 
 ---
 
