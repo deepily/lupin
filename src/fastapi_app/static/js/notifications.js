@@ -10469,10 +10469,18 @@ class NotificationsUI {
         // Clear activeTTSItem BEFORE entering focus mode so updateTTSQueueSection()
         // (called inside enterTTSFocusMode) doesn't re-render a ghost card into active slot
         if ( wasActionRequired && justCompletedItem?.id ) {
-            this.activeTTSItem = null;  // Clear BEFORE focus mode to prevent ghost re-render
-            this.enterTTSFocusMode( justCompletedItem.id );
-            // updateTTSQueueSection() already called inside enterTTSFocusMode
-            return;  // Exit early - don't activate next until response received
+            // Check if notification was already resolved while audio was playing (Path B-2 race)
+            const arState = this.actionRequiredNotifications.get( justCompletedItem.id );
+            if ( !arState || arState.isResponded || arState.isExpired ) {
+                this.log( `TTS queue: Skipping focus mode — notification ${justCompletedItem.id} already resolved` );
+                this.activeTTSItem = null;
+                // Fall through to normal queue advancement below
+            } else {
+                this.activeTTSItem = null;  // Clear BEFORE focus mode to prevent ghost re-render
+                this.enterTTSFocusMode( justCompletedItem.id );
+                // updateTTSQueueSection() already called inside enterTTSFocusMode
+                return;  // Exit early - don't activate next until response received
+            }
         }
 
         // Clear active item (only for non-action-required completions)
@@ -10507,7 +10515,7 @@ class NotificationsUI {
      */
     stopTTSAndAdvance() {
         this.log( 'TTS queue: User requested stop' );
-        this.stopAllAudio();
+        this.stopAudio();
         this.onTTSPlaybackComplete();
     }
 
@@ -10529,13 +10537,26 @@ class NotificationsUI {
      */
     enterTTSFocusMode( notificationId ) {
         this.log( `TTS Focus Mode: ENTERING for notification ${notificationId}` );
+
+        // GUARD: Never enter focus mode for an already-resolved notification.
+        // Prevents Path B-2 race: onended fires after user already responded/dismissed/expired.
+        const guardState = this.actionRequiredNotifications.get( notificationId );
+        if ( !guardState || guardState.isResponded || guardState.isExpired ) {
+            this.log( `TTS Focus Mode: SKIPPED — notification ${notificationId} already resolved (responded=${guardState?.isResponded}, expired=${guardState?.isExpired}, exists=${!!guardState})` );
+            // Advance queue since onTTSPlaybackComplete() returned early expecting focus mode to handle it
+            if ( this.ttsQueue.length > 0 && !this.isTTSPaused ) {
+                setTimeout( () => this.activateNextTTS(), 100 );
+            }
+            return;
+        }
+
         this.ttsFocusModeActive = true;
         this.focusModeNotificationId = notificationId;
         this.focusModeEnteredAt = Date.now();
 
         // Compute safety timeout from notification's own timeout + buffer
-        const state = this.actionRequiredNotifications.get( notificationId );
-        const notifTimeoutMs = state?.timeoutSeconds
+        // (guardState already fetched above and validated as non-null/non-resolved)
+        const notifTimeoutMs = guardState?.timeoutSeconds
             ? state.timeoutSeconds * 1000 + this.TTS_FOCUS_MODE_BUFFER_MS
             : this.TTS_FOCUS_MODE_FALLBACK_MS;
         this.focusModeTimeoutMs = notifTimeoutMs;
@@ -11887,6 +11908,14 @@ class NotificationsUI {
         // Mark as responded
         state.isResponded = true;
 
+        // Stop TTS immediately if this notification is currently playing
+        // User already answered — don't keep reading the question
+        if ( this.activeTTSItem?.id === notificationId ) {
+            this.log( `Stopping TTS — user responded to currently-playing notification ${notificationId}` );
+            this.stopAudio();
+            this.onTTSPlaybackComplete();
+        }
+
         // Disable buttons to prevent double-submit
         const card = document.getElementById( `action-required-${notificationId}` );
         if ( card ) {
@@ -11980,6 +12009,18 @@ class NotificationsUI {
         // Mark as expired and stop timer
         state.isExpired = true;
         this.stopCountdownTimer( notificationId );
+
+        // Stop TTS if this notification is currently playing
+        if ( this.activeTTSItem?.id === notificationId ) {
+            this.log( `Stopping TTS — grace period exceeded for currently-playing notification ${notificationId}` );
+            this.stopAudio();
+            this.onTTSPlaybackComplete();
+        }
+
+        // Exit focus mode if active for this notification
+        if ( this.focusModeNotificationId === notificationId ) {
+            this.exitTTSFocusMode();
+        }
 
         // Transition to conversation history after delay
         setTimeout( () => {

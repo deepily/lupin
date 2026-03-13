@@ -185,9 +185,9 @@ Last updated: 2026-03-12 (Session 346)
   - **DB isolation**: Hot-swap infrastructure from Session 343 — [`src/rnd/2026.03.12-integration-test-hot-swap-config.md`](src/rnd/2026.03.12-integration-test-hot-swap-config.md)
 - [x] **[LUPIN] CJ Flow verification: Dry run end-to-end testing for UNBOUNDED tasks** - Session 269: INTERACTIVE dry-run exercises MessageHistory + 6-scenario smoke test created. Needs live server validation.
 
-### TTS Focus Mode Race Condition (Session 346)
+### TTS Focus Mode Race Condition (Sessions 346-347)
 
-- [ ] **[LUPIN] Fix TTS Focus Mode race: orphaned focus mode freezes queue** — Path B-2: when user answers yes/no while audio still plays AND `onended` fires after `handleNotificationResponded`'s 1500ms setTimeout, `enterTTSFocusMode()` activates for an already-responded notification with no one to call `exitTTSFocusMode()`. Queue permanently stuck — new notifications render silently. Partial fix applied (stale `handleAudioComplete` guard + deferred instant-mode cleanup).
+- [x] **[LUPIN] Fix TTS Focus Mode race: orphaned focus mode freezes queue** — Session 346: guards in `enterTTSFocusMode()` and `onTTSPlaybackComplete()`. Session 347: `stopAudio()` + `onTTSPlaybackComplete()` in `submitResponse()` and `handleGracePeriodExceeded()`, fixed `stopAllAudio()` typo in `stopTTSAndAdvance()`. All 10 dismissal paths now have audio cleanup.
   - **Analysis doc**: [`src/rnd/2026.03.12-tts-focus-mode-race-condition-analysis.md`](src/rnd/2026.03.12-tts-focus-mode-race-condition-analysis.md)
   - **File**: `src/fastapi_app/static/js/notifications.js`
 

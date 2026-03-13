@@ -61,6 +61,13 @@
 
 ### Completed
 
+- [x] **TTS audio not stopped on notification dismissal** → pending commit | By: a0d314eb (Session 347)
+  - **Symptom**: TTS audio keeps playing after user responds to action-required notification; queue can't advance until audio naturally finishes
+  - **Root Cause**: `submitResponse()` never called `stopAudio()`; `handleGracePeriodExceeded()` had no audio cleanup; `stopTTSAndAdvance()` called nonexistent `stopAllAudio()`
+  - **Fix**: Added `stopAudio()` + `onTTSPlaybackComplete()` to `submitResponse()` and `handleGracePeriodExceeded()`; fixed typo `stopAllAudio()` → `stopAudio()` in `stopTTSAndAdvance()`
+  - **Tests**: Manual verification — 5+ yes/no notifications, all dismissal paths confirmed
+  - **File**: `src/fastapi_app/static/js/notifications.js`
+
 - [x] **UPE multiple-choice prediction ignores available options** → CoSA pending commit | By: 23f6d6de (Session 345)
   - **Symptom**: MC predictions return free-text values like "Commit Scope: commit my files (76%)" instead of selecting from available options [Push, Done, Cancel, Other]
   - **Root Cause**: (1) No `response_type` field in LanceDB schema → cross-type contamination, (2) `_predict_multiple_choice()` ignores `options` param, (3) bare MC strings stored unparseable

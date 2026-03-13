@@ -1,5 +1,18 @@
 # Lupin Project History
 
+### 2026.03.12 - Session 347 | Fix: TTS Audio Stops on Every Notification Dismissal Path
+
+**Accomplishments**:
+- Fixed TTS audio continuing after user responds to action-required notifications while audio still playing
+- Added `stopAudio()` + `onTTSPlaybackComplete()` to `submitResponse()` — audio stops instantly when user clicks yes/no
+- Added TTS cleanup to `handleGracePeriodExceeded()` — audio stops on grace period expiry + focus mode exit
+- Fixed `stopAllAudio()` → `stopAudio()` typo in `stopTTSAndAdvance()` — UI stop button was silently broken
+- Manual verification: 5+ yes/no notifications tested, all dismissal paths confirmed working
+
+**File**: `src/fastapi_app/static/js/notifications.js`
+
+---
+
 ### 2026.03.12 - Session 346 | TTS Race Condition: Stale handleAudioComplete + Focus Mode Analysis
 
 #### Checkpoint | 2026.03.12 22:30 | Partial fix + race condition documented
