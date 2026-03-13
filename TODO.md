@@ -118,11 +118,18 @@ Last updated: 2026-03-13 (Session 355)
 - [ ] **[LUPIN] Phase 4: End-to-End Voice Workflows + Polish** - PENDING (blocked by Phase 3 ✅)
 - **Note**: Moved to v0.1.6 to leverage Playwright E2E testing infrastructure for UI test automation
 
-### CJ Flow Persistence
+### CJ Flow Persistence (Session 357 — IN PROGRESS)
 
-- [ ] **Add persistence for CJ Flow job tracking** - Jobs are currently transient
-  - **Goal**: Durable storage for ClaudeCode Job tracking state
-  - **Affects**: Job state survives server restarts, enables job history/resume
+- [ ] **[LUPIN] CJ Flow Persistence: PostgreSQL-backed job history for agentic jobs** — 🔄 IN PROGRESS. Plan complete and serialized (Session 357). Implementation Phases 1-5 pending, will resume in next sessions.
+  - **Goal**: Durable storage for AgenticJobBase jobs (DeepResearch, PodcastGenerator, ClaudeCode, SweTeam). Job state survives server restarts, enables job history queries, marks interrupted jobs.
+  - **Architecture**: Central write-through via `emit_job_state_transition()` in `queue_util.py`
+  - **Plan doc**: [`src/rnd/2026.03.13-cj-flow-persistence-plan.md`](src/rnd/2026.03.13-cj-flow-persistence-plan.md)
+  - **Phase 0**: DONE — Plan serialized to R&D
+  - **Phase 1**: Pending — Schema + SQLAlchemy model (`job_history` table, `add-job-history.sql`)
+  - **Phase 2**: Pending — Persistence service (`job_persistence.py`, config keys)
+  - **Phase 3**: Pending — Write-through integration in `emit_job_state_transition()`
+  - **Phase 4**: Pending — Startup recovery (`mark_interrupted_jobs()`)
+  - **Phase 5**: Pending — `/api/job-history` endpoint + unit/integration tests
 
 ### Universal Prediction Engine: Live E2E Validation (Session 340)
 

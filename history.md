@@ -1,5 +1,26 @@
 # Lupin Project History
 
+#### Checkpoint | 2026.03.13 | Session 358: Added markdown render TODO item
+
+**Files**: TODO.md
+**Commit**: c285454
+
+---
+
+### 2026.03.13 - Session 357 | CJ Flow Persistence — Plan & Design
+
+**Accomplishments**:
+- Designed comprehensive CJ Flow persistence plan: durable PostgreSQL-backed job history for AgenticJobBase jobs (DeepResearch, PodcastGenerator, ClaudeCode, SweTeam)
+- Architecture decision: central write-through via `emit_job_state_transition()` — single integration point avoids touching ~10 handler sites
+- 5-phase plan: schema+model, persistence service, write-through integration, startup recovery, API+tests
+- Key design: `job_history` table with JSONB metadata, `mark_interrupted_jobs()` on startup, `/api/job-history` endpoint with role-based auth
+- Serialized plan to R&D, updated TODO.md with phase-by-phase tracking
+
+**Files Created**: `src/rnd/2026.03.13-cj-flow-persistence-plan.md`
+**Files Modified**: `src/rnd/README.md`, `TODO.md`
+
+---
+
 ### 2026.03.13 - Session 356 | Bug Fix: SWE Team Notifications Routing to Personal Email
 
 **Accomplishments**:

@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.13 - CJ Flow Persistence Plan
+- **Plan**: [2026.03.13-cj-flow-persistence-plan.md](2026.03.13-cj-flow-persistence-plan.md) - Durable PostgreSQL-backed persistence for AgenticJobBase jobs (DeepResearch, PodcastGenerator, ClaudeCode, SweTeam). Central write-through via `emit_job_state_transition()`, job_history table with JSONB metadata, startup recovery marking interrupted jobs, `/api/job-history` endpoint with role-based auth. 5 phases: schema+model, persistence service, write-through integration, startup recovery, API+tests.
+
 ### 2026.03.12 - TTS Focus Mode Race Condition Analysis
 - **Analysis**: [2026.03.12-tts-focus-mode-race-condition-analysis.md](2026.03.12-tts-focus-mode-race-condition-analysis.md) - Execution path analysis of TTS state after action-required notification completion. Documents three paths (A: audio finishes before user answers, B: user answers while audio plays, C: dismiss/cancel) and identifies race condition where `onended` handler enters focus mode for an already-responded notification, permanently freezing the TTS queue.
 
