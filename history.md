@@ -1,5 +1,17 @@
 # Lupin Project History
 
+### 2026.03.13 - Session 354 | COSA Audio Player Viewer: In-Browser MP3 Playback Page
+
+**Accomplishments**:
+- Created `audio-player.html` — styled HTML5 `<audio>` player page mirroring document-viewer architecture (nav bar, CSS, container layout, companion script metadata lookup, file size via HEAD, download button, file details accordion)
+- Added `/app/audio` route in `pages.py` (route table entry + route function)
+- Migrated last 2 MP3 link URLs in `orchestrator.py` from `/api/io/file?path=` → `/app/audio?path=` so podcast MP3 links open in styled player
+
+**Files Created**: `src/fastapi_app/static/html/audio-player.html`
+**Files Modified**: `src/cosa/rest/routers/pages.py`, `src/cosa/agents/podcast_generator/orchestrator.py`
+
+---
+
 ### 2026.03.13 - Session 353 | COSA Document Viewer Phase 2: Frontmatter Fix + Link URL Migration
 
 **Accomplishments**:
