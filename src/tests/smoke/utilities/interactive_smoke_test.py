@@ -19,6 +19,8 @@ Usage:
 Created: 2026-02-13
 """
 
+import os
+
 from tests.smoke.utilities.live_pipeline_base import LivePipelineTestBase
 from tests.smoke.utilities.embedded_proxy import EmbeddedProxyMixin
 
@@ -64,8 +66,10 @@ class InteractiveSmokeTest( LivePipelineTestBase, EmbeddedProxyMixin ):
             - Returns True to continue test execution
         """
         if getattr( args, "auto_proxy", False ):
-            debug = getattr( args, "proxy_debug", False )
-            self._start_proxy( debug=debug )
+            debug    = getattr( args, "proxy_debug", False )
+            email    = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_EMAIL" )
+            password = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_PASSWORD" )
+            self._start_proxy( debug=debug, email=email, password=password )
 
             if not self.proxy_running:
                 print( "  WARNING: Proxy failed to start. Interactive scenarios may timeout." )

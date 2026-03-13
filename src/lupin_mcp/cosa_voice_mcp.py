@@ -10,7 +10,9 @@ Provides five tools:
   - get_session_info(): Get current session identification
 
 Sender ID Format: claude.code@{project}.deepily.ai#{session_id}
-    - session_id is an 8-character hex string unique to each MCP server instance
+    - session_id is the first 8 chars of the Claude Code session UUID
+    - Derived from the session bridge (env > file > fallback), shared with hooks
+    - A background thread upgrades the ID once the SessionStart hook writes it
 
 Project Detection (automatic):
     1. Auto-detects from current working directory (checked in order):
@@ -32,16 +34,18 @@ Usage:
 
 import logging
 import os
+import requests
 import signal
 import sys
-import uuid
+import time
+import threading
 from typing import Optional
 
 from pydantic import ValidationError
 from fastmcp import FastMCP
 
-# Import from cosa.cli (the notification library)
-from cosa.cli.notification_models import (
+# Import from lupin_cli.notifications (the notification library)
+from lupin_cli.notifications.notification_models import (
     NotificationRequest,
     AsyncNotificationRequest,
     NotificationResponse,
@@ -50,30 +54,24 @@ from cosa.cli.notification_models import (
     NotificationPriority,
     ResponseType
 )
-from cosa.cli.notify_user_sync import notify_user_sync
-from cosa.cli.notify_user_async import notify_user_async
+from lupin_cli.notifications.notify_user_sync import notify_user_sync
+from lupin_cli.notifications.notify_user_async import notify_user_async
 from cosa.utils.notification_utils import (
     format_questions_for_tts,
     convert_questions_for_api,
     format_open_ended_batch_for_tts,
-    convert_open_ended_batch_for_api
+    convert_open_ended_batch_for_api,
+    normalize_abstract as _normalize_abstract,
+    extract_qualifier_comment,
+    format_qualified_response,
+    is_known_project
 )
-
-
-def _normalize_abstract( abstract: Optional[ str ] ) -> Optional[ str ]:
-    """
-    Convert literal \\n to actual newlines in abstract text.
-
-    Requires:
-        - abstract is None or a string
-
-    Ensures:
-        - returns None if input is None
-        - returns string with literal \\n converted to newlines
-    """
-    if abstract is None:
-        return None
-    return abstract.replace( '\\n', '\n' )
+from cosa.agents.utils.sender_id import detect_project as _detect_project_shared
+from lupin_cli.claude_code.hooks.lib.session_bridge import (
+    get_claude_session_id, wait_for_session_id, get_session_metadata as _get_cc_metadata,
+    clear_cached_session_id, _find_session_file, _read_session_file
+)
+from lupin_cli.claude_code.hooks.lib.hook_common import log_to_stream
 
 
 # ============================================================================
@@ -105,101 +103,187 @@ def _get_server_url() -> str:
 def _detect_project_from_cwd() -> Optional[ str ]:
     """Attempt to detect project name from current working directory.
 
-    Requires:
-        - Current working directory is accessible
+    Delegates to the shared detect_project() utility from
+    cosa.agents.utils.sender_id for consistent detection logic.
 
-    Ensures:
-        - Returns lowercase project name if detected
-        - Returns None if no known project pattern found
-
-    Known project patterns (checked in order):
-        - cosa → "cosa" (checked first - may be submodule of lupin)
-        - lupin → "lupin"
-        - planning-is-prompting → "plan"
+    Returns None only if detection fails entirely (exception).
     """
     try:
-        cwd = os.getcwd().lower()
-
-        # CoSA detection (check FIRST - may be submodule of lupin)
-        if "/cosa" in cwd:
-            return "cosa"
-
-        # Lupin project detection (only if not in cosa subdirectory)
-        if "/lupin" in cwd:
-            return "lupin"
-
-        # Planning-is-Prompting project detection
-        if "planning-is-prompting" in cwd:
-            return "plan"
-
-        return None
-
+        return _detect_project_shared()
     except Exception as e:
         logger.debug( f"Could not detect project from cwd: {e}" )
         return None
 
 
+_PROJECT_SOURCE = "unknown"  # Set by _get_project(): "known" | "basename" | "env_var"
+
+
 def _get_project() -> str:
-    """Get project name with dynamic detection and fallback.
+    """Get project name with dynamic detection — no silent fallback.
 
     Detection priority:
         1. Auto-detect from current working directory
         2. MCP_PROJECT environment variable
-        3. Fallback to "unknown" (with warning)
+        3. RuntimeError + os._exit(1) — refuses to run as "unknown"
+
+    Sets module-level _PROJECT_SOURCE to track how the project was resolved:
+        - "known"    : auto-detected and in KNOWN_PROJECTS registry
+        - "basename" : auto-detected as cwd basename (not in registry)
+        - "env_var"  : from MCP_PROJECT environment variable
 
     Note: MCP_PROJECT can be set in MCP JSON config's env section as a default,
     but dynamic detection from cwd takes precedence for multi-project support.
     """
+    global _PROJECT_SOURCE
+
     # Priority 1: Try dynamic detection from working directory
     detected = _detect_project_from_cwd()
     if detected:
-        logger.info( f"Project auto-detected from cwd: {detected}" )
+        if is_known_project( detected ):
+            _PROJECT_SOURCE = "known"
+            logger.info( f"Project auto-detected (known): {detected}" )
+        else:
+            _PROJECT_SOURCE = "basename"
+            logger.info( f"Project auto-detected (basename): {detected}" )
         return detected
 
     # Priority 2: Check environment variable
     project = os.getenv( "MCP_PROJECT", "" ).strip()
     if project:
+        _PROJECT_SOURCE = "env_var"
         logger.info( f"Project from MCP_PROJECT env var: {project.lower()}" )
         return project.lower()
 
-    # Priority 3: Fallback to unknown with prominent warning
-    logger.warning( "=" * 60 )
-    logger.warning( "⚠️  PROJECT DETECTION FAILED - USING 'unknown'" )
-    logger.warning( "=" * 60 )
-    logger.warning( f"Current working directory: {os.getcwd()}" )
-    logger.warning( "Could not detect project from path, and MCP_PROJECT env var not set." )
-    logger.warning( "" )
-    logger.warning( "Notifications will appear as: claude.code@unknown.deepily.ai" )
-    logger.warning( "" )
-    logger.warning( "To fix, either:" )
-    logger.warning( "  1. Run Claude Code from within a known project directory" )
-    logger.warning( "  2. Set MCP_PROJECT in your MCP config's env section:" )
-    logger.warning( '     "env": { "MCP_PROJECT": "your-project-name" }' )
-    logger.warning( "=" * 60 )
+    # Priority 3: Hard failure — refuse to run as "unknown"
+    logger.critical( "=" * 60 )
+    logger.critical( "PROJECT DETECTION FAILED — MCP SERVER CANNOT START" )
+    logger.critical( "=" * 60 )
+    logger.critical( f"Current working directory: {os.getcwd()}" )
+    logger.critical( "Could not detect project from path, and MCP_PROJECT env var not set." )
+    logger.critical( "" )
+    logger.critical( "To fix, either:" )
+    logger.critical( "  1. Run Claude Code from within a known project directory" )
+    logger.critical( "  2. Set MCP_PROJECT in your MCP config's env section:" )
+    logger.critical( '     "env": { "MCP_PROJECT": "your-project-name" }' )
+    logger.critical( "=" * 60 )
 
-    return "unknown"
+    os._exit( 1 )
 
 
 def _get_sender_id( project: str, session_id: str = None ) -> str:
     """
     Generate sender_id with optional session identifier.
 
-    Requires:
-        - project is a lowercase string
-        - session_id is an 8-char hex string or None
-
-    Ensures:
-        - Returns claude.code@{project}.deepily.ai#{session_id} if session_id provided
-        - Returns claude.code@{project}.deepily.ai if session_id is None (backward compatible)
+    Delegates to the shared build_sender_id() utility.
 
     Examples:
         _get_sender_id( "lupin" ) -> "claude.code@lupin.deepily.ai"
         _get_sender_id( "lupin", "a1b2c3d4" ) -> "claude.code@lupin.deepily.ai#a1b2c3d4"
     """
-    base = f"claude.code@{project}.deepily.ai"
-    if session_id:
-        return f"{base}#{session_id}"
-    return base
+    from cosa.agents.utils.sender_id import build_sender_id
+    return build_sender_id( "claude.code", project=project, suffix=session_id )
+
+
+# ============================================================================
+# Repo Account Validation
+# ============================================================================
+
+ERROR_SENDER_ID = "claude.code@errors.deepily.ai"
+
+
+def _send_validation_error( detail: str ) -> None:
+    """
+    Send urgent notification about a validation failure.
+
+    Requires:
+        - Lupin FastAPI server is running (for notification delivery)
+
+    Ensures:
+        - Sends urgent-priority notification from ERROR_SENDER_ID
+        - Logs critical message regardless of notification success
+        - Never raises (all exceptions caught)
+    """
+    msg = f"COSA-VOICE MCP VALIDATION FAILED\n\n{detail}"
+    logger.critical( msg )
+    try:
+        request = AsyncNotificationRequest(
+            message           = msg,
+            notification_type = NotificationType.TASK,
+            priority          = NotificationPriority( "urgent" ),
+            sender_id         = ERROR_SENDER_ID
+        )
+        notify_user_async( request=request, debug=False )
+    except Exception as e:
+        logger.warning( f"Could not send validation error notification: {e}" )
+
+
+def _validate_repo_account( project: str ) -> None:
+    """
+    Validate that a Lupin service account exists for this project.
+
+    Checks:
+        1. Credentials exist in ~/.lupin/config for [project] section
+        2. Login succeeds via POST /auth/login
+
+    On failure, sends an urgent notification with setup instructions via
+    the synthetic claude.code@errors.deepily.ai sender. Tools continue
+    working in degraded mode — this does not crash the server.
+
+    Requires:
+        - SERVER_URL is set
+        - project is a non-empty string
+
+    Ensures:
+        - On success: logs confirmation, returns normally
+        - On failure: sends urgent notification, logs critical, returns normally
+    """
+    from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
+
+    expected_email = f"claude.code@{project}.deepily.ai"
+
+    # Check 1: Credentials exist in config file
+    try:
+        email, password = get_hook_credentials( project )
+    except ( FileNotFoundError, ValueError ) as e:
+        _send_validation_error(
+            f"No credentials for project '{project}'.\n{e}\n\n"
+            f"To fix:\n"
+            f"1. Open the Admin UI: {SERVER_URL}/app/admin/users\n"
+            f"2. Create a new user account with email: {expected_email}\n"
+            f"3. Add credentials to ~/.lupin/config:\n"
+            f"   [{project}]\n"
+            f"   email = {expected_email}\n"
+            f"   password = <the password you set in the admin UI>\n\n"
+            f"Once the account exists, the CC Notification Listener can authenticate\n"
+            f"via WebSocket and auto-start receiving hook events for this repo."
+        )
+        return
+
+    # Check 2: Login works
+    try:
+        resp = requests.post(
+            f"{SERVER_URL}/auth/login",
+            json={ "email": email, "password": password },
+            timeout=5
+        )
+        if resp.status_code != 200:
+            _send_validation_error(
+                f"Login failed for {email} (HTTP {resp.status_code}).\n"
+                f"Account may not exist or may be disabled.\n\n"
+                f"To fix:\n"
+                f"1. Open the Admin UI: {SERVER_URL}/app/admin/users\n"
+                f"2. Verify or create the user account: {expected_email}\n"
+                f"3. Check that the password in ~/.lupin/config [{project}] matches"
+            )
+            return
+    except requests.ConnectionError:
+        _send_validation_error(
+            f"Cannot reach Lupin server at {SERVER_URL}.\n"
+            f"Ensure FastAPI is running: src/scripts/run-fastapi-lupin.sh"
+        )
+        return
+
+    logger.info( f"Repo account validated: {email}" )
 
 
 # ============================================================================
@@ -218,15 +302,180 @@ signal.signal( signal.SIGTERM, _handle_sigterm )
 # Initialize at module load
 # ============================================================================
 
-PROJECT    = _get_project()
-SESSION_ID = uuid.uuid4().hex[:8]  # 8-char hex, e.g., "a1b2c3d4"
-SENDER_ID  = _get_sender_id( PROJECT, SESSION_ID )
-SERVER_URL = _get_server_url()
+PROJECT         = _get_project()
+SESSION_ID      = get_claude_session_id()[:8]  # 8-char hex from session bridge (env > file > fallback)
+SENDER_ID       = _get_sender_id( PROJECT, SESSION_ID )
+SERVER_URL      = _get_server_url()
+_session_ready  = threading.Event()   # Gate: blocks tool calls until session ID resolved
+_session_failed = False               # True if real ID never arrived (fallback only)
 
-logger.info( f"Project: {PROJECT}" )
+logger.info( f"Project: {PROJECT} (source: {_PROJECT_SOURCE})" )
 logger.info( f"Session ID: {SESSION_ID}" )
 logger.info( f"Sender ID: {SENDER_ID}" )
 logger.info( f"Server URL: {SERVER_URL}" )
+
+# Validate repo service account (non-blocking — logs + notifies on failure)
+_validate_repo_account( PROJECT )
+
+
+def _session_watcher_thread():
+    """
+    Persistent daemon thread that resolves and monitors the CC session_id.
+
+    Phase 1 (Initial resolution):
+        Polls for the real CC session_id via wait_for_session_id(). Signals
+        _session_ready so gated tool calls can proceed.
+
+    Phase 2 (Continuous monitoring):
+        Watches the resolved bridge file for changes (mtime check every 2s).
+        If the session ID changes (context clear), updates SESSION_ID and
+        SENDER_ID atomically. Clears the session bridge cache before each
+        poll to ensure fresh resolution.
+
+    This replaces the one-shot _upgrade_session_id_background() to handle
+    context clears that overwrite the bridge file mid-session.
+    """
+    global SESSION_ID, SENDER_ID, _session_failed
+
+    # ── Phase 1: Initial resolution ─────────────────────────────────────
+    try:
+        real_id    = wait_for_session_id( timeout=10.0, poll_interval=1.0 )
+        new_suffix = real_id[:8]
+
+        if new_suffix != SESSION_ID:
+            old_sender = SENDER_ID
+            SESSION_ID = new_suffix
+            SENDER_ID  = _get_sender_id( PROJECT, SESSION_ID )
+            logger.info( f"Session ID upgraded: {old_sender} -> {SENDER_ID}" )
+
+        # Verify we got a real session ID, not the fallback
+        meta = _get_cc_metadata()
+        if meta.get( "source" ) == "fallback":
+            logger.warning( "No session bridge file found for this project" )
+            logger.warning( f"Using stable fallback sender_id: {SENDER_ID}" )
+        else:
+            logger.info( f"Session ready (sender_id={SENDER_ID})" )
+
+    except Exception as e:
+        _session_failed = True
+        logger.critical( f"Session ID resolution failed: {e}" )
+
+    finally:
+        _session_ready.set()
+
+    # ── Phase 2: Persistent bridge file watcher ─────────────────────────
+    # Track the last-seen mtime and session ID for change detection
+    last_mtime      = 0.0
+    last_session_id = SESSION_ID
+    poll_interval   = 2.0  # seconds
+
+    logger.info( "Session watcher: entering persistent monitoring loop" )
+
+    while True:
+        try:
+            time.sleep( poll_interval )
+
+            # Clear cache so _find_session_file() does a fresh lookup
+            clear_cached_session_id()
+
+            result = _find_session_file()
+            if result is None:
+                continue
+
+            bridge_path, _source = result
+
+            # Check if file was modified
+            try:
+                current_mtime = bridge_path.stat().st_mtime
+            except OSError:
+                continue
+
+            if current_mtime <= last_mtime:
+                continue
+
+            last_mtime = current_mtime
+
+            # Re-read the session ID
+            file_id = _read_session_file( bridge_path )
+            if not file_id:
+                continue
+
+            new_suffix = file_id[:8]
+            if new_suffix != last_session_id:
+                old_sender     = SENDER_ID
+                SESSION_ID     = new_suffix
+                SENDER_ID      = _get_sender_id( PROJECT, SESSION_ID )
+                last_session_id = new_suffix
+                logger.info(
+                    f"Session ID changed: {old_sender} -> {SENDER_ID} "
+                    f"(context clear detected)"
+                )
+
+        except Exception as e:
+            logger.error( f"Session watcher error: {e}" )
+
+
+_watcher_thread = threading.Thread(
+    target=_session_watcher_thread,
+    name="session-id-watcher",
+    daemon=True
+)
+_watcher_thread.start()
+
+
+def _die_no_session_id():
+    """
+    Send error notification and hard-exit — real session ID never arrived.
+
+    Requires:
+        - Lupin FastAPI server is running (for notification delivery)
+
+    Ensures:
+        - Sends high-priority alert from sender_id claude.code@{PROJECT}.deepily.ai#mcp-error
+        - Terminates MCP server process via os._exit( 1 )
+        - Never returns
+    """
+    error_sender = f"claude.code@{PROJECT}.deepily.ai#mcp-error"
+    logger.critical( "Sending error notification and terminating MCP server" )
+
+    try:
+        request = AsyncNotificationRequest(
+            message           = "MCP server failed: Claude Code session ID not found. "
+                                "No session bridge file detected. Restart Claude Code to fix.",
+            notification_type = NotificationType.ALERT,
+            priority          = NotificationPriority( "high" ),
+            sender_id         = error_sender
+        )
+        notify_user_async( request=request, debug=False )
+    except Exception as e:
+        logger.error( f"Failed to send error notification: {e}" )
+
+    os._exit( 1 )
+
+
+def _wait_for_sender_id( timeout: float = 12.0 ) -> str:
+    """
+    Block until the session ID is resolved, then return SENDER_ID.
+    If resolution failed (fallback only), send error notification and exit.
+
+    Requires:
+        - _session_ready is a threading.Event set by _upgrade_session_id_background
+        - _session_failed is a bool set by _upgrade_session_id_background
+        - timeout exceeds background thread's 10s wait
+
+    Ensures:
+        - Returns SENDER_ID with real session ID on success
+        - Calls _die_no_session_id() and never returns on failure
+        - Zero overhead after first resolution (Event.wait on set event returns instantly)
+    """
+    if not _session_ready.wait( timeout=timeout ):
+        _die_no_session_id()
+
+    if _session_failed:
+        _die_no_session_id()
+
+    return SENDER_ID
+
 
 # ============================================================================
 # MCP Server
@@ -285,7 +534,7 @@ def converse(
             timeout_seconds=timeout_seconds,
             response_default=response_default,
             title=title,
-            sender_id=SENDER_ID,
+            sender_id=_wait_for_sender_id(),
             abstract=_normalize_abstract( abstract ),
             job_id=job_id
         )
@@ -313,7 +562,8 @@ def notify(
     priority: str = "medium",
     abstract: Optional[ str ] = None,
     job_id: Optional[ str ] = None,
-    suppress_ding: bool = False
+    suppress_ding: bool = False,
+    progress_group_id: Optional[ str ] = None
 ) -> str:
     """
     Announce something to the user without waiting for response.
@@ -329,6 +579,8 @@ def notify(
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
         suppress_ding: Suppress notification sound while still speaking via TTS (default False)
+        progress_group_id: Optional progress group ID (pg-{8 hex chars}) for in-place DOM updates.
+            Notifications sharing this ID update a single element instead of appending new ones.
 
     Returns:
         Delivery status message
@@ -346,10 +598,11 @@ def notify(
             message=message,
             notification_type=NotificationType( notification_type ),
             priority=NotificationPriority( priority ),
-            sender_id=SENDER_ID,
+            sender_id=_wait_for_sender_id(),
             abstract=_normalize_abstract( abstract ),
             job_id=job_id,
-            suppress_ding=suppress_ding
+            suppress_ding=suppress_ding,
+            progress_group_id=progress_group_id
         )
     except ( ValidationError, ValueError ) as e:
         logger.error( f"Validation error: {e}" )
@@ -412,7 +665,7 @@ def ask_yes_no(
             priority=NotificationPriority( priority ),
             timeout_seconds=timeout_seconds,
             response_default=default,
-            sender_id=SENDER_ID,
+            sender_id=_wait_for_sender_id(),
             abstract=_normalize_abstract( abstract ),
             job_id=job_id
         )
@@ -422,7 +675,17 @@ def ask_yes_no(
     response: NotificationResponse = notify_user_sync( request=request, debug=False )
 
     if response.exit_code == 0 and response.response_value:
-        return response.response_value.strip()
+        raw_value = response.response_value.strip()
+        answer, qualifier = extract_qualifier_comment( raw_value )
+        result = format_qualified_response( answer, qualifier ) if qualifier else raw_value
+        log_to_stream( "mcp_ask_yes_no", {}, extra={
+            "raw_value"  : raw_value,
+            "answer"     : answer,
+            "qualifier"  : qualifier,
+            "enriched"   : bool( qualifier ),
+            "return_len" : len( result )
+        } )
+        return result
 
     return default
 
@@ -511,7 +774,7 @@ def ask_multiple_choice(
             priority=NotificationPriority( priority ),
             timeout_seconds=timeout_seconds,
             title=title,
-            sender_id=SENDER_ID,
+            sender_id=_wait_for_sender_id(),
             response_options=response_options,
             abstract=_normalize_abstract( abstract ),
             job_id=job_id
@@ -628,7 +891,7 @@ def ask_open_ended_batch(
             priority         = NotificationPriority( priority ),
             timeout_seconds  = timeout_seconds,
             title            = title,
-            sender_id        = SENDER_ID,
+            sender_id        = _wait_for_sender_id(),
             response_options = response_options,
             abstract         = _normalize_abstract( abstract ),
             job_id           = job_id
@@ -684,15 +947,31 @@ def get_session_info() -> dict:
     Get current session identification and server info.
 
     Returns:
-        dict with project name, session_id, sender_id, server_url, and version
+        dict with project name, session_id, sender_id, server_url, version,
+        and claude_code metadata from the session bridge
     """
-    return {
-        "project"    : PROJECT,
-        "session_id" : SESSION_ID,
-        "sender_id"  : SENDER_ID,
-        "server_url" : SERVER_URL,
-        "version"    : __version__
+    resolved_sender = _wait_for_sender_id()
+    info = {
+        "project"        : PROJECT,
+        "project_source" : _PROJECT_SOURCE,
+        "session_id"     : SESSION_ID,
+        "sender_id"      : resolved_sender,
+        "server_url"     : SERVER_URL,
+        "version"        : __version__
     }
+
+    # Include CC session bridge metadata when available
+    try:
+        cc_meta = _get_cc_metadata()
+        info["claude_code"] = {
+            "session_id"        : cc_meta.get( "session_id", "" ),
+            "stable_session_id" : cc_meta.get( "stable_session_id", "" ),
+            "source"            : cc_meta.get( "source", "unknown" )
+        }
+    except Exception:
+        pass
+
+    return info
 
 
 if __name__ == "__main__":

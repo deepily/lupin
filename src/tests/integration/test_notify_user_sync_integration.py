@@ -12,12 +12,13 @@ Usage:
     pytest src/tests/integration/test_notify_user_sync_integration.py -v
 """
 
+import os
 import pytest
 import subprocess
 import time
 import requests
 
-from cosa.cli.notification_models import ResponseType
+from lupin_cli.notifications.notification_models import ResponseType
 
 
 # ============================================================================
@@ -91,8 +92,8 @@ class TestSSENotificationAPI:
 
     def test_offline_user_returns_default_immediately( self, server_check ):
         """Test offline detection returns default immediately."""
-        import cosa.cli.notify_user_sync as sync_module
-        from cosa.cli.notification_models import NotificationRequest
+        import lupin_cli.notifications.notify_user_sync as sync_module
+        from lupin_cli.notifications.notification_models import NotificationRequest
 
         request = NotificationRequest(
             message="Test offline notification",
@@ -109,15 +110,15 @@ class TestSSENotificationAPI:
     @pytest.mark.manual
     def test_timeout_with_default( self, server_check ):
         """Test notification timeout returns default."""
-        import cosa.cli.notify_user_sync as sync_module
-        from cosa.cli.notification_models import NotificationRequest
+        import lupin_cli.notifications.notify_user_sync as sync_module
+        from lupin_cli.notifications.notification_models import NotificationRequest
 
         request = NotificationRequest(
             message="Test timeout (will wait 10 seconds)",
             response_type=ResponseType.YES_NO,
             response_default="no",
             timeout_seconds=10,  # Short timeout for testing
-            target_user="ricardo.felipe.ruiz@gmail.com"
+            target_user=os.environ.get( "LUPIN_DEV_EMAIL", "test@example.com" )
         )
 
         response = sync_module.notify_user_sync( request, debug=True )

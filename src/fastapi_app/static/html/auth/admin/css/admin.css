@@ -2,7 +2,8 @@
  * Admin Interface Styles
  *
  * Professional styling for admin user management interface.
- * Consistent with auth.css gradient theme.
+ * Shared base styles (reset, body, buttons, messages, spinner, utilities)
+ * live in lupin-base.css.
  */
 
 /* ============================================================================
@@ -20,15 +21,16 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 30px;
-    padding: 20px;
-    background: linear-gradient( 135deg, #667eea 0%, #764ba2 100% );
-    border-radius: 10px;
-    color: white;
+    padding: 20px 0;
+    border-bottom: 1px solid #e5e7eb;
+    color: #111827;
 }
 
 .admin-header h1 {
     margin: 0;
     font-size: 2rem;
+    color: #111827;
+    font-weight: 700;
 }
 
 .admin-actions {
@@ -62,8 +64,8 @@
 
 .search-input:focus {
     outline: none;
-    border-color: #667eea;
-    box-shadow: 0 0 0 3px rgba( 102, 126, 234, 0.1 );
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba( 59, 130, 246, 0.1 );
 }
 
 .filter-select {
@@ -78,8 +80,8 @@
 
 .filter-select:focus {
     outline: none;
-    border-color: #667eea;
-    box-shadow: 0 0 0 3px rgba( 102, 126, 234, 0.1 );
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba( 59, 130, 246, 0.1 );
 }
 
 /* ============================================================================
@@ -97,8 +99,8 @@
 }
 
 .users-table thead {
-    background: linear-gradient( 135deg, #667eea 0%, #764ba2 100% );
-    color: white;
+    background-color: #f8f9fa;
+    color: #495057;
 }
 
 .users-table th {
@@ -108,6 +110,8 @@
     font-size: 14px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    color: #495057;
+    border-bottom: 2px solid #dee2e6;
 }
 
 .users-table tbody tr {
@@ -351,7 +355,7 @@
 }
 
 .role-checkbox:hover {
-    border-color: #667eea;
+    border-color: #3b82f6;
     background-color: #f7fafc;
 }
 
@@ -396,7 +400,7 @@
 .password-input {
     flex: 1;
     padding: 12px 15px;
-    border: 2px solid #667eea;
+    border: 2px solid #3b82f6;
     border-radius: 6px;
     font-family: 'Courier New', monospace;
     font-size: 16px;
@@ -406,27 +410,206 @@
 }
 
 /* ============================================================================
-   Loading States
+   Create User Form
    ============================================================================ */
 
-.loading {
+.create-user-form {
+    padding: 10px 0;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    font-weight: 600;
+    color: #4a5568;
+    margin-bottom: 6px;
+    font-size: 14px;
+}
+
+.form-input {
+    width: 100%;
+    padding: 10px 15px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 14px;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+}
+
+.form-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba( 59, 130, 246, 0.1 );
+}
+
+/* ============================================================================
+   Inline Action Buttons
+   ============================================================================ */
+
+.actions-cell {
+    white-space: nowrap;
+    min-width: 180px;
+}
+
+.btn-icon-action {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    opacity: 0.7;
+}
+
+.btn-icon-action:hover {
+    opacity: 1;
+}
+
+.btn-icon-action.action-roles:hover {
+    background-color: #ebf5fb;
+}
+
+.btn-icon-action.action-status:hover {
+    background-color: #fef9e7;
+}
+
+.btn-icon-action.action-reset:hover {
+    background-color: #fdf2e9;
+}
+
+.btn-icon-action.action-delete:hover {
+    background-color: #fdedec;
+}
+
+/* ============================================================================
+   Warning Button (referenced but never defined)
+   ============================================================================ */
+
+.btn-warning {
+    background-color: #f59e0b;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: background-color 0.2s;
+}
+
+.btn-warning:hover {
+    background-color: #d97706;
+}
+
+/* ============================================================================
+   Batch Selection & Action Bar
+   ============================================================================ */
+
+.checkbox-col {
+    width: 40px;
     text-align: center;
-    padding: 60px 20px;
 }
 
-.spinner {
-    border: 4px solid #e2e8f0;
-    border-top: 4px solid #667eea;
-    border-radius: 50%;
-    width: 50px;
-    height: 50px;
-    animation: spin 1s linear infinite;
-    margin: 0 auto 15px;
+.checkbox-col input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
 }
 
-@keyframes spin {
-    0% { transform: rotate( 0deg ); }
-    100% { transform: rotate( 360deg ); }
+.users-table td.checkbox-col,
+.users-table th.checkbox-col {
+    padding: 12px 8px;
+    text-align: center;
+}
+
+.batch-action-bar {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 12px 20px;
+    background: linear-gradient( 135deg, #fef3c7 0%, #fde68a 100% );
+    border: 1px solid #f59e0b;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY( -10px );
+    }
+    to {
+        opacity: 1;
+        transform: translateY( 0 );
+    }
+}
+
+.batch-action-bar .batch-count {
+    font-weight: 600;
+    color: #92400e;
+    font-size: 14px;
+}
+
+.batch-action-bar .btn {
+    font-size: 13px;
+    padding: 6px 14px;
+}
+
+.batch-email-list {
+    max-height: 200px;
+    overflow-y: auto;
+    background: #f7fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 10px;
+    margin: 10px 0;
+    font-size: 13px;
+    text-align: left;
+}
+
+.batch-email-list li {
+    padding: 4px 0;
+    color: #4a5568;
+    list-style: none;
+    border-bottom: 1px solid #edf2f7;
+}
+
+.batch-email-list li:last-child {
+    border-bottom: none;
+}
+
+/* ============================================================================
+   Delete User Confirmation
+   ============================================================================ */
+
+.btn-delete-user {
+    margin-left: auto;
+}
+
+.delete-confirm-body {
+    padding: 10px 0;
+    text-align: left;
+}
+
+.delete-target-email {
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    color: #c53030;
+    background: #fff5f5;
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin: 10px 0;
+    font-size: 14px;
+}
+
+#delete-confirm-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 /* ============================================================================
@@ -445,48 +628,6 @@
     color: #4a5568;
     font-size: 16px;
     margin-bottom: 20px;
-}
-
-/* ============================================================================
-   Messages
-   ============================================================================ */
-
-.error-message,
-.success-message {
-    display: none;
-    padding: 15px 20px;
-    margin-bottom: 20px;
-    border-radius: 8px;
-    font-weight: 500;
-}
-
-.error-message {
-    background: #fff5f5;
-    border-left: 4px solid #f56565;
-    color: #c53030;
-}
-
-.success-message {
-    background: #f0fff4;
-    border-left: 4px solid #48bb78;
-    color: #22543d;
-}
-
-/* ============================================================================
-   Utilities
-   ============================================================================ */
-
-.text-muted {
-    color: #a0aec0;
-    font-style: italic;
-}
-
-.mb-2 {
-    margin-bottom: 10px;
-}
-
-.mt-2 {
-    margin-top: 10px;
 }
 
 /* ============================================================================
@@ -529,5 +670,18 @@
 
     .modal-actions .btn {
         width: 100%;
+    }
+
+    .actions-cell {
+        min-width: 120px;
+    }
+
+    .btn-icon-action {
+        font-size: 14px;
+        padding: 3px 4px;
+    }
+
+    .batch-action-bar {
+        flex-wrap: wrap;
     }
 }

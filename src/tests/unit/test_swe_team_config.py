@@ -416,3 +416,135 @@ class TestCosaInterface:
     ] )
     def test_is_rejection( self, feedback, expected ):
         assert is_rejection( feedback ) == expected
+
+
+# =============================================================================
+# Config Factory Tests (Phase 2: INI Config Wiring)
+# =============================================================================
+
+class TestTrustProxyConfigFactory:
+    """Tests for trust_proxy_config_from_config_mgr factory function."""
+
+    def test_factory_returns_all_expected_keys( self ):
+        """Factory returns dict with all 36 config keys."""
+        from unittest.mock import MagicMock
+        from cosa.agents.decision_proxy.config import trust_proxy_config_from_config_mgr
+
+        mock_mgr = MagicMock()
+        mock_mgr.get = MagicMock( side_effect=lambda key, default=None, return_type="string": default )
+
+        result = trust_proxy_config_from_config_mgr( mock_mgr )
+
+        expected_keys = {
+            "enabled", "active_hours_start", "active_hours_end", "timezone",
+            "l2_threshold", "l3_threshold", "l4_threshold", "l5_threshold",
+            "decay_half_life_days", "rolling_window_days",
+            "cb_error_rate_threshold", "cb_confidence_collapse_threshold",
+            "cb_auto_demotion_levels", "cb_recovery_cooldown_seconds",
+            "l4_audit_sample_rate",
+            "similarity_threshold", "proxy_lancedb_table",
+            "beta_l2_rate_threshold", "beta_l3_rate_threshold",
+            "beta_l4_rate_threshold", "beta_l5_rate_threshold",
+            "beta_l2_min_samples", "beta_l3_min_samples",
+            "beta_l4_min_samples", "beta_l5_min_samples",
+            "cbr_top_k", "cbr_confidence_threshold",
+            "thompson_enabled", "thompson_act_threshold", "thompson_suggest_threshold",
+            "bald_enabled", "bald_defer_threshold",
+            "conformal_enabled", "conformal_alpha",
+            "icrl_enabled", "icrl_top_k",
+        }
+        assert set( result.keys() ) == expected_keys
+
+    def test_factory_defaults_match_module_constants( self ):
+        """Factory defaults match the module-level DEFAULT_* constants."""
+        from unittest.mock import MagicMock
+        from cosa.agents.decision_proxy.config import (
+            trust_proxy_config_from_config_mgr,
+            DEFAULT_L2_THRESHOLD,
+            DEFAULT_L3_THRESHOLD,
+            DEFAULT_DECAY_HALF_LIFE_DAYS,
+            DEFAULT_CB_ERROR_RATE_THRESHOLD,
+        )
+
+        mock_mgr = MagicMock()
+        mock_mgr.get = MagicMock( side_effect=lambda key, default=None, return_type="string": default )
+
+        result = trust_proxy_config_from_config_mgr( mock_mgr )
+
+        assert result[ "l2_threshold" ] == DEFAULT_L2_THRESHOLD
+        assert result[ "l3_threshold" ] == DEFAULT_L3_THRESHOLD
+        assert result[ "decay_half_life_days" ] == DEFAULT_DECAY_HALF_LIFE_DAYS
+        assert result[ "cb_error_rate_threshold" ] == DEFAULT_CB_ERROR_RATE_THRESHOLD
+
+    def test_factory_passes_correct_return_types( self ):
+        """Factory calls config_mgr.get() with correct return_type for each key."""
+        from unittest.mock import MagicMock
+        from cosa.agents.decision_proxy.config import trust_proxy_config_from_config_mgr
+
+        mock_mgr = MagicMock()
+        calls = {}
+
+        def track_calls( key, default=None, return_type="string" ):
+            calls[ key ] = return_type
+            return default
+
+        mock_mgr.get = MagicMock( side_effect=track_calls )
+
+        trust_proxy_config_from_config_mgr( mock_mgr )
+
+        # Verify type annotations
+        assert calls[ "decision proxy enabled" ] == "boolean"
+        assert calls[ "swe team trust proxy l2 threshold" ] == "int"
+        assert calls[ "swe team trust proxy circuit breaker error rate threshold" ] == "float"
+        assert calls[ "decision proxy timezone" ] == "string"
+
+
+class TestSweProxyConfigFactory:
+    """Tests for swe_proxy_config_from_config_mgr factory function."""
+
+    def test_factory_returns_all_expected_keys( self ):
+        """Factory returns dict with all 4 SWE-specific keys."""
+        from unittest.mock import MagicMock
+        from cosa.agents.swe_team.proxy.config import swe_proxy_config_from_config_mgr
+
+        mock_mgr = MagicMock()
+        mock_mgr.get = MagicMock( side_effect=lambda key, default=None, return_type="string": default )
+
+        result = swe_proxy_config_from_config_mgr( mock_mgr )
+
+        expected_keys = {
+            "accepted_senders", "deployment_cap_level",
+            "destructive_cap_level", "architecture_cap_level",
+        }
+        assert set( result.keys() ) == expected_keys
+
+    def test_factory_parses_accepted_senders_csv( self ):
+        """Accepted senders are parsed from comma-separated string."""
+        from unittest.mock import MagicMock
+        from cosa.agents.swe_team.proxy.config import swe_proxy_config_from_config_mgr
+
+        def mock_get( key, default=None, return_type="string" ):
+            if key == "swe engineering proxy accepted senders":
+                return "a@test.com, b@test.com, c@test.com"
+            return default
+
+        mock_mgr = MagicMock()
+        mock_mgr.get = MagicMock( side_effect=mock_get )
+
+        result = swe_proxy_config_from_config_mgr( mock_mgr )
+
+        assert result[ "accepted_senders" ] == [ "a@test.com", "b@test.com", "c@test.com" ]
+
+    def test_factory_cap_levels_default_to_three( self ):
+        """Cap levels default to 3 for deployment, destructive, architecture."""
+        from unittest.mock import MagicMock
+        from cosa.agents.swe_team.proxy.config import swe_proxy_config_from_config_mgr
+
+        mock_mgr = MagicMock()
+        mock_mgr.get = MagicMock( side_effect=lambda key, default=None, return_type="string": default )
+
+        result = swe_proxy_config_from_config_mgr( mock_mgr )
+
+        assert result[ "deployment_cap_level" ] == 3
+        assert result[ "destructive_cap_level" ] == 3
+        assert result[ "architecture_cap_level" ] == 3

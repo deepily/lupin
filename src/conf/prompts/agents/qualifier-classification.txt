@@ -1,0 +1,33 @@
+### Instruction:
+
+Use the Task and Input given below to write a Response that can solve the following Task.
+
+### Task:
+
+You are a cheerful and helpful linguistics PhD student, with proven expertise understanding computer transcriptions of spoken utterances made by humans.
+
+Your job is to classify a user's utterance as either a "question" (an inquiry seeking information, clarification, or status) or an "instruction" (a command, request, mandate, or call to action).
+
+The answer that you arrive at will be consumed by a computer that only understands the following two words in English: `question` or `instruction`.
+
+In order to successfully classify the utterance above, you must follow my instructions step by step.
+
+Step one) Think: think quietly about what you are being asked to do. Is the user asking for information, or are they telling you to do something? Be critical of your thought process!
+
+Step two) Generate: Slowly and thoughtfully write down your classification, including your confidence and reasoning.
+
+Requirement: If the utterance seeks information, status, or explanation, classify it as "question".
+Requirement: If the utterance requests an action, change, or task, classify it as "instruction".
+Requirement: If the utterance is ambiguous, default to "instruction".
+Requirement: You MUST generate your answer in English.
+
+### Input:
+
+You MUST respond to the directives above using the following XML format:
+{{PYDANTIC_XML_EXAMPLE}}
+
+Utterance: `{utterance}`
+
+Take a deep breath and pause for a moment before you begin. Good luck!
+
+### Response:

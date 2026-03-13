@@ -225,6 +225,18 @@ pytest src/tests/smoke/test_proxy_integration.py -v
 
 ---
 
+## Testing Anti-Patterns
+
+| Anti-Pattern | Why It's Prohibited | Use Instead |
+|-------------|---------------------|-------------|
+| Manual `curl` to `/api/push` + polling | Non-repeatable, no validation, no reporting | `LivePipelineTestBase` or `InteractiveSmokeTest` |
+| Bespoke shell scripts with curl | Unmaintainable, no framework integration | Automated smoke test scripts |
+| Copy-paste curl from API docs into tests | Fragile, no auth lifecycle management | Test base classes handle auth, submit, poll, validate |
+
+**Acceptable curl usage**: API reference documentation, deployment health checks (`curl /health`), one-off debugging (never committed).
+
+---
+
 ## Running All Tests
 
 ### Run Everything
@@ -419,7 +431,7 @@ Recommended test sequence for CI/CD:
 - **Integration Tests**: `src/tests/integration/README.md`
 - **Interactive Proxy Tests**: [`src/docs/automated-interactive-testing.md`](../docs/automated-interactive-testing.md) — Comprehensive proxy testing guide
 - **Smoke Tests**: [`src/tests/smoke/README.md`](smoke/README.md) — Quick-start guide for smoke tests
-- **JWT Authentication**: `src/rnd/jwt-oauth/README.md`
+- **JWT Authentication**: `src/rnd/2025.09.29-jwt-oauth/README.md`
 - **API Documentation**: (Phase 10 - coming soon)
 - **Project CLAUDE.md**: Development guidelines and testing section
 

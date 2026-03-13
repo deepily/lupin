@@ -35,9 +35,6 @@ FILES = {
     "voice-commands-xml-train.jsonl"    : "Voice Commands (train)",
     "voice-commands-xml-test.jsonl"     : "Voice Commands (test)",
     "voice-commands-xml-validate.jsonl" : "Voice Commands (validate)",
-    "agentic-job-xml-train.jsonl"       : "Agentic Jobs (train)",
-    "agentic-job-xml-test.jsonl"        : "Agentic Jobs (test)",
-    "agentic-job-xml-validate.jsonl"    : "Agentic Jobs (validate)",
 }
 
 

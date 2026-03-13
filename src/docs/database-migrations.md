@@ -1,7 +1,7 @@
 # Database Migrations with Alembic
 
 **Created**: 2025-12-30
-**Database**: PostgreSQL (lupin_db)
+**Database**: PostgreSQL (lupin_db_dev / lupin_db_prod)
 
 ---
 
@@ -15,7 +15,7 @@ Lupin uses **Alembic** for database schema migrations. Alembic provides version 
 
 ```bash
 # Check current migration status
-export DATABASE_URL="postgresql://lupin_dev:dev_password@localhost:5432/lupin_db"
+export DATABASE_URL="postgresql://lupin_dev:dev_password@localhost:5432/lupin_db_dev"
 alembic current
 
 # Apply all pending migrations
@@ -79,7 +79,7 @@ python3 -c "import uuid; print(uuid.uuid4().hex[:12])"
 ### 4. Apply Migration
 
 ```bash
-export DATABASE_URL="postgresql://lupin_dev:dev_password@localhost:5432/lupin_db"
+export DATABASE_URL="postgresql://lupin_dev:dev_password@localhost:5432/lupin_db_dev"
 alembic upgrade head
 ```
 
@@ -99,7 +99,7 @@ The `DATABASE_URL` environment variable controls which database Alembic connects
 
 | Environment | Database URL |
 |-------------|--------------|
-| Development | `postgresql://lupin_dev:dev_password@localhost:5432/lupin_db` |
+| Development | `postgresql://lupin_dev:dev_password@localhost:5432/lupin_db_dev` |
 | Testing | `postgresql://lupin_dev:dev_password@localhost:5432/lupin_db_test` |
 | Production | Set via `CLOUD_SQL_CONNECTION_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` |
 

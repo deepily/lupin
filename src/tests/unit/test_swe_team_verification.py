@@ -554,6 +554,7 @@ class TestCoderTesterLoop:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.get_feedback     = AsyncMock( return_value=None )
 
             result = asyncio.run( orch._execute_live( team_io ) )
 
@@ -606,6 +607,7 @@ class TestCoderTesterLoop:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.get_feedback     = AsyncMock( return_value=None )
 
             result = asyncio.run( orch._execute_live( team_io ) )
 
@@ -655,6 +657,7 @@ class TestCoderTesterLoop:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.get_feedback     = AsyncMock( return_value=None )
 
             result = asyncio.run( orch._execute_live( team_io ) )
 
@@ -696,6 +699,7 @@ class TestCoderTesterLoop:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.get_feedback     = AsyncMock( return_value=None )
 
             result = asyncio.run( orch._execute_live( team_io ) )
 
@@ -740,6 +744,7 @@ class TestCoderTesterLoop:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.get_feedback     = AsyncMock( return_value=None )
 
             asyncio.run( orch._execute_live( team_io ) )
 
@@ -785,6 +790,7 @@ class TestCoderTesterLoop:
             team_io = MagicMock()
             team_io.notify_progress  = AsyncMock()
             team_io.ask_confirmation = AsyncMock( return_value=True )
+            team_io.get_feedback     = AsyncMock( return_value=None )
 
             asyncio.run( orch._execute_live( team_io ) )
 

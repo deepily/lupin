@@ -9,7 +9,7 @@ Verifies that:
 
 Requires:
 - Server running on localhost:7999
-- Environment variables: LUPIN_TEST_EMAIL, LUPIN_TEST_PASSWORD
+- Environment variables: LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL, LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD
 - At least one research file in user's deep-research directory
 
 Created: 2026-02-02
@@ -41,7 +41,7 @@ def quick_smoke_test():
 
     Requires:
         - Server running on port 7999
-        - LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables set
+        - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD environment variables set
         - User account exists in development database
         - At least one research file exists for the user
 
@@ -53,13 +53,13 @@ def quick_smoke_test():
     cu.print_banner( "Podcast Generator Dry-Run Smoke Test", prepend_nl=True )
 
     # Get credentials from environment
-    email    = os.environ.get( "LUPIN_TEST_EMAIL" )
-    password = os.environ.get( "LUPIN_TEST_PASSWORD" )
+    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
     if not email or not password:
         print( "✗ Missing environment variables:" )
-        print( "  export LUPIN_TEST_EMAIL='your@email.com'" )
-        print( "  export LUPIN_TEST_PASSWORD='yourpassword'" )
+        print( "  export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL='your@email.com'" )
+        print( "  export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD='yourpassword'" )
         return False
 
     try:

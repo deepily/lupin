@@ -4,13 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lupin - Profile</title>
-    <link rel="stylesheet" href="css/auth.css">
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+    <link rel="stylesheet" href="/static/html/auth/css/auth.css">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
 </head>
 <body>
     <div class="profile-container">
         <div class="profile-header">
             <h1>Your Profile</h1>
-            <button class="btn btn-secondary" onclick="logout()">Logout</button>
+            <div class="profile-header-actions">
+                <button class="btn btn-primary" onclick="window.location.href='/app/auth/change-password'">
+                    Change Password
+                </button>
+                <button class="btn btn-secondary" onclick="logout()">Logout</button>
+            </div>
         </div>
 
         <div class="error-message" id="error-message"></div>
@@ -54,24 +61,19 @@
                 <h2>🔐 ADMIN ACCESS</h2>
                 <p>You have administrative privileges on this system.</p>
                 <div class="button-group">
-                    <button class="btn btn-primary" onclick="window.location.href='../admin/dashboard.html'">🏠 Admin Dashboard</button>
-                    <button class="btn btn-secondary" onclick="window.location.href='admin/users.html'">👥 Manage Users</button>
-                    <button class="btn btn-secondary" onclick="window.location.href='../admin/snapshots.html'">🔍 Solution Snapshots</button>
+                    <button class="btn btn-primary" onclick="window.location.href='/app/admin'">🏠 Admin Dashboard</button>
+                    <button class="btn btn-secondary" onclick="window.location.href='/app/admin/users'">👥 Manage Users</button>
+                    <button class="btn btn-secondary" onclick="window.location.href='/app/admin/snapshots'">🔍 Solution Snapshots</button>
+                    <button class="btn btn-secondary" onclick="window.location.href='/app/admin/proxy-ratify'">Pending Ratification</button>
+                    <button class="btn btn-secondary" onclick="window.location.href='/app/admin/proxy-dashboard'">Trust Dashboard</button>
                 </div>
             </div>
 
-            <div class="button-group mt-3">
-                <button class="btn btn-primary" onclick="window.location.href='change-password.html'">
-                    Change Password
-                </button>
-                <button class="btn btn-secondary" onclick="window.location.href='../notifications.html'">
-                    Go to Notifications
-                </button>
-            </div>
         </div>
     </div>
 
-    <script src="js/auth.js"></script>
+    <script src="/static/js/lupin-nav.js" defer></script>
+    <script src="/static/html/auth/js/auth.js"></script>
     <script>
         // Require authentication
         requireAuth();
@@ -152,7 +154,7 @@
                 // If authentication failed, redirect to login
                 if ( error.message.includes( 'Session expired' ) || error.message.includes( '401' ) ) {
                     setTimeout( () => {
-                        window.location.href = 'login.html';
+                        window.location.href = '/app/auth/login';
                     }, 2000 );
                 }
             }

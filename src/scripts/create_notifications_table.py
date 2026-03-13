@@ -5,7 +5,7 @@ Create notifications table for Phase 2 SSE notification system.
 This is initial table creation (NOT migration - table does not currently exist).
 Current notifications are in-memory only (NotificationItem objects).
 
-Design reference: src/rnd/sse-notifications/05-phase2-design-decisions.md
+Design reference: src/rnd/2025.10.15-sse-notifications/05-phase2-design-decisions.md
 Schema reference: Lines 136-179 (Area 1 Q1.3) + Line 267 (Q1.4 deleted_at field)
 
 Database: lupin-notifications.db (new dedicated SQLite database)

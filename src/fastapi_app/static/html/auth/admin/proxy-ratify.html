@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pending Ratification — Lupin Admin</title>
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+    <link rel="stylesheet" href="/static/html/auth/admin/css/admin.css">
+    <link rel="stylesheet" href="/static/html/auth/admin/css/proxy-ratify.css">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
+</head>
+<body>
+    <div class="admin-container">
+        <!-- Breadcrumb -->
+        <div class="breadcrumb">
+            <a href="/app">Home</a>
+            <span class="separator">></span>
+            <a href="/app/admin">Admin</a>
+            <span class="separator">></span>
+            <span class="current">Pending Ratification</span>
+        </div>
+
+        <!-- Header -->
+        <div class="admin-header">
+            <h1>Decision Proxy — Pending Ratification</h1>
+            <div class="admin-actions">
+                <button class="btn btn-secondary btn-small"
+                        onclick="window.location.href='/app/admin'">
+                    ← Back to Admin
+                </button>
+            </div>
+        </div>
+
+        <!-- Messages -->
+        <div class="error-message" id="error-message"></div>
+        <div class="success-message" id="success-message"></div>
+
+        <!-- Loading State -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p class="mt-2">Loading pending decisions...</p>
+        </div>
+
+        <!-- Main Content -->
+        <div id="main-content" style="display: none;">
+
+            <!-- Summary Cards -->
+            <div class="summary-cards" id="summary-cards">
+                <div class="summary-card summary-card-pending">
+                    <div class="card-label">Pending</div>
+                    <div class="card-value" id="stat-pending">0</div>
+                </div>
+                <div class="summary-card summary-card-approved">
+                    <div class="card-label">Approved Today</div>
+                    <div class="card-value" id="stat-approved">0</div>
+                </div>
+                <div class="summary-card summary-card-rejected">
+                    <div class="card-label">Rejected Today</div>
+                    <div class="card-value" id="stat-rejected">0</div>
+                </div>
+                <div class="summary-card summary-card-oldest">
+                    <div class="card-label">Oldest Pending</div>
+                    <div class="card-value" id="stat-oldest">—</div>
+                </div>
+            </div>
+
+            <!-- Filter Bar -->
+            <div class="filter-bar">
+                <select id="filter-data-origin" class="filter-select">
+                    <option value="">All Sources</option>
+                    <option value="organic">Organic (Live)</option>
+                    <option value="synthetic_seed">Synthetic (Seed)</option>
+                    <option value="synthetic_generated">Synthetic (Generated)</option>
+                </select>
+
+                <select id="filter-category" class="filter-select">
+                    <option value="">All Categories</option>
+                    <option value="deployment">Deployment</option>
+                    <option value="testing">Testing</option>
+                    <option value="deps">Dependencies</option>
+                    <option value="architecture">Architecture</option>
+                    <option value="destructive">Destructive</option>
+                    <option value="general">General</option>
+                </select>
+
+                <select id="filter-trust-level" class="filter-select">
+                    <option value="">All Trust Levels</option>
+                    <option value="1">L1 — Shadow</option>
+                    <option value="2">L2 — Provisional</option>
+                    <option value="3">L3 — Trusted</option>
+                    <option value="4">L4 — Autonomous</option>
+                    <option value="5">L5 — Full Trust</option>
+                </select>
+
+                <select id="filter-action" class="filter-select">
+                    <option value="">All Actions</option>
+                    <option value="shadow">Shadow</option>
+                    <option value="suggest">Suggest</option>
+                    <option value="act">Act</option>
+                    <option value="defer">Defer</option>
+                </select>
+
+                <button class="btn btn-secondary btn-small" onclick="clearFilters()">
+                    Clear Filters
+                </button>
+            </div>
+
+            <!-- Bulk Actions -->
+            <div class="bulk-actions" id="bulk-actions" style="display: none;">
+                <span class="selected-count" id="selected-count">0 selected</span>
+                <button class="btn btn-primary btn-small" onclick="bulkApprove()">
+                    Approve Selected
+                </button>
+                <button class="btn btn-danger btn-small" onclick="bulkReject()">
+                    Reject Selected
+                </button>
+                <button class="btn btn-danger btn-small" onclick="bulkDelete()">
+                    Delete Selected
+                </button>
+            </div>
+
+            <!-- Decisions Table -->
+            <div id="table-container">
+                <table class="decisions-table">
+                    <thead>
+                        <tr>
+                            <th><input type="checkbox" id="select-all" onclick="toggleSelectAll()"></th>
+                            <th>Source</th>
+                            <th>Category</th>
+                            <th>Question</th>
+                            <th>Action</th>
+                            <th>Trust</th>
+                            <th>Confidence</th>
+                            <th>Age</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="decisions-tbody">
+                        <!-- Populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Empty State -->
+            <div id="empty-state" class="empty-state" style="display: none;">
+                <div class="empty-icon">&#9989;</div>
+                <p>No pending decisions. All caught up!</p>
+            </div>
+
+            <!-- Pagination -->
+            <div class="pagination" id="pagination-container">
+                <button id="prev-page" class="btn btn-secondary btn-small" onclick="previousPage()" disabled>
+                    ← Previous
+                </button>
+                <span id="page-info">Page 1</span>
+                <button id="next-page" class="btn btn-secondary btn-small" onclick="nextPage()">
+                    Next →
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Decision Detail Modal -->
+    <div id="detail-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeDetailModal()">&times;</span>
+            <h2>Decision Detail</h2>
+
+            <div class="decision-detail" id="decision-detail">
+                <!-- Populated by JavaScript -->
+            </div>
+
+            <div class="feedback-section">
+                <label for="feedback-text">Feedback (optional):</label>
+                <textarea id="feedback-text" class="feedback-textarea"
+                          placeholder="Add feedback about this decision..."></textarea>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-primary" id="modal-approve-btn" onclick="modalApprove()">
+                    Approve
+                </button>
+                <button class="btn btn-danger" id="modal-reject-btn" onclick="modalReject()">
+                    Reject
+                </button>
+                <button class="btn btn-secondary" onclick="closeDetailModal()">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Modal (generic — used for bulk reject and bulk delete) -->
+    <div id="confirm-modal" class="modal">
+        <div class="modal-content modal-confirm">
+            <h2 id="confirm-title">Confirm Action</h2>
+            <p id="confirm-message">Are you sure?</p>
+
+            <div class="modal-actions">
+                <button class="btn btn-danger" id="confirm-yes">
+                    Confirm
+                </button>
+                <button class="btn btn-secondary" onclick="closeConfirmModal()">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/js/lupin-nav.js" defer></script>
+    <script src="/static/html/auth/js/auth.js"></script>
+    <script src="/static/html/auth/admin/js/proxy-ratify.js"></script>
+</body>
+</html>

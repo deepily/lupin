@@ -40,7 +40,7 @@
 /p-is-p-02-documentation
 
 # With arguments
-/p-is-p-02-documentation --pattern=A --project-name=jwt-oauth
+/p-is-p-02-documentation --pattern=A --project-name=2025.09.29-jwt-oauth
 ```
 
 Invoke this command when:

@@ -1,224 +1,256 @@
 # Lupin
 
-_**TBD**: Why I choose this name._
+*Named after Arsene Lupin, the gentleman thief. More on that front once Lupin enters multi-user testing on Google Cloud.*
 
-### YOU KNOW THE DREAM
+**A voice-first AI agent platform that closes the voice loop from browser UI through agent execution into developer tooling and back -- with Bayesian trust learning, fine-tuned intent routing, and solution caching built in.**
+
+`FastAPI` | `Voice I/O` | `PEFT/LoRA` | `LanceDB` | `Claude Agent SDK` | `Bayesian Trust` | `MCP Protocol`
+
+Current version: **v0.1.5** | License: [Apache 2.0](LICENSE)
+
+---
+
+## Human in the loop, reimagined
+
+Every agentic AI platform needs human oversight. Most implement it as a modal dialog: click approve, type feedback, wait. Lupin takes a fundamentally different approach -- **voice-first human-in-the-loop**.
+
+Agents speak to you. You speak back. A Bayesian trust engine learns your preferences over time, escalating only when confidence is low and auto-approving when it has earned your trust. The result: human oversight that works **from across the room**, while you're multitasking, or even from your phone -- no screen required.
+
+This is the missing piece in agentic AI: not just making agents smarter, but making **human oversight effortless**.
+
+---
+
+## The dream
 
 Talk to the computer, and it tells you, or does, something useful.
 
-#### YOU PROBABLY KNOW THE PROBLEM
+### The problem
 
-Currently, AI Agents & Chat Bots are [slow and expensive](https://www.linkedin.com/pulse/langchains-dataframe-agent-why-you-so-slow-r-p-ruiz). 
-They [make silly mistakes](https://www.linkedin.com/pulse/meet-my-idiot-savant-intern-chatgpts-advanced-data-analysis-ruiz/). 
+Currently, AI agents and chatbots are [slow and expensive](https://www.linkedin.com/pulse/langchains-dataframe-agent-why-you-so-slow-r-p-ruiz).
+They [make silly mistakes](https://www.linkedin.com/pulse/meet-my-idiot-savant-intern-chatgpts-advanced-data-analysis-ruiz/).
 They're forgetful. And they work too hard reinventing the wheel.
 
-#### WHAT MOST PEOPLE PROBABLY DON'T REALIZE
+### What most people probably don't realize
 
-Even the simplest of vox in & vox out UX -- especially when coupled with agentic behaviors -- is **_hard_**. It's asynchronous, and usually frustratingly 
-slow. It's a new way of interacting with computers, which requires a global re-thinking of how different the UI control and display modalities interact. 
+Even the simplest vox-in and vox-out UX -- especially when coupled with agentic behaviors -- is **_hard_**. It's asynchronous, and usually frustratingly slow. It's a new way of interacting with computers, which requires a global rethinking of how different the UI control and display modalities interact.
 
-#### I'VE BEEN WORKING ON SOLUTIONs to THESE PROBLEMS FOR A WHILE NOW
+### Lupin's approach
 
-I'm working on helping Agents [remember what problems they've already solved](https://www.linkedin.com/pulse/slow-expensive-erratic-problem-whats-solution-r-p-ruiz/), 
-or if they've solved something semantically synonymous or computationally analogous before.
+Fine-tune small models for cheap, fast intent routing -- not prompt engineering, actual PEFT/LoRA fine-tuning. Escalate to frontier models only when complexity demands it. Cache solutions via vector search so agents never solve the same problem twice. Layer Bayesian trust learning so the system earns autonomy over time, minimizing human interruptions without sacrificing oversight. And voice-enable *everything* -- from the browser UI, through agent execution, into [Claude Code developer sessions](https://www.linkedin.com/pulse/slow-expensive-erratic-problem-whats-solution-r-p-ruiz/) via 6 system hooks and an MCP voice server, and back again.
 
+---
 
-#### TECHNICAL ROADMAP & ARCHITECTURE
+## Architecture
 
-Lupin is built on a modern FastAPI architecture with WebSocket support for real-time communication. The project integrates with the COSA (Collection of Small Agents) framework to provide intelligent agent capabilities.
+```mermaid
+flowchart TD
+    subgraph Input
+        MIC["Microphone"] --> ASR["ASR (Whisper)"]
+        TEXT["Text Input"] --> ROUTER
+    end
 
-**Current Architecture:**
-- **FastAPI-only server** running on port 7999 (Flask has been completely eliminated as of 2025.06.28)
-- **WebSocket support** for real-time bidirectional communication
-- **COSA integration** for modular agent framework
-- **Notification system** for agent-to-user feedback
+    ASR --> ROUTER["Intent Router<br/>(PEFT/LoRA fine-tuned)"]
 
-**Key Technical Documents:**
-- **[WebSocket Events Documentation](src/docs/websocket-events.md)** - Comprehensive guide to all WebSocket events and their usage
-- **[WebSocket Architecture Overview](src/docs/websocket-architecture.md)** - Complete system design and architectural patterns
-- **[WebSocket Troubleshooting Guide](src/docs/websocket-troubleshooting.md)** - Common issues, solutions, and debugging procedures
-- **[WebSocket TTS Streaming Design](src/rnd/2025.06.03-websocket-tts-streaming-design.md)** - Architecture for real-time text-to-speech streaming
-- **[Claude Code Notification System](src/rnd/2025.06.20-claude-code-notification-system-design.md)** - Design for real-time agent notifications
-- **[FastAPI Queue Implementation](src/rnd/2025.06.17-fastapi-queue-implementation-plan.md)** - Queue-based request handling
-- **[Lupin Renaming Plan](src/rnd/2025.06.28-lupin-renaming-plan.md)** - Project rebranding documentation
-- **[Audio Chunk Sequential Playback Analysis](src/rnd/2025.08.01-audio-chunk-sequential-playback-analysis.md)** - Root cause analysis and solution for ElevenLabs audio duplication issues
-- **[LanceDB Migration Plan](src/rnd/2025.08.22-solution-snapshot-lancedb-interface-migration-plan.md)** - Complete migration from file-based to vector database storage
+    ROUTER --> SNAP{"Solution Snapshot<br/>Lookup (LanceDB)"}
+    SNAP -- "Cache Hit" --> TTS["TTS Output"]
+    SNAP -- "Cache Miss" --> CJ["CJ Flow Queue"]
 
-**Current Development Status (2026.02.16):**
+    subgraph CJ Flow
+        CJ --> SYNC["Sync Agents<br/>Math · Calendar · Calculator<br/>CRUD · Weather · DateTime"]
+        CJ --> ASYNC["Async Agents<br/>Deep Research · Podcast<br/>SWE Team · Claude Code"]
+    end
 
-## What's New in v0.1.4
+    SYNC --> TTS
+    ASYNC --> PROXY["Decision Proxy<br/>(Bayesian Trust · L1-L5)"]
+    PROXY --> TTS
 
-### End-to-End Voice I/O for Agentics
-- **cosa-voice MCP Server** - Full voice I/O integration for Claude Code workflows via MCP protocol
-- **Notification Proxy Agent** - Automated proxy for interactive notifications during testing and production
-- **Runtime Argument Expeditor** - LLM-powered gap analysis that asks users for missing arguments via voice
-- **Batch Open-Ended Questions** - Multi-question voice collection on a single screen (`ask_open_ended_batch`)
-- **Yes/No Comments** - Optional qualifying comments on yes/no blocking notifications
+    TTS --> WS["WebSocket<br/>(queue + audio channels)"]
+    WS --> BROWSER["Browser UI"]
 
-### New Agents
-- **SWE Team Agent** - 4-phase agentic software development team (foundation → delegation → tester verification → trust-aware decision proxy) with L1-L5 trust tracking, circuit breaker, and ratification API
-- **Everyday Calculator Agent** - Natural language calculator with MathAgent fallback, 508 LORA templates, full voice routing (31 implementation steps complete)
-- **CRUD for DataFrames Agent** - Voice-controlled create/read/update/delete for Pandas DataFrames with confirmation dialogs for destructive operations
-- **Notification Proxy Agent** - Phi-4 LLM fuzzy script matching for automated interactive testing with Q&A scripts
+    subgraph Claude Code Voice Loop
+        HOOKS["6 System Hooks<br/>(PreToolUse · PostToolUse · Notification<br/>Stop · PermissionRequest · UserPromptSubmit)"] --> MCP["cosa-voice<br/>MCP Server"]
+        MCP --> ROUTER
+    end
 
-### Testing Expansion (881 → 1170 unit tests)
-- **+289 unit tests** across SWE Team (214), Calculator (94), CRUD (73+), Expeditor (123), Proxy (49+)
-- **12-scenario proxy integration test** combining Calculator, CRUD, and Expediter agents
-- **Automated interactive testing framework** with 3-tier strategy chain (exact → fuzzy → fallback)
-- **Comprehensive testing documentation** (`automated-interactive-testing.md`, smoke test README)
-
-### Training Pipeline
-- **39,871 Training Examples** - 35 commands including Calculator (1,500 templates) and Claude Code intents
-- **PEFT Phase 2** - Results dashboard, explicit routing phrases, quantization strengthening (1,200→1,500 samples/command)
-- **Post-Quantization GPU Memory Fix** - Explicit `release_gpu_memory()` for vLLM OOM prevention
-
-### Infrastructure
-- **Local GPU Embeddings** - CodeRankEmbed + nomic-embed-text-v1.5 (7-398x faster than OpenAI API)
-- **LanceDB Dimension Standardization** - All providers on 768 dims with validation
-- **CJ Flow Bounded Job Packaging** - Complete guide for packaging new QueueableJob types
-- **Consolidated Notification API Reference** - 4,033-line comprehensive doc with 5 Mermaid diagrams
-
-## What's New in v0.1.3
-
-### Agentic Job System (CJ Flow)
-- **Claude Code Job Integration** - Full Claude Agent SDK integration with QueueableJob protocol (22 attributes + 3 methods)
-- **Deep Research Agent** - Background research jobs with automatic report generation
-- **Podcast Generator** - Convert research documents to audio podcast format
-- **Research→Podcast Workflow** - Chained pipeline from research to podcast in one click
-- **Dry-Run Mode** - Test all agentic jobs without API costs (enabled by default in UI)
-
-### WebSocket Infrastructure
-- **JWT Authentication** - Secure WebSocket connections with JWT tokens (replaces mock tokens)
-- **job_state_transition Events** - Real-time job status updates via WebSocket
-- **100% WebSocket Test Coverage** - All 50 smoke tests passing (up from 46% before v0.1.3)
-
-### Testing & Quality
-- **Unit Tests**: 195/195 (100%) - Complete test infrastructure remediation
-- **WebSocket Tests**: 50/50 (100%) - JWT auth migration complete
-- **Integration Tests**: Comprehensive API endpoint testing with auth
-
-### Training Pipeline
-- **Unified LoRA Training** - Single pipeline for voice commands + agentic job intents
-- **40,258 Training Examples** - Including 600 agentic command examples
-- **Agentic Intent Recognition** - "Go to deep research", "make a podcast about..."
-
-### Notifications UI
-- **Compact Dropdown Controls** - Task Type and Flow Type selectors (replaces cluttered radio buttons)
-- **cosa-voice MCP Integration** - Voice I/O for Claude Code workflows via MCP server
-
-### Previous Releases
-
-The project has several **completed milestones from earlier versions**:
-
-1. **✅ LanceDB Migration Complete** (v0.1.2) - Successfully migrated solution snapshots from file-based storage to LanceDB vector database with 100% feature parity and massive performance improvements
-2. **✅ Configuration-Based Backend Switching** (v0.1.2) - Implemented seamless switching between storage backends via simple configuration change
-3. **✅ WebSocket FastAPI Test Suite** (v0.1.1) - Comprehensive diagnostic and testing tools for WebSocket functionality
-4. **✅ FastAPI Migration** (v0.1.0) - Complete Flask elimination, FastAPI-only architecture
-
-## Solution Snapshot Storage
-
-The system supports two storage backends for solution snapshots (agent memory):
-
-### File-Based Storage (Default)
-- Stores snapshots as JSON files in `/src/conf/long-term-memory/solutions/`
-- Good for small datasets (<100 snapshots)
-- No additional dependencies required
-- Simple file system operations
-
-### LanceDB Storage (Recommended for Production)
-- Vector database with native similarity search
-- 100-1000x faster for search operations
-- Better memory efficiency and scalability
-- Advanced semantic search capabilities
-
-### Switching Between Backends
-
-To switch from file-based to LanceDB storage:
-
-1. **Edit Configuration** - In `src/conf/lupin-app.ini`, change:
-   ```ini
-   solution snapshots manager type = lancedb
-   ```
-
-2. **Optional: Migrate Existing Data** - Run the migration script:
-   ```bash
-   python src/scripts/migrate_snapshots_to_lancedb.py
-   ```
-
-3. **Restart Server** - Restart the FastAPI server to apply changes
-
-To switch back to file-based storage, simply change the config back to:
-```ini
-solution snapshots manager type = file_based
+    style HOOKS fill:#f9f,stroke:#333,stroke-width:2px
+    style MCP fill:#f9f,stroke:#333,stroke-width:2px
 ```
 
-Both backends provide **identical functionality** - the switch is completely transparent to users and agents.
+Voice flows end-to-end: browser microphone through agent execution into Claude Code sessions and back via dual-channel WebSocket audio streaming.
 
-## Performance Comparison
+---
 
-Based on benchmarks with real data:
+## Agent ecosystem
+
+**17 specialized agents** -- from sub-second sync responders to long-running autonomous research pipelines -- all routed through fine-tuned small models and unified by a single voice-first queue system.
+
+### Synchronous agents (respond in <1s via PEFT routing)
+
+| Agent | Purpose |
+|-------|---------|
+| MathAgent | Symbolic math via LLM |
+| CalendarAgent | Date-aware scheduling |
+| DateTimeAgent | Time queries and conversions |
+| WeatherAgent | Weather lookups |
+| TodoListAgent | Persistent task management |
+| CalculatorAgent | Natural language calculator (508 LoRA templates), MathAgent fallback |
+| CRUDAgent | Voice-controlled DataFrame create/read/update/delete |
+| ReceptionistAgent | Top-level intent router |
+| RuntimeArgumentExpeditor | LLM-powered gap analysis -- asks for missing arguments via voice |
+
+### Long-running agents (async via CJ Flow queue)
+
+| Agent | Purpose |
+|-------|---------|
+| DeepResearchAgent | Background research with automatic report generation |
+| PodcastGeneratorAgent | Convert documents to audio podcast format |
+| ResearchToPodcastAgent | Chained research-to-podcast pipeline |
+| ClaudeCodeAgent | Claude Agent SDK tasks (BOUNDED or INTERACTIVE mode) |
+| SWETeamAgent | 4-phase dev team: Lead, Coder, Tester, Trust Proxy |
+
+### Infrastructure agents
+
+| Agent | Purpose |
+|-------|---------|
+| NotificationProxyAgent | Phi-4 fuzzy script matching for automated interactive testing |
+| DecisionProxyAgent | Universal Prediction Engine (7 slices) · Bayesian Beta-Bernoulli trust · Thompson Sampling · Conformal prediction · L1-L5 escalation · Circuit breaker |
+
+---
+
+## Key capabilities
+
+### Voice-first everywhere -- browser to agents to developer tooling
+
+No other platform closes the voice loop this completely:
+
+- **Browser to agents**: Dual-channel WebSocket architecture (queue events + audio streaming) with ASR (Whisper) to TTS pipeline, end to end
+- **Agents to developer tools**: 6 Claude Code system hooks (`PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `PermissionRequest`, `UserPromptSubmit`) bridge voice into every coding session
+- **Developer tools back to browser**: cosa-voice MCP server provides 5 voice tools (`notify`, `converse`, `ask_yes_no`, `ask_multiple_choice`, `ask_open_ended_batch`)
+- **Session continuity**: Stable session IDs survive context clears via write-once atomic lockfile -- no identity drift
+- **Stop hook gisting**: Ultra-short TTS summaries of completed work via frontier model distillation
+- **Voice injection**: tmux-based voice input into idle Claude Code sessions -- speak and it types
+
+### Intent routing via fine-tuned small models -- not prompt engineering
+
+While most platforms route via system prompts or keyword matching, Lupin fine-tunes:
+
+- 39,871 training examples across 35 command intents
+- PEFT/LoRA on Phi-4, Qwen, and Llama -- local GPU inference, zero API calls for routing
+- Sub-second classification with GSM8K-validated post-quantization math reasoning
+- Result: routing that is faster, cheaper, and more reliable than prompt-based alternatives
+
+### Solution snapshot memory -- agents that learn from their own work
+
+When an agent solves a problem, the solution is embedded and cached in LanceDB. Next time the same (or similar) question arrives, the answer comes from vector search -- not from re-running the agent.
 
 | Operation | File-Based | LanceDB | Speedup |
 |-----------|------------|---------|---------|
-| Search (exact) | 96ms | 0.1ms | **960x faster** |
-| Add snapshot | 827ms | 15ms | **55x faster** |
-| Search (fuzzy) | 120ms | 0.3ms | **400x faster** |
+| Search (exact) | 96 ms | 0.1 ms | **960x** |
+| Add snapshot | 827 ms | 15 ms | **55x** |
+| Search (fuzzy) | 120 ms | 0.3 ms | **400x** |
 
-*Note: Performance varies based on dataset size. For small datasets (<100 snapshots), file-based may be faster due to lower overhead.*
+Local GPU embeddings (CodeRankEmbed + nomic-embed-text-v1.5) vs OpenAI API:
 
-## Embedding Performance
+| Operation | Content | Local GPU | OpenAI API | Speedup |
+|-----------|---------|-----------|------------|---------|
+| Single embed | prose | 164 ms | 1,146 ms | **7x** |
+| Single embed | code | 70 ms | 1,211 ms | **17x** |
+| Batch (3) | prose | 8 ms | 2,989 ms | **374x** |
+| Batch (3) | code | 8 ms | 3,183 ms | **398x** |
 
-Local GPU embedding engines (CodeRankEmbed + nomic-embed-text-v1.5) vs OpenAI API (text-embedding-3-small), benchmarked with N=10 iterations over 3 queries each:
+### Trust-aware decision proxy -- Bayesian autonomy that earns your confidence
 
-| Operation | Content Type | Local GPU | OpenAI API | Speedup |
-|-----------|-------------|-----------|------------|---------|
-| Single embedding | prose | 164 ms | 1,146 ms | **7x faster** |
-| Single embedding | code | 70 ms | 1,211 ms | **17x faster** |
-| Batch (3 items) | prose | 8 ms | 2,989 ms | **374x faster** |
-| Batch (3 items) | code | 8 ms | 3,183 ms | **398x faster** |
+The first decision proxy for AI agents with academic-grade statistical rigor:
 
-Toggle between providers via `embedding provider = local | openai` in `lupin-app.ini`. Benchmark harness: `pytest src/tests/smoke/test_embedding_benchmark.py -v -s`
+- **Universal Prediction Engine**: 7 prediction slices with 87 unit tests and 21 end-to-end tests
+- **Bayesian Beta-Bernoulli trust model**: Per-agent trust learning with conjugate prior updates
+- **Thompson Sampling**: Exploration-exploitation balance for when to auto-approve vs. escalate
+- **Conformal prediction**: Calibrated confidence intervals -- not guesses, statistical guarantees
+- **LanceDB-backed preference embeddings**: Semantic similarity with response_type filtering
+- **L1-L5 trust escalation**: Five trust levels from "always ask" to "full autonomy" with circuit breaker pattern
+- **Morning coffee batch review**: Non-urgent decisions queued for human review at your convenience
+- **Ratification API**: Post-hoc approval with trust feedback loop
 
-**Quick Start Commands:**
-- Run FastAPI server: `src/scripts/run-fastapi-lupin.sh` (port 7999)
-- Run GUI client: `src/scripts/run-lupin-gui.sh`
-- Run GSM8K benchmarks: `src/scripts/run-gsm8k.sh --help`
+### Battle-tested -- 2,075+ automated tests
 
-**WebSocket Configuration:**
+| Suite | Count | Coverage |
+|-------|-------|----------|
+| Unit tests | 2,075+ | Core logic, trust engine, hooks, credentials, prediction engine |
+| WebSocket tests | 50 | Connection, auth, event routing, session management |
+| Integration tests | 136+ | End-to-end API workflows with hot-swap test infrastructure |
+| Interactive proxy tests | 12 scenarios | Calculator, CRUD, and Expediter agents via auto-proxy |
 
-The Lupin system uses WebSocket connections for real-time communication between the server and client applications. Configuration is managed through `src/conf/lupin-app.ini`.
+Built and maintained by a single engineer. Every PR must pass all three tiers before merge.
 
-*Key WebSocket Settings:*
-```ini
-# Enable/disable WebSocket functionality
-websocket_enabled = true
+---
 
-# Connection health monitoring
-websocket_heartbeat_interval = 30        # Ping interval (seconds)
-websocket_cleanup_interval = 3600        # Stale session cleanup (seconds)
+## Quick start
 
-# Connection limits
-websocket_max_connections_per_user = 5   # Multiple tabs support
-websocket_single_session_policy = false  # Allow multiple sessions per user
+```bash
+# Prerequisites: Python 3.11+, GPU recommended, PostgreSQL
+export LUPIN_ROOT=/path/to/lupin
 
-# Available events (comma-separated)
-websocket_available_events = queue_todo_update, queue_done_update, 
-                             audio_streaming_chunk, notification_queue_update, 
-                             sys_time_update, sys_ping, auth_request, auth_success
+# Configure credentials
+src/scripts/lupin_config.py init
+
+# Start the server
+src/scripts/run-fastapi-lupin.sh          # FastAPI on port 7999
+src/scripts/run-lupin-gui.sh              # Browser GUI client
+
+# Run tests
+pytest src/tests/unit/                     # 2,075+ unit tests
+src/scripts/run-websocket-smoke-tests.sh   # 50 WebSocket tests
+src/tests/run-integration-tests.sh -v      # Integration gate
+
+# Install cosa-voice MCP server (for Claude Code voice I/O)
+claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.py
 ```
 
-*WebSocket Endpoints:*
-- `ws://localhost:7999/ws/queue/{session_id}` - Main application WebSocket for authenticated users
-- `ws://localhost:7999/ws/audio/{session_id}` - Audio-only WebSocket for TTS streaming
+**Config**: `src/conf/lupin-app.ini` | **Docker**: `docker build -f docker/lupin/Dockerfile .` | **GSM8K**: `src/scripts/run-gsm8k.sh --help`
 
-*Authentication:* All WebSocket connections require authentication via `auth_request` message with Bearer token format: `Bearer mock_token_email_{your_email}`
+---
 
-For detailed configuration options, troubleshooting, and architecture information, see the WebSocket documentation links above.
+## Documentation
 
-#### DISCLAIMER
+### For developers
 
-This [Lupin project]() 
-started out as an **_extremely_** large set of working sketches that I've been actively organizing & tidying up so that I can collaborate with others.
+- [REST API Reference](src/docs/rest-api-reference.md) — all HTTP and WebSocket endpoints
+- [WebSocket Architecture](src/docs/websocket-architecture.md) — dual-session design and event system
+- [Notification API](src/docs/notification-api.md) — comprehensive notification reference with Mermaid diagrams
+- [CJ Flow Packaging Guide](src/rnd/2026.02.12-cj-flow-bounded-job-packaging-guide.md) — how to add new QueueableJob types
+- [cosa-voice MCP Server](src/lupin_mcp/README.md) — MCP server setup and tool reference
+- [Agentic Voice Workflow](src/workflow/agentic-voice-workflow.md) — building new agents with voice I/O
 
-And I'm getting closer: I'm currently at v0.1.4, with a plan to share and build upon it RealSoonNow!
+### For operators
 
+- [Decision Proxy Admin Guide](src/docs/proxy-admin-guide.md) — Trust Dashboard and ratification how-to
+- [Automated Interactive Testing](src/docs/automated-interactive-testing.md) — proxy auto-answer testing guide
+- [WebSocket Troubleshooting](src/docs/websocket-troubleshooting.md) — common issues and debugging procedures
+
+### R&D archive
+
+Over 130 dated planning and research documents in [`src/rnd/`](src/rnd/README.md).
+
+---
+
+## Version history
+
+**v0.1.5** (March 2026) — Voice-first human-in-the-loop. Full voice loop inside Claude Code via 6 system hooks + cosa-voice MCP. Trust-aware Decision Proxy with Universal Prediction Engine, Bayesian Beta-Bernoulli trust, Thompson Sampling, and conformal prediction. Credential consolidation. Stable session identity architecture. 2,075+ tests.
+
+**v0.1.4** — cosa-voice MCP server, SWE Team Agent, Calculator Agent, CRUD Agent, Notification Proxy, 881 to 1170 unit tests, 39,871 training examples, local GPU embeddings
+
+**v0.1.3** — CJ Flow agentic job system, Deep Research + Podcast agents, Claude Agent SDK integration, JWT WebSocket auth, 100% test coverage
+
+[Full changelog](CHANGELOG.md)
+
+---
+
+## Project status
+
+Lupin is an active research platform at v0.1.5. Developed by a solo engineer, it combines voice-first agent orchestration, PEFT fine-tuning, and Bayesian decision theory into a production-grade stack backed by 2,075+ automated tests, full CI discipline, and a FastAPI + PostgreSQL + LanceDB architecture. Through a series of ambitious refactorings made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology, Lupin has evolved from single-user PoC sketches into a multi-user platform entering GCP testing.
+
+---
+
+## License
+
+[Apache 2.0](LICENSE)

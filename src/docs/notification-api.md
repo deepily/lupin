@@ -3,7 +3,7 @@
 > **One-stop reference** for the Lupin notification system — from architecture to testing.
 >
 > **Last Updated**: 2026-02-13
-> **Source of Truth**: This document supersedes all R&D planning docs in `src/rnd/sse-notifications/`.
+> **Source of Truth**: This document supersedes all R&D planning docs in `src/rnd/2025.10.15-sse-notifications/`.
 
 ---
 
@@ -302,7 +302,7 @@ terminal. This was the first working prototype of agent-to-human communication.
 3. For response-required mode, the bash script parsed the SSE stream output
 4. Exit codes conveyed status: 0 = success, 1 = error, 2 = timeout
 
-**Archived at**: `src/rnd/sse-notifications/src/`
+**Archived at**: `src/rnd/2025.10.15-sse-notifications/src/`
 
 ### Phase 2 — Python CLI Consolidation ( November-December 2025 )
 
@@ -413,12 +413,12 @@ curl -X POST "http://localhost:7999/api/notify" \
 **Python ( CLI )**:
 
 ```python
-from cosa.cli.notification_models import (
+from lupin_cli.notifications.notification_models import (
     AsyncNotificationRequest,
     NotificationType,
     NotificationPriority
 )
-from cosa.cli.notify_user_async import notify_user_async
+from lupin_cli.notifications.notify_user_async import notify_user_async
 
 request = AsyncNotificationRequest(
     message           = "Build completed successfully",
@@ -471,8 +471,8 @@ data: {"status": "expired", "response": "no", "default_used": true}
 **Python ( CLI )**:
 
 ```python
-from cosa.cli.notification_models import NotificationRequest, ResponseType
-from cosa.cli.notify_user_sync import notify_user_sync
+from lupin_cli.notifications.notification_models import NotificationRequest, ResponseType
+from lupin_cli.notifications.notify_user_sync import notify_user_sync
 
 request = NotificationRequest(
     message          = "Deploy to production?",
@@ -524,7 +524,7 @@ curl -N -X POST "http://localhost:7999/api/notify" \
 **Python ( CLI )**:
 
 ```python
-from cosa.cli.notification_models import NotificationRequest, ResponseType
+from lupin_cli.notifications.notification_models import NotificationRequest, ResponseType
 
 request = NotificationRequest(
     message          = "How should we handle the migration?",
@@ -753,7 +753,7 @@ Environment Variables  >  Config File  >  Hardcoded Defaults
 | `LUPIN_API_URL`               | Server base URL                  | `http://localhost:7999`    |
 | `LUPIN_APP_SERVER_URL`        | Server base URL ( legacy alias ) | `http://localhost:7999`    |
 | `LUPIN_API_KEY_FILE`          | Path to file containing API key  | From config                |
-| `LUPIN_NOTIFICATION_RECIPIENT`| Default target user email        | From config                |
+| `LUPIN_DEV_EMAIL`             | Default target user email        | From config                |
 | `LUPIN_ENV`                   | Environment name for config      | `local`                    |
 
 #### Config File
@@ -848,6 +848,7 @@ are prefixed with `/api` and tagged as `notifications`.
 | `job_id`             | string   | No       | `null`     | Agentic job ID for routing to job cards ( e.g., `dr-a1b2c3d4` )                               |
 | `queue_name`         | string   | No       | `null`     | Queue where job is running ( `run`/`todo`/`done` ). Used for provisional job card registration  |
 | `suppress_ding`      | boolean  | No       | `false`    | Suppress notification sound while still speaking via TTS                                       |
+| `progress_group_id`  | string   | No       | `null`     | Progress group ID for in-place DOM updates. Notifications sharing this ID update a single element instead of appending new ones. Format: `pg-{8 hex chars}` (e.g., `pg-a1b2c3d4`) |
 
 #### Fire-and-Forget Response ( `response_requested=false` )
 
@@ -1926,7 +1927,7 @@ class NotificationRequest( BaseModel ):
 | `response_type`     | `ResponseType`                | *required*                           | Enum validation                       |
 | `notification_type` | `NotificationType`            | `NotificationType.CUSTOM`            | Enum validation                       |
 | `priority`          | `NotificationPriority`        | `NotificationPriority.MEDIUM`        | Enum validation                       |
-| `target_user`       | `str`                         | `"ricardo.felipe.ruiz@gmail.com"`    | Email address of recipient            |
+| `target_user`       | `Optional[str]`               | `None`                               | Resolved from config/env at dispatch time |
 | `timeout_seconds`   | `int`                         | `120`                                | ge=1, le=600                          |
 | `response_default`  | `Optional[str]`               | `None`                               | `validate_yes_no_default` validator   |
 | `title`             | `Optional[str]`               | `None`                               | min_length=1, max_length=100          |
@@ -1966,7 +1967,7 @@ class AsyncNotificationRequest( BaseModel ):
 | `message`           | `str`                         | *required*                           | min_length=1, max_length=5000, `message_not_whitespace` validator |
 | `notification_type` | `NotificationType`            | `NotificationType.CUSTOM`            | Enum validation                       |
 | `priority`          | `NotificationPriority`        | `NotificationPriority.MEDIUM`        | Enum validation                       |
-| `target_user`       | `str`                         | `"ricardo.felipe.ruiz@gmail.com"`    | Email address of recipient            |
+| `target_user`       | `Optional[str]`               | `None`                               | Resolved from config/env at dispatch time |
 | `timeout`           | `int`                         | `5`                                  | ge=1, le=30 (HTTP request timeout)    |
 | `sender_id`         | `Optional[str]`               | `None`                               | Regex pattern (see Section 5.5)       |
 | `abstract`          | `Optional[str]`               | `None`                               | max_length=5000                       |
@@ -1974,12 +1975,13 @@ class AsyncNotificationRequest( BaseModel ):
 | `job_id`            | `Optional[str]`               | `None`                               | Regex pattern (see Section 5.5)       |
 | `suppress_ding`     | `bool`                        | `False`                              | Boolean flag                          |
 | `queue_name`        | `Optional[str]`               | `None`                               | Pattern: `^(run|todo|done|dead)$`     |
+| `progress_group_id` | `Optional[str]`               | `None`                               | Pattern: `^pg-[a-f0-9]{8}$`          |
 
 **Method**: `to_api_params() -> dict`
 
 Same conversion logic as `NotificationRequest.to_api_params()`, minus
 `response_requested`, `response_type`, and `timeout_seconds` fields. Includes
-`queue_name` for provisional job card registration.
+`queue_name` for provisional job card registration, and `progress_group_id` for in-place DOM updates.
 
 ---
 
@@ -2266,6 +2268,7 @@ class NotificationItem:
 | `suppress_ding`      | `bool`          | `False`                              | Skip notification sound for conversational TTS |
 | `job_id`             | `Optional[str]` | `None`                               | Agentic job ID for routing to job cards        |
 | `queue_name`         | `Optional[str]` | `None`                               | Queue where job is running (run/todo/done/dead) |
+| `progress_group_id`  | `Optional[str]` | `None`                               | Progress group ID for in-place DOM updates |
 
 **Methods**:
 
@@ -2826,8 +2829,8 @@ responds, the timeout expires, or the user is detected as offline.
 **Python API**:
 
 ```python
-from cosa.cli.notify_user_sync import notify_user_sync
-from cosa.cli.notification_models import (
+from lupin_cli.notifications.notify_user_sync import notify_user_sync
+from lupin_cli.notifications.notification_models import (
     NotificationRequest, NotificationResponse,
     NotificationType, NotificationPriority, ResponseType
 )
@@ -2880,7 +2883,7 @@ def notify_user_sync(
 **CLI usage**:
 
 ```bash
-python3 -m cosa.cli.notify_user_sync "Approve deployment?" \
+python3 -m lupin_cli.notifications.notify_user_sync "Approve deployment?" \
     --response-type yes_no \
     --response-default no \
     --timeout 120
@@ -2900,8 +2903,8 @@ confirmation. Uses adaptive retry to handle the WebSocket authentication window.
 **Python API**:
 
 ```python
-from cosa.cli.notify_user_async import notify_user_async
-from cosa.cli.notification_models import (
+from lupin_cli.notifications.notify_user_async import notify_user_async
+from lupin_cli.notifications.notification_models import (
     AsyncNotificationRequest, AsyncNotificationResponse,
     NotificationType, NotificationPriority
 )
@@ -2950,10 +2953,59 @@ retry patterns based on the timeout budget:
 **CLI usage**:
 
 ```bash
-python3 -m cosa.cli.notify_user_async "Build completed" \
+python3 -m lupin_cli.notifications.notify_user_async "Build completed" \
     --type task \
     --priority high
 ```
+
+#### Bash Wrapper Scripts ( Global CLI Commands )
+
+The Python CLI tools above are wrapped by bash scripts installed at `~/.local/bin/`
+for convenient command-line access from any directory. The canonical copies live in
+`src/scripts/` for version control and easy reinstallation.
+
+**Installation** ( from project root ):
+
+```bash
+cp src/scripts/notify-claude-async ~/.local/bin/
+cp src/scripts/notify-claude-sync  ~/.local/bin/
+chmod +x ~/.local/bin/notify-claude-async ~/.local/bin/notify-claude-sync
+```
+
+**How they work**:
+
+1. Resolve `LUPIN_ROOT` ( from env var, `DEEPILY_PROJECTS_DIR` fallback, or hardcoded path )
+2. Validate the directory exists
+3. Use the CoSA venv Python ( `$LUPIN_ROOT/src/cosa/.venv/bin/python3` ) which has `requests` + `pydantic`
+4. Set `PYTHONPATH` to include `$LUPIN_ROOT/src`
+5. `exec` the Python CLI module with all args passed through ( `"$@"` )
+
+**Fire-and-forget** ( async ):
+
+```bash
+notify-claude-async "Build completed" --type task --priority medium
+notify-claude-async "Deploying..." --type progress --priority low --debug
+```
+
+**Response-required** ( sync, SSE blocking ):
+
+```bash
+notify-claude-sync "Approve deployment?" --response-type yes_no --response-default no
+notify-claude-sync "Enter API key" --response-type open_ended --timeout 60
+```
+
+**Deprecated wrapper**: `~/.local/bin/notify-claude` prints a deprecation warning
+and chains to `notify-claude-async` via `exec`. A per-project `src/scripts/notify.sh`
+does the same.
+
+| Command | Script | Delegates To |
+|---------|--------|-------------|
+| `notify-claude-async` | `~/.local/bin/notify-claude-async` | `lupin_cli.notifications.notify_user_async` |
+| `notify-claude-sync` | `~/.local/bin/notify-claude-sync` | `lupin_cli.notifications.notify_user_sync` |
+| `notify-claude` | `~/.local/bin/notify-claude` *(deprecated)* | chains → `notify-claude-async` |
+| `src/scripts/notify.sh` | per-project *(deprecated)* | chains → `notify-claude-async` |
+
+**Canonical copies**: `src/scripts/notify-claude-async`, `src/scripts/notify-claude-sync`
 
 ---
 
@@ -3053,7 +3105,8 @@ with the full notification payload.
         "abstract"           : null,
         "suppress_ding"      : false,
         "job_id"             : null,
-        "queue_name"         : null
+        "queue_name"         : null,
+        "progress_group_id"  : null
     }
 }
 ```
@@ -3075,7 +3128,6 @@ with the full notification payload.
 | `notification_responded` | Server -> Client | User submitted a response. Contains `notification_id`, `response_value`, `timestamp`, `time_display`, `date_display`. |
 | `notification_expired` | Server -> Client | Notification timed out. Contains `notification_id`, `default_used`, `timeout` flag, `timestamp`. |
 | `notification_play_sound` | Server -> Client | Instructs client to play notification sound. Carries priority for sound selection. |
-| `active_conversation_changed` | Server -> Client | Active conversation context changed. Used for project/session grouping updates. |
 
 ---
 
@@ -3711,8 +3763,6 @@ All config keys have matching explainer entries in `src/conf/lupin-app-splainer.
 | `ANTHROPIC_API_KEY_FIREWALLED` | Anthropic API key for Tier 3 LLM Fallback |
 | `LUPIN_ROOT` | Project root directory ( used by `cu.get_project_root()` ) |
 | `LUPIN_CONFIG_MGR_CLI_ARGS` | CLI args JSON for `ConfigurationManager` |
-| `LUPIN_TEST_EMAIL` | General test email for integration tests |
-| `LUPIN_TEST_PASSWORD` | General test password for integration tests |
 
 ---
 
@@ -3827,9 +3877,7 @@ All notification tests that hit authenticated endpoints require credentials:
 export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL="your@email.com"
 export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD="yourpassword"
 
-# For integration tests
-export LUPIN_TEST_EMAIL="your@email.com"
-export LUPIN_TEST_PASSWORD="yourpassword"
+# All test types use the unified prefix (Session 267 unification)
 ```
 
 **Critical**: Never hardcode credentials. Tests that find empty env vars
@@ -4042,3 +4090,5 @@ if __name__ == "__main__":
 | [`src/tests/smoke/README.md`](../tests/smoke/README.md) | Quick-start guide for all smoke tests |
 | [`src/tests/README.md`](../tests/README.md) | Lupin 5-tier testing strategy overview |
 | [`src/tests/AUTH-TESTING-GUIDE.md`](../tests/AUTH-TESTING-GUIDE.md) | Test credential management patterns |
+| [`src/docs/proxy-admin-guide.md`](proxy-admin-guide.md) | Decision Proxy admin how-to — Trust Dashboard, Ratification page, trust feedback loop |
+| [`src/rnd/.../2026.02.27-end-to-end-trust-proxy-overview.md`](../rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-end-to-end-trust-proxy-overview.md) | End-to-end conceptual overview — 5 stages from cold start to autonomous proxy, CBR engine, trust models, component map |

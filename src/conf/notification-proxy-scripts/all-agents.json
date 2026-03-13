@@ -51,6 +51,27 @@
             "agents"           : [ "podcast", "research_to_podcast" ]
         },
         {
+            "question_pattern" : "What engineering task should the SWE Team work on?",
+            "answer"           : "add a health check endpoint to the API",
+            "arg_name"         : "task",
+            "response_types"   : [ "open_ended", "open_ended_batch" ],
+            "agents"           : [ "swe_team" ]
+        },
+        {
+            "question_pattern" : "Would you like to set a budget limit",
+            "answer"           : "no limit",
+            "arg_name"         : "budget",
+            "response_types"   : [ "open_ended", "open_ended_batch" ],
+            "agents"           : [ "swe_team" ]
+        },
+        {
+            "question_pattern" : "Would you like to set a timeout",
+            "answer"           : "default",
+            "arg_name"         : "timeout",
+            "response_types"   : [ "open_ended", "open_ended_batch" ],
+            "agents"           : [ "swe_team" ]
+        },
+        {
             "question_pattern" : "Would you like to proceed with these settings?",
             "answer"           : "yes",
             "arg_name"         : "confirmation",

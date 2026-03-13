@@ -240,7 +240,7 @@ def sse_test_client():
         - Handles timeout scenarios
     """
     # TODO Phase 2.1: Implement SSE test client
-    # Based on Phase 1 PoC client (src/rnd/sse-notifications/src/client.py)
+    # Based on Phase 1 PoC client (src/rnd/2025.10.15-sse-notifications/src/client.py)
     pass
 
 

@@ -26,9 +26,9 @@ def quick_smoke_test():
     cu.print_banner( "CoSA Voice MCP Server Smoke Test", prepend_nl=True )
 
     try:
-        # Test 1: Import cosa.cli notification models
-        print( "Test 1: Importing cosa.cli notification models..." )
-        from cosa.cli.notification_models import (
+        # Test 1: Import lupin_cli.notifications notification models
+        print( "Test 1: Importing lupin_cli.notifications notification models..." )
+        from lupin_cli.notifications.notification_models import (
             NotificationRequest,
             AsyncNotificationRequest,
             NotificationResponse,
@@ -39,10 +39,10 @@ def quick_smoke_test():
         )
         print( "✓ All notification models imported successfully" )
 
-        # Test 2: Import cosa.cli notification functions
-        print( "\nTest 2: Importing cosa.cli notification functions..." )
-        from cosa.cli.notify_user_sync import notify_user_sync
-        from cosa.cli.notify_user_async import notify_user_async
+        # Test 2: Import lupin_cli.notifications notification functions
+        print( "\nTest 2: Importing lupin_cli.notifications notification functions..." )
+        from lupin_cli.notifications.notify_user_sync import notify_user_sync
+        from lupin_cli.notifications.notify_user_async import notify_user_async
         print( "✓ notify_user_sync imported" )
         print( "✓ notify_user_async imported" )
 

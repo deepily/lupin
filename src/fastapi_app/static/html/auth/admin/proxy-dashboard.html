@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trust Dashboard — Lupin Admin</title>
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+    <link rel="stylesheet" href="/static/html/auth/admin/css/admin.css">
+    <link rel="stylesheet" href="/static/html/auth/admin/css/proxy-ratify.css">
+    <link rel="stylesheet" href="/static/html/auth/admin/css/proxy-dashboard.css">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
+</head>
+<body>
+    <div class="admin-container">
+        <!-- Breadcrumb -->
+        <div class="breadcrumb">
+            <a href="/app">Home</a>
+            <span class="separator">></span>
+            <a href="/app/admin">Admin</a>
+            <span class="separator">></span>
+            <span class="current">Trust Dashboard</span>
+        </div>
+
+        <!-- Header -->
+        <div class="admin-header">
+            <h1>Decision Proxy — Trust Dashboard</h1>
+            <div class="admin-actions">
+                <button class="btn btn-secondary btn-small"
+                        onclick="window.location.href='/app/admin'">
+                    ← Back to Admin
+                </button>
+            </div>
+        </div>
+
+        <!-- Messages -->
+        <div class="error-message" id="error-message"></div>
+        <div class="success-message" id="success-message"></div>
+
+        <!-- Loading State -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p class="mt-2">Loading trust data...</p>
+        </div>
+
+        <!-- Main Content -->
+        <div id="main-content" style="display: none;">
+
+            <!-- Mode Bar -->
+            <div class="mode-bar" id="mode-bar">
+                <div class="mode-item">
+                    <span class="mode-label">Trust Mode:</span>
+                    <select class="mode-selector" id="mode-trust-select">
+                        <option value="disabled">DISABLED</option>
+                        <option value="shadow" selected>SHADOW</option>
+                        <option value="suggest">SUGGEST</option>
+                        <option value="active">ACTIVE</option>
+                    </select>
+                    <span class="mode-status-dot" id="mode-status-dot" title="Mode status"></span>
+                </div>
+                <div class="mode-item">
+                    <span class="mode-label">Domain:</span>
+                    <span class="mode-value" id="mode-domain">swe</span>
+                </div>
+                <div class="mode-item">
+                    <span class="mode-label">User:</span>
+                    <span class="mode-value" id="mode-user">—</span>
+                </div>
+            </div>
+
+            <!-- Trust Cards Grid -->
+            <div class="trust-cards-grid" id="trust-cards-grid">
+                <!-- Populated by JavaScript -->
+            </div>
+
+            <!-- Recent Decisions Section -->
+            <div class="recent-decisions-header">
+                <h2>Recent Decisions</h2>
+                <select id="category-selector" class="category-selector">
+                    <option value="">All Categories</option>
+                    <option value="deployment">Deployment</option>
+                    <option value="testing">Testing</option>
+                    <option value="deps">Dependencies</option>
+                    <option value="architecture">Architecture</option>
+                    <option value="destructive">Destructive</option>
+                    <option value="general">General</option>
+                </select>
+            </div>
+
+            <!-- Recent Decisions Table -->
+            <div id="decisions-table-container">
+                <table class="dashboard-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Question</th>
+                            <th>Action</th>
+                            <th>Trust</th>
+                            <th>Confidence</th>
+                            <th>State</th>
+                        </tr>
+                    </thead>
+                    <tbody id="decisions-tbody">
+                        <!-- Populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Empty State for Decisions -->
+            <div id="decisions-empty" class="empty-state" style="display: none;">
+                <div class="empty-icon">&#128202;</div>
+                <p>No decisions recorded yet. Run a SWE Team job with trust mode enabled to start collecting data.</p>
+            </div>
+
+            <!-- Pagination -->
+            <div class="pagination" id="pagination-container">
+                <button id="prev-page" class="btn btn-secondary btn-small" onclick="previousPage()" disabled>
+                    ← Previous
+                </button>
+                <span id="page-info">Page 1</span>
+                <button id="next-page" class="btn btn-secondary btn-small" onclick="nextPage()">
+                    Next →
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/js/lupin-nav.js" defer></script>
+    <script src="/static/html/auth/js/auth.js"></script>
+    <script src="/static/html/auth/admin/js/proxy-dashboard.js"></script>
+</body>
+</html>

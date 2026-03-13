@@ -1,298 +1,248 @@
 # TODO
 
-Last updated: 2026-02-14 (Session 210)
+Last updated: 2026-03-12 (Session 348)
 
-## Pending
+## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 
-### vLLM Upgrade for Qwen3-4B-Base (FIRST THING TOMORROW — Session 166)
+- [x] **[LUPIN] Fix stop hook qualifier: Claude Code ignores qualifier text** — Session 336: Replaced broken `systemMessage` approach with tmux injection. `inject_qualifier_via_tmux()` spawns detached background process that injects qualifier text directly into CC's tmux input after stop block. Uses bash positional args for shell-safe text passing. 36/36 tests pass. Needs manual E2E verification (Phase 4).
+  - **Phases 1-2 (Sessions 332-333)**: `reason` and `systemMessage` both silently ignored by CC Stop hooks
+  - **Phase 3 (Session 336)**: tmux injection — proven technique from `CCNotificationListener._inject_via_tmux()`
 
-- [x] **[LUPIN] Upgrade vLLM to >= 0.8.5** — ✅ COMPLETE (2026-02-13)
-  - **Research doc**: `src/rnd/2026.02.10-qwen3-vllm-inference-slowdown-root-cause.md`
+## COMPLETED — CC Listener Session ID Drift (Session 335)
 
-### Unified Smoke Test Framework Verification (RESUME TOMORROW)
+- [x] **[LUPIN] Fix CC Notification Listener session ID drift after context clears** — Session 335: Implemented write-once lockfile (`cc-stable-{ppid}.id`) with atomic `open('x')`, passed `stable_session_id` to listener, added `accepted_ids` set for multi-hash filtering, extended stale cleanup with PID liveness check. 9 new tests, 28 total pass.
+  - **Design doc**: `src/rnd/.../2026.03.10-stable-session-id-lockfile-and-listener-drift-fix.md`
 
-- [ ] **[LUPIN] Execute unified smoke test framework verification plan** - Return to `src/rnd/2026.02.13-unified-smoke-test-framework-verification-plan.md` and execute the verification steps.
+## COMPLETED — Hook Session ID Drift (Session 342)
 
-### Pre-Execution Confirmation of Top Semantically Similar Matches (HIGH)
+- [x] **[LUPIN] Fix session ID drift across hooks after context clear** — Session 342: Added `resolve_stable_session_id()` to session_bridge.py. All 6 hooks + hook_common.py now resolve transient CC session_id to stable lockfile ID. MCP `get_session_info()` exposes `stable_session_id`. 231/231 hook tests pass.
 
-- [ ] **[LUPIN] Pre-execution confirmation of top semantically similar matches** - Before executing a cached/semantic match, present the top similar matches to the user for confirmation via voice. Prevents stale or incorrect cache hits from being served silently.
+## HIGH PRIORITY — Consolidate Credential Stores (Session 337)
 
-### Agentic Software Development Team (HIGH)
+- [x] **[LUPIN] Consolidate three credential/config files into unified `~/.lupin/config`** — Session 337c: Steps 1-6 (code + tests). Session 338: Step 7 migration executed on live system. Session 339: Step 8 hardened — removed all legacy fallbacks, fail-hard on missing config, updated cloud-run scripts. 38/38 tests pass.
+  - **Plan doc**: [`src/rnd/2026.03.10-consolidate-credential-stores.md`](src/rnd/2026.03.10-consolidate-credential-stores.md)
 
-- [x] **[LUPIN] Begin design of Agentic Software Development Team** - ✅ COMPLETE (Sessions 205-210)
-  - Phase 1: Foundation — agent definitions, state management, hooks, orchestrator (64 unit tests)
-  - Phase 2: Delegation loop — SDK integration, live execution, coder role (34 unit tests, 915 total)
-  - Phase 3: Tester verification loop — pytest runner, coder-tester iteration (31 unit tests, 946 total)
-  - Phase 4: Trust-Aware Decision Proxy — 4-layer architecture, 6 engineering categories, trust tracker L1-L5, circuit breaker, ratification API (214 unit tests, 1160 total)
-  - **Plan**: `src/rnd/2026.02.14-swe-team-phase-4-decision-proxy-architecture.md`
+## HIGH PRIORITY — MCP Strict Project Detection + Repo Account Validation (Session 332)
 
-### SWE Team Interactive Proxy Smoke Testing (HIGH — TOMORROW)
+- [x] **[LUPIN] cosa-voice MCP: strict project detection + per-repo account validation** — Session 339: Implemented. MCP server no longer falls back to `"unknown"` project; validates per-repo Lupin account at startup; sends urgent notification on validation failure.
+  - **Plan doc**: [`src/rnd/2026.03.10-mcp-strict-project-detection-account-validation.md`](src/rnd/2026.03.10-mcp-strict-project-detection-account-validation.md)
+  - **Files**: `cosa_voice_mcp.py`, `notification_utils.py`, new test file
 
-- [ ] **[LUPIN] Update SWE team testing docs + begin interactive proxy smoke testing** - Session TBD
-  - Update `src/rnd/2026.02.13-claude-code-agentic-dev-team/00-index.md`: Phases 2-5 status (Phases 2, 3, 4 are DONE, not PENDING)
-  - Update `src/rnd/2026.02.13-claude-code-agentic-dev-team/03-testing-validation.md`: Add Phase 4 results (214 unit tests, trust tracker, circuit breaker, engineering proxy, decision store), Phase 4 gate checklist, regression row (946 → 1160)
-  - Create new Q&A script: `src/conf/notification-proxy-scripts/swe-team.json` for SWE team decision proxy notifications
-  - Create new test profile in `config.py:TEST_PROFILES` for SWE team
-  - Write smoke test scenarios for the decision proxy agent
-  - Add SWE team sender_id to `all-agents.json`
+## HIGH PRIORITY — CC Session Voice Input Bugs (Session 300)
 
-### Notification Proxy Agent Refactor (HIGH)
+- [x] **[LUPIN] Fix date off-by-one in CC session outgoing bubble** — Session 332: Fixed. `extractDateFromTimestamp()` now parses through `appTimezone`.
 
-- [ ] **[LUPIN] Refactor mock job client into standalone Notification Proxy Agent** - Extract the existing mock job client into a proper standalone notification proxy agent object. Decouples notification testing/proxying from mock job infrastructure.
+## HIGH PRIORITY — PG Audio Progress Not Updating In-Place (Session 329)
 
-### DataFrame CRUD with Voice I/O (Session 132-136)
+- [x] **[LUPIN] Fix PG audio progress notifications not using progress_group_id** — Session 330: Added `progress_group_id = self._audio_progress_group_id` to Phase 5 English audio start notification in `orchestrator.py`. The first notification now establishes the DOM tag so subsequent milestone notifications update in-place.
 
-- [x] **[LUPIN] Phase 1: Storage Layer + Pydantic Models** - ✅ COMPLETE (Session 136)
-  - 5 source files in `src/cosa/crud_for_dataframes/` (schemas, xml_models, storage, crud_operations, __init__)
-  - 91 unit tests + 16 smoke tests, all passing
-  - 4 config keys + prompt template stub
-  - R&D docs: `src/rnd/headless-cc-for-dataframe-crud/`
-  - Issues fixed: Pydantic ClassVar, XML None coercion, timestamp truncation
-- [x] **[LUPIN] Phase 2: Agent Implementation** - ✅ COMPLETE (Session 143)
-  - CrudForDataFramesAgent + TodoCrudAgent + CalendarCrudAgent + dispatcher + intent_extractor
-  - 73 unit tests, all passing
-- [x] **[LUPIN] Phase 3: Queue Integration + Voice Confirmation** - ✅ COMPLETE (Session 143)
-  - Feature-flag routing swap in todo_fifo_queue.py, cache skip + serialization exclusion
-  - Voice confirmation for destructive ops (delete, delete_list, update)
-  - 26 unit tests, 449 total passing, 50 WebSocket smoke tests passing
-- [ ] **[LUPIN] Interactive E2E Testing of CRUD Agents** (HIGH PRIORITY) - Execute the 29-scenario testing protocol at `src/rnd/headless-cc-for-dataframe-crud/testing-protocol.md`.
+## COMPLETED — Review `active_conversation_changed` + JS Event Anomalies (Sessions 329, 331)
+
+- [x] **[LUPIN] Investigate `active_conversation_changed` WebSocket event** — Session 331: Removed dead code. Server emitted it but never in INI available events or JS subscriptions. Both emission blocks removed from `notifications.py`, unreachable JS handler removed from `notifications.js`.
+- [x] **[LUPIN] Investigate oddly named event type in JS notification API** — Session 331: Two events (`notification_play_sound`, `audio_streaming_chunk`) were subscribed but had no `case` handler, falling through to "Unhandled message type" default. Added no-op log handlers to both.
+
+## HIGH PRIORITY — target_user Notification Dispatch Bug (Session 286)
+
+- [x] **[LUPIN] Fix target_user "Cannot resolve" error in Docker** — Session 304: Root cause was sender_id double-hash (`#cli#pg-xxx`). Fixed `_get_sender_id()` suffix param in both podcast_generator and deep_research cosa_interface + job files. 10 unit tests written.
+  - **Bug fix doc**: [`src/rnd/2026.02.27-target-user-notification-dispatch-bug-fix.md`](src/rnd/2026.02.27-target-user-notification-dispatch-bug-fix.md)
+
+## HIGH PRIORITY — Podcast Generator Bugs (Session 283)
+
+- [x] **[LUPIN] Fuzzy matching via voice** — Session 304: Added `difflib.get_close_matches()` as 3rd validation tier in `match_research_docs()`. 14 unit tests written.
+- [x] **[LUPIN] Job card contact failure** — Session 304: Fixed sender_id double-hash in `_get_sender_id()` suffix param. Same root cause as target_user bug above.
+- [x] **[LUPIN] Audio segment upload** — Session 304: 3 sub-fixes: (1) non-interactive `_is_interactive()` guard on all `input()` CLI fallbacks in voice_io.py, (2) fixed TTS cost key `tts_results` → `tts_results_en` in orchestrator.py, (3) pre-stitching guard when all segments fail. 13 unit tests written.
+
+---
+
+## v0.1.6 — FUTURE DEVELOPMENT
+
+### INI Config Key Naming Convention — Standardize on Spaces (Session 256)
+
+- [ ] **[LUPIN] Standardize ~98 underscore config keys to space-separated** — 6-phase migration: backward-compat shim → INI rename → Lupin code (18 files) → CoSA code (62 files) → remove shim + guardrail test. ~2 weeks estimated.
+  - **Design doc**: [`src/rnd/2026.02.23-ini-config-key-naming-convention.md`](src/rnd/2026.02.23-ini-config-key-naming-convention.md)
+  - **Scope**: ~98 keys, ~80 files (18 Lupin + 62 CoSA), both INI files + splainer
+  - **Priority**: Medium — no functional impact, improves consistency and predictability
+
+### SWE Team Proxy: Validation + Shadow-Mode + Simulation
+
+- [ ] **[LUPIN] SWE Team Proxy end-to-end validation pipeline** — Review Layer 1 dry-run JSONL output (`io/decision-proxies/`), run Layer 2 live shadow-mode capture (`--live --trust-mode shadow`), and build fully automated simulation harness for repeatable E2E validation without manual intervention.
+  - **R&D doc**: [`src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md`](src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md)
+  - **Runner**: `src/scripts/swe_workload_runner.py`
+  - **Integration tests**: `src/tests/integration/test_swe_team_pipeline.py` (7 tests)
+- [ ] **[LUPIN] Test SWE agent team with small jobs** — Validate SWE team end-to-end with small, scoped tasks to verify orchestration and proxy behavior
+
+### Config Migration — Claude Agent SDK
+
+- [ ] **[LUPIN] Config Migration**: Implement Claude Agent SDK config migration plan documented at `src/rnd/2026.01.27-claude-agent-sdk-config-migration-plan.md`
+
+### CJ Flow: Hybrid Fast Lane + Bounded Agentic Pool (Session 237)
+
+- [ ] **[LUPIN] Phase 1.1: Add RLock to FifoQueue** — `fifo_queue.py`: wrap all mutating + reading methods with `threading.RLock()`
+- [ ] **[LUPIN] Phase 1.2: Add config key** — `lupin-app.ini` + `lupin-app-splainer.ini`: `cj flow max concurrent agentic jobs = 3`
+- [ ] **[LUPIN] Phase 1.3: Write thread safety tests** — `test_fifo_queue_thread_safety.py`: 4 concurrency tests
+- [ ] **[LUPIN] Phase 1.4: Verify Phase 1** — New + existing unit tests pass
+- [ ] **[LUPIN] Phase 2.1: Agentic pool + dispatcher refactor** — `running_fifo_queue.py`: ThreadPoolExecutor, route by isinstance, new methods
+- [ ] **[LUPIN] Phase 2.2: Update shutdown sequence** — `main.py`: add pool shutdown before consumer thread
+- [ ] **[LUPIN] Phase 2.3: Write agentic pool tests** — `test_agentic_pool.py`: 10 pool behavior tests
+- [ ] **[LUPIN] Phase 2.4: Verify Phase 2** — New + existing unit tests pass
+- [ ] **[LUPIN] Phase 3.1: API endpoint** — `/api/queue/pool-status` (optional)
+- [ ] **[LUPIN] Phase 3.2: Integration verification** — Manual E2E test with concurrent agentic + sync jobs
+- **Tracking doc**: `src/rnd/2026.02.19-approach-c-hybrid-queue-architecture.md`
+
+### Playwright E2E Browser Testing (Session 252)
+
+- [x] **[LUPIN] Research AI/automation for end-to-end testing** — Session 252: Research complete. Playwright Python + pytest-playwright recommended for FastAPI + vanilla HTML/JS stack
+- [ ] **[LUPIN] Implement Playwright E2E testing** — 8-phase plan (~78 tasks, ~5 weeks), 189 data-testid elements, 28 test journeys, 9 architecture decisions
+  - **Planning docs**: [`src/rnd/2026.02.23-automating-ui-testing/`](src/rnd/2026.02.23-automating-ui-testing/00-index.md)
+  - **Serialized plan**: `src/rnd/2026.02.23-playwright-e2e-testing-plan.md`
+  - **Phases**: Foundation → data-testid rollout → Auth tests → Page smoke → Admin tests → Notifications/Q&A → WebSocket → Visual regression + CI
+  - **Round 2**: Claude Code + Playwright MCP for AI-augmented test generation + self-healing selectors
+
+### DataFrame CRUD with Voice I/O — UI Testing + Voice Polish
+
+- [ ] **[LUPIN] Interactive E2E Testing of CRUD Agents** — Execute the 29-scenario testing protocol at `src/rnd/2026.02.04-headless-cc-for-dataframe-crud/testing-protocol.md`.
   - [x] Part 1: Mock pipeline tests (17/17 passed — routing, pipeline, cache, confirmation, prompt construction)
   - [x] Bug fix: CRUD agent completion — emit_job_state_transition, answer guard, done queue push (3 new tests, 532/532 pass)
   - [x] Bug fix: TTS focus mode stuck — staleness check in restoreTTSQueueState + exit in moveToRegularNotifications (Session 164)
   - [x] **Bug fix: delete_item deletes all records** — Session 189: dedup guard, multi-delete guard, infra column rejection. 6 new tests (816 total). Commit fd21f0c.
   - [x] Part 3: Curl smoke tests → **SUPERSEDED** by `test_crud_live_pipeline.py` (8-scenario automated test, Session 189)
-  - [ ] **Run CRUD live pipeline test** — `test_crud_live_pipeline.py --mode direct` with notification proxy (`--profile crud`). **Testing guide**: `src/rnd/2026.02.11-crud-live-pipeline-testing-guide.md`. **RESUME NEXT SESSION.**
-  - [ ] Part 2: Notifications UI tests (8 scenarios, live server)
+  - [x] **Run CRUD live pipeline test** — `test_crud_live_pipeline.py --mode direct --auto-proxy`. Session 267 fixed credential mismatch (CREDENTIAL_ENV_PREFIX unified).
+  - [ ] Part 2: Notifications UI tests (8 scenarios, live server) — **Leverage Playwright E2E infrastructure**
 - [ ] **[LUPIN] Phase 4: End-to-End Voice Workflows + Polish** - PENDING (blocked by Phase 3 ✅)
+- **Note**: Moved to v0.1.6 to leverage Playwright E2E testing infrastructure for UI test automation
 
-### Skills Management (Session 118 Discovery)
-
-Skill candidates identified - create with `/plan-skills-management-create <skill-name>`:
-- [ ] **notification-patterns** (HIGH) - cosa-voice MCP usage patterns (~250 lines)
-- [ ] **path-management** (MEDIUM) - `cu.get_project_root()` vs bootstrap (~150 lines)
-- [ ] **code-style-preferences** (LOW) - Spacing, alignment, getattr prohibition (~100 lines)
-
-### Before Branch Merge (This Week)
-
-- [x] **[LUPIN] Verify CJ Flow Queueable Job Protocol Compliance** - Session 124: Investigation complete, implementation verified compliant. Session 128: Verification complete.
-  - **Report**: `src/rnd/2026.02.02-cj-flow-protocol-compliance-report.md`
-  - **Finding**: ClaudeCodeJob implements all 22 protocol requirements for both BOUNDED and INTERACTIVE modes
-- [x] **[LUPIN] CJ Flow verification: Dry run end-to-end testing for BOUNDED tasks** - Session 128: Complete
-- [ ] **[LUPIN] CJ Flow verification: Dry run end-to-end testing for UNBOUNDED tasks** - Pending
-- [x] **Run baseline testing plan** - Session 123: **COMPLETE** ✅
-  - Unit tests: 168/199 (84.4%) → **195/195 (100%)**
-  - All test infrastructure issues resolved
-  - 4 debug scripts moved to `src/scripts/debug/`
-  - See: `src/rnd/2026.02.02-test-suite-remediation-plan.md`
-- [x] **[LUPIN] Run agentic job intent LORA 1% sample training** - ✅ COMPLETE (2026-02-13)
-- [x] **[LUPIN] PEFT Training Optimization - Phase 1 Training Run** - Session 136: Phase 1 actual results: 92.2% exact match (target: 89%)
-- [x] **[LUPIN] PEFT Training Optimization - Phase 2 Disambiguation** - Session 136: Code/data complete. Session 141: Model swap to 2026-02-05 training run, 15 disambiguation tests passing, router confirmed working
-- [x] **[LUPIN] Rebalance XML training data to 1200 samples/command** - Session 145 (checkpoint): Fixed `run-agentic-intent-training.sh` (hardcoded 400→1200), expanded placeholders (research-topics 50→190, document-paths 50→179), removed near-miss none examples, replaced product names (Deep Dive, PodMaker, Doc-to-Pod) with natural phrasing
-  - **Plan**: `src/rnd/2026.02.05-peft-trainer-optimization-plan.md`
-  - **Analysis script**: `src/scripts/analyze-training-distribution.py`
-- [x] **[LUPIN] PEFT Phase 2 — Results Dashboard + Explicit Routing + Quantization Strengthening** - Session 148 (checkpoint): Part A (results dashboard in peft_trainer.py), Part B (explicit routing phrases for 5 agents + new automatic routing mode command with 60 templates), Part C (strengthened podcast-generator, math, todo-list, none-of-the-above with disambiguation anchors). Bumped sample size 1200→1500.
-  - **Plan**: `src/rnd/2026.02.07-peft-trainer-optimization-plan-part-2.md`
-  - **461 unit tests passing**, zero regressions
-  - **CoSA submodule files need separate commit**: xml_coordinator.py, peft_trainer.py, todo_fifo_queue.py
-- [x] **[LUPIN] Everyday Calculator — ALL 31 STEPS COMPLETE** (Sessions 165-191)
-  - [x] Phases 1-4: 94 unit tests, 17 mock pipeline tests, MathAgent fallback, 508 LORA templates
-  - [x] Step 24: Automated 6-query test via Calculator mode (`test_calculator_live_pipeline.py`)
-  - [x] Step 25: Auto-route test via LORA router (`test_calculator_live_pipeline.py --auto-route`) — Session 191
-  - [x] Steps 29-30: LORA retrained, >95% accuracy, no regression
-  - [x] Step 31: Full voice routing test (10 spoken queries, 8/10 correct routing)
-  - **Implementation doc**: `src/rnd/2026.02.09-everyday-calculator-agent-implementation.md`
-- [x] **[LUPIN] Run PEFT Phase 2 training + LORA retrain** - ✅ COMPLETE (2026-02-13). 39,871 examples, 35 commands trained.
-- [x] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - ✅ COMPLETE (2026-02-13)
-- [x] **[LUPIN] Extended Parameter Training (Chunk 1.6)** - ✅ COMPLETE (2026-02-13)
-- [x] **[LUPIN] Disambiguation Agent for Missing Arguments** - Session 130 (checkpoint): Implemented as RuntimeArgumentExpeditor
-  - `src/cosa/agents/runtime_argument_expeditor/` (agent_registry.py, xml_models.py, expeditor.py)
-  - LLM gap analysis against `--help` output, asks user via `notify_user_sync()` for missing args
-  - Integrated into TodoFifoQueue elif chain + mock_job.py expeditor test mode
-  - Shared `agentic_job_factory.py` DRY factory for both voice and REST paths
-- [x] **Run Deep Research dry-run smoke test** - Session 115: All 5 tests passed (login, submit, structure, polling, verification). Job dr-6aa5d16d completed in ~10s with $0.00 cost.
-- [x] **Run Podcast Generator dry-run API smoke test** - Session 115: All tests passed. Job pg-dd026977 completed in ~10s with $0.00 cost.
-- [x] **Run Research→Podcast dry-run API smoke test** - Session 115: All tests passed. Job rp-221fe28e completed in ~14s with $0.00 cost.
-
-### job_state_transition Implementation (Session 107 - Complete)
-
-- [x] Phase 1: Add job_state_transition to config files
-- [x] Phase 2: Add _emit_job_state_transition method to FifoQueue
-- [x] Phase 3: Add server emissions (7 transition points)
-- [x] Phase 4: Client subscription to job_state_transition
-- [x] Phase 5: Client handler (handleJobStateTransition, insertJobMetadata)
-- [x] Phase 6: Badge-only handlers
-- [x] Phase 7: Placeholder DOM nodes in renderJobCard()
-- [x] Phase 8: Remove cruft - data structures
-- [x] Phase 9: Remove cruft - methods
-- [x] Phase 10: Remove cruft - logic
-- [x] WebSocket smoke tests after Phase 10
-- [x] Manual browser verification of job transitions
-
-### Bug Fix: Job Card Field Parity (Session 107 - For Next Session)
-
-- [x] **Test bug fix**: WebSocket cards now include 6 missing fields (status, has_interactions, is_cache_hit, started_at, completed_at, duration_seconds)
-- [x] Verify cards created via WebSocket match server-fetched cards after page refresh
-- [x] Test with mock job submission (success path)
-- [x] Test with mock job failure (error path)
-
-### Implementation Plans
-
-- [ ] **Config Migration**: Implement Claude Agent SDK config migration plan documented at `src/rnd/2026.01.27-claude-agent-sdk-config-migration-plan.md`
-
-### Browser Testing (Agentic Job Submission)
-
-- [x] **Test 1**: Deep Research submission - verify job queues with dr-xxxxxxxx ID
-- [x] **Test 2**: Research→Podcast (checkbox) - verify rp-xxxxxxxx prefix and chained routing
-- [x] **Test 3**: Podcast Generator - Direct path mode (immediate queue)
-- [x] **Test 4**: Podcast Generator - Description mode (fuzzy match → multiple choice)
-- [x] **Test 5**: Error handling - empty topic shows validation warning
-- [x] **Test 6**: Dry-run mode - Deep Research breadcrumb notifications
-- [x] **Test 7**: Dry-run mode - Podcast Generator breadcrumb notifications
-- [x] **Test 8**: Dry-run mode - Chained workflow (both sets of breadcrumbs)
-
-### Verification Checklist
-
-- [x] Research card submits to `/api/deep-research/submit`
-- [x] Checkbox routes to `/api/deep-research-to-podcast/submit`
-- [x] Podcast card submits to `/api/podcast-generator/submit`
-- [x] Job IDs use correct prefixes (dr-, rp-, pg-)
-- [x] Jobs appear in queue UI after submission
-- [x] STT buttons work for voice input
-- [x] Loading spinners show during submission
-- [x] Error messages display correctly
-
-### Architecture Review
-
-- [x] **Cache Hit Behavior**: Moved to bug-fix-queue.md - Session 118
-
-### Future Considerations
-
-- [ ] **[LUPIN] Add 60s safety timeout to TTS focus mode** - Prevent permanent stuck state when TTS queue items fail to play. **Partially addressed** (Session 164): Added staleness check on restore + exit in moveToRegularNotifications. Still need: runtime 60s timeout for cases where notification exists but user never responds and timeout doesn't fire. **File**: `src/fastapi_app/static/js/notifications.js:9374-9393`
-- [ ] **Silent flag for notifications**: Consider adding a `silent` parameter to the cosa-voice notification system to suppress TTS during automated testing. Would require changes to: router request models, job classes, voice_io wrappers, and core notification functions.
-- [ ] **Standardize compound job/user ID usage** - Currently compound IDs (job_id + user_id) are only used when submitting jobs to the standard queue entry point. Consider standardizing this pattern across all job submission paths to avoid inconsistency issues later.
-  - **Current state**: Only standard Q entry point uses compound IDs
-  - **Risk**: Inconsistent ID formats could cause routing/tracking bugs
-  - **Action**: Audit all job submission paths and standardize on compound ID format
-- [ ] **Standardize job-user-session association interface** - Jobs are repeatedly associated with users and sessions at multiple points: queue transfers, job submission, processing handoffs. This repetition suggests an opportunity for a unified interface.
-  - **Current state**: Ad-hoc association at each queue transition point
-  - **Risk**: Inconsistent association logic, potential for user/session mismatch bugs
-  - **Action**: Design a single interface/method for job-user-session binding that all queue operations use
-
-### Carried Over from Session 102
-
-- [x] Test math agent notification fixes (hard refresh, ask "What's 11+11?", verify console logs and TTS) - Session 109 ✅
-- [x] Verify both notifications appear in job card (not sender card)
-- [x] Future: Add `tts_raw` parameter to cosa-voice MCP server
-
-### COSA Submodule (Needs Separate Commit)
-
-- [x] Commit API consistency fix: `deep_research.py` derives user_email from JWT
-- [x] Commit dry-run mode additions to routers and job classes
-- [x] Commit new `mock_clients.py` for Podcast Generator
-
----
-
-## Next Version: v0.1.4
-
-Voice I/O enhancements driven by cosa-voice MCP notification system. Both require planning documents before implementation.
-
-### Pre-Development Setup
-
-- [ ] **[LUPIN] Create baseline test report for wip-v0.1.4 branch** - Run `/smoke-test-baseline` to establish pass/fail baseline before starting development work. This ensures we can detect regressions introduced during v0.1.4 development.
-
-### Runtime Argument Expeditor Testing (HIGH) - Session 130
-
-- [x] **[LUPIN] Test Runtime Argument Expeditor end-to-end** - ✅ COMPLETE (Session 200): All three testing surfaces verified. 12/12 proxy-automated smoke scenarios pass, 814 unit tests pass. Root cause of `http_error`: missing `open_ended_batch` in `/api/notify` response_type validation — fixed. No secondary JWT auth issues.
-  - **Design review**: Return tomorrow to review expeditor notification architecture (dual-auth, batch collection flow)
-  - **Plan**: `src/rnd/2026.02.12-fix-expeditor-notification-dual-auth-plan.md`
-- [x] **[LUPIN] Create testing plan for Runtime Argument Expeditor** - Session 131: Initial 49 tests. Sessions 144-160: Expanded to 115 unit tests across 13 classes, 9 interactive smoke scenarios. **Session 162**: Bug fix + 8 new tests (Class 15: TestOptionalArgPrompting), total 123 tests across 15 classes. **Session 163**: Timeout chain fix (60/60/120→180/180/300) + diagnostic logging for notification failure analysis.
-  - **Unit tests**: `src/tests/unit/test_runtime_argument_expeditor.py` (123 tests, 15 classes)
-  - **Smoke tests**: `src/tests/smoke/test_expeditor_mock_job_smoke.py` (3 automated + 9 interactive, 600s timeout)
-  - **Testing plan**: `src/rnd/2026.02.07-runtime-argument-expeditor-testing-plan.md`
-  - **Bug fix**: `expeditor.py` — replaced `if parsed.is_complete()` gate with deterministic user-visible-args diff (optional args now always prompted)
-  - **Next**: Run interactive scenarios (`LUPIN_INTERACTIVE_TESTS=true`) — first scenario failure diagnosis via new `[Expeditor]` debug logging
-- [x] **[LUPIN] Finish expanding smoke test matrix to 13 scenarios** - ✅ COMPLETE (2026-02-13)
-- [x] **[LUPIN] Run interactive expeditor smoke tests 4-5** - Session 144: Fixed async deadlock (`asyncio.to_thread()` wrapper), tests 4-5 now pass. User responds to voice prompt, dry-run job completes with $0.00 cost.
-
-### Cache Freshness Policy (HIGH) - Session 121/122
-
-- [x] **Create planning document**: `src/rnd/2026.02.02-cache-freshness-implementation-plan.md` - Session 121
-- [x] **Simple fix implemented**: Always re-execute cached code in `_format_cached_result()` - Session 122
-  - Trade-off: Math queries re-execute unnecessarily (~100ms) but ensures time queries are always fresh
-  - Full policy system (Phases 1-4) deferred until simple fix proves insufficient
-- [ ] **Phase 1**: Foundation - Create `cache_freshness_policy.py`, add `cache_policy` to SolutionSnapshot, update LanceDB schema, add config keys
-- [ ] **Phase 2**: Agent integration - Add property overrides to DateAndTimeAgent (VOLATILE), MathAgent (IMMUTABLE), WeatherAgent (VOLATILE)
-- [ ] **Phase 3**: Enforcement - Add `_is_cache_immutable()` and `_handle_volatile_cache()` to running_fifo_queue.py
-- [ ] **Phase 4**: Semantic match confirmation (deferred - add `ask_yes_no()` for approximate matches)
-
-### Semantic Cache Hit Confirmation (MEDIUM) - Merged into Cache Freshness
-
-- [x] **Planning document**: Merged into Cache Freshness Policy plan (`src/rnd/2026.02.02-cache-freshness-implementation-plan.md`)
-- [ ] **Implementation**: Part of Cache Freshness Phase 4 (deferred)
-
-### Voice Module Audit (MEDIUM)
-
-- [ ] **Review cosa_interface.py vs voice_io.py** - Audit for overlap, redundancy, and execution flow clarity
-  - **Files**: `src/cosa/agents/claude_code/cosa_interface.py`, `src/cosa/agents/claude_code/voice_io.py`
-  - **Goal**: Understand and document the relationship between these modules
-  - **Deliverable**: Refactor if redundancy found, or document if distinct purposes
-
-### CJ Flow Persistence (HIGH)
+### CJ Flow Persistence
 
 - [ ] **Add persistence for CJ Flow job tracking** - Jobs are currently transient
   - **Goal**: Durable storage for ClaudeCode Job tracking state
   - **Affects**: Job state survives server restarts, enables job history/resume
 
-### Post-Execution Feedback Loop (HIGH)
+### Universal Prediction Engine: Live E2E Validation (Session 340)
 
-- [ ] **Create planning document**: `src/rnd/2026.02.XX-post-execution-feedback-plan.md`
-- [ ] **Implementation**
-  - **Goal**: After AgentBase-derived objects complete execution, collect user feedback via voice
-  - **Questions to ask** (via `ask_yes_no()` or `ask_multiple_choice()`):
-    1. "Was this response correct?" (yes/no)
-    2. "Was the language and tone appropriate?" (yes/no)
-  - **Data Collection**: Store feedback for potential fine-tuning / RLHF training data
-  - **Affects**: `agent_base.py`, `todo_fifo_queue.py`, possibly new feedback storage table
+- [ ] **[LUPIN] Live E2E validation of all 7 UPE slices** — All slices 0-6 code-complete (87 unit tests, 21 E2E tests). 5-phase validation plan: baseline test run, warm prediction threshold investigation, 6 new gap-filling E2E tests, browser visual QA for hint rendering, full cold-to-warm lifecycle with accuracy tracking.
+  - **Validation plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md)
+  - **Master plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md)
+  - **Progress**: Phase 0 (serialize) done, Phase 1.1 (unit baseline 87/87) done. Phases 1.2-5 pending.
+
+### Trust Proxy Documentation Update
+
+- [ ] **[LUPIN] Update trust proxy documentation after Phases 3-4 of preference learning** — Revise `src/docs/proxy-admin-guide.md` and related docs to reflect preference learning algorithms, new trust escalation paths, and updated decision proxy behavior.
+  - **Partially unblocked**: Phase 3 implemented (Session 266). Phase 4 pending.
+  - **Scope**: Admin guide, API reference, R&D docs
+
+---
+
+## v0.1.5 — HIGH PRIORITY
+
+### Voice I/O Integration with Claude Code System Hooks (Sessions 272-278)
+
+- [x] **[LUPIN] Review and finalize voice hook integration draft plan** — Session 276: Plan reviewed, 3 ADs confirmed (AD-2, AD-5, AD-6), master plan updated.
+- [x] **[LUPIN] Phase 0: Hook Contract Validation** — Session 276: 5 test hooks live, shared library + session bridge implemented, hooks capturing real CC payloads.
+- [x] **[LUPIN] Align hook & MCP sender_id for per-session routing** — Session 278: `build_sender_id_for_cc()` in session bridge, `send_tts()` auto-resolves sender_id, MCP server uses session bridge instead of random UUID, background upgrade thread. 1692 unit tests pass.
+- [x] **[LUPIN] Phase 0 validation: Analyze captured payloads** — Session 283: Validation report created from 3,430 payloads (1,686 pre_tool_use, 1,620 post_tool_use, 69 notification, 28 stop, 26 session_start). All 12 gate checks passed. Report at `src/rnd/.../2026.02.27-phase-0-validation-report.md`.
+  - **Logs dir**: `io/claude_code_hooks/logs/`
+  - **Session bridge file**: `~/.claude/sessions/cc-{PID}.json` — 26 files verified
+- [x] **[LUPIN] Phase 1: Notification System Extensions** — Session 290: Revised architecture — `user_initiated_message` type (not VOICE_INPUT), stateful WebSocket listener (CCNotificationListener subclassing BaseWebSocketListener), INI-based credentials, atomic JSONL buffer drain. 5 new files, 7 modified, 35 new tests (all pass). See [Design Doc Revisions](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.28-design-doc-revisions-session-290.md).
+- [x] **[LUPIN] Phases 2-3: Hook infrastructure + voice output** — Session 292: 7 hooks renamed to production, smart TTS (silent/announce/default), voice buffer drain + acknowledge. 82 hook tests.
+- [x] **[LUPIN] Phases 4-6: Voice injection, approvals, browser capture** — Session 296: additionalContext injection (Pre/PostToolUse), Stop hook blocking with counter safety valve, MCP voice bypass, PermissionRequest 3-path flow (auto-allow, buffer-redirect, sync), CC session voice capture UI. 126 hook tests.
+- [x] **[LUPIN] Voice injection into idle CC sessions (tmux + UserPromptSubmit hook)** — Session 323: All 6 phases implemented. tmux discovery in register_session.py, `find_session_by_id/tmux()` in session_bridge.py, listener tmux Enter trigger, UserPromptSubmit hook, shell scripts, hook registration, 29 tests (8+18+3) all passing.
+  - **Plan doc**: [`2026.03.05-voice-injection-listener-tmux-hook-plan.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.03.05-voice-injection-listener-tmux-hook-plan.md)
+  - **Research doc**: [`2026.03.05-voice-injection-tmux-buffer-hook-design.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.03.05-voice-injection-tmux-buffer-hook-design.md)
+- [x] **[LUPIN] Phase 7: E2E testing + polish** — Manual E2E verification of voice pipeline (browser 🎤 → STT → notify → buffer → hook drain → additionalContext). Polish remaining rough edges. Session 332: Completed.
+  - **Master plan**: [`2026.02.25-opportunistic-voice-hook-integration-plan.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.25-opportunistic-voice-hook-integration-plan.md)
+  - **Phase 0 plan**: [`2026.02.26-voice-hook-phase-0-implementation.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.26-voice-hook-phase-0-implementation.md)
+  - **Phase 0 validation**: [`2026.02.27-phase-0-validation-report.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.27-phase-0-validation-report.md)
+  - **Phase 1 design revisions**: [`2026.02.28-design-doc-revisions-session-290.md`](src/rnd/2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.02.28-design-doc-revisions-session-290.md)
+
+---
+
+## Pending
+
+### History Archive (Session 280)
+
+- [x] **[LUPIN] Archive history.md** — Session 332: Archived Sessions 260-303 (Feb 24 - Mar 3) to `history/2026-02-24-to-03-03-history.md`. Retained Sessions 304-331 (~11.9k tokens).
+
+### SWE Team Proxy: Workload Generator + Shadow-Mode Capture
+
+- [x] **[LUPIN] Layer 1: Enhanced dry-run + capture harness** — Session 268: 18-task catalog, JSONL capture harness, 7 integration tests, `data_origin` column. Validated Session 273: manifest path corrected to `io/decision-proxies/`.
+
+### SWE Team Proxy Agent (HIGH PRIORITY)
+
+- [x] **[LUPIN] Finish implementing and testing first cut of SWE Team Proxy Agent** - Session 241: Activated proxy in shadow mode, wired trust feedback loop, 7 new tests. 1490 pass.
+- [x] **[LUPIN] Phase 7: Real-Time Proxy Summary Notifications** - Session 248: 10 tasks, 7 new tests, 1 E2E smoke. Batch lifecycle, proxy summary emission, trust mode dropdown, circuit breaker alerts. 1518 pass.
+- [x] **[LUPIN] Phase 8: Hot-Reload Trust Mode** - Session 248: REST endpoint + UI dropdown on Trust Dashboard, 16 new tests, 1534 pass
+
+
+### Disambiguate Database Names (Session 343-344)
+
+- [x] **[LUPIN] Phase 6: Rename lupin_db → lupin_db_dev and lupin_db_prod** — Session 344: PostgreSQL `ALTER DATABASE RENAME`, updated defaults in `database.py` (dev → `lupin_db_dev`, prod → `lupin_db_prod`), `docker-compose.yml`, `run-postgresql-dev.sh`, `backup-postgres.sh`, plus 16 doc references across 7 files. Full test suite validation pending.
+  - **Plan doc**: [`src/rnd/2026.03.12-integration-test-hot-swap-config.md`](src/rnd/2026.03.12-integration-test-hot-swap-config.md) (Phase 6 → Done)
+
+### Before Branch Merge
+
+- [x] **[LUPIN] Run and remediate full testing harness** — Session 344: All suites green after DB rename. Unit **2075/2075**, smoke **27/27**, WebSocket **50/50**, integration **136 passed** (53 skipped, 23 xfailed, 13 xpassed, 0 failures). Fixed: notification auth assertions, admin fixture dependency, WS edge case expectation. Marked skip/xfail: prediction engine (20), deep research (10), queue filtering (5), dispatcher mock (4), job queue progressive (4), token refresh (4), SDK client (2), admin bcrypt (2), LanceDB normalization (5).
+  - **Plan doc**: [`src/rnd/2026.03.12-integration-test-remediation-and-db-disambiguation.md`](src/rnd/2026.03.12-integration-test-remediation-and-db-disambiguation.md)
+  - **DB isolation**: Hot-swap infrastructure from Session 343 — [`src/rnd/2026.03.12-integration-test-hot-swap-config.md`](src/rnd/2026.03.12-integration-test-hot-swap-config.md)
+- [x] **[LUPIN] CJ Flow verification: Dry run end-to-end testing for UNBOUNDED tasks** - Session 269: INTERACTIVE dry-run exercises MessageHistory + 6-scenario smoke test created. Needs live server validation.
+
+### TTS Focus Mode Race Condition (Sessions 346-347)
+
+- [x] **[LUPIN] Fix TTS Focus Mode race: orphaned focus mode freezes queue** — Session 346: guards in `enterTTSFocusMode()` and `onTTSPlaybackComplete()`. Session 347: `stopAudio()` + `onTTSPlaybackComplete()` in `submitResponse()` and `handleGracePeriodExceeded()`, fixed `stopAllAudio()` typo in `stopTTSAndAdvance()`. All 10 dismissal paths now have audio cleanup.
+  - **Analysis doc**: [`src/rnd/2026.03.12-tts-focus-mode-race-condition-analysis.md`](src/rnd/2026.03.12-tts-focus-mode-race-condition-analysis.md)
+  - **File**: `src/fastapi_app/static/js/notifications.js`
+
+### Future Considerations
+
+- [ ] **[LUPIN] Add 60s safety timeout to TTS focus mode** - Prevent permanent stuck state when TTS queue items fail to play. **Partially addressed** (Session 164): Added staleness check on restore + exit in moveToRegularNotifications. Still need: runtime 60s timeout for cases where notification exists but user never responds and timeout doesn't fire. **File**: `src/fastapi_app/static/js/notifications.js:9374-9393`
+- [ ] **Silent flag for notifications**: Consider adding a `silent` parameter to the cosa-voice notification system to suppress TTS during automated testing. Would require changes to: router request models, job classes, voice_io wrappers, and core notification functions.
+- [x] **Standardize compound job/user ID usage** - Session 236: Bug #5 made scoped IDs (`base_hash::user_id`) universal across ALL job types via `register_scoped_job()`
+- [x] **Standardize job-user-session association interface** - Session 236: Bug #5 unified all write sites through `register_scoped_job()` and all reads through direct `job.user_id` access
+- [x] **Implement Approach D: Hybrid Queue + Check-In** - Session 238: Full 5-phase implementation. 20+10 new tests, 317 SWE team tests pass
 
 ---
 
 ## Completed (Recent)
 
-- [x] **[LUPIN] Add `refresh()` method to ConfigurationManager** - 2026-02-13: WON'T FIX. Planned as a convenience wrapper around `init( silent=True )` for runtime config reloads. Decided not to implement.
-- [x] **[LUPIN] Upgrade vLLM to >= 0.8.5** - 2026-02-13: Qwen3-4B-Base native support confirmed
+- [x] **[LUPIN] Fix CC session messages loading into "Unknown" sender card after refresh** — Completed Session 337.
+- [x] **Centralized Navigation & URL Naming Conventions** — Unified nav and URL patterns for entire suite of static HTML/plain vanilla JavaScript pages covering all user and admin tasks - Session 247
+- [x] **CRUD Live Pipeline Test** - `test_crud_live_pipeline.py --mode direct --auto-proxy` passing. Session 267 fixed credential mismatch (CREDENTIAL_ENV_PREFIX unified).
+- [x] **SWE Team Proxy: Preference Learning** - Sessions 258-266: Phases 0-3 complete. Embedding infrastructure, CBR + Beta-Bernoulli trust, seed data (50 decisions), BLR + Thompson Sampling, Conformal Guarantees + ICRL. 1645 total tests pass.
+- [x] **Skill: notification-patterns** - cosa-voice MCP usage patterns skill created (~250 lines)
+- [x] **Gist embeddings: jettisoned** - Dead embedding code removed, ~30% embedding cost savings per snapshot (2 of 7 embeddings). Removed `question_gist_embedding`, `solution_gist_embedding` fields and unused search methods.
+- [x] **Voice Module Audit** - Session 260: Full 5-phase refactoring of `cosa_interface.py` vs `voice_io.py`. Created shared `AgentNotificationDispatcher`, `sender_id.py`, `feedback_analysis.py`, `sync_notify.py`. Eliminated ~1,548 lines of duplication across 16 files. 1538 unit tests pass.
+- [x] **Smoke Test Coverage Audit** - Session 221: 6 new test files, 54 pytest methods covering Decision Proxy, SWE Orchestrator dry-run, Queue Consumer, Answer Feedback, Agentic Disambiguation, Classic Agents. All passing.
+- [x] **SWE Team Testing Docs Update** - Session 221: Updated 00-index.md (Phases 2-4 DONE), 04-surfaces testing design (Surfaces 2-3 PASS), all-agents.json entries
+- [x] **Post-Execution Feedback Loop** - Session 215-220: answer_is_correct tri-state, language/tone feedback, data collection pipeline. All 3 parts complete.
+- [x] **CoSA Submodule Commit Backlog** - Session 220: 16 files across 5 areas committed
+- [x] **SWE Team Surface 3 Proxy Crash Fix** - Session 219: 3 bugs fixed (ImportError, ValueError, expeditor pass-through). 1343 tests pass.
+- [x] **Agentic Software Development Team (Phases 1-4)** - Sessions 205-210: Foundation, delegation, tester loop, trust-aware decision proxy. 1265 unit tests.
+- [x] **Pre-Execution Confirmation of Semantic Matches** - 2026-02-16: Top-1 confirm strategy, 3-tier decision
+- [x] **Unified Smoke Test Framework Verification** - 2026-02-16
+- [x] **vLLM Upgrade to >= 0.8.5** - 2026-02-13: Qwen3-4B-Base native support
+- [x] **DataFrame CRUD Phases 1-3** - Sessions 132-143: Storage, agents, queue integration + voice confirmation. 190 tests.
+- [x] **Before Branch Merge** - Sessions 123-148: CJ Flow compliance, baseline testing, PEFT training (Phases 1-2), calculator (31 steps), disambiguation agent, dry-run smoke tests
+- [x] **job_state_transition (10 phases)** - Session 107: Config through cruft removal + WebSocket smoke tests
+- [x] **Job Card Field Parity fix** - Session 107: 6 missing WebSocket metadata fields
+- [x] **Browser Testing (8 tests)** + **Verification Checklist (8 items)** - Sessions 103-115
+- [x] **Architecture Review: Cache Hit Behavior** - Session 118: Moved to bug-fix-queue.md
+- [x] **Carried Over from Session 102** - Sessions 109+: Math agent TTS, job card notifications, tts_raw parameter
+- [x] **COSA Submodule commits** - Sessions 115+: API consistency, dry-run mode, mock_clients
+- [x] **[LUPIN] Refactor mock job client into standalone Notification Proxy Agent** - Sessions 210-211: Phase 4a proxy extraction + standalone agent. Fully decoupled from mock job infrastructure.
+- [x] **[LUPIN] Add `refresh()` method to ConfigurationManager** - 2026-02-13: WON'T FIX.
 - [x] **[LUPIN] Run PEFT Phase 2 training + LORA retrain** - 2026-02-13: 39,871 examples, 35 commands
 - [x] **[LUPIN] Finish expanding smoke test matrix to 13 scenarios** - 2026-02-13
-- [x] **[LUPIN] Run agentic job intent LORA 1% sample training** - 2026-02-13
 - [x] **[LUPIN] Fuzzy file matching for LORA adapter podcast generation routing** - 2026-02-13
 - [x] **[LUPIN] Extended Parameter Training (Chunk 1.6)** - 2026-02-13
-- [x] **[LUPIN] Embedding benchmark harness** - Session 194: Side-by-side local GPU vs OpenAI API comparison. Local 7-398x faster. File: `src/tests/smoke/test_embedding_benchmark.py`
-- [x] **[LUPIN] Bug fix: Dead job card stuck in run bucket** - Session 199: Added missing `emit_job_state_transition()` call in `_handle_error_case()` for `run -> dead` transition. Only AgentBase error path was missing the WebSocket event — all other paths (agentic success/failure/crash, snapshot, cached) already emitted correctly. 814 unit tests pass.
-- [x] **[LUPIN] Bug fix: Stopwatch API mismatch in cache hit path** - `_format_cached_result()` called non-existent `stop()` + `get_elapsed_millis()` → replaced with `get_delta_ms()`. 817 unit tests pass.
-- [x] **[LUPIN] Bug fix: Missing WebSocket event in generic exception handler** - `_process_job()` except block now emits `job_state_transition( 'run', 'dead' )` + TTS notification, matching `_handle_error_case()` pattern. 817 unit tests pass.
-- [x] **[LUPIN] Fix LanceDB Embedding Dimension Mismatch** - Session 198: Standardized all providers on 768 dims (OpenAI MRL truncation), added `_validate_embedding_dimensions()` to all 6 table classes, 811 tests pass. CoSA submodule changes need separate commit.
-- [x] **[LUPIN] CJ Flow Branding + Bounded Job Packaging + Claude Code LORA Data** - Session 195
-  - Part A: CJ Flow branding propagated to 12 files (docstrings/comments only)
-  - Part B1: ClaudeCodeJob registered in agentic_job_factory.py, claude_code_queue.py router, agent_registry.py
-  - Part B2: Hardcoded defaults (max_turns, timeout_seconds) externalized to lupin-app.ini config
-  - Part B3: 420-line packaging guide at `src/rnd/2026.02.12-cj-flow-bounded-job-packaging-guide.md`
-  - Part C1-C5: 66 voice templates + 100 placeholders + training pipeline (coordinator, prompt_generator, xml_models, templates)
-  - Part C6: Training data regenerated — 39,871 examples, 35 commands, Claude Code at 1,500
-  - 816 unit tests pass, zero regressions
-  - **Plan**: `~/.claude/plans/eager-dazzling-gem.md`
-- [x] **Deprecated util_xml.py Elimination**: Migrated all production code to Pydantic XML I/O - Session 116
-  - Removed fallbacks from gister.py, confirmation_dialog.py
-  - Added Pydantic to todo_fifo_queue.py, multimodal_munger.py
-  - Removed ALL deprecated fallbacks from agent_base.py, bug_injector.py, raw_output_formatter.py
-  - Rewrote xml_parser_factory.py to Pydantic-only (removed baseline and hybrid strategies)
-  - Added deprecation warnings to util_xml.py
-  - 12 files modified, all smoke tests passing
-- [x] **Math Agent TTS Fix**: job_id pattern + user_email pipeline - Session 109, 110
-  - Fix: Updated regex in `notification_models.py` to accept compound hash format
-  - Fix: Added `user_email` as first-class constructor parameter (Session 110)
-  - Verified: TTS now works for math questions via /api/push
-- [x] job_state_transition Phases 6-10 (badge handlers, DOM nodes, cruft removal) - Session 107
-- [x] WebSocket smoke tests for job_state_transition - Session 107
-- [x] Bug fix implementation: Add 6 missing fields to WebSocket metadata - Session 107
+- [x] **[LUPIN] Embedding benchmark harness** - Session 194: Local GPU 7-398x faster than OpenAI API.
+- [x] **[LUPIN] Bug fix: Dead job card stuck in run bucket** - Session 199: Missing `emit_job_state_transition()` in `_handle_error_case()`. 814 tests pass.
+- [x] **[LUPIN] Bug fix: Stopwatch API mismatch in cache hit path** - `_format_cached_result()` → replaced with `get_delta_ms()`. 817 tests pass.
+- [x] **[LUPIN] Bug fix: Missing WebSocket event in generic exception handler** - 817 tests pass.
+- [x] **[LUPIN] Fix LanceDB Embedding Dimension Mismatch** - Session 198: Standardized on 768 dims. 811 tests pass.
+- [x] **[LUPIN] CJ Flow Branding + Bounded Job Packaging + Claude Code LORA Data** - Session 195: 816 tests pass.
+- [x] **Deprecated util_xml.py Elimination** - Session 116: Migrated all production code to Pydantic XML I/O.
+- [x] **Math Agent TTS Fix** - Sessions 109-110: job_id pattern + user_email pipeline.
+- [x] job_state_transition Phases 6-10 + WebSocket smoke tests - Session 107
+- [x] Bug fix: Add 6 missing fields to WebSocket metadata - Session 107
 - [x] Rename `currentUser` to `currentUserEmail` in notifications.js - Session 106
 - [x] Remove redundant `user_email` from Deep Research JS request body - Session 106
 - [x] Fix job cards not rendering when queue collapsed - Session 105

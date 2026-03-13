@@ -1,0 +1,210 @@
+/* ============================================================================
+   Lupin Navigation Bar Styles
+   Design tokens from existing codebase:
+     - Background: #1e293b (slate-800)
+     - Active: #3b82f6 (blue-500)
+     - Font stack: system font
+   Generated on: 2026-02-21
+   ============================================================================ */
+
+/* Nav bar — fixed top */
+.lupin-nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: #1e293b;
+    z-index: 9999;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    box-shadow: 0 1px 3px rgba( 0, 0, 0, 0.2 );
+}
+
+.lupin-nav-inner {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 16px;
+    gap: 8px;
+}
+
+/* Brand */
+.lupin-nav-brand {
+    font-size: 18px;
+    font-weight: 700;
+    color: #ffffff;
+    text-decoration: none;
+    margin-right: 16px;
+    white-space: nowrap;
+    letter-spacing: 0.5px;
+}
+
+.lupin-nav-brand:hover {
+    color: #93c5fd;
+}
+
+/* Hamburger (hidden on desktop) */
+.lupin-nav-toggle {
+    display: none;
+    background: none;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 4px;
+    margin-left: auto;
+}
+
+.lupin-nav-toggle:hover {
+    color: #ffffff;
+}
+
+/* Nav links container */
+.lupin-nav-links {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: 1;
+    overflow-x: auto;
+}
+
+/* Individual nav link */
+.lupin-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    color: #94a3b8;
+    text-decoration: none;
+    border-radius: 6px;
+    white-space: nowrap;
+    transition: background 150ms, color 150ms;
+}
+
+.lupin-nav-link:hover {
+    background: #334155;
+    color: #e2e8f0;
+}
+
+.lupin-nav-link.lupin-nav-active {
+    background: #3b82f6;
+    color: #ffffff;
+}
+
+.lupin-nav-link svg {
+    flex-shrink: 0;
+}
+
+/* Separator between app and admin sections */
+.lupin-nav-separator {
+    display: inline-block;
+    width: 1px;
+    height: 24px;
+    background: #475569;
+    margin: 0 6px;
+    flex-shrink: 0;
+}
+
+/* Right side (email + logout / login) */
+.lupin-nav-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-left: auto;
+    white-space: nowrap;
+}
+
+.lupin-nav-email {
+    color: #94a3b8;
+    font-size: 13px;
+}
+
+.lupin-nav-logout {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: 1px solid #475569;
+    color: #94a3b8;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 150ms, color 150ms, border-color 150ms;
+}
+
+.lupin-nav-logout:hover {
+    background: #ef4444;
+    border-color: #ef4444;
+    color: #ffffff;
+}
+
+.lupin-nav-login {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #94a3b8;
+    text-decoration: none;
+    padding: 6px 12px;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    font-size: 13px;
+    transition: background 150ms, color 150ms, border-color 150ms;
+}
+
+.lupin-nav-login:hover {
+    background: #334155;
+    color: #e2e8f0;
+    border-color: #64748b;
+}
+
+/* ============================================================================
+   Responsive — collapse to hamburger below 768px
+   ============================================================================ */
+
+@media ( max-width: 768px ) {
+    .lupin-nav-toggle {
+        display: block;
+    }
+
+    .lupin-nav-links,
+    .lupin-nav-right {
+        display: none;
+        position: absolute;
+        top: 56px;
+        left: 0;
+        right: 0;
+        background: #1e293b;
+        flex-direction: column;
+        padding: 8px 16px 16px;
+        gap: 4px;
+        box-shadow: 0 4px 6px rgba( 0, 0, 0, 0.3 );
+    }
+
+    .lupin-nav-links.lupin-nav-open,
+    .lupin-nav-right.lupin-nav-open {
+        display: flex;
+    }
+
+    /* Right section appears after links */
+    .lupin-nav-right {
+        top: auto;
+        position: relative;
+        border-top: 1px solid #475569;
+        padding-top: 12px;
+        margin-top: 8px;
+        margin-left: 0;
+    }
+
+    .lupin-nav-link {
+        padding: 10px 12px;
+    }
+
+    .lupin-nav-separator {
+        width: 100%;
+        height: 1px;
+        margin: 4px 0;
+    }
+}

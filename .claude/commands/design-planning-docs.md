@@ -710,7 +710,7 @@ These links work in:
 
 Templates are located in:
 ```
-/path/to/src/rnd/prompts/templates/design-planning/
+/path/to/src/rnd/2025.09.27-prompts/templates/design-planning/
 ├── pattern-a/
 │   ├── 00-index.template.md
 │   ├── 01-implementation-current.template.md
@@ -1033,20 +1033,20 @@ Expected output:
 On branch wip-documentation-reorganization
 
 New files:
-  src/rnd/jwt-oauth/00-index.md
-  src/rnd/jwt-oauth/01-implementation-current.md
-  src/rnd/jwt-oauth/02-architecture.md
-  src/rnd/jwt-oauth/03-decisions.md
-  src/rnd/jwt-oauth/04-testing-validation.md
-  src/rnd/jwt-oauth/archive/phases-01-03-completed.md
-  src/rnd/jwt-oauth/archive-original/README.md
+  src/rnd/2025.09.29-jwt-oauth/00-index.md
+  src/rnd/2025.09.29-jwt-oauth/01-implementation-current.md
+  src/rnd/2025.09.29-jwt-oauth/02-architecture.md
+  src/rnd/2025.09.29-jwt-oauth/03-decisions.md
+  src/rnd/2025.09.29-jwt-oauth/04-testing-validation.md
+  src/rnd/2025.09.29-jwt-oauth/archive/phases-01-03-completed.md
+  src/rnd/2025.09.29-jwt-oauth/archive-original/README.md
 
 Modified files:
   (none expected)
 
 Renamed/moved:
   src/rnd/2025.06.03-jwt-oauth-implementation.md →
-  src/rnd/jwt-oauth/archive-original/2025.06.03-jwt-oauth-implementation-ORIGINAL.md
+  src/rnd/2025.09.29-jwt-oauth/archive-original/2025.06.03-jwt-oauth-implementation-ORIGINAL.md
 ```
 
 ### Reorganization Completion
@@ -1392,7 +1392,7 @@ When implementing this slash command:
 
 4. **Template locations**:
    ```
-   /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/rnd/prompts/templates/design-planning/
+   /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/rnd/2025.09.27-prompts/templates/design-planning/
    ```
 
 5. **Error handling**:

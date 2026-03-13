@@ -30,6 +30,17 @@ if lupin_root is None:
         "  python src/fastapi_app/main.py"
     )
 
+# Load LoRA model paths from ~/.lora_env (auto-updated by peft_trainer.py)
+_lora_env_path = os.path.expanduser( "~/.lora_env" )
+if os.path.exists( _lora_env_path ):
+    with open( _lora_env_path, "r" ) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line.startswith( "export " ) and "=" in _line:
+                _var_def = _line[ len( "export " ): ]
+                _key, _val = _var_def.split( "=", 1 )
+                os.environ[ _key ] = _val.strip( '"' )
+
 src_path = os.path.join( lupin_root, 'src' )
 if src_path not in sys.path:
     sys.path.insert( 0, src_path )
@@ -49,7 +60,7 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code, claude_code_queue, mode, stats, deep_research, mock_job, io_files, podcast_generator, deep_research_to_podcast
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, podcast_generator, deep_research_to_podcast, swe_team, decision_proxy, pages
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 
 # Suppress noisy LanceDB warnings
@@ -466,7 +477,7 @@ async def lifespan( app: FastAPI ):
 
     # Database initialization
     # PostgreSQL database selected via LUPIN_ENV environment variable:
-    #   - development: lupin_db (automatic schema creation via Alembic migrations)
+    #   - development: lupin_db_dev (automatic schema creation via Alembic migrations)
     #   - testing: lupin_db_test (automatic schema creation in tests)
     #   - production: Cloud SQL (automatic schema creation via Alembic migrations)
     print( "[AUTH] Using PostgreSQL authentication database" )
@@ -489,6 +500,11 @@ async def lifespan( app: FastAPI ):
     prose_engine = get_prose_engine( debug=app_debug, verbose=app_verbose )
     prose_engine.encode_query( [ "warmup" ] )
     print( "Done!" )
+
+    # Initialize Prediction Engine singleton (Universal Decision Proxy)
+    from cosa.agents.prediction_engine import get_prediction_engine
+    prediction_engine = get_prediction_engine( config_mgr=config_mgr, debug=app_debug )
+    print( f"[PREDICTION] Prediction engine initialized (enabled={prediction_engine.enabled})" )
 
     # Store event loop reference in WebSocketManager for thread-safe operations
     print( "[WS] Storing event loop reference for thread-safe operations..." )
@@ -630,6 +646,7 @@ app.include_router(websocket.router)
 app.include_router(websocket_admin.router)
 app.include_router(claude_code.router)
 app.include_router(claude_code_queue.router)
+app.include_router(embeddings.router)
 app.include_router(mode.router)
 app.include_router(stats.router)
 app.include_router(deep_research.router)
@@ -637,6 +654,9 @@ app.include_router(io_files.router)
 app.include_router(mock_job.router)
 app.include_router(podcast_generator.router)
 app.include_router(deep_research_to_podcast.router)
+app.include_router(swe_team.router)
+app.include_router(decision_proxy.router)
+app.include_router(pages.router)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")

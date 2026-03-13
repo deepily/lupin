@@ -480,6 +480,20 @@ class TestCalcIntentModel:
         assert "compare_prices" in CalcIntent.VALID_OPERATIONS
         assert "mortgage" in CalcIntent.VALID_OPERATIONS
 
+    def test_unsupported_in_valid_operations( self ):
+        """'unsupported' is a recognized valid operation."""
+        assert "unsupported" in CalcIntent.VALID_OPERATIONS
+
+    def test_create_unsupported_intent( self ):
+        """CalcIntent accepts operation='unsupported' with minimal fields."""
+        intent = CalcIntent( operation="unsupported", confidence="0.95", raw_query="What is 2 plus 2?" )
+        assert intent.operation == "unsupported"
+        assert intent.get_confidence_float() == 0.95
+        assert intent.raw_query == "What is 2 plus 2?"
+        assert intent.value == ""
+        assert intent.from_unit == ""
+        assert intent.to_unit == ""
+
 
 # ═════════════════════════════════════════════════════════════════════════
 # Test Class: Dispatcher

@@ -9,8 +9,8 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 import json
 
-from cosa.cli.notify_user_sync import consume_sse_stream, notify_user_sync
-from cosa.cli.notification_models import (
+from lupin_cli.notifications.notify_user_sync import consume_sse_stream, notify_user_sync
+from lupin_cli.notifications.notification_models import (
     NotificationRequest,
     NotificationResponse,
     RespondedEvent,
@@ -140,7 +140,7 @@ class TestConsumeSSEStream:
 class TestNotifyUserSync:
     """Test notify_user_sync function with mocked requests."""
 
-    @patch( 'cosa.cli.notify_user_sync.requests.post' )
+    @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
     def test_successful_yes_response( self, mock_post ):
         """Test successful yes response."""
         # Mock SSE response
@@ -155,6 +155,7 @@ class TestNotifyUserSync:
         request = NotificationRequest(
             message="Approve?",
             response_type=ResponseType.YES_NO,
+            target_user="test@example.com",
             response_default="no"
         )
 
@@ -167,7 +168,7 @@ class TestNotifyUserSync:
         assert response.default_used is False
         assert response.success is True
 
-    @patch( 'cosa.cli.notify_user_sync.requests.post' )
+    @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
     def test_timeout_with_default( self, mock_post ):
         """Test timeout using default value."""
         mock_response = Mock()
@@ -180,6 +181,7 @@ class TestNotifyUserSync:
         request = NotificationRequest(
             message="Approve?",
             response_type=ResponseType.YES_NO,
+            target_user="test@example.com",
             response_default="no"
         )
 
@@ -191,7 +193,7 @@ class TestNotifyUserSync:
         assert response.default_used is True
         assert response.is_timeout is True
 
-    @patch( 'cosa.cli.notify_user_sync.requests.post' )
+    @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
     def test_offline_with_default( self, mock_post ):
         """Test offline user with default value."""
         mock_response = Mock()
@@ -204,6 +206,7 @@ class TestNotifyUserSync:
         request = NotificationRequest(
             message="Approve?",
             response_type=ResponseType.YES_NO,
+            target_user="test@example.com",
             response_default="yes"
         )
 
@@ -214,7 +217,7 @@ class TestNotifyUserSync:
         assert response.status == "offline"
         assert response.default_used is True
 
-    @patch( 'cosa.cli.notify_user_sync.requests.post' )
+    @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
     def test_http_error( self, mock_post ):
         """Test HTTP error response."""
         mock_response = Mock()
@@ -224,7 +227,8 @@ class TestNotifyUserSync:
 
         request = NotificationRequest(
             message="Test",
-            response_type=ResponseType.YES_NO
+            response_type=ResponseType.YES_NO,
+            target_user="test@example.com"
         )
 
         response = notify_user_sync( request )
@@ -234,7 +238,7 @@ class TestNotifyUserSync:
         assert response.status == "http_error_404"
         assert response.is_error is True
 
-    @patch( 'cosa.cli.notify_user_sync.requests.post' )
+    @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
     def test_connection_error( self, mock_post ):
         """Test connection error handling."""
         import requests
@@ -242,7 +246,8 @@ class TestNotifyUserSync:
 
         request = NotificationRequest(
             message="Test",
-            response_type=ResponseType.YES_NO
+            response_type=ResponseType.YES_NO,
+            target_user="test@example.com"
         )
 
         response = notify_user_sync( request )
@@ -251,7 +256,7 @@ class TestNotifyUserSync:
         assert response.response_value is None
         assert response.status == "connection_error"
 
-    @patch( 'cosa.cli.notify_user_sync.requests.post' )
+    @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
     def test_request_timeout( self, mock_post ):
         """Test request timeout handling."""
         import requests
@@ -259,7 +264,8 @@ class TestNotifyUserSync:
 
         request = NotificationRequest(
             message="Test",
-            response_type=ResponseType.YES_NO
+            response_type=ResponseType.YES_NO,
+            target_user="test@example.com"
         )
 
         response = notify_user_sync( request )
@@ -269,7 +275,7 @@ class TestNotifyUserSync:
         assert response.status == "request_timeout"
         assert response.is_timeout is True
 
-    @patch( 'cosa.cli.notify_user_sync.requests.post' )
+    @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
     def test_server_error_event( self, mock_post ):
         """Test server error SSE event."""
         mock_response = Mock()
@@ -281,7 +287,8 @@ class TestNotifyUserSync:
 
         request = NotificationRequest(
             message="Test",
-            response_type=ResponseType.YES_NO
+            response_type=ResponseType.YES_NO,
+            target_user="test@example.com"
         )
 
         response = notify_user_sync( request )
@@ -290,7 +297,7 @@ class TestNotifyUserSync:
         assert response.response_value is None
         assert response.status == "error"
 
-    @patch( 'cosa.cli.notify_user_sync.requests.post' )
+    @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
     def test_expired_without_default( self, mock_post ):
         """Test expired notification without default value."""
         mock_response = Mock()
@@ -313,7 +320,7 @@ class TestNotifyUserSync:
         assert response.status == "expired_no_default"
         assert response.is_timeout is True
 
-    @patch( 'cosa.cli.notify_user_sync.requests.post' )
+    @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
     def test_open_ended_response( self, mock_post ):
         """Test open-ended text response."""
         mock_response = Mock()
@@ -325,7 +332,8 @@ class TestNotifyUserSync:
 
         request = NotificationRequest(
             message="Enter text",
-            response_type=ResponseType.OPEN_ENDED
+            response_type=ResponseType.OPEN_ENDED,
+            target_user="test@example.com"
         )
 
         response = notify_user_sync( request )
@@ -353,6 +361,7 @@ def quick_smoke_test():
         request = NotificationRequest(
             message="Test notification",
             response_type=ResponseType.YES_NO,
+            target_user="test@example.com",
             response_default="yes"
         )
         print( "✓ Request created successfully" )

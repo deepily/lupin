@@ -66,6 +66,9 @@ python src/tests/smoke/test_deep_research_dry_run_smoke.py
 python -m cosa.agents.notification_proxy --profile all_agents --strategy llm_script
 ```
 
+> **Important**: Always use these automated scripts for pipeline testing. Manual curl-based
+> job submission is prohibited — see project `CLAUDE.md` Testing Anti-Patterns.
+
 ---
 
 ## Environment Variables
@@ -73,10 +76,8 @@ python -m cosa.agents.notification_proxy --profile all_agents --strategy llm_scr
 | Variable | Purpose |
 |----------|---------|
 | `LUPIN_ROOT` | Project root (required for PYTHONPATH) |
-| `LUPIN_TEST_EMAIL` | Standard test account email |
-| `LUPIN_TEST_PASSWORD` | Standard test account password |
-| `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` | Interactive test account email |
-| `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD` | Interactive test account password |
+| `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` | Unified test account email (all test types) |
+| `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD` | Unified test account password (all test types) |
 | `LUPIN_INTERACTIVE_TESTS` | Set to `"true"` to enable expediter scenarios |
 
 See [`src/tests/AUTH-TESTING-GUIDE.md`](../AUTH-TESTING-GUIDE.md) for credential setup patterns.

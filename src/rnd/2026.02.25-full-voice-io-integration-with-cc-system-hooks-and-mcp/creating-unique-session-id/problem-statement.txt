@@ -1,0 +1,46 @@
+On a related note since I will be using multiple instances of Claude code within one repo, I'm going to need to know the session ID for every given instance running. While I know that the hooks emit a session ID with their output in JSON format, I'm wondering if there is a programmatic way of accessing this unique session ID so that I can pass the same session ID to an MCP server, which would then use that to make sure that message histories are identified by the Claude code session ID
+
+6:20 PM
+
+Investigated mechanisms for accessing Claude Code session IDs programmatically
+Rick wants to know how to programmatically access the Claude Code session ID so he can pass it to his MCP server (the CoSA Voice MCP) for routing messages to the correct session. Let me think about what I know and what I need to research.
+
+From our previous conversations and the research, I know:
+
+Hooks receive session_id in their stdin JSON payload
+The MCP server currently generates its own SESSION_ID = uuid.uuid4().hex[:8]
+Rick needs the actual Claude Code session ID, not a self-generated one
+Let me think about the mechanisms:
+
+Hooks get session_id via stdin JSON
+The --resume flag and claude sessions list command both work with session IDs, and the transcript path itself contains the session ID embedded in it
+I need to figure out if MCP servers receive session context during startup or if there's an environment variable that exposes it
+Let me search for how MCP servers can actually access the Claude Code session ID.
+
+This is a critical architectural question — your current cosa_voice_mcp.py generates its own SESSION_ID = uuid.uuid4().hex[:8], which is decoupled from the actual Claude Code session. Let me research the exact mechanisms available.
+
+Identified architectural gap and synthesized workaround solutions
+
+That Jon Roosevelt blog post from last week is exactly your problem. Here's the definitive answer:
+
+There is no CLAUDE_SESSION_ID environment variable. This is an open feature request (GitHub #17188) with unanimous community support. MCP servers are spawned as child processes with standard env vars (USER, HOME, PATH) but Claude Code does not inject session metadata into the MCP server's environment.
+
+The session_id is only accessible through three channels, each with tradeoffs for your multi-instance scenario:
+
+Channel 1: Hook stdin JSON — Every hook receives session_id via stdin, but MCP servers don't run as hooks.
+
+Channel 2: CLAUDE_ENV_FILE bridge — The canonical workaround. A SessionStart hook extracts the session_id and writes it to CLAUDE_ENV_FILE, making it available to all subsequent Bash tool calls in that session. But MCP servers are spawned before SessionStart fires, so they can't read it at startup.
+
+Channel 3: Transcript path parsing — The transcript path contains the session UUID: ~/.claude/projects/.../UUID.jsonl. Fragile and discouraged.
+
+For your architecture — multiple Claude Code instances in one repo, each needing its CoSA Voice MCP to know which session it belongs to — the cleanest approach is a two-phase handshake: SessionStart hook captures the session_id and pushes it to the already-running MCP server via a registration call. Here's a minimalist implementation:
+
+
+Synthesized architectural solution for session ID management across instances
+
+
+The core insight is that PPID is your isolation primitive. Each Claude Code instance has a unique PID; each stdio MCP server inherits that PID as its PPID. The SessionStart hook writes cc-{PID}.json, and the MCP server reads cc-{PPID}.json — zero ambiguity, zero cross-talk, even with N concurrent instances in the same repo.
+
+The three-tier resolution in session_bridge.py is deliberately future-proof: when Anthropic ships CLAUDE_SESSION_ID as an env var (GitHub #17188 — heavily upvoted, likely coming), Tier 1 activates automatically with zero code changes.
+
+One subtlety worth flagging: the /proc/{ppid}/stat grandparent PID lookup in _find_session_file() handles the case where Claude Code spawns your MCP via an intermediary wrapper (e.g., uv run or a shell script). On macOS you'd swap that for ps -o ppid= -p {ppid} since there's no /proc. Given your Linux dev servers with the dual 4090s, the /proc approach should work directly, but the MacBook Pro testing path would need the ps fallback.

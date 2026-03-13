@@ -4,9 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lupin - Login</title>
-    <link rel="stylesheet" href="css/auth.css">
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+    <link rel="stylesheet" href="/static/html/auth/css/auth.css">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
 </head>
-<body>
+<body class="auth-page">
     <div class="auth-container">
         <div class="auth-header">
             <div class="lupin-logo">🔐</div>
@@ -53,11 +55,12 @@
         </div>
 
         <div class="auth-link">
-            Don't have an account? <a href="register.html">Register</a>
+            Don't have an account? <a href="/app/auth/register">Register</a>
         </div>
     </div>
 
-    <script src="js/auth.js"></script>
+    <script src="/static/js/lupin-nav.js" defer></script>
+    <script src="/static/html/auth/js/auth.js"></script>
     <script>
         // Get safe redirect URL
         const redirectUrl = getSafeRedirectUrl();

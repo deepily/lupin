@@ -31,7 +31,7 @@ set -e  # Exit on error
 CONTAINER_NAME="lupin-postgres-dev"
 DB_USER="lupin_dev"
 DB_PASSWORD="dev_password"
-DB_NAME="lupin_db"
+DB_NAME="lupin_db_dev"
 TEST_DB_NAME="lupin_db_test"
 MAX_WAIT=30  # Maximum seconds to wait for PostgreSQL startup
 

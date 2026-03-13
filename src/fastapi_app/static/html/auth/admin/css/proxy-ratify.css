@@ -1,0 +1,584 @@
+/**
+ * Proxy Ratification Page Styles
+ *
+ * Styles for the decision proxy ratification queue.
+ * Badge classes here are shared with proxy-dashboard.css via @import.
+ */
+
+/* ============================================================================
+   Summary Cards
+   ============================================================================ */
+
+.summary-cards {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+
+.summary-card {
+    flex: 1;
+    min-width: 180px;
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba( 0, 0, 0, 0.08 );
+    border-left: 4px solid #a0aec0;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.summary-card:hover {
+    transform: translateY( -2px );
+    box-shadow: 0 4px 12px rgba( 0, 0, 0, 0.12 );
+}
+
+.summary-card-pending {
+    border-left-color: #ed8936;
+}
+
+.summary-card-approved {
+    border-left-color: #48bb78;
+}
+
+.summary-card-rejected {
+    border-left-color: #f56565;
+}
+
+.summary-card-oldest {
+    border-left-color: #a0aec0;
+}
+
+.summary-card .card-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #718096;
+    margin-bottom: 8px;
+}
+
+.summary-card .card-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: #2d3748;
+}
+
+/* ============================================================================
+   Action Badges
+   ============================================================================ */
+
+.badge-shadow {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #e2e8f0;
+    color: #4a5568;
+}
+
+.badge-suggest {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #bee3f8;
+    color: #2b6cb0;
+}
+
+.badge-act {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #c6f6d5;
+    color: #276749;
+}
+
+.badge-defer {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #fefcbf;
+    color: #975a16;
+}
+
+/* ============================================================================
+   Data Origin Badges
+   ============================================================================ */
+
+.badge-organic {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #b2f5ea;
+    color: #234e52;
+}
+
+.badge-seed {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #feebc8;
+    color: #c05621;
+}
+
+.badge-generated {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #e9d8fd;
+    color: #553c9a;
+}
+
+/* ============================================================================
+   Trust Level Badges
+   ============================================================================ */
+
+.badge-trust-1 {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #e2e8f0;
+    color: #4a5568;
+}
+
+.badge-trust-2 {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #bee3f8;
+    color: #2b6cb0;
+}
+
+.badge-trust-3 {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #c6f6d5;
+    color: #276749;
+}
+
+.badge-trust-4 {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #e9d8fd;
+    color: #553c9a;
+}
+
+.badge-trust-5 {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #fefcbf;
+    color: #975a16;
+}
+
+/* ============================================================================
+   Ratification State Badges
+   ============================================================================ */
+
+.badge-pending {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #feebc8;
+    color: #c05621;
+}
+
+.badge-approved {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #c6f6d5;
+    color: #276749;
+}
+
+.badge-rejected {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #fed7d7;
+    color: #c53030;
+}
+
+.badge-nr {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #e2e8f0;
+    color: #4a5568;
+}
+
+/* ============================================================================
+   Confidence Colors
+   ============================================================================ */
+
+.confidence-high {
+    color: #276749;
+    font-weight: 600;
+}
+
+.confidence-medium {
+    color: #975a16;
+    font-weight: 600;
+}
+
+.confidence-low {
+    color: #c53030;
+    font-weight: 600;
+}
+
+/* ============================================================================
+   Decisions Table
+   ============================================================================ */
+
+.decisions-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba( 0, 0, 0, 0.1 );
+    margin-bottom: 20px;
+}
+
+.decisions-table thead {
+    background-color: #f8f9fa;
+    color: #495057;
+}
+
+.decisions-table th {
+    padding: 15px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #495057;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.decisions-table tbody tr {
+    border-bottom: 1px solid #e2e8f0;
+    transition: background-color 0.2s;
+}
+
+.decisions-table tbody tr:nth-child( even ) {
+    background-color: #f7fafc;
+}
+
+.decisions-table tbody tr:hover {
+    background-color: #edf2f7;
+    cursor: pointer;
+}
+
+.decisions-table td {
+    padding: 12px 15px;
+    font-size: 14px;
+}
+
+.decisions-table th:first-child,
+.decisions-table td:first-child {
+    width: 40px;
+    text-align: center;
+}
+
+.decisions-table input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.question-text {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ============================================================================
+   Bulk Actions Bar
+   ============================================================================ */
+
+.bulk-actions {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 12px 16px;
+    background: #f7fafc;
+    border-radius: 8px;
+    align-items: center;
+}
+
+.bulk-actions .selected-count {
+    font-size: 14px;
+    color: #4a5568;
+    font-weight: 500;
+    margin-right: auto;
+}
+
+/* ============================================================================
+   Action Buttons (Inline)
+   ============================================================================ */
+
+.action-buttons {
+    display: flex;
+    gap: 6px;
+}
+
+.btn-approve-sm,
+.btn-reject-sm,
+.btn-delete-sm {
+    border: none;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 16px;
+    transition: background-color 0.2s, transform 0.1s;
+}
+
+.btn-approve-sm {
+    background: #c6f6d5;
+    color: #276749;
+}
+
+.btn-approve-sm:hover {
+    background: #9ae6b4;
+    transform: scale( 1.1 );
+}
+
+.btn-reject-sm {
+    background: #fed7d7;
+    color: #c53030;
+}
+
+.btn-reject-sm:hover {
+    background: #feb2b2;
+    transform: scale( 1.1 );
+}
+
+.btn-delete-sm {
+    background: #e2e8f0;
+    color: #718096;
+}
+
+.btn-delete-sm:hover {
+    background: #cbd5e0;
+    transform: scale( 1.1 );
+}
+
+/* ============================================================================
+   Decision Detail Modal
+   ============================================================================ */
+
+.decision-detail .detail-row {
+    display: flex;
+    padding: 10px 0;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.decision-detail .detail-row:last-child {
+    border-bottom: none;
+}
+
+.decision-detail .detail-label {
+    font-weight: 600;
+    color: #4a5568;
+    min-width: 130px;
+}
+
+.decision-detail .detail-value {
+    color: #2d3748;
+    flex: 1;
+}
+
+.question-box {
+    background: #f7fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 12px 0;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #2d3748;
+}
+
+.feedback-section {
+    margin-top: 16px;
+}
+
+.feedback-section label {
+    display: block;
+    font-weight: 600;
+    color: #4a5568;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+.feedback-textarea {
+    width: 100%;
+    min-height: 80px;
+    padding: 10px 14px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+}
+
+.feedback-textarea:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba( 59, 130, 246, 0.1 );
+}
+
+/* ============================================================================
+   Empty State
+   ============================================================================ */
+
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba( 0, 0, 0, 0.1 );
+}
+
+.empty-state .empty-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.empty-state p {
+    color: #718096;
+    font-size: 16px;
+}
+
+/* ============================================================================
+   Responsive Design
+   ============================================================================ */
+
+@media ( max-width: 1024px ) {
+    .summary-cards {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media ( max-width: 768px ) {
+    .summary-cards {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .summary-card {
+        min-width: unset;
+    }
+
+    .filter-bar {
+        flex-direction: column;
+    }
+
+    .decisions-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .bulk-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .bulk-actions .selected-count {
+        margin-right: 0;
+        margin-bottom: 8px;
+    }
+
+    .bulk-actions .btn {
+        width: 100%;
+    }
+
+    .modal-content {
+        margin: 10% auto;
+        width: 95%;
+        padding: 20px;
+    }
+
+    .modal-actions {
+        flex-direction: column;
+    }
+
+    .modal-actions .btn {
+        width: 100%;
+    }
+}
+
+@media ( max-width: 480px ) {
+    .summary-cards {
+        grid-template-columns: 1fr;
+    }
+}

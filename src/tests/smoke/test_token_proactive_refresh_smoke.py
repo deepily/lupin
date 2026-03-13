@@ -114,6 +114,11 @@ def quick_smoke_test():
     return True
 
 
+def test_token_proactive_refresh():
+    """Pytest entry point."""
+    assert quick_smoke_test()
+
+
 if __name__ == "__main__":
     success = quick_smoke_test()
     sys.exit( 0 if success else 1 )

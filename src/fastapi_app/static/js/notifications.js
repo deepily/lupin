@@ -184,6 +184,12 @@ class NotificationsUI {
         // Focus Mode: Pause TTS queue while responding to action-required notification
         this.ttsFocusModeActive = false;         // True when queue is paused for response
         this.focusModeNotificationId = null;     // Which action-required triggered focus mode
+        this.focusModeTimeoutId = null;          // Safety timeout handle for focus mode
+        this.focusModeEnteredAt = null;          // Timestamp when focus mode entered
+        this.focusModeTimeoutMs = null;          // Duration of safety timeout (for restore)
+        this.focusModeElapsedBeforePause = null; // Elapsed ms before pause (for resume calc)
+        this.TTS_FOCUS_MODE_BUFFER_MS = 30000;   // 30s buffer beyond notification timeout
+        this.TTS_FOCUS_MODE_FALLBACK_MS = 150000; // 150s fallback if timeout_seconds unknown
 
         // Manual Pause: User-controlled pause of TTS playback (via pause button)
         this.isTTSPaused = false;                // True when user clicks pause button
@@ -417,7 +423,7 @@ class NotificationsUI {
             // No tokens found - redirect to login with current page as redirect target
             this.log( "No authentication tokens found - redirecting to login" );
             const currentPath = window.location.pathname;
-            window.location.href = `/static/html/auth/login.html?redirect=${currentPath}`;
+            window.location.href = `/app/auth/login?redirect=${currentPath}`;
             return;
         }
 
@@ -967,7 +973,7 @@ class NotificationsUI {
 
         // Redirect to login with current page as redirect target
         const currentPath = window.location.pathname;
-        window.location.href = `/static/html/auth/login.html?redirect=${currentPath}`;
+        window.location.href = `/app/auth/login?redirect=${currentPath}`;
     }
 
     logout() {
@@ -997,8 +1003,8 @@ class NotificationsUI {
         // Update UI
         this.updateStatus( "auth-status", "Logged out", "warning" );
 
-        // Redirect to login page (no redirect param - go to profile after login)
-        window.location.href = '/static/html/auth/login.html';
+        // Redirect to login page
+        window.location.href = '/app/auth/login';
     }
 
     async reinitializeConfig() {
@@ -1209,6 +1215,28 @@ class NotificationsUI {
         } );
     }
 
+    copySenderSessionId( btnElement ) {
+        /**
+         * Copy a sender session ID (without # prefix) to the clipboard.
+         *
+         * Requires:
+         *     - btnElement is the 📋 span immediately after a .sender-session-id span
+         *
+         * Ensures:
+         *     - copies hex session ID to clipboard (without # prefix)
+         *     - shows brief checkmark feedback on the copy button
+         */
+        const idSpan = btnElement.previousElementSibling;
+        if ( !idSpan ) return;
+        const text = idSpan.textContent.trim().replace( /^#/, '' );
+        if ( !text ) return;
+        navigator.clipboard.writeText( text ).then( () => {
+            const original = btnElement.textContent;
+            btnElement.textContent = '✅';
+            setTimeout( () => { btnElement.textContent = original; }, 1200 );
+        } );
+    }
+
     createAudioElement() {
         const audio = document.createElement( 'audio' );
         audio.controls = false; // Hidden for UI cleanliness
@@ -1385,6 +1413,9 @@ class NotificationsUI {
         // Claude Code Dispatcher event listeners
         this.setupClaudeCodeEventListeners();
 
+        // CC Session voice input (sender card delegation)
+        this._setupCCSessionVoiceDelegation();
+
         // Job Submission (Research + Podcast) event listeners
         this.setupJobSubmitEventListeners();
 
@@ -1496,6 +1527,152 @@ class NotificationsUI {
     }
 
     // ========================================
+    // CC SESSION VOICE INPUT (Phase 6)
+    // ========================================
+
+    _setupCCSessionVoiceDelegation() {
+        /**
+         * Setup event delegation for CC session voice input in sender cards.
+         *
+         * Sender cards for claude.code sessions include a voice input row
+         * (STT button + text input + Send button). Since sender cards are
+         * created dynamically, we use delegation on the notifications-list
+         * container.
+         *
+         * Ensures:
+         *     - STT button → handleSTTButtonClick (same as job cards)
+         *     - Send button → sendCCSessionMessage
+         *     - Enter key in input → sendCCSessionMessage
+         */
+        const container = document.getElementById( 'notifications-list' );
+        if ( !container ) return;
+
+        container.addEventListener( 'click', ( e ) => {
+            // CC session STT button click
+            const sttBtn = e.target.closest( '.cc-voice-input .cc-session-stt' );
+            if ( sttBtn ) {
+                const sessionHash = sttBtn.id.replace( 'cc-session-stt-', '' );
+                this.handleSTTButtonClick( `cc-session-input-${sessionHash}`, sttBtn );
+                return;
+            }
+
+            // CC session Send button click
+            const sendBtn = e.target.closest( '.cc-voice-input .cc-session-send' );
+            if ( sendBtn ) {
+                const sessionHash = sendBtn.id.replace( 'cc-session-send-', '' );
+                this.sendCCSessionMessage( sessionHash );
+                return;
+            }
+        } );
+
+        container.addEventListener( 'keydown', ( e ) => {
+            if ( e.key !== 'Enter' ) return;
+            const input = e.target.closest( '.cc-session-msg-input' );
+            if ( input ) {
+                e.preventDefault();
+                const sessionHash = input.id.replace( 'cc-session-input-', '' );
+                this.sendCCSessionMessage( sessionHash );
+            }
+        } );
+
+        this.log( 'CC session voice input delegation setup complete' );
+    }
+
+    async sendCCSessionMessage( sessionHash ) {
+        /**
+         * Send a user message to a CC session via POST /api/notify.
+         *
+         * Unlike CJ Flow job cards which use /api/jobs/{jobId}/message,
+         * CC hook sessions have no job_id in the queue system. Instead,
+         * we POST to /api/notify with type=user_initiated_message and
+         * job_id=sessionHash so the CCNotificationListener can filter
+         * and buffer it for hook drain.
+         *
+         * Requires:
+         *     - sessionHash is the 8-char CC session hash
+         *     - DOM elements cc-session-input-{hash} and cc-session-send-{hash} exist
+         *     - User is authenticated (authToken available)
+         *
+         * Ensures:
+         *     - Message sent to /api/notify on valid input
+         *     - Input cleared on success
+         *     - Error shown inline on failure
+         */
+        const input   = document.getElementById( `cc-session-input-${sessionHash}` );
+        const sendBtn = document.getElementById( `cc-session-send-${sessionHash}` );
+
+        if ( !input ) return;
+
+        const message = input.value.trim();
+        if ( !message ) {
+            input.focus();
+            return;
+        }
+
+        // Disable controls and clear input immediately
+        input.disabled   = true;
+        sendBtn.disabled = true;
+        input.value      = '';
+
+        try {
+            await this.ensureValidToken();
+
+            // Extract listener email from CC session sender_id (format: email#hash)
+            const voiceDiv   = document.querySelector( `.cc-voice-input[data-session-hash="${sessionHash}"]` );
+            const ccSenderId = voiceDiv?.getAttribute( 'data-sender-id' ) || '';
+
+            if ( !ccSenderId.includes( '#' ) ) {
+                throw new Error( `Cannot send CC session message: missing or malformed data-sender-id on voice input for session ${sessionHash}` );
+            }
+            const listenerEmail = ccSenderId.split( '#' )[ 0 ];
+
+            const params = new URLSearchParams( {
+                message     : message,
+                type        : 'user_initiated_message',
+                priority    : 'medium',
+                target_user : listenerEmail,
+                sender_id   : this.currentUserEmail,
+                job_id      : sessionHash,
+            } );
+
+            const response = await fetch( `/api/notify?${params.toString()}`, {
+                method  : 'POST',
+                headers : {
+                    'Authorization' : this.getAuthHeader(),
+                },
+            } );
+
+            if ( !response.ok ) {
+                const errData = await response.json().catch( () => ( {} ) );
+                throw new Error( errData.detail || `HTTP ${response.status}` );
+            }
+
+            this.log( `[CC-VOICE] Sent to session ${sessionHash}: ${message.substring( 0, 80 )}` );
+
+            if ( ccSenderId ) {
+                const outgoing = {
+                    id           : `cc-voice-${sessionHash}-${Date.now()}`,
+                    sender_id    : ccSenderId,
+                    message      : message,
+                    timestamp    : new Date().toISOString(),
+                    time_display : this.getLocalTimeDisplay(),
+                    state        : 'delivered'
+                };
+                this.addNotificationToSenderGroup( outgoing, true );
+            }
+
+        } catch ( error ) {
+            this.error( `[CC-VOICE] Failed to send to session ${sessionHash}:`, error );
+            input.style.borderColor = '#dc3545';
+            setTimeout( () => { input.style.borderColor = ''; }, 3000 );
+        } finally {
+            input.disabled   = false;
+            sendBtn.disabled = false;
+            input.focus();
+        }
+    }
+
+    // ========================================
     // JOB SUBMISSION EVENT LISTENERS
     // ========================================
 
@@ -1554,7 +1731,110 @@ class NotificationsUI {
             });
         }
 
+        // SWE Team submit button
+        const submitSweBtn = document.getElementById( 'submit-swe-job' );
+        if ( submitSweBtn ) {
+            submitSweBtn.addEventListener( 'click', () => {
+                this.submitSweTeamJob();
+            });
+        }
+
+        // SWE Team STT button (voice input)
+        const sweSttBtn = document.getElementById( 'swe-stt-button' );
+        if ( sweSttBtn ) {
+            sweSttBtn.addEventListener( 'click', () => {
+                this.handleSTTButtonClick( 'swe-task', sweSttBtn );
+            });
+        }
+
+        // Ctrl+Enter in SWE Team textarea (Enter alone inserts newline)
+        const sweTaskInput = document.getElementById( 'swe-task' );
+        if ( sweTaskInput ) {
+            sweTaskInput.addEventListener( 'keydown', ( e ) => {
+                if ( e.key === 'Enter' && e.ctrlKey ) {
+                    e.preventDefault();
+                    this.submitSweTeamJob();
+                }
+            });
+        }
+
+        // ── Job Message Send: Event delegation on todo + run queue containers ──
+        // Handles dynamically-created job message inputs via bubbling
+        this._setupJobMessageDelegation( 'run-jobs-container' );
+        this._setupJobMessageDelegation( 'todo-jobs-container' );
+
         this.log( "Job submission event listeners setup complete" );
+    }
+
+    _setupJobMessageDelegation( containerId ) {
+        /**
+         * Setup click + keydown event delegation for job message send UI.
+         *
+         * Requires:
+         *     - containerId is a valid DOM element ID
+         *
+         * Ensures:
+         *     - STT, Send, Urgent toggle clicks handled via delegation
+         *     - Enter key in job-msg-input triggers send
+         */
+        const container = document.getElementById( containerId );
+        if ( !container ) return;
+
+        container.addEventListener( 'click', ( e ) => {
+            // STT button click
+            const sttBtn = e.target.closest( '.job-send-message .stt-button' );
+            if ( sttBtn ) {
+                const jobId = sttBtn.id.replace( 'job-msg-stt-', '' );
+                this.handleSTTButtonClick( `job-msg-input-${jobId}`, sttBtn );
+                return;
+            }
+
+            // Send button click
+            const sendBtn = e.target.closest( '.job-send-message .response-submit-button' );
+            if ( sendBtn ) {
+                const jobId = sendBtn.id.replace( 'job-msg-submit-', '' );
+                this.sendJobMessage( jobId );
+                return;
+            }
+
+            // Urgent toggle label click
+            // NOTE: The checkbox is display:none, so clicks always land on the
+            // <label> or the ⚡ emoji.  We must preventDefault() to stop the
+            // browser's native label→checkbox toggle from firing a SECOND time
+            // after our manual toggle (classic double-toggle bug).
+            const urgentLabel = e.target.closest( '.urgent-toggle' );
+            if ( urgentLabel ) {
+                e.preventDefault();
+                const checkbox = urgentLabel.querySelector( 'input[type="checkbox"]' );
+                if ( checkbox ) {
+                    checkbox.checked = !checkbox.checked;
+                    urgentLabel.classList.toggle( 'checked', checkbox.checked );
+                }
+                return;
+            }
+
+            // Progress group toggle click (expand/collapse notification history)
+            const pgToggle = e.target.closest( '.progress-group-toggle' );
+            if ( pgToggle ) {
+                const entry = pgToggle.closest( '.progress-group-entry' );
+                if ( !entry ) return;
+                const history = entry.querySelector( '.progress-group-history' );
+                if ( !history ) return;
+                const isExpanded = history.style.display !== 'none';
+                history.style.display = isExpanded ? 'none' : 'block';
+                const count = entry.getAttribute( 'data-progress-group-count' );
+                pgToggle.innerHTML = ( isExpanded ? '&#9660;' : '&#9650;' ) + ` #${count}`;
+            }
+        } );
+
+        // Enter key sends message in job input
+        container.addEventListener( 'keydown', ( e ) => {
+            if ( e.key === 'Enter' && e.target.classList.contains( 'job-msg-input' ) ) {
+                e.preventDefault();
+                const jobId = e.target.id.replace( 'job-msg-input-', '' );
+                this.sendJobMessage( jobId );
+            }
+        } );
     }
 
     /**
@@ -1883,9 +2163,9 @@ class NotificationsUI {
                     this.handleNotificationExpired( envelope );
                     break;
 
-                case "active_conversation_changed":
-                    // Conversation Identity Phase 3 - Update active sender indicator
-                    this.handleActiveConversationChanged( envelope );
+                case "notification_play_sound":
+                    // Subscribed event — no-op handler to prevent "Unhandled message type" console noise
+                    this.log( `[QUEUE WS] notification_play_sound received (priority: ${envelope.priority || 'default'})` );
                     break;
 
                 case "sys_time_update":
@@ -1959,6 +2239,11 @@ class NotificationsUI {
                     
                 case "audio_streaming_complete":
                     this.handleAudioComplete( envelope );
+                    break;
+
+                case "audio_streaming_chunk":
+                    // Subscribed event — binary audio handled in Blob branch above; text fallback is no-op
+                    this.log( `[AUDIO WS] audio_streaming_chunk received (text envelope fallback)` );
                     break;
 
                 case "tts_error":
@@ -2308,6 +2593,98 @@ class NotificationsUI {
 
         } catch ( error ) {
             this.error( "Podcast job submission failed:", error );
+            statusDiv.textContent = `✗ Error: ${error.message}`;
+            statusDiv.style.color = '#dc3545';
+        } finally {
+            submitButton.disabled = false;
+            loadingSpinner.style.display = 'none';
+        }
+    }
+
+    /**
+     * Submit a SWE Team engineering task.
+     *
+     * Sends task to /api/swe-team/submit for asynchronous execution.
+     * Budget and timeout are optional — only included if user sets them.
+     */
+    async submitSweTeamJob() {
+        const taskInput      = document.getElementById( 'swe-task' );
+        const budgetInput    = document.getElementById( 'swe-budget' );
+        const timeoutInput   = document.getElementById( 'swe-timeout' );
+        const dryRunCheckbox = document.getElementById( 'swe-dry-run' );
+        const submitButton   = document.getElementById( 'submit-swe-job' );
+        const loadingSpinner = document.getElementById( 'swe-loading' );
+        const statusDiv      = document.getElementById( 'swe-submit-status' );
+
+        const task   = taskInput.value.trim();
+        const dryRun = dryRunCheckbox.checked;
+
+        if ( !task ) {
+            statusDiv.textContent = '⚠️ Please describe the engineering task.';
+            statusDiv.style.color = '#dc3545';
+            return;
+        }
+
+        try {
+            // Update UI
+            submitButton.disabled = true;
+            loadingSpinner.style.display = 'inline-block';
+            statusDiv.textContent = 'Submitting SWE Team task...';
+            statusDiv.style.color = '#666';
+
+            // Ensure token is valid before API call
+            await this.ensureValidToken();
+
+            this.log( `Submitting SWE Team job: ${task.substring( 0, 50 )}...` );
+
+            // Build request body — budget and timeout are nullable
+            const body = {
+                task         : task,
+                dry_run      : dryRun,
+                websocket_id : this.queueSessionId
+            };
+
+            const budgetVal = parseFloat( budgetInput.value );
+            if ( !isNaN( budgetVal ) && budgetVal > 0 ) {
+                body.budget = budgetVal;
+            }
+
+            const timeoutVal = parseInt( timeoutInput.value );
+            if ( !isNaN( timeoutVal ) && timeoutVal > 0 ) {
+                body.timeout = timeoutVal;
+            }
+
+            const trustModeSelect = document.getElementById( 'swe-trust-mode' );
+            const trustMode = trustModeSelect ? trustModeSelect.value : '';
+            if ( trustMode ) {
+                body.trust_mode = trustMode;
+            }
+
+            const response = await fetch( '/api/swe-team/submit', {
+                method  : 'POST',
+                headers : {
+                    'Authorization' : this.getAuthHeader(),
+                    'X-Session-ID'  : this.queueSessionId,
+                    'Content-Type'  : 'application/json'
+                },
+                body: JSON.stringify( body )
+            });
+
+            if ( !response.ok ) {
+                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
+                throw new Error( errorData.detail || `HTTP ${response.status}` );
+            }
+
+            const result = await response.json();
+            this.log( "SWE Team job response:", result );
+
+            // Success feedback
+            statusDiv.textContent = `✓ SWE Team job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
+            statusDiv.style.color = '#28a745';
+            taskInput.value = '';
+
+        } catch ( error ) {
+            this.error( "SWE Team job submission failed:", error );
             statusDiv.textContent = `✗ Error: ${error.message}`;
             statusDiv.style.color = '#dc3545';
         } finally {
@@ -3049,13 +3426,11 @@ class NotificationsUI {
     formatNotificationTTSMessage( notification ) {
         // Format notification message for TTS with priority prefix
         // Single source of truth for notification TTS message formatting
-        let ttsMessage = `${notification.type} notification: ${notification.message}`;
+        let ttsMessage = notification.message;
 
-        // Add priority prefix for urgent/high priority notifications
+        // Add priority prefix for urgent notifications
         if ( notification.priority === "urgent" ) {
             ttsMessage = `Urgent! ${ttsMessage}`;
-        } else if ( notification.priority === "high" ) {
-            ttsMessage = `Important! ${ttsMessage}`;
         }
 
         return ttsMessage;
@@ -3326,7 +3701,7 @@ class NotificationsUI {
     }
 
     handleAudioChunk( blobData ) {
-        if ( this.debug ) this.log( `Received audio chunk: ${blobData.size} bytes` );
+        this.log( `🔊 handleAudioChunk: ${blobData.size} bytes, currentTTSMode=${this.currentTTSMode}` );
 
         // TEMPORARY: Only collect chunks for reliable mode (MP3)
         // PCM caching disabled until quality validated
@@ -3346,6 +3721,15 @@ class NotificationsUI {
     }
     
     async handleAudioComplete( data ) {
+        this.log( `🔴 handleAudioComplete: currentTTSMode=${this.currentTTSMode} at ${Date.now()}` );
+
+        // Guard: if stopAudio() already ran (mode is null), skip cleanup
+        // to avoid clobbering a NEW notification's TTS mode that may have started
+        if ( this.currentTTSMode === null ) {
+            this.log( `🔴 handleAudioComplete: SKIPPING - stopAudio() already cleared mode (stale audio_complete from dismissed notification)` );
+            return;
+        }
+
         // Handle pulsing indicator based on TTS mode
         if ( this.currentTTSMode === this.TTS_MODE_INSTANT ) {
             // For instant mode: defer indicator stop until last chunk finishes playing
@@ -3382,17 +3766,16 @@ class NotificationsUI {
             this.playCollectedAudio();
         }
         
-        // Clean up
-        this.currentTTSMode = null;
+        // Clean up - for instant mode, defer mode reset to onended handler
+        // so in-flight chunks aren't dropped prematurely
+        if ( this.currentTTSMode !== this.TTS_MODE_INSTANT ) {
+            this.currentTTSMode = null;
+            this.firstChunkStartTime = null;
+            this.firstChunkPlayed = false;
+            this.currentTTSText = null;
+        }
         this.processedChunks = 0;
         this.sequentialChunksPlayed = 0;
-        
-        // Reset first chunk timing for next request
-        this.firstChunkStartTime = null;
-        this.firstChunkPlayed = false;
-        
-        // Clear current TTS text after caching is complete
-        this.currentTTSText = null;
     }
     
     async cacheGeneratedAudio( audioBlob = null ) {
@@ -3469,6 +3852,12 @@ class NotificationsUI {
         // Convert blob to ArrayBuffer
         const arrayBuffer = await blobData.arrayBuffer();
 
+        // Race condition guard: stopAudio() may have run during the await above
+        if ( this.currentTTSMode === null ) {
+            this.log( `🔴 playPCMChunk: RACE DETECTED - currentTTSMode went null during await, dropping chunk` );
+            return;
+        }
+
         // Convert PCM16 (Int16Array, signed 16-bit little-endian) to Float32Array
         // This is the same approach as Gemini Live
         const pcm16 = new Int16Array( arrayBuffer );
@@ -3508,6 +3897,11 @@ class NotificationsUI {
                 if ( this.debug ) this.log( "PCM playback complete - notifying TTS queue" );
                 this.pcmStreamComplete = false;
                 this.lastPCMSource = null;
+                // Deferred cleanup from handleAudioComplete (instant mode)
+                this.currentTTSMode = null;
+                this.firstChunkStartTime = null;
+                this.firstChunkPlayed = false;
+                this.currentTTSText = null;
                 // Notify TTS queue that playback is complete
                 this.onTTSPlaybackComplete();
             }
@@ -3823,7 +4217,7 @@ class NotificationsUI {
     }
     
     stopAudio() {
-        this.log( "Stopping all audio playback" );
+        this.log( `🔴 stopAudio() CALLED at ${Date.now()}` );
 
         // Stop pulsing indicator on notification card
         this.stopTTSPlayingIndicator( this.currentNotificationId );
@@ -3865,6 +4259,7 @@ class NotificationsUI {
         // Reset scheduling and state
         this.nextScheduledTime = null;
         this.isPlaying = false;
+        this.currentTTSMode = null;  // Prevent incoming WebSocket chunks from being played
         this.audioChunks = [];
         this.processedChunks = 0;
         
@@ -4003,7 +4398,8 @@ class NotificationsUI {
                     status          : metadata.status || 'completed',
                     error           : metadata.error || null,
                     has_interactions: metadata.has_interactions || false,
-                    duration_seconds: metadata.duration_seconds || null
+                    duration_seconds: metadata.duration_seconds || null,
+                    expediting      : metadata.expediting || false
                 };
 
                 // Remove empty message if present
@@ -4092,29 +4488,51 @@ class NotificationsUI {
                     durationLine.remove();
                 }
 
-                // 5. Remove activity log (real-time feed no longer needed, interactions section provides history)
-                const activityLog = card.querySelector( '.job-activity-log' );
-                if ( activityLog ) {
-                    activityLog.remove();
-                    this.log( `[JOB-TRANSITION] Removed activity log for ${jobId}` );
+                // 5. Remove send-message input (no messaging for done jobs)
+                const sendMsg = card.querySelector( '.job-send-message' );
+                if ( sendMsg ) {
+                    sendMsg.remove();
+                    this.log( `[JOB-TRANSITION] Removed send-message UI for ${jobId}` );
+                }
+
+                // 6. Remove cancel button (no cancelling completed jobs)
+                const cancelBtn = header.querySelector( '.job-cancel-button' );
+                if ( cancelBtn ) {
+                    cancelBtn.remove();
+                    header.classList.remove( 'has-cancel' );
+                    this.log( `[JOB-TRANSITION] Removed cancel button for completed ${jobId}` );
+                }
+
+                // 7. Convert live interactions to done-queue lazy-load pattern
+                const interactionsSection = card.querySelector( '.job-interactions-section' );
+                if ( interactionsSection ) {
+                    interactionsSection.classList.remove( 'live-interactions' );
+                    // Update header text
+                    const headerSpan = interactionsSection.querySelector( '.interactions-header span' );
+                    if ( headerSpan ) headerSpan.textContent = '📋 Notification Conversation';
+                    // Collapse and set up for lazy loading
+                    const contentEl = interactionsSection.querySelector( '.interactions-content' );
+                    if ( contentEl ) {
+                        contentEl.classList.add( 'collapsed' );
+                        contentEl.innerHTML = '<div class="interactions-loading">Loading...</div>';
+                    }
+                    // Reset expand button
+                    const expandBtn = interactionsSection.querySelector( '.interactions-expand-btn' );
+                    if ( expandBtn ) expandBtn.textContent = '▶';
                 }
             }
+        }
 
-            // 6. Inject interactions section if not present (card was rendered for run queue)
-            const detailsSection = card.querySelector( '.job-card-details' );
-            if ( detailsSection && !card.querySelector( '.job-interactions-section' ) ) {
-                const interactionsHtml = `
-                    <div class="job-interactions-section" id="job-interactions-${jobId}">
-                        <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${jobId}', event)">
-                            <span>📋 Notification Conversation</span>
-                            <button class="interactions-expand-btn">▶</button>
-                        </div>
-                        <div class="interactions-content collapsed" id="interactions-content-${jobId}">
-                            <div class="interactions-loading">Loading...</div>
-                        </div>
-                    </div>
-                `;
-                detailsSection.insertAdjacentHTML( 'beforeend', interactionsHtml );
+        // Remove cancel button when transitioning to dead queue
+        if ( toQueue === 'dead' ) {
+            const header = card.querySelector( '.job-card-header' );
+            if ( header ) {
+                const cancelBtn = header.querySelector( '.job-cancel-button' );
+                if ( cancelBtn ) {
+                    cancelBtn.remove();
+                    header.classList.remove( 'has-cancel' );
+                    this.log( `[JOB-TRANSITION] Removed cancel button for dead ${jobId}` );
+                }
             }
         }
 
@@ -4263,6 +4681,13 @@ class NotificationsUI {
         // New notification - add to local cache
         this.notificationState.notifications.push( notification );
         this.log( `Processing new notification: ${notification.type}/${notification.priority} - ${notification.message}` );
+
+        // Approach D: Append user_initiated_message to live interaction pane on running job card
+        const notifType = notification.type || notification.notification_type;
+        if ( notifType === 'user_initiated_message' && notification.job_id ) {
+            // Skip DOM append — optimistic render in sendJobMessage() already added the bubble
+            return;
+        }
 
         // Phase 2.2 SSE - Check if this is a response-required notification
         if ( notification.response_requested === true ) {
@@ -4845,9 +5270,9 @@ class NotificationsUI {
             return;
         }
 
-        // Preserve activity log content
-        const oldActivityLog = oldCard.querySelector( '.job-activity-log' );
-        const activityLogHtml = oldActivityLog ? oldActivityLog.innerHTML : null;
+        // Preserve unified conversation content
+        const oldContent = oldCard.querySelector( '.interactions-content' );
+        const conversationHtml = oldContent ? oldContent.innerHTML : null;
 
         // Render new card with full metadata
         const newCardHtml = this.renderJobCard( metadata, queueName );
@@ -4855,60 +5280,100 @@ class NotificationsUI {
         // Replace old card
         oldCard.outerHTML = newCardHtml;
 
-        // Restore activity log if it existed
-        if ( activityLogHtml ) {
-            const newCard = container.querySelector( `.job-card[data-job-id="${jobId}"]` );
-            if ( newCard ) {
-                let activityLog = newCard.querySelector( '.job-activity-log' );
-                if ( !activityLog ) {
-                    activityLog = this.createJobActivityLog( newCard );
-                }
-                if ( activityLog ) {
-                    activityLog.innerHTML = activityLogHtml;
-                }
+        // Restore conversation content if it existed
+        if ( conversationHtml ) {
+            const newContent = document.getElementById( `interactions-content-${jobId}` );
+            if ( newContent ) {
+                newContent.innerHTML = conversationHtml;
             }
         }
 
-        this.log( `[Session 107] Updated job card with full metadata: ${jobId}` );
+        this.log( `[Phase 6] Updated job card with full metadata: ${jobId}` );
     }
 
     appendNotificationToJobCard( jobId, notification ) {
         /**
-         * Append a notification to a job card's activity log.
-         * Session 107: Simplified - searches all queue containers directly.
+         * Append a notification to a job card's unified conversation container.
+         * Writes directly to interactions-content-${jobId} (newest first).
+         * Progress Group: If progress_group_id is set, updates existing entry in-place.
          *
          * Requires:
          *     - jobId is a valid job ID string
          *     - notification has message, priority, timestamp
          *
          * Ensures:
-         *     - Finds job card in DOM (any queue)
-         *     - Creates activity log if not exists
-         *     - Appends notification entry with timestamp
+         *     - Finds interactions-content container by ID
+         *     - If progress_group_id: updates existing entry in-place (or creates first)
+         *     - If no progress_group_id: inserts entry at top (newest first)
          *     - Auto-expands job card if collapsed
          */
-        // Session 107: Search all queue containers for the job card
-        const jobCard = document.querySelector( `.job-card[data-job-id="${jobId}"]` );
+        // Find the unified conversation container
+        const contentEl = document.getElementById( `interactions-content-${jobId}` );
 
-        if ( !jobCard ) {
-            this.log( `[Session 107] Job card not found for notification: ${jobId}` );
+        if ( !contentEl ) {
+            this.log( `[Phase 6] interactions-content not found for ${jobId}` );
             return;
         }
 
-        // Find or create activity log section
-        let activityLog = jobCard.querySelector( '.job-activity-log' );
-        if ( !activityLog ) {
-            activityLog = this.createJobActivityLog( jobCard );
+        // Progress group: update existing entry in-place if one exists
+        const groupId = notification.progress_group_id;
+        if ( groupId ) {
+            const existing = contentEl.querySelector( `[data-progress-group="${groupId}"]` );
+            if ( existing ) {
+                this.updateProgressGroupEntry( existing, notification );
+                return;
+            }
         }
 
-        // Create notification entry - insert after header (newest first)
-        const entry = this.createActivityLogEntry( notification );
-        const header = activityLog.querySelector( '.activity-log-header' );
-        if ( header && header.nextSibling ) {
-            activityLog.insertBefore( entry, header.nextSibling );
-        } else {
-            activityLog.appendChild( entry );
+        // User-initiated messages → right-justified blue chat bubble (same as appendJobUserMessage)
+        const notifType = notification.type || notification.notification_type;
+        if ( notifType === 'user_initiated_message' ) {
+            const ts = notification.timestamp
+                ? new Date( notification.timestamp ).toLocaleTimeString()
+                : new Date().toLocaleTimeString();
+            const urgentClass = notification.priority === 'urgent' ? ' priority-urgent' : '';
+            const priorityBadge = notification.priority === 'urgent' ? ' <strong>[URGENT]</strong>' : '';
+            const entry = document.createElement( 'div' );
+            entry.className = `sender-message outgoing${urgentClass}`;
+            entry.innerHTML = `
+                <span class="message-time">${ts}${priorityBadge}</span>
+                <span class="message-text">${this.renderMarkdownInline( notification.message )}</span>
+            `;
+            contentEl.insertBefore( entry, contentEl.firstChild );
+            if ( !this.expandedJobCards.has( jobId ) ) {
+                this.expandJobCard( jobId );
+            }
+            entry.scrollIntoView( { behavior: 'smooth', block: 'nearest' } );
+            this.log( `[Phase 6] User message appended to job ${jobId}: ${notification.message.substring( 0, 50 )}...` );
+            return;
         }
+
+        // Create notification entry
+        const entry = this.createActivityLogEntry( notification );
+
+        // Tag with progress group ID if present (first occurrence)
+        if ( groupId ) {
+            entry.setAttribute( 'data-progress-group', groupId );
+            entry.classList.add( 'progress-group-entry' );
+            entry.setAttribute( 'data-progress-group-count', '1' );
+
+            // Wrap existing content in progress-group-head div
+            const headDiv = document.createElement( 'div' );
+            headDiv.className = 'progress-group-head';
+            while ( entry.firstChild ) {
+                headDiv.appendChild( entry.firstChild );
+            }
+            entry.appendChild( headDiv );
+
+            // Add proxy ratification link for proxy progress groups
+            const proxyLink = this.createProxyRatifyLink( groupId );
+            if ( proxyLink ) {
+                headDiv.appendChild( proxyLink );
+            }
+        }
+
+        // Insert at top (newest first)
+        contentEl.insertBefore( entry, contentEl.firstChild );
 
         // Auto-expand job card to show new notification
         if ( !this.expandedJobCards.has( jobId ) ) {
@@ -4918,28 +5383,140 @@ class NotificationsUI {
         // Scroll to show new entry
         entry.scrollIntoView( { behavior: 'smooth', block: 'nearest' } );
 
-        this.log( `[Session 107] Notification appended to job ${jobId}: ${notification.message.substring( 0, 50 )}...` );
+        this.log( `[Phase 6] Notification appended to job ${jobId}: ${notification.message.substring( 0, 50 )}...` );
     }
 
-    createJobActivityLog( jobCard ) {
+    updateProgressGroupEntry( element, notification ) {
         /**
-         * Create activity log section in job card.
+         * Update an existing progress group entry with history accumulation.
          *
-         * Returns:
-         *     - DOM element for activity log container
+         * Requires:
+         *     - element is a DOM element with data-progress-group attribute
+         *     - notification has message, timestamp
+         *
+         * Ensures:
+         *     - Moves current head message into history container (newest first)
+         *     - Sets new message + timestamp as head
+         *     - Increments counter, updates toggle text
+         *     - Preserves expanded/collapsed toggle state
+         *     - Triggers CSS pulse animation on head
          */
-        const detailsSection = jobCard.querySelector( '.job-card-details' );
-        if ( !detailsSection ) {
-            this.error( '[Phase 6] Job card details section not found' );
-            return null;
+        const head = element.querySelector( '.progress-group-head' );
+        if ( !head ) return;
+
+        // Read current head values before overwriting
+        const oldMessageSpan = head.querySelector( '.activity-message' );
+        const oldTimestampSpan = head.querySelector( '.activity-timestamp' );
+        const oldMessage = oldMessageSpan ? oldMessageSpan.textContent : '';
+        const oldTimestamp = oldTimestampSpan ? oldTimestampSpan.textContent : '';
+
+        // Create history entry from old head values
+        const historyEntry = document.createElement( 'div' );
+        historyEntry.className = 'progress-history-entry';
+        historyEntry.innerHTML = `
+            <span class="activity-timestamp">${this.escapeHtml( oldTimestamp )}</span>
+            <span class="activity-message">${this.escapeHtml( oldMessage )}</span>
+        `;
+
+        // Get or create history container
+        let history = element.querySelector( '.progress-group-history' );
+        if ( !history ) {
+            history = document.createElement( 'div' );
+            history.className = 'progress-group-history';
+            history.style.display = 'none';
+            element.appendChild( history );
         }
 
-        const activityLog = document.createElement( 'div' );
-        activityLog.className = 'job-activity-log';
-        activityLog.innerHTML = '<div class="activity-log-header">📋 Activity Log</div>';
+        // Prepend old head to history (newest first)
+        history.insertBefore( historyEntry, history.firstChild );
 
-        detailsSection.appendChild( activityLog );
-        return activityLog;
+        // Update head with new notification values
+        if ( oldMessageSpan ) {
+            oldMessageSpan.textContent = this.escapeHtml( notification.message );
+        }
+        if ( oldTimestampSpan ) {
+            const timestamp = notification.timestamp
+                ? new Date( notification.timestamp ).toLocaleTimeString()
+                : new Date().toLocaleTimeString();
+            oldTimestampSpan.textContent = timestamp;
+        }
+
+        // Increment counter
+        let count = parseInt( element.getAttribute( 'data-progress-group-count' ) || '1', 10 ) + 1;
+        element.setAttribute( 'data-progress-group-count', String( count ) );
+
+        // Find or create toggle (replaces old counter badge)
+        let toggle = element.querySelector( '.progress-group-toggle' );
+        if ( !toggle ) {
+            toggle = document.createElement( 'span' );
+            toggle.className = 'progress-group-toggle';
+            toggle.title = 'Show history';
+            head.appendChild( toggle );
+        }
+
+        // Update toggle text — preserve expanded/collapsed state
+        const isExpanded = history.style.display !== 'none';
+        const chevron = isExpanded ? '&#9650;' : '&#9660;';
+        toggle.innerHTML = `${chevron} #${count}`;
+
+        // Trigger CSS pulse animation on head
+        head.classList.remove( 'progress-group-updated' );
+        void head.offsetWidth;
+        head.classList.add( 'progress-group-updated' );
+    }
+
+    /**
+     * Create a proxy ratification link element for proxy progress group notifications.
+     *
+     * @param {string} groupId - The progress group ID (must start with 'pr-')
+     * @returns {HTMLAnchorElement} - The link element, or null if not a proxy group
+     */
+    createProxyRatifyLink( groupId ) {
+        if ( !groupId || !groupId.startsWith( 'pr-' ) ) return null;
+
+        const link = document.createElement( 'a' );
+        link.className = 'proxy-ratify-link';
+        link.href = '#';
+        link.textContent = 'Open Ratification →';
+        link.setAttribute( 'data-batch-id', groupId );
+
+        const self = this;
+        link.onclick = async function( e ) {
+            e.preventDefault();
+
+            // 1. Call acknowledge endpoint to retire this batch
+            try {
+                const response = await fetch( '/api/proxy/acknowledge', {
+                    method  : 'POST',
+                    headers : self.getAuthHeaders()
+                });
+                if ( !response.ok ) {
+                    console.warn( '[PROXY] Acknowledge response not OK:', response.status );
+                }
+            } catch ( err ) {
+                console.warn( '[PROXY] Acknowledge failed:', err );
+            }
+
+            // 2. Gray out this element + add checkmark
+            const entry = this.closest( '.progress-group-entry' );
+            if ( entry ) {
+                entry.classList.add( 'progress-batch-retired' );
+                const head = entry.querySelector( '.progress-group-head' );
+                if ( head ) {
+                    const check = document.createElement( 'span' );
+                    check.className = 'batch-retired-indicator';
+                    check.textContent = ' ✅';
+                    head.appendChild( check );
+                }
+                // Remove the link itself
+                this.remove();
+            }
+
+            // 3. Open (or focus) ratification page in single tab
+            window.open( '/app/admin/proxy-ratify', 'lupin-proxy-ratify' );
+        };
+
+        return link;
     }
 
     createActivityLogEntry( notification ) {
@@ -4956,9 +5533,15 @@ class NotificationsUI {
             ? new Date( notification.timestamp ).toLocaleTimeString()
             : new Date().toLocaleTimeString();
 
+        // Abstract indicator — clickable 📋 that opens the abstract tooltip
+        const hasAbstract = notification.abstract && notification.abstract.trim().length > 0;
+        const abstractHtml = hasAbstract
+            ? ` <span class="abstract-indicator" data-abstract="${encodeURIComponent( notification.abstract )}" title="View details">📋</span>`
+            : '';
+
         entry.innerHTML = `
             <span class="activity-timestamp">${timestamp}</span>
-            <span class="activity-message">${this.escapeHtml( notification.message )}</span>
+            <span class="activity-message">${this.escapeHtml( notification.message )}${abstractHtml}</span>
         `;
 
         return entry;
@@ -4987,6 +5570,7 @@ class NotificationsUI {
             'dr'   : 'Deep Research',
             'pg'   : 'Podcast Generator',
             'd2p'  : 'Deep Research → Podcast',
+            'swe'  : 'SWE Team',
             'mock' : 'Mock Agent'
         };
 
@@ -5047,7 +5631,7 @@ class NotificationsUI {
         if ( !abstract ) return '';
         return `
             <div class="abstract-header">📄 Summary</div>
-            <div class="abstract-content">${this.escapeHtml( abstract )}</div>
+            <div class="abstract-content">${this.renderMarkdown( abstract )}</div>
         `;
     }
 
@@ -5118,6 +5702,11 @@ class NotificationsUI {
             statusIndicator = '<span class="status-indicator spinning" title="Running">⟳</span>';
         }
 
+        // Expediting job in todo queue: pulsing indicator while expeditor collects args
+        if ( queueName === 'todo' && job.expediting ) {
+            statusIndicator = '<span class="status-indicator expediting" title="Setting up...">⟳</span>';
+        }
+
         // Done job: completion badge
         let completionBadge = '';
         if ( queueName === 'done' ) {
@@ -5160,9 +5749,16 @@ class NotificationsUI {
         // Session 107: Removed provisionalAttr - no longer using provisional registration
         // ═══════════════════════════════════════════════════════════════════
 
+        const hasCancelBtn = ( queueName === 'run' || queueName === 'todo' );
+        const cancelBtnHtml = hasCancelBtn
+            ? `<button type="button" class="job-cancel-button" id="job-cancel-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.cancelJob('${jobId}')" title="Cancel this job">✕</button>`
+            : '';
+        const headerCancelClass = hasCancelBtn ? ' has-cancel' : '';
+
         return `
             <div class="job-card ${statusClass}" id="job-card-${jobId}" data-job-id="${jobId}">
-                <div class="job-card-header" onclick="window.notificationsUI.toggleJobCard('${jobId}', '${queueName}')">
+                <div class="job-card-header${headerCancelClass}" onclick="window.notificationsUI.toggleJobCard('${jobId}', '${queueName}')">
+                    ${cancelBtnHtml}
                     ${agentBadge}${cacheHitBadge}${completionBadge}
                     <span class="job-question">${this.escapeHtml( truncatedQuestion )}</span>
                     ${statusIndicator}${interactionIndicator}
@@ -5193,6 +5789,30 @@ class NotificationsUI {
                         <span>Agent: ${job.agent_type || 'Unknown'}</span>
                         <span>Time: ${timestamp}</span>
                     </div>
+                    ${( queueName === 'run' || queueName === 'todo' ) ? `
+                    <div class="job-interactions-section live-interactions" id="job-interactions-${jobId}">
+                        <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${jobId}', event)">
+                            <span>📋 Activity Log</span>
+                            <button class="interactions-expand-btn">▶</button>
+                        </div>
+                        <div class="job-send-message" id="job-send-msg-${jobId}">
+                            <div class="job-send-message-row">
+                                <button type="button" class="stt-button" id="job-msg-stt-${jobId}"
+                                        title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <input type="text" id="job-msg-input-${jobId}" class="job-msg-input"
+                                       placeholder="Send message to job..." />
+                                <label class="urgent-toggle" title="Mark as urgent (interrupts current task)">
+                                    <input type="checkbox" id="job-msg-urgent-${jobId}" />
+                                    ⚡
+                                </label>
+                                <button type="button" class="response-submit-button"
+                                        id="job-msg-submit-${jobId}">Send</button>
+                            </div>
+                        </div>
+                        <div class="interactions-content collapsed" id="interactions-content-${jobId}">
+                        </div>
+                    </div>
+                    ` : ''}
                     ${queueName === 'done' ? `
                     <div class="job-interactions-section" id="job-interactions-${jobId}">
                         <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${jobId}', event)">
@@ -5232,6 +5852,163 @@ class NotificationsUI {
             if ( expandBtn ) expandBtn.textContent = '▼';
             this.expandedJobCards.add( jobId );
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Approach D: Job Message Send — User-to-Job Communication
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    async sendJobMessage( jobId ) {
+        /**
+         * Send a user message to a running job via POST /api/jobs/{jobId}/message.
+         *
+         * Reads input text and urgent checkbox state, POSTs to the API,
+         * and appends the message to the job's live interaction pane on success.
+         *
+         * Requires:
+         *     - jobId is a valid running job ID
+         *     - DOM elements job-msg-input-{jobId} and job-msg-urgent-{jobId} exist
+         *
+         * Ensures:
+         *     - Message sent to API on valid input
+         *     - Input cleared on success
+         *     - Message appended to live interaction pane (optimistic UI)
+         *     - Error shown inline on failure
+         */
+        const input    = document.getElementById( `job-msg-input-${jobId}` );
+        const urgentCb = document.getElementById( `job-msg-urgent-${jobId}` );
+        const sendBtn  = document.getElementById( `job-msg-submit-${jobId}` );
+
+        if ( !input ) return;
+
+        const message  = input.value.trim();
+        const priority = urgentCb && urgentCb.checked ? 'urgent' : 'normal';
+
+        if ( !message ) {
+            input.focus();
+            return;
+        }
+
+        // Disable controls and clear input immediately
+        input.disabled   = true;
+        sendBtn.disabled = true;
+        input.value      = '';
+        if ( urgentCb ) {
+            urgentCb.checked = false;
+            const label = urgentCb.closest( '.urgent-toggle' );
+            if ( label ) label.classList.remove( 'checked' );
+        }
+
+        // TRUE optimistic render — append user bubble BEFORE the fetch so
+        // the bubble appears above any echo the server sends back via WebSocket
+        this.appendJobUserMessage( jobId, message, priority );
+
+        // Auto-expand conversation if collapsed
+        const contentEl = document.getElementById( `interactions-content-${jobId}` );
+        if ( contentEl && contentEl.classList.contains( 'collapsed' ) ) {
+            contentEl.classList.remove( 'collapsed' );
+            const section = document.getElementById( `job-interactions-${jobId}` );
+            const expandBtn = section ? section.querySelector( '.interactions-expand-btn' ) : null;
+            if ( expandBtn ) expandBtn.textContent = '▼';
+        }
+
+        try {
+            const response = await fetch( `/api/jobs/${jobId}/message`, {
+                method  : 'POST',
+                headers : {
+                    'Content-Type'  : 'application/json',
+                    'Authorization' : this.getAuthHeader(),
+                },
+                body: JSON.stringify( { message, priority } ),
+            } );
+
+            if ( !response.ok ) {
+                const errData = await response.json().catch( () => ( {} ) );
+                throw new Error( errData.detail || `HTTP ${response.status}` );
+            }
+
+            this.log( `[JOB-MSG] Sent to ${jobId}: ${message.substring( 0, 80 )}` );
+
+        } catch ( error ) {
+            this.error( `[JOB-MSG] Failed to send message to ${jobId}:`, error );
+            // Show inline error
+            input.style.borderColor = '#dc3545';
+            setTimeout( () => { input.style.borderColor = ''; }, 3000 );
+        } finally {
+            input.disabled  = false;
+            sendBtn.disabled = false;
+            input.focus();
+        }
+    }
+
+    async cancelJob( jobId ) {
+        /**
+         * Request graceful cancellation of a running agentic job.
+         *
+         * POSTs to /api/jobs/{jobId}/cancel. On success, the job stops at the
+         * next checkpoint and transitions to the dead queue via WebSocket.
+         *
+         * Requires:
+         *     - jobId is a valid running agentic job ID
+         *
+         * Ensures:
+         *     - Confirmation dialog shown before cancel
+         *     - Button disabled while request is in-flight
+         *     - Card moves to dead queue via normal WebSocket transition on success
+         */
+        if ( !confirm( 'Cancel this job? It will stop at the next checkpoint.' ) ) return;
+
+        const cancelBtn = document.getElementById( `job-cancel-${jobId}` );
+        if ( cancelBtn ) {
+            cancelBtn.disabled  = true;
+            cancelBtn.innerText = 'Cancelling...';
+        }
+
+        try {
+            const response = await fetch( `/api/jobs/${jobId}/cancel`, {
+                method  : 'POST',
+                headers : { 'Authorization': this.getAuthHeader() },
+            } );
+
+            if ( !response.ok ) {
+                const errData = await response.json().catch( () => ( {} ) );
+                throw new Error( errData.detail || `HTTP ${response.status}` );
+            }
+
+            this.log( `[JOB-CANCEL] Cancel requested for ${jobId}` );
+            // On success, WebSocket state transition will move card to dead queue
+
+        } catch ( error ) {
+            this.error( `[JOB-CANCEL] Failed to cancel ${jobId}:`, error );
+            alert( `Cancel failed: ${error.message}` );
+            if ( cancelBtn ) {
+                cancelBtn.disabled  = false;
+                cancelBtn.innerText = 'Cancel Job';
+            }
+        }
+    }
+
+    appendJobUserMessage( jobId, message, priority ) {
+        /**
+         * Append a user-sent message to the job's unified conversation pane.
+         *
+         * Creates an outgoing chat bubble (sender-message outgoing) and
+         * inserts it at the top (newest first) of the conversation.
+         */
+        const contentEl = document.getElementById( `interactions-content-${jobId}` );
+        if ( !contentEl ) return;
+
+        const timestamp = new Date().toLocaleTimeString();
+        const priorityBadge = priority === 'urgent' ? ' <strong>[URGENT]</strong>' : '';
+
+        const itemHtml = `
+            <div class="sender-message outgoing animated-in${priority === 'urgent' ? ' priority-urgent' : ''}">
+                <span class="message-time">${timestamp}${priorityBadge}</span>
+                <span class="message-text">${this.renderMarkdownInline( message )}</span>
+            </div>
+        `;
+
+        contentEl.insertAdjacentHTML( 'afterbegin', itemHtml );
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -5296,6 +6073,12 @@ class NotificationsUI {
             if ( !this.jobInteractionsCache.has( jobId ) ) {
                 await this.loadJobInteractions( jobId );
             }
+
+            // Scroll the "Notification Conversation" header to the top of the viewport
+            const sectionEl = headerEl ? headerEl.closest( '.job-interactions-section' ) : null;
+            if ( sectionEl ) {
+                sectionEl.scrollIntoView( { behavior: 'smooth', block: 'start' } );
+            }
         }
     }
 
@@ -5328,10 +6111,92 @@ class NotificationsUI {
         }
     }
 
+    formatResponseValue( responseValue ) {
+        /**
+         * Format a notification response value for human-readable display.
+         * Parses JSON envelope { value, source } and formats the inner value.
+         *
+         * Requires:
+         *   - responseValue is a string, object, or primitive
+         *
+         * Ensures:
+         *   - returns an HTML-safe string with the human-readable value
+         *   - nested JSON answers are formatted as "key: value, ..." pairs
+         */
+        let parsed = responseValue;
+
+        // Parse string to object if needed
+        if ( typeof parsed === 'string' ) {
+            try {
+                parsed = JSON.parse( parsed );
+            } catch ( e ) {
+                return this.escapeHtml( parsed );  // Not JSON — show as-is
+            }
+        }
+
+        // Extract inner value from { value, source } envelope
+        if ( parsed && typeof parsed === 'object' && 'value' in parsed ) {
+            let innerValue = parsed.value;
+
+            // Try parsing nested JSON (open_ended_batch wraps answers as string)
+            if ( typeof innerValue === 'string' ) {
+                try {
+                    const nested = JSON.parse( innerValue );
+                    if ( nested && typeof nested === 'object' ) {
+                        // Format answers dict as readable key-value pairs
+                        if ( nested.answers && typeof nested.answers === 'object' ) {
+                            const pairs = Object.entries( nested.answers )
+                                .map( ( [ k, v ] ) => `${k}: ${v}` )
+                                .join( ', ' );
+                            return this.escapeHtml( pairs );
+                        }
+                        // Generic object — format as key-value pairs
+                        const pairs = Object.entries( nested )
+                            .map( ( [ k, v ] ) => `${k}: ${v}` )
+                            .join( ', ' );
+                        return this.escapeHtml( pairs );
+                    }
+                } catch ( e ) {
+                    // Not nested JSON — use the string value directly
+                }
+                return this.escapeHtml( innerValue );
+            }
+
+            // Non-string inner value
+            return this.escapeHtml( String( innerValue ) );
+        }
+
+        // Fallback: stringify the object
+        return this.escapeHtml( JSON.stringify( parsed ) );
+    }
+
     renderInteractionItem( interaction ) {
         /**
          * Render a single notification interaction.
+         *
+         * User-initiated messages (type="user_initiated_message") render as
+         * outgoing chat bubbles; all other types render as system entries.
          */
+        let timestamp = '';
+        try {
+            timestamp = new Date( interaction.timestamp ).toLocaleTimeString();
+        } catch ( e ) {
+            timestamp = interaction.timestamp || '';
+        }
+
+        // User-initiated messages → outgoing chat bubble (same style as live send)
+        if ( interaction.type === 'user_initiated_message' ) {
+            const urgentClass = interaction.priority === 'urgent' ? ' priority-urgent' : '';
+            const priorityBadge = interaction.priority === 'urgent' ? ' <strong>[URGENT]</strong>' : '';
+            return `
+                <div class="sender-message outgoing${urgentClass}">
+                    <span class="message-time">${timestamp}${priorityBadge}</span>
+                    <span class="message-text">${this.renderMarkdownInline( interaction.message )}</span>
+                </div>
+            `;
+        }
+
+        // System notifications → standard interaction item
         const typeIcons = {
             'task'    : '📋',
             'progress': '⏳',
@@ -5340,25 +6205,22 @@ class NotificationsUI {
         };
         const typeIcon = typeIcons[ interaction.type ] || '📋';
 
-        let timestamp = '';
-        try {
-            timestamp = new Date( interaction.timestamp ).toLocaleTimeString();
-        } catch ( e ) {
-            timestamp = interaction.timestamp || '';
-        }
-
         let responseHtml = '';
         if ( interaction.response_requested && interaction.response_value ) {
-            const responseStr = typeof interaction.response_value === 'object'
-                ? JSON.stringify( interaction.response_value )
-                : String( interaction.response_value );
+            const responseStr = this.formatResponseValue( interaction.response_value );
             responseHtml = `
-                <div class="interaction-response">
-                    <span class="response-label">Your response:</span>
-                    <span class="response-value">${this.escapeHtml( responseStr )}</span>
+                <div class="sender-message outgoing">
+                    <span class="message-time">${timestamp}</span>
+                    <span class="message-text">${responseStr}</span>
                 </div>
             `;
         }
+
+        // Abstract indicator — clickable 📋 that opens the abstract tooltip
+        const hasAbstract = interaction.abstract && interaction.abstract.trim().length > 0;
+        const abstractIndicator = hasAbstract
+            ? ` <span class="abstract-indicator" data-abstract="${encodeURIComponent( interaction.abstract )}" title="View details">📋</span>`
+            : '';
 
         return `
             <div class="interaction-item priority-${interaction.priority || 'medium'}">
@@ -5366,9 +6228,9 @@ class NotificationsUI {
                     <span class="interaction-type">${typeIcon} ${interaction.type}</span>
                     <span class="interaction-time">${timestamp}</span>
                 </div>
-                <div class="interaction-message">${this.escapeHtml( interaction.message || '' )}</div>
-                ${responseHtml}
+                <div class="interaction-message">${this.escapeHtml( interaction.message || '' )}${abstractIndicator}</div>
             </div>
+            ${responseHtml}
         `;
     }
 
@@ -6668,17 +7530,27 @@ class NotificationsUI {
     }
 
     /**
-     * Extract date string from ISO timestamp, preserving server timezone.
+     * Extract date string from ISO timestamp, resolved to appTimezone.
+     * Converts any ISO timestamp (UTC "Z" or offset-bearing) to the server's
+     * configured timezone before extracting the date portion.
      * Falls back to local date if timestamp is missing or invalid.
-     * @param {string|null} isoTimestamp - ISO 8601 timestamp (e.g., "2026-01-06T02:30:00-05:00")
-     * @returns {string} ISO date string (YYYY-MM-DD)
+     * @param {string|null} isoTimestamp - ISO 8601 timestamp (e.g., "2026-03-03T03:36:00.000Z")
+     * @returns {string} ISO date string (YYYY-MM-DD) in appTimezone
      */
     extractDateFromTimestamp( isoTimestamp ) {
         if ( isoTimestamp && typeof isoTimestamp === 'string' && isoTimestamp.includes( 'T' ) ) {
-            return isoTimestamp.split( 'T' )[ 0 ];
+            const parsed = new Date( isoTimestamp );
+            if ( !isNaN( parsed.getTime() ) ) {
+                return parsed.toLocaleDateString( 'en-CA', {
+                    timeZone : this.appTimezone,
+                    year     : 'numeric',
+                    month    : '2-digit',
+                    day      : '2-digit'
+                } );
+            }
         }
-        // Fallback: use local date (existing behavior for edge cases)
-        return this.getDateString( new Date() );
+        // Fallback: use appTimezone-aware local date
+        return this.getLocalDateDisplay();
     }
 
     /**
@@ -6775,7 +7647,10 @@ class NotificationsUI {
         // Build session display string (only if session_id present)
         // Session name is clickable for inline editing, gist button triggers LLM summary
         const sessionDisplay = sessionId
-            ? `<span class="sender-session-id">#${sessionId}</span>
+            ? `<span class="sender-session-id"
+                     onclick="event.stopPropagation();">#${sessionId}</span><span class="sender-session-copy copy-btn"
+                     onclick="event.stopPropagation(); window.notificationsUI.copySenderSessionId( this )"
+                     title="Copy session ID">📋</span>
                <button class="sender-gist-btn"
                        onclick="event.stopPropagation(); window.notificationsUI.generateSessionGist('${escapedSenderId}')"
                        title="Generate smart gist from conversation">✨</button>
@@ -6795,6 +7670,23 @@ class NotificationsUI {
         card.className = `sender-card${activeClass}`;
         card.setAttribute( 'data-project', parsed.project );
         card.setAttribute( 'data-session-id', sessionId || '' );
+        // Build CC voice input row (only for claude.code sessions with a session ID)
+        const isCCSession  = parsed.agentType === 'claude.code' && sessionId;
+        const ccVoiceInput = isCCSession ? `
+            <div class="cc-voice-input" data-session-hash="${sessionId}" data-sender-id="${senderId}">
+                <div class="cc-voice-input-row">
+                    <button type="button" class="stt-button cc-session-stt"
+                            id="cc-session-stt-${sessionId}"
+                            title="Click to record (30s max, ESC to cancel)">🎤</button>
+                    <input type="text" class="cc-session-msg-input"
+                           id="cc-session-input-${sessionId}"
+                           placeholder="Send voice/text to CC session..." />
+                    <button type="button" class="response-submit-button cc-session-send"
+                            id="cc-session-send-${sessionId}">Send</button>
+                </div>
+            </div>
+        ` : '';
+
         card.innerHTML = `
             <div class="sender-card-header" onclick="window.notificationsUI.toggleSenderCard('${escapedSenderId}')">
                 <span class="sender-active-indicator" title="${activeTitle}">${activeIndicator}</span>
@@ -6809,6 +7701,7 @@ class NotificationsUI {
                 <button class="sender-delete-btn" onclick="event.stopPropagation(); window.notificationsUI.deleteSenderConversation('${escapedSenderId}')" title="Delete all">×</button>
                 <span class="sender-toggle">▼</span>
             </div>
+            ${ccVoiceInput}
             <div class="sender-card-dates" id="sender-dates-${senderId.replace( /[@.#]/g, '-' )}">
                 <!-- Date accordions will be added here -->
             </div>
@@ -6846,7 +7739,7 @@ class NotificationsUI {
             <div class="date-accordion-header" onclick="window.notificationsUI.toggleDateAccordion('${escapedSenderId}', '${dateString}')">
                 <span class="date-text">${dateString}</span>
                 <span class="date-count">(0)</span>
-                <button class="date-delete-btn" onclick="event.stopPropagation(); window.notificationsUI.softDeleteByDate('${escapedSenderId}', '${dateString}')" title="Hide this day">🗑️</button>
+                <button class="date-delete-btn" onclick="event.stopPropagation(); window.notificationsUI.softDeleteByDate('${escapedSenderId}', '${dateString}')" title="Delete this day">×</button>
                 <span class="date-toggle">▼</span>
             </div>
             <div class="date-accordion-messages" id="date-messages-${senderId.replace( /[@.#]/g, '-' )}-${dateString}">
@@ -6867,6 +7760,23 @@ class NotificationsUI {
                 insertBefore = existing;
                 break;
             }
+        }
+
+        // Delegated click handler for progress group toggles within this date accordion
+        const messagesContainer = accordion.querySelector( '.date-accordion-messages' );
+        if ( messagesContainer ) {
+            messagesContainer.addEventListener( 'click', ( e ) => {
+                const toggle = e.target.closest( '.progress-group-toggle' );
+                if ( !toggle ) return;
+                const entry = toggle.closest( '.progress-group-entry' );
+                if ( !entry ) return;
+                const history = entry.querySelector( '.progress-group-history' );
+                if ( !history ) return;
+                const isExpanded = history.style.display !== 'none';
+                history.style.display = isExpanded ? 'none' : 'block';
+                const count = entry.getAttribute( 'data-progress-group-count' );
+                toggle.innerHTML = ( isExpanded ? '&#9660;' : '&#9650;' ) + ` #${count}`;
+            } );
         }
 
         if ( insertBefore ) {
@@ -6937,6 +7847,16 @@ class NotificationsUI {
             return;
         }
 
+        // Progress group: update existing message in-place if one exists
+        const groupId = notification.progress_group_id;
+        if ( groupId && !isResponse ) {
+            const existing = container.querySelector( `[data-progress-group="${groupId}"]` );
+            if ( existing ) {
+                this.updateSenderProgressGroupEntry( existing, notification );
+                return;
+            }
+        }
+
         // Format timestamp for display (time only since date is in header)
         // Prefer backend-provided time_display (includes timezone abbreviation: "23:10 EST")
         // Fall back to JavaScript formatting for legacy data
@@ -6961,12 +7881,6 @@ class NotificationsUI {
             cleanMessage = this.formatMultipleChoiceResponse( cleanMessage );
         }
 
-        // Truncate long messages
-        const maxLength = 120;
-        const displayMessage = cleanMessage.length > maxLength
-            ? cleanMessage.substring( 0, maxLength ) + '...'
-            : cleanMessage;
-
         // Build CSS class - add expired-response if notification was expired
         const isExpired = notification.was_expired === true;
         let cssClass = `sender-message ${isResponse ? 'outgoing' : 'incoming'}`;
@@ -6986,16 +7900,130 @@ class NotificationsUI {
         const messageDiv = document.createElement( 'div' );
         messageDiv.className = cssClass;
         messageDiv.id = notification.id || notification.id_hash || '';  // Set ID for TTS indicator
-        messageDiv.innerHTML = `
-            <span class="message-time">${timeStr}</span>
-            <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${displayMessage}${expiredBadge}${abstractIndicator}</span>
-        `;
+
+        // Tag with progress group ID if present (first occurrence in sender card)
+        if ( groupId && !isResponse ) {
+            messageDiv.setAttribute( 'data-progress-group', groupId );
+            messageDiv.classList.add( 'progress-group-entry' );
+            messageDiv.setAttribute( 'data-progress-group-count', '1' );
+
+            // Wrap content in progress-group-head div for accordion structure
+            messageDiv.innerHTML = `
+                <div class="progress-group-head">
+                    <span class="message-time">${timeStr}</span>
+                    <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${this.renderMarkdownInline( cleanMessage )}${expiredBadge}${abstractIndicator}</span>
+                </div>
+            `;
+
+            // Add proxy ratification link for proxy progress groups
+            const proxyLink = this.createProxyRatifyLink( groupId );
+            if ( proxyLink ) {
+                messageDiv.querySelector( '.progress-group-head' ).appendChild( proxyLink );
+            }
+        } else {
+            messageDiv.innerHTML = `
+                <span class="message-time">${timeStr}</span>
+                <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${this.renderMarkdownInline( cleanMessage )}${expiredBadge}${abstractIndicator}</span>
+            `;
+        }
 
         // Add to top (newest first)
         container.insertBefore( messageDiv, container.firstChild );
 
         // Update date accordion count
         this.updateDateAccordionCount( senderId, dateString );
+    }
+
+    updateSenderProgressGroupEntry( element, notification ) {
+        /**
+         * Update an existing progress group entry with history accumulation (sender card path).
+         *
+         * Requires:
+         *     - element is a DOM element with data-progress-group attribute
+         *     - notification has message, timestamp/time_display
+         *
+         * Ensures:
+         *     - Moves current head message into history container (newest first)
+         *     - Sets new message + timestamp as head
+         *     - Increments counter, updates toggle text
+         *     - Preserves expanded/collapsed toggle state
+         *     - Triggers CSS pulse animation on head
+         */
+        const head = element.querySelector( '.progress-group-head' );
+        if ( !head ) return;
+
+        // Read current head values before overwriting
+        const oldTimeSpan = head.querySelector( '.message-time' );
+        const oldMessageSpan = head.querySelector( '.message-text' );
+        const oldTime = oldTimeSpan ? oldTimeSpan.textContent : '';
+        const oldMessage = oldMessageSpan ? oldMessageSpan.textContent : '';
+
+        // Create history entry from old head values
+        const historyEntry = document.createElement( 'div' );
+        historyEntry.className = 'progress-history-entry';
+        historyEntry.innerHTML = `
+            <span class="activity-timestamp">${this.escapeHtml( oldTime )}</span>
+            <span class="activity-message">${this.escapeHtml( oldMessage )}</span>
+        `;
+
+        // Get or create history container
+        let history = element.querySelector( '.progress-group-history' );
+        if ( !history ) {
+            history = document.createElement( 'div' );
+            history.className = 'progress-group-history';
+            history.style.display = 'none';
+            element.appendChild( history );
+        }
+
+        // Prepend old head to history (newest first)
+        history.insertBefore( historyEntry, history.firstChild );
+
+        // Clean new message
+        let cleanMessage = notification.message || '';
+        cleanMessage = cleanMessage.replace( /^\[[A-Z]+\]\s*/, '' );
+
+        // Update head with new notification values
+        if ( oldMessageSpan ) {
+            oldMessageSpan.innerHTML = this.renderMarkdownInline( cleanMessage );
+            oldMessageSpan.title = cleanMessage.replace( /"/g, '&quot;' );
+        }
+        if ( oldTimeSpan ) {
+            let timeStr;
+            if ( notification.time_display ) {
+                timeStr = notification.time_display;
+            } else {
+                const timestamp = new Date( notification.timestamp || Date.now() );
+                timeStr = timestamp.toLocaleTimeString( 'en-US', {
+                    hour   : '2-digit',
+                    minute : '2-digit',
+                    hour12 : false
+                });
+            }
+            oldTimeSpan.textContent = timeStr;
+        }
+
+        // Increment counter
+        let count = parseInt( element.getAttribute( 'data-progress-group-count' ) || '1', 10 ) + 1;
+        element.setAttribute( 'data-progress-group-count', String( count ) );
+
+        // Find or create toggle (replaces old counter badge)
+        let toggle = element.querySelector( '.progress-group-toggle' );
+        if ( !toggle ) {
+            toggle = document.createElement( 'span' );
+            toggle.className = 'progress-group-toggle';
+            toggle.title = 'Show history';
+            head.appendChild( toggle );
+        }
+
+        // Update toggle text — preserve expanded/collapsed state
+        const isExpanded = history.style.display !== 'none';
+        const chevron = isExpanded ? '&#9650;' : '&#9660;';
+        toggle.innerHTML = `${chevron} #${count}`;
+
+        // Trigger CSS pulse animation on head
+        head.classList.remove( 'progress-group-updated' );
+        void head.offsetWidth;
+        head.classList.add( 'progress-group-updated' );
     }
 
     /**
@@ -7142,16 +8170,11 @@ class NotificationsUI {
             displayMessage = prefixMatch[2];  // Remove prefix
         }
 
-        // Truncate long messages
-        const truncatedMessage = displayMessage.length > 120
-            ? displayMessage.substring( 0, 117 ) + '...'
-            : displayMessage;
-
         const messageDiv = document.createElement( 'div' );
         messageDiv.className = `sender-message ${isResponse ? 'outgoing' : 'incoming'}`;
         messageDiv.innerHTML = `
             <span class="message-time">${time}${isResponse ? ' →' : ''}</span>
-            <span class="message-text" title="${displayMessage}">${truncatedMessage}</span>
+            <span class="message-text" title="${displayMessage}">${this.renderMarkdownInline( displayMessage )}</span>
         `;
 
         // Prepend to container so newest messages always appear at top
@@ -7999,7 +9022,7 @@ class NotificationsUI {
             return;
         }
 
-        const count = group.notifications.length;
+        const count = group.totalCount;
 
         // Confirm before clearing (destructive action)
         if ( !confirm( `Delete all ${count} message${count !== 1 ? 's' : ''} from ${projectName}? This cannot be undone.` ) ) {
@@ -8385,6 +9408,68 @@ class NotificationsUI {
             return tempDiv.innerHTML;
         } catch ( error ) {
             this.error( `Markdown rendering failed: ${error.message}` );
+            return this.escapeHtml( text );
+        }
+    }
+
+    /**
+     * Render markdown text to sanitized inline HTML (no block elements).
+     * Uses marked.parseInline() to avoid wrapping output in <p> tags,
+     * making it safe for use inside <span> elements (chat bubbles).
+     *
+     * Requires:
+     *     - marked.js loaded globally (window.marked)
+     *     - DOMPurify loaded globally (window.DOMPurify)
+     *     - text is a string (can be empty/null)
+     *
+     * Ensures:
+     *     - Returns sanitized inline HTML string safe for innerHTML inside <span>
+     *     - Returns empty string if text is null/undefined/empty
+     *     - Only inline elements rendered: bold, italic, code, links, strikethrough
+     *     - All block elements and dangerous HTML/JS removed
+     *
+     * @param {string} text - Raw markdown text to render
+     * @returns {string} - Sanitized inline HTML string
+     */
+    renderMarkdownInline( text ) {
+        if ( !text ) return '';
+
+        // Normalize escaped newlines to actual newlines
+        text = text.replace( /\\n/g, '\n' );
+
+        // Check if libraries are available
+        if ( typeof marked === 'undefined' || typeof DOMPurify === 'undefined' ) {
+            return this.escapeHtml( text );
+        }
+
+        try {
+            marked.setOptions( {
+                gfm    : true,
+                breaks : true
+            } );
+
+            // parseInline() produces NO wrapping <p> tags
+            const rawHtml = marked.parseInline( text );
+
+            const sanitizedHtml = DOMPurify.sanitize( rawHtml, {
+                ALLOWED_TAGS : [ 'strong', 'b', 'em', 'i', 'u', 's', 'del', 'a', 'code', 'br' ],
+                ALLOWED_ATTR : [ 'href', 'target', 'rel', 'title' ],
+                ADD_ATTR     : [ 'target', 'rel' ],
+                FORBID_TAGS  : [ 'script', 'style', 'iframe', 'form', 'input', 'img', 'p', 'div' ],
+                FORBID_ATTR  : [ 'onerror', 'onclick', 'onload', 'onmouseover' ]
+            } );
+
+            // Post-process: add target="_blank" and rel="noopener" to all links
+            const tempDiv = document.createElement( 'div' );
+            tempDiv.innerHTML = sanitizedHtml;
+            tempDiv.querySelectorAll( 'a' ).forEach( link => {
+                link.setAttribute( 'target', '_blank' );
+                link.setAttribute( 'rel', 'noopener noreferrer' );
+            } );
+
+            return tempDiv.innerHTML;
+        } catch ( error ) {
+            this.error( `Inline markdown rendering failed: ${error.message}` );
             return this.escapeHtml( text );
         }
     }
@@ -9050,6 +10135,16 @@ class NotificationsUI {
         iconDiv.className = 'tts-type-icon';
         iconDiv.textContent = icon;
 
+        // Timestamp span (matches .message-time styling used by conversation elements)
+        const timeSpan = document.createElement( 'span' );
+        timeSpan.className = 'message-time';
+        if ( item.notification?.time_display ) {
+            timeSpan.textContent = item.notification.time_display;
+        } else {
+            const ts = new Date( item.addedAt );
+            timeSpan.textContent = ts.toLocaleTimeString( 'en-US', { hour: '2-digit', minute: '2-digit', hour12: false } );
+        }
+
         const messageDiv = document.createElement( 'div' );
         messageDiv.className = 'tts-message';
         messageDiv.textContent = truncatedText;
@@ -9069,6 +10164,7 @@ class NotificationsUI {
         };
 
         card.appendChild( iconDiv );
+        card.appendChild( timeSpan );
         card.appendChild( messageDiv );
         card.appendChild( stopBtn );
         card.appendChild( deleteBtn );
@@ -9108,6 +10204,16 @@ class NotificationsUI {
         badgeDiv.className = 'tts-type-badge';
         badgeDiv.textContent = icon;
 
+        // Timestamp span (matches .message-time styling used by conversation elements)
+        const timeSpan = document.createElement( 'span' );
+        timeSpan.className = 'message-time';
+        if ( item.notification?.time_display ) {
+            timeSpan.textContent = item.notification.time_display;
+        } else {
+            const ts = new Date( item.addedAt );
+            timeSpan.textContent = ts.toLocaleTimeString( 'en-US', { hour: '2-digit', minute: '2-digit', hour12: false } );
+        }
+
         const textDiv = document.createElement( 'div' );
         textDiv.className = 'tts-text';
         textDiv.textContent = truncatedText;
@@ -9123,10 +10229,14 @@ class NotificationsUI {
 
         card.appendChild( positionDiv );
         card.appendChild( badgeDiv );
+        card.appendChild( timeSpan );
         card.appendChild( textDiv );
         card.appendChild( deleteBtn );
 
         container.appendChild( card );
+
+        // Re-order DOM to match ttsQueue array order (handles priority splice)
+        this.reorderTTSQueueDOM();
     }
 
     /**
@@ -9139,6 +10249,22 @@ class NotificationsUI {
                 badge.textContent = `${index + 1}`;
             }
         } );
+    }
+
+    /**
+     * Re-orders DOM children in tts-pending-queue to match ttsQueue array order.
+     * Leverages the fact that appendChild on an existing DOM node moves it.
+     */
+    reorderTTSQueueDOM() {
+        const container = document.getElementById( 'tts-pending-queue' );
+        if ( !container ) return;
+
+        this.ttsQueue.forEach( ( item ) => {
+            const card = document.getElementById( `tts-minimized-${item.id}` );
+            if ( card ) container.appendChild( card );
+        } );
+
+        this.updateTTSQueuePositions();
     }
 
     /**
@@ -9343,10 +10469,18 @@ class NotificationsUI {
         // Clear activeTTSItem BEFORE entering focus mode so updateTTSQueueSection()
         // (called inside enterTTSFocusMode) doesn't re-render a ghost card into active slot
         if ( wasActionRequired && justCompletedItem?.id ) {
-            this.activeTTSItem = null;  // Clear BEFORE focus mode to prevent ghost re-render
-            this.enterTTSFocusMode( justCompletedItem.id );
-            // updateTTSQueueSection() already called inside enterTTSFocusMode
-            return;  // Exit early - don't activate next until response received
+            // Check if notification was already resolved while audio was playing (Path B-2 race)
+            const arState = this.actionRequiredNotifications.get( justCompletedItem.id );
+            if ( !arState || arState.isResponded || arState.isExpired ) {
+                this.log( `TTS queue: Skipping focus mode — notification ${justCompletedItem.id} already resolved` );
+                this.activeTTSItem = null;
+                // Fall through to normal queue advancement below
+            } else {
+                this.activeTTSItem = null;  // Clear BEFORE focus mode to prevent ghost re-render
+                this.enterTTSFocusMode( justCompletedItem.id );
+                // updateTTSQueueSection() already called inside enterTTSFocusMode
+                return;  // Exit early - don't activate next until response received
+            }
         }
 
         // Clear active item (only for non-action-required completions)
@@ -9381,7 +10515,7 @@ class NotificationsUI {
      */
     stopTTSAndAdvance() {
         this.log( 'TTS queue: User requested stop' );
-        this.stopAllAudio();
+        this.stopAudio();
         this.onTTSPlaybackComplete();
     }
 
@@ -9403,8 +10537,36 @@ class NotificationsUI {
      */
     enterTTSFocusMode( notificationId ) {
         this.log( `TTS Focus Mode: ENTERING for notification ${notificationId}` );
+
+        // GUARD: Never enter focus mode for an already-resolved notification.
+        // Prevents Path B-2 race: onended fires after user already responded/dismissed/expired.
+        const guardState = this.actionRequiredNotifications.get( notificationId );
+        if ( !guardState || guardState.isResponded || guardState.isExpired ) {
+            this.log( `TTS Focus Mode: SKIPPED — notification ${notificationId} already resolved (responded=${guardState?.isResponded}, expired=${guardState?.isExpired}, exists=${!!guardState})` );
+            // Advance queue since onTTSPlaybackComplete() returned early expecting focus mode to handle it
+            if ( this.ttsQueue.length > 0 && !this.isTTSPaused ) {
+                setTimeout( () => this.activateNextTTS(), 100 );
+            }
+            return;
+        }
+
         this.ttsFocusModeActive = true;
         this.focusModeNotificationId = notificationId;
+        this.focusModeEnteredAt = Date.now();
+
+        // Compute safety timeout from notification's own timeout + buffer
+        // (guardState already fetched above and validated as non-null/non-resolved)
+        const notifTimeoutMs = guardState?.timeoutSeconds
+            ? state.timeoutSeconds * 1000 + this.TTS_FOCUS_MODE_BUFFER_MS
+            : this.TTS_FOCUS_MODE_FALLBACK_MS;
+        this.focusModeTimeoutMs = notifTimeoutMs;
+
+        this.log( `TTS Focus Mode: Safety timeout set to ${notifTimeoutMs / 1000}s` );
+        this.focusModeTimeoutId = setTimeout( () => {
+            this.log( `TTS Focus Mode: Safety timeout (${notifTimeoutMs / 1000}s) — auto-exiting` );
+            this.exitTTSFocusMode();
+        }, notifTimeoutMs );
+
         this.updateTTSQueueSection();
 
         // Persist focus mode state
@@ -9421,13 +10583,26 @@ class NotificationsUI {
      *     - Queue resumes if items are waiting
      */
     exitTTSFocusMode() {
+        this.log( `🔴 exitTTSFocusMode() CALLED at ${Date.now()}` );
         if ( !this.ttsFocusModeActive ) {
             return;  // Not in focus mode, nothing to do
+        }
+
+        // Stop any audio that was playing for this notification
+        this.stopAudio();
+
+        // Clear safety timeout if still pending
+        if ( this.focusModeTimeoutId ) {
+            clearTimeout( this.focusModeTimeoutId );
+            this.focusModeTimeoutId = null;
         }
 
         this.log( `TTS Focus Mode: EXITING (was for ${this.focusModeNotificationId})` );
         this.ttsFocusModeActive = false;
         this.focusModeNotificationId = null;
+        this.focusModeEnteredAt = null;
+        this.focusModeTimeoutMs = null;
+        this.focusModeElapsedBeforePause = null;
         this.updateTTSQueueSection();
 
         // Persist focus mode state change
@@ -9580,6 +10755,8 @@ class NotificationsUI {
                 queue                   : this.ttsQueue,
                 focusModeActive         : this.ttsFocusModeActive,
                 focusModeNotificationId : this.focusModeNotificationId,
+                focusModeEnteredAt      : this.focusModeEnteredAt || null,
+                focusModeTimeoutMs      : this.focusModeTimeoutMs || null,
                 isTTSPaused             : this.isTTSPaused
             };
 
@@ -9606,6 +10783,8 @@ class NotificationsUI {
             this.ttsQueue = parsed.queue || [];
             this.ttsFocusModeActive = parsed.focusModeActive || false;
             this.focusModeNotificationId = parsed.focusModeNotificationId || null;
+            this.focusModeEnteredAt = parsed.focusModeEnteredAt || null;
+            this.focusModeTimeoutMs = parsed.focusModeTimeoutMs || null;
             // NOTE: Don't restore isTTSPaused - page refresh resets audio context,
             // so we should auto-resume playback. User can pause again if needed.
             this.isTTSPaused = false;
@@ -9627,7 +10806,31 @@ class NotificationsUI {
                     this.log( `TTS Focus Mode: Stale — notification ${this.focusModeNotificationId} no longer exists, auto-exiting` );
                     this.ttsFocusModeActive = false;
                     this.focusModeNotificationId = null;
+                    this.focusModeEnteredAt = null;
+                    this.focusModeTimeoutMs = null;
                     this.saveTTSQueueState();
+                }
+            }
+
+            // Time-based staleness: if focus mode has exceeded its safety timeout, auto-exit
+            if ( this.ttsFocusModeActive && this.focusModeEnteredAt ) {
+                const elapsed = Date.now() - this.focusModeEnteredAt;
+                const timeoutMs = this.focusModeTimeoutMs || this.TTS_FOCUS_MODE_FALLBACK_MS;
+                if ( elapsed > timeoutMs ) {
+                    this.log( `TTS Focus Mode: Stale — entered ${Math.round( elapsed / 1000 )}s ago (limit: ${timeoutMs / 1000}s), auto-exiting` );
+                    this.ttsFocusModeActive = false;
+                    this.focusModeNotificationId = null;
+                    this.focusModeEnteredAt = null;
+                    this.focusModeTimeoutMs = null;
+                    this.saveTTSQueueState();
+                } else {
+                    // Still within timeout — restart timer for remaining time
+                    const remaining = timeoutMs - elapsed;
+                    this.log( `TTS Focus Mode: Restored with ${Math.round( remaining / 1000 )}s remaining on safety timeout` );
+                    this.focusModeTimeoutId = setTimeout( () => {
+                        this.log( `TTS Focus Mode: Safety timeout — auto-exiting after restore` );
+                        this.exitTTSFocusMode();
+                    }, remaining );
                 }
             }
 
@@ -9744,9 +10947,9 @@ class NotificationsUI {
                     </button>
                 </div>
                 <div class="yes-no-comment-hint" data-notification-id="${notification.id}">
-                    Press C to add comment
+                    ${notification.display_qualifier_widget ? 'You may comment on your answer here if you wish' : 'Press C to add comment'}
                 </div>
-                <div class="yes-no-comment-container" id="yn-comment-container-${notification.id}">
+                <div class="yes-no-comment-container${notification.display_qualifier_widget ? ' expanded' : ''}" id="yn-comment-container-${notification.id}">
                     <div class="yes-no-comment-input-row">
                         <button class="response-mic-button yes-no-comment-mic" data-notification-id="${notification.id}" title="Record voice comment">
                             🎤
@@ -9786,12 +10989,14 @@ class NotificationsUI {
             <div class="action-required-abstract">${this.renderMarkdown( notification.abstract )}</div>
         ` : '';
 
+        const predictionHintSection = this.buildPredictionHintSection( notification );
+
         card.innerHTML = `
             <div class="action-required-header">
                 <button class="action-required-cancel-btn" data-notification-id="${notification.id}" title="Cancel and use default (Esc)">
                     ✕
                 </button>
-                <div class="action-required-title">${notification.title || notification.message}</div>
+                <div class="action-required-title">${this.renderMarkdown( notification.title || notification.message )}</div>
                 <div class="action-required-timer-controls">
                     <button class="action-required-pause-btn" id="pause-btn-${notification.id}" title="Pause timer and audio (P)">
                         \u23F8\uFE0F
@@ -9799,8 +11004,9 @@ class NotificationsUI {
                     <div class="action-required-timer" id="timer-${notification.id}">--:--</div>
                 </div>
             </div>
-            <div class="action-required-message">${notification.message}</div>
+            <div class="action-required-message">${this.renderMarkdown( notification.message )}</div>
             ${abstractSection}
+            ${predictionHintSection}
             <div class="action-required-progress-bar">
                 <div class="action-required-progress-fill" id="progress-${notification.id}" style="width: 100%;"></div>
             </div>
@@ -9981,6 +11187,98 @@ class NotificationsUI {
                 </div>
             </div>
         `;
+    }
+
+    /**
+     * Builds prediction hint HTML section for action-required notification cards.
+     *
+     * Requires:
+     *   - notification object with optional prediction_hint field
+     *   - notification.response_type indicates the type of response expected
+     *
+     * Ensures:
+     *   - Returns ghost hint box if prediction_hint is null/undefined (cold start)
+     *   - Returns formatted HTML div for yes_no, multiple_choice, open_ended, open_ended_batch
+     *   - Displays predicted value, confidence percentage, and strategy label
+     */
+    buildPredictionHintSection( notification ) {
+        const hint = notification.prediction_hint;
+        if ( !hint ) {
+            return `
+                <div class="prediction-hint prediction-hint-cold">
+                    <div class="prediction-hint-label">Learning, no prediction yet</div>
+                </div>
+            `;
+        }
+
+        const confidence   = Math.round( hint.confidence * 100 );
+        const strategy     = this.formatStrategyLabel( hint.strategy );
+        const responseType = notification.response_type;
+
+        let predictedText = '';
+
+        if ( responseType === 'yes_no' ) {
+            const value = typeof hint.predicted_value === 'string'
+                ? hint.predicted_value.charAt( 0 ).toUpperCase() + hint.predicted_value.slice( 1 )
+                : hint.predicted_value;
+            predictedText = hint.predicted_qualifier
+                ? `Predicted: ${value} — "${hint.predicted_qualifier}" (${confidence}%)`
+                : `Predicted: ${value} (${confidence}%)`;
+
+        } else if ( responseType === 'multiple_choice' ) {
+            const answers = hint.predicted_value?.answers;
+            if ( answers ) {
+                const parts = Object.entries( answers ).map( ( [ header, val ] ) => {
+                    return Array.isArray( val ) ? `${header}: [${val.join( ', ' )}]` : `${header}: ${val}`;
+                } );
+                predictedText = `Predicted: ${parts.join( '; ' )} (${confidence}%)`;
+            }
+
+        } else if ( responseType === 'open_ended' ) {
+            const value = typeof hint.predicted_value === 'string'
+                ? hint.predicted_value
+                : JSON.stringify( hint.predicted_value );
+            predictedText = `Predicted: "${value}" (${confidence}%)`;
+
+        } else if ( responseType === 'open_ended_batch' ) {
+            const answers = hint.predicted_value?.answers;
+            if ( answers ) {
+                const parts = Object.entries( answers ).map( ( [ header, val ] ) =>
+                    `${header}: "${val}"`
+                );
+                predictedText = `Predicted: ${parts.join( '; ' )} (${confidence}%)`;
+            }
+        }
+
+        if ( !predictedText ) return '';
+
+        return `
+            <div class="prediction-hint">
+                <div class="prediction-hint-label">${predictedText}</div>
+                <div class="prediction-hint-strategy">${strategy}</div>
+            </div>
+        `;
+    }
+
+    /**
+     * Maps prediction strategy constants to human-readable labels.
+     *
+     * Requires:
+     *   - strategy is a string constant from PredictionEngine
+     *
+     * Ensures:
+     *   - Returns human-readable label for known strategies
+     *   - Returns raw strategy string as fallback for unknown strategies
+     */
+    formatStrategyLabel( strategy ) {
+        const labels = {
+            'cbr_majority_vote'       : 'Based on majority vote',
+            'cbr_retrieval'           : 'Based on exact match retrieval',
+            'llm_synthesis'           : 'Based on LLM synthesis',
+            'option_embedding_scoring': 'Based on option scoring',
+            'cold_start'              : 'No prediction data'
+        };
+        return labels[ strategy ] || strategy;
     }
 
     /**
@@ -10610,6 +11908,14 @@ class NotificationsUI {
         // Mark as responded
         state.isResponded = true;
 
+        // Stop TTS immediately if this notification is currently playing
+        // User already answered — don't keep reading the question
+        if ( this.activeTTSItem?.id === notificationId ) {
+            this.log( `Stopping TTS — user responded to currently-playing notification ${notificationId}` );
+            this.stopAudio();
+            this.onTTSPlaybackComplete();
+        }
+
         // Disable buttons to prevent double-submit
         const card = document.getElementById( `action-required-${notificationId}` );
         if ( card ) {
@@ -10637,6 +11943,12 @@ class NotificationsUI {
 
                 // Special handling for grace period exceeded (rare with 5-minute window)
                 if ( apiResponse.status === 400 && errorData.detail?.includes( 'grace period exceeded' ) ) {
+                    this.handleGracePeriodExceeded( notificationId, state );
+                    return;
+                }
+
+                // Already responded/expired server-side — dismiss card gracefully
+                if ( apiResponse.status === 400 && errorData.detail?.includes( 'already responded' ) ) {
                     this.handleGracePeriodExceeded( notificationId, state );
                     return;
                 }
@@ -10698,6 +12010,18 @@ class NotificationsUI {
         state.isExpired = true;
         this.stopCountdownTimer( notificationId );
 
+        // Stop TTS if this notification is currently playing
+        if ( this.activeTTSItem?.id === notificationId ) {
+            this.log( `Stopping TTS — grace period exceeded for currently-playing notification ${notificationId}` );
+            this.stopAudio();
+            this.onTTSPlaybackComplete();
+        }
+
+        // Exit focus mode if active for this notification
+        if ( this.focusModeNotificationId === notificationId ) {
+            this.exitTTSFocusMode();
+        }
+
         // Transition to conversation history after delay
         setTimeout( () => {
             const senderId = state.notification?.sender_id || this.UNKNOWN_SENDER;
@@ -10707,9 +12031,9 @@ class NotificationsUI {
             card.addEventListener( 'animationend', () => {
                 card.remove();
 
-                // Add to conversation with default indicator
+                // Route to conversation with default indicator
                 const defaultValue = state.notification.response_default || '(no response)';
-                this.addConversationPair( senderId, state.notification, `[Default] ${defaultValue}`, true );
+                this.routeCompletedNotification( state.notification, defaultValue, true );
 
                 // Cleanup
                 this.actionRequiredNotifications.delete( notificationId );
@@ -10735,12 +12059,15 @@ class NotificationsUI {
         // Get sender ID from notification
         const senderId = state.notification?.sender_id || this.UNKNOWN_SENDER;
 
-        // Ensure sender card exists for the conversation
-        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
-        let senderCard = document.getElementById( cardId );
-        if ( !senderCard ) {
-            this.createSenderCard( senderId );
+        // Ensure sender card exists for the conversation (skip if routing to job card)
+        let senderCard = null;
+        if ( !state.notification.job_id ) {
+            const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
             senderCard = document.getElementById( cardId );
+            if ( !senderCard ) {
+                this.createSenderCard( senderId );
+                senderCard = document.getElementById( cardId );
+            }
         }
 
         // Simple shrink-fade animation in place (no flying)
@@ -10751,16 +12078,16 @@ class NotificationsUI {
             // Remove the action-required card from DOM
             card.remove();
 
-            // Add conversation pair to sender card (with pulsing highlight)
-            this.addConversationPair( senderId, state.notification, response, false, serverTimeDisplay, serverDateDisplay );
+            // Route completed Q&A to job card or sender card
+            this.routeCompletedNotification( state.notification, response, false, serverTimeDisplay, serverDateDisplay );
 
             // Cleanup action-required state
             this.actionRequiredNotifications.delete( notificationId );
             this.updateActionRequiredCount();
             this.saveActionRequiredState();  // Persist removal
 
-            // Scroll sender card into view
-            if ( senderCard ) {
+            // Scroll sender card into view (job card scroll handled by routeCompletedNotification)
+            if ( !state.notification.job_id && senderCard ) {
                 senderCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
             }
 
@@ -10781,7 +12108,7 @@ class NotificationsUI {
         setTimeout( () => {
             if ( card.parentElement ) {
                 card.remove();
-                this.addConversationPair( senderId, state.notification, response, false, serverTimeDisplay, serverDateDisplay );
+                this.routeCompletedNotification( state.notification, response, false, serverTimeDisplay, serverDateDisplay );
                 this.actionRequiredNotifications.delete( notificationId );
                 this.updateActionRequiredCount();
                 this.saveActionRequiredState();  // Persist removal
@@ -10876,25 +12203,40 @@ class NotificationsUI {
         // Get sender ID from notification
         const senderId = state.notification?.sender_id || this.UNKNOWN_SENDER;
 
-        // Calculate destination for animation
-        const destination = this.calculateDestination( senderId );
+        // Calculate destination for animation (prefer job card when job_id exists)
+        let destination;
+        if ( state.notification.job_id ) {
+            const jobCard = document.getElementById( `job-card-${state.notification.job_id}` );
+            if ( jobCard ) {
+                const header = jobCard.querySelector( '.job-card-header' );
+                const rect = ( header || jobCard ).getBoundingClientRect();
+                destination = {
+                    cardId   : `job-card-${state.notification.job_id}`,
+                    senderId : senderId,
+                    rect     : rect
+                };
+            }
+        }
+        if ( !destination ) {
+            destination = this.calculateDestination( senderId );
+        }
 
         if ( destination ) {
             // Start genie animation for expired notification
             this.startGenieAnimation( notificationId, card, destination, () => {
-                // On animation complete: add conversation pair (marked as expired)
+                // On animation complete: route to job card or sender card (marked as expired)
                 // Use client-generated time/date since there's no server call for timeout
-                this.addConversationPair( senderId, state.notification, defaultValue, true, this.getLocalTimeDisplay(), this.getLocalDateDisplay() );
+                this.routeCompletedNotification( state.notification, defaultValue, true, this.getLocalTimeDisplay(), this.getLocalDateDisplay() );
 
                 // Cleanup action-required state
                 this.actionRequiredNotifications.delete( notificationId );
                 this.updateActionRequiredCount();
                 this.saveActionRequiredState();  // Persist removal
 
-                // Scroll sender card into view after DOM changes (moveSenderCardToTop shifts layout)
-                const senderCard = document.getElementById( destination.cardId );
-                if ( senderCard ) {
-                    senderCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
+                // Scroll target card into view after DOM changes
+                const targetCard = document.getElementById( destination.cardId );
+                if ( targetCard ) {
+                    targetCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
                 }
 
                 // QUEUE SYSTEM: Promote next pending notification
@@ -11074,57 +12416,6 @@ class NotificationsUI {
         this.handleLocalTimeout( notificationId );
     }
 
-    /**
-     * Handle active_conversation_changed WebSocket event.
-     * Updates the active indicator on sender cards.
-     * (Conversation Identity Phase 3)
-     *
-     * @param {Object} data - { active_sender_id, timestamp }
-     */
-    handleActiveConversationChanged( data ) {
-        const activeSenderId = data.active_sender_id;
-        this.log( `Active conversation changed to: ${activeSenderId}` );
-
-        // Update all sender groups
-        for ( const [ senderId, group ] of this.senderGroups ) {
-            const wasActive = group.isActive;
-            group.isActive = ( senderId === activeSenderId );
-
-            // Update UI if state changed
-            if ( wasActive !== group.isActive ) {
-                this.updateSenderActiveIndicator( senderId, group.isActive );
-            }
-        }
-    }
-
-    /**
-     * Update the active indicator on a sender card.
-     * (Conversation Identity Phase 3)
-     *
-     * @param {string} senderId - Sender ID
-     * @param {boolean} isActive - Whether this sender is now active
-     */
-    updateSenderActiveIndicator( senderId, isActive ) {
-        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
-        const card = document.getElementById( cardId );
-        if ( !card ) return;
-
-        const indicator = card.querySelector( '.sender-active-indicator' );
-        if ( indicator ) {
-            indicator.textContent = isActive ? '●' : '○';
-            indicator.title = isActive ? 'Active session' : 'Inactive session';
-        }
-
-        // Add/remove CSS class for styling
-        if ( isActive ) {
-            card.classList.add( 'sender-card-active' );
-        } else {
-            card.classList.remove( 'sender-card-active' );
-        }
-
-        this.log( `Updated active indicator for ${senderId}: ${isActive ? 'active' : 'inactive'}` );
-    }
-
     stopCountdownTimer( notificationId ) {
         const intervalHandle = this.countdownTimers.get( notificationId );
         if ( intervalHandle ) {
@@ -11186,6 +12477,15 @@ class NotificationsUI {
         // 5. Persist state
         this.saveActionRequiredState();
 
+        // Pause focus mode safety timer if active
+        if ( this.ttsFocusModeActive && this.focusModeTimeoutId ) {
+            clearTimeout( this.focusModeTimeoutId );
+            this.focusModeTimeoutId = null;
+            // Record how much time has elapsed so we can compute remaining on resume
+            this.focusModeElapsedBeforePause = Date.now() - this.focusModeEnteredAt;
+            this.log( `TTS Focus Mode: Safety timer paused (${Math.round( this.focusModeElapsedBeforePause / 1000 )}s elapsed)` );
+        }
+
         this.log( `Pause: Notification ${notificationId} paused` );
     }
 
@@ -11240,6 +12540,23 @@ class NotificationsUI {
 
         // 6. Persist state
         this.saveActionRequiredState();
+
+        // Resume focus mode safety timer if active
+        if ( this.ttsFocusModeActive && this.focusModeTimeoutMs && !this.focusModeTimeoutId ) {
+            const elapsed = this.focusModeElapsedBeforePause || ( Date.now() - this.focusModeEnteredAt );
+            const remaining = this.focusModeTimeoutMs - elapsed;
+            if ( remaining > 0 ) {
+                this.log( `TTS Focus Mode: Safety timer resumed (${Math.round( remaining / 1000 )}s remaining)` );
+                this.focusModeTimeoutId = setTimeout( () => {
+                    this.log( `TTS Focus Mode: Safety timeout — auto-exiting` );
+                    this.exitTTSFocusMode();
+                }, remaining );
+            } else {
+                this.log( `TTS Focus Mode: Safety timeout already exceeded during pause — auto-exiting` );
+                this.exitTTSFocusMode();
+            }
+            this.focusModeElapsedBeforePause = null;
+        }
 
         this.log( `Resume: Notification ${notificationId} resumed, added ${pauseDuration}ms to timer` );
     }
@@ -11306,6 +12623,7 @@ class NotificationsUI {
      *   - Notification is dismissed same as a normal response
      */
     cancelActionRequired( notificationId ) {
+        this.log( `🔴 cancelActionRequired CALLED at ${Date.now()} for ${notificationId}` );
         const state = this.actionRequiredNotifications.get( notificationId );
         if ( !state ) {
             this.log( `cancelActionRequired: Notification ${notificationId} not found` );
@@ -11635,12 +12953,11 @@ class NotificationsUI {
     }
 
     /**
-     * Get today's date string in YYYY-MM-DD format.
-     * @returns {string} - ISO date string
+     * Get today's date string in YYYY-MM-DD format, resolved to appTimezone.
+     * @returns {string} - ISO date string in appTimezone
      */
     getTodayDateString() {
-        const now = new Date();
-        return now.toISOString().split( 'T' )[ 0 ];
+        return this.getLocalDateDisplay();
     }
 
     /**
@@ -11885,6 +13202,55 @@ class NotificationsUI {
         this.moveSenderCardToTop( senderId );
 
         this.log( `Added conversation pair for ${senderId}: "${notification.message?.substring( 0, 30 )}..." → "${response}"` );
+    }
+
+    /**
+     * Route a completed response-required notification to the correct UI container.
+     *
+     * When notification has job_id: routes to job card's interactions area.
+     * When no job_id: routes to sender card's conversation history.
+     *
+     * @param {Object} notification - The original notification object
+     * @param {string} response - The user's response text
+     * @param {boolean} wasExpired - Whether the notification expired (default used)
+     * @param {string|null} serverTimeDisplay - Server time string for display
+     * @param {string|null} serverDateDisplay - Server date string for display
+     */
+    routeCompletedNotification( notification, response, wasExpired = false, serverTimeDisplay = null, serverDateDisplay = null ) {
+        const jobId = notification.job_id;
+
+        if ( jobId ) {
+            const contentEl = document.getElementById( `interactions-content-${jobId}` );
+            if ( contentEl ) {
+                // Route to job card: append Q (original notification) then A (response)
+                this.appendNotificationToJobCard( jobId, notification );
+
+                const responseMessage = wasExpired
+                    ? `[Default: ${response}]`
+                    : ( notification.response_type === 'multiple_choice' || notification.response_type === 'open_ended_batch' )
+                        ? this.formatMultipleChoiceResponse( response )
+                        : response;
+
+                const responseNotif = {
+                    message   : `↳ ${responseMessage}`,
+                    priority  : 'low',
+                    timestamp : new Date().toISOString()
+                };
+                this.appendNotificationToJobCard( jobId, responseNotif );
+
+                // Scroll job card into view
+                const jobCard = document.getElementById( `job-card-${jobId}` );
+                if ( jobCard ) {
+                    jobCard.scrollIntoView( { behavior: 'smooth', block: 'start' } );
+                }
+                return;
+            }
+            // Fall through to sender card if job card not found
+        }
+
+        // Default: route to sender card
+        const senderId = notification.sender_id || this.UNKNOWN_SENDER;
+        this.addConversationPair( senderId, notification, response, wasExpired, serverTimeDisplay, serverDateDisplay );
     }
 
     /**

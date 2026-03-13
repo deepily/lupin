@@ -12,7 +12,7 @@ Tests validation logic, field validators, and model methods for:
 import pytest
 from pydantic import ValidationError
 
-from cosa.cli.notification_models import (
+from lupin_cli.notifications.notification_models import (
     NotificationRequest,
     NotificationResponse,
     RespondedEvent,
@@ -23,7 +23,8 @@ from cosa.cli.notification_models import (
     AsyncNotificationResponse,
     NotificationType,
     NotificationPriority,
-    ResponseType
+    ResponseType,
+    resolve_target_user
 )
 
 
@@ -155,6 +156,7 @@ class TestNotificationRequestValidation:
             response_type=ResponseType.YES_NO,
             notification_type=NotificationType.TASK,
             priority=NotificationPriority.HIGH,
+            target_user="test@example.com",
             timeout_seconds=60,
             response_default="yes",
             title="Test Title"
@@ -166,6 +168,7 @@ class TestNotificationRequestValidation:
         assert params["message"] == "Test notification"
         assert params["type"] == "task"
         assert params["priority"] == "high"
+        assert params["target_user"] == "test@example.com"
         assert params["response_requested"] == "true"
         assert params["response_type"] == "yes_no"
         assert params["timeout_seconds"] == 60
@@ -177,7 +180,8 @@ class TestNotificationRequestValidation:
         """Test that None optional fields are excluded from params."""
         request = NotificationRequest(
             message="Test",
-            response_type=ResponseType.YES_NO
+            response_type=ResponseType.YES_NO,
+            target_user="test@example.com"
             # response_default and title are None
         )
 
@@ -187,6 +191,17 @@ class TestNotificationRequestValidation:
         assert "response_default" not in params
         assert "title" not in params
         assert "api_key" not in params  # Now in HTTP headers
+
+    def test_to_api_params_raises_when_target_user_none( self ):
+        """Test that to_api_params() raises ValueError when target_user is None."""
+        request = NotificationRequest(
+            message="Test",
+            response_type=ResponseType.YES_NO
+            # target_user defaults to None
+        )
+
+        with pytest.raises( ValueError, match="target_user is None" ):
+            request.to_api_params()
 
 
 # ============================================================================
@@ -363,7 +378,7 @@ class TestAsyncNotificationRequestValidation:
         assert request.message == "Build completed successfully"
         assert request.notification_type == NotificationType.TASK
         assert request.priority == NotificationPriority.MEDIUM
-        assert request.target_user == "ricardo.felipe.ruiz@gmail.com"  # default
+        assert request.target_user is None  # default (resolved at dispatch time)
         assert request.timeout == 5  # default
 
     def test_message_required( self ):
@@ -478,7 +493,7 @@ class TestAsyncNotificationRequestValidation:
 
     def test_to_api_params_no_response_fields( self ):
         """Test that async params don't include sync response fields."""
-        request = AsyncNotificationRequest( message="Test" )
+        request = AsyncNotificationRequest( message="Test", target_user="test@example.com" )
         # Phase 2.5: API key moved to X-API-Key header, not in params
         params = request.to_api_params()
 
@@ -631,6 +646,199 @@ class TestAsyncNotificationResponse:
         assert response.message is None  # optional
         assert response.target_system_id is None  # optional
         assert response.connection_count == 0  # default
+
+
+# ============================================================================
+# Progress Group ID Tests
+# ============================================================================
+
+class TestProgressGroupId:
+    """Test progress_group_id field on AsyncNotificationRequest."""
+
+    def test_default_is_none( self ):
+        """Test that progress_group_id defaults to None."""
+        req = AsyncNotificationRequest( message="Test message" )
+        assert req.progress_group_id is None
+
+    def test_valid_progress_group_id( self ):
+        """Test that valid progress_group_id patterns are accepted (original pg- format)."""
+        valid_ids = [
+            "pg-a1b2c3d4",
+            "pg-00000000",
+            "pg-ffffffff",
+            "pg-abcdef01",
+        ]
+        for pg_id in valid_ids:
+            req = AsyncNotificationRequest( message="Test", progress_group_id=pg_id )
+            assert req.progress_group_id == pg_id
+
+    def test_valid_proxy_batch_progress_group_id( self ):
+        """Test that proxy batch pr-{hex}-{N} format is accepted by relaxed regex."""
+        valid_ids = [
+            "pr-a1b2c3d4-1",     # Standard proxy batch
+            "pr-a1b2c3d4-01",    # Zero-padded batch
+            "pr-deadbeef-99",    # Two-digit batch
+            "pr-a1b2c3d4-99999", # Unbounded batch number (long sessions)
+            "pr-abcdef-1",       # 6-char hex is valid too
+        ]
+        for pg_id in valid_ids:
+            req = AsyncNotificationRequest( message="Test", progress_group_id=pg_id )
+            assert req.progress_group_id == pg_id
+
+    def test_invalid_progress_group_id_rejected( self ):
+        """Test that invalid progress_group_id patterns are rejected."""
+        invalid_ids = [
+            "pg-ABCDEF01",    # Uppercase hex
+            "a1b2c3d4",       # Missing prefix
+            "PG-a1b2c3d4",    # Uppercase prefix
+            "pg_a1b2c3d4",    # Underscore instead of hyphen
+            "pg-a1b2c",       # Too short (5 hex chars)
+            "pr-ABCD1234-1",  # Uppercase hex in proxy format
+            "abcd-a1b2c3d4",  # Prefix too long (4 chars)
+        ]
+        for pg_id in invalid_ids:
+            with pytest.raises( ValidationError ):
+                AsyncNotificationRequest( message="Test", progress_group_id=pg_id )
+
+    def test_included_in_to_api_params( self ):
+        """Test that progress_group_id is included in to_api_params() when set."""
+        req = AsyncNotificationRequest(
+            message="Test progress",
+            target_user="test@example.com",
+            progress_group_id="pg-a1b2c3d4"
+        )
+        params = req.to_api_params()
+        assert "progress_group_id" in params
+        assert params[ "progress_group_id" ] == "pg-a1b2c3d4"
+
+    def test_excluded_from_to_api_params_when_none( self ):
+        """Test that progress_group_id is excluded from to_api_params() when None."""
+        req = AsyncNotificationRequest( message="Test no progress", target_user="test@example.com" )
+        params = req.to_api_params()
+        assert "progress_group_id" not in params
+
+    def test_coexists_with_job_id( self ):
+        """Test that progress_group_id works alongside job_id."""
+        req = AsyncNotificationRequest(
+            message="Test",
+            target_user="test@example.com",
+            job_id="dr-a1b2c3d4",
+            progress_group_id="pg-12345678"
+        )
+        params = req.to_api_params()
+        assert params[ "job_id" ] == "dr-a1b2c3d4"
+        assert params[ "progress_group_id" ] == "pg-12345678"
+
+
+class TestNotificationItemProgressGroup:
+    """Test progress_group_id on NotificationItem and queue."""
+
+    def test_notification_item_stores_progress_group_id( self ):
+        """Test that NotificationItem stores progress_group_id."""
+        from cosa.rest.notification_fifo_queue import NotificationItem
+        item = NotificationItem( message="Step 1/5", progress_group_id="pg-abcdef01" )
+        assert item.progress_group_id == "pg-abcdef01"
+
+    def test_notification_item_default_none( self ):
+        """Test that NotificationItem defaults progress_group_id to None."""
+        from cosa.rest.notification_fifo_queue import NotificationItem
+        item = NotificationItem( message="No group" )
+        assert item.progress_group_id is None
+
+    def test_notification_item_to_dict_includes_progress_group_id( self ):
+        """Test that to_dict() includes progress_group_id."""
+        from cosa.rest.notification_fifo_queue import NotificationItem
+        item = NotificationItem( message="Step 2/5", progress_group_id="pg-12345678" )
+        d = item.to_dict()
+        assert "progress_group_id" in d
+        assert d[ "progress_group_id" ] == "pg-12345678"
+
+    def test_notification_item_to_dict_none_when_unset( self ):
+        """Test that to_dict() includes progress_group_id as None when unset."""
+        from cosa.rest.notification_fifo_queue import NotificationItem
+        item = NotificationItem( message="No group" )
+        d = item.to_dict()
+        assert "progress_group_id" in d
+        assert d[ "progress_group_id" ] is None
+
+
+class TestAgenticJobBaseProgressGroup:
+    """Test create_progress_group() on AgenticJobBase."""
+
+    def test_create_progress_group_format( self ):
+        """Test that create_progress_group() returns valid pg-{8hex} format."""
+        from cosa.agents.agentic_job_base import AgenticJobBase
+
+        class _TestJob( AgenticJobBase ):
+            JOB_TYPE = "test"
+            JOB_PREFIX = "tj"
+            def __init__( self ):
+                super().__init__( "u1", "t@t.com", "s1" )
+            @property
+            def last_question_asked( self ): return "test"
+            def do_all( self ): return ""
+            async def _execute( self ): return ""
+
+        job = _TestJob()
+        pg_id = job.create_progress_group()
+
+        assert pg_id.startswith( "pg-" )
+        assert len( pg_id ) == 11  # "pg-" + 8 hex chars
+        # Validate hex characters
+        hex_part = pg_id[ 3: ]
+        int( hex_part, 16 )  # Should not raise
+
+    def test_create_progress_group_unique( self ):
+        """Test that create_progress_group() generates unique IDs."""
+        from cosa.agents.agentic_job_base import AgenticJobBase
+
+        class _TestJob( AgenticJobBase ):
+            JOB_TYPE = "test"
+            JOB_PREFIX = "tj"
+            def __init__( self ):
+                super().__init__( "u1", "t@t.com", "s1" )
+            @property
+            def last_question_asked( self ): return "test"
+            def do_all( self ): return ""
+            async def _execute( self ): return ""
+
+        job = _TestJob()
+        ids = { job.create_progress_group() for _ in range( 20 ) }
+        assert len( ids ) == 20  # All unique
+
+
+# ============================================================================
+# resolve_target_user Tests
+# ============================================================================
+
+class TestResolveTargetUser:
+    """Test resolve_target_user() precedence chain."""
+
+    def test_explicit_value_takes_priority( self ):
+        """Test that explicit value is returned immediately."""
+        result = resolve_target_user( "explicit@example.com" )
+        assert result == "explicit@example.com"
+
+    def test_env_var_used_when_no_explicit( self, monkeypatch ):
+        """Test LUPIN_DEV_EMAIL env var is used when no explicit value."""
+        monkeypatch.setenv( "LUPIN_DEV_EMAIL", "env@example.com" )
+        result = resolve_target_user()
+        assert result == "env@example.com"
+
+    def test_explicit_beats_env_var( self, monkeypatch ):
+        """Test explicit value takes priority over env var."""
+        monkeypatch.setenv( "LUPIN_DEV_EMAIL", "env@example.com" )
+        result = resolve_target_user( "explicit@example.com" )
+        assert result == "explicit@example.com"
+
+    def test_raises_when_no_source( self, monkeypatch ):
+        """Test ValueError raised when no source provides email."""
+        from unittest.mock import patch
+        monkeypatch.delenv( "LUPIN_DEV_EMAIL", raising=False )
+        # Mock config loader to return no global_notification_recipient
+        with patch( "cosa.utils.config_loader.get_api_config", return_value={ "api_url": "x", "api_key_file": "y" } ):
+            with pytest.raises( ValueError, match="Cannot resolve target_user" ):
+                resolve_target_user()
 
 
 # ============================================================================

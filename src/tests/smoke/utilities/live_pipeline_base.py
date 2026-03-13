@@ -71,7 +71,7 @@ class LivePipelineTestBase:
     SUBMIT_ENDPOINT = "/api/push"
 
     # Credential env var prefix — override for tests using different accounts
-    CREDENTIAL_ENV_PREFIX = "LUPIN_TEST"
+    CREDENTIAL_ENV_PREFIX = "LUPIN_TEST_INTERACTIVE_MOCK_JOBS"
 
     # ═══════════════════════════════════════════════════════════════════════
     # Authentication

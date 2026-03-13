@@ -499,7 +499,7 @@ Modify `conftest.py` to add new fixtures or update existing ones. Ensure backwar
 - **Unit Tests**: `src/tests/unit/README.md` (if exists)
 - **Smoke Tests**: Inline `quick_smoke_test()` functions in modules
 - **Main Testing README**: `src/tests/README.md`
-- **JWT Auth Design**: `src/rnd/jwt-oauth/README.md`
+- **JWT Auth Design**: `src/rnd/2025.09.29-jwt-oauth/README.md`
 
 ## Questions?
 

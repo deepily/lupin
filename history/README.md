@@ -12,6 +12,11 @@ This directory contains archived session history from the Lupin project, organiz
 
 | Archive | Period | Sessions | Key Topics |
 |---------|--------|----------|------------|
+| [2026-02-24-to-03-03](2026-02-24-to-03-03-history.md) | Feb 24 - Mar 3, 2026 | 260-303 | Voice Module Refactoring, Preference Learning, Universal Prediction Engine, Voice Hook Phases 0-1, CC Session Voice Input |
+| [2026-02-16-to-23](2026-02-16-to-23-history.md) | Feb 16-23, 2026 | 214-258 | Bug Fix Mode, SWE Team Proxy Phases 6-8, Preference Learning, Playwright E2E Planning |
+| [2026-02-10-to-14](2026-02-10-to-14-history.md) | Feb 10-14, 2026 | 171-213 | Notification Proxy Agent, SWE Team Phases 2-4, Unified Smoke Test Framework |
+| [2026-02-03-to-10](2026-02-03-to-10-history.md) | Feb 3-10, 2026 | 126-180 | DataFrame CRUD Phases 1-3, Runtime Argument Expeditor, PEFT Phase 2 |
+| [2026-01-19-to-02-02](2026-01-19-to-02-02-history.md) | Jan 19 - Feb 2, 2026 | 57-124 | Podcast Generator Phase 2, Deep Research CLI UX, LORA Training |
 | [2026-01-13-to-19](2026-01-13-to-19-history.md) | Jan 13-19, 2026 | 56-74b | Conversation Identity, Deep Research Agent, Podcast Generator Phase 1, Job Queue Progressive Disclosure UI |
 
 ### 2025 (Late)
@@ -49,10 +54,10 @@ This directory contains archived session history from the Lupin project, organiz
 
 ## Quick Stats
 
-- **Total Archives**: 10 files
-- **Date Range**: May 2025 - January 2026
-- **Total Sessions Documented**: 90+
+- **Total Archives**: 15 files
+- **Date Range**: May 2025 - March 2026
+- **Total Sessions Documented**: 303+
 
 ---
 
-*Last updated: 2026-01-22*
+*Last updated: 2026-03-09*

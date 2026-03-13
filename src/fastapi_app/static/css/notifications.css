@@ -16,7 +16,7 @@
             /* Position just left of container (800px max-width, centered) */
             /* Container center = 50%, half container = 400px, plus toolbar width + gap */
             left: calc( 50% - 400px - 60px );
-            top: 80px;  /* Below header, aligned with container top */
+            top: 136px;  /* Below nav bar (56px) + header, aligned with container top */
             display: flex;
             flex-direction: column;
             gap: 4px;
@@ -751,6 +751,44 @@
             font-weight: 600;
         }
 
+        /* Prediction engine hint section */
+        .prediction-hint {
+            font-size: 0.85em;
+            color: #5a4e8c;
+            margin-top: 4px;
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            background: #f3f0ff;
+            border-left: 3px solid #7c6bc4;
+            border-radius: 4px;
+            line-height: 1.5;
+        }
+
+        .prediction-hint-label {
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+
+        .prediction-hint-strategy {
+            font-size: 0.9em;
+            color: #7c6bc4;
+            font-style: italic;
+        }
+
+        .prediction-hint-cold {
+            background: #faf9ff;
+            border-left: 3px dashed #b8b0d8;
+            color: #9990b3;
+        }
+
+        .prediction-hint-cold .prediction-hint-label {
+            font-weight: 500;
+        }
+
+        .prediction-hint-cold .prediction-hint-strategy {
+            color: #b8b0d8;
+        }
+
         .action-required-progress-bar {
             width: 100%;
             height: 8px;
@@ -1423,12 +1461,6 @@
             font-style: italic;
         }
 
-        .sender-toggle {
-            font-size: 12px;
-            color: #6c757d;
-            margin-left: 8px;
-        }
-
         .sender-delete-btn {
             background: none;
             border: none;
@@ -1447,6 +1479,13 @@
             color: white;
         }
 
+        .sender-toggle {
+            font-size: 12px;
+            color: #6c757d;
+            margin-left: 8px;
+        }
+
+
         /* ========================================
            SESSION IDENTITY STYLES (Conversation Identity Phase 3)
            ======================================== */
@@ -1457,6 +1496,12 @@
             font-size: 11px;
             color: #868e96;
             margin-left: 4px;
+        }
+
+        .sender-session-copy {
+            font-size: 11px;
+            margin-left: 0;
+            margin-right: 2px;
         }
 
         /* Session name (auto-generated from first message, editable on click) */
@@ -2906,6 +2951,11 @@
     padding: 8px 12px;
     cursor: pointer;
     gap: 8px;
+    position: relative;
+}
+
+.job-card-header.has-cancel {
+    padding-left: 36px;
 }
 
 .job-card-header:hover {
@@ -3119,22 +3169,6 @@
     word-break: break-word;
 }
 
-.interaction-response {
-    margin-top: 4px;
-    padding-top: 4px;
-    border-top: 1px solid #e9ecef;
-    font-size: 11px;
-}
-
-.response-label {
-    color: #6c757d;
-    margin-right: 6px;
-}
-
-.response-value {
-    color: #28a745;
-    font-weight: 500;
-}
 
 .no-interactions,
 .interactions-loading,
@@ -3158,6 +3192,12 @@
 .status-indicator.spinning {
     display: inline-block;
     animation: spin 1s linear infinite;
+}
+
+.status-indicator.expediting {
+    display: inline-block;
+    animation: spin 1.5s linear infinite;
+    color: #f0ad4e;
 }
 
 @keyframes spin {
@@ -3585,4 +3625,377 @@
 .abstract-tooltip-content th {
     background: #e9ecef;
     font-weight: 600;
+}
+
+/* ========================================
+   PROGRESS GROUP IN-PLACE UPDATES
+   ======================================== */
+.progress-group-entry {
+    border-left: 3px solid #17a2b8;
+    flex-direction: column;    /* Override parent .sender-message's horizontal flex */
+}
+
+/* Head row layout */
+.progress-group-head {
+    display: flex;
+    width: 100%;
+    gap: 8px;
+    align-items: center;
+}
+
+/* Clickable toggle with pointer cursor */
+.progress-group-toggle {
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    min-width: 28px;
+    height: 18px;
+    padding: 0 5px;
+    margin-left: auto;
+    background: #17a2b8;
+    color: white;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 600;
+}
+.progress-group-toggle:hover {
+    background: #138496;
+}
+
+/* Legacy counter badge (kept for backward compat during transition) */
+.progress-group-counter {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 18px;
+    padding: 0 4px;
+    margin-left: 6px;
+    background: #17a2b8;
+    color: white;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 600;
+    vertical-align: middle;
+}
+
+/* History container */
+.progress-group-history {
+    margin-top: 4px;
+    padding-left: 12px;
+    border-left: 2px solid rgba( 23, 162, 184, 0.3 );
+}
+
+/* Individual history entries — muted, compact */
+.progress-history-entry {
+    display: flex;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 11px;
+    color: #6c757d;
+}
+.progress-history-entry .activity-timestamp {
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+/* Pulse animation for head updates */
+.progress-group-updated {
+    animation: progressGroupPulse 0.6s ease-out;
+}
+@keyframes progressGroupPulse {
+    0%   { background-color: rgba( 23, 162, 184, 0.15 ); }
+    100% { background-color: transparent; }
+}
+
+/* ========================================
+   JOB SUBMIT CARD — Collapsible Sub-Accordions
+   Individual toggleable cards inside "Submit Agentic Jobs"
+   ======================================== */
+
+.job-submit-card {
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    background: white;
+}
+
+.job-submit-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background-color 0.2s;
+}
+
+.job-submit-card-header:hover {
+    background-color: rgba( 0, 0, 0, 0.03 );
+}
+
+.job-submit-card-header h4 {
+    margin: 0;
+    font-size: 14px;
+    color: #495057;
+}
+
+.job-submit-card .section-content {
+    padding: 12px 14px;
+}
+
+.job-submit-card .section-content.collapsed {
+    padding: 0 14px;
+}
+
+/* ========================================
+   JOB SEND MESSAGE — User-to-Job Communication (Approach D)
+   Appears on todo + running job cards to allow users to send
+   messages to the SWE Team orchestrator.
+   ======================================== */
+
+.job-send-message {
+    margin-top: 10px;
+    padding: 8px 0 0;
+    border-top: 1px dashed #dee2e6;
+}
+
+.job-send-message-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.job-send-message .stt-button {
+    align-self: center;
+    height: 34px;
+    min-width: 40px;
+    padding: 4px 8px;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.job-msg-input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.job-msg-input:focus {
+    border-color: #007bff;
+    box-shadow: 0 0 0 2px rgba( 0, 123, 255, 0.15 );
+}
+
+.job-msg-input::placeholder {
+    color: #adb5bd;
+    font-style: italic;
+}
+
+.urgent-toggle {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px;
+    border: 2px solid transparent;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    user-select: none;
+}
+
+.urgent-toggle:hover {
+    background-color: #fff3cd;
+}
+
+.urgent-toggle input[type="checkbox"] {
+    display: none;
+}
+
+.urgent-toggle.checked,
+.urgent-toggle:has(input:checked) {
+    background-color: #ffcc80;
+    border: 2px solid #f59e0b;
+    border-radius: 4px;
+}
+
+.job-send-message .response-submit-button {
+    padding: 6px 14px;
+    font-size: 13px;
+    height: 34px;
+    flex-shrink: 0;
+}
+
+/* User message in interaction pane — visually distinct from job notifications */
+.interaction-item.user-message {
+    background-color: #e7f3ff;
+    border-left-color: #007bff;
+    margin-left: 20px;
+}
+
+.interaction-item.user-message .interaction-type::before {
+    content: "👤 ";
+}
+
+/* Running-queue interaction pane (lightweight live variant) */
+.job-interactions-section.live-interactions {
+    margin-top: 8px;
+}
+
+.job-interactions-section.live-interactions .interactions-content {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* Outgoing messages (user chat bubbles) in unified conversation pane */
+.interactions-content .sender-message.outgoing {
+    margin-left: 40px;
+}
+
+/* Urgent outgoing message — light amber background matching the toggle checked state */
+.interactions-content .sender-message.outgoing.priority-urgent {
+    background-color: #ffcc80;
+    border: 2px solid #f59e0b;
+    box-shadow: 0 0 4px rgba( 245, 158, 11, 0.4 );
+}
+
+.interactions-content .sender-message.outgoing.priority-urgent .message-time {
+    color: #92400e;
+}
+
+/* Send input sits below accordion header, no top border when inside section */
+.job-interactions-section .job-send-message {
+    margin-top: 0;
+    padding: 8px 8px 0;
+    border-top: none;
+}
+
+/* ========================================
+   JOB CANCEL BUTTON — Graceful agentic job cancellation
+   Appears in the title bar of running/todo job cards.
+   ======================================== */
+
+.job-cancel-button {
+    position: absolute;
+    top: 4px;
+    left: 6px;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 2px solid #6c757d;
+    border-radius: 4px;
+    background-color: white;
+    color: #6c757d;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    z-index: 10;
+}
+
+.job-cancel-button:hover {
+    background-color: #6c757d;
+    color: white;
+}
+
+.job-cancel-button:disabled:hover {
+    background-color: #6c757d;
+    color: white;
+    cursor: not-allowed;
+}
+
+.job-cancel-button:disabled {
+    background-color: #6c757d;
+    color: white;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+/* ========================================
+   CC SESSION VOICE INPUT — Browser → Hook Buffer (Phase 6)
+   Appears on sender cards for claude.code sessions to allow
+   users to send voice/text directly to CC session hooks.
+   ======================================== */
+
+.cc-voice-input {
+    padding: 8px 12px;
+    border-bottom: 1px dashed #dee2e6;
+    background: #f0f7ff;
+}
+
+.cc-voice-input-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.cc-voice-input .stt-button {
+    align-self: center;
+    height: 34px;
+    min-width: 40px;
+    padding: 4px 8px;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.cc-session-msg-input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.cc-session-msg-input:focus {
+    border-color: #007bff;
+}
+
+.cc-voice-input .response-submit-button {
+    padding: 6px 14px;
+    font-size: 13px;
+    height: 34px;
+    flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Proxy Ratification Link + Retired Batch (Phase 7)
+   ========================================================================== */
+
+/* Proxy ratification link in progress group */
+.proxy-ratify-link {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    padding: 2px 8px;
+    background: #3b82f6;
+    color: white;
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.proxy-ratify-link:hover {
+    background: #2563eb;
+}
+
+/* Retired batch — grayed out with checkmark */
+.progress-batch-retired .progress-group-head {
+    opacity: 0.5;
+}
+.progress-batch-retired {
+    border-left: 3px solid #a0aec0;
+}
+.batch-retired-indicator {
+    margin-left: 6px;
+    font-size: 14px;
 }

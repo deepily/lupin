@@ -350,7 +350,7 @@ mv history.md.backup history.md
 - **Canonical Workflow**: `/mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/workflow/history-management.md`
 - **Global Configuration**: `/home/rruiz/.claude/CLAUDE.md` (HISTORY DOCUMENT MANAGEMENT section)
 - **Session-End Integration**: `.claude/commands/lupin-session-end.md`
-- **Reference Copy**: `src/rnd/prompts/history-management.md`
+- **Reference Copy**: `src/rnd/2025.09.27-prompts/history-management.md`
 
 ---
 

@@ -1,0 +1,396 @@
+/**
+ * Proxy Trust Dashboard Styles
+ *
+ * Styles for the decision proxy trust dashboard.
+ * Imports badge classes from proxy-ratify.css.
+ */
+
+/* ============================================================================
+   Mode Bar
+   ============================================================================ */
+
+.mode-bar {
+    display: flex;
+    gap: 32px;
+    align-items: center;
+    background: #ebf8ff;
+    border: 1px solid #bee3f8;
+    border-radius: 8px;
+    padding: 12px 20px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+
+.mode-bar .mode-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.mode-bar .mode-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #2b6cb0;
+}
+
+.mode-bar .mode-value {
+    font-size: 14px;
+    font-weight: 700;
+    color: #2d3748;
+}
+
+.mode-bar .mode-selector {
+    padding: 6px 12px;
+    border: 2px solid #bee3f8;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: white;
+    color: #2d3748;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.mode-bar .mode-selector:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba( 59, 130, 246, 0.15 );
+}
+
+.mode-bar .mode-selector:hover {
+    border-color: #90cdf4;
+}
+
+.mode-status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-left: 6px;
+    transition: background-color 0.3s;
+}
+
+.mode-status-dot.status-running {
+    background: #48bb78;
+}
+
+.mode-status-dot.status-queued {
+    background: #ecc94b;
+}
+
+.mode-status-dot.status-idle {
+    background: #a0aec0;
+}
+
+/* ============================================================================
+   Trust Cards Grid
+   ============================================================================ */
+
+.trust-cards-grid {
+    display: grid;
+    grid-template-columns: repeat( 3, 1fr );
+    gap: 20px;
+    margin-bottom: 32px;
+}
+
+.trust-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba( 0, 0, 0, 0.08 );
+    border-top: 4px solid #a0aec0;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.trust-card:hover {
+    transform: translateY( -2px );
+    box-shadow: 0 4px 16px rgba( 0, 0, 0, 0.12 );
+}
+
+/* Level color top borders */
+.trust-card-level-1 { border-top-color: #a0aec0; }
+.trust-card-level-2 { border-top-color: #4299e1; }
+.trust-card-level-3 { border-top-color: #48bb78; }
+.trust-card-level-4 { border-top-color: #9f7aea; }
+.trust-card-level-5 { border-top-color: #ecc94b; }
+
+.trust-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.trust-card-header .category-icon {
+    font-size: 24px;
+}
+
+.trust-card-header .category-name {
+    font-size: 16px;
+    font-weight: 700;
+    color: #2d3748;
+    text-transform: capitalize;
+}
+
+.trust-card .trust-level {
+    font-size: 32px;
+    font-weight: 800;
+    margin-bottom: 12px;
+}
+
+.trust-level-L1 { color: #a0aec0; }
+.trust-level-L2 { color: #4299e1; }
+.trust-level-L3 { color: #48bb78; }
+.trust-level-L4 { color: #9f7aea; }
+.trust-level-L5 { color: #ecc94b; }
+
+.trust-card .trust-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #718096;
+    margin-bottom: 16px;
+}
+
+/* ============================================================================
+   Success Rate Bar
+   ============================================================================ */
+
+.success-rate-container {
+    margin-bottom: 12px;
+}
+
+.success-rate-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: #4a5568;
+    margin-bottom: 6px;
+}
+
+.success-rate-bar {
+    height: 6px;
+    background: #e2e8f0;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.success-rate-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s ease;
+}
+
+.rate-high   { background: #48bb78; }
+.rate-medium { background: #ecc94b; }
+.rate-low    { background: #f56565; }
+
+/* ============================================================================
+   Card Stats
+   ============================================================================ */
+
+.trust-card-stats {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 12px;
+    border-top: 1px solid #e2e8f0;
+}
+
+.stat-item {
+    text-align: center;
+}
+
+.stat-item .stat-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: #2d3748;
+}
+
+.stat-item .stat-label {
+    font-size: 11px;
+    color: #718096;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+/* ============================================================================
+   Circuit Breaker Status
+   ============================================================================ */
+
+.cb-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.cb-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.cb-ok      .cb-dot { background: #48bb78; }
+.cb-tripped .cb-dot { background: #f56565; }
+.cb-cooldown .cb-dot { background: #ecc94b; }
+
+.cb-ok      { color: #276749; }
+.cb-tripped { color: #c53030; }
+.cb-cooldown { color: #975a16; }
+
+/* ============================================================================
+   No Data State (in cards)
+   ============================================================================ */
+
+.trust-card .no-data {
+    color: #a0aec0;
+    font-style: italic;
+    font-size: 13px;
+}
+
+/* ============================================================================
+   Recent Decisions Section
+   ============================================================================ */
+
+.recent-decisions-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.recent-decisions-header h2 {
+    font-size: 20px;
+    font-weight: 700;
+    color: #2d3748;
+    margin: 0;
+}
+
+.category-selector {
+    padding: 8px 14px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 14px;
+    background: white;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.category-selector:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba( 59, 130, 246, 0.1 );
+}
+
+/* Reuse decisions-table from proxy-ratify.css — duplicated here for standalone usage */
+.dashboard-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba( 0, 0, 0, 0.1 );
+    margin-bottom: 20px;
+}
+
+.dashboard-table thead {
+    background-color: #f8f9fa;
+    color: #495057;
+}
+
+.dashboard-table th {
+    padding: 15px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #495057;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.dashboard-table tbody tr {
+    border-bottom: 1px solid #e2e8f0;
+    transition: background-color 0.2s;
+}
+
+.dashboard-table tbody tr:nth-child( even ) {
+    background-color: #f7fafc;
+}
+
+.dashboard-table tbody tr:hover {
+    background-color: #edf2f7;
+}
+
+.dashboard-table td {
+    padding: 12px 15px;
+    font-size: 14px;
+}
+
+/* ============================================================================
+   Empty State
+   ============================================================================ */
+
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba( 0, 0, 0, 0.1 );
+}
+
+.empty-state .empty-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.empty-state p {
+    color: #718096;
+    font-size: 16px;
+}
+
+/* ============================================================================
+   Responsive Design
+   ============================================================================ */
+
+@media ( max-width: 1024px ) {
+    .trust-cards-grid {
+        grid-template-columns: repeat( 2, 1fr );
+    }
+}
+
+@media ( max-width: 768px ) {
+    .trust-cards-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .mode-bar {
+        flex-direction: column;
+        gap: 12px;
+        align-items: flex-start;
+    }
+
+    .recent-decisions-header {
+        flex-direction: column;
+        gap: 12px;
+        align-items: flex-start;
+    }
+
+    .category-selector {
+        width: 100%;
+    }
+
+    .dashboard-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+}

@@ -148,7 +148,7 @@ This allows the Lupin UI to group notifications by project.
 - Python 3.11+
 - fastmcp >= 2.14.0
 - Lupin server running (default: port 7999)
-- cosa.cli module available
+- lupin_cli.notifications module available
 
 ## Troubleshooting
 

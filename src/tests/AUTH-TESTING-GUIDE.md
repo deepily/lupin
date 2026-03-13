@@ -6,9 +6,9 @@
 
 | Test Type | Database | Safe to Run Anytime? |
 |-----------|----------|---------------------|
-| Smoke tests | Development (lupin_db) | ✅ YES - non-destructive |
-| Unit tests | Development (lupin_db) | ✅ YES - non-destructive |
-| Manual curl | Development (lupin_db) | ✅ YES - non-destructive |
+| Smoke tests | Development (lupin_db_dev) | ✅ YES - non-destructive |
+| Unit tests | Development (lupin_db_dev) | ✅ YES - non-destructive |
+| Manual curl | Development (lupin_db_dev) | ✅ YES - non-destructive |
 | Integration tests | Test DB (lupin_db_test) | ⚠️ Destructive - use runner script |
 
 ### Running Integration Tests (Destructive)
@@ -39,6 +39,14 @@ See: `src/rnd/2025.10.17-integration-test-database-safety-proof.md`
 
 ---
 
+## Credential Unification (Session 267)
+
+All smoke tests, proxy tests, and pipeline tests now use the unified `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*`
+prefix. This ensures the test runner and notification proxy authenticate as the same user (same WebSocket
+channel), preventing "Operation cancelled" failures caused by credential mismatch.
+
+---
+
 ## Non-Destructive Testing (Manual/Smoke/Unit)
 
 ### Python - Login and Get Token
@@ -50,11 +58,11 @@ import requests
 BASE_URL = "http://localhost:7999"
 
 # Get credentials from environment variables (NEVER hardcode passwords)
-email = os.environ.get( "LUPIN_TEST_EMAIL" )
-password = os.environ.get( "LUPIN_TEST_PASSWORD" )
+email = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
 if not email or not password:
-    raise ValueError( "Set LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables" )
+    raise ValueError( "Set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD environment variables" )
 
 # Login with existing user (development database)
 login_resp = requests.post( f"{BASE_URL}/auth/login",
@@ -66,17 +74,26 @@ headers = {"Authorization": f"Bearer {token}"}
 response = requests.get( f"{BASE_URL}/api/protected-endpoint", headers=headers )
 ```
 
+### Curl Patterns — Reference Only
+
+The curl examples below document HTTP authentication flows for understanding and one-off debugging.
+**Do NOT use curl for pipeline or integration testing.** Use the automated test infrastructure instead:
+
+- **Non-interactive agents**: `LivePipelineTestBase` — see `src/tests/smoke/test_calculator_live_pipeline.py`
+- **Interactive agents**: `InteractiveSmokeTest` — see `src/tests/smoke/test_proxy_integration.py`
+- **Integration tests**: `./src/tests/run-integration-tests.sh -v`
+
 ### CURL - One-Liner Pattern
 
 ```bash
 # First, set credentials via environment variables (NEVER embed passwords in scripts)
-export LUPIN_TEST_EMAIL="your@email.com"
-export LUPIN_TEST_PASSWORD="yourpassword"
+export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL="your@email.com"
+export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD="yourpassword"
 
 # Login and extract token
 TOKEN=$(curl -s -X POST "http://localhost:7999/auth/login" \
   -H "Content-Type: application/json" \
-  -d "{\"email\": \"$LUPIN_TEST_EMAIL\", \"password\": \"$LUPIN_TEST_PASSWORD\"}" \
+  -d "{\"email\": \"$LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL\", \"password\": \"$LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD\"}" \
   | python3 -c "import sys, json; print(json.load(sys.stdin)['tokens']['access_token'])")
 
 # Use token for authenticated requests
@@ -87,13 +104,13 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:7999/api/your-endpoint
 
 ```bash
 # Set credentials via environment variables
-export LUPIN_TEST_EMAIL="your@email.com"
-export LUPIN_TEST_PASSWORD="yourpassword"
+export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL="your@email.com"
+export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD="yourpassword"
 
 # Step 1: Login
 curl -X POST "http://localhost:7999/auth/login" \
   -H "Content-Type: application/json" \
-  -d "{\"email\": \"$LUPIN_TEST_EMAIL\", \"password\": \"$LUPIN_TEST_PASSWORD\"}"
+  -d "{\"email\": \"$LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL\", \"password\": \"$LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD\"}"
 
 # Step 2: Copy access_token from response, then:
 curl -H "Authorization: Bearer YOUR_TOKEN_HERE" http://localhost:7999/api/your-endpoint
@@ -105,15 +122,15 @@ curl -H "Authorization: Bearer YOUR_TOKEN_HERE" http://localhost:7999/api/your-e
 
 Always use environment variables:
 ```bash
-export LUPIN_TEST_EMAIL="your@email.com"
-export LUPIN_TEST_PASSWORD="yourpassword"
+export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL="your@email.com"
+export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD="yourpassword"
 ```
 
 In Python:
 ```python
 import os
-email = os.environ.get( "LUPIN_TEST_EMAIL" )
-password = os.environ.get( "LUPIN_TEST_PASSWORD" )
+email = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 ```
 
 ---

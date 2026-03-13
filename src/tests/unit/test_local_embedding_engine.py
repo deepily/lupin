@@ -438,6 +438,50 @@ class TestEmbeddingProvider:
         mock_code.encode_code.assert_called_once()
         assert len( result ) == 2
 
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config( { "embedding provider": "openai" } ) )
+    def test_openai_code_warning_single( self, mock_cm, capsys ):
+        """OpenAI provider + content_type=code should print a warning."""
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        provider = EmbeddingProvider( debug=False )
+
+        mock_engine = Mock()
+        mock_engine.generate_embedding.return_value = [ 0.1 ] * 1536
+        provider._openai_engine = mock_engine
+
+        provider.generate_embedding( "def foo(): pass", content_type="code" )
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "code-specific" in captured.out
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config( { "embedding provider": "openai" } ) )
+    def test_openai_code_warning_batch( self, mock_cm, capsys ):
+        """OpenAI provider + content_type=code in batch should print a warning."""
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        provider = EmbeddingProvider( debug=False )
+
+        mock_engine = Mock()
+        mock_engine.generate_embedding.return_value = [ 0.1 ] * 1536
+        provider._openai_engine = mock_engine
+
+        provider.generate_embeddings_batch( [ "def a():", "def b():" ], content_type="code" )
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "code-specific" in captured.out
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config( { "embedding provider": "openai" } ) )
+    def test_openai_prose_no_warning( self, mock_cm, capsys ):
+        """OpenAI provider + content_type=prose should NOT print a code warning."""
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        provider = EmbeddingProvider( debug=False )
+
+        mock_engine = Mock()
+        mock_engine.generate_embedding.return_value = [ 0.1 ] * 1536
+        provider._openai_engine = mock_engine
+
+        provider.generate_embedding( "what time is it", content_type="prose" )
+        captured = capsys.readouterr()
+        assert "code-specific" not in captured.out
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Module-level convenience functions

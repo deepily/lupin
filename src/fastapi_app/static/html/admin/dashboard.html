@@ -6,17 +6,19 @@
     <title>Admin Dashboard - Lupin</title>
 
     <!-- Base styles -->
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
     <link rel="stylesheet" href="/static/css/notifications.css">
 
     <!-- Admin dashboard styles -->
     <link rel="stylesheet" href="/static/html/admin/css/admin-dashboard.css">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
 </head>
 <body>
     <div class="admin-dashboard-container">
         <!-- Page Header -->
         <header class="page-header">
             <div class="breadcrumb">
-                <a href="/static/html/notifications.html">Home</a>
+                <a href="/app">Home</a>
                 <span class="separator">></span>
                 <span class="current">Admin</span>
             </div>
@@ -46,7 +48,7 @@
                 </div>
                 <h2 class="card-title">User Management</h2>
                 <p class="card-description">View, edit, and manage user accounts, roles, and permissions</p>
-                <a href="/static/html/auth/admin/users.html" class="card-link">
+                <a href="/app/admin/users" class="card-link">
                     <button class="btn-primary">Open User Management</button>
                 </a>
             </div>
@@ -63,8 +65,38 @@
                 </div>
                 <h2 class="card-title">Solution Snapshots</h2>
                 <p class="card-description">Search, view, and manage solution snapshot database entries</p>
-                <a href="/static/html/admin/snapshots.html" class="card-link">
+                <a href="/app/admin/snapshots" class="card-link">
                     <button class="btn-primary">Open Snapshots</button>
+                </a>
+            </div>
+
+            <!-- Decision Ratification Card -->
+            <div class="admin-card">
+                <div class="card-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                        <path d="m9 12 2 2 4-4"></path>
+                    </svg>
+                </div>
+                <h2 class="card-title">Decision Ratification</h2>
+                <p class="card-description">Review and approve pending proxy decisions. See what the AI decided and ratify or reject.</p>
+                <a href="/app/admin/proxy-ratify" class="card-link">
+                    <button class="btn-primary">Open Ratification Queue</button>
+                </a>
+            </div>
+
+            <!-- Trust Dashboard Card -->
+            <div class="admin-card">
+                <div class="card-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path>
+                        <path d="M22 12A10 10 0 0 0 12 2v10z"></path>
+                    </svg>
+                </div>
+                <h2 class="card-title">Trust Dashboard</h2>
+                <p class="card-description">Monitor proxy trust levels, success rates, and circuit breaker status across all categories.</p>
+                <a href="/app/admin/proxy-dashboard" class="card-link">
+                    <button class="btn-primary">Open Trust Dashboard</button>
                 </a>
             </div>
         </div>
@@ -76,6 +108,7 @@
     </div>
 
     <!-- Scripts -->
+    <script src="/static/js/lupin-nav.js" defer></script>
     <script src="/static/html/auth/js/auth.js"></script>
     <script src="/static/html/admin/js/admin-dashboard.js"></script>
 </body>

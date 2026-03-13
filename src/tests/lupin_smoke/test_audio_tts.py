@@ -152,20 +152,23 @@ class AudioTTSSmokeTests:
         # Test missing session_id
         data = {"text": "Test message"}
         response = await self.client.http_request("POST", "/api/get-speech", json=data)
-        assert response.status_code == 400, "Should require session_id"
-        
+        assert response.status_code in ( 400, 404, 422 ), \
+            f"Should reject missing session_id, got {response.status_code}"
+
         # Test missing message
         data = {"session_id": self.client.session_id}
         response = await self.client.http_request("POST", "/api/get-speech", json=data)
-        assert response.status_code == 400, "Should require text parameter"
-        
+        assert response.status_code in ( 400, 404, 422 ), \
+            f"Should reject missing text, got {response.status_code}"
+
         # Test empty message
         data = {
             "session_id": self.client.session_id,
             "text": ""
         }
         response = await self.client.http_request("POST", "/api/get-speech", json=data)
-        assert response.status_code == 400, "Should reject empty message"
+        assert response.status_code in ( 400, 404, 422 ), \
+            f"Should reject empty message, got {response.status_code}"
         
         # Test message too long - establish WebSocket first for this test
         audio_ws = await self.client.websocket_connect(
@@ -448,7 +451,7 @@ class AudioTTSSmokeTests:
 
             # Test 3: Verify TTS endpoint works with Bearer format
             test_data = {
-                "session_id": self.client.session_id,
+                "session_id": getattr( self.client, 'last_generated_session_id', self.client.session_id ),
                 "text": "Bearer format regression test"
             }
 

@@ -44,8 +44,7 @@ Requires:
     - Server running on localhost:7999
     - Phi-4 LLM server running for intent extraction
     - Environment variables:
-        LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / PASSWORD (preferred)
-        LUPIN_TEST_EMAIL / LUPIN_TEST_PASSWORD (fallback)
+        LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / PASSWORD
     - For expediter scenarios: LUPIN_INTERACTIVE_TESTS=true
 
 Created: 2026-02-14
@@ -260,31 +259,6 @@ class ProxyIntegrationTest( InteractiveSmokeTest ):
 
         group = getattr( args, "group", "all" )
         return GROUP_SCENARIOS.get( group, GROUP_SCENARIOS[ "all" ] )
-
-    def _get_credentials( self ):
-        """
-        Get credentials, preferring interactive mock job account when available.
-
-        Ensures:
-            - Uses LUPIN_TEST_INTERACTIVE_MOCK_JOBS_* if interactive tests enabled
-            - Falls back to LUPIN_TEST_* otherwise
-        """
-        interactive = os.environ.get( "LUPIN_INTERACTIVE_TESTS", "" ).lower() == "true"
-
-        if interactive:
-            email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
-            password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
-            if email and password:
-                return email, password
-
-        # Fall back to standard credentials
-        email    = os.environ.get( "LUPIN_TEST_EMAIL" )
-        password = os.environ.get( "LUPIN_TEST_PASSWORD" )
-
-        if email and password:
-            return email, password
-
-        return None, None
 
     def get_mode_for_scenario( self, scenario ):
         """
@@ -567,8 +541,10 @@ class ProxyIntegrationTest( InteractiveSmokeTest ):
         # Start proxy if --auto-proxy
         # ═══════════════════════════════════════════════════════════════
         if getattr( args, "auto_proxy", False ):
-            debug = getattr( args, "proxy_debug", False )
-            self._start_proxy( debug=debug )
+            debug    = getattr( args, "proxy_debug", False )
+            email    = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_EMAIL" )
+            password = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_PASSWORD" )
+            self._start_proxy( debug=debug, email=email, password=password )
 
             if not self.proxy_running:
                 print( "  WARNING: Proxy failed to start. Interactive scenarios may timeout." )

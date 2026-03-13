@@ -67,31 +67,39 @@ api_key_file = /tmp/config_key_file
                     assert config['api_url'] == 'http://config-file:8888'
                     assert config['api_key_file'] == '/tmp/config_key_file'
 
-    def test_hardcoded_defaults_lowest_precedence( self, monkeypatch ):
-        """Test that hardcoded defaults are used when no other sources available."""
+    def test_raises_error_when_config_missing( self, monkeypatch ):
+        """Test that missing ~/.lupin/config raises FileNotFoundError."""
         # Ensure env vars are NOT set
         monkeypatch.delenv( 'LUPIN_API_URL', raising=False )
         monkeypatch.delenv( 'LUPIN_API_KEY_FILE', raising=False )
 
         # Mock no config file
-        with patch( 'cosa.utils.config_loader.Path.exists', return_value=False ):
-            config = get_api_config()
+        with patch( 'cosa.utils.config_loader.Path.home', return_value=Path( '/nonexistent' ) ):
+            with pytest.raises( FileNotFoundError, match="~/.lupin/config not found" ):
+                get_api_config()
 
-            assert config['api_url'] == 'http://localhost:7999'
-            assert 'notification-api-claude-code-dev' in config['api_key_file']
-
-    def test_partial_env_vars_falls_back( self, monkeypatch ):
-        """Test that partial env vars (only one set) falls back to next precedence."""
+    def test_partial_env_vars_falls_through_to_config( self, monkeypatch, tmp_path ):
+        """Test that partial env vars (only one set) falls through to config file."""
         # Only set API_URL, not KEY_FILE
         monkeypatch.setenv( 'LUPIN_API_URL', 'http://partial:7000' )
         monkeypatch.delenv( 'LUPIN_API_KEY_FILE', raising=False )
+        monkeypatch.delenv( 'LUPIN_ENV', raising=False )
 
-        # Should fall back to config file or defaults (not use partial env vars)
-        with patch( 'cosa.utils.config_loader.Path.exists', return_value=False ):
+        # Should fall through to config file (not use partial env vars)
+        with patch( 'cosa.utils.config_loader.Path.home', return_value=tmp_path ):
+            lupin_dir = tmp_path / '.lupin'
+            lupin_dir.mkdir()
+            config_file = lupin_dir / 'config'
+            config_file.write_text( """[environments]
+default = local
+
+[local]
+api_url = http://from-config:7999
+api_key_file = /tmp/config_key
+""" )
             config = get_api_config()
 
-            # Should use defaults (not partial env vars)
-            assert config['api_url'] == 'http://localhost:7999'
+            assert config['api_url'] == 'http://from-config:7999'
 
 
 class TestEnvironmentSwitching:
@@ -379,3 +387,95 @@ api_url = http://localhost:7999
 
                     with pytest.raises( ValueError, match="Missing 'api_key_file'" ):
                         get_api_config()
+
+
+class TestUnifiedConfigFile:
+    """Test that credentials and API config coexist in one unified file."""
+
+    def test_unified_file_loads_api_config( self, monkeypatch, tmp_path ):
+        """Test that API config loads from unified file containing credentials + environments."""
+        monkeypatch.delenv( 'LUPIN_API_URL', raising=False )
+        monkeypatch.delenv( 'LUPIN_API_KEY_FILE', raising=False )
+        monkeypatch.delenv( 'LUPIN_ENV', raising=False )
+
+        # Create unified config with both credentials and environments
+        unified_content = """[lupin]
+email = claude.code@lupin.deepily.ai
+password = test-password
+
+[environments]
+default = local
+
+[local]
+api_url = http://localhost:7999
+api_key_file = /tmp/unified_key
+global_notification_recipient = test@example.com
+"""
+        with patch( 'cosa.utils.config_loader.Path.home', return_value=tmp_path.parent ):
+            with patch( 'cosa.utils.config_loader.Path.exists', return_value=True ):
+                with patch( 'cosa.utils.config_loader._load_config_file' ) as mock_load:
+                    from configparser import ConfigParser
+                    mock_config = ConfigParser()
+                    mock_config.read_string( unified_content )
+                    mock_load.return_value = mock_config
+
+                    config = get_api_config()
+
+                    assert config['api_url'] == 'http://localhost:7999'
+                    assert config['api_key_file'] == '/tmp/unified_key'
+                    assert config['global_notification_recipient'] == 'test@example.com'
+
+    def test_credential_sections_do_not_interfere_with_env_sections( self, tmp_path ):
+        """Test that [lupin]/[cosa] credential sections don't break _load_config_file."""
+        unified_file = tmp_path / 'config'
+        unified_file.write_text( """[lupin]
+email = test@example.com
+password = secret
+
+[cosa]
+email = cosa@example.com
+password = secret2
+
+[environments]
+default = local
+
+[local]
+api_url = http://localhost:7999
+api_key_file = /tmp/key
+""" )
+        config = _load_config_file( unified_file )
+        assert 'environments' in config
+        assert 'local' in config
+        assert 'lupin' in config
+        assert 'cosa' in config
+        assert config['local']['api_url'] == 'http://localhost:7999'
+
+
+class TestFailHardWhenConfigMissing:
+    """Test that missing ~/.lupin/config raises FileNotFoundError with migration instructions."""
+
+    def test_raises_file_not_found_with_migration_message( self, monkeypatch ):
+        """Test FileNotFoundError includes lupin-config init/migrate instructions."""
+        monkeypatch.delenv( 'LUPIN_API_URL', raising=False )
+        monkeypatch.delenv( 'LUPIN_API_KEY_FILE', raising=False )
+
+        with patch( 'cosa.utils.config_loader.Path.home', return_value=Path( '/nonexistent' ) ):
+            with pytest.raises( FileNotFoundError ) as exc_info:
+                get_api_config()
+
+            error_msg = str( exc_info.value )
+            assert "~/.lupin/config not found" in error_msg
+            assert "lupin-config init" in error_msg
+            assert "lupin-config migrate" in error_msg
+
+    def test_env_vars_bypass_config_file_requirement( self, monkeypatch ):
+        """Test that env vars work even when config file is missing."""
+        monkeypatch.setenv( 'LUPIN_API_URL', 'http://env-only:9000' )
+        monkeypatch.setenv( 'LUPIN_API_KEY_FILE', '/tmp/env_key' )
+
+        # Even with no config file, env vars should work
+        with patch( 'cosa.utils.config_loader.Path.home', return_value=Path( '/nonexistent' ) ):
+            config = get_api_config()
+
+            assert config['api_url'] == 'http://env-only:9000'
+            assert config['api_key_file'] == '/tmp/env_key'

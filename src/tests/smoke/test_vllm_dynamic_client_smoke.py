@@ -123,6 +123,11 @@ def quick_smoke_test():
     return passed == total
 
 
+def test_vllm_dynamic_client():
+    """Pytest entry point."""
+    assert quick_smoke_test()
+
+
 if __name__ == "__main__":
     success = quick_smoke_test()
     sys.exit( 0 if success else 1 )

@@ -112,8 +112,9 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 - **API Reference**: `src/docs/notification-api.md` (comprehensive one-stop reference)
 - **WebSocket Events**: `src/docs/websocket-events.md` (event catalog)
 - **Agentic Voice Integration**: `src/workflow/agentic-voice-workflow.md`
+- **Decision Proxy Admin Guide**: `src/docs/proxy-admin-guide.md` (Trust Dashboard + Ratification how-to)
 - **Interactive Proxy Testing**: `src/docs/automated-interactive-testing.md` (proxy auto-answer testing guide)
-- **R&D Planning Docs**: `src/rnd/sse-notifications/` (historical)
+- **R&D Planning Docs**: `src/rnd/2025.10.15-sse-notifications/` (historical)
 
 ## STARTUP PROCEDURE
 - The first thing you should do when you start a session is read the global Claude configuration file and follow its instructions.
@@ -324,6 +325,14 @@ pytest src/tests/unit/ -v && \
 - **Fix the failing tests first**, then re-run the full suite
 - If a test is legitimately flaky (not your code), document and create a separate fix
 
+### Testing Anti-Patterns
+
+- **NEVER** use `curl` commands for pipeline or integration testing — use automated test scripts
+- **NEVER** manually POST to `/api/push` and poll `/api/get-queue/done` — use `LivePipelineTestBase`
+- **NEVER** create bespoke curl scripts as a substitute for repeatable test automation
+- Manual curl is acceptable ONLY for: API reference documentation, deployment health checks, one-off debugging (never committed)
+- When building new agents, create an automated smoke test — see `.claude/skills/agentic-voice-workflow/SKILL.md`
+
 ## TEST CREDENTIALS
 
 **CRITICAL**: Never hardcode test credentials. Always use environment variables.
@@ -331,20 +340,24 @@ pytest src/tests/unit/ -v && \
 ### Required Environment Variables
 
 ```bash
-export LUPIN_TEST_EMAIL="your@email.com"
-export LUPIN_TEST_PASSWORD="yourpassword"
+export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL="your@email.com"
+export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD="yourpassword"
 ```
+
+> **Session 267 unification**: All smoke tests, proxy tests, and pipeline tests now use the
+> `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` prefix. This ensures test and proxy authenticate as the
+> same user (same WebSocket channel), preventing "Operation cancelled" failures.
 
 ### Usage Pattern (Python)
 
 ```python
 import os
 
-email    = os.environ.get( "LUPIN_TEST_EMAIL" )
-password = os.environ.get( "LUPIN_TEST_PASSWORD" )
+email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
 if not email or not password:
-    raise ValueError( "Set LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables" )
+    raise ValueError( "Set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD environment variables" )
 ```
 
 ### When to Use
@@ -354,7 +367,7 @@ if not email or not password:
 - Manual testing scripts
 - Protocol verification tests that need real user context
 
-**Reference**: See `src/tests/AUTH-TESTING-GUIDE.md` for complete patterns including curl examples.
+**Reference**: See `src/tests/AUTH-TESTING-GUIDE.md` for credential patterns. For pipeline testing, always use automated smoke tests — never manual curl.
 
 ## HISTORY STRUCTURE NOTES
 - **Project Span**: December 2024 - Present (Lupin evolution from Genie-in-the-Box)

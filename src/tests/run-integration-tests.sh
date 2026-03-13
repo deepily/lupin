@@ -2,12 +2,15 @@
 #
 # Automated Integration Test Runner for Lupin
 #
+# Hot-swap approach: Instead of starting a separate test server, this script
+# swaps the running dev server's config block and database connection to
+# [Lupin: Testing] / lupin_db_test, runs pytest, then swaps back.
+#
 # Features:
-# - Checks if port 7999 is available
-# - Starts FastAPI server with Testing config block
-# - Waits for server health check
+# - Requires dev server already running on port 7999
+# - Hot-swaps to [Lupin: Testing] config block (lupin_db_test)
 # - Runs pytest with pass-through arguments
-# - Automatic server cleanup on exit
+# - ALWAYS swaps back to [Lupin: Development] on exit (trap handler)
 # - Returns pytest exit code for CI/CD
 #
 # Usage:
@@ -21,9 +24,9 @@ set -e  # Exit on error
 
 # Configuration
 PORT=7999
+BASE_URL="http://localhost:$PORT"
 PROJECT_ROOT="${LUPIN_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/lupin}"
-SERVER_PID=""
-MAX_WAIT=30  # Maximum seconds to wait for server startup
+ORIGINAL_BLOCK=""
 
 # Colors for output
 RED='\033[0;31m'
@@ -31,14 +34,21 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Cleanup function - runs on EXIT/INT/TERM
+# Cleanup function - ALWAYS swap back, even on test failure or Ctrl+C
 cleanup() {
-    if [ -n "$SERVER_PID" ]; then
+    if [ -n "$ORIGINAL_BLOCK" ]; then
         echo ""
-        echo -e "${YELLOW}[CLEANUP] Stopping test server (PID: $SERVER_PID)...${NC}"
-        kill $SERVER_PID 2>/dev/null || true
-        wait $SERVER_PID 2>/dev/null || true
-        echo -e "${GREEN}[CLEANUP] Server stopped${NC}"
+        echo -e "${YELLOW}[CLEANUP] Restoring original config: $ORIGINAL_BLOCK${NC}"
+        local encoded_block="${ORIGINAL_BLOCK// /+}"
+        python3 -c "
+import urllib.request
+try:
+    urllib.request.urlopen( '${BASE_URL}/api/init?config_block_id=${encoded_block}' )
+    print( 'Config restored to ${ORIGINAL_BLOCK}' )
+except Exception as e:
+    print( f'WARNING: Failed to restore config: {e}' )
+" 2>/dev/null || true
+        echo -e "${GREEN}[CLEANUP] Server restored${NC}"
     fi
 }
 
@@ -47,19 +57,13 @@ trap cleanup EXIT INT TERM
 
 # Print banner
 echo "================================================================"
-echo "  Lupin Integration Test Runner"
+echo "  Lupin Integration Test Runner (Hot-Swap Mode)"
 echo "================================================================"
 echo ""
-echo -e "${YELLOW}⚠️  IMPORTANT: This script requires the development server to be stopped!${NC}"
-echo ""
 echo "These tests will:"
-echo "  • Start their own test server on port $PORT"
-echo "  • Use [Lupin: Testing] config block (test database)"
-echo "  • Run in complete isolation from production"
-echo ""
-echo "If you see authentication or 401 errors:"
-echo "  → Your dev server is probably still running"
-echo "  → Stop it first: kill \$(lsof -ti:$PORT)"
+echo "  • Hot-swap the running dev server to [Lupin: Testing] config"
+echo "  • Use lupin_db_test database for complete isolation"
+echo "  • Swap back to [Lupin: Development] when done"
 echo ""
 echo "================================================================"
 echo ""
@@ -76,82 +80,112 @@ fi
 
 echo ""
 
-# Check if port 7999 is already in use
-if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null 2>&1 ; then
+# Check that dev server IS running (via health endpoint, not lsof — works with Docker too)
+echo -e "${YELLOW}[SERVER] Checking dev server on port $PORT...${NC}"
+
+SERVER_HEALTHY=$(python3 -c "
+import urllib.request
+try:
+    urllib.request.urlopen( '${BASE_URL}/health', timeout=3 )
+    print( 'yes' )
+except Exception:
+    print( 'no' )
+" 2>/dev/null)
+
+if [ "$SERVER_HEALTHY" != "yes" ]; then
     echo ""
     echo "========================================================================"
-    echo -e "${RED}  ERROR: Development Server Running${NC}"
+    echo -e "${RED}  ERROR: Development Server Not Running${NC}"
     echo "========================================================================"
     echo ""
-    echo "Port $PORT is already in use (likely the development FastAPI server)."
+    echo "Integration tests require the development server running on port $PORT."
     echo ""
-    echo -e "${YELLOW}IMPORTANT: Integration tests REQUIRE the development server to be stopped.${NC}"
+    echo "Start the server first:"
+    echo -e "  ${GREEN}./src/scripts/run-fastapi-lupin.sh${NC}"
     echo ""
-    echo "Why this is required:"
-    echo "  • Integration tests manage their own FastAPI server instance"
-    echo "  • Tests use [Lupin: Testing] config block (test database)"
-    echo "  • Development server uses [Lupin: Development] config block (production database)"
-    echo "  • Both try to use port $PORT → port conflict"
-    echo ""
-    echo "To fix this issue:"
-    echo ""
-    echo "  1. Find the running server:"
-    echo -e "     ${GREEN}lsof -Pi :$PORT -sTCP:LISTEN${NC}"
-    echo ""
-    echo "  2. Stop the development server:"
-    echo -e "     ${GREEN}kill <PID>${NC}"
-    echo ""
-    echo "  3. Re-run the integration tests:"
-    echo -e "     ${GREEN}./src/tests/run-integration-tests.sh -v${NC}"
+    echo "Then re-run:"
+    echo -e "  ${GREEN}./src/tests/run-integration-tests.sh -v${NC}"
     echo ""
     echo "========================================================================"
     echo ""
     exit 1
 fi
 
-echo -e "${GREEN}✓ Port $PORT is available${NC}"
+echo -e "${GREEN}✓ Dev server is running on port $PORT${NC}"
 
-# Start FastAPI server with Testing config block
-echo -e "${YELLOW}[SERVER] Starting FastAPI server with Testing config block...${NC}"
+# Record original config block
+echo -e "${YELLOW}[CONFIG] Querying current server state...${NC}"
 
-cd "$PROJECT_ROOT/src"
+ORIGINAL_BLOCK=$(python3 -c "
+import urllib.request, json
+try:
+    resp = urllib.request.urlopen( '${BASE_URL}/api/server-info', timeout=5 )
+    info = json.loads( resp.read() )
+    print( info.get( 'config_block_id', '' ) )
+except Exception as e:
+    print( '' )
+" 2>/dev/null)
 
+if [ -z "$ORIGINAL_BLOCK" ]; then
+    echo -e "${RED}[ERROR] Cannot query /api/server-info — is the server running?${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Current config: $ORIGINAL_BLOCK${NC}"
+
+# Hot-swap to Testing config
+echo -e "${YELLOW}[CONFIG] Swapping to [Lupin: Testing] config block...${NC}"
+
+SWAP_RESULT=$(python3 -c "
+import urllib.request, json
+try:
+    resp = urllib.request.urlopen( '${BASE_URL}/api/init?config_block_id=Lupin:+Testing', timeout=10 )
+    info = json.loads( resp.read() )
+    print( info.get( 'status', 'error' ) )
+    print( info.get( 'database_url', 'unknown' ) )
+    print( info.get( 'config_block_id', 'unknown' ) )
+except Exception as e:
+    print( 'error' )
+    print( str( e ) )
+    print( '' )
+" 2>/dev/null)
+
+SWAP_STATUS=$(echo "$SWAP_RESULT" | head -1)
+SWAP_DB_URL=$(echo "$SWAP_RESULT" | sed -n '2p')
+SWAP_BLOCK=$(echo "$SWAP_RESULT" | tail -1)
+
+if [ "$SWAP_STATUS" != "success" ]; then
+    echo -e "${RED}[ERROR] Hot-swap failed: $SWAP_DB_URL${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Config block: $SWAP_BLOCK${NC}"
+echo -e "${GREEN}✓ Database: $SWAP_DB_URL${NC}"
+
+# Verify swap via /api/server-info
+VERIFY_DB=$(python3 -c "
+import urllib.request, json
+try:
+    resp = urllib.request.urlopen( '${BASE_URL}/api/server-info', timeout=5 )
+    info = json.loads( resp.read() )
+    print( info.get( 'database_url', '' ) )
+except Exception:
+    print( '' )
+" 2>/dev/null)
+
+if echo "$VERIFY_DB" | grep -q "lupin_db_test"; then
+    echo -e "${GREEN}✓ Verified: database is lupin_db_test${NC}"
+else
+    echo -e "${RED}[ERROR] Verification failed — database is NOT lupin_db_test${NC}"
+    echo -e "${RED}  Got: $VERIFY_DB${NC}"
+    exit 1
+fi
+
+echo ""
+
+# Set environment for pytest conftest.py
 export LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
 export LUPIN_ENV="testing"
-
-# Start server in background
-"$PROJECT_ROOT/src/cosa/.venv/bin/python3" -m fastapi_app.main > /tmp/lupin-test-server.log 2>&1 &
-SERVER_PID=$!
-
-echo -e "${GREEN}✓ Server started (PID: $SERVER_PID)${NC}"
-echo -e "${YELLOW}[SERVER] Waiting for health check...${NC}"
-
-# Wait for server to be ready
-SECONDS_WAITED=0
-until curl -s http://localhost:$PORT/health > /dev/null 2>&1; do
-    sleep 1
-    SECONDS_WAITED=$((SECONDS_WAITED + 1))
-
-    if [ $SECONDS_WAITED -ge $MAX_WAIT ]; then
-        echo -e "${RED}[ERROR] Server failed to start within $MAX_WAIT seconds${NC}"
-        echo ""
-        echo "Server log:"
-        tail -20 /tmp/lupin-test-server.log
-        exit 1
-    fi
-
-    # Check if server process is still running
-    if ! kill -0 $SERVER_PID 2>/dev/null; then
-        echo -e "${RED}[ERROR] Server process died during startup${NC}"
-        echo ""
-        echo "Server log:"
-        tail -20 /tmp/lupin-test-server.log
-        exit 1
-    fi
-done
-
-echo -e "${GREEN}✓ Server is healthy (took ${SECONDS_WAITED}s)${NC}"
-echo ""
 
 # Run pytest with all arguments passed through
 echo "================================================================"
@@ -180,5 +214,5 @@ fi
 echo "================================================================"
 echo ""
 
-# Cleanup happens automatically via trap
+# Cleanup happens automatically via trap (swaps back to original config)
 exit $PYTEST_EXIT_CODE

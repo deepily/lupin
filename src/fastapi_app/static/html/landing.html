@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lupin — Home</title>
+
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
+    <link rel="stylesheet" href="/static/html/admin/css/admin-dashboard.css">
+    <style>
+        /* Landing page overrides */
+        .landing-greeting {
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #6b7280;
+        }
+
+        .landing-greeting strong {
+            color: #111827;
+        }
+
+        /* Two-column layout: App + Admin */
+        .landing-sections {
+            display: flex;
+            flex-direction: column;
+            gap: 48px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #374151;
+            margin: 0 0 16px 0;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        /* Quick stats strip */
+        .stats-strip {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 32px;
+            flex-wrap: wrap;
+        }
+
+        .stat-chip {
+            background: #f0f9ff;
+            border: 1px solid #bae6fd;
+            border-radius: 8px;
+            padding: 12px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-width: 120px;
+        }
+
+        .stat-chip .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #0369a1;
+        }
+
+        .stat-chip .stat-label {
+            font-size: 12px;
+            color: #6b7280;
+            margin-top: 4px;
+        }
+
+        /* Card description truncation */
+        .admin-card .card-description {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-dashboard-container">
+        <!-- Dashboard Header -->
+        <div class="dashboard-header">
+            <div class="landing-greeting" id="greeting"></div>
+            <h1>Lupin</h1>
+            <p class="subtitle">Your AI assistant hub</p>
+        </div>
+
+        <!-- Quick Stats -->
+        <div class="stats-strip" id="stats-strip">
+            <div class="stat-chip">
+                <span class="stat-value" id="stat-time-saved">—</span>
+                <span class="stat-label">Time Saved</span>
+            </div>
+            <div class="stat-chip">
+                <span class="stat-value" id="stat-replays">—</span>
+                <span class="stat-label">Solution Replays</span>
+            </div>
+        </div>
+
+        <div class="landing-sections">
+            <!-- App Section -->
+            <div>
+                <h2 class="section-title">Application</h2>
+                <div class="admin-tools-grid">
+
+                    <!-- Notifications Card -->
+                    <div class="admin-card">
+                        <div class="card-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                            </svg>
+                        </div>
+                        <h2 class="card-title">Notifications &amp; Q&amp;A</h2>
+                        <p class="card-description">Submit questions, run agentic jobs, and view notification queues</p>
+                        <a href="/app/notifications" class="card-link">
+                            <button class="btn-primary">Open Notifications</button>
+                        </a>
+                    </div>
+
+                    <!-- Profile Card -->
+                    <div class="admin-card">
+                        <div class="card-icon" style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="12" cy="7" r="4"></circle>
+                            </svg>
+                        </div>
+                        <h2 class="card-title">Profile</h2>
+                        <p class="card-description">View your account details, roles, and change your password</p>
+                        <a href="/app/auth/profile" class="card-link">
+                            <button class="btn-primary">Open Profile</button>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Admin Section (role-gated) -->
+            <div id="admin-section" style="display: none;">
+                <h2 class="section-title">Administration</h2>
+                <div class="admin-tools-grid">
+
+                    <!-- User Management Card -->
+                    <div class="admin-card">
+                        <div class="card-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="9" cy="7" r="4"></circle>
+                                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                            </svg>
+                        </div>
+                        <h2 class="card-title">User Management</h2>
+                        <p class="card-description">View, edit, and manage user accounts, roles, and permissions</p>
+                        <a href="/app/admin/users" class="card-link">
+                            <button class="btn-primary">Open User Management</button>
+                        </a>
+                    </div>
+
+                    <!-- Solution Snapshots Card -->
+                    <div class="admin-card">
+                        <div class="card-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <path d="m21 21-4.35-4.35"></path>
+                                <path d="M11 8v6"></path>
+                                <path d="M8 11h6"></path>
+                            </svg>
+                        </div>
+                        <h2 class="card-title">Solution Snapshots</h2>
+                        <p class="card-description">Search, view, and manage solution snapshot database entries</p>
+                        <a href="/app/admin/snapshots" class="card-link">
+                            <button class="btn-primary">Open Snapshots</button>
+                        </a>
+                    </div>
+
+                    <!-- Decision Ratification Card -->
+                    <div class="admin-card">
+                        <div class="card-icon" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                                <path d="m9 12 2 2 4-4"></path>
+                            </svg>
+                        </div>
+                        <h2 class="card-title">Decision Ratification</h2>
+                        <p class="card-description">Review and approve pending proxy decisions</p>
+                        <a href="/app/admin/proxy-ratify" class="card-link">
+                            <button class="btn-primary">Open Ratification Queue</button>
+                        </a>
+                    </div>
+
+                    <!-- Trust Dashboard Card -->
+                    <div class="admin-card">
+                        <div class="card-icon" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path>
+                                <path d="M22 12A10 10 0 0 0 12 2v10z"></path>
+                            </svg>
+                        </div>
+                        <h2 class="card-title">Trust Dashboard</h2>
+                        <p class="card-description">Monitor proxy trust levels, success rates, and circuit breaker status</p>
+                        <a href="/app/admin/proxy-dashboard" class="card-link">
+                            <button class="btn-primary">Open Trust Dashboard</button>
+                        </a>
+                    </div>
+
+                    <!-- Dev Tools Card -->
+                    <div class="admin-card">
+                        <div class="card-icon" style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+                            </svg>
+                        </div>
+                        <h2 class="card-title">Dev Tools</h2>
+                        <p class="card-description">Test pages, diagnostic tools, and development utilities</p>
+                        <a href="/app/admin/dev-tools" class="card-link">
+                            <button class="btn-primary">Open Dev Tools</button>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="dashboard-footer">
+            <p>Lupin v0.1.5</p>
+        </footer>
+    </div>
+
+    <script src="/static/js/lupin-nav.js" defer></script>
+    <script>
+        // Greeting from localStorage
+        ( function () {
+            try {
+                const raw = localStorage.getItem( "user_data" );
+                if ( raw ) {
+                    const user = JSON.parse( raw );
+                    const el = document.getElementById( "greeting" );
+                    if ( el && user.email ) {
+                        el.innerHTML = "Welcome back, <strong>" + user.email + "</strong>";
+                    }
+
+                    // Show admin section if admin
+                    if ( user.role === "admin" || ( user.roles && user.roles.includes( "admin" ) ) ) {
+                        document.getElementById( "admin-section" ).style.display = "block";
+                    }
+                }
+            } catch ( e ) {
+                // Silently ignore — landing works without auth
+            }
+
+            // Fetch time-saved stats (fire and forget)
+            fetch( "/api/stats/time-saved/global" )
+                .then( function ( r ) { return r.json(); } )
+                .then( function ( data ) {
+                    if ( data.formatted_time_saved ) {
+                        document.getElementById( "stat-time-saved" ).textContent = data.formatted_time_saved;
+                    }
+                    if ( data.total_replays !== undefined ) {
+                        document.getElementById( "stat-replays" ).textContent = data.total_replays.toLocaleString();
+                    }
+                } )
+                .catch( function () {
+                    // Stats unavailable — leave dashes
+                } );
+        } )();
+    </script>
+</body>
+</html>

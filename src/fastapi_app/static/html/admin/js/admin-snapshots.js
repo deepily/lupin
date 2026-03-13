@@ -47,7 +47,7 @@ class AdminSnapshotsDashboard {
     async setupAuthentication() {
         // Check if user is authenticated
         if ( !isAuthenticated() ) {
-            window.location.href = '/static/html/auth/login.html?redirect=/static/html/admin/snapshots.html';
+            window.location.href = '/app/auth/login?redirect=/app/admin/snapshots';
             return;
         }
 
@@ -56,7 +56,7 @@ class AdminSnapshotsDashboard {
 
         if ( !userData ) {
             clearTokens();
-            window.location.href = '/static/html/auth/login.html';
+            window.location.href = '/app/auth/login';
             return;
         }
 
@@ -67,7 +67,7 @@ class AdminSnapshotsDashboard {
         // Check admin role
         if ( !this.isAdmin ) {
             alert( 'Admin access required' );
-            window.location.href = '/static/html/auth/profile.html';
+            window.location.href = '/app/auth/profile';
             return;
         }
     }
@@ -105,7 +105,7 @@ class AdminSnapshotsDashboard {
         // Logout button
         document.getElementById( 'logout-btn' ).addEventListener( 'click', () => {
             clearTokens();
-            window.location.href = '/static/html/auth/login.html';
+            window.location.href = '/app/auth/login';
         });
 
         // Detail modal close buttons
@@ -883,10 +883,10 @@ class AdminSnapshotsDashboard {
             const response = await this.apiCall( `/admin/snapshots/${idHash}/similar` );
 
             // Update modal title with source question
-            if ( response.source_snapshot ) {
-                const truncatedSource = response.source_snapshot.length > 60
-                    ? response.source_snapshot.substring( 0, 60 ) + '...'
-                    : response.source_snapshot;
+            if ( response.source_question ) {
+                const truncatedSource = response.source_question.length > 60
+                    ? response.source_question.substring( 0, 60 ) + '...'
+                    : response.source_question;
                 document.getElementById( 'similarity-modal-title' ).textContent =
                     `Similar Snapshots: "${truncatedSource}"`;
             }
@@ -914,19 +914,6 @@ class AdminSnapshotsDashboard {
             } else {
                 explList.innerHTML = response.explanation_similar.map( result =>
                     this.createSimilarResultItem( result, 'explanation' )
-                ).join( '' );
-            }
-
-            // Populate gist similarity column
-            const gistList = document.getElementById( 'solution-gist-similar-list' );
-            const gistCount = document.getElementById( 'solution-gist-similar-count' );
-            gistCount.textContent = `Found ${response.total_solution_gist_matches} match${response.total_solution_gist_matches !== 1 ? 'es' : ''}`;
-
-            if ( response.solution_gist_similar.length === 0 ) {
-                gistList.innerHTML = '<div class="similarity-empty">No similar gists found</div>';
-            } else {
-                gistList.innerHTML = response.solution_gist_similar.map( result =>
-                    this.createSimilarResultItem( result, 'gist' )
                 ).join( '' );
             }
 
@@ -982,15 +969,10 @@ class AdminSnapshotsDashboard {
                 maxLength = 400;  // Show more code
                 break;
             case 'explanation':
+            default:
                 contentText = result.solution_summary_preview || '';
                 contentClass = 'similar-result-gist';
                 maxLength = 200;
-                break;
-            case 'gist':
-            default:
-                contentText = result.solution_summary_gist || '';
-                contentClass = 'similar-result-gist';
-                maxLength = 150;
                 break;
         }
 

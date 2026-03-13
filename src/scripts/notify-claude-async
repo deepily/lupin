@@ -1,0 +1,37 @@
+#!/bin/bash
+#
+# notify-claude-async - Fire-and-forget notification via Lupin CLI
+#
+# Usage:
+#   notify-claude-async "Message text" --type progress --priority low
+#   notify-claude-async "Build completed" --type task --debug
+#
+# Delegates to: src/lupin_cli/notifications/notify_user_async.py
+#
+# Installation:
+#   cp src/scripts/notify-claude-async ~/.local/bin/
+#   chmod +x ~/.local/bin/notify-claude-async
+#
+
+# Resolve LUPIN_ROOT
+LUPIN_ROOT="${LUPIN_ROOT:-${DEEPILY_PROJECTS_DIR:-/mnt/DATA01/include/www.deepily.ai/projects}/lupin}"
+
+if [ ! -d "$LUPIN_ROOT" ]; then
+    echo "ERROR: LUPIN_ROOT not found: $LUPIN_ROOT" >&2
+    echo "Set LUPIN_ROOT or DEEPILY_PROJECTS_DIR environment variable." >&2
+    exit 1
+fi
+
+# Use CoSA venv Python (has requests + pydantic)
+PYTHON="$LUPIN_ROOT/src/cosa/.venv/bin/python3"
+
+if [ ! -x "$PYTHON" ]; then
+    echo "ERROR: Python not found: $PYTHON" >&2
+    echo "Ensure CoSA venv is set up: cd $LUPIN_ROOT/src/cosa && python3 -m venv .venv" >&2
+    exit 1
+fi
+
+# Add src/ to PYTHONPATH for lupin_cli and cosa imports
+export PYTHONPATH="$LUPIN_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+
+exec "$PYTHON" -m lupin_cli.notifications.notify_user_async "$@"

@@ -152,14 +152,6 @@ print( f'Train: {train_df.shape[0]}, Test: {test_df.shape[0]}, Validate: {valida
 print( '\\nWriting unified JSONL files...' )
 coordinator.write_ttv_split_to_jsonl( train_df, test_df, validate_df )
 
-# Also write isolated agentic job files for reference
-print( '\\nAlso writing isolated agentic job JSONL files (for reference)...' )
-agentic_df = df[ df[ 'command' ].str.contains( 'deep research|podcast generator|research to podcast' ) ].copy()
-if agentic_df.shape[0] > 0:
-    agentic_train, agentic_test, agentic_val = coordinator.get_agentic_job_train_test_validate_split( agentic_df, sample_size=agentic_df.shape[0] )
-    coordinator.write_agentic_job_ttv_split_to_jsonl( agentic_train, agentic_test, agentic_val )
-    print( f'Agentic-only: Train: {agentic_train.shape[0]}, Test: {agentic_test.shape[0]}, Validate: {agentic_val.shape[0]}' )
-
 print( '\\nDone!' )
 "
         ;;
@@ -172,56 +164,18 @@ import cosa.utils.util as du
 
 du.print_banner( 'Validating JSONL Training Data', prepend_nl=True )
 
-# Validate both unified and isolated agentic job files
+# Validate training files
 unified_files = [
     '$TEST_TRAIN_PATH/voice-commands-xml-train.jsonl',
     '$TEST_TRAIN_PATH/voice-commands-xml-test.jsonl',
     '$TEST_TRAIN_PATH/voice-commands-xml-validate.jsonl'
 ]
 
-agentic_files = [
-    '$TEST_TRAIN_PATH/agentic-job-xml-train.jsonl',
-    '$TEST_TRAIN_PATH/agentic-job-xml-test.jsonl',
-    '$TEST_TRAIN_PATH/agentic-job-xml-validate.jsonl'
-]
-
 required_fields = [ 'command', 'instruction', 'input', 'output', 'prompt' ]
-agentic_commands = [ 'agent router go to deep research', 'agent router go to podcast generator', 'agent router go to research to podcast' ]
 total_errors = 0
 
-print( '=== Unified Training Files ===' )
+print( '=== Training Files ===' )
 for filepath in unified_files:
-    name = filepath.split( '/' )[ -1 ]
-    try:
-        with open( filepath, 'r' ) as f:
-            lines = f.readlines()
-
-        errors = 0
-        agentic_count = 0
-        for i, line in enumerate( lines ):
-            try:
-                data = json.loads( line )
-                for field in required_fields:
-                    if field not in data:
-                        errors += 1
-                        print( f'  Missing {field} in line {i}' )
-                # Count agentic commands in unified files
-                if data.get( 'command', '' ) in agentic_commands:
-                    agentic_count += 1
-            except json.JSONDecodeError:
-                errors += 1
-
-        if errors == 0:
-            print( f'✓ {name}: {len( lines )} examples ({agentic_count} agentic) - VALID' )
-        else:
-            print( f'✗ {name}: {errors} errors' )
-            total_errors += errors
-    except FileNotFoundError:
-        print( f'✗ {name}: FILE NOT FOUND' )
-        total_errors += 1
-
-print( '\\n=== Isolated Agentic Job Files (Reference) ===' )
-for filepath in agentic_files:
     name = filepath.split( '/' )[ -1 ]
     try:
         with open( filepath, 'r' ) as f:
@@ -244,8 +198,8 @@ for filepath in agentic_files:
             print( f'✗ {name}: {errors} errors' )
             total_errors += errors
     except FileNotFoundError:
-        print( f'⚠ {name}: FILE NOT FOUND (optional)' )
-        # Don't count as error - isolated files are optional now
+        print( f'✗ {name}: FILE NOT FOUND' )
+        total_errors += 1
 
 if total_errors == 0:
     print( '\\n✓ All validation checks passed!' )
@@ -260,7 +214,7 @@ else:
         echo ""
 
         # Check if training data exists
-        if [ ! -f "$TEST_TRAIN_PATH/agentic-job-xml-train.jsonl" ]; then
+        if [ ! -f "$TEST_TRAIN_PATH/voice-commands-xml-train.jsonl" ]; then
             echo -e "${YELLOW}Training data not found. Generating...${NC}"
             $0 generate
         fi
@@ -285,7 +239,7 @@ else:
         echo ""
 
         # Check if training data exists
-        if [ ! -f "$TEST_TRAIN_PATH/agentic-job-xml-train.jsonl" ]; then
+        if [ ! -f "$TEST_TRAIN_PATH/voice-commands-xml-train.jsonl" ]; then
             echo -e "${YELLOW}Training data not found. Generating...${NC}"
             $0 generate
         fi
@@ -333,6 +287,18 @@ else:
         exit 1
         ;;
 esac
+
+# After successful training, source the updated LoRA env vars
+if [ -f ~/.lora_env ]; then
+    source ~/.lora_env
+    echo ""
+    echo -e "${GREEN}LoRA environment variables updated and sourced.${NC}"
+    echo "   LUPIN_ROUTER_LORA_MINISTRAL_8B_PATH=$LUPIN_ROUTER_LORA_MINISTRAL_8B_PATH"
+    echo "   LUPIN_ROUTER_LORA_QWEN3_4B_PATH=$LUPIN_ROUTER_LORA_QWEN3_4B_PATH"
+    echo ""
+    echo "Note: These vars are active in THIS shell. Open a new terminal or run"
+    echo "  'source ~/.bashrc' in other terminals for them to take effect there."
+fi
 
 echo ""
 echo -e "${GREEN}Done!${NC}"

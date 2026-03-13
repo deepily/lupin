@@ -46,9 +46,8 @@ Usage:
 
 Requires:
 - Server running on localhost:7999
-- Environment variables: LUPIN_TEST_EMAIL, LUPIN_TEST_PASSWORD
+- Environment variables: LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / PASSWORD
 - For tests 4.x: LUPIN_INTERACTIVE_TESTS=true
-  (uses LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / PASSWORD)
 
 Created: 2026-02-05
 Updated: 2026-02-11 — Expanded to 13 scenarios, single-pass proxy docs
@@ -239,8 +238,6 @@ class ExpeditorSmokeTest( InteractiveSmokeTest ):
     SUBMIT_ENDPOINT       = "/api/mock-job/submit"
     PROXY_PROFILE         = "expeditor_smoke"
     PROXY_STRATEGY        = "llm_script"
-    CREDENTIAL_ENV_PREFIX = "LUPIN_TEST"
-
     def build_argparser( self ):
         """Add expeditor-specific CLI arguments."""
         parser = super().build_argparser()
@@ -262,31 +259,6 @@ class ExpeditorSmokeTest( InteractiveSmokeTest ):
         if hasattr( args, "scenarios" ) and args.scenarios:
             return [ int( x.strip() ) for x in args.scenarios.split( "," ) if int( x.strip() ) < len( self.SCENARIOS ) ]
         return list( range( len( self.SCENARIOS ) ) )
-
-    def _get_credentials( self ):
-        """
-        Get credentials, preferring interactive mock job account when available.
-
-        Ensures:
-            - Uses LUPIN_TEST_INTERACTIVE_MOCK_JOBS_* if interactive tests enabled
-            - Falls back to LUPIN_TEST_* otherwise
-        """
-        interactive = os.environ.get( "LUPIN_INTERACTIVE_TESTS", "" ).lower() == "true"
-
-        if interactive:
-            email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
-            password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
-            if email and password:
-                return email, password
-
-        # Fall back to standard credentials
-        email    = os.environ.get( "LUPIN_TEST_EMAIL" )
-        password = os.environ.get( "LUPIN_TEST_PASSWORD" )
-
-        if email and password:
-            return email, password
-
-        return None, None
 
     def get_submit_payload( self, scenario, ws_id ):
         """
@@ -598,8 +570,10 @@ class ExpeditorSmokeTest( InteractiveSmokeTest ):
 
         # Start proxy if --auto-proxy
         if getattr( args, "auto_proxy", False ):
-            debug = getattr( args, "proxy_debug", False )
-            self._start_proxy( debug=debug )
+            debug    = getattr( args, "proxy_debug", False )
+            email    = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_EMAIL" )
+            password = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_PASSWORD" )
+            self._start_proxy( debug=debug, email=email, password=password )
 
             if not self.proxy_running:
                 print( "  WARNING: Proxy failed to start. Interactive scenarios may timeout." )

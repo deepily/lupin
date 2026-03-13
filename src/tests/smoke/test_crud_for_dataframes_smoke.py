@@ -259,6 +259,11 @@ def quick_smoke_test():
     return all_passed
 
 
+def test_crud_for_dataframes():
+    """Pytest entry point."""
+    assert quick_smoke_test()
+
+
 if __name__ == "__main__":
     success = quick_smoke_test()
     exit( 0 if success else 1 )

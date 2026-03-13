@@ -256,6 +256,7 @@ class TestSDKOptions:
 # Phase 1.3: SDK Client Tests (require Claude CLI)
 # ============================================================================
 
+@pytest.mark.skip( reason="Requires active Claude SDK daemon connection — environment-dependent" )
 class TestSDKClient:
     """Validate ClaudeSDKClient functionality."""
 

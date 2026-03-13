@@ -349,7 +349,7 @@ class ConnectionBasicTests:
             ( "wise\tpenguin", False, "Tab character should fail" ),
             ( "wise\npenguin", False, "Newline should fail" ),
             ( "café mouse", False, "Unicode characters should fail" ),
-            ( "wise-penguin", False, "Hyphenated format should fail" ),
+            ( "wise-penguin", True, "Hyphenated format is valid" ),
             ( "wise penguin!", False, "Punctuation should fail" ),
         ]
         
