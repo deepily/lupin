@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-13 (Session 349)
+Last updated: 2026-03-13 (Session 355)
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 
@@ -92,10 +92,17 @@ Last updated: 2026-03-13 (Session 349)
 ### Playwright E2E Browser Testing (Session 252)
 
 - [x] **[LUPIN] Research AI/automation for end-to-end testing** — Session 252: Research complete. Playwright Python + pytest-playwright recommended for FastAPI + vanilla HTML/JS stack
-- [ ] **[LUPIN] Implement Playwright E2E testing** — 8-phase plan (~78 tasks, ~5 weeks), 189 data-testid elements, 28 test journeys, 9 architecture decisions
+- [ ] **[LUPIN] Implement Playwright E2E testing** — 8-phase plan (~78 tasks, ~5 weeks), ~266 data-testid elements, 28 test journeys, 9 architecture decisions
   - **Planning docs**: [`src/rnd/2026.02.23-automating-ui-testing/`](src/rnd/2026.02.23-automating-ui-testing/00-index.md)
   - **Serialized plan**: `src/rnd/2026.02.23-playwright-e2e-testing-plan.md`
-  - **Phases**: Foundation → data-testid rollout → Auth tests → Page smoke → Admin tests → Notifications/Q&A → WebSocket → Visual regression + CI
+  - **Phases 1-2**: DONE — Foundation + data-testid rollout (~266 testids across 13 files)
+  - **Phase 3**: DONE — Auth Flow Tests (30 tests: login, register, profile, change-password, session)
+  - **Phase 4**: DONE — Page Smoke Tests (39 tests: parametrized smoke, navigation, landing)
+  - **Phase 5**: DONE — Admin Flow Tests (69 tests: dashboard, users, snapshots, proxy-dashboard, proxy-ratify, role-gating)
+  - **Total**: 253 passing E2E tests across 27 test files
+  - **Phase 6**: DONE — Notifications & Q&A Tests (86 tests: sections, Q&A, job dispatch, TTS, status, queues, action, time saved)
+  - **Phase 7**: DONE — WebSocket & Real-Time Tests (28 tests: connection lifecycle, session persistence, auth handshake)
+  - **Phase 8**: Pending — Visual Regression & CI (blocked by starlette version conflict)
   - **Round 2**: Claude Code + Playwright MCP for AI-augmented test generation + self-healing selectors
 
 ### DataFrame CRUD with Voice I/O — UI Testing + Voice Polish
@@ -123,6 +130,10 @@ Last updated: 2026-03-13 (Session 349)
   - **Validation plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md)
   - **Master plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md)
   - **Progress**: Phase 0 (serialize) done, Phase 1.1 (unit baseline 87/87) done. Phases 1.2-5 pending.
+
+### Render Markdown Documents as HTML
+
+- [ ] **[LUPIN] Render markdown documents as HTML** — 🔄 IN PROGRESS
 
 ### Trust Proxy Documentation Update
 

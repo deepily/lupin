@@ -1,0 +1,457 @@
+"""
+Pytest configuration and fixtures for Playwright E2E UI tests.
+
+Provides browser fixtures, authentication helpers, and page navigation
+utilities for end-to-end browser testing against the live FastAPI server.
+
+IMPORTANT: Tests require live server running with Testing config block.
+Use the automated runner:
+    ./src/scripts/run-e2e-ui-tests.sh -v
+
+Or manually:
+    Terminal 1: ./src/scripts/run-fastapi-lupin.sh
+    Terminal 2: ./src/tests/run-integration-tests.sh  (to hot-swap to Testing)
+    Terminal 3: pytest src/tests/e2e_ui/ -v
+"""
+
+import os
+
+# CRITICAL: Set config environment variable BEFORE any other imports
+# This ensures config_mgr singleton initializes with Testing block
+os.environ[ "LUPIN_CONFIG_MGR_CLI_ARGS" ] = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
+
+import pytest
+import requests
+
+# Test server configuration
+BASE_URL = "http://localhost:7999"
+
+
+# ---------------------------------------------------------------------------
+# Environment Validation
+# ---------------------------------------------------------------------------
+
+@pytest.fixture( scope="session", autouse=True )
+def verify_test_environment():
+    """
+    One-time validation that server is running with Testing configuration.
+
+    Runs once at start of entire test session (scope="session").
+    Checks /api/server-info to confirm the hot-swap to Testing config
+    has taken effect (database points to lupin_db_test).
+
+    Requires:
+        - Server running on port 7999
+        - Server hot-swapped to [Lupin: Testing] via /api/init
+
+    Ensures:
+        - Server is accessible and responsive
+        - Config block is [Lupin: Testing]
+        - Database URL contains lupin_db_test
+        - Aborts entire test suite if environment invalid
+
+    Raises:
+        - RuntimeError: Server not accessible or misconfigured
+    """
+    print( "\n" + "=" * 60 )
+    print( "E2E UI TEST ENVIRONMENT VALIDATION" )
+    print( "=" * 60 )
+
+    try:
+        health_response = requests.get( f"{BASE_URL}/health", timeout=5 )
+        if health_response.status_code != 200:
+            raise RuntimeError( f"Server health check failed: {health_response.status_code}" )
+
+        print( f"✓ Server accessible at {BASE_URL}" )
+
+        info_response = requests.get( f"{BASE_URL}/api/server-info", timeout=5 )
+        if info_response.status_code == 200:
+            info         = info_response.json()
+            config_block = info.get( "config_block_id", "unknown" )
+            db_url       = info.get( "database_url", "unknown" )
+
+            print( f"✓ Config block: {config_block}" )
+            print( f"✓ Database URL: {db_url}" )
+
+            if "lupin_db_test" not in db_url:
+                raise RuntimeError(
+                    f"Server database is NOT lupin_db_test!\n"
+                    f"  Current: {db_url}\n\n"
+                    f"Run E2E UI tests via:\n"
+                    f"  ./src/scripts/run-e2e-ui-tests.sh -v"
+                )
+        else:
+            print( f"⚠ /api/server-info returned {info_response.status_code} — skipping config validation" )
+
+        print( "=" * 60 + "\n" )
+
+    except requests.exceptions.ConnectionError:
+        raise RuntimeError(
+            f"\n{'=' * 60}\n"
+            f"ERROR: Cannot connect to test server at {BASE_URL}\n\n"
+            f"Run E2E UI tests via:\n"
+            f"  ./src/scripts/run-e2e-ui-tests.sh -v\n"
+            f"{'=' * 60}\n"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Database Cleanup
+# ---------------------------------------------------------------------------
+
+@pytest.fixture( scope="function" )
+def clean_test_db():
+    """
+    Clean PostgreSQL test database before each test.
+
+    Reuses the same pattern as integration tests: drop all tables,
+    recreate schema, verify empty state.
+
+    Requires:
+        - Server hot-swapped to Testing config (lupin_db_test)
+
+    Ensures:
+        - Fresh database schema before each test
+        - Complete isolation between tests
+        - Tests never affect development database
+    """
+    from cosa.rest.db import database as db_module
+    from cosa.rest.postgres_models import Base
+    from sqlalchemy import text
+
+    engine = db_module.engine
+    db_url = str( engine.url )
+    assert "lupin_db_test" in db_url, \
+        f"SAFETY: clean_test_db must only run against lupin_db_test, got: {db_url}"
+
+    Base.metadata.drop_all( bind=engine )
+    Base.metadata.create_all( bind=engine )
+
+    with engine.connect() as conn:
+        count = conn.execute( text( "SELECT count(*) FROM users" ) ).scalar()
+        assert count == 0, f"SAFETY: users table not empty after clean ({count} rows)"
+
+    yield
+
+
+# ---------------------------------------------------------------------------
+# Test Credentials
+# ---------------------------------------------------------------------------
+
+@pytest.fixture( scope="function" )
+def test_user_credentials():
+    """
+    Provide test user credentials for E2E browser tests.
+
+    Returns:
+        dict: Test user email, password, and roles
+    """
+    return {
+        "email"    : "e2e_test@example.com",
+        "password" : "TestPassword123!",
+        "roles"    : [ "user" ]
+    }
+
+
+@pytest.fixture( scope="function" )
+def test_admin_credentials():
+    """
+    Provide test admin user credentials for E2E browser tests.
+
+    Returns:
+        dict: Test admin email, password, and roles
+    """
+    return {
+        "email"    : "e2e_admin@example.com",
+        "password" : "AdminPassword123!",
+        "roles"    : [ "user", "admin" ]
+    }
+
+
+# ---------------------------------------------------------------------------
+# Page URL Registry
+# ---------------------------------------------------------------------------
+
+PAGE_URLS = {
+    "login"           : "/app/auth/login",
+    "register"        : "/app/auth/register",
+    "change-password" : "/app/auth/change-password",
+    "profile"         : "/app/auth/profile",
+    "landing"         : "/app",
+    "notifications"   : "/app/notifications",
+    "admin-dashboard" : "/app/admin",
+    "admin-snapshots" : "/app/admin/snapshots",
+    "admin-users"     : "/app/admin/users",
+    "admin-ratify"    : "/app/admin/proxy-ratify",
+    "admin-trust"     : "/app/admin/proxy-dashboard",
+    "dev-tools"       : "/app/admin/dev-tools",
+}
+
+# Pages accessible without authentication
+PUBLIC_PAGES = [ "login", "register" ]
+
+# Pages requiring a logged-in user
+AUTH_PAGES = [ "change-password", "profile", "notifications" ]
+
+# Pages that show different content when logged in but don't require auth
+HYBRID_PAGES = [ "landing" ]
+
+# Pages requiring admin role
+ADMIN_PAGES = [ "admin-dashboard", "admin-snapshots", "admin-users", "admin-ratify", "admin-trust", "dev-tools" ]
+
+
+# ---------------------------------------------------------------------------
+# Browser Auth Helpers
+# ---------------------------------------------------------------------------
+
+def fill_login_form( page, email, password ):
+    """
+    Fill and submit the login form via browser.
+
+    Requires:
+        - page is navigated to /app/auth/login
+        - email and password are non-empty strings
+
+    Ensures:
+        - Login form fields are filled and submitted
+    """
+    page.get_by_test_id( "login-email-input" ).fill( email )
+    page.get_by_test_id( "login-password-input" ).fill( password )
+    page.get_by_test_id( "login-submit-btn" ).click()
+
+
+def fill_register_form( page, email, password ):
+    """
+    Fill and submit the registration form via browser.
+
+    Requires:
+        - page is navigated to /app/auth/register
+        - email and password are non-empty strings
+
+    Ensures:
+        - Registration form fields are filled and submitted
+    """
+    page.get_by_test_id( "register-email-input" ).fill( email )
+    page.get_by_test_id( "register-password-input" ).fill( password )
+    page.get_by_test_id( "register-confirm-password-input" ).fill( password )
+    page.get_by_test_id( "register-submit-btn" ).click()
+
+
+def assert_error_message( page, expected_text ):
+    """
+    Assert that an error message is visible and contains expected text.
+
+    Requires:
+        - page has a visible element with data-testid ending in '-error-message'
+        - expected_text is a non-empty string
+
+    Ensures:
+        - Error message element is visible
+        - Error message contains expected_text (case-insensitive)
+    """
+    error = page.locator( "[data-testid$='-error-message']" ).first
+    error.wait_for( state="visible", timeout=5000 )
+    assert expected_text.lower() in error.text_content().lower()
+
+
+def assert_success_message( page, expected_text ):
+    """
+    Assert that a success message is visible and contains expected text.
+
+    Requires:
+        - page has a visible element with data-testid ending in '-success-message'
+        - expected_text is a non-empty string
+
+    Ensures:
+        - Success message element is visible
+        - Success message contains expected_text (case-insensitive)
+    """
+    success = page.locator( "[data-testid$='-success-message']" ).first
+    success.wait_for( state="visible", timeout=5000 )
+    assert expected_text.lower() in success.text_content().lower()
+
+
+# ---------------------------------------------------------------------------
+# Authenticated Page Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture( scope="function" )
+def logged_in_page( page, clean_test_db, test_user_credentials ):
+    """
+    Provide a Playwright page logged in as a regular user.
+
+    Registers a new user via browser UI, then logs in via browser UI.
+
+    Requires:
+        - Server running with Testing config
+        - Clean test database
+
+    Ensures:
+        - Returns a Playwright page with an authenticated session
+        - User tokens stored in browser localStorage
+    """
+    email    = test_user_credentials[ "email" ]
+    password = test_user_credentials[ "password" ]
+
+    # Register via browser
+    page.goto( f"{BASE_URL}/app/auth/register" )
+    fill_register_form( page, email, password )
+    page.wait_for_url( "**/login**", timeout=10000 )
+
+    # Login via browser
+    page.goto( f"{BASE_URL}/app/auth/login" )
+    fill_login_form( page, email, password )
+    page.wait_for_url( "**/app**", timeout=10000 )
+
+    # Wait for localStorage tokens to be populated
+    page.wait_for_function(
+        'localStorage.getItem( "lupin_access_token" ) !== null',
+        timeout=5000
+    )
+
+    return page
+
+
+@pytest.fixture( scope="function" )
+def admin_page( page, clean_test_db, test_admin_credentials ):
+    """
+    Provide a Playwright page logged in as an admin user.
+
+    Registers a new user via browser UI, assigns admin role via DB,
+    then logs in via browser UI.
+
+    Requires:
+        - Server running with Testing config
+        - Clean test database
+
+    Ensures:
+        - Returns a Playwright page with an admin-authenticated session
+        - User has both 'user' and 'admin' roles
+    """
+    email    = test_admin_credentials[ "email" ]
+    password = test_admin_credentials[ "password" ]
+
+    # Register via browser
+    page.goto( f"{BASE_URL}/app/auth/register" )
+    fill_register_form( page, email, password )
+    page.wait_for_url( "**/login**", timeout=10000 )
+
+    # Assign admin role via DB (no API for this)
+    from cosa.rest.db.database import get_db
+    from cosa.rest.db.repositories import UserRepository
+    from sqlalchemy.orm.attributes import flag_modified
+
+    with get_db() as session:
+        user_repo = UserRepository( session )
+        user      = user_repo.get_by_email( email )
+        if user:
+            user.roles = [ "user", "admin" ]
+            flag_modified( user, "roles" )
+
+    # Login via browser
+    page.goto( f"{BASE_URL}/app/auth/login" )
+    fill_login_form( page, email, password )
+    page.wait_for_url( "**/app**", timeout=10000 )
+
+    # Wait for localStorage tokens to be populated
+    page.wait_for_function(
+        'localStorage.getItem( "lupin_access_token" ) !== null',
+        timeout=5000
+    )
+
+    return page
+
+
+# ---------------------------------------------------------------------------
+# Notifications Page Fixture (Phase 7)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture( scope="function" )
+def notifications_page( logged_in_page ):
+    """
+    Provide a Playwright page on the notifications page with WebSocket connections established.
+
+    Requires:
+        - logged_in_page fixture (authenticated session)
+
+    Ensures:
+        - Page navigated to /app/notifications
+        - Queue WebSocket shows 'Connected' status
+    """
+    logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+    logged_in_page.wait_for_load_state( "networkidle" )
+
+    # Wait for queue WS to connect
+    wait_for_ws_connected( logged_in_page )
+
+    return logged_in_page
+
+
+# ---------------------------------------------------------------------------
+# WebSocket Helpers (Phase 7)
+# ---------------------------------------------------------------------------
+
+def capture_websockets( page ):
+    """
+    Register WebSocket listener before navigation. Returns list that fills as WS connections open.
+
+    Requires:
+        - page is a Playwright page object
+        - Must be called BEFORE page.goto() so listener catches WS opens
+
+    Ensures:
+        - Returns a list that accumulates WebSocket objects as they open
+    """
+    websockets = []
+    page.on( "websocket", lambda ws: websockets.append( ws ) )
+    return websockets
+
+
+def wait_for_ws_connected( page, timeout=10000 ):
+    """
+    Wait for queue WS status indicator to show 'Connected'.
+
+    Requires:
+        - page is on the notifications page
+        - WebSocket connections are being established
+
+    Ensures:
+        - Returns when queue-ws-status element contains 'Connected'
+
+    Raises:
+        - TimeoutError if status doesn't update within timeout
+    """
+    page.wait_for_function(
+        """() => {
+            const el = document.getElementById( 'queue-ws-status' );
+            return el && el.textContent.includes( 'Connected' );
+        }""",
+        timeout=timeout
+    )
+
+
+def get_ws_status( page, ws_type="queue" ):
+    """
+    Read current WS status indicator text and CSS class.
+
+    Requires:
+        - page is on the notifications page
+        - ws_type is 'queue', 'audio', or 'auth'
+
+    Ensures:
+        - Returns dict with 'text' and 'class_name' keys
+    """
+    element_id = {
+        "queue" : "queue-ws-status",
+        "audio" : "audio-ws-status",
+        "auth"  : "auth-status",
+    }[ ws_type ]
+
+    return page.evaluate(
+        """( eid ) => {
+            const el = document.getElementById( eid );
+            if ( !el ) return { text: null, class_name: null };
+            return { text: el.textContent, class_name: el.className };
+        }""",
+        element_id
+    )

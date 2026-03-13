@@ -1,5 +1,20 @@
 # Lupin Project History
 
+### 2026.03.13 - Session 355 | Playwright E2E Phase 7: WebSocket & Real-Time Tests (253 total passing)
+
+**Accomplishments**:
+- Implemented Phase 7 of the Playwright E2E testing plan — WebSocket & Real-Time Tests
+- Created 3 test files with 28 new tests covering browser-side WebSocket behavior
+- Added 3 conftest helper functions (`capture_websockets`, `wait_for_ws_connected`, `get_ws_status`) + `notifications_page` fixture
+- Test coverage: WS connection lifecycle (11), session ID persistence (10), auth handshake frame inspection (7)
+- Discovered session IDs use space-separated format ("wise penguin") not underscore — URLs contain %20 encoding
+- Full suite: 253/253 passing, zero regressions
+
+**Files Created**: `src/tests/e2e_ui/test_websocket_connection.py`, `src/tests/e2e_ui/test_websocket_session_persistence.py`, `src/tests/e2e_ui/test_websocket_auth_handshake.py`
+**Files Modified**: `src/tests/e2e_ui/conftest.py`
+
+---
+
 ### 2026.03.13 - Session 354 | COSA Audio Player Viewer: In-Browser MP3 Playback Page
 
 **Accomplishments**:
