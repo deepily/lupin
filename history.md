@@ -1,5 +1,57 @@
 # Lupin Project History
 
+### 2026.03.13 - Session 353 | COSA Document Viewer Phase 2: Frontmatter Fix + Link URL Migration
+
+**Accomplishments**:
+- Added YAML frontmatter extraction to `document-viewer.html` — strips `---` delimited metadata before marked.js parsing, renders as collapsed `<details>` accordion
+- Migrated 8 podcast orchestrator markdown links from `/api/io/file?path=` → `/app/docs?path=` (kept MP3 links on raw endpoint)
+- Changed deep research CLI local-path URL from hardcoded `http://localhost:7999/api/deep-research/report` → relative `/app/docs?path=deep-research/` (GCS paths unchanged)
+
+**Files Modified**: `src/fastapi_app/static/html/document-viewer.html`, `src/cosa/agents/podcast_generator/orchestrator.py`, `src/cosa/agents/deep_research/cli.py`
+
+---
+
+### 2026.03.13 - Session 352 | Playwright E2E Phase 6: Notifications & Q&A Tests (225 total passing)
+
+**Accomplishments**:
+- Implemented Phase 6 of the Playwright E2E testing plan — Notifications & Q&A Tests
+- Created 8 test files covering all 11 sections of the notifications page (86 new tests)
+- Test files: notifications_sections (13), qa_submission (9), job_dispatch (23), tts_controls (11), system_status (7), queue_display (12), action_required (5), time_saved (6)
+- Fixed notifications page logout button test — uses timeout+URL check instead of wait_for_url (no hard navigation)
+- Updated implementation plan with checkmarks for Phases 1-6 (was missing Phases 1-5 checkmarks)
+- Updated TODO.md with Phase 6 completion status
+- Total: 225 E2E UI tests, all passing across 24 test files (12:30 runtime on Chromium headless)
+
+**Files Created**:
+- `src/tests/e2e_ui/test_notifications_sections.py`, `test_qa_submission.py`, `test_job_dispatch.py`, `test_tts_controls.py` (Phase 6)
+- `src/tests/e2e_ui/test_system_status.py`, `test_queue_display.py`, `test_action_required.py`, `test_time_saved.py` (Phase 6)
+
+**Files Modified**: `src/rnd/2026.02.23-automating-ui-testing/01-implementation-plan.md`, `TODO.md`
+
+---
+
+### 2026.03.13 - Session 351 | Playwright E2E Phases 3-5: Auth + Smoke + Admin Tests (139 passing)
+
+**Accomplishments**:
+- Implemented Phases 3-5 of the Playwright E2E testing plan (Phases 1-2 were done in prior sessions)
+- Phase 3 (Auth Flow Tests): 5 test files — login, register, profile, change-password, session management (30 tests)
+- Phase 4 (Page Smoke Tests): 3 test files — parametrized page load for all 12 pages, navigation bar, landing page (39 tests)
+- Phase 5 (Admin Flow Tests): 6 test files — admin dashboard, user management, snapshots, proxy dashboard, proxy ratify, role gating (69 tests)
+- Fixed conftest.py `logged_in_page` redirect bug: `**/notifications**` → `**/app**` (matches actual `getSafeRedirectUrl()` default)
+- Fixed conftest.py `admin_page` roles: added `flag_modified( user, "roles" )` for SQLAlchemy JSONB mutation tracking
+- Fixed localStorage race conditions: added `wait_for_function` for token population in auth fixtures
+- Landing page reclassified from AUTH_PAGES to HYBRID_PAGES (doesn't call `requireAuth()`)
+- Total: 139 E2E UI tests, all passing (7:17 runtime on Chromium headless)
+
+**Files Created**:
+- `src/tests/e2e_ui/test_login.py`, `test_register.py`, `test_profile.py`, `test_change_password.py`, `test_session.py` (Phase 3)
+- `src/tests/e2e_ui/test_page_smoke.py`, `test_navigation.py`, `test_landing.py` (Phase 4)
+- `src/tests/e2e_ui/test_admin_dashboard.py`, `test_admin_users.py`, `test_admin_snapshots.py`, `test_admin_proxy_dashboard.py`, `test_admin_proxy_ratify.py`, `test_role_gating.py` (Phase 5)
+
+**Files Modified**: `src/tests/e2e_ui/conftest.py` (bug fixes + HYBRID_PAGES)
+
+---
+
 ### 2026.03.13 - Session 350 | Bug Fix: find_session_by_id() Session ID History List
 
 **Accomplishments**:

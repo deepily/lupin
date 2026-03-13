@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Viewer — Lupin</title>
+
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
+    <style>
+        .doc-viewer-container {
+            max-width: 860px;
+            margin: 32px auto;
+            padding: 0 24px 48px;
+        }
+
+        .doc-viewer-loading {
+            text-align: center;
+            padding: 64px 0;
+            color: #6b7280;
+            font-size: 15px;
+        }
+
+        .doc-viewer-error {
+            text-align: center;
+            padding: 64px 0;
+            color: #dc2626;
+            font-size: 15px;
+        }
+
+        /* Markdown typography */
+        .doc-viewer-content h1 { font-size: 28px; font-weight: 700; margin: 32px 0 16px; color: #111827; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
+        .doc-viewer-content h2 { font-size: 22px; font-weight: 600; margin: 28px 0 12px; color: #1f2937; border-bottom: 1px solid #f3f4f6; padding-bottom: 6px; }
+        .doc-viewer-content h3 { font-size: 18px; font-weight: 600; margin: 24px 0 10px; color: #374151; }
+        .doc-viewer-content h4 { font-size: 15px; font-weight: 600; margin: 20px 0 8px; color: #4b5563; }
+        .doc-viewer-content p  { margin: 12px 0; line-height: 1.7; color: #374151; }
+        .doc-viewer-content ul,
+        .doc-viewer-content ol { margin: 12px 0; padding-left: 28px; line-height: 1.7; color: #374151; }
+        .doc-viewer-content li { margin: 4px 0; }
+        .doc-viewer-content a  { color: #4f46e5; text-decoration: none; }
+        .doc-viewer-content a:hover { text-decoration: underline; }
+
+        .doc-viewer-content blockquote {
+            margin: 16px 0;
+            padding: 12px 20px;
+            border-left: 4px solid #6366f1;
+            background: #f5f3ff;
+            color: #4b5563;
+        }
+        .doc-viewer-content blockquote p { margin: 4px 0; }
+
+        .doc-viewer-content code {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            background: #f3f4f6;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #1f2937;
+        }
+
+        .doc-viewer-content pre {
+            margin: 16px 0;
+            padding: 16px;
+            background: #1e1e2e;
+            color: #cdd6f4;
+            border-radius: 8px;
+            overflow-x: auto;
+            line-height: 1.5;
+        }
+        .doc-viewer-content pre code {
+            background: none;
+            padding: 0;
+            border-radius: 0;
+            color: inherit;
+            font-size: 13px;
+        }
+
+        .doc-viewer-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 14px;
+        }
+        .doc-viewer-content th {
+            background: #f9fafb;
+            font-weight: 600;
+            text-align: left;
+            padding: 10px 14px;
+            border: 1px solid #e5e7eb;
+            color: #374151;
+        }
+        .doc-viewer-content td {
+            padding: 10px 14px;
+            border: 1px solid #e5e7eb;
+            color: #4b5563;
+        }
+
+        .doc-viewer-content hr {
+            border: none;
+            border-top: 1px solid #e5e7eb;
+            margin: 24px 0;
+        }
+
+        .doc-viewer-content img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            margin: 12px 0;
+        }
+
+        .doc-frontmatter {
+            margin: 0 0 24px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .doc-frontmatter summary {
+            padding: 10px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #6b7280;
+            background: #f9fafb;
+            cursor: pointer;
+            user-select: none;
+        }
+        .doc-frontmatter summary:hover { background: #f3f4f6; }
+        .doc-frontmatter dl {
+            display: grid;
+            grid-template-columns: max-content 1fr;
+            gap: 4px 16px;
+            padding: 12px 16px;
+            margin: 0;
+            font-size: 13px;
+        }
+        .doc-frontmatter dt { font-weight: 600; color: #374151; }
+        .doc-frontmatter dd { margin: 0; color: #6b7280; word-break: break-word; }
+    </style>
+</head>
+<body>
+    <div class="doc-viewer-container">
+        <div id="doc-viewer-target" class="doc-viewer-loading">Loading document...</div>
+    </div>
+
+    <script src="/static/js/lupin-nav.js" defer></script>
+    <script src="/static/js/vendor/marked.min.js"></script>
+    <script src="/static/js/vendor/purify.min.js"></script>
+    <script>
+        ( async function() {
+            const target = document.getElementById( 'doc-viewer-target' );
+            const params = new URLSearchParams( window.location.search );
+            const path   = params.get( 'path' );
+
+            if ( !path ) {
+                target.className = 'doc-viewer-error';
+                target.textContent = 'No document path specified. Use ?path=/io/...';
+                return;
+            }
+
+            // Set page title from filename
+            const filename = path.split( '/' ).pop();
+            if ( filename ) document.title = filename + ' — Lupin';
+
+            try {
+                const response = await fetch( '/api/io/file?path=' + encodeURIComponent( path ) );
+                if ( !response.ok ) {
+                    throw new Error( 'Failed to load document (HTTP ' + response.status + ')' );
+                }
+                const markdown = await response.text();
+
+                // Configure marked (mirrors notifications.js renderMarkdown config)
+                marked.setOptions( {
+                    gfm       : true,
+                    breaks    : true,
+                    headerIds : false,
+                    mangle    : false
+                } );
+
+                // Extract YAML frontmatter before parsing markdown
+                function extractFrontmatter( text ) {
+                    const match = text.match( /^---\n([\s\S]*?)\n---\n?/ );
+                    if ( !match ) return { frontmatter: null, body: text };
+                    return { frontmatter: match[ 1 ], body: text.slice( match[ 0 ].length ) };
+                }
+
+                const { frontmatter, body } = extractFrontmatter( markdown );
+
+                let frontmatterHtml = '';
+                if ( frontmatter ) {
+                    const lines = frontmatter.split( '\n' )
+                        .filter( l => l.includes( ':' ) )
+                        .map( l => {
+                            const idx = l.indexOf( ':' );
+                            const key = l.slice( 0, idx ).trim();
+                            const val = DOMPurify.sanitize( l.slice( idx + 1 ).trim().replace( /^['"]|['"]$/g, '' ) );
+                            return `<dt>${DOMPurify.sanitize( key )}</dt><dd>${val}</dd>`;
+                        } ).join( '' );
+
+                    frontmatterHtml = `
+                        <details class="doc-frontmatter">
+                            <summary>Document Metadata</summary>
+                            <dl>${lines}</dl>
+                        </details>`;
+                }
+
+                const rawHtml      = marked.parse( body );
+                const sanitizedHtml = DOMPurify.sanitize( rawHtml, {
+                    ALLOWED_TAGS : [
+                        'p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'del',
+                        'ul', 'ol', 'li',
+                        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                        'a', 'code', 'pre', 'blockquote',
+                        'table', 'thead', 'tbody', 'tr', 'th', 'td',
+                        'hr', 'img', 'div', 'span', 'sup', 'sub'
+                    ],
+                    ALLOWED_ATTR : [ 'href', 'target', 'rel', 'title', 'src', 'alt', 'class' ],
+                    ADD_ATTR     : [ 'target', 'rel' ]
+                } );
+
+                target.className = 'doc-viewer-content';
+                target.innerHTML = frontmatterHtml + sanitizedHtml;
+
+            } catch ( err ) {
+                target.className = 'doc-viewer-error';
+                target.textContent = err.message;
+            }
+        } )();
+    </script>
+</body>
+</html>
