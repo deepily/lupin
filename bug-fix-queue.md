@@ -61,7 +61,7 @@
 
 ### Completed
 
-- [x] **find_session_by_id() fails after context clear — qualifier silently dropped** → commit: pending | By: 638212c2 (Session 350)
+- [x] **find_session_by_id() fails after context clear — qualifier silently dropped** → commit: 98c0072 | By: 638212c2 (Session 350)
   - **Symptom**: Stop hook qualifier dropped with `qualifier_tmux_inject_skip reason: "no session found"` for stable ID when bridge file has different transient `session_id`
   - **Root Cause**: `find_session_by_id()` only checked `data["session_id"]` (latest transient UUID), not the stable ID passed by the stop hook
   - **Fix**: Added `session_ids` accumulator list to bridge file; `find_session_by_id()` checks full list + backward-compat fallback
