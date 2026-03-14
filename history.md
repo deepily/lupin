@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.03.14 - Session 359 | Bug Fix: Periodic CUDA OOM on Whisper Transcription
+
+**Accomplishments**:
+- Fixed periodic 500 errors on `/api/upload-and-transcribe-mp3` and WAV endpoints caused by CUDA memory fragmentation
+- Root cause: PyTorch CUDA allocator couldn't find contiguous 16 MiB block despite ~290 MiB reserved (fragmentation from co-resident Whisper + embedding models on 23.65 GiB GPU)
+- Added `_run_whisper_with_retry()` helper in `speech.py` — on CUDA OOM, runs `gc.collect()` + `torch.cuda.empty_cache()` then retries once
+- Both MP3 and WAV endpoints now return 503 with `Retry-After: 5` header instead of 500 on persistent OOM
+- Set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` in `main.py` before model loading to reduce long-term fragmentation
+
+**Files Modified**: `src/fastapi_app/main.py`
+**Files Modified (CoSA)**: `src/cosa/rest/routers/speech.py` — pending separate CoSA commit
+
+---
+
 #### Checkpoint | 2026.03.13 | Session 358: Added markdown render TODO item
 
 **Files**: TODO.md

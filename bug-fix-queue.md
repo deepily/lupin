@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-03-11T11:30:00
+**Last Updated**: 2026-03-14T12:15:00
 
 ---
 
@@ -60,6 +60,12 @@
 ---
 
 ### Completed
+
+- [x] **Periodic CUDA OOM on Whisper transcription** → pending commit | By: 73bf201f (Session 359)
+  - **Symptom**: Periodic 500 errors on `/api/upload-and-transcribe-mp3` — CUDA OOM despite ~290 MiB reserved (fragmentation)
+  - **Root Cause**: PyTorch CUDA allocator fragmentation from co-resident Whisper + embedding models; can't find contiguous 16 MiB block
+  - **Fix**: `_run_whisper_with_retry()` with `gc.collect()` + `torch.cuda.empty_cache()` + retry; `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`; 503 with Retry-After instead of 500
+  - **Files (Lupin)**: `main.py`; **(CoSA)**: `speech.py`
 
 - [x] **find_session_by_id() fails after context clear — qualifier silently dropped** → commit: 98c0072 | By: 638212c2 (Session 350)
   - **Symptom**: Stop hook qualifier dropped with `qualifier_tmux_inject_skip reason: "no session found"` for stable ID when bridge file has different transient `session_id`

@@ -45,6 +45,9 @@ src_path = os.path.join( lupin_root, 'src' )
 if src_path not in sys.path:
     sys.path.insert( 0, src_path )
 
+# Reduce CUDA memory fragmentation (prevents periodic OOM on Whisper inference)
+os.environ.setdefault( "PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True" )
+
 import torch
 from transformers import pipeline
 
