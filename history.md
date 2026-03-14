@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.03.14 - Session 360 | Stop Hook: Two-Signal Gate to Suppress Spurious Notifications
+
+**Accomplishments**:
+- Added two-signal heuristic gate (`_should_ask_anything_else()`) to stop hook that suppresses the blocking "Anything else?" notification when no substantive work was performed
+- Signal 1: Empty `last_assistant_message` → no output from Claude → skip silently
+- Signal 2: Turn duration < 10 seconds → trivial turn (plan mode exit, CLAUDE.md ack, quick answer) → skip silently
+- Mechanism: `UserPromptSubmit` hook writes `/tmp/cc-turn-start-{session_id}` epoch marker; stop hook reads it to compute elapsed time
+- Safe fallback: missing marker (first turn, edge case) → fires notification (never suppresses by mistake)
+- Added `write_turn_start_marker()` and `get_turn_elapsed_seconds()` helpers to `hook_common.py`
+- 9 new gate tests in `TestShouldAskAnythingElse` + 14 existing tests updated with gate mock; 193/193 hook tests pass
+- `MIN_TURN_DURATION_SECONDS = 10` is tunable; `gate_skip` log entries include elapsed values for calibration
+
+**Files Modified**: `src/lupin_cli/claude_code/hooks/lib/hook_common.py`, `src/lupin_cli/claude_code/hooks/user_prompt_submit.py`, `src/lupin_cli/claude_code/hooks/stop.py`, `src/tests/unit/test_stop_hook.py`
+**Commit**: 03d5e64
+
+---
+
 ### 2026.03.14 - Session 359 | Bug Fix: Periodic CUDA OOM on Whisper Transcription
 
 **Accomplishments**:

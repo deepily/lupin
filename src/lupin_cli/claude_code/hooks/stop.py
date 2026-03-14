@@ -31,7 +31,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     drain_and_acknowledge, format_voice_context, build_stop_block,
     inject_qualifier_via_tmux,
     enrich_voice_context, get_stop_block_count, increment_stop_block_count,
-    reset_stop_block_count, MAX_STOP_BLOCKS
+    reset_stop_block_count, get_turn_elapsed_seconds, MAX_STOP_BLOCKS
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, build_sender_id_for_cc, resolve_stable_session_id
@@ -116,6 +116,47 @@ def _summarize_task( last_assistant_message ):
 #
 #     except ( XMLParsingError, Exception ):
 #         return None
+
+
+# Minimum turn duration (seconds) to consider work "substantive"
+MIN_TURN_DURATION_SECONDS = 10
+
+
+def _should_ask_anything_else( last_assistant_message, session_id ):
+    """
+    Determine whether the stop hook should prompt "Anything else?"
+
+    Two-signal gate:
+        1. Empty last_assistant_message → no work done → skip
+        2. Turn duration < threshold → trivial turn → skip
+
+    Requires:
+        - last_assistant_message is a string or None
+        - session_id is a string
+
+    Ensures:
+        - Returns False if no substantive work was done
+        - Returns True if both signals indicate real work
+    """
+    # Signal 1: No assistant output at all
+    if not last_assistant_message or not last_assistant_message.strip():
+        log_to_stream( "stop", {}, extra={
+            "phase"  : "gate_skip",
+            "reason" : "empty last_assistant_message"
+        } )
+        return False
+
+    # Signal 2: Turn was too short
+    elapsed = get_turn_elapsed_seconds( session_id )
+    if elapsed is not None and elapsed < MIN_TURN_DURATION_SECONDS:
+        log_to_stream( "stop", {}, extra={
+            "phase"   : "gate_skip",
+            "reason"  : "turn_too_short",
+            "elapsed" : round( elapsed, 1 )
+        } )
+        return False
+
+    return True
 
 
 def _ask_anything_else( session_id, last_assistant_message=None ):
@@ -247,11 +288,15 @@ def main():
             send_tts( "Stop — blocking with voice input" )
             emit_json( build_stop_block( enrich_voice_context( voice_ctx ) ) )
     else:
-        # No voice input → Phase 2: ask user "Anything else?" via notification
+        # No voice input → check if substantive work was done before asking
         reset_stop_block_count( session_id )
         last_assistant_message = payload.get( "last_assistant_message" )
-        result = _ask_anything_else( session_id, last_assistant_message )
-        emit_json( result )
+
+        if _should_ask_anything_else( last_assistant_message, session_id ):
+            result = _ask_anything_else( session_id, last_assistant_message )
+            emit_json( result )
+        else:
+            emit_json( {} )
 
 
 if __name__ == "__main__":
