@@ -135,3 +135,29 @@ CREATE TABLE IF NOT EXISTS auth_audit_log (
 CREATE INDEX IF NOT EXISTS idx_auth_audit_event_type ON auth_audit_log(event_type);
 CREATE INDEX IF NOT EXISTS idx_auth_audit_user_id ON auth_audit_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_audit_event_time ON auth_audit_log(event_time);
+
+-- Table: job_history (CJ Flow Persistence)
+CREATE TABLE IF NOT EXISTS job_history (
+    id_hash             VARCHAR(255)    PRIMARY KEY,
+    job_type            VARCHAR(100)    NOT NULL,
+    user_id             VARCHAR(255)    NOT NULL,
+    user_email          VARCHAR(255),
+    session_id          VARCHAR(255),
+    routing_command     VARCHAR(255),
+    status              VARCHAR(50)     NOT NULL DEFAULT 'pending',
+    question_text       TEXT,
+    error               TEXT,
+    is_cache_hit        BOOLEAN         DEFAULT FALSE,
+    duration_seconds    FLOAT,
+    metadata_json       JSONB,
+    created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    started_at          TIMESTAMP WITH TIME ZONE,
+    completed_at        TIMESTAMP WITH TIME ZONE,
+    updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_history_user_id ON job_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_job_history_status ON job_history(status);
+CREATE INDEX IF NOT EXISTS idx_job_history_job_type ON job_history(job_type);
+CREATE INDEX IF NOT EXISTS idx_job_history_created_at ON job_history(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_job_history_user_status ON job_history(user_id, status);

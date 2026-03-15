@@ -1,5 +1,56 @@
 # Lupin Project History
 
+### 2026.03.14 - Session 364 | Claude Agent SDK Config Migration — Phases 0-4
+
+**Accomplishments**:
+- Migrated Deep Research, Podcast Generator, and LLM Client Factory configs from hardcoded `@dataclass` to COSA ConfigurationManager (INI + env var overrides)
+- Added 61 new INI keys across 3 agents: Deep Research (24 keys: models, scaling, limits, tokens, search, output), Podcast Generator (27 keys: model, script, content, host A/B personality with pipe-delimited phrases, audio), LLM Client Factory (10 keys: vendor URLs, API env vars, defaults)
+- Added matching splainer documentation for all 61 new keys
+- Implemented `ResearchConfig.from_config( config_mgr )` classmethod — reads all 24 fields from INI with type coercion, falls back to dataclass defaults
+- Implemented `HostPersonality.from_config()`, `VoiceProfile.from_config()`, `PodcastConfig.from_config()` — nested composition with pipe-delimited list parsing for `typical_phrases`
+- Replaced hardcoded `VENDOR_URLS`, `VENDOR_API_ENV_VARS`, `CLIENT_DEFAULT_PARAMS` class dicts in LlmClientFactory with instance methods loading from INI at singleton init
+- Updated all consumers (job.py, cli.py for both agents) to use `from_config()` with job/CLI arg overrides
+- No backward compatibility — `from_config()` is the only path (per project feedback)
+- Serialized revised plan to `src/rnd/2026.03.14-claude-agent-sdk-config-migration-plan.md`
+- 2083/2083 unit tests pass, both config smoke tests pass
+
+**Files Modified (CoSA)**: `src/cosa/agents/deep_research/config.py`, `src/cosa/agents/deep_research/job.py`, `src/cosa/agents/deep_research/cli.py`, `src/cosa/agents/podcast_generator/config.py`, `src/cosa/agents/podcast_generator/job.py`, `src/cosa/agents/llm_client_factory.py`
+**Files Modified**: `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`
+**Files Created**: `src/rnd/2026.03.14-claude-agent-sdk-config-migration-plan.md`
+**Files Modified**: `src/rnd/README.md`
+
+---
+
+### 2026.03.14 - Session 360 | CJ Flow Persistence — Phases 1-2 (Schema + Model + Service)
+
+**Accomplishments**:
+- Implemented Phase 1: PostgreSQL `job_history` table with 16 columns and 5 indexes for tracking agentic job lifecycle
+- Created standalone SQL migration (`add-job-history.sql`) and appended to master schema
+- Added `JobHistory` SQLAlchemy model to `postgres_models.py` (12 models, 12 tables)
+- Implemented Phase 2: Stateless persistence service (`job_persistence.py`) with 8 functions (INSERT/UPDATE/query/recovery)
+- Agentic type filter: `deep_research`, `podcast`, `claude_code`, `swe_team`, `research_to_podcast`
+- All persist functions are fire-and-forget — catch/log exceptions, never break queue pipeline
+- Fixed timezone-aware datetime issue (PostgreSQL TIMESTAMPTZ requires `datetime.now( timezone.utc )`)
+- Added 2 config keys (`cj flow persistence enabled`, `cj flow persistence history days`)
+- Full DB round-trip smoke test passes; 2096 unit tests, 0 regressions
+- Updated planning document with completion markers, implementation notes, and deviations log
+
+**Files Created**: `src/scripts/sql/add-job-history.sql`, `src/cosa/rest/job_persistence.py`
+**Files Modified**: `src/scripts/sql/schema.sql`, `src/cosa/rest/postgres_models.py`, `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/rnd/2026.03.13-cj-flow-persistence-plan.md`, `TODO.md`
+
+---
+
+### 2026.03.14 - Session 363 | WS-QUEUE Verbose Logging Guard + TODO Cleanup
+
+**Accomplishments**:
+- Gated `[WS-QUEUE] Received message from` print behind `app_debug and app_verbose` — stops sys_pong flood from cc-listener sessions
+- Matches existing pattern used by `[WS-AUDIO]` endpoint (line 212)
+- Marked "Render Markdown Documents as HTML + Audio Player Viewer" as complete in TODO.md
+
+**Files Modified**: `src/cosa/rest/routers/websocket.py` (CoSA), `TODO.md`
+
+---
+
 ### 2026.03.14 - Session 360b | Bug Fix: Graceful STT Degradation — Server Starts Without GPU
 
 **Accomplishments**:

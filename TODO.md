@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-14 (Session 361)
+Last updated: 2026-03-14 (Session 362)
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 
@@ -73,7 +73,8 @@ Last updated: 2026-03-14 (Session 361)
 
 ### Config Migration — Claude Agent SDK
 
-- [ ] **[LUPIN] Config Migration**: Implement Claude Agent SDK config migration plan documented at `src/rnd/2026.01.27-claude-agent-sdk-config-migration-plan.md`
+- [x] **[LUPIN] Config Migration**: Phases 0-4 complete — Session 364. Deep Research (24 keys + `from_config()`), Podcast Generator (27 keys + nested `from_config()`), LLM Client Factory (10 keys + INI loading). 2083 unit tests pass. Revised plan at `src/rnd/2026.03.14-claude-agent-sdk-config-migration-plan.md`.
+- [ ] **[LUPIN] Phase 5: Update agentic voice workflow skill** — Ensure `/lupin-new-claude-agent-sdk-voice-workflow` scaffolds new agents with `from_config()` pattern by default. Update templates in `src/workflow/agentic-voice-workflow.md`.
 
 ### CJ Flow: Hybrid Fast Lane + Bounded Agentic Pool (Session 237)
 
@@ -117,15 +118,31 @@ Last updated: 2026-03-14 (Session 361)
 - [ ] **[LUPIN] Phase 4: End-to-End Voice Workflows + Polish** - PENDING (blocked by Phase 3 ✅)
 - **Note**: Moved to v0.1.6 to leverage Playwright E2E testing infrastructure for UI test automation
 
-### CJ Flow Persistence (Session 357 — IN PROGRESS)
+### Presentation Generator Agent (Session 362 — IN PROGRESS)
 
-- [ ] **[LUPIN] CJ Flow Persistence: PostgreSQL-backed job history for agentic jobs** — 🔄 IN PROGRESS. Plan complete and serialized (Session 357). Implementation Phases 1-5 pending, will resume in next sessions.
+- [ ] **[LUPIN] Presentation Generator Agent: Transform research docs into slide decks** — 🔄 IN PROGRESS. Strategy & design complete, documentation serialized (Session 362). Implementation Phases 1-8 pending, will resume in next sessions.
+  - **Goal**: Agentic process (Claude SDK) that transforms ~1200-word research documents or technical blog posts into 10-20 minute slide decks with presenter notes. Single orchestrator pattern (like Podcast Generator).
+  - **Architecture**: 8-phase pipeline (ingest, analyze, outline, elaborate, serialize YAML, render Marp, render Mermaid visuals, deliver). 4 human-in-the-loop gates. Pluggable visual renderer registry. Theme cascade (INI -> YAML template -> per-presentation overrides).
+  - **R&D directory**: [`src/rnd/2026.03.14-presentation-generator/`](src/rnd/2026.03.14-presentation-generator/00-index.md)
+  - **Phase 0**: DONE — Strategy & design serialized, implementation plan & tracking created (4 docs)
+  - **Phase 1**: Pending — Foundation (Job, Config, Voice I/O, CJ Flow packaging)
+  - **Phase 2**: Pending — State models & orchestrator skeleton
+  - **Phase 3**: Pending — Content generation: ingest & analyze (Phases 1-2)
+  - **Phase 4**: Pending — Content generation: outline & elaborate (Phases 3-4)
+  - **Phase 5**: Pending — Content generation: serialize YAML (Phase 5)
+  - **Phase 6**: Pending — Text rendering: Marp Markdown (Phase 6)
+  - **Phase 7**: Pending — Visual rendering: Mermaid + registry (Phase 7)
+  - **Phase 8**: Pending — Delivery & DR-to-Presentation chaining (Phase 8)
+
+### CJ Flow Persistence (Sessions 357, 360 — IN PROGRESS)
+
+- [ ] **[LUPIN] CJ Flow Persistence: PostgreSQL-backed job history for agentic jobs** — 🔄 IN PROGRESS. Plan complete (Session 357), Phases 1-2 implemented (Session 360). Resuming Phase 3+ next session.
   - **Goal**: Durable storage for AgenticJobBase jobs (DeepResearch, PodcastGenerator, ClaudeCode, SweTeam). Job state survives server restarts, enables job history queries, marks interrupted jobs.
   - **Architecture**: Central write-through via `emit_job_state_transition()` in `queue_util.py`
   - **Plan doc**: [`src/rnd/2026.03.13-cj-flow-persistence-plan.md`](src/rnd/2026.03.13-cj-flow-persistence-plan.md)
   - **Phase 0**: DONE — Plan serialized to R&D
-  - **Phase 1**: Pending — Schema + SQLAlchemy model (`job_history` table, `add-job-history.sql`)
-  - **Phase 2**: Pending — Persistence service (`job_persistence.py`, config keys)
+  - **Phase 1**: DONE — Schema + SQLAlchemy model (`job_history` table, `add-job-history.sql`, `JobHistory` in postgres_models.py). 12 models, 12 tables. Table + 5 indexes deployed to lupin_db_dev.
+  - **Phase 2**: DONE — Persistence service (`job_persistence.py`, 8 functions, 2 config keys). Full DB round-trip smoke test passes. 2096 unit tests, 0 regressions.
   - **Phase 3**: Pending — Write-through integration in `emit_job_state_transition()`
   - **Phase 4**: Pending — Startup recovery (`mark_interrupted_jobs()`)
   - **Phase 5**: Pending — `/api/job-history` endpoint + unit/integration tests
