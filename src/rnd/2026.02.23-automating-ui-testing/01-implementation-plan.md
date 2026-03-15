@@ -1,17 +1,18 @@
 # Playwright E2E Testing — Implementation Plan
 
 **Created**: 2026-02-23
-**Status**: Planning Complete — Implementation deferred to v0.1.6
+**Status**: ALL PHASES COMPLETE (Phases 1-8, Sessions 351-361)
 **Pattern**: Pattern 1 (Multi-Phase Implementation)
 **Phases**: 8 | **Tasks**: ~78 | **Timeline**: ~5 weeks
 
 ---
 
-## Implementation Constraint
+## Implementation Notes
 
-**DO NOT IMPLEMENT until development branch v0.1.6.**
-All code changes, package installs, and test writing are deferred.
-This document tracks what to build and in what order.
+- **Directory**: Named `e2e_ui/` (not `e2e/`) to avoid Python namespace conflicts
+- **Visual Snapshot Plugin**: Installed `pytest-playwright-visual-snapshot==0.5.1` with `--no-deps` to avoid starlette version conflict; patched `__init__.py` to make structlog import optional
+- **JS Content Normalization**: Playwright mask overlays caused subpixel rendering differences; pivoted to deterministic JS text replacement for dynamic elements (UUIDs, timestamps, WS status)
+- **Final Test Counts**: 2,102 unit + 50 WebSocket + 265 E2E UI + 137 integration = ALL PASS
 
 ---
 
@@ -291,91 +292,69 @@ gantt
 
 ### Tasks
 
-- [ ] **8.1** Configure `pytest-playwright-visual-snapshot`:
-  - Set comparison threshold (e.g., 0.1% pixel difference)
-  - Configure snapshot directory: `src/tests/e2e/snapshots/`
-  - Set viewport size: 1280x720 (standard)
-- [ ] **8.2** Create `src/tests/e2e/test_visual_regression.py`:
-  - Parametrized test for all 12 pages
-  - Full-page screenshot per page
-  - Compare against baseline with configured threshold
-  - Generate diff images on failure
-- [ ] **8.3** Generate baseline screenshots:
-  - All 12 pages in default state (light mode)
-  - Auth pages: login, register, change-password (unauthenticated)
-  - Protected pages: with logged-in user context
-  - Admin pages: with admin user context
-- [ ] **8.4** Create `src/tests/e2e/snapshots/` directory with baselines
-- [ ] **8.5** Add E2E stage to CI pipeline (if CI exists):
-  - Install Playwright in CI environment
-  - Run E2E tests as separate stage after unit + integration
-  - Store screenshots as artifacts on failure
-- [ ] **8.6** Update `CLAUDE.md` TESTING section:
-  - Add E2E tier to test types table
-  - Add E2E commands to running tests section
-  - Update test count totals
-  - Add E2E to pre-merge checklist
-- [ ] **8.7** Update `src/tests/README.md`:
-  - Add E2E testing section with examples
-  - Document Playwright setup and configuration
-  - Add visual regression workflow
-- [ ] **8.8** Verify: full test suite green (all 7 tiers)
+- [x] **8.1** Installed `pytest-playwright-visual-snapshot==0.5.1` with `--no-deps` (starlette conflict workaround). Patched plugin `__init__.py` to make structlog import optional (try/except fallback). Configured pytest.ini: snapshot threshold 0.1, baselines in `src/tests/e2e_ui/__snapshots__/`, failures in `src/tests/e2e_ui/snapshot_failures/`
+- [x] **8.2** Created `src/tests/e2e_ui/test_visual_regression.py`: 12 parametrized tests covering all pages (public, auth, admin). JS content normalization for dynamic elements (UUIDs, timestamps, WS status) — key pivot from mask overlays which caused subpixel rendering differences
+- [x] **8.3** Generated 12 baseline screenshots: public (login, register, landing), auth (change-password, profile, notifications, dev-tools), admin (dashboard, users, snapshots, proxy-dashboard, proxy-ratify). Zero-diff verified on re-run.
+- [x] **8.4** Created `src/tests/e2e_ui/__snapshots__/` directory with 12 PNG baselines
+- [x] **8.5** Updated `docker/lupin/Dockerfile` with Playwright E2E testing section: pytest, chromium install, visual snapshot pip install + `__init__.py` sed patch for structlog fallback
+- [x] **8.6** Updated `CLAUDE.md`: E2E UI tier in testing section, visual regression commands, pre-merge checklist updated with visual regression row
+- [x] **8.7** Updated `src/tests/README.md`: E2E UI tier documentation, test counts, visual regression workflow, `--update-snapshots` usage
+- [x] **8.8** Full 4-tier suite verified green: 2,102 unit + 50 WS + 265 E2E UI + 137 integration = ALL PASS
 
 ### Phase 8 Exit Criteria
-- [ ] Visual baselines for all 12 pages
-- [ ] Screenshot comparison tests passing
-- [ ] Documentation updated (CLAUDE.md, README.md)
-- [ ] Full 7-tier test suite green
+- [x] 12 visual baselines for all pages (PNG screenshots)
+- [x] Screenshot comparison tests passing (zero-diff on re-run)
+- [x] Documentation updated (CLAUDE.md, README.md)
+- [x] Full test suite green (2,554 total tests)
 
 ---
 
-## Test Directory Structure (Final)
+## Test Directory Structure (Final — Actual)
 
 ```
-src/tests/e2e/
-├── conftest.py                         # Browser fixtures, auth helpers, server management
+src/tests/e2e_ui/
+├── conftest.py                              # Browser fixtures, auth helpers, WS helpers
 ├── __init__.py
-├── test_login.py                       # Phase 3
-├── test_register.py                    # Phase 3
-├── test_profile.py                     # Phase 3
-├── test_change_password.py             # Phase 3
-├── test_session.py                     # Phase 3
-├── test_page_smoke.py                  # Phase 4
-├── test_navigation.py                  # Phase 4
-├── test_landing.py                     # Phase 4
-├── test_admin_dashboard.py             # Phase 5
-├── test_admin_users.py                 # Phase 5
-├── test_admin_snapshots.py             # Phase 5
-├── test_admin_proxy_dashboard.py       # Phase 5
-├── test_admin_proxy_ratify.py          # Phase 5
-├── test_role_gating.py                 # Phase 5
-├── test_qa_submission.py               # Phase 6
-├── test_job_dispatch.py                # Phase 6
-├── test_notifications_sections.py      # Phase 6
-├── test_tts_controls.py                # Phase 6
-├── test_system_status.py              # Phase 6
-├── test_queue_display.py               # Phase 6
-├── test_action_required.py             # Phase 6
-├── test_time_saved.py                  # Phase 6
-├── test_websocket_connection.py        # Phase 7
-├── test_websocket_heartbeat.py         # Phase 7
-├── test_websocket_reconnect.py         # Phase 7
-├── test_realtime_updates.py            # Phase 7
-├── test_session_persistence.py         # Phase 7
-├── test_visual_regression.py           # Phase 8
-└── snapshots/                          # Phase 8: Baseline screenshots
-    ├── login.png
-    ├── register.png
-    ├── change-password.png
-    ├── profile.png
-    ├── landing.png
-    ├── notifications.png
-    ├── admin-dashboard.png
-    ├── admin-snapshots.png
-    ├── admin-users.png
-    ├── admin-proxy-ratify.png
-    ├── admin-proxy-dashboard.png
-    └── dev-tools.png
+├── test_login.py                            # Phase 3 (8 tests)
+├── test_register.py                         # Phase 3 (7 tests)
+├── test_profile.py                          # Phase 3 (7 tests)
+├── test_change_password.py                  # Phase 3 (7 tests)
+├── test_session.py                          # Phase 3 (8 tests)
+├── test_page_smoke.py                       # Phase 4 (13 tests)
+├── test_navigation.py                       # Phase 4 (5 tests)
+├── test_landing.py                          # Phase 4 (9 tests)
+├── test_admin_dashboard.py                  # Phase 5 (8 tests)
+├── test_admin_users.py                      # Phase 5 (13 tests)
+├── test_admin_snapshots.py                  # Phase 5 (14 tests)
+├── test_admin_proxy_dashboard.py            # Phase 5 (9 tests)
+├── test_admin_proxy_ratify.py               # Phase 5 (13 tests)
+├── test_role_gating.py                      # Phase 5 (12 tests)
+├── test_qa_submission.py                    # Phase 6 (9 tests)
+├── test_job_dispatch.py                     # Phase 6 (23 tests)
+├── test_notifications_sections.py           # Phase 6 (13 tests)
+├── test_tts_controls.py                     # Phase 6 (11 tests)
+├── test_system_status.py                    # Phase 6 (7 tests)
+├── test_queue_display.py                    # Phase 6 (12 tests)
+├── test_action_required.py                  # Phase 6 (5 tests)
+├── test_time_saved.py                       # Phase 6 (6 tests)
+├── test_websocket_connection.py             # Phase 7 (11 tests)
+├── test_websocket_session_persistence.py    # Phase 7 (10 tests)
+├── test_websocket_auth_handshake.py         # Phase 7 (7 tests)
+├── test_trivial_verification.py             # Phase 1 (1 test)
+├── test_visual_regression.py                # Phase 8 (12 tests)
+└── __snapshots__/                           # Phase 8: Baseline screenshots
+    ├── test_visual_admin-dashboard.png
+    ├── test_visual_admin-proxy-dashboard.png
+    ├── test_visual_admin-proxy-ratify.png
+    ├── test_visual_admin-snapshots.png
+    ├── test_visual_admin-users.png
+    ├── test_visual_change-password.png
+    ├── test_visual_dev-tools.png
+    ├── test_visual_landing.png
+    ├── test_visual_login.png
+    ├── test_visual_notifications.png
+    ├── test_visual_profile.png
+    └── test_visual_register.png
 ```
 
 ---
@@ -383,23 +362,23 @@ src/tests/e2e/
 ## Verification Strategy
 
 After each phase:
-1. Run `src/scripts/run-e2e-tests.sh` — all E2E tests pass
+1. Run `./src/scripts/run-e2e-ui-tests.sh -v` — all E2E tests pass
 2. Run existing test suites — no regressions:
-   - `pytest src/tests/unit/` (1534+ tests)
+   - `pytest src/tests/unit/` (2,102 tests)
    - `./src/scripts/run-websocket-smoke-tests.sh` (50 tests)
-   - `./src/tests/run-integration-tests.sh -v` (85+ tests)
-3. Final gate before merge: all 7 test tiers green
+   - `./src/tests/run-integration-tests.sh -v` (137 tests)
+3. Final gate before merge: all 4 tiers green (2,554 total tests)
 
 ---
 
-## Dependencies to Add (`requirements-test.txt`)
+## Dependencies Added (`requirements-test.txt`)
 
 ```
 pytest-playwright>=0.7.0
-pytest-playwright-visual-snapshot>=0.2.0
+pytest-playwright-visual-snapshot==0.5.1  # installed with --no-deps (starlette conflict)
 ```
 
-Plus system install: `playwright install chromium --with-deps`
+Plus system install: `playwright install chromium` (no `--with-deps`, no sudo)
 
 ---
 

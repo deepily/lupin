@@ -181,7 +181,46 @@ src/scripts/run-websocket-smoke-tests.sh
 python src/tests/websocket_smoke/test_basic_connection.py
 ```
 
-### 5. Interactive Proxy Tests (`src/tests/smoke/test_proxy_integration.py`)
+### 5. E2E UI Tests (`src/tests/e2e_ui/`)
+
+**Purpose**: End-to-end browser testing with Playwright (Phases 1-8)
+
+**Characteristics**:
+- Playwright Chromium headless browser
+- Covers all 12 pages (public, auth, admin)
+- Parametrized page smoke tests, auth flows, navigation, WebSocket tests
+- Visual regression via `pytest-playwright-visual-snapshot` (Phase 8)
+
+**Coverage**:
+- 253 E2E tests across 27 test files (Phases 1-7)
+- 12 visual regression snapshot tests (Phase 8)
+- Pages: login, register, change-password, profile, landing, notifications, admin (6 pages)
+
+**Run Command**:
+```bash
+# Run all E2E UI tests (hot-swaps server to Testing config)
+./src/scripts/run-e2e-ui-tests.sh -v
+
+# Run only visual regression tests
+./src/scripts/run-e2e-ui-tests.sh -v -k visual
+
+# Update visual baselines after intentional UI changes
+./src/scripts/run-e2e-ui-tests.sh --update-snapshots -k visual
+
+# Run specific E2E test file
+./src/scripts/run-e2e-ui-tests.sh -v -k login
+```
+
+**Visual Regression Workflow**:
+1. First run creates baseline screenshots in `src/tests/e2e_ui/__snapshots__/`
+2. Subsequent runs compare against baselines (10% pixel threshold)
+3. After intentional UI changes: `--update-snapshots` to regenerate baselines
+4. Failures produce diff images in `src/tests/e2e_ui/snapshot_failures/`
+5. Baselines are version-controlled; failure diffs are gitignored
+
+---
+
+### 6. Interactive Proxy Tests (`src/tests/smoke/test_proxy_integration.py`)
 
 **Purpose**: Automated interactive testing with notification proxy auto-answer
 
@@ -221,6 +260,7 @@ pytest src/tests/smoke/test_proxy_integration.py -v
 | **Smoke** | ~50 | Fast (10-100ms) | Single module | Minimal | Module sanity check |
 | **Integration** | 8 | Medium (100-1000ms) | Full flow | Real (API, DB) | End-to-end validation |
 | **WebSocket** | 50 | Medium | WebSocket layer | Real (WS server) | WebSocket functionality |
+| **E2E UI** | 265 | Medium-Slow (1-5s) | Full browser flow | Server + Chromium | Visual + functional browser tests |
 | **Interactive Proxy** | 12 | Slow (5-60s) | Full pipeline | Server + Proxy + LLM | Interactive agent validation |
 
 ---
@@ -298,11 +338,12 @@ pytest -x src/tests/
 | `rate_limiter.py` | ✅ Yes | ✅ Yes | ✅ Lockout test |
 | WebSocket auth | ⚠️ Partial | ✅ Yes | ✅ JWT auth test |
 
-**Total Test Count**: ~122 tests
+**Total Test Count**: ~387+ tests
 - Unit: 14+
 - Smoke: ~50
 - Integration: 8
 - WebSocket: 50
+- E2E UI: 265 (253 functional + 12 visual regression)
 
 **Overall Coverage**: ~85-90% for authentication system
 
@@ -449,4 +490,4 @@ Recommended test sequence for CI/CD:
 
 ---
 
-**Last Updated**: October 2025 (Phase 9 - Integration Tests Added)
+**Last Updated**: March 2026 (Phase 8 - Visual Regression & E2E UI)

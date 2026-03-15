@@ -241,6 +241,37 @@ RUN pip install --no-cache-dir llama-index==0.14.14 llama-index-embeddings-nomic
 RUN python3 -c "from sentence_transformers import SentenceTransformer; SentenceTransformer( 'nomic-ai/CodeRankEmbed', trust_remote_code=True )"
 RUN python3 -c "from transformers import AutoModel, AutoTokenizer; AutoModel.from_pretrained( 'nomic-ai/nomic-embed-text-v1.5', trust_remote_code=True ); AutoTokenizer.from_pretrained( 'bert-base-uncased' )"
 
+# ============================================================================
+# PLAYWRIGHT E2E TESTING (Phases 1-8, v0.1.6)
+# ============================================================================
+# E2E UI tests run against the container from host or CI.
+# Playwright browsers are installed inside the container for CI execution.
+
+# Testing framework (pytest already may be installed as transitive dep — pin explicitly)
+RUN pip install --no-cache-dir pytest==8.4.2 pytest-asyncio==1.2.0
+
+# Playwright + pytest integration
+RUN pip install --no-cache-dir pytest-playwright==0.7.2
+
+# Playwright browser binaries (Chromium only — keeps image smaller)
+RUN playwright install --with-deps chromium
+
+# Visual regression dependencies (pillow + pixelmatch already installed if not present)
+RUN pip install --no-cache-dir pillow==11.1.0 pixelmatch==0.4.0
+
+# Visual snapshot plugin — installed with --no-deps to avoid starlette version conflict
+# (structlog-config transitive dep requires starlette >=0.49.1, FastAPI 0.115.12 pins <0.47.0)
+# The plugin only uses pillow + pixelmatch at runtime; structlog-config is never imported.
+RUN pip install --no-cache-dir --no-deps pytest-playwright-visual-snapshot==0.5.1
+
+# Patch __init__.py to make structlog import optional (same as local dev setup)
+RUN sed -i 's/from structlog_config import configure_logger/try:\n    from structlog_config import configure_logger\nexcept ImportError:\n    import logging; configure_logger = lambda: logging.getLogger(__name__)/' \
+    /usr/local/lib/python3.11/site-packages/pytest_playwright_visual_snapshot/__init__.py
+
+# ============================================================================
+# END PLAYWRIGHT E2E TESTING
+# ============================================================================
+
 # CMD ["/bin/bash", "-c", "echo '-- OR -- Run `python3 -m fastapi_app.main` to spin up FastAPI server' && exec /bin/bash"]
 # Run the script: /var/lupin/src/scripts/run-fastapi-lupin.sh
 CMD [ "/bin/bash", "/var/lupin/src/scripts/run-fastapi-lupin.sh" ]

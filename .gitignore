@@ -99,3 +99,6 @@ history/migrations/
 
 # Claude Code hook logs - empirical payload captures
 io/claude_code_hooks/
+
+# Visual regression snapshot failures (generated during test runs)
+src/tests/e2e_ui/snapshot_failures/

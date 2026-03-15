@@ -3,8 +3,8 @@ name: testing-patterns
 description: Testing patterns for Lupin project. Use when writing tests, running pytest, debugging test failures, choosing between smoke/unit/integration tests, checking test coverage, or fixing failing tests.
 metadata:
   author: lupin-team
-  version: "1.1"
-  last-updated: "2026-02-20"
+  version: "1.2"
+  last-updated: "2026-03-14"
 ---
 
 # Testing Patterns
@@ -20,7 +20,7 @@ Lupin uses a **three-tier testing strategy** for comprehensive validation.
 | Integration | `src/tests/integration/` | 100-1000ms | End-to-end flows | `./src/tests/run-integration-tests.sh -v` |
 | WebSocket | `src/tests/websocket_smoke/` | varies | WS functionality | `src/scripts/run-websocket-smoke-tests.sh` |
 | Live Pipeline | `src/tests/smoke/test_*_live_pipeline.py` | 10-120s | Full LLM pipeline | `python src/tests/smoke/test_calculator_live_pipeline.py` |
-| UI E2E | `src/tests/e2e/` | 5-30s | Browser-level UI flows | *(Planned v0.1.6)* |
+| UI E2E | `src/tests/e2e_ui/` | 1-5s | Browser-level visual + functional | `./src/scripts/run-e2e-ui-tests.sh -v` |
 
 ## Quick Commands
 
@@ -97,6 +97,8 @@ python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-c
 | Testing with database | Integration test |
 | Testing auth flow | Integration test |
 | Testing full agent pipeline with real LLM | Live pipeline test |
+| Testing UI visual regression | E2E visual test |
+| Testing browser-level UI flows | E2E UI test |
 
 ## Critical Rules
 
@@ -111,7 +113,10 @@ python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-c
 |------|----------|-------|
 | Auth System | 85-90% | 14+ unit, 43 integration |
 | WebSocket | 92% pass | 50 tests |
-| Total | ~122 tests | unit + smoke + integration + WS |
+| E2E UI | 265 tests | 253 functional + 12 visual regression |
+| Unit | 2,102 tests | Comprehensive module coverage |
+| Integration | 137 tests | End-to-end flows |
+| Total | ~2,554 tests | unit + smoke + integration + WS + E2E UI |
 
 ## Documentation
 
@@ -119,11 +124,30 @@ python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-c
 - **Integration**: `src/tests/integration/README.md`
 - **Unit Tests**: Inline documentation in test files
 
-## UI E2E Tests (Planned — v0.1.6)
+## E2E UI Tests (Playwright)
 
-Playwright-based browser tests for UI-level validation: form submission, job card rendering,
-notification display, and WebSocket event reflection. Not yet implemented — this section will
-be expanded when the Playwright infrastructure is added.
+Browser-level functional + visual regression tests using Playwright + Chromium headless.
+
+| Property | Value |
+|----------|-------|
+| Location | `src/tests/e2e_ui/` |
+| Runner | `./src/scripts/run-e2e-ui-tests.sh -v` |
+| Tests | 265 (253 functional + 12 visual regression) |
+| Baselines | `src/tests/e2e_ui/__snapshots__/` (12 PNG screenshots) |
+| Failures | `src/tests/e2e_ui/snapshot_failures/` (auto-generated on diff) |
+
+```bash
+# All E2E UI tests
+./src/scripts/run-e2e-ui-tests.sh -v
+
+# Visual regression only
+./src/scripts/run-e2e-ui-tests.sh -v -k visual
+
+# Update baselines after intentional UI changes
+./src/scripts/run-e2e-ui-tests.sh --update-snapshots -k visual
+```
+
+**Coverage**: All 12 pages — auth flows, page smoke, admin flows, notifications, WebSocket lifecycle, visual regression.
 
 ## Anti-Patterns
 

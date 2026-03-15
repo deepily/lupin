@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-13 (Session 355)
+Last updated: 2026-03-14 (Session 361)
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 
@@ -92,18 +92,17 @@ Last updated: 2026-03-13 (Session 355)
 ### Playwright E2E Browser Testing (Session 252)
 
 - [x] **[LUPIN] Research AI/automation for end-to-end testing** — Session 252: Research complete. Playwright Python + pytest-playwright recommended for FastAPI + vanilla HTML/JS stack
-- [ ] **[LUPIN] Implement Playwright E2E testing** — 8-phase plan (~78 tasks, ~5 weeks), ~266 data-testid elements, 28 test journeys, 9 architecture decisions
+- [x] **[LUPIN] Implement Playwright E2E testing** — ALL 8 PHASES COMPLETE (Sessions 351-361). 265 E2E tests (253 functional + 12 visual regression) across 28 test files covering all 12 pages.
   - **Planning docs**: [`src/rnd/2026.02.23-automating-ui-testing/`](src/rnd/2026.02.23-automating-ui-testing/00-index.md)
-  - **Serialized plan**: `src/rnd/2026.02.23-playwright-e2e-testing-plan.md`
   - **Phases 1-2**: DONE — Foundation + data-testid rollout (~266 testids across 13 files)
-  - **Phase 3**: DONE — Auth Flow Tests (30 tests: login, register, profile, change-password, session)
-  - **Phase 4**: DONE — Page Smoke Tests (39 tests: parametrized smoke, navigation, landing)
-  - **Phase 5**: DONE — Admin Flow Tests (69 tests: dashboard, users, snapshots, proxy-dashboard, proxy-ratify, role-gating)
-  - **Total**: 253 passing E2E tests across 27 test files
-  - **Phase 6**: DONE — Notifications & Q&A Tests (86 tests: sections, Q&A, job dispatch, TTS, status, queues, action, time saved)
-  - **Phase 7**: DONE — WebSocket & Real-Time Tests (28 tests: connection lifecycle, session persistence, auth handshake)
-  - **Phase 8**: Pending — Visual Regression & CI (blocked by starlette version conflict)
-  - **Round 2**: Claude Code + Playwright MCP for AI-augmented test generation + self-healing selectors
+  - **Phase 3**: DONE — Auth Flow Tests (37 tests)
+  - **Phase 4**: DONE — Page Smoke Tests (27 tests)
+  - **Phase 5**: DONE — Admin Flow Tests (69 tests)
+  - **Phase 6**: DONE — Notifications & Q&A Tests (86 tests)
+  - **Phase 7**: DONE — WebSocket & Real-Time Tests (28 tests)
+  - **Phase 8**: DONE — Visual Regression & CI (12 tests, JS normalization, Dockerfile, `--no-deps` starlette workaround)
+  - **Full suite**: 2,102 unit + 50 WS + 265 E2E UI + 137 integration = ALL PASS
+  - **Round 2** (future): Claude Code + Playwright MCP for AI-augmented test generation + self-healing selectors
 
 ### DataFrame CRUD with Voice I/O — UI Testing + Voice Polish
 
@@ -138,9 +137,9 @@ Last updated: 2026-03-13 (Session 355)
   - **Master plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md)
   - **Progress**: Phase 0 (serialize) done, Phase 1.1 (unit baseline 87/87) done. Phases 1.2-5 pending.
 
-### Render Markdown Documents as HTML
+### Render Markdown Documents as HTML + Audio Player Viewer
 
-- [ ] **[LUPIN] Render markdown documents as HTML** — 🔄 IN PROGRESS
+- [x] **[LUPIN] Render markdown documents as HTML + in-browser MP3 player** — Completed. Markdown documents render as styled HTML pages; also created an Audio Player Viewer for in-browser MP3 playback.
 
 ### Trust Proxy Documentation Update
 

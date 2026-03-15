@@ -18,6 +18,7 @@
 #   ./src/scripts/run-e2e-ui-tests.sh -v         # Verbose output
 #   ./src/scripts/run-e2e-ui-tests.sh -v -s      # Very verbose (show prints)
 #   ./src/scripts/run-e2e-ui-tests.sh -k login   # Run only login tests
+#   ./src/scripts/run-e2e-ui-tests.sh --update-snapshots  # Update visual baselines
 #
 
 set -e  # Exit on error

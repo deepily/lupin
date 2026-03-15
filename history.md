@@ -1,5 +1,29 @@
 # Lupin Project History
 
+### 2026.03.14 - Session 361 | Playwright E2E Phase 8: Visual Regression & CI Integration
+
+**Accomplishments**:
+- Installed pytest-playwright-visual-snapshot==0.5.1 with --no-deps (starlette conflict workaround)
+- Patched plugin __init__.py to make structlog import optional (try/except fallback)
+- Configured pytest.ini: snapshot threshold 0.1, paths for baselines and failures
+- Created test_visual_regression.py: 12 parametrized tests covering all pages (public, auth, admin)
+- Implemented JS content normalization for dynamic elements (UUIDs, timestamps, WS status)
+  - Key pivot: Playwright mask overlays caused subpixel rendering differences; JS text replacement is deterministic
+- Generated and verified 12 baseline screenshots (zero-diff on re-run)
+- Updated Dockerfile with Playwright E2E testing section (pytest, chromium, visual snapshot + __init__.py sed patch)
+- Updated run-e2e-ui-tests.sh usage docs for --update-snapshots
+- Added snapshot_failures/ to .gitignore
+- Updated CLAUDE.md: E2E UI tier in testing section + visual regression in pre-merge checklist
+- Updated src/tests/README.md: E2E UI tier documentation, test counts
+- Session-end documentation: updated implementation plan (Phase 8 complete), testing skills (global + project), TODO.md
+- Full suite verification: 2,102 unit + 50 WS + 265 E2E UI + 137 integration = ALL PASS
+- **Phases 1-8 Summary**: 265 E2E tests across 28 test files, covering all 12 pages with functional + visual regression
+
+**Files Created**: src/tests/e2e_ui/test_visual_regression.py, src/tests/e2e_ui/__snapshots__/ (12 baselines)
+**Files Modified**: requirements-test.txt, pytest.ini, .gitignore, src/scripts/run-e2e-ui-tests.sh, docker/lupin/Dockerfile, CLAUDE.md, src/tests/README.md, src/rnd/2026.02.23-automating-ui-testing/01-implementation-plan.md, TODO.md, ~/.claude/skills/testing-development/SKILL.md, .claude/skills/testing-patterns/SKILL.md
+
+---
+
 ### 2026.03.14 - Session 360 | Stop Hook: Two-Signal Gate to Suppress Spurious Notifications
 
 **Accomplishments**:

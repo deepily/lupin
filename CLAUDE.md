@@ -246,7 +246,15 @@ Lupin uses a three-tier testing strategy for comprehensive validation:
    - Coverage: 50 tests
    - Run: `src/scripts/run-websocket-smoke-tests.sh`
 
-5. **Interactive Proxy Tests** (`src/tests/smoke/test_proxy_integration.py`)
+5. **E2E UI Tests** (`src/tests/e2e_ui/`)
+   - Playwright Chromium headless browser tests against live server
+   - Coverage: 253 functional tests + 12 visual regression (Phase 8)
+   - Run: `./src/scripts/run-e2e-ui-tests.sh -v`
+   - Visual only: `./src/scripts/run-e2e-ui-tests.sh -v -k visual`
+   - Update baselines: `./src/scripts/run-e2e-ui-tests.sh --update-snapshots -k visual`
+   - Snapshots: `src/tests/e2e_ui/__snapshots__/` (version-controlled)
+
+6. **Interactive Proxy Tests** (`src/tests/smoke/test_proxy_integration.py`)
    - Automated interactive testing with notification proxy auto-answer
    - Coverage: 12 scenarios across Calculator, CRUD, and Expediter agents
    - Tests submit-and-poll pipelines with proxy-driven notification responses
@@ -282,7 +290,7 @@ pytest --cov=cosa.rest --cov-report=html src/tests/
 
 ### Test Coverage
 
-- **Total Tests**: ~122 (14+ unit, ~50 smoke, 8 integration, 50 WebSocket)
+- **Total Tests**: ~387+ (14+ unit, ~50 smoke, 43 integration, 50 WebSocket, 265 E2E UI)
 - **Auth System Coverage**: 85-90%
 - **Critical Paths**: Login, registration, token refresh, password change all tested
 
@@ -298,6 +306,8 @@ See `src/tests/README.md` for comprehensive testing documentation.
 |------------|---------|-------------|
 | Unit Tests | `pytest src/tests/unit/` | 100% pass |
 | WebSocket Tests | `./src/scripts/run-websocket-smoke-tests.sh` | 100% pass |
+| E2E UI Tests | `./src/scripts/run-e2e-ui-tests.sh -v` | 100% pass |
+| Visual Regression | `./src/scripts/run-e2e-ui-tests.sh -v -k visual` | 100% pass |
 | Integration Tests | `./src/tests/run-integration-tests.sh -v` | 100% pass (FINAL GATE) |
 
 ### Integration Tests are the Final Gate
