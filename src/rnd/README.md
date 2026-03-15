@@ -4,6 +4,13 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.14 - Presentation Generator Agent
+- **R&D Directory**: [2026.03.14-presentation-generator/](2026.03.14-presentation-generator/00-index.md) - Agentic process (Claude SDK) that transforms research documents or technical blog posts into 10-20 minute slide decks with presenter notes. Single orchestrator pattern (like Podcast Generator). 8-phase pipeline: ingest, analyze narrative, outline titles+visuals, elaborate content+notes, serialize YAML, render Marp Markdown, render Mermaid visuals, deliver. 4 human-in-the-loop gates. Pluggable visual renderer registry for future AI generators. Theme cascade: INI -> YAML template -> per-presentation overrides.
+  - [Strategy & Design](2026.03.14-presentation-generator/01-strategy-and-design.md) | [Implementation Plan](2026.03.14-presentation-generator/02-implementation-plan.md) | [Tracking](2026.03.14-presentation-generator/03-implementation-tracking.md)
+
+### 2026.03.14 - Claude Agent SDK Config Migration Plan (Revised)
+- **Plan**: [2026.03.14-claude-agent-sdk-config-migration-plan.md](2026.03.14-claude-agent-sdk-config-migration-plan.md) - Revised plan for migrating Deep Research, Podcast Generator, and LLM Client Factory configs from hardcoded `@dataclass` to COSA ConfigurationManager (INI + env var overrides). No backward compatibility — `from_config()` is the only path. Supersedes 2026.01.27 plan. 5 phases: INI key prep, Deep Research, Podcast Generator, LLM Client Factory, testing.
+
 ### 2026.03.13 - CJ Flow Persistence Plan
 - **Plan**: [2026.03.13-cj-flow-persistence-plan.md](2026.03.13-cj-flow-persistence-plan.md) - Durable PostgreSQL-backed persistence for AgenticJobBase jobs (DeepResearch, PodcastGenerator, ClaudeCode, SweTeam). Central write-through via `emit_job_state_transition()`, job_history table with JSONB metadata, startup recovery marking interrupted jobs, `/api/job-history` endpoint with role-based auth. 5 phases: schema+model, persistence service, write-through integration, startup recovery, API+tests.
 
