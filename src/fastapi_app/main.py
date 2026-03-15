@@ -485,11 +485,17 @@ async def lifespan( app: FastAPI ):
     #   - production: Cloud SQL (automatic schema creation via Alembic migrations)
     print( "[AUTH] Using PostgreSQL authentication database" )
 
-    # Load STT model on startup
+    # Load STT model on startup (graceful degradation if GPU unavailable)
     global whisper_pipeline
     print( "Loading distill whisper engine... ", end="" )
-    whisper_pipeline = await load_stt_model()
-    print( "Done!" )
+    try:
+        whisper_pipeline = await load_stt_model()
+        print( "Done!" )
+    except Exception as e:
+        whisper_pipeline = None
+        print( "FAILED!" )
+        print( f"[WARN] Whisper STT model failed to load: {e}" )
+        print( "[WARN] STT endpoints will return 503. All other endpoints remain functional." )
 
     # Load local embedding models on startup (claim VRAM before vLLM)
     from cosa.memory.local_embedding_engine import get_code_engine, get_prose_engine

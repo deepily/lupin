@@ -1,5 +1,35 @@
 # Lupin Project History
 
+### 2026.03.14 - Session 360b | Bug Fix: Graceful STT Degradation — Server Starts Without GPU
+
+**Accomplishments**:
+- Fixed server startup crash when Whisper STT model can't load (no CUDA GPU, driver issue, Docker without `--gpus all`)
+- Root cause: `load_stt_model()` in `lifespan()` had no try/except — any load failure killed the entire server, blocking all endpoints including auth, admin, queue, WebSocket, pages, and TTS
+- Change 1 (`main.py`): Wrapped STT load in try/except; on failure sets `whisper_pipeline = None`, logs warning, continues startup
+- Change 2 (`speech.py`): Added None guard in `get_whisper_pipeline()` dependency; raises HTTP 503 with `Retry-After: 60` when pipeline unavailable
+- Only 2 STT endpoints affected (`/api/upload-and-transcribe-mp3`, `/api/upload-and-transcribe-wav`); 3 TTS endpoints + all other endpoints remain fully functional
+
+**Files Modified**: `src/fastapi_app/main.py`, `src/cosa/rest/routers/speech.py` (CoSA — pending separate commit)
+**Commit**: 3604443
+
+---
+
+### 2026.03.14 - Session 362 | Presentation Generator Agent — Strategy, Design & Documentation
+
+**Accomplishments**:
+- Designed comprehensive Presentation Generator Agent: agentic process (Claude SDK) transforming research docs into 10-20 minute slide decks with presenter notes
+- Architecture: single orchestrator pattern (Podcast Generator), 8-phase pipeline with content/rendering separation, 4 human-in-the-loop gates
+- Key design decisions: YAML intermediate format, Marp Markdown output, assertion-style slide titles, pluggable visual renderer registry, theme cascade (INI -> YAML template -> per-presentation overrides)
+- Serialized strategy & design document covering: slides-per-minute theory, narrative arc decomposition, presenter notes spec, visual taxonomy, theme architecture, renderer protocol
+- Created implementation plan: 8 phases, 55 tasks, file inventory, dependency list
+- Created implementation tracking document with phase/task checkboxes
+- Updated R&D README index with new entry
+
+**Files Created**: `src/rnd/2026.03.14-presentation-generator/00-index.md`, `01-strategy-and-design.md`, `02-implementation-plan.md`, `03-implementation-tracking.md`
+**Files Modified**: `src/rnd/README.md`, `TODO.md`
+
+---
+
 ### 2026.03.14 - Session 361 | Playwright E2E Phase 8: Visual Regression & CI Integration
 
 **Accomplishments**:
