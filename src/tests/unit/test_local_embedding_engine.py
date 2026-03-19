@@ -260,6 +260,165 @@ class TestProseEmbeddingEngine:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# CUDA OOM Retry
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestCudaOomRetryCode:
+    """Test _run_with_cuda_retry() in CodeEmbeddingEngine."""
+
+    def setup_method( self ):
+        _reset_singletons()
+
+    @patch( "cosa.memory.local_embedding_engine.ConfigurationManager", return_value=_make_fake_config() )
+    def test_cuda_retry_success_on_first_try( self, mock_cm ):
+        """fn() succeeds on first call — no retry, returns result."""
+        from cosa.memory.local_embedding_engine import CodeEmbeddingEngine
+        engine = CodeEmbeddingEngine( debug=False )
+        result = engine._run_with_cuda_retry( lambda: "success" )
+        assert result == "success"
+
+    @patch( "cosa.memory.local_embedding_engine.torch" )
+    @patch( "cosa.memory.local_embedding_engine.gc" )
+    @patch( "cosa.memory.local_embedding_engine.ConfigurationManager", return_value=_make_fake_config() )
+    def test_cuda_retry_recovers_from_oom( self, mock_cm, mock_gc, mock_torch ):
+        """First call raises OutOfMemoryError, second succeeds — returns result."""
+        from cosa.memory.local_embedding_engine import CodeEmbeddingEngine
+        engine = CodeEmbeddingEngine( debug=False )
+
+        call_count = { "n": 0 }
+        def flaky():
+            call_count[ "n" ] += 1
+            if call_count[ "n" ] == 1:
+                raise mock_torch.cuda.OutOfMemoryError( "CUDA out of memory" )
+            return "recovered"
+
+        # Make isinstance check work for the except clause
+        mock_torch.cuda.OutOfMemoryError = type( "OutOfMemoryError", ( RuntimeError, ), {} )
+
+        call_count[ "n" ] = 0
+        result = engine._run_with_cuda_retry( flaky )
+        assert result == "recovered"
+        assert call_count[ "n" ] == 2
+
+    @patch( "cosa.memory.local_embedding_engine.torch" )
+    @patch( "cosa.memory.local_embedding_engine.gc" )
+    @patch( "cosa.memory.local_embedding_engine.ConfigurationManager", return_value=_make_fake_config() )
+    def test_cuda_retry_calls_gc_and_empty_cache( self, mock_cm, mock_gc, mock_torch ):
+        """On OOM, gc.collect() and torch.cuda.empty_cache() must be called."""
+        from cosa.memory.local_embedding_engine import CodeEmbeddingEngine
+        engine = CodeEmbeddingEngine( debug=False )
+
+        mock_torch.cuda.OutOfMemoryError = type( "OutOfMemoryError", ( RuntimeError, ), {} )
+
+        call_count = { "n": 0 }
+        def flaky():
+            call_count[ "n" ] += 1
+            if call_count[ "n" ] == 1:
+                raise mock_torch.cuda.OutOfMemoryError( "CUDA out of memory" )
+            return "ok"
+
+        engine._run_with_cuda_retry( flaky )
+        mock_gc.collect.assert_called_once()
+        mock_torch.cuda.empty_cache.assert_called_once()
+
+    @patch( "cosa.memory.local_embedding_engine.ConfigurationManager", return_value=_make_fake_config() )
+    def test_cuda_retry_raises_non_cuda_runtime_error( self, mock_cm ):
+        """Non-CUDA RuntimeError should be re-raised immediately, no retry."""
+        from cosa.memory.local_embedding_engine import CodeEmbeddingEngine
+        engine = CodeEmbeddingEngine( debug=False )
+
+        call_count = { "n": 0 }
+        def always_fail():
+            call_count[ "n" ] += 1
+            raise RuntimeError( "unrelated error" )
+
+        with pytest.raises( RuntimeError, match="unrelated error" ):
+            engine._run_with_cuda_retry( always_fail )
+        assert call_count[ "n" ] == 1  # no retry
+
+    @patch( "cosa.memory.local_embedding_engine.torch" )
+    @patch( "cosa.memory.local_embedding_engine.gc" )
+    @patch( "cosa.memory.local_embedding_engine.ConfigurationManager", return_value=_make_fake_config() )
+    def test_cuda_retry_handles_cublas_error( self, mock_cm, mock_gc, mock_torch ):
+        """RuntimeError with 'CUBLAS' in message should trigger retry."""
+        from cosa.memory.local_embedding_engine import CodeEmbeddingEngine
+        engine = CodeEmbeddingEngine( debug=False )
+
+        mock_torch.cuda.OutOfMemoryError = type( "OutOfMemoryError", ( RuntimeError, ), {} )
+
+        call_count = { "n": 0 }
+        def flaky():
+            call_count[ "n" ] += 1
+            if call_count[ "n" ] == 1:
+                raise RuntimeError( "CUBLAS error: workspace allocation failed" )
+            return "recovered"
+
+        result = engine._run_with_cuda_retry( flaky )
+        assert result == "recovered"
+        assert call_count[ "n" ] == 2
+
+    @patch( "cosa.memory.local_embedding_engine.torch" )
+    @patch( "cosa.memory.local_embedding_engine.gc" )
+    @patch( "cosa.memory.local_embedding_engine.ConfigurationManager", return_value=_make_fake_config() )
+    def test_cuda_retry_fails_on_second_oom( self, mock_cm, mock_gc, mock_torch ):
+        """If both attempts raise OOM, exception propagates."""
+        from cosa.memory.local_embedding_engine import CodeEmbeddingEngine
+        engine = CodeEmbeddingEngine( debug=False )
+
+        mock_torch.cuda.OutOfMemoryError = type( "OutOfMemoryError", ( RuntimeError, ), {} )
+
+        def always_oom():
+            raise mock_torch.cuda.OutOfMemoryError( "CUDA out of memory" )
+
+        with pytest.raises( RuntimeError, match="CUDA out of memory" ):
+            engine._run_with_cuda_retry( always_oom )
+
+
+class TestCudaOomRetryProse:
+    """Test _run_with_cuda_retry() in ProseEmbeddingEngine."""
+
+    def setup_method( self ):
+        _reset_singletons()
+
+    @patch( "cosa.memory.local_embedding_engine.torch" )
+    @patch( "cosa.memory.local_embedding_engine.gc" )
+    @patch( "cosa.memory.local_embedding_engine.ConfigurationManager", return_value=_make_fake_config() )
+    def test_prose_cuda_retry_recovers_from_oom( self, mock_cm, mock_gc, mock_torch ):
+        """ProseEmbeddingEngine retry should recover from OOM identically."""
+        from cosa.memory.local_embedding_engine import ProseEmbeddingEngine
+        engine = ProseEmbeddingEngine( debug=False )
+
+        mock_torch.cuda.OutOfMemoryError = type( "OutOfMemoryError", ( RuntimeError, ), {} )
+
+        call_count = { "n": 0 }
+        def flaky():
+            call_count[ "n" ] += 1
+            if call_count[ "n" ] == 1:
+                raise mock_torch.cuda.OutOfMemoryError( "CUDA out of memory" )
+            return "recovered"
+
+        result = engine._run_with_cuda_retry( flaky )
+        assert result == "recovered"
+        mock_gc.collect.assert_called_once()
+        mock_torch.cuda.empty_cache.assert_called_once()
+
+    @patch( "cosa.memory.local_embedding_engine.ConfigurationManager", return_value=_make_fake_config() )
+    def test_prose_cuda_retry_raises_non_cuda_error( self, mock_cm ):
+        """Non-CUDA RuntimeError should pass through without retry."""
+        from cosa.memory.local_embedding_engine import ProseEmbeddingEngine
+        engine = ProseEmbeddingEngine( debug=False )
+
+        call_count = { "n": 0 }
+        def always_fail():
+            call_count[ "n" ] += 1
+            raise RuntimeError( "unrelated error" )
+
+        with pytest.raises( RuntimeError, match="unrelated error" ):
+            engine._run_with_cuda_retry( always_fail )
+        assert call_count[ "n" ] == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # VramReport
 # ─────────────────────────────────────────────────────────────────────────────
 

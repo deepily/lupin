@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-03-14T12:15:00
+**Last Updated**: 2026-03-18T12:00:00
 
 ---
 
@@ -34,6 +34,8 @@
 | 98958f70 | 2026-02-28T23:00:00 | 2026-02-28T23:45:00 | closed |
 | 9f656de9 | 2026-03-11T10:00:00 | 2026-03-12T17:30:00 | closed |
 | 59afa5ba | 2026-03-12T17:25:00 | 2026-03-12T18:15:00 | committed |
+| 135a6b16 | 2026-03-18T12:00:00 | 2026-03-18T12:00:00 | stale |
+| 7d02176c | 2026-03-19T12:00:00 | 2026-03-19T13:00:00 | committed |
 
 ---
 
@@ -66,6 +68,10 @@
   - **Root Cause**: PyTorch CUDA allocator fragmentation from co-resident Whisper + embedding models; can't find contiguous 16 MiB block
   - **Fix**: `_run_whisper_with_retry()` with `gc.collect()` + `torch.cuda.empty_cache()` + retry; `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`; 503 with Retry-After instead of 500
   - **Files (Lupin)**: `main.py`; **(CoSA)**: `speech.py`
+
+- [x] **CUDA Memory Optimization — loading order, warmup & embedding OOM retry** → commit: b2d709b | By: 7d02176c (Session 365)
+  - **Follow-up to Session 359**: Reduced VLLM 0.70→0.55, reordered model loading (smallest→largest), added multi-batch warmup + 85s chunked Whisper warmup, added `_run_with_cuda_retry()` to both embedding engines
+  - **Files (Lupin)**: `main.py`, `whisper-warmup-85s.mp3`; **(CoSA)**: `local_embedding_engine.py`; **(Tests)**: `test_local_embedding_engine.py` (8 new)
 
 - [x] **find_session_by_id() fails after context clear — qualifier silently dropped** → commit: 98c0072 | By: 638212c2 (Session 350)
   - **Symptom**: Stop hook qualifier dropped with `qualifier_tmux_inject_skip reason: "no session found"` for stable ID when bridge file has different transient `session_id`

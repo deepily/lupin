@@ -1,5 +1,24 @@
 # Lupin Project History
 
+### 2026.03.19 - Session 365 | CUDA Memory Optimization — Model Loading Order, Warmup & OOM Retry
+
+**Accomplishments**:
+- Reduced VLLM `gpu_memory_utilization` from 0.70 → 0.55 in `~/.bash_aliases` (`svllmr` alias), freeing ~3.7 GiB for FastAPI-resident models
+- Generated 85-second Whisper warmup MP3 via ElevenLabs TTS (narration about CUDA memory fragmentation)
+- Reordered GPU model loading: CodeRankEmbed → Prose Embedding → Whisper (smallest → largest) to minimize CUDA fragmentation
+- Enhanced warmup routines: multi-batch encode calls for both embedding engines, chunked 85s transcription for Whisper (`chunk_length_s=30, stride_length_s=5` matching production)
+- Added `_log_vram()` helper for VRAM reporting after each model load (allocated/reserved GiB)
+- Implemented `_run_with_cuda_retry()` in both CodeEmbeddingEngine and ProseEmbeddingEngine — wraps all 4 encode methods with gc.collect + empty_cache + single retry on CUDA OOM
+- Added 8 unit tests for CUDA OOM retry logic (success, recovery, gc/cache verification, non-CUDA passthrough, CUBLAS handling, double-OOM failure)
+- 40/40 embedding engine unit tests pass (32 existing + 8 new)
+
+**Files Created**: `src/conf/warmup/whisper-warmup-85s.mp3`
+**Files Modified**: `src/fastapi_app/main.py`, `src/cosa/memory/local_embedding_engine.py` (CoSA), `src/tests/unit/test_local_embedding_engine.py`
+**External**: `~/.bash_aliases` (svllmr alias — not in repo)
+**Commit**: b2d709b
+
+---
+
 ### 2026.03.14 - Session 364 | Claude Agent SDK Config Migration — Phases 0-4
 
 **Accomplishments**:

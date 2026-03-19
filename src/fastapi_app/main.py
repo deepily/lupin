@@ -70,6 +70,14 @@ from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 import logging
 logging.getLogger( "lance" ).setLevel( logging.ERROR )
 
+def _log_vram( label ):
+    """Log CUDA VRAM snapshot after model load."""
+    if torch.cuda.is_available():
+        alloc    = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        print( f"  [VRAM] {label}: Allocated {alloc:.2f} GiB, Reserved {reserved:.2f} GiB" )
+
+
 # Global variables
 config_mgr = None
 app_debug = False
@@ -485,32 +493,50 @@ async def lifespan( app: FastAPI ):
     #   - production: Cloud SQL (automatic schema creation via Alembic migrations)
     print( "[AUTH] Using PostgreSQL authentication database" )
 
-    # Load STT model on startup (graceful degradation if GPU unavailable)
+    # ===================================================================
+    # GPU Model Loading (smallest → largest to minimize CUDA fragmentation)
+    # ===================================================================
+
+    # 1. CodeRankEmbed — Load + multi-batch warmup
+    from cosa.memory.local_embedding_engine import get_code_engine, get_prose_engine
+
+    print( "Loading CodeRankEmbed embedding engine... ", end="" )
+    code_engine = get_code_engine( debug=app_debug, verbose=app_verbose )
+    code_engine.encode_code( [ "def hello(): return 'world'" ] )
+    code_engine.encode_query( [ "How do I sort a list in Python?" ] )
+    code_engine.encode_code( [ "import os\nimport sys\n\ndef main():\n    path = os.getcwd()\n    print( path )\n    return 0" ] )
+    print( "Done!" )
+    _log_vram( "CodeRankEmbed" )
+
+    # 2. Prose Embedding — Load + multi-batch warmup
+    print( "Loading nomic-embed-text-v1.5 embedding engine... ", end="" )
+    prose_engine = get_prose_engine( debug=app_debug, verbose=app_verbose )
+    prose_engine.encode_query( [ "What is the meaning of life?" ] )
+    prose_engine.encode_document( [ "The quick brown fox jumps over the lazy dog. This is a longer document to exercise memory allocation patterns." ] )
+    prose_engine.encode_query( [ "Explain quantum computing in simple terms" ] )
+    print( "Done!" )
+    _log_vram( "Prose Embedding" )
+
+    # 3. Whisper STT — Load + warmup transcription (LAST, largest GPU footprint)
     global whisper_pipeline
     print( "Loading distill whisper engine... ", end="" )
     try:
         whisper_pipeline = await load_stt_model()
-        print( "Done!" )
+        # Warmup: transcribe audio to establish stable CUDA footprint
+        warmup_path = du.get_project_root() + "/src/conf/warmup/whisper-warmup-85s.mp3"
+        if os.path.exists( warmup_path ):
+            whisper_pipeline( warmup_path, chunk_length_s=30, stride_length_s=5, return_timestamps=False )
+            print( "Done! (with warmup)" )
+        else:
+            print( "Done! (no warmup file)" )
     except Exception as e:
         whisper_pipeline = None
         print( "FAILED!" )
         print( f"[WARN] Whisper STT model failed to load: {e}" )
         print( "[WARN] STT endpoints will return 503. All other endpoints remain functional." )
+    _log_vram( "Whisper" )
 
-    # Load local embedding models on startup (claim VRAM before vLLM)
-    from cosa.memory.local_embedding_engine import get_code_engine, get_prose_engine
-
-    print( "Loading CodeRankEmbed embedding engine... ", end="" )
-    code_engine = get_code_engine( debug=app_debug, verbose=app_verbose )
-    code_engine.encode_code( [ "warmup" ] )
-    print( "Done!" )
-
-    print( "Loading nomic-embed-text-v1.5 embedding engine... ", end="" )
-    prose_engine = get_prose_engine( debug=app_debug, verbose=app_verbose )
-    prose_engine.encode_query( [ "warmup" ] )
-    print( "Done!" )
-
-    # Initialize Prediction Engine singleton (Universal Decision Proxy)
+    # 4. Prediction Engine — no GPU model, just initialization
     from cosa.agents.prediction_engine import get_prediction_engine
     prediction_engine = get_prediction_engine( config_mgr=config_mgr, debug=app_debug )
     print( f"[PREDICTION] Prediction engine initialized (enabled={prediction_engine.enabled})" )
