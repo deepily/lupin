@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.23 - Notification Admin Filter Toggle Plan
+- **Plan**: [2026.03.23-notification-admin-filter-toggle-plan.md](2026.03.23-notification-admin-filter-toggle-plan.md) - Create `admin@lupin.deepily.ai` as default notification recipient, add "Not Mine" filter mode to notifications UI (3-way toggle: Own/All/Not Mine), batch delete for filtered notifications, reassign 1001 SWE Team `st-*` dry-run artifacts.
+
 ### 2026.03.14 - Presentation Generator Agent
 - **R&D Directory**: [2026.03.14-presentation-generator/](2026.03.14-presentation-generator/00-index.md) - Agentic process (Claude SDK) that transforms research documents or technical blog posts into 10-20 minute slide decks with presenter notes. Single orchestrator pattern (like Podcast Generator). 8-phase pipeline: ingest, analyze narrative, outline titles+visuals, elaborate content+notes, serialize YAML, render Marp Markdown, render Mermaid visuals, deliver. 4 human-in-the-loop gates. Pluggable visual renderer registry for future AI generators. Theme cascade: INI -> YAML template -> per-presentation overrides.
   - [Strategy & Design](2026.03.14-presentation-generator/01-strategy-and-design.md) | [Implementation Plan](2026.03.14-presentation-generator/02-implementation-plan.md) | [Tracking](2026.03.14-presentation-generator/03-implementation-tracking.md)
