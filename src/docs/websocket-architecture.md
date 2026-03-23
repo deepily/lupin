@@ -1,18 +1,19 @@
 # WebSocket Architecture Overview
 
-**Date**: 2025.08.13  
-**Purpose**: Comprehensive architectural documentation for the Lupin WebSocket system  
-**Status**: Active  
+**Date**: 2026.03.20
+**Source of truth**: `src/cosa/rest/websocket_manager.py`, `src/cosa/rest/routers/websocket.py`
+**Status**: Active
 
 ## Executive Summary
 
 The Lupin WebSocket architecture provides real-time bidirectional communication between the FastAPI server and client applications. The system employs a dual-session design with user-centric routing, event subscription filtering, and robust connection management.
 
 ### Key Architectural Principles
+
 - **User-Centric Routing**: Events route by user ID, not ephemeral WebSocket connection ID
 - **Event Subscription Filtering**: Clients only receive events they explicitly subscribe to
 - **Dual-Session Architecture**: Separate channels for queue management and audio streaming
-- **Graceful Degradation**: HTTP polling fallback when WebSocket connections fail
+- **Thread-Safe Emission**: Background threads emit via `asyncio.run_coroutine_threadsafe`
 - **Session Persistence**: localStorage-based session management across page reloads
 
 ---
@@ -20,6 +21,7 @@ The Lupin WebSocket architecture provides real-time bidirectional communication 
 ## System Architecture
 
 ### High-Level Data Flow
+
 ```
 ┌─────────────────┐    WebSocket     ┌──────────────────┐    Events     ┌─────────────────┐
 │   Client Apps   │ ←─────────────→  │  WebSocket       │ ←──────────   │   Background    │
@@ -31,583 +33,222 @@ The Lupin WebSocket architecture provides real-time bidirectional communication 
                                      └──────────────────┘               └─────────────────┘
 ```
 
-### Core Components
+### Dual-Session Design
 
-#### 1. WebSocketManager (`src/cosa/rest/websocket_manager.py`)
-**Purpose**: Central hub for all WebSocket connection and event management
+Every client opens **two** WebSocket connections sharing the same `session_id`:
 
-**Responsibilities**:
-- User session lifecycle management
-- Event routing and filtering
-- Connection health monitoring
-- Authentication validation
-- Subscription management
+| Channel | Endpoint | Purpose | Auth |
+|---------|----------|---------|------|
+| Queue | `/ws/queue/{session_id}` | Job state, notifications, system events | JWT required (in-band handshake) |
+| Audio | `/ws/audio/{session_id}` | TTS streaming, audio events | No mandatory auth; pre-registration supported |
 
-**Key Methods**:
-```python
-async def emit_to_user(user_id, event_type, data)
-async def handle_auth_request(websocket, auth_data)
-def update_subscriptions(session_id, events, action)
-def cleanup_stale_sessions(max_age_hours)
-```
+**Session ID formats**:
+- Browser sessions: `"adjective noun"` (e.g., `wise penguin`, `happy cat`)
+- Programmatic sessions: `"prefix-identifier"` (e.g., `cc-listener-72116632`, `proxy-ratify`)
 
-#### 2. WebSocket Routers (`src/cosa/rest/routers/websocket.py`)
-**Purpose**: FastAPI endpoints for WebSocket connections
-
-**Endpoints**:
-- `/ws/queue/{session_id}` - Main application WebSocket
-- `/ws/audio/{session_id}` - Audio-only WebSocket for TTS streaming
-
-**Authentication Flow**:
-```
-Client Connect → Send auth_request → Server Validates → auth_success/auth_error
-```
-
-#### 3. Event Emission System (`src/fastapi_app/main.py`)
-**Purpose**: Background processes that generate WebSocket events
-
-**Event Sources**:
-- **Job Queue Changes**: Todo/Running/Done/Dead count updates
-- **TTS Streaming**: Audio chunk delivery and status updates  
-- **Notifications**: User alerts and system messages
-- **System Events**: Clock updates, heartbeat pings
+The `cc-listener-` prefix identifies programmatic listener sessions (e.g., Claude Code agents) vs. browser clients.
 
 ---
 
-## Dual-Session Architecture
+## WebSocketManager — Complete API
 
-### Session Types
+**File**: `src/cosa/rest/websocket_manager.py`
 
-#### Queue Session (`/ws/queue/{session_id}`)
-**Purpose**: Primary application interface for authenticated users
+The `WebSocketManager` bridges COSA's synchronous queue system with FastAPI's async WebSocket API. All methods are documented below, grouped by category.
 
-**Events Received**:
-- Queue state changes (`queue_todo_update`, `queue_running_update`, etc.)
-- Job completion notifications (`tts_job_request`)
-- User notifications (`notification_queue_update`)
-- System events (`sys_time_update`, `sys_ping`)
+### Class Attributes
 
-**Authentication**: Required - first message must be `auth_request`
+| Attribute | Type | Purpose |
+|-----------|------|---------|
+| `active_connections` | `Dict[str, WebSocket]` | Maps `session_id` → live WebSocket |
+| `session_to_user` | `Dict[str, str]` | Maps `session_id` → `user_id` |
+| `user_sessions` | `Dict[str, list]` | Maps `user_id` → list of `session_id`s (multi-session support) |
+| `user_to_email` | `Dict[str, str]` | Debug cache: `user_id` → email |
+| `session_subscriptions` | `Dict[str, List[str]]` | Maps `session_id` → subscribed event names (or `["*"]` for all) |
+| `session_timestamps` | `Dict[str, datetime]` | Connection time per session; used by stale-session cleanup |
+| `available_events` | `set` | Valid event names loaded from `lupin-app.ini` |
+| `main_loop` | `Optional[asyncio.AbstractEventLoop]` | Main event loop reference for thread-safe emission |
+| `single_session_per_user` | `bool` | Policy flag; when `True`, new connections close prior sessions for same user |
+| `debug` | `bool` | Verbose diagnostic printing |
 
-**Subscription Model**: Configurable - client specifies desired events
+### 1. Lifecycle / Application Startup
 
-#### Audio Session (`/ws/audio/{session_id}`)
-**Purpose**: Dedicated channel for TTS audio streaming
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `__init__` | `() -> None` | Initializes all dicts, loads config, validates available events from INI |
+| `set_event_loop` | `(loop) -> None` | Stores main-loop reference. **Must be called at startup** before background threads emit |
 
-**Events Received**:
-- Audio streaming data (`audio_streaming_chunk`)
-- Audio status updates (`audio_streaming_status`, `audio_streaming_complete`)
-- Basic system events (`sys_ping`, `auth_success`)
+### 2. Connection Management
 
-**Authentication**: Optional - can pre-register via TTS API request
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `connect` | `(websocket, session_id, user_id=None, subscribed_events=None, email=None) -> None` | Registers a WebSocket. Enforces single-session policy if configured. Validates and stores event subscriptions; defaults to `["*"]` |
+| `disconnect` | `(session_id) -> None` | Removes connection and cleans all associated data: timestamps, subscriptions, user maps |
+| `register_session_user` | `(session_id, user_id) -> None` | Associates a session with a user **before** the WebSocket connects. Used when a TTS HTTP request arrives with auth ahead of the audio WebSocket upgrade |
 
-**Subscription Model**: Fixed - audio events only
+### 3. Event Emission
 
-### Session Relationship
-```
-User "ricardo.felipe.ruiz@gmail.com"
-├── Queue Session: "wise penguin"
-│   ├── Subscriptions: [queue_*, notification_*, sys_*]
-│   └── Purpose: Main UI interaction
-└── Audio Session: "wise penguin audio"  
-    ├── Subscriptions: [audio_*, sys_ping]
-    └── Purpose: TTS streaming only
-```
+| Method | Async? | Thread-Safe? | Description |
+|--------|--------|--------------|-------------|
+| `emit(event, data)` | No | Yes | **Primary interface for COSA queue threads.** Wraps `async_emit` via `asyncio.run_coroutine_threadsafe`. Fire-and-forget |
+| `emit_to_user_sync(user_id, event, data)` | No | Yes | Like `emit` but targets a single user's sessions. Called by COSA queues when user routing is needed |
+| `async_emit(event, data)` | Yes | N/A | Broadcasts to all active connections subscribed to the event. Adds `type` and `timestamp` to the message. Auto-disconnects dead sockets |
+| `emit_to_user(user_id, event, data)` | Yes | N/A | Sends to all sessions for a user, respecting subscriptions. Returns `True` if at least one send succeeded |
+| `emit_to_session(session_id, event, data)` | Yes | N/A | Sends to one specific session only. No-ops if session absent |
+| `emit_to_all(event, data)` | Yes | N/A | Alias for `async_emit` |
 
----
-
-## User-Centric Routing
-
-### Traditional vs Lupin Approach
-
-#### Traditional WebSocket Routing (Problems)
-```python
-# Route by WebSocket connection ID (ephemeral)
-websocket_id = "conn_12345"
-emit_to_connection(websocket_id, event_data)
-
-# Issues:
-# - Connection IDs change on reconnect
-# - Can't route to user across sessions
-# - Difficult to handle multiple tabs
-```
-
-#### Lupin User-Centric Routing (Solution)
-```python
-# Route by stable user ID
-user_id = email_to_system_id("ricardo.felipe.ruiz@gmail.com") 
-emit_to_user(user_id, event_type, event_data)
-
-# Benefits:
-# - Survives reconnections
-# - Works across multiple tabs
-# - Enables persistent user state
-```
-
-### User ID Generation
-```python
-def email_to_system_id(email):
-    """
-    Convert email to consistent system user ID.
-    
-    Examples:
-    "ricardo.felipe.ruiz@gmail.com" → "user_ricardo_felipe_ruiz_gmail_com"
-    "test@example.com" → "user_test_example_com"
-    """
-    clean_email = email.replace("@", "_").replace(".", "_")
-    return f"user_{clean_email}"
-```
-
----
-
-## Event Subscription System
-
-### Subscription Filtering Benefits
-- **Performance**: Clients only process relevant events
-- **Security**: Prevents information leakage between users
-- **Flexibility**: Different clients can have different event needs
-- **Scalability**: Reduces network traffic and processing load
-
-### Subscription Configuration
-
-#### Static Subscriptions (Configured at Connection)
-```javascript
-// Queue interface subscriptions
-const queueSubscriptions = [
-    "queue_todo_update",
-    "queue_running_update", 
-    "queue_done_update",
-    "queue_dead_update",
-    "tts_job_request",
-    "sys_time_update",
-    "notification_queue_update",
-    "sys_ping"
-];
-
-// Audio interface subscriptions  
-const audioSubscriptions = [
-    "audio_streaming_chunk",
-    "audio_streaming_status",
-    "audio_streaming_complete",
-    "sys_ping"
-];
-```
-
-#### Dynamic Subscription Updates
-```javascript
-// Add new event subscription
-websocket.send(JSON.stringify({
-    "type": "update_subscriptions",
-    "events": ["new_event_type"],
-    "action": "add"
-}));
-
-// Replace all subscriptions
-websocket.send(JSON.stringify({
-    "type": "update_subscriptions", 
-    "events": ["event1", "event2"],
-    "action": "replace"
-}));
-```
-
-### Server-Side Filtering
-```python
-def emit_to_user(self, user_id, event_type, data):
-    """Only emit event if user is subscribed to event_type"""
-    for session_id, session_info in self.user_sessions.get(user_id, {}).items():
-        if event_type in session_info.get("subscribed_events", []):
-            await session_info["websocket"].send_text(json.dumps(data))
-```
-
----
-
-## Session Management Lifecycle
-
-### Session Creation Flow
-```
-1. Client connects to WebSocket endpoint
-2. Server generates connection and waits for auth
-3. Client sends auth_request with session_id and subscriptions
-4. Server validates token and session_id format
-5. Server maps session to user_id
-6. Server stores session info with subscriptions
-7. Server responds with auth_success
-8. Session is active and ready for events
-```
-
-### Session Persistence Strategy
-```javascript
-// Client-side session management
-function getOrCreateSession() {
-    let sessionId = localStorage.getItem("session_id");
-    
-    if (!sessionId || !isValidSessionFormat(sessionId)) {
-        sessionId = generateSessionId(); // "wise penguin" format
-        localStorage.setItem("session_id", sessionId);
-    }
-    
-    return sessionId;
-}
-
-function isValidSessionFormat(sessionId) {
-    // Must be "adjective noun" format (e.g., "wise penguin")
-    return /^[a-z]+ [a-z]+$/.test(sessionId);
+**Message envelope** (all emit paths):
+```json
+{
+  "type": "<event_name>",
+  "timestamp": "<ISO-8601>",
+  "...data fields"
 }
 ```
 
-### Session Cleanup Policies
+### 4. User Routing / Session Queries
+
+| Method | Signature | Returns | Description |
+|--------|-----------|---------|-------------|
+| `is_connected` | `(session_id)` | `bool` | Whether session has an active WebSocket |
+| `is_user_connected` | `(user_id)` | `bool` | Whether user has at least one active session |
+| `get_connection_count` | `()` | `int` | Total active WebSocket connections |
+| `get_user_connection_count` | `(user_id)` | `int` | Active connections for a specific user |
+| `get_session_info` | `(session_id)` | `Optional[dict]` | Returns `session_id`, `connected`, `user_id`, `connected_at`, `duration_seconds` |
+| `get_all_sessions_info` | `()` | `list` | Session info dicts for all active connections |
+
+### 5. Event Subscriptions
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `update_subscriptions` | `(session_id, events, action="replace")` | Modifies subscriptions post-connection. `action`: `"replace"` / `"add"` / `"remove"`. Validates against `available_events`. Returns `False` if session not found |
+| `get_subscription_stats` | `()` | Returns `total_connections`, `wildcard_subscribers`, `filtered_connections`, per-event `subscription_counts` |
+
+### 6. Session Policy
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `set_single_session_policy` | `(enabled)` | Runtime toggle for single-session-per-user enforcement |
+
+### 7. Background / Maintenance Tasks
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `heartbeat_check` | `async ()` | Sends `sys_ping` to all connections. Disconnects dead sockets. Returns count removed. Respects `websocket heartbeat enabled` config |
+| `auto_cleanup` | `async ()` | Calls `cleanup_stale_sessions` with configured `websocket session max age hours`. Respects `websocket cleanup enabled` config. Returns count cleaned |
+| `cleanup_stale_sessions` | `(max_age_hours=24)` | Synchronous age-based sweep. Disconnects sessions older than threshold. Returns count removed |
+
+---
+
+## Authentication Flow
+
+The `/ws/queue/{session_id}` endpoint uses **in-band auth** (not HTTP headers), because WebSocket upgrade requests cannot carry Authorization headers in most browsers.
+
+```
+┌──────────┐                           ┌──────────────┐
+│  Client   │                           │  WS Router   │
+└─────┬─────┘                           └──────┬───────┘
+      │  1. Open /ws/queue/{session_id}        │
+      │ ──────────────────────────────────────→ │
+      │                                        │  2. Accept connection
+      │  3. Send auth_request                  │
+      │ ──────────────────────────────────────→ │
+      │  {                                     │  4. verify_token()
+      │    "type": "auth_request",             │
+      │    "token": "Bearer <jwt>",            │
+      │    "subscribed_events": [...]          │
+      │  }                                     │
+      │                                        │  5a. Success:
+      │  ← ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │  auth_success + connect
+      │                                        │  5b. Failure:
+      │  ← ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  │  auth_error + close
+```
+
+### Auth Error Conditions
+
+| Condition | Error Message |
+|-----------|---------------|
+| Not valid JSON | `"Authentication message must be valid JSON"` |
+| Not a dict | `"Authentication message must be a JSON object"` |
+| `type` != `auth_request` | `"First message must be auth_request"` |
+| Missing `token` key | `"Authentication message must include token field"` |
+| Token not a string | `"Token must be a string"` |
+| Token empty/whitespace | `"Token cannot be empty"` |
+| Token expired | `"Token expired"` (closes connection) |
+| Verification exception | Exception message (closes connection) |
+
+### Audio WebSocket Authentication
+
+The `/ws/audio/{session_id}` endpoint accepts connections **without** upfront auth. User association is handled via `register_session_user()` when a TTS HTTP request (which carries JWT auth) arrives and needs to route audio to the client's audio socket. Audio subscriptions are fixed: `audio_streaming_status`, `audio_streaming_complete`, `sys_ping`.
+
+---
+
+## Session ID Validation
+
+**Function**: `is_valid_session_id(session_id: str) -> bool`
+
+Both endpoints validate the session ID before accepting the WebSocket. Invalid IDs receive close code `1008`.
+
+| Format | Pattern | Examples |
+|--------|---------|----------|
+| Browser | `^[a-z]+ [a-z]+$` (two lowercase words, single space) | `wise penguin`, `happy cat` |
+| Programmatic | `^[a-z][a-z0-9]*-[a-z0-9-]{1,47}$` | `cc-listener-72116632`, `proxy-ratify` |
+
+Security: tab, newline, carriage return, form-feed, vertical-tab characters are rejected. URL-encoded spaces (`%20`) are decoded before validation.
+
+---
+
+## Thread-Safety Model
+
+The core problem: COSA queue workers run in **background threads** and call `emit()` synchronously, but WebSocket `send_json()` is an async coroutine that must run on the **main asyncio event loop**.
+
+### Pattern: `asyncio.run_coroutine_threadsafe`
+
+Both `emit()` and `emit_to_user_sync()` schedule the async coroutine onto `self.main_loop` from any thread. The returned `Future` is discarded (fire-and-forget).
+
 ```python
-# Automatic cleanup triggers
-CLEANUP_TRIGGERS = {
-    "stale_sessions": 24,      # Hours of inactivity
-    "dead_connections": 5,     # Minutes of no heartbeat
-    "invalid_auth": 0,         # Immediate cleanup
-    "duplicate_sessions": 0    # When single-session policy enabled
-}
-
-# Manual cleanup endpoint
-POST /api/websocket-sessions/cleanup?max_age_hours=1
+asyncio.run_coroutine_threadsafe(
+    self._async_emit( event, data ),
+    self.main_loop
+)
 ```
+
+**Guard checks** before scheduling:
+1. `self.main_loop is not None`
+2. `self.main_loop.is_running()` is `True`
+
+If either fails, the emit is silently dropped with an error print.
+
+**No explicit locks**: All dict mutations ultimately execute on the single asyncio event loop thread. Python's GIL combined with single-threaded event loop model provides safety without mutexes. Direct mutation from a background thread (without `run_coroutine_threadsafe`) would be unsafe.
 
 ---
 
-## Authentication and Security
+## Dynamic Subscription Updates
 
-### Authentication Flow
-```
-┌─────────┐              ┌─────────────┐              ┌──────────────┐
-│ Client  │              │ WebSocket   │              │ Auth System  │
-│         │              │ Router      │              │              │
-├─────────┤              ├─────────────┤              ├──────────────┤
-│ Connect │ ────────────▶│ Accept      │              │              │
-│         │              │ Connection  │              │              │
-│         │              │             │              │              │
-│ Send    │              │ Receive     │              │              │
-│ auth_   │ ────────────▶│ auth_       │ ────────────▶│ Validate     │
-│ request │              │ request     │              │ Token        │
-│         │              │             │              │              │
-│ Receive │              │ Send        │              │ Return       │
-│ auth_   │ ◀────────────│ auth_       │ ◀────────────│ User Info    │
-│ success │              │ success     │              │              │
-└─────────┘              └─────────────┘              └──────────────┘
-```
+Clients can modify their subscriptions after authentication:
 
-### Token Format and Validation
-```python
-# Expected token format
-"Bearer mock_token_email_user@example.com"
-
-# Server validation
-def validate_websocket_token(token):
-    if not token.startswith("Bearer mock_token_email_"):
-        return None
-    
-    email = token.replace("Bearer mock_token_email_", "")
-    user_id = email_to_system_id(email)
-    return {"user_id": user_id, "email": email}
-```
-
-### Security Considerations
-- **User Isolation**: Events only route to intended users
-- **Session Validation**: Session IDs must match expected format
-- **Token Consistency**: Same user must use same token across sessions
-- **Event Filtering**: Subscription-based access control
-- **Rate Limiting**: Heartbeat system prevents resource exhaustion
-
----
-
-## Connection Management
-
-### Connection Health Monitoring
-```python
-# Heartbeat system
-HEARTBEAT_INTERVAL = 30  # seconds
-HEARTBEAT_TIMEOUT = 90   # seconds
-
-# Server sends sys_ping every 30s
-# Client should respond with sys_pong
-# Connections without pong for 90s are cleaned up
-```
-
-### Reconnection Strategy
-```javascript
-// Client-side exponential backoff
-let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 10;
-const INITIAL_RETRY_DELAY = 1000;    // 1 second
-const MAX_RETRY_DELAY = 30000;       // 30 seconds
-
-function calculateRetryDelay(attempt) {
-    const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt);
-    return Math.min(delay, MAX_RETRY_DELAY);
+```json
+// Client sends:
+{
+  "type": "update_subscriptions",
+  "events": ["job_state_transition", "notification_queue_update"],
+  "action": "replace"
 }
 
-function reconnectWebSocket() {
-    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        console.log("Max reconnection attempts reached, falling back to HTTP polling");
-        startHttpPolling();
-        return;
-    }
-    
-    const delay = calculateRetryDelay(reconnectAttempts);
-    setTimeout(connectWebSocket, delay);
-    reconnectAttempts++;
+// Server responds:
+{
+  "type": "subscription_update",
+  "success": true,
+  "subscriptions": ["job_state_transition", "notification_queue_update"]
 }
 ```
 
-### Graceful Degradation
-```javascript
-// HTTP polling fallback when WebSocket fails
-function startHttpPolling() {
-    setInterval(async () => {
-        try {
-            const response = await fetch('/api/queue/status');
-            const data = await response.json();
-            updateQueueDisplay(data);
-        } catch (error) {
-            console.error("HTTP polling failed:", error);
-        }
-    }, 5000); // Poll every 5 seconds
-}
-```
-
----
-
-## Event Processing Pipeline
-
-### Server-Side Event Generation
-```python
-# Background process generates event
-job_completed = True
-if job_completed:
-    event_data = {
-        "type": "queue_todo_update", 
-        "value": get_todo_count(),
-        "timestamp": datetime.now().isoformat()
-    }
-    
-    # Route to all users subscribed to queue events
-    await websocket_manager.emit_to_all_users("queue_todo_update", event_data)
-```
-
-### Client-Side Event Processing
-```javascript
-// Event reception and routing
-websocket.onmessage = function(event) {
-    const data = JSON.parse(event.data);
-    
-    // Log for debugging
-    if (debug) console.log("[WS] Received:", data.type, data);
-    
-    // Route to appropriate handler
-    const handler = eventHandlers[data.type];
-    if (handler) {
-        handler(data);
-    } else {
-        console.warn("No handler for event type:", data.type);
-    }
-};
-
-// Event handler registration
-const eventHandlers = {
-    "queue_todo_update": handleQueueUpdate,
-    "tts_job_request": handleSpeechUpdate,
-    "sys_ping": handlePing,
-    "auth_success": handleAuthSuccess
-};
-```
-
----
-
-## Performance Considerations
-
-### Event Frequency Management
-```python
-# Production vs Debug event timing
-if app_debug:
-    CLOCK_UPDATE_INTERVAL = 5    # seconds (for testing)
-else:
-    CLOCK_UPDATE_INTERVAL = 60   # seconds (production)
-```
-
-### Connection Scaling
-```python
-# Current capacity planning
-MAX_CONNECTIONS_PER_USER = 5    # Multiple tabs support
-MAX_TOTAL_CONNECTIONS = 1000    # Server capacity limit
-CONNECTION_CLEANUP_INTERVAL = 3600  # 1 hour
-
-# Memory usage optimization
-SESSION_DATA_TTL = 86400        # 24 hours
-MAX_MESSAGE_QUEUE_SIZE = 100    # Per connection
-```
-
-### Client-Side Performance
-```javascript
-// Debounce rapid UI updates
-const debouncedQueueUpdate = debounce(updateQueueDisplay, 100);
-
-// Use requestAnimationFrame for smooth UI updates
-function updateQueueDisplay(data) {
-    requestAnimationFrame(() => {
-        document.getElementById("todo").textContent = data.value;
-    });
-}
-
-// Efficient event handler management
-function addEventHandler(eventType, handler) {
-    // Remove existing handler to prevent duplicates
-    removeEventHandler(eventType);
-    eventHandlers[eventType] = handler;
-}
-```
-
----
-
-## Error Handling and Recovery
-
-### Error Types and Responses
-
-#### Connection Errors
-```javascript
-websocket.onerror = function(error) {
-    console.error("WebSocket error:", error);
-    showConnectionError("Connection lost. Attempting to reconnect...");
-    reconnectWebSocket();
-};
-
-websocket.onclose = function(event) {
-    if (event.code !== 1000) { // Not normal closure
-        console.warn("WebSocket closed unexpectedly:", event.code, event.reason);
-        reconnectWebSocket();
-    }
-};
-```
-
-#### Authentication Errors
-```javascript
-function handleAuthError(data) {
-    console.error("Authentication failed:", data.message);
-    
-    // Clear invalid session data
-    localStorage.removeItem("session_id");
-    
-    // Show user-friendly error
-    showAuthError("Please refresh the page to reconnect");
-    
-    // Don't auto-reconnect on auth errors
-    stopReconnectionAttempts();
-}
-```
-
-#### Event Processing Errors
-```javascript
-function safeEventHandler(handler) {
-    return function(data) {
-        try {
-            handler(data);
-        } catch (error) {
-            console.error("Event handler error:", error);
-            // Continue processing other events
-        }
-    };
-}
-```
-
----
-
-## Configuration Architecture
-
-### Configuration Hierarchy
-```
-Environment Variables (highest priority)
-    ↓
-lupin-app.ini (application config)
-    ↓
-Default values (lowest priority)
-```
-
-### WebSocket-Specific Configuration
-```ini
-# lupin-app.ini WebSocket section
-[websocket]
-enabled = true
-heartbeat_interval = 30
-cleanup_interval = 3600
-max_connections_per_user = 5
-single_session_policy = false
-
-available_events = queue_todo_update, queue_done_update, queue_running_update, 
-                  queue_dead_update, tts_job_request, audio_streaming_chunk, 
-                  notification_queue_update, sys_time_update, sys_ping, sys_pong, 
-                  auth_request, auth_success, auth_error, connect, 
-                  audio_streaming_status, audio_streaming_complete
-```
-
-### Runtime Configuration Access
-```python
-# Server-side configuration access
-config_mgr = ConfigurationManager(env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS")
-heartbeat_interval = config_mgr.get("websocket_heartbeat_interval", default=30)
-available_events = config_mgr.get("websocket_available_events", default="").split(", ")
-```
-
----
-
-## Testing and Validation
-
-### Automated Testing Strategy
-- **Unit Tests**: Individual WebSocket endpoint connections
-- **Integration Tests**: Full event flow from generation to client reception  
-- **Load Tests**: Multiple concurrent connections and event throughput
-- **Regression Tests**: Smoke test suite for ongoing validation
-
-### Manual Testing Procedures
-1. **Basic Connection Test**: Verify WebSocket upgrade succeeds
-2. **Authentication Test**: Confirm auth_request → auth_success flow
-3. **Event Subscription Test**: Verify only subscribed events are received
-4. **Multi-Tab Test**: Confirm user-centric routing works across sessions
-5. **Reconnection Test**: Verify graceful reconnection after network interruption
-
-### Debug Tools and Monitoring
-```bash
-# WebSocket session monitoring
-curl "http://localhost:7999/api/websocket-sessions/stats" \
-     -H "Authorization: Bearer mock_token_email_user@example.com"
-
-# Connection health check
-curl "http://localhost:7999/api/websocket-sessions" \
-     -H "Authorization: Bearer mock_token_email_user@example.com"
-```
-
----
-
-## Future Architecture Considerations
-
-### Scalability Enhancements
-- **Redis Pub/Sub**: For multi-server WebSocket event distribution
-- **Load Balancing**: Sticky sessions for WebSocket connections
-- **Microservice Architecture**: Separate WebSocket service from main API
-
-### Security Improvements
-- **JWT Token Validation**: Replace simple token with proper JWT
-- **Rate Limiting**: Per-user event emission limits
-- **Audit Logging**: Complete WebSocket activity logging
-
-### Feature Extensions
-- **Message Persistence**: Store events for offline users
-- **Custom Event Types**: User-defined event subscriptions
-- **Event History**: Replay missed events on reconnection
+Actions: `replace` (set exact list), `add` (append), `remove` (subtract). All events are validated against `available_events` from config.
 
 ---
 
 ## Related Documentation
 
-- **[WebSocket Events Documentation](websocket-events.md)** - Complete event catalog and payloads
-- **[WebSocket Troubleshooting Guide](websocket-troubleshooting.md)** - Common issues and solutions
-- **[WebSocket Testing Results](websocket-testing-results.md)** - Validation and testing outcomes
-- **[WebSocket Configuration Guide](websocket-configuration.md)** - All configuration options
-
----
-
-*This document reflects the current architecture as of 2025.08.13. For the most current implementation details, refer to the source code and related documentation.*
+- [WebSocket Events](websocket-events.md) — Complete event catalog with payload schemas
+- [WebSocket Configuration](websocket-configuration.md) — All config keys and tuning
+- [WebSocket Troubleshooting](websocket-troubleshooting.md) — Diagnostic procedures

@@ -379,6 +379,27 @@ if not email or not password:
 
 **Reference**: See `src/tests/AUTH-TESTING-GUIDE.md` for credential patterns. For pipeline testing, always use automated smoke tests — never manual curl.
 
+## DOCUMENTATION TOUCHPOINTS
+
+When modifying code in these areas, update the corresponding documentation:
+
+| Code Area Changed | Update These Docs |
+|-------------------|-------------------|
+| `routers/*.py` endpoint decorators | `/docs` auto-updates (no action needed) |
+| `websocket_manager.py` | `src/docs/websocket-architecture.md` |
+| `routers/websocket.py` | `src/docs/websocket-events.md`, `websocket-architecture.md` |
+| `routers/notifications.py` architecture | `src/docs/notification-api.md` |
+| `lupin-app.ini` WebSocket keys | `src/docs/websocket-configuration.md` |
+| `lupin-app.ini` `websocket available events` | `src/docs/websocket-events.md`, `websocket-configuration.md` |
+| New router added | `src/docs/rest-api-reference.md` quick-reference table |
+| Auth services (`jwt_service`, `user_service`, etc.) | `src/docs/auth/architecture-overview.md` |
+| Decision proxy / trust logic | `src/docs/proxy-admin-guide.md` |
+| Frontend page routes | `src/docs/rest-api-reference.md` (Pages section) |
+
+**Documentation index**: `src/docs/README.md` — lists all docs with verification dates.
+
+**Principle**: FastAPI `/docs` and `/redoc` are the authoritative API reference. Hand-written docs cover architecture, concepts, and operations only.
+
 ## HISTORY STRUCTURE NOTES
 - **Project Span**: December 2024 - Present (Lupin evolution from Genie-in-the-Box)
 - **Key Archived Periods**: 
