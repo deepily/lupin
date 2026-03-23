@@ -25,6 +25,7 @@ WS_EVENT_NAMES = {
     "tts_job_request",
     "audio_streaming_status", "audio_streaming_complete", "audio_streaming_chunk",
     "notification_queue_update", "notification_play_sound",
+    "notification_expired", "notification_responded",
     "update_subscriptions",
 }
 

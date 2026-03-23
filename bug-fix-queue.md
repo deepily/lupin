@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-03-18T12:00:00
+**Last Updated**: 2026-03-23T17:00:00
 
 ---
 
@@ -36,6 +36,7 @@
 | 59afa5ba | 2026-03-12T17:25:00 | 2026-03-12T18:15:00 | committed |
 | 135a6b16 | 2026-03-18T12:00:00 | 2026-03-18T12:00:00 | stale |
 | 7d02176c | 2026-03-19T12:00:00 | 2026-03-19T13:00:00 | committed |
+| cd0fd61a | 2026-03-23T16:30:00 | 2026-03-23T17:00:00 | committed |
 
 ---
 
@@ -62,6 +63,18 @@
 ---
 
 ### Completed
+
+- [x] **WebSocket reconnection gives up after 5 failures + missing notification events** → pending commit | By: cd0fd61a (Session 366)
+  - **Symptom**: Notifications stop rendering until force page refresh. Has been broken ~2 days.
+  - **Root Cause**: `scheduleReconnect()` gave up after 5 retries; `Promise.all` coupled both WS reconnects; `notification_expired`/`notification_responded` silently filtered from subscriptions
+  - **Fix**: Infinite retry with backoff, independent WS reconnection, added 2 events to INI config
+  - **Files (Lupin)**: `notifications.js`, `lupin-app.ini`, `lupin-app-splainer.ini`, `websocket-events.md`, `test_ini_key_naming.py`
+
+- [x] **LanceDB proxy_decisions schema mismatch (non-fatal)** → CoSA pending commit | By: cd0fd61a (Session 366)
+  - **Symptom**: `find_similar failed: No field named response_type` on every proxy prediction
+  - **Root Cause**: Session 345 added `response_type` to schema but existing table predates the change
+  - **Fix**: Schema validation in `_ensure_table()` — drop+recreate on mismatch
+  - **Files (CoSA)**: `proxy_decision_embeddings.py`
 
 - [x] **Periodic CUDA OOM on Whisper transcription** → pending commit | By: 73bf201f (Session 359)
   - **Symptom**: Periodic 500 errors on `/api/upload-and-transcribe-mp3` — CUDA OOM despite ~290 MiB reserved (fragmentation)

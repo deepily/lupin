@@ -6,7 +6,7 @@
 
 ## Event Catalog
 
-The system defines **18 events** in `lupin-app.ini`. Clients subscribe to specific events (or `"*"` for all) during the auth handshake or via dynamic subscription updates.
+The system defines **20 events** in `lupin-app.ini`. Clients subscribe to specific events (or `"*"` for all) during the auth handshake or via dynamic subscription updates.
 
 ### Event Summary Table
 
@@ -19,6 +19,8 @@ The system defines **18 events** in `lupin-app.ini`. Clients subscribe to specif
 | `audio_streaming_complete` | Audio | Server → Client | Yes |
 | `notification_queue_update` | Notifications | Server → Client | Yes |
 | `notification_play_sound` | Notifications | Server → Client | Yes |
+| `notification_expired` | Notifications | Server → Client | Yes |
+| `notification_responded` | Notifications | Server → Client | Yes |
 | `proxy_decision_new` | Proxy / Ratification | Server → Client | Yes |
 | `sys_time_update` | System | Server → Client | No (broadcast) |
 | `status` | System | Server → Client | Varies |
@@ -146,6 +148,35 @@ Triggers a sound notification on the client (e.g., chime on job completion).
   "type": "notification_play_sound",
   "sound": "complete",
   "timestamp": "2026-03-20T10:30:00Z"
+}
+```
+
+### `notification_expired`
+
+Broadcast when a response-required notification times out without user response. The server applies the `response_default` (if set) and closes the SSE stream.
+
+**Payload**:
+```json
+{
+  "type": "notification_expired",
+  "notification_id": "7a3d1fd8-...",
+  "default_used": null,
+  "timeout": true,
+  "timestamp": "2026-03-23T16:35:51Z"
+}
+```
+
+### `notification_responded`
+
+Broadcast when a user submits a response to a response-required notification. Allows other clients to update their UI (e.g., remove pending indicator).
+
+**Payload**:
+```json
+{
+  "type": "notification_responded",
+  "notification_id": "7a3d1fd8-...",
+  "response_value": "Add new bugs",
+  "timestamp": "2026-03-23T16:34:00Z"
 }
 ```
 

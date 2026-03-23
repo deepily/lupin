@@ -1,5 +1,35 @@
 # Lupin Project History
 
+### 2026.03.23 - Session 366 | Bug Fix: WebSocket Reconnection + Missing Events + LanceDB Schema
+
+**Accomplishments**:
+
+**Bug 1 — Notifications stop rendering until force refresh**:
+- Root cause: `scheduleReconnect()` gave up permanently after 5 failed attempts (`maxRetries = 5`). Once the queue WebSocket dropped (token expiry, server restart, network blip), it never recovered.
+- Fix 1a: Removed retry limit — infinite retry with exponential backoff (30s cap, 60s after 10+ failures). Reset counter on successful auth.
+- Fix 1b: Independent WebSocket reconnection — if only queue WS drops, only queue WS reconnects (not both). Added `target` parameter to `connectWebSockets()` and `scheduleReconnect()`. Tracked `queueWsConnected`/`audioWsConnected` flags.
+- Fix 1c: Added `notification_expired` and `notification_responded` to `websocket available events` in INI config. These events were emitted by server and subscribed by client, but silently filtered out during validation.
+
+**Bug 2 — LanceDB `response_type` schema mismatch (non-fatal)**:
+- Root cause: Session 345 added `response_type` field to `ProxyDecisionEmbeddings` schema, but existing LanceDB table was created before this change. `_ensure_table()` opened old table as-is.
+- Fix: Added schema validation in `_ensure_table()` — compares existing column names against expected schema. On mismatch, drops and recreates table. Table repopulates organically.
+
+**Test Results**: 2110 unit tests pass, 0 regressions
+
+**Files Modified (Lupin — 5 files)**:
+- `src/fastapi_app/static/js/notifications.js` — Infinite retry, independent WS reconnect, connection tracking
+- `src/conf/lupin-app.ini` — Added `notification_expired`, `notification_responded` to available events
+- `src/conf/lupin-app-splainer.ini` — Splainer entries for new events
+- `src/docs/websocket-events.md` — Documented 2 new events (18→20 total)
+- `src/tests/unit/test_ini_key_naming.py` — Added 2 events to WS exemption set
+
+**Files Modified (CoSA — 1 file, pending separate commit)**:
+- `src/cosa/agents/decision_proxy/proxy_decision_embeddings.py` — Schema mismatch detection + auto-recreate
+
+**Commit**: ccc362f
+
+---
+
 ### 2026.03.19 - Session 365 | CUDA Memory Optimization — Model Loading Order, Warmup & OOM Retry
 
 **Accomplishments**:

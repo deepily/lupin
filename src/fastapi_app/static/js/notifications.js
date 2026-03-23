@@ -76,7 +76,8 @@ class NotificationsUI {
         // State management
         this.isConnecting = false;
         this.connectionRetries = 0;
-        this.maxRetries = 5;
+        this.queueWsConnected = false;
+        this.audioWsConnected = false;
         this.authRefreshAttempted = false; // Track refresh attempts to prevent loops
         this.isInitialLoad = false;        // Track initial load vs runtime for card ordering
         
@@ -813,16 +814,17 @@ class NotificationsUI {
         const audioNeedsReconnect = !this.audioWS || this.audioWS.readyState !== WebSocket.OPEN;
 
         if ( queueNeedsReconnect || audioNeedsReconnect ) {
-            // Disconnection detected
-            this.log( `Health check: Disconnected WebSockets detected (queue=${queueNeedsReconnect}, audio=${audioNeedsReconnect})` );
+            // Disconnection detected — reconnect only what's broken
+            const target = ( queueNeedsReconnect && audioNeedsReconnect ) ? 'both'
+                         : queueNeedsReconnect ? 'queue' : 'audio';
+            this.log( `Health check: Disconnected WebSockets detected (queue=${queueNeedsReconnect}, audio=${audioNeedsReconnect}) → reconnecting ${target}` );
             this.updateHealthStatus( "Reconnecting...", "status-warning" );
 
-            // Reset retry counter to give reconnection a fresh start
-            // (scheduleReconnect gives up after 5 attempts, but health monitor provides unlimited retries)
+            // Reset retry counter to give reconnection a fresh start from health monitor
             this.connectionRetries = 0;
 
-            // Trigger existing reconnection logic
-            this.scheduleReconnect();
+            // Trigger targeted reconnection
+            this.scheduleReconnect( target );
         } else {
             // Both WebSockets healthy
             this.updateHealthStatus( `✓ Healthy (checked ${now.toLocaleTimeString()})`, "status-success" );
@@ -1920,29 +1922,30 @@ class NotificationsUI {
     // WEBSOCKET CONNECTIONS
     // ========================================
     
-    async connectWebSockets() {
-        this.log( "Connecting WebSockets..." );
-        
+    async connectWebSockets( target = 'both' ) {
+        this.log( `Connecting WebSockets (target=${target})...` );
+
         try {
-            // Get session IDs
+            // Get session IDs (cached in localStorage — no network call)
             this.queueSessionId = await this.getOrCreateSessionId( 'queue' );
             this.audioSessionId = await this.getOrCreateSessionId( 'audio' );
-            
+
             // Update UI with session IDs
             this.updateElement( "queue-session", this.queueSessionId );
             this.updateElement( "audio-session", this.audioSessionId );
-            
-            // Connect both WebSockets
-            await Promise.all([
-                this.connectQueueWebSocket(),
-                this.connectAudioWebSocket()
-            ]);
-            
-            this.log( "Both WebSockets connected successfully" );
-            
+
+            // Connect only the requested WebSocket(s)
+            const promises = [];
+            if ( target === 'both' || target === 'queue' ) promises.push( this.connectQueueWebSocket() );
+            if ( target === 'both' || target === 'audio' ) promises.push( this.connectAudioWebSocket() );
+
+            await Promise.all( promises );
+
+            this.log( `WebSocket(s) connected successfully (target=${target})` );
+
         } catch ( error ) {
             this.error( "WebSocket connection failed:", error );
-            this.scheduleReconnect();
+            this.scheduleReconnect( target );
         }
     }
     
@@ -1957,22 +1960,25 @@ class NotificationsUI {
                 
                 this.queueWS.onopen = () => {
                     this.log( "Queue WebSocket connected" );
+                    this.queueWsConnected = true;
                     this.updateStatus( "queue-ws-status", "Connected", "good" );
                     this.authenticateQueueWebSocket();
                 };
-                
+
                 this.queueWS.onmessage = ( event ) => {
                     this.handleQueueMessage( event );
                 };
-                
+
                 this.queueWS.onclose = ( event ) => {
                     this.log( `Queue WebSocket closed: ${event.code} ${event.reason}` );
+                    this.queueWsConnected = false;
                     this.updateStatus( "queue-ws-status", "Disconnected", "error" );
-                    this.scheduleReconnect();
+                    this.scheduleReconnect( 'queue' );
                 };
-                
+
                 this.queueWS.onerror = ( error ) => {
                     this.error( "Queue WebSocket error:", error );
+                    this.queueWsConnected = false;
                     this.updateStatus( "queue-ws-status", "Error", "error" );
                     reject( error );
                 };
@@ -2004,22 +2010,25 @@ class NotificationsUI {
                 
                 this.audioWS.onopen = () => {
                     this.log( "Audio WebSocket connected" );
+                    this.audioWsConnected = true;
                     this.updateStatus( "audio-ws-status", "Connected", "good" );
                     this.authenticateAudioWebSocket();
                 };
-                
+
                 this.audioWS.onmessage = ( event ) => {
                     this.handleAudioMessage( event );
                 };
-                
+
                 this.audioWS.onclose = ( event ) => {
                     this.log( `Audio WebSocket closed: ${event.code} ${event.reason}` );
+                    this.audioWsConnected = false;
                     this.updateStatus( "audio-ws-status", "Disconnected", "error" );
-                    this.scheduleReconnect();
+                    this.scheduleReconnect( 'audio' );
                 };
-                
+
                 this.audioWS.onerror = ( error ) => {
                     this.error( "Audio WebSocket error:", error );
+                    this.audioWsConnected = false;
                     this.updateStatus( "audio-ws-status", "Error", "error" );
                     reject( error );
                 };
@@ -2099,6 +2108,7 @@ class NotificationsUI {
                 case "auth_success":
                     this.log( `Queue WebSocket authenticated for user: ${envelope.user_id}` );
                     this.updateStatus( "auth-status", `Authenticated as ${envelope.user_id}`, "good" );
+                    this.connectionRetries = 0; // Reset backoff on successful auth
                     
                     // Store the server-provided user ID for notifications
                     this.notificationState.userId = envelope.user_id;
@@ -4837,26 +4847,21 @@ class NotificationsUI {
     // CONNECTION MANAGEMENT
     // ========================================
 
-    scheduleReconnect() {
+    scheduleReconnect( target = 'both' ) {
         if ( this.isConnecting ) {
             return; // Already attempting to reconnect
         }
-        
-        if ( this.connectionRetries >= this.maxRetries ) {
-            this.error( "Max reconnection attempts reached" );
-            this.updateStatus( "queue-ws-status", "Failed", "error" );
-            this.updateStatus( "audio-ws-status", "Failed", "error" );
-            return;
-        }
-        
+
         this.connectionRetries++;
-        const delay = Math.min( 1000 * Math.pow( 2, this.connectionRetries ), 30000 ); // Exponential backoff, max 30s
-        
-        this.log( `Scheduling reconnect attempt ${this.connectionRetries}/${this.maxRetries} in ${delay}ms` );
-        
+        // Exponential backoff: 2s, 4s, 8s, 16s, 30s... then cap at 60s after 10 failures
+        const maxDelay = this.connectionRetries > 10 ? 60000 : 30000;
+        const delay = Math.min( 1000 * Math.pow( 2, this.connectionRetries ), maxDelay );
+
+        this.log( `Scheduling reconnect attempt #${this.connectionRetries} for ${target} in ${delay}ms` );
+
         setTimeout( () => {
             this.isConnecting = true;
-            this.connectWebSockets().finally( () => {
+            this.connectWebSockets( target ).finally( () => {
                 this.isConnecting = false;
             });
         }, delay );
