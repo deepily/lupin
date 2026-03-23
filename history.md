@@ -21,8 +21,12 @@
 - Fix 3c: Self-healing orphan cleanup in `emit_to_user()` — when a session is found in `user_sessions` but not in `active_connections`, clean it up automatically.
 
 **Bug 4 — Config key underscore/space mismatch in `/api/config/client`**:
-- Root cause: `system.py` read 4 config keys with underscores (`jwt_token_refresh_check_interval_mins`) but INI uses spaces (`jwt token refresh check interval mins`). Keys existed but were never found.
-- Fix: Changed 4 `config_mgr.get()` calls to use space-separated key names. Added 3 missing JWT splainer entries.
+- Root cause: `system.py` read 4 config keys with underscores (`jwt_token_refresh_check_interval_mins`) but INI uses spaces (`jwt token refresh check interval mins`). Keys existed but were never found. Additionally, `return_type="int"` was missing — INI values returned as strings caused `"10" * 60 * 1000` string multiplication.
+- Fix: Changed 4 `config_mgr.get()` calls to use space-separated key names + `return_type="int"`. Added 3 missing JWT splainer entries.
+
+**Bug 5 — Phantom connection: server disconnect() doesn't close WebSocket**:
+- Root cause: `disconnect()` removes WebSocket from dicts but does NOT call `websocket.close()`. Browser never receives close frame → `onclose` never fires → no reconnection → phantom connection (browser shows "Connected", server says gone).
+- Fix: Added explicit `ws.close( code=1000, reason="Server disconnect" )` via `asyncio.run_coroutine_threadsafe()` in `disconnect()` before removing from dicts.
 
 **Test Results**: 2110 unit tests pass, 0 regressions
 
@@ -41,7 +45,8 @@
 - `src/cosa/agents/decision_proxy/proxy_decision_embeddings.py` — LanceDB schema mismatch auto-recreate
 
 **Commit 1**: a994446 (Lupin — Bug 1 + Bug 2 partial)
-**Commit 2**: pending (Lupin — Bug 3 + Bug 4 splainer entries)
+**Commit 2**: 393ab56 (Lupin — Bug 3 + Bug 4 splainer entries)
+**Commit 3**: pending (Lupin — Bug 4 return_type fix + Bug 5 phantom connection)
 
 ---
 
