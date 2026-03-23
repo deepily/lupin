@@ -76,6 +76,18 @@
   - **Fix**: Schema validation in `_ensure_table()` — drop+recreate on mismatch
   - **Files (CoSA)**: `proxy_decision_embeddings.py`
 
+- [x] **Race condition: old WS handler disconnect() kills new connection** → pending commit | By: cd0fd61a (Session 366)
+  - **Symptom**: Browser shows connected but server says `not in active_connections`. Notifications lost.
+  - **Root Cause**: Reconnect with same session_id → old handler's `finally` calls `disconnect()` deleting the NEW connection
+  - **Fix**: Identity guard in finally blocks, dedup user_sessions, orphan cleanup in emit_to_user
+  - **Files (CoSA)**: `websocket.py`, `websocket_manager.py`
+
+- [x] **Config key underscore/space mismatch in `/api/config/client`** → pending commit | By: cd0fd61a (Session 366)
+  - **Symptom**: 4 config keys not found, falling back to defaults with ¿WUH? warnings
+  - **Root Cause**: `system.py` used underscores, INI uses spaces
+  - **Fix**: 4 `config_mgr.get()` calls fixed + 3 JWT splainer entries added
+  - **Files (CoSA)**: `system.py`; **(Lupin)**: `lupin-app-splainer.ini`
+
 - [x] **Periodic CUDA OOM on Whisper transcription** → pending commit | By: 73bf201f (Session 359)
   - **Symptom**: Periodic 500 errors on `/api/upload-and-transcribe-mp3` — CUDA OOM despite ~290 MiB reserved (fragmentation)
   - **Root Cause**: PyTorch CUDA allocator fragmentation from co-resident Whisper + embedding models; can't find contiguous 16 MiB block

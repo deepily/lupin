@@ -14,19 +14,34 @@
 - Root cause: Session 345 added `response_type` field to `ProxyDecisionEmbeddings` schema, but existing LanceDB table was created before this change. `_ensure_table()` opened old table as-is.
 - Fix: Added schema validation in `_ensure_table()` — compares existing column names against expected schema. On mismatch, drops and recreates table. Table repopulates organically.
 
+**Bug 3 — Race condition: old WS handler's `disconnect()` kills new connection**:
+- Root cause: When browser reconnects with same session_id, old handler's `finally` block calls `disconnect()` which removes the NEW connection from `active_connections`. Result: browser shows connected but server has no record.
+- Fix 3a: Guard `disconnect()` in both `/ws/queue/` and `/ws/audio/` finally blocks — only disconnect if `active_connections[session_id] is websocket` (identity check).
+- Fix 3b: Deduplicate `user_sessions` in `connect()` — prevent same session_id from being appended multiple times on reconnect.
+- Fix 3c: Self-healing orphan cleanup in `emit_to_user()` — when a session is found in `user_sessions` but not in `active_connections`, clean it up automatically.
+
+**Bug 4 — Config key underscore/space mismatch in `/api/config/client`**:
+- Root cause: `system.py` read 4 config keys with underscores (`jwt_token_refresh_check_interval_mins`) but INI uses spaces (`jwt token refresh check interval mins`). Keys existed but were never found.
+- Fix: Changed 4 `config_mgr.get()` calls to use space-separated key names. Added 3 missing JWT splainer entries.
+
 **Test Results**: 2110 unit tests pass, 0 regressions
 
-**Files Modified (Lupin — 5 files)**:
+**Files Modified (Lupin — 6 files)**:
 - `src/fastapi_app/static/js/notifications.js` — Infinite retry, independent WS reconnect, connection tracking
 - `src/conf/lupin-app.ini` — Added `notification_expired`, `notification_responded` to available events
-- `src/conf/lupin-app-splainer.ini` — Splainer entries for new events
+- `src/conf/lupin-app-splainer.ini` — Splainer entries for 2 new events + 3 JWT token refresh keys
 - `src/docs/websocket-events.md` — Documented 2 new events (18→20 total)
 - `src/tests/unit/test_ini_key_naming.py` — Added 2 events to WS exemption set
 
-**Files Modified (CoSA — 1 file, pending separate commit)**:
-- `src/cosa/agents/decision_proxy/proxy_decision_embeddings.py` — Schema mismatch detection + auto-recreate
+**Files Modified (CoSA — 5 files, pending separate commit)**:
+- `src/cosa/rest/routers/websocket.py` — Race condition guard in both finally blocks + TokenExpiredException handling
+- `src/cosa/rest/websocket_manager.py` — Dedup user_sessions, orphan cleanup in emit_to_user
+- `src/cosa/rest/routers/notifications.py` — API docs metadata on route decorators
+- `src/cosa/rest/routers/system.py` — 4 config key underscore→space fixes
+- `src/cosa/agents/decision_proxy/proxy_decision_embeddings.py` — LanceDB schema mismatch auto-recreate
 
-**Commit**: ccc362f
+**Commit 1**: a994446 (Lupin — Bug 1 + Bug 2 partial)
+**Commit 2**: pending (Lupin — Bug 3 + Bug 4 splainer entries)
 
 ---
 
