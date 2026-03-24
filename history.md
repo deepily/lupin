@@ -1,5 +1,73 @@
 # Lupin Project History
 
+### 2026.03.23 - Session 367c | cosa-voice Global MCP Onboarding Bootstrapper
+
+**Accomplishments**:
+- Implemented cosa-voice onboarding bootstrapper — migrates MCP registration from per-project `.mcp.json` to global user scope (`claude mcp add --scope user`)
+- Hardened MCP server project detection: replaced hard `os._exit(1)` failure with graceful CWD basename fallback + warning. Server now starts from any directory.
+- Added consolidated runtime banner to MCP server stderr (project, session, sender, server, account validation status)
+- Added two-part session status display: SessionStart hook shows immediate prereq checks (MCP registration, project detection, hooks, server, config) in `additionalContext`; MCP stderr shows runtime status after initialization
+- Created `install-cosa-voice.sh` bootstrapper with 3 modes: install (user scope), `--check-only`, `--uninstall`. Validates 6 prerequisites, sends test notification.
+- Deleted old `install-mcp-server.sh` (no backward compat)
+- Added `.mcp.json` to `.gitignore` and untracked from git (machine-specific absolute paths)
+
+**Test Results**: 2161 unit tests pass, 0 regressions
+
+**Files Created (Lupin — 2 files)**:
+- `src/scripts/install-cosa-voice.sh` — Global MCP bootstrapper script
+- `src/docs/cosa-voice-onboarding.md` — User-facing onboarding guide
+
+**Files Modified (Lupin — 5 files)**:
+- `src/lupin_mcp/cosa_voice_mcp.py` — Softened project detection, added startup banner, updated docstring
+- `src/lupin_cli/claude_code/hooks/register_session.py` — Added `_check_cosa_voice_status()`, expanded additionalContext
+- `src/lupin_mcp/README.md` — Updated install instructions for global model
+- `CLAUDE.md` — Added `install-cosa-voice.sh` to COMMANDS
+- `.gitignore` — Added `.mcp.json`
+
+**Files Deleted (Lupin — 1 file)**:
+- `src/scripts/install-mcp-server.sh` — Replaced by `install-cosa-voice.sh`
+
+**Files Untracked (Lupin — 1 file)**:
+- `.mcp.json` — Removed from git tracking (stays on disk)
+
+**Design doc updated**: `src/rnd/2026.03.23-cosa-voice-onboarding-bootstrapper.md` — Finalized from early design to approved implementation plan
+
+---
+
+### 2026.03.23 - Session 367b | Presentation Generator Agent — Phases 1-2 Foundation
+
+**Accomplishments**:
+- Implemented Phase 1 (Foundation) and Phase 2 (State Models + Orchestrator) of the Presentation Generator Agent — 18/55 tasks complete
+- Created `PresentationGeneratorJob` (AgenticJobBase, JOB_TYPE="presentation", JOB_PREFIX="pr") with dry-run and orchestrator execution paths
+- Created `PresentationConfig` dataclass with `from_config()` loading 9 INI keys (content model, duration, slides/minute, title style, revisions, theme, templates path, output dir, audience)
+- Created 6 Pydantic state models: OrchestratorState (12 states), ArcPosition (6 positions), NarrativeSection, PresenterNotes, SlideModel, PresentationModel
+- Created `PresentationOrchestratorAgent` with 8-phase state machine (ingest → analyze → outline → elaborate → serialize → render text → render visuals → deliver), 4 gate checkpoints (auto-approve stubs), cancellation support
+- Created cosa_interface.py (AGENT_TYPE="presentation.gen") and voice_io.py thin wrapper
+- REST router at `/api/presentation-generator/submit`, factory registration, main.py wiring
+- All smoke tests pass (6 modules), 39 presentation unit tests, 2170 total unit tests, 0 regressions
+
+**Files Created (14 — CoSA)**:
+- `src/cosa/agents/presentation_generator/__init__.py`, `__main__.py`, `config.py`, `cosa_interface.py`, `voice_io.py`, `job.py`, `state.py`, `orchestrator.py`
+- `src/cosa/agents/presentation_generator/prompts/__init__.py`, `renderers/__init__.py`
+- `src/cosa/agents/presentation_generator/templates/themes/` (empty dir)
+- `src/cosa/rest/routers/presentation_generator.py`
+
+**Files Modified (4 — CoSA)**:
+- `src/cosa/rest/agentic_job_factory.py` — Factory branch for presentation generator
+- `src/conf/lupin-app.ini` — 9 new presentation generator config keys
+- `src/conf/lupin-app-splainer.ini` — 9 matching explanations
+
+**Files Modified (1 — Lupin)**:
+- `src/fastapi_app/main.py` — Router import + registration
+
+**Files Created (1 — Lupin)**:
+- `src/tests/unit/test_presentation_generator_job.py` — 39 unit tests
+
+**R&D Updated**:
+- `src/rnd/2026.03.14-presentation-generator/03-implementation-tracking.md` — Phase 1 Done, Phase 2 Done, 18/55 total
+
+---
+
 ### 2026.03.23 - Session 367 | Feature: Notification Admin Filter Toggle — "Not My Jobs" Mode
 
 **Accomplishments**:

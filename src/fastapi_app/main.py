@@ -63,8 +63,9 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, podcast_generator, deep_research_to_podcast, swe_team, decision_proxy, pages
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, podcast_generator, presentation_generator, deep_research_to_podcast, swe_team, decision_proxy, pages
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
+from cosa.rest.job_persistence import mark_interrupted_jobs
 
 # Suppress noisy LanceDB warnings
 import logging
@@ -493,6 +494,16 @@ async def lifespan( app: FastAPI ):
     #   - production: Cloud SQL (automatic schema creation via Alembic migrations)
     print( "[AUTH] Using PostgreSQL authentication database" )
 
+    # CJ Flow Persistence: Mark in-flight jobs from previous session as interrupted
+    try:
+        interrupted_count = mark_interrupted_jobs()
+        if interrupted_count > 0:
+            print( f"[CJ-PERSIST] Marked {interrupted_count} interrupted job(s) from previous session" )
+        else:
+            print( "[CJ-PERSIST] No interrupted jobs found" )
+    except Exception as e:
+        print( f"[WARN] CJ Flow startup recovery failed: {e}" )
+
     # ===================================================================
     # GPU Model Loading (smallest → largest to minimize CUDA fragmentation)
     # ===================================================================
@@ -688,6 +699,7 @@ app.include_router(deep_research.router)
 app.include_router(io_files.router)
 app.include_router(mock_job.router)
 app.include_router(podcast_generator.router)
+app.include_router(presentation_generator.router)
 app.include_router(deep_research_to_podcast.router)
 app.include_router(swe_team.router)
 app.include_router(decision_proxy.router)

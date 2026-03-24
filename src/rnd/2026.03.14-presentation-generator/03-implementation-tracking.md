@@ -1,7 +1,7 @@
 # Presentation Generator Agent — Implementation Tracking
 
 **Created**: 2026-03-14
-**Last Updated**: 2026-03-14
+**Last Updated**: 2026-03-23
 
 ---
 
@@ -9,19 +9,19 @@
 
 | # | Task | Status |
 |---|------|--------|
-| 1.1 | Create agent directory structure | Pending |
-| 1.2 | Implement `PresentationConfig` dataclass | Pending |
-| 1.3 | Implement `PresentationGeneratorJob` | Pending |
-| 1.4 | Create `cosa_interface.py` | Pending |
-| 1.5 | Create `voice_io.py` wrapper | Pending |
-| 1.6 | Add INI config keys | Pending |
-| 1.7 | Add factory registration | Pending |
-| 1.8 | Add REST router | Pending |
-| 1.9 | Register router in main.py | Pending |
-| 1.10 | Write smoke test | Pending |
-| 1.11 | Write unit tests | Pending |
+| 1.1 | Create agent directory structure | Done |
+| 1.2 | Implement `PresentationConfig` dataclass | Done |
+| 1.3 | Implement `PresentationGeneratorJob` | Done |
+| 1.4 | Create `cosa_interface.py` | Done |
+| 1.5 | Create `voice_io.py` wrapper | Done |
+| 1.6 | Add INI config keys | Done |
+| 1.7 | Add factory registration | Done |
+| 1.8 | Add REST router | Done |
+| 1.9 | Register router in main.py | Done |
+| 1.10 | Write smoke test | Done |
+| 1.11 | Write unit tests | Done |
 
-**Phase 1 Status**: Pending
+**Phase 1 Status**: Done (Session 367)
 
 ---
 
@@ -29,15 +29,15 @@
 
 | # | Task | Status |
 |---|------|--------|
-| 2.1 | Define `OrchestratorState` enum | Pending |
-| 2.2 | Define `SlideModel` (Pydantic) | Pending |
-| 2.3 | Define `PresentationModel` (Pydantic) | Pending |
-| 2.4 | Define `NarrativeSection` model | Pending |
-| 2.5 | Implement orchestrator skeleton | Pending |
-| 2.6 | Wire orchestrator into job | Pending |
-| 2.7 | Write unit tests for state models | Pending |
+| 2.1 | Define `OrchestratorState` enum | Done |
+| 2.2 | Define `SlideModel` (Pydantic) | Done |
+| 2.3 | Define `PresentationModel` (Pydantic) | Done |
+| 2.4 | Define `NarrativeSection` model | Done |
+| 2.5 | Implement orchestrator skeleton | Done |
+| 2.6 | Wire orchestrator into job | Done |
+| 2.7 | Write unit tests for state models | Done |
 
-**Phase 2 Status**: Pending
+**Phase 2 Status**: Done (Session 367)
 
 ---
 
@@ -136,12 +136,12 @@
 
 | Phase | Description | Tasks | Done | Status |
 |-------|-------------|-------|------|--------|
-| 1 | Foundation | 11 | 0 | Pending |
-| 2 | State Models & Orchestrator | 7 | 0 | Pending |
+| 1 | Foundation | 11 | 11 | Done |
+| 2 | State Models & Orchestrator | 7 | 7 | Done |
 | 3 | Ingest & Analyze | 6 | 0 | Pending |
 | 4 | Outline & Elaborate | 7 | 0 | Pending |
 | 5 | Serialize | 5 | 0 | Pending |
 | 6 | Marp Rendering | 6 | 0 | Pending |
 | 7 | Visual Rendering | 7 | 0 | Pending |
 | 8 | Delivery & Chaining | 6 | 0 | Pending |
-| **Total** | | **55** | **0** | **Pending** |
+| **Total** | | **55** | **18** | **In Progress** |

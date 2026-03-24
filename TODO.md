@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-23 (Session 367)
+Last updated: 2026-03-23 (Session 367b)
 
 ## Pending
 
@@ -126,18 +126,18 @@ Last updated: 2026-03-23 (Session 367)
 
 ### Presentation Generator Agent (Session 362 — IN PROGRESS)
 
-- [ ] **[LUPIN] Presentation Generator Agent: Transform research docs into slide decks** — 🔄 IN PROGRESS. Strategy & design complete, documentation serialized (Session 362). Implementation Phases 1-8 pending, will resume in next sessions.
+- [ ] **[LUPIN] Presentation Generator Agent: Transform research docs into slide decks** — 🔄 IN PROGRESS. Phases 1-2 complete (Session 367b), 18/55 tasks done. Next: Phase 3 (Ingest & Analyze — first LLM work).
   - **Goal**: Agentic process (Claude SDK) that transforms ~1200-word research documents or technical blog posts into 10-20 minute slide decks with presenter notes. Single orchestrator pattern (like Podcast Generator).
   - **Architecture**: 8-phase pipeline (ingest, analyze, outline, elaborate, serialize YAML, render Marp, render Mermaid visuals, deliver). 4 human-in-the-loop gates. Pluggable visual renderer registry. Theme cascade (INI -> YAML template -> per-presentation overrides).
   - **R&D directory**: [`src/rnd/2026.03.14-presentation-generator/`](src/rnd/2026.03.14-presentation-generator/00-index.md)
   - **Phase 0**: DONE — Strategy & design serialized, implementation plan & tracking created (4 docs)
-  - **Phase 1**: Pending — Foundation (Job, Config, Voice I/O, CJ Flow packaging)
-  - **Phase 2**: Pending — State models & orchestrator skeleton
-  - **Phase 3**: Pending — Content generation: ingest & analyze (Phases 1-2)
-  - **Phase 4**: Pending — Content generation: outline & elaborate (Phases 3-4)
-  - **Phase 5**: Pending — Content generation: serialize YAML (Phase 5)
-  - **Phase 6**: Pending — Text rendering: Marp Markdown (Phase 6)
-  - **Phase 7**: Pending — Visual rendering: Mermaid + registry (Phase 7)
+  - **Phase 1**: DONE — Foundation (Job, Config, Voice I/O, CJ Flow packaging) — Session 367b
+  - **Phase 2**: DONE — State models & orchestrator skeleton — Session 367b
+  - **Phase 3**: Pending — Content generation: ingest & analyze (first LLM work)
+  - **Phase 4**: Pending — Content generation: outline & elaborate
+  - **Phase 5**: Pending — Content generation: serialize YAML
+  - **Phase 6**: Pending — Text rendering: Marp Markdown
+  - **Phase 7**: Pending — Visual rendering: Mermaid + registry
   - **Phase 8**: Pending — Delivery & DR-to-Presentation chaining (Phase 8)
 
 ### CJ Flow Persistence (Sessions 357, 360 — IN PROGRESS)
