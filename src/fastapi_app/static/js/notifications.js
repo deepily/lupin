@@ -7164,6 +7164,34 @@ class NotificationsUI {
         this.sessionNames[ sessionId ] = name;
         localStorage.setItem( this.SESSION_NAMES_KEY, JSON.stringify( this.sessionNames ) );
         this.log( `Saved session name for ${sessionId}: ${name}` );
+        // Push topic to CC listener for stop hook context
+        this.pushSessionTopicNotification( sessionId, name );
+    }
+
+    /**
+     * Push a session topic notification so the CC listener can update the session bridge file.
+     * Uses hybrid encoding: type=custom, title=action:set_session_topic, job_id=sessionHash.
+     * @param {string} sessionId - Session ID (8-char hex hash)
+     * @param {string} topic - The session topic text
+     */
+    async pushSessionTopicNotification( sessionId, topic ) {
+        try {
+            await fetch( '/api/notify', {
+                method  : 'POST',
+                headers : { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
+                body    : JSON.stringify( {
+                    message       : topic,
+                    type          : 'custom',
+                    title         : 'action:set_session_topic',
+                    job_id        : sessionId,
+                    priority      : 'low',
+                    suppress_ding : true
+                } )
+            } );
+            this.log( `Pushed session topic notification for ${sessionId}: ${topic}` );
+        } catch ( error ) {
+            this.log( `Failed to push session topic: ${error.message}` );
+        }
     }
 
     /**
@@ -11095,12 +11123,18 @@ class NotificationsUI {
 
         const predictionHintSection = this.buildPredictionHintSection( notification );
 
+        // Extract project badge from sender_id (same pattern as renderMultipleChoiceUI)
+        const project      = this.getProjectFromSenderId( notification.sender_id );
+        const projectBadge = project && project !== 'UNKNOWN'
+            ? `<span class="mc-project-badge">[${project}]</span> `
+            : '';
+
         card.innerHTML = `
             <div class="action-required-header">
                 <button class="action-required-cancel-btn" data-notification-id="${notification.id}" title="Cancel and use default (Esc)">
                     ✕
                 </button>
-                <div class="action-required-title">${this.renderMarkdown( notification.title || notification.message )}</div>
+                <div class="action-required-title">${projectBadge}${notification.title || notification.message}</div>
                 <div class="action-required-timer-controls">
                     <button class="action-required-pause-btn" id="pause-btn-${notification.id}" title="Pause timer and audio (P)">
                         \u23F8\uFE0F

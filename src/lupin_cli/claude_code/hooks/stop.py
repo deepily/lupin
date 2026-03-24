@@ -159,7 +159,45 @@ def _should_ask_anything_else( last_assistant_message, session_id ):
     return True
 
 
-def _ask_anything_else( session_id, last_assistant_message=None ):
+def _get_session_context( cwd ):
+    """
+    Read session topic from bridge file + git branch name.
+
+    Requires:
+        - cwd is a string path or None
+
+    Ensures:
+        - Returns (topic, branch) tuple
+        - topic is a string or None (from bridge file's session_topic)
+        - branch is a string or None (from git rev-parse)
+        - Never raises exceptions
+    """
+    topic  = None
+    branch = None
+
+    # Session topic from bridge file
+    try:
+        from lupin_cli.claude_code.hooks.lib.session_bridge import get_session_metadata
+        meta  = get_session_metadata()
+        topic = meta.get( "session_topic" )
+    except Exception:
+        pass
+
+    # Git branch
+    if cwd:
+        try:
+            import subprocess
+            branch = subprocess.check_output(
+                [ "git", "rev-parse", "--abbrev-ref", "HEAD" ],
+                cwd=cwd, text=True, timeout=5
+            ).strip()
+        except Exception:
+            pass
+
+    return topic, branch
+
+
+def _ask_anything_else( session_id, last_assistant_message=None, cwd=None ):
     """
     Ask the user "Anything else?" via notify_user_sync with a 5-minute timeout.
 
@@ -169,6 +207,7 @@ def _ask_anything_else( session_id, last_assistant_message=None ):
     Requires:
         - session_id is a string for sender_id resolution
         - last_assistant_message is a string or None
+        - cwd is a string path or None (for session context resolution)
 
     Ensures:
         - Returns dict suitable for emit_json()
@@ -184,9 +223,18 @@ def _ask_anything_else( session_id, last_assistant_message=None ):
 
         gist = _summarize_task( last_assistant_message )
         if gist:
-            message = f'[LUPIN] I\'m finished *"...{gist}"*. Is there anything else you want me to do?'
+            message = f'I\'m finished *"...{gist}"*. Is there anything else you want me to do?'
         else:
-            message = "[LUPIN] I've finished the current task. Is there anything else you'd like me to do?"
+            message = "I've finished the current task. Is there anything else you'd like me to do?"
+
+        # Build abstract with session-level context
+        topic, branch = _get_session_context( cwd )
+        parts = []
+        if topic:
+            parts.append( f"**Session**: {topic}" )
+        if branch:
+            parts.append( f"**Branch**: `{branch}`" )
+        abstract = "  \n".join( parts ) if parts else None
 
         request = NotificationRequest(
             message                  = message,
@@ -196,6 +244,7 @@ def _ask_anything_else( session_id, last_assistant_message=None ):
             response_default         = "no",
             title                    = "Continue Session?",
             sender_id                = sender_id,
+            abstract                 = abstract,
             display_qualifier_widget = True
         )
 
@@ -293,7 +342,7 @@ def main():
         last_assistant_message = payload.get( "last_assistant_message" )
 
         if _should_ask_anything_else( last_assistant_message, session_id ):
-            result = _ask_anything_else( session_id, last_assistant_message )
+            result = _ask_anything_else( session_id, last_assistant_message, cwd=payload.get( "cwd" ) )
             emit_json( result )
         else:
             emit_json( {} )

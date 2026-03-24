@@ -65,7 +65,12 @@
 
 ### Completed
 
-- [x] **WS queue crash (`app_verbose` undefined) + TTS focus mode crash (`state` undefined)** → commit: 4908700 | By: 0015f34e (Session 369)
+- [x] **Stop hook "Continue Session?" lacks project/task context** → commit: 47a3f8a | By: 0015f34e (Session 369b)
+  - **Symptom**: Notification card shows generic "Continue Session?" with no project badge or session topic. User can't tell which session is asking.
+  - **Fix**: Project badge from sender_id on all action-required cards, session topic pipeline (UI → listener → bridge → stop hook abstract), MCP tool
+  - **Files**: `notifications.js`, `stop.py`, `cc_notification_listener.py`, `session_bridge.py`, `cosa_voice_mcp.py`
+
+- [x] **WS queue crash (`app_verbose` undefined) + TTS focus mode crash (`state` undefined)** → commit: d7f00b5 | By: 0015f34e (Session 369)
   - **Symptom**: WebSocket queue handler crashes on every message receive, killing connection. Notifications stop until page refresh. TTS focus mode also crashes on playback complete.
   - **Root Cause 1**: `websocket_queue_endpoint()` extracts `app_debug` but omits `app_verbose` from `main_module` — NameError at line 488
   - **Root Cause 2**: `enterTTSFocusMode()` uses `state.timeoutSeconds` instead of `guardState.timeoutSeconds` — ReferenceError at line 10664

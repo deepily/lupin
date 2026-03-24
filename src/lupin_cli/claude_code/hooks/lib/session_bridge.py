@@ -426,6 +426,7 @@ def get_session_metadata() -> dict:
                 data = json.load( f )
             data["source"]            = "session_file"
             data["resolution_source"] = resolution_source
+            data["_bridge_path"]      = str( session_file )
             # Ensure stable_session_id is always present (backward compat)
             if "stable_session_id" not in data:
                 data["stable_session_id"] = data.get( "session_id" )

@@ -1,5 +1,36 @@
 # Lupin Project History
 
+### 2026.03.24 - Session 369b | Feature: Session Topic Context for Stop Hook Notifications
+
+**Accomplishments**:
+- Implemented session topic context so "Continue Session?" notifications show WHAT you'd be continuing
+- **Project badge**: `[LUPIN]` now appears in all action-required notification card headers (yes/no, open-ended), extracted from sender_id via existing `getProjectFromSenderId()` pattern
+- **Session topic pipeline**: UI gist/rename → `pushSessionTopicNotification()` → notification API → CCNotificationListener `action:set_session_topic` routing → writes `session_topic` to session bridge file
+- **Stop hook abstract**: `_get_session_context()` reads `session_topic` + git branch from bridge file, builds abstract for "Continue Session?" notification
+- **MCP tool**: New `set_session_topic()` in cosa-voice for Claude to set topic directly (session start, plan approval, task switch)
+- **UX polish**: Removed redundant `[LUPIN]` from stop hook message body (badge already shows it), removed `renderMarkdown()` from title to prevent newline injection
+- **Hybrid encoding**: Uses existing `custom` notification type + `title="action:set_session_topic"` as action discriminator — zero schema changes
+
+**Files Modified (Lupin — 4 files)**:
+- `src/fastapi_app/static/js/notifications.js` — Project badge on action-required cards, `pushSessionTopicNotification()` + hook into `saveSessionName()`
+- `src/lupin_cli/claude_code/hooks/stop.py` — `_get_session_context()`, abstract builder, `cwd` passthrough, removed `[LUPIN]` from message
+- `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` — `action:` prefix routing branch, `_handle_action()`, `_update_session_topic()`
+- `src/lupin_cli/claude_code/hooks/lib/session_bridge.py` — Exposed `_bridge_path` in `get_session_metadata()`
+
+**Files Modified (MCP — 1 file)**:
+- `src/lupin_mcp/cosa_voice_mcp.py` — New `set_session_topic()` tool
+
+**Files Modified (Docs — 1 file)**:
+- `~/.claude/CLAUDE.md` — Documented `set_session_topic()` convention
+
+**Test Results**: Manual E2E verified — injected session_topic into bridge file, stop hook picked it up and displayed in abstract. Project badge renders on action-required cards.
+
+**Commit**: 47a3f8a
+
+**Plan doc**: `~/.claude/plans/parsed-strolling-toucan.md`
+
+---
+
 ### 2026.03.24 - Session 369 | Bug Fix: WS queue crash + TTS focus mode crash
 
 **Accomplishments**:
@@ -16,7 +47,7 @@
 
 **Test Results**: Not run (trivial variable reference fixes)
 
-**Commit**: 4908700
+**Commit**: d7f00b5
 
 ---
 

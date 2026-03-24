@@ -959,6 +959,39 @@ def _parse_open_ended_batch_response( response_value: Optional[ str ] ) -> dict:
 
 
 @mcp.tool
+def set_session_topic( topic: str ) -> dict:
+    """
+    Set the current session's topic/description for context in stop hook notifications.
+
+    The topic appears in the "Continue Session?" notification abstract so users
+    know WHAT they'd be continuing. Call this at session start, after plan
+    approval, or when switching tasks.
+
+    Args:
+        topic: Brief description of current work (e.g., "Bug Fix: WS queue crash")
+
+    Returns:
+        dict with status and the topic that was set
+    """
+    import json
+
+    meta        = _get_cc_metadata()
+    bridge_path = meta.get( "_bridge_path" )
+    if not bridge_path:
+        return { "status": "error", "reason": "No bridge file found" }
+
+    try:
+        with open( bridge_path ) as f:
+            data = json.load( f )
+        data[ "session_topic" ] = topic
+        with open( bridge_path, "w" ) as f:
+            json.dump( data, f, indent=2 )
+        return { "status": "ok", "topic": topic }
+    except Exception as e:
+        return { "status": "error", "reason": str( e ) }
+
+
+@mcp.tool
 def get_session_info() -> dict:
     """
     Get current session identification and server info.
