@@ -1,9 +1,10 @@
 # TODO
 
-Last updated: 2026-03-23 (Session 367b)
+Last updated: 2026-03-23 (Session 368)
 
 ## Pending
 
+- [ ] [LUPIN] **Bug Fix: WebSocket 503 "user_not_available" — audio WS auth fix not yet working.** Root cause confirmed: audio WS endpoint connects without user auth, so after hot reloads only a "ghost" connection (in `active_connections` but not `user_sessions`) remains. Fix added auth_request handling to audio endpoint (`websocket.py:205-260`) but needs further debugging — test notification still failed. Diagnostic infrastructure in place (`[NOTIFY] ⚠️ OFFLINE DIAG`, `[WS-DIAG]` browser prefix, `[WS] STATE` logs). Plan doc: `~/.claude/plans/bubbly-churning-donut.md`
 - [ ] [LUPIN] Phase 1: Create `admin@lupin.deepily.ai` account + update `~/.lupin/config` (manual)
 - [ ] [LUPIN] Phase 6: Clean up existing 1001 `st-*` test notification artifacts (delete or reassign — decide after using filter)
 - [ ] [LUPIN] Run full E2E + integration test suite before merging branch to main
@@ -140,18 +141,20 @@ Last updated: 2026-03-23 (Session 367b)
   - **Phase 7**: Pending — Visual rendering: Mermaid + registry
   - **Phase 8**: Pending — Delivery & DR-to-Presentation chaining (Phase 8)
 
-### CJ Flow Persistence (Sessions 357, 360 — IN PROGRESS)
+### CJ Flow Persistence (Sessions 357, 360, 367 — BACKEND COMPLETE)
 
-- [ ] **[LUPIN] CJ Flow Persistence: PostgreSQL-backed job history for agentic jobs** — 🔄 IN PROGRESS. Plan complete (Session 357), Phases 1-2 implemented (Session 360). Resuming Phase 3+ next session.
+- [x] **[LUPIN] CJ Flow Persistence: PostgreSQL-backed job history for agentic jobs** — ✅ ALL 5 PHASES COMPLETE. Backend fully implemented and E2E verified (Session 367).
   - **Goal**: Durable storage for AgenticJobBase jobs (DeepResearch, PodcastGenerator, ClaudeCode, SweTeam). Job state survives server restarts, enables job history queries, marks interrupted jobs.
   - **Architecture**: Central write-through via `emit_job_state_transition()` in `queue_util.py`
   - **Plan doc**: [`src/rnd/2026.03.13-cj-flow-persistence-plan.md`](src/rnd/2026.03.13-cj-flow-persistence-plan.md)
   - **Phase 0**: DONE — Plan serialized to R&D
   - **Phase 1**: DONE — Schema + SQLAlchemy model (`job_history` table, `add-job-history.sql`, `JobHistory` in postgres_models.py). 12 models, 12 tables. Table + 5 indexes deployed to lupin_db_dev.
-  - **Phase 2**: DONE — Persistence service (`job_persistence.py`, 8 functions, 2 config keys). Full DB round-trip smoke test passes. 2096 unit tests, 0 regressions.
-  - **Phase 3**: Pending — Write-through integration in `emit_job_state_transition()`
-  - **Phase 4**: Pending — Startup recovery (`mark_interrupted_jobs()`)
-  - **Phase 5**: Pending — `/api/job-history` endpoint + unit/integration tests
+  - **Phase 2**: DONE — Persistence service (`job_persistence.py`, 8 functions, 2 config keys). Full DB round-trip smoke test passes.
+  - **Phase 3**: DONE — Write-through integration in `emit_job_state_transition()`. Persistence fires after WS emit, filtered by `is_agentic_job_type()`. 12 callsites audited, zero needed modification. Session 367.
+  - **Phase 4**: DONE — Startup recovery (`mark_interrupted_jobs()`) in `main.py` lifespan. Session 367.
+  - **Phase 5**: DONE — `GET /api/job-history` + `GET /api/job-history/{job_id}` endpoints with role-based auth. 17 unit tests, 9 integration tests. E2E smoke test 7/7 pass. Session 367.
+  - **Regression**: 2155 unit tests pass, 0 new failures
+- [ ] **[LUPIN] CJ Flow Persistence: Job History UI page** — Future scope. Backend + API complete, no browser page yet. Pick up in next session to scope a job history viewer page.
 
 ### Universal Prediction Engine: Live E2E Validation (Session 340)
 

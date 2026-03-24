@@ -1,5 +1,33 @@
 # Lupin Project History
 
+### 2026.03.23 - Session 367d | CJ Flow Persistence — Phases 3-5 (Write-Through + Recovery + API + Tests)
+
+**Accomplishments**:
+- Completed all 5 phases of CJ Flow Persistence — agentic jobs now persist to PostgreSQL
+- **Phase 3**: Wired `job_persistence.py` into `emit_job_state_transition()` in `queue_util.py`. Persistence fires after WS emit, filtered by `is_agentic_job_type()`. Audited all 12 callsites — zero needed modification. Changed `websocket_mgr=None` from early-return to conditional guard so persistence works without WS.
+- **Phase 4**: Added `mark_interrupted_jobs()` startup recovery in `main.py` lifespan, after PostgreSQL init but before GPU loading and consumer thread.
+- **Phase 5**: Added `GET /api/job-history` (paginated, admin sees all, user sees own) and `GET /api/job-history/{job_id}` (detail with 403/404) to `queues.py`. 17 unit tests + 9 integration tests + 1 E2E smoke test (7/7 pass).
+- Updated design doc `src/rnd/2026.03.13-cj-flow-persistence-plan.md` with detailed Phase 3-5 specs, callsite audit table, and deviations log.
+
+**Test Results**: 2155 unit tests pass (17 new), 0 regressions. E2E smoke test 7/7 pass.
+
+**Files Created (Lupin — 2 files)**:
+- `src/tests/unit/test_job_persistence.py` — 17 unit tests (type filter, metadata extraction, persist functions, dispatch routing)
+- `src/tests/integration/test_job_history_api.py` — 9 integration tests (auth, pagination, filtering, detail)
+
+**Files Created (Lupin — 1 smoke test)**:
+- `src/tests/smoke/test_job_persistence_e2e.py` — Automated E2E: auth → DB insert → status progression → API query → detail → cleanup
+
+**Files Modified (CoSA — 1 file)**:
+- `src/cosa/rest/queue_util.py` — Added persistence imports + 14-line dispatch block, changed early-return to conditional WS guard
+- `src/cosa/rest/routers/queues.py` — Added 2 job-history endpoints (~80 lines)
+
+**Files Modified (Lupin — 2 files)**:
+- `src/fastapi_app/main.py` — Added `mark_interrupted_jobs()` import + 7-line recovery block in lifespan
+- `src/rnd/2026.03.13-cj-flow-persistence-plan.md` — Updated Phases 3-5 status to ✅, added callsite audit, deviations log
+
+---
+
 ### 2026.03.23 - Session 367c | cosa-voice Global MCP Onboarding Bootstrapper
 
 **Accomplishments**:
