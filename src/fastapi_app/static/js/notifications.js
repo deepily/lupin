@@ -10661,7 +10661,7 @@ class NotificationsUI {
         // Compute safety timeout from notification's own timeout + buffer
         // (guardState already fetched above and validated as non-null/non-resolved)
         const notifTimeoutMs = guardState?.timeoutSeconds
-            ? state.timeoutSeconds * 1000 + this.TTS_FOCUS_MODE_BUFFER_MS
+            ? guardState.timeoutSeconds * 1000 + this.TTS_FOCUS_MODE_BUFFER_MS
             : this.TTS_FOCUS_MODE_FALLBACK_MS;
         this.focusModeTimeoutMs = notifTimeoutMs;
 

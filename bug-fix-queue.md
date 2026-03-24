@@ -37,6 +37,7 @@
 | 135a6b16 | 2026-03-18T12:00:00 | 2026-03-18T12:00:00 | stale |
 | 7d02176c | 2026-03-19T12:00:00 | 2026-03-19T13:00:00 | committed |
 | cd0fd61a | 2026-03-23T16:30:00 | 2026-03-23T17:00:00 | committed |
+| 0015f34e | 2026-03-24T12:00:00 | 2026-03-24T12:15:00 | committed |
 
 ---
 
@@ -63,6 +64,14 @@
 ---
 
 ### Completed
+
+- [x] **WS queue crash (`app_verbose` undefined) + TTS focus mode crash (`state` undefined)** → commit: 4908700 | By: 0015f34e (Session 369)
+  - **Symptom**: WebSocket queue handler crashes on every message receive, killing connection. Notifications stop until page refresh. TTS focus mode also crashes on playback complete.
+  - **Root Cause 1**: `websocket_queue_endpoint()` extracts `app_debug` but omits `app_verbose` from `main_module` — NameError at line 488
+  - **Root Cause 2**: `enterTTSFocusMode()` uses `state.timeoutSeconds` instead of `guardState.timeoutSeconds` — ReferenceError at line 10664
+  - **Fix**: Added `app_verbose = main_module.app_verbose` (CoSA); changed `state.` → `guardState.` (Lupin)
+  - **Files (CoSA)**: `websocket.py` — 1 line added
+  - **Files (Lupin)**: `notifications.js` — 1 word changed
 
 - [x] **WebSocket reconnection gives up after 5 failures + missing notification events** → pending commit | By: cd0fd61a (Session 366)
   - **Symptom**: Notifications stop rendering until force page refresh. Has been broken ~2 days.

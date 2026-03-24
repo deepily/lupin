@@ -1,5 +1,25 @@
 # Lupin Project History
 
+### 2026.03.24 - Session 369 | Bug Fix: WS queue crash + TTS focus mode crash
+
+**Accomplishments**:
+- Fixed two `NameError`/`ReferenceError` crashes that killed WebSocket connections and TTS focus mode
+- **Bug 1**: `websocket_queue_endpoint()` in CoSA's `websocket.py` extracted `app_debug` from `main_module` but omitted `app_verbose` — every received message threw `NameError`, disconnecting the queue WebSocket. Added missing `app_verbose = main_module.app_verbose`.
+- **Bug 2**: `enterTTSFocusMode()` in `notifications.js` used bare `state.timeoutSeconds` instead of `guardState.timeoutSeconds` — ReferenceError on TTS playback complete for action-required notifications. Fixed typo.
+- Both bugs caused notifications to stop appearing until manual page refresh.
+
+**Files Modified (CoSA — 1 file)**:
+- `src/cosa/rest/routers/websocket.py` — Added `app_verbose = main_module.app_verbose` (1 line)
+
+**Files Modified (Lupin — 1 file)**:
+- `src/fastapi_app/static/js/notifications.js` — Changed `state.timeoutSeconds` → `guardState.timeoutSeconds` (1 word)
+
+**Test Results**: Not run (trivial variable reference fixes)
+
+**Commit**: 4908700
+
+---
+
 ### 2026.03.23 - Session 368 | Bug Fix: WebSocket 503 "user_not_available" Notifications
 
 **Accomplishments**:
