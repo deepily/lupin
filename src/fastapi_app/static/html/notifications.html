@@ -366,6 +366,8 @@
         <div class="collapsible-section" id="section-notifications">
             <div class="section-header" onclick="toggleSection('notifications-section')">
                 <h3>Claude Code Notifications: <span id="notifications-count">0</span></h3>
+                <span class="filter-mode-badge" id="notifications-filter-badge" style="display: none;"
+                      data-testid="notifications-filter-badge" title="Current filter mode">👤 Mine</span>
                 <div id="history-dropdown-container" style="margin-left: auto;"></div>
                 <!-- Refresh button commented out - filter dropdown now works correctly
                 <button id="refresh-notifications" type="button"
@@ -405,6 +407,9 @@
                         <button id="filter-own-jobs" data-testid="notifications-filter-own-btn" class="filter-button active" type="button">
                             👤 My Jobs Only
                         </button>
+                        <button id="filter-others-jobs" data-testid="notifications-filter-others-btn" class="filter-button" type="button">
+                            🚫 Not My Jobs
+                        </button>
                         <button id="filter-all-jobs" data-testid="notifications-filter-all-btn" class="filter-button" type="button">
                             👥 All Users' Jobs
                         </button>
@@ -420,6 +425,8 @@
         <div class="collapsible-section" id="section-queues">
             <div class="section-header" onclick="toggleSection('queues-section')">
                 <h3>Cosa Jobs Flow: Current States</h3>
+                <span class="filter-mode-badge" id="queues-filter-badge" style="display: none;"
+                      data-testid="queues-filter-badge" title="Current filter mode">👤 Mine</span>
                 <button class="toggle-button" id="queues-toggle">▼</button>
             </div>
             <div class="section-content" id="queues-section">

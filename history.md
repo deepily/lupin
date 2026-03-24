@@ -1,5 +1,41 @@
 # Lupin Project History
 
+### 2026.03.23 - Session 367 | Feature: Notification Admin Filter Toggle — "Not My Jobs" Mode
+
+**Accomplishments**:
+
+**New Feature — Three-mode queue + notification filter (Own / Not Mine / All Users)**:
+- Backend: Added `!self` authorization case in `queue_auth.py`, `get_jobs_excluding_user()` in `fifo_queue.py`, wired `!`-prefix sentinel in `queues.py` router
+- Backend: Added `exclude_own_jobs` param to notification senders-visible and bulk-delete endpoints, with `exclude_job_ids` filtering in repository layer
+- Frontend: Third filter button ("Not My Jobs"), two clickable filter mode badges (Notifications header + CJ Flow header) with color-coded modes
+- Frontend: Badges click → show + scroll to filter panel; toolbar scroll-on-show for all sections
+- Bug fix: `setFilterMode()` now calls `clearSenderGroups()` before `loadConversationHistory()` to prevent UI duplication when switching modes
+
+**Testing**:
+- 4 new unit tests for `!self` authorization (21 total, all pass)
+- 11 new E2E UI tests: role-gating, mode switching, badge sync, persistence, badge click-to-scroll, toolbar scroll-on-show
+- 6 new integration tests: `!self` 403 for non-admin, data correctness (disjoint sets, `own ∪ !self = *`), cross-queue validation
+
+**Test Results**: 2114 unit tests pass, 11 E2E pass, 6 integration pass
+
+**Files Modified (Lupin — 5 files)**:
+- `src/fastapi_app/static/html/notifications.html` — Third filter button, header badges, toolbar restored to single-column
+- `src/fastapi_app/static/css/notifications.css` — Filter badge styles (color-coded pills, clickable)
+- `src/fastapi_app/static/js/notifications.js` — Three-mode filter logic, badge click handlers, scroll-on-show, clearSenderGroups fix
+- `src/rnd/2026.03.23-notification-admin-filter-toggle-plan.md` — Serialized plan
+- `src/tests/e2e_ui/test_filter_toggle.py` — 11 E2E tests (new)
+
+**Files Modified (CoSA — 5 files, pending separate commit)**:
+- `src/cosa/rest/queue_auth.py` — `!self` authorization case (Case 2b)
+- `src/cosa/rest/fifo_queue.py` — `get_jobs_excluding_user()` method
+- `src/cosa/rest/routers/queues.py` — Wire `!`-prefix filter to exclusion method
+- `src/cosa/rest/routers/notifications.py` — `exclude_own_jobs` param on senders + bulk delete
+- `src/cosa/rest/db/repositories/notification_repository.py` — `exclude_job_ids` param on sender listing + bulk delete
+
+**Files Modified (Tests — 2 files)**:
+- `src/tests/unit/test_queue_authorization.py` — 4 new `!self` test cases + updated matrix tests
+- `src/tests/integration/test_queue_not_self_filter.py` — 6 integration tests (new)
+
 ### 2026.03.23 - Session 366 | Bug Fix: WebSocket Reconnection + Missing Events + LanceDB Schema
 
 **Accomplishments**:

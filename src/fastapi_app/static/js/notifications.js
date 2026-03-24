@@ -817,7 +817,7 @@ class NotificationsUI {
             // Disconnection detected — reconnect only what's broken
             const target = ( queueNeedsReconnect && audioNeedsReconnect ) ? 'both'
                          : queueNeedsReconnect ? 'queue' : 'audio';
-            this.log( `Health check: Disconnected WebSockets detected (queue=${queueNeedsReconnect}, audio=${audioNeedsReconnect}) → reconnecting ${target}` );
+            this.wsDiag( `Health check: Disconnected WebSockets detected (queue=${queueNeedsReconnect}, audio=${audioNeedsReconnect}) → reconnecting ${target}` );
             this.updateHealthStatus( "Reconnecting...", "status-warning" );
 
             // Reset retry counter to give reconnection a fresh start from health monitor
@@ -1387,13 +1387,34 @@ class NotificationsUI {
         });
 
         // Queue filter toggle (admin only - buttons may not exist for regular users)
-        const filterOwnBtn = document.getElementById( 'filter-own-jobs' );
-        const filterAllBtn = document.getElementById( 'filter-all-jobs' );
+        const filterOwnBtn    = document.getElementById( 'filter-own-jobs' );
+        const filterOthersBtn = document.getElementById( 'filter-others-jobs' );
+        const filterAllBtn    = document.getElementById( 'filter-all-jobs' );
 
         if ( filterOwnBtn && filterAllBtn ) {
             filterOwnBtn.addEventListener( 'click', () => this.setFilterMode( 'own' ) );
+            if ( filterOthersBtn ) {
+                filterOthersBtn.addEventListener( 'click', () => this.setFilterMode( 'others' ) );
+            }
             filterAllBtn.addEventListener( 'click', () => this.setFilterMode( 'all' ) );
             this.log( "Filter button event listeners added" );
+        }
+
+        // Filter mode badges in section headers (click to show + scroll to filter panel)
+        const notifFilterBadge  = document.getElementById( 'notifications-filter-badge' );
+        const queuesFilterBadge = document.getElementById( 'queues-filter-badge' );
+
+        if ( notifFilterBadge ) {
+            notifFilterBadge.addEventListener( 'click', ( e ) => {
+                e.stopPropagation();  // Prevent section toggle
+                this.showAndScrollToFilterPanel();
+            } );
+        }
+        if ( queuesFilterBadge ) {
+            queuesFilterBadge.addEventListener( 'click', ( e ) => {
+                e.stopPropagation();  // Prevent section toggle
+                this.showAndScrollToFilterPanel();
+            } );
         }
 
         // Clear all notifications button
@@ -1959,9 +1980,9 @@ class NotificationsUI {
                 this.queueWS = new WebSocket( wsUrl );
                 
                 this.queueWS.onopen = () => {
-                    this.log( "Queue WebSocket connected" );
+                    this.wsDiag( "Queue WebSocket TCP open, authenticating..." );
                     this.queueWsConnected = true;
-                    this.updateStatus( "queue-ws-status", "Connected", "good" );
+                    this.updateStatus( "queue-ws-status", "Authenticating...", "warning" );
                     this.authenticateQueueWebSocket();
                 };
 
@@ -1970,14 +1991,14 @@ class NotificationsUI {
                 };
 
                 this.queueWS.onclose = ( event ) => {
-                    this.log( `Queue WebSocket closed: ${event.code} ${event.reason}` );
+                    this.wsDiag( `Queue WebSocket closed: code=${event.code} reason=${event.reason}` );
                     this.queueWsConnected = false;
                     this.updateStatus( "queue-ws-status", "Disconnected", "error" );
                     this.scheduleReconnect( 'queue' );
                 };
 
                 this.queueWS.onerror = ( error ) => {
-                    this.error( "Queue WebSocket error:", error );
+                    this.wsDiag( `Queue WebSocket error: ${error}` );
                     this.queueWsConnected = false;
                     this.updateStatus( "queue-ws-status", "Error", "error" );
                     reject( error );
@@ -2009,9 +2030,9 @@ class NotificationsUI {
                 this.audioWS = new WebSocket( wsUrl );
                 
                 this.audioWS.onopen = () => {
-                    this.log( "Audio WebSocket connected" );
+                    this.wsDiag( "Audio WebSocket TCP open, authenticating..." );
                     this.audioWsConnected = true;
-                    this.updateStatus( "audio-ws-status", "Connected", "good" );
+                    this.updateStatus( "audio-ws-status", "Authenticating...", "warning" );
                     this.authenticateAudioWebSocket();
                 };
 
@@ -2020,14 +2041,14 @@ class NotificationsUI {
                 };
 
                 this.audioWS.onclose = ( event ) => {
-                    this.log( `Audio WebSocket closed: ${event.code} ${event.reason}` );
+                    this.wsDiag( `Audio WebSocket closed: code=${event.code} reason=${event.reason}` );
                     this.audioWsConnected = false;
                     this.updateStatus( "audio-ws-status", "Disconnected", "error" );
                     this.scheduleReconnect( 'audio' );
                 };
 
                 this.audioWS.onerror = ( error ) => {
-                    this.error( "Audio WebSocket error:", error );
+                    this.wsDiag( `Audio WebSocket error: ${error}` );
                     this.audioWsConnected = false;
                     this.updateStatus( "audio-ws-status", "Error", "error" );
                     reject( error );
@@ -2070,9 +2091,9 @@ class NotificationsUI {
         };
         
         this.queueWS.send( JSON.stringify( authMessage ) );
-        this.log( "Queue WebSocket authentication sent" );
+        this.wsDiag( "Queue WebSocket auth_request sent" );
     }
-    
+
     authenticateAudioWebSocket() {
         const authMessage = {
             type: "auth_request",
@@ -2091,7 +2112,7 @@ class NotificationsUI {
         };
         
         this.audioWS.send( JSON.stringify( authMessage ) );
-        this.log( "Audio WebSocket authentication sent" );
+        this.wsDiag( "Audio WebSocket auth_request sent" );
     }
     
     // ========================================
@@ -2106,20 +2127,22 @@ class NotificationsUI {
             
             switch ( envelope.type ) {
                 case "auth_success":
-                    this.log( `Queue WebSocket authenticated for user: ${envelope.user_id}` );
+                    this.wsDiag( `Queue WebSocket authenticated for user: ${envelope.user_id}` );
+                    this.updateStatus( "queue-ws-status", "Connected", "good" );
                     this.updateStatus( "auth-status", `Authenticated as ${envelope.user_id}`, "good" );
                     this.connectionRetries = 0; // Reset backoff on successful auth
-                    
+
                     // Store the server-provided user ID for notifications
                     this.notificationState.userId = envelope.user_id;
-                    this.log( `Notification state updated with server user ID: ${envelope.user_id}` );
-                    
+                    this.wsDiag( `Notification state updated with server user ID: ${envelope.user_id}` );
+
                     // Load initial data now that we have the correct user ID
                     this.loadInitialData();
                     break;
-                    
+
                 case "auth_error":
-                    this.error( `Queue WebSocket auth failed: ${envelope.message}` );
+                    this.wsDiag( `Queue WebSocket auth FAILED: ${envelope.message}` );
+                    this.updateStatus( "queue-ws-status", "Auth Failed", "error" );
                     this.updateStatus( "auth-status", `Auth failed: ${envelope.message}`, "error" );
 
                     // Attempt token refresh once
@@ -2213,11 +2236,13 @@ class NotificationsUI {
             
             switch ( envelope.type ) {
                 case "auth_success":
-                    this.log( `Audio WebSocket authenticated for user: ${envelope.user_id}` );
+                    this.wsDiag( `Audio WebSocket authenticated for user: ${envelope.user_id}` );
+                    this.updateStatus( "audio-ws-status", "Connected", "good" );
                     break;
-                    
+
                 case "auth_error":
-                    this.error( `Audio WebSocket auth failed: ${envelope.message}` );
+                    this.wsDiag( `Audio WebSocket auth FAILED: ${envelope.message}` );
+                    this.updateStatus( "audio-ws-status", "Auth Failed", "error" );
                     this.updateStatus( "auth-status", "Auth failed", "error" );
 
                     // Audio WebSocket auth error - delegate to queue handler logic
@@ -4857,7 +4882,7 @@ class NotificationsUI {
         const maxDelay = this.connectionRetries > 10 ? 60000 : 30000;
         const delay = Math.min( 1000 * Math.pow( 2, this.connectionRetries ), maxDelay );
 
-        this.log( `Scheduling reconnect attempt #${this.connectionRetries} for ${target} in ${delay}ms` );
+        this.wsDiag( `Scheduling reconnect attempt #${this.connectionRetries} for ${target} in ${delay}ms` );
 
         setTimeout( () => {
             this.isConnecting = true;
@@ -4901,11 +4926,14 @@ class NotificationsUI {
     async updateQueueLists( queueName ) {
         this.log( `Updating queue list for: ${queueName}` );
 
-        // Build URL with user_filter parameter for admins viewing all jobs
+        // Build URL with user_filter parameter for admins viewing filtered jobs
         let url = `/api/get-queue/${queueName}`;
         if ( this.isAdmin && this.queueFilterMode === 'all' ) {
             url += '?user_filter=*';  // Admin viewing all jobs
             this.log( `Admin mode: fetching ALL users' jobs for ${queueName}` );
+        } else if ( this.isAdmin && this.queueFilterMode === 'others' ) {
+            url += '?user_filter=!self';  // Admin viewing other users' jobs only
+            this.log( `Admin mode: fetching OTHER users' jobs for ${queueName}` );
         } else {
             this.log( `Fetching own jobs only for ${queueName}` );
         }
@@ -4978,11 +5006,12 @@ class NotificationsUI {
          *     - Regular users cannot change filter mode (warning logged)
          *     - Admin users can toggle between 'own' and 'all'
          *     - UI buttons update to reflect active mode
+         *     - All three indicator locations update (toolbar, notifications header, queue header)
          *     - Filter preference persists in localStorage
-         *     - All queues refresh with new filter applied
+         *     - All queues refresh and conversation history reloads with new filter applied
          *
          * Args:
-         *     mode: 'own' (user's jobs only) or 'all' (all users' jobs)
+         *     mode: 'own' (user's jobs only), 'others' (not user's jobs), or 'all' (all users' jobs)
          */
         if ( !this.isAdmin ) {
             this.warn( 'Only admin users can change filter mode' );
@@ -4991,18 +5020,66 @@ class NotificationsUI {
 
         this.queueFilterMode = mode;
 
-        // Update UI button states
+        // Mode display config
+        const modeConfig = {
+            own    : { icon: '👤', label: 'Mine',     displayText: 'Your jobs only' },
+            others : { icon: '🚫', label: 'Not Mine', displayText: 'Other users\' jobs' },
+            all    : { icon: '👥', label: 'All Users', displayText: 'All users\' jobs' }
+        };
+
+        const config = modeConfig[ mode ] || modeConfig.own;
+
+        // Update filter panel button states
         document.getElementById( 'filter-own-jobs' ).classList.toggle( 'active', mode === 'own' );
+        const othersBtn = document.getElementById( 'filter-others-jobs' );
+        if ( othersBtn ) othersBtn.classList.toggle( 'active', mode === 'others' );
         document.getElementById( 'filter-all-jobs' ).classList.toggle( 'active', mode === 'all' );
-        document.getElementById( 'filter-mode-display' ).textContent =
-            mode === 'own' ? 'Your jobs only' : 'All users\' jobs';
+        document.getElementById( 'filter-mode-display' ).textContent = config.displayText;
+
+        // Update indicator Location 1: Notifications section header badge
+        const notifBadge = document.getElementById( 'notifications-filter-badge' );
+        if ( notifBadge ) {
+            notifBadge.textContent = `${config.icon} ${config.label}`;
+            notifBadge.setAttribute( 'data-mode', mode );
+        }
+
+        // Update indicator Location 2: Queue section header badge
+        const queueBadge = document.getElementById( 'queues-filter-badge' );
+        if ( queueBadge ) {
+            queueBadge.textContent = `${config.icon} ${config.label}`;
+            queueBadge.setAttribute( 'data-mode', mode );
+        }
 
         // Save preference to localStorage
         localStorage.setItem( this.QUEUE_FILTER_PREF_KEY, mode );
 
-        // Refresh all queues with new filter
-        this.log( `Filter mode changed to: ${mode} - refreshing queues` );
+        // Refresh all queues and reload conversation history with new filter
+        this.log( `Filter mode changed to: ${mode} - refreshing queues and notifications` );
         this.refreshAllQueues();
+        this.clearSenderGroups();  // Clear existing sender cards before reloading with new filter
+        this.loadConversationHistory();
+    }
+
+    showAndScrollToFilterPanel() {
+        /**
+         * Show the filter settings panel and scroll it into view.
+         *
+         * Called when clicking the filter mode badges in section headers.
+         * Ensures the filter panel is visible (removes section-hidden),
+         * activates the toolbar button, and smooth-scrolls to the panel.
+         */
+        const filterSection = document.getElementById( 'filter-settings-section' );
+        const filterBtn = document.querySelector( '.toolbar-btn[data-section="filter-settings-section"]' );
+
+        if ( !filterSection ) return;
+
+        // Show the section if hidden
+        filterSection.classList.remove( 'section-hidden' );
+        if ( filterBtn ) filterBtn.classList.add( 'active' );
+        this.saveSectionVisibility();
+
+        // Scroll to filter panel
+        this.scrollIntoViewIfNeeded( filterSection );
     }
 
     initializeFilterUI() {
@@ -5014,31 +5091,35 @@ class NotificationsUI {
          *     - Filter panel HTML elements exist
          *
          * Ensures:
-         *     - Admin users see filter panel, regular users don't
+         *     - Admin users see filter panel + header badge indicators
          *     - Admin filter preference loaded from localStorage (default: 'own')
-         *     - UI button states match current filter mode
+         *     - UI button states and all indicators match current filter mode
          *     - Filter mode defaulted to 'own' for regular users
          */
-        const filterSection = document.getElementById( 'filter-settings-section' );
+        const filterSection      = document.getElementById( 'filter-settings-section' );
+        const notifFilterBadge   = document.getElementById( 'notifications-filter-badge' );
+        const queuesFilterBadge  = document.getElementById( 'queues-filter-badge' );
 
         if ( this.isAdmin ) {
-            // Show filter panel for admins
+            // Show filter panel and header badges for admins
             filterSection.style.display = 'block';
+            if ( notifFilterBadge )  notifFilterBadge.style.display  = 'inline-flex';
+            if ( queuesFilterBadge ) queuesFilterBadge.style.display = 'inline-flex';
 
             // Load saved preference or default to 'own'
             const savedFilter = localStorage.getItem( this.QUEUE_FILTER_PREF_KEY );
-            this.queueFilterMode = ( savedFilter === 'all' ) ? 'all' : 'own';
+            const validModes = [ 'own', 'others', 'all' ];
+            this.queueFilterMode = validModes.includes( savedFilter ) ? savedFilter : 'own';
 
-            // Update button states
-            document.getElementById( 'filter-own-jobs' ).classList.toggle( 'active', this.queueFilterMode === 'own' );
-            document.getElementById( 'filter-all-jobs' ).classList.toggle( 'active', this.queueFilterMode === 'all' );
-            document.getElementById( 'filter-mode-display' ).textContent =
-                this.queueFilterMode === 'own' ? 'Your jobs only' : 'All users\' jobs';
+            // Use setFilterMode to update both indicator locations consistently
+            this.setFilterMode( this.queueFilterMode );
 
             this.log( `Admin filter UI initialized - mode: ${this.queueFilterMode}` );
         } else {
             // Hide for regular users
             filterSection.style.display = 'none';
+            if ( notifFilterBadge )  notifFilterBadge.style.display  = 'none';
+            if ( queuesFilterBadge ) queuesFilterBadge.style.display = 'none';
             this.queueFilterMode = 'own';  // Force own jobs only
 
             this.log( 'Regular user - filter locked to own jobs' );
@@ -6519,6 +6600,9 @@ class NotificationsUI {
             section.classList.remove( 'section-hidden' );
             btn?.classList.add( 'active' );
             this.log( `Section shown: ${sectionId}` );
+
+            // Scroll the newly-shown section into view
+            this.scrollIntoViewIfNeeded( section );
         }
 
         this.saveSectionVisibility();
@@ -8268,7 +8352,14 @@ class NotificationsUI {
         try {
             // Get list of senders with visible (non-hidden) notifications
             const sendersUrl = `/api/notifications/senders-visible/${encodeURIComponent( this.currentUserEmail )}`;
-            const params = this.historyWindowHours ? `?hours=${this.historyWindowHours}` : '';
+            const queryParams = new URLSearchParams();
+            if ( this.historyWindowHours ) {
+                queryParams.append( 'hours', this.historyWindowHours );
+            }
+            if ( this.isAdmin && this.queueFilterMode === 'others' ) {
+                queryParams.append( 'exclude_own_jobs', 'true' );
+            }
+            const params = queryParams.toString() ? `?${queryParams.toString()}` : '';
 
             const sendersResponse = await fetch( sendersUrl + params, {
                 headers: this.getAuthHeaders()
@@ -9125,6 +9216,9 @@ class NotificationsUI {
             if ( this.historyWindowHours !== null ) {
                 params.append( 'hours', this.historyWindowHours );
             }
+            if ( this.isAdmin && this.queueFilterMode === 'others' ) {
+                params.append( 'exclude_own_jobs', 'true' );
+            }
 
             const url = `/api/notifications/bulk/${encodeURIComponent( this.currentUserEmail )}?${params}`;
             const response = await fetch( url, {
@@ -9316,6 +9410,11 @@ class NotificationsUI {
     error( message, ...args ) {
         console.error( `[Notifications ERROR] ${message}`, ...args );
         this.addDebugMessage( `ERROR: ${message}`, 'error' );
+    }
+
+    wsDiag( message, ...args ) {
+        console.log( `[WS-DIAG] ${message}`, ...args );
+        this.addDebugMessage( `WS-DIAG: ${message}` );
     }
     
     addDebugMessage( message, type = 'info' ) {

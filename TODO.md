@@ -1,6 +1,12 @@
 # TODO
 
-Last updated: 2026-03-14 (Session 362)
+Last updated: 2026-03-23 (Session 367)
+
+## Pending
+
+- [ ] [LUPIN] Phase 1: Create `admin@lupin.deepily.ai` account + update `~/.lupin/config` (manual)
+- [ ] [LUPIN] Phase 6: Clean up existing 1001 `st-*` test notification artifacts (delete or reassign — decide after using filter)
+- [ ] [LUPIN] Run full E2E + integration test suite before merging branch to main
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 

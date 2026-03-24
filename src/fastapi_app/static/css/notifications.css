@@ -57,6 +57,43 @@
             opacity: 0.7;
         }
 
+        /* Filter mode badge (appears in section headers, clickable) */
+        .filter-mode-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+            margin-left: 8px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .filter-mode-badge:hover {
+            opacity: 0.8;
+        }
+
+        .filter-mode-badge[data-mode="own"] {
+            background: #e7f1ff;
+            color: #0056b3;
+            border: 1px solid #b8daff;
+        }
+
+        .filter-mode-badge[data-mode="others"] {
+            background: #fff3e0;
+            color: #e65100;
+            border: 1px solid #ffcc80;
+        }
+
+        .filter-mode-badge[data-mode="all"] {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #a5d6a7;
+        }
+
         /* Hidden section styling */
         .collapsible-section.section-hidden {
             display: none !important;
