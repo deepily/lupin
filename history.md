@@ -44,9 +44,11 @@
 - `src/cosa/rest/routers/system.py` — 4 config key underscore→space fixes
 - `src/cosa/agents/decision_proxy/proxy_decision_embeddings.py` — LanceDB schema mismatch auto-recreate
 
-**Commit 1**: a994446 (Lupin — Bug 1 + Bug 2 partial)
-**Commit 2**: 393ab56 (Lupin — Bug 3 + Bug 4 splainer entries)
-**Commit 3**: pending (Lupin — Bug 4 return_type fix + Bug 5 phantom connection)
+**Design docs serialized**:
+- `src/rnd/2026.03.23-notification-admin-filter-toggle-plan.md` — Admin account + "Not Mine" filter (Session 367 scope)
+- `src/rnd/2026.03.23-cosa-voice-onboarding-bootstrapper.md` — MCP bootstrapper for new repos (future scope)
+
+**Commits**: a994446, 393ab56, e647895, 89cf554, 3195e49
 
 ---
 

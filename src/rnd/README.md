@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.23 - cosa-voice Onboarding Bootstrapper
+- **Design**: [2026.03.23-cosa-voice-onboarding-bootstrapper.md](2026.03.23-cosa-voice-onboarding-bootstrapper.md) - Bootstrapper script (`install-cosa-voice.sh`) for new repos to inherit cosa-voice MCP server access. Generates `.mcp.json`, validates prerequisites (env vars, config, API key), adds startup diagnostics to MCP server, with a pointer from planning-is-prompting's installation guide.
+
 ### 2026.03.23 - Notification Admin Filter Toggle Plan
 - **Plan**: [2026.03.23-notification-admin-filter-toggle-plan.md](2026.03.23-notification-admin-filter-toggle-plan.md) - Create `admin@lupin.deepily.ai` as default notification recipient, add "Not Mine" filter mode to notifications UI (3-way toggle: Own/All/Not Mine), batch delete for filtered notifications, reassign 1001 SWE Team `st-*` dry-run artifacts.
 
