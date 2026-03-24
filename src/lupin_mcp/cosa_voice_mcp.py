@@ -14,22 +14,22 @@ Sender ID Format: claude.code@{project}.deepily.ai#{session_id}
     - Derived from the session bridge (env > file > fallback), shared with hooks
     - A background thread upgrades the ID once the SessionStart hook writes it
 
-Project Detection (automatic):
+Project Detection (automatic — no MCP_PROJECT needed):
     1. Auto-detects from current working directory (checked in order):
        - cosa → "cosa" (checked first - may be submodule of lupin)
        - lupin → "lupin"
        - planning-is-prompting → "plan"
-    2. Falls back to MCP_PROJECT env var if cwd detection fails
-    3. Falls back to "unknown" with console warning if neither works
+       - anything else → CWD basename (works in any repo)
+    2. Falls back to MCP_PROJECT env var if cwd detection raises an exception
+    3. Last resort: uses CWD basename with warning (never crashes)
 
 Environment Variables:
-    MCP_PROJECT: Fallback project name (optional, auto-detection preferred)
+    MCP_PROJECT: Optional override (auto-detection is preferred and sufficient)
     LUPIN_APP_SERVER_URL: Server URL (default: http://localhost:7999)
     MCP_DEBUG: Enable debug logging (optional)
 
-Usage:
-    # One MCP registration works for all projects via auto-detection
-    claude mcp add cosa-voice -- python /path/to/cosa_voice_mcp.py
+Installation (global — one registration for all repos):
+    install-cosa-voice.sh   # registers at user scope via claude mcp add --scope user
 """
 
 import logging
@@ -115,7 +115,8 @@ def _detect_project_from_cwd() -> Optional[ str ]:
         return None
 
 
-_PROJECT_SOURCE = "unknown"  # Set by _get_project(): "known" | "basename" | "env_var"
+_PROJECT_SOURCE    = "unknown"  # Set by _get_project(): "known" | "basename" | "env_var"
+_ACCOUNT_VALIDATED = None       # Set by _validate_repo_account(): True | False | None (not yet checked)
 
 
 def _get_project() -> str:
@@ -154,20 +155,18 @@ def _get_project() -> str:
         logger.info( f"Project from MCP_PROJECT env var: {project.lower()}" )
         return project.lower()
 
-    # Priority 3: Hard failure — refuse to run as "unknown"
-    logger.critical( "=" * 60 )
-    logger.critical( "PROJECT DETECTION FAILED — MCP SERVER CANNOT START" )
-    logger.critical( "=" * 60 )
-    logger.critical( f"Current working directory: {os.getcwd()}" )
-    logger.critical( "Could not detect project from path, and MCP_PROJECT env var not set." )
-    logger.critical( "" )
-    logger.critical( "To fix, either:" )
-    logger.critical( "  1. Run Claude Code from within a known project directory" )
-    logger.critical( "  2. Set MCP_PROJECT in your MCP config's env section:" )
-    logger.critical( '     "env": { "MCP_PROJECT": "your-project-name" }' )
-    logger.critical( "=" * 60 )
+    # Priority 3: Last-resort fallback — use CWD basename with warning
+    fallback = os.path.basename( os.getcwd() ).lower() or "unknown"
+    _PROJECT_SOURCE = "basename"
+    logger.warning( "=" * 60 )
+    logger.warning( f"PROJECT DETECTION FALLBACK — using CWD basename: {fallback}" )
+    logger.warning( "=" * 60 )
+    logger.warning( f"Current working directory: {os.getcwd()}" )
+    logger.warning( "Auto-detection raised an exception, and MCP_PROJECT env var not set." )
+    logger.warning( f"Falling back to basename '{fallback}' — notifications may route incorrectly." )
+    logger.warning( "=" * 60 )
 
-    os._exit( 1 )
+    return fallback
 
 
 def _get_sender_id( project: str, session_id: str = None ) -> str:
@@ -237,6 +236,7 @@ def _validate_repo_account( project: str ) -> None:
         - On success: logs confirmation, returns normally
         - On failure: sends urgent notification, logs critical, returns normally
     """
+    global _ACCOUNT_VALIDATED
     from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
 
     expected_email = f"claude.code@{project}.deepily.ai"
@@ -245,6 +245,7 @@ def _validate_repo_account( project: str ) -> None:
     try:
         email, password = get_hook_credentials( project )
     except ( FileNotFoundError, ValueError ) as e:
+        _ACCOUNT_VALIDATED = False
         _send_validation_error(
             f"No credentials for project '{project}'.\n{e}\n\n"
             f"To fix:\n"
@@ -267,6 +268,7 @@ def _validate_repo_account( project: str ) -> None:
             timeout=5
         )
         if resp.status_code != 200:
+            _ACCOUNT_VALIDATED = False
             _send_validation_error(
                 f"Login failed for {email} (HTTP {resp.status_code}).\n"
                 f"Account may not exist or may be disabled.\n\n"
@@ -277,12 +279,14 @@ def _validate_repo_account( project: str ) -> None:
             )
             return
     except requests.ConnectionError:
+        _ACCOUNT_VALIDATED = False
         _send_validation_error(
             f"Cannot reach Lupin server at {SERVER_URL}.\n"
             f"Ensure FastAPI is running: src/scripts/run-fastapi-lupin.sh"
         )
         return
 
+    _ACCOUNT_VALIDATED = True
     logger.info( f"Repo account validated: {email}" )
 
 
@@ -309,13 +313,26 @@ SERVER_URL      = _get_server_url()
 _session_ready  = threading.Event()   # Gate: blocks tool calls until session ID resolved
 _session_failed = False               # True if real ID never arrived (fallback only)
 
-logger.info( f"Project: {PROJECT} (source: {_PROJECT_SOURCE})" )
-logger.info( f"Session ID: {SESSION_ID}" )
-logger.info( f"Sender ID: {SENDER_ID}" )
-logger.info( f"Server URL: {SERVER_URL}" )
-
 # Validate repo service account (non-blocking — logs + notifies on failure)
 _validate_repo_account( PROJECT )
+
+# ── Startup banner (consolidated status to stderr) ──────────────────────
+_account_status = "validated" if _ACCOUNT_VALIDATED else "FAILED" if _ACCOUNT_VALIDATED is False else "skipped"
+_banner_lines   = [
+    "",
+    "=" * 42,
+    f"  cosa-voice MCP v{__version__} — Runtime",
+    "=" * 42,
+    f"  Project : {PROJECT} ({_PROJECT_SOURCE})",
+    f"  Session : {SESSION_ID}",
+    f"  Sender  : {SENDER_ID}",
+    f"  Server  : {SERVER_URL}",
+    f"  Account : {_account_status}",
+    "=" * 42,
+    "",
+]
+for _line in _banner_lines:
+    logger.info( _line )
 
 
 def _session_watcher_thread():

@@ -5,6 +5,7 @@
 - Run GUI client: `src/scripts/run-lupin-gui.sh`
 - Docker build: `docker build -f docker/lupin/Dockerfile .`
 - Run GSM8K benchmarks: `src/scripts/run-gsm8k.sh --help`
+- Install cosa-voice MCP (global): `src/scripts/install-cosa-voice.sh` (user scope, all repos)
 
 ## CLAUDE CODE SLASH COMMANDS
 - `/smoke-test-baseline [scope]` - Establish comprehensive baseline before changes
