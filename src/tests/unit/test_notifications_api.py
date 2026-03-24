@@ -82,6 +82,7 @@ class TestNotifyFireAndForget:
         mock_ws_instance.get_user_connection_count.return_value = 1
         mock_ws_instance.user_sessions = { "550e8400-e29b-41d4-a716-446655440000": [ "session-1" ] }
         mock_ws_instance.active_connections = { "session-1": Mock() }
+        mock_ws_instance.user_to_email = { "550e8400-e29b-41d4-a716-446655440000": "test@example.com" }
 
         mock_queue_instance = Mock()
         mock_queue_instance.push_notification.return_value = {"id": "notif-123"}
@@ -149,6 +150,7 @@ class TestNotifyFireAndForget:
         mock_ws_instance.get_user_connection_count.return_value = 0
         mock_ws_instance.user_sessions = {}
         mock_ws_instance.active_connections = {}
+        mock_ws_instance.user_to_email = {}
 
         mock_queue_instance = Mock()
         mock_queue_instance.push_notification.return_value = {"id": "notif-123"}
@@ -281,6 +283,7 @@ class TestNotifyResponseRequired:
         mock_ws_instance.get_user_connection_count.return_value = 0
         mock_ws_instance.user_sessions = {}
         mock_ws_instance.active_connections = {}
+        mock_ws_instance.user_to_email = {}
 
         mock_queue_instance = Mock()
 
@@ -349,6 +352,7 @@ class TestNotifyResponseRequired:
         mock_ws_instance.get_user_connection_count.return_value = 0
         mock_ws_instance.user_sessions = {}
         mock_ws_instance.active_connections = {}
+        mock_ws_instance.user_to_email = {}
 
         mock_queue_instance = Mock()
 
@@ -415,6 +419,7 @@ class TestNotifyResponseRequired:
         mock_ws_instance.get_user_connection_count.return_value = 0
         mock_ws_instance.user_sessions = {}
         mock_ws_instance.active_connections = {}
+        mock_ws_instance.user_to_email = {}
 
         mock_queue_instance = Mock()
 

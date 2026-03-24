@@ -1,5 +1,30 @@
 # Lupin Project History
 
+### 2026.03.23 - Session 368 | Bug Fix: WebSocket 503 "user_not_available" Notifications
+
+**Accomplishments**:
+- Diagnosed and partially fixed recurring 503/user_not_available notification delivery failures
+- **Root cause identified**: Audio WebSocket endpoint (`/ws/audio/{session_id}`) connects WITHOUT user authentication, leaving sessions in `active_connections` but not `user_sessions`. After hot reloads, only the audio WS reconnects (no auth needed), creating "ghost" connections with no user mapping.
+- **Diagnostic infrastructure added**: Always-on `[NOTIFY] ⚠️ OFFLINE DIAG` dump on server when user offline, `[WS-DIAG]` filterable prefix for browser console, `[WS] STATE after connect/disconnect` summary logs
+- **Browser UI fix**: "Connected" status now only shown after auth_success (was shown on TCP open, misleading during hot reloads)
+- **Audio WS auth handler added**: Audio endpoint now processes `auth_request` messages (mirrors queue endpoint), providing redundant user registration in `user_sessions`
+- **Status**: Fix applied but not yet verified working — needs further debugging next session
+
+**Files Modified (Lupin — 3 files)**:
+- `src/cosa/rest/routers/notifications.py` — Added ungated OFFLINE DIAG dump (~10 lines)
+- `src/fastapi_app/static/js/notifications.js` — Truthful Connected status, `wsDiag()` method, `[WS-DIAG]` prefix (~20 lines)
+- `src/tests/unit/test_notifications_api.py` — Added `user_to_email = {}` to mock fixtures (5 occurrences)
+
+**Files Modified (CoSA — 2 files)**:
+- `src/cosa/rest/websocket_manager.py` — Added `[WS] STATE` summary logs after connect/disconnect
+- `src/cosa/rest/routers/websocket.py` — Added auth_request handler to audio WS endpoint (~40 lines)
+
+**Test Results**: 2151 passed (11 notification API tests pass), 6 pre-existing failures (cosa_voice_mcp SyntaxError from parallel session)
+
+**Plan doc**: `~/.claude/plans/bubbly-churning-donut.md`
+
+---
+
 ### 2026.03.23 - Session 367d | CJ Flow Persistence — Phases 3-5 (Write-Through + Recovery + API + Tests)
 
 **Accomplishments**:
