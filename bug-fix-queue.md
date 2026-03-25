@@ -39,7 +39,7 @@
 | cd0fd61a | 2026-03-23T16:30:00 | 2026-03-23T17:00:00 | committed |
 | 0015f34e | 2026-03-24T12:00:00 | 2026-03-24T12:15:00 | committed |
 | f52e3261 | 2026-03-24T15:00:00 | 2026-03-24T15:30:00 | committed |
-| 1e9b946f | 2026-03-25T13:00:00 | 2026-03-25T13:30:00 | active |
+| 1e9b946f | 2026-03-25T13:00:00 | 2026-03-25T13:30:00 | committed |
 
 ---
 
@@ -67,7 +67,7 @@
 
 ### Completed
 
-- [x] **set_session_topic() not propagating to notification UI header** → pending commit | By: 1e9b946f (Session 372b)
+- [x] **set_session_topic() not propagating to notification UI header** → commit: f2420ed (Lupin), CoSA pending | By: 1e9b946f (Session 372b)
   - **Symptom**: MCP `set_session_topic()` writes to bridge file but UI `sender-session-name` span never updates
   - **Root Cause**: `session_name` field existed in model but server pipeline never plumbed it through `/api/notify` → `NotificationItem` → WebSocket
   - **Fix**: Added `SESSION_TOPIC` notification type, plumbed `session_name` through full pipeline, frontend intercept with anti-feedback

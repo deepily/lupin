@@ -23,6 +23,7 @@
 - `src/fastapi_app/static/js/notifications.js` (Lupin — intercept + anti-feedback)
 
 **Plan doc**: `~/.claude/plans/wondrous-twirling-sprout.md`
+**Commit**: f2420ed (Lupin), CoSA pending
 
 ---
 
