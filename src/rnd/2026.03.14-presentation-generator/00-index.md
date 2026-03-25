@@ -13,15 +13,16 @@
 | 01 | [Strategy & Design](01-strategy-and-design.md) | Presentation design theory, narrative arc decomposition, structural decisions, theme/visual architecture | Complete |
 | 02 | [Implementation Plan](02-implementation-plan.md) | Phase-by-phase implementation breakdown with tasks, file lists, dependencies | Complete |
 | 03 | [Implementation Tracking](03-implementation-tracking.md) | Phase/task completion tracking with checkboxes | Active |
+| 04 | [Phase 3 Implementation Plan](04-phase-3-implementation-plan.md) | Expeditor integration + Ingest + Narrative Analysis + Gate 1 | Active |
 
 ## Future Documents (Added as Work Progresses)
 
 | # | Document | Purpose | Status |
 |---|----------|---------|--------|
-| 04 | Theme Template Spec | Theme YAML schema, examples, default theme | Planned |
-| 05 | Visual Renderer Protocol | Renderer interface specification, registry design | Planned |
-| 06 | Prompt Engineering | LLM prompts for narrative extraction, title generation, elaboration | Planned |
-| 07 | Lessons Learned | Post-implementation notes, design pivots, gotchas | Planned |
+| 05 | Theme Template Spec | Theme YAML schema, examples, default theme | Planned |
+| 06 | Visual Renderer Protocol | Renderer interface specification, registry design | Planned |
+| 07 | Prompt Engineering | LLM prompts for narrative extraction, title generation, elaboration | Planned |
+| 08 | Lessons Learned | Post-implementation notes, design pivots, gotchas | Planned |
 
 ## Architecture Summary
 

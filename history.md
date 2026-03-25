@@ -1,5 +1,41 @@
 # Lupin Project History
 
+### 2026.03.24 - Session 370 | Presentation Generator Phase 3 — Expeditor + Ingest + Narrative Analysis
+
+**Accomplishments**:
+- **Runtime Argument Expeditor integration**: Full CLI entry point (`__main__.py` rewrite) with `--user-visible-args` protocol, registry entry in `agent_registry.py` (6 agents), `audience_context` added to job/factory/config, product name "SlideCraft" in disambiguation UI
+- **Content ingestion** (`_ingest_async()`): Markdown section parser (heading-boundary splitting with level tracking, frontmatter stripping), plain text paragraph parser, format auto-detection
+- **Claude API client** (`api_client.py`): Firewalled API key pattern, `AsyncAnthropic` with exponential backoff retry, per-request cost tracking (Opus/Sonnet pricing), 3 call methods (analysis, outline, elaboration)
+- **Narrative analysis prompts** (`prompts/narrative.py`): System prompt for arc position classification (setup/argument/evidence/transition/conclusion/cta), prompt builder with slide budget calculation, JSON response parser with validation and fallback
+- **Orchestrator Phase 2** (`_analyze_async()`): Claude call → parse → `NarrativeSection` model conversion, slide budget comparison, state management
+- **Gate 1 voice review** (`_gate_1_narrative_review()`): Approve/Revise/Cancel via `present_choices()`, revision loop with feedback collection, max revision tracking
+- **100 unit tests** across 3 test files, plus 3 regression fixes (registry count, product names, proxy profiles)
+- **Agentic voice workflow doc**: Added Expeditor concept section explaining gap analysis → collection → confirmation pipeline
+
+**Files Created (4 new)**:
+- `src/cosa/agents/presentation_generator/api_client.py`
+- `src/cosa/agents/presentation_generator/prompts/narrative.py`
+- `src/tests/unit/test_presentation_api_client.py`
+- `src/tests/unit/test_presentation_prompts.py`
+
+**Files Modified (10)**:
+- `src/cosa/agents/presentation_generator/__main__.py` (rewrite)
+- `src/cosa/agents/presentation_generator/orchestrator.py` (+ingest, analyze, gate 1)
+- `src/cosa/agents/presentation_generator/job.py` (+audience_context)
+- `src/cosa/agents/presentation_generator/state.py` (+source_format, raw_sections, word_count)
+- `src/cosa/agents/runtime_argument_expeditor/agent_registry.py` (+presentation generator entry)
+- `src/cosa/rest/agentic_job_factory.py` (+audience_context)
+- `src/cosa/rest/todo_fifo_queue.py` (+SlideCraft product name)
+- `src/cosa/agents/notification_proxy/config.py` (+source, target_duration_minutes, theme)
+- `src/tests/unit/test_presentation_generator_job.py` (+21 tests)
+- `src/tests/unit/test_runtime_argument_expeditor.py` (6 agents assertion)
+- `src/workflow/agentic-voice-workflow.md` (+Expeditor concept section)
+
+**Docs Created (1)**:
+- `src/rnd/2026.03.14-presentation-generator/04-phase-3-implementation-plan.md`
+
+**Test Results**: 100/100 presentation generator tests pass, 2229/2231 full unit suite (2 pre-existing stop hook failures)
+
 ### 2026.03.24 - Session 369b | Feature: Session Topic Context for Stop Hook Notifications
 
 **Accomplishments**:

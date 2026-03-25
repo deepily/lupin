@@ -1,7 +1,7 @@
 # Presentation Generator Agent — Implementation Tracking
 
 **Created**: 2026-03-14
-**Last Updated**: 2026-03-23
+**Last Updated**: 2026-03-24
 
 ---
 
@@ -45,14 +45,15 @@
 
 | # | Task | Status |
 |---|------|--------|
-| 3.1 | Implement `api_client.py` | Pending |
-| 3.2 | Implement Phase 1: Ingest | Pending |
-| 3.3 | Write narrative extraction prompts | Pending |
-| 3.4 | Implement Phase 2: Analyze | Pending |
-| 3.5 | Implement Gate 1 checkpoint | Pending |
-| 3.6 | Write unit tests | Pending |
+| 3.0 | Expeditor integration (CLI `__main__.py` + registry + factory `audience_context`) | Done |
+| 3.1 | Implement `api_client.py` | Done |
+| 3.2 | Implement Phase 1: Ingest | Done |
+| 3.3 | Write narrative extraction prompts | Done |
+| 3.4 | Implement Phase 2: Analyze | Done |
+| 3.5 | Implement Gate 1 checkpoint | Done |
+| 3.6 | Write unit tests (100 tests across 3 files) | Done |
 
-**Phase 3 Status**: Pending
+**Phase 3 Status**: Done (Session 370)
 
 ---
 
@@ -138,10 +139,10 @@
 |-------|-------------|-------|------|--------|
 | 1 | Foundation | 11 | 11 | Done |
 | 2 | State Models & Orchestrator | 7 | 7 | Done |
-| 3 | Ingest & Analyze | 6 | 0 | Pending |
+| 3 | Ingest & Analyze | 7 | 7 | Done |
 | 4 | Outline & Elaborate | 7 | 0 | Pending |
 | 5 | Serialize | 5 | 0 | Pending |
 | 6 | Marp Rendering | 6 | 0 | Pending |
 | 7 | Visual Rendering | 7 | 0 | Pending |
 | 8 | Delivery & Chaining | 6 | 0 | Pending |
-| **Total** | | **55** | **18** | **In Progress** |
+| **Total** | | **56** | **25** | **In Progress** |

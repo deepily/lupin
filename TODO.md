@@ -1,9 +1,11 @@
 # TODO
 
-Last updated: 2026-03-24 (Session 369b)
+Last updated: 2026-03-24 (Session 370)
 
 ## Pending
 
+- [ ] [LUPIN] Presentation Generator Phase 4: Outline & Elaborate — next implementation phase after Phase 3 (ingest + analyze)
+- [ ] [LUPIN] Presentation Generator: Wire `fuzzy_file_match` special handler to search 3 paths (`io/deep-research/{user}/`, `src/rnd/`, `src/docs/`) — handler logic exists but search paths not yet configured
 - [ ] [LUPIN] **Bug Fix: WebSocket 503 "user_not_available" — audio WS auth fix not yet working.** Root cause confirmed: audio WS endpoint connects without user auth, so after hot reloads only a "ghost" connection (in `active_connections` but not `user_sessions`) remains. Fix added auth_request handling to audio endpoint (`websocket.py:205-260`) but needs further debugging — test notification still failed. Diagnostic infrastructure in place (`[NOTIFY] ⚠️ OFFLINE DIAG`, `[WS-DIAG]` browser prefix, `[WS] STATE` logs). Plan doc: `~/.claude/plans/bubbly-churning-donut.md`
 - [ ] [LUPIN] Phase 1: Create `admin@lupin.deepily.ai` account + update `~/.lupin/config` (manual)
 - [ ] [LUPIN] Phase 6: Clean up existing 1001 `st-*` test notification artifacts (delete or reassign — decide after using filter)

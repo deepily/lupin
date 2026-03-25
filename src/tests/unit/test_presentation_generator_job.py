@@ -394,7 +394,8 @@ class TestCreateInitialState:
         """create_initial_state includes all expected keys."""
         state = create_initial_state( "/test", "u" )
         expected_keys = {
-            "source_path", "source_content", "narrative_sections",
+            "source_path", "source_content", "source_format", "raw_sections",
+            "word_count", "narrative_sections",
             "slide_outline", "elaborated_slides", "presentation_model",
             "yaml_path", "marp_path", "revision_count", "human_feedback", "user_id"
         }
@@ -476,3 +477,270 @@ class TestPresentationOrchestratorAgent:
         assert agent.metrics[ "start_time" ] is None
         assert agent.metrics[ "end_time" ] is None
         assert agent.metrics[ "api_calls" ] == 0
+
+
+# =============================================================================
+# Runtime Argument Expeditor Integration Tests
+# =============================================================================
+
+class TestExpeditorIntegration:
+    """Tests for Runtime Argument Expeditor integration."""
+
+    def test_user_visible_args_protocol( self ):
+        """--user-visible-args returns correct JSON list via CLI."""
+        import subprocess
+        import sys
+        import json
+
+        result = subprocess.run(
+            [ sys.executable, "-m", "cosa.agents.presentation_generator", "--user-visible-args" ],
+            capture_output = True,
+            text           = True,
+            timeout        = 10
+        )
+        assert result.returncode == 0
+        args_list = json.loads( result.stdout.strip() )
+        assert args_list == [ "source", "target_duration_minutes", "audience", "audience_context", "theme" ]
+
+    def test_registry_entry_exists( self ):
+        """Presentation generator is registered in AGENTIC_AGENTS."""
+        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+
+        entry = AGENTIC_AGENTS.get( "agent router go to presentation generator" )
+        assert entry is not None
+        assert entry[ "job_prefix" ] == "pr"
+        assert entry[ "display_name" ] == "Presentation Generator"
+
+    def test_registry_entry_required_keys( self ):
+        """Registry entry has all required keys."""
+        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+
+        entry = AGENTIC_AGENTS[ "agent router go to presentation generator" ]
+        required_keys = {
+            "job_prefix", "cli_module", "job_class_path", "display_name",
+            "required_user_args", "system_provided", "arg_mapping",
+            "fallback_questions", "fallback_defaults"
+        }
+        assert required_keys.issubset( set( entry.keys() ) )
+
+    def test_registry_required_user_args( self ):
+        """Only 'source' is a required user arg."""
+        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+
+        entry = AGENTIC_AGENTS[ "agent router go to presentation generator" ]
+        assert entry[ "required_user_args" ] == [ "source" ]
+
+    def test_registry_special_handlers( self ):
+        """Source arg uses fuzzy_file_match handler."""
+        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+
+        entry = AGENTIC_AGENTS[ "agent router go to presentation generator" ]
+        assert "special_handlers" in entry
+        assert entry[ "special_handlers" ][ "source" ] == "fuzzy_file_match"
+
+    def test_registry_arg_mapping_aliases( self ):
+        """Arg mapping includes common voice aliases for source."""
+        from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
+
+        mapping = AGENTIC_AGENTS[ "agent router go to presentation generator" ][ "arg_mapping" ]
+        # All these voice aliases should map to "source"
+        for alias in [ "source", "source_path", "document", "file", "doc" ]:
+            assert mapping[ alias ] == "source", f"Alias '{alias}' should map to 'source'"
+
+    def test_factory_creates_job_from_expeditor_args( self ):
+        """Factory creates PresentationGeneratorJob from expeditor-style args_dict."""
+        from cosa.rest.agentic_job_factory import create_agentic_job
+
+        job = create_agentic_job(
+            command    = "agent router go to presentation generator",
+            args_dict  = {
+                "source"                  : "/io/deep-research/test@test.com/test.md",
+                "target_duration_minutes" : "20",
+                "audience"                : "expert",
+                "audience_context"        : "ML engineers familiar with transformers",
+                "theme"                   : "default",
+            },
+            user_id    = "user123",
+            user_email = "test@test.com",
+            session_id = "wise-penguin"
+        )
+        assert job is not None
+        assert isinstance( job, PresentationGeneratorJob )
+        assert job.source_path == "/io/deep-research/test@test.com/test.md"
+        assert job.target_duration_minutes == 20
+        assert job.audience == "expert"
+        assert job.audience_context == "ML engineers familiar with transformers"
+        assert job.theme == "default"
+
+    def test_factory_handles_semantic_none_values( self ):
+        """Factory treats 'default' and 'none' as None for optional int args."""
+        from cosa.rest.agentic_job_factory import create_agentic_job
+
+        job = create_agentic_job(
+            command    = "agent router go to presentation generator",
+            args_dict  = {
+                "source"                  : "/test.md",
+                "target_duration_minutes" : "default",
+                "audience_context"        : "none",
+            },
+            user_id    = "u1",
+            user_email = "u@e.com",
+            session_id = "s1"
+        )
+        assert job is not None
+        assert job.target_duration_minutes is None  # "default" → None
+
+    def test_job_accepts_audience_context( self ):
+        """PresentationGeneratorJob constructor accepts audience_context."""
+        job = PresentationGeneratorJob(
+            source_path      = "/test.md",
+            user_id          = "u1",
+            user_email       = "u@e.com",
+            session_id       = "s1",
+            audience_context = "Data scientists with Python experience"
+        )
+        assert job.audience_context == "Data scientists with Python experience"
+
+    def test_job_audience_context_default_none( self ):
+        """audience_context defaults to None when not provided."""
+        job = PresentationGeneratorJob(
+            source_path = "/test.md",
+            user_id     = "u1",
+            user_email  = "u@e.com",
+            session_id  = "s1"
+        )
+        assert job.audience_context is None
+
+
+# =============================================================================
+# Content Ingestion Tests (Phase 1: Ingest)
+# =============================================================================
+
+class TestMarkdownParsing:
+    """Tests for _parse_markdown_sections() and related helpers."""
+
+    def test_parse_markdown_with_headings( self ):
+        """Markdown with ## headings splits into sections."""
+        content = """# Title
+
+Intro paragraph.
+
+## Section One
+
+Content of section one.
+
+## Section Two
+
+Content of section two.
+
+### Sub-Section
+
+Sub-section content.
+"""
+        sections = PresentationOrchestratorAgent._parse_markdown_sections( content )
+        # Should have: Title (H1), Section One (H2), Section Two (H2), Sub-Section (H3)
+        assert len( sections ) == 4
+        assert sections[ 0 ][ 0 ] == "Title"
+        assert sections[ 0 ][ 2 ] == 1  # H1
+        assert sections[ 1 ][ 0 ] == "Section One"
+        assert sections[ 1 ][ 2 ] == 2  # H2
+        assert "Content of section one" in sections[ 1 ][ 1 ]
+        assert sections[ 3 ][ 0 ] == "Sub-Section"
+        assert sections[ 3 ][ 2 ] == 3  # H3
+
+    def test_parse_markdown_no_headings( self ):
+        """Markdown without headings returns single untitled section."""
+        content = "Just some plain text without any headings.\n\nAnother paragraph."
+        sections = PresentationOrchestratorAgent._parse_markdown_sections( content )
+        assert len( sections ) == 1
+        assert sections[ 0 ][ 0 ] == "(untitled)"
+        assert "plain text" in sections[ 0 ][ 1 ]
+
+    def test_parse_markdown_with_frontmatter( self ):
+        """YAML frontmatter at start of file is stripped."""
+        content = """---
+title: My Document
+date: 2026-03-24
+---
+
+## Real Content
+
+The actual document content.
+"""
+        sections = PresentationOrchestratorAgent._parse_markdown_sections( content )
+        assert len( sections ) == 1
+        assert sections[ 0 ][ 0 ] == "Real Content"
+        assert "actual document content" in sections[ 0 ][ 1 ]
+
+    def test_parse_markdown_preamble_before_first_heading( self ):
+        """Content before the first heading becomes a preamble section."""
+        content = """This is a preamble paragraph.
+
+## First Heading
+
+Heading content.
+"""
+        sections = PresentationOrchestratorAgent._parse_markdown_sections( content )
+        assert len( sections ) == 2
+        assert sections[ 0 ][ 0 ] == "(preamble)"
+        assert "preamble paragraph" in sections[ 0 ][ 1 ]
+        assert sections[ 1 ][ 0 ] == "First Heading"
+
+    def test_parse_markdown_empty_sections( self ):
+        """Empty body between headings produces empty string."""
+        content = """## Heading A
+
+## Heading B
+
+Content B.
+"""
+        sections = PresentationOrchestratorAgent._parse_markdown_sections( content )
+        assert len( sections ) == 2
+        assert sections[ 0 ][ 0 ] == "Heading A"
+        assert sections[ 0 ][ 1 ] == ""  # Empty body
+        assert sections[ 1 ][ 0 ] == "Heading B"
+        assert "Content B" in sections[ 1 ][ 1 ]
+
+
+class TestPlaintextParsing:
+    """Tests for _parse_plaintext_sections()."""
+
+    def test_parse_plaintext_paragraphs( self ):
+        """Plain text splits into sections by double newlines."""
+        content = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."
+        sections = PresentationOrchestratorAgent._parse_plaintext_sections( content )
+        assert len( sections ) == 3
+        assert sections[ 0 ][ 0 ] == "Section 1"
+        assert sections[ 0 ][ 1 ] == "First paragraph."
+        assert sections[ 2 ][ 0 ] == "Section 3"
+
+    def test_parse_plaintext_single_block( self ):
+        """Single block without double newlines returns one section."""
+        content = "Just one continuous block of text."
+        sections = PresentationOrchestratorAgent._parse_plaintext_sections( content )
+        assert len( sections ) == 1
+
+    def test_parse_plaintext_empty( self ):
+        """Empty content returns single empty section."""
+        sections = PresentationOrchestratorAgent._parse_plaintext_sections( "" )
+        assert len( sections ) == 1
+        assert sections[ 0 ][ 0 ] == "(empty)"
+
+
+class TestFormatDetection:
+    """Tests for _detect_format()."""
+
+    def test_detects_markdown( self ):
+        """Content with multiple markdown indicators detected as markdown."""
+        content = "# Title\n\nSome text with **bold** and a [link](http://example.com).\n\n- Bullet item"
+        assert PresentationOrchestratorAgent._detect_format( content ) == "markdown"
+
+    def test_detects_plaintext( self ):
+        """Content without markdown indicators detected as plaintext."""
+        content = "This is just a normal paragraph.\n\nAnother paragraph without special formatting."
+        assert PresentationOrchestratorAgent._detect_format( content ) == "plaintext"
+
+    def test_single_indicator_not_enough( self ):
+        """Single markdown indicator alone isn't enough (need >= 2)."""
+        content = "# Just a heading\n\nBut nothing else special about this text."
+        assert PresentationOrchestratorAgent._detect_format( content ) == "plaintext"

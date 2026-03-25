@@ -14,6 +14,7 @@
 - [Part I: CONCEPT](#part-i-concept)
   - [Why Agentic Jobs Exist](#why-agentic-jobs-exist)
   - [Architecture Overview](#architecture-overview)
+  - [The Runtime Argument Expeditor](#the-runtime-argument-expeditor)
   - [Agentic Jobs vs Traditional Agents](#agentic-jobs-vs-traditional-agents)
   - [When to Use Agentic Jobs](#when-to-use-agentic-jobs)
   - [Decision Checklist](#decision-checklist)
@@ -111,6 +112,26 @@ tasks need a fundamentally different execution model.
 **Key flow**: User submits via browser or CLI → FastAPI router receives request → Expeditor
 parses arguments → Factory creates the right Job subclass → Queue manages lifecycle (todo → run →
 done) → Job's `do_all()` runs the Orchestrator → Voice notifications keep user informed throughout.
+
+## The Runtime Argument Expeditor
+
+The **Runtime Argument Expeditor** bridges the gap between a natural-language voice command and the structured arguments an agentic job needs to start.
+
+When a user says *"make me a podcast about quantum computing"*, the voice pipeline (ASR → LORA router) identifies the command (`agent router go to podcast generator`) and extracts raw arguments. But the job constructor may need additional parameters — research file path, target audience, languages. The Expeditor's role is to:
+
+1. **Gap Analysis**: Compare extracted args against the agent's required + optional arg list (defined in `agent_registry.py`)
+2. **Collection**: For each missing arg, prompt the user via voice — either one-by-one or as a batch form
+3. **Confirmation**: Present the full arg set for user review, allowing tweaks or approval
+4. **Injection**: Add system-provided args (user_email, session_id) that the user never sees
+
+Without Expeditor registration, an agent **cannot be invoked via voice commands** — only via direct REST API calls. This makes it a mandatory integration step for any agent that participates in the voice-first UX.
+
+**Key files**:
+- `src/cosa/agents/runtime_argument_expeditor/agent_registry.py` — Agent registry with arg specs
+- `src/cosa/agents/runtime_argument_expeditor/expeditor.py` — Gap analysis + collection logic
+- `src/cosa/rest/agentic_job_factory.py` — `args_dict` → Job constructor mapping
+
+See [Expeditor Registration](#expeditor-registration-agent_registrypy) in Part II for the how-to.
 
 ## Agentic Jobs vs Traditional Agents
 
