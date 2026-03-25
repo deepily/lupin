@@ -1,14 +1,18 @@
 # TODO
 
-Last updated: 2026-03-24 (Session 370)
+Last updated: 2026-03-24 (Session 371)
 
 ## Pending
 
-- [ ] [LUPIN] Presentation Generator Phase 4: Outline & Elaborate — next implementation phase after Phase 3 (ingest + analyze)
-- [ ] [LUPIN] Presentation Generator: Wire `fuzzy_file_match` special handler to search 3 paths (`io/deep-research/{user}/`, `src/rnd/`, `src/docs/`) — handler logic exists but search paths not yet configured
-- [ ] [LUPIN] **Bug Fix: WebSocket 503 "user_not_available" — audio WS auth fix not yet working.** Root cause confirmed: audio WS endpoint connects without user auth, so after hot reloads only a "ghost" connection (in `active_connections` but not `user_sessions`) remains. Fix added auth_request handling to audio endpoint (`websocket.py:205-260`) but needs further debugging — test notification still failed. Diagnostic infrastructure in place (`[NOTIFY] ⚠️ OFFLINE DIAG`, `[WS-DIAG]` browser prefix, `[WS] STATE` logs). Plan doc: `~/.claude/plans/bubbly-churning-donut.md`
+- [ ] [LUPIN] Presentation Generator Phases C-D verification: UI dry-run submission via CJ Flow queue card, then live E2E with real Claude calls. Plan doc: `src/rnd/2026.03.14-presentation-generator/06-phase-4-5-verification-plan.md`
+- [ ] [LUPIN] Presentation Generator Phase 6: Marp Text Rendering — YAML → Marp Markdown with theme application (6 tasks)
+- [x] [LUPIN] Presentation Generator Phase 4: Outline & Elaborate — Session 371: 7/7 tasks, 94 new tests
+- [x] [LUPIN] Presentation Generator Phase 5: Serialize — Session 371: 5/5 tasks, 17 new tests
+- [x] [LUPIN] Presentation Generator: Wire `fuzzy_file_match` special handler — Session 371: already wired, added presentation-specific config key
+- [x] [LUPIN] **Bug Fix: WebSocket 503 "user_not_available" — audio WS auth fix not yet working.** Root cause confirmed: audio WS endpoint connects without user auth, so after hot reloads only a "ghost" connection (in `active_connections` but not `user_sessions`) remains. Fix added auth_request handling to audio endpoint (`websocket.py:205-260`) but needs further debugging — test notification still failed. Diagnostic infrastructure in place (`[NOTIFY] ⚠️ OFFLINE DIAG`, `[WS-DIAG]` browser prefix, `[WS] STATE` logs). Plan doc: `~/.claude/plans/bubbly-churning-donut.md` — **Fixed Session 371**
 - [ ] [LUPIN] Phase 1: Create `admin@lupin.deepily.ai` account + update `~/.lupin/config` (manual)
-- [ ] [LUPIN] Phase 6: Clean up existing 1001 `st-*` test notification artifacts (delete or reassign — decide after using filter)
+- [ ] [LUPIN] **CJ Flow Persistence Phase 6: Job History UI** — Frontend & management for persisted job history. Two-tier approach: (1) recent history in notifications UI alongside live queue, (2) dedicated history page for older artifacts with search/filter/management. Design discussion started Session 370, paused on notification integration pattern (new section vs modify done/dead vs hybrid). Resume design questions next session. Plan doc: `src/rnd/2026.03.13-cj-flow-persistence-plan.md` (Phase 6 section)
+- [x] [LUPIN] Phase 6 cleanup: Clean up existing 1001 `st-*` test notification artifacts (delete or reassign — decide after using filter) — **Fixed Session 371**
 - [ ] [LUPIN] Run full E2E + integration test suite before merging branch to main
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)

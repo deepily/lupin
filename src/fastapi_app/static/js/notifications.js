@@ -149,10 +149,11 @@ class NotificationsUI {
         // ========================================
         // State management for expandable queue categories and job cards
         this.queueCategoryState = {
-            todo : { expanded: false, loaded: false, jobs: [] },
-            run  : { expanded: false, loaded: false, jobs: [] },
-            done : { expanded: false, loaded: false, jobs: [] },
-            dead : { expanded: false, loaded: false, jobs: [] }
+            todo    : { expanded: false, loaded: false, jobs: [] },
+            run     : { expanded: false, loaded: false, jobs: [] },
+            done    : { expanded: false, loaded: false, jobs: [] },
+            dead    : { expanded: false, loaded: false, jobs: [] },
+            history : { expanded: false, loaded: false, jobs: [], offset: 0, total: 0, timeWindow: 30 }
         };
         this.expandedJobCards = new Set();         // Track which job cards are expanded
         this.jobInteractionsCache = new Map();     // Cache loaded interactions: job_id → interactions[]
@@ -2059,7 +2060,10 @@ class NotificationsUI {
                 
                 // Set timeout for connection
                 setTimeout( () => {
-                    if ( this.audioWS.readyState !== WebSocket.OPEN ) {
+                    if ( this.audioWS && this.audioWS.readyState !== WebSocket.OPEN ) {
+                        this.audioWsConnected = false;
+                        this.updateStatus( "audio-ws-status", "Timeout", "error" );
+                        try { this.audioWS.close(); } catch ( e ) { /* ignore close errors */ }
                         reject( new Error( "Audio WebSocket connection timeout" ) );
                     }
                 }, 10000 );
@@ -5135,18 +5139,26 @@ class NotificationsUI {
          *     - Authentication complete
          *
          * Ensures:
-         *     - All four queues (todo, run, done, dead) are refreshed
+         *     - All four live queues (todo, run, done, dead) are refreshed
+         *     - Job history refreshed if currently expanded
          *     - Fetches use current queueFilterMode setting
          *     - Errors logged but don't block other queues
          */
         this.log( 'Refreshing all queue lists...' );
         try {
-            await Promise.all( [
+            const refreshTasks = [
                 this.updateQueueLists( 'todo' ),
                 this.updateQueueLists( 'run' ),
                 this.updateQueueLists( 'done' ),
                 this.updateQueueLists( 'dead' )
-            ] );
+            ];
+
+            // Also refresh history if it's currently expanded
+            if ( this.queueCategoryState.history.expanded ) {
+                refreshTasks.push( this.loadJobHistory() );
+            }
+
+            await Promise.all( refreshTasks );
             this.log( 'All queues refreshed successfully' );
         } catch ( error ) {
             this.error( 'Error refreshing queues:', error );
@@ -5162,11 +5174,12 @@ class NotificationsUI {
          * Toggle expand/collapse for a queue category.
          *
          * Requires:
-         *     - queueName is 'todo', 'run', 'done', or 'dead'
+         *     - queueName is 'todo', 'run', 'done', 'dead', or 'history'
          *
          * Ensures:
          *     - Category container visibility toggles
          *     - First expansion triggers lazy load of job cards
+         *     - History category routes to loadJobHistory() instead of loadQueueJobCards()
          *     - Expand button icon updates (▶ / ▼)
          */
         const state = this.queueCategoryState[ queueName ];
@@ -5186,7 +5199,11 @@ class NotificationsUI {
 
             // Lazy load job cards on first expansion
             if ( !state.loaded ) {
-                this.loadQueueJobCards( queueName );
+                if ( queueName === 'history' ) {
+                    this.loadJobHistory();
+                } else {
+                    this.loadQueueJobCards( queueName );
+                }
             }
         } else {
             container.classList.add( 'collapsed' );
@@ -5289,6 +5306,281 @@ class NotificationsUI {
             this.error( `Error loading ${queueName} job cards:`, error );
             container.innerHTML = '<div class="queue-error-message">Error loading jobs</div>';
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // JOB HISTORY — PostgreSQL-backed persistent job history
+    //
+    // OVERLAY MODEL: The live queue (Done/Dead) shows jobs from the CURRENT
+    // server session only (in-memory). Job History queries PostgreSQL for ALL
+    // persisted agentic jobs. To avoid duplicates, we collect job IDs from
+    // the live Done and Dead queues and pass them as `exclude_ids` to the API.
+    //
+    // This means: a job appears in EITHER the live queue OR history, never
+    // both. When the server restarts, previously-live jobs move to history
+    // automatically (they are no longer in memory).
+    // ═══════════════════════════════════════════════════════════════════════
+
+    async loadJobHistory( append = false ) {
+        /**
+         * Fetch and render job history cards from PostgreSQL persistence.
+         *
+         * Requires:
+         *     - Authentication is established
+         *     - queueCategoryState.history is initialized
+         *
+         * Ensures:
+         *     - Fetches from /api/job-history with time window + exclude_ids
+         *     - Live Done/Dead job IDs excluded to prevent duplicates
+         *     - Cards rendered with management actions (delete, retry)
+         *     - Pagination via "Load More" button
+         */
+        const state      = this.queueCategoryState.history;
+        const container  = document.getElementById( 'history-jobs-container' );
+        const countBadge = document.getElementById( 'history-count-badge' );
+
+        if ( !container ) return;
+
+        try {
+            // Collect live Done/Dead job IDs for deduplication
+            const liveJobIds = [
+                ...( this.queueCategoryState.done.jobs || [] ).map( j => j.job_id ),
+                ...( this.queueCategoryState.dead.jobs || [] ).map( j => j.job_id )
+            ].filter( Boolean );
+
+            // Build URL with filters
+            const params = new URLSearchParams();
+            if ( state.timeWindow !== 'all' ) params.set( 'days', state.timeWindow );
+            params.set( 'limit', '20' );
+            params.set( 'offset', append ? state.offset : '0' );
+            if ( liveJobIds.length > 0 ) params.set( 'exclude_ids', liveJobIds.join( ',' ) );
+
+            const response = await fetch( `/api/job-history?${params}`, {
+                headers: { 'Authorization': this.getAuthHeader() }
+            } );
+
+            if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
+
+            const data = await response.json();
+
+            if ( append ) {
+                state.jobs = [ ...state.jobs, ...data.jobs ];
+            } else {
+                state.jobs = data.jobs;
+            }
+            state.total  = data.total;
+            state.offset = state.jobs.length;
+            state.loaded = true;
+
+            // Update badge
+            if ( countBadge ) countBadge.textContent = data.total;
+
+            // Render
+            if ( state.jobs.length === 0 ) {
+                container.innerHTML = '<div class="queue-empty-message">No job history found</div>';
+            } else {
+                container.innerHTML = state.jobs.map( job => this.renderHistoryCard( job ) ).join( '' );
+            }
+
+            // Show/hide Load More
+            const pagination = document.getElementById( 'history-pagination' );
+            if ( pagination ) {
+                pagination.style.display = state.jobs.length < state.total ? 'block' : 'none';
+            }
+
+        } catch ( error ) {
+            this.error( 'Error loading job history:', error );
+            container.innerHTML = '<div class="queue-error-message">Error loading job history</div>';
+        }
+    }
+
+    renderHistoryCard( job ) {
+        /**
+         * Adapt a PostgreSQL job history record to renderJobCard() format.
+         *
+         * Requires:
+         *     - job is a dict from /api/job-history with id_hash, metadata_json, etc.
+         *
+         * Ensures:
+         *     - Normalizes DB record shape to renderJobCard expected shape
+         *     - Maps status to queue name for correct styling
+         *     - Appends management action buttons (delete, retry)
+         */
+        const metadata = job.metadata_json || {};
+
+        // Normalize history record to match renderJobCard expected shape
+        const normalized = {
+            job_id           : job.id_hash,
+            question_text    : job.question_text || '',
+            timestamp        : job.created_at,
+            agent_type       : metadata.agent_type || job.job_type || '',
+            response_text    : metadata.response_text || null,
+            abstract         : metadata.abstract || null,
+            report_path      : metadata.report_link || null,
+            cost_summary     : metadata.cost_summary || null,
+            is_cache_hit     : job.is_cache_hit || false,
+            has_interactions  : false,
+            started_at       : job.started_at,
+            completed_at     : job.completed_at,
+            duration_seconds : job.duration_seconds,
+            status           : job.status,
+            error            : job.error,
+            session_id       : job.session_id
+        };
+
+        // Map history status to queue name for styling
+        const statusToQueue = {
+            completed   : 'done',
+            failed      : 'dead',
+            interrupted : 'dead',
+            pending     : 'todo',
+            running     : 'run'
+        };
+        const queueName = statusToQueue[ job.status ] || 'done';
+
+        // Render using existing renderJobCard
+        let cardHtml = this.renderJobCard( normalized, queueName );
+
+        // Inject management action buttons before the last closing </div> of the card
+        const actionsHtml = this.renderHistoryActions( job );
+        const lastDivClose = cardHtml.lastIndexOf( '</div>' );
+        if ( lastDivClose > 0 ) {
+            cardHtml = cardHtml.substring( 0, lastDivClose ) + actionsHtml + cardHtml.substring( lastDivClose );
+        }
+
+        return cardHtml;
+    }
+
+    renderHistoryActions( job ) {
+        /**
+         * Render management action buttons for a history job card.
+         *
+         * Requires:
+         *     - job has id_hash and status fields
+         *
+         * Ensures:
+         *     - Retry button shown only for failed/interrupted jobs
+         *     - Delete button always shown
+         *     - Buttons use stopPropagation to prevent card toggle
+         */
+        const canRetry     = [ 'failed', 'interrupted' ].includes( job.status );
+        const questionSafe = ( job.question_text || '' ).replace( /'/g, "\\'" ).replace( /"/g, '&quot;' ).substring( 0, 100 );
+
+        return `
+            <div class="history-action-buttons">
+                ${canRetry ? `<button class="history-action-btn retry-btn"
+                    onclick="event.stopPropagation(); window.notificationsUI.retryHistoryJob( '${job.id_hash}', '${questionSafe}' )"
+                    >↻ Retry</button>` : ''}
+                <button class="history-action-btn delete-btn"
+                    onclick="event.stopPropagation(); window.notificationsUI.deleteHistoryJob( '${job.id_hash}' )"
+                    >🗑 Delete</button>
+            </div>
+        `;
+    }
+
+    async deleteHistoryJob( jobId ) {
+        /**
+         * Delete a job from PostgreSQL history.
+         *
+         * Requires:
+         *     - jobId is a valid id_hash string
+         *     - User is authenticated (admin or job owner)
+         *
+         * Ensures:
+         *     - Prompts user for confirmation before deleting
+         *     - Sends DELETE /api/job-history/{jobId}
+         *     - Removes from local state and re-renders on success
+         */
+        if ( !confirm( 'Delete this job from history?' ) ) return;
+
+        try {
+            const response = await fetch( `/api/job-history/${jobId}`, {
+                method  : 'DELETE',
+                headers : { 'Authorization': this.getAuthHeader() }
+            } );
+
+            if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
+
+            // Remove from local state and re-render
+            const state = this.queueCategoryState.history;
+            state.jobs  = state.jobs.filter( j => j.id_hash !== jobId );
+            state.total = Math.max( 0, state.total - 1 );
+            this.loadJobHistory();
+
+        } catch ( error ) {
+            this.error( 'Error deleting job:', error );
+            alert( 'Failed to delete job from history' );
+        }
+    }
+
+    async retryHistoryJob( jobId, questionText ) {
+        /**
+         * Retry a failed/interrupted job by re-submitting to the todo queue.
+         *
+         * Requires:
+         *     - jobId is a valid id_hash of a failed/interrupted job
+         *     - questionText is the original question for display
+         *     - Active WebSocket connection with valid websocketId
+         *
+         * Ensures:
+         *     - Prompts user for confirmation before retrying
+         *     - Sends POST /api/job-history/{jobId}/retry with websocket_id
+         *     - Refreshes history and live queues on success
+         */
+        if ( !confirm( `Retry this job?\n\n"${questionText}"` ) ) return;
+
+        try {
+            const response = await fetch( `/api/job-history/${jobId}/retry`, {
+                method  : 'POST',
+                headers : {
+                    'Authorization' : this.getAuthHeader(),
+                    'Content-Type'  : 'application/json'
+                },
+                body: JSON.stringify( { websocket_id: this.queueSessionId } )
+            } );
+
+            if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
+
+            const data = await response.json();
+            this.log( `Job retried: ${JSON.stringify( data )}` );
+
+            // Refresh history and live queues
+            this.loadJobHistory();
+            this.refreshAllQueues();
+
+        } catch ( error ) {
+            this.error( 'Error retrying job:', error );
+            alert( 'Failed to retry job' );
+        }
+    }
+
+    onHistoryTimeWindowChange( value ) {
+        /**
+         * Handle time window dropdown change.
+         *
+         * Requires:
+         *     - value is '7', '14', '30', or 'all'
+         *
+         * Ensures:
+         *     - Updates state.timeWindow
+         *     - Reloads history if section is expanded
+         *     - Marks as unloaded if collapsed (will reload on next expand)
+         */
+        const state = this.queueCategoryState.history;
+        state.timeWindow = value === 'all' ? 'all' : parseInt( value );
+        state.offset = 0;
+        if ( state.expanded ) {
+            this.loadJobHistory();
+        } else {
+            state.loaded = false;
+        }
+    }
+
+    loadMoreHistory() {
+        /**
+         * Load next page of history results (append mode).
+         */
+        this.loadJobHistory( true );
     }
 
     extractQuestionFromHtml( html ) {
@@ -12039,7 +12331,30 @@ class NotificationsUI {
 
         const state = this.actionRequiredNotifications.get( notificationId );
         if ( !state || state.isResponded ) {
-            this.log( "Already responded or notification not found" );
+            this.log( "Already responded or notification not found — performing UI cleanup" );
+
+            // Defense in depth: ensure card and focus mode are cleaned up
+            if ( state?.isResponded ) {
+                const card = document.getElementById( `action-required-${notificationId}` );
+                if ( card ) card.remove();
+
+                const minimized = document.getElementById( `action-required-minimized-${notificationId}` );
+                if ( minimized ) minimized.remove();
+
+                this.actionRequiredNotifications.delete( notificationId );
+                this.updateActionRequiredCount();
+                this.saveActionRequiredState();
+
+                if ( this.activeActionRequiredId === notificationId ) {
+                    this.activeActionRequiredId = null;
+                    this.activateNextNotification();
+                }
+
+                if ( this.focusModeNotificationId === notificationId ) {
+                    this.exitTTSFocusMode();
+                }
+            }
+
             return;
         }
 
@@ -12769,7 +13084,32 @@ class NotificationsUI {
         }
 
         if ( state.isResponded ) {
-            this.log( `cancelActionRequired: Notification ${notificationId} already responded` );
+            this.log( `cancelActionRequired: Notification ${notificationId} already responded — performing UI cleanup` );
+
+            // Response already sent (e.g., by another session via WebSocket)
+            // but cleanup hasn't fired yet. Force immediate cleanup.
+            const card = document.getElementById( `action-required-${notificationId}` );
+            if ( card ) card.remove();
+
+            const minimized = document.getElementById( `action-required-minimized-${notificationId}` );
+            if ( minimized ) minimized.remove();
+
+            // Cleanup action-required state (idempotent — safe if already deleted)
+            this.actionRequiredNotifications.delete( notificationId );
+            this.updateActionRequiredCount();
+            this.saveActionRequiredState();
+
+            // QUEUE SYSTEM: Promote next pending notification
+            if ( this.activeActionRequiredId === notificationId ) {
+                this.activeActionRequiredId = null;
+                this.activateNextNotification();
+            }
+
+            // TTS FOCUS MODE: Exit if this notification triggered focus mode
+            if ( this.focusModeNotificationId === notificationId ) {
+                this.exitTTSFocusMode();
+            }
+
             return;
         }
 

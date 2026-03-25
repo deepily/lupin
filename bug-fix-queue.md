@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-03-23T17:00:00
+**Last Updated**: 2026-03-24T15:30:00
 
 ---
 
@@ -38,6 +38,7 @@
 | 7d02176c | 2026-03-19T12:00:00 | 2026-03-19T13:00:00 | committed |
 | cd0fd61a | 2026-03-23T16:30:00 | 2026-03-23T17:00:00 | committed |
 | 0015f34e | 2026-03-24T12:00:00 | 2026-03-24T12:15:00 | committed |
+| f52e3261 | 2026-03-24T15:00:00 | 2026-03-24T15:30:00 | committed |
 
 ---
 
@@ -64,6 +65,11 @@
 ---
 
 ### Completed
+
+- [x] **Action-required card stuck + WS send-after-close crash** → commit: 2c9beb5 (Lupin), CoSA pending | By: f52e3261 (Session 371b)
+  - **Symptom**: Notification card refuses dismissal (spinner cursor), FastAPI console spams RuntimeError on every WS disconnect
+  - **Fix**: cancelActionRequired/submitResponse cleanup guards, audio WS timeout state cleanup, WebSocketDisconnect exception handling
+  - **Files**: `notifications.js`, `websocket.py`
 
 - [x] **Stop hook "Continue Session?" lacks project/task context** → commit: 47a3f8a | By: 0015f34e (Session 369b)
   - **Symptom**: Notification card shows generic "Continue Session?" with no project badge or session topic. User can't tell which session is asking.

@@ -1,5 +1,39 @@
 # Lupin Project History
 
+### 2026.03.24 - Session 371c | Presentation Generator Phase 4 & 5 + Enhanced Dry-Run
+
+**Accomplishments**:
+- **Phase 4: Outline & Elaborate** (7/7 tasks): Outline prompt (`prompts/outline.py`), elaboration prompt (`prompts/elaboration.py`), `SlideOutline` Pydantic model, `_outline_async()` + `_elaborate_async()` with chunked fallback, Gate 2 + Gate 3 voice review, 94 unit tests
+- **Phase 5: Serialize** (5/5 tasks): `to_yaml()`/`from_yaml()` on PresentationModel, `_serialize_async()` with thread-pool file I/O, cost summary from API client, 17 unit tests
+- **fuzzy_file_match config**: Added presentation-specific INI key, agent-aware expeditor lookup
+- **Stop hook test fix**: 2 `cwd=None` assertion mismatches from Session 369b
+- **Enhanced dry-run mode**: Real ingest → mock analysis/outline/elaborate → real YAML output. Verified: 2412 words, 10 slides, 4.5KB YAML
+- **Smoke tests**: All 9 modules pass
+
+**Files Created (7)**: `prompts/outline.py`, `prompts/elaboration.py`, `test_presentation_outline_prompts.py`, `test_presentation_elaboration_prompts.py`, `05-phase-4-implementation-plan.md`, `06-phase-4-5-verification-plan.md`
+
+**Files Modified (12)**: `orchestrator.py`, `state.py`, `job.py`, `__main__.py`, `prompts/__init__.py`, `expeditor.py`, `lupin-app.ini`, `lupin-app-splainer.ini`, `test_presentation_generator_job.py`, `test_stop_hook.py`, `00-index.md`, `03-implementation-tracking.md`
+
+**Test Results**: 211/211 presentation tests, 2319/2325 full suite (6 pre-existing). Progress: 66% (37/56 tasks)
+
+---
+
+### 2026.03.24 - Session 371b | Bug Fix: Action-Required Card Stuck + WS Send-After-Close Crash
+
+**Accomplishments**:
+- **Fix 1 — cancelActionRequired() race**: When `isResponded` was set by another session's WebSocket event, `cancelActionRequired()` returned early without UI cleanup — card stuck, focus mode active (spinner cursor). Now performs full cleanup (card removal, state delete, queue promotion, focus mode exit) before returning.
+- **Fix 2 — submitResponse() defense in depth**: Same early-return-without-cleanup guard added to `submitResponse()` when `isResponded` is already true.
+- **Fix 3 — Audio WS timeout state cleanup**: 10s timeout rejected the promise but didn't set `audioWsConnected = false`, update status UI, or close the dead socket — causing health monitor reconnect storm ("replaced by new connection" spam). Now matches `onerror` handler behavior.
+- **Fix 4 — Queue WS send-after-close crash**: `WebSocketDisconnect(1012)` caught by generic `except Exception` handler which tried to `send_json()` on dead socket → `RuntimeError` spam. Added explicit `except WebSocketDisconnect` before generic handler; wrapped outer handler's `close()` in try/except.
+
+**Files Modified (2)**:
+- `src/fastapi_app/static/js/notifications.js` (Fixes 1-3: cancelActionRequired cleanup, submitResponse cleanup, audio WS timeout)
+- `src/cosa/rest/routers/websocket.py` (Fix 4: WebSocketDisconnect handler, safe close)
+
+**Commit**: 2c9beb5 (Lupin), CoSA pending (websocket.py Fix 4)
+
+---
+
 ### 2026.03.24 - Session 371 | MCP Session Startup Protocol — Strengthen CLAUDE.md Language
 
 **Accomplishments**:
