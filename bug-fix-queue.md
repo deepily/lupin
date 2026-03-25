@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-03-25T13:30:00
+**Last Updated**: 2026-03-25T18:30:00
 
 ---
 
@@ -40,6 +40,7 @@
 | 0015f34e | 2026-03-24T12:00:00 | 2026-03-24T12:15:00 | committed |
 | f52e3261 | 2026-03-24T15:00:00 | 2026-03-24T15:30:00 | committed |
 | 1e9b946f | 2026-03-25T13:00:00 | 2026-03-25T13:30:00 | committed |
+| e3c3bab8 | 2026-03-25T18:02:00 | 2026-03-25T18:35:00 | committed |
 
 ---
 
@@ -66,6 +67,12 @@
 ---
 
 ### Completed
+
+- [x] **set_session_topic() FunctionTool not callable (second root cause)** → commit: ab2cf50 | By: e3c3bab8 (Session 373)
+  - **Symptom**: Session 372b pipeline fix worked, but `set_session_topic()` still never sent the notification
+  - **Root Cause**: FastMCP 2.14.2 `@mcp.tool` converts functions to `FunctionTool` objects — not callable as Python functions. `except Exception: pass` swallowed the TypeError.
+  - **Fix**: Extracted `_notify_impl()` private function, both MCP tool and internal callers use it directly
+  - **Files**: `cosa_voice_mcp.py`
 
 - [x] **set_session_topic() not propagating to notification UI header** → commit: f2420ed (Lupin), CoSA pending | By: 1e9b946f (Session 372b)
   - **Symptom**: MCP `set_session_topic()` writes to bridge file but UI `sender-session-name` span never updates

@@ -1,5 +1,27 @@
 # Lupin Project History
 
+### 2026.03.25 - Session 373 | Bug Fix: set_session_topic() FunctionTool Not Callable
+
+**Bug**: `set_session_topic()` called `notify()` internally to push a `session_topic` notification to the UI, but the call silently failed. Session topic was written to bridge file (for stop hook) but never reached the notification UI header.
+
+**Root cause**: FastMCP 2.14.2's `@mcp.tool` decorator converts functions into `FunctionTool` objects that are **not callable** as regular Python functions. `set_session_topic()` calling `notify(...)` raised `TypeError: 'FunctionTool' object is not callable`, silently swallowed by `except Exception: pass`.
+
+**Note**: Session 372b fixed the server pipeline plumbing (adding `session_name` through `/api/notify` → `NotificationItem` → WebSocket → JS intercept). This session fixes the MCP-side caller that was never actually invoking that pipeline.
+
+**Fix** (1 file):
+1. Extracted `_notify_impl()` — plain Python function with the core notify logic
+2. `@mcp.tool notify()` now delegates to `_notify_impl()` (preserves MCP tool interface)
+3. `set_session_topic()` calls `_notify_impl()` directly (bypasses FunctionTool wrapper)
+4. Replaced `except Exception: pass` with `logger.warning()` for observability
+
+**Files Modified (1)**:
+- `src/lupin_mcp/cosa_voice_mcp.py` (Lupin — `_notify_impl` extraction + `set_session_topic` rewire)
+
+**Plan doc**: `~/.claude/plans/valiant-tickling-umbrella.md`
+**Commit**: ab2cf50
+
+---
+
 ### 2026.03.25 - Session 372b | Bug Fix: set_session_topic() Not Propagating to Notification UI Header
 
 **Bug**: `set_session_topic()` MCP tool wrote the topic to the session bridge file (for stop hook) but never pushed it to the notification UI. The `sender-session-name` span in notification history card headers relied on inferior auto-generated names instead of the high-quality MCP-crafted topic.

@@ -572,6 +572,74 @@ def converse(
         return f"[error: {response.status}]"
 
 
+def _notify_impl(
+    message: str,
+    notification_type: str = "progress",
+    priority: str = "medium",
+    abstract: Optional[ str ] = None,
+    job_id: Optional[ str ] = None,
+    suppress_ding: bool = False,
+    progress_group_id: Optional[ str ] = None,
+    session_name: Optional[ str ] = None
+) -> str:
+    """
+    Core notify implementation — plain Python function callable from anywhere.
+
+    FastMCP 2.x @mcp.tool converts decorated functions into FunctionTool objects
+    that are NOT callable as regular Python functions. This private function holds
+    the actual logic so that both the MCP tool and internal callers (e.g.,
+    set_session_topic) can invoke it directly.
+
+    Requires:
+        - message is a non-empty string
+        - notification_type is a valid NotificationType value
+        - priority is a valid NotificationPriority value
+
+    Ensures:
+        - Returns a status string (never raises)
+        - Sends notification via HTTP POST to /api/notify
+
+    Args:
+        message: What to announce to the user
+        notification_type: "task", "progress", "alert", "custom", or "session_topic"
+        priority: "low", "medium", "high", or "urgent"
+        abstract: Optional supplementary context (plan details, URLs, markdown)
+        job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
+        suppress_ding: Suppress notification sound while still speaking via TTS (default False)
+        progress_group_id: Optional progress group ID (pg-{8 hex chars}) for in-place DOM updates.
+            Notifications sharing this ID update a single element instead of appending new ones.
+        session_name: Optional human-readable session name for UI header display.
+            When set, updates the sender-session-name span in notification history card.
+
+    Returns:
+        Delivery status message
+    """
+    logger.debug( f"_notify_impl() called: {message[:50]}..." )
+
+    try:
+        request = AsyncNotificationRequest(
+            message=message,
+            notification_type=NotificationType( notification_type ),
+            priority=NotificationPriority( priority ),
+            sender_id=_wait_for_sender_id(),
+            abstract=_normalize_abstract( abstract ),
+            job_id=job_id,
+            suppress_ding=suppress_ding,
+            progress_group_id=progress_group_id,
+            session_name=session_name
+        )
+    except ( ValidationError, ValueError ) as e:
+        logger.error( f"Validation error: {e}" )
+        return f"[validation error: {e}]"
+
+    response: AsyncNotificationResponse = notify_user_async( request=request, debug=False )
+
+    if response.success:
+        return f"Notification sent ({response.status})"
+    else:
+        return f"Failed: {response.message}"
+
+
 @mcp.tool
 def notify(
     message: str,
@@ -611,30 +679,16 @@ def notify(
         notify("Warning: deprecated API detected", notification_type="alert", priority="high")
         notify("Task complete", suppress_ding=True)  # TTS only, no ding
     """
-    logger.debug( f"notify() called: {message[:50]}..." )
-
-    try:
-        request = AsyncNotificationRequest(
-            message=message,
-            notification_type=NotificationType( notification_type ),
-            priority=NotificationPriority( priority ),
-            sender_id=_wait_for_sender_id(),
-            abstract=_normalize_abstract( abstract ),
-            job_id=job_id,
-            suppress_ding=suppress_ding,
-            progress_group_id=progress_group_id,
-            session_name=session_name
-        )
-    except ( ValidationError, ValueError ) as e:
-        logger.error( f"Validation error: {e}" )
-        return f"[validation error: {e}]"
-
-    response: AsyncNotificationResponse = notify_user_async( request=request, debug=False )
-
-    if response.success:
-        return f"Notification sent ({response.status})"
-    else:
-        return f"Failed: {response.message}"
+    return _notify_impl(
+        message=message,
+        notification_type=notification_type,
+        priority=priority,
+        abstract=abstract,
+        job_id=job_id,
+        suppress_ding=suppress_ding,
+        progress_group_id=progress_group_id,
+        session_name=session_name
+    )
 
 
 @mcp.tool
@@ -993,15 +1047,15 @@ def set_session_topic( topic: str ) -> dict:
 
         # Also push to notification UI for real-time header update
         try:
-            notify(
+            _notify_impl(
                 message           = topic,
                 notification_type = "session_topic",
                 priority          = "low",
                 session_name      = topic,
                 suppress_ding     = True
             )
-        except Exception:
-            pass  # Bridge write succeeded — UI push is best-effort
+        except Exception as e:
+            logger.warning( f"set_session_topic() UI push failed: {e}" )
 
         return { "status": "ok", "topic": topic }
     except Exception as e:
