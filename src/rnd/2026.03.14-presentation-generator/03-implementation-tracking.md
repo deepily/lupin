@@ -1,7 +1,7 @@
 # Presentation Generator Agent — Implementation Tracking
 
 **Created**: 2026-03-14
-**Last Updated**: 2026-03-24
+**Last Updated**: 2026-03-24 (Session 371)
 
 ---
 
@@ -61,15 +61,15 @@
 
 | # | Task | Status |
 |---|------|--------|
-| 4.1 | Write outline generation prompt | Pending |
-| 4.2 | Implement Phase 3: Outline | Pending |
-| 4.3 | Implement Gate 2 checkpoint | Pending |
-| 4.4 | Write elaboration prompts | Pending |
-| 4.5 | Implement Phase 4: Elaborate | Pending |
-| 4.6 | Implement Gate 3 checkpoint | Pending |
-| 4.7 | Write unit tests | Pending |
+| 4.1 | Write outline generation prompt (`prompts/outline.py`) | Done |
+| 4.2 | Implement Phase 3: Outline (`_outline_async`) | Done |
+| 4.3 | Implement Gate 2 checkpoint (`_gate_2_outline_review`) | Done |
+| 4.4 | Write elaboration prompts (`prompts/elaboration.py`) | Done |
+| 4.5 | Implement Phase 4: Elaborate (`_elaborate_async` + chunked fallback) | Done |
+| 4.6 | Implement Gate 3 checkpoint (`_gate_3_content_review`) | Done |
+| 4.7 | Write unit tests (94 new tests: 36 outline + 37 elaboration + 13 model + 8 gate) | Done |
 
-**Phase 4 Status**: Pending
+**Phase 4 Status**: Done (Session 371)
 
 ---
 
@@ -77,13 +77,13 @@
 
 | # | Task | Status |
 |---|------|--------|
-| 5.1 | Implement Phase 5: Serialize | Pending |
-| 5.2 | Add YAML serialization helpers | Pending |
-| 5.3 | Wire final results back to job | Pending |
-| 5.4 | End-to-end dry-run test | Pending |
-| 5.5 | Write unit tests | Pending |
+| 5.1 | Implement Phase 5: Serialize (`_serialize_async` + `_write_yaml`) | Done |
+| 5.2 | Add YAML serialization helpers (`to_yaml()`, `from_yaml()` on PresentationModel) | Done |
+| 5.3 | Wire final results back to job (cost summary from API client) | Done |
+| 5.4 | End-to-end dry-run test (YAML file creation verified in unit tests) | Done |
+| 5.5 | Write unit tests (17 tests: 11 YAML round-trip + 6 serialize orchestrator) | Done |
 
-**Phase 5 Status**: Pending
+**Phase 5 Status**: Done (Session 371)
 
 ---
 
@@ -140,9 +140,9 @@
 | 1 | Foundation | 11 | 11 | Done |
 | 2 | State Models & Orchestrator | 7 | 7 | Done |
 | 3 | Ingest & Analyze | 7 | 7 | Done |
-| 4 | Outline & Elaborate | 7 | 0 | Pending |
-| 5 | Serialize | 5 | 0 | Pending |
+| 4 | Outline & Elaborate | 7 | 7 | Done |
+| 5 | Serialize | 5 | 5 | Done |
 | 6 | Marp Rendering | 6 | 0 | Pending |
 | 7 | Visual Rendering | 7 | 0 | Pending |
 | 8 | Delivery & Chaining | 6 | 0 | Pending |
-| **Total** | | **56** | **25** | **In Progress** |
+| **Total** | | **56** | **37** | **In Progress** |

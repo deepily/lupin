@@ -21,6 +21,7 @@ from cosa.agents.presentation_generator.state import (
     OrchestratorState,
     ArcPosition,
     NarrativeSection,
+    SlideOutline,
     PresenterNotes,
     SlideModel,
     PresentationModel,
@@ -397,7 +398,9 @@ class TestCreateInitialState:
             "source_path", "source_content", "source_format", "raw_sections",
             "word_count", "narrative_sections",
             "slide_outline", "elaborated_slides", "presentation_model",
-            "yaml_path", "marp_path", "revision_count", "human_feedback", "user_id"
+            "yaml_path", "marp_path", "revision_count",
+            "outline_revision_count", "elaborate_revision_count",
+            "human_feedback", "user_id"
         }
         assert set( state.keys() ) == expected_keys
 
@@ -744,3 +747,312 @@ class TestFormatDetection:
         """Single markdown indicator alone isn't enough (need >= 2)."""
         content = "# Just a heading\n\nBut nothing else special about this text."
         assert PresentationOrchestratorAgent._detect_format( content ) == "plaintext"
+
+
+# =============================================================================
+# Phase 4: SlideOutline Model Tests
+# =============================================================================
+
+class TestSlideOutlineModel:
+    """Tests for SlideOutline Pydantic model."""
+
+    def test_construction_with_all_fields( self ):
+        outline = SlideOutline(
+            number       = 3,
+            arc_position = "body",
+            type         = "key_point",
+            title        = "Key Insight Here",
+            visual_type  = "diagram",
+            source_hint  = "Methods section"
+        )
+        assert outline.number == 3
+        assert outline.arc_position == "body"
+        assert outline.type == "key_point"
+        assert outline.title == "Key Insight Here"
+        assert outline.visual_type == "diagram"
+        assert outline.source_hint == "Methods section"
+
+    def test_defaults( self ):
+        outline = SlideOutline(
+            number       = 1,
+            arc_position = "opening",
+            type         = "title",
+            title        = "My Talk"
+        )
+        assert outline.visual_type == "text_only"
+        assert outline.source_hint is None
+
+    def test_serialization_to_dict( self ):
+        outline = SlideOutline(
+            number       = 5,
+            arc_position = "closing",
+            type         = "cta",
+            title        = "Start Today",
+            visual_type  = "icon_only"
+        )
+        d = outline.model_dump()
+        assert d[ "number" ] == 5
+        assert d[ "title" ] == "Start Today"
+        assert d[ "source_hint" ] is None
+
+    def test_all_arc_positions_accepted( self ):
+        for pos in [ "opening", "body", "closing" ]:
+            outline = SlideOutline(
+                number=1, arc_position=pos, type="key_point", title="Test"
+            )
+            assert outline.arc_position == pos
+
+    def test_all_visual_types_accepted( self ):
+        for vt in [ "diagram", "code_block", "chart", "screenshot",
+                     "icon_only", "text_only", "before_after", "table" ]:
+            outline = SlideOutline(
+                number=1, arc_position="body", type="key_point",
+                title="Test", visual_type=vt
+            )
+            assert outline.visual_type == vt
+
+
+# =============================================================================
+# Phase 4: create_initial_state revision counters
+# =============================================================================
+
+class TestInitialStateRevisionCounters:
+    """Tests for Phase 4 additions to create_initial_state."""
+
+    def test_outline_revision_count_initialized( self ):
+        state = create_initial_state( "/path/doc.md", "user1" )
+        assert state[ "outline_revision_count" ] == 0
+
+    def test_elaborate_revision_count_initialized( self ):
+        state = create_initial_state( "/path/doc.md", "user1" )
+        assert state[ "elaborate_revision_count" ] == 0
+
+    def test_all_revision_counters_present( self ):
+        state = create_initial_state( "/path/doc.md", "user1" )
+        assert "revision_count" in state
+        assert "outline_revision_count" in state
+        assert "elaborate_revision_count" in state
+
+
+# =============================================================================
+# Phase 4: Orchestrator Gate Auto-Approve Tests
+# =============================================================================
+
+class TestGateAutoApproveEmpty:
+    """Tests that gates auto-approve when given empty input."""
+
+    @pytest.fixture
+    def orchestrator( self, tmp_path ):
+        source = tmp_path / "test.md"
+        source.write_text( "# Test\n\nContent." )
+        config = PresentationConfig()
+        return PresentationOrchestratorAgent(
+            source_path = str( source ),
+            config      = config,
+            user_id     = "test-user",
+            debug       = True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_gate_2_auto_approves_empty_outline( self, orchestrator ):
+        result = await orchestrator._gate_2_outline_review( [] )
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_gate_3_auto_approves_empty_slides( self, orchestrator ):
+        result = await orchestrator._gate_3_content_review( [] )
+        assert result is True
+
+
+# =============================================================================
+# Phase 5: YAML Serialization Tests
+# =============================================================================
+
+class TestPresentationModelYaml:
+    """Tests for PresentationModel.to_yaml() and from_yaml() methods."""
+
+    @pytest.fixture
+    def full_presentation( self ):
+        """Create a fully populated PresentationModel for testing."""
+        return PresentationModel(
+            title            = "Test Presentation: YAML Round-Trip",
+            speaker          = "Test Speaker",
+            date             = "2026-03-24",
+            duration_minutes = 15,
+            source_document  = "/path/to/doc.md",
+            total_slides     = 2,
+            slides           = [
+                SlideModel(
+                    number             = 1,
+                    arc_position       = "opening",
+                    type               = "title",
+                    title              = "Hello World",
+                    subtitle           = "A Deep Dive",
+                    visual_type        = "text_only",
+                    content_bullets    = [],
+                    presenter_notes    = PresenterNotes(
+                        transition     = None,
+                        talking_points = [ "Welcome everyone" ],
+                        timing_seconds = 30,
+                        emphasis       = None
+                    )
+                ),
+                SlideModel(
+                    number             = 2,
+                    arc_position       = "body",
+                    type               = "key_point",
+                    title              = "Key Insight: Data Shows 3x Improvement",
+                    visual_type        = "diagram",
+                    visual_description = "Flowchart: A → B → C",
+                    content_bullets    = [ "Point 1", "Point 2", "Point 3" ],
+                    presenter_notes    = PresenterNotes(
+                        transition     = "Now let's look at...",
+                        talking_points = [ "Explain the flow", "Note the branching" ],
+                        timing_seconds = 75,
+                        emphasis       = "Pause at the branching point"
+                    )
+                ),
+            ],
+            theme            = "corporate",
+            theme_overrides  = { "accent_color": "#FF5733" },
+        )
+
+    def test_to_yaml_produces_valid_yaml( self, full_presentation ):
+        import yaml
+        yaml_str = full_presentation.to_yaml()
+        parsed = yaml.safe_load( yaml_str )
+        assert isinstance( parsed, dict )
+
+    def test_to_yaml_contains_title( self, full_presentation ):
+        yaml_str = full_presentation.to_yaml()
+        assert "Test Presentation: YAML Round-Trip" in yaml_str
+
+    def test_to_yaml_contains_nested_presenter_notes( self, full_presentation ):
+        yaml_str = full_presentation.to_yaml()
+        assert "talking_points" in yaml_str
+        assert "Welcome everyone" in yaml_str
+
+    def test_to_yaml_contains_visual_description( self, full_presentation ):
+        yaml_str = full_presentation.to_yaml()
+        assert "Flowchart:" in yaml_str
+
+    def test_from_yaml_round_trip( self, full_presentation ):
+        yaml_str = full_presentation.to_yaml()
+        restored = PresentationModel.from_yaml( yaml_str )
+        assert restored.title == full_presentation.title
+        assert restored.total_slides == full_presentation.total_slides
+        assert restored.theme == "corporate"
+
+    def test_round_trip_preserves_slides( self, full_presentation ):
+        yaml_str = full_presentation.to_yaml()
+        restored = PresentationModel.from_yaml( yaml_str )
+        assert len( restored.slides ) == 2
+        assert restored.slides[ 0 ].title == "Hello World"
+        assert restored.slides[ 1 ].visual_type == "diagram"
+
+    def test_round_trip_preserves_presenter_notes( self, full_presentation ):
+        yaml_str = full_presentation.to_yaml()
+        restored = PresentationModel.from_yaml( yaml_str )
+        notes = restored.slides[ 1 ].presenter_notes
+        assert notes.timing_seconds == 75
+        assert notes.emphasis == "Pause at the branching point"
+        assert len( notes.talking_points ) == 2
+
+    def test_round_trip_preserves_theme_overrides( self, full_presentation ):
+        yaml_str = full_presentation.to_yaml()
+        restored = PresentationModel.from_yaml( yaml_str )
+        assert restored.theme_overrides == { "accent_color": "#FF5733" }
+
+    def test_empty_slides_round_trip( self ):
+        pres = PresentationModel( title="Empty", total_slides=0 )
+        yaml_str = pres.to_yaml()
+        restored = PresentationModel.from_yaml( yaml_str )
+        assert restored.title == "Empty"
+        assert restored.slides == []
+
+    def test_from_yaml_invalid_raises( self ):
+        with pytest.raises( ValueError ):
+            PresentationModel.from_yaml( "just a string" )
+
+    def test_from_yaml_non_dict_raises( self ):
+        with pytest.raises( ValueError ):
+            PresentationModel.from_yaml( "- item1\n- item2" )
+
+
+# =============================================================================
+# Phase 5: Serialize Orchestrator Tests
+# =============================================================================
+
+class TestSerializeAsync:
+    """Tests for _serialize_async orchestrator method."""
+
+    @pytest.fixture
+    def orchestrator( self, tmp_path ):
+        source = tmp_path / "test.md"
+        source.write_text( "# Test\n\nContent." )
+        config = PresentationConfig()
+        # Override output dir to use tmp_path
+        config.output_dir_template = str( tmp_path / "output/{user}" )
+        orch = PresentationOrchestratorAgent(
+            source_path = str( source ),
+            config      = config,
+            user_id     = "test-user",
+            debug       = True,
+        )
+        orch._presentation_state[ "user_id" ] = "test-user"
+        return orch
+
+    @pytest.fixture
+    def sample_slides( self ):
+        return [
+            SlideModel(
+                number=1, arc_position="opening", type="title",
+                title="My Presentation",
+                presenter_notes=PresenterNotes( timing_seconds=30 )
+            ),
+            SlideModel(
+                number=2, arc_position="body", type="key_point",
+                title="Key Point",
+                content_bullets=[ "Bullet 1" ],
+                presenter_notes=PresenterNotes( timing_seconds=60 )
+            ),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_returns_presentation_model( self, orchestrator, sample_slides ):
+        result = await orchestrator._serialize_async( sample_slides )
+        assert isinstance( result, PresentationModel )
+
+    @pytest.mark.asyncio
+    async def test_sets_yaml_path_in_state( self, orchestrator, sample_slides ):
+        await orchestrator._serialize_async( sample_slides )
+        assert orchestrator._presentation_state[ "yaml_path" ] is not None
+        assert orchestrator._presentation_state[ "yaml_path" ].endswith( ".yaml" )
+
+    @pytest.mark.asyncio
+    async def test_creates_yaml_file( self, orchestrator, sample_slides ):
+        import os
+        await orchestrator._serialize_async( sample_slides )
+        yaml_path = orchestrator._presentation_state[ "yaml_path" ]
+        assert os.path.exists( yaml_path )
+
+    @pytest.mark.asyncio
+    async def test_yaml_file_content_valid( self, orchestrator, sample_slides ):
+        import yaml
+        await orchestrator._serialize_async( sample_slides )
+        yaml_path = orchestrator._presentation_state[ "yaml_path" ]
+        with open( yaml_path, "r" ) as f:
+            data = yaml.safe_load( f )
+        assert data[ "title" ] == "My Presentation"
+        assert data[ "total_slides" ] == 2
+
+    @pytest.mark.asyncio
+    async def test_title_from_first_title_slide( self, orchestrator, sample_slides ):
+        result = await orchestrator._serialize_async( sample_slides )
+        assert result.title == "My Presentation"
+
+    @pytest.mark.asyncio
+    async def test_empty_slides_returns_model( self, orchestrator ):
+        result = await orchestrator._serialize_async( [] )
+        assert isinstance( result, PresentationModel )
+        assert result.total_slides == 0

@@ -260,7 +260,7 @@ class TestVoiceDrain:
         main()
 
         mock_drain.assert_called_once_with( "abc12345" )
-        mock_ask.assert_called_once_with( "abc12345", None )
+        mock_ask.assert_called_once_with( "abc12345", None, cwd=None )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -332,7 +332,7 @@ class TestVoiceBlocking:
         main()
 
         mock_reset.assert_called_once_with( "abc12345" )
-        mock_ask.assert_called_once_with( "abc12345", None )
+        mock_ask.assert_called_once_with( "abc12345", None, cwd=None )
         mock_emit.assert_called_once_with( {} )
 
 
