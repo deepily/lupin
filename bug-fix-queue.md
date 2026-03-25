@@ -66,7 +66,7 @@
 
 ### Completed
 
-- [x] **Action-required card stuck + WS send-after-close crash** → commit: 2c9beb5 (Lupin), CoSA pending | By: f52e3261 (Session 371b)
+- [x] **Action-required card stuck + WS send-after-close crash** → commit: d3ad8bf (Lupin), CoSA pending | By: f52e3261 (Session 371b)
   - **Symptom**: Notification card refuses dismissal (spinner cursor), FastAPI console spams RuntimeError on every WS disconnect
   - **Fix**: cancelActionRequired/submitResponse cleanup guards, audio WS timeout state cleanup, WebSocketDisconnect exception handling
   - **Files**: `notifications.js`, `websocket.py`

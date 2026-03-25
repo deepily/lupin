@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-24 (Session 371)
+Last updated: 2026-03-24 (Session 371b)
 
 ## Pending
 
@@ -13,6 +13,8 @@ Last updated: 2026-03-24 (Session 371)
 - [ ] [LUPIN] Phase 1: Create `admin@lupin.deepily.ai` account + update `~/.lupin/config` (manual)
 - [ ] [LUPIN] **CJ Flow Persistence Phase 6: Job History UI** — Frontend & management for persisted job history. Two-tier approach: (1) recent history in notifications UI alongside live queue, (2) dedicated history page for older artifacts with search/filter/management. Design discussion started Session 370, paused on notification integration pattern (new section vs modify done/dead vs hybrid). Resume design questions next session. Plan doc: `src/rnd/2026.03.13-cj-flow-persistence-plan.md` (Phase 6 section)
 - [x] [LUPIN] Phase 6 cleanup: Clean up existing 1001 `st-*` test notification artifacts (delete or reassign — decide after using filter) — **Fixed Session 371**
+- [ ] [LUPIN] Archive history.md — at 18.4k tokens, above 17k WARNING threshold (deferred from Session 371b)
+- [ ] [LUPIN] CoSA commit pending: `websocket.py` Fix 4 (WebSocketDisconnect handler + safe close) — must commit from CoSA repo context
 - [ ] [LUPIN] Run full E2E + integration test suite before merging branch to main
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)

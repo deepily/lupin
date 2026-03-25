@@ -30,7 +30,7 @@
 - `src/fastapi_app/static/js/notifications.js` (Fixes 1-3: cancelActionRequired cleanup, submitResponse cleanup, audio WS timeout)
 - `src/cosa/rest/routers/websocket.py` (Fix 4: WebSocketDisconnect handler, safe close)
 
-**Commit**: 2c9beb5 (Lupin), CoSA pending (websocket.py Fix 4)
+**Commit**: d3ad8bf (Lupin), CoSA pending (websocket.py Fix 4)
 
 ---
 
