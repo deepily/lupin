@@ -3384,6 +3384,107 @@
 }
 
 /* ========================================
+   JOB HISTORY SECTION
+   ======================================== */
+
+/* History section header — visual distinction from live queues */
+.history-header {
+    background: #f0f4f8;
+    border-top: 2px solid #6c757d;
+}
+
+.history-header:hover {
+    background: #e3e8ed;
+}
+
+/* History status indicator */
+.status-history {
+    color: #6c757d;
+}
+
+/* Interrupted job card — orange left border */
+.job-card.status-interrupted {
+    border-left-color: #fd7e14;
+}
+
+/* Time window dropdown (inline in header) */
+.history-time-select {
+    padding: 2px 8px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 12px;
+    background: white;
+    margin-left: 10px;
+    cursor: pointer;
+}
+
+.history-time-select:focus {
+    outline: none;
+    border-color: #007bff;
+}
+
+/* Management action buttons on history cards */
+.history-action-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed #dee2e6;
+}
+
+.history-action-btn {
+    padding: 4px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    background: white;
+    transition: background 0.2s, color 0.2s;
+}
+
+.history-action-btn.delete-btn {
+    color: #dc3545;
+    border-color: #dc3545;
+}
+
+.history-action-btn.delete-btn:hover {
+    background: #dc3545;
+    color: white;
+}
+
+.history-action-btn.retry-btn {
+    color: #007bff;
+    border-color: #007bff;
+}
+
+.history-action-btn.retry-btn:hover {
+    background: #007bff;
+    color: white;
+}
+
+/* Load More pagination button */
+.history-pagination {
+    padding: 10px;
+    text-align: center;
+}
+
+.history-load-more-btn {
+    padding: 6px 20px;
+    border: 1px solid #6c757d;
+    border-radius: 4px;
+    background: white;
+    color: #6c757d;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.2s, color 0.2s;
+}
+
+.history-load-more-btn:hover {
+    background: #6c757d;
+    color: white;
+}
+
+/* ========================================
    TIME SAVED DASHBOARD
    ======================================== */
 

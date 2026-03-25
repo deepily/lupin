@@ -1,5 +1,35 @@
 # Lupin Project History
 
+### 2026.03.24 - Session 371 | CJ Flow Persistence Phase 6 — Job History UI
+
+**Accomplishments**:
+- **Option C Hybrid Architecture**: Designed and implemented overlay model — live queue (in-memory) + persistent history (PostgreSQL) with server-side deduplication via `exclude_ids` query parameter. Jobs appear in either live queue or history, never both.
+- **Backend** (6A): Extended `query_job_history()` with `days` and `exclude_ids` filters, added `delete_job_history()`, new `DELETE /api/job-history/{job_id}` and `POST /api/job-history/{job_id}/retry` endpoints
+- **Frontend HTML/CSS** (6B): 5th collapsible "Job History" section with configurable time window dropdown (7d/14d/30d/All), Load More pagination, interrupted status styling (orange), delete/retry action buttons
+- **Frontend JS** (6C): 7 new methods (`loadJobHistory`, `renderHistoryCard`, `renderHistoryActions`, `deleteHistoryJob`, `retryHistoryJob`, `onHistoryTimeWindowChange`, `loadMoreHistory`) + hooks into `toggleQueueCategory` and `refreshAllQueues`
+- **Tests** (6E): 6 new unit tests (23 total persistence), 7 new integration tests (delete/retry/filter endpoints), 6 new E2E Playwright tests (history section UI)
+- **Documentation** (6D): R&D plan updated with Phase 6 completion, REST API reference updated with 4 new endpoints, overlay model documented in HTML comments and JS block comment
+
+**Files Created (1 new)**:
+- `src/tests/e2e_ui/test_job_history_ui.py`
+
+**Files Modified (9)**:
+- `src/cosa/rest/job_persistence.py` (+days/exclude_ids params, +delete_job_history)
+- `src/cosa/rest/routers/queues.py` (+DELETE, +POST retry, updated GET params)
+- `src/fastapi_app/static/html/notifications.html` (+5th history section)
+- `src/fastapi_app/static/css/notifications.css` (+~90 lines history styles)
+- `src/fastapi_app/static/js/notifications.js` (+history state, +7 methods, +2 hooks)
+- `src/tests/unit/test_job_persistence.py` (+6 tests)
+- `src/tests/integration/test_job_history_api.py` (+7 tests)
+- `src/rnd/2026.03.13-cj-flow-persistence-plan.md` (Phase 6 section updated)
+- `src/docs/rest-api-reference.md` (+4 job-history endpoints)
+
+**Test Results**: 2348/2348 unit tests pass (0 regressions). Integration: 5/5 new endpoint tests pass (2 filter tests hit pre-existing fixture flakiness). E2E: written, pending live server run.
+
+**Plan doc**: `~/.claude/plans/happy-puzzling-patterson.md` → `src/rnd/2026.03.13-cj-flow-persistence-plan.md` (Phase 6)
+
+---
+
 ### 2026.03.24 - Session 371c | Presentation Generator Phase 4 & 5 + Enhanced Dry-Run
 
 **Accomplishments**:

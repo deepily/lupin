@@ -70,6 +70,10 @@
 | POST | `/api/reset-queues` | JWT | Clear all queues for current user |
 | GET | `/api/get-job-interactions/{job_id}` | JWT | Get interaction history for a job |
 | POST | `/api/jobs/{job_id}/message` | JWT | Send message to running job |
+| GET | `/api/job-history` | JWT | Paginated job history (days, status, job_type, exclude_ids filters) |
+| GET | `/api/job-history/{job_id}` | JWT | Single job detail by ID hash |
+| DELETE | `/api/job-history/{job_id}` | JWT | Delete job from history (admin or owner) |
+| POST | `/api/job-history/{job_id}/retry` | JWT | Retry failed/interrupted job |
 
 ## 5. Notifications (`/api/notify/*`)
 

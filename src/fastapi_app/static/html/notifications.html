@@ -483,6 +483,45 @@
                     </div>
                 </div>
 
+                <!-- ═══════════════════════════════════════════════════════════
+                     JOB HISTORY (PostgreSQL Persistence)
+
+                     OVERLAY MODEL: The 4 live queues above (TODO/Running/Done/Dead)
+                     show jobs from the CURRENT server session only (in-memory).
+                     This history section queries PostgreSQL for ALL persisted agentic
+                     jobs, EXCLUDING job IDs currently visible in the live Done/Dead
+                     queues to avoid duplicates.
+
+                     A job appears in EITHER the live queue OR history, never both.
+                     When the server restarts, previously-live jobs move to history
+                     automatically (they are no longer in memory).
+                     ═══════════════════════════════════════════════════════════ -->
+                <div class="queue-category history-section" id="queue-category-history" data-testid="notifications-queue-history">
+                    <div class="queue-header history-header" onclick="window.notificationsUI.toggleQueueCategory('history')">
+                        <span class="queue-status-indicator status-history">📋</span>
+                        <h4>Job History</h4>
+                        <select id="history-time-window" class="history-time-select"
+                                onclick="event.stopPropagation()"
+                                onchange="window.notificationsUI.onHistoryTimeWindowChange( this.value )"
+                                data-testid="history-time-window-select">
+                            <option value="7">7 days</option>
+                            <option value="14">14 days</option>
+                            <option value="30" selected>30 days</option>
+                            <option value="all">All</option>
+                        </select>
+                        <span class="queue-count-badge" id="history-count-badge">0</span>
+                        <button class="queue-expand-btn" id="history-expand" data-testid="notifications-queue-history-expand-btn">▶</button>
+                    </div>
+                    <div class="queue-jobs-container collapsed" id="history-jobs-container" data-testid="notifications-queue-history-jobs">
+                        <!-- History job cards populated from PostgreSQL via /api/job-history -->
+                    </div>
+                    <div class="history-pagination" id="history-pagination" style="display: none;">
+                        <button class="history-load-more-btn" id="history-load-more"
+                                onclick="window.notificationsUI.loadMoreHistory()"
+                                data-testid="history-load-more-btn">Load More</button>
+                    </div>
+                </div>
+
             </div>
         </div>
 

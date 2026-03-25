@@ -296,3 +296,111 @@ class TestEmitPersistenceDispatch:
         mock_started.assert_not_called()
         mock_completed.assert_not_called()
         mock_failed.assert_not_called()
+
+
+# ===========================================================================
+# Tests for delete_job_history()
+# ===========================================================================
+
+class TestDeleteJobHistory:
+    """Tests for the delete_job_history function."""
+
+    @patch( "cosa.rest.job_persistence.get_db" )
+    def test_delete_existing_row( self, mock_get_db ):
+        """delete_job_history returns True when a row is deleted (rowcount > 0)."""
+        from cosa.rest.job_persistence import delete_job_history
+
+        mock_session = MagicMock()
+        mock_get_db.return_value.__enter__ = MagicMock( return_value=mock_session )
+        mock_get_db.return_value.__exit__ = MagicMock( return_value=False )
+        mock_session.execute.return_value.rowcount = 1
+
+        result = delete_job_history( "job-abc::user_123" )
+
+        assert result is True
+        mock_session.commit.assert_called_once()
+
+    @patch( "cosa.rest.job_persistence.get_db" )
+    def test_delete_nonexistent_row( self, mock_get_db ):
+        """delete_job_history returns False when no row is found (rowcount == 0)."""
+        from cosa.rest.job_persistence import delete_job_history
+
+        mock_session = MagicMock()
+        mock_get_db.return_value.__enter__ = MagicMock( return_value=mock_session )
+        mock_get_db.return_value.__exit__ = MagicMock( return_value=False )
+        mock_session.execute.return_value.rowcount = 0
+
+        result = delete_job_history( "nonexistent-id" )
+
+        assert result is False
+
+    @patch( "cosa.rest.job_persistence.get_db" )
+    def test_delete_fires_and_forgets( self, mock_get_db ):
+        """DB failure does not propagate — returns False instead of raising."""
+        from cosa.rest.job_persistence import delete_job_history
+
+        mock_get_db.side_effect = Exception( "DB connection refused" )
+
+        result = delete_job_history( "job-abc" )
+
+        assert result is False
+
+
+# ===========================================================================
+# Tests for query_job_history() — days and exclude_ids filters
+# ===========================================================================
+
+class TestQueryJobHistoryFilters:
+    """Tests for the new days and exclude_ids filters in query_job_history."""
+
+    @patch( "cosa.rest.job_persistence.get_db" )
+    def test_days_filter_applies_cutoff( self, mock_get_db ):
+        """days=7 adds a created_at >= cutoff filter to the query."""
+        from cosa.rest.job_persistence import query_job_history
+
+        mock_session = MagicMock()
+        mock_get_db.return_value.__enter__ = MagicMock( return_value=mock_session )
+        mock_get_db.return_value.__exit__ = MagicMock( return_value=False )
+        mock_session.execute.return_value.scalar.return_value = 0
+        mock_session.execute.return_value.scalars.return_value.all.return_value = []
+
+        result = query_job_history( days=7 )
+
+        assert result[ "total" ] == 0
+        assert result[ "jobs" ] == []
+        # The query should have been called with filters (2 execute calls: count + query)
+        assert mock_session.execute.call_count == 2
+
+    @patch( "cosa.rest.job_persistence.get_db" )
+    def test_exclude_ids_filter( self, mock_get_db ):
+        """exclude_ids parameter filters out specified job IDs."""
+        from cosa.rest.job_persistence import query_job_history
+
+        mock_session = MagicMock()
+        mock_get_db.return_value.__enter__ = MagicMock( return_value=mock_session )
+        mock_get_db.return_value.__exit__ = MagicMock( return_value=False )
+        mock_session.execute.return_value.scalar.return_value = 0
+        mock_session.execute.return_value.scalars.return_value.all.return_value = []
+
+        result = query_job_history( exclude_ids=[ "id-a", "id-b" ] )
+
+        assert result[ "total" ] == 0
+        assert result[ "jobs" ] == []
+        assert mock_session.execute.call_count == 2
+
+    @patch( "cosa.rest.job_persistence.get_db" )
+    def test_days_none_no_time_filter( self, mock_get_db ):
+        """days=None does not add a time cutoff filter (same as before)."""
+        from cosa.rest.job_persistence import query_job_history
+
+        mock_session = MagicMock()
+        mock_get_db.return_value.__enter__ = MagicMock( return_value=mock_session )
+        mock_get_db.return_value.__exit__ = MagicMock( return_value=False )
+        mock_session.execute.return_value.scalar.return_value = 0
+        mock_session.execute.return_value.scalars.return_value.all.return_value = []
+
+        result = query_job_history( days=None, exclude_ids=None )
+
+        assert result[ "total" ] == 0
+        assert result[ "jobs" ] == []
+        assert mock_session.execute.call_count == 2

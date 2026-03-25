@@ -1,8 +1,9 @@
 """
 Integration Tests for Job History API
 
-Tests the /api/job-history endpoints added by CJ Flow Persistence Phase 5.
-Validates authentication, authorization, pagination, and filtering against live server.
+Tests the /api/job-history endpoints added by CJ Flow Persistence Phases 5-6.
+Validates authentication, authorization, pagination, filtering, delete, and retry
+against live server.
 """
 
 import pytest
@@ -123,3 +124,91 @@ class TestJobHistoryDetailApi:
         """Detail endpoint without auth token returns 401."""
         response = requests.get( f"{BASE_URL}/api/job-history/some-job-id" )
         assert response.status_code == 401
+
+
+class TestJobHistoryDeleteApi:
+    """Integration tests for DELETE /api/job-history/{job_id} endpoint (Phase 6)."""
+
+    def test_delete_unauthenticated_returns_401( self ):
+        """DELETE without auth token returns 401."""
+        response = requests.delete( f"{BASE_URL}/api/job-history/some-job-id" )
+        assert response.status_code == 401
+
+    def test_delete_nonexistent_returns_404( self, create_test_user ):
+        """DELETE with nonexistent job ID returns 404."""
+        headers = get_auth_header( create_test_user[ "access_token" ] )
+
+        response = requests.delete(
+            f"{BASE_URL}/api/job-history/nonexistent-job-id-xyz",
+            headers=headers
+        )
+
+        assert response.status_code == 404
+
+
+class TestJobHistoryRetryApi:
+    """Integration tests for POST /api/job-history/{job_id}/retry endpoint (Phase 6)."""
+
+    def test_retry_unauthenticated_returns_401( self ):
+        """POST retry without auth token returns 401."""
+        response = requests.post( f"{BASE_URL}/api/job-history/some-job-id/retry" )
+        assert response.status_code == 401
+
+    def test_retry_nonexistent_returns_404( self, create_test_user ):
+        """POST retry with nonexistent job ID returns 404."""
+        headers = get_auth_header( create_test_user[ "access_token" ] )
+
+        response = requests.post(
+            f"{BASE_URL}/api/job-history/nonexistent-job-id-xyz/retry",
+            headers=headers,
+            json={ "websocket_id": "test-ws-id" }
+        )
+
+        assert response.status_code == 404
+
+
+class TestJobHistoryFiltersApi:
+    """Integration tests for new days and exclude_ids filters (Phase 6)."""
+
+    def test_days_filter_accepted( self, create_test_user ):
+        """days=7 parameter is accepted and returns valid response."""
+        headers = get_auth_header( create_test_user[ "access_token" ] )
+
+        response = requests.get(
+            f"{BASE_URL}/api/job-history?days=7",
+            headers=headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "jobs" in data
+        assert "total" in data
+
+    def test_exclude_ids_filter_accepted( self, create_test_user ):
+        """exclude_ids parameter is accepted and returns valid response."""
+        headers = get_auth_header( create_test_user[ "access_token" ] )
+
+        response = requests.get(
+            f"{BASE_URL}/api/job-history?exclude_ids=fake-id-1,fake-id-2",
+            headers=headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "jobs" in data
+        assert "total" in data
+
+    def test_combined_filters( self, create_test_user ):
+        """Multiple filters (days + status + exclude_ids) work together."""
+        headers = get_auth_header( create_test_user[ "access_token" ] )
+
+        response = requests.get(
+            f"{BASE_URL}/api/job-history?days=30&status=completed&exclude_ids=id-a,id-b&limit=10",
+            headers=headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data[ "limit" ] == 10
+        for job in data[ "jobs" ]:
+            assert job[ "status" ] == "completed"
