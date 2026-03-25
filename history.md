@@ -1,5 +1,34 @@
 # Lupin Project History
 
+### 2026.03.25 - Session 372 | Bug Fix: Voice Injection Silent Crash on Null Title
+
+#### Checkpoint | 2026.03.25 12:55 | CC Listener null title fix + stale test cleanup
+
+**Bug**: Voice messages sent via browser CC session card were delivered to CC Notification Listener via WebSocket but never injected into Claude Code's tmux input. Messages silently disappeared.
+
+**Root cause**: `NotificationItem.title` was `None` when no title provided. `notification.get("title", "")` returns `None` (key exists with `None` value — Python default only applies for missing keys). `None.startswith("action:")` raised `AttributeError`, silently caught by `base_listener.py`'s generic exception handler that printed to lost subprocess stdout.
+
+**Fix** (source-side, not defensive):
+- `notification_fifo_queue.py`: `title: str = ""`, `abstract: str = ""` in both `NotificationItem.__init__` and `push_notification()` signatures
+- `notifications.py`: `title = title or ""`, `abstract = abstract or ""` at API boundary
+- `base_listener.py`: Error logging routed through `_log()` when available (observability)
+
+**Test updates**:
+- `test_cc_notification_listener.py`: Replaced 5 stale buffer-write tests with tmux injection tests (mocked), fixed 4 `test_session_end` → `session_end` import typos, added 2 new tests (empty title, action title routing)
+
+**Files Modified (4)** — 3 in CoSA submodule, 1 in Lupin:
+- `src/cosa/rest/notification_fifo_queue.py` (CoSA — title/abstract type tightening)
+- `src/cosa/rest/routers/notifications.py` (CoSA — API boundary normalization)
+- `src/cosa/agents/utils/proxy_agents/base_listener.py` (CoSA — observability)
+- `src/tests/smoke/test_cc_notification_listener.py` (Lupin — test updates)
+
+**Test Results**: 36/36 listener tests, 189/189 notification model tests pass.
+
+**Plan doc**: `~/.claude/plans/steady-hugging-sunrise.md`
+**Commit**: 716162e
+
+---
+
 ### 2026.03.24 - Session 371 | CJ Flow Persistence Phase 6 — Job History UI
 
 **Accomplishments**:

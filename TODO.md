@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-24 (Session 371)
+Last updated: 2026-03-25 (Session 372)
 
 ## Pending
 
@@ -10,11 +10,13 @@ Last updated: 2026-03-24 (Session 371)
 - [x] [LUPIN] Presentation Generator Phase 5: Serialize — Session 371: 5/5 tasks, 17 new tests
 - [x] [LUPIN] Presentation Generator: Wire `fuzzy_file_match` special handler — Session 371: already wired, added presentation-specific config key
 - [x] [LUPIN] **Bug Fix: WebSocket 503 "user_not_available" — audio WS auth fix not yet working.** Root cause confirmed: audio WS endpoint connects without user auth, so after hot reloads only a "ghost" connection (in `active_connections` but not `user_sessions`) remains. Fix added auth_request handling to audio endpoint (`websocket.py:205-260`) but needs further debugging — test notification still failed. Diagnostic infrastructure in place (`[NOTIFY] ⚠️ OFFLINE DIAG`, `[WS-DIAG]` browser prefix, `[WS] STATE` logs). Plan doc: `~/.claude/plans/bubbly-churning-donut.md` — **Fixed Session 371**
-- [ ] [LUPIN] Phase 1: Create `admin@lupin.deepily.ai` account + update `~/.lupin/config` (manual)
+- [x] [LUPIN] Phase 1: Create `admin@lupin.deepily.ai` account + update `~/.lupin/config` (manual) — Session 372: Done
+- [x] [LUPIN] **Bug Fix: Voice injection silent crash on null title** — Session 372: `NotificationItem.title` was None, crashing listener's `startswith()`. Fixed at source: `title: str = ""` in constructor + API boundary normalization. 36/36 listener + 189/189 model tests pass.
 - [x] [LUPIN] **CJ Flow Persistence Phase 6: Job History UI** — Session 371: Hybrid overlay model (Option C) with deduplication. 5th collapsible history section, configurable time window, delete/retry management, 19 new tests. Plan doc: `src/rnd/2026.03.13-cj-flow-persistence-plan.md`
 - [x] [LUPIN] Phase 6 cleanup: Clean up existing 1001 `st-*` test notification artifacts (delete or reassign — decide after using filter) — **Fixed Session 371**
 - [ ] [LUPIN] Archive history.md — at 18.4k tokens, above 17k WARNING threshold (deferred from Session 371b)
 - [ ] [LUPIN] CoSA commit pending: `websocket.py` Fix 4 (WebSocketDisconnect handler + safe close) — must commit from CoSA repo context
+- [ ] [LUPIN] CoSA commit pending: Voice injection bug fix — `notification_fifo_queue.py`, `notifications.py`, `base_listener.py` — must commit from CoSA repo context
 - [ ] [LUPIN] Run full E2E + integration test suite before merging branch to main
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
