@@ -17,6 +17,7 @@ Last updated: 2026-03-25 (Session 372)
 - [ ] [LUPIN] Archive history.md — at 18.4k tokens, above 17k WARNING threshold (deferred from Session 371b)
 - [ ] [LUPIN] CoSA commit pending: `websocket.py` Fix 4 (WebSocketDisconnect handler + safe close) — must commit from CoSA repo context
 - [ ] [LUPIN] CoSA commit pending: Voice injection bug fix — `notification_fifo_queue.py`, `notifications.py`, `base_listener.py` — must commit from CoSA repo context
+- [ ] [LUPIN] CoSA commit pending: session_name pipeline — `notification_fifo_queue.py` (session_name attr), `notifications.py` (session_name param + session_topic type) — must commit from CoSA repo context
 - [ ] [LUPIN] Run full E2E + integration test suite before merging branch to main
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)

@@ -1,5 +1,31 @@
 # Lupin Project History
 
+### 2026.03.25 - Session 372b | Bug Fix: set_session_topic() Not Propagating to Notification UI Header
+
+**Bug**: `set_session_topic()` MCP tool wrote the topic to the session bridge file (for stop hook) but never pushed it to the notification UI. The `sender-session-name` span in notification history card headers relied on inferior auto-generated names instead of the high-quality MCP-crafted topic.
+
+**Root cause**: The notification pipeline had a half-built `session_name` path — `AsyncNotificationRequest` had the field, the frontend had a handler, but the server never plumbed `session_name` through `/api/notify` → `NotificationItem` → WebSocket payload. Additionally, `saveSessionName()` always triggered a feedback push back to the server.
+
+**Fix** (7 changes across 5 files):
+1. Added `SESSION_TOPIC = "session_topic"` to `NotificationType` enum
+2. Added `session_name` attribute to `NotificationItem` class + `to_dict()` + `push_notification()`
+3. Added `session_name` query param to `/api/notify` endpoint + `session_topic` to valid types
+4. Added `session_name` param to MCP `notify()` tool
+5. Extended `set_session_topic()` to dispatch a `session_topic` notification after bridge write
+6. Added early intercept in `handleNotificationUpdate()` — updates header span, skips history card
+7. Added `{ fromServer: true }` anti-feedback flag to `saveSessionName()` to prevent push-back loop
+
+**Files Modified (5)** — 2 in CoSA submodule, 3 in Lupin:
+- `src/lupin_cli/notifications/notification_models.py` (Lupin — enum addition)
+- `src/cosa/rest/notification_fifo_queue.py` (CoSA — session_name in NotificationItem)
+- `src/cosa/rest/routers/notifications.py` (CoSA — session_name param + session_topic type)
+- `src/lupin_mcp/cosa_voice_mcp.py` (Lupin — notify() + set_session_topic() changes)
+- `src/fastapi_app/static/js/notifications.js` (Lupin — intercept + anti-feedback)
+
+**Plan doc**: `~/.claude/plans/wondrous-twirling-sprout.md`
+
+---
+
 ### 2026.03.25 - Session 372 | Bug Fix: Voice Injection Silent Crash on Null Title
 
 #### Checkpoint | 2026.03.25 12:55 | CC Listener null title fix + stale test cleanup

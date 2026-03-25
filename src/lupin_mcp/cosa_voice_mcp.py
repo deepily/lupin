@@ -580,7 +580,8 @@ def notify(
     abstract: Optional[ str ] = None,
     job_id: Optional[ str ] = None,
     suppress_ding: bool = False,
-    progress_group_id: Optional[ str ] = None
+    progress_group_id: Optional[ str ] = None,
+    session_name: Optional[ str ] = None
 ) -> str:
     """
     Announce something to the user without waiting for response.
@@ -591,13 +592,15 @@ def notify(
 
     Args:
         message: What to announce to the user
-        notification_type: "task", "progress", "alert", or "custom"
+        notification_type: "task", "progress", "alert", "custom", or "session_topic"
         priority: "low", "medium", "high", or "urgent"
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
         suppress_ding: Suppress notification sound while still speaking via TTS (default False)
         progress_group_id: Optional progress group ID (pg-{8 hex chars}) for in-place DOM updates.
             Notifications sharing this ID update a single element instead of appending new ones.
+        session_name: Optional human-readable session name for UI header display.
+            When set, updates the sender-session-name span in notification history card.
 
     Returns:
         Delivery status message
@@ -619,7 +622,8 @@ def notify(
             abstract=_normalize_abstract( abstract ),
             job_id=job_id,
             suppress_ding=suppress_ding,
-            progress_group_id=progress_group_id
+            progress_group_id=progress_group_id,
+            session_name=session_name
         )
     except ( ValidationError, ValueError ) as e:
         logger.error( f"Validation error: {e}" )
@@ -986,6 +990,19 @@ def set_session_topic( topic: str ) -> dict:
         data[ "session_topic" ] = topic
         with open( bridge_path, "w" ) as f:
             json.dump( data, f, indent=2 )
+
+        # Also push to notification UI for real-time header update
+        try:
+            notify(
+                message           = topic,
+                notification_type = "session_topic",
+                priority          = "low",
+                session_name      = topic,
+                suppress_ding     = True
+            )
+        except Exception:
+            pass  # Bridge write succeeded — UI push is best-effort
+
         return { "status": "ok", "topic": topic }
     except Exception as e:
         return { "status": "error", "reason": str( e ) }

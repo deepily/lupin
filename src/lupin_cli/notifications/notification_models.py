@@ -125,6 +125,7 @@ class NotificationType(str, Enum):
     ALERT                  = "alert"
     CUSTOM                 = "custom"
     USER_INITIATED_MESSAGE = "user_initiated_message"
+    SESSION_TOPIC          = "session_topic"
 
 
 class NotificationPriority(str, Enum):

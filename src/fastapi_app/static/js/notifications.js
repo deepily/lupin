@@ -4721,8 +4721,19 @@ class NotificationsUI {
         this.notificationState.notifications.push( notification );
         this.log( `Processing new notification: ${notification.type}/${notification.priority} - ${notification.message}` );
 
-        // Approach D: Append user_initiated_message to live interaction pane on running job card
+        // Session topic control message — update header span, skip history card
         const notifType = notification.type || notification.notification_type;
+        if ( notifType === 'session_topic' && notification.session_name ) {
+            const parsed = this.parseSenderId( this.resolveSenderId( notification ) );
+            if ( parsed.sessionId ) {
+                this.saveSessionName( parsed.sessionId, notification.session_name, { fromServer: true } );
+                this.refreshSessionNameDisplay( parsed.sessionId, notification.session_name );
+            }
+            this.log( `Session topic updated for ${parsed.sessionId}: ${notification.session_name}` );
+            return;
+        }
+
+        // Approach D: Append user_initiated_message to live interaction pane on running job card
         if ( notifType === 'user_initiated_message' && notification.job_id ) {
             // Skip DOM append — optimistic render in sendJobMessage() already added the bubble
             return;
@@ -7451,13 +7462,16 @@ class NotificationsUI {
      * Save a session name to localStorage.
      * @param {string} sessionId - Session ID (hex string)
      * @param {string} name - Session name to save
+     * @param {object} options - Optional flags: { fromServer: true } to skip push-back
      */
-    saveSessionName( sessionId, name ) {
+    saveSessionName( sessionId, name, options = {} ) {
         this.sessionNames[ sessionId ] = name;
         localStorage.setItem( this.SESSION_NAMES_KEY, JSON.stringify( this.sessionNames ) );
         this.log( `Saved session name for ${sessionId}: ${name}` );
-        // Push topic to CC listener for stop hook context
-        this.pushSessionTopicNotification( sessionId, name );
+        // Only push back to server if this came from the UI (not from server)
+        if ( !options.fromServer ) {
+            this.pushSessionTopicNotification( sessionId, name );
+        }
     }
 
     /**
@@ -7864,7 +7878,7 @@ class NotificationsUI {
         if ( notification.session_name ) {
             const parsed = this.parseSenderId( senderId );
             if ( parsed.sessionId ) {
-                this.saveSessionName( parsed.sessionId, notification.session_name );
+                this.saveSessionName( parsed.sessionId, notification.session_name, { fromServer: true } );
             }
         }
 

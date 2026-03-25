@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-03-24T15:30:00
+**Last Updated**: 2026-03-25T13:30:00
 
 ---
 
@@ -39,6 +39,7 @@
 | cd0fd61a | 2026-03-23T16:30:00 | 2026-03-23T17:00:00 | committed |
 | 0015f34e | 2026-03-24T12:00:00 | 2026-03-24T12:15:00 | committed |
 | f52e3261 | 2026-03-24T15:00:00 | 2026-03-24T15:30:00 | committed |
+| 1e9b946f | 2026-03-25T13:00:00 | 2026-03-25T13:30:00 | active |
 
 ---
 
@@ -65,6 +66,12 @@
 ---
 
 ### Completed
+
+- [x] **set_session_topic() not propagating to notification UI header** → pending commit | By: 1e9b946f (Session 372b)
+  - **Symptom**: MCP `set_session_topic()` writes to bridge file but UI `sender-session-name` span never updates
+  - **Root Cause**: `session_name` field existed in model but server pipeline never plumbed it through `/api/notify` → `NotificationItem` → WebSocket
+  - **Fix**: Added `SESSION_TOPIC` notification type, plumbed `session_name` through full pipeline, frontend intercept with anti-feedback
+  - **Files**: `notification_models.py`, `notification_fifo_queue.py`, `notifications.py`, `cosa_voice_mcp.py`, `notifications.js`
 
 - [x] **Action-required card stuck + WS send-after-close crash** → commit: d3ad8bf (Lupin), CoSA pending | By: f52e3261 (Session 371b)
   - **Symptom**: Notification card refuses dismissal (spinner cursor), FastAPI console spams RuntimeError on every WS disconnect
