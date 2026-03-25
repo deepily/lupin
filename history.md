@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.03.24 - Session 371 | MCP Session Startup Protocol — Strengthen CLAUDE.md Language
+
+**Accomplishments**:
+- **Diagnosed MCP protocol gap**: Session started without any cosa-voice MCP calls — no `get_session_info()`, no `set_session_topic()`, no status report. Root cause: tools are deferred (schemas must be fetched via ToolSearch first) and CLAUDE.md language wasn't strong enough to prevent hesitation
+- **New `MCP SESSION STARTUP PROTOCOL` section** in global `~/.claude/CLAUDE.md`: Two-phase mandatory protocol — Phase A (fetch schemas, verify connectivity, report status) before any file reading; Phase B (`set_session_topic()`) after context gathering when session focus is known
+- **Strengthened `SESSION TOPIC` section**: Changed MANDATE → MUST, added plan mode applicability, added "Do NOT call until you know the focus" guard
+- **Updated `Final Instructions`**: Added Step 0 (MCP Startup Phase A) before existing steps 1-2
+- **Feedback memory saved**: `feedback_mcp_startup_protocol.md` — two-phase startup rule with rationale
+
+**Files Modified (3 — all outside Lupin repo)**:
+- `~/.claude/CLAUDE.md` (3 edits: new section, strengthen session topic, update final instructions)
+- `~/.claude/projects/.../memory/feedback_mcp_startup_protocol.md` (new)
+- `~/.claude/projects/.../memory/MEMORY.md` (added index entry)
+
+**Plan doc**: `~/.claude/plans/precious-snacking-cray.md`
+
+---
+
 ### 2026.03.24 - Session 370 | Presentation Generator Phase 3 — Expeditor + Ingest + Narrative Analysis
 
 **Accomplishments**:
