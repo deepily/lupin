@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.25 - Presentation Generator Phase C-D Verification Plan
+- **Plan**: [2026.03.14-presentation-generator/07-phase-c-d-verification-plan.md](2026.03.14-presentation-generator/07-phase-c-d-verification-plan.md) - CJ Flow dry-run verification for Presentation Generator. Adds "presentation" to mode maps, Q&A dropdown option, dedicated HTML submission card, JS handler, 6-scenario smoke test. Phase C (dry-run queue) complete; Phase D (live E2E) deferred.
+
 ### 2026.03.25 - CJ Flow Persistence UI Testing Plan
 - **Plan**: [2026.03.25-cj-flow-persistence-ui-testing-plan.md](2026.03.25-cj-flow-persistence-ui-testing-plan.md) - Data-driven automated testing plan for Job History UI. Shared seed utility, 17 integration tests (data display, filtering, delete, retry, user isolation), 16 E2E Playwright tests (data display, time window filtering, pagination, delete/retry actions). All tests run against lupin_db_test via hot-swap.
 
@@ -37,6 +40,9 @@ This directory contains research and development documents for the Lupin project
 
 ### 2026.03.11 - Baseline Test Report
 - **Report**: [2026.03.11-baseline-test-report.md](2026.03.11-baseline-test-report.md) - Comprehensive baseline test results across all 5 test tiers before remediation.
+
+### 2026.03.25 - UPE LanceDB Test Isolation
+- **Plan**: [2026.03.25-upe-lancedb-test-isolation.md](2026.03.25-upe-lancedb-test-isolation.md) - 4-step fix to isolate LanceDB test table from production. Config override in Testing block + PredictionEngine singleton reset on hot-swap + test cleanup fixture. Unblocks Phase 2 of validation campaign.
 
 ### 2026.03.25 - Prediction System Validation Campaign
 - **Plan**: [2026.03.25-prediction-system-validation-campaign.md](2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md) - Umbrella plan consolidating UPE validation + SWE proxy Layer 2 + trust proxy documentation update into 2 items. 6-phase validation campaign (baseline, threshold tuning, SWE shadow-mode, gap tests, visual QA, full lifecycle) covering 142 total tests. Documentation update deferred as final gate after validation.

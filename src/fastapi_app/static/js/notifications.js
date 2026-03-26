@@ -1782,6 +1782,33 @@ class NotificationsUI {
             });
         }
 
+        // Presentation Generator submit button
+        const submitPresentationBtn = document.getElementById( 'submit-presentation-job' );
+        if ( submitPresentationBtn ) {
+            submitPresentationBtn.addEventListener( 'click', () => {
+                this.submitPresentationJob();
+            });
+        }
+
+        // Presentation Generator STT button (voice input)
+        const presentationSttBtn = document.getElementById( 'presentation-stt-button' );
+        if ( presentationSttBtn ) {
+            presentationSttBtn.addEventListener( 'click', () => {
+                this.handleSTTButtonClick( 'presentation-source', presentationSttBtn );
+            });
+        }
+
+        // Enter key in Presentation source input
+        const presentationSourceInput = document.getElementById( 'presentation-source' );
+        if ( presentationSourceInput ) {
+            presentationSourceInput.addEventListener( 'keydown', ( e ) => {
+                if ( e.key === 'Enter' ) {
+                    e.preventDefault();
+                    this.submitPresentationJob();
+                }
+            });
+        }
+
         // ── Job Message Send: Event delegation on todo + run queue containers ──
         // Handles dynamically-created job message inputs via bubbling
         this._setupJobMessageDelegation( 'run-jobs-container' );
@@ -2724,6 +2751,82 @@ class NotificationsUI {
 
         } catch ( error ) {
             this.error( "SWE Team job submission failed:", error );
+            statusDiv.textContent = `✗ Error: ${error.message}`;
+            statusDiv.style.color = '#dc3545';
+        } finally {
+            submitButton.disabled = false;
+            loadingSpinner.style.display = 'none';
+        }
+    }
+
+    /**
+     * Submit a Presentation Generator job.
+     *
+     * Sends source document to /api/presentation-generator/submit for
+     * asynchronous slide generation via the CJ Flow queue.
+     */
+    async submitPresentationJob() {
+        const sourceInput      = document.getElementById( 'presentation-source' );
+        const audienceSelect   = document.getElementById( 'presentation-audience' );
+        const durationInput    = document.getElementById( 'presentation-duration' );
+        const dryRunCheckbox   = document.getElementById( 'presentation-dry-run' );
+        const submitButton     = document.getElementById( 'submit-presentation-job' );
+        const loadingSpinner   = document.getElementById( 'presentation-loading' );
+        const statusDiv        = document.getElementById( 'presentation-submit-status' );
+
+        const source   = sourceInput.value.trim();
+        const audience = audienceSelect.value;
+        const duration = parseInt( durationInput.value ) || 15;
+        const dryRun   = dryRunCheckbox.checked;
+
+        if ( !source ) {
+            statusDiv.textContent = '⚠️ Please enter a source document path.';
+            statusDiv.style.color = '#dc3545';
+            return;
+        }
+
+        try {
+            // Update UI
+            submitButton.disabled = true;
+            loadingSpinner.style.display = 'inline-block';
+            statusDiv.textContent = 'Submitting presentation job...';
+            statusDiv.style.color = '#666';
+
+            // Ensure token is valid before API call
+            await this.ensureValidToken();
+
+            this.log( `Submitting presentation job: ${source.substring( 0, 50 )}...` );
+
+            const response = await fetch( '/api/presentation-generator/submit', {
+                method  : 'POST',
+                headers : {
+                    'Authorization' : this.getAuthHeader(),
+                    'X-Session-ID'  : this.queueSessionId,
+                    'Content-Type'  : 'application/json'
+                },
+                body: JSON.stringify({
+                    source_path              : source,
+                    audience                 : audience,
+                    target_duration_minutes  : duration,
+                    dry_run                  : dryRun
+                })
+            });
+
+            if ( !response.ok ) {
+                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
+                throw new Error( errorData.detail || `HTTP ${response.status}` );
+            }
+
+            const result = await response.json();
+            this.log( "Presentation job response:", result );
+
+            // Success feedback
+            statusDiv.textContent = `✓ Presentation job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
+            statusDiv.style.color = '#28a745';
+            sourceInput.value = '';
+
+        } catch ( error ) {
+            this.error( "Presentation job submission failed:", error );
             statusDiv.textContent = `✗ Error: ${error.message}`;
             statusDiv.style.color = '#dc3545';
         } finally {

@@ -1,5 +1,35 @@
 # Lupin Project History
 
+### 2026.03.25 - Session 373b | Prediction System Validation Campaign — TODO Consolidation + Phase 1-2
+
+**Goal**: Consolidate 3 overlapping TODO items (UPE validation, SWE proxy Layer 2, trust proxy docs) into 2, then execute Phase 1 (baseline) and begin Phase 2 (threshold tuning) of the validation campaign.
+
+**Accomplishments**:
+- Consolidated 3 TODO items into 2: "Prediction System Validation Campaign" (Item A) + "Trust & Prediction Documentation Update" (Item B)
+- Created `00-index.md` navigation hub for the 12-file trust-proxy-preference-learning directory
+- Created umbrella plan: `2026.03.25-prediction-system-validation-campaign.md` (6-phase campaign, 179 total tests)
+- Phase 1 complete: 104/104 unit tests pass, 20/20 smoke tests pass, 21 E2E tests un-skipped
+- Phase 2 root cause found: E2E tests fail because test user has no WebSocket connection — notification router takes early return, bypassing prediction engine hooks
+- Implemented WebSocket fixture in `conftest.py` — prediction_log entries now created successfully
+- Found secondary issue: production LanceDB table has accumulated decisions, cold-start tests get `cbr_majority_vote` instead of `cold_start`
+- Planned LanceDB test isolation fix (serialized to `src/rnd/2026.03.25-upe-lancedb-test-isolation.md`)
+- Archived history.md: 19.9k → 9.3k tokens (Sessions 304-348 → `history/2026-03-03-to-12-history.md`)
+
+**Files Created (4)**:
+- `src/rnd/2026.02.23-trust-proxy-preference-learning/00-index.md`
+- `src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md`
+- `src/rnd/2026.03.25-upe-lancedb-test-isolation.md`
+- `history/2026-03-03-to-12-history.md`
+
+**Files Modified (5)**:
+- `TODO.md` (3 items → 2 consolidated, progress notes added)
+- `src/rnd/README.md` (new plan doc links)
+- `src/tests/integration/conftest.py` (`ws_connection` fixture)
+- `src/tests/integration/test_prediction_engine_e2e.py` (un-skip both classes, `ws_connection` usage, `DetachedInstanceError` fix)
+- `history.md` (archive + session entry)
+
+---
+
 ### 2026.03.25 - Session 374 | Presentation Generator Phase C — CJ Flow Dry-Run Verification
 
 **Goal**: Exercise the Presentation Generator agent through the actual CJ Flow queue and notifications UI for the first time. Phases 1-5 were code-complete but had never been submitted through the queue pipeline.
@@ -816,4 +846,10 @@
 **Design doc**: [`src/rnd/2026.02.23-ini-config-key-naming-convention.md`](src/rnd/2026.02.23-ini-config-key-naming-convention.md)
 
 ---
+
+## Archives
+
+- [2026-03-03 to 03-12](history/2026-03-03-to-12-history.md) — Sessions 304-348
+- [2026-02-24 to 03-03](history/2026-02-24-to-03-03-history.md) — Sessions 266-303
+- [Earlier archives](history/README.md)
 

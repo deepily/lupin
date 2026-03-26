@@ -1,7 +1,7 @@
 # Presentation Generator Agent — Implementation Tracking
 
 **Created**: 2026-03-14
-**Last Updated**: 2026-03-24 (Session 371)
+**Last Updated**: 2026-03-25 (Session 374)
 
 ---
 
@@ -84,6 +84,19 @@
 | 5.5 | Write unit tests (17 tests: 11 YAML round-trip + 6 serialize orchestrator) | Done |
 
 **Phase 5 Status**: Done (Session 371)
+
+---
+
+## Verification — CJ Flow Queue Integration
+
+| # | Task | Status |
+|---|------|--------|
+| V.A | Smoke tests (6 modules) | Done (Session 371) |
+| V.B | Enhanced dry-run (CLI) — real ingest + mock pipeline + real YAML | Done (Session 371) |
+| V.C | Dry-run via CJ Flow queue + notifications UI | Done (Session 374) |
+| V.D | Live E2E with real Claude API calls + voice gates | Pending |
+
+**Phase C details** (Session 374): Added "presentation" to MODE_METADATA + AGENTIC_MODE_MAP, Q&A dropdown option, dedicated HTML submission card, JS handler, 6-scenario smoke test (all pass). Plan doc: `07-phase-c-d-verification-plan.md`
 
 ---
 
