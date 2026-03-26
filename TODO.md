@@ -18,10 +18,10 @@ Last updated: 2026-03-25 (Session 374)
 - [x] [LUPIN] Phase 6 cleanup: Clean up existing 1001 `st-*` test notification artifacts (delete or reassign — decide after using filter) — **Fixed Session 371**
 - [x] [LUPIN] Archive history.md — at 18.4k tokens, above 17k WARNING threshold (deferred from Session 371b) — **Superseded**: now 19.5k+, escalated to CRITICAL in Session 374 TODO above
 - [ ] [LUPIN] CoSA commit pending: `websocket.py` Fix 4 (WebSocketDisconnect handler + safe close) — must commit from CoSA repo context
-- [ ] [LUPIN] CoSA commit pending: Voice injection bug fix — `notification_fifo_queue.py`, `notifications.py`, `base_listener.py` — must commit from CoSA repo context
-- [ ] [LUPIN] CoSA commit pending: session_name pipeline — `notification_fifo_queue.py` (session_name attr), `notifications.py` (session_name param + session_topic type) — must commit from CoSA repo context
+- [x] [LUPIN] CoSA commit pending: Voice injection bug fix — `notification_fifo_queue.py`, `notifications.py`, `base_listener.py` — committed b544c78
+- [x] [LUPIN] CoSA commit pending: session_name pipeline — `notification_fifo_queue.py` (session_name attr), `notifications.py` (session_name param + session_topic type) — committed b544c78
 - [ ] [LUPIN] Run full E2E + integration test suite before merging branch to main
-- [ ] [LUPIN] **Verify E2E UI test suite health — clean single run needed** — Session 372c's "272 passed, 3 failed, 23 errors" result was likely caused by hot-swap collision (multiple test runs overlapping, restoring server config mid-suite). The 23 errors all show `RuntimeError: Server database is NOT lupin_db_test!` — consistent with config restore from a parallel run. The 3 failures were retry integration tests already fixed. **Action**: Run `! ./src/scripts/run-e2e-ui-tests.sh -v` as a single clean run to get true baseline. If all 298 pass, close this item. If real failures exist, categorize and track them.
+- [x] [LUPIN] **Verify E2E UI test suite health — clean single run needed** — Session 377: **297 passed, 0 failed** in 17m12s. Session 372c's 23 errors confirmed as hot-swap collision (not real failures). Added `--bg` flag to `run-e2e-ui-tests.sh` with PID-file overlap protection to prevent recurrence. Updated 1 stale visual snapshot (notifications page). Suite is fully healthy.
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 

@@ -20,7 +20,7 @@ Lupin uses a **three-tier testing strategy** for comprehensive validation.
 | Integration | `src/tests/integration/` | 100-1000ms | End-to-end flows | `./src/tests/run-integration-tests.sh -v` |
 | WebSocket | `src/tests/websocket_smoke/` | varies | WS functionality | `src/scripts/run-websocket-smoke-tests.sh` |
 | Live Pipeline | `src/tests/smoke/test_*_live_pipeline.py` | 10-120s | Full LLM pipeline | `python src/tests/smoke/test_calculator_live_pipeline.py` |
-| UI E2E | `src/tests/e2e_ui/` | 1-5s | Browser-level visual + functional | `./src/scripts/run-e2e-ui-tests.sh -v` |
+| UI E2E | `src/tests/e2e_ui/` | 1-5s | Browser-level visual + functional | `./src/scripts/run-e2e-ui-tests.sh --bg -v` |
 
 ## Quick Commands
 
@@ -131,20 +131,39 @@ Browser-level functional + visual regression tests using Playwright + Chromium h
 | Property | Value |
 |----------|-------|
 | Location | `src/tests/e2e_ui/` |
-| Runner | `./src/scripts/run-e2e-ui-tests.sh -v` |
-| Tests | 265 (253 functional + 12 visual regression) |
+| Runner | `./src/scripts/run-e2e-ui-tests.sh --bg -v` |
+| Tests | 297 (285 functional + 12 visual regression) |
+| Duration | ~17 minutes (full suite) |
 | Baselines | `src/tests/e2e_ui/__snapshots__/` (12 PNG screenshots) |
 | Failures | `src/tests/e2e_ui/snapshot_failures/` (auto-generated on diff) |
 
-```bash
-# All E2E UI tests
-./src/scripts/run-e2e-ui-tests.sh -v
+**CRITICAL: Always use `--bg` flag from Claude Code.** The full suite takes ~17 minutes,
+which exceeds the Bash tool's 10-minute max timeout. Without `--bg`, the timeout kills
+the run mid-suite and the trap handler restores production config, causing hot-swap
+collisions if re-run (Session 372c: 23 spurious errors). The `--bg` flag runs via nohup
+with PID-file overlap protection.
 
-# Visual regression only
-./src/scripts/run-e2e-ui-tests.sh -v -k visual
+```bash
+# All E2E UI tests (ALWAYS use --bg from Claude Code)
+./src/scripts/run-e2e-ui-tests.sh --bg -v
+
+# Monitor progress
+tail -20 /tmp/e2e-ui-latest.log
+
+# Check if still running
+kill -0 $(cat /tmp/e2e-ui-tests.pid) 2>/dev/null && echo running || echo done
+
+# Check final results
+grep -E '(passed|failed|error)' /tmp/e2e-ui-latest.log
+
+# Visual regression only (~37s, --bg optional)
+./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual
 
 # Update baselines after intentional UI changes
-./src/scripts/run-e2e-ui-tests.sh --update-snapshots -k visual
+./src/scripts/run-e2e-ui-tests.sh --bg --update-snapshots -k visual
+
+# From user terminal (foreground OK — no timeout concern)
+./src/scripts/run-e2e-ui-tests.sh -v
 ```
 
 **Coverage**: All 12 pages — auth flows, page smoke, admin flows, notifications, WebSocket lifecycle, visual regression.

@@ -19,6 +19,19 @@
 #   ./src/scripts/run-e2e-ui-tests.sh -v -s      # Very verbose (show prints)
 #   ./src/scripts/run-e2e-ui-tests.sh -k login   # Run only login tests
 #   ./src/scripts/run-e2e-ui-tests.sh --update-snapshots  # Update visual baselines
+#   ./src/scripts/run-e2e-ui-tests.sh --bg -v    # Run in background (for Claude Code)
+#
+# Background mode (--background / --bg):
+#   The E2E suite runs ~19 minutes (298 tests × Playwright × Chromium).
+#   Claude Code's Bash tool has a 10-minute max timeout. When the timeout
+#   fires mid-run, the trap handler restores the production config block.
+#   If a second run is then attempted, the config hot-swap collides with
+#   the first run's cleanup, causing "Server database is NOT lupin_db_test!"
+#   errors across the board (Session 372c: 23 spurious errors).
+#
+#   --bg re-execs via nohup so the caller returns immediately.
+#   A PID file prevents overlapping runs. The symlink /tmp/e2e-ui-latest.log
+#   always points to the most recent run's output.
 #
 
 set -e  # Exit on error
@@ -30,6 +43,64 @@ PROJECT_ROOT="${LUPIN_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/lupin}"
 VENV_PYTHON="$PROJECT_ROOT/src/cosa/.venv/bin/python3"
 ORIGINAL_BLOCK=""
 
+# --- Background execution support ---
+LOG_DIR="/tmp"
+PID_FILE="/tmp/e2e-ui-tests.pid"
+
+# Parse --background / --bg flag (strip it from args passed to pytest)
+BG_MODE=false
+REMAINING_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --background|--bg)
+            BG_MODE=true
+            ;;
+        *)
+            REMAINING_ARGS+=( "$arg" )
+            ;;
+    esac
+done
+
+# Prevent overlapping runs (regardless of mode)
+if [ -f "$PID_FILE" ]; then
+    EXISTING_PID=$( cat "$PID_FILE" )
+    if [ "$EXISTING_PID" = "$$" ]; then
+        # This is our own PID — nohup re-exec case. Proceed normally.
+        :
+    elif kill -0 "$EXISTING_PID" 2>/dev/null; then
+        echo "ERROR: E2E test run already in progress (PID $EXISTING_PID)"
+        echo "Log: $( readlink -f /tmp/e2e-ui-latest.log 2>/dev/null || echo 'unknown' )"
+        echo "To force: rm $PID_FILE"
+        exit 1
+    else
+        echo "WARNING: Stale PID file found (PID $EXISTING_PID no longer running). Cleaning up."
+        rm -f "$PID_FILE"
+    fi
+fi
+
+# If --background requested, re-exec via nohup and exit immediately
+if [ "$BG_MODE" = true ]; then
+    LOG_FILE="$LOG_DIR/e2e-ui-$( date +%Y%m%d-%H%M%S ).log"
+    ln -sf "$LOG_FILE" /tmp/e2e-ui-latest.log
+
+    nohup "$0" "${REMAINING_ARGS[@]}" > "$LOG_FILE" 2>&1 &
+    BG_PID=$!
+    echo "$BG_PID" > "$PID_FILE"
+
+    echo "E2E UI tests running in background"
+    echo "  PID:  $BG_PID"
+    echo "  Log:  $LOG_FILE"
+    echo "  Link: /tmp/e2e-ui-latest.log"
+    echo ""
+    echo "Monitor:  tail -f $LOG_FILE"
+    echo "Status:   kill -0 $BG_PID 2>/dev/null && echo running || echo done"
+    echo "Results:  grep -E '(passed|failed|error)' $LOG_FILE"
+    exit 0
+fi
+
+# Record our PID (for overlap detection in foreground mode too)
+echo "$$" > "$PID_FILE"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -38,6 +109,9 @@ NC='\033[0m' # No Color
 
 # Cleanup function - ALWAYS swap back, even on test failure or Ctrl+C
 cleanup() {
+    # Remove PID file so future runs aren't blocked
+    rm -f "$PID_FILE"
+
     if [ -n "$ORIGINAL_BLOCK" ]; then
         echo ""
         echo -e "${YELLOW}[CLEANUP] Restoring original config: $ORIGINAL_BLOCK${NC}"
@@ -223,7 +297,7 @@ cd "$PROJECT_ROOT"
 
 # Run pytest and capture exit code
 set +e  # Don't exit on pytest failure
-"$PROJECT_ROOT/src/cosa/.venv/bin/pytest" src/tests/e2e_ui/ --browser chromium "$@"
+"$PROJECT_ROOT/src/cosa/.venv/bin/pytest" src/tests/e2e_ui/ --browser chromium "${REMAINING_ARGS[@]}"
 PYTEST_EXIT_CODE=$?
 set -e
 

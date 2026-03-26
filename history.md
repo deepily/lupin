@@ -1,5 +1,33 @@
 # Lupin Project History
 
+### 2026.03.26 - Session 377 | E2E UI Test Suite Health — Background Execution + Verification
+
+**Goal**: Resolve Session 372c's spurious E2E failures (23 hot-swap collision errors) and prevent recurrence by adding background execution support to the test runner.
+
+#### Checkpoint | 2026.03.26 17:30 | Background mode + clean verification run
+
+**Infrastructure fix** — `src/scripts/run-e2e-ui-tests.sh`:
+- Added `--bg` / `--background` flag: re-execs via nohup, returns immediately, logs to `/tmp/e2e-ui-*.log`
+- Added PID-file overlap protection: prevents concurrent runs that cause hot-swap collisions
+- Fixed self-PID detection bug in nohup re-exec path
+- Documented "why" in script header (Session 372c incident)
+
+**Verification** — E2E suite is healthy:
+- Full suite: **297 passed, 0 failed** in 17m12s (zero hot-swap errors)
+- Updated 1 stale visual snapshot (notifications page — new UI elements from Sessions 372c/374)
+- Visual re-verification: 12/12 pass
+
+**Documentation updates** — `--bg` now mandatory in all references:
+- `CLAUDE.md`: E2E section commands + pre-merge checklist + pre-merge validation sequence
+- `.claude/skills/testing-patterns/SKILL.md`: E2E section with CRITICAL warning + monitoring commands
+- `~/.claude/skills/testing-development/SKILL.md`: E2E quick commands
+- Memory: `feedback_e2e_background_mode.md`
+
+**Files Modified (5)**: `src/scripts/run-e2e-ui-tests.sh`, `.claude/skills/testing-patterns/SKILL.md`, `CLAUDE.md`, `TODO.md`, `src/tests/e2e_ui/__snapshots__/.../notifications.png`
+**Commit**: 63577da
+
+---
+
 ### 2026.03.26 - Session 376 | Bug Fix: session_name max_length=50 Silently Rejects Long Session Topics
 
 **Fix**: `set_session_topic()` failed to propagate topics longer than 50 characters to the notifications UI. Pydantic `max_length=50` on `session_name` caused silent `ValidationError` inside `_notify_impl()`, which returned an error string — but `set_session_topic()` ignored the return value and reported `{"status": "ok"}`.

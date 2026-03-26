@@ -249,10 +249,13 @@ Lupin uses a three-tier testing strategy for comprehensive validation:
 
 5. **E2E UI Tests** (`src/tests/e2e_ui/`)
    - Playwright Chromium headless browser tests against live server
-   - Coverage: 253 functional tests + 12 visual regression (Phase 8)
-   - Run: `./src/scripts/run-e2e-ui-tests.sh -v`
-   - Visual only: `./src/scripts/run-e2e-ui-tests.sh -v -k visual`
-   - Update baselines: `./src/scripts/run-e2e-ui-tests.sh --update-snapshots -k visual`
+   - Coverage: 285 functional tests + 12 visual regression
+   - **CRITICAL**: Always use `--bg` flag from Claude Code (suite takes ~17min, exceeds 10min Bash timeout)
+   - Run: `./src/scripts/run-e2e-ui-tests.sh --bg -v`
+   - Visual only: `./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual`
+   - Update baselines: `./src/scripts/run-e2e-ui-tests.sh --bg --update-snapshots -k visual`
+   - Monitor: `tail -20 /tmp/e2e-ui-latest.log`
+   - Status: `kill -0 $(cat /tmp/e2e-ui-tests.pid) 2>/dev/null && echo running || echo done`
    - Snapshots: `src/tests/e2e_ui/__snapshots__/` (version-controlled)
 
 6. **Interactive Proxy Tests** (`src/tests/smoke/test_proxy_integration.py`)
@@ -307,8 +310,8 @@ See `src/tests/README.md` for comprehensive testing documentation.
 |------------|---------|-------------|
 | Unit Tests | `pytest src/tests/unit/` | 100% pass |
 | WebSocket Tests | `./src/scripts/run-websocket-smoke-tests.sh` | 100% pass |
-| E2E UI Tests | `./src/scripts/run-e2e-ui-tests.sh -v` | 100% pass |
-| Visual Regression | `./src/scripts/run-e2e-ui-tests.sh -v -k visual` | 100% pass |
+| E2E UI Tests | `./src/scripts/run-e2e-ui-tests.sh --bg -v` | 100% pass |
+| Visual Regression | `./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual` | 100% pass |
 | Integration Tests | `./src/tests/run-integration-tests.sh -v` | 100% pass (FINAL GATE) |
 
 ### Integration Tests are the Final Gate
@@ -327,8 +330,12 @@ Integration tests are the **FINAL validation step** before any branch merge to m
 # Complete pre-merge validation sequence
 pytest src/tests/unit/ -v && \
 ./src/scripts/run-websocket-smoke-tests.sh && \
+./src/scripts/run-e2e-ui-tests.sh --bg -v && \
 ./src/tests/run-integration-tests.sh -v
 ```
+
+**Note**: E2E UI tests run in background (`--bg`) — monitor via `tail -20 /tmp/e2e-ui-latest.log`.
+Wait for completion before proceeding to integration tests (the final gate).
 
 ### When Tests Fail
 
