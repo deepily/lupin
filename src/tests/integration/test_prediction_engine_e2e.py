@@ -109,13 +109,19 @@ def _get_prediction_log( session_factory, notification_id ):
     Query prediction_log for a specific notification.
 
     Returns:
-        PredictionLog object or None
+        PredictionLog object (detached) or None
     """
+    from sqlalchemy.orm import make_transient
     from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository
 
     with session_factory() as session:
         repo = PredictionLogRepository( session )
-        return repo.get_by_notification_id( notification_id )
+        log  = repo.get_by_notification_id( notification_id )
+        if log is not None:
+            # Eagerly load all columns before detaching from session
+            session.refresh( log )
+            make_transient( log )
+        return log
 
 
 def _get_all_prediction_logs( session_factory ):
@@ -123,20 +129,24 @@ def _get_all_prediction_logs( session_factory ):
     Get all prediction_log entries.
 
     Returns:
-        list of PredictionLog objects
+        list of PredictionLog objects (detached)
     """
+    from sqlalchemy.orm import make_transient
     from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository
 
     with session_factory() as session:
         repo = PredictionLogRepository( session )
-        return repo.get_recent( limit=100 )
+        logs = repo.get_recent( limit=100 )
+        for log in logs:
+            session.refresh( log )
+            make_transient( log )
+        return logs
 
 
 # ===========================================================================
 # TestPredictionEngineE2E — full cycle tests
 # ===========================================================================
 
-@pytest.mark.skip( reason="Requires prediction engine server-side state (LanceDB + prediction_log table init) — deferred to UPE live E2E validation" )
 class TestPredictionEngineE2E:
     """
     E2E tests for the predict-respond-record cycle.
@@ -149,11 +159,11 @@ class TestPredictionEngineE2E:
     """
 
     @pytest.fixture( autouse=True )
-    def setup_auth( self, create_test_user ):
-        """Set up authentication for all tests."""
-        self.user_data    = create_test_user
-        self.auth_headers = { "Authorization": f"Bearer {create_test_user[ 'access_token' ]}" }
-        self.target_email = create_test_user[ "email" ]
+    def setup_auth( self, ws_connection ):
+        """Set up authentication + WebSocket for all tests."""
+        self.user_data    = ws_connection
+        self.auth_headers = { "Authorization": f"Bearer {ws_connection[ 'access_token' ]}" }
+        self.target_email = ws_connection[ "email" ]
 
     @pytest.fixture( autouse=True )
     def setup_db( self ):
@@ -500,7 +510,6 @@ class TestPredictionEngineE2E:
 # TestPredictionEngineWarm — warm CBR prediction tests
 # ===========================================================================
 
-@pytest.mark.skip( reason="Requires prediction engine server-side state (LanceDB + embeddings) — deferred to UPE live E2E validation" )
 class TestPredictionEngineWarm:
     """
     Warm E2E tests that seed LanceDB with real embeddings (via HTTP fallback)
@@ -514,11 +523,11 @@ class TestPredictionEngineWarm:
     """
 
     @pytest.fixture( autouse=True )
-    def setup_auth( self, create_test_user ):
-        """Set up authentication for all tests."""
-        self.user_data    = create_test_user
-        self.auth_headers = { "Authorization": f"Bearer {create_test_user[ 'access_token' ]}" }
-        self.target_email = create_test_user[ "email" ]
+    def setup_auth( self, ws_connection ):
+        """Set up authentication + WebSocket for all tests."""
+        self.user_data    = ws_connection
+        self.auth_headers = { "Authorization": f"Bearer {ws_connection[ 'access_token' ]}" }
+        self.target_email = ws_connection[ "email" ]
 
         # API key for HTTP embedding calls
         self.api_key = cu.get_api_key( "notification-api-claude-code-dev" )
