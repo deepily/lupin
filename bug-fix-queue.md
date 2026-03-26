@@ -69,7 +69,13 @@
 
 ### Completed
 
-- [x] **session_name max_length=50 silently rejects long session topics** → commit: 4ddb07b | By: 5b508f0e (Session 376)
+- [x] **Presentation Generator dry-run sends zero progress notifications** → commit: 8b749b0 | By: 5b508f0e (Session 376)
+  - **Symptom**: Dry run completes but UI shows no breadcrumb notifications
+  - **Root Cause**: `_execute_dry_run()` was dead code; orchestrator path lacked identity setup → `is_voice_available()` cached False
+  - **Fix**: Wired `_execute_dry_run()` with identity setup (matching podcast pattern) + added breadcrumb docs to agentic workflow skill
+  - **Files**: `job.py`, `agentic-voice-workflow.md`, `SKILL.md`
+
+- [x] **session_name max_length=50 silently rejects long session topics** → commit: 0cadd52 | By: 5b508f0e (Session 376)
   - **Symptom**: `set_session_topic()` returns OK but UI never updates for topics > 50 chars
   - **Fix**: Truncate to 64 chars before `_notify_impl()`, bump `max_length` to 64, surface failures in logs
   - **Files**: `cosa_voice_mcp.py`, `notification_models.py`

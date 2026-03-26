@@ -80,7 +80,14 @@ response = ask_yes_no( "Approve this plan?", default="yes" )
 
 # Completion
 notify( "Agent completed successfully", priority="medium" )
+
+# Progressive breadcrumbs (inside loops or long phases)
+for i, item in enumerate( items ):
+    await voice_io.notify( f"Processing {i + 1} of {len( items )}", priority="low" )
 ```
+
+**Breadcrumb notifications** are required for loops, long phases (>10s), and
+dry-run mode. See "Progressive Breadcrumb Notifications" in the full workflow doc.
 
 ## Key Interfaces
 

@@ -1,5 +1,20 @@
 # Lupin Project History
 
+### 2026.03.26 - Session 376 | Bug Fixes: session_name max_length + Presentation Dry-Run Notifications
+
+**Bug #1**: `set_session_topic()` silently rejected topics >50 chars — Pydantic `max_length=50` on `session_name` caused `ValidationError` inside `_notify_impl()`, swallowed by error handling, `set_session_topic()` returned "ok" anyway.
+- **Fix**: Truncate to 64 chars (61 + "...") before `_notify_impl()`, bumped `max_length` 50→64, surface failures via `logger.warning`
+- **Files**: `src/lupin_mcp/cosa_voice_mcp.py`, `src/lupin_cli/notifications/notification_models.py`
+- **Commit**: 0cadd52
+
+**Bug #2**: Presentation Generator dry-run sent zero progress notifications — `_execute_dry_run()` was dead code (never called); dry run went through orchestrator but `voice_io` identity (SENDER_ID, TARGET_USER) wasn't configured before the first `notify()` call, causing `is_voice_available()` to cache `False` and all subsequent notifications to silently fall back to `print()`.
+- **Fix**: Wired `_execute_dry_run()` call in `_execute()` (matching podcast generator pattern), added identity setup + `try/finally` cleanup
+- **Doc fix**: Added "Progressive Breadcrumb Notifications" section to `agentic-voice-workflow.md` + SKILL.md — loop-level notification guidance was completely missing
+- **Files**: `src/cosa/agents/presentation_generator/job.py`, `src/workflow/agentic-voice-workflow.md`, `.claude/skills/agentic-voice-workflow/SKILL.md`
+- **Commit**: 8b749b0
+
+---
+
 ### 2026.03.26 - Session 377 | E2E UI Test Suite Health — Background Execution + Verification
 
 **Goal**: Resolve Session 372c's spurious E2E failures (23 hot-swap collision errors) and prevent recurrence by adding background execution support to the test runner.

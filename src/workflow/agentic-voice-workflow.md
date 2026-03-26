@@ -1216,6 +1216,53 @@ await voice_io.notify(
 await voice_io.notify( f"Error: {error_msg}", priority="urgent" )
 ```
 
+### Progressive Breadcrumb Notifications (Loop-Level)
+
+For long-running phases that iterate over multiple items, send **low-priority
+breadcrumb notifications** so the user knows work is progressing. Without these,
+the UI appears frozen between phase-level transitions.
+
+**When to add breadcrumbs:**
+- Loops that process multiple items (e.g., per-topic research, per-language TTS)
+- Phases that take >10 seconds with no other visible output
+- Dry-run mode — breadcrumbs are the ONLY sign of life since no real work happens
+
+**Pattern:**
+```python
+# Inside a loop — notify on each iteration
+for i, topic in enumerate( topics ):
+    await voice_io.notify(
+        f"Researching topic {i + 1} of {len( topics )}: {topic[ :60 ]}",
+        priority="low"
+    )
+    result = await process_topic( topic )
+
+# Inside dry-run — breadcrumbs simulate the real workflow
+async def _execute_dry_run( self, voice_io, cosa_interface ):
+    # Identity setup (required — dry run bails out before normal setup)
+    cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
+    cosa_interface.TARGET_USER = self.user_email
+    voice_io.set_job_id( self.id_hash )
+
+    try:
+        await voice_io.notify( "Dry run: Skipping phase 1...", priority="low", job_id=self.id_hash )
+        await asyncio.sleep( 0.5 )
+        # ... one breadcrumb per simulated phase ...
+        await voice_io.notify( "Dry run complete!", priority="medium", job_id=self.id_hash )
+    finally:
+        voice_io.clear_job_id()
+```
+
+**Frequency guidance:**
+- One notification per loop iteration is fine for <20 items
+- For >20 items, notify every Nth iteration (e.g., every 5th) to avoid spam
+- Always include the count/total so user knows progress (e.g., "3 of 12")
+
+**Reference implementations:**
+- `deep_research/cli.py` — per-topic research notifications (~line 570)
+- `podcast_generator/orchestrator.py` — per-language TTS notifications (~line 572)
+- `presentation_generator/job.py` — dry-run breadcrumbs (~line 313)
+
 ### Phase 3-4 Smoke Test Checklist
 
 ```
