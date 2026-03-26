@@ -1,11 +1,13 @@
 # TODO
 
-Last updated: 2026-03-25 (Session 373)
+Last updated: 2026-03-25 (Session 374)
 
 ## Pending
 
-- [ ] [LUPIN] Presentation Generator Phases C-D verification: UI dry-run submission via CJ Flow queue card, then live E2E with real Claude calls. Plan doc: `src/rnd/2026.03.14-presentation-generator/06-phase-4-5-verification-plan.md`
+- [ ] [LUPIN] **Archive history.md — CRITICAL** at 19.5k+ tokens, above 19k threshold. Must archive before next session content addition.
+- [ ] [LUPIN] Presentation Generator Phase D verification: Live E2E with real Claude API calls + voice gate interaction. Plan doc: `src/rnd/2026.03.14-presentation-generator/07-phase-c-d-verification-plan.md`
 - [ ] [LUPIN] Presentation Generator Phase 6: Marp Text Rendering — YAML → Marp Markdown with theme application (6 tasks)
+- [x] [LUPIN] Presentation Generator Phase C verification: CJ Flow dry-run queue submission + UI card — Session 374: 6/6 smoke tests pass, mode maps + HTML card + JS handler added
 - [x] [LUPIN] Presentation Generator Phase 4: Outline & Elaborate — Session 371: 7/7 tasks, 94 new tests
 - [x] [LUPIN] Presentation Generator Phase 5: Serialize — Session 371: 5/5 tasks, 17 new tests
 - [x] [LUPIN] Presentation Generator: Wire `fuzzy_file_match` special handler — Session 371: already wired, added presentation-specific config key
@@ -14,18 +16,12 @@ Last updated: 2026-03-25 (Session 373)
 - [x] [LUPIN] **Bug Fix: Voice injection silent crash on null title** — Session 372: `NotificationItem.title` was None, crashing listener's `startswith()`. Fixed at source: `title: str = ""` in constructor + API boundary normalization. 36/36 listener + 189/189 model tests pass.
 - [x] [LUPIN] **CJ Flow Persistence Phase 6: Job History UI** — Session 371: Hybrid overlay model (Option C) with deduplication. 5th collapsible history section, configurable time window, delete/retry management, 19 new tests. Plan doc: `src/rnd/2026.03.13-cj-flow-persistence-plan.md`
 - [x] [LUPIN] Phase 6 cleanup: Clean up existing 1001 `st-*` test notification artifacts (delete or reassign — decide after using filter) — **Fixed Session 371**
-- [ ] [LUPIN] Archive history.md — at 18.4k tokens, above 17k WARNING threshold (deferred from Session 371b)
+- [x] [LUPIN] Archive history.md — at 18.4k tokens, above 17k WARNING threshold (deferred from Session 371b) — **Superseded**: now 19.5k+, escalated to CRITICAL in Session 374 TODO above
 - [ ] [LUPIN] CoSA commit pending: `websocket.py` Fix 4 (WebSocketDisconnect handler + safe close) — must commit from CoSA repo context
 - [ ] [LUPIN] CoSA commit pending: Voice injection bug fix — `notification_fifo_queue.py`, `notifications.py`, `base_listener.py` — must commit from CoSA repo context
 - [ ] [LUPIN] CoSA commit pending: session_name pipeline — `notification_fifo_queue.py` (session_name attr), `notifications.py` (session_name param + session_topic type) — must commit from CoSA repo context
 - [ ] [LUPIN] Run full E2E + integration test suite before merging branch to main
-- [ ] [LUPIN] **Stabilize pre-existing E2E UI test failures** — 272 passed, 3 failed, 23 errors (Session 372 regression run). Verified pre-existing via `git diff aff6c7b`. Affected test files (all last modified Sessions 351-361):
-  - WebSocket: `test_websocket_session_persistence.py`, `test_websocket_auth_handshake.py`, `test_websocket_connection.py`
-  - Page smoke: `test_page_smoke.py` (notifications, admin-users, admin-trust)
-  - Role gating: `test_role_gating.py` (admin-ratify)
-  - Visual regression: `test_visual_regression.py` (notifications, admin-ratify)
-  - Notifications: `test_notifications_sections.py` (toolbar buttons)
-  - Other: `test_time_saved.py`, `test_tts_controls.py`
+- [ ] [LUPIN] **Verify E2E UI test suite health — clean single run needed** — Session 372c's "272 passed, 3 failed, 23 errors" result was likely caused by hot-swap collision (multiple test runs overlapping, restoring server config mid-suite). The 23 errors all show `RuntimeError: Server database is NOT lupin_db_test!` — consistent with config restore from a parallel run. The 3 failures were retry integration tests already fixed. **Action**: Run `! ./src/scripts/run-e2e-ui-tests.sh -v` as a single clean run to get true baseline. If all 298 pass, close this item. If real failures exist, categorize and track them.
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 
@@ -94,7 +90,8 @@ Last updated: 2026-03-25 (Session 373)
   - **Umbrella plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md)
   - **UPE validation plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md)
   - **SWE workload doc**: [`src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md`](src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md)
-  - **Progress**: Phases 1-6 pending
+  - **Progress**: Phase 1 DONE (104 unit pass, 21 E2E un-skipped). Phase 2 in progress — WebSocket fixture implemented, LanceDB isolation planned.
+  - **LanceDB isolation plan**: [`src/rnd/2026.03.25-upe-lancedb-test-isolation.md`](src/rnd/2026.03.25-upe-lancedb-test-isolation.md) — 4 small changes to isolate test LanceDB table from production
 - [ ] **[LUPIN] Trust & Prediction Documentation Update** — Revise `src/docs/proxy-admin-guide.md` for Phase 3 conformal/ICRL + Phase 4 UPE prediction engine. Create `prediction-engine-reference.md`. Blocked by Prediction System Validation Campaign completion.
   - **Scope**: proxy-admin-guide.md (Sections 7, 9, 10), new prediction-engine-reference.md, docs/README.md links
   - **Umbrella plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md)
