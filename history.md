@@ -1,5 +1,34 @@
 # Lupin Project History
 
+### 2026.03.25 - Session 372c | CJ Flow Persistence — Automated UI Testing
+
+**Goal**: Build data-driven automated tests for the Job History UI (Phase 6 of CJ Flow Persistence). The existing 6 E2E tests were purely structural — verified DOM elements exist but never tested actual job data display, filtering, pagination, or actions.
+
+**Deliverables**:
+1. **Shared test data seeder** (`src/tests/helpers/job_history_seed.py`) — 4 reusable seed functions for direct PostgreSQL insertion via SQLAlchemy. Used by both integration and E2E test suites.
+2. **16 new integration tests** across 4 classes: data display, filtering (status/type/days/exclude_ids/pagination), delete (owner/admin/403), retry (failed/interrupted/completed-400/403), user isolation (regular vs admin visibility).
+3. **15 new E2E Playwright tests** across 4 classes: data display (cards, question text, badge, status styling, empty message), time window filter (7d/30d/all), pagination (Load More visible/append/hidden), actions (delete removes card, retry buttons on failed/interrupted, delete-all empty message).
+4. **3 remediation fixes**: JWT `sub` vs `uid` claim in E2E helper, retry test 500 tolerance for test env without agent pipeline, default time window 30d not 7d.
+
+**Test results**: Integration 32/32 passed. E2E (job history) 21/21 passed. Full regression: 2347 unit (1 pre-existing failure), 50/50 WS smoke, 272/298 E2E (26 pre-existing failures now tracked in TODO).
+
+**Files Created (3)**:
+- `src/tests/helpers/__init__.py`
+- `src/tests/helpers/job_history_seed.py`
+- `src/rnd/2026.03.25-cj-flow-persistence-ui-testing-plan.md`
+
+**Files Modified (6)**:
+- `src/tests/e2e_ui/conftest.py` (3 new fixtures + `get_user_id_from_page` helper)
+- `src/tests/e2e_ui/test_job_history_ui.py` (15 new tests in 4 classes)
+- `src/tests/integration/conftest.py` (`seeded_job_history` fixture)
+- `src/tests/integration/test_job_history_api.py` (16 new tests in 4 classes)
+- `src/rnd/README.md` (plan entry)
+- `TODO.md` (pre-existing E2E failures tracked)
+
+**Plan doc**: `src/rnd/2026.03.25-cj-flow-persistence-ui-testing-plan.md`
+
+---
+
 ### 2026.03.25 - Session 373 | Bug Fix: set_session_topic() FunctionTool Not Callable
 
 **Bug**: `set_session_topic()` called `notify()` internally to push a `session_topic` notification to the UI, but the call silently failed. Session topic was written to bridge file (for stop hook) but never reached the notification UI header.

@@ -391,6 +391,120 @@ def notifications_page( logged_in_page ):
 # WebSocket Helpers (Phase 7)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Job History Seed Helpers (Phase 6 — Session 372)
+# ---------------------------------------------------------------------------
+
+def get_user_id_from_page( page ):
+    """
+    Extract user_id (uid) from JWT access token in browser localStorage.
+
+    Requires:
+        - page has lupin_access_token in localStorage (logged-in session)
+
+    Ensures:
+        - Returns the uid string from the JWT payload
+
+    Returns:
+        str: User ID (UUID string from users table)
+    """
+    import json
+    import base64
+
+    token   = page.evaluate( 'localStorage.getItem( "lupin_access_token" )' )
+    # JWT is header.payload.signature — decode the payload
+    payload = token.split( "." )[ 1 ]
+    # Add padding for base64 decoding
+    padding = 4 - len( payload ) % 4
+    if padding != 4:
+        payload += "=" * padding
+    decoded = json.loads( base64.b64decode( payload ) )
+    # JWT uses "sub" claim for user ID; the API's get_current_user maps it to "uid"
+    return decoded[ "sub" ]
+
+
+@pytest.fixture( scope="function" )
+def seeded_history_page( logged_in_page ):
+    """
+    Seed 5 standard job_history rows for the logged-in user, navigate to notifications.
+
+    Requires:
+        - logged_in_page fixture (authenticated browser session)
+
+    Ensures:
+        - 5 job_history rows inserted for the current user
+        - Page navigated to /app/notifications
+        - Returns (page, records) tuple
+
+    Returns:
+        tuple: (Playwright page, list of seeded record dicts)
+    """
+    from tests.helpers.job_history_seed import seed_standard_job_set
+
+    user_id    = get_user_id_from_page( logged_in_page )
+    user_email = "e2e_test@example.com"
+    records    = seed_standard_job_set( user_id, user_email )
+
+    logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+    logged_in_page.wait_for_load_state( "networkidle" )
+
+    return logged_in_page, records
+
+
+@pytest.fixture( scope="function" )
+def seeded_time_window_page( logged_in_page ):
+    """
+    Seed 3 jobs at 3d/10d/40d ago for time-window filter testing.
+
+    Requires:
+        - logged_in_page fixture
+
+    Ensures:
+        - 3 job_history rows with varied ages
+        - Page navigated to /app/notifications
+        - Returns (page, records) tuple
+    """
+    from tests.helpers.job_history_seed import seed_time_window_jobs
+
+    user_id    = get_user_id_from_page( logged_in_page )
+    user_email = "e2e_test@example.com"
+    records    = seed_time_window_jobs( user_id, user_email )
+
+    logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+    logged_in_page.wait_for_load_state( "networkidle" )
+
+    return logged_in_page, records
+
+
+@pytest.fixture( scope="function" )
+def seeded_pagination_page( logged_in_page ):
+    """
+    Seed 25 jobs for pagination testing (API limit=20 per page).
+
+    Requires:
+        - logged_in_page fixture
+
+    Ensures:
+        - 25 job_history rows inserted
+        - Page navigated to /app/notifications
+        - Returns (page, records) tuple
+    """
+    from tests.helpers.job_history_seed import seed_pagination_jobs
+
+    user_id    = get_user_id_from_page( logged_in_page )
+    user_email = "e2e_test@example.com"
+    records    = seed_pagination_jobs( user_id, user_email, count=25 )
+
+    logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+    logged_in_page.wait_for_load_state( "networkidle" )
+
+    return logged_in_page, records
+
+
+# ---------------------------------------------------------------------------
+# WebSocket Helpers (Phase 7)
+# ---------------------------------------------------------------------------
+
 def capture_websockets( page ):
     """
     Register WebSocket listener before navigation. Returns list that fills as WS connections open.

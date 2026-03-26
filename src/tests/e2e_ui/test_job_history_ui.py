@@ -4,6 +4,9 @@ E2E UI tests for Job History section on the notifications page.
 CJ Flow Persistence Phase 6: Validates the 5th collapsible "Job History"
 section with time window dropdown, expand/collapse, and count badge.
 
+Session 372 additions: Data-driven tests with seeded job_history rows.
+Tests verify actual job data display, filtering, pagination, delete/retry.
+
 Requires:
     - Dev server running on port 7999 with Testing config
     - Clean test database (via logged_in_page fixture)
@@ -13,7 +16,33 @@ from .conftest import BASE_URL
 
 
 # ---------------------------------------------------------------------------
-# Job History Section Present
+# Helper: Expand history section and wait for API response
+# ---------------------------------------------------------------------------
+
+def expand_history_section( page ):
+    """
+    Click the history expand button and wait for the API response.
+
+    Requires:
+        - page is on /app/notifications
+        - History section is collapsed
+
+    Ensures:
+        - History section is expanded
+        - API fetch for /api/job-history has completed
+    """
+    expand_btn = page.get_by_test_id( "notifications-queue-history-expand-btn" )
+
+    # Start waiting for the response BEFORE clicking
+    with page.expect_response( lambda r: "/api/job-history" in r.url ) as response_info:
+        expand_btn.click()
+
+    response_info.value  # Wait for response to complete
+    page.wait_for_timeout( 300 )  # Brief pause for DOM rendering
+
+
+# ---------------------------------------------------------------------------
+# Section Layout Tests (original Phase 6)
 # ---------------------------------------------------------------------------
 
 class TestJobHistorySectionLayout:
@@ -122,3 +151,355 @@ class TestJobHistorySectionLayout:
 
         badge = logged_in_page.locator( "#history-count-badge" )
         assert badge.count() > 0
+
+
+# ===========================================================================
+# Data-Driven Tests (Session 372)
+# ===========================================================================
+
+class TestJobHistoryDataDisplay:
+    """Tests for job history data rendering with seeded database rows."""
+
+    def test_expand_shows_job_cards( self, seeded_history_page ):
+        """
+        Expanding history section shows seeded job cards.
+
+        Requires:
+            - 5 seeded job_history rows
+
+        Ensures:
+            - 5 .job-card elements appear in history container
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        container = page.locator( "#history-jobs-container" )
+        cards     = container.locator( ".job-card" )
+        assert cards.count() == 5, f"Expected 5 job cards, got {cards.count()}"
+
+    def test_card_shows_question_text( self, seeded_history_page ):
+        """
+        Job cards display the seeded question text.
+
+        Requires:
+            - Seeded job with known question_text
+
+        Ensures:
+            - At least one card contains the seeded question text (truncated to 60 chars)
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        # Check for the known question from std-001
+        expected_text = "What are the latest advances in quantum"  # truncated portion
+        container = page.locator( "#history-jobs-container" )
+        assert container.locator( f".job-question:has-text('{expected_text}')" ).count() > 0
+
+    def test_count_badge_shows_total( self, seeded_history_page ):
+        """
+        Count badge reflects the total number of seeded jobs.
+
+        Requires:
+            - 5 seeded job_history rows
+
+        Ensures:
+            - Badge text is "5"
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        badge = page.locator( "#history-count-badge" )
+        assert badge.text_content() == "5", f"Expected badge '5', got '{badge.text_content()}'"
+
+    def test_failed_job_has_dead_styling( self, seeded_history_page ):
+        """
+        Failed job card has status-dead CSS class (statusToQueue mapping).
+
+        Requires:
+            - Seeded set includes a failed job (std-003)
+
+        Ensures:
+            - Card for the failed job has 'status-dead' class
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        failed_rec = next( r for r in records if r[ "status" ] == "failed" )
+        card = page.locator( f".job-card[data-job-id='{failed_rec[ 'id_hash' ]}']" )
+        assert card.count() > 0, "Failed job card not found"
+        classes = card.get_attribute( "class" ) or ""
+        assert "status-dead" in classes, f"Expected 'status-dead' in classes, got: {classes}"
+
+    def test_empty_history_shows_message( self, logged_in_page ):
+        """
+        Empty history (no seeded data) shows 'No job history found' message.
+
+        Requires:
+            - Clean database with no job_history rows
+
+        Ensures:
+            - Empty message displayed in history container
+        """
+        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+
+        expand_history_section( logged_in_page )
+
+        container = logged_in_page.locator( "#history-jobs-container" )
+        empty_msg = container.locator( ".queue-empty-message" )
+        assert empty_msg.count() > 0, "Expected empty message element"
+        assert "No job history found" in ( empty_msg.text_content() or "" )
+
+
+class TestJobHistoryTimeWindowFilter:
+    """Tests for time window dropdown filter with seeded data at different ages."""
+
+    def test_7_day_filter( self, seeded_time_window_page ):
+        """
+        7-day filter shows only the 3-day-old job.
+
+        Requires:
+            - 3 seeded jobs at 3d, 10d, 40d ago
+
+        Ensures:
+            - Only 1 job card visible after selecting 7-day window
+        """
+        page, records = seeded_time_window_page
+
+        # Default timeWindow is 30 days — expand first, then switch to 7
+        expand_history_section( page )
+
+        select = page.get_by_test_id( "history-time-window-select" )
+        with page.expect_response( lambda r: "/api/job-history" in r.url ):
+            select.select_option( "7" )
+        page.wait_for_timeout( 300 )
+
+        container = page.locator( "#history-jobs-container" )
+        cards     = container.locator( ".job-card" )
+        assert cards.count() == 1, f"Expected 1 card in 7-day window, got {cards.count()}"
+
+    def test_30_day_filter( self, seeded_time_window_page ):
+        """
+        30-day filter shows the 3-day and 10-day old jobs.
+
+        Requires:
+            - 3 seeded jobs at 3d, 10d, 40d ago
+
+        Ensures:
+            - 2 job cards visible after selecting 30-day window
+        """
+        page, records = seeded_time_window_page
+        expand_history_section( page )
+
+        # Change time window to 30 days
+        select = page.get_by_test_id( "history-time-window-select" )
+        with page.expect_response( lambda r: "/api/job-history" in r.url ):
+            select.select_option( "30" )
+        page.wait_for_timeout( 300 )
+
+        container = page.locator( "#history-jobs-container" )
+        cards     = container.locator( ".job-card" )
+        assert cards.count() == 2, f"Expected 2 cards in 30-day window, got {cards.count()}"
+
+    def test_all_time_filter( self, seeded_time_window_page ):
+        """
+        'All' filter shows all 3 jobs regardless of age.
+
+        Requires:
+            - 3 seeded jobs at 3d, 10d, 40d ago
+
+        Ensures:
+            - 3 job cards visible after selecting 'all' window
+        """
+        page, records = seeded_time_window_page
+        expand_history_section( page )
+
+        select = page.get_by_test_id( "history-time-window-select" )
+        with page.expect_response( lambda r: "/api/job-history" in r.url ):
+            select.select_option( "all" )
+        page.wait_for_timeout( 300 )
+
+        container = page.locator( "#history-jobs-container" )
+        cards     = container.locator( ".job-card" )
+        assert cards.count() == 3, f"Expected 3 cards in 'all' window, got {cards.count()}"
+
+
+class TestJobHistoryPagination:
+    """Tests for Load More pagination with seeded data exceeding page size."""
+
+    def test_load_more_visible_over_limit( self, seeded_pagination_page ):
+        """
+        Load More button is visible when seeded jobs exceed page limit (20).
+
+        Requires:
+            - 25 seeded jobs
+
+        Ensures:
+            - 20 job cards rendered initially
+            - Load More button is visible
+        """
+        page, records = seeded_pagination_page
+        expand_history_section( page )
+
+        container = page.locator( "#history-jobs-container" )
+        cards     = container.locator( ".job-card" )
+        assert cards.count() == 20, f"Expected 20 initial cards, got {cards.count()}"
+
+        pagination = page.locator( "#history-pagination" )
+        assert pagination.is_visible(), "Load More should be visible with 25 jobs"
+
+    def test_load_more_appends( self, seeded_pagination_page ):
+        """
+        Clicking Load More appends remaining jobs.
+
+        Requires:
+            - 25 seeded jobs, first page of 20 loaded
+
+        Ensures:
+            - After clicking Load More, 25 total cards visible
+            - Load More button hidden (all loaded)
+        """
+        page, records = seeded_pagination_page
+        expand_history_section( page )
+
+        load_more = page.get_by_test_id( "history-load-more-btn" )
+        with page.expect_response( lambda r: "/api/job-history" in r.url ):
+            load_more.click()
+        page.wait_for_timeout( 300 )
+
+        container = page.locator( "#history-jobs-container" )
+        cards     = container.locator( ".job-card" )
+        assert cards.count() == 25, f"Expected 25 cards after Load More, got {cards.count()}"
+
+        pagination = page.locator( "#history-pagination" )
+        assert not pagination.is_visible(), "Load More should be hidden after all loaded"
+
+    def test_load_more_hidden_under_limit( self, seeded_history_page ):
+        """
+        Load More is hidden when total jobs are under page limit.
+
+        Requires:
+            - 5 seeded jobs (under 20 limit)
+
+        Ensures:
+            - Load More button is not visible
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        pagination = page.locator( "#history-pagination" )
+        assert not pagination.is_visible(), "Load More should be hidden with only 5 jobs"
+
+
+class TestJobHistoryActions:
+    """Tests for delete and retry action buttons on history job cards."""
+
+    def test_delete_removes_card( self, seeded_history_page ):
+        """
+        Clicking delete removes the card from the DOM after confirm().
+
+        Requires:
+            - 5 seeded job cards displayed
+
+        Ensures:
+            - After delete, card count decremented to 4
+            - Badge count updates
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        # Auto-accept confirm() dialogs
+        page.on( "dialog", lambda dialog: dialog.accept() )
+
+        # Click delete on first card
+        container   = page.locator( "#history-jobs-container" )
+        delete_btns = container.locator( ".delete-btn" )
+        assert delete_btns.count() >= 1, "No delete buttons found"
+
+        with page.expect_response( lambda r: "/api/job-history" in r.url ):
+            delete_btns.first.click()
+        page.wait_for_timeout( 500 )
+
+        # Verify card count decreased
+        cards = container.locator( ".job-card" )
+        assert cards.count() == 4, f"Expected 4 cards after delete, got {cards.count()}"
+
+    def test_retry_visible_on_failed( self, seeded_history_page ):
+        """
+        Retry button visible on failed jobs, not on completed jobs.
+
+        Requires:
+            - Standard seed set with failed and completed jobs
+
+        Ensures:
+            - Failed job card has .retry-btn
+            - Completed job card does NOT have .retry-btn
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        failed    = next( r for r in records if r[ "status" ] == "failed" )
+        completed = next( r for r in records if r[ "status" ] == "completed" )
+
+        failed_card    = page.locator( f".job-card[data-job-id='{failed[ 'id_hash' ]}']" )
+        completed_card = page.locator( f".job-card[data-job-id='{completed[ 'id_hash' ]}']" )
+
+        assert failed_card.locator( ".retry-btn" ).count() > 0, "Failed job should have retry button"
+        assert completed_card.locator( ".retry-btn" ).count() == 0, "Completed job should NOT have retry button"
+
+    def test_retry_visible_on_interrupted( self, seeded_history_page ):
+        """
+        Retry button visible on interrupted jobs.
+
+        Requires:
+            - Standard seed set with interrupted job
+
+        Ensures:
+            - Interrupted job card has .retry-btn
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        interrupted = next( r for r in records if r[ "status" ] == "interrupted" )
+        card = page.locator( f".job-card[data-job-id='{interrupted[ 'id_hash' ]}']" )
+        assert card.locator( ".retry-btn" ).count() > 0, "Interrupted job should have retry button"
+
+    def test_delete_all_shows_empty_message( self, logged_in_page ):
+        """
+        Deleting all jobs shows the empty history message.
+
+        Requires:
+            - 1 seeded job to keep the test fast
+
+        Ensures:
+            - After deleting the single job, 'No job history found' message appears
+        """
+        from tests.helpers.job_history_seed import seed_job_history_records
+        from .conftest import get_user_id_from_page
+
+        user_id = get_user_id_from_page( logged_in_page )
+        seed_job_history_records(
+            user_id    = user_id,
+            user_email = "e2e_test@example.com",
+            records    = [ { "id_suffix": "del-all-001", "status": "completed" } ]
+        )
+
+        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+        expand_history_section( logged_in_page )
+
+        # Auto-accept confirm()
+        logged_in_page.on( "dialog", lambda dialog: dialog.accept() )
+
+        # Delete the single job
+        container  = logged_in_page.locator( "#history-jobs-container" )
+        delete_btn = container.locator( ".delete-btn" ).first
+
+        with logged_in_page.expect_response( lambda r: "/api/job-history" in r.url ):
+            delete_btn.click()
+        logged_in_page.wait_for_timeout( 500 )
+
+        # Verify empty message
+        empty_msg = container.locator( ".queue-empty-message" )
+        assert empty_msg.count() > 0, "Expected empty message after deleting all jobs"
+        assert "No job history found" in ( empty_msg.text_content() or "" )

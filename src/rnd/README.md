@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.25 - CJ Flow Persistence UI Testing Plan
+- **Plan**: [2026.03.25-cj-flow-persistence-ui-testing-plan.md](2026.03.25-cj-flow-persistence-ui-testing-plan.md) - Data-driven automated testing plan for Job History UI. Shared seed utility, 17 integration tests (data display, filtering, delete, retry, user isolation), 16 E2E Playwright tests (data display, time window filtering, pagination, delete/retry actions). All tests run against lupin_db_test via hot-swap.
+
 ### 2026.03.23 - cosa-voice Onboarding Bootstrapper
 - **Design**: [2026.03.23-cosa-voice-onboarding-bootstrapper.md](2026.03.23-cosa-voice-onboarding-bootstrapper.md) - Bootstrapper script (`install-cosa-voice.sh`) for new repos to inherit cosa-voice MCP server access. Generates `.mcp.json`, validates prerequisites (env vars, config, API key), adds startup diagnostics to MCP server, with a pointer from planning-is-prompting's installation guide.
 
@@ -35,8 +38,12 @@ This directory contains research and development documents for the Lupin project
 ### 2026.03.11 - Baseline Test Report
 - **Report**: [2026.03.11-baseline-test-report.md](2026.03.11-baseline-test-report.md) - Comprehensive baseline test results across all 5 test tiers before remediation.
 
+### 2026.03.25 - Prediction System Validation Campaign
+- **Plan**: [2026.03.25-prediction-system-validation-campaign.md](2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md) - Umbrella plan consolidating UPE validation + SWE proxy Layer 2 + trust proxy documentation update into 2 items. 6-phase validation campaign (baseline, threshold tuning, SWE shadow-mode, gap tests, visual QA, full lifecycle) covering 142 total tests. Documentation update deferred as final gate after validation.
+- **Index**: [00-index.md](2026.02.23-trust-proxy-preference-learning/00-index.md) - Navigation hub for the trust-proxy-preference-learning directory (12 files).
+
 ### 2026.03.11 - Universal Prediction Engine: Live E2E Validation Plan
-- **Plan**: [2026.03.11-upe-live-e2e-validation-plan.md](2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md) - Comprehensive live validation of all 7 UPE slices against running FastAPI server. 5 phases: baseline (87 unit + 21 E2E tests), warm prediction threshold investigation, 6 new gap-filling E2E tests, browser visual QA for prediction hint rendering, and full cold-to-warm lifecycle validation with accuracy tracking.
+- **Plan**: [2026.03.11-upe-live-e2e-validation-plan.md](2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md) - Comprehensive live validation of all 7 UPE slices against running FastAPI server. 5 phases: baseline (87 unit + 21 E2E tests), warm prediction threshold investigation, 6 new gap-filling E2E tests, browser visual QA for prediction hint rendering, and full cold-to-warm lifecycle validation with accuracy tracking. **Superseded by** [Prediction System Validation Campaign](2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md).
 
 ### 2026.03.05 - Voice Injection: Listener + tmux + UserPromptSubmit Hook Plan
 - **Plan**: [2026.03.05-voice-injection-listener-tmux-hook-plan.md](2026.02.25-full-voice-io-integration-with-cc-system-hooks-and-mcp/2026.03.05-voice-injection-listener-tmux-hook-plan.md) - Implementation plan for direct voice injection into idle Claude Code sessions. Reuses existing notification -> listener -> JSONL buffer pipeline, adds tmux session discovery in register_session.py, tmux Enter trigger in CCNotificationListener after buffering, and new UserPromptSubmit hook that drains buffer and injects as additionalContext. 6 phases, 10 files (3 new, 7 modified), ~24 unit tests + E2E smoke test.

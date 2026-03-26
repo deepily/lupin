@@ -19,6 +19,13 @@ Last updated: 2026-03-25 (Session 373)
 - [ ] [LUPIN] CoSA commit pending: Voice injection bug fix — `notification_fifo_queue.py`, `notifications.py`, `base_listener.py` — must commit from CoSA repo context
 - [ ] [LUPIN] CoSA commit pending: session_name pipeline — `notification_fifo_queue.py` (session_name attr), `notifications.py` (session_name param + session_topic type) — must commit from CoSA repo context
 - [ ] [LUPIN] Run full E2E + integration test suite before merging branch to main
+- [ ] [LUPIN] **Stabilize pre-existing E2E UI test failures** — 272 passed, 3 failed, 23 errors (Session 372 regression run). Verified pre-existing via `git diff aff6c7b`. Affected test files (all last modified Sessions 351-361):
+  - WebSocket: `test_websocket_session_persistence.py`, `test_websocket_auth_handshake.py`, `test_websocket_connection.py`
+  - Page smoke: `test_page_smoke.py` (notifications, admin-users, admin-trust)
+  - Role gating: `test_role_gating.py` (admin-ratify)
+  - Visual regression: `test_visual_regression.py` (notifications, admin-ratify)
+  - Notifications: `test_notifications_sections.py` (toolbar buttons)
+  - Other: `test_time_saved.py`, `test_tts_controls.py`
 
 ## COMPLETED — Stop Hook Qualifier (Sessions 332-336)
 
@@ -81,13 +88,16 @@ Last updated: 2026-03-25 (Session 373)
   - **Migration map**: `src/conf/config-key-migration-map.json` (105 entries, archivable)
   - **Guardrail**: `src/tests/unit/test_ini_key_naming.py` (prevents future underscore keys)
 
-### SWE Team Proxy: Validation + Shadow-Mode + Simulation
+### Prediction System: Validation + Documentation
 
-- [ ] **[LUPIN] SWE Team Proxy end-to-end validation pipeline** — Review Layer 1 dry-run JSONL output (`io/decision-proxies/`), run Layer 2 live shadow-mode capture (`--live --trust-mode shadow`), and build fully automated simulation harness for repeatable E2E validation without manual intervention.
-  - **R&D doc**: [`src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md`](src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md)
-  - **Runner**: `src/scripts/swe_workload_runner.py`
-  - **Integration tests**: `src/tests/integration/test_swe_team_pipeline.py` (7 tests)
-- [ ] **[LUPIN] Test SWE agent team with small jobs** — Validate SWE team end-to-end with small, scoped tasks to verify orchestration and proxy behavior
+- [ ] **[LUPIN] Prediction System Validation Campaign** — Unified 6-phase validation of UPE (7 slices, 87 unit + 21 E2E) and SWE proxy Layer 2 (shadow-mode capture). Phases: baseline, threshold tuning, SWE shadow-mode, gap tests (+6 E2E), visual QA, full lifecycle. 136 existing + 6 new = 142 total tests.
+  - **Umbrella plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md)
+  - **UPE validation plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md)
+  - **SWE workload doc**: [`src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md`](src/rnd/2026.02.25-swe-proxy-data-origin-and-workload-generator.md)
+  - **Progress**: Phases 1-6 pending
+- [ ] **[LUPIN] Trust & Prediction Documentation Update** — Revise `src/docs/proxy-admin-guide.md` for Phase 3 conformal/ICRL + Phase 4 UPE prediction engine. Create `prediction-engine-reference.md`. Blocked by Prediction System Validation Campaign completion.
+  - **Scope**: proxy-admin-guide.md (Sections 7, 9, 10), new prediction-engine-reference.md, docs/README.md links
+  - **Umbrella plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md)
 
 ### Config Migration — Claude Agent SDK
 
@@ -169,10 +179,7 @@ Last updated: 2026-03-25 (Session 373)
 
 ### Universal Prediction Engine: Live E2E Validation (Session 340)
 
-- [ ] **[LUPIN] Live E2E validation of all 7 UPE slices** — All slices 0-6 code-complete (87 unit tests, 21 E2E tests). 5-phase validation plan: baseline test run, warm prediction threshold investigation, 6 new gap-filling E2E tests, browser visual QA for hint rendering, full cold-to-warm lifecycle with accuracy tracking.
-  - **Validation plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.11-upe-live-e2e-validation-plan.md)
-  - **Master plan**: [`src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md`](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-universal-prediction-engine-plan.md)
-  - **Progress**: Phase 0 (serialize) done, Phase 1.1 (unit baseline 87/87) done. Phases 1.2-5 pending.
+- [ ] **[LUPIN] Live E2E validation of all 7 UPE slices** — **CONSOLIDATED** into [Prediction System Validation Campaign](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md). See "Prediction System: Validation + Documentation" section above.
 
 ### Render Markdown Documents as HTML + Audio Player Viewer
 
@@ -180,9 +187,7 @@ Last updated: 2026-03-25 (Session 373)
 
 ### Trust Proxy Documentation Update
 
-- [ ] **[LUPIN] Update trust proxy documentation after Phases 3-4 of preference learning** — Revise `src/docs/proxy-admin-guide.md` and related docs to reflect preference learning algorithms, new trust escalation paths, and updated decision proxy behavior.
-  - **Partially unblocked**: Phase 3 implemented (Session 266). Phase 4 pending.
-  - **Scope**: Admin guide, API reference, R&D docs
+- [ ] **[LUPIN] Update trust proxy documentation** — **CONSOLIDATED** into [Trust & Prediction Documentation Update](src/rnd/2026.02.23-trust-proxy-preference-learning/2026.03.25-prediction-system-validation-campaign.md). See "Prediction System: Validation + Documentation" section above.
 
 ---
 

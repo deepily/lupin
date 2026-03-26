@@ -273,6 +273,108 @@ def create_test_admin( clean_test_db, test_admin_credentials ):
 
 
 @pytest.fixture( scope="function" )
+def ws_connection( create_test_user ):
+    """
+    Establish a WebSocket connection for the test user so
+    is_user_connected() returns True during notification tests.
+
+    Requires:
+        - create_test_user fixture (provides access_token)
+        - FastAPI server running on port 7999
+
+    Ensures:
+        - WebSocket connected and authenticated before test runs
+        - Connection closed after test completes
+        - User appears "online" to notification router
+    """
+    import threading
+    import asyncio
+    import json
+    import urllib.parse
+    import websockets
+
+    token      = create_test_user[ "access_token" ]
+    session_id = "test penguin"
+    encoded    = urllib.parse.quote( session_id )
+    uri        = f"ws://{BASE_URL.replace( 'http://', '' )}/ws/queue/{encoded}"
+
+    connected_event = threading.Event()
+    stop_event      = threading.Event()
+    ws_error        = {}
+
+    def run_ws():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop( loop )
+
+        async def connect_and_hold():
+            try:
+                async with websockets.connect( uri ) as ws:
+                    auth_msg = {
+                        "type"              : "auth_request",
+                        "token"             : f"Bearer {token}",
+                        "subscribed_events" : [
+                            "auth_success", "auth_error",
+                            "notification_new", "notification_response_required"
+                        ]
+                    }
+                    await ws.send( json.dumps( auth_msg ) )
+                    response = await asyncio.wait_for( ws.recv(), timeout=5.0 )
+                    data = json.loads( response )
+
+                    if data.get( "type" ) != "auth_success":
+                        ws_error[ "msg" ] = f"WebSocket auth failed: {data}"
+                        connected_event.set()
+                        return
+
+                    connected_event.set()
+
+                    # Hold connection open until test signals stop
+                    while not stop_event.is_set():
+                        try:
+                            await asyncio.wait_for( ws.recv(), timeout=0.5 )
+                        except asyncio.TimeoutError:
+                            pass
+            except Exception as e:
+                ws_error[ "msg" ] = str( e )
+                connected_event.set()
+
+        loop.run_until_complete( connect_and_hold() )
+        loop.close()
+
+    thread = threading.Thread( target=run_ws, daemon=True )
+    thread.start()
+
+    connected_event.wait( timeout=10.0 )
+    if ws_error:
+        pytest.fail( f"WebSocket connection failed: {ws_error[ 'msg' ]}" )
+
+    yield create_test_user
+
+    stop_event.set()
+    thread.join( timeout=5.0 )
+
+
+@pytest.fixture( scope="function" )
+def seeded_job_history( create_test_user ):
+    """
+    Seed 5 standard job_history rows owned by the test user.
+
+    Requires:
+        - create_test_user fixture (chains through clean_test_db)
+
+    Ensures:
+        - 5 rows inserted: 2 completed, 1 failed, 1 interrupted, 1 pending
+        - Returns dict with 'records' list and 'user' dict
+    """
+    from tests.helpers.job_history_seed import seed_standard_job_set
+    records = seed_standard_job_set(
+        user_id    = create_test_user[ "user_id" ],
+        user_email = create_test_user[ "email" ]
+    )
+    return { "records": records, "user": create_test_user }
+
+
+@pytest.fixture( scope="function" )
 def auth_headers( create_test_user ):
     """
     Create authenticated session with JWT tokens.
