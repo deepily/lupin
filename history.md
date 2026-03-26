@@ -1,5 +1,16 @@
 # Lupin Project History
 
+### 2026.03.26 - Session 376 | Bug Fix: session_name max_length=50 Silently Rejects Long Session Topics
+
+**Fix**: `set_session_topic()` failed to propagate topics longer than 50 characters to the notifications UI. Pydantic `max_length=50` on `session_name` caused silent `ValidationError` inside `_notify_impl()`, which returned an error string — but `set_session_topic()` ignored the return value and reported `{"status": "ok"}`.
+
+- **Root Cause**: `AsyncNotificationRequest.session_name` field had `max_length=50`; typical session topics (with branch names, session numbers) exceed that
+- **Fix**: (1) Truncate topic to 64 chars (61 + "...") before passing to `_notify_impl()` — bridge file keeps full topic, (2) Bumped `max_length` from 50 → 64 on both Pydantic models, (3) Surface `_notify_impl()` failures via logger.warning
+- **Files**: `src/lupin_mcp/cosa_voice_mcp.py`, `src/lupin_cli/notifications/notification_models.py`
+- **Commit**: 4ddb07b
+
+---
+
 ### 2026.03.25 - Session 373b | Prediction System Validation Campaign — TODO Consolidation + Phase 1-2
 
 **Goal**: Consolidate 3 overlapping TODO items (UPE validation, SWE proxy Layer 2, trust proxy docs) into 2, then execute Phase 1 (baseline) and begin Phase 2 (threshold tuning) of the validation campaign.

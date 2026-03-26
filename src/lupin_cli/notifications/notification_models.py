@@ -231,7 +231,7 @@ class NotificationRequest(BaseModel):
 
     session_name: Optional[str] = Field(
         default=None,
-        max_length=50,
+        max_length=64,
         description="Human-readable session name (e.g., 'cats vs dogs comparison'). If provided, used instead of auto-generated name in UI."
     )
 
@@ -641,7 +641,7 @@ class AsyncNotificationRequest(BaseModel):
 
     session_name: Optional[str] = Field(
         default=None,
-        max_length=50,
+        max_length=64,
         description="Human-readable session name (e.g., 'cats vs dogs comparison'). If provided, used instead of auto-generated name in UI."
     )
 

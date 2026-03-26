@@ -1025,6 +1025,10 @@ def set_session_topic( topic: str ) -> dict:
     know WHAT they'd be continuing. Call this at session start, after plan
     approval, or when switching tasks.
 
+    The full topic is stored in the bridge file. For UI propagation, topics
+    longer than 64 characters are truncated with "..." because the notification
+    header has minimal display space.
+
     Args:
         topic: Brief description of current work (e.g., "Bug Fix: WS queue crash")
 
@@ -1046,16 +1050,22 @@ def set_session_topic( topic: str ) -> dict:
             json.dump( data, f, indent=2 )
 
         # Also push to notification UI for real-time header update
-        try:
-            _notify_impl(
-                message           = topic,
-                notification_type = "session_topic",
-                priority          = "low",
-                session_name      = topic,
-                suppress_ding     = True
-            )
-        except Exception as e:
-            logger.warning( f"set_session_topic() UI push failed: {e}" )
+        # Truncate session_name for UI display (max 64 chars)
+        MAX_SESSION_NAME = 64
+        if len( topic ) > MAX_SESSION_NAME:
+            display_topic = topic[ :MAX_SESSION_NAME - 3 ] + "..."
+        else:
+            display_topic = topic
+
+        result = _notify_impl(
+            message           = display_topic,
+            notification_type = "session_topic",
+            priority          = "low",
+            session_name      = display_topic,
+            suppress_ding     = True
+        )
+        if result.startswith( "[validation error" ) or result.startswith( "Failed:" ):
+            logger.warning( f"set_session_topic() UI push failed: {result}" )
 
         return { "status": "ok", "topic": topic }
     except Exception as e:

@@ -41,6 +41,7 @@
 | f52e3261 | 2026-03-24T15:00:00 | 2026-03-24T15:30:00 | committed |
 | 1e9b946f | 2026-03-25T13:00:00 | 2026-03-25T13:30:00 | committed |
 | e3c3bab8 | 2026-03-25T18:02:00 | 2026-03-25T18:35:00 | committed |
+| 5b508f0e | 2026-03-26T15:50:00 | 2026-03-26T16:30:00 | committed |
 
 ---
 
@@ -67,6 +68,11 @@
 ---
 
 ### Completed
+
+- [x] **session_name max_length=50 silently rejects long session topics** → commit: 4ddb07b | By: 5b508f0e (Session 376)
+  - **Symptom**: `set_session_topic()` returns OK but UI never updates for topics > 50 chars
+  - **Fix**: Truncate to 64 chars before `_notify_impl()`, bump `max_length` to 64, surface failures in logs
+  - **Files**: `cosa_voice_mcp.py`, `notification_models.py`
 
 - [x] **set_session_topic() FunctionTool not callable (second root cause)** → commit: ab2cf50 | By: e3c3bab8 (Session 373)
   - **Symptom**: Session 372b pipeline fix worked, but `set_session_topic()` still never sent the notification
