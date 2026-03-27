@@ -1,5 +1,28 @@
 # Lupin Project History
 
+### 2026.03.26 - Session 379 | Presentation Generator Phase D — Planning + E2E Collision Root Cause
+
+**Goal**: Investigate whether Phase D verification caused the Session 372c hot-swap collision, and create a manual test process for Phase D that can run safely alongside E2E test suite work.
+
+**Findings**:
+- Hot-swap collision was NOT caused by Phase D (never attempted). Root cause: two concurrent `run-e2e-ui-tests.sh` runs in Session 372c — Run A's cleanup trap restored Development config while Run B was still executing
+- Session 377 already fixed this with `--bg` flag + PID-file overlap guard (297/0 clean run)
+- Phase D is safe to run alongside E2E tests (uses live development server, no hot-swap)
+
+**Deliverables**:
+- 17-step browser-based manual checklist for Phase D live verification (real Claude API calls, 3 voice gates, ~$0.10-0.30)
+- Coordination protocol for parallel sessions
+- Plan serialized to `src/rnd/`
+
+**Files Created (1)**:
+- `src/rnd/2026.03.26-presentation-generator-phase-d-manual-verification.md`
+
+**Files Modified (2)**:
+- `src/rnd/README.md` (new plan entry)
+- `TODO.md` (Phase D item updated with resume date + new plan doc reference)
+
+---
+
 ### 2026.03.26 - Session 378 | UPE LanceDB Test Isolation + Warm Test Fix
 
 **Goal**: Unblock Phase 2 of the Prediction System Validation Campaign by fixing cold-start E2E tests that returned `cbr_majority_vote` instead of `cold_start` due to production LanceDB table contamination. Also fix all 11 warm test failures.

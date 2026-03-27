@@ -1,11 +1,11 @@
 # TODO
 
-Last updated: 2026-03-26 (Session 378)
+Last updated: 2026-03-26 (Session 379)
 
 ## Pending
 
 - [x] [LUPIN] ~~**Archive history.md — CRITICAL**~~ — Resolved: was 19.5k after Session 373b, now 10.4k (41.5%) after Session 375 archival
-- [ ] [LUPIN] Presentation Generator Phase D verification: Live E2E with real Claude API calls + voice gate interaction. Plan doc: `src/rnd/2026.03.14-presentation-generator/07-phase-c-d-verification-plan.md`
+- [ ] [LUPIN] Presentation Generator Phase D verification: Live E2E with real Claude API calls + voice gate interaction. 17-step browser manual checklist ready. E2E suite healthy (Session 377: 297/0). **Resume 2026-03-27**. Plan docs: `src/rnd/2026.03.14-presentation-generator/07-phase-c-d-verification-plan.md`, `src/rnd/2026.03.26-presentation-generator-phase-d-manual-verification.md`
 - [ ] [LUPIN] Presentation Generator Phase 6: Marp Text Rendering — YAML → Marp Markdown with theme application (6 tasks)
 - [x] [LUPIN] Presentation Generator Phase C verification: CJ Flow dry-run queue submission + UI card — Session 374: 6/6 smoke tests pass, mode maps + HTML card + JS handler added
 - [x] [LUPIN] Presentation Generator Phase 4: Outline & Elaborate — Session 371: 7/7 tasks, 94 new tests
@@ -17,6 +17,7 @@ Last updated: 2026-03-26 (Session 378)
 - [x] [LUPIN] **CJ Flow Persistence Phase 6: Job History UI** — Session 371: Hybrid overlay model (Option C) with deduplication. 5th collapsible history section, configurable time window, delete/retry management, 19 new tests. Plan doc: `src/rnd/2026.03.13-cj-flow-persistence-plan.md`
 - [x] [LUPIN] Phase 6 cleanup: Clean up existing 1001 `st-*` test notification artifacts (delete or reassign — decide after using filter) — **Fixed Session 371**
 - [x] [LUPIN] Archive history.md — at 18.4k tokens, above 17k WARNING threshold (deferred from Session 371b) — **Superseded**: now 19.5k+, escalated to CRITICAL in Session 374 TODO above
+- [ ] [LUPIN] **Run clean full integration suite** — Verify Session 378 LanceDB isolation + warm test fixes produce zero regressions. Prior full run was corrupted by overlapping test runners. Command: `./src/tests/run-integration-tests.sh -v` (ensure no other runners active first)
 - [ ] [LUPIN] CoSA commit pending: `websocket.py` Fix 4 (WebSocketDisconnect handler + safe close) — must commit from CoSA repo context
 - [x] [LUPIN] CoSA commit pending: Voice injection bug fix — `notification_fifo_queue.py`, `notifications.py`, `base_listener.py` — committed b544c78
 - [x] [LUPIN] CoSA commit pending: session_name pipeline — `notification_fifo_queue.py` (session_name attr), `notifications.py` (session_name param + session_topic type) — committed b544c78

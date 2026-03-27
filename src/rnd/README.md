@@ -4,6 +4,12 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.26 - Presentation Generator Phase D Manual Verification Plan
+- **Plan**: [2026.03.26-presentation-generator-phase-d-manual-verification.md](2026.03.26-presentation-generator-phase-d-manual-verification.md) - 17-step browser-based manual checklist for live (non-dry-run) Presentation Generator through CJ Flow with real Claude API calls and 4 voice gates. Includes E2E test suite status update (Session 377 fixed hot-swap collision with `--bg` + PID guard, 297/297 pass). Coordination protocol for parallel sessions.
+
+### 2026.03.26 - UPE LanceDB Test Isolation + Warm Test Fix
+- **Plan**: [2026.03.26-upe-lancedb-test-isolation-and-warm-fix.md](2026.03.26-upe-lancedb-test-isolation-and-warm-fix.md) - LanceDB test isolation for UPE E2E prediction engine tests. Config override for `[Lupin: Testing]`, new `/api/prediction-engine/reset` endpoint (server-side table drop + singleton reset), `clean_lancedb` fixture, JWT auth for warm tests, `get_api_key().strip()` fix. Cold-start 10/10, warm 11/11 pass. Full suite clean run pending (corrupted by overlapping test runners).
+
 ### 2026.03.25 - Presentation Generator Phase C-D Verification Plan
 - **Plan**: [2026.03.14-presentation-generator/07-phase-c-d-verification-plan.md](2026.03.14-presentation-generator/07-phase-c-d-verification-plan.md) - CJ Flow dry-run verification for Presentation Generator. Adds "presentation" to mode maps, Q&A dropdown option, dedicated HTML submission card, JS handler, 6-scenario smoke test. Phase C (dry-run queue) complete; Phase D (live E2E) deferred.
 
