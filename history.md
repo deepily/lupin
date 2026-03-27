@@ -1,39 +1,33 @@
 # Lupin Project History
 
-### 2026.03.26 - Session 376 | Bug Fixes: session_name max_length + Presentation Dry-Run Notifications
+### 2026.03.26 - Session 378 | UPE LanceDB Test Isolation + Warm Test Fix
 
-**Bug #1**: `set_session_topic()` silently rejected topics >50 chars — Pydantic `max_length=50` on `session_name` caused `ValidationError` inside `_notify_impl()`, swallowed by error handling, `set_session_topic()` returned "ok" anyway.
-- **Fix**: Truncate to 64 chars (61 + "...") before `_notify_impl()`, bumped `max_length` 50→64, surface failures via `logger.warning`
-- **Files**: `src/lupin_mcp/cosa_voice_mcp.py`, `src/lupin_cli/notifications/notification_models.py`
-- **Commit**: 0cadd52
+**Goal**: Unblock Phase 2 of the Prediction System Validation Campaign by fixing cold-start E2E tests that returned `cbr_majority_vote` instead of `cold_start` due to production LanceDB table contamination. Also fix all 11 warm test failures.
 
-**Bug #2**: Presentation Generator dry-run sent zero progress notifications — `_execute_dry_run()` was dead code (never called); dry run went through orchestrator but `voice_io` identity (SENDER_ID, TARGET_USER) wasn't configured before the first `notify()` call, causing `is_voice_available()` to cache `False` and all subsequent notifications to silently fall back to `print()`.
-- **Fix**: Wired `_execute_dry_run()` call in `_execute()` (matching podcast generator pattern), added identity setup + `try/finally` cleanup
-- **Doc fix**: Added "Progressive Breadcrumb Notifications" section to `agentic-voice-workflow.md` + SKILL.md — loop-level notification guidance was completely missing
-- **Files**: `src/cosa/agents/presentation_generator/job.py`, `src/workflow/agentic-voice-workflow.md`, `.claude/skills/agentic-voice-workflow/SKILL.md`
-- **Commit**: 8b749b0
+#### Checkpoint | 2026.03.26 | LanceDB isolation + warm auth fix — clean full suite run pending
 
-**Bug #3**: Agentic job notifications 401 Unauthorized inside Docker — `notify_user_async()` loads API key from `~/.lupin/config` which doesn't exist in the container. ALL agentic job notifications (presentation, podcast, deep research) silently failed.
-- **Fix**: Added `LUPIN_API_KEY` env var support in `config_loader.py` (direct key value, bypasses file); updated `start-docker-lupin.sh` to read key from host config and pass to container; documented in Dockerfile
-- **Files**: `src/cosa/utils/config_loader.py`, `src/scripts/lupin_config.py`, `docker/lupin/Dockerfile`, `start-docker-lupin.sh` (external)
-- **Commit**: [pending checkpoint]
+**LanceDB isolation** (cold-start tests):
+- Added `prediction engine lancedb table = prediction_decisions_test` override to `[Lupin: Testing]` config block
+- Added `PredictionEngine.reset()` + `get_prediction_engine()` to `/api/init` hot-swap endpoint
+- Created new `GET /api/prediction-engine/reset` lightweight endpoint — drops LanceDB table (server has root permission from Docker) + resets singleton. Needed because: (1) test process can't drop root-owned LanceDB files, (2) `/api/init` is too heavy per-test (causes 429 rate limiting)
+- Added `clean_lancedb` autouse fixture to `TestPredictionEngineE2E` using the new endpoint
 
-**Bug #4**: `PresentationAPIClient.estimated_cost_usd` AttributeError — wrong attribute chain; should be `api_client.cost_estimate.estimated_cost_usd`
-- **Fix**: One-line fix in `job.py:271`
-- **Files**: `src/cosa/agents/presentation_generator/job.py`
-- **Commit**: [pending checkpoint]
+**Warm test fix** (11 tests):
+- Root cause 1: `get_api_key()` in `util.py` returned file contents with trailing `\n` — HTTP headers reject newlines. Fixed with `.strip()` at source (system boundary normalization)
+- Root cause 2: API key not seeded in test database (`lupin_db_test`). Switched warm tests from `X-API-Key` header to JWT Bearer auth (already available from `ws_connection` fixture)
+- Updated warm `setup_prediction_engine` fixture to use server-side `/api/prediction-engine/reset` (same permission issue as cold-start)
 
-**Doc**: Updated `reset_user_password.py` — documented Docker exec as primary usage (host has passlib+bcrypt 5.x incompatibility, container has bcrypt 3.2.2)
-- **Files**: `src/scripts/reset_user_password.py`
-- **Commit**: [pending checkpoint]
+**Verification**: Focused run `-k "prediction_engine"` passes **21/21** (10 cold-start + 11 warm). Full integration suite run was corrupted by overlapping test runners — needs clean re-run next session.
+
+**Files Created (1)**: `src/rnd/2026.03.26-upe-lancedb-test-isolation-and-warm-fix.md`
+
+**Files Modified (5)**: `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/cosa/rest/routers/system.py`, `src/tests/integration/test_prediction_engine_e2e.py`, `src/cosa/utils/util.py`
 
 ---
 
 ### 2026.03.26 - Session 377 | E2E UI Test Suite Health — Background Execution + Verification
 
 **Goal**: Resolve Session 372c's spurious E2E failures (23 hot-swap collision errors) and prevent recurrence by adding background execution support to the test runner.
-
-#### Checkpoint | 2026.03.26 17:30 | Background mode + clean verification run
 
 **Infrastructure fix** — `src/scripts/run-e2e-ui-tests.sh`:
 - Added `--bg` / `--background` flag: re-execs via nohup, returns immediately, logs to `/tmp/e2e-ui-*.log`
@@ -52,18 +46,42 @@
 - `~/.claude/skills/testing-development/SKILL.md`: E2E quick commands
 - Memory: `feedback_e2e_background_mode.md`
 
-**Files Modified (5)**: `src/scripts/run-e2e-ui-tests.sh`, `.claude/skills/testing-patterns/SKILL.md`, `CLAUDE.md`, `TODO.md`, `src/tests/e2e_ui/__snapshots__/.../notifications.png`
-**Commit**: 63577da
+**Files Modified (6)**: `src/scripts/run-e2e-ui-tests.sh`, `.claude/skills/testing-patterns/SKILL.md`, `CLAUDE.md`, `TODO.md`, `src/tests/e2e_ui/__snapshots__/.../notifications.png`, `history.md`
+**Commit**: 0c844ad (checkpoint), [final pending]
 
 ---
 
-### 2026.03.26 - Session 376 | Bug Fix: session_name max_length=50 Silently Rejects Long Session Topics
+### 2026.03.26 - Session 376 | Bug Fixes: session_name max_length + Presentation Dry-Run Notifications
 
-**Fix**: `set_session_topic()` failed to propagate topics longer than 50 characters to the notifications UI. Pydantic `max_length=50` on `session_name` caused silent `ValidationError` inside `_notify_impl()`, which returned an error string — but `set_session_topic()` ignored the return value and reported `{"status": "ok"}`.
-
-- **Root Cause**: `AsyncNotificationRequest.session_name` field had `max_length=50`; typical session topics (with branch names, session numbers) exceed that
-- **Fix**: (1) Truncate topic to 64 chars (61 + "...") before passing to `_notify_impl()` — bridge file keeps full topic, (2) Bumped `max_length` from 50 → 64 on both Pydantic models, (3) Surface `_notify_impl()` failures via logger.warning
+**Bug #1**: `set_session_topic()` silently rejected topics >50 chars — Pydantic `max_length=50` on `session_name` caused `ValidationError` inside `_notify_impl()`, swallowed by error handling, `set_session_topic()` returned "ok" anyway.
+- **Fix**: Truncate to 64 chars (61 + "...") before `_notify_impl()`, bumped `max_length` 50→64, surface failures via `logger.warning`
 - **Files**: `src/lupin_mcp/cosa_voice_mcp.py`, `src/lupin_cli/notifications/notification_models.py`
+- **Commit**: 0cadd52
+
+**Bug #2**: Presentation Generator dry-run sent zero progress notifications — `_execute_dry_run()` was dead code (never called); dry run went through orchestrator but `voice_io` identity (SENDER_ID, TARGET_USER) wasn't configured before the first `notify()` call, causing `is_voice_available()` to cache `False` and all subsequent notifications to silently fall back to `print()`.
+- **Fix**: Wired `_execute_dry_run()` call in `_execute()` (matching podcast generator pattern), added identity setup + `try/finally` cleanup
+- **Doc fix**: Added "Progressive Breadcrumb Notifications" section to `agentic-voice-workflow.md` + SKILL.md — loop-level notification guidance was completely missing
+- **Files**: `src/cosa/agents/presentation_generator/job.py`, `src/workflow/agentic-voice-workflow.md`, `.claude/skills/agentic-voice-workflow/SKILL.md`
+- **Commit**: 8b749b0
+
+**Bug #3**: Agentic job notifications 401 Unauthorized inside Docker — `notify_user_async()` loads API key from `~/.lupin/config` which doesn't exist in the container. ALL agentic job notifications (presentation, podcast, deep research) silently failed.
+- **Fix**: Added `LUPIN_API_KEY` env var support in `config_loader.py` (direct key value, bypasses file); updated `start-docker-lupin.sh` to read key from host config and pass to container; documented in Dockerfile
+- **Files**: `src/cosa/utils/config_loader.py`, `src/scripts/lupin_config.py`, `docker/lupin/Dockerfile`, `start-docker-lupin.sh` (external)
+- **Commit**: 5148e1a (checkpoint)
+
+**Bug #4**: `PresentationAPIClient.estimated_cost_usd` AttributeError — wrong attribute chain; should be `api_client.cost_estimate.estimated_cost_usd`
+- **Fix**: One-line fix in `job.py:271`
+- **Files**: `src/cosa/agents/presentation_generator/job.py`
+- **Commit**: [pending]
+
+**Bug #5**: Presentation Generator completion — no abstract, no clickable links — queue metadata empty because `artifacts["abstract"]` and `artifacts["report_path"]` were never set.
+- **Fix**: Added completion abstract with clickable `/app/docs?path=` links (matching podcast pattern), `report_path` pointing to Marp output, `voice_io.notify()` with `queue_name="run"`
+- **Files**: `src/cosa/agents/presentation_generator/job.py`
+- **Commit**: [pending]
+
+**Doc**: Updated `reset_user_password.py` — documented Docker exec as primary usage (host has passlib+bcrypt 5.x incompatibility, container has bcrypt 3.2.2)
+- **Files**: `src/scripts/reset_user_password.py`
+- **Commit**: [pending]
 - **Commit**: 4ddb07b
 
 ---
