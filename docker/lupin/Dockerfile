@@ -157,6 +157,13 @@ RUN pip install --no-cache-dir pydub==0.25.1
 #
 # Available config blocks: Lupin:+Development, Lupin:+Testing, Lupin:+Testing-GCS, Lupin:+Production
 # Note: '+' is URL encoding for space - becomes "Lupin: Development" internally
+#
+# LUPIN_API_KEY: Required for agentic job notifications from inside the container.
+# Without it, jobs running via RunningFifoQueue (presentation, podcast, research)
+# cannot POST to /api/notify and all notifications get 401 Unauthorized.
+# Passed at runtime (never baked in):
+#   Local dev:  start-docker-lupin.sh reads from ~/.lupin/config automatically
+#   Cloud Run:  --set-secrets="LUPIN_API_KEY=lupin-api-key:latest"
 # ============================================================================
 
 env LUPIN_ROOT=/var/lupin

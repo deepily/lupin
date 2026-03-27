@@ -13,6 +13,20 @@
 - **Files**: `src/cosa/agents/presentation_generator/job.py`, `src/workflow/agentic-voice-workflow.md`, `.claude/skills/agentic-voice-workflow/SKILL.md`
 - **Commit**: 8b749b0
 
+**Bug #3**: Agentic job notifications 401 Unauthorized inside Docker — `notify_user_async()` loads API key from `~/.lupin/config` which doesn't exist in the container. ALL agentic job notifications (presentation, podcast, deep research) silently failed.
+- **Fix**: Added `LUPIN_API_KEY` env var support in `config_loader.py` (direct key value, bypasses file); updated `start-docker-lupin.sh` to read key from host config and pass to container; documented in Dockerfile
+- **Files**: `src/cosa/utils/config_loader.py`, `src/scripts/lupin_config.py`, `docker/lupin/Dockerfile`, `start-docker-lupin.sh` (external)
+- **Commit**: [pending checkpoint]
+
+**Bug #4**: `PresentationAPIClient.estimated_cost_usd` AttributeError — wrong attribute chain; should be `api_client.cost_estimate.estimated_cost_usd`
+- **Fix**: One-line fix in `job.py:271`
+- **Files**: `src/cosa/agents/presentation_generator/job.py`
+- **Commit**: [pending checkpoint]
+
+**Doc**: Updated `reset_user_password.py` — documented Docker exec as primary usage (host has passlib+bcrypt 5.x incompatibility, container has bcrypt 3.2.2)
+- **Files**: `src/scripts/reset_user_password.py`
+- **Commit**: [pending checkpoint]
+
 ---
 
 ### 2026.03.26 - Session 377 | E2E UI Test Suite Health — Background Execution + Verification

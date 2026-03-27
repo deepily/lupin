@@ -232,6 +232,8 @@ def cmd_show( args ):
     print( f"  LUPIN_ENV: {os.getenv( 'LUPIN_ENV' ) or '(not set)'}" )
     print( f"  LUPIN_API_URL: {os.getenv( 'LUPIN_API_URL' ) or '(not set)'}" )
     print( f"  LUPIN_API_KEY_FILE: {os.getenv( 'LUPIN_API_KEY_FILE' ) or '(not set)'}" )
+    api_key_direct = os.getenv( 'LUPIN_API_KEY' )
+    print( f"  LUPIN_API_KEY: {'ck_live_...' + api_key_direct[ -8: ] if api_key_direct else '(not set)'}" )
 
     return 0
 
