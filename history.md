@@ -38,6 +38,13 @@
 - **Files**: `notifications.html`
 - **Commit**: d83882f
 
+#### Fix 6: FastAPI startup crash — missing `Field` import in podcast_generator router
+- **Source**: Ad-hoc (server startup failure)
+- **Root Cause**: `podcast_generator.py:55` uses `Field()` but only imported `BaseModel` from pydantic
+- **Fix**: Added `Field` to the pydantic import on line 25
+- **Files**: `podcast_generator.py` (CoSA)
+- **Commit**: 8f0b214 (docs), CoSA pending
+
 #### Housekeeping: R&D Directory Archival
 - Reorganized 174 items (159 .md files + 15 subdirs) into 11 version directories (`v0.5.0` through `v0.1.6`)
 - Updated external references in `CLAUDE.md`, `lupin_config.py`, `test_presentation_dry_run_smoke.py`, `tests/README.md`

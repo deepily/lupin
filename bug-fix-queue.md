@@ -75,6 +75,7 @@
 - [x] **Stack trace not captured on dead jobs** → commit: d9cd6f0 | By: 5329e0ea (Session 380b)
 - [x] **Cost summary missing from PresentationGenerator + DeepResearch** → commit: d9cd6f0 | By: 5329e0ea (Session 380b)
 - [x] **Job History missing "1 day" time window filter** → commit: d83882f | By: 5329e0ea (Session 380b)
+- [x] **FastAPI startup crash — missing Field import in podcast_generator** → commit: 8f0b214 (docs), CoSA pending | By: 5329e0ea (Session 380b)
 
 - [x] **Presentation Generator dry-run sends zero progress notifications** → commit: 8b749b0 | By: 5b508f0e (Session 376)
   - **Symptom**: Dry run completes but UI shows no breadcrumb notifications
