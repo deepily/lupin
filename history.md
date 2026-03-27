@@ -32,6 +32,12 @@
 - **Files**: `presentation_generator/job.py`, `deep_research/job.py`
 - **Commit**: d9cd6f0
 
+#### Fix 5: Job History missing "1 day" time window filter
+- **Source**: Ad-hoc (CJ Flow job history pane testing)
+- **Fix**: Added `<option value="1">1 day</option>` to the history time window dropdown — API already supports `days=1`
+- **Files**: `notifications.html`
+- **Commit**: d83882f
+
 #### Housekeeping: R&D Directory Archival
 - Reorganized 174 items (159 .md files + 15 subdirs) into 11 version directories (`v0.5.0` through `v0.1.6`)
 - Updated external references in `CLAUDE.md`, `lupin_config.py`, `test_presentation_dry_run_smoke.py`, `tests/README.md`
