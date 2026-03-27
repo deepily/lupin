@@ -240,7 +240,10 @@ Lupin uses a three-tier testing strategy for comprehensive validation:
    - End-to-end user flow validation (100-1000ms per test)
    - Test complete workflows across API, database, and authentication
    - Coverage: 43 comprehensive tests (auth, admin user management, queue filtering)
-   - Run: `./src/tests/run-integration-tests.sh -v` (automated with server management)
+   - **CRITICAL**: Always use `--bg` flag from Claude Code (suite can exceed 10min Bash timeout under load)
+   - Run: `./src/tests/run-integration-tests.sh --bg -v`
+   - Monitor: `tail -20 /tmp/integration-latest.log`
+   - Status: `kill -0 $(cat /tmp/integration-tests.pid) 2>/dev/null && echo running || echo done`
 
 4. **WebSocket Tests** (`src/tests/websocket_smoke/`)
    - WebSocket functionality validation
@@ -269,9 +272,9 @@ Lupin uses a three-tier testing strategy for comprehensive validation:
 
 ```bash
 # Integration tests (RECOMMENDED - automated)
-./src/tests/run-integration-tests.sh -v              # All integration tests
-./src/tests/run-integration-tests.sh -v -s           # Very verbose
-./src/tests/run-integration-tests.sh test_auth*.py   # Specific pattern
+./src/tests/run-integration-tests.sh --bg -v         # All (background, recommended)
+./src/tests/run-integration-tests.sh --bg -v -s      # Very verbose (background)
+./src/tests/run-integration-tests.sh test_auth*.py   # Specific pattern (foreground OK for quick runs)
 
 # Unit tests
 pytest src/tests/unit/                               # All unit tests
@@ -312,7 +315,7 @@ See `src/tests/README.md` for comprehensive testing documentation.
 | WebSocket Tests | `./src/scripts/run-websocket-smoke-tests.sh` | 100% pass |
 | E2E UI Tests | `./src/scripts/run-e2e-ui-tests.sh --bg -v` | 100% pass |
 | Visual Regression | `./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual` | 100% pass |
-| Integration Tests | `./src/tests/run-integration-tests.sh -v` | 100% pass (FINAL GATE) |
+| Integration Tests | `./src/tests/run-integration-tests.sh --bg -v` | 100% pass (FINAL GATE) |
 
 ### Integration Tests are the Final Gate
 
@@ -331,11 +334,14 @@ Integration tests are the **FINAL validation step** before any branch merge to m
 pytest src/tests/unit/ -v && \
 ./src/scripts/run-websocket-smoke-tests.sh && \
 ./src/scripts/run-e2e-ui-tests.sh --bg -v && \
-./src/tests/run-integration-tests.sh -v
+./src/tests/run-integration-tests.sh --bg -v
 ```
 
-**Note**: E2E UI tests run in background (`--bg`) — monitor via `tail -20 /tmp/e2e-ui-latest.log`.
-Wait for completion before proceeding to integration tests (the final gate).
+**Note**: E2E UI and integration tests run in background (`--bg`) — monitor via:
+- E2E: `tail -20 /tmp/e2e-ui-latest.log`
+- Integration: `tail -20 /tmp/integration-latest.log`
+
+Wait for E2E completion before launching integration tests (the final gate). Both have PID-file overlap protection to prevent concurrent runs.
 
 ### When Tests Fail
 

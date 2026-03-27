@@ -1,5 +1,32 @@
 # Lupin Project History
 
+### 2026.03.27 - Session 380 | Integration Test Runner — Overlap Protection + Clean Suite Verification
+
+**Goal**: Add PID-file overlap protection and `--bg` nohup background mode to `run-integration-tests.sh`, then execute clean full integration suite to verify Session 378 LanceDB isolation + warm test fixes.
+
+#### Checkpoint | 2026.03.27 | --bg + overlap protection + clean suite 195/0
+
+**Infrastructure** — `src/tests/run-integration-tests.sh`:
+- Added `--bg`/`--background` flag: re-execs via nohup, returns immediately, logs to `/tmp/integration-*.log`
+- Added PID-file overlap protection (`/tmp/integration-tests.pid`): prevents concurrent runs that corrupt server config hot-swap
+- Replicates exact pattern from E2E UI runner (Session 377)
+
+**Clean suite result**: **195 passed, 0 failed, 32 skipped** in 5:50
+- Session 378 LanceDB isolation + warm auth fixes: zero regressions
+- Prediction System Validation Campaign Phase 2: confirmed complete
+
+**Bug fix** — `test_admin_not_self_excludes_own_jobs`:
+- Root cause: `POST /api/push` returns 500 in test env (LLM routing service unreachable at `192.168.1.21:3000`)
+- Fix: `pytest.skip()` when push returns non-200 (test validates `!self` filter, not push pipeline)
+
+**Files Created (1)**: `src/rnd/2026.03.27-integration-test-runner-overlap-protection.md`
+
+**Files Modified (5)**: `src/tests/run-integration-tests.sh`, `CLAUDE.md`, `src/tests/integration/test_queue_not_self_filter.py`, `TODO.md`, `src/rnd/README.md`
+
+**Commit**: f019106
+
+---
+
 ### 2026.03.26 - Session 379 | Presentation Generator Phase D — Planning + E2E Collision Root Cause
 
 **Goal**: Investigate whether Phase D verification caused the Session 372c hot-swap collision, and create a manual test process for Phase D that can run safely alongside E2E test suite work.

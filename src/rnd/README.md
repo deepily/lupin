@@ -4,6 +4,9 @@ This directory contains research and development documents for the Lupin project
 
 ## Recent Additions
 
+### 2026.03.27 - Integration Test Runner Overlap Protection + Background Mode
+- **Plan**: [2026.03.27-integration-test-runner-overlap-protection.md](2026.03.27-integration-test-runner-overlap-protection.md) - PID-file overlap protection + `--bg` nohup background mode for `run-integration-tests.sh` (replicates E2E UI runner pattern from Session 377). Prevents concurrent hot-swap collisions (Session 378 incident: 49 ERRORs). Full suite verified: 195 passed, 0 failed. Bug fix for `test_admin_not_self_excludes_own_jobs` (push 500 in test env → graceful skip).
+
 ### 2026.03.26 - Presentation Generator Phase D Manual Verification Plan
 - **Plan**: [2026.03.26-presentation-generator-phase-d-manual-verification.md](2026.03.26-presentation-generator-phase-d-manual-verification.md) - 17-step browser-based manual checklist for live (non-dry-run) Presentation Generator through CJ Flow with real Claude API calls and 4 voice gates. Includes E2E test suite status update (Session 377 fixed hot-swap collision with `--bg` + PID guard, 297/297 pass). Coordination protocol for parallel sessions.
 

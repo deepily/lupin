@@ -18,6 +18,14 @@
 #   ./src/tests/run-integration-tests.sh -v        # Verbose output
 #   ./src/tests/run-integration-tests.sh -v -s     # Very verbose (show prints)
 #   ./src/tests/run-integration-tests.sh test_auth_integration.py  # Specific file
+#   ./src/tests/run-integration-tests.sh --bg -v   # Run in background (nohup)
+#
+# Background mode (--background / --bg):
+#   The integration suite can exceed 10 minutes under load (rate limiting,
+#   slow DB, suite growth). Claude Code's Bash tool has a 10-minute max
+#   timeout. --bg re-execs via nohup so the caller returns immediately.
+#   A PID file prevents overlapping runs that corrupt server config state.
+#   Session 378 incident: overlapping runners caused 49 ERRORs + 15 FAILEDs.
 #
 
 set -e  # Exit on error
@@ -28,6 +36,64 @@ BASE_URL="http://localhost:$PORT"
 PROJECT_ROOT="${LUPIN_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/lupin}"
 ORIGINAL_BLOCK=""
 
+# --- Background execution support ---
+LOG_DIR="/tmp"
+PID_FILE="/tmp/integration-tests.pid"
+
+# Parse --background / --bg flag (strip it from args passed to pytest)
+BG_MODE=false
+REMAINING_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --background|--bg)
+            BG_MODE=true
+            ;;
+        *)
+            REMAINING_ARGS+=( "$arg" )
+            ;;
+    esac
+done
+
+# Prevent overlapping runs (regardless of mode)
+if [ -f "$PID_FILE" ]; then
+    EXISTING_PID=$( cat "$PID_FILE" )
+    if [ "$EXISTING_PID" = "$$" ]; then
+        # This is our own PID — nohup re-exec case. Proceed normally.
+        :
+    elif kill -0 "$EXISTING_PID" 2>/dev/null; then
+        echo "ERROR: Integration test run already in progress (PID $EXISTING_PID)"
+        echo "Monitor: tail -f /tmp/integration-latest.log"
+        echo "Status:  kill -0 $EXISTING_PID 2>/dev/null && echo running || echo done"
+        echo "To force: rm $PID_FILE"
+        exit 1
+    else
+        echo "WARNING: Stale PID file found (PID $EXISTING_PID no longer running). Cleaning up."
+        rm -f "$PID_FILE"
+    fi
+fi
+
+# If --background requested, re-exec via nohup and exit immediately
+if [ "$BG_MODE" = true ]; then
+    LOG_FILE="$LOG_DIR/integration-$( date +%Y%m%d-%H%M%S ).log"
+    ln -sf "$LOG_FILE" /tmp/integration-latest.log
+
+    nohup "$0" "${REMAINING_ARGS[@]}" > "$LOG_FILE" 2>&1 &
+    BG_PID=$!
+    echo "$BG_PID" > "$PID_FILE"
+
+    echo "Integration tests running in background (PID $BG_PID)"
+    echo "  Log:     $LOG_FILE"
+    echo "  Link:    /tmp/integration-latest.log"
+    echo ""
+    echo "Monitor:  tail -f $LOG_FILE"
+    echo "Status:   kill -0 $BG_PID 2>/dev/null && echo running || echo done"
+    echo "Results:  grep -E '(passed|failed|error)' $LOG_FILE"
+    exit 0
+fi
+
+# Record our PID (for overlap detection in foreground mode too)
+echo "$$" > "$PID_FILE"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -36,6 +102,9 @@ NC='\033[0m' # No Color
 
 # Cleanup function - ALWAYS swap back, even on test failure or Ctrl+C
 cleanup() {
+    # Remove PID file so future runs aren't blocked
+    rm -f "$PID_FILE"
+
     if [ -n "$ORIGINAL_BLOCK" ]; then
         echo ""
         echo -e "${YELLOW}[CLEANUP] Restoring original config: $ORIGINAL_BLOCK${NC}"
@@ -197,7 +266,7 @@ cd "$PROJECT_ROOT"
 
 # Run pytest and capture exit code
 set +e  # Don't exit on pytest failure
-"$PROJECT_ROOT/src/cosa/.venv/bin/pytest" src/tests/integration/ "$@"
+"$PROJECT_ROOT/src/cosa/.venv/bin/pytest" src/tests/integration/ "${REMAINING_ARGS[@]}"
 PYTEST_EXIT_CODE=$?
 set -e
 
