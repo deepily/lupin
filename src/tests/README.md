@@ -472,7 +472,7 @@ Recommended test sequence for CI/CD:
 - **Integration Tests**: `src/tests/integration/README.md`
 - **Interactive Proxy Tests**: [`src/docs/automated-interactive-testing.md`](../docs/automated-interactive-testing.md) — Comprehensive proxy testing guide
 - **Smoke Tests**: [`src/tests/smoke/README.md`](smoke/README.md) — Quick-start guide for smoke tests
-- **JWT Authentication**: `src/rnd/2025.09.29-jwt-oauth/README.md`
+- **JWT Authentication**: `src/rnd/v0.9.0/2025.09.29-jwt-oauth/README.md`
 - **API Documentation**: (Phase 10 - coming soon)
 - **Project CLAUDE.md**: Development guidelines and testing section
 

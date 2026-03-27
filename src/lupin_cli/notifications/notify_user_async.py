@@ -223,7 +223,17 @@ def notify_user_async(
                 )
 
             else:
-                # HTTP error - don't retry, fail immediately
+                # Retry transient HTTP errors (server overload / rate limiting)
+                retryable = response.status_code in ( 429, 502, 503, 504 )
+                if retryable and not is_last_attempt:
+                    retry_after = response.headers.get( "Retry-After" )
+                    if retry_after and retry_after.isdigit():
+                        time.sleep( min( int( retry_after ), 5 ) )
+                    if debug:
+                        print( f"[DEBUG] HTTP {response.status_code} (attempt {attempt_idx}), will retry...", file=sys.stderr )
+                    continue
+
+                # Non-retryable or last attempt — fail
                 error_text = response.text if response.text else "No error message"
                 return AsyncNotificationResponse(
                     success     = False,
@@ -233,7 +243,10 @@ def notify_user_async(
                 )
 
         except requests.exceptions.ConnectionError:
-            # Network errors - don't retry, fail immediately
+            if not is_last_attempt:
+                if debug:
+                    print( f"[DEBUG] ConnectionError (attempt {attempt_idx}), will retry...", file=sys.stderr )
+                continue
             return AsyncNotificationResponse(
                 success     = False,
                 status      = "connection_error",
@@ -242,7 +255,10 @@ def notify_user_async(
             )
 
         except requests.exceptions.Timeout:
-            # Timeout - don't retry, fail immediately
+            if not is_last_attempt:
+                if debug:
+                    print( f"[DEBUG] Timeout (attempt {attempt_idx}), will retry...", file=sys.stderr )
+                continue
             return AsyncNotificationResponse(
                 success     = False,
                 status      = "timeout",

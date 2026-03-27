@@ -43,7 +43,7 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 - `src/cosa/rest/running_fifo_queue.py` — Execution engine
 - `src/cosa/rest/queue_consumer.py` — Background consumer thread
 
-**Packaging Guide**: `src/rnd/2026.02.12-cj-flow-bounded-job-packaging-guide.md`
+**Packaging Guide**: `src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md`
 
 ## CODE STYLE
 - **Imports**: Group by stdlib, third-party, local
@@ -115,7 +115,7 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 - **Agentic Voice Integration**: `src/workflow/agentic-voice-workflow.md`
 - **Decision Proxy Admin Guide**: `src/docs/proxy-admin-guide.md` (Trust Dashboard + Ratification how-to)
 - **Interactive Proxy Testing**: `src/docs/automated-interactive-testing.md` (proxy auto-answer testing guide)
-- **R&D Planning Docs**: `src/rnd/2025.10.15-sse-notifications/` (historical)
+- **R&D Planning Docs**: `src/rnd/v0.1.0/2025.10.15-sse-notifications/` (historical)
 
 ## STARTUP PROCEDURE
 - The first thing you should do when you start a session is read the global Claude configuration file and follow its instructions.

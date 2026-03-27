@@ -6582,7 +6582,7 @@ class NotificationsUI {
         if ( !contentEl ) return;
 
         try {
-            const response = await fetch( `/api/get-job-interactions/${jobId}`, {
+            const response = await fetch( `/api/get-job-interactions/${encodeURIComponent( jobId )}`, {
                 headers: { 'Authorization': this.getAuthHeader() }
             } );
 

@@ -44,7 +44,7 @@ from tests.smoke.utilities.live_pipeline_base import LivePipelineTestBase
 # Constants
 # ═══════════════════════════════════════════════════════════════════════════════
 
-SOURCE_DOC = "/src/rnd/2026.03.14-presentation-generator/01-strategy-and-design.md"
+SOURCE_DOC = "/src/rnd/v0.1.6/2026.03.14-presentation-generator/01-strategy-and-design.md"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

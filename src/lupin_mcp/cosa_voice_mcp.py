@@ -1064,10 +1064,12 @@ def set_session_topic( topic: str ) -> dict:
             session_name      = display_topic,
             suppress_ding     = True
         )
-        if result.startswith( "[validation error" ) or result.startswith( "Failed:" ):
+        ui_ok = not ( result.startswith( "[validation error" ) or result.startswith( "Failed:" ) )
+
+        if not ui_ok:
             logger.warning( f"set_session_topic() UI push failed: {result}" )
 
-        return { "status": "ok", "topic": topic }
+        return { "status": "ok", "topic": topic, "ui_push": "ok" if ui_ok else result }
     except Exception as e:
         return { "status": "error", "reason": str( e ) }
 

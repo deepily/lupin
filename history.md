@@ -1,5 +1,42 @@
 # Lupin Project History
 
+### 2026.03.27 - Session 380b | Bug Fixing Session — 5 Fixes + R&D Archival
+
+**Goal**: Ad-hoc bug fixing session covering CJ Flow job history, notification system, and R&D directory organization.
+
+#### Fix 1: set_session_topic() UI propagation failure under load
+- **Source**: Ad-hoc (50% failure rate observed across 2 sessions)
+- **Root Cause**: `_notify_impl()` POST to `/api/notify` silently fails under server load; `set_session_topic()` always returns `{"status": "ok"}` masking the failure; `notify_user_async()` never retries transient HTTP errors
+- **Fix**: Added `ui_push` status to return value; added retry for 429/502/503/504, ConnectionError, and Timeout in `notify_user_async()`
+- **Files**: `cosa_voice_mcp.py`, `notify_user_async.py`
+- **Commit**: d9cd6f0
+
+#### Fix 2: Job interactions 404 for compound job IDs
+- **Source**: Ad-hoc (CJ Flow job history pane testing)
+- **Root Cause**: `loadJobInteractions()` didn't URL-encode the `::` in compound job IDs (`swe-3d1a26b7::uuid`)
+- **Fix**: Added `encodeURIComponent()` around jobId in fetch URL
+- **Files**: `notifications.js`
+- **Commit**: d9cd6f0
+
+#### Fix 3: Stack trace not captured when jobs die
+- **Source**: Ad-hoc (CJ Flow job history pane testing)
+- **Root Cause**: Dead-job metadata only stored `str(e)`, not the full Python traceback; `stack_trace` not in persistence `rich_fields`
+- **Fix**: Added `traceback.format_exc()` to crash-path metadata; added `stack_trace` to `rich_fields` in `_build_metadata_json()`
+- **Files**: `running_fifo_queue.py`, `job_persistence.py`
+- **Commit**: d9cd6f0
+
+#### Fix 4: Cost summary missing from Presentation Generator + Deep Research
+- **Source**: Ad-hoc (CJ Flow job history pane testing)
+- **Root Cause**: PresentationGenerator cost_summary lacked token counts (only `total_cost_usd`); DeepResearchJob never stored `cost_summary` in `artifacts` dict (PodcastGenerator was the only one doing this correctly)
+- **Fix**: Enhanced PresentationGenerator cost_summary with `total_input_tokens`, `total_output_tokens`, `total_api_calls`; added `artifacts["cost_summary"] = asdict(self.cost_summary)` to DeepResearchJob (both live + dry-run paths)
+- **Files**: `presentation_generator/job.py`, `deep_research/job.py`
+- **Commit**: d9cd6f0
+
+#### Housekeeping: R&D Directory Archival
+- Reorganized 174 items (159 .md files + 15 subdirs) into 11 version directories (`v0.5.0` through `v0.1.6`)
+- Updated external references in `CLAUDE.md`, `lupin_config.py`, `test_presentation_dry_run_smoke.py`, `tests/README.md`
+- Rewrote `src/rnd/README.md` with version directory index
+
 ### 2026.03.27 - Session 380 | Integration Test Runner — Overlap Protection + Clean Suite Verification
 
 **Goal**: Add PID-file overlap protection and `--bg` nohup background mode to `run-integration-tests.sh`, then execute clean full integration suite to verify Session 378 LanceDB isolation + warm test fixes.
@@ -122,16 +159,16 @@
 **Bug #4**: `PresentationAPIClient.estimated_cost_usd` AttributeError — wrong attribute chain; should be `api_client.cost_estimate.estimated_cost_usd`
 - **Fix**: One-line fix in `job.py:271`
 - **Files**: `src/cosa/agents/presentation_generator/job.py`
-- **Commit**: [pending]
+- **Commit**: d9cd6f0
 
 **Bug #5**: Presentation Generator completion — no abstract, no clickable links — queue metadata empty because `artifacts["abstract"]` and `artifacts["report_path"]` were never set.
 - **Fix**: Added completion abstract with clickable `/app/docs?path=` links (matching podcast pattern), `report_path` pointing to Marp output, `voice_io.notify()` with `queue_name="run"`
 - **Files**: `src/cosa/agents/presentation_generator/job.py`
-- **Commit**: [pending]
+- **Commit**: d9cd6f0
 
 **Doc**: Updated `reset_user_password.py` — documented Docker exec as primary usage (host has passlib+bcrypt 5.x incompatibility, container has bcrypt 3.2.2)
 - **Files**: `src/scripts/reset_user_password.py`
-- **Commit**: [pending]
+- **Commit**: d9cd6f0
 - **Commit**: 4ddb07b
 
 ---

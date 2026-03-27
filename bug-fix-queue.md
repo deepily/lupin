@@ -42,6 +42,7 @@
 | 1e9b946f | 2026-03-25T13:00:00 | 2026-03-25T13:30:00 | committed |
 | e3c3bab8 | 2026-03-25T18:02:00 | 2026-03-25T18:35:00 | committed |
 | 5b508f0e | 2026-03-26T15:50:00 | 2026-03-26T16:30:00 | committed |
+| 5329e0ea | 2026-03-27T14:00:00 | 2026-03-27T15:30:00 | committed |
 
 ---
 
@@ -68,6 +69,11 @@
 ---
 
 ### Completed
+
+- [x] **set_session_topic() UI propagation + notify retry** → commit: d9cd6f0 | By: 5329e0ea (Session 380b)
+- [x] **Job interactions 404 for compound IDs** → commit: d9cd6f0 | By: 5329e0ea (Session 380b)
+- [x] **Stack trace not captured on dead jobs** → commit: d9cd6f0 | By: 5329e0ea (Session 380b)
+- [x] **Cost summary missing from PresentationGenerator + DeepResearch** → commit: d9cd6f0 | By: 5329e0ea (Session 380b)
 
 - [x] **Presentation Generator dry-run sends zero progress notifications** → commit: 8b749b0 | By: 5b508f0e (Session 376)
   - **Symptom**: Dry run completes but UI shows no breadcrumb notifications
