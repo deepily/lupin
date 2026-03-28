@@ -1,0 +1,91 @@
+# Comparing Google Cloud, OpenAI, and ElevenLabs Text-to-Speech APIs for Low-Latency Streaming
+
+## Overview
+Google Cloud Text-to-Speech, OpenAI Speech (TTS) API, and ElevenLabs TTS all offer neural text-to-speech services with streaming support so that synthesized speech can play as it is generated.  
+- **Google Cloud:** Hundreds of voices (50+ languages) powered by WaveNet/Chirp3 HD for low-latency streaming.  
+- **OpenAI:** Six “studio” voices (Alloy, Echo, Fable, Onyx, Nova, Shimmer) with HTTP chunked streaming and a realtime WebSocket API.  
+- **ElevenLabs:** Multiple realistic voices, multilingual support, and a dedicated streaming endpoint with tunable latency settings.
+
+## API Features & Streaming Support
+
+| Feature                  | Google Cloud TTS (Chirp3 HD)* | OpenAI Speech (TTS)        | ElevenLabs TTS             |
+|--------------------------|-------------------------------|----------------------------|----------------------------|
+| **Voices & Languages**   | ~380 voices, 50+ languages    | 6 voices (English-focused) | Dozens, multilingual       |
+| **Streaming Protocol**   | gRPC bidirectional            | HTTP chunked; WebSocket**  | HTTP chunked               |
+| **Latency Tuning**       | Built-in for Chirp3           | Realtime API via WebSocket | `optimize_streaming_latency` option |
+| **Output Formats**       | WAV, MP3, OGG/Opus            | MP3, WAV, OGG/Opus         | MP3, WAV                   |
+| **Auth Header**          | API Key or OAuth token        | `Authorization: Bearer ...`| `xi-api-key: ...`          |
+| **SDK Support**          | Google Cloud client libs      | OpenAI official SDK        | Official Python/Node SDK   |
+
+_*Streaming only supported on Chirp3 HD voices._  
+_**WebSocket via OpenAI Realtime API (powered by GPT‑4o)._
+
+## Streaming Architecture
+
+1. **Client (HTML/JS)**  
+   - Sends TTS text request to FastAPI server.  
+   - Sets an `<audio>` source to the streaming endpoint.  
+   - Begins playback as chunks arrive.
+
+2. **Server (FastAPI)**  
+   - Receives text, handles API key authentication.  
+   - Proxies to TTS provider’s streaming endpoint.  
+   - Returns a `StreamingResponse` of raw audio bytes (`audio/mpeg`).
+
+3. **Browser Playback**  
+   - `<audio>` element or Web Audio API plays MP3/Opus chunks immediately.  
+   - Works in both Chrome and Firefox.
+
+## Sample FastAPI + Vanilla JavaScript Implementation
+
+```python
+# server.py (FastAPI)
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
+import requests, os
+
+app = FastAPI()
+ELEVEN_KEY = os.getenv("ELEVENLABS_API_KEY")
+
+@app.get("/tts")
+def tts(text: str, voice_id: str = "JBFqnCBsd6RMkjVDRZzb"):
+    if not ELEVEN_KEY:
+        raise HTTPException(500, "TTS API key not configured")
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
+    headers = {"xi-api-key": ELEVEN_KEY}
+    json_body = {"text": text, "model_id": "eleven_multilingual_v2"}
+    resp = requests.post(url, headers=headers, json=json_body, stream=True)
+    if resp.status_code != 200:
+        raise HTTPException(resp.status_code, "TTS provider error")
+    return StreamingResponse(resp.iter_content(4096), media_type="audio/mpeg")
+```
+
+```html
+<!-- client.html -->
+<!DOCTYPE html>
+<html>
+<head><title>Streaming TTS Demo</title></head>
+<body>
+  <h1>Stream TTS</h1>
+  <input id="txt" type="text" value="Hello, world!" size="40"/>
+  <button onclick="speak()">Speak</button><br/>
+  <audio id="player" controls></audio>
+  <script>
+    function speak() {
+      const text = encodeURIComponent(document.getElementById("txt").value);
+      const audio = document.getElementById("player");
+      audio.src = `/tts?text=${text}`;
+      audio.play();
+    }
+  </script>
+</body>
+</html>
+```
+
+## Key Takeaways
+
+- **Low-Latency Streaming:** All three vendors support streaming with minimal delay (Google via gRPC, OpenAI/ElevenLabs via HTTP chunked).  
+- **Browser Compatibility:** Native `<audio>` playback of MP3/Opus works in Chrome & Firefox.  
+- **Ease of Integration:** Proxying with FastAPI’s `StreamingResponse` makes implementation straightforward.  
+- **Voice & Quality Options:** Google has the largest catalog; ElevenLabs offers multilingual/custom voices with latency tuning; OpenAI focuses on a small set of studio-quality voices and a Realtime WebSocket API.
+
