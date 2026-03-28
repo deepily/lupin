@@ -46,6 +46,11 @@ class MockJob:
         self.status                = "pending"
         self.error                 = None
 
+        # Scheduling attributes (CJ Flow)
+        self.scheduled_at          = None
+        self.monopolize            = False
+        self.paused                = False
+
     def do_all( self ):
         """Execute the job (mock implementation)."""
         return "done"
