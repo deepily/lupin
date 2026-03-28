@@ -1,11 +1,12 @@
 # TODO
 
-Last updated: 2026-03-26 (Session 379)
+Last updated: 2026-03-27 (Session 381)
 
 ## Pending
 
 - [x] [LUPIN] ~~**Archive history.md — CRITICAL**~~ — Resolved: was 19.5k after Session 373b, now 10.4k (41.5%) after Session 375 archival
 - [ ] [LUPIN] Presentation Generator Phase D verification: Live E2E with real Claude API calls + voice gate interaction. 17-step browser manual checklist ready. E2E suite healthy (Session 377: 297/0). **Resume 2026-03-27**. Plan docs: `src/rnd/2026.03.14-presentation-generator/07-phase-c-d-verification-plan.md`, `src/rnd/2026.03.26-presentation-generator-phase-d-manual-verification.md`
+- [ ] [LUPIN] **CJ Flow History: Manual testing of delete & retry buttons**. 11-test rubric covering happy paths, cancel flows, error scenarios, authorization, and time window interactions. No automated E2E test clicks the retry button yet. **Resume 2026-03-28**. Plan doc: `src/rnd/v0.1.6/2026.03.27-cj-flow-history-delete-retry-manual-testing-rubric.md`
 - [ ] [LUPIN] Presentation Generator Phase 6: Marp Text Rendering — YAML → Marp Markdown with theme application (6 tasks)
 - [x] [LUPIN] Presentation Generator Phase C verification: CJ Flow dry-run queue submission + UI card — Session 374: 6/6 smoke tests pass, mode maps + HTML card + JS handler added
 - [x] [LUPIN] Presentation Generator Phase 4: Outline & Elaborate — Session 371: 7/7 tasks, 94 new tests
@@ -19,6 +20,7 @@ Last updated: 2026-03-26 (Session 379)
 - [x] [LUPIN] Archive history.md — at 18.4k tokens, above 17k WARNING threshold (deferred from Session 371b) — **Superseded**: now 19.5k+, escalated to CRITICAL in Session 374 TODO above
 - [x] [LUPIN] **Run clean full integration suite** — Session 380: **195 passed, 0 failed, 32 skipped** in 5:50. LanceDB isolation + warm test fixes verified clean. Added `--bg` flag + PID-file overlap protection to `run-integration-tests.sh` (same pattern as E2E runner). Fixed `test_admin_not_self_excludes_own_jobs` (500 from push pipeline unavailable in test env → skip gracefully).
 - [ ] [LUPIN] CoSA commit pending: `websocket.py` Fix 4 (WebSocketDisconnect handler + safe close) — must commit from CoSA repo context
+- [ ] [LUPIN] CoSA commit pending: Session 380b fixes — `running_fifo_queue.py` (stack trace capture), `job_persistence.py` (stack_trace rich_field), `deep_research/job.py` (cost_summary in artifacts), `presentation_generator/job.py` (cost_summary tokens), `podcast_generator.py` (Field import), `presentation_generator.py` (Field import)
 - [x] [LUPIN] CoSA commit pending: Voice injection bug fix — `notification_fifo_queue.py`, `notifications.py`, `base_listener.py` — committed b544c78
 - [x] [LUPIN] CoSA commit pending: session_name pipeline — `notification_fifo_queue.py` (session_name attr), `notifications.py` (session_name param + session_topic type) — committed b544c78
 - [ ] [LUPIN] Run full E2E + integration test suite before merging branch to main
@@ -103,6 +105,18 @@ Last updated: 2026-03-26 (Session 379)
 - [x] **[LUPIN] Config Migration**: Phases 0-4 complete — Session 364. Deep Research (24 keys + `from_config()`), Podcast Generator (27 keys + nested `from_config()`), LLM Client Factory (10 keys + INI loading). 2083 unit tests pass. Revised plan at `src/rnd/2026.03.14-claude-agent-sdk-config-migration-plan.md`.
 - [ ] **[LUPIN] Phase 5: Update agentic voice workflow skill** — Ensure `/lupin-new-claude-agent-sdk-voice-workflow` scaffolds new agents with `from_config()` pattern by default. Update templates in `src/workflow/agentic-voice-workflow.md`.
 
+### CJ Flow: Timed Execution + Monopolize + Pause/Resume (Session 381 — IN PROGRESS)
+
+- [x] **[LUPIN] Phases 0-4: Backend complete** — Protocol fields (`scheduled_at`, `monopolize`, `paused`), consumer loop rewrite with `pop_next_eligible()` + dynamic wake-up timeout, 5 router updates, pause/resume REST endpoints, config keys, 25 new tests (all pass), 2338 unit regression clean.
+- [ ] **[LUPIN] Phase 5: Notifications UI + WebSocket integration** — JS event subscriptions (`job_paused`, `job_resumed`), event handlers, paused/scheduled visual states on job cards, pause/resume toggle button, CSS. Continue next session.
+- [ ] **[LUPIN] Phase 6: Documentation + E2E validation** — `websocket-events.md` updates, manual E2E test with live server.
+- **Tracking doc**: [`src/rnd/2026.03.27-cj-flow-timed-execution-monopolize-pause.md`](src/rnd/2026.03.27-cj-flow-timed-execution-monopolize-pause.md)
+
+### CJ Flow: Unified Job State Machine (Pre-Hybrid Fast Lane)
+
+- [ ] **[LUPIN] Refactor fragmented state tracking** — Replace `status` field + queue position + `paused` boolean with unified `job_state` column (`pending → queued → scheduled → running → paused → completed/failed/cancelled`). Touches 15+ files: protocol, 7 job types, consumer, persistence, routers, UI. Dedicated preparatory effort before Hybrid Fast Lane.
+- **Design notes**: See "Architectural Note: State Machine Deferral" in [`src/rnd/2026.03.27-cj-flow-timed-execution-monopolize-pause.md`](src/rnd/2026.03.27-cj-flow-timed-execution-monopolize-pause.md)
+
 ### CJ Flow: Hybrid Fast Lane + Bounded Agentic Pool (Session 237)
 
 - [ ] **[LUPIN] Phase 1.1: Add RLock to FifoQueue** — `fifo_queue.py`: wrap all mutating + reading methods with `threading.RLock()`
@@ -115,6 +129,7 @@ Last updated: 2026-03-26 (Session 379)
 - [ ] **[LUPIN] Phase 2.4: Verify Phase 2** — New + existing unit tests pass
 - [ ] **[LUPIN] Phase 3.1: API endpoint** — `/api/queue/pool-status` (optional)
 - [ ] **[LUPIN] Phase 3.2: Integration verification** — Manual E2E test with concurrent agentic + sync jobs
+- **Prerequisite**: Unified Job State Machine refactor must complete first (freshness review of this plan against new consumer loop)
 - **Tracking doc**: `src/rnd/2026.02.19-approach-c-hybrid-queue-architecture.md`
 
 ### Playwright E2E Browser Testing (Session 252)

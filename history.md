@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.03.27 - Session 381 | CJ Flow History — Delete & Retry Investigation + Manual Testing Rubric
+
+**Goal**: Investigate the current state of delete and retry button implementations in the CJ Flow history section, then create a comprehensive manual testing rubric.
+
+**Findings**: Both delete (`DELETE /api/job-history/{id}`) and retry (`POST /api/job-history/{id}/retry`) are fully implemented end-to-end (Session 371). Delete performs hard PostgreSQL removal; retry creates a new job in the todo queue with the original question text. Retry is only available for `failed`/`interrupted` jobs. No automated E2E test actually clicks the retry button — only visibility is tested.
+
+**Deliverables**:
+- 11-test manual testing rubric covering: rendering, delete happy/cancel/empty-state, retry happy/cancel/guard/interrupted, time window interactions, error scenarios, authorization
+- Identified 7 automated test gaps (highest priority: E2E retry click flow, retry-creates-todo integration test)
+- TODO item added for manual testing session on 2026-03-28
+
+**Files Created (1)**: `src/rnd/v0.1.6/2026.03.27-cj-flow-history-delete-retry-manual-testing-rubric.md`
+
+**Files Modified (2)**: `src/rnd/README.md` (file count update), `TODO.md` (new manual testing item)
+
+---
+
 ### 2026.03.27 - Session 380b | Bug Fixing Session — 5 Fixes + R&D Archival
 
 **Goal**: Ad-hoc bug fixing session covering CJ Flow job history, notification system, and R&D directory organization.
