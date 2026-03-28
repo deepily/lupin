@@ -1,11 +1,12 @@
 # TODO
 
-Last updated: 2026-03-27 (Session 381)
+Last updated: 2026-03-27 (Session 381c)
 
 ## Pending
 
+- [ ] [LUPIN] **Bug Fix Expediter — Continue Phase 0 → Phase 1**. Phase 0 code fixes complete (5/5), skill template updated (v1.3). Remaining: run integration tests (`--bg`) for lifecycle validation, then begin Phase 1 (Foundation: Job, Config, State, Directory). **Resume 2026-03-28**. Plan docs: `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/01-implementation-plan.md`
 - [x] [LUPIN] ~~**Archive history.md — CRITICAL**~~ — Resolved: was 19.5k after Session 373b, now 10.4k (41.5%) after Session 375 archival
-- [ ] [LUPIN] Presentation Generator Phase D verification: Live E2E with real Claude API calls + voice gate interaction. 17-step browser manual checklist ready. E2E suite healthy (Session 377: 297/0). **Resume 2026-03-27**. Plan docs: `src/rnd/2026.03.14-presentation-generator/07-phase-c-d-verification-plan.md`, `src/rnd/2026.03.26-presentation-generator-phase-d-manual-verification.md`
+- [ ] [LUPIN] Presentation Generator Phase D verification: Live E2E with real Claude API calls + voice gate interaction. 17-step browser manual checklist serialized. E2E suite healthy (Session 377: 297/0). **Resume 2026-03-28**. Checklist: `src/rnd/2026.03.27-presentation-generator-phase-d-verification-checklist.md`. Plan docs: `src/rnd/2026.03.14-presentation-generator/07-phase-c-d-verification-plan.md`, `src/rnd/2026.03.26-presentation-generator-phase-d-manual-verification.md`
 - [ ] [LUPIN] **CJ Flow History: Manual testing of delete & retry buttons**. 11-test rubric covering happy paths, cancel flows, error scenarios, authorization, and time window interactions. No automated E2E test clicks the retry button yet. **Resume 2026-03-28**. Plan doc: `src/rnd/v0.1.6/2026.03.27-cj-flow-history-delete-retry-manual-testing-rubric.md`
 - [ ] [LUPIN] Presentation Generator Phase 6: Marp Text Rendering — YAML → Marp Markdown with theme application (6 tasks)
 - [x] [LUPIN] Presentation Generator Phase C verification: CJ Flow dry-run queue submission + UI card — Session 374: 6/6 smoke tests pass, mode maps + HTML card + JS handler added

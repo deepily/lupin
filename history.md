@@ -1,5 +1,56 @@
 # Lupin Project History
 
+### 2026.03.27 - Session 381c | Bug Fix Expediter Planning + Agentic Job Consistency Remediation
+
+**Goal**: Design the Bug Fix Expediter (dead job → automated diagnosis → fix) and fix consistency gaps across all agentic job implementations as a prerequisite.
+
+**Requirements Elicitation**: Interactive design session produced a new `BugFixExpediterJob` concept — three-phase forensic pipeline (diagnose → propose → fix) that reuses SWE team's coder/tester agents, integrates with trust proxy (plan context for richer learning), and supports overnight scheduled execution.
+
+**Phase 0 — Agentic Job Consistency Remediation** (code complete):
+- Audited 6 job implementations, found 4 critical gaps
+- SweTeamJob: Added `set_job_id()`/`clear_job_id()` in live execution path
+- PodcastGeneratorJob: Added `queue_name="run"` to all 8 notify calls (live + dry-run)
+- ClaudeCodeJob: Added `queue_name="run"` to all 13 `notify_progress()` calls
+- PresentationGeneratorJob: Added `queue_name="run"` to all 9 notify calls (live + dry-run)
+- SweTeamConfig: Added `from_config()` classmethod, updated `job.py` to use INI-driven config
+- Unit tests: 2367 passed, 6 pre-existing failures (unrelated), 0 regressions
+
+**Skill Template Update** (v1.2 → v1.3):
+- Added 14-item AgenticJobBase Compliance Checklist (mandatory gate for new jobs)
+- Fixed voice notification examples to show correct `set_job_id`/`queue_name` patterns
+- Added 4 anti-patterns covering the gaps we fixed
+
+**Plan Documents Created (3)**: `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/00-index.md`, `01-implementation-plan.md`, `02-agentic-job-consistency-audit.md`
+
+**Files Modified (6)**: `swe_team/job.py`, `swe_team/config.py`, `podcast_generator/job.py`, `claude_code/job.py`, `presentation_generator/job.py`, `.claude/skills/agentic-voice-workflow/SKILL.md`
+
+---
+
+### 2026.03.27 - Session 381b | CJ Flow: Timed Execution + Monopolize + Pause/Resume — Backend Complete
+
+**Goal**: Add timed execution (scheduled jobs), monopolize flag (exclusive execution), and pause/resume (todo queue hold) to CJ Flow. Prerequisite for Hybrid Fast Lane dual-lane architecture.
+
+**Backend — Phases 0-4 complete**:
+- Protocol: Added `scheduled_at`, `monopolize`, `paused` to QueueableJob protocol + all 3 implementations (AgenticJobBase, AgentBase, SolutionSnapshot)
+- Queue: New `pop_next_eligible()` scans for eligible jobs (not paused, scheduled time reached); `earliest_scheduled_at()` calculates dynamic wake-up timeout; `delete_by_id_hash()` override notifies consumer on removal
+- Consumer: Full rewrite — replaces `pop()` with `pop_next_eligible()`, dynamic `condition.wait(timeout=...)` for timed jobs, all-paused guard, monopolize placeholder
+- REST: 5 routers updated with `scheduled_at`/`monopolize` request fields; new `PATCH /api/queue/todo/{id}/pause` and `/resume` endpoints; queue GET serialization updated
+- Config: 2 new INI keys (`cj flow timed execution enabled`, `cj flow monopolize enabled`), 2 new WS events (`job_paused`, `job_resumed`)
+- Persistence: `scheduled_at` + `monopolize` added to JSONB metadata extraction
+- Tests: 25 new tests (15 timed execution + 10 consumer integration), all pass. Full regression: 2338 passed, 0 regressions.
+
+**Architectural decision**: Documented state machine deferral — current `status` field + queue position + `paused` boolean is fragmented. Unified `job_state` refactor (15+ files) deferred as dedicated pre-Hybrid Fast Lane effort.
+
+**Remaining**: Phase 5 (notifications UI: JS subscriptions, event handlers, paused/scheduled visual states, pause/resume button) + Phase 6 (docs, E2E validation).
+
+**Files Created (3)**: `src/rnd/2026.03.27-cj-flow-timed-execution-monopolize-pause.md`, `src/tests/unit/test_timed_execution.py`, `src/tests/unit/test_consumer_timed.py`
+
+**Files Modified (17)**: `queue_protocol.py`, `agentic_job_base.py`, `agent_base.py`, `solution_snapshot.py`, `fifo_queue.py`, `todo_fifo_queue.py`, `queue_consumer.py`, `routers/deep_research.py`, `routers/podcast_generator.py`, `routers/presentation_generator.py`, `routers/swe_team.py`, `routers/mock_job.py`, `routers/queues.py`, `job_persistence.py`, `test_harness/mock_job.py`, `lupin-app.ini`, `lupin-app-splainer.ini`
+
+**Plan doc**: [`src/rnd/2026.03.27-cj-flow-timed-execution-monopolize-pause.md`](src/rnd/2026.03.27-cj-flow-timed-execution-monopolize-pause.md)
+
+---
+
 ### 2026.03.27 - Session 381 | CJ Flow History — Delete & Retry Investigation + Manual Testing Rubric
 
 **Goal**: Investigate the current state of delete and retry button implementations in the CJ Flow history section, then create a comprehensive manual testing rubric.
@@ -71,8 +122,6 @@
 
 **Goal**: Add PID-file overlap protection and `--bg` nohup background mode to `run-integration-tests.sh`, then execute clean full integration suite to verify Session 378 LanceDB isolation + warm test fixes.
 
-#### Checkpoint | 2026.03.27 | --bg + overlap protection + clean suite 195/0
-
 **Infrastructure** — `src/tests/run-integration-tests.sh`:
 - Added `--bg`/`--background` flag: re-execs via nohup, returns immediately, logs to `/tmp/integration-*.log`
 - Added PID-file overlap protection (`/tmp/integration-tests.pid`): prevents concurrent runs that corrupt server config hot-swap
@@ -86,11 +135,11 @@
 - Root cause: `POST /api/push` returns 500 in test env (LLM routing service unreachable at `192.168.1.21:3000`)
 - Fix: `pytest.skip()` when push returns non-200 (test validates `!self` filter, not push pipeline)
 
-**Files Created (1)**: `src/rnd/2026.03.27-integration-test-runner-overlap-protection.md`
+**Phase D Checklist**: Serialized 17-step Presentation Generator Phase D live verification checklist to `src/rnd/2026.03.27-presentation-generator-phase-d-verification-checklist.md`. Deferred to next session.
+
+**Files Created (2)**: `src/rnd/2026.03.27-integration-test-runner-overlap-protection.md`, `src/rnd/2026.03.27-presentation-generator-phase-d-verification-checklist.md`
 
 **Files Modified (5)**: `src/tests/run-integration-tests.sh`, `CLAUDE.md`, `src/tests/integration/test_queue_not_self_filter.py`, `TODO.md`, `src/rnd/README.md`
-
-**Commit**: f019106
 
 ---
 
