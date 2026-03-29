@@ -68,8 +68,8 @@ def full_params_job():
         user_email   = "admin@example.com",
         session_id   = "brave-hawk",
         dry_run      = False,
-        lead_model   = "claude-opus-4-20250514",
-        worker_model = "claude-sonnet-4-20250514",
+        lead_model   = "claude-opus-4-6",
+        worker_model = "claude-sonnet-4-6",
         budget       = 5.00,
         timeout      = 1800,
         debug        = True,
@@ -113,8 +113,8 @@ class TestJobConstruction:
 
     def test_constructor_stores_optional_params( self, full_params_job ):
         """Constructor should store all optional parameters when provided."""
-        assert full_params_job.lead_model == "claude-opus-4-20250514"
-        assert full_params_job.worker_model == "claude-sonnet-4-20250514"
+        assert full_params_job.lead_model == "claude-opus-4-6"
+        assert full_params_job.worker_model == "claude-sonnet-4-6"
         assert full_params_job.budget == 5.00
         assert full_params_job.timeout == 1800
         assert full_params_job.debug is True

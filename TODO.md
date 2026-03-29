@@ -1,10 +1,10 @@
 # TODO
 
-Last updated: 2026-03-28 (Session 382d)
+Last updated: 2026-03-28 (Session 382e)
 
 ## Pending
 
-- [ ] [LUPIN] **Bug Fix Expediter — Phase 1: Foundation**. Phase 0 complete + validated (Session 382: 196 passed, 0 failed). Phase 1 plan refined with concrete patterns (constructor, registration touchpoints, INI keys, DeadJobContext model, task ordering). Next: implement `src/cosa/agents/bug_fix_expediter/` directory structure. Plan docs: `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/01-implementation-plan.md`
+- [ ] [LUPIN] **Bug Fix Expediter — Phase 2: Orchestrator Diagnose Phase**. Phase 1 foundation complete (Session 382e: 8 new files, 2461 tests pass). Next: implement orchestrator skeleton with state machine, diagnosis prompt template, Lead agent SDK delegation. Plan docs: `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/01-implementation-plan.md`
 - [x] [LUPIN] ~~**Archive history.md — CRITICAL**~~ — Resolved: was 19.5k after Session 373b, now 10.4k (41.5%) after Session 375 archival
 - [ ] [LUPIN] Presentation Generator Phase D verification: Live E2E with real Claude API calls + voice gate interaction. 17-step browser manual checklist serialized. E2E suite healthy (Session 377: 297/0). **Resume 2026-03-28**. Checklist: `src/rnd/2026.03.27-presentation-generator-phase-d-verification-checklist.md`. Plan docs: `src/rnd/2026.03.14-presentation-generator/07-phase-c-d-verification-plan.md`, `src/rnd/2026.03.26-presentation-generator-phase-d-manual-verification.md`
 - [x] [LUPIN] **CJ Flow Phase 5: Notifications UI + WebSocket Integration** — Session 382: 6 code steps complete (WS emission, subscriptions, CSS, badges, button, handlers), 12/12 E2E Playwright tests pass, 2372 unit tests (0 regressions). Also found+fixed missing push metadata fields. Plan doc: `src/rnd/2026.03.28-cj-flow-phase-5-notifications-ui.md`

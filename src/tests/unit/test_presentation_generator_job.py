@@ -146,7 +146,7 @@ class TestPresentationConfig:
 
     def test_defaults( self, default_config ):
         """Default config values are correct."""
-        assert default_config.content_model == "claude-opus-4-20250514"
+        assert default_config.content_model == "claude-opus-4-6"
         assert default_config.target_duration_minutes == 15
         assert default_config.slides_per_minute == 1.0
         assert default_config.title_style == "assertion"
@@ -179,7 +179,7 @@ class TestPresentationConfig:
         from cosa.config.configuration_manager import ConfigurationManager
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         config = PresentationConfig.from_config( config_mgr )
-        assert config.content_model == "claude-opus-4-20250514"
+        assert config.content_model == "claude-opus-4-6"
         assert config.target_duration_minutes == 15
         assert config.slides_per_minute == 1.0
         assert config.title_style == "assertion"

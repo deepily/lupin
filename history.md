@@ -1,5 +1,34 @@
 # Lupin Project History
 
+### 2026.03.28 - Session 382e | Bug Fix Expediter: Phase 0.95 (Model Update) + Phase 1 (Foundation)
+
+**Goal**: Update all agentic job model defaults to Claude 4.6 family, then build the complete BugFixExpediterJob foundation scaffolding.
+
+**Phase 0.9 — Integration Test Validation**: Ran integration tests (`--bg`) to close out Phase 0 consistency fixes from Session 381c. Result: 196 passed, 0 failed, 4:58.
+
+**Phase 0.95 — Model Default Update to Claude 4.6** (code complete):
+- Updated all agentic job model defaults from legacy `claude-opus-4-20250514` / `claude-sonnet-4-20250514` to current `claude-opus-4-6` / `claude-sonnet-4-6`
+- 22 files modified across source defaults, CLI help, INI config, cost tracker, unit tests, workflow template
+- Cost tracker: added 3 new model tier entries (backward compat preserved for historical data)
+- Unit tests: 2418 passed, 0 regressions
+
+**Phase 1 — BugFixExpediterJob Foundation** (code complete):
+- Created `src/cosa/agents/bug_fix_expediter/` package (7 files): `__init__.py`, `config.py`, `state.py`, `cosa_interface.py`, `voice_io.py`, `dead_job_packager.py`, `job.py`
+- Created `src/cosa/rest/routers/bug_fix_expediter.py` — `POST /api/bug-fix-expediter/submit` endpoint
+- Registered in `agent_registry.py` (7th agent), `agentic_job_factory.py`, `job_persistence.py`, `main.py`
+- Added 11 INI config keys + splainer explanations, `PRODUCT_NAMES` entry, test profile update
+- `_execute()` packages dead job context via `dead_job_packager.py`; orchestrator pipeline is Phase 2+ placeholder
+- `_execute_dry_run()` sends 5 breadcrumb notifications simulating all pipeline phases
+- Unit tests: 2461 passed, 0 failed (was 2418 after Phase 0.95)
+
+**Phase 1 Plan Refinement**: Fleshed out 5 gaps in the implementation plan before coding — full `cosa_interface.py` imports/body, `job.py` method bodies, `__init__.py` code block, splainer text for 11 keys, `main.py` registration location, and 6 smoke test bodies.
+
+**Files Created (8)**: `bug_fix_expediter/__init__.py`, `config.py`, `state.py`, `cosa_interface.py`, `voice_io.py`, `dead_job_packager.py`, `job.py`, `routers/bug_fix_expediter.py`
+
+**Files Modified (31)**: 6 agent config/CLI files (model defaults), 2 INI files, `cost_tracker.py`, 9 test files, `agentic-voice-workflow.md`, `agent_registry.py`, `agentic_job_factory.py`, `job_persistence.py`, `main.py`, `todo_fifo_queue.py`, `notification_proxy/config.py`, `01-implementation-plan.md`, `02-agentic-job-consistency-audit.md`, `TODO.md`
+
+---
+
 ### 2026.03.28 - Session 382d | Presentation Generator Phases 6-7 Implementation + Phase 7-8 Planning
 
 **Goal**: Implement Phase 6 (Marp Text Rendering) and Phase 7 (Visual Rendering) of the Presentation Generator, plus write detailed planning documents for Phases 7 and 8.

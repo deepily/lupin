@@ -328,7 +328,7 @@ Register your agent's config keys in `lupin-app.ini` so they can be tuned withou
 
 ```ini
 # In src/conf/lupin-app.ini under [Lupin: Baseline]
-{agent_name} model           = claude-sonnet-4-20250514
+{agent_name} model           = claude-sonnet-4-6
 {agent_name} max iterations  = 10
 {agent_name} timeout seconds = 300
 {agent_name} budget usd      = 5.00
@@ -468,7 +468,7 @@ class {AgentName}Config:
     """
 
     # === Model Selection ===
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-6"
 
     # === Execution Limits ===
     max_iterations: int = 10
@@ -491,7 +491,7 @@ def quick_smoke_test():
     try:
         print( "Testing default config..." )
         config = {AgentName}Config()
-        assert config.model == "claude-sonnet-4-20250514"
+        assert config.model == "claude-sonnet-4-6"
         print( "✓ Default config created" )
 
         print( "\\n✓ {AgentName}Config smoke test completed successfully" )
@@ -2196,8 +2196,8 @@ class {AgentName}Config:
     # ... existing fields ...
 
     # === Model Routing (Phase 6) ===
-    lead_model    : str = "claude-opus-4-20250514"      # Primary reasoning
-    subagent_model: str = "claude-sonnet-4-20250514"    # Supporting tasks
+    lead_model    : str = "claude-opus-4-6"      # Primary reasoning
+    subagent_model: str = "claude-sonnet-4-6"    # Supporting tasks
     max_tokens    : int = 16000
 ```
 
@@ -2279,9 +2279,9 @@ CACHE_READ_MULTIPLIER     = 0.10   # 90% discount on cached reads
 
 # Model string → tier mapping
 MODEL_TO_TIER = {
-    "claude-opus-4-20250514"   : ModelTier.OPUS_4,
-    "claude-sonnet-4-20250514" : ModelTier.SONNET_4,
-    "claude-haiku-4-20250514"  : ModelTier.HAIKU_4,
+    "claude-opus-4-6"   : ModelTier.OPUS_4,
+    "claude-sonnet-4-6" : ModelTier.SONNET_4,
+    "claude-haiku-4-5-20251001"  : ModelTier.HAIKU_4,
 }
 
 
@@ -2448,7 +2448,7 @@ def quick_smoke_test():
         print( "1. Testing cost calculation..." )
         tracker = {AgentName}CostTracker( budget_limit_usd=1.00, debug=True )
         cost = tracker.record_call(
-            model         = "claude-sonnet-4-20250514",
+            model         = "claude-sonnet-4-6",
             input_tokens  = 1000,
             output_tokens = 500,
             call_type     = "test"
@@ -2460,7 +2460,7 @@ def quick_smoke_test():
         try:
             # Try to record a massive call that exceeds budget
             tracker.record_call(
-                model         = "claude-opus-4-20250514",
+                model         = "claude-opus-4-6",
                 input_tokens  = 1_000_000,
                 output_tokens = 1_000_000,
                 call_type     = "budget_test"
@@ -3242,13 +3242,13 @@ class Test{AgentName}Config:
 
     def test_default_values( self ):
         config = {AgentName}Config()
-        assert config.model == "claude-sonnet-4-20250514"
+        assert config.model == "claude-sonnet-4-6"
         assert config.max_iterations > 0
         assert config.timeout_seconds > 0
 
     def test_custom_values( self ):
-        config = {AgentName}Config( model="claude-opus-4-20250514", max_iterations=5 )
-        assert config.model == "claude-opus-4-20250514"
+        config = {AgentName}Config( model="claude-opus-4-6", max_iterations=5 )
+        assert config.model == "claude-opus-4-6"
         assert config.max_iterations == 5
 
 

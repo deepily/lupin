@@ -335,7 +335,7 @@ class TestVerifyResult:
             text_block = TextBlock( text="All tests pass." )
             msg = AssistantMessage(
                 content = [ tool_block, text_block ],
-                model   = "claude-sonnet-4-20250514",
+                model   = "claude-sonnet-4-6",
             )
             yield msg
 

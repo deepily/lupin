@@ -55,8 +55,8 @@ class TestSweTeamConfig:
 
     def test_default_models( self ):
         config = SweTeamConfig()
-        assert config.lead_model == "claude-opus-4-20250514"
-        assert config.worker_model == "claude-sonnet-4-20250514"
+        assert config.lead_model == "claude-opus-4-6"
+        assert config.worker_model == "claude-sonnet-4-6"
 
     def test_default_safety_limits( self ):
         config = SweTeamConfig()

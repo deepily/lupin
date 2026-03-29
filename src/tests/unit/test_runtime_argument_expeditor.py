@@ -358,9 +358,9 @@ class TestAgentRegistry:
         _help_cache.clear()
         _user_visible_cache.clear()
 
-    def test_registry_has_six_agents( self ):
-        """Registry contains exactly 6 agentic agents."""
-        assert len( AGENTIC_AGENTS ) == 6
+    def test_registry_has_seven_agents( self ):
+        """Registry contains exactly 7 agentic agents."""
+        assert len( AGENTIC_AGENTS ) == 7
 
     def test_all_entries_required_keys( self ):
         """All registry entries have the required keys."""
@@ -942,7 +942,7 @@ class TestConfirmAndIterate:
         args = {
             "query"      : "quantum computing",
             "budget"     : "10",
-            "lead_model" : "claude-opus-4-20250514",
+            "lead_model" : "claude-opus-4-6",
             "debug"      : True,
         }
 
@@ -965,7 +965,7 @@ class TestConfirmAndIterate:
         mock_confirm.return_value = "yes"
         args = {
             "query"      : "quantum computing",
-            "lead_model" : "claude-opus-4-20250514",
+            "lead_model" : "claude-opus-4-6",
         }
 
         result = self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )

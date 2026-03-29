@@ -30,13 +30,13 @@ class TestAPIResponse:
         """APIResponse stores all fields correctly."""
         resp = APIResponse(
             content       = "Analysis result",
-            model         = "claude-opus-4-20250514",
+            model         = "claude-opus-4-6",
             input_tokens  = 1500,
             output_tokens = 800,
             stop_reason   = "end_turn",
         )
         assert resp.content == "Analysis result"
-        assert resp.model == "claude-opus-4-20250514"
+        assert resp.model == "claude-opus-4-6"
         assert resp.input_tokens == 1500
         assert resp.output_tokens == 800
         assert resp.stop_reason == "end_turn"
