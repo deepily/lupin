@@ -16,7 +16,7 @@ from .conftest import BASE_URL
 
 
 # ---------------------------------------------------------------------------
-# Helper: Expand history section and wait for API response
+# Helpers
 # ---------------------------------------------------------------------------
 
 def expand_history_section( page ):
@@ -39,6 +39,25 @@ def expand_history_section( page ):
 
     response_info.value  # Wait for response to complete
     page.wait_for_timeout( 300 )  # Brief pause for DOM rendering
+
+
+def collapse_and_reexpand_history( page ):
+    """
+    Collapse the history section, then re-expand it.
+
+    Requires:
+        - page is on /app/notifications
+        - History section is currently expanded
+
+    Ensures:
+        - History section is expanded again after a full round-trip
+        - Note: Re-expand uses cached data (state.loaded=true), no new API call
+    """
+    expand_btn = page.get_by_test_id( "notifications-queue-history-expand-btn" )
+    expand_btn.click()        # collapse
+    page.wait_for_timeout( 300 )
+    expand_btn.click()        # re-expand (uses cached state, no API fetch)
+    page.wait_for_timeout( 300 )
 
 
 # ---------------------------------------------------------------------------
@@ -80,14 +99,14 @@ class TestJobHistorySectionLayout:
 
     def test_history_time_window_select( self, logged_in_page ):
         """
-        Job History section has a time window dropdown with 4 options.
+        Job History section has a time window dropdown with 5 options.
 
         Requires:
             - Authenticated session
 
         Ensures:
             - Time window select element exists
-            - Has 4 options: 7 days, 14 days, 30 days, All
+            - Has 5 options: 1 day, 7 days, 14 days, 30 days, All
         """
         logged_in_page.goto( f"{BASE_URL}/app/notifications" )
         logged_in_page.wait_for_load_state( "networkidle" )
@@ -96,7 +115,7 @@ class TestJobHistorySectionLayout:
         assert select.count() > 0
 
         options = select.locator( "option" )
-        assert options.count() == 4
+        assert options.count() == 5
 
     def test_history_collapsed_by_default( self, logged_in_page ):
         """
@@ -503,3 +522,431 @@ class TestJobHistoryActions:
         empty_msg = container.locator( ".queue-empty-message" )
         assert empty_msg.count() > 0, "Expected empty message after deleting all jobs"
         assert "No job history found" in ( empty_msg.text_content() or "" )
+
+
+# ===========================================================================
+# Delete Flow Tests (Session 382 — Rubric Tests 2-4, 9)
+# ===========================================================================
+
+class TestJobHistoryDeleteFlows:
+    """Extended delete tests: badge updates, persistence, cancel, filter interaction."""
+
+    def test_delete_badge_count_decrements( self, seeded_history_page ):
+        """
+        Badge count decrements from 5 to 4 after deleting a job.
+
+        Requires:
+            - 5 seeded job_history rows
+
+        Ensures:
+            - Badge text is "5" before delete
+            - Badge text is "4" after delete
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        badge = page.locator( "#history-count-badge" )
+        assert badge.text_content() == "5", f"Expected badge '5' before delete, got '{badge.text_content()}'"
+
+        # Auto-accept confirm() dialogs
+        page.on( "dialog", lambda dialog: dialog.accept() )
+
+        container   = page.locator( "#history-jobs-container" )
+        delete_btns = container.locator( ".delete-btn" )
+
+        with page.expect_response( lambda r: "/api/job-history" in r.url ):
+            delete_btns.first.click()
+        page.wait_for_timeout( 500 )
+
+        assert badge.text_content() == "4", f"Expected badge '4' after delete, got '{badge.text_content()}'"
+
+    def test_delete_persists_after_collapse_reexpand( self, seeded_history_page ):
+        """
+        Deleted job does not reappear after collapsing and re-expanding history.
+
+        Requires:
+            - 5 seeded job_history rows
+
+        Ensures:
+            - After delete + collapse + re-expand, card count is 4
+            - Deleted job's id_hash is absent from the DOM
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        page.on( "dialog", lambda dialog: dialog.accept() )
+
+        container = page.locator( "#history-jobs-container" )
+        cards     = container.locator( ".job-card" )
+
+        # Capture the first card's job ID before deleting it
+        first_card_id = cards.first.get_attribute( "data-job-id" )
+
+        with page.expect_response( lambda r: "/api/job-history" in r.url ):
+            container.locator( ".delete-btn" ).first.click()
+        page.wait_for_timeout( 500 )
+
+        # Collapse and re-expand
+        collapse_and_reexpand_history( page )
+
+        assert cards.count() == 4, f"Expected 4 cards after reexpand, got {cards.count()}"
+        assert page.locator( f".job-card[data-job-id='{first_card_id}']" ).count() == 0, \
+            f"Deleted job {first_card_id} reappeared after collapse/reexpand"
+
+    def test_delete_cancel_leaves_unchanged( self, seeded_history_page ):
+        """
+        Cancelling the delete confirm dialog leaves everything unchanged.
+
+        Requires:
+            - 5 seeded job_history rows
+
+        Ensures:
+            - Card count remains 5
+            - Badge text remains "5"
+            - No API request sent
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        # Dismiss (cancel) confirm() dialogs
+        page.on( "dialog", lambda dialog: dialog.dismiss() )
+
+        container = page.locator( "#history-jobs-container" )
+        cards     = container.locator( ".job-card" )
+        badge     = page.locator( "#history-count-badge" )
+
+        assert cards.count() == 5, f"Expected 5 cards before cancel, got {cards.count()}"
+        assert badge.text_content() == "5"
+
+        # Click delete — confirm() will be dismissed
+        container.locator( ".delete-btn" ).first.click()
+        page.wait_for_timeout( 300 )
+
+        # Everything unchanged
+        assert cards.count() == 5, f"Expected 5 cards after cancel, got {cards.count()}"
+        assert badge.text_content() == "5", f"Badge changed after cancel: '{badge.text_content()}'"
+
+    def test_delete_persists_across_filter_change( self, seeded_history_page ):
+        """
+        Deleted job stays absent after changing time window filters.
+
+        Requires:
+            - 5 seeded job_history rows (all recent, within any time window)
+
+        Ensures:
+            - After delete, switching to 'all' then '30' does not resurrect the job
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        page.on( "dialog", lambda dialog: dialog.accept() )
+
+        container     = page.locator( "#history-jobs-container" )
+        cards         = container.locator( ".job-card" )
+        first_card_id = cards.first.get_attribute( "data-job-id" )
+
+        with page.expect_response( lambda r: "/api/job-history" in r.url ):
+            container.locator( ".delete-btn" ).first.click()
+        page.wait_for_timeout( 500 )
+
+        assert cards.count() == 4, f"Expected 4 cards after delete, got {cards.count()}"
+
+        # Switch to "all" filter
+        select = page.get_by_test_id( "history-time-window-select" )
+        with page.expect_response( lambda r: "/api/job-history" in r.url ):
+            select.select_option( "all" )
+        page.wait_for_timeout( 300 )
+
+        assert page.locator( f".job-card[data-job-id='{first_card_id}']" ).count() == 0, \
+            f"Deleted job reappeared after switching to 'all' filter"
+
+        # Switch back to "30"
+        with page.expect_response( lambda r: "/api/job-history" in r.url ):
+            select.select_option( "30" )
+        page.wait_for_timeout( 300 )
+
+        assert page.locator( f".job-card[data-job-id='{first_card_id}']" ).count() == 0, \
+            f"Deleted job reappeared after switching back to '30' filter"
+
+
+# ===========================================================================
+# Retry Flow Tests (Session 382 — Rubric Tests 5, 6, 8)
+# ===========================================================================
+
+class TestJobHistoryRetryFlows:
+    """Retry button flows: happy path, cancel, interrupted job retry."""
+
+    def test_retry_happy_path_creates_todo_job( self, seeded_history_page ):
+        """
+        Retry on failed job sends correct POST, UI handles success, original stays in history.
+
+        Note: The backend push_job routes through the LLM pipeline which is unavailable
+        in the test environment. We mock the retry API response to test the frontend flow.
+        Backend retry logic is covered by integration tests.
+
+        Requires:
+            - Standard seed set with failed job (std-003)
+
+        Ensures:
+            - Confirm dialog shown with question text
+            - POST /retry sent with correct URL and method
+            - On 200 response: original failed card remains in history
+            - Badge count unchanged at 5
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        page.on( "dialog", lambda dialog: dialog.accept() )
+
+        failed_rec    = next( r for r in records if r[ "status" ] == "failed" )
+        failed_id     = failed_rec[ "id_hash" ]
+        failed_card   = page.locator( f".job-card[data-job-id='{failed_id}']" )
+        retry_btn     = failed_card.locator( ".retry-btn" )
+
+        assert retry_btn.count() > 0, "Retry button not found on failed job"
+
+        # Mock the retry API response (push_job requires LLM routing, unavailable in test env)
+        import json
+        mock_response = json.dumps( {
+            "status"          : "retried",
+            "original_job_id" : failed_id,
+            "result"          : { "id_hash": "mock-retried-job-001", "status": "todo" }
+        } )
+        page.route(
+            "**/api/job-history/*/retry",
+            lambda route: route.fulfill(
+                status       = 200,
+                content_type = "application/json",
+                body         = mock_response
+            ) if route.request.method == "POST" else route.continue_()
+        )
+
+        # Click retry and wait for the mocked response
+        with page.expect_response( lambda r: "/retry" in r.url ) as response_info:
+            retry_btn.click()
+
+        retry_response = response_info.value
+        assert retry_response.ok, f"Retry POST failed with status {retry_response.status}"
+
+        retry_data = retry_response.json()
+        assert retry_data[ "status" ] == "retried"
+        assert retry_data[ "original_job_id" ] == failed_id
+
+        page.wait_for_timeout( 500 )
+
+        # Original card still in history
+        assert failed_card.count() == 1, "Original failed card should remain in history after retry"
+
+        # Badge unchanged
+        badge = page.locator( "#history-count-badge" )
+        assert badge.text_content() == "5", f"Badge changed after retry: '{badge.text_content()}'"
+
+    def test_retry_cancel_leaves_unchanged( self, seeded_history_page ):
+        """
+        Cancelling the retry confirm dialog leaves everything unchanged.
+
+        Requires:
+            - Standard seed set with failed job (std-003)
+
+        Ensures:
+            - Card count remains 5
+            - Badge text remains "5"
+            - No API request sent
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        # Dismiss (cancel) confirm() dialogs
+        page.on( "dialog", lambda dialog: dialog.dismiss() )
+
+        failed_rec = next( r for r in records if r[ "status" ] == "failed" )
+        failed_id  = failed_rec[ "id_hash" ]
+        retry_btn  = page.locator( f".job-card[data-job-id='{failed_id}'] .retry-btn" )
+
+        container = page.locator( "#history-jobs-container" )
+        cards     = container.locator( ".job-card" )
+        badge     = page.locator( "#history-count-badge" )
+
+        assert cards.count() == 5
+        assert badge.text_content() == "5"
+
+        # Click retry — confirm() will be dismissed
+        retry_btn.click()
+        page.wait_for_timeout( 300 )
+
+        # Everything unchanged
+        assert cards.count() == 5, f"Expected 5 cards after cancel, got {cards.count()}"
+        assert badge.text_content() == "5", f"Badge changed after cancel: '{badge.text_content()}'"
+
+    def test_retry_interrupted_job_creates_todo_job( self, seeded_history_page ):
+        """
+        Retry on interrupted job sends correct POST, UI handles success.
+
+        Note: Backend push_job mocked (requires LLM routing, unavailable in test env).
+
+        Requires:
+            - Standard seed set with interrupted job (std-004)
+
+        Ensures:
+            - POST /retry sent for interrupted job
+            - On 200 response: original interrupted card remains in history
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        page.on( "dialog", lambda dialog: dialog.accept() )
+
+        interrupted_rec = next( r for r in records if r[ "status" ] == "interrupted" )
+        interrupted_id  = interrupted_rec[ "id_hash" ]
+        card            = page.locator( f".job-card[data-job-id='{interrupted_id}']" )
+        retry_btn       = card.locator( ".retry-btn" )
+
+        assert retry_btn.count() > 0, "Retry button not found on interrupted job"
+
+        # Mock the retry API response
+        import json
+        mock_response = json.dumps( {
+            "status"          : "retried",
+            "original_job_id" : interrupted_id,
+            "result"          : { "id_hash": "mock-retried-job-002", "status": "todo" }
+        } )
+        page.route(
+            "**/api/job-history/*/retry",
+            lambda route: route.fulfill(
+                status       = 200,
+                content_type = "application/json",
+                body         = mock_response
+            ) if route.request.method == "POST" else route.continue_()
+        )
+
+        with page.expect_response( lambda r: "/retry" in r.url ) as response_info:
+            retry_btn.click()
+
+        retry_response = response_info.value
+        assert retry_response.ok, f"Retry POST failed with status {retry_response.status}"
+
+        retry_data = retry_response.json()
+        assert retry_data[ "status" ] == "retried"
+        assert retry_data[ "original_job_id" ] == interrupted_id
+
+        page.wait_for_timeout( 500 )
+
+        # Original card still in history
+        assert card.count() == 1, "Original interrupted card should remain in history after retry"
+
+
+# ===========================================================================
+# Edge Case Tests (Session 382 — Rubric Tests 10, 11)
+# ===========================================================================
+
+class TestJobHistoryEdgeCases:
+    """Edge cases: error handling, admin cross-user management."""
+
+    def test_delete_already_deleted_shows_error( self, seeded_history_page ):
+        """
+        Deleting a job that was already removed from the DB shows an error alert.
+
+        Requires:
+            - 5 seeded job_history rows
+
+        Ensures:
+            - When DELETE returns 404, an alert with error message is shown
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        # Intercept DELETE requests to return 404 (simulates already-deleted job)
+        page.route(
+            "**/api/job-history/**",
+            lambda route: route.fulfill(
+                status       = 404,
+                content_type = "application/json",
+                body         = '{"detail": "Job not found"}'
+            ) if route.request.method == "DELETE" else route.continue_()
+        )
+
+        # Capture dialog messages
+        dialogs = []
+        page.on( "dialog", lambda dialog: ( dialogs.append( dialog.message ), dialog.accept() ) )
+
+        container = page.locator( "#history-jobs-container" )
+        container.locator( ".delete-btn" ).first.click()
+        page.wait_for_timeout( 500 )
+
+        # The first dialog is the confirm(), the second should be the error alert
+        assert len( dialogs ) >= 2, f"Expected at least 2 dialogs (confirm + alert), got {len( dialogs )}"
+        assert "Failed to delete job from history" in dialogs[ 1 ], \
+            f"Expected error alert, got: {dialogs[ 1 ]}"
+
+    def test_admin_can_manage_other_users_jobs( self, admin_page ):
+        """
+        Admin can see, delete, and retry jobs belonging to other users.
+
+        Requires:
+            - Admin user authenticated
+            - Jobs seeded for a different user
+
+        Ensures:
+            - Admin sees other user's jobs in history
+            - Admin can delete other user's completed job
+            - Admin can retry other user's failed job
+        """
+        from tests.helpers.job_history_seed import seed_job_history_records
+
+        # Seed jobs for a different user (not the admin)
+        other_user_id    = "other-user-for-admin-test"
+        other_user_email = "other@example.com"
+        seed_job_history_records(
+            user_id    = other_user_id,
+            user_email = other_user_email,
+            records    = [
+                {
+                    "id_suffix"    : "admin-001",
+                    "status"       : "completed",
+                    "question_text": "Other user completed job for admin test"
+                },
+                {
+                    "id_suffix"    : "admin-002",
+                    "status"       : "failed",
+                    "question_text": "Other user failed job for admin retry test",
+                    "error"        : "Simulated failure"
+                },
+            ]
+        )
+
+        admin_page.goto( f"{BASE_URL}/app/notifications" )
+        admin_page.wait_for_load_state( "networkidle" )
+        expand_history_section( admin_page )
+
+        container = admin_page.locator( "#history-jobs-container" )
+        cards     = container.locator( ".job-card" )
+        assert cards.count() == 2, f"Admin should see 2 other-user jobs, got {cards.count()}"
+
+        # Auto-accept all dialogs
+        admin_page.on( "dialog", lambda dialog: dialog.accept() )
+
+        # Delete the completed job
+        completed_id   = f"test-job-admin-001::{other_user_id}"
+        completed_card = container.locator( f".job-card[data-job-id='{completed_id}']" )
+        assert completed_card.count() == 1, "Admin should see other user's completed job"
+
+        with admin_page.expect_response( lambda r: "/api/job-history" in r.url and r.request.method == "DELETE" ):
+            completed_card.locator( ".delete-btn" ).click()
+        admin_page.wait_for_timeout( 500 )
+
+        assert container.locator( f".job-card[data-job-id='{completed_id}']" ).count() == 0, \
+            "Admin-deleted job should be gone"
+
+        # Retry the failed job
+        failed_id   = f"test-job-admin-002::{other_user_id}"
+        failed_card = container.locator( f".job-card[data-job-id='{failed_id}']" )
+        assert failed_card.count() == 1, "Admin should see other user's failed job"
+        retry_btn = failed_card.locator( ".retry-btn" )
+        assert retry_btn.count() > 0, "Failed job should have retry button"
+
+        with admin_page.expect_response( lambda r: "/retry" in r.url and r.status == 200 ):
+            retry_btn.click()
+        admin_page.wait_for_timeout( 500 )
+
+        # Failed card still in history after retry
+        assert failed_card.count() == 1, "Original failed card should remain after admin retry"

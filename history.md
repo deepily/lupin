@@ -1,5 +1,27 @@
 # Lupin Project History
 
+### 2026.03.28 - Session 382c | CJ Flow History: Delete & Retry E2E Test Automation
+
+**Goal**: Automate the 11-test manual testing rubric for CJ Flow History delete and retry buttons as Playwright E2E tests.
+
+**Deliverables**:
+- 9 new Playwright E2E tests in 3 classes added to `test_job_history_ui.py`
+- `TestJobHistoryDeleteFlows` (4 tests): badge decrement, collapse/reexpand persistence, cancel dialog, filter persistence
+- `TestJobHistoryRetryFlows` (3 tests): retry happy path (mocked backend), cancel, interrupted job retry
+- `TestJobHistoryEdgeCases` (2 tests): 404 error alert via route interception, admin cross-user management
+- Fixed pre-existing `test_history_time_window_select` (4→5 options after Phase 5 added "1 day")
+- Retry tests mock the backend response (LLM routing unavailable in test env); validates frontend flow + API contract
+
+**Test Results**: 9/9 new tests pass. Full regression: 317/318 (1 pre-existing from Phase 5, now fixed → expect 318/318).
+
+**Debug iterations**: 3 rounds — fixed collapse/reexpand (cached state.loaded), WebSocket wait for retry queueSessionId, mocked push_job (LLM routing)
+
+**Files Modified (3)**: `test_job_history_ui.py`, `2026.03.27-cj-flow-history-delete-retry-manual-testing-rubric.md`, `TODO.md`
+
+**Commit**: d11ec45
+
+---
+
 ### 2026.03.28 - Session 382b | Bug Fix: Config Manager Visual Grouping Broken by Space-Separated Keys
 
 **Goal**: Fix broken visual grouping in `print_configuration_to_stdout()` — blank lines inserted between every key instead of only between different prefix groups.
