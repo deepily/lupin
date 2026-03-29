@@ -279,6 +279,43 @@ class TestPauseButtonRendering:
         btn = _get_pause_btn( page, job_id )
         assert btn.count() > 0, "Pause button should be on todo card"
 
+    def test_cancel_and_pause_buttons_coexist( self, notifications_page ):
+        """
+        Both cancel (✕) and pause (⏸/▶) buttons render on a todo card
+        and function independently. Pausing does not remove the cancel button.
+
+        Requires:
+            - Mock job in todo queue
+
+        Ensures:
+            - Both .job-cancel-button and .job-pause-button present
+            - After pausing via API, cancel button still present
+            - After pausing, pause button shows ▶ (resume icon)
+        """
+        page        = notifications_page
+        future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        result      = _submit_mock_job( page, scheduled_at=future_time, description="Coexist test" )
+        job_id      = result[ "job_id" ]
+
+        # Pause via API immediately (before consumer can pick it up)
+        _pause_job( page, job_id )
+
+        # Reload to render paused card with both buttons
+        page.goto( f"{BASE_URL}/app/notifications" )
+        page.wait_for_load_state( "networkidle" )
+        wait_for_ws_connected( page )
+        _expand_todo_queue( page )
+
+        card = _get_job_card( page, job_id )
+        assert card.count() > 0, f"Job card {job_id} not found"
+
+        # Both buttons present on paused card
+        cancel_btn = card.locator( ".job-cancel-button" )
+        pause_btn  = _get_pause_btn( page, job_id )
+        assert cancel_btn.count() > 0, "Cancel button missing on paused todo card"
+        assert pause_btn.count() > 0, "Pause button missing on paused todo card"
+        assert "▶" in pause_btn.text_content(), "Pause button should show ▶ on paused card"
+
 
 # ---------------------------------------------------------------------------
 # Pause/Resume API Integration Tests
@@ -379,6 +416,52 @@ class TestPauseResumeFlow:
         assert "⏸" in btn.text_content(), f"Expected ⏸ icon on resumed job, got: {btn.text_content()}"
         btn_classes = btn.get_attribute( "class" )
         assert "is-paused" not in btn_classes, f"Button should not have .is-paused, got: {btn_classes}"
+
+    def test_paused_state_persists_after_reload( self, notifications_page ):
+        """
+        Paused state survives a page reload — the GET API returns paused=true
+        and renderJobCard() renders the paused visual state correctly.
+
+        Requires:
+            - Mock job paused in todo queue
+            - Page reloaded after pausing
+
+        Ensures:
+            - After reload, card has .job-paused class
+            - Paused badge visible
+            - Button shows ▶ with .is-paused class
+            - data-paused attribute is 'true'
+        """
+        page        = notifications_page
+        future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        result      = _submit_mock_job( page, scheduled_at=future_time, description="Reload persist test" )
+        job_id      = result[ "job_id" ]
+
+        # Pause via API
+        _pause_job( page, job_id )
+
+        # Reload the page completely
+        page.goto( f"{BASE_URL}/app/notifications" )
+        page.wait_for_load_state( "networkidle" )
+        wait_for_ws_connected( page )
+        _expand_todo_queue( page )
+
+        card = _get_job_card( page, job_id )
+        assert card.count() > 0, f"Job card {job_id} not found after reload"
+
+        # Paused visual state persisted
+        card_classes = card.get_attribute( "class" )
+        assert "job-paused" in card_classes, f"Expected .job-paused after reload, got: {card_classes}"
+        assert card.get_attribute( "data-paused" ) == "true"
+
+        # Paused badge present
+        paused_badge = card.locator( ".paused-badge" )
+        assert paused_badge.count() > 0, "Paused badge missing after reload"
+
+        # Button shows resume icon
+        btn = _get_pause_btn( page, job_id )
+        assert "▶" in btn.text_content(), f"Expected ▶ after reload, got: {btn.text_content()}"
+        assert "is-paused" in btn.get_attribute( "class" )
 
 
 # ---------------------------------------------------------------------------
