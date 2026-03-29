@@ -42,7 +42,7 @@
 | 1e9b946f | 2026-03-25T13:00:00 | 2026-03-25T13:30:00 | committed |
 | e3c3bab8 | 2026-03-25T18:02:00 | 2026-03-25T18:35:00 | committed |
 | 5b508f0e | 2026-03-26T15:50:00 | 2026-03-26T16:30:00 | committed |
-| 5329e0ea | 2026-03-27T14:00:00 | 2026-03-27T15:30:00 | committed |
+| 5329e0ea | 2026-03-27T14:00:00 | 2026-03-27T16:15:00 | closed |
 
 ---
 
@@ -69,6 +69,11 @@
 ---
 
 ### Completed
+
+- [x] **Config manager visual grouping broken by space-separated keys** → commit: 94044ab (docs), CoSA pending | By: 2098634b (Session 382b)
+  - **Root Cause**: `key.split( "_" )[ 0 ]` returns entire key when no underscores present
+  - **Fix**: Changed to `key.split()[ 0 ]` — splits on whitespace
+  - **Files**: `configuration_manager.py`
 
 - [x] **set_session_topic() UI propagation + notify retry** → commit: d9cd6f0 | By: 5329e0ea (Session 380b)
 - [x] **Job interactions 404 for compound IDs** → commit: d9cd6f0 | By: 5329e0ea (Session 380b)

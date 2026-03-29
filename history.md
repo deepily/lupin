@@ -1,5 +1,21 @@
 # Lupin Project History
 
+### 2026.03.28 - Session 382b | Bug Fix: Config Manager Visual Grouping Broken by Space-Separated Keys
+
+**Goal**: Fix broken visual grouping in `print_configuration_to_stdout()` — blank lines inserted between every key instead of only between different prefix groups.
+
+**Root Cause**: Line 736 split on `"_"` to extract the key stem (`key.split( "_" )[ 0 ]`). After the convention change from underscore-separated to space-separated keys, `split("_")` returns the entire key as one element, making every key its own unique "group."
+
+**Fix**: Changed `key.split( "_" )[ 0 ]` → `key.split()[ 0 ]` — splits on whitespace, returning the first word as the stem.
+
+**Files Modified (1)**: `src/cosa/config/configuration_manager.py` (line 736)
+
+**Test**: `py_compile` pass, visual output verified — prefix groups now display on consecutive lines with blank lines only between different stems.
+
+**Commit**: 94044ab (docs), CoSA pending (configuration_manager.py is in nested CoSA repo)
+
+---
+
 ### 2026.03.28 - Session 382 | CJ Flow Phase 5: Notifications UI + WebSocket Integration
 
 **Goal**: Implement frontend UI for CJ Flow timed execution, monopolize, and pause/resume features (Phase 5 of the parent plan). Add WebSocket event emission, JS event handlers, visual badge states, and pause/resume toggle button on todo queue cards.
