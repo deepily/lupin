@@ -104,14 +104,14 @@
 
 | # | Task | Status |
 |---|------|--------|
-| 6.1 | Implement `marp_renderer.py` | Pending |
-| 6.2 | Implement theme loader | Pending |
-| 6.3 | Create default theme | Pending |
-| 6.4 | Implement Phase 6 in orchestrator | Pending |
-| 6.5 | Add INI config for Marp | Pending |
-| 6.6 | Write unit tests | Pending |
+| 6.1 | Create `renderers/marp_text_renderer.py` (MarpTextRenderer class) | Done |
+| 6.2 | Create default theme (`templates/themes/default.yaml`) | Done |
+| 6.3 | Implement `_load_theme_config()` + `_write_marp()` in orchestrator | Done |
+| 6.4 | Implement Phase 6 in orchestrator (`_render_text_async`) | Done |
+| 6.5 | INI config — existing keys sufficient (no changes needed) | Done |
+| 6.6 | Write unit tests (45 tests in `test_presentation_marp_renderer.py`) | Done |
 
-**Phase 6 Status**: Pending
+**Phase 6 Status**: Done (Session 382)
 
 ---
 
@@ -119,15 +119,15 @@
 
 | # | Task | Status |
 |---|------|--------|
-| 7.1 | Implement `VisualRenderer` ABC | Pending |
-| 7.2 | Implement `MermaidRenderer` | Pending |
-| 7.3 | Implement `PlaceholderRenderer` | Pending |
-| 7.4 | Implement visual renderer registry | Pending |
-| 7.5 | Implement Phase 7 in orchestrator | Pending |
-| 7.6 | Implement Gate 4 checkpoint | Pending |
-| 7.7 | Write unit tests | Pending |
+| 7.1 | Create `VisualRenderer` ABC + `VisualRendererRegistry` (`visual_registry.py`) | Done |
+| 7.2 | Create `MermaidRenderer` (`mermaid.py`) + `prompts/visual.py` + `call_for_mermaid()` | Done |
+| 7.3 | Create `PlaceholderRenderer` (`placeholder.py`) | Done |
+| 7.4 | Update `renderers/__init__.py` + `prompts/__init__.py` exports | Done |
+| 7.5 | Implement Phase 7 in orchestrator (`_render_visuals_async`) | Done |
+| 7.6 | Implement Gate 4 checkpoint (`_gate_4_render_review`) | Done |
+| 7.7 | Write unit tests (43 tests in `test_presentation_visual_renderer.py`) | Done |
 
-**Phase 7 Status**: Pending
+**Phase 7 Status**: Done (Session 382)
 
 ---
 
@@ -155,7 +155,7 @@
 | 3 | Ingest & Analyze | 7 | 7 | Done |
 | 4 | Outline & Elaborate | 7 | 7 | Done |
 | 5 | Serialize | 5 | 5 | Done |
-| 6 | Marp Rendering | 6 | 0 | Pending |
-| 7 | Visual Rendering | 7 | 0 | Pending |
+| 6 | Marp Rendering | 6 | 6 | Done |
+| 7 | Visual Rendering | 7 | 7 | Done |
 | 8 | Delivery & Chaining | 6 | 0 | Pending |
-| **Total** | | **56** | **37** | **In Progress** |
+| **Total** | | **56** | **50** | **In Progress** |

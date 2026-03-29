@@ -16,15 +16,17 @@
 | 04 | [Phase 3 Implementation Plan](04-phase-3-implementation-plan.md) | Expeditor integration + Ingest + Narrative Analysis + Gate 1 | Complete |
 | 05 | [Phase 4 Implementation Plan](05-phase-4-implementation-plan.md) | Outline & Elaborate + fuzzy_file_match config | Complete |
 | 06 | [Phase 4-5 Verification Plan](06-phase-4-5-verification-plan.md) | Test & verify strategy: smoke → dry-run → UI → live E2E | Active |
+| 07 | [Phase C-D Verification Plan](07-phase-c-d-verification-plan.md) | CJ Flow queue + live E2E verification | Active |
+| 08 | [Phase 6 Implementation Plan](08-phase-6-implementation-plan.md) | Marp text rendering: theme system, renderer, orchestrator integration | Complete |
+| 09 | [Phase 7 Implementation Plan](09-phase-7-implementation-plan.md) | Visual rendering: Mermaid + registry + placeholder + Gate 4 | Active |
+| 10 | [Phase 8 Implementation Plan](10-phase-8-implementation-plan.md) | Delivery + Deep Research → Presentation chaining bridge | Active |
 
 ## Future Documents (Added as Work Progresses)
 
 | # | Document | Purpose | Status |
 |---|----------|---------|--------|
-| 06 | Theme Template Spec | Theme YAML schema, examples, default theme | Planned |
-| 07 | Visual Renderer Protocol | Renderer interface specification, registry design | Planned |
-| 08 | Prompt Engineering | LLM prompts for narrative extraction, title generation, elaboration | Planned |
-| 09 | Lessons Learned | Post-implementation notes, design pivots, gotchas | Planned |
+| 11 | Theme Template Spec | Additional themes (dark, academic, branded) | Planned |
+| 12 | Lessons Learned | Post-implementation notes, design pivots, gotchas | Planned |
 
 ## Architecture Summary
 

@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-28 (Session 382)
+Last updated: 2026-03-28 (Session 382d)
 
 ## Pending
 
@@ -9,7 +9,9 @@ Last updated: 2026-03-28 (Session 382)
 - [ ] [LUPIN] Presentation Generator Phase D verification: Live E2E with real Claude API calls + voice gate interaction. 17-step browser manual checklist serialized. E2E suite healthy (Session 377: 297/0). **Resume 2026-03-28**. Checklist: `src/rnd/2026.03.27-presentation-generator-phase-d-verification-checklist.md`. Plan docs: `src/rnd/2026.03.14-presentation-generator/07-phase-c-d-verification-plan.md`, `src/rnd/2026.03.26-presentation-generator-phase-d-manual-verification.md`
 - [x] [LUPIN] **CJ Flow Phase 5: Notifications UI + WebSocket Integration** — Session 382: 6 code steps complete (WS emission, subscriptions, CSS, badges, button, handlers), 12/12 E2E Playwright tests pass, 2372 unit tests (0 regressions). Also found+fixed missing push metadata fields. Plan doc: `src/rnd/2026.03.28-cj-flow-phase-5-notifications-ui.md`
 - [x] [LUPIN] **CJ Flow History: Delete & retry E2E tests** — Session 382b: 11-test manual rubric automated as 9 Playwright E2E tests (3 classes). 9/9 new tests pass, full regression 317/318 (1 pre-existing). Retry tests mock backend (LLM routing unavailable in test env). Plan doc: `src/rnd/v0.1.6/2026.03.27-cj-flow-history-delete-retry-manual-testing-rubric.md`
-- [ ] [LUPIN] Presentation Generator Phase 6: Marp Text Rendering — YAML → Marp Markdown with theme application (6 tasks)
+- [x] [LUPIN] Presentation Generator Phase 6: Marp Text Rendering — Session 382d: 6/6 tasks, 45 new tests, MarpTextRenderer + theme system + orchestrator integration
+- [x] [LUPIN] Presentation Generator Phase 7: Visual Rendering — Session 382d: 7/7 tasks, 43 new tests, VisualRenderer ABC + MermaidRenderer + PlaceholderRenderer + registry + Gate 4
+- [ ] [LUPIN] **Presentation Generator Phase 8: Delivery & Chaining** — Orchestrator `_deliver_async()` + Deep Research → Presentation bridge (job, agent, router, factory, expeditor). Plan doc: `src/rnd/v0.1.6/2026.03.14-presentation-generator/10-phase-8-implementation-plan.md`
 - [x] [LUPIN] Presentation Generator Phase C verification: CJ Flow dry-run queue submission + UI card — Session 374: 6/6 smoke tests pass, mode maps + HTML card + JS handler added
 - [x] [LUPIN] Presentation Generator Phase 3: Ingest & Analyze — Content generation, first LLM work
 - [x] [LUPIN] Presentation Generator Phase 4: Outline & Elaborate — Session 371: 7/7 tasks, 94 new tests

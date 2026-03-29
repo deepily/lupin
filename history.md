@@ -1,5 +1,41 @@
 # Lupin Project History
 
+### 2026.03.28 - Session 382d | Presentation Generator Phases 6-7 Implementation + Phase 7-8 Planning
+
+**Goal**: Implement Phase 6 (Marp Text Rendering) and Phase 7 (Visual Rendering) of the Presentation Generator, plus write detailed planning documents for Phases 7 and 8.
+
+**Phase 6 — Marp Text Rendering** (code complete):
+- Created `MarpTextRenderer` — stateless `@staticmethod` class converting `PresentationModel` → Marp Markdown
+- Frontmatter generation with CSS from theme config (colors, fonts, layout)
+- Slide type dispatch: title, content, section_divider, conclusion + unknown fallback
+- Presenter notes as HTML comments, visual placeholders (`<!-- VISUAL: type | desc -->`) for Phase 7
+- Default theme file (`templates/themes/default.yaml`): Marp directives, color palette, font settings
+- Orchestrator integration: `_render_text_async()` with `_load_theme_config()` (YAML + hardcoded fallback) and `_write_marp()`
+- 45 new unit tests (8 test classes), all pass
+
+**Phase 7 — Visual Rendering** (code complete):
+- Created `VisualRenderer` ABC + `VisualRendererRegistry` — type dispatch with PlaceholderRenderer fallback
+- Created `MermaidRenderer` — LLM-backed Mermaid code generation via Claude API (temp=0.3)
+- Created `PlaceholderRenderer` — visible TODO markers for unsupported types (screenshot, icon_only, before_after)
+- Created `prompts/visual.py` — Mermaid system prompt + diagram type hints (keyword → diagram type mapping)
+- Added `call_for_mermaid()` to `PresentationAPIClient` (max_tokens=2048)
+- Orchestrator: `_render_visuals_async()` reads Marp file, regex-finds placeholders, dispatches to registry, rewrites file. Dry run uses PlaceholderRenderer only (no API calls)
+- Gate 4: voice I/O summary with approve/cancel (auto-approve in dry run)
+- 43 new unit tests (8 test classes), all pass
+
+**Planning Documents Created (3)**:
+- `src/rnd/v0.1.6/2026.03.14-presentation-generator/08-phase-6-implementation-plan.md`
+- `src/rnd/v0.1.6/2026.03.14-presentation-generator/09-phase-7-implementation-plan.md`
+- `src/rnd/v0.1.6/2026.03.14-presentation-generator/10-phase-8-implementation-plan.md`
+
+**Unit tests**: 2501 passed (was 2367), 88 new tests added (45 Phase 6 + 43 Phase 7), 0 regressions
+
+**Files Created (8)**: `templates/themes/default.yaml`, `renderers/marp_text_renderer.py`, `renderers/visual_registry.py`, `renderers/placeholder.py`, `renderers/mermaid.py`, `prompts/visual.py`, `test_presentation_marp_renderer.py`, `test_presentation_visual_renderer.py`
+
+**Files Modified (7)**: `renderers/__init__.py`, `prompts/__init__.py`, `orchestrator.py` (Phase 6+7+Gate 4), `api_client.py` (+call_for_mermaid), `03-implementation-tracking.md`, `00-index.md`, `src/rnd/README.md`
+
+---
+
 ### 2026.03.28 - Session 382c | CJ Flow History: Delete & Retry E2E Test Automation
 
 **Goal**: Automate the 11-test manual testing rubric for CJ Flow History delete and retry buttons as Playwright E2E tests.
