@@ -2114,6 +2114,8 @@ class NotificationsUI {
                 "notification_queue_update",
                 "notification_responded",  // Phase 2.2 SSE - multi-device sync
                 "notification_expired",    // Phase 2.2 SSE - timeout handling
+                "job_paused",              // Phase 5 CJ Flow — pause/resume
+                "job_resumed",             // Phase 5 CJ Flow — pause/resume
                 "auth_success",
                 "auth_error",
                 "connect",
@@ -2211,6 +2213,14 @@ class NotificationsUI {
 
                 case "job_state_transition":
                     this.handleJobStateTransition( envelope );
+                    break;
+
+                case "job_paused":
+                    this.handleJobPauseStateChange( envelope, true );
+                    break;
+
+                case "job_resumed":
+                    this.handleJobPauseStateChange( envelope, false );
                     break;
 
                 case "notification_queue_update":
@@ -4541,7 +4551,10 @@ class NotificationsUI {
                     error           : metadata.error || null,
                     has_interactions: metadata.has_interactions || false,
                     duration_seconds: metadata.duration_seconds || null,
-                    expediting      : metadata.expediting || false
+                    expediting      : metadata.expediting || false,
+                    scheduled_at    : metadata.scheduled_at || null,
+                    monopolize      : metadata.monopolize || false,
+                    paused          : metadata.paused || false
                 };
 
                 // Remove empty message if present
@@ -4686,6 +4699,103 @@ class NotificationsUI {
         // Update count badges for both queues
         this.updateQueueCountFromDOM( fromQueue );
         this.updateQueueCountFromDOM( toQueue );
+    }
+
+    handleJobPauseStateChange( event, isPaused ) {
+        /**
+         * Handle job_paused / job_resumed WebSocket event.
+         * Updates card in-place without full queue reload.
+         *
+         * Requires:
+         *     - event.data.job_id identifies a card in the todo queue
+         *     - isPaused is boolean indicating new state
+         *
+         * Ensures:
+         *     - Card classes toggled (job-paused added/removed)
+         *     - Paused badge added/removed
+         *     - Status indicator swapped
+         *     - Pause button icon/state updated
+         *     - data-paused attribute updated
+         */
+        const jobId = event.data?.job_id || event.job_id;
+        if ( !jobId ) {
+            this.error( '[JOB-PAUSE] Missing job_id in event:', event );
+            return;
+        }
+
+        this.log( `[JOB-PAUSE] ${isPaused ? 'Paused' : 'Resumed'}: ${jobId}` );
+
+        const card = document.getElementById( `job-card-${jobId}` );
+        if ( !card ) {
+            this.log( `[JOB-PAUSE] Card not found: ${jobId} (may not be rendered)` );
+            return;
+        }
+
+        const header = card.querySelector( '.job-card-header' );
+
+        // 1. Toggle card-level paused class and data attribute
+        if ( isPaused ) {
+            card.classList.add( 'job-paused' );
+            card.dataset.paused = 'true';
+        } else {
+            card.classList.remove( 'job-paused' );
+            card.dataset.paused = 'false';
+        }
+
+        // 2. Toggle paused badge
+        const existingPausedBadge = header?.querySelector( '.paused-badge' );
+        if ( isPaused && !existingPausedBadge && header ) {
+            const badge = document.createElement( 'span' );
+            badge.className = 'paused-badge';
+            badge.title     = 'Paused — consumer will skip';
+            badge.textContent = '⏸ Paused';
+            const refNode = header.querySelector( '.job-question' );
+            if ( refNode ) {
+                header.insertBefore( badge, refNode );
+            }
+        } else if ( !isPaused && existingPausedBadge ) {
+            existingPausedBadge.remove();
+        }
+
+        // 3. Toggle status indicator
+        const existingIndicator = header?.querySelector( '.status-indicator' );
+        if ( isPaused ) {
+            if ( existingIndicator ) {
+                existingIndicator.className   = 'status-indicator paused-icon';
+                existingIndicator.title       = 'Paused';
+                existingIndicator.textContent = '⏸';
+            } else if ( header ) {
+                const indicator = document.createElement( 'span' );
+                indicator.className   = 'status-indicator paused-icon';
+                indicator.title       = 'Paused';
+                indicator.textContent = '⏸';
+                const timestampSpan = header.querySelector( '.job-timestamp' );
+                if ( timestampSpan ) header.insertBefore( indicator, timestampSpan );
+            }
+        } else {
+            // Remove paused indicator (un-paused todo job has no spinning indicator unless expediting)
+            if ( existingIndicator && existingIndicator.classList.contains( 'paused-icon' ) ) {
+                existingIndicator.remove();
+            }
+        }
+
+        // 4. Update pause/resume button
+        const pauseBtn = document.getElementById( `job-pause-${jobId}` );
+        if ( pauseBtn ) {
+            pauseBtn.disabled    = false;
+            pauseBtn.textContent = isPaused ? '▶' : '⏸';
+            pauseBtn.title       = isPaused ? 'Resume this job' : 'Pause this job';
+            pauseBtn.onclick     = ( e ) => {
+                e.stopPropagation();
+                window.notificationsUI.toggleJobPause( jobId, !isPaused );
+            };
+
+            if ( isPaused ) {
+                pauseBtn.classList.add( 'is-paused' );
+            } else {
+                pauseBtn.classList.remove( 'is-paused' );
+            }
+        }
     }
 
     /**
@@ -6199,6 +6309,37 @@ class NotificationsUI {
             statusIndicator = '<span class="status-indicator expediting" title="Setting up...">⟳</span>';
         }
 
+        // ═══════════════════════════════════════════════════════════════════
+        // Phase 5 CJ Flow: Paused / Scheduled / Monopolize indicators
+        // ═══════════════════════════════════════════════════════════════════
+
+        // Paused job: muted card with pause icon
+        let pausedBadge = '';
+        let pausedCardClass = '';
+        if ( queueName === 'todo' && job.paused ) {
+            pausedBadge = '<span class="paused-badge" title="Paused — consumer will skip">⏸ Paused</span>';
+            pausedCardClass = ' job-paused';
+            statusIndicator = '<span class="status-indicator paused-icon" title="Paused">⏸</span>';
+        }
+
+        // Scheduled job: show clock badge with formatted time
+        let scheduledBadge = '';
+        if ( queueName === 'todo' && job.scheduled_at ) {
+            const schedDate = new Date( job.scheduled_at );
+            const now = new Date();
+            if ( schedDate > now ) {
+                const schedTimeStr = schedDate.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit' } );
+                const schedDateStr = schedDate.toLocaleDateString( [], { month: 'short', day: 'numeric' } );
+                scheduledBadge = `<span class="scheduled-badge" title="Scheduled for ${schedDate.toISOString()}">🕐 ${schedDateStr} ${schedTimeStr}</span>`;
+            }
+        }
+
+        // Monopolize job: subtle lock badge (no-op in serial mode)
+        let monopolizeBadge = '';
+        if ( job.monopolize ) {
+            monopolizeBadge = '<span class="monopolize-badge" title="Exclusive execution — no concurrent jobs">🔒</span>';
+        }
+
         // Done job: completion badge
         let completionBadge = '';
         if ( queueName === 'done' ) {
@@ -6247,11 +6388,16 @@ class NotificationsUI {
             : '';
         const headerCancelClass = hasCancelBtn ? ' has-cancel' : '';
 
+        // Phase 5 CJ Flow: Pause/resume toggle button (todo queue only)
+        const pauseBtnHtml = ( queueName === 'todo' )
+            ? `<button type="button" class="job-pause-button${job.paused ? ' is-paused' : ''}" id="job-pause-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.toggleJobPause('${jobId}', ${!job.paused})" title="${job.paused ? 'Resume this job' : 'Pause this job'}">${job.paused ? '▶' : '⏸'}</button>`
+            : '';
+
         return `
-            <div class="job-card ${statusClass}" id="job-card-${jobId}" data-job-id="${jobId}">
+            <div class="job-card ${statusClass}${pausedCardClass}" id="job-card-${jobId}" data-job-id="${jobId}" data-paused="${job.paused ? 'true' : 'false'}">
                 <div class="job-card-header${headerCancelClass}" onclick="window.notificationsUI.toggleJobCard('${jobId}', '${queueName}')">
-                    ${cancelBtnHtml}
-                    ${agentBadge}${cacheHitBadge}${completionBadge}
+                    ${cancelBtnHtml}${pauseBtnHtml}
+                    ${agentBadge}${cacheHitBadge}${completionBadge}${pausedBadge}${scheduledBadge}${monopolizeBadge}
                     <span class="job-question">${this.escapeHtml( truncatedQuestion )}</span>
                     ${statusIndicator}${interactionIndicator}
                     <span class="job-timestamp">${timestamp}</span>
@@ -6476,6 +6622,56 @@ class NotificationsUI {
             if ( cancelBtn ) {
                 cancelBtn.disabled  = false;
                 cancelBtn.innerText = 'Cancel Job';
+            }
+        }
+    }
+
+    async toggleJobPause( jobId, shouldPause ) {
+        /**
+         * Toggle pause/resume state of a todo queue job.
+         *
+         * Requires:
+         *     - jobId is a valid todo queue job ID
+         *     - shouldPause is boolean (true=pause, false=resume)
+         *
+         * Ensures:
+         *     - Calls PATCH /api/queue/todo/{jobId}/pause or /resume
+         *     - Button updated optimistically, reverted on failure
+         *     - WebSocket event will confirm state change
+         */
+        const action = shouldPause ? 'pause' : 'resume';
+        const btn = document.getElementById( `job-pause-${jobId}` );
+
+        // Optimistic UI update
+        if ( btn ) {
+            btn.disabled    = true;
+            btn.textContent = '...';
+        }
+
+        try {
+            const response = await fetch( `/api/queue/todo/${jobId}/${action}`, {
+                method  : 'PATCH',
+                headers : { 'Authorization': this.getAuthHeader() },
+            } );
+
+            if ( !response.ok ) {
+                const errData = await response.json().catch( () => ( {} ) );
+                throw new Error( errData.detail || `HTTP ${response.status}` );
+            }
+
+            this.log( `[JOB-PAUSE] ${action} requested for ${jobId}` );
+            // WebSocket event (job_paused/job_resumed) will apply final UI state
+
+        } catch ( error ) {
+            this.error( `[JOB-PAUSE] Failed to ${action} ${jobId}:`, error );
+            alert( `${action} failed: ${error.message}` );
+
+            // Revert optimistic update
+            if ( btn ) {
+                btn.disabled = false;
+                const wasPaused = !shouldPause;
+                btn.textContent = wasPaused ? '▶' : '⏸';
+                btn.title       = wasPaused ? 'Resume this job' : 'Pause this job';
             }
         }
     }

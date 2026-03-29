@@ -1,17 +1,19 @@
 # TODO
 
-Last updated: 2026-03-27 (Session 381c)
+Last updated: 2026-03-28 (Session 382)
 
 ## Pending
 
-- [ ] [LUPIN] **Bug Fix Expediter — Continue Phase 0 → Phase 1**. Phase 0 code fixes complete (5/5), skill template updated (v1.3). Remaining: run integration tests (`--bg`) for lifecycle validation, then begin Phase 1 (Foundation: Job, Config, State, Directory). **Resume 2026-03-28**. Plan docs: `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/01-implementation-plan.md`
+- [ ] [LUPIN] **Bug Fix Expediter — Phase 1: Foundation**. Phase 0 complete + validated (Session 382: 196 passed, 0 failed). Phase 1 plan refined with concrete patterns (constructor, registration touchpoints, INI keys, DeadJobContext model, task ordering). Next: implement `src/cosa/agents/bug_fix_expediter/` directory structure. Plan docs: `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/01-implementation-plan.md`
 - [x] [LUPIN] ~~**Archive history.md — CRITICAL**~~ — Resolved: was 19.5k after Session 373b, now 10.4k (41.5%) after Session 375 archival
 - [ ] [LUPIN] Presentation Generator Phase D verification: Live E2E with real Claude API calls + voice gate interaction. 17-step browser manual checklist serialized. E2E suite healthy (Session 377: 297/0). **Resume 2026-03-28**. Checklist: `src/rnd/2026.03.27-presentation-generator-phase-d-verification-checklist.md`. Plan docs: `src/rnd/2026.03.14-presentation-generator/07-phase-c-d-verification-plan.md`, `src/rnd/2026.03.26-presentation-generator-phase-d-manual-verification.md`
+- [x] [LUPIN] **CJ Flow Phase 5: Notifications UI + WebSocket Integration** — Session 382: 6 code steps complete (WS emission, subscriptions, CSS, badges, button, handlers), 12/12 E2E Playwright tests pass, 2372 unit tests (0 regressions). Also found+fixed missing push metadata fields. Plan doc: `src/rnd/2026.03.28-cj-flow-phase-5-notifications-ui.md`
 - [ ] [LUPIN] **CJ Flow History: Manual testing of delete & retry buttons**. 11-test rubric covering happy paths, cancel flows, error scenarios, authorization, and time window interactions. No automated E2E test clicks the retry button yet. **Resume 2026-03-28**. Plan doc: `src/rnd/v0.1.6/2026.03.27-cj-flow-history-delete-retry-manual-testing-rubric.md`
 - [ ] [LUPIN] Presentation Generator Phase 6: Marp Text Rendering — YAML → Marp Markdown with theme application (6 tasks)
 - [x] [LUPIN] Presentation Generator Phase C verification: CJ Flow dry-run queue submission + UI card — Session 374: 6/6 smoke tests pass, mode maps + HTML card + JS handler added
+- [x] [LUPIN] Presentation Generator Phase 3: Ingest & Analyze — Content generation, first LLM work
 - [x] [LUPIN] Presentation Generator Phase 4: Outline & Elaborate — Session 371: 7/7 tasks, 94 new tests
-- [x] [LUPIN] Presentation Generator Phase 5: Serialize — Session 371: 5/5 tasks, 17 new tests
+- [x] [LUPIN] Presentation Generator Phase 5: Serialize YAML — Session 371: 5/5 tasks, 17 new tests
 - [x] [LUPIN] Presentation Generator: Wire `fuzzy_file_match` special handler — Session 371: already wired, added presentation-specific config key
 - [x] [LUPIN] **Bug Fix: WebSocket 503 "user_not_available" — audio WS auth fix not yet working.** Root cause confirmed: audio WS endpoint connects without user auth, so after hot reloads only a "ghost" connection (in `active_connections` but not `user_sessions`) remains. Fix added auth_request handling to audio endpoint (`websocket.py:205-260`) but needs further debugging — test notification still failed. Diagnostic infrastructure in place (`[NOTIFY] ⚠️ OFFLINE DIAG`, `[WS-DIAG]` browser prefix, `[WS] STATE` logs). Plan doc: `~/.claude/plans/bubbly-churning-donut.md` — **Fixed Session 371**
 - [x] [LUPIN] Phase 1: Create `admin@lupin.deepily.ai` account + update `~/.lupin/config` (manual) — Session 372: Done
@@ -20,8 +22,8 @@ Last updated: 2026-03-27 (Session 381c)
 - [x] [LUPIN] Phase 6 cleanup: Clean up existing 1001 `st-*` test notification artifacts (delete or reassign — decide after using filter) — **Fixed Session 371**
 - [x] [LUPIN] Archive history.md — at 18.4k tokens, above 17k WARNING threshold (deferred from Session 371b) — **Superseded**: now 19.5k+, escalated to CRITICAL in Session 374 TODO above
 - [x] [LUPIN] **Run clean full integration suite** — Session 380: **195 passed, 0 failed, 32 skipped** in 5:50. LanceDB isolation + warm test fixes verified clean. Added `--bg` flag + PID-file overlap protection to `run-integration-tests.sh` (same pattern as E2E runner). Fixed `test_admin_not_self_excludes_own_jobs` (500 from push pipeline unavailable in test env → skip gracefully).
-- [ ] [LUPIN] CoSA commit pending: `websocket.py` Fix 4 (WebSocketDisconnect handler + safe close) — must commit from CoSA repo context
-- [ ] [LUPIN] CoSA commit pending: Session 380b fixes — `running_fifo_queue.py` (stack trace capture), `job_persistence.py` (stack_trace rich_field), `deep_research/job.py` (cost_summary in artifacts), `presentation_generator/job.py` (cost_summary tokens), `podcast_generator.py` (Field import), `presentation_generator.py` (Field import)
+- [x] [LUPIN] CoSA commit pending: `websocket.py` Fix 4 (WebSocketDisconnect handler + safe close) — committed from CoSA repo context
+- [x] [LUPIN] CoSA commit pending: Session 380b fixes — `running_fifo_queue.py` (stack trace capture), `job_persistence.py` (stack_trace rich_field), `deep_research/job.py` (cost_summary in artifacts), `presentation_generator/job.py` (cost_summary tokens), `podcast_generator.py` (Field import), `presentation_generator.py` (Field import) — committed from CoSA repo context
 - [x] [LUPIN] CoSA commit pending: Voice injection bug fix — `notification_fifo_queue.py`, `notifications.py`, `base_listener.py` — committed b544c78
 - [x] [LUPIN] CoSA commit pending: session_name pipeline — `notification_fifo_queue.py` (session_name attr), `notifications.py` (session_name param + session_topic type) — committed b544c78
 - [ ] [LUPIN] Run full E2E + integration test suite before merging branch to main
@@ -163,16 +165,16 @@ Last updated: 2026-03-27 (Session 381c)
 
 ### Presentation Generator Agent (Session 362 — IN PROGRESS)
 
-- [ ] **[LUPIN] Presentation Generator Agent: Transform research docs into slide decks** — 🔄 IN PROGRESS. Phases 1-2 complete (Session 367b), 18/55 tasks done. Next: Phase 3 (Ingest & Analyze — first LLM work).
+- [ ] **[LUPIN] Presentation Generator Agent: Transform research docs into slide decks** — 🔄 IN PROGRESS. Phases 1-5 complete, Phase 6 beginning. Next: Phase 6 (Text Rendering: Marp Markdown).
   - **Goal**: Agentic process (Claude SDK) that transforms ~1200-word research documents or technical blog posts into 10-20 minute slide decks with presenter notes. Single orchestrator pattern (like Podcast Generator).
   - **Architecture**: 8-phase pipeline (ingest, analyze, outline, elaborate, serialize YAML, render Marp, render Mermaid visuals, deliver). 4 human-in-the-loop gates. Pluggable visual renderer registry. Theme cascade (INI -> YAML template -> per-presentation overrides).
   - **R&D directory**: [`src/rnd/2026.03.14-presentation-generator/`](src/rnd/2026.03.14-presentation-generator/00-index.md)
   - **Phase 0**: DONE — Strategy & design serialized, implementation plan & tracking created (4 docs)
   - **Phase 1**: DONE — Foundation (Job, Config, Voice I/O, CJ Flow packaging) — Session 367b
   - **Phase 2**: DONE — State models & orchestrator skeleton — Session 367b
-  - **Phase 3**: Pending — Content generation: ingest & analyze (first LLM work)
-  - **Phase 4**: Pending — Content generation: outline & elaborate
-  - **Phase 5**: Pending — Content generation: serialize YAML
+  - **Phase 3**: DONE — Content generation: ingest & analyze
+  - **Phase 4**: DONE — Content generation: outline & elaborate
+  - **Phase 5**: DONE — Content generation: serialize YAML
   - **Phase 6**: Pending — Text rendering: Marp Markdown
   - **Phase 7**: Pending — Visual rendering: Mermaid + registry
   - **Phase 8**: Pending — Delivery & DR-to-Presentation chaining (Phase 8)

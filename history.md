@@ -1,5 +1,29 @@
 # Lupin Project History
 
+### 2026.03.28 - Session 382 | CJ Flow Phase 5: Notifications UI + WebSocket Integration
+
+**Goal**: Implement frontend UI for CJ Flow timed execution, monopolize, and pause/resume features (Phase 5 of the parent plan). Add WebSocket event emission, JS event handlers, visual badge states, and pause/resume toggle button on todo queue cards.
+
+**Phase 5 — Code Complete**:
+- Backend: WS emission (`job_paused`/`job_resumed`) wired into pause/resume endpoints in `queues.py`
+- Backend fix: Added `scheduled_at`, `monopolize`, `paused` to push metadata in `todo_fifo_queue.py` (discovered via E2E testing — cards created from WS events were missing these fields)
+- Frontend: 2 new event subscriptions, `handleJobPauseStateChange()` handler (~90 lines), `toggleJobPause()` method, `renderJobCard()` badge/button additions
+- CSS: 75 lines — `.job-paused` (muted card), `.paused-badge` (amber), `.scheduled-badge` (purple), `.monopolize-badge` (gray), `.job-pause-button` with toggle states
+
+**Phase 6 — Documentation**:
+- `websocket-events.md`: Added `job_paused`/`job_resumed` event catalog entries (event count 20→22)
+- Plan serialized: `src/rnd/2026.03.28-cj-flow-phase-5-notifications-ui.md`
+
+**E2E Testing**: 12 new Playwright tests covering scheduled badge, monopolize badge, pause button rendering, pause/resume via API, pause/resume via UI button click, and combined states. All 12 pass.
+
+**Regression**: 2372 unit tests passed (0 regressions), 12/12 new E2E tests passed.
+
+**Files Created (2)**: `src/rnd/2026.03.28-cj-flow-phase-5-notifications-ui.md`, `src/tests/e2e_ui/test_cj_flow_pause_schedule.py`
+
+**Files Modified (6)**: `src/cosa/rest/routers/queues.py`, `src/cosa/rest/todo_fifo_queue.py`, `src/fastapi_app/static/js/notifications.js`, `src/fastapi_app/static/css/notifications.css`, `src/docs/websocket-events.md`, `src/rnd/README.md`
+
+---
+
 ### 2026.03.27 - Session 381c | Bug Fix Expediter Planning + Agentic Job Consistency Remediation
 
 **Goal**: Design the Bug Fix Expediter (dead job → automated diagnosis → fix) and fix consistency gaps across all agentic job implementations as a prerequisite.

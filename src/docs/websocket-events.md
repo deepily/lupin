@@ -6,13 +6,15 @@
 
 ## Event Catalog
 
-The system defines **20 events** in `lupin-app.ini`. Clients subscribe to specific events (or `"*"` for all) during the auth handshake or via dynamic subscription updates.
+The system defines **22 events** in `lupin-app.ini`. Clients subscribe to specific events (or `"*"` for all) during the auth handshake or via dynamic subscription updates.
 
 ### Event Summary Table
 
 | Event | Category | Direction | User-Scoped |
 |-------|----------|-----------|-------------|
 | `job_state_transition` | Job lifecycle | Server → Client | Yes |
+| `job_paused` | Job lifecycle | Server → Client | Yes |
+| `job_resumed` | Job lifecycle | Server → Client | Yes |
 | `tts_job_request` | TTS | Server → Client | Yes |
 | `audio_streaming_chunk` | Audio | Server → Client | Yes |
 | `audio_streaming_status` | Audio | Server → Client | Yes |
@@ -57,6 +59,38 @@ Notifies when a job moves between queues (todo → running → done/dead). Repla
 ```
 
 **Queue values**: `"todo"`, `"run"`, `"done"`, `"dead"`
+
+### `job_paused`
+
+Emitted when a todo queue job is paused via `PATCH /api/queue/todo/{id}/pause`. User-scoped — sent to the job's owner. The frontend handler updates the card in-place (adds `.job-paused` class, paused badge, swaps button icon to ▶).
+
+**Payload**:
+```json
+{
+  "type": "job_paused",
+  "job_id": "mock-abc123::user-uuid",
+  "paused": true,
+  "timestamp": "2026-03-28T20:00:00"
+}
+```
+
+**Source**: `src/cosa/rest/routers/queues.py` → `pause_job()` → `emit_to_user_sync()`
+
+### `job_resumed`
+
+Emitted when a paused todo queue job is resumed via `PATCH /api/queue/todo/{id}/resume`. User-scoped — sent to the job's owner. The frontend handler clears the paused state (removes `.job-paused` class, removes badge, swaps button icon back to ⏸).
+
+**Payload**:
+```json
+{
+  "type": "job_resumed",
+  "job_id": "mock-abc123::user-uuid",
+  "paused": false,
+  "timestamp": "2026-03-28T20:01:00"
+}
+```
+
+**Source**: `src/cosa/rest/routers/queues.py` → `resume_job()` → `emit_to_user_sync()`
 
 ---
 
