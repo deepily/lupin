@@ -9,7 +9,14 @@
 - **Root Cause**: `.container` in `notifications.css` and `.profile-container` in `auth.css` both set `max-width: 800px`, limiting the usable layout area to ~760px after padding. Floating section toolbar `calc()` also hard-coded 400px (half of 800).
 - **Fix**: Changed `max-width` to `1000px` in both files; updated toolbar `left: calc( 50% - 500px - 60px )` and corresponding comments.
 - **Files**: `notifications.css`, `auth/css/auth.css`
-- **Commit**: 484c74c
+- **Commit**: 5c2ba91
+
+#### Fix 2: SentenceTransformer contacts HuggingFace Hub on every startup
+- **Source**: Ad-hoc (slow/failing startups during testing + network issues)
+- **Root Cause**: `SentenceTransformer()` in `local_embedding_engine.py` lacked `local_files_only=True`, so every model load hit the HuggingFace Hub to check for updates — problematic during rapid restart cycles and when the network is unreliable.
+- **Fix**: Added `local_files_only=True` to `SentenceTransformer()` constructor. Model loads exclusively from local HuggingFace cache.
+- **Files**: `local_embedding_engine.py` (CoSA)
+- **Commit**: CoSA pending
 
 ---
 

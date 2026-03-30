@@ -70,7 +70,12 @@
 
 ### Completed
 
-- [x] **Main container max-width too narrow (800px → 1000px)** → commit: 484c74c | By: 28f07da3 (Session 383)
+- [x] **SentenceTransformer contacts HuggingFace Hub on every startup** → CoSA pending | By: 28f07da3 (Session 383)
+  - **Root Cause**: Missing `local_files_only=True` — every load checked Hub for updates
+  - **Fix**: Added `local_files_only=True` to `SentenceTransformer()` constructor
+  - **Files**: `local_embedding_engine.py` (CoSA)
+
+- [x] **Main container max-width too narrow (800px → 1000px)** → commit: 5c2ba91 | By: 28f07da3 (Session 383)
   - **Root Cause**: `.container` and `.profile-container` both set `max-width: 800px`
   - **Fix**: Changed to `1000px` in both CSS files + toolbar `calc()` updated
   - **Files**: `notifications.css`, `auth/css/auth.css`
