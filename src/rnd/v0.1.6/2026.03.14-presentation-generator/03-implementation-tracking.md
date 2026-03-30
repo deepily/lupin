@@ -1,7 +1,7 @@
 # Presentation Generator Agent — Implementation Tracking
 
 **Created**: 2026-03-14
-**Last Updated**: 2026-03-25 (Session 374)
+**Last Updated**: 2026-03-30 (Session 383)
 
 ---
 
@@ -135,14 +135,14 @@
 
 | # | Task | Status |
 |---|------|--------|
-| 8.1 | Implement Phase 8: Deliver | Pending |
-| 8.2 | Build DR-to-Presentation bridge | Pending |
-| 8.3 | Add factory registration for chained job | Pending |
-| 8.4 | Add REST router for chained job | Pending |
+| 8.1 | Implement Phase 8: Deliver (`_deliver_async` in orchestrator) | Done |
+| 8.2 | Build DR-to-Presentation bridge (state, agent, job, __init__, __main__) | Done |
+| 8.3 | Add factory registration for chained job | Done |
+| 8.4 | Add REST router + expeditor registry + main.py for chained job | Done |
 | 8.5 | End-to-end integration test | Pending |
-| 8.6 | Write comprehensive unit tests | Pending |
+| 8.6 | Write comprehensive unit tests (32 tests) | Done |
 
-**Phase 8 Status**: Pending
+**Phase 8 Status**: Done (Session 383) — Code complete, 32 new unit tests pass
 
 ---
 
@@ -157,5 +157,5 @@
 | 5 | Serialize | 5 | 5 | Done |
 | 6 | Marp Rendering | 6 | 6 | Done |
 | 7 | Visual Rendering | 7 | 7 | Done |
-| 8 | Delivery & Chaining | 6 | 0 | Pending |
-| **Total** | | **56** | **50** | **In Progress** |
+| 8 | Delivery & Chaining | 6 | 5 | Done (code) |
+| **Total** | | **56** | **55** | **Near Complete** |

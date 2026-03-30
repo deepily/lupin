@@ -1,0 +1,65 @@
+make a presentation from DOCUMENT_PATH
+create slides from DOCUMENT_PATH
+turn DOCUMENT_PATH into a slide deck
+generate a presentation using DOCUMENT_PATH
+convert DOCUMENT_PATH into a presentation
+make slides from the document at DOCUMENT_PATH
+create a slide deck from DOCUMENT_PATH
+turn the document at DOCUMENT_PATH into slides
+generate slides using DOCUMENT_PATH
+build a presentation from DOCUMENT_PATH
+I need a presentation based on DOCUMENT_PATH
+make a slide deck out of DOCUMENT_PATH
+create a presentation from the document at DOCUMENT_PATH
+turn DOCUMENT_PATH into presentation slides
+convert the document at DOCUMENT_PATH to slides
+make presentation slides from DOCUMENT_PATH
+generate a slide deck from DOCUMENT_PATH
+create slides based on DOCUMENT_PATH
+turn DOCUMENT_PATH into a presentation
+build slides from the document at DOCUMENT_PATH
+please make a presentation from DOCUMENT_PATH
+can you create slides from DOCUMENT_PATH
+I want a slide deck from DOCUMENT_PATH
+could you generate a presentation from DOCUMENT_PATH
+make me a presentation using DOCUMENT_PATH
+create a deck of slides from DOCUMENT_PATH
+turn DOCUMENT_PATH into presentation format
+convert DOCUMENT_PATH to slide format
+build a slide deck using DOCUMENT_PATH
+generate presentation from the document DOCUMENT_PATH
+um make a presentation from DOCUMENT_PATH
+hey can you create slides from DOCUMENT_PATH
+so like turn DOCUMENT_PATH into a presentation
+make a presentation out of DOCUMENT_PATH please
+I'd like a slide deck from DOCUMENT_PATH
+create a presentation based on the content in DOCUMENT_PATH
+turn the content at DOCUMENT_PATH into slides
+make slides using the document DOCUMENT_PATH
+generate a deck from DOCUMENT_PATH
+convert DOCUMENT_PATH into a slide deck please
+make me some slides from DOCUMENT_PATH
+create presentation slides using DOCUMENT_PATH
+turn DOCUMENT_PATH into a set of slides
+build me a presentation from DOCUMENT_PATH
+generate slides from DOCUMENT_PATH for me
+can you turn DOCUMENT_PATH into a slide deck
+I need slides from DOCUMENT_PATH
+please create a presentation from DOCUMENT_PATH
+make a deck from DOCUMENT_PATH
+create slides from the document DOCUMENT_PATH
+turn this document into a presentation
+convert the document to slides
+make a presentation from this document
+create a slide deck from the research
+turn the research into slides
+make slides from this report
+create a presentation from the analysis
+generate slides from this document
+convert this report into a presentation
+turn the findings into a slide deck
+make a presentation from the report
+create slides from the research document
+turn the analysis into presentation slides
+generate a slide deck from the document
+make me a presentation from this file

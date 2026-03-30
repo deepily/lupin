@@ -400,7 +400,8 @@ class TestCreateInitialState:
             "slide_outline", "elaborated_slides", "presentation_model",
             "yaml_path", "marp_path", "revision_count",
             "outline_revision_count", "elaborate_revision_count",
-            "human_feedback", "user_id"
+            "human_feedback", "user_id",
+            "visuals_rendered", "delivery_summary"
         }
         assert set( state.keys() ) == expected_keys
 

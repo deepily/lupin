@@ -185,14 +185,47 @@ INTEGRATION_SCENARIOS = [
         "expect_cancel" : False,
         "instructions"  : "All args in voice command. Proxy auto-confirms.",
     },
+    # --- Presentation expediter scenarios (12-14) ---
+    {
+        "id"            : "EXP_PRES_MISSING",
+        "group"         : "expediter",
+        "voice_command" : "make me a presentation",
+        "agent"         : "presentation",
+        "key_arg"       : "source",
+        "missing"       : True,
+        "expect_cancel" : False,
+        "instructions"  : "Proxy provides source doc, then auto-confirms.",
+        "expected_args" : { "source": "/tmp/mock-source-document.md" },
+    },
+    {
+        "id"            : "EXP_RTPRES_HAPPY",
+        "group"         : "expediter",
+        "voice_command" : "research quantum computing and make a presentation",
+        "agent"         : "research to presentation",
+        "key_arg"       : "query",
+        "missing"       : False,
+        "expect_cancel" : False,
+        "instructions"  : "All args in voice command. Proxy auto-confirms.",
+    },
+    {
+        "id"            : "EXP_RTPRES_MISSING",
+        "group"         : "expediter",
+        "voice_command" : "research something and present it",
+        "agent"         : "research to presentation",
+        "key_arg"       : "query",
+        "missing"       : True,
+        "expect_cancel" : False,
+        "instructions"  : "Proxy provides topic, then auto-confirms.",
+        "expected_args" : { "query": "quantum computing breakthroughs 2026" },
+    },
 ]
 
 # Group -> scenario index mapping
 GROUP_SCENARIOS = {
     "calculator" : [ 0, 1, 2 ],
     "crud"       : [ 3, 4, 5, 6, 7 ],
-    "expediter"  : [ 8, 9, 10, 11 ],
-    "all"        : list( range( 12 ) ),
+    "expediter"  : [ 8, 9, 10, 11, 12, 13, 14 ],
+    "all"        : list( range( 15 ) ),
 }
 
 

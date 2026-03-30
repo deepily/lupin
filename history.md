@@ -1,5 +1,36 @@
 # Lupin Project History
 
+### 2026.03.30 - Session 383 | Presentation Generator Phase 8 (Delivery & Chaining) + Automated Testing Infrastructure
+
+**Goal**: Complete the final phase of the Presentation Generator (Phase 8: Delivery & Chaining) and build comprehensive automated testing infrastructure covering proxy Q&A, voice routing training data, UI integration, and E2E tests.
+
+**Phase 8 — Delivery & Chaining** (code complete):
+- Part A: Replaced `_deliver_async()` stub with real artifact verification + delivery summary (~50 lines in orchestrator.py)
+- Part B: Created `deep_research_to_presentation/` bridge module — `state.py` (PipelineState + ChainedResult), `agent.py` (DeepResearchToPresentationAgent), `job.py` (AgenticJobBase, prefix `rx-`), `__init__.py`, `__main__.py` (CLI entry point)
+- Part C: REST router (`POST /api/deep-research-to-presentation/submit`), factory branch, expeditor registry (8th agent), main.py registration, PRODUCT_NAMES ("Research-to-Slides"), job_persistence types
+- Part D: 32 new unit tests (state, job, factory, registry, agent, package imports) — all pass
+
+**Automated Testing Infrastructure** (8 phases):
+- Proxy Q&A scripts: `presentation.json` + `research-to-presentation.json` for expediter auto-answer
+- Proxy config profiles: 2 new + updated union profiles in `notification_proxy/config.py`
+- Proxy integration scenarios: 3 new (EXP_PRES_MISSING, EXP_RTPRES_HAPPY, EXP_RTPRES_MISSING) — 15 total
+- Dry-run smoke test: `test_research_to_presentation_dry_run_smoke.py` — 6 scenarios
+- Voice routing: 65 utterance templates × 2 agents, `agent-router-agentic-commands.json` entries, prompt template updated with 3 new commands (swe team, presentation generator, research to presentation)
+- UI: "Also generate presentation" checkbox + `research_to_presentation` dropdown option + mutual exclusivity JS
+- E2E tests: presentation checkbox + mode dropdown tests in `test_job_dispatch.py`
+- Skill docs: Added mandatory 13-item new-agent automation checklist to `agentic-voice-workflow.md` Surface 4
+- `AGENTIC_MODE_MAP` + `MODE_METADATA`: Added `research_to_presentation` entry (7 agentic modes)
+
+**Regression**: 308 targeted unit tests pass, 0 failures. Full suite: 2487+ passed (6 pre-existing MCP qualifier failures only).
+
+**Files Created (11)**: `deep_research_to_presentation/{state,agent,job,__init__,__main__}.py`, `routers/deep_research_to_presentation.py`, `test_deep_research_to_presentation.py`, `test_research_to_presentation_dry_run_smoke.py`, `presentation.json`, `research-to-presentation.json`, `synthetic-data-agent-routing-{presentation-generator,research-to-presentation}.txt`
+
+**Files Modified (16)**: `orchestrator.py`, `state.py` (initial state), `agentic_job_factory.py`, `agent_registry.py`, `main.py`, `todo_fifo_queue.py`, `job_persistence.py`, `notification_proxy/config.py`, `test_proxy_integration.py`, `test_job_dispatch.py`, `test_mode_management.py`, `test_presentation_generator_job.py`, `test_runtime_argument_expeditor.py`, `notifications.html`, `notifications.js`, `agent-router-agentic-commands.json`, `agent-router-template-completion.txt`, `agentic-voice-workflow.md`, `03-implementation-tracking.md`
+
+**Commit**: b8b6da3
+
+---
+
 ### 2026.03.30 - Session 383b | CJ Flow Scheduling UI + Voice Runtime Args (Close-Out)
 
 **Goal**: Close out CJ Flow Timed Execution by adding user-facing scheduling controls to both UI forms and the voice-driven Runtime Argument Expeditor.

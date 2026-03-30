@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-28 (Session 382e)
+Last updated: 2026-03-30 (Session 383)
 
 ## Pending
 
@@ -11,7 +11,7 @@ Last updated: 2026-03-28 (Session 382e)
 - [x] [LUPIN] **CJ Flow History: Delete & retry E2E tests** — Session 382b: 11-test manual rubric automated as 9 Playwright E2E tests (3 classes). 9/9 new tests pass, full regression 317/318 (1 pre-existing). Retry tests mock backend (LLM routing unavailable in test env). Plan doc: `src/rnd/v0.1.6/2026.03.27-cj-flow-history-delete-retry-manual-testing-rubric.md`
 - [x] [LUPIN] Presentation Generator Phase 6: Marp Text Rendering — Session 382d: 6/6 tasks, 45 new tests, MarpTextRenderer + theme system + orchestrator integration
 - [x] [LUPIN] Presentation Generator Phase 7: Visual Rendering — Session 382d: 7/7 tasks, 43 new tests, VisualRenderer ABC + MermaidRenderer + PlaceholderRenderer + registry + Gate 4
-- [ ] [LUPIN] **Presentation Generator Phase 8: Delivery & Chaining** — Orchestrator `_deliver_async()` + Deep Research → Presentation bridge (job, agent, router, factory, expeditor). Plan doc: `src/rnd/v0.1.6/2026.03.14-presentation-generator/10-phase-8-implementation-plan.md`
+- [x] [LUPIN] **Presentation Generator Phase 8: Delivery & Chaining** — Session 383: `_deliver_async()` real implementation + DR→Presentation bridge (5 new files), factory, registry, router, main.py, PRODUCT_NAMES, job_persistence. 32 new unit tests. Automated testing infra: proxy Q&A scripts, config profiles, 3 integration scenarios, dry-run smoke test, voice routing utterances (65×2), UI checkbox + dropdown, E2E tests, skill doc checklist. Plan doc: `src/rnd/v0.1.6/2026.03.14-presentation-generator/10-phase-8-implementation-plan.md`
 - [x] [LUPIN] Presentation Generator Phase C verification: CJ Flow dry-run queue submission + UI card — Session 374: 6/6 smoke tests pass, mode maps + HTML card + JS handler added
 - [x] [LUPIN] Presentation Generator Phase 3: Ingest & Analyze — Content generation, first LLM work
 - [x] [LUPIN] Presentation Generator Phase 4: Outline & Elaborate — Session 371: 7/7 tasks, 94 new tests

@@ -259,6 +259,38 @@ class TestResearchCard:
 
         assert logged_in_page.get_by_test_id( "notifications-research-stt-btn" ).count() > 0
 
+    def test_research_card_has_presentation_checkbox( self, logged_in_page ):
+        """
+        Research card has presentation generation checkbox.
+
+        Requires:
+            - Authenticated session
+
+        Ensures:
+            - Presentation checkbox element exists alongside podcast checkbox
+        """
+        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+
+        assert logged_in_page.get_by_test_id( "notifications-research-presentation-checkbox" ).count() > 0
+
+    def test_mode_selector_has_research_to_presentation( self, logged_in_page ):
+        """
+        Mode selector dropdown includes research_to_presentation option.
+
+        Requires:
+            - Authenticated session
+
+        Ensures:
+            - research_to_presentation option exists in mode dropdown
+        """
+        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+
+        mode_select = logged_in_page.locator( "#agent-mode" )
+        options = mode_select.locator( "option[value='research_to_presentation']" )
+        assert options.count() > 0
+
 
 # ---------------------------------------------------------------------------
 # Podcast Card
