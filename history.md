@@ -1,5 +1,36 @@
 # Lupin Project History
 
+### 2026.03.30 - Session 383b | CJ Flow Scheduling UI + Voice Runtime Args (Close-Out)
+
+**Goal**: Close out CJ Flow Timed Execution by adding user-facing scheduling controls to both UI forms and the voice-driven Runtime Argument Expeditor.
+
+**Phase 0 — Plan Serialization**: Serialized to `src/rnd/v0.1.6/2026.03.30-cj-flow-scheduling-ui-and-voice-runtime-args.md`.
+
+**Phase 1 — UI Forms** (code complete):
+- HTML: Added "Schedule for later" checkbox + `datetime-local` picker + "Exclusive mode" checkbox to 5 job submission cards (Claude Code, Research, Podcast, SWE Team, Presentation)
+- CSS: `.schedule-section` styles with focus states
+- JS: `_getSchedulingParams()` shared helper wired into all 5 submit functions
+- `ClaudeCodeQueueRequest`: Added missing `scheduled_at` + `monopolize` fields + pass-through
+
+**Phase 2 — Voice Path** (code complete):
+- Expeditor confirmation summary now includes runtime scheduling section ("run_at: immediately", "exclusive_mode: no")
+- Modification parser accepts `scheduled_at` and `monopolize` as valid arg names
+- `_handle_agentic_command()`: runtime args popped from `args_dict`, normalized ("immediately"→None, "yes"→True), set on job post-factory
+
+**Phase 3 — Skill Documentation**: Updated SKILL.md + `src/workflow/agentic-voice-workflow.md` with "Runtime Scheduling (Automatic)" section — future agents get scheduling for free.
+
+**Phase 4 — Checklist Close-Out**: Items 3.10, 4.3, 6.3 from parent plan marked resolved. Implementation tracking doc status → COMPLETE.
+
+**Phase 5 — Tests**: 12 new unit tests (confirmation summary includes scheduling, normalization edge cases). 147 expeditor tests pass, 2542 full suite pass.
+
+**Files Created (1)**: `src/rnd/v0.1.6/2026.03.30-cj-flow-scheduling-ui-and-voice-runtime-args.md`
+
+**Files Modified (11)**: `notifications.html`, `notifications.css`, `notifications.js`, `claude_code_queue.py`, `expeditor.py`, `todo_fifo_queue.py`, `SKILL.md` (agentic-voice-workflow), `agentic-voice-workflow.md`, `test_runtime_argument_expeditor.py`, `README.md` (rnd), `2026.03.27-cj-flow-timed-execution-monopolize-pause.md`
+
+**Commit**: 2d11ae7
+
+---
+
 ### 2026.03.30 - Session 383 | Bug Fix: Main Layout Width Too Narrow
 
 **Goal**: Increase main vertical layout area from 800px to 1000px max-width.

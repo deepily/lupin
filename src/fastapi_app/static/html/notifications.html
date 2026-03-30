@@ -54,6 +54,7 @@
                             <option value="claude_code">Claude Code</option>
                             <option value="swe_team">SWE Team</option>
                             <option value="presentation">Presentation Generator</option>
+                            <option value="research_to_presentation">Research to Presentation</option>
                         </optgroup>
                     </select>
                     <span id="mode-badge" class="mode-badge" style="display: none; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; text-transform: uppercase; background: #0d6efd; color: white; cursor: pointer;" title="Click to return to System mode">
@@ -147,6 +148,21 @@
                             </button>
                         </div>
 
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-cc-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="cc-schedule" data-testid="notifications-cc-schedule-checkbox" onchange="document.getElementById('cc-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="cc-scheduled-time" data-testid="notifications-cc-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="cc-monopolize" data-testid="notifications-cc-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
+                        </div>
+
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Response:</label>
                             <pre id="cc-response" data-testid="notifications-cc-response" style="background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 4px; min-height: 100px; max-height: 300px; overflow-y: auto; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;"></pre>
@@ -197,9 +213,27 @@
                                 <span style="font-size: 13px;">Also generate podcast from research</span>
                             </label>
                             <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                                <input type="checkbox" id="research-with-presentation" data-testid="notifications-research-presentation-checkbox" />
+                                <span style="font-size: 13px;">Also generate presentation from research</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
                                 <input type="checkbox" id="research-dry-run" data-testid="notifications-research-dry-run-checkbox" checked />
                                 <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
                             </label>
+                        </div>
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-research-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="research-schedule" data-testid="notifications-research-schedule-checkbox" onchange="document.getElementById('research-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="research-scheduled-time" data-testid="notifications-research-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="research-monopolize" data-testid="notifications-research-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
                         </div>
                         <button id="submit-research-job" data-testid="notifications-research-submit-btn" type="button" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
                             🚀 Submit Research Job
@@ -233,6 +267,20 @@
                                 <input type="checkbox" id="podcast-dry-run" data-testid="notifications-podcast-dry-run-checkbox" checked />
                                 <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
                             </label>
+                        </div>
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-podcast-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="podcast-schedule" data-testid="notifications-podcast-schedule-checkbox" onchange="document.getElementById('podcast-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="podcast-scheduled-time" data-testid="notifications-podcast-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="podcast-monopolize" data-testid="notifications-podcast-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
                         </div>
                         <button id="submit-podcast-job" data-testid="notifications-podcast-submit-btn" type="button" style="padding: 10px 20px; background: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
                             🎙️ Generate Podcast
@@ -282,6 +330,20 @@
                                 </select>
                             </div>
                         </div>
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-swe-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="swe-schedule" data-testid="notifications-swe-schedule-checkbox" onchange="document.getElementById('swe-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="swe-scheduled-time" data-testid="notifications-swe-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="swe-monopolize" data-testid="notifications-swe-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
+                        </div>
                         <button id="submit-swe-job" data-testid="notifications-swe-submit-btn" type="button" style="padding: 10px 20px; background: #fd7e14; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
                             🛠️ Submit SWE Task
                             <span id="swe-loading" class="loading" style="display: none;">
@@ -327,6 +389,20 @@
                                 <input type="checkbox" id="presentation-dry-run" data-testid="notifications-presentation-dry-run-checkbox" checked />
                                 <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
                             </label>
+                        </div>
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-presentation-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="presentation-schedule" data-testid="notifications-presentation-schedule-checkbox" onchange="document.getElementById('presentation-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="presentation-scheduled-time" data-testid="notifications-presentation-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="presentation-monopolize" data-testid="notifications-presentation-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
                         </div>
                         <button id="submit-presentation-job" data-testid="notifications-presentation-submit-btn" type="button" style="padding: 10px 20px; background: #20c997; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
                             📊 Generate Presentation

@@ -1709,6 +1709,18 @@ class NotificationsUI {
             });
         }
 
+        // Mutual exclusivity: podcast and presentation checkboxes
+        const podcastCb = document.getElementById( 'research-with-podcast' );
+        const presentationCb = document.getElementById( 'research-with-presentation' );
+        if ( podcastCb && presentationCb ) {
+            podcastCb.addEventListener( 'change', () => {
+                if ( podcastCb.checked ) presentationCb.checked = false;
+            });
+            presentationCb.addEventListener( 'change', () => {
+                if ( presentationCb.checked ) podcastCb.checked = false;
+            });
+        }
+
         // Podcast submit button
         const submitPodcastBtn = document.getElementById( 'submit-podcast-job' );
         if ( submitPodcastBtn ) {
@@ -2521,6 +2533,7 @@ class NotificationsUI {
         const topicInput = document.getElementById( 'research-topic' );
         const budgetInput = document.getElementById( 'research-budget' );
         const withPodcastCheckbox = document.getElementById( 'research-with-podcast' );
+        const withPresentationCheckbox = document.getElementById( 'research-with-presentation' );
         const dryRunCheckbox = document.getElementById( 'research-dry-run' );
         const submitButton = document.getElementById( 'submit-research-job' );
         const loadingSpinner = document.getElementById( 'research-loading' );
@@ -2529,6 +2542,7 @@ class NotificationsUI {
         const topic = topicInput.value.trim();
         const budget = parseFloat( budgetInput.value ) || 3.00;
         const withPodcast = withPodcastCheckbox.checked;
+        const withPresentation = withPresentationCheckbox ? withPresentationCheckbox.checked : false;
         const dryRun = dryRunCheckbox.checked;
 
         if ( !topic ) {
@@ -2547,14 +2561,21 @@ class NotificationsUI {
             // Ensure token is valid before API call
             await this.ensureValidToken();
 
-            // Choose endpoint based on checkbox
-            const endpoint = withPodcast
-                ? '/api/deep-research-to-podcast/submit'
-                : '/api/deep-research/submit';
+            // Choose endpoint based on checkboxes (mutually exclusive)
+            let endpoint = '/api/deep-research/submit';
+            if ( withPresentation ) {
+                endpoint = '/api/deep-research-to-presentation/submit';
+            } else if ( withPodcast ) {
+                endpoint = '/api/deep-research-to-podcast/submit';
+            }
 
-            const body = withPodcast
-                ? { query: topic, budget: budget, target_languages: [ 'en' ], dry_run: dryRun }
-                : { query: topic, budget: budget, dry_run: dryRun };
+            const schedulingParams = this._getSchedulingParams( 'research' );
+            let body = { query: topic, budget: budget, dry_run: dryRun, ...schedulingParams };
+            if ( withPodcast ) {
+                body.target_languages = [ 'en' ];
+            } else if ( withPresentation ) {
+                body.target_duration_minutes = 15;
+            }
 
             this.log( `Submitting research job to ${endpoint}: ${topic.substring( 0, 50 )}...` );
 
@@ -2639,7 +2660,8 @@ class NotificationsUI {
                 body: JSON.stringify({
                     research_source: source,
                     target_languages: [ 'en' ],
-                    dry_run: dryRun
+                    dry_run: dryRun,
+                    ...this._getSchedulingParams( 'podcast' )
                 })
             });
 
@@ -2736,6 +2758,8 @@ class NotificationsUI {
                 body.trust_mode = trustMode;
             }
 
+            Object.assign( body, this._getSchedulingParams( 'swe' ) );
+
             const response = await fetch( '/api/swe-team/submit', {
                 method  : 'POST',
                 headers : {
@@ -2818,7 +2842,8 @@ class NotificationsUI {
                     source_path              : source,
                     audience                 : audience,
                     target_duration_minutes  : duration,
-                    dry_run                  : dryRun
+                    dry_run                  : dryRun,
+                    ...this._getSchedulingParams( 'presentation' )
                 })
             });
 
@@ -3263,7 +3288,8 @@ class NotificationsUI {
                     task_type: taskType,
                     max_turns: taskType === 'INTERACTIVE' ? 200 : 50,
                     websocket_id: this.sessionId,
-                    dry_run: dryRun
+                    dry_run: dryRun,
+                    ...this._getSchedulingParams( 'cc' )
                 } )
             } );
 
@@ -5128,7 +5154,32 @@ class NotificationsUI {
         // Use the hardcoded email as per original queue.js pattern
         return "ricardo.felipe.ruiz@gmail.com";
     }
-    
+
+    /**
+     * Read scheduling controls for a job submission form.
+     *
+     * Requires:
+     *     - formPrefix matches the HTML id prefix (e.g. "research", "cc", "swe")
+     *
+     * Ensures:
+     *     - returns object with scheduled_at (ISO string) and/or monopolize (true) when set
+     *     - returns empty object when no scheduling options are selected
+     */
+    _getSchedulingParams( formPrefix ) {
+        const params = {};
+        const scheduleCheckbox   = document.getElementById( `${formPrefix}-schedule` );
+        const scheduleTime       = document.getElementById( `${formPrefix}-scheduled-time` );
+        const monopolizeCheckbox = document.getElementById( `${formPrefix}-monopolize` );
+
+        if ( scheduleCheckbox?.checked && scheduleTime?.value ) {
+            params.scheduled_at = new Date( scheduleTime.value ).toISOString();
+        }
+        if ( monopolizeCheckbox?.checked ) {
+            params.monopolize = true;
+        }
+        return params;
+    }
+
     getAuthHeader() {
         // Return JWT access token for authentication
         if ( this.authToken ) {

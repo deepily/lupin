@@ -153,6 +153,47 @@ Contains:
 - Testing procedures
 - Integration patterns
 
+## Runtime Scheduling (Automatic — No Per-Agent Work Needed)
+
+All agentic jobs automatically support timed execution and exclusive mode. These are
+**runtime infrastructure concerns**, not agent-specific features. No per-agent registration,
+factory changes, or `_execute()` modifications needed.
+
+### How It Works
+
+**UI form path**: Every job submission card includes a "Schedule for later" checkbox +
+datetime picker and an "Exclusive mode" checkbox. The JS `_getSchedulingParams()` helper
+adds `scheduled_at` (ISO string) and `monopolize` (bool) to the POST body when set.
+
+**Voice path**: The Runtime Argument Expeditor's confirmation summary automatically includes:
+```
+---
+**Scheduling**
+- **run_at**: immediately
+- **exclusive_mode**: no
+```
+Users can modify via the existing `[comment: ...]` pattern:
+- *"yes, but schedule it for tomorrow at 2am"* → sets `scheduled_at`
+- *"yes, but run it in exclusive mode"* → sets `monopolize = True`
+
+**Runtime arg extraction**: In `_handle_agentic_command()`, `scheduled_at` and `monopolize`
+are popped from `args_dict` before the factory creates the job, then set directly on the
+job object. The factory never sees these — they're infrastructure, not agent params.
+
+### Queue Consumer Behavior
+
+- `scheduled_at = None` → immediate execution (default)
+- `scheduled_at = "2026-03-31T02:00:00"` → consumer sleeps until that time
+- `monopolize = True` → no-op in serial mode; when Hybrid Fast Lane is added, blocks
+  all concurrent jobs until this one completes
+
+### What You Do NOT Need to Do
+
+- Add `scheduled_at` / `monopolize` to your agent's registry entry
+- Handle scheduling in your agent's `_execute()` method
+- Add UI controls for scheduling (already present on all forms)
+- Modify the confirmation prompt template
+
 ## Anti-Patterns
 
 - **Don't** skip Phase 0 discovery - design before coding

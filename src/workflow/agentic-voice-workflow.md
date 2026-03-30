@@ -126,6 +126,28 @@ When a user says *"make me a podcast about quantum computing"*, the voice pipeli
 
 Without Expeditor registration, an agent **cannot be invoked via voice commands** — only via direct REST API calls. This makes it a mandatory integration step for any agent that participates in the voice-first UX.
 
+### Runtime Scheduling (Automatic)
+
+The confirmation step (step 3 above) also displays **runtime scheduling options** that apply universally to all agents:
+
+```
+---
+**Scheduling**
+- **run_at**: immediately
+- **exclusive_mode**: no
+```
+
+Users can modify these via the `[comment: ...]` pattern — e.g., *"yes, but schedule it for 2am"*. These are **not agent-specific args** — they're infrastructure concerns consumed by the queue consumer, not by the job's `_execute()` method.
+
+| Runtime Arg | Default | Purpose |
+|-------------|---------|---------|
+| `scheduled_at` | `None` (immediate) | ISO datetime for delayed execution |
+| `monopolize` | `False` | When True, blocks concurrent jobs (future Hybrid Fast Lane) |
+
+**No per-agent work needed**: Runtime args are automatically included in every confirmation summary and extracted in `_handle_agentic_command()` before the factory creates the job. New agents get scheduling for free.
+
+**UI form path**: Every job submission card also includes a "Schedule for later" checkbox + datetime picker and an "Exclusive mode" checkbox, producing the same `scheduled_at` and `monopolize` fields in the POST body.
+
 **Key files**:
 - `src/cosa/agents/runtime_argument_expeditor/agent_registry.py` — Agent registry with arg specs
 - `src/cosa/agents/runtime_argument_expeditor/expeditor.py` — Gap analysis + collection logic
@@ -3598,6 +3620,28 @@ spinner toggle, color-coded status feedback (#28a745 = green success, #dc3545 = 
 
 **CRITICAL**: This surface MUST come before Surface 5 (voice routing). The LORA classifier
 can't route to an agent it hasn't been trained on.
+
+### Mandatory New-Agent Automation Checklist
+
+**EVERY new agentic agent or chained workflow requires ALL of the following.** Do not plan
+an agent implementation without including these artifacts. If any item is not applicable,
+explicitly state why — never silently omit.
+
+| # | Artifact | Location | Purpose |
+|---|----------|----------|---------|
+| 1 | Utterance template (65+ lines) | `src/ephemera/prompts/data/synthetic-data-agent-routing-{agent}.txt` | PEFT training data |
+| 2 | Agentic commands config entry | `src/conf/training/agent-router-agentic-commands.json` | Maps command to template |
+| 3 | Prompt template `<command>` | `src/conf/prompts/agent-router-template-completion.txt` | LLM router knows the command |
+| 4 | `AGENTIC_MODE_MAP` entry | `src/cosa/rest/todo_fifo_queue.py` | UI dropdown → queue routing |
+| 5 | `MODE_METADATA` entry | `src/cosa/rest/todo_fifo_queue.py` | Mode display name + description |
+| 6 | `PRODUCT_NAMES` entry | `src/cosa/rest/todo_fifo_queue.py` | Disambiguation display name |
+| 7 | Proxy Q&A script | `src/conf/notification-proxy-scripts/{agent}.json` | Proxy auto-answers expediter |
+| 8 | Proxy config profile | `src/cosa/agents/notification_proxy/config.py` | `TEST_PROFILES` dict entry |
+| 9 | Proxy integration scenarios | `src/tests/smoke/test_proxy_integration.py` | Happy + missing-arg paths |
+| 10 | Dry-run smoke test | `src/tests/smoke/test_{agent}_dry_run_smoke.py` | Submit→poll→validate lifecycle |
+| 11 | E2E UI card tests | `src/tests/e2e_ui/test_job_dispatch.py` | DOM element verification |
+| 12 | UI elements | `notifications.html` + `notifications.js` | Card, checkbox, dropdown |
+| 13 | Unit tests | `src/tests/unit/test_{agent}.py` | State, job, factory, registry |
 
 ### Why This Surface Exists
 

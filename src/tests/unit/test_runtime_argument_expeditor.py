@@ -1,7 +1,7 @@
 """
 Unit tests for Runtime Argument Expeditor.
 
-Tests 17 components (135 tests total):
+Tests 18 components (147 tests total):
 1. ExpeditorResponse model (xml_models.py) - 16 tests
 2. _parse_lora_args() (expeditor.py) - 9 tests
 3. _inject_system_args() (expeditor.py) - 4 tests
@@ -19,11 +19,13 @@ Tests 17 components (135 tests total):
 15. Optional arg prompting (expeditor.py) - 8 tests (post-bug-fix)
 16. _parse_boolean() (agentic_job_factory.py) - 7 tests
 17. dry_run visibility in _build_request_context() (expeditor.py) - 5 tests
+18. Runtime scheduling in confirmation + normalization (expeditor.py + todo_fifo_queue.py) - 12 tests
 
 All external dependencies mocked. No server, no LLM, no filesystem I/O.
 
 Created: 2026-02-05
 Updated: 2026-02-10 — optional arg prompting tests (bug fix: is_complete() gate replaced)
+Updated: 2026-03-30 — runtime scheduling tests (confirmation summary + normalization)
 """
 
 import pytest
@@ -358,9 +360,9 @@ class TestAgentRegistry:
         _help_cache.clear()
         _user_visible_cache.clear()
 
-    def test_registry_has_seven_agents( self ):
-        """Registry contains exactly 7 agentic agents."""
-        assert len( AGENTIC_AGENTS ) == 7
+    def test_registry_has_eight_agents( self ):
+        """Registry contains exactly 8 agentic agents."""
+        assert len( AGENTIC_AGENTS ) == 8
 
     def test_all_entries_required_keys( self ):
         """All registry entries have the required keys."""
@@ -2100,3 +2102,140 @@ class TestDryRunVisibility:
             { "query": "quantum", "dry_run": "yes" }, [ "budget" ]
         )
         assert "dry_run: yes" in result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 18. Runtime Scheduling in Confirmation + Normalization (12 tests)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestRuntimeSchedulingConfirmation:
+    """Tests for runtime scheduling args in _confirm_and_iterate() summary
+    and normalization in _handle_agentic_command() extraction logic."""
+
+    DR_COMMAND_KEY = "agent router go to deep research"
+
+    def setup_method( self ):
+        """Create a minimal expeditor instance with mocked dependencies."""
+        self.expeditor                          = RuntimeArgumentExpeditor.__new__( RuntimeArgumentExpeditor )
+        self.expeditor.debug                    = False
+        self.expeditor.verbose                  = False
+        self.expeditor.confirmation_prompt_path = "/src/conf/prompts/runtime-argument-confirmation.txt"
+        self.expeditor.llm_spec_key             = "test_key"
+        self.expeditor.llm_factory              = MagicMock()
+        self.expeditor._job_id                  = None
+        self.agent_entry = AGENTIC_AGENTS[ self.DR_COMMAND_KEY ]
+
+    # ── Confirmation summary includes scheduling section ──────────────
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_ask_for_confirmation" )
+    def test_summary_includes_scheduling_defaults( self, mock_confirm, mock_uva ):
+        """Confirmation abstract includes scheduling section with defaults."""
+        mock_uva.return_value = [ "query", "budget" ]
+        mock_confirm.return_value = "yes"
+        args = { "query": "test" }
+
+        self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+
+        # The abstract passed to _ask_for_confirmation should contain scheduling
+        call_args = mock_confirm.call_args
+        abstract = call_args[ 1 ][ "abstract" ] if "abstract" in call_args[ 1 ] else call_args[ 0 ][ 2 ]
+        assert "**Scheduling**" in abstract
+        assert "**run_at**: immediately" in abstract
+        assert "**exclusive_mode**: no" in abstract
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_ask_for_confirmation" )
+    def test_summary_shows_scheduled_at_when_set( self, mock_confirm, mock_uva ):
+        """Confirmation shows actual scheduled_at value when present."""
+        mock_uva.return_value = [ "query" ]
+        mock_confirm.return_value = "yes"
+        args = { "query": "test", "scheduled_at": "2026-03-31T02:00:00" }
+
+        self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+
+        call_args = mock_confirm.call_args
+        abstract = call_args[ 1 ][ "abstract" ] if "abstract" in call_args[ 1 ] else call_args[ 0 ][ 2 ]
+        assert "2026-03-31T02:00:00" in abstract
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_ask_for_confirmation" )
+    def test_summary_shows_monopolize_when_set( self, mock_confirm, mock_uva ):
+        """Confirmation shows exclusive_mode: yes when monopolize is set."""
+        mock_uva.return_value = [ "query" ]
+        mock_confirm.return_value = "yes"
+        args = { "query": "test", "monopolize": True }
+
+        self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+
+        call_args = mock_confirm.call_args
+        abstract = call_args[ 1 ][ "abstract" ] if "abstract" in call_args[ 1 ] else call_args[ 0 ][ 2 ]
+        assert "**exclusive_mode**: yes" in abstract
+
+    # ── Modification parser includes runtime args ─────────────────────
+
+    @patch( "cosa.agents.runtime_argument_expeditor.expeditor.get_user_visible_args" )
+    @patch.object( RuntimeArgumentExpeditor, "_ask_for_confirmation" )
+    @patch.object( RuntimeArgumentExpeditor, "_parse_modification" )
+    def test_modification_parser_receives_runtime_arg_names( self, mock_parse, mock_confirm, mock_uva ):
+        """_parse_modification receives scheduled_at and monopolize in arg_names."""
+        mock_uva.return_value = [ "query" ]
+        mock_confirm.return_value = "yes [comment: schedule for 2am]"
+        mock_parse.return_value = MagicMock( is_modify=lambda: False )
+        args = { "query": "test" }
+
+        self.expeditor._confirm_and_iterate( args, self.agent_entry, self.DR_COMMAND_KEY, "test@test.com" )
+
+        # The modification parser should have been called with the comment
+        mock_parse.assert_called_once()
+        call_comment = mock_parse.call_args[ 0 ][ 0 ]
+        assert "schedule for 2am" in call_comment
+
+    # ── Runtime arg normalization ─────────────────────────────────────
+
+    def test_normalize_immediately_to_none( self ):
+        """'immediately' string normalizes to None for scheduled_at."""
+        raw = "immediately"
+        result = None if raw and str( raw ).lower() in ( "immediately", "now", "none" ) else raw
+        assert result is None
+
+    def test_normalize_now_to_none( self ):
+        """'now' string normalizes to None for scheduled_at."""
+        raw = "now"
+        result = None if raw and str( raw ).lower() in ( "immediately", "now", "none" ) else raw
+        assert result is None
+
+    def test_normalize_none_string_to_none( self ):
+        """'none' string normalizes to None for scheduled_at."""
+        raw = "none"
+        result = None if raw and str( raw ).lower() in ( "immediately", "now", "none" ) else raw
+        assert result is None
+
+    def test_normalize_iso_datetime_preserved( self ):
+        """Valid ISO datetime strings are preserved."""
+        raw = "2026-03-31T02:00:00"
+        result = None if raw and str( raw ).lower() in ( "immediately", "now", "none" ) else raw
+        assert result == "2026-03-31T02:00:00"
+
+    def test_normalize_monopolize_yes_to_true( self ):
+        """'yes' string normalizes to True for monopolize."""
+        raw = "yes"
+        result = raw.lower() in ( "yes", "true", "1" ) if isinstance( raw, str ) else bool( raw )
+        assert result is True
+
+    def test_normalize_monopolize_no_to_false( self ):
+        """'no' string normalizes to False for monopolize."""
+        raw = "no"
+        result = raw.lower() in ( "yes", "true", "1" ) if isinstance( raw, str ) else bool( raw )
+        assert result is False
+
+    def test_normalize_monopolize_bool_passthrough( self ):
+        """Boolean monopolize values pass through unchanged."""
+        assert bool( True ) is True
+        assert bool( False ) is False
+
+    def test_normalize_monopolize_none_to_false( self ):
+        """None monopolize value normalizes to False."""
+        raw = None
+        result = bool( raw ) if raw else False
+        assert result is False

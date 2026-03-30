@@ -4225,3 +4225,25 @@
 .job-pause-button.is-paused:hover {
     background: #ffe69c;
 }
+
+/* ───────── Scheduling section in job submission forms ───────── */
+
+.schedule-section {
+    border-top: 1px solid #e9ecef;
+    padding-top: 10px;
+    margin-top: 10px;
+    margin-bottom: 12px;
+}
+
+.schedule-section input[type="datetime-local"] {
+    padding: 6px 8px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.schedule-section input[type="datetime-local"]:focus {
+    border-color: #86b7fe;
+    outline: 0;
+    box-shadow: 0 0 0 0.2rem rgba( 13, 110, 253, 0.25 );
+}
