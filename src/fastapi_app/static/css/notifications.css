@@ -13,9 +13,9 @@
            ======================================== */
         .section-toolbar {
             position: fixed;
-            /* Position just left of container (800px max-width, centered) */
-            /* Container center = 50%, half container = 400px, plus toolbar width + gap */
-            left: calc( 50% - 400px - 60px );
+            /* Position just left of container (1000px max-width, centered) */
+            /* Container center = 50%, half container = 500px, plus toolbar width + gap */
+            left: calc( 50% - 500px - 60px );
             top: 136px;  /* Below nav bar (56px) + header, aligned with container top */
             display: flex;
             flex-direction: column;
@@ -100,7 +100,7 @@
         }
 
         .container {
-            max-width: 800px;
+            max-width: 1000px;
             margin: 0 auto;
             background-color: white;
             padding: 20px;

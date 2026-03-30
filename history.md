@@ -1,5 +1,18 @@
 # Lupin Project History
 
+### 2026.03.30 - Session 383 | Bug Fix: Main Layout Width Too Narrow
+
+**Goal**: Increase main vertical layout area from 800px to 1000px max-width.
+
+#### Fix 1: Main container max-width too narrow (800px → 1000px)
+- **Source**: Ad-hoc (UI layout constraint)
+- **Root Cause**: `.container` in `notifications.css` and `.profile-container` in `auth.css` both set `max-width: 800px`, limiting the usable layout area to ~760px after padding. Floating section toolbar `calc()` also hard-coded 400px (half of 800).
+- **Fix**: Changed `max-width` to `1000px` in both files; updated toolbar `left: calc( 50% - 500px - 60px )` and corresponding comments.
+- **Files**: `notifications.css`, `auth/css/auth.css`
+- **Commit**: 484c74c
+
+---
+
 ### 2026.03.28 - Session 382e | Bug Fix Expediter: Phase 0.95 (Model Update) + Phase 1 (Foundation)
 
 **Goal**: Update all agentic job model defaults to Claude 4.6 family, then build the complete BugFixExpediterJob foundation scaffolding.

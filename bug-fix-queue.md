@@ -70,6 +70,11 @@
 
 ### Completed
 
+- [x] **Main container max-width too narrow (800px → 1000px)** → commit: 484c74c | By: 28f07da3 (Session 383)
+  - **Root Cause**: `.container` and `.profile-container` both set `max-width: 800px`
+  - **Fix**: Changed to `1000px` in both CSS files + toolbar `calc()` updated
+  - **Files**: `notifications.css`, `auth/css/auth.css`
+
 - [x] **Config manager visual grouping broken by space-separated keys** → commit: 94044ab (docs), CoSA pending | By: 2098634b (Session 382b)
   - **Root Cause**: `key.split( "_" )[ 0 ]` returns entire key when no underscores present
   - **Fix**: Changed to `key.split()[ 0 ]` — splits on whitespace
