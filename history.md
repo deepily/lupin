@@ -1,5 +1,30 @@
 # Lupin Project History
 
+### 2026.03.30 - Session 383b | Bug Fixes + SDK Upgrade Planning
+
+**Goal**: Fix UI layout width constraint and SentenceTransformer Hub startup issue. Plan claude-agent-sdk upgrade from 0.1.36 to 0.1.52.
+
+**Fix 1: Main container max-width too narrow (800px → 1000px)**
+- `.container` and `.profile-container` both set `max-width: 800px`. Changed to `1000px` in both CSS files. Updated toolbar `calc()` positioning.
+- **Files**: `notifications.css`, `auth/css/auth.css`
+- **Commit**: 5c2ba91
+
+**Fix 2: SentenceTransformer contacts HuggingFace Hub on every startup**
+- Added `local_files_only=True` to `SentenceTransformer()` in `local_embedding_engine.py`. Prevents Hub calls during rapid restart cycles and network issues.
+- **Files**: `local_embedding_engine.py` (CoSA pending)
+- **Commit**: 7b22f11 (docs)
+
+**SDK Upgrade Planning (documentation only)**:
+- Read upgrade analysis doc covering 16 patches (0.1.36 → 0.1.52)
+- Explored all 11 SDK touchpoints (5 production, 6 test files)
+- Designed minimal upgrade plan: version pin bump (requirements.txt + Dockerfile), RateLimitEvent handling in 9 streaming loops across 3 files
+- Plan serialized: `src/rnd/v0.1.6/2026.03.30-claude-agent-sdk-upgrade-plan.md`
+
+**Files Created (1)**: `src/rnd/v0.1.6/2026.03.30-claude-agent-sdk-upgrade-plan.md`
+**Files Modified (6)**: `notifications.css`, `auth/css/auth.css`, `local_embedding_engine.py` (CoSA), `history.md`, `bug-fix-queue.md`, `TODO.md`, `src/rnd/README.md`
+
+---
+
 #### Checkpoint 2 | 2026.03.30 | CJ Flow R&D Consolidation + State Machine Plan
 
 **Consolidation**: Created `src/rnd/v0.1.6/2026.03.30-cj-flow/` hub directory with `00-index.md` linking all 18 CJ Flow R&D docs across 4 version directories. Moved 3 root-level docs into subdirectory. Updated cross-references in TODO.md, scheduling UI doc, bug fix expediter index.

@@ -1,9 +1,10 @@
 # TODO
 
-Last updated: 2026-03-30 (Session 383 — end)
+Last updated: 2026-03-30 (Session 383)
 
 ## Pending
 
+- [ ] [LUPIN] **Claude Agent SDK Upgrade 0.1.36 → 0.1.52** — 16 patches behind. Stability upgrade: RateLimitEvent handling (9 streaming loops in 3 files), version pins (requirements.txt + Dockerfile). No feature adoption. Analysis: `src/rnd/v0.1.6/2026.03.30-claude-agent-sdk-upgrade-0.1.36-to-0.1.52.md`. Plan: `src/rnd/v0.1.6/2026.03.30-claude-agent-sdk-upgrade-plan.md`
 - [ ] [LUPIN] **Presentation Generator Visual Rendering Expansion — Phase 9A: MatplotlibRenderer**. Review `01-matplotlib-renderer-plan.md` first, then implement. Plan docs: `src/rnd/v0.1.6/2026.03.14-presentation-generator/renderers/`. **Resume first thing next session**.
 - [ ] [LUPIN] **Bug Fix Expediter — Phase 2: Orchestrator Diagnose Phase**. Phase 1 foundation complete (Session 382e: 8 new files, 2461 tests pass). Next: implement orchestrator skeleton with state machine, diagnosis prompt template, Lead agent SDK delegation. Plan docs: `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/01-implementation-plan.md`
 - [x] [LUPIN] ~~**Archive history.md — CRITICAL**~~ — Resolved: was 19.5k after Session 373b, now 10.4k (41.5%) after Session 375 archival
