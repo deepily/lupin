@@ -42,7 +42,17 @@
 
 **Files Modified (16)**: `orchestrator.py`, `state.py` (initial state), `agentic_job_factory.py`, `agent_registry.py`, `main.py`, `todo_fifo_queue.py`, `job_persistence.py`, `notification_proxy/config.py`, `test_proxy_integration.py`, `test_job_dispatch.py`, `test_mode_management.py`, `test_presentation_generator_job.py`, `test_runtime_argument_expeditor.py`, `notifications.html`, `notifications.js`, `agent-router-agentic-commands.json`, `agent-router-template-completion.txt`, `agentic-voice-workflow.md`, `03-implementation-tracking.md`
 
-**Commit**: b8b6da3
+**Visual Rendering Expansion Planning** (post-checkpoint):
+- Created `src/rnd/v0.1.6/2026.03.14-presentation-generator/11-visual-rendering-expansion-plan.md` — comprehensive brainstorm with current landscape research (March 2026 pricing, API availability)
+- Created `renderers/` subdirectory with 6 implementation plan docs (index + 5 renderer plans)
+- Decisions: Matplotlib/Plotly (charts), D2 (flowcharts), Nano Banana 2 (images, $0.045-$0.151/image), Google Veo 2 (video, $0.20/sec)
+- Each plan includes: code-level implementation, unit test plan, verification steps, cost estimates, open questions
+
+**Files Created (post-checkpoint, 8)**: `11-visual-rendering-expansion-plan.md`, `renderers/{00-index,01-matplotlib-renderer-plan,02-d2-renderer-plan,03-nano-banana-renderer-plan,04-veo-renderer-plan,05-theme-integration-plan}.md`
+
+**Commit**: 5e535bf (checkpoint), 2018849 (final)
+
+**Next Session**: Return to `01-matplotlib-renderer-plan.md` for detailed review and implementation.
 
 ---
 

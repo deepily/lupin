@@ -19,7 +19,19 @@
 | 07 | [Phase C-D Verification Plan](07-phase-c-d-verification-plan.md) | CJ Flow queue + live E2E verification | Active |
 | 08 | [Phase 6 Implementation Plan](08-phase-6-implementation-plan.md) | Marp text rendering: theme system, renderer, orchestrator integration | Complete |
 | 09 | [Phase 7 Implementation Plan](09-phase-7-implementation-plan.md) | Visual rendering: Mermaid + registry + placeholder + Gate 4 | Active |
-| 10 | [Phase 8 Implementation Plan](10-phase-8-implementation-plan.md) | Delivery + Deep Research → Presentation chaining bridge | Active |
+| 10 | [Phase 8 Implementation Plan](10-phase-8-implementation-plan.md) | Delivery + Deep Research → Presentation chaining bridge | Done (Session 383) |
+| 11 | [Visual Rendering Expansion Plan](11-visual-rendering-expansion-plan.md) | Matplotlib, D2, Nano Banana 2, Google Veo 2 renderer roadmap | Planning |
+
+### Renderer Implementation Plans (Subdirectory)
+
+| # | Document | Renderer | Status |
+|---|----------|----------|--------|
+| R-00 | [Renderer Index](renderers/00-index.md) | All | Planning |
+| R-01 | [Matplotlib Renderer](renderers/01-matplotlib-renderer-plan.md) | Charts, plots, data viz | Planning |
+| R-02 | [D2 Renderer](renderers/02-d2-renderer-plan.md) | Beautiful flowcharts, architecture | Planning |
+| R-03 | [Nano Banana Renderer](renderers/03-nano-banana-renderer-plan.md) | Hero images, infographics | Planning |
+| R-04 | [Veo Renderer](renderers/04-veo-renderer-plan.md) | Flow animations, title videos | Planning |
+| R-05 | [Theme Integration](renderers/05-theme-integration-plan.md) | Cross-renderer theme cascade | Planning |
 
 ## Future Documents (Added as Work Progresses)
 
