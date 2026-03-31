@@ -1,8 +1,10 @@
 # TODO
 
-Last updated: 2026-03-30 (Session 384)
+Last updated: 2026-03-31
 
 ## Pending
+
+- [ ] [LUPIN] **Run PEFT trainer this evening** — Training data regenerated (44,371 examples, 38 commands). Both `presentation generator` and `research to presentation` commands included (1,500 examples each). Run `./src/scripts/run-agentic-intent-training.sh full` to retrain.
 
 - [ ] [LUPIN] **Bug Fix Expediter — Phase 5: Trust Proxy + Git Strategy**. Phases 2-4 complete (Session 384: 97 new tests, 2602 total). Next: trust proxy init, git_ops.py, run_git_strategy(), voice gate proxy gating. Plan doc: `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/06-phase5-trust-proxy-git-strategy-plan.md`. **Execute first thing next session**.
 - [ ] [LUPIN] **Claude Agent SDK Upgrade 0.1.36 → 0.1.52** — 16 patches behind. Stability upgrade: RateLimitEvent handling (9 streaming loops in 3 files), version pins (requirements.txt + Dockerfile). No feature adoption. Analysis: `src/rnd/v0.1.6/2026.03.30-claude-agent-sdk-upgrade-0.1.36-to-0.1.52.md`. Plan: `src/rnd/v0.1.6/2026.03.30-claude-agent-sdk-upgrade-plan.md`

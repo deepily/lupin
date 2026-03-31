@@ -1,5 +1,16 @@
 # Lupin Project History
 
+### 2026.03.31 - PEFT Training Data Regeneration for Presentation Generator Voice Routing
+
+**Goal**: Regenerate PEFT training data to include two new voice commands added in Session 383: `presentation generator` (standalone) and `research to presentation` (chained DR→PG).
+
+**Result**: Ran `run-agentic-intent-training.sh generate` — 44,371 training examples across 38 commands (was 36). Both new commands hit the 1,500/command target. Train/test/validate split: 35,496 / 4,437 / 4,438. All validation checks passed. No code changes — pure execution of existing pipeline.
+
+**Files Modified (1)**: `TODO.md` (added PEFT trainer run item)
+**Files Regenerated (3)**: `voice-commands-xml-{train,test,validate}.jsonl` (not version-controlled)
+
+---
+
 ### 2026.03.30 - Session 384 | Bug Fix Expediter: Phases 2-4 Implementation + Phase 5 Planning
 
 **Goal**: Implement the three-phase forensic pipeline (diagnose → propose → fix) for the Bug Fix Expediter, then plan the trust proxy + git strategy phase.
