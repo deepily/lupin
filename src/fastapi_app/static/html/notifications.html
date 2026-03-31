@@ -55,6 +55,7 @@
                             <option value="swe_team">SWE Team</option>
                             <option value="presentation">Presentation Generator</option>
                             <option value="research_to_presentation">Research to Presentation</option>
+                            <option value="test_suite">Test Suite</option>
                         </optgroup>
                     </select>
                     <span id="mode-badge" class="mode-badge" style="display: none; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; text-transform: uppercase; background: #0d6efd; color: white; cursor: pointer;" title="Click to return to System mode">
@@ -411,6 +412,52 @@
                             </span>
                         </button>
                         <div id="presentation-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+                    </div>
+                </div>
+
+                <!-- Test Suite Submit Card -->
+                <div class="job-submit-card" id="test-suite-submit-card" data-testid="notifications-test-suite-card">
+                    <div class="job-submit-card-header" onclick="toggleSection('test-suite-submit-section')">
+                        <h4>🧪 Run Test Suite</h4>
+                        <button class="toggle-button" id="test-suite-submit-toggle">▶</button>
+                    </div>
+                    <div class="section-content collapsed" id="test-suite-submit-section">
+                        <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+                            <div>
+                                <label for="test-suite-types" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Test Suites:</label>
+                                <select id="test-suite-types" data-testid="notifications-test-suite-types-select" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
+                                    <option value="integration,e2e" selected>Both (Integration + E2E)</option>
+                                    <option value="integration">Integration Only</option>
+                                    <option value="e2e">E2E Only</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="test-suite-pytest-args" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Extra Pytest Args:</label>
+                                <input type="text" id="test-suite-pytest-args" data-testid="notifications-test-suite-pytest-args-input" placeholder="-v -k test_auth" style="width: 200px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;" />
+                            </div>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                                <input type="checkbox" id="test-suite-dry-run" data-testid="notifications-test-suite-dry-run-checkbox" checked />
+                                <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
+                            </label>
+                        </div>
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-test-suite-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="test-suite-schedule" data-testid="notifications-test-suite-schedule-checkbox" onchange="document.getElementById('test-suite-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="test-suite-scheduled-time" data-testid="notifications-test-suite-scheduled-time" style="display: none;" />
+                                <span style="font-size: 12px; color: #888;" title="Test suites always run in exclusive mode (DB hot-swap)">🔒 Exclusive mode (always on)</span>
+                            </div>
+                        </div>
+                        <button id="submit-test-suite-job" data-testid="notifications-test-suite-submit-btn" type="button" style="padding: 10px 20px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; margin-top: 8px;">
+                            🧪 Run Tests
+                            <span id="test-suite-loading" class="loading" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                        <div id="test-suite-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
                     </div>
                 </div>
 

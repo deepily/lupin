@@ -1,10 +1,10 @@
 # TODO
 
-Last updated: 2026-03-31 (Session 385)
+Last updated: 2026-03-31 (Session 386)
 
 ## Pending
 
-- [ ] [LUPIN] **Run PEFT trainer this evening** — Training data regenerated (44,371 examples, 38 commands). Both `presentation generator` and `research to presentation` commands included (1,500 examples each). Run `./src/scripts/run-agentic-intent-training.sh full` to retrain.
+- [ ] [LUPIN] **Run PEFT trainer** — Training data needs regeneration (Session 386 added `test_suite` agent: 65 utterance templates + config JSON entry). Run `./src/scripts/run-agentic-intent-training.sh generate` then `full` to retrain.
 
 - [ ] [LUPIN] **Bug Fix Expediter — Phase 5: Trust Proxy + Git Strategy**. Phases 2-4 complete (Session 384: 97 new tests, 2602 total). Next: trust proxy init, git_ops.py, run_git_strategy(), voice gate proxy gating. Plan doc: `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/06-phase5-trust-proxy-git-strategy-plan.md`. **Execute first thing next session**.
 - [ ] [LUPIN] **Claude Agent SDK Upgrade 0.1.36 → 0.1.52** — 16 patches behind. Stability upgrade: RateLimitEvent handling (9 streaming loops in 3 files), version pins (requirements.txt + Dockerfile). No feature adoption. Analysis: `src/rnd/v0.1.6/2026.03.30-claude-agent-sdk-upgrade-0.1.36-to-0.1.52.md`. Plan: `src/rnd/v0.1.6/2026.03.30-claude-agent-sdk-upgrade-plan.md`
@@ -34,7 +34,8 @@ Last updated: 2026-03-31 (Session 385)
 - [x] [LUPIN] CoSA commit pending: Session 380b fixes — `running_fifo_queue.py` (stack trace capture), `job_persistence.py` (stack_trace rich_field), `deep_research/job.py` (cost_summary in artifacts), `presentation_generator/job.py` (cost_summary tokens), `podcast_generator.py` (Field import), `presentation_generator.py` (Field import) — committed from CoSA repo context
 - [x] [LUPIN] CoSA commit pending: Voice injection bug fix — `notification_fifo_queue.py`, `notifications.py`, `base_listener.py` — committed b544c78
 - [x] [LUPIN] CoSA commit pending: session_name pipeline — `notification_fifo_queue.py` (session_name attr), `notifications.py` (session_name param + session_topic type) — committed b544c78
-- [ ] [LUPIN] **Scheduled Long-Running Jobs in CJ Flow** — Design exploration for automating test suites (AgenticJob, queue-level monopolize) and PEFT/LoRA training (OS-level orchestration, server-down). Return to refine and begin implementation. Planning doc: `src/rnd/v0.1.6/2026.03.30-scheduled-long-running-jobs.md`
+- [ ] [LUPIN] **TestSuiteJob: Manual + Automated Testing** — Pattern A implemented (Session 386). Remaining: (1) Fix voice_io dispatcher bug (`AgentNotificationDispatcher` missing `notify` attribute — notifications fall back to CLI), (2) Manual UI verification of submit card + scheduling, (3) Verify scheduling timezone fix with live scheduled job, (4) Run live pipeline smoke test with server, (5) Integration test for `POST /api/test-suite/submit`. Plan: `src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md`
+- [x] [LUPIN] **Scheduled Long-Running Jobs in CJ Flow** — Pattern A (TestSuiteJob) fully implemented Session 386. Pattern B (PEFT training OS-level orchestrator) deferred. Planning doc: `src/rnd/v0.1.6/2026.03.30-scheduled-long-running-jobs.md`
 - [x] [LUPIN] Run full E2E + integration test suite before merging branch to main — Session 385: all 4 layers passed (unit 2647, WS 50/50, E2E 14/14 pause/schedule, integration 196). Full E2E re-run needed for visual regression (2 pre-existing errors).
 - [ ] [LUPIN] CoSA commit pending: Session 385 — Unified Job State Machine (~25 CoSA files: job_state.py, queue_protocol, queue_util, job_persistence, fifo_queue, queue_consumer, running_fifo_queue, todo_fifo_queue, routers/queues, agent_base, agentic_job_base, solution_snapshot, 9 agent jobs, mock_job)
 - [ ] [LUPIN] Full E2E re-run needed to verify 2 visual regression errors are pre-existing (test_visual_regression.py profile + notifications)

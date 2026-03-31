@@ -429,3 +429,104 @@ class TestSWETeamCard:
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-swe-stt-btn" ).count() > 0
+
+
+# ---------------------------------------------------------------------------
+# Test Suite Card
+# ---------------------------------------------------------------------------
+
+class TestTestSuiteCard:
+    """Tests for Test Suite job dispatch card."""
+
+    def test_test_suite_card_exists( self, logged_in_page ):
+        """
+        Test Suite card element exists on notifications page.
+
+        Requires:
+            - Authenticated session
+
+        Ensures:
+            - Test suite card container element exists
+        """
+        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+
+        assert logged_in_page.get_by_test_id( "notifications-test-suite-card" ).count() > 0
+
+    def test_test_suite_card_has_types_select( self, logged_in_page ):
+        """
+        Test Suite card has test types dropdown selector.
+
+        Requires:
+            - Authenticated session
+
+        Ensures:
+            - Types select element exists
+        """
+        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+
+        assert logged_in_page.get_by_test_id( "notifications-test-suite-types-select" ).count() > 0
+
+    def test_test_suite_card_has_pytest_args_input( self, logged_in_page ):
+        """
+        Test Suite card has pytest args text input.
+
+        Requires:
+            - Authenticated session
+
+        Ensures:
+            - Pytest args input element exists
+        """
+        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+
+        assert logged_in_page.get_by_test_id( "notifications-test-suite-pytest-args-input" ).count() > 0
+
+    def test_test_suite_card_has_dry_run_and_submit( self, logged_in_page ):
+        """
+        Test Suite card has dry-run checkbox and submit button.
+
+        Requires:
+            - Authenticated session
+
+        Ensures:
+            - Dry-run checkbox and submit button exist
+        """
+        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+
+        assert logged_in_page.get_by_test_id( "notifications-test-suite-dry-run-checkbox" ).count() > 0
+        assert logged_in_page.get_by_test_id( "notifications-test-suite-submit-btn" ).count() > 0
+
+    def test_test_suite_card_has_schedule_option( self, logged_in_page ):
+        """
+        Test Suite card has schedule-for-later checkbox.
+
+        Requires:
+            - Authenticated session
+
+        Ensures:
+            - Schedule checkbox element exists
+        """
+        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+
+        assert logged_in_page.get_by_test_id( "notifications-test-suite-schedule-checkbox" ).count() > 0
+
+    def test_mode_selector_has_test_suite( self, logged_in_page ):
+        """
+        Mode selector dropdown includes test_suite option.
+
+        Requires:
+            - Authenticated session
+
+        Ensures:
+            - test_suite option exists in mode dropdown
+        """
+        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+
+        mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )
+        options     = mode_select.locator( "option[value='test_suite']" )
+        assert options.count() > 0

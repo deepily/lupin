@@ -183,7 +183,13 @@
 |--------|------|------|---------|
 | POST | `/api/swe-team/submit` | JWT | Submit SWE team job to queue |
 
-## 17. Decision Proxy (`/api/proxy/*`)
+## 17. Test Suite (`/api/test-suite/*`)
+
+| Method | Path | Auth | Summary |
+|--------|------|------|---------|
+| POST | `/api/test-suite/submit` | JWT | Submit test suite job to queue (always monopolize) |
+
+## 18. Decision Proxy (`/api/proxy/*`)
 
 > **Deep-dive**: See [`proxy-admin-guide.md`](proxy-admin-guide.md)
 
@@ -199,21 +205,21 @@
 | GET | `/api/proxy/mode` | JWT | Get current trust mode |
 | PUT | `/api/proxy/mode` | JWT | Update trust mode |
 
-## 18. Mock Job (`/api/mock-job/*`)
+## 19. Mock Job (`/api/mock-job/*`)
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
 | POST | `/api/mock-job/submit` | JWT | Submit mock job for queue UI testing |
 | GET | `/api/mock-job/health` | Public | Mock job subsystem health |
 
-## 19. I/O Files (`/api/io/*`)
+## 20. I/O Files (`/api/io/*`)
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
 | GET | `/api/io/file` | Public | Serve file from io/ directory |
 | GET | `/api/io/health` | Public | I/O subsystem health |
 
-## 20. WebSocket Admin (`/api/websocket-sessions/*`)
+## 21. WebSocket Admin (`/api/websocket-sessions/*`)
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
@@ -227,7 +233,7 @@
 
 ---
 
-## 21. WebSocket Connections (`/ws/*`)
+## 22. WebSocket Connections (`/ws/*`)
 
 > **Deep-dive**: See [`websocket-architecture.md`](websocket-architecture.md)
 
@@ -242,7 +248,7 @@
 
 ---
 
-## 22. Pages (`/app/*`)
+## 23. Pages (`/app/*`)
 
 > UI page routes. All return HTML. Not in OpenAPI schema. Auth enforced client-side via JS JWT validation.
 
@@ -272,6 +278,7 @@
 | `rp-` | Research-to-Podcast | `/api/deep-research-to-podcast/submit` |
 | `cc-` | Claude Code | `/api/claude-code/queue/submit` |
 | `swe-` | SWE Team | `/api/swe-team/submit` |
+| `ts-` | Test Suite | `/api/test-suite/submit` |
 | `mock-` | Mock Job | `/api/mock-job/submit` |
 
 ---

@@ -1,5 +1,27 @@
 # Lupin Project History
 
+### 2026.03.31 - Session 386 | TestSuiteJob: New CJ Flow Agentic Agent + Scheduling Bug Fix
+
+**Goal**: Encapsulate integration and E2E test suites as a first-class AgenticJob in CJ Flow, enabling scheduled unattended execution with monopolize mode.
+
+**Result**: Full agentic-voice-workflow compliance. 11 new files, 14 modified. 224 unit tests passing (35 new). 6 new E2E Playwright tests.
+
+**TestSuiteJob Implementation**: New `test_suite` agent package (`src/cosa/agents/test_suite/`) with job.py, voice_io.py, cosa_interface.py. Runs existing shell scripts via `subprocess.Popen` with cancellation support. Always `monopolize=True` (DB hot-swap exclusive). Dry-run mode with breadcrumb notifications. `from_config()` classmethod for INI-driven defaults.
+
+**Integration Points**: Factory branch (`agentic_job_factory.py`), registry entry (9th agent in `AGENTIC_AGENTS`), `AGENTIC_MODE_MAP` + `MODE_METADATA` + `PRODUCT_NAMES` entries, REST endpoint (`POST /api/test-suite/submit`), router registered in `main.py`.
+
+**UI**: Submit card accordion in `notifications.html` (types dropdown, pytest args, dry-run, schedule). JS handler `submitTestSuiteJob()` in `notifications.js`. Mode selector dropdown option added.
+
+**Voice/PEFT**: 65 utterance templates (`synthetic-data-agent-routing-test-suite.txt`), training config JSON entry. Proxy Q&A script (`test-suite.json`) + profile registered.
+
+**Bug Fix — Scheduled Jobs Execute Immediately**: `fifo_queue.py::pop_next_eligible()` compared timezone-aware UTC datetime (from JS `toISOString()`) against naive local `datetime.now()`. Python raises `TypeError`, caught by blanket `except`, treating job as immediate. Fix: `.astimezone().replace(tzinfo=None)` normalizes to naive-local. Applied to both `pop_next_eligible()` and `earliest_scheduled_at()`.
+
+**Bug Fix — Missing cost_summary**: Added `self.cost_summary = None` to TestSuiteJob `__init__` (required by `queues.py` unified interface — every other job has it).
+
+**Files Created (11)**: test_suite package (4), REST router, unit tests, smoke test, proxy Q&A script, PEFT utterances, plan doc
+**Files Modified (16)**: factory, registry, mode map, fifo_queue (tz fix), main.py, config INI (x2), training JSON, proxy config, HTML, JS, REST API docs, 3 test files, R&D doc
+**Plan Doc**: `src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md`
+
 ### 2026.03.31 - Session 385 | CJ Flow: Unified Job State Machine
 
 **Goal**: Replace the inconsistent mix of `status` strings, queue names, and `paused` boolean with a single `JobState` enum as the authoritative source of truth for job lifecycle state.

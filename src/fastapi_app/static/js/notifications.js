@@ -1821,6 +1821,14 @@ class NotificationsUI {
             });
         }
 
+        // Test Suite submit button
+        const submitTestSuiteBtn = document.getElementById( 'submit-test-suite-job' );
+        if ( submitTestSuiteBtn ) {
+            submitTestSuiteBtn.addEventListener( 'click', () => {
+                this.submitTestSuiteJob();
+            });
+        }
+
         // ── Job Message Send: Event delegation on todo + run queue containers ──
         // Handles dynamically-created job message inputs via bubbling
         this._setupJobMessageDelegation( 'run-jobs-container' );
@@ -2855,6 +2863,84 @@ class NotificationsUI {
 
         } catch ( error ) {
             this.error( "Presentation job submission failed:", error );
+            statusDiv.textContent = `✗ Error: ${error.message}`;
+            statusDiv.style.color = '#dc3545';
+        } finally {
+            submitButton.disabled = false;
+            loadingSpinner.style.display = 'none';
+        }
+    }
+
+    /**
+     * Submit a Test Suite job.
+     *
+     * Sends test suite parameters to /api/test-suite/submit for
+     * asynchronous execution via the CJ Flow queue. Always runs
+     * with monopolize=True (DB hot-swap is exclusive).
+     */
+    async submitTestSuiteJob() {
+        const typesSelect    = document.getElementById( 'test-suite-types' );
+        const pytestArgsInput = document.getElementById( 'test-suite-pytest-args' );
+        const dryRunCheckbox = document.getElementById( 'test-suite-dry-run' );
+        const submitButton   = document.getElementById( 'submit-test-suite-job' );
+        const loadingSpinner = document.getElementById( 'test-suite-loading' );
+        const statusDiv      = document.getElementById( 'test-suite-submit-status' );
+
+        const testTypes  = typesSelect.value;
+        const pytestArgs = pytestArgsInput.value.trim();
+        const dryRun     = dryRunCheckbox.checked;
+
+        try {
+            // Update UI
+            submitButton.disabled = true;
+            loadingSpinner.style.display = 'inline-block';
+            statusDiv.textContent = 'Submitting test suite job...';
+            statusDiv.style.color = '#666';
+
+            // Ensure token is valid before API call
+            await this.ensureValidToken();
+
+            this.log( `Submitting test suite job: types=${testTypes}, dryRun=${dryRun}` );
+
+            const body = {
+                test_types : testTypes,
+                dry_run    : dryRun,
+            };
+            if ( pytestArgs ) {
+                body.pytest_args = pytestArgs;
+            }
+
+            // Add scheduling params (schedule checkbox + monopolize is always on)
+            const scheduleCheckbox = document.getElementById( 'test-suite-schedule' );
+            const scheduleTime     = document.getElementById( 'test-suite-scheduled-time' );
+            if ( scheduleCheckbox?.checked && scheduleTime?.value ) {
+                body.scheduled_at = new Date( scheduleTime.value ).toISOString();
+            }
+
+            const response = await fetch( '/api/test-suite/submit', {
+                method  : 'POST',
+                headers : {
+                    'Authorization' : this.getAuthHeader(),
+                    'X-Session-ID'  : this.queueSessionId,
+                    'Content-Type'  : 'application/json'
+                },
+                body: JSON.stringify( body )
+            });
+
+            if ( !response.ok ) {
+                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
+                throw new Error( errorData.detail || `HTTP ${response.status}` );
+            }
+
+            const result = await response.json();
+            this.log( "Test suite job response:", result );
+
+            // Success feedback
+            statusDiv.textContent = `✓ Test suite job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
+            statusDiv.style.color = '#28a745';
+
+        } catch ( error ) {
+            this.error( "Test suite job submission failed:", error );
             statusDiv.textContent = `✗ Error: ${error.message}`;
             statusDiv.style.color = '#dc3545';
         } finally {
