@@ -1,5 +1,20 @@
 # Lupin Project History
 
+#### Checkpoint 2 | 2026.03.30 | CJ Flow R&D Consolidation + State Machine Plan
+
+**Consolidation**: Created `src/rnd/v0.1.6/2026.03.30-cj-flow/` hub directory with `00-index.md` linking all 18 CJ Flow R&D docs across 4 version directories. Moved 3 root-level docs into subdirectory. Updated cross-references in TODO.md, scheduling UI doc, bug fix expediter index.
+
+**State Machine Pre-Planning**: Wrote assessment doc (5 prerequisites) and HFL freshness review (HFL plan partially stale but structurally sound; state machine is NOT a strict prerequisite for HFL but IS needed for naming consistency).
+
+**State Machine Implementation Plan**: Designed 9-state `JobState( str, Enum )` with frozen transition matrix, 6-phase plan (enum → protocol → queue infra → frontend → tests → PostgreSQL). No backward compat — clean cut. Plan serialized, ready for implementation.
+
+**Files Created (3)**: `2026.03.30-cj-flow/00-index.md`, `2026.03.30-unified-job-state-machine-assessment.md`, `2026.03.30-unified-job-state-machine.md`
+**Files Moved (3)**: Root-level CJ Flow docs → `2026.03.30-cj-flow/` subdirectory
+**Files Modified (4)**: `TODO.md`, `src/rnd/README.md`, scheduling UI doc, bug fix expediter index
+**Commit**: a82f21d
+
+---
+
 ### 2026.03.30 - Session 383 | Presentation Generator Phase 8 (Delivery & Chaining) + Automated Testing Infrastructure
 
 **Goal**: Complete the final phase of the Presentation Generator (Phase 8: Delivery & Chaining) and build comprehensive automated testing infrastructure covering proxy Q&A, voice routing training data, UI integration, and E2E tests.

@@ -117,12 +117,13 @@ Last updated: 2026-03-30 (Session 383)
 - [x] **[LUPIN] Phases 0-4: Backend complete** — Protocol fields (`scheduled_at`, `monopolize`, `paused`), consumer loop rewrite with `pop_next_eligible()` + dynamic wake-up timeout, 5 router updates, pause/resume REST endpoints, config keys, 25 new tests (all pass), 2338 unit regression clean.
 - [ ] **[LUPIN] Phase 5: Notifications UI + WebSocket integration** — JS event subscriptions (`job_paused`, `job_resumed`), event handlers, paused/scheduled visual states on job cards, pause/resume toggle button, CSS. Continue next session.
 - [ ] **[LUPIN] Phase 6: Documentation + E2E validation** — `websocket-events.md` updates, manual E2E test with live server.
-- **Tracking doc**: [`src/rnd/2026.03.27-cj-flow-timed-execution-monopolize-pause.md`](src/rnd/2026.03.27-cj-flow-timed-execution-monopolize-pause.md)
+- **Tracking doc**: [`src/rnd/v0.1.6/2026.03.30-cj-flow/2026.03.27-cj-flow-timed-execution-monopolize-pause.md`](src/rnd/v0.1.6/2026.03.30-cj-flow/2026.03.27-cj-flow-timed-execution-monopolize-pause.md)
 
 ### CJ Flow: Unified Job State Machine (Pre-Hybrid Fast Lane)
 
 - [ ] **[LUPIN] Refactor fragmented state tracking** — Replace `status` field + queue position + `paused` boolean with unified `job_state` column (`pending → queued → scheduled → running → paused → completed/failed/cancelled`). Touches 15+ files: protocol, 7 job types, consumer, persistence, routers, UI. Dedicated preparatory effort before Hybrid Fast Lane.
-- **Design notes**: See "Architectural Note: State Machine Deferral" in [`src/rnd/2026.03.27-cj-flow-timed-execution-monopolize-pause.md`](src/rnd/2026.03.27-cj-flow-timed-execution-monopolize-pause.md)
+- **Assessment doc**: [`src/rnd/v0.1.6/2026.03.30-cj-flow/2026.03.30-unified-job-state-machine-assessment.md`](src/rnd/v0.1.6/2026.03.30-cj-flow/2026.03.30-unified-job-state-machine-assessment.md)
+- **CJ Flow hub**: [`src/rnd/v0.1.6/2026.03.30-cj-flow/00-index.md`](src/rnd/v0.1.6/2026.03.30-cj-flow/00-index.md)
 
 ### CJ Flow: Hybrid Fast Lane + Bounded Agentic Pool (Session 237)
 
