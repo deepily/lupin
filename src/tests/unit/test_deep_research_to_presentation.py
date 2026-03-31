@@ -7,6 +7,8 @@ Tests state models, job construction, factory routing, and registry entry.
 import pytest
 from unittest.mock import patch, MagicMock
 
+from cosa.rest.job_state import JobState
+
 
 # =============================================================================
 # PipelineState Tests
@@ -218,7 +220,7 @@ class TestJobConstruction:
         assert job.dry_run                 is False
         assert job.audience                is None
         assert job.audience_context        is None
-        assert job.status                  == "pending"
+        assert job.state                   == JobState.PENDING
         assert job.research_path           is None
         assert job.yaml_path               is None
         assert job.marp_path               is None

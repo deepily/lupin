@@ -2126,8 +2126,7 @@ class NotificationsUI {
                 "notification_queue_update",
                 "notification_responded",  // Phase 2.2 SSE - multi-device sync
                 "notification_expired",    // Phase 2.2 SSE - timeout handling
-                "job_paused",              // Phase 5 CJ Flow — pause/resume
-                "job_resumed",             // Phase 5 CJ Flow — pause/resume
+                // job_paused/job_resumed removed — now handled as job_state_transition events
                 "auth_success",
                 "auth_error",
                 "connect",
@@ -2227,13 +2226,7 @@ class NotificationsUI {
                     this.handleJobStateTransition( envelope );
                     break;
 
-                case "job_paused":
-                    this.handleJobPauseStateChange( envelope, true );
-                    break;
-
-                case "job_resumed":
-                    this.handleJobPauseStateChange( envelope, false );
-                    break;
+                // job_paused/job_resumed cases removed — now routed through handleJobStateTransition
 
                 case "notification_queue_update":
                     this.handleNotificationUpdate( envelope );
@@ -4507,15 +4500,46 @@ class NotificationsUI {
 
     /**
      * Handle job_state_transition WebSocket event.
+     * Map a JobState value to its UI container name.
+     *
+     * @param {string} state - JobState value (pending, queued, scheduled, paused, running, completed, failed, interrupted, cancelled)
+     * @returns {string} UI container name (todo, run, done, dead)
+     */
+    stateToContainer( state ) {
+        const mapping = {
+            'pending'     : 'todo',
+            'queued'      : 'todo',
+            'scheduled'   : 'todo',
+            'paused'      : 'todo',
+            'running'     : 'run',
+            'completed'   : 'done',
+            'failed'      : 'dead',
+            'interrupted' : 'dead',
+            'cancelled'   : 'dead',
+        };
+        return mapping[ state ] || 'todo';
+    }
+
+    /**
      * Moves job cards between queue containers via DOM reparenting.
      *
-     * @param {Object} event - WebSocket event with job_id, from_queue, to_queue, metadata
+     * @param {Object} event - WebSocket event with job_id, from_state, to_state, metadata
      */
     handleJobStateTransition( event ) {
-        const { job_id: jobId, from_queue: fromQueue, to_queue: toQueue, metadata } = event;
+        const { job_id: jobId, from_state: fromState, to_state: toState, metadata } = event;
 
-        if ( !jobId || !fromQueue || !toQueue ) {
+        // Map states to UI containers
+        const fromQueue = this.stateToContainer( fromState );
+        const toQueue   = this.stateToContainer( toState );
+
+        if ( !jobId || !fromState || !toState ) {
             this.error( '[JOB-TRANSITION] Invalid event:', event );
+            return;
+        }
+
+        // Handle pause/resume as in-place card updates (no container move needed)
+        if ( toState === 'paused' || ( fromState === 'paused' && toState === 'queued' ) ) {
+            this.handleJobPauseStateChange( event, toState === 'paused' );
             return;
         }
 

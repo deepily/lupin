@@ -12,6 +12,7 @@ import pytest
 import requests
 from datetime import datetime, timedelta, timezone
 
+from cosa.rest.job_state import JobState
 from tests.integration.conftest import get_auth_header
 
 
@@ -56,7 +57,7 @@ class TestJobHistoryApi:
         data = response.json()
         # All returned jobs should have status=completed (if any exist)
         for job in data[ "jobs" ]:
-            assert job[ "status" ] == "completed", f"Expected 'completed', got '{job[ 'status' ]}'"
+            assert job[ "status" ] == JobState.COMPLETED.value, f"Expected '{JobState.COMPLETED.value}', got '{job[ 'status' ]}'"
 
     def test_filters_by_job_type( self, create_test_user ):
         """Job type filter parameter is accepted and returns valid response."""
@@ -214,7 +215,7 @@ class TestJobHistoryFiltersApi:
         data = response.json()
         assert data[ "limit" ] == 10
         for job in data[ "jobs" ]:
-            assert job[ "status" ] == "completed"
+            assert job[ "status" ] == JobState.COMPLETED.value
 
 
 # ===========================================================================
@@ -258,7 +259,7 @@ class TestJobHistoryWithData:
         # Standard set has 2 completed jobs
         assert data[ "total" ] == 2, f"Expected 2 completed, got {data[ 'total' ]}"
         for job in data[ "jobs" ]:
-            assert job[ "status" ] == "completed"
+            assert job[ "status" ] == JobState.COMPLETED.value
 
     def test_filters_by_job_type_with_data( self, seeded_job_history ):
         """Job type filter returns only matching jobs from seeded data."""
@@ -395,7 +396,7 @@ class TestJobHistoryDeleteWithData:
         records = seed_job_history_records(
             user_id    = admin_user_id,
             user_email = create_test_admin[ "email" ],
-            records    = [ { "id_suffix": "other-001", "status": "completed" } ]
+            records    = [ { "id_suffix": "other-001", "status": JobState.COMPLETED.value } ]
         )
 
         # Regular user tries to delete it
@@ -414,7 +415,7 @@ class TestJobHistoryDeleteWithData:
         records = seed_job_history_records(
             user_id    = create_test_user[ "user_id" ],
             user_email = create_test_user[ "email" ],
-            records    = [ { "id_suffix": "admin-del-001", "status": "completed" } ]
+            records    = [ { "id_suffix": "admin-del-001", "status": JobState.COMPLETED.value } ]
         )
 
         # Admin deletes it
@@ -442,7 +443,7 @@ class TestJobHistoryRetryWithData:
         headers = get_auth_header( user[ "access_token" ] )
 
         # Find the failed job (std-003)
-        failed = next( r for r in records if r[ "status" ] == "failed" )
+        failed = next( r for r in records if r[ "status" ] == JobState.FAILED.value )
 
         response = requests.post(
             f"{BASE_URL}/api/job-history/{failed[ 'id_hash' ]}/retry",
@@ -466,7 +467,7 @@ class TestJobHistoryRetryWithData:
         records = seeded_job_history[ "records" ]
         headers = get_auth_header( user[ "access_token" ] )
 
-        interrupted = next( r for r in records if r[ "status" ] == "interrupted" )
+        interrupted = next( r for r in records if r[ "status" ] == JobState.INTERRUPTED.value )
 
         response = requests.post(
             f"{BASE_URL}/api/job-history/{interrupted[ 'id_hash' ]}/retry",
@@ -483,7 +484,7 @@ class TestJobHistoryRetryWithData:
         records = seeded_job_history[ "records" ]
         headers = get_auth_header( user[ "access_token" ] )
 
-        completed = next( r for r in records if r[ "status" ] == "completed" )
+        completed = next( r for r in records if r[ "status" ] == JobState.COMPLETED.value )
 
         response = requests.post(
             f"{BASE_URL}/api/job-history/{completed[ 'id_hash' ]}/retry",
@@ -500,7 +501,7 @@ class TestJobHistoryRetryWithData:
         records = seed_job_history_records(
             user_id    = create_test_admin[ "user_id" ],
             user_email = create_test_admin[ "email" ],
-            records    = [ { "id_suffix": "retry-other-001", "status": "failed", "error": "test error" } ]
+            records    = [ { "id_suffix": "retry-other-001", "status": JobState.FAILED.value, "error": "test error" } ]
         )
 
         # Regular user tries to retry
@@ -525,8 +526,8 @@ class TestJobHistoryUserIsolation:
             user_id    = create_test_admin[ "user_id" ],
             user_email = create_test_admin[ "email" ],
             records    = [
-                { "id_suffix": "iso-admin-001", "status": "completed" },
-                { "id_suffix": "iso-admin-002", "status": "completed" },
+                { "id_suffix": "iso-admin-001", "status": JobState.COMPLETED.value },
+                { "id_suffix": "iso-admin-002", "status": JobState.COMPLETED.value },
             ]
         )
 
@@ -547,8 +548,8 @@ class TestJobHistoryUserIsolation:
             user_id    = create_test_user[ "user_id" ],
             user_email = create_test_user[ "email" ],
             records    = [
-                { "id_suffix": "iso-user-001", "status": "completed" },
-                { "id_suffix": "iso-user-002", "status": "completed" },
+                { "id_suffix": "iso-user-001", "status": JobState.COMPLETED.value },
+                { "id_suffix": "iso-user-002", "status": JobState.COMPLETED.value },
             ]
         )
 

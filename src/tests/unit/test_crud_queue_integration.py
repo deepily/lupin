@@ -21,6 +21,7 @@ from cosa.crud_for_dataframes.agent import CrudForDataFramesAgent
 from cosa.crud_for_dataframes.todo_crud_agent import TodoCrudAgent
 from cosa.crud_for_dataframes.calendar_crud_agent import CalendarCrudAgent
 from cosa.agents.agent_base import AgentBase
+from cosa.rest.job_state import JobState
 
 
 # ============================================================================
@@ -440,8 +441,8 @@ class TestCrudQueueCompletion:
         call_args = mock_emit.call_args
         assert call_args[ 0 ][ 0 ] == queue.websocket_mgr     # websocket_mgr
         assert call_args[ 0 ][ 1 ] == "test-hash-123"          # job_id
-        assert call_args[ 0 ][ 2 ] == "run"                    # from_state
-        assert call_args[ 0 ][ 3 ] == "done"                   # to_state
+        assert call_args[ 0 ][ 2 ] == JobState.RUNNING            # from_state
+        assert call_args[ 0 ][ 3 ] == JobState.COMPLETED        # to_state
         assert call_args[ 0 ][ 4 ] == "test@example.com"       # user_id
 
         # Verify metadata contains expected fields

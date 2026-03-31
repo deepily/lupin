@@ -15,6 +15,7 @@ Usage:
 from datetime import datetime, timedelta, timezone
 
 from cosa.rest.db.database import get_db
+from cosa.rest.job_state import JobState
 from cosa.rest.postgres_models import JobHistory
 
 
@@ -57,7 +58,7 @@ def seed_job_history_records( user_id, user_email, records ):
                 user_email       = user_email,
                 session_id       = rec.get( "session_id", "test-session" ),
                 routing_command  = rec.get( "routing_command", "deep research" ),
-                status           = rec.get( "status", "completed" ),
+                status           = rec.get( "status", JobState.COMPLETED.value ),
                 question_text    = rec.get( "question_text", f"Test question {suffix}" ),
                 error            = rec.get( "error", None ),
                 is_cache_hit     = rec.get( "is_cache_hit", False ),
@@ -95,7 +96,7 @@ def seed_standard_job_set( user_id, user_email ):
         - user_email is a non-empty string
 
     Ensures:
-        - Inserts 5 rows: 2 completed, 1 failed, 1 interrupted, 1 pending
+        - Inserts 5 rows: 2 COMPLETED, 1 FAILED, 1 INTERRUPTED, 1 PENDING
         - Uses variety of job_type values for filter testing
         - Returns list of 5 inserted record dicts
 
@@ -108,7 +109,7 @@ def seed_standard_job_set( user_id, user_email ):
         {
             "id_suffix"       : "std-001",
             "job_type"        : "deep_research",
-            "status"          : "completed",
+            "status"          : JobState.COMPLETED.value,
             "question_text"   : "What are the latest advances in quantum computing?",
             "duration_seconds": 45.2,
             "metadata_json"   : { "agent_type": "deep_research", "abstract": "Quantum computing overview" },
@@ -117,7 +118,7 @@ def seed_standard_job_set( user_id, user_email ):
         {
             "id_suffix"       : "std-002",
             "job_type"        : "podcast",
-            "status"          : "completed",
+            "status"          : JobState.COMPLETED.value,
             "question_text"   : "Create a podcast about machine learning trends",
             "duration_seconds": 120.8,
             "metadata_json"   : { "agent_type": "podcast", "abstract": "ML trends discussion" },
@@ -126,7 +127,7 @@ def seed_standard_job_set( user_id, user_email ):
         {
             "id_suffix"       : "std-003",
             "job_type"        : "deep_research",
-            "status"          : "failed",
+            "status"          : JobState.FAILED.value,
             "question_text"   : "Research climate change mitigation strategies",
             "error"           : "LLM API timeout after 300 seconds",
             "duration_seconds": 300.0,
@@ -136,7 +137,7 @@ def seed_standard_job_set( user_id, user_email ):
         {
             "id_suffix"       : "std-004",
             "job_type"        : "claude_code",
-            "status"          : "interrupted",
+            "status"          : JobState.INTERRUPTED.value,
             "question_text"   : "Refactor authentication module",
             "error"           : "Server shutdown during execution",
             "duration_seconds": 60.0,
@@ -146,7 +147,7 @@ def seed_standard_job_set( user_id, user_email ):
         {
             "id_suffix"       : "std-005",
             "job_type"        : "deep_research",
-            "status"          : "pending",
+            "status"          : JobState.PENDING.value,
             "question_text"   : "Analyze renewable energy adoption rates",
             "duration_seconds": None,
             "metadata_json"   : { "agent_type": "deep_research" },
@@ -167,7 +168,7 @@ def seed_time_window_jobs( user_id, user_email ):
 
     Ensures:
         - Inserts 3 rows at: 3 days, 10 days, 40 days ago
-        - All have status 'completed' to isolate time-window behavior
+        - All have status COMPLETED to isolate time-window behavior
         - Returns list of 3 inserted record dicts
 
     Returns:
@@ -178,19 +179,19 @@ def seed_time_window_jobs( user_id, user_email ):
     records = [
         {
             "id_suffix"    : "tw-3d",
-            "status"       : "completed",
+            "status"       : JobState.COMPLETED.value,
             "question_text": "Recent job (3 days old)",
             "created_at"   : now - timedelta( days=3 ),
         },
         {
             "id_suffix"    : "tw-10d",
-            "status"       : "completed",
+            "status"       : JobState.COMPLETED.value,
             "question_text": "Medium-age job (10 days old)",
             "created_at"   : now - timedelta( days=10 ),
         },
         {
             "id_suffix"    : "tw-40d",
-            "status"       : "completed",
+            "status"       : JobState.COMPLETED.value,
             "question_text": "Old job (40 days old)",
             "created_at"   : now - timedelta( days=40 ),
         },
@@ -209,7 +210,7 @@ def seed_pagination_jobs( user_id, user_email, count=25 ):
         - count >= 1
 
     Ensures:
-        - Inserts count rows, all status 'completed'
+        - Inserts count rows, all status COMPLETED
         - Each has a unique id_suffix (pg-000 through pg-NNN)
         - Created_at staggered by 1 second for deterministic ordering
         - Returns list of count inserted record dicts
@@ -223,7 +224,7 @@ def seed_pagination_jobs( user_id, user_email, count=25 ):
     for i in range( count ):
         records.append( {
             "id_suffix"    : f"pg-{i:03d}",
-            "status"       : "completed",
+            "status"       : JobState.COMPLETED.value,
             "question_text": f"Pagination test job {i}",
             "created_at"   : now - timedelta( seconds=i ),
         } )

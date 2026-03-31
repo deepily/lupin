@@ -14,6 +14,7 @@ Tests cover:
 import os
 import pytest
 
+from cosa.rest.job_state import JobState
 from cosa.agents.presentation_generator.job import PresentationGeneratorJob
 from cosa.agents.presentation_generator.config import PresentationConfig
 from cosa.agents.presentation_generator.orchestrator import PresentationOrchestratorAgent
@@ -104,8 +105,8 @@ class TestPresentationGeneratorJob:
         assert sample_job.id_hash.startswith( "pr-" )
 
     def test_status_initial( self, sample_job ):
-        """Job starts in 'pending' status."""
-        assert sample_job.status == "pending"
+        """Job starts in PENDING state."""
+        assert sample_job.state == JobState.PENDING
 
     def test_last_question_asked( self, sample_job ):
         """last_question_asked returns [Presentation] + filename."""

@@ -14,7 +14,7 @@ flowchart LR
     B --> D[Persistence<br>Plan<br>v0.1.6]
     D --> E[Timed Execution<br>+ Monopolize + Pause<br>v0.1.6]
     E --> F[Scheduling UI<br>+ Voice Runtime<br>v0.1.6]
-    F --> G[Unified Job<br>State Machine<br>NEXT]
+    F --> G[Unified Job<br>State Machine<br>v0.1.6]
     G --> H[Hybrid Fast Lane<br>Implementation<br>FUTURE]
 
     style A fill:#c3e6cb,stroke:#28a745
@@ -22,7 +22,7 @@ flowchart LR
     style D fill:#c3e6cb,stroke:#28a745
     style E fill:#c3e6cb,stroke:#28a745
     style F fill:#c3e6cb,stroke:#28a745
-    style G fill:#fff3cd,stroke:#ffc107
+    style G fill:#c3e6cb,stroke:#28a745
     style H fill:#f8d7da,stroke:#dc3545
     style C fill:#cce5ff,stroke:#007bff
 ```
@@ -37,7 +37,7 @@ flowchart LR
 |----------|---------|--------|-------------|
 | [Hybrid Fast Lane (Approach C)](../../v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md) | v0.1.5 | Planned | ThreadPoolExecutor for concurrent agentic jobs + fast lane for sync agents |
 | [Unified Job State Machine Assessment](2026.03.30-unified-job-state-machine-assessment.md) | v0.1.6 | Pre-planning | Prerequisites and sequencing for unified `job_state` refactor |
-| [Unified Job State Machine Implementation Plan](2026.03.30-unified-job-state-machine.md) | v0.1.6 | **PLANNED** | 9-state `JobState` enum, transition matrix, 6-phase implementation |
+| [Unified Job State Machine Implementation Plan](2026.03.30-unified-job-state-machine.md) | v0.1.6 | **COMPLETE** | 9-state `JobState` enum, transition matrix, 6-phase implementation |
 | [Approach D: Check-In Decoupling](../../v0.1.4/2026.02.13-claude-code-agentic-dev-team/2026.02.18-approach-d-hybrid-queue-checkin.md) | v0.1.4 | Reference | Alternative hybrid queue design with user-initiated communication |
 
 ## Implementation Plans

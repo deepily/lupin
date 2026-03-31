@@ -10,12 +10,13 @@ Session 381: Initial implementation.
 import pytest
 from datetime import datetime, timedelta
 from cosa.rest.fifo_queue import FifoQueue
+from cosa.rest.job_state import JobState
 
 
 class MockSchedulableJob:
     """Mock job implementing QueueableJob protocol with scheduling fields."""
 
-    def __init__( self, id_hash, scheduled_at=None, monopolize=False, paused=False ):
+    def __init__( self, id_hash, scheduled_at=None, monopolize=False ):
         # Identity
         self.id_hash               = id_hash
         self.push_counter          = 0
@@ -34,15 +35,14 @@ class MockSchedulableJob:
         self.last_question_asked   = f"Job {id_hash}"
         self.answer                = ""
         self.answer_conversational = ""
-        # Type/Status
+        # Type/State
         self.job_type              = "MockSchedulableJob"
         self.is_cache_hit          = False
-        self.status                = "pending"
+        self.state                 = JobState.PENDING
         self.error                 = None
         # Scheduling (CJ Flow)
         self.scheduled_at          = scheduled_at
         self.monopolize            = monopolize
-        self.paused                = paused
 
     def do_all( self ):
         return "done"
@@ -133,24 +133,29 @@ class TestPopNextEligible:
     def test_paused_job_skipped( self ):
         """Paused job skipped even if immediate."""
         queue = self._make_queue()
-        queue.push( MockSchedulableJob( "paused-1", paused=True ) )
+        job   = MockSchedulableJob( "paused-1" )
+        job.state = JobState.PAUSED
+        queue.push( job )
         assert queue.pop_next_eligible() is None
         assert queue.size() == 1
 
     def test_paused_timed_job_skipped( self ):
         """Paused + past scheduled_at still skipped."""
         queue = self._make_queue()
-        past = ( datetime.now() - timedelta( minutes=5 ) ).isoformat()
-        queue.push( MockSchedulableJob( "paused-timed", scheduled_at=past, paused=True ) )
+        past  = ( datetime.now() - timedelta( minutes=5 ) ).isoformat()
+        job   = MockSchedulableJob( "paused-timed", scheduled_at=past )
+        job.state = JobState.PAUSED
+        queue.push( job )
         assert queue.pop_next_eligible() is None
 
     def test_resume_makes_eligible( self ):
-        """Set paused=False, job becomes eligible."""
+        """Set state=QUEUED, job becomes eligible."""
         queue = self._make_queue()
-        job = MockSchedulableJob( "paused-1", paused=True )
+        job   = MockSchedulableJob( "paused-1" )
+        job.state = JobState.PAUSED
         queue.push( job )
         assert queue.pop_next_eligible() is None
-        job.paused = False
+        job.state = JobState.QUEUED
         result = queue.pop_next_eligible()
         assert result is job
 
@@ -198,7 +203,9 @@ class TestEarliestScheduledAt:
         queue = self._make_queue()
         early = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
         late = ( datetime.now() + timedelta( hours=3 ) ).isoformat()
-        queue.push( MockSchedulableJob( "paused-early", scheduled_at=early, paused=True ) )
+        paused_job       = MockSchedulableJob( "paused-early", scheduled_at=early )
+        paused_job.state = JobState.PAUSED
+        queue.push( paused_job )
         queue.push( MockSchedulableJob( "active-late", scheduled_at=late ) )
         result = queue.earliest_scheduled_at()
         # Should return the late time, not the paused early one

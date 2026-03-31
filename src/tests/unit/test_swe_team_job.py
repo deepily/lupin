@@ -14,6 +14,7 @@ from cosa.agents.swe_team.job import SweTeamJob
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.queue_protocol import QueueableJob
 from cosa.rest.agentic_job_factory import create_agentic_job
+from cosa.rest.job_state import JobState
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +97,7 @@ class TestJobConstruction:
 
     def test_default_attributes( self, basic_job ):
         """Default status should be 'pending', dry_run False, error None."""
-        assert basic_job.status == "pending"
+        assert basic_job.state == JobState.PENDING
         assert basic_job.dry_run is False
         assert basic_job.debug is False
         assert basic_job.error is None
@@ -187,7 +188,7 @@ class TestDryRun:
     def test_dry_run_sets_completed( self, mock_notify, dry_run_job ):
         """After dry_run do_all(), status should be 'completed'."""
         dry_run_job.do_all()
-        assert dry_run_job.status == "completed"
+        assert dry_run_job.state == JobState.COMPLETED
 
     @patch( "cosa.agents.swe_team.voice_io.notify", new_callable=AsyncMock )
     def test_dry_run_sets_cost_summary( self, mock_notify, dry_run_job ):
@@ -224,7 +225,7 @@ class TestErrorHandling:
         """When _execute() raises, status should be 'failed'."""
         with patch.object( basic_job, "_execute", new_callable=AsyncMock, side_effect=RuntimeError( "test error" ) ):
             basic_job.do_all()
-            assert basic_job.status == "failed"
+            assert basic_job.state == JobState.FAILED
 
     def test_error_stores_message( self, basic_job ):
         """When _execute() raises, error attribute should contain the message."""
@@ -279,9 +280,9 @@ class TestQueueableJobProtocol:
         assert hasattr( basic_job, "job_type" )
         assert basic_job.job_type == "swe_team"
 
-        # Status
+        # State
         assert hasattr( basic_job, "is_cache_hit" )
-        assert hasattr( basic_job, "status" )
+        assert hasattr( basic_job, "state" )
         assert hasattr( basic_job, "error" )
 
         # Methods

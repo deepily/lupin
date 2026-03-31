@@ -9,6 +9,8 @@ import pytest
 from unittest.mock import patch, MagicMock, PropertyMock
 from datetime import datetime, timezone
 
+from cosa.rest.job_state import JobState
+
 
 # ===========================================================================
 # Tests for is_agentic_job_type()
@@ -228,7 +230,7 @@ class TestEmitPersistenceDispatch:
         from cosa.rest.queue_util import emit_job_state_transition
 
         metadata = { "agent_type": "deep_research", "question_text": "test" }
-        emit_job_state_transition( None, "job-1", "pending", "todo", user_id="user_1", metadata=metadata )
+        emit_job_state_transition( None, "job-1", JobState.PENDING, JobState.QUEUED, user_id="user_1", metadata=metadata )
 
         mock_persist.assert_called_once_with( "job-1", "user_1", metadata )
 
@@ -239,7 +241,7 @@ class TestEmitPersistenceDispatch:
         from cosa.rest.queue_util import emit_job_state_transition
 
         metadata = { "agent_type": "podcast" }
-        emit_job_state_transition( None, "job-2", "todo", "run", metadata=metadata )
+        emit_job_state_transition( None, "job-2", JobState.QUEUED, JobState.RUNNING, metadata=metadata )
 
         mock_persist.assert_called_once_with( "job-2", metadata )
 
@@ -250,7 +252,7 @@ class TestEmitPersistenceDispatch:
         from cosa.rest.queue_util import emit_job_state_transition
 
         metadata = { "agent_type": "claude_code", "response_text": "Done" }
-        emit_job_state_transition( None, "job-3", "run", "done", metadata=metadata )
+        emit_job_state_transition( None, "job-3", JobState.RUNNING, JobState.COMPLETED, metadata=metadata )
 
         mock_persist.assert_called_once_with( "job-3", metadata )
 
@@ -261,7 +263,7 @@ class TestEmitPersistenceDispatch:
         from cosa.rest.queue_util import emit_job_state_transition
 
         metadata = { "agent_type": "swe_team", "error": "timeout" }
-        emit_job_state_transition( None, "job-4", "run", "dead", metadata=metadata )
+        emit_job_state_transition( None, "job-4", JobState.RUNNING, JobState.FAILED, metadata=metadata )
 
         mock_persist.assert_called_once_with( "job-4", metadata )
 
@@ -275,7 +277,7 @@ class TestEmitPersistenceDispatch:
         from cosa.rest.queue_util import emit_job_state_transition
 
         metadata = { "agent_type": "math", "question_text": "2+2" }
-        emit_job_state_transition( None, "job-5", "run", "done", metadata=metadata )
+        emit_job_state_transition( None, "job-5", JobState.RUNNING, JobState.COMPLETED, metadata=metadata )
 
         mock_created.assert_not_called()
         mock_started.assert_not_called()
@@ -290,7 +292,7 @@ class TestEmitPersistenceDispatch:
         """No metadata → is_agentic_job_type(None) returns False → no persistence calls."""
         from cosa.rest.queue_util import emit_job_state_transition
 
-        emit_job_state_transition( None, "job-6", "run", "done", metadata=None )
+        emit_job_state_transition( None, "job-6", JobState.RUNNING, JobState.COMPLETED, metadata=None )
 
         mock_created.assert_not_called()
         mock_started.assert_not_called()

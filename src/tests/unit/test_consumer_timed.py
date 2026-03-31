@@ -13,13 +13,14 @@ import time
 from datetime import datetime, timedelta
 from unittest.mock import Mock, MagicMock
 from cosa.rest.fifo_queue import FifoQueue
+from cosa.rest.job_state import JobState
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 
 
 class MockSchedulableJob:
     """Mock job with scheduling fields for consumer tests."""
 
-    def __init__( self, id_hash, scheduled_at=None, monopolize=False, paused=False ):
+    def __init__( self, id_hash, scheduled_at=None, monopolize=False ):
         self.id_hash               = id_hash
         self.push_counter          = 0
         self.user_id               = "test_user"
@@ -36,11 +37,10 @@ class MockSchedulableJob:
         self.answer_conversational = ""
         self.job_type              = "MockSchedulableJob"
         self.is_cache_hit          = False
-        self.status                = "pending"
+        self.state                 = JobState.PENDING
         self.error                 = None
         self.scheduled_at          = scheduled_at
         self.monopolize            = monopolize
-        self.paused                = paused
 
     def do_all( self ):
         return "done"
@@ -248,8 +248,8 @@ class TestConsumerTimed:
     def test_pause_while_consumer_sleeping( self ):
         """Pause a timed job that consumer is sleeping for — recalculates."""
         todo_queue = MockTodoQueue()
-        processed = []
-        thread = self._start_consumer( todo_queue, processed )
+        processed  = []
+        thread     = self._start_consumer( todo_queue, processed )
 
         scheduled = ( datetime.now() + timedelta( seconds=0.5 ) ).isoformat()
         job = MockSchedulableJob( "pause-sleep", scheduled_at=scheduled )
@@ -257,7 +257,7 @@ class TestConsumerTimed:
         time.sleep( 0.1 )
 
         # Pause the job — consumer should NOT process it even after scheduled time
-        job.paused = True
+        job.state = JobState.PAUSED
         with todo_queue.condition:
             todo_queue.condition.notify()  # Wake consumer to see paused state
         time.sleep( 0.8 )  # Well past scheduled time
@@ -270,16 +270,17 @@ class TestConsumerTimed:
     def test_resume_wakes_consumer( self ):
         """Resume a paused job — consumer wakes and processes it."""
         todo_queue = MockTodoQueue()
-        processed = []
-        thread = self._start_consumer( todo_queue, processed )
+        processed  = []
+        thread     = self._start_consumer( todo_queue, processed )
 
-        job = MockSchedulableJob( "resume-1", paused=True )
+        job       = MockSchedulableJob( "resume-1" )
+        job.state = JobState.PAUSED
         todo_queue.push_with_notify( job )
         time.sleep( 0.2 )
         assert "resume-1" not in processed  # Paused
 
         # Resume
-        job.paused = False
+        job.state = JobState.QUEUED
         with todo_queue.condition:
             todo_queue.condition.notify()
         time.sleep( 0.3 )
