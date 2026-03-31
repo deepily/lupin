@@ -1,5 +1,50 @@
 # Lupin Project History
 
+### 2026.03.30 - Session 384 | Bug Fix Expediter: Phases 2-4 Implementation + Phase 5 Planning
+
+**Goal**: Implement the three-phase forensic pipeline (diagnose → propose → fix) for the Bug Fix Expediter, then plan the trust proxy + git strategy phase.
+
+**Phase 2 — Orchestrator Diagnose Phase** (code complete):
+- Created `BFEOrchestrator` class with `run_diagnosis()` — Lead agent (Opus, read-only) SDK delegation
+- Diagnosis prompt template with iterative refinement loop (confidence threshold 0.7)
+- Voice gate for user approval/rejection with feedback-driven retry
+- Cancellation support (`_stop_requested` + `cancel_check` lambda bridge)
+- Ad hoc user message queue (SWE Team Approach D pattern)
+- ResultMessage + ToolUseBlock progress forwarding during SDK execution
+- 37 new unit tests across 9 categories
+
+**Phase 3 — Propose Phase + Plan Artifacts** (code complete):
+- Added `run_proposal()` — Lead agent generates 1-3 fix proposals
+- Proposal prompt with diagnosis context + dead job forensics
+- `PlanWriter` class writes structured markdown to `io/swe-team/plans/{email}/`
+- Auto-select for single high-confidence (≥80%) fixes
+- Multi-fix voice gate via `present_choices()` with rejection feedback retry
+- 35 new unit tests across 8 categories
+
+**Phase 4 — Fix Phase: Coder + Tester** (code complete):
+- Added `run_fix()` — Coder (Sonnet, `acceptEdits`) applies fix, Tester validates
+- Reuses SWE Team `SafetyGuard`, `build_can_use_tool`, `post_tool_hook`, `run_pytest` directly
+- Coder-tester retry loop (max `max_fix_attempts` iterations) with escalation at cap
+- Independent `run_pytest()` overrides tester self-report
+- `PlanWriter.update_implementation_log()` updates plan with fix results
+- 25 new unit tests across 7 categories
+
+**Phase 5 — Trust Proxy + Git Strategy** (planned, not implemented):
+- Detailed implementation plan serialized to `src/rnd/`
+- Reuses SWE Team `EngineeringStrategy` — L1-L2: commit on branch, L3+: fix branch + PR
+- `git_ops.py` module designed for async subprocess-based git operations
+- Plan ready for morning implementation session
+
+**Files Created (10)**: `orchestrator.py`, `prompts/__init__.py`, `prompts/diagnosis.py`, `prompts/proposal.py`, `prompts/fix.py`, `plan_writer.py`, `test_bfe_orchestrator.py`, `test_bfe_proposal.py`, `test_bfe_fix.py`, Phase 5 plan doc
+
+**Files Modified (8)**: `config.py` (+2 fields), `job.py` (full pipeline wiring), `__init__.py` (exports), `lupin-app.ini` (+2 keys), `lupin-app-splainer.ini` (+2 keys), `state.py` (referenced), `00-index.md` (plan index), `rnd/README.md`
+
+**Plan Docs Serialized (4)**: `03-phase2-diagnose-orchestrator-plan.md`, `04-phase3-propose-plan-artifacts.md`, `05-phase4-fix-coder-tester-plan.md`, `06-phase5-trust-proxy-git-strategy-plan.md`
+
+**Unit Tests**: 2602 passed, 0 failures (was 2461 at session start, +141 new BFE tests — 97 from this session + 44 from parallel Session 383)
+
+---
+
 ### 2026.03.30 - Session 383b | Bug Fixes + SDK Upgrade Planning
 
 **Goal**: Fix UI layout width constraint and SentenceTransformer Hub startup issue. Plan claude-agent-sdk upgrade from 0.1.36 to 0.1.52.

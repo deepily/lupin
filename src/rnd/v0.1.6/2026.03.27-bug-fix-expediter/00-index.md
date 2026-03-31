@@ -16,7 +16,8 @@
 | [02-agentic-job-consistency-audit.md](02-agentic-job-consistency-audit.md) | Phase 0 audit findings and remediation spec | Complete |
 | [03-phase2-diagnose-orchestrator-plan.md](03-phase2-diagnose-orchestrator-plan.md) | Phase 2 detailed implementation plan — orchestrator, prompts, SDK delegation, voice gate, cancellation, unit tests | Complete |
 | [04-phase3-propose-plan-artifacts.md](04-phase3-propose-plan-artifacts.md) | Phase 3 detailed implementation plan — proposal prompts, plan writer, fix selection, voice gate | Complete |
-| [05-phase4-fix-coder-tester-plan.md](05-phase4-fix-coder-tester-plan.md) | Phase 4 detailed implementation plan — coder/tester delegation, retry loop, safety hooks, plan update | Active |
+| [05-phase4-fix-coder-tester-plan.md](05-phase4-fix-coder-tester-plan.md) | Phase 4 detailed implementation plan — coder/tester delegation, retry loop, safety hooks, plan update | Complete |
+| [06-phase5-trust-proxy-git-strategy-plan.md](06-phase5-trust-proxy-git-strategy-plan.md) | Phase 5 detailed implementation plan — trust proxy init, git operations, commit/branch/PR strategy | Active |
 
 ## Context
 
