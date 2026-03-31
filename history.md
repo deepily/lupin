@@ -1,5 +1,36 @@
 # Lupin Project History
 
+### 2026.03.31 - Session 385 | CJ Flow: Unified Job State Machine
+
+**Goal**: Replace the inconsistent mix of `status` strings, queue names, and `paused` boolean with a single `JobState` enum as the authoritative source of truth for job lifecycle state.
+
+**Result**: All 6 phases implemented across ~38 files. Clean cut — no backward compatibility shims.
+
+**Phase 1 — JobState Enum**: New `src/cosa/rest/job_state.py` — 9-state `JobState(str, Enum)`, frozen transition matrix, `validate_transition()`/`assert_valid_transition()`, convenience sets (TERMINAL, PRE_EXECUTION, ACTIVE), `STATE_TO_UI_CONTAINER` mapping. 53 unit tests.
+
+**Phase 2 — Protocol + Base Classes**: `queue_protocol.py` (`status: str` → `state: JobState`, removed `paused: bool`), `agentic_job_base.py` (removed `paused` constructor param), `agent_base.py`, `solution_snapshot.py`, + 9 agent job subclasses updated.
+
+**Phase 3 — Queue Infrastructure**: `emit_job_state_transition()` renamed `from_queue`/`to_queue` → `from_state`/`to_state` with transition validation. Updated `queue_util.py`, `job_persistence.py`, `fifo_queue.py`, `queue_consumer.py`, `running_fifo_queue.py`, `todo_fifo_queue.py`, `routers/queues.py`. Pause/resume endpoints emit `job_state_transition` instead of `job_paused`/`job_resumed`.
+
+**Phase 4 — Frontend**: Added `stateToContainer()` mapping in `notifications.js`, updated `handleJobStateTransition()` to extract `from_state`/`to_state`, removed separate `job_paused`/`job_resumed` event handlers.
+
+**Phase 5 — Tests**: 14 test files updated. Fixed 2 missed assertions (`test_presentation_generator_job`, `test_swe_team_job`). Fixed `mock_job.py` constructor passing removed `paused` param.
+
+**Phase 6 — PostgreSQL + Docs**: SQL migration script with CHECK constraint, `00-index.md` updated.
+
+**Pre-Merge Test Results**:
+- Unit: 2647 passed (6 pre-existing timeouts)
+- WebSocket smoke: 50/50
+- E2E pause/schedule: 14/14 (was 0/14 before mock_job fix)
+- Integration: 196 passed (final gate)
+
+**Files Created (2)**: `job_state.py`, `test_job_state.py`, `migrate-job-state-enum.sql`
+**Files Modified (~35)**: Protocol, base classes, 9 agent jobs, 7 queue infra, frontend JS, 14 test files, R&D docs
+**Commits**: `4cfe0a5` (Lupin-side), CoSA changes pending separate commit
+**Plan Doc**: `src/rnd/v0.1.6/2026.03.30-cj-flow/2026.03.30-unified-job-state-machine.md`
+
+---
+
 ### 2026.03.31 - PEFT Training Data Regeneration for Presentation Generator Voice Routing
 
 **Goal**: Regenerate PEFT training data to include two new voice commands added in Session 383: `presentation generator` (standalone) and `research to presentation` (chained DR→PG).
