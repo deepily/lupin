@@ -43,27 +43,30 @@
 
 ---
 
-### 2026.04.01 - Session 388 | Presentation Generator Phase 9A: MatplotlibRenderer
+### 2026.04.01 - Session 388 | Presentation Generator Phase 9A + 10A: MatplotlibRenderer + NanoBananaRenderer
 
-**Goal**: Implement LLM-backed chart renderer for the Presentation Generator visual pipeline — slides with `visual_type: chart/plot/graph/data_viz` now generate real PNG charts instead of `[TODO: chart]` placeholders.
+**Goal**: Implement two visual renderers — MatplotlibRenderer for data charts (Phase 9A) and NanoBananaRenderer for AI-generated images (Phase 10A).
 
-**MatplotlibRenderer Implementation**: New renderer class (`renderers/matplotlib_renderer.py`) following MermaidRenderer pattern. Claude API generates Python plotting code from slide `visual_description`, code is extracted via regex, `plt.savefig()` injected, executed in sandboxed subprocess (30s timeout), PNG verified, returns Marp-compatible `![title](visuals/chart-NNN.png)` markdown reference. `SUPPORTED_TYPES = ["chart", "plot", "graph", "data_viz"]`.
+**MatplotlibRenderer (Phase 9A)**: New renderer (`renderers/matplotlib_renderer.py`). Claude API generates Python plotting code from slide `visual_description`, code extracted via regex, `plt.savefig()` injected, executed in sandboxed subprocess (30s timeout), PNG verified, returns `![title](visuals/chart-NNN.png)`. `SUPPORTED_TYPES = ["chart", "plot", "graph", "data_viz"]`. MermaidRenderer "chart" → "diagram" only (types disentangled).
 
-**Prompt Module**: New `prompts/matplotlib.py` — system prompt encouraging seaborn `whitegrid` styling, chart type keyword hints (bar/line/scatter/pie/heatmap/histogram/box/radar), prompt builder with chart type suggestion. 3-part structure matching Mermaid prompts.
+**NanoBananaRenderer (Phase 10A)**: New renderer (`renderers/nano_banana.py`). Calls Google Imagen 3 (Nano Banana 2) via `google-genai` SDK native async (`client.aio.models.generate_images()`). Generates hero images, infographics, title backgrounds, icons. `SUPPORTED_TYPES = ["hero_image", "infographic", "title_background", "icon"]`. Style-aware prompts with no-text directives for non-infographic types.
 
-**API Client Extension**: `call_for_matplotlib()` on `PresentationAPIClient` — higher `max_tokens` (4096 vs 2048) for code, lower `temperature` (0.2 vs 0.3) for determinism.
+**GeminiImageClient**: Shared client (`gemini_client.py`) for Gemini image APIs. Lazy init with `cu.get_api_key("gemini")`, cost tracking ($0.067/image at 1K), configurable budget limit ($1.00 default), RAI safety filtering. Try/except in orchestrator for graceful degradation if key missing.
 
-**Type Disentangling**: MermaidRenderer `SUPPORTED_TYPES` changed from `["diagram", "chart"]` → `["diagram"]` only. Data charts now handled by MatplotlibRenderer. Non-overlapping types.
+**Prompt Modules**: `prompts/matplotlib.py` (seaborn styling, chart type hints) + `prompts/image_gen.py` (style modifiers per visual type, 16:9 composition hints).
 
-**Orchestrator Integration**: `_build_visual_registry()` registers both Mermaid + Matplotlib. `_render_visuals_async()` creates `visuals/` directory before rendering, passes `output_dir` and `slide_index` to all renderers via kwargs.
+**API Client Extension**: `call_for_matplotlib()` — `max_tokens=4096`, `temperature=0.2`.
 
-**Dependencies**: `seaborn==0.13.2` installed, pinned in `requirements.txt` and Dockerfile (late layer to preserve cache).
+**Dependencies**: `seaborn==0.13.2` installed + pinned in requirements.txt and Dockerfile.
 
-**Test Results**: 30 new tests (6 classes), 43 existing renderer tests updated (3 fixed for chart→diagram move), all passing. 1 pre-existing failure (stale agent count from Session 386).
+**INI Config**: 3 new keys for NanoBanana (aspect ratio, model, budget) with splainer explanations.
 
-**Files Created (4)**: `renderers/matplotlib_renderer.py`, `prompts/matplotlib.py`, `test_presentation_matplotlib_renderer.py`, plan doc
-**Files Modified (6)**: `api_client.py` (+30), `mermaid.py` (SUPPORTED_TYPES), `orchestrator.py` (+15), `renderers/__init__.py` (+2), `requirements.txt` (+1), `Dockerfile` (+7)
-**Plan Doc**: `src/rnd/v0.1.6/2026.03.14-presentation-generator/renderers/2026.04.01-matplotlib-renderer-implementation.md`
+**Test Results**: 57 new tests (30 MatplotlibRenderer + 27 NanoBananaRenderer), 43 existing tests updated, all passing.
+
+**Files Created (7)**: `matplotlib_renderer.py`, `nano_banana.py`, `gemini_client.py`, `prompts/matplotlib.py`, `prompts/image_gen.py`, 2 test files, 2 plan docs
+**Files Modified (8)**: `api_client.py`, `mermaid.py`, `orchestrator.py`, `renderers/__init__.py`, `requirements.txt`, `Dockerfile`, `lupin-app.ini` (+3), `lupin-app-splainer.ini` (+3)
+**Commits**: `6f2d2d8` (MatplotlibRenderer), `66c5b85` (NanoBananaRenderer)
+**Plan Docs**: `src/rnd/v0.1.6/2026.03.14-presentation-generator/renderers/2026.04.01-matplotlib-renderer-implementation.md`, `src/rnd/v0.1.6/2026.03.14-presentation-generator/renderers/2026.04.01-nano-banana-renderer-implementation.md`
 
 ---
 
