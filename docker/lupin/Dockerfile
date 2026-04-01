@@ -138,6 +138,16 @@ RUN pip install --no-cache-dir pydub==0.25.1
 RUN pip install --no-cache-dir seaborn==0.13.2
 
 # ============================================================================
+# D2 DIAGRAMMING CLI (Phase 9B, v0.1.6)
+# ============================================================================
+# D2 is a modern diagramming language compiled to SVG. Used by D2Renderer
+# for flowchart_d2 and architecture visual types in presentation generation.
+# Installed via official installer; binary lands in /root/.local/bin/d2.
+# Placed late in Dockerfile to avoid invalidating earlier cached layers.
+RUN curl -fsSL https://d2lang.com/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+
+# ============================================================================
 # RUNTIME CONFIGURATION (Can be overridden via docker run -e or Cloud Run)
 # ============================================================================
 # This Docker image is multi-environment capable. The ENV values below are

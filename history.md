@@ -1,5 +1,30 @@
 # Lupin Project History
 
+### 2026.04.01 - Session 388b | Presentation Generator Phase 9B: D2Renderer
+
+#### Checkpoint | 2026.04.01 11:00 | D2Renderer implementation complete
+
+**Goal**: Implement D2 diagramming renderer for the Presentation Generator visual pipeline — slides with `visual_type: flowchart_d2/architecture` now generate SVG diagrams via D2 CLI instead of `[TODO]` placeholders.
+
+**D2Renderer Implementation**: New renderer class (`renderers/d2_renderer.py`) following MermaidRenderer pattern. Claude API generates D2 syntax from slide `visual_description`, code extracted via regex, rendered to SVG via `d2` CLI in async subprocess (30s timeout), returns `![title](visuals/diagram-NNN.svg)` markdown reference. Lazy CLI detection cached after first call. `SUPPORTED_TYPES = ["flowchart_d2", "architecture"]`.
+
+**Prompt Module**: New `prompts/d2.py` — system prompt with D2 syntax rules (containers, arrows, node naming), pattern hint mapping (architecture→containers, flow→sequential, sequence→sequence_diagram), prompt builder. 3-part structure matching Mermaid/Matplotlib prompts.
+
+**API Client Extension**: `call_for_d2()` on `PresentationAPIClient` — same params as Mermaid (`max_tokens=2048`, `temperature=0.3`).
+
+**Orchestrator Integration**: `_build_visual_registry()` registers D2Renderer alongside Mermaid + Matplotlib. `output_dir`/`slide_index` kwargs already present from parallel MatplotlibRenderer session — zero merge conflicts.
+
+**Dependencies**: d2 CLI v0.7.1 installed locally. Dockerfile updated with `curl -fsSL https://d2lang.com/install.sh | sh` (late layer, after seaborn).
+
+**Test Results**: 25 new tests (6 classes), 43 existing renderer tests still pass, full unit suite 2742/2745 (3 pre-existing failures unrelated).
+
+**Files Created (3)**: `renderers/d2_renderer.py`, `prompts/d2.py`, `test_presentation_d2_renderer.py`
+**Files Modified (4)**: `api_client.py` (+30), `orchestrator.py` (+3), `renderers/__init__.py` (+2), `Dockerfile` (+8)
+**Plan Doc**: `src/rnd/v0.1.6/2026.03.14-presentation-generator/renderers/2026.04.01-d2-renderer-implementation.md`
+**Commit**: 7d3a949
+
+---
+
 ### 2026.04.01 - Session 388 | Presentation Generator Phase 9A: MatplotlibRenderer
 
 **Goal**: Implement LLM-backed chart renderer for the Presentation Generator visual pipeline — slides with `visual_type: chart/plot/graph/data_viz` now generate real PNG charts instead of `[TODO: chart]` placeholders.
