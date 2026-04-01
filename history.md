@@ -1,6 +1,24 @@
 # Lupin Project History
 
-### 2026.04.01 - Session 388b | Presentation Generator Phase 9B: D2Renderer
+### 2026.04.01 - Session 388b | Presentation Generator Phase 9B + 10B: D2Renderer + VeoRenderer
+
+#### Checkpoint | 2026.04.01 12:15 | VeoRenderer implementation complete
+
+**Goal**: Implement Veo video renderer (Phase 10B) for the Presentation Generator visual pipeline — slides with `visual_type: title_video/flow_animation/process_video` now generate MP4 video + PNG still frame via Google Veo 2 API.
+
+**VeoRenderer**: New renderer class (`renderers/veo_renderer.py`). Dual-format output: `<video autoplay muted loop>` with `<img>` fallback for PDF/PPTX. Lazy ffmpeg detection (same pattern as D2Renderer). Per-deck video limit (`max_videos=5`). `SUPPORTED_TYPES = ["title_video", "flow_animation", "process_video"]`.
+
+**GeminiImageClient Extension**: `generate_video()` method with Veo 2 async polling pattern (120s timeout, 10s intervals). Video cost tracking ($0.20/sec) with separate `video_budget_limit` ($5.00 default). Shares API key + client instance with NanoBananaRenderer.
+
+**Config-Driven Model Selection**: `PresentationConfig.veo_model` loaded from `lupin-app.ini` key `presentation generator veo model`. Default `veo-2.0-generate-001`, switchable to `veo-3.0-generate-001` (with audio) per environment.
+
+**VISUAL_TYPES Expansion**: Outline prompt `VISUAL_TYPES` list expanded from 8 → 17, adding all Phase 9B/10A/10B visual types. System prompt table updated with usage guidance for all 17 types.
+
+**Files Created (3)**: `renderers/veo_renderer.py`, `prompts/video_gen.py`, `test_presentation_veo_renderer.py`
+**Files Modified (7)**: `config.py` (+3), `gemini_client.py` (+80), `orchestrator.py` (+15), `renderers/__init__.py` (+2), `prompts/outline.py` (+12), `lupin-app.ini` (+1), `lupin-app-splainer.ini` (+1)
+**Test Results**: 26 new tests, 407 total presentation tests passing, zero regressions
+**Plan Doc**: `src/rnd/v0.1.6/2026.03.14-presentation-generator/renderers/2026.04.01-veo-renderer-implementation.md`
+**Commit**: baf797f
 
 #### Checkpoint | 2026.04.01 11:00 | D2Renderer implementation complete
 

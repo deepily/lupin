@@ -271,7 +271,7 @@ class TestOutlineConstants:
     """Tests for module-level constants."""
 
     def test_visual_types_count( self ):
-        assert len( VISUAL_TYPES ) == 8
+        assert len( VISUAL_TYPES ) == 17
 
     def test_slide_types_count( self ):
         assert len( SLIDE_TYPES ) == 9
