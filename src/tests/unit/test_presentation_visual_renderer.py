@@ -118,7 +118,8 @@ class TestVisualRendererRegistry:
         registry.register( mermaid )
 
         assert registry.get( "diagram" ) is mermaid
-        assert registry.get( "chart" ) is mermaid
+        # "chart" moved to MatplotlibRenderer — falls back to placeholder here
+        assert registry.get( "chart" ) is fallback
 
     def test_registry_get_unregistered_type( self ):
         fallback = PlaceholderRenderer()
@@ -133,9 +134,9 @@ class TestVisualRendererRegistry:
         mermaid  = MermaidRenderer()
         registry.register( mermaid )
 
-        # MermaidRenderer registers both "diagram" and "chart"
+        # MermaidRenderer registers "diagram" only (chart moved to MatplotlibRenderer)
         assert "diagram" in registry.registered_types
-        assert "chart" in registry.registered_types
+        assert "chart" not in registry.registered_types
 
     def test_registry_registered_types_list( self ):
         fallback = PlaceholderRenderer()
@@ -144,7 +145,7 @@ class TestVisualRendererRegistry:
 
         mermaid = MermaidRenderer()
         registry.register( mermaid )
-        assert len( registry.registered_types ) == 2
+        assert len( registry.registered_types ) == 1  # "diagram" only
 
     def test_registry_fallback_is_never_none( self ):
         fallback = PlaceholderRenderer()

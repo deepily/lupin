@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-03-31 (Session 386)
+Last updated: 2026-04-01 (Session 388)
 
 ## Pending
 
@@ -8,7 +8,8 @@ Last updated: 2026-03-31 (Session 386)
 
 - [ ] [LUPIN] **Bug Fix Expediter — Phase 5: Trust Proxy + Git Strategy**. Phases 2-4 complete (Session 384: 97 new tests, 2602 total). Next: trust proxy init, git_ops.py, run_git_strategy(), voice gate proxy gating. Plan doc: `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/06-phase5-trust-proxy-git-strategy-plan.md`. **Execute first thing next session**.
 - [ ] [LUPIN] **Claude Agent SDK Upgrade 0.1.36 → 0.1.52** — 16 patches behind. Stability upgrade: RateLimitEvent handling (9 streaming loops in 3 files), version pins (requirements.txt + Dockerfile). No feature adoption. Analysis: `src/rnd/v0.1.6/2026.03.30-claude-agent-sdk-upgrade-0.1.36-to-0.1.52.md`. Plan: `src/rnd/v0.1.6/2026.03.30-claude-agent-sdk-upgrade-plan.md`
-- [ ] [LUPIN] **Presentation Generator Visual Rendering Expansion — Phase 9A: MatplotlibRenderer**. Review `01-matplotlib-renderer-plan.md` first, then implement. Plan docs: `src/rnd/v0.1.6/2026.03.14-presentation-generator/renderers/`.
+- [x] [LUPIN] **Presentation Generator Visual Rendering Expansion — Phase 9A: MatplotlibRenderer** — Session 388: 30 new tests, all passing. MatplotlibRenderer + prompts + API client + orchestrator integration + seaborn dep. Plan doc: `src/rnd/v0.1.6/2026.03.14-presentation-generator/renderers/2026.04.01-matplotlib-renderer-implementation.md`
+- [ ] [LUPIN] **Presentation Generator Visual Rendering Expansion — Phase 9B+: Remaining Renderers**. Nano Banana (images), Veo (video), theme integration. Plan docs: `src/rnd/v0.1.6/2026.03.14-presentation-generator/renderers/`.
 - [x] [LUPIN] ~~**Archive history.md — CRITICAL**~~ — Resolved: was 19.5k after Session 373b, now 10.4k (41.5%) after Session 375 archival
 - [ ] [LUPIN] Presentation Generator Phase D verification: Live E2E with real Claude API calls + voice gate interaction. 17-step browser manual checklist serialized. E2E suite healthy (Session 377: 297/0). **Resume 2026-03-28**. Checklist: `src/rnd/2026.03.27-presentation-generator-phase-d-verification-checklist.md`. Plan docs: `src/rnd/2026.03.14-presentation-generator/07-phase-c-d-verification-plan.md`, `src/rnd/2026.03.26-presentation-generator-phase-d-manual-verification.md`
 - [x] [LUPIN] **CJ Flow Phase 5: Notifications UI + WebSocket Integration** — Session 382: 6 code steps + Phase 6 docs complete, 14/14 E2E Playwright tests pass, 2372 unit tests (0 regressions). Plan doc: `src/rnd/2026.03.28-cj-flow-phase-5-notifications-ui.md`

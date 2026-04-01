@@ -130,6 +130,14 @@ RUN pip install --no-cache-dir fastmcp==2.14.2
 RUN pip install --no-cache-dir pydub==0.25.1
 
 # ============================================================================
+# VISUAL RENDERING DEPENDENCIES (Phase 9A, v0.1.6)
+# ============================================================================
+# Matplotlib is already installed as a transitive dep. Pin seaborn explicitly
+# for presentation generator chart rendering (MatplotlibRenderer).
+# Placed late in Dockerfile to avoid invalidating earlier cached layers.
+RUN pip install --no-cache-dir seaborn==0.13.2
+
+# ============================================================================
 # RUNTIME CONFIGURATION (Can be overridden via docker run -e or Cloud Run)
 # ============================================================================
 # This Docker image is multi-environment capable. The ENV values below are
