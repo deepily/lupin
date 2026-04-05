@@ -214,7 +214,7 @@ class NotificationRequest(BaseModel):
 
     sender_id: Optional[str] = Field(
         default=None,
-        pattern=r'^[a-z]+(\.[a-z]+)+@[a-z]+\.deepily\.ai(#([a-f0-9]{8}|[a-z]+(-[a-z]+)*|[a-z]+-[a-f0-9]{8}))?$',
+        pattern=r'^[a-z]+(\.[a-z]+)+@[a-z][a-z0-9]*(-[a-z0-9]+)*\.deepily\.ai(#([a-f0-9]{8}|[a-z]+(-[a-z]+)*|[a-z]+-[a-f0-9]{8}))?$',
         description="Sender ID (e.g., claude.code@lupin.deepily.ai#a1b2c3d4, claude.code.job@lupin.deepily.ai#cc-a0ebba60). Supports 2+ word agent names, hex suffix, hyphenated topic, or job ID (prefix-hex)."
     )
 
@@ -629,7 +629,7 @@ class AsyncNotificationRequest(BaseModel):
 
     sender_id: Optional[str] = Field(
         default=None,
-        pattern=r'^[a-z]+(\.[a-z]+)+@[a-z]+\.deepily\.ai(#([a-f0-9]{8}|[a-z]+(-[a-z]+)*|[a-z]+-[a-f0-9]{8}))?$',
+        pattern=r'^[a-z]+(\.[a-z]+)+@[a-z][a-z0-9]*(-[a-z0-9]+)*\.deepily\.ai(#([a-f0-9]{8}|[a-z]+(-[a-z]+)*|[a-z]+-[a-f0-9]{8}))?$',
         description="Sender ID (e.g., claude.code@lupin.deepily.ai#a1b2c3d4, claude.code.job@lupin.deepily.ai#cc-a0ebba60). Supports 2+ word agent names, hex suffix, hyphenated topic, or job ID (prefix-hex)."
     )
 

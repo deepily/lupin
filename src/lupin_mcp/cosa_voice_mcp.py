@@ -34,6 +34,7 @@ Installation (global — one registration for all repos):
 
 import logging
 import os
+import re
 import requests
 import signal
 import sys
@@ -169,11 +170,59 @@ def _get_project() -> str:
     return fallback
 
 
+def _resolve_canonical_project( detected: str ) -> str:
+    """
+    Resolve canonical project identifier from ~/.lupin/config.
+
+    The cwd-detected project name (e.g., "ampe-to-meridian") may differ from
+    the canonical identity used in the user's Lupin account email. For example,
+    the user's config may map [ampe-to-meridian] -> claude.code@ampe2meridian.deepily.ai,
+    and THAT canonical identifier ("ampe2meridian") is what should be used for
+    sender_id construction — not the raw cwd basename.
+
+    The config file is the source of truth: if a matching section exists and
+    contains a parseable email, extract the identifier from between '@' and
+    '.deepily.ai'. Otherwise, return the detected name unchanged.
+
+    Requires:
+        - detected is a non-empty string (project name from cwd detection)
+
+    Ensures:
+        - Returns canonical project identifier from ~/.lupin/config if mapped
+        - Returns detected name unchanged if no config section or unparseable email
+        - Never raises — all lookups are best-effort
+
+    Args:
+        detected: Project name detected from cwd
+
+    Returns:
+        str: Canonical project identifier for sender_id construction
+    """
+    try:
+        from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
+        email, _ = get_hook_credentials( detected )
+        # Parse: {agent}@{identifier}.deepily.ai -> identifier
+        match = re.match( r"^[a-z]+(?:\.[a-z]+)+@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\.deepily\.ai$", email )
+        if match:
+            canonical = match.group( 1 )
+            if canonical != detected:
+                logger.info( f"Canonical project identity from config: {detected} -> {canonical}" )
+            return canonical
+        logger.warning( f"Config email for [{detected}] does not match expected format: {email}" )
+    except ( FileNotFoundError, ValueError ) as e:
+        logger.debug( f"No canonical project mapping for '{detected}' in ~/.lupin/config ({e.__class__.__name__})" )
+    except Exception as e:
+        logger.warning( f"Unexpected error resolving canonical project for '{detected}': {e}" )
+    return detected
+
+
 def _get_sender_id( project: str, session_id: str = None ) -> str:
     """
     Generate sender_id with optional session identifier.
 
-    Delegates to the shared build_sender_id() utility.
+    Delegates to the shared build_sender_id() utility. The caller is expected
+    to pass the CANONICAL project identifier (from _resolve_canonical_project),
+    not the raw cwd-detected name.
 
     Examples:
         _get_sender_id( "lupin" ) -> "claude.code@lupin.deepily.ai"
@@ -306,24 +355,26 @@ signal.signal( signal.SIGTERM, _handle_sigterm )
 # Initialize at module load
 # ============================================================================
 
-PROJECT         = _get_project()
-SESSION_ID      = get_claude_session_id()[:8]  # 8-char hex from session bridge (env > file > fallback)
-SENDER_ID       = _get_sender_id( PROJECT, SESSION_ID )
-SERVER_URL      = _get_server_url()
-_session_ready  = threading.Event()   # Gate: blocks tool calls until session ID resolved
-_session_failed = False               # True if real ID never arrived (fallback only)
+PROJECT           = _get_project()
+CANONICAL_PROJECT = _resolve_canonical_project( PROJECT )  # Config-mapped identity for sender_id
+SESSION_ID        = get_claude_session_id()[:8]  # 8-char hex from session bridge (env > file > fallback)
+SENDER_ID         = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
+SERVER_URL        = _get_server_url()
+_session_ready    = threading.Event()   # Gate: blocks tool calls until session ID resolved
+_session_failed   = False               # True if real ID never arrived (fallback only)
 
 # Validate repo service account (non-blocking — logs + notifies on failure)
 _validate_repo_account( PROJECT )
 
 # ── Startup banner (consolidated status to stderr) ──────────────────────
 _account_status = "validated" if _ACCOUNT_VALIDATED else "FAILED" if _ACCOUNT_VALIDATED is False else "skipped"
+_project_line   = f"  Project : {PROJECT} ({_PROJECT_SOURCE})" if PROJECT == CANONICAL_PROJECT else f"  Project : {PROJECT} ({_PROJECT_SOURCE}) -> {CANONICAL_PROJECT} (config)"
 _banner_lines   = [
     "",
     "=" * 42,
     f"  cosa-voice MCP v{__version__} — Runtime",
     "=" * 42,
-    f"  Project : {PROJECT} ({_PROJECT_SOURCE})",
+    _project_line,
     f"  Session : {SESSION_ID}",
     f"  Sender  : {SENDER_ID}",
     f"  Server  : {SERVER_URL}",
@@ -362,7 +413,7 @@ def _session_watcher_thread():
         if new_suffix != SESSION_ID:
             old_sender = SENDER_ID
             SESSION_ID = new_suffix
-            SENDER_ID  = _get_sender_id( PROJECT, SESSION_ID )
+            SENDER_ID  = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
             logger.info( f"Session ID upgraded: {old_sender} -> {SENDER_ID}" )
 
         # Verify we got a real session ID, not the fallback
@@ -421,7 +472,7 @@ def _session_watcher_thread():
             if new_suffix != last_session_id:
                 old_sender     = SENDER_ID
                 SESSION_ID     = new_suffix
-                SENDER_ID      = _get_sender_id( PROJECT, SESSION_ID )
+                SENDER_ID      = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
                 last_session_id = new_suffix
                 logger.info(
                     f"Session ID changed: {old_sender} -> {SENDER_ID} "
