@@ -1,10 +1,10 @@
 # TODO
 
-Last updated: 2026-04-01 (Session 388)
+Last updated: 2026-04-05 (Session 389)
 
 ## Pending
 
-- [ ] [LUPIN] **Run PEFT trainer** — Training data needs regeneration (Session 386 added `test_suite` agent: 65 utterance templates + config JSON entry). Run `./src/scripts/run-agentic-intent-training.sh generate` then `full` to retrain.
+- [ ] [LUPIN] **Run PEFT trainer — training data REGENERATED & ready (USER-RUN GPU)**. Session 389 expanded training data for complete argument coverage across 5 content-gen agents: presentation_generator (5 placeholders + renderer/duration/audience/audience_context), research_to_presentation, podcast_generator, research_to_podcast, deep_research. Also added monopolize conditional_args for test_suite, target_languages multi-value conditional (es-MX/es-ES/es-AR + en/fr/de) for podcast agents. Fixed multi-placeholder expansion bug in xml_coordinator.py. 35,564 train + 4,446 test + 4,446 validate examples generated; all JSONL files validated. **When GPU free, USER runs**: `./src/scripts/run-agentic-intent-training.sh test` (1% sanity, 5-10 min) then `full` (~3-4 hrs). Plan: `src/cosa/agents/presentation_generator/rnd/2026.04.05-voice-routing-training-data-complete-coverage.md`.
 
 - [ ] [LUPIN] **Bug Fix Expediter — Phase 5: Trust Proxy + Git Strategy**. Phases 2-4 complete (Session 384: 97 new tests, 2602 total). Next: trust proxy init, git_ops.py, run_git_strategy(), voice gate proxy gating. Plan doc: `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/06-phase5-trust-proxy-git-strategy-plan.md`. **Execute first thing next session**.
 - [ ] [LUPIN] **Claude Agent SDK Upgrade 0.1.36 → 0.1.52** — 16 patches behind. Stability upgrade: RateLimitEvent handling (9 streaming loops in 3 files), version pins (requirements.txt + Dockerfile). No feature adoption. Analysis: `src/rnd/v0.1.6/2026.03.30-claude-agent-sdk-upgrade-0.1.36-to-0.1.52.md`. Plan: `src/rnd/v0.1.6/2026.03.30-claude-agent-sdk-upgrade-plan.md`

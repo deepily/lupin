@@ -64,3 +64,22 @@ queue up the test suite
 run tests in exclusive mode
 run the test suite in monopolize mode
 run tests with exclusive access
+run the test suite with exclusive access
+run the tests in exclusive mode
+run integration tests in exclusive mode
+run e2e tests in monopolize mode
+run the full test suite in exclusive mode
+kick off the tests in monopolize mode
+run the test suite when idle
+schedule tests for when the system is idle
+run tests overnight with exclusive access
+run the test suite overnight
+run e2e tests overnight
+run integration tests with exclusive access
+schedule tests in exclusive mode for tonight
+run tests with monopolize flag
+execute the test suite in exclusive mode
+run everything in monopolize mode
+kick off tests with exclusive access tonight
+run integration tests exclusive
+lets run the test suite in exclusive mode

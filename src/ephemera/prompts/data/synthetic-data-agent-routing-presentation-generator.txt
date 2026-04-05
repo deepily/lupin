@@ -1,3 +1,4 @@
+# ── Tier A: Core utterances (DOCUMENT_PATH only) ─────────────────────────────
 make a presentation from DOCUMENT_PATH
 create slides from DOCUMENT_PATH
 turn DOCUMENT_PATH into a slide deck
@@ -48,18 +49,160 @@ I need slides from DOCUMENT_PATH
 please create a presentation from DOCUMENT_PATH
 make a deck from DOCUMENT_PATH
 create slides from the document DOCUMENT_PATH
-turn this document into a presentation
-convert the document to slides
-make a presentation from this document
-create a slide deck from the research
-turn the research into slides
-make slides from this report
-create a presentation from the analysis
-generate slides from this document
-convert this report into a presentation
-turn the findings into a slide deck
-make a presentation from the report
-create slides from the research document
-turn the analysis into presentation slides
-generate a slide deck from the document
-make me a presentation from this file
+
+# ── Tier B: Duration variants (DOCUMENT_PATH + DURATION_MINUTES) ─────────────
+make a DURATION_MINUTES minute presentation from DOCUMENT_PATH
+create a DURATION_MINUTES minute slide deck from DOCUMENT_PATH
+turn DOCUMENT_PATH into a DURATION_MINUTES minute presentation
+I need a DURATION_MINUTES minute presentation from DOCUMENT_PATH
+build a DURATION_MINUTES minute slide deck from DOCUMENT_PATH
+generate a DURATION_MINUTES minute deck from DOCUMENT_PATH
+create a DURATION_MINUTES minute presentation based on DOCUMENT_PATH
+make a DURATION_MINUTES minute slide deck out of DOCUMENT_PATH
+please make a DURATION_MINUTES minute presentation from DOCUMENT_PATH
+turn DOCUMENT_PATH into a DURATION_MINUTES minute slide deck
+can you build a DURATION_MINUTES minute presentation from DOCUMENT_PATH
+I'd like a DURATION_MINUTES minute deck from DOCUMENT_PATH
+generate a DURATION_MINUTES minute slide deck using DOCUMENT_PATH
+make me a DURATION_MINUTES minute presentation from DOCUMENT_PATH
+convert DOCUMENT_PATH into a DURATION_MINUTES minute presentation
+create a DURATION_MINUTES minute deck from the document at DOCUMENT_PATH
+build a DURATION_MINUTES minute presentation from DOCUMENT_PATH
+turn the document at DOCUMENT_PATH into a DURATION_MINUTES minute slide deck
+make a DURATION_MINUTES min presentation from DOCUMENT_PATH
+create a DURATION_MINUTES min slide deck from DOCUMENT_PATH
+generate a DURATION_MINUTES minute talk from DOCUMENT_PATH
+I need a DURATION_MINUTES minute talk using DOCUMENT_PATH
+build me a DURATION_MINUTES minute talk from DOCUMENT_PATH
+make a DURATION_MINUTES minute slide show from DOCUMENT_PATH
+turn DOCUMENT_PATH into a DURATION_MINUTES minute talk
+can you make a DURATION_MINUTES minute deck from DOCUMENT_PATH
+create DURATION_MINUTES minutes worth of slides from DOCUMENT_PATH
+generate DURATION_MINUTES minutes of slides from DOCUMENT_PATH
+I want a DURATION_MINUTES minute presentation from DOCUMENT_PATH
+make a DURATION_MINUTES minute slide deck based on DOCUMENT_PATH
+build a DURATION_MINUTES minute deck using DOCUMENT_PATH
+please create a DURATION_MINUTES minute presentation from DOCUMENT_PATH
+turn DOCUMENT_PATH into a DURATION_MINUTES minute talk
+generate slides for a DURATION_MINUTES minute presentation from DOCUMENT_PATH
+
+# ── Tier C: Renderer variants (DOCUMENT_PATH + RENDERER) ─────────────────────
+make a presentation from DOCUMENT_PATH using RENDERER
+create slides from DOCUMENT_PATH rendered with RENDERER
+turn DOCUMENT_PATH into a slide deck using RENDERER
+generate a presentation from DOCUMENT_PATH with RENDERER
+build slides from DOCUMENT_PATH using RENDERER
+make a slide deck from DOCUMENT_PATH with RENDERER
+create a presentation from DOCUMENT_PATH rendered in RENDERER
+I want a presentation from DOCUMENT_PATH using RENDERER
+turn DOCUMENT_PATH into slides using RENDERER
+render DOCUMENT_PATH as a presentation with RENDERER
+make slides from DOCUMENT_PATH and use RENDERER
+build a deck from DOCUMENT_PATH using RENDERER
+use RENDERER to make a presentation from DOCUMENT_PATH
+use RENDERER to create slides from DOCUMENT_PATH
+use the RENDERER renderer for DOCUMENT_PATH
+please use RENDERER when making slides from DOCUMENT_PATH
+create a RENDERER presentation from DOCUMENT_PATH
+make a RENDERER slide deck from DOCUMENT_PATH
+generate a RENDERER based presentation from DOCUMENT_PATH
+I'd like a RENDERER rendered presentation from DOCUMENT_PATH
+make a presentation from DOCUMENT_PATH with RENDERER visuals
+turn DOCUMENT_PATH into a RENDERER presentation
+convert DOCUMENT_PATH to a slide deck using RENDERER
+generate slides from DOCUMENT_PATH with RENDERER rendering
+create slides from DOCUMENT_PATH using the RENDERER renderer
+build slides from DOCUMENT_PATH using RENDERER visuals
+I need a RENDERER presentation from DOCUMENT_PATH
+can you use RENDERER for the slides from DOCUMENT_PATH
+make slides from DOCUMENT_PATH using RENDERER style
+turn DOCUMENT_PATH into slides rendered with RENDERER
+generate a RENDERER deck from DOCUMENT_PATH
+please render DOCUMENT_PATH with RENDERER
+use RENDERER renderer on DOCUMENT_PATH
+create a deck from DOCUMENT_PATH styled with RENDERER
+
+# ── Tier D: Audience level variants (DOCUMENT_PATH + AUDIENCE) ───────────────
+make a presentation from DOCUMENT_PATH for AUDIENCE
+create slides from DOCUMENT_PATH aimed at AUDIENCE
+turn DOCUMENT_PATH into a slide deck for AUDIENCE
+generate a presentation from DOCUMENT_PATH targeting AUDIENCE
+build a slide deck from DOCUMENT_PATH for AUDIENCE
+I need a presentation from DOCUMENT_PATH for AUDIENCE audience
+make slides from DOCUMENT_PATH for an AUDIENCE audience
+create a presentation from DOCUMENT_PATH at the AUDIENCE level
+turn DOCUMENT_PATH into slides at the AUDIENCE level
+make an AUDIENCE level presentation from DOCUMENT_PATH
+create an AUDIENCE level slide deck from DOCUMENT_PATH
+generate slides from DOCUMENT_PATH for AUDIENCE viewers
+build a presentation from DOCUMENT_PATH for AUDIENCE readers
+make a deck from DOCUMENT_PATH for AUDIENCE audiences
+I want a presentation from DOCUMENT_PATH for an AUDIENCE crowd
+turn DOCUMENT_PATH into a presentation for AUDIENCE listeners
+please make a presentation from DOCUMENT_PATH for AUDIENCE
+can you create slides from DOCUMENT_PATH for AUDIENCE
+make me a presentation from DOCUMENT_PATH for AUDIENCE
+generate a deck from DOCUMENT_PATH for AUDIENCE audience
+build slides from DOCUMENT_PATH aimed at AUDIENCE audience
+create a slide deck from DOCUMENT_PATH for the AUDIENCE level
+I'd like an AUDIENCE presentation from DOCUMENT_PATH
+make a presentation from DOCUMENT_PATH geared toward AUDIENCE
+create slides from DOCUMENT_PATH tailored to AUDIENCE
+
+# ── Tier E: Audience context variants (DOCUMENT_PATH + AUDIENCE_CONTEXT) ─────
+make a presentation from DOCUMENT_PATH for AUDIENCE_CONTEXT
+create slides from DOCUMENT_PATH aimed at AUDIENCE_CONTEXT
+turn DOCUMENT_PATH into a slide deck for AUDIENCE_CONTEXT
+generate a presentation from DOCUMENT_PATH targeting AUDIENCE_CONTEXT
+build a slide deck from DOCUMENT_PATH for AUDIENCE_CONTEXT
+I need a presentation from DOCUMENT_PATH for AUDIENCE_CONTEXT
+make slides from DOCUMENT_PATH tailored to AUDIENCE_CONTEXT
+create a presentation from DOCUMENT_PATH geared toward AUDIENCE_CONTEXT
+turn DOCUMENT_PATH into slides for AUDIENCE_CONTEXT
+please make a presentation from DOCUMENT_PATH for AUDIENCE_CONTEXT
+can you create slides from DOCUMENT_PATH for AUDIENCE_CONTEXT
+make me slides from DOCUMENT_PATH for AUDIENCE_CONTEXT
+I want a presentation from DOCUMENT_PATH written for AUDIENCE_CONTEXT
+generate slides from DOCUMENT_PATH aimed at AUDIENCE_CONTEXT
+build a presentation from DOCUMENT_PATH for AUDIENCE_CONTEXT
+turn DOCUMENT_PATH into a deck written for AUDIENCE_CONTEXT
+make a presentation from DOCUMENT_PATH designed for AUDIENCE_CONTEXT
+create slides from DOCUMENT_PATH designed for AUDIENCE_CONTEXT
+generate a presentation from DOCUMENT_PATH for the audience of AUDIENCE_CONTEXT
+I need slides from DOCUMENT_PATH speaking to AUDIENCE_CONTEXT
+
+# ── Tier F: Scheduling variants ──────────────────────────────────────────────
+schedule a presentation from DOCUMENT_PATH for tonight
+schedule the presentation from DOCUMENT_PATH for later
+make a presentation from DOCUMENT_PATH tonight
+generate slides from DOCUMENT_PATH at midnight
+schedule a slide deck from DOCUMENT_PATH for later tonight
+make a presentation from DOCUMENT_PATH overnight
+queue up a presentation from DOCUMENT_PATH
+schedule presentation generation for tonight from DOCUMENT_PATH
+run the presentation generator tonight on DOCUMENT_PATH
+schedule the slide deck for later
+turn DOCUMENT_PATH into slides at two am
+create a presentation from DOCUMENT_PATH at 3 am
+schedule slides from DOCUMENT_PATH for the morning
+make a presentation tomorrow morning from DOCUMENT_PATH
+schedule a deck from DOCUMENT_PATH for later
+run presentation generator as a dry run from DOCUMENT_PATH
+do a dry run of the presentation from DOCUMENT_PATH
+do a trial run of slides from DOCUMENT_PATH
+dry run a presentation from DOCUMENT_PATH
+trial run for slides from DOCUMENT_PATH
+
+# ── ASR-robustness: speech-to-text near-misses ───────────────────────────────
+make a presentation from DOCUMENT_PATH
+create a pre-sentation from DOCUMENT_PATH
+make a presentation out of document path
+can you presentation DOCUMENT_PATH
+I need a slide show from DOCUMENT_PATH
+make a slideshow from DOCUMENT_PATH
+turn DOCUMENT_PATH into a slide show
+generate a slide show from DOCUMENT_PATH
+make a P P T from DOCUMENT_PATH
+make a powerpoint from DOCUMENT_PATH
+make a power point from DOCUMENT_PATH
+slide deck from DOCUMENT_PATH

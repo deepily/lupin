@@ -1,0 +1,15 @@
+5
+10
+15
+20
+25
+30
+45
+60
+90
+ten
+fifteen
+twenty
+thirty
+forty five
+sixty

@@ -1,5 +1,47 @@
 # Lupin Project History
 
+### 2026.04.05 - Session 389 | Voice Routing Training Data — Complete Argument Coverage
+
+#### Checkpoint | 2026.04.05 14:10 | Training data regenerated with full arg coverage
+
+**Goal**: Close argument-coverage gaps in PEFT voice-routing training data before retraining. Session 388's 3 new presentation renderers (Matplotlib, NanoBanana, Veo) shipped without utterance coverage. 5 content-gen agents lacked `audience` / `audience_context` variants entirely.
+
+**Coverage Added**:
+- **presentation_generator**: 5 placeholders (was 1) — `DOCUMENT_PATH` + `DURATION_MINUTES` + `RENDERER` + `AUDIENCE` + `AUDIENCE_CONTEXT`
+- **research_to_presentation**: 4 placeholders — `RESEARCH_TOPIC` + `DURATION_MINUTES` + `AUDIENCE` + `AUDIENCE_CONTEXT`
+- **podcast_generator / research_to_podcast**: 3 placeholders + multi-value `target_languages` conditional (es-MX / es-ES / es-AR + en / fr / de)
+- **deep_research**: 3 placeholders (`RESEARCH_TOPIC` + `AUDIENCE` + `AUDIENCE_CONTEXT`)
+- **test_suite**: added `monopolize` + `dry_run` conditional_args (only test_suite gets monopolize per user direction)
+
+**Code Changes (COSA nested repo)**:
+- `xml_prompt_generator.py`: +2 getters (`get_renderer_names`, `get_duration_minutes`)
+- `xml_coordinator.py`: +4 dispatch map entries (audience_levels, audience_contexts, renderer_names, duration_minutes); extended `conditional_args` parser to handle list-form multi-value specs; **rewrote expansion loop to handle multi-placeholder templates** (legacy code only substituted one placeholder per iteration, leaving literal tokens in output); added word-boundary regex to prevent `AUDIENCE` matching inside `AUDIENCE_CONTEXT`
+
+**Config Format Extension**: `placeholders` dict now accepts per-placeholder `{source, args_key}` objects alongside legacy string form (backward-compatible).
+
+**New Data Files (2)**: `placeholders-renderer-names.txt` (5 renderers + ASR variants), `placeholders-duration-minutes.txt` (9 numeric + word forms)
+
+**Template Expansion**: 5 utterance files rewritten/extended — presentation_generator (65→208), research_to_presentation (65→137), podcast_generator (85→171), research_to_podcast (66→143), deep_research (65→138). test_suite extended +20 monopolize lines.
+
+**Validation Results** (35,564 train examples):
+- renderer=: 160 (0.4%)
+- target_duration_minutes=: 339 (1.0%)
+- audience=: 606 (1.7%)
+- audience_context=: 629 (1.8%)
+- target_languages=: 481 (1.3%)
+- dry_run=: 830 (2.3%)
+- monopolize=: 20 (0.1%, test_suite only)
+- **0 unresolved placeholders** in output
+- **0 records with both audience+audience_context** (alternatives preserved)
+
+**Files Modified (13)**: 2 new placeholder data files; 5 template files; 1 config JSON; 2 COSA code files; 1 test-suite.txt (monopolize examples); TODO.md; history.md
+
+**Plan Doc**: `src/cosa/agents/presentation_generator/rnd/2026.04.05-voice-routing-training-data-complete-coverage.md`
+
+**Status**: Data pipeline complete (CPU-only). PEFT training itself (`test` 1% sample + `full` LoRA) is **USER-RUN** — GPU resources are maximally allocated.
+
+---
+
 ### 2026.04.01 - Session 388b | Presentation Generator Phase 9B + 10B: D2Renderer + VeoRenderer
 
 #### Checkpoint | 2026.04.01 12:15 | VeoRenderer implementation complete
