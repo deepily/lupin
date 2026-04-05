@@ -1,5 +1,38 @@
 # Lupin Project History
 
+### 2026.04.05 - Session 390 | CJ Flow Phase 5 Doc Status Sync
+
+**Goal**: Verify a CJ Flow status report against repo reality and update stale planning docs.
+
+**Finding**: Report described Phase 5 UI, Phase 6 docs/E2E, and Unified Job State Machine as pending/blocking, but all three were completed in Sessions 382-385. TODO.md and `00-index.md` already reflected completion; only one serialized plan doc had slipped through without a close-out pass.
+
+**Change**: Updated `src/rnd/v0.1.6/2026.03.30-cj-flow/2026.03.28-cj-flow-phase-5-notifications-ui.md`:
+- Status header: `IN PROGRESS` → `COMPLETE (Session 382, commit 958d2d1)`
+- Six step headers: `— PENDING` → `— DONE`
+- Added post-completion note referencing Session 385's `job_state_transition` event consolidation
+
+**Files Modified**: 1 file (+9/-7 lines)
+
+---
+
+### 2026.04.05 - Infrastructure Bug Fix | cosa-voice MCP global availability + sender_id regex
+
+**Two stacked infrastructure bugs** blocking cosa-voice MCP from working outside the Lupin repo:
+
+**Bug 1 — MCP not available in non-Lupin sessions**: cosa-voice was pinned at project scope via `lupin/.mcp.json` but never registered at user scope. The install script `src/scripts/install-cosa-voice.sh` had two latent bugs that silently broke user-scope registration: (a) `claude mcp add -e` variadic flag consumed the server name as an env var value (wrong argument order), and (b) user-scope detection checked `~/.claude/settings.json` instead of `~/.claude.json` (wrong file), so idempotent re-runs always failed with "already exists". Fixed both; registered at user scope. cosa-voice now visible from any cwd. **Commit**: `bb8c1bc`
+
+**Bug 2 — sender_id regex rejects hyphenated/digit'd projects**: After fix #1, the MCP launched from `/mnt/.../ampe-to-meridian/` and generated `claude.code@ampe-to-meridian.deepily.ai#...`, which failed pydantic validation because the sender_id regex's project part was `[a-z]+` (no hyphens, no digits). User's `~/.lupin/config` had workaround emails like `claude.code@ampe2meridian.deepily.ai` but the MCP ignored the config and synthesized from cwd basename. Two-part fix: (a) loosened regex in `notification_models.py` to `[a-z][a-z0-9]*(-[a-z0-9]+)*` — accepts hyphens + digits, still rejects leading digits/trailing hyphens/double-hyphens/uppercase; (b) added `_resolve_canonical_project()` in `cosa_voice_mcp.py` that reads `~/.lupin/config` `[project]` section and extracts the canonical identity from the `email` field. Config becomes the source of truth for per-project sender_id identity. Startup banner shows the mapping when detected != canonical. **Commit**: `6250e17`
+
+**Also updated (global, not in repo)**:
+- `~/.claude/CLAUDE.md` — added remediation block pointing at `install-cosa-voice.sh` next to the MCP startup protocol; strengthened Phase B `set_session_topic()` mandate with explicit triggers and self-check
+- Auto-memory `feedback_mcp_startup_protocol.md` — captured the Phase B deferral anti-pattern encountered this session
+
+**Files Modified (3)**: `src/scripts/install-cosa-voice.sh`, `src/lupin_cli/notifications/notification_models.py`, `src/lupin_mcp/cosa_voice_mcp.py`
+
+**Action required before fix is complete**: Restart Lupin FastAPI server on port 7999 to load the new regex server-side (until then, the MCP produces valid sender_ids client-side but the running server still validates against the old pattern).
+
+---
+
 ### 2026.04.05 - Session 389 | Voice Routing Training Data — Complete Argument Coverage
 
 #### Checkpoint | 2026.04.05 14:10 | Training data regenerated with full arg coverage
