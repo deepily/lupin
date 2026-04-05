@@ -177,7 +177,10 @@ echo -e "${CYAN}MCP Registration Status${NC}"
 echo ""
 
 # Check registration by inspecting config files directly
+# NOTE: user-scope MCP servers live in ~/.claude.json top-level "mcpServers",
+# NOT in ~/.claude/settings.json. The settings.json file holds hooks/permissions only.
 SETTINGS_FILE="$HOME/.claude/settings.json"
+USER_CONFIG_FILE="$HOME/.claude.json"
 HAS_LOCAL=false
 HAS_USER=false
 
@@ -194,11 +197,11 @@ exit( 0 if 'cosa-voice' in cfg.get( 'mcpServers', {} ) else 1 )
     fi
 fi
 
-# Check user scope (~/.claude/settings.json mcpServers)
-if [ -f "$SETTINGS_FILE" ]; then
+# Check user scope (~/.claude.json top-level mcpServers)
+if [ -f "$USER_CONFIG_FILE" ]; then
     if python3 -c "
 import json
-with open( '$SETTINGS_FILE' ) as f:
+with open( '$USER_CONFIG_FILE' ) as f:
     cfg = json.load( f )
 exit( 0 if 'cosa-voice' in cfg.get( 'mcpServers', {} ) else 1 )
 " 2>/dev/null; then
@@ -284,22 +287,24 @@ else
 
     # Register at user scope (global)
     echo "  Registering at user scope..."
+    # NOTE: server name MUST come before -e flags. The claude CLI's -e is variadic
+    # and will greedily consume the server name as another env var value otherwise.
     if claude mcp add \
         --scope user \
         --transport stdio \
+        cosa-voice \
         -e "PYTHONPATH=$LUPIN_ROOT/src" \
         -e "LUPIN_ROOT=$LUPIN_ROOT" \
-        cosa-voice \
         -- "$VENV_PYTHON" "$MCP_SERVER" 2>/dev/null; then
         pass_check "cosa-voice registered at user scope (global)"
     else
         fail_check "Failed to register cosa-voice"
         echo ""
         echo "    Try manually:"
-        echo "      claude mcp add --scope user --transport stdio \\"
+        echo "      claude mcp add --scope user --transport stdio cosa-voice \\"
         echo "        -e \"PYTHONPATH=$LUPIN_ROOT/src\" \\"
         echo "        -e \"LUPIN_ROOT=$LUPIN_ROOT\" \\"
-        echo "        cosa-voice -- \"$VENV_PYTHON\" \"$MCP_SERVER\""
+        echo "        -- \"$VENV_PYTHON\" \"$MCP_SERVER\""
         echo ""
         exit 1
     fi
