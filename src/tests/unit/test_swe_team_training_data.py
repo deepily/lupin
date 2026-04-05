@@ -196,7 +196,10 @@ class TestSweTeamTrainingData:
 # ============================================================================
 
 REQUIRED_CONFIG_KEYS = { "template_file", "placeholders", "args_key" }
-VALID_GETTER_NAMES   = { "research_topics", "document_paths", "claude_code_tasks", "swe_team_tasks" }
+VALID_GETTER_NAMES   = {
+    "research_topics", "document_paths", "claude_code_tasks", "swe_team_tasks",
+    "audience_levels", "audience_contexts", "renderer_names", "duration_minutes",
+}
 
 
 def _load_full_config():
@@ -233,11 +236,17 @@ class TestAgenticCommandsConfig:
             f"Template files not found:\n" + "\n".join( f"  {nf}" for nf in not_found )
 
     def test_all_config_placeholder_getters_valid( self ):
-        """Every getter name in placeholders is in the known valid set."""
+        """Every getter name in placeholders is in the known valid set.
+
+        Supports both legacy string form ("X": "getter_name") and the
+        multi-placeholder dict form ("X": {"source": "getter_name", "args_key": "..."}).
+        """
         config  = _load_full_config()
         invalid = {}
         for command_name, entry in config.items():
-            for placeholder, getter_name in entry[ "placeholders" ].items():
+            for placeholder, spec in entry[ "placeholders" ].items():
+                # Normalize both legacy and dict forms
+                getter_name = spec if isinstance( spec, str ) else spec.get( "source" )
                 if getter_name not in VALID_GETTER_NAMES:
                     invalid[ f"{command_name}.{placeholder}" ] = getter_name
         assert len( invalid ) == 0, \
@@ -319,14 +328,30 @@ class TestSweTeamDryRunCoverage:
         asr_found = sum( 1 for t in triggers if t in [ "try run", "drive run", "dry bun", "dry ron" ] )
         assert asr_found >= 3, f"Expected >= 3 ASR triggers, found {asr_found}"
 
-    def test_no_dry_run_in_other_agent_templates( self ):
-        """No dry-run triggers in other agent template files (prevents contamination)."""
-        data_dir      = cu.get_project_root() + TRAINING_DATA_DIR
-        contaminated  = {}
+    def test_no_dry_run_in_non_agentic_templates( self ):
+        """
+        Dry-run triggers are universal to agentic agents (swe_team, presentation_generator,
+        research_to_presentation, podcast_generator, research_to_podcast, deep_research, test_suite).
+        This test ensures dry_run triggers don't contaminate simple (non-agentic) command templates.
+
+        Session 389 expanded dry_run conditional_args to all agentic agents; this test was
+        updated to reflect that universal coverage.
+        """
+        AGENTIC_TEMPLATES = {
+            "synthetic-data-agent-routing-swe-team.txt",
+            "synthetic-data-agent-routing-presentation-generator.txt",
+            "synthetic-data-agent-routing-research-to-presentation.txt",
+            "synthetic-data-agent-routing-podcast-generator.txt",
+            "synthetic-data-agent-routing-research-to-podcast.txt",
+            "synthetic-data-agent-routing-deep-research.txt",
+            "synthetic-data-agent-routing-test-suite.txt",
+        }
+        data_dir     = cu.get_project_root() + TRAINING_DATA_DIR
+        contaminated = {}
 
         for filename in os.listdir( data_dir ):
             if filename.startswith( "synthetic-data-agent-routing-" ) and filename.endswith( ".txt" ):
-                if filename == "synthetic-data-agent-routing-swe-team.txt":
+                if filename in AGENTIC_TEMPLATES:
                     continue
                 filepath = os.path.join( data_dir, filename )
                 with open( filepath, "r" ) as f:
@@ -337,7 +362,7 @@ class TestSweTeamDryRunCoverage:
                                 contaminated.setdefault( filename, [] ).append( ( line_num, stripped ) )
 
         assert len( contaminated ) == 0, \
-            f"Dry-run triggers found in other templates:\n" + \
+            f"Dry-run triggers found in non-agentic templates:\n" + \
             "\n".join( f"  {fname}: line {ln} -> {text}" for fname, hits in contaminated.items() for ln, text in hits )
 
 

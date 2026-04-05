@@ -380,10 +380,10 @@ class TestRegistryEntry:
         assert mapping[ "theme" ]    == "theme"
 
     def test_registry_agent_count( self ):
-        """Total agent count is 8 (was 7 before this addition)."""
+        """Total agent count is 9 (Session 386 added test_suite agent)."""
         from cosa.agents.runtime_argument_expeditor.agent_registry import AGENTIC_AGENTS
 
-        assert len( AGENTIC_AGENTS ) == 8
+        assert len( AGENTIC_AGENTS ) == 9
 
     def test_registry_no_special_handlers( self ):
         """Chained job has no special_handlers (query-driven, not file-driven)."""
