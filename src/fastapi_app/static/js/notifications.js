@@ -2879,16 +2879,38 @@ class NotificationsUI {
      * with monopolize=True (DB hot-swap is exclusive).
      */
     async submitTestSuiteJob() {
-        const typesSelect    = document.getElementById( 'test-suite-types' );
+        const typesSelect     = document.getElementById( 'test-suite-types' );
+        const filePathInput   = document.getElementById( 'test-suite-file-path' );
+        const failFastCheckbox = document.getElementById( 'test-suite-fail-fast' );
         const pytestArgsInput = document.getElementById( 'test-suite-pytest-args' );
-        const dryRunCheckbox = document.getElementById( 'test-suite-dry-run' );
-        const submitButton   = document.getElementById( 'submit-test-suite-job' );
-        const loadingSpinner = document.getElementById( 'test-suite-loading' );
-        const statusDiv      = document.getElementById( 'test-suite-submit-status' );
+        const dryRunCheckbox  = document.getElementById( 'test-suite-dry-run' );
+        const submitButton    = document.getElementById( 'submit-test-suite-job' );
+        const loadingSpinner  = document.getElementById( 'test-suite-loading' );
+        const statusDiv       = document.getElementById( 'test-suite-submit-status' );
 
         const testTypes  = typesSelect.value;
+        const filePath   = ( filePathInput?.value || "" ).trim();
+        const failFast   = failFastCheckbox?.checked || false;
         const pytestArgs = pytestArgsInput.value.trim();
         const dryRun     = dryRunCheckbox.checked;
+
+        // Validation: smoke_direct requires a file path
+        if ( testTypes === 'smoke_direct' && !filePath ) {
+            statusDiv.textContent = '✗ Error: smoke_direct requires a test file path';
+            statusDiv.style.color = '#dc3545';
+            return;
+        }
+
+        // Build combined pytest_args:
+        //   - smoke_direct: prepend file path so runner does `python3 <file> <args>`
+        //   - all + fail-fast: append --fail-fast flag
+        let combinedArgs = pytestArgs;
+        if ( testTypes === 'smoke_direct' && filePath ) {
+            combinedArgs = combinedArgs ? `${filePath} ${combinedArgs}` : filePath;
+        }
+        if ( testTypes === 'all' && failFast ) {
+            combinedArgs = combinedArgs ? `${combinedArgs} --fail-fast` : '--fail-fast';
+        }
 
         try {
             // Update UI
@@ -2900,14 +2922,14 @@ class NotificationsUI {
             // Ensure token is valid before API call
             await this.ensureValidToken();
 
-            this.log( `Submitting test suite job: types=${testTypes}, dryRun=${dryRun}` );
+            this.log( `Submitting test suite job: types=${testTypes}, dryRun=${dryRun}, args="${combinedArgs}"` );
 
             const body = {
                 test_types : testTypes,
                 dry_run    : dryRun,
             };
-            if ( pytestArgs ) {
-                body.pytest_args = pytestArgs;
+            if ( combinedArgs ) {
+                body.pytest_args = combinedArgs;
             }
 
             // Add scheduling params (schedule checkbox + monopolize is always on)

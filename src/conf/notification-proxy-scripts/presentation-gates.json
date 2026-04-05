@@ -1,0 +1,31 @@
+{
+    "profile_name"  : "presentation-gates",
+    "description"   : "Auto-approve orchestrator gates (1-4) for Phase D live E2E testing",
+    "sender_ids"    : [ "presentation.gen@lupin.deepily.ai" ],
+    "entries" : [
+        {
+            "question_pattern" : "How does this narrative arc look for your presentation?",
+            "answer"           : "Approve",
+            "arg_name"         : "gate_1_narrative_arc",
+            "response_types"   : [ "multiple_choice" ]
+        },
+        {
+            "question_pattern" : "How does this slide outline look?",
+            "answer"           : "Approve",
+            "arg_name"         : "gate_2_slide_outline",
+            "response_types"   : [ "multiple_choice" ]
+        },
+        {
+            "question_pattern" : "How does the elaborated content look?",
+            "answer"           : "Approve",
+            "arg_name"         : "gate_3_content_review",
+            "response_types"   : [ "multiple_choice" ]
+        },
+        {
+            "question_pattern" : "Visuals rendered. Approve?",
+            "answer"           : "Approve",
+            "arg_name"         : "gate_4_render_review",
+            "response_types"   : [ "multiple_choice", "yes_no" ]
+        }
+    ]
+}

@@ -83,3 +83,72 @@ run everything in monopolize mode
 kick off tests with exclusive access tonight
 run integration tests exclusive
 lets run the test suite in exclusive mode
+run unit tests
+run the unit tests
+run pytest unit tests
+kick off unit tests
+start unit testing
+execute unit tests
+trigger the unit tests
+just run unit tests
+run only the unit tests
+run the unit test suite
+run smoke tests
+run the smoke tests
+kick off smoke tests
+execute smoke tests
+run smoke testing
+trigger smoke tests
+start the smoke tests
+run all smoke tests
+run the smoke test suite
+run websocket tests
+run the websocket tests
+run ws smoke tests
+kick off websocket tests
+execute websocket tests
+run the websocket smoke suite
+trigger ws tests
+run the websocket test suite
+run all tests
+run every test
+run the full test suite
+run everything
+run the complete test suite
+run all the tests
+execute all tests
+kick off everything
+run the full regression
+run all test suites
+run every single test
+execute the full suite
+run all tests at midnight
+schedule all tests for midnight
+run the full suite at midnight
+run all tests tonight at midnight
+run every test at midnight
+run all tests at one am
+schedule the test suite for midnight
+run unit tests at eight pm tonight
+schedule unit tests for tonight at 8pm
+run smoke tests in thirty minutes
+schedule smoke tests for tomorrow morning
+run e2e tests at ten pm
+run integration tests at nine pm tonight
+schedule integration tests for tomorrow
+kick off the test suite in an hour
+run all tests in two hours
+queue up all tests for midnight
+run everything at three am
+schedule the full regression for tomorrow
+run unit tests in fifteen minutes
+run all tests tomorrow morning
+schedule e2e tests for overnight
+run the test suite at six thirty
+run unit and smoke tests
+run unit smoke and websocket tests
+run unit tests then smoke tests
+run unit and smoke and websocket
+run integration and e2e together
+run unit tests followed by smoke tests
+run smoke and websocket tests
