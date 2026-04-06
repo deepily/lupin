@@ -70,6 +70,11 @@
 
 ### Completed
 
+- [x] **Agentic job factory scattered imports** → commit: 18ff764 (docs), CoSA pending | By: 65e3162f
+  - **Symptom**: 9 imports scattered across function body — 4 at top, 5 inline in `elif` branches
+  - **Fix**: Consolidated into single alphabetically-sorted, vertically-aligned block
+  - **File (CoSA)**: `agentic_job_factory.py`
+
 - [x] **SentenceTransformer contacts HuggingFace Hub on every startup** → CoSA pending | By: 28f07da3 (Session 383)
   - **Root Cause**: Missing `local_files_only=True` — every load checked Hub for updates
   - **Fix**: Added `local_files_only=True` to `SentenceTransformer()` constructor

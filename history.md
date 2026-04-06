@@ -1,5 +1,16 @@
 # Lupin Project History
 
+### 2026.04.06 - Session 65e3162f | Agentic Job Factory Import Reformatting
+
+**Goal**: Consolidate scattered imports in `agentic_job_factory.py` into a single vertically-aligned block.
+
+**Fix**: 9 imports were scattered — 4 at the top of `create_agentic_job()` and 5 inline within `elif` branches. Consolidated all 9 into one alphabetically-sorted block with vertical alignment on the `import` keyword.
+- **File (CoSA)**: `src/cosa/rest/agentic_job_factory.py`
+- **Test**: `py_compile` PASS
+- **Commit**: 18ff764 (docs), CoSA pending
+
+---
+
 ### 2026.04.06 - Session db376295 | OpenAPI-to-Markdown Automation Script
 
 **Goal**: Automate regeneration of REST API markdown documentation from FastAPI's `/openapi.json` endpoint.
