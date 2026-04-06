@@ -17,14 +17,26 @@
 
 set -e
 
-# Resolve project root (script is at src/tests/run-smoke-direct.sh)
+# Resolve project root (script is at src/tests/run-smoke-direct.sh → go up TWO levels)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
 # Ensure PYTHONPATH + LUPIN_ROOT are set for the smoke test
 export PYTHONPATH="$PROJECT_ROOT/src:${PYTHONPATH}"
 export LUPIN_ROOT="$PROJECT_ROOT"
+
+# Source test credentials if env file exists (allows running under uvicorn
+# subprocess context where the server's env doesn't include test creds).
+# Uvicorn server may have empty $HOME — resolve via getent passwd fallback.
+if [ -z "$HOME" ]; then
+    HOME="$(getent passwd "$(id -un)" | cut -d: -f6)"
+    export HOME
+fi
+if [ -f "$HOME/.lupin/test-env.sh" ]; then
+    # shellcheck source=/dev/null
+    source "$HOME/.lupin/test-env.sh"
+fi
 
 # Delegate to python3 — test file's own argparse handles flags
 exec python3 "$@"

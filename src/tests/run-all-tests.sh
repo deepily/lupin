@@ -24,8 +24,20 @@
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
+
+# Uvicorn subprocess may have empty $HOME — resolve + export so child scripts
+# (run-integration-tests.sh, run-e2e-ui-tests.sh, etc.) can find ~/.lupin/
+if [ -z "$HOME" ]; then
+    HOME="$(getent passwd "$(id -un)" | cut -d: -f6)"
+    export HOME
+fi
+# Source test credentials for all child suites that need them
+if [ -f "$HOME/.lupin/test-env.sh" ]; then
+    # shellcheck source=/dev/null
+    source "$HOME/.lupin/test-env.sh"
+fi
 
 COMBINED_LOG="/tmp/all-tests-latest.log"
 SUMMARY_JSON="/tmp/all-tests-summary.json"

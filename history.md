@@ -1,5 +1,28 @@
 # Lupin Project History
 
+### 2026.04.05 - Session 8042b0d1 | Phase D E2E Automation + Test-Suite Job Expansion
+
+**Primary goal**: Automate Presentation Generator Phase D live E2E verification and extend the test-suite agentic job endpoint to support all 7 test tiers.
+
+**Phase D result**: First successful live run — `pr-fc786e8e`, 469s (7m49s), **15 slides**, $2.43 cost, 10 Claude API calls, all 4 voice gates auto-approved via scripted notification proxy. Full results: `src/rnd/v0.1.6/2026.03.14-presentation-generator/2026.04.05-phase-d-live-e2e-results.md`.
+
+**Test-suite job expansion**: Extended `SUITE_SCRIPTS` from 2 types (integration/e2e) to 7 types (unit/smoke/smoke_direct/websocket/integration/e2e/all). Created 4 new runner scripts, sequential pyramid orchestrator (`run-all-tests.sh` with continue-on-failure default), per-suite timeouts, `--bg` flag stripping. Notification UI dropdown expanded from 3 to 9 options with conditional UX fields.
+
+**Scheduling endpoint first-exercise**: `POST /api/test-suite/submit` with `scheduled_at` verified — dry-run at 14:45:00 EDT fired at 14:45:00.000736 EDT (1.002s precision). 4 new suite types dry-run verified.
+
+**Bugs discovered + fixed**:
+- Runner script path: `cd ../` → `cd ../..` (all 4 scripts)
+- Server subprocess missing `$HOME` env var: added `getent passwd` fallback + `~/.lupin/test-env.sh` credential sourcing
+- `"test_suite"` missing from `AGENTIC_JOB_TYPES` frozenset → scheduled jobs lost on uvicorn reload (fixed)
+
+**Files created (8)**: `test_presentation_live_smoke.py`, `presentation-gates.json`, `run-smoke-direct.sh`, `run-unit-tests.sh`, `run-smoke-tests.sh`, `run-all-tests.sh`, `2026.04.05-test-suite-agentic-job-comprehensive-expansion.md`, `2026.04.05-phase-d-live-e2e-results.md`
+
+**Files modified (7)**: `notifications.html`, `notifications.js`, `synthetic-data-agent-routing-test-suite.txt` (+69 PEFT examples), `cost_tracker.py` (pricing comment), `job.py` (SUITE_SCRIPTS/timeouts), `job_persistence.py` (test_suite type), `notification_proxy/config.py` (presentation_gates)
+
+**Commits**: `4a9488e` (Lupin parent, 11 files), `9f3a362` (manifest). CoSA subrepo changes surfaced but NOT committed (4 files, separate context required).
+
+---
+
 ### 2026.04.05 - Session 390 | CJ Flow Phase 5 Doc Status Sync
 
 **Goal**: Verify a CJ Flow status report against repo reality and update stale planning docs.
