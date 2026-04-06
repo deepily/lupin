@@ -771,6 +771,28 @@ Reload configuration and optionally swap active config block and database connec
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## GET `/api/prediction-engine/reset`
+
+> **Reset PredictionEngine singleton**
+
+Destroy and re-create the PredictionEngine singleton with current config. Used by integration tests to ensure LanceDB table isolation between tests.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| drop_table | boolean | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## GET `/api/get-session-id`
 
 > **Generate session ID**
@@ -940,6 +962,7 @@ Dispatch notification to a user via WebSocket. Supports fire-and-forget or SSE b
 | progress_group_id |  | False | Progress group ID for in-place DOM updates. Notifications sharing this ID update a single element instead of appending new ones. |
 | prediction_hint_override |  | False | JSON override for prediction_hint (testing/debug). Bypasses PredictionEngine. |
 | display_qualifier_widget | boolean | False | Render yes/no qualifier comment widget expanded by default with softer instructional text. |
+| session_name |  | False | Human-readable session name for UI header display. Updates sender-session-name span in notification history card. |
 | x-api-key |  | False |  |
 | authorization |  | False |  |
 
@@ -1076,6 +1099,7 @@ Delete all notifications for a user from PostgreSQL with optional time window fi
 |------|------|----------|-------------|
 | user_email | string | True |  |
 | hours |  | False | Filter to notifications within N hours (None = all) |
+| exclude_own_jobs | boolean | False | Only delete notifications NOT from user's own jobs (admin 'not mine' filter) |
 
 
 ### ✅ Responses
@@ -1245,6 +1269,7 @@ Enhanced sender list respecting is_hidden flag with unread counts for notificati
 | user_email | string | True |  |
 | hours |  | False | Filter to senders with activity within N hours |
 | include_hidden | boolean | False | Include hidden notifications in counts |
+| exclude_own_jobs | boolean | False | Exclude notifications from user's own jobs (admin 'not mine' filter) |
 
 
 ### ✅ Responses
@@ -1502,6 +1527,143 @@ Send a user-initiated message to a running agentic job via WebSocket notificatio
 > **Cancel running job**
 
 Request graceful cancellation of a running agentic job at its next phase boundary.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| job_id | string | True |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/job-history`
+
+> **Query job history**
+
+Paginated history of agentic jobs from PostgreSQL persistence. Admin sees all jobs; regular users see only their own.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| status |  | False | Filter by status: pending, running, completed, failed, interrupted |
+| job_type |  | False | Filter by job type: deep_research, podcast, claude_code, swe_team, research_to_podcast |
+| limit | integer | False | Results per page (max 100) |
+| offset | integer | False | Pagination offset |
+| days |  | False | Time window in days (e.g. 7, 14, 30). None = all time. |
+| exclude_ids |  | False | Comma-separated job IDs to exclude (for live queue deduplication) |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/job-history/{job_id}`
+
+> **Get job detail**
+
+Retrieve a single job's full history record by ID hash.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| job_id | string | True |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## DELETE `/api/job-history/{job_id}`
+
+> **Delete job from history**
+
+Hard delete a job history record. Admin or job owner only.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| job_id | string | True |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/job-history/{job_id}/retry`
+
+> **Retry a failed or interrupted job**
+
+Re-submit a failed or interrupted job to the todo queue as a new job.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| job_id | string | True |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## PATCH `/api/queue/todo/{job_id}/pause`
+
+> **Pause a todo queue job**
+
+Set paused=True on a todo queue job. Consumer skips it until resumed.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| job_id | string | True |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## PATCH `/api/queue/todo/{job_id}/resume`
+
+> **Resume a paused todo queue job**
+
+Set paused=False and notify consumer to recalculate eligibility.
 
 
 
@@ -2138,6 +2300,28 @@ Submit a podcast generation job. Accepts either a direct file path or a natural 
  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## POST `/api/presentation-generator/submit`
+
+> **Submit presentation generation job**
+
+Submit a presentation generation job from a source document path.
+
+
+
+
+
+### 📦 Request Body 
+
+[PresentationSubmitRequest](#presentationsubmitrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [PresentationSubmitResponse](#presentationsubmitresponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## POST `/api/deep-research-to-podcast/submit`
 
 > **Submit research→podcast chained job**
@@ -2160,6 +2344,28 @@ Submit a deep research job that automatically generates a podcast upon completio
  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## POST `/api/deep-research-to-presentation/submit`
+
+> **Submit research→presentation chained job**
+
+Submit a deep research job that automatically generates a presentation upon completion.
+
+
+
+
+
+### 📦 Request Body 
+
+[ResearchToPresentationSubmitRequest](#researchtopresentationsubmitrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [ResearchToPresentationSubmitResponse](#researchtopresentationsubmitresponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## POST `/api/swe-team/submit`
 
 > **Submit SWE team task**
@@ -2179,6 +2385,50 @@ Submit an engineering task to the SWE Team for async execution via CJ Flow.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | [SweTeamSubmitResponse](#sweteamsubmitresponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/bug-fix-expediter/submit`
+
+> **Submit bug fix expediter job**
+
+Submit a bug fix expediter job to diagnose and fix a failed job via CJ Flow.
+
+
+
+
+
+### 📦 Request Body 
+
+[BugFixExpediterSubmitRequest](#bugfixexpeditersubmitrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [BugFixExpediterSubmitResponse](#bugfixexpeditersubmitresponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/test-suite/submit`
+
+> **Submit test suite job**
+
+Create a test suite job and push to the CJ Flow todo queue. Always runs with monopolize=True.
+
+
+
+
+
+### 📦 Request Body 
+
+[TestSuiteSubmitRequest](#testsuitesubmitrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [TestSuiteSubmitResponse](#testsuitesubmitresponse)
  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
@@ -2432,6 +2682,36 @@ Response model for batch user deletion.
 | file | string |  |
 
 
+## BugFixExpediterSubmitRequest
+
+
+Request body for submitting a Bug Fix Expediter job.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| dead_job_id | string | The id_hash of the failed/interrupted job to fix |
+| extra_context |  | Additional context about the failure |
+| dry_run | boolean | Simulate execution without making changes |
+| websocket_id |  | WebSocket session ID for notifications |
+| scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
+| monopolize | boolean | Run exclusively, block all other jobs until complete |
+
+
+## BugFixExpediterSubmitResponse
+
+
+Response body for Bug Fix Expediter job submission.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| status | string | Job status (queued) |
+| job_id | string | Unique job identifier (bfe-{uuid8}) |
+| queue_position | integer | Position in the todo queue |
+| message | string | Human-readable confirmation message |
+
+
 ## ChangePasswordRequest
 
 
@@ -2458,6 +2738,8 @@ Request body for submitting a Claude Code task to the queue.
 | max_turns | integer | Maximum agentic turns |
 | websocket_id |  | WebSocket session ID for notifications |
 | dry_run | boolean | If True, simulate execution without running Claude Code |
+| scheduled_at |  | ISO datetime for delayed execution (e.g. 2026-03-31T02:00:00) |
+| monopolize | boolean | If True, no other jobs run concurrently with this job |
 
 
 ## ClaudeCodeQueueResponse
@@ -2532,6 +2814,8 @@ Request body for submitting a deep research job.
 | dry_run | boolean | Simulate execution without API calls |
 | audience |  | Target audience level: beginner, general, expert, academic |
 | audience_context |  | Custom audience description |
+| scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
+| monopolize | boolean | Run exclusively, block all other jobs until complete |
 
 
 ## DeepResearchSubmitResponse
@@ -2773,6 +3057,8 @@ Request body for submitting a mock job.
 | description |  | Custom description for queue display |
 | websocket_id |  | WebSocket session ID for notifications |
 | voice_command |  | Test expeditor: provide a voice command to route through RuntimeArgumentExpeditor |
+| scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
+| monopolize | boolean | Run exclusively, block all other jobs until complete |
 
 
 ## MockJobSubmitResponse
@@ -2874,9 +3160,41 @@ The research_source field is overloaded:
 | dry_run | boolean |  |
 | audience |  |  |
 | audience_context |  |  |
+| scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
+| monopolize | boolean | Run exclusively, block all other jobs until complete |
 
 
 ## PodcastSubmitResponse
+
+
+Response for successful job submission.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| job_id | string |  |
+| queue_position | integer |  |
+| status | string |  |
+
+
+## PresentationSubmitRequest
+
+
+Request body for presentation generation submission.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| source_path | string |  |
+| target_duration_minutes |  |  |
+| audience |  |  |
+| theme |  |  |
+| dry_run | boolean |  |
+| scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
+| monopolize | boolean | Run exclusively, block all other jobs until complete |
+
+
+## PresentationSubmitResponse
 
 
 Response for successful job submission.
@@ -2992,6 +3310,38 @@ Response for successful job submission.
 | Field | Type | Description |
 |-------|------|-------------|
 | job_id | string | Unique job identifier (rp-xxxxx format) |
+| queue_position | integer | Position in the todo queue |
+| message | string | Human-readable confirmation message |
+
+
+## ResearchToPresentationSubmitRequest
+
+
+Request body for research→presentation submission.
+
+Mirrors DeepResearchSubmitRequest with additional presentation parameters.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| query | string | Research topic/question to investigate |
+| budget |  | Maximum budget in USD for Deep Research |
+| target_duration_minutes |  | Target presentation duration in minutes |
+| theme |  | Presentation theme name |
+| audience |  | Target audience level |
+| audience_context |  | Custom audience description |
+| dry_run | boolean | Simulate execution without API calls |
+
+
+## ResearchToPresentationSubmitResponse
+
+
+Response for successful job submission.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| job_id | string | Unique job identifier (rx-xxxxx format) |
 | queue_position | integer | Position in the todo queue |
 | message | string | Human-readable confirmation message |
 
@@ -3116,6 +3466,8 @@ Request body for submitting a SWE Team job.
 | budget |  | Maximum budget in USD (None = use default) |
 | timeout |  | Wall-clock timeout in seconds (None = use default) |
 | trust_mode |  | Trust mode: disabled, shadow, suggest, active (None = use server default) |
+| scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
+| monopolize | boolean | Run exclusively, block all other jobs until complete |
 
 
 ## SweTeamSubmitResponse
@@ -3138,6 +3490,35 @@ Response body for SWE Team job submission.
 Task type selection for dispatch.
 
 
+
+
+## TestSuiteSubmitRequest
+
+
+Request body for submitting a test suite job.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| test_types | string | Comma-separated suite types: integration, e2e |
+| pytest_args |  | Space-separated extra pytest arguments (e.g., '-v -k test_auth') |
+| dry_run | boolean | Simulate execution without running tests |
+| websocket_id |  | WebSocket session ID for notifications |
+| scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
+
+
+## TestSuiteSubmitResponse
+
+
+Response body for test suite job submission.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| status | string | Job status (queued) |
+| job_id | string | Unique job identifier (ts-{uuid8}) |
+| queue_position | integer | Position in the todo queue |
+| message | string | Human-readable confirmation message |
 
 
 ## TokenResponse
@@ -3319,3 +3700,6 @@ Request model for admin password reset.
 | Field | Type | Description |
 |-------|------|-------------|
 | reason |  | Optional reason for audit trail |
+
+---
+_Auto-generated on 2026.04.06 13:02:00 by `src/scripts/generate-api-docs.sh`_

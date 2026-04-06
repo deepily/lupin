@@ -6,6 +6,7 @@
 - Docker build: `docker build -f docker/lupin/Dockerfile .`
 - Run GSM8K benchmarks: `src/scripts/run-gsm8k.sh --help`
 - Install cosa-voice MCP (global): `src/scripts/install-cosa-voice.sh` (user scope, all repos)
+- Regenerate API docs: `src/scripts/generate-api-docs.sh` (requires server on port 7999, `--offline` for saved JSON)
 
 ## CLAUDE CODE SLASH COMMANDS
 - `/smoke-test-baseline [scope]` - Establish comprehensive baseline before changes
@@ -399,7 +400,7 @@ When modifying code in these areas, update the corresponding documentation:
 
 | Code Area Changed | Update These Docs |
 |-------------------|-------------------|
-| `routers/*.py` endpoint decorators | `/docs` auto-updates (no action needed) |
+| `routers/*.py` endpoint decorators | `/docs` auto-updates; run `src/scripts/generate-api-docs.sh` to update `src/docs/fastapi/` |
 | `websocket_manager.py` | `src/docs/websocket-architecture.md` |
 | `routers/websocket.py` | `src/docs/websocket-events.md`, `websocket-architecture.md` |
 | `routers/notifications.py` architecture | `src/docs/notification-api.md` |
