@@ -1,5 +1,26 @@
 # Lupin Project History
 
+### 2026.04.07 - Session a47f938e | BFE Phase 6: Automated Repair Loop (Full Implementation)
+
+**Goal**: Design and implement the automated bug fix loop — when an agentic job fails, automatically trigger the Bug Fix Expediter, apply the fix, and resubmit the original job with the user's identity so notifications route to their UI.
+
+**Accomplishments**:
+- Exhaustive research on self-healing agent patterns (VIGIL, MASAI, morphllm 4-level escalation, Elastic's Claude CI, SWE-bench APR). Synthesized anti-patterns: fix-grade loop (37% vuln increase), semantic dedup failure, flaky test trap, context collapse.
+- **Phase 6A**: Dead Queue Watchdog (`dead_queue_watchdog.py`) — failure classification (code bug vs infra: timeout/OOM/rate-limit/environment), eligibility filter (job type allow-list, BFE recursion prevention, max attempts), module singleton initialized at startup
+- **Phase 6B**: BFE resubmit pipeline — `_resubmit_original_job()` in `job.py` reconstructs original job via `agentic_job_factory` with original user's `user_id`/`user_email`/`session_id`, pushes to todo queue. Added `RESUBMITTING` phase and `resubmitted_job_id` to `FixResult`.
+- **Phase 6C**: RepairAttemptTracker (`repair_attempt_tracker.py`) — per-chain circuit breakers: iteration counter, cost budget ($10 default), wall-clock timeout (30min), semantic dedup via `Gister.get_gist()` (local Phi-4 14B) + `local_embedding_engine` cosine similarity (threshold 0.92)
+- **Phase 6D**: Cooldown enforcement + direct-retry for transient failures (timeout, rate limit bypass BFE and directly requeue the original job)
+- **Phase 6E**: Notification flow wired through BFE's existing `voice_io` + watchdog console logging. Escalation on max-attempts exhaustion.
+- **Phase 6F**: `repair_cycle_update` WebSocket event registered in INI. Chain tracking via `repair_chain_id` in extra_context. Tracker records full attempt history.
+- INI config: 6 keys under `[Lupin: Auto Fix]` (disabled by default, all 4 job types eligible)
+- **58 new unit tests** (44 in `test_bfe_phase6.py`, 14 in `test_repair_integration.py`), 2,870 total passing, 0 regressions
+
+**Files Created (5)**: `dead_queue_watchdog.py`, `repair_attempt_tracker.py`, `test_bfe_phase6.py`, `test_repair_integration.py`, `08-phase6-automated-repair-loop-plan.md`
+
+**Files Modified (8)**: `bug_fix_expediter/job.py` (+resubmit), `bug_fix_expediter/state.py` (+RESUBMITTING +resubmitted_job_id), `running_fifo_queue.py` (+watchdog hook), `main.py` (+init), `lupin-app.ini` (+6 keys +1 event), `lupin-app-splainer.ini` (+6 explanations), `test_bfe_phase5.py` (enum count), `00-index.md` (plan index)
+
+---
+
 ### 2026.04.07 - Session 5946362f | Phase D Postmortem + Sonnet Pivot
 
 **Goal**: Postmortem review of Phase D testing failures (Haiku 0 slides). Pivot automated testing default from Haiku to Sonnet. Add slide_count > 0 assertion. Validate both Sonnet and Opus through the smoke test endpoint.
@@ -27,7 +48,16 @@ Fixed 3 bugs discovered when accessing completed Opus job via admin Notification
 3. **Job interactions 404** — `/api/get-job-interactions/` searched only in-memory queues. Added DB fallback via `get_job_by_id_hash()` returning dict (not ORM object — caught `AttributeError` on first attempt).
 
 **Files (CoSA — pending separate commit)**: `io_files.py` (+yaml allowlist, +absolute path stripping), `queues.py` (+DB fallback), `job.py` (+relative artifact paths)
-**Commit**: [docs-only — CoSA code changes pending]
+**Commit**: e87bbc3 (docs-only — CoSA code changes pending)
+
+#### Checkpoint 3 | 2026.04.07 14:30 | Render-only mode for Presentation Generator
+
+Full render-only pipeline: load existing YAML intermediate, skip Phases 1-5 ($0 content cost), run Phases 6-8 only. Three entry points: REST API (`render_only=true`), UI "Re-render" button on done cards, and voice routing (YAML auto-detection).
+
+**Backend (10 files, all CoSA)**: `orchestrator.py` (+`render_from_yaml_async()`), `config.py` (filename convention `YYYY.MM.DD-at-HH:MM-TZ-slug`), `job.py` (+`render_only` flag), `presentation_generator.py` router (+`render_only` param + YAML auto-detect), `agentic_job_factory.py` (+wire), `agent_registry.py` (+`render_only` arg mapping), `expeditor.py` (YAML in fuzzy_file_match + presentations dir search), `running_fifo_queue.py` (+`yaml_path` in metadata), `queues.py` (+`yaml_path` in done response + DB fallback fix)
+**Frontend (1 file)**: `notifications.js` (+Re-render button, +`submitRerender()`, +`yaml_path` flow)
+**Plan doc (1 file, new)**: `src/rnd/v0.1.6/2026.03.14-presentation-generator/2026.04.07-render-only-mode-plan.md`
+**Commit**: 514506c
 
 ---
 

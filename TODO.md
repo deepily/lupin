@@ -1,8 +1,11 @@
 # TODO
 
-Last updated: 2026-04-07 (Session 5946362f — Phase D postmortem + Sonnet pivot: $0.46, 15 slides, 8/8 PASS)
+Last updated: 2026-04-07 (Session a47f938e — BFE Phase 6 full implementation: 58 new tests, 2870 total, auto-fix loop complete)
 
 ## Pending
+
+- [ ] [LUPIN] **BFE Phase 6: Live E2E test of automated repair loop**. All code implemented (6A-6F), 58 unit tests passing. Needs live E2E: enable `auto fix enabled = true` in INI, submit a presentation gen job with known-bad mutation, verify watchdog → BFE → resubmit cycle completes. Schedule as monopolized test-suite job after hours.
+- [ ] [LUPIN] **Automated E2E testing workflow**: Design standard pattern for scheduling E2E/integration test runs as monopolized jobs at user-specified times. Becomes the modus operandi for all post-coding verification.
 
 - [ ] [LUPIN] **Session 389 VERIFICATION — return to review today's work (NEXT SESSION)**. Two bodies of work landed in Session 389 that need end-to-end verification: (1) Voice routing training data complete coverage (5 content-gen agents, multi-placeholder expansion bug fix in xml_coordinator.py), (2) BFE Phase 5 Trust Proxy + Git Strategy (git_ops.py, run_git_strategy, 33 new tests, 2,831 unit tests passing). User shut down mid-session; resume with: summarize what was completed, verify commits landed (Lupin parent-repo + COSA nested-repo commits pending), confirm no regressions, identify any loose ends. Plan docs: `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/07-phase5-execution-log.md`, `src/cosa/agents/presentation_generator/rnd/2026.04.05-voice-routing-training-data-complete-coverage.md`.
 

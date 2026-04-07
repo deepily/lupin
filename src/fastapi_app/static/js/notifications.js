@@ -2872,6 +2872,52 @@ class NotificationsUI {
     }
 
     /**
+     * Submit a render-only presentation job from an existing YAML.
+     *
+     * Called from the "Re-render" button on completed presentation job cards.
+     * Submits to the same endpoint with render_only=true, skipping Phases 1-5.
+     *
+     * @param {string} yamlPath - Relative path to the YAML intermediate file
+     */
+    async submitRerender( yamlPath ) {
+        if ( !yamlPath ) {
+            console.error( '[Notifications] submitRerender called without yamlPath' );
+            return;
+        }
+
+        try {
+            await this.ensureValidToken();
+            this.log( `Submitting render-only job for: ${yamlPath}` );
+
+            const response = await fetch( '/api/presentation-generator/submit', {
+                method  : 'POST',
+                headers : {
+                    'Authorization' : this.getAuthHeader(),
+                    'X-Session-ID'  : this.queueSessionId,
+                    'Content-Type'  : 'application/json'
+                },
+                body: JSON.stringify({
+                    source_path : yamlPath,
+                    render_only : true
+                })
+            });
+
+            if ( !response.ok ) {
+                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
+                throw new Error( errorData.detail || `HTTP ${response.status}` );
+            }
+
+            const result = await response.json();
+            this.log( "Render-only job response:", result );
+            alert( `✓ Re-render job submitted! Job ID: ${result.job_id}` );
+
+        } catch ( error ) {
+            this.error( "Re-render submission failed:", error );
+            alert( `✗ Re-render failed: ${error.message}` );
+        }
+    }
+
+    /**
      * Submit a Test Suite job.
      *
      * Sends test suite parameters to /api/test-suite/submit for
@@ -4988,7 +5034,9 @@ class NotificationsUI {
         if ( reportPath ) {
             const reportEl = card.querySelector( '.job-report-link' );
             if ( reportEl ) {
-                reportEl.innerHTML = this.renderReportLinkSection( reportPath );
+                const agentType = metadata.agent_type || card.dataset.agentType || null;
+                const yamlPath = metadata.yaml_path || null;
+                reportEl.innerHTML = this.renderReportLinkSection( reportPath, agentType, yamlPath );
                 reportEl.style.display = 'block';
             }
         }
@@ -6427,9 +6475,14 @@ class NotificationsUI {
      * @param {string} reportPath - Path to the report file
      * @returns {string} HTML content for report link section
      */
-    renderReportLinkSection( reportPath ) {
+    renderReportLinkSection( reportPath, agentType, yamlPath ) {
         if ( !reportPath ) return '';
-        return `<a href="/app/docs?path=${encodeURIComponent( reportPath )}" target="_blank" class="report-link-btn">📋 View Full Report</a>`;
+        let html = `<a href="/app/docs?path=${encodeURIComponent( reportPath )}" target="_blank" class="report-link-btn">📋 View Full Report</a>`;
+        // Re-render button for presentation jobs with existing YAML
+        if ( agentType === 'presentation' && yamlPath ) {
+            html += ` <button class="report-link-btn rerender-btn" onclick="window.notificationsUI.submitRerender( '${this.escapeHtml( yamlPath )}' )" title="Re-render from YAML (Phases 6-8 only)">🔄 Re-render</button>`;
+        }
+        return html;
     }
 
     /**
@@ -6598,7 +6651,7 @@ class NotificationsUI {
                         ${this.renderAbstractSection( job.abstract )}
                     </div>
                     <div class="job-report-link" style="${job.report_path ? '' : 'display: none'}">
-                        ${this.renderReportLinkSection( job.report_path )}
+                        ${this.renderReportLinkSection( job.report_path, job.agent_type, job.yaml_path )}
                     </div>
                     <div class="job-cost-summary" style="${job.cost_summary ? '' : 'display: none'}">
                         ${job.cost_summary ? this.renderCostSummaryContent( job.cost_summary, job.duration_seconds ) : ''}
