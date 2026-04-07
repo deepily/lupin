@@ -1,0 +1,46 @@
+{
+    "profile_name"  : "research_to_presentation_gates",
+    "description"   : "Auto-approve Deep Research + Presentation Generator orchestrator gates for R2P chain live E2E testing",
+    "sender_ids"    : [
+        "deep.research@lupin.deepily.ai",
+        "presentation.gen@lupin.deepily.ai"
+    ],
+    "entries" : [
+        {
+            "question_pattern" : "research plan",
+            "answer"           : "Approve",
+            "arg_name"         : "dr_research_plan",
+            "response_types"   : [ "yes_no", "multiple_choice" ]
+        },
+        {
+            "question_pattern" : "continue with",
+            "answer"           : "yes",
+            "arg_name"         : "dr_continue",
+            "response_types"   : [ "yes_no" ]
+        },
+        {
+            "question_pattern" : "narrative arc",
+            "answer"           : "Approve",
+            "arg_name"         : "gate_1_narrative_arc",
+            "response_types"   : [ "multiple_choice" ]
+        },
+        {
+            "question_pattern" : "slide outline",
+            "answer"           : "Approve",
+            "arg_name"         : "gate_2_slide_outline",
+            "response_types"   : [ "multiple_choice" ]
+        },
+        {
+            "question_pattern" : "elaborated content",
+            "answer"           : "Approve",
+            "arg_name"         : "gate_3_content_review",
+            "response_types"   : [ "multiple_choice" ]
+        },
+        {
+            "question_pattern" : "rendered",
+            "answer"           : "Approve",
+            "arg_name"         : "gate_4_render_review",
+            "response_types"   : [ "multiple_choice", "yes_no" ]
+        }
+    ]
+}

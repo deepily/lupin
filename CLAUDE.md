@@ -269,6 +269,16 @@ Lupin uses a three-tier testing strategy for comprehensive validation:
    - Run: `python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-confirm`
    - **Guide**: `src/docs/automated-interactive-testing.md`
 
+7. **Presentation Regression** (`src/tests/run-presentation-regression.sh`)
+   - Sequential pyramid: render-only → Sonnet full → (optional) Opus + R2P chain
+   - **CRITICAL**: Always use `--bg` flag or schedule via test-suite endpoint
+   - Default (nightly): `./src/tests/run-presentation-regression.sh --bg` (~$0.46, ~10min)
+   - With Opus: `./src/tests/run-presentation-regression.sh --bg --include-opus` (~$2.89)
+   - Full weekly: `./src/tests/run-presentation-regression.sh --bg --all` (~$10, ~45min)
+   - Schedule: `POST /api/test-suite/submit {"test_types": "presentation", "scheduled_at": "..."}`
+   - Monitor: `tail -20 /tmp/presentation-regression-latest.log`
+   - **Strategy doc**: `src/rnd/v0.1.6/2026.03.14-presentation-generator/2026.04.07-e2e-testing-strategy.md`
+
 ### Running Tests
 
 ```bash
