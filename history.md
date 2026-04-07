@@ -1,5 +1,22 @@
 # Lupin Project History
 
+### 2026.04.06 - Session db376295 | OpenAPI Docs Automation + SDK Upgrade + Testing README
+
+**Goal**: Create automation for regenerating REST API markdown docs from OpenAPI spec, upgrade Claude Agent SDK, and update outdated testing README.
+
+**Accomplishments**:
+- Created `src/scripts/generate-api-docs.sh` — fetches `/openapi.json`, pretty-prints JSON (1-line 118KB → 8,949 readable lines), generates `api.md` via `openapi-to-markdown` CLI, supports `--offline` mode
+- Claude Agent SDK upgraded `0.1.36` → `0.1.56` (20 patches): version pin in `requirements.txt`, `RateLimitEvent` handling added to all 9 streaming loops across 3 orchestrator files (dispatcher, SWE team, BFE). 162 unit tests passing.
+- Updated `src/tests/README.md` — corrected severely outdated test counts (was "~387+" → actual **~3,535**): unit 14→2,832, integration 8→263, E2E 265→328. Added `--bg` flag guidance, pre-merge checklist, PID overlap protection docs, test credentials section.
+- Marked 3 CoSA commit pending TODO items as completed (Sessions 383, 382b, 385)
+- Archived `history.md` (19.2k → 8.6k tokens): `history/2026-03-13-to-26-history.md`
+
+**Files Created (3)**: `src/scripts/generate-api-docs.sh`, `history/2026-03-13-to-26-history.md`, `src/rnd/v0.1.6/2026.04.06-openapi-to-markdown-automation.md`
+
+**Files Modified (8)**: `CLAUDE.md` (+command, +touchpoint), `TODO.md` (3 items completed + timestamp), `src/cosa/requirements.txt` (SDK 0.1.36→0.1.56), `src/cosa/orchestration/claude_code/dispatcher.py` (+RateLimitEvent), `src/cosa/agents/swe_team/orchestrator.py` (+RateLimitEvent ×5), `src/cosa/agents/bug_fix_expediter/orchestrator.py` (+RateLimitEvent ×3), `src/tests/README.md` (full rewrite), `src/docs/fastapi/api.json` + `api.md` (regenerated)
+
+---
+
 ### 2026.04.06 - Session 65e3162f | Agentic Job Factory Import Reformatting
 
 **Goal**: Consolidate scattered imports in `agentic_job_factory.py` into a single vertically-aligned block.
