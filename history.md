@@ -14,10 +14,20 @@
 - **Sonnet Phase D**: `pr-512e5ca4`, 472s (7m52s), **15 slides**, **$0.46**, 8/8 PASS
 - **Opus Phase D**: `pr-1f5ea9a9`, 476s (7m56s), **15 slides**, **$2.37**, 8/8 PASS — first successful run through proper smoke test endpoint
 
-#### Checkpoint | 2026.04.07 12:40 | Phase D postmortem + Sonnet pivot
+#### Checkpoint 1 | 2026.04.07 12:40 | Phase D postmortem + Sonnet pivot
 
 **Files**: `lupin-app.ini`, `lupin-app-splainer.ini`, `test_presentation_live_smoke.py`, `TODO.md`, 2 new rnd docs
-**Commit**: 8b66c2f
+**Commit**: c0157f7
+
+#### Checkpoint 2 | 2026.04.07 13:15 | Three post-Phase D UI bug fixes
+
+Fixed 3 bugs discovered when accessing completed Opus job via admin Notifications UI:
+1. **YAML 404** — `.yaml`/`.yml` missing from `MEDIA_TYPES` allowlist in `io_files.py`. Added + text rendering.
+2. **"View Full Report" 404** — `report_path` artifact stored absolute Docker path (`/var/lupin/io/...`), doubled when joined with `io_base`. Fixed at two levels: (a) `job.py` now stores relative paths in artifacts, (b) `io_files.py` strips `io_base` prefix from incoming absolute paths (handles legacy jobs).
+3. **Job interactions 404** — `/api/get-job-interactions/` searched only in-memory queues. Added DB fallback via `get_job_by_id_hash()` returning dict (not ORM object — caught `AttributeError` on first attempt).
+
+**Files (CoSA — pending separate commit)**: `io_files.py` (+yaml allowlist, +absolute path stripping), `queues.py` (+DB fallback), `job.py` (+relative artifact paths)
+**Commit**: [docs-only — CoSA code changes pending]
 
 ---
 
