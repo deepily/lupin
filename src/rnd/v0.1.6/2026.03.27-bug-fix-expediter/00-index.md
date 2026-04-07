@@ -17,7 +17,9 @@
 | [03-phase2-diagnose-orchestrator-plan.md](03-phase2-diagnose-orchestrator-plan.md) | Phase 2 detailed implementation plan — orchestrator, prompts, SDK delegation, voice gate, cancellation, unit tests | Complete |
 | [04-phase3-propose-plan-artifacts.md](04-phase3-propose-plan-artifacts.md) | Phase 3 detailed implementation plan — proposal prompts, plan writer, fix selection, voice gate | Complete |
 | [05-phase4-fix-coder-tester-plan.md](05-phase4-fix-coder-tester-plan.md) | Phase 4 detailed implementation plan — coder/tester delegation, retry loop, safety hooks, plan update | Complete |
-| [06-phase5-trust-proxy-git-strategy-plan.md](06-phase5-trust-proxy-git-strategy-plan.md) | Phase 5 detailed implementation plan — trust proxy init, git operations, commit/branch/PR strategy | Active |
+| [06-phase5-trust-proxy-git-strategy-plan.md](06-phase5-trust-proxy-git-strategy-plan.md) | Phase 5 detailed implementation plan — trust proxy init, git operations, commit/branch/PR strategy | Complete |
+| [07-phase5-execution-log.md](07-phase5-execution-log.md) | Phase 5 execution log — Session 389 implementation results | Complete |
+| [08-phase6-automated-repair-loop-plan.md](08-phase6-automated-repair-loop-plan.md) | Phase 6 detailed plan — Dead queue watchdog, automated BFE trigger, job resubmission, circuit breakers, failure classification | Planning |
 
 ## Context
 

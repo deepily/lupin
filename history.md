@@ -57,7 +57,18 @@ Full render-only pipeline: load existing YAML intermediate, skip Phases 1-5 ($0 
 **Backend (10 files, all CoSA)**: `orchestrator.py` (+`render_from_yaml_async()`), `config.py` (filename convention `YYYY.MM.DD-at-HH:MM-TZ-slug`), `job.py` (+`render_only` flag), `presentation_generator.py` router (+`render_only` param + YAML auto-detect), `agentic_job_factory.py` (+wire), `agent_registry.py` (+`render_only` arg mapping), `expeditor.py` (YAML in fuzzy_file_match + presentations dir search), `running_fifo_queue.py` (+`yaml_path` in metadata), `queues.py` (+`yaml_path` in done response + DB fallback fix)
 **Frontend (1 file)**: `notifications.js` (+Re-render button, +`submitRerender()`, +`yaml_path` flow)
 **Plan doc (1 file, new)**: `src/rnd/v0.1.6/2026.03.14-presentation-generator/2026.04.07-render-only-mode-plan.md`
-**Commit**: 514506c
+**Commit**: d34d912
+
+#### Checkpoint 4 | 2026.04.07 18:30 | E2E testing infrastructure + session close
+
+Built 5-tier testing pyramid for presentation generation (Tiers 0-5). Created render-only smoke test, R2P live chain test, presentation regression runner script, combined proxy profile, registered `"presentation"` suite type. Scheduled render-only at 8 PM and R2P chain at 9 PM for after-hours verification.
+
+**Files Created (4)**: `test_presentation_render_only_smoke.py` (Tier 2), `run-presentation-regression.sh` (runner), `research-to-presentation-gates.json` (proxy profile), `test_research_to_presentation_live_smoke.py` (Tier 5)
+**Files Modified (3)**: `test_suite/job.py` (+presentation SUITE_SCRIPTS), `notifications.html` (+dropdown), `CLAUDE.md` (+testing docs)
+**Docs (2, new)**: `2026.04.07-e2e-testing-strategy.md`, `2026.04.07-render-only-mode-plan.md`
+**Commit**: [pending — session-end]
+
+**Session Total**: 4 checkpoints, ~20 files modified/created across Lupin + CoSA. Sonnet validated ($0.46, 15 slides), Opus validated ($2.37, 15 slides). Render-only mode + E2E testing infrastructure built. Two scheduled tests queued for tonight (8 PM + 9 PM EDT).
 
 ---
 

@@ -577,6 +577,12 @@ async def lifespan( app: FastAPI ):
     print( "[CONSUMER] Starting todo-producer-run-consumer thread..." )
     consumer_thread = start_todo_producer_run_consumer_thread( jobs_todo_queue, jobs_run_queue )
     print( "[CONSUMER] Todo-producer-run-consumer thread started" )
+
+    # Initialize dead queue watchdog + repair tracker for automated BFE repair (Phase 6)
+    from cosa.rest.dead_queue_watchdog import init_watchdog
+    from cosa.rest.repair_attempt_tracker import init_tracker
+    init_tracker( config_mgr, debug=app_debug )
+    init_watchdog( config_mgr, jobs_todo_queue, debug=app_debug )
     
     print( f"FastAPI startup complete at {datetime.now()}" )
     

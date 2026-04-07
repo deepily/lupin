@@ -278,6 +278,7 @@ def test_fix_result_git_fields_accept_values():
 # =============================================================================
 
 def test_bfe_phase_has_committing():
-    """COMMITTING phase was added for Phase 5."""
+    """COMMITTING phase was added for Phase 5, RESUBMITTING for Phase 6."""
     assert BFEPhase.COMMITTING.value == "committing"
-    assert len( BFEPhase ) == 10
+    assert BFEPhase.RESUBMITTING.value == "resubmitting"
+    assert len( BFEPhase ) == 11
