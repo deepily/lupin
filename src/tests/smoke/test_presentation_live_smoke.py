@@ -16,11 +16,14 @@ Scenarios:
                                artifacts present, no stack trace, gates fired
 
 Usage:
-    # Run immediately (foreground, blocks until done)
-    python src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --cost-cap-usd 2.00
+    # Run with Opus (production default, ~$2.43/run)
+    python src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --cost-cap-usd 5.00
+
+    # Run with Haiku (automated/CI default, ~$0.13/run)
+    python src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --content-model claude-haiku-4-5-20251001 --cost-cap-usd 1.00
 
     # With debug output
-    python src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --cost-cap-usd 2.00 --debug --proxy-debug
+    python src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --cost-cap-usd 5.00 --debug --proxy-debug
 
     # Schedule via test-suite endpoint (from Claude):
     #   POST /api/test-suite/submit
@@ -39,8 +42,8 @@ Requires:
     - Gemini API key configured in INI (for NanoBanana/Veo if they fire)
 
 Cost envelope (Tier 1 — Marp + Mermaid + Matplotlib + D2):
-    - Expected: ~$0.50-$0.70 per run with 4500-token source doc
-    - Default cap: $2.00 (4x headroom)
+    - Opus: ~$2.43 per run with 4500-token source doc. Default cap: $5.00
+    - Haiku: ~$0.13 per run (estimated). Cap: $1.00
     - If NanoBanana/Veo fire organically from outline generation, cost may exceed cap
       (test will FAIL at PR_COST_ENVELOPE check — this is correct behavior)
 
@@ -67,7 +70,7 @@ from tests.smoke.utilities.interactive_smoke_test import InteractiveSmokeTest
 
 SOURCE_DOC = "/src/rnd/v0.1.6/2026.03.14-presentation-generator/01-strategy-and-design.md"
 
-DEFAULT_COST_CAP_USD = 2.00
+DEFAULT_COST_CAP_USD = 5.00
 
 PID_FILE         = "/tmp/presentation-live.pid"
 E2E_UI_PID_FILE  = "/tmp/e2e-ui-tests.pid"
@@ -193,9 +196,10 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
     PROXY_STRATEGY  = "llm_script"
 
     def __init__( self, *args, **kwargs ):
-        """Initialize with cost cap default."""
+        """Initialize with cost cap and model defaults."""
         super().__init__( *args, **kwargs )
-        self._cost_cap_usd = DEFAULT_COST_CAP_USD
+        self._cost_cap_usd   = DEFAULT_COST_CAP_USD
+        self._content_model  = None
 
     # ═══════════════════════════════════════════════════════════════════════
     # Scenario Selection
@@ -228,12 +232,15 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
         Ensures:
             - Returns payload with dry_run=False and scenario's audience/duration
         """
-        return {
+        payload = {
             "source_path"             : scenario[ "source_path" ],
             "target_duration_minutes" : scenario.get( "target_duration_minutes", 15 ),
             "audience"                : scenario.get( "audience", "general" ),
             "dry_run"                 : False,
         }
+        if self._content_model:
+            payload[ "content_model" ] = self._content_model
+        return payload
 
     def get_mode_for_scenario( self, scenario ):
         """
@@ -250,6 +257,7 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
         print( f"  Target duration:    {scenario.get( 'target_duration_minutes', 15 )} min" )
         print( f"  Audience:           {scenario.get( 'audience', 'general' )}" )
         print( f"  Mode:               LIVE (dry_run=False)" )
+        print( f"  Content model:      {self._content_model or 'INI default (Opus)'}" )
         print( f"  Cost cap:           ${self._cost_cap_usd:.2f}" )
         print( f"  Proxy profile:      {self.PROXY_PROFILE}" )
         print( f"  Expected duration:  5-10 min (includes Claude API calls + 4 gates)" )
@@ -274,6 +282,12 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
             default=DEFAULT_COST_CAP_USD,
             help=f"Max cost (USD). Job FAILS test if exceeded. Default: ${DEFAULT_COST_CAP_USD:.2f}"
         )
+        parser.add_argument(
+            "--content-model",
+            type=str,
+            default=None,
+            help="Override Claude model (e.g. claude-haiku-4-5-20251001). Default: INI config (Opus)."
+        )
         return parser
 
     def pre_run_hook( self, args, headers, ws_id ):
@@ -288,8 +302,9 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
             - Proxy subprocess launched
             - Returns True to proceed, False to abort
         """
-        # Capture cost cap
-        self._cost_cap_usd = getattr( args, "cost_cap_usd", DEFAULT_COST_CAP_USD )
+        # Capture cost cap and model override
+        self._cost_cap_usd  = getattr( args, "cost_cap_usd", DEFAULT_COST_CAP_USD )
+        self._content_model = getattr( args, "content_model", None )
 
         # Overlap guard
         ok, msg = _check_overlap_locks()
