@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.04.06 - Session 93c49ccb | Haiku Automated Testing Default + Phase D Re-Run
+
+**Goal**: Add Claude Haiku as low-cost default for automated Presentation Generator regression testing. Wire `--content-model` override end-to-end. Fix TestSuiteJob error messaging. Re-run Phase D through test-suite endpoint with Haiku.
+
+**Accomplishments**:
+- Added Haiku pricing to `CostEstimate` (api_client.py) and `automated_content_model` INI config key
+- Wired `--content-model` CLI arg through: submit endpoint → router → factory → job → orchestrator config override
+- Fixed TestSuiteJob stderr surfacing: when subprocess crashes with 0 tests, now shows last 20 lines of output in response_text and notification abstract (validated in production — caught Docker credential gap)
+- Updated cost cap $2→$5 for Opus runs, $1 for Haiku
+- Diagnosed Docker credential blocker: server runs in `lupin-rest` container where `$HOME=/root` but `~/.lupin/test-env.sh` doesn't exist. Quick-fixed via `docker cp`; permanent fix (volume mount) deferred
+- Phase D Haiku run completed: `pr-b77c44d3`, 192s (3m12s), **$0.06 cost** (97% cheaper than Opus $2.43), 3 API calls, 15,226 in / 11,810 out tokens. **Quality gap**: 0 slides generated despite pipeline completing without error — Haiku YAML output didn't parse into slides
+
+**Files Modified (10)**: `api_client.py` (Haiku pricing), `config.py` (+automated_content_model), `lupin-app.ini` (+1 key), `lupin-app-splainer.ini` (+1 explanation), `presentation_generator.py` router (+content_model field), `job.py` presentation (+content_model param), `agentic_job_factory.py` (+content_model pass-through), `test_presentation_live_smoke.py` (model override + cost cap), `job.py` test_suite (stderr surfacing), `TODO.md`
+
+**Commits**: `e12a579` (Lupin parent, 5 files), `3aa21a6` (Phase D results + TODO). CoSA subrepo: 6 modified files need separate commit (api_client, config, 2x job.py, factory, router).
+
+---
+
 ### 2026.04.06 - Session db376295 | OpenAPI Docs Automation + SDK Upgrade + Testing README
 
 **Goal**: Create automation for regenerating REST API markdown docs from OpenAPI spec, upgrade Claude Agent SDK, and update outdated testing README.
