@@ -13,17 +13,21 @@ which is then validated against N post-completion assertions.
 Scenarios:
     # ID                       Validates
     0 PR_LIVE_TIER1_FULL       job_id prefix, agent_type, cost envelope,
-                               artifacts present, no stack trace, gates fired
+                               slide_count > 0, artifacts present, no stack trace,
+                               gates fired
 
 Usage:
+    # Run with Sonnet (automated/CI default, ~$0.49/run)
+    python src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --content-model claude-sonnet-4-6 --cost-cap-usd 2.00
+
     # Run with Opus (production default, ~$2.43/run)
     python src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --cost-cap-usd 5.00
 
-    # Run with Haiku (automated/CI default, ~$0.13/run)
-    python src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --content-model claude-haiku-4-5-20251001 --cost-cap-usd 1.00
-
     # With debug output
     python src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --cost-cap-usd 5.00 --debug --proxy-debug
+
+    # With custom timeout (default 900s)
+    python src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --timeout 1200
 
     # Schedule via test-suite endpoint (from Claude):
     #   POST /api/test-suite/submit
@@ -43,7 +47,8 @@ Requires:
 
 Cost envelope (Tier 1 — Marp + Mermaid + Matplotlib + D2):
     - Opus: ~$2.43 per run with 4500-token source doc. Default cap: $5.00
-    - Haiku: ~$0.13 per run (estimated). Cap: $1.00
+    - Sonnet: ~$0.49 per run (estimated). Cap: $2.00
+    - Haiku: DEPRECATED — produced 0 slides in Phase D testing (2026-04-06)
     - If NanoBanana/Veo fire organically from outline generation, cost may exceed cap
       (test will FAIL at PR_COST_ENVELOPE check — this is correct behavior)
 
@@ -183,12 +188,12 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
 
     Ensures:
         - Single live job submitted, 4 gates auto-approved
-        - All 7 post-completion sub-checks pass OR test fails with per-check detail
+        - All 8 post-completion sub-checks pass OR test fails with per-check detail
     """
 
     TEST_NAME       = "Presentation Generator Live E2E"
     SUBMIT_ENDPOINT = "/api/presentation-generator/submit"
-    DEFAULT_TIMEOUT = 600  # 10 min for live pipeline
+    DEFAULT_TIMEOUT = 900  # 15 min — includes ~400s test-suite scheduling overhead
     POLL_INTERVAL   = 3
     REQUEST_TIMEOUT = 600
     SCENARIOS       = PRESENTATION_LIVE_SCENARIOS
@@ -286,7 +291,13 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
             "--content-model",
             type=str,
             default=None,
-            help="Override Claude model (e.g. claude-haiku-4-5-20251001). Default: INI config (Opus)."
+            help="Override Claude model (e.g. claude-sonnet-4-6). Default: INI config (Opus)."
+        )
+        parser.add_argument(
+            "--timeout",
+            type=int,
+            default=None,
+            help="Override poll timeout in seconds. Default: 900 (15 min, includes test-suite overhead)."
         )
         return parser
 
@@ -302,9 +313,13 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
             - Proxy subprocess launched
             - Returns True to proceed, False to abort
         """
-        # Capture cost cap and model override
+        # Capture cost cap, model override, and timeout
         self._cost_cap_usd  = getattr( args, "cost_cap_usd", DEFAULT_COST_CAP_USD )
         self._content_model = getattr( args, "content_model", None )
+        timeout_override    = getattr( args, "timeout", None )
+        if timeout_override is not None:
+            self.DEFAULT_TIMEOUT  = timeout_override
+            self.REQUEST_TIMEOUT  = timeout_override
 
         # Overlap guard
         ok, msg = _check_overlap_locks()
@@ -366,6 +381,7 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
             ( "agent_type",      self._check_agent_type( job_data ) ),
             ( "cost_envelope",   self._check_cost_envelope( job_data ) ),
             ( "nonzero_cost",    self._check_nonzero_cost( job_data ) ),
+            ( "slide_count",     self._check_slide_count( job_data ) ),
             ( "timestamps",      self._check_timestamps( job_data ) ),
             ( "no_stack_trace",  self._check_no_stack_trace( job_data ) ),
             ( "response_text",   self._check_response_text( job_data ) ),
@@ -426,6 +442,31 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
         if total > 0:
             return { "ok": True, "detail": f"cost=${total:.4f} (live API calls confirmed)" }
         return { "ok": False, "detail": f"cost=${total} — no Claude calls? (expected live, got zero-cost)" }
+
+    def _check_slide_count( self, job_data ):
+        """Verify slide_count > 0 — pipeline COMPLETED with 0 slides is a quality failure."""
+        # Try response_text first (contains "N slides" in the conversational answer)
+        response = job_data.get( "response_text" ) or ""
+        artifacts = job_data.get( "artifacts" ) or {}
+
+        # Check artifacts for explicit slide count
+        slide_count = artifacts.get( "slide_count" )
+        if slide_count is not None:
+            if int( slide_count ) > 0:
+                return { "ok": True, "detail": f"slide_count={slide_count} (from artifacts)" }
+            return { "ok": False, "detail": f"slide_count={slide_count} — pipeline completed but generated 0 slides" }
+
+        # Fallback: parse "N slides" from response_text
+        import re
+        match = re.search( r"(\d+)\s+slide", response )
+        if match:
+            count = int( match.group( 1 ) )
+            if count > 0:
+                return { "ok": True, "detail": f"slide_count={count} (parsed from response_text)" }
+            return { "ok": False, "detail": f"slide_count=0 — pipeline completed but generated 0 slides" }
+
+        # No slide count found anywhere — warn but don't fail (might be dry-run)
+        return { "ok": False, "detail": "slide_count not found in artifacts or response_text" }
 
     def _check_timestamps( self, job_data ):
         """Verify started_at and completed_at are set."""

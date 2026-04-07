@@ -1,5 +1,26 @@
 # Lupin Project History
 
+### 2026.04.07 - Session 5946362f | Phase D Postmortem + Sonnet Pivot
+
+**Goal**: Postmortem review of Phase D testing failures (Haiku 0 slides). Pivot automated testing default from Haiku to Sonnet. Add slide_count > 0 assertion. Validate both Sonnet and Opus through the smoke test endpoint.
+
+**Accomplishments**:
+- Postmortem: inspected Haiku YAML artifact (`pres-bd87e234`) — valid YAML with `slides: []`, not malformed. Root cause: Haiku content quality insufficient for structured YAML schema (only 3 API calls vs Opus's 10)
+- Pivoted automated testing model: Haiku (`claude-haiku-4-5-20251001`) → Sonnet (`claude-sonnet-4-6`) in INI, splainer, and config.py defaults
+- Added 8th sub-check `_check_slide_count()` to smoke test — parses `artifacts.slide_count` or regex from `response_text`. COMPLETED + 0 slides = FAIL
+- Increased `DEFAULT_TIMEOUT` 600→900s, added `--timeout` CLI arg for operator override
+- Docker volume mount: added `-v "$HOME/.lupin:/root/.lupin:ro"` to `start-docker-lupin.sh` — replaces `docker cp` workaround
+- **Bug fix**: Initial model ID `claude-sonnet-4-6-20250514` returned 404 (doesn't exist). Correct ID: `claude-sonnet-4-6` (no date suffix)
+- **Sonnet Phase D**: `pr-512e5ca4`, 472s (7m52s), **15 slides**, **$0.46**, 8/8 PASS
+- **Opus Phase D**: `pr-1f5ea9a9`, 476s (7m56s), **15 slides**, **$2.37**, 8/8 PASS — first successful run through proper smoke test endpoint
+
+#### Checkpoint | 2026.04.07 12:40 | Phase D postmortem + Sonnet pivot
+
+**Files**: `lupin-app.ini`, `lupin-app-splainer.ini`, `test_presentation_live_smoke.py`, `TODO.md`, 2 new rnd docs
+**Commit**: 8b66c2f
+
+---
+
 ### 2026.04.06 - Session 93c49ccb | Haiku Automated Testing Default + Phase D Re-Run
 
 **Goal**: Add Claude Haiku as low-cost default for automated Presentation Generator regression testing. Wire `--content-model` override end-to-end. Fix TestSuiteJob error messaging. Re-run Phase D through test-suite endpoint with Haiku.
