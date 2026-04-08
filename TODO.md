@@ -1,9 +1,10 @@
 # TODO
 
-Last updated: 2026-04-07 (Session a47f938e — BFE Phase 6 full implementation: 58 new tests, 2870 total, auto-fix loop complete)
+Last updated: 2026-04-08 (Session a312ee22 — Queue badge counts + process owner badge fix)
 
 ## Pending
 
+- [ ] [LUPIN] **CoSA commit pending: Session a312ee22 (4 files)** — `queues.py` (+user_email API responses), `running_fifo_queue.py` (+user_email 8 metadata dicts), `todo_fifo_queue.py` (+user_email 2 metadata dicts), `queue_consumer.py` (+user_email 1 metadata dict). Commit from CoSA repo context.
 - [ ] [LUPIN] **BFE Phase 6: Live E2E test of automated repair loop**. All code implemented (6A-6F), 58 unit tests passing. Needs live E2E: enable `auto fix enabled = true` in INI, submit a presentation gen job with known-bad mutation, verify watchdog → BFE → resubmit cycle completes. Schedule as monopolized test-suite job after hours.
 - [ ] [LUPIN] **Automated E2E testing workflow**: Design standard pattern for scheduling E2E/integration test runs as monopolized jobs at user-specified times. Becomes the modus operandi for all post-coding verification.
 

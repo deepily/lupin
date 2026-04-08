@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-03-25T18:30:00
+**Last Updated**: 2026-04-08T12:00:00
 
 ---
 
@@ -43,6 +43,7 @@
 | e3c3bab8 | 2026-03-25T18:02:00 | 2026-03-25T18:35:00 | committed |
 | 5b508f0e | 2026-03-26T15:50:00 | 2026-03-26T16:30:00 | committed |
 | 5329e0ea | 2026-03-27T14:00:00 | 2026-03-27T16:15:00 | closed |
+| a312ee22 | 2026-04-08T11:00:00 | 2026-04-08T12:00:00 | committed |
 
 ---
 
@@ -69,6 +70,10 @@
 ---
 
 ### Completed
+
+- [x] **Queue badge counts stale + process owner badge missing** → commit: 90869bc | By: a312ee22
+  - **Bug 1**: Badge counts used DOM element counting on collapsed (empty) containers. Fixed with local counter tracker.
+  - **Bug 2**: `user_email` not propagated to frontend. Added to API responses + all WebSocket metadata dicts + UI badge.
 
 - [x] **Agentic job factory scattered imports** → commit: 18ff764 (docs), CoSA pending | By: 65e3162f
   - **Symptom**: 9 imports scattered across function body — 4 at top, 5 inline in `elif` branches

@@ -155,6 +155,7 @@ class NotificationsUI {
             dead    : { expanded: false, loaded: false, jobs: [] },
             history : { expanded: false, loaded: false, jobs: [], offset: 0, total: 0, timeWindow: 30 }
         };
+        this.queueCounts = { todo: 0, run: 0, done: 0, dead: 0 };
         this.expandedJobCards = new Set();         // Track which job cards are expanded
         this.jobInteractionsCache = new Map();     // Cache loaded interactions: job_id → interactions[]
 
@@ -4751,6 +4752,7 @@ class NotificationsUI {
                     report_path     : metadata.report_link || null,
                     cost_summary    : metadata.cost_summary || null,
                     is_cache_hit    : metadata.is_cache_hit || false,
+                    user_email      : metadata.user_email || null,
                     status          : metadata.status || 'completed',
                     error           : metadata.error || null,
                     has_interactions: metadata.has_interactions || false,
@@ -4769,8 +4771,9 @@ class NotificationsUI {
                 toContainer.insertAdjacentHTML( 'afterbegin', cardHtml );
                 this.log( `[JOB-TRANSITION] Created new card in ${toQueue} container` );
 
-                // Update count badge for target queue
-                this.updateQueueCountFromDOM( toQueue );
+                // Update count badge for target queue (local counter, not DOM-based)
+                this.queueCounts[ toQueue ] = ( this.queueCounts[ toQueue ] || 0 ) + 1;
+                this.updateQueueCountBadge( toQueue, this.queueCounts[ toQueue ] );
             } else {
                 this.log( `[JOB-TRANSITION] No metadata provided, cannot create card` );
             }
@@ -4900,9 +4903,13 @@ class NotificationsUI {
             this.insertJobMetadata( jobId, card, metadata );
         }
 
-        // Update count badges for both queues
-        this.updateQueueCountFromDOM( fromQueue );
-        this.updateQueueCountFromDOM( toQueue );
+        // Update count badges for both queues (local counter, not DOM-based)
+        if ( fromQueue !== toQueue ) {
+            this.queueCounts[ fromQueue ] = Math.max( 0, ( this.queueCounts[ fromQueue ] || 0 ) - 1 );
+            this.updateQueueCountBadge( fromQueue, this.queueCounts[ fromQueue ] );
+            this.queueCounts[ toQueue ] = ( this.queueCounts[ toQueue ] || 0 ) + 1;
+            this.updateQueueCountBadge( toQueue, this.queueCounts[ toQueue ] );
+        }
     }
 
     handleJobPauseStateChange( event, isPaused ) {
@@ -5420,6 +5427,7 @@ class NotificationsUI {
                 // Update count badge for progressive disclosure UI
                 const countBadge = document.getElementById( "todo-count-badge" );
                 if ( countBadge ) countBadge.textContent = data.total_jobs;
+                this.queueCounts.todo = data.total_jobs;
                 // Store metadata for progressive disclosure job cards
                 this.queueCategoryState.todo.jobs = data.todo_jobs_metadata || [];
                 // Also refresh job cards if category is expanded
@@ -5427,6 +5435,7 @@ class NotificationsUI {
             } else if ( queueName === "run" ) {
                 const countBadge = document.getElementById( "run-count-badge" );
                 if ( countBadge ) countBadge.textContent = data.total_jobs;
+                this.queueCounts.run = data.total_jobs;
                 // Store metadata for progressive disclosure job cards
                 this.queueCategoryState.run.jobs = data.run_jobs_metadata || [];
                 this.updateQueueCategoryIfExpanded( "run", data.total_jobs );
@@ -5435,12 +5444,14 @@ class NotificationsUI {
                 await this.handleDoneQueueUpdate( data );
                 const countBadge = document.getElementById( "done-count-badge" );
                 if ( countBadge ) countBadge.textContent = data.total_jobs;
+                this.queueCounts.done = data.total_jobs;
                 // Store metadata for progressive disclosure job cards
                 this.queueCategoryState.done.jobs = data.done_jobs_metadata || [];
                 this.updateQueueCategoryIfExpanded( "done", data.total_jobs );
             } else if ( queueName === "dead" ) {
                 const countBadge = document.getElementById( "dead-count-badge" );
                 if ( countBadge ) countBadge.textContent = data.total_jobs;
+                this.queueCounts.dead = data.total_jobs;
                 // Store metadata for progressive disclosure job cards
                 this.queueCategoryState.dead.jobs = data.dead_jobs_metadata || [];
                 this.updateQueueCategoryIfExpanded( "dead", data.total_jobs );
@@ -6526,6 +6537,9 @@ class NotificationsUI {
         const statusClass = `status-${queueName}`;
         const truncatedQuestion = this.truncateText( job.question_text || 'No question', 60 );
         const agentBadge = job.agent_type ? `<span class="agent-badge">${( job.agent_type || '' ).replace( 'Agent', '' )}</span>` : '';
+        const ownerBadge = ( this.isAdmin && this.queueFilterMode !== 'own' && job.user_email )
+            ? `<span class="owner-badge">${this.escapeHtml( job.user_email )}</span>`
+            : '';
         const cacheHitBadge = job.is_cache_hit ? '<span class="cache-hit-badge" title="Result from cache">⚡ Cached</span>' : '';
         const timestamp = this.formatJobTimestamp( job.timestamp );
         const jobId = job.job_id || `job-${Date.now()}`;
@@ -6633,7 +6647,7 @@ class NotificationsUI {
             <div class="job-card ${statusClass}${pausedCardClass}" id="job-card-${jobId}" data-job-id="${jobId}" data-paused="${job.paused ? 'true' : 'false'}">
                 <div class="job-card-header${headerCancelClass}" onclick="window.notificationsUI.toggleJobCard('${jobId}', '${queueName}')">
                     ${cancelBtnHtml}${pauseBtnHtml}
-                    ${agentBadge}${cacheHitBadge}${completionBadge}${pausedBadge}${scheduledBadge}${monopolizeBadge}
+                    ${agentBadge}${ownerBadge}${cacheHitBadge}${completionBadge}${pausedBadge}${scheduledBadge}${monopolizeBadge}
                     <span class="job-question">${this.escapeHtml( truncatedQuestion )}</span>
                     ${statusIndicator}${interactionIndicator}
                     <span class="job-timestamp">${timestamp}</span>

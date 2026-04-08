@@ -1,5 +1,23 @@
 # Lupin Project History
 
+### 2026.04.08 - Session a312ee22 | Bug Fix: Queue Badge Counts + Process Owner Badge
+
+**Goal**: Fix two CJ Flow UI issues: (1) queue accordion badge counts not updating until clicked, (2) no process owner identification on job cards in admin multi-user views.
+
+**Bug 1 — Badge counts stale until accordion clicked**:
+- **Root cause**: `handleJobStateTransition()` called `updateQueueCountFromDOM()` which counts `.job-card` elements in collapsed (empty) DOM containers. Cards are lazy-loaded on first expand.
+- **Fix**: Added `queueCounts` local tracker seeded from server `data.total_jobs` on every `updateQueueLists()` call. Transition handler now increments/decrements counter and calls `updateQueueCountBadge()`. Guard for `fromQueue !== toQueue`, `Math.max(0)` floor, server re-seed on reconnect.
+
+**Bug 2 — Process owner badge (user_email propagation)**:
+- **Root cause**: `user_email` existed on all job objects (QueueableJob protocol) but was never sent to the frontend — missing from API responses and WebSocket transition metadata.
+- **Fix**: Full ecosystem propagation: added `user_email` to API response dicts in `queues.py` (2 dicts), all 8 metadata dicts in `running_fifo_queue.py`, 2 metadata dicts in `todo_fifo_queue.py`, 1 in `queue_consumer.py`. Frontend maps `user_email` from both API and WebSocket paths. Green `.owner-badge` renders raw email, visible only in admin "all"/"others" filter modes.
+
+**Files Modified — Lupin (2)**: `notifications.js` (queueCounts + owner badge), `notifications.css` (+.owner-badge)
+**Files Modified — CoSA (4, commit pending)**: `queues.py`, `running_fifo_queue.py`, `todo_fifo_queue.py`, `queue_consumer.py`
+**Commit**: 90869bc
+
+---
+
 ### 2026.04.07 - Session a47f938e (cont.) | Bug Fix: Scheduled Jobs Lost on Server Restart
 
 **Goal**: Fix bug where `mark_interrupted_jobs()` killed scheduled-but-not-yet-fired jobs on server restart. Job `ts-36a0c8cc` (scheduled for 7 PM) was marked interrupted when the server restarted at 5:58 PM.
