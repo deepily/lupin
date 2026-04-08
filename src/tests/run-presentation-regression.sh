@@ -37,6 +37,7 @@ INCLUDE_OPUS=false
 INCLUDE_R2P=false
 LOG_FILE="/tmp/presentation-regression-latest.log"
 VENV_ACTIVATE="src/cosa/.venv/bin/activate"
+PYTEST="python3 -m pytest"  # System python3 has pytest in Docker; matches unit/smoke runners
 
 TOTAL=0
 PASSED=0
@@ -124,20 +125,20 @@ echo "════════════════════════�
 
 # Tier 2: Render-only (~60s, $0)
 run_tier "render-only" \
-    "pytest src/tests/smoke/test_presentation_render_only_smoke.py --auto-proxy -v" \
+    "$PYTEST src/tests/smoke/test_presentation_render_only_smoke.py --auto-proxy -v" \
     120 \
     "\$0.00"
 
 # Tier 3: Sonnet full pipeline (~8min, $0.46)
 run_tier "sonnet-full" \
-    "pytest src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --content-model claude-sonnet-4-6 --cost-cap-usd 2.00 -v" \
+    "$PYTEST src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --content-model claude-sonnet-4-6 --cost-cap-usd 2.00 -v" \
     900 \
     "~\$0.46"
 
 # Tier 4: Opus full pipeline (optional, ~8min, $2.43)
 if [ "$INCLUDE_OPUS" = "true" ]; then
     run_tier "opus-full" \
-        "pytest src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --cost-cap-usd 5.00 -v" \
+        "$PYTEST src/tests/smoke/test_presentation_live_smoke.py --auto-proxy --cost-cap-usd 5.00 -v" \
         900 \
         "~\$2.43"
 fi
@@ -145,9 +146,9 @@ fi
 # Tier 5: Research-to-Presentation chain (optional, ~30min, $5-10)
 if [ "$INCLUDE_R2P" = "true" ]; then
     run_tier "r2p-chain" \
-        "pytest src/tests/smoke/test_research_to_presentation_live_smoke.py --auto-proxy --cost-cap-usd 10.00 -v" \
+        "$PYTEST src/tests/smoke/test_research_to_presentation_live_smoke.py --auto-proxy --lead-model claude-haiku-4-5 --cost-cap-usd 10.00 -v" \
         2400 \
-        "~\$5-10"
+        "~\$1-3 (Haiku)"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════

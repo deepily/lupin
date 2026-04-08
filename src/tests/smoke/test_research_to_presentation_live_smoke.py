@@ -164,6 +164,7 @@ class ResearchToPresentationLiveSmokeTest( InteractiveSmokeTest ):
     def __init__( self, *args, **kwargs ):
         super().__init__( *args, **kwargs )
         self._cost_cap_usd = DEFAULT_COST_CAP_USD
+        self._lead_model   = None
 
     # ═══════════════════════════════════════════════════════════════════════
     # Scenario Selection
@@ -178,13 +179,16 @@ class ResearchToPresentationLiveSmokeTest( InteractiveSmokeTest ):
 
     def get_submit_payload( self, scenario, ws_id ):
         """Build the R2P chain payload."""
-        return {
+        payload = {
             "query"                   : scenario[ "query" ],
             "budget"                  : scenario.get( "budget", 3.0 ),
             "target_duration_minutes" : scenario.get( "target_duration_minutes", 10 ),
             "audience"                : scenario.get( "audience", "general" ),
             "dry_run"                 : False,
         }
+        if self._lead_model:
+            payload[ "lead_model" ] = self._lead_model
+        return payload
 
     def get_mode_for_scenario( self, scenario ):
         return None
@@ -195,6 +199,7 @@ class ResearchToPresentationLiveSmokeTest( InteractiveSmokeTest ):
         print( f"  Target duration:    {scenario.get( 'target_duration_minutes', 10 )} min" )
         print( f"  Audience:           {scenario.get( 'audience', 'general' )}" )
         print( f"  Mode:               LIVE CHAIN (DR → PR)" )
+        print( f"  DR lead model:      {self._lead_model or 'INI default'}" )
         print( f"  Cost cap:           ${self._cost_cap_usd:.2f}" )
         print( f"  Proxy profile:      {self.PROXY_PROFILE}" )
         print( f"  Expected duration:  20-35 min" )
@@ -212,6 +217,12 @@ class ResearchToPresentationLiveSmokeTest( InteractiveSmokeTest ):
             help=f"Max total cost (USD) for DR + PR combined. Default: ${DEFAULT_COST_CAP_USD:.2f}"
         )
         parser.add_argument(
+            "--lead-model",
+            type=str,
+            default=None,
+            help="Override DR lead model (e.g. claude-haiku-4-5 for cheap testing). Default: INI config."
+        )
+        parser.add_argument(
             "--timeout",
             type=int,
             default=None,
@@ -221,6 +232,7 @@ class ResearchToPresentationLiveSmokeTest( InteractiveSmokeTest ):
 
     def pre_run_hook( self, args, headers, ws_id ):
         self._cost_cap_usd = getattr( args, "cost_cap_usd", DEFAULT_COST_CAP_USD )
+        self._lead_model   = getattr( args, "lead_model", None )
         timeout_override   = getattr( args, "timeout", None )
         if timeout_override is not None:
             self.DEFAULT_TIMEOUT = timeout_override
