@@ -44,16 +44,11 @@ RUN apt-get update && apt-get install -y \
     && apt-get install libportaudio2 libportaudiocpp0 portaudio19-dev libasound-dev libsndfile1-dev ffmpeg -y \
     && pip install pyaudio
 
-RUN pip install -U pip
+# Re-establish Python 3.11 symlinks (apt-get install pip above restores python3 → 3.10)
+RUN ln -sf /usr/local/bin/python3.11 /usr/bin/python3 && \
+    ln -sf /usr/local/bin/pip3.11 /usr/bin/pip3
 
-#######################################
-# Specific versions needed to support web socket Io
-#######################################
-#RUN pip install Flask==2.1.3
-#RUN pip install Flask-SocketIO==5.0.1
-#RUN pip install eventlet==0.30.2
-#RUN pip install Werkzeug==2.0.3
-#RUN pip install requests==2.31.0
+RUN pip install -U pip
 
 RUN pip install pandas
 
@@ -61,29 +56,17 @@ RUN pip install pydub
 
 RUN pip install pyperclip
 
-# RUN pip install flask_cors
-
-# RUN #pip install duckduckgo-search
-
-# RUN pip install jupyterlab
-#
-# RUN pip install ipywidgets
-
 RUN pip install tabulate
 
 RUN pip install tiktoken
 
 RUN pip install --upgrade --no-cache-dir openai
 
-# RUN pip install --upgrade --no-cache-dir langchain[llms]
-
-# RUN pip install --upgrade --no-cache-dir wandb
-
 RUN pip install --upgrade --no-cache-dir transformers
 
 RUN pip install --upgrade --no-cache-dir accelerate
 
-RUN pip install --upgrade --no-cache-dir torch
+RUN pip install --upgrade --no-cache-dir torch==2.7.0
 
 RUN pip install pyaudio
 
@@ -235,17 +218,11 @@ RUN mkdir -p /var/lupin/io
 #   gcloud run deploy lupin --set-secrets="ANTHROPIC_API_KEY=anthropic-api-key:latest"
 # ============================================================================
 
-# Install Node.js 20.x LTS (required for Claude Code CLI)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
+# Install Claude Code native binary
+RUN curl -fsSL https://claude.ai/install.sh | bash
 
-# Install Claude Code CLI globally (gets latest version at build time)
-# To update: rebuild this image. Auto-update disabled for container immutability.
-RUN npm install -g @anthropic-ai/claude-code
-
-# latest, as of feb 10 2026
-RUN pip install claude-agent-sdk==0.1.36
+# latest, as of April 6, 2026
+RUN pip install --no-cache-dir claude-agent-sdk==0.1.56
 
 # Create Claude config directory and copy pre-configured settings
 RUN mkdir -p /root/.claude

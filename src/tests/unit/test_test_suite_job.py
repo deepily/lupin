@@ -8,7 +8,7 @@ dry run mode, and voice_io integration.
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from cosa.agents.test_suite.job import TestSuiteJob, _PYTEST_SUMMARY_RE
+from cosa.agents.test_suite.job import TestSuiteJob
 from cosa.rest.job_state import JobState
 
 
@@ -139,83 +139,85 @@ class TestDisplay:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Pytest Output Parsing Tests
+# JUnit XML Parsing Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TestParsePytestOutput:
-    """Tests for _parse_pytest_output static method."""
+def _write_junit_xml( tmp_path, tests=0, failures=0, errors=0, skipped=0 ):
+    """Helper: write a minimal junit-xml file and return its path."""
+    xml_path = tmp_path / "results.xml"
+    xml_path.write_text(
+        f'<?xml version="1.0" encoding="utf-8"?>\n'
+        f'<testsuite name="pytest" tests="{tests}" failures="{failures}" '
+        f'errors="{errors}" skipped="{skipped}" time="10.0">\n'
+        f'</testsuite>\n'
+    )
+    return str( xml_path )
 
-    def test_all_passed( self ):
-        """Parse output with only passed tests."""
-        result = TestSuiteJob._parse_pytest_output(
-            "======== 195 passed in 350.12s ========"
-        )
+
+class TestParseJunitXml:
+    """Tests for _parse_junit_xml static method."""
+
+    def test_all_passed( self, tmp_path ):
+        """Parse XML with only passed tests."""
+        path   = _write_junit_xml( tmp_path, tests=195 )
+        result = TestSuiteJob._parse_junit_xml( path )
         assert result[ "passed" ] == 195
         assert result[ "failed" ] == 0
         assert result[ "skipped" ] == 0
         assert result[ "errors" ] == 0
 
-    def test_mixed_results( self ):
-        """Parse output with passed, failed, and skipped."""
-        result = TestSuiteJob._parse_pytest_output(
-            "======== 195 passed, 3 failed, 32 skipped in 350.12s ========"
-        )
+    def test_mixed_results( self, tmp_path ):
+        """Parse XML with passed, failed, and skipped."""
+        path   = _write_junit_xml( tmp_path, tests=230, failures=3, skipped=32 )
+        result = TestSuiteJob._parse_junit_xml( path )
         assert result[ "passed" ] == 195
         assert result[ "failed" ] == 3
         assert result[ "skipped" ] == 32
 
-    def test_with_errors( self ):
-        """Parse output with errors."""
-        result = TestSuiteJob._parse_pytest_output(
-            "======== 5 passed, 3 failed, 1 error in 2.34s ========"
-        )
+    def test_with_errors( self, tmp_path ):
+        """Parse XML with errors."""
+        path   = _write_junit_xml( tmp_path, tests=9, failures=3, errors=1 )
+        result = TestSuiteJob._parse_junit_xml( path )
         assert result[ "passed" ] == 5
         assert result[ "failed" ] == 3
         assert result[ "errors" ] == 1
 
-    def test_with_warnings( self ):
-        """Parse output with warnings (not tracked but shouldn't break parsing)."""
-        result = TestSuiteJob._parse_pytest_output(
-            "======== 195 passed, 2 warnings in 5.00s ========"
-        )
-        assert result[ "passed" ] == 195
-        assert result[ "failed" ] == 0
-
-    def test_empty_output( self ):
-        """Empty output should return zeros."""
-        result = TestSuiteJob._parse_pytest_output( "" )
+    def test_missing_file( self ):
+        """Missing file should return zeros (startup crash scenario)."""
+        result = TestSuiteJob._parse_junit_xml( "/tmp/nonexistent-junit.xml" )
         assert result[ "passed" ] == 0
         assert result[ "failed" ] == 0
         assert result[ "skipped" ] == 0
         assert result[ "errors" ] == 0
 
-    def test_no_summary_line( self ):
-        """Output without summary line should return zeros."""
-        result = TestSuiteJob._parse_pytest_output( "some random output\nno summary here" )
+    def test_malformed_xml( self, tmp_path ):
+        """Malformed XML should return zeros."""
+        xml_path = tmp_path / "bad.xml"
+        xml_path.write_text( "this is not xml" )
+        result = TestSuiteJob._parse_junit_xml( str( xml_path ) )
         assert result[ "passed" ] == 0
 
-    def test_failed_only( self ):
-        """Parse output where all tests failed."""
-        result = TestSuiteJob._parse_pytest_output(
-            "======== 10 failed in 5.00s ========"
-        )
+    def test_failed_only( self, tmp_path ):
+        """Parse XML where all tests failed."""
+        path   = _write_junit_xml( tmp_path, tests=10, failures=10 )
+        result = TestSuiteJob._parse_junit_xml( path )
         assert result[ "passed" ] == 0
         assert result[ "failed" ] == 10
 
-    def test_real_integration_output( self ):
-        """Parse a realistic integration test summary."""
-        output = """
-collecting ... collected 195 items
-
-test_auth_integration.py::test_login PASSED
-test_auth_integration.py::test_register PASSED
-...many more...
-
-======== 195 passed, 0 failed, 32 skipped in 350.12s ========
-"""
-        result = TestSuiteJob._parse_pytest_output( output )
-        assert result[ "passed" ] == 195
-        assert result[ "skipped" ] == 32
+    def test_testsuites_wrapper( self, tmp_path ):
+        """Parse XML with <testsuites> root wrapping <testsuite>."""
+        xml_path = tmp_path / "results.xml"
+        xml_path.write_text(
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<testsuites>\n'
+            '<testsuite name="pytest" tests="50" failures="2" errors="0" skipped="5" time="30.0">\n'
+            '</testsuite>\n'
+            '</testsuites>\n'
+        )
+        result = TestSuiteJob._parse_junit_xml( str( xml_path ) )
+        assert result[ "passed" ] == 43
+        assert result[ "failed" ] == 2
+        assert result[ "skipped" ] == 5
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -271,10 +273,12 @@ class TestStateTransitions:
         """New job should be PENDING."""
         assert job.state == JobState.PENDING
 
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.job.TestSuiteJob._run_suite" )
     @patch( "cosa.agents.test_suite.voice_io" )
-    def test_successful_completion( self, mock_voice_io, mock_run_suite, job ):
+    def test_successful_completion( self, mock_voice_io, mock_run_suite, mock_root, job, tmp_path ):
         """Successful execution should transition to COMPLETED."""
+        mock_root.return_value = str( tmp_path )
         mock_run_suite.return_value = {
             "passed"    : 10,
             "failed"    : 0,
@@ -297,10 +301,12 @@ class TestStateTransitions:
         assert job.answer_conversational is not None
         assert job.error is None
 
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.job.TestSuiteJob._run_suite" )
     @patch( "cosa.agents.test_suite.voice_io" )
-    def test_failed_suite( self, mock_voice_io, mock_run_suite, job ):
+    def test_failed_suite( self, mock_voice_io, mock_run_suite, mock_root, job, tmp_path ):
         """Suite failure should still complete (both always run)."""
+        mock_root.return_value = str( tmp_path )
         mock_run_suite.return_value = {
             "passed"    : 5,
             "failed"    : 3,

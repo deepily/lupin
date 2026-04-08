@@ -40,7 +40,9 @@ set -e  # Exit on error
 PORT=7999
 BASE_URL="http://localhost:$PORT"
 PROJECT_ROOT="${LUPIN_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/lupin}"
+# Use venv python on host, fall back to system python in Docker container
 VENV_PYTHON="$PROJECT_ROOT/src/cosa/.venv/bin/python3"
+if ! "$VENV_PYTHON" --version > /dev/null 2>&1; then VENV_PYTHON="python3"; fi
 ORIGINAL_BLOCK=""
 
 # --- Background execution support ---
@@ -148,11 +150,33 @@ echo ""
 # Ensure PostgreSQL is running and test database exists
 echo -e "${YELLOW}[POSTGRES] Ensuring PostgreSQL is ready...${NC}"
 
-if ! "$PROJECT_ROOT/src/scripts/run-postgresql-dev.sh" --no-follow-logs; then
-    echo ""
-    echo -e "${RED}[ERROR] Failed to start/verify PostgreSQL${NC}"
-    echo ""
-    exit 1
+if command -v docker > /dev/null 2>&1; then
+    # Host: use full docker-based postgres setup (starts container, creates DB, applies schema)
+    if ! "$PROJECT_ROOT/src/scripts/run-postgresql-dev.sh" --no-follow-logs; then
+        echo ""
+        echo -e "${RED}[ERROR] Failed to start/verify PostgreSQL${NC}"
+        echo ""
+        exit 1
+    fi
+else
+    # Container: docker CLI unavailable — verify postgres is reachable directly
+    echo -e "${YELLOW}[POSTGRES] Running inside container — checking direct connectivity...${NC}"
+    if ! "$VENV_PYTHON" -c "
+import socket
+try:
+    s = socket.create_connection( ('lupin-postgres-dev', 5432), timeout=5 )
+    s.close()
+    print( 'PostgreSQL reachable at lupin-postgres-dev:5432' )
+except Exception as e:
+    print( f'PostgreSQL not reachable: {e}' )
+    exit( 1 )
+"; then
+        echo ""
+        echo -e "${RED}[ERROR] PostgreSQL not reachable from container${NC}"
+        echo "Ensure the postgres container is running and on the same Docker network."
+        echo ""
+        exit 1
+    fi
 fi
 
 echo ""
@@ -297,7 +321,7 @@ cd "$PROJECT_ROOT"
 
 # Run pytest and capture exit code
 set +e  # Don't exit on pytest failure
-"$PROJECT_ROOT/src/cosa/.venv/bin/pytest" src/tests/e2e_ui/ --browser chromium "${REMAINING_ARGS[@]}"
+$VENV_PYTHON -m pytest src/tests/e2e_ui/ --browser chromium "${REMAINING_ARGS[@]}"
 PYTEST_EXIT_CODE=$?
 set -e
 

@@ -413,7 +413,7 @@ def quick_smoke_test():
         - Returns True if all 6 scenarios pass
     """
     test = ResearchToPresentationDryRunSmokeTest()
-    return test.run()
+    return test.run( argv=[] )
 
 
 def test_research_to_presentation_dry_run_endpoint():

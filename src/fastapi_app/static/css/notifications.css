@@ -4090,6 +4090,12 @@
     left: 6px;
 }
 
+/* Make room for delete button on done/dead cards (no cancel button present) */
+.job-card.status-done .job-card-header,
+.job-card.status-dead .job-card-header {
+    padding-left: 36px;
+}
+
 .job-cancel-button:disabled {
     background-color: #6c757d;
     color: white;

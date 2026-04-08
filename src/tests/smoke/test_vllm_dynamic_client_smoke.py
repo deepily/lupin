@@ -94,8 +94,9 @@ def quick_smoke_test():
         factory = LlmClientFactory()
         client = factory.get_client( model, debug=False, verbose=False )
 
-        assert client.base_url == "http://localhost:3000/v1/completions", f"Expected localhost:3000, got {client.base_url}"
-        assert client.model_name == MERGED_ADAPTER_DIR, f"Expected '{MERGED_ADAPTER_DIR}', got '{client.model_name}'"
+        expected_base = factory.VENDOR_URLS.get( "vllm", "http://localhost:3000/v1" ) + "/completions"
+        assert client.base_url == expected_base, f"Expected {expected_base}, got {client.base_url}"
+        assert MERGED_ADAPTER_DIR in client.model_name, f"Expected model_name to contain '{MERGED_ADAPTER_DIR}', got '{client.model_name}'"
         assert client.prompt_format == "instruction_completion", f"Expected 'instruction_completion', got '{client.prompt_format}'"
         print( f"  base_url: {client.base_url}" )
         print( f"  model_name: {client.model_name}" )

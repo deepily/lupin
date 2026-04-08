@@ -23,4 +23,8 @@ cd "$PROJECT_ROOT"
 export PYTHONPATH="$PROJECT_ROOT/src:${PYTHONPATH}"
 export LUPIN_ROOT="$PROJECT_ROOT"
 
-exec python3 -m pytest src/tests/unit/ "$@"
+# Use venv pytest on host, fall back to system pytest in Docker container
+VENV_PYTEST="$PROJECT_ROOT/src/cosa/.venv/bin/pytest"
+if [ -x "$VENV_PYTEST" ] && "$VENV_PYTEST" --version > /dev/null 2>&1; then PYTEST="$VENV_PYTEST"; else PYTEST="python3 -m pytest"; fi
+
+exec $PYTEST src/tests/unit/ "$@"

@@ -27,7 +27,9 @@
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR/../.."  # Project root
+PROJECT_ROOT="$SCRIPT_DIR/../.."
+cd "$PROJECT_ROOT"
+PROJECT_ROOT="$(pwd)"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Configuration
@@ -37,7 +39,10 @@ INCLUDE_OPUS=false
 INCLUDE_R2P=false
 LOG_FILE="/tmp/presentation-regression-latest.log"
 VENV_ACTIVATE="src/cosa/.venv/bin/activate"
-PYTEST="python3 -m pytest"  # System python3 has pytest in Docker; matches unit/smoke runners
+# Use venv python on host, fall back to system python in Docker container
+VENV_PYTHON="$PROJECT_ROOT/src/cosa/.venv/bin/python3"
+if ! "$VENV_PYTHON" --version > /dev/null 2>&1; then VENV_PYTHON="python3"; fi
+PYTEST="$VENV_PYTHON -m pytest"
 
 TOTAL=0
 PASSED=0
