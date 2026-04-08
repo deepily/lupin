@@ -4059,6 +4059,37 @@
     cursor: not-allowed;
 }
 
+.job-delete-button {
+    position: absolute;
+    top: 4px;
+    left: 34px;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 2px solid #dc3545;
+    border-radius: 4px;
+    background-color: white;
+    color: #dc3545;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    z-index: 10;
+}
+
+.job-delete-button:hover {
+    background-color: #dc3545;
+    color: white;
+}
+
+/* When no cancel button, shift delete to left edge */
+.job-card.status-done .job-delete-button,
+.job-card.status-dead .job-delete-button {
+    left: 6px;
+}
+
 .job-cancel-button:disabled {
     background-color: #6c757d;
     color: white;

@@ -2129,6 +2129,7 @@ class NotificationsUI {
             session_id: this.queueSessionId,
             subscribed_events: [
                 "job_state_transition",
+                "job_removed",
                 "tts_job_request",
                 "sys_time_update",
                 "notification_play_sound",
@@ -2235,7 +2236,16 @@ class NotificationsUI {
                     this.handleJobStateTransition( envelope );
                     break;
 
-                // job_paused/job_resumed cases removed — now routed through handleJobStateTransition
+                case "job_removed":
+                    // Remove card from DOM when another client/session deletes a job
+                    const removedCard = document.getElementById( `job-card-${envelope.job_id}` );
+                    if ( removedCard ) removedCard.remove();
+                    if ( envelope.queue && this.queueCounts[ envelope.queue ] !== undefined ) {
+                        this.queueCounts[ envelope.queue ] = Math.max( 0, this.queueCounts[ envelope.queue ] - 1 );
+                        this.updateQueueCountBadge( envelope.queue, this.queueCounts[ envelope.queue ] );
+                        this.updateQueueEmptyMessage( envelope.queue );
+                    }
+                    break;
 
                 case "notification_queue_update":
                     this.handleNotificationUpdate( envelope );
@@ -5979,6 +5989,48 @@ class NotificationsUI {
         }
     }
 
+    async deleteQueueJob( jobId, queueName ) {
+        /**
+         * Forcefully remove a job from an in-memory queue (run, done, dead).
+         *
+         * Requires:
+         *     - jobId is a valid job ID string
+         *     - queueName is 'run', 'done', or 'dead'
+         *     - User is authenticated (admin or job owner)
+         *
+         * Ensures:
+         *     - Prompts user for confirmation before removing
+         *     - Sends DELETE /api/queue/{queueName}/{jobId}
+         *     - Removes card from DOM and updates count badge on success
+         */
+        const label = queueName === 'run' ? 'running' : queueName;
+        if ( !confirm( `Remove this job from the ${label} queue?` ) ) return;
+
+        try {
+            const response = await fetch( `/api/queue/${queueName}/${jobId}`, {
+                method  : 'DELETE',
+                headers : { 'Authorization': this.getAuthHeader() }
+            } );
+
+            if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
+
+            // Remove card from DOM
+            const card = document.getElementById( `job-card-${jobId}` );
+            if ( card ) card.remove();
+
+            // Update local count badge
+            this.queueCounts[ queueName ] = Math.max( 0, ( this.queueCounts[ queueName ] || 0 ) - 1 );
+            this.updateQueueCountBadge( queueName, this.queueCounts[ queueName ] );
+            this.updateQueueEmptyMessage( queueName );
+
+            this.log( `[DELETE] Job ${jobId} removed from ${queueName} queue` );
+
+        } catch ( error ) {
+            this.error( `Error removing job from ${queueName} queue:`, error );
+            alert( `Failed to remove job from ${label} queue` );
+        }
+    }
+
     async retryHistoryJob( jobId, questionText ) {
         /**
          * Retry a failed/interrupted job by re-submitting to the todo queue.
@@ -6578,8 +6630,9 @@ class NotificationsUI {
             const schedDate = new Date( job.scheduled_at );
             const now = new Date();
             if ( schedDate > now ) {
-                const schedTimeStr = schedDate.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit' } );
-                const schedDateStr = schedDate.toLocaleDateString( [], { month: 'short', day: 'numeric' } );
+                const tz = this.appTimezone || 'America/New_York';
+                const schedTimeStr = schedDate.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit', timeZone: tz } );
+                const schedDateStr = schedDate.toLocaleDateString( [], { month: 'short', day: 'numeric', timeZone: tz } );
                 scheduledBadge = `<span class="scheduled-badge" title="Scheduled for ${schedDate.toISOString()}">🕐 ${schedDateStr} ${schedTimeStr}</span>`;
             }
         }
@@ -6643,10 +6696,16 @@ class NotificationsUI {
             ? `<button type="button" class="job-pause-button${job.paused ? ' is-paused' : ''}" id="job-pause-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.toggleJobPause('${jobId}', ${!job.paused})" title="${job.paused ? 'Resume this job' : 'Pause this job'}">${job.paused ? '▶' : '⏸'}</button>`
             : '';
 
+        // Delete button for run/done/dead queues (forceful removal)
+        const hasDeleteBtn = ( queueName === 'run' || queueName === 'done' || queueName === 'dead' );
+        const deleteBtnHtml = hasDeleteBtn
+            ? `<button type="button" class="job-delete-button" id="job-delete-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.deleteQueueJob('${jobId}', '${queueName}')" title="Remove from ${queueName} queue">🗑</button>`
+            : '';
+
         return `
             <div class="job-card ${statusClass}${pausedCardClass}" id="job-card-${jobId}" data-job-id="${jobId}" data-paused="${job.paused ? 'true' : 'false'}">
                 <div class="job-card-header${headerCancelClass}" onclick="window.notificationsUI.toggleJobCard('${jobId}', '${queueName}')">
-                    ${cancelBtnHtml}${pauseBtnHtml}
+                    ${cancelBtnHtml}${pauseBtnHtml}${deleteBtnHtml}
                     ${agentBadge}${ownerBadge}${cacheHitBadge}${completionBadge}${pausedBadge}${scheduledBadge}${monopolizeBadge}
                     <span class="job-question">${this.escapeHtml( truncatedQuestion )}</span>
                     ${statusIndicator}${interactionIndicator}
@@ -7191,10 +7250,11 @@ class NotificationsUI {
             const cleaned = timestamp.replace( ' @ ', 'T' ).replace( ' EST', '' ).replace( ' EDT', '' );
             const date = new Date( cleaned );
             return date.toLocaleString( 'en-US', {
-                month  : 'short',
-                day    : 'numeric',
-                hour   : 'numeric',
-                minute : '2-digit'
+                month    : 'short',
+                day      : 'numeric',
+                hour     : 'numeric',
+                minute   : '2-digit',
+                timeZone : this.appTimezone || 'America/New_York'
             } );
         } catch ( e ) {
             return timestamp;

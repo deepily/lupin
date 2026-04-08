@@ -43,7 +43,7 @@
 | e3c3bab8 | 2026-03-25T18:02:00 | 2026-03-25T18:35:00 | committed |
 | 5b508f0e | 2026-03-26T15:50:00 | 2026-03-26T16:30:00 | committed |
 | 5329e0ea | 2026-03-27T14:00:00 | 2026-03-27T16:15:00 | closed |
-| a312ee22 | 2026-04-08T11:00:00 | 2026-04-08T12:00:00 | committed |
+| a312ee22 | 2026-04-08T11:00:00 | 2026-04-08T15:45:00 | committed |
 
 ---
 
@@ -71,9 +71,13 @@
 
 ### Completed
 
-- [x] **Queue badge counts stale + process owner badge missing** → commit: 90869bc | By: a312ee22
+- [x] **Queue badge counts stale + process owner badge missing** → commit: a149363 | By: a312ee22
   - **Bug 1**: Badge counts used DOM element counting on collapsed (empty) containers. Fixed with local counter tracker.
   - **Bug 2**: `user_email` not propagated to frontend. Added to API responses + all WebSocket metadata dicts + UI badge.
+
+- [x] **Timezone UTC→EST + queue job delete button** → commit: 7e71e1a | By: a312ee22
+  - **Bug 3**: `datetime.now().isoformat()` produced naive UTC strings. Added `get_current_datetime_iso()` utility, replaced ~65 call sites across 20 files.
+  - **Bug 4**: No delete for stuck/done jobs. Added `DELETE /api/queue/{name}/{id}` + 🗑 button + `job_removed` WS event.
 
 - [x] **Agentic job factory scattered imports** → commit: 18ff764 (docs), CoSA pending | By: 65e3162f
   - **Symptom**: 9 imports scattered across function body — 4 at top, 5 inline in `elif` branches

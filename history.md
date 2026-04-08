@@ -14,7 +14,22 @@
 
 **Files Modified — Lupin (2)**: `notifications.js` (queueCounts + owner badge), `notifications.css` (+.owner-badge)
 **Files Modified — CoSA (4, commit pending)**: `queues.py`, `running_fifo_queue.py`, `todo_fifo_queue.py`, `queue_consumer.py`
-**Commit**: 90869bc
+**Commit**: a149363 (checkpoint 1)
+
+#### Fix 2: Timezone-Aware Timestamps + Queue Job Delete Button
+
+**Bug 3 — Timestamps showing UTC instead of EST**:
+- **Root cause**: `datetime.now().isoformat()` used throughout codebase produces naive ISO strings. Docker container runs UTC. Browser interprets naive strings as local time, displaying UTC value 4-5 hours wrong.
+- **Fix**: Added `get_current_datetime_iso()` to `util.py` — returns Eastern ISO strings with offset (e.g., `2026-04-08T14:08:19-04:00`). Replaced all frontend-facing `datetime.now().isoformat()` calls across 20 files (~65 call sites): 9 REST/WebSocket layer files (Tier 1) + 11 agent job files (Tier 2). No frontend changes needed — `new Date()` handles offset strings correctly.
+
+**Bug 4 — No delete button for stuck/completed jobs**:
+- **Root cause**: Running jobs only had graceful cancel (useless for stuck jobs). Done/dead queues had no removal mechanism. `FifoQueue.delete_by_id_hash()` existed but no API endpoint exposed it.
+- **Fix**: Added `DELETE /api/queue/{queue_name}/{job_id}` endpoint with owner/admin auth. Frontend `deleteQueueJob()` function + 🗑 delete button on run/done/dead cards. `job_removed` WebSocket event for multi-client sync. Registered in INI + splainer.
+
+**Files Modified — Lupin (4)**: `notifications.js`, `notifications.css`, `lupin-app.ini`, `lupin-app-splainer.ini`
+**Files Modified — CoSA (22, commit pending)**: `util.py` (+function), `queue_util.py`, `websocket_manager.py`, `running_fifo_queue.py`, `queue_consumer.py`, `routers/queues.py` (+DELETE endpoint +timestamps), `routers/websocket.py`, `routers/system.py`, `routers/websocket_admin.py`, `routers/jobs.py`, `agentic_job_base.py`, 10 agent job files
+**Tests**: Unit suite scheduled (ts-d8b84b8b), timestamps confirmed correct in UI
+**Commit**: 7e71e1a
 
 ---
 
