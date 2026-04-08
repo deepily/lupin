@@ -1,5 +1,21 @@
 # Lupin Project History
 
+### 2026.04.07 - Session a47f938e (cont.) | Bug Fix: Scheduled Jobs Lost on Server Restart
+
+**Goal**: Fix bug where `mark_interrupted_jobs()` killed scheduled-but-not-yet-fired jobs on server restart. Job `ts-36a0c8cc` (scheduled for 7 PM) was marked interrupted when the server restarted at 5:58 PM.
+
+**Root cause**: `mark_interrupted_jobs()` marked ALL `pending` + `running` jobs as `interrupted`. But `pending` in the DB includes scheduled jobs that never started — they were sitting in the in-memory queue waiting for their `scheduled_at` time.
+
+**Fix**: Split `mark_interrupted_jobs()` into two paths: RUNNING → INTERRUPTED (correct), PENDING + future `scheduled_at` → preserved. Added `_is_future_scheduled()` helper for timezone-aware comparison. Added `get_restorable_jobs()` to query preserved jobs. Added restore loop in `main.py` that re-creates and re-enqueues scheduled jobs via `agentic_job_factory` after startup.
+
+**Also this session**: Created `/schedule-tests` skill for voice-triggered test scheduling, E2E Playwright tests for repair loop (`test_repair_loop_ui.py`, 7 tests), and `repair_chain_seed.py` helper.
+
+**Files Modified (2)**: `job_persistence.py` (split function + 2 new functions), `main.py` (+restore loop)
+**Files Created (1)**: `test_job_restoration.py` (16 tests)
+**Tests**: 2,886 passed (+16 new), 0 failed
+
+---
+
 ### 2026.04.07 - Session a47f938e | BFE Phase 6: Automated Repair Loop (Full Implementation)
 
 **Goal**: Design and implement the automated bug fix loop — when an agentic job fails, automatically trigger the Bug Fix Expediter, apply the fix, and resubmit the original job with the user's identity so notifications route to their UI.

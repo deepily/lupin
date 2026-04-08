@@ -494,13 +494,15 @@ async def lifespan( app: FastAPI ):
     #   - production: Cloud SQL (automatic schema creation via Alembic migrations)
     print( "[AUTH] Using PostgreSQL authentication database" )
 
-    # CJ Flow Persistence: Mark in-flight jobs from previous session as interrupted
+    # CJ Flow Persistence: Mark in-flight jobs as interrupted, preserve scheduled jobs
     try:
-        interrupted_count = mark_interrupted_jobs()
-        if interrupted_count > 0:
-            print( f"[CJ-PERSIST] Marked {interrupted_count} interrupted job(s) from previous session" )
+        counts = mark_interrupted_jobs()
+        total_interrupted = counts.get( "running", 0 ) + counts.get( "pending_interrupted", 0 )
+        preserved         = counts.get( "pending_preserved", 0 )
+        if total_interrupted > 0 or preserved > 0:
+            print( f"[CJ-PERSIST] Startup recovery: {total_interrupted} interrupted, {preserved} scheduled preserved" )
         else:
-            print( "[CJ-PERSIST] No interrupted jobs found" )
+            print( "[CJ-PERSIST] No interrupted or scheduled jobs found" )
     except Exception as e:
         print( f"[WARN] CJ Flow startup recovery failed: {e}" )
 
@@ -583,7 +585,44 @@ async def lifespan( app: FastAPI ):
     from cosa.rest.repair_attempt_tracker import init_tracker
     init_tracker( config_mgr, debug=app_debug )
     init_watchdog( config_mgr, jobs_todo_queue, debug=app_debug )
-    
+
+    # Restore scheduled jobs that survived the restart (preserved by mark_interrupted_jobs)
+    try:
+        from cosa.rest.job_persistence import get_restorable_jobs
+        from cosa.rest.agentic_job_factory import create_agentic_job
+
+        restorable = get_restorable_jobs()
+        for job_data in restorable:
+            routing_cmd = job_data[ "routing_command" ]
+            if not routing_cmd:
+                print( f"[CJ-PERSIST] Cannot restore {job_data[ 'id_hash' ]}: no routing_command" )
+                continue
+
+            job = create_agentic_job(
+                command    = routing_cmd,
+                args_dict  = job_data.get( "metadata_json", {} ),
+                user_id    = job_data[ "user_id" ],
+                user_email = job_data[ "user_email" ],
+                session_id = job_data[ "session_id" ],
+                debug      = app_debug,
+            )
+            if job is None:
+                print( f"[CJ-PERSIST] Cannot restore {job_data[ 'id_hash' ]}: factory returned None" )
+                continue
+
+            job.scheduled_at = job_data[ "scheduled_at" ]
+            if job_data.get( "monopolize" ):
+                job.monopolize = True
+
+            jobs_todo_queue.push( job )
+            print( f"[CJ-PERSIST] Restored scheduled job: {job_data[ 'id_hash' ]} "
+                   f"(type={job_data[ 'job_type' ]}, scheduled_at={job_data[ 'scheduled_at' ]})" )
+
+        if restorable:
+            print( f"[CJ-PERSIST] Restored {len( restorable )} scheduled job(s)" )
+    except Exception as e:
+        print( f"[WARN] Scheduled job restoration failed: {e}" )
+
     print( f"FastAPI startup complete at {datetime.now()}" )
     
     yield
