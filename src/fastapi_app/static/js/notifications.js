@@ -5912,7 +5912,8 @@ class NotificationsUI {
             duration_seconds : job.duration_seconds,
             status           : job.status,
             error            : job.error,
-            session_id       : job.session_id
+            session_id       : job.session_id,
+            _isHistory       : true
         };
 
         // Map history status to queue name for styling
@@ -6707,8 +6708,8 @@ class NotificationsUI {
             ? `<button type="button" class="job-pause-button${job.paused ? ' is-paused' : ''}" id="job-pause-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.toggleJobPause('${jobId}', ${!job.paused})" title="${job.paused ? 'Resume this job' : 'Pause this job'}">${job.paused ? '▶' : '⏸'}</button>`
             : '';
 
-        // Delete button for run/done/dead queues (forceful removal)
-        const hasDeleteBtn = ( queueName === 'run' || queueName === 'done' || queueName === 'dead' );
+        // Delete button for run/done/dead queues (forceful removal, not history cards)
+        const hasDeleteBtn = !job._isHistory && ( queueName === 'run' || queueName === 'done' || queueName === 'dead' );
         const deleteBtnHtml = hasDeleteBtn
             ? `<button type="button" class="job-delete-button" id="job-delete-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.deleteQueueJob('${jobId}', '${queueName}')" title="Remove from ${queueName} queue">🗑</button>`
             : '';
@@ -6753,7 +6754,7 @@ class NotificationsUI {
                             <span>📋 Activity Log</span>
                             <button class="interactions-expand-btn">▶</button>
                         </div>
-                        <div class="job-send-message" id="job-send-msg-${jobId}">
+                        <div class="job-send-message collapsed" id="job-send-msg-${jobId}">
                             <div class="job-send-message-row">
                                 <button type="button" class="stt-button" id="job-msg-stt-${jobId}"
                                         title="Click to record (30s max, ESC to cancel)">🎤</button>
@@ -7065,16 +7066,20 @@ class NotificationsUI {
             return;
         }
 
-        const headerEl = contentEl.previousElementSibling;
+        const sectionEl = contentEl.closest( '.job-interactions-section' );
+        const headerEl  = sectionEl ? sectionEl.querySelector( '.interactions-header' ) : null;
         const expandBtn = headerEl ? headerEl.querySelector( '.interactions-expand-btn' ) : null;
 
         const isExpanded = !contentEl.classList.contains( 'collapsed' );
+        const sendMsgEl  = sectionEl ? sectionEl.querySelector( '.job-send-message' ) : null;
 
         if ( isExpanded ) {
             contentEl.classList.add( 'collapsed' );
+            if ( sendMsgEl ) sendMsgEl.classList.add( 'collapsed' );
             if ( expandBtn ) expandBtn.textContent = '▶';
         } else {
             contentEl.classList.remove( 'collapsed' );
+            if ( sendMsgEl ) sendMsgEl.classList.remove( 'collapsed' );
             if ( expandBtn ) expandBtn.textContent = '▼';
 
             // Lazy load interactions if not cached
@@ -7082,8 +7087,7 @@ class NotificationsUI {
                 await this.loadJobInteractions( jobId );
             }
 
-            // Scroll the "Notification Conversation" header to the top of the viewport
-            const sectionEl = headerEl ? headerEl.closest( '.job-interactions-section' ) : null;
+            // Scroll the interactions section header to the top of the viewport
             if ( sectionEl ) {
                 sectionEl.scrollIntoView( { behavior: 'smooth', block: 'start' } );
             }

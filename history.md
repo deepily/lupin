@@ -1,5 +1,37 @@
 # Lupin Project History
 
+### 2026.04.08 - Session 97f29034 | CJ Flow UPE + Test Suite Hardening
+
+**Goal**: Fix 4 open items from Session a312ee22: E2E Docker test crash, WebSocket admin broadcast, test failures, and UI bug fixes.
+
+**E2E Docker Fix (exit 126)**:
+- **Root cause**: `run-e2e-ui-tests.sh:324` hardcoded `.venv/bin/pytest` — shebang points to host Python path, doesn't exist in container. Container-aware postgres check (from previous session) worked fine.
+- **Fix**: Replace with `$VENV_PYTHON -m pytest` (falls back to `python3` in Docker). Same fix in `run-presentation-regression.sh`.
+
+**WebSocket Admin Broadcast (Option B)**:
+- **Problem**: `emit_job_state_transition()` routed events only to job submitter — admin "all jobs" view never received real-time updates.
+- **Fix**: Store `is_admin` in WebSocket session metadata at connect time. New `emit_to_admins_sync()` method broadcasts to admin sessions with `exclude_user_id` to avoid double delivery. Frontend `handleJobStateTransition()` filters by `queueFilterMode` + `user_email`. Verified with MockJob + unit test dry-run + live unit test.
+
+**Test Suite Hardening (16 smoke → 12, 2 unit → 0)**:
+- Fixed 4 genuine smoke test bugs: proxy UI header count (8→9), vLLM hardcoded URL (read from factory), voice injection session ID leak (patch `resolve_stable_session_id` at use site), argparse picking up pytest CLI args in 5 pipeline tests (`argv=[]`)
+- Fixed 2 unit test PermissionErrors: mock `cu.get_project_root()` → `tmp_path` in TestStateTransitions
+- Remaining: 11 server-dependent smoke tests, 1 LLM flaky, 11 unit timeout tests (pre-existing)
+
+**Bug Fixes**:
+- TestSuiteJob voice_io: `_dispatcher.notify()` → `_dispatcher.notify_progress()` (method didn't exist on AgentNotificationDispatcher)
+- Activity Log toggle: `previousElementSibling` → `closest('.job-interactions-section')` for reliable header/button lookup across todo/run cards
+- Activity Log send-message form: starts collapsed, toggles with content div
+- Removed redundant "View Full Log" link from test suite abstract (📋 View Full Report already provides this)
+- **False positive "FAILURES DETECTED"**: Test suite pass/fail was determined by process exit code, not parsed results. 335 passed / 0 failed reported as "FAIL" because exit code was non-zero (warnings/cleanup). Fixed all 4 locations to use `(failed + errors) == 0` instead of `exit_code == 0`
+
+**Dockerfile cleanup**: Removed Flask comments, pinned torch 2.7.0, native CC binary install (`curl install.sh`), SDK 0.1.36→0.1.56, Python 3.11 symlink fix
+
+**Commits**: `07cf84b` (15 files: Docker + test runners + smoke/unit fixes), `a349c83` (frontend admin filter)
+**Files Modified — Lupin (16)**: `notifications.js` (admin filter + toggle fix + send-msg collapse), `notifications.css`, `Dockerfile`, `run-e2e-ui-tests.sh`, `run-presentation-regression.sh`, `run-smoke-tests.sh`, `run-unit-tests.sh`, 7 smoke tests, `test_test_suite_job.py`
+**Files Modified — CoSA (25, commit pending)**: `websocket_manager.py` (+session_is_admin +emit_to_admins_sync), `queue_util.py` (+admin broadcast), `websocket.py` (+roles param), `cosa_interface.py` (notify→notify_progress), `job.py` (remove View Full Log + false positive fix: exit_code→parsed results), + 20 files from Session a312ee22
+
+---
+
 ### 2026.04.08 - Session a312ee22 | Bug Fix: Queue Badge Counts + Process Owner Badge
 
 **Goal**: Fix two CJ Flow UI issues: (1) queue accordion badge counts not updating until clicked, (2) no process owner identification on job cards in admin multi-user views.
