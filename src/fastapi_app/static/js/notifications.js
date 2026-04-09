@@ -4702,6 +4702,17 @@ class NotificationsUI {
             return;
         }
 
+        // Filter by queue view mode — admins with "own" filter skip other users' jobs
+        const eventEmail = metadata?.user_email;
+        if ( this.queueFilterMode === 'own' && eventEmail && eventEmail !== this.currentUserEmail ) {
+            this.log( `[JOB-TRANSITION] Filtered out (own mode, job belongs to ${eventEmail})` );
+            return;
+        }
+        if ( this.queueFilterMode === 'others' && eventEmail && eventEmail === this.currentUserEmail ) {
+            this.log( `[JOB-TRANSITION] Filtered out (others mode, job belongs to self)` );
+            return;
+        }
+
         // Handle pause/resume as in-place card updates (no container move needed)
         if ( toState === 'paused' || ( fromState === 'paused' && toState === 'queued' ) ) {
             this.handleJobPauseStateChange( event, toState === 'paused' );
