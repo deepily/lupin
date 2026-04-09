@@ -1,10 +1,10 @@
 # TODO
 
-Last updated: 2026-04-08 (Session 97f29034 — CJ Flow UPE + Test Suite Hardening)
+Last updated: 2026-04-09 (Session a312ee22 — 7 bug fixes: badges, timestamps, delete buttons, desync guard)
 
 ## Pending
 
-- [ ] [LUPIN] **CoSA commit pending: Session 97f29034 + a312ee22 (25 files)** — Session 97f29034 additions: `websocket_manager.py` (+session_is_admin +emit_to_admins_sync +roles), `queue_util.py` (+admin broadcast), `websocket.py` (+roles param), `cosa_interface.py` (notify→notify_progress), `job.py` (remove View Full Log). Session a312ee22: `util.py` (+get_current_datetime_iso), 9 REST/WS files, 11 agent job files. Commit from CoSA repo context.
+- [ ] [LUPIN] **CoSA commit pending: Session 97f29034 + a312ee22 (26 files)** — Session 97f29034 additions: `websocket_manager.py` (+session_is_admin +emit_to_admins_sync +roles), `queue_util.py` (+admin broadcast), `websocket.py` (+roles param), `cosa_interface.py` (notify→notify_progress), `job.py` (remove View Full Log). Session a312ee22: `util.py` (+get_current_datetime_iso), `fifo_queue.py` (desync guard), 9 REST/WS files, 11 agent job files. Commit from CoSA repo context.
 - [ ] [LUPIN] **4x Duplicate Notifications** — Notifications appear 4 times. Likely multiple WS sessions per user (queue + audio + cc-listener + zombie). Needs interactive reproduction and diagnostics. Deferred from Session 97f29034.
 - [ ] [LUPIN] **E2E test scheduled 9:26 PM EST** — `ts-efba6552`. Check results next session if not reviewed tonight.
 - [ ] [LUPIN] **BFE Phase 6: Live E2E test of automated repair loop**. All code implemented (6A-6F), 58 unit tests passing. Needs live E2E: enable `auto fix enabled = true` in INI, submit a presentation gen job with known-bad mutation, verify watchdog → BFE → resubmit cycle completes. Schedule as monopolized test-suite job after hours.

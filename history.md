@@ -61,7 +61,19 @@
 **Files Modified — Lupin (4)**: `notifications.js`, `notifications.css`, `lupin-app.ini`, `lupin-app-splainer.ini`
 **Files Modified — CoSA (22, commit pending)**: `util.py` (+function), `queue_util.py`, `websocket_manager.py`, `running_fifo_queue.py`, `queue_consumer.py`, `routers/queues.py` (+DELETE endpoint +timestamps), `routers/websocket.py`, `routers/system.py`, `routers/websocket_admin.py`, `routers/jobs.py`, `agentic_job_base.py`, 10 agent job files
 **Tests**: Unit suite scheduled (ts-d8b84b8b), timestamps confirmed correct in UI
-**Commit**: 7e71e1a
+**Commit**: dbe59eb (checkpoint 2)
+
+#### Fix 3: Post-Deploy Bug Fixes (2026.04.09)
+
+**Bug 5 — Delete/agent badge overlap in history cards**: CSS `padding-left: 36px` added for done/dead card headers to make room for 🗑 button (same pattern as `.has-cancel`).
+
+**Bug 6 — History delete button routing**: History cards rendered via `renderJobCard()` showed the queue delete button (🗑) which called `DELETE /api/queue/done/{id}` → 404. Fix: added `_isHistory: true` flag to normalized job object; `hasDeleteBtn` now checks `!job._isHistory`.
+
+**Bug 7 — queue_list/queue_dict desync infinite loop**: `pop_next_eligible()` crashed with KeyError when `queue_dict` and `queue_list` got out of sync (concurrent `delete_by_id_hash()` from another thread). Consumer retried endlessly on the same stale job. Fix: guard `del` with `if job.id_hash not in self.queue_dict` — removes stale entry from list and continues.
+
+**Files Modified — Lupin (2)**: `notifications.js` (_isHistory flag), `notifications.css` (padding fix)
+**Files Modified — CoSA (1, commit pending)**: `fifo_queue.py` (desync guard)
+**Commit**: 1c064d1
 
 ---
 
