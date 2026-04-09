@@ -1,5 +1,42 @@
 # Lupin Project History
 
+### 2026.04.09 - Session bacc971a | Bug Fix: 4x Duplicate Notifications
+
+**Goal**: Fix duplicate notifications (every message appearing 4 times) from overnight test jobs.
+
+**Root cause**: Retry loop in `notify_user_async.py` sends up to 6 HTTP POSTs to `/api/notify` when user is offline. The server unconditionally pushed to FIFO queue AND persisted to PostgreSQL on EVERY request BEFORE checking connectivity. Each retry created a duplicate notification record. Timestamps (~1s apart) matched retry intervals [0, 1, 1, 2] exactly.
+
+**Fix**: Server-side idempotency key — client generates UUID once per logical notification, sends it with all retry attempts. Server caches first response and returns it for duplicates. Also reordered fire-and-forget block: persist to PostgreSQL first (preserves history), then push to FIFO queue only if user is connected (eliminates phantom queue entries).
+
+**Changes**:
+- `notification_models.py`: Added `idempotency_key` field to `AsyncNotificationRequest` + `to_api_params()`
+- `notify_user_async.py`: Auto-generate UUID idempotency key before retry loop
+- `notifications.py` (CoSA): Module-level `OrderedDict` idempotency cache (60s TTL), reordered persist-before-push
+
+**Files Modified — Lupin (2)**: `src/lupin_cli/notifications/notification_models.py`, `src/lupin_cli/notifications/notify_user_async.py`
+**Files Modified — CoSA (1)**: `src/cosa/rest/routers/notifications.py`
+
+---
+
+### 2026.04.09 - Session 6b8670e7 | Bug Fix: CC Listener Sessions Not Appearing
+
+**Goal**: Debug why Claude Code hook notification listeners show 0 in diagnostic output despite being connected.
+
+**Root cause**: User identity mismatch — CC listeners authenticate as `claude.code@lupin.deepily.ai` (service account) while browser sessions authenticate as the human user. The diagnostic and notification broadcasts only query the human user's session list, so listeners under the service account are invisible.
+
+**Fix**: Targeted cross-user delivery using `emit_to_session_sync()` — directly targeting listener sessions by their deterministic session ID (`cc-listener-{job_id_hash}`) instead of relying on user-based broadcast.
+
+**Changes**:
+- Added `emit_to_session_sync()` to `WebSocketManager` — sync wrapper for cross-user session targeting
+- Added cross-user listener delivery in `notification_fifo_queue.py` at both priority paths
+- Added cross-user delivery for `user_initiated_message` events in `queues.py`
+- Added cross-user diagnostic showing all CC listeners regardless of auth user in `notifications.py`
+- Commented out misleading per-user listener count (always 0 due to user mismatch)
+
+**Files Modified — CoSA (4)**: `websocket_manager.py`, `notification_fifo_queue.py`, `routers/notifications.py`, `routers/queues.py`
+
+---
+
 ### 2026.04.08 - Session 97f29034 | CJ Flow UPE + Test Suite Hardening
 
 **Goal**: Fix 4 open items from Session a312ee22: E2E Docker test crash, WebSocket admin broadcast, test failures, and UI bug fixes.

@@ -20,6 +20,7 @@ Environment Variables:
 import os
 import sys
 import time
+import uuid as uuid_mod
 import requests
 import argparse
 from typing import Optional
@@ -154,6 +155,10 @@ def notify_user_async(
     if request.target_user is None:
         from lupin_cli.notifications.notification_models import resolve_target_user
         request = request.model_copy( update={ "target_user": resolve_target_user() } )
+
+    # Generate idempotency key ONCE for all retry attempts (prevents duplicate notifications)
+    if request.idempotency_key is None:
+        request = request.model_copy( update={ "idempotency_key": str( uuid_mod.uuid4() ) } )
 
     # Calculate retry intervals based on timeout (Phase 2.7 - adaptive retry for WebSocket auth)
     retry_intervals = calculate_retry_intervals( request.timeout )

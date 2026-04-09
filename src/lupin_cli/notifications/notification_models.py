@@ -668,6 +668,12 @@ class AsyncNotificationRequest(BaseModel):
         description="Progress group ID for in-place DOM updates. Format: {prefix}-{hex} or {prefix}-{hex}-{batch}. Supports pg-XXXXXXXX (existing) and pr-XXXXXXXX-N+ (proxy batches, unbounded)."
     )
 
+    idempotency_key: Optional[str] = Field(
+        default=None,
+        description="UUID idempotency key to prevent duplicate notifications on retry. "
+                    "Generated once per logical notification, sent with all retry attempts."
+    )
+
     @field_validator( 'message' )
     @classmethod
     def message_not_whitespace( cls, v: str ) -> str:
@@ -750,6 +756,10 @@ class AsyncNotificationRequest(BaseModel):
         # Add progress_group_id for in-place DOM updates
         if self.progress_group_id is not None:
             params["progress_group_id"] = self.progress_group_id
+
+        # Add idempotency_key for retry deduplication
+        if self.idempotency_key is not None:
+            params["idempotency_key"] = self.idempotency_key
 
         return params
 
