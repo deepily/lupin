@@ -137,12 +137,12 @@ echo ""
 echo "================================================================"
 echo ""
 
-# Ensure PostgreSQL is running and test database exists
-echo -e "${YELLOW}[POSTGRES] Ensuring PostgreSQL is ready...${NC}"
-
-if ! "$PROJECT_ROOT/src/scripts/run-postgresql-dev.sh" --no-follow-logs; then
+# Ensure PostgreSQL test database is ready (works from host or inside container)
+if ! python3 "$PROJECT_ROOT/src/tests/preflight_test_db.py"; then
     echo ""
-    echo -e "${RED}[ERROR] Failed to start/verify PostgreSQL${NC}"
+    echo -e "${RED}[ERROR] PostgreSQL test database pre-flight failed${NC}"
+    echo -e "${RED}        If Postgres is stopped, start it from the host:${NC}"
+    echo -e "${RED}          $PROJECT_ROOT/src/scripts/run-postgresql-dev.sh${NC}"
     echo ""
     exit 1
 fi
