@@ -72,7 +72,7 @@
 
 ### Completed
 
-- [x] **Done bucket job card render parity** → commit: 1e334c1 | By: 1b8c1cc0
+- [x] **Done bucket job card render parity** → commit: 3faec04 | By: 1b8c1cc0
   - **Symptom 1**: Dynamically-inserted done cards (WS transition) showed an irrelevant pause button and lacked a trash button
   - **Symptom 2**: Reload-loaded done cards lacked the scheduled (🕐) and monopolize (🔒) badges that dynamic cards displayed
   - **Symptom 3**: History-tab cards lacked the trash button (`_isHistory` gate) and the scheduled/monopolize badges

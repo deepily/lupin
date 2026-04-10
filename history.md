@@ -25,7 +25,7 @@
 
 **Test**: py_compile + import-chain check on `queues.py` PASS. `node --check` on `notifications.js` PASS. Live `/api/get-queue/done` smoke returned 0 done jobs (no runtime data to assert against — server holds old code in memory). Manual UI verification deferred until after server restart.
 
-**Commit**: 1e334c1
+**Commit**: 3faec04
 
 ---
 
