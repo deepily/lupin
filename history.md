@@ -100,6 +100,14 @@
 
 **Commit**: 3faec04
 
+### Session Summary
+- **Total Fixes**: 1 (Done bucket job card render parity)
+- **Files Changed**: 2 (`notifications.js`, `src/rnd/v0.1.6/2026.04.10-done-card-render-parity.md`)
+- **GitHub Issues Closed**: none (ad-hoc bug)
+- **Commits**: `3faec04` (fix), `332edd4` (tracking-doc hash refresh)
+
+**Status**: Session closed 2026.04.10
+
 ---
 
 ### 2026.04.09 - Session ea400c01 | CoSA Commit: Sessions bacc971a+6b8670e7+f28d32d1
