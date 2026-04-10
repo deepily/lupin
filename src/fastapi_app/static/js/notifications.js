@@ -573,11 +573,10 @@ class NotificationsUI {
          */
         try {
             // Authenticated API call (requires valid JWT token)
-            const response = await fetch( '/api/config/client', {
+            const response = await this.authedFetch( '/api/config/client', {
                 method: 'GET',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': this.getAuthHeader()  // JWT authentication required
+                    'Content-Type': 'application/json'
                 }
             });
 
@@ -905,6 +904,39 @@ class NotificationsUI {
             const elapsed = ( performance.now() - startTime ).toFixed( 1 );
             this.log( `✓ Token valid (checked in ${elapsed}ms)` );
         }
+    }
+
+    async authedFetch( url, options = {} ) {
+        /**
+         * Authenticated fetch wrapper.
+         *
+         * Proactively refreshes the JWT access token (via ensureValidToken) before
+         * firing the request, then injects the Authorization header. Use this for
+         * every authenticated API call from notifications.js — it eliminates the
+         * 401s that occur when a user is idle longer than the JWT TTL and the
+         * browser still holds a stale token.
+         *
+         * Requires:
+         *     - this.ensureValidToken() and this.getAuthHeader() are available
+         *     - options is a plain object (or omitted)
+         *
+         * Ensures:
+         *     - Token is refreshed if expired before the fetch fires
+         *     - Authorization header is injected (caller headers take precedence
+         *       if they also define Authorization)
+         *     - All other fetch options (method, body, signal, etc.) pass through
+         *     - Returns the Response object as-is — caller handles status checking
+         *
+         * Raises:
+         *     - Whatever ensureValidToken() raises (auth failure after refresh)
+         *     - Whatever fetch() raises (network failure)
+         */
+        await this.ensureValidToken();
+        const headers = {
+            'Authorization': this.getAuthHeader(),
+            ...( options.headers || {} )
+        };
+        return fetch( url, { ...options, headers } );
     }
 
     async refreshAccessToken() {
@@ -5499,16 +5531,12 @@ class NotificationsUI {
         // Regular users and admins in 'own' mode: no parameter = own jobs only
 
         try {
-            const response = await fetch( url, {
-                headers: {
-                    'Authorization': this.getAuthHeader()
-                }
-            });
-            
+            const response = await this.authedFetch( url );
+
             if ( !response.ok ) {
                 throw new Error( `HTTP error! status: ${response.status}` );
             }
-            
+
             const data = await response.json();
             this.log( `Data received for ${queueName}:`, data );
             
@@ -5822,9 +5850,7 @@ class NotificationsUI {
                 url += '?user_filter=*';
             }
 
-            const response = await fetch( url, {
-                headers: { 'Authorization': this.getAuthHeader() }
-            } );
+            const response = await this.authedFetch( url );
 
             if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
 
@@ -5914,9 +5940,7 @@ class NotificationsUI {
             params.set( 'offset', append ? state.offset : '0' );
             if ( liveJobIds.length > 0 ) params.set( 'exclude_ids', liveJobIds.join( ',' ) );
 
-            const response = await fetch( `/api/job-history?${params}`, {
-                headers: { 'Authorization': this.getAuthHeader() }
-            } );
+            const response = await this.authedFetch( `/api/job-history?${params}` );
 
             if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
 
@@ -6058,9 +6082,8 @@ class NotificationsUI {
         if ( !confirm( 'Delete this job from history?' ) ) return;
 
         try {
-            const response = await fetch( `/api/job-history/${jobId}`, {
-                method  : 'DELETE',
-                headers : { 'Authorization': this.getAuthHeader() }
+            const response = await this.authedFetch( `/api/job-history/${jobId}`, {
+                method : 'DELETE'
             } );
 
             if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
@@ -6095,9 +6118,8 @@ class NotificationsUI {
         if ( !confirm( `Remove this job from the ${label} queue?` ) ) return;
 
         try {
-            const response = await fetch( `/api/queue/${queueName}/${jobId}`, {
-                method  : 'DELETE',
-                headers : { 'Authorization': this.getAuthHeader() }
+            const response = await this.authedFetch( `/api/queue/${queueName}/${jobId}`, {
+                method : 'DELETE'
             } );
 
             if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
@@ -6136,13 +6158,10 @@ class NotificationsUI {
         if ( !confirm( `Retry this job?\n\n"${questionText}"` ) ) return;
 
         try {
-            const response = await fetch( `/api/job-history/${jobId}/retry`, {
+            const response = await this.authedFetch( `/api/job-history/${jobId}/retry`, {
                 method  : 'POST',
-                headers : {
-                    'Authorization' : this.getAuthHeader(),
-                    'Content-Type'  : 'application/json'
-                },
-                body: JSON.stringify( { websocket_id: this.queueSessionId } )
+                headers : { 'Content-Type': 'application/json' },
+                body    : JSON.stringify( { websocket_id: this.queueSessionId } )
             } );
 
             if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
@@ -6960,13 +6979,10 @@ class NotificationsUI {
         }
 
         try {
-            const response = await fetch( `/api/jobs/${jobId}/message`, {
+            const response = await this.authedFetch( `/api/jobs/${jobId}/message`, {
                 method  : 'POST',
-                headers : {
-                    'Content-Type'  : 'application/json',
-                    'Authorization' : this.getAuthHeader(),
-                },
-                body: JSON.stringify( { message, priority } ),
+                headers : { 'Content-Type': 'application/json' },
+                body    : JSON.stringify( { message, priority } ),
             } );
 
             if ( !response.ok ) {
@@ -7012,9 +7028,8 @@ class NotificationsUI {
         }
 
         try {
-            const response = await fetch( `/api/jobs/${jobId}/cancel`, {
-                method  : 'POST',
-                headers : { 'Authorization': this.getAuthHeader() },
+            const response = await this.authedFetch( `/api/jobs/${jobId}/cancel`, {
+                method : 'POST'
             } );
 
             if ( !response.ok ) {
@@ -7058,9 +7073,8 @@ class NotificationsUI {
         }
 
         try {
-            const response = await fetch( `/api/queue/todo/${jobId}/${action}`, {
-                method  : 'PATCH',
-                headers : { 'Authorization': this.getAuthHeader() },
+            const response = await this.authedFetch( `/api/queue/todo/${jobId}/${action}`, {
+                method : 'PATCH'
             } );
 
             if ( !response.ok ) {
@@ -7190,9 +7204,7 @@ class NotificationsUI {
         if ( !contentEl ) return;
 
         try {
-            const response = await fetch( `/api/get-job-interactions/${encodeURIComponent( jobId )}`, {
-                headers: { 'Authorization': this.getAuthHeader() }
-            } );
+            const response = await this.authedFetch( `/api/get-job-interactions/${encodeURIComponent( jobId )}` );
 
             if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
 
@@ -13108,11 +13120,10 @@ class NotificationsUI {
                 response_value: response
             };
 
-            const apiResponse = await fetch( '/api/notify/response', {
+            const apiResponse = await this.authedFetch( '/api/notify/response', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': this.getAuthHeader()
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify( payload )
             } );
