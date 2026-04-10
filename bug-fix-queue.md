@@ -44,6 +44,7 @@
 | 5b508f0e | 2026-03-26T15:50:00 | 2026-03-26T16:30:00 | committed |
 | 5329e0ea | 2026-03-27T14:00:00 | 2026-03-27T16:15:00 | closed |
 | a312ee22 | 2026-04-08T11:00:00 | 2026-04-08T15:45:00 | committed |
+| 1b8c1cc0 | 2026-04-10T09:30:00 | 2026-04-10T10:30:00 | active |
 
 ---
 
@@ -70,6 +71,15 @@
 ---
 
 ### Completed
+
+- [x] **Done bucket job card render parity** → commit: 1e334c1 | By: 1b8c1cc0
+  - **Symptom 1**: Dynamically-inserted done cards (WS transition) showed an irrelevant pause button and lacked a trash button
+  - **Symptom 2**: Reload-loaded done cards lacked the scheduled (🕐) and monopolize (🔒) badges that dynamic cards displayed
+  - **Symptom 3**: History-tab cards lacked the trash button (`_isHistory` gate) and the scheduled/monopolize badges
+  - **Root Cause**: 4 defects across 2 files — backend `/api/get-queue/done` omitted 3 fields; `renderJobCard` gated scheduled badge to `queueName==='todo'`; `handleJobStateTransition` surgically morphed cards on transition instead of re-rendering; `renderHistoryCard` omitted same 3 fields and stamped `_isHistory:true`
+  - **Fix**: Single source of truth via `renderJobCard()` — fed it complete data from every path; ungated the scheduled badge; switched terminal-state (done/dead) WS transitions to full re-render via `renderJobCard`; normalized history card fields; dropped the unused `_isHistory` gate
+  - **Files (Lupin)**: `notifications.js`, `src/rnd/v0.1.6/2026.04.10-done-card-render-parity.md`
+  - **Files (CoSA, separate commit)**: `routers/queues.py`
 
 - [x] **Queue badge counts stale + process owner badge missing** → commit: a149363 | By: a312ee22
   - **Bug 1**: Badge counts used DOM element counting on collapsed (empty) containers. Fixed with local counter tracker.

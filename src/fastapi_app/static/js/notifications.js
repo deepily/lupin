@@ -4802,6 +4802,67 @@ class NotificationsUI {
             return;
         }
 
+        // Terminal states (done/dead): full re-render via renderJobCard for parity with reload path.
+        // Eliminates surgical-morph divergence: pause-button-persists, missing-trash-button,
+        // missing scheduled/monopolize badges. Single source of truth shared with reload/history paths.
+        if ( ( toQueue === 'done' || toQueue === 'dead' ) && metadata ) {
+            const targetContainer = document.getElementById( `${toQueue}-jobs-container` );
+            if ( !targetContainer ) {
+                this.error( `[JOB-TRANSITION] Target container not found: ${toQueue}-jobs-container` );
+                return;
+            }
+
+            // Build complete job object — same shape as cold-start branch above (lines 4764-4786)
+            const job = {
+                job_id          : jobId,
+                question_text   : metadata.question_text || 'Processing...',
+                agent_type      : metadata.agent_type || 'Unknown',
+                timestamp       : metadata.timestamp || new Date().toISOString(),
+                started_at      : metadata.started_at || null,
+                completed_at    : metadata.completed_at || null,
+                response_text   : metadata.response_text || null,
+                abstract        : metadata.abstract || null,
+                report_path               : metadata.report_link || metadata.report_path || null,
+                yaml_path                 : metadata.yaml_path || null,
+                remediation_snapshot_path : metadata.remediation_snapshot_path || null,
+                cost_summary              : metadata.cost_summary || null,
+                is_cache_hit    : metadata.is_cache_hit || false,
+                user_email      : metadata.user_email || null,
+                status          : metadata.status || ( toQueue === 'dead' ? 'failed' : 'completed' ),
+                error           : metadata.error || null,
+                has_interactions: metadata.has_interactions || false,
+                duration_seconds: metadata.duration_seconds || null,
+                expediting      : metadata.expediting || false,
+                scheduled_at    : metadata.scheduled_at || null,
+                monopolize      : metadata.monopolize || false,
+                paused          : metadata.paused || false
+            };
+
+            // Remove empty message in target container if present
+            const targetEmptyMsg = targetContainer.querySelector( '.queue-empty-message' );
+            if ( targetEmptyMsg ) targetEmptyMsg.remove();
+
+            // Remove the old card and insert freshly-rendered HTML at top of target
+            card.remove();
+            const newCardHtml = this.renderJobCard( job, toQueue );
+            targetContainer.insertAdjacentHTML( 'afterbegin', newCardHtml );
+            this.log( `[JOB-TRANSITION] Re-rendered ${jobId} into ${toQueue} via renderJobCard` );
+
+            // Update empty message for source container
+            this.updateQueueEmptyMessage( fromQueue );
+
+            // Update count badges for both queues
+            if ( fromQueue !== toQueue ) {
+                this.queueCounts[ fromQueue ] = Math.max( 0, ( this.queueCounts[ fromQueue ] || 0 ) - 1 );
+                this.updateQueueCountBadge( fromQueue, this.queueCounts[ fromQueue ] );
+                this.queueCounts[ toQueue ] = ( this.queueCounts[ toQueue ] || 0 ) + 1;
+                this.updateQueueCountBadge( toQueue, this.queueCounts[ toQueue ] );
+            }
+            return;
+        }
+
+        // Non-terminal transitions (todo/run), or terminal transitions without metadata —
+        // fall back to reparent + surgical morph
         // Update status class
         card.classList.remove( `status-${fromQueue}` );
         card.classList.add( `status-${toQueue}` );
@@ -5925,7 +5986,10 @@ class NotificationsUI {
             status           : job.status,
             error            : job.error,
             session_id       : job.session_id,
-            _isHistory       : true
+            user_email       : job.user_email || metadata.user_email || null,
+            scheduled_at     : metadata.scheduled_at || null,
+            monopolize       : metadata.monopolize || false,
+            paused           : metadata.paused || false
         };
 
         // Map history status to queue name for styling
@@ -6662,16 +6726,15 @@ class NotificationsUI {
         }
 
         // Scheduled job: show clock badge with formatted time
+        // Renders for any queue when job has scheduled_at — for done/dead the time is in the past
+        // but the badge is still meaningful as historical context
         let scheduledBadge = '';
-        if ( queueName === 'todo' && job.scheduled_at ) {
+        if ( job.scheduled_at ) {
             const schedDate = new Date( job.scheduled_at );
-            const now = new Date();
-            if ( schedDate > now ) {
-                const tz = this.appTimezone || 'America/New_York';
-                const schedTimeStr = schedDate.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit', timeZone: tz } );
-                const schedDateStr = schedDate.toLocaleDateString( [], { month: 'short', day: 'numeric', timeZone: tz } );
-                scheduledBadge = `<span class="scheduled-badge" title="Scheduled for ${schedDate.toISOString()}">🕐 ${schedDateStr} ${schedTimeStr}</span>`;
-            }
+            const tz = this.appTimezone || 'America/New_York';
+            const schedTimeStr = schedDate.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit', timeZone: tz } );
+            const schedDateStr = schedDate.toLocaleDateString( [], { month: 'short', day: 'numeric', timeZone: tz } );
+            scheduledBadge = `<span class="scheduled-badge" title="Scheduled for ${schedDate.toISOString()}">🕐 ${schedDateStr} ${schedTimeStr}</span>`;
         }
 
         // Monopolize job: subtle lock badge (no-op in serial mode)
@@ -6733,8 +6796,8 @@ class NotificationsUI {
             ? `<button type="button" class="job-pause-button${job.paused ? ' is-paused' : ''}" id="job-pause-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.toggleJobPause('${jobId}', ${!job.paused})" title="${job.paused ? 'Resume this job' : 'Pause this job'}">${job.paused ? '▶' : '⏸'}</button>`
             : '';
 
-        // Delete button for run/done/dead queues (forceful removal, not history cards)
-        const hasDeleteBtn = !job._isHistory && ( queueName === 'run' || queueName === 'done' || queueName === 'dead' );
+        // Delete button for run/done/dead queues (forceful removal)
+        const hasDeleteBtn = ( queueName === 'run' || queueName === 'done' || queueName === 'dead' );
         const deleteBtnHtml = hasDeleteBtn
             ? `<button type="button" class="job-delete-button" id="job-delete-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.deleteQueueJob('${jobId}', '${queueName}')" title="Remove from ${queueName} queue">🗑</button>`
             : '';

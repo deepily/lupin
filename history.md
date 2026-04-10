@@ -1,5 +1,44 @@
 # Lupin Project History
 
+### 2026.04.10 - Session 1b8c1cc0 | Bug Fix: Done Bucket Job Card Render Parity
+
+**Goal**: Fix divergence between dynamically-inserted (WS transition) and reload-loaded done-bucket job cards. They render the same logical state (`done`) through different code paths and produce visibly different results: dynamic cards show an irrelevant pause button and lack the trash button; reload cards lack scheduled/monopolize badges. User wants both paths fully equivalent and sharing a single rendering method.
+
+**Root Causes**:
+1. **Backend** (`src/cosa/rest/routers/queues.py`): the `if queue_name == "done":` branch built `job_data` without `scheduled_at`/`monopolize`/`paused` (the todo/run branch already includes them). On page reload, `/api/get-queue/done` never sent these fields → frontend had nothing to render.
+2. **Frontend `renderJobCard`**: the scheduled badge was double-gated by `queueName === 'todo'` AND `schedDate > now`. Done cards were always excluded.
+3. **Frontend `handleJobStateTransition`**: when a job transitioned todo→run→done live, the existing card was DOM-reparented and surgically morphed (spinner removed, completion badge added) — but the pause button was never removed and the trash button was never added.
+4. **Frontend `renderHistoryCard`**: history-tab adapter omitted `scheduled_at`/`monopolize`/`paused`/`user_email` and set `_isHistory: true`, which a stale `renderJobCard` gate consumed to suppress the delete button.
+
+**Fix**: Single source of truth via `renderJobCard()` — feed it complete data from every path, then make `renderJobCard()` itself queue-agnostic for the scheduled/monopolize badges.
+
+**Files Changed — Lupin (2)**:
+- `src/fastapi_app/static/js/notifications.js` — 4 surgical edits:
+  - Ungated scheduled badge (line ~6664): renders for any queue when `job.scheduled_at` is set
+  - Terminal-state (done/dead) WS transitions (line ~4805): full re-render via `renderJobCard` instead of surgical DOM morph — kills pause-button-persists and missing-trash-button bugs in one stroke
+  - History card normalization (line ~5910): added `scheduled_at`/`monopolize`/`paused`/`user_email` fields
+  - Removed `_isHistory` delete-button gate (line ~6797) — history cards now show trash like live cards
+- `src/rnd/v0.1.6/2026.04.10-done-card-render-parity.md` — serialized plan (new)
+
+**Files Changed — CoSA (1, committed separately from CoSA context)**:
+- `src/cosa/rest/routers/queues.py` — added 3 fields to done-branch metadata response (`scheduled_at`, `monopolize`, `paused`), mirroring the todo/run branch
+
+**Test**: py_compile + import-chain check on `queues.py` PASS. `node --check` on `notifications.js` PASS. Live `/api/get-queue/done` smoke returned 0 done jobs (no runtime data to assert against — server holds old code in memory). Manual UI verification deferred until after server restart.
+
+**Commit**: 1e334c1
+
+---
+
+### 2026.04.09 - Session ea400c01 | CoSA Commit: Sessions bacc971a+6b8670e7+f28d32d1
+
+**Goal**: Commit pending CoSA changes from 3 sessions (8 files, +250/-38).
+
+**CoSA Commit 7618499**: Idempotency cache for duplicate notifications, CBR prediction JSON parsing fix, cross-user WebSocket delivery for CC listener sessions, remediation snapshot JSON output for TestSuiteJob, stale queue entry guard.
+
+**Files Committed — CoSA (8)**: `prediction_engine.py`, `test_suite/job.py`, `fifo_queue.py`, `notification_fifo_queue.py`, `routers/notifications.py`, `routers/queues.py`, `running_fifo_queue.py`, `websocket_manager.py`
+
+---
+
 ### 2026.04.09 - Session f28d32d1 | Test Suite Remediation Snapshots
 
 **Goal**: Add machine-readable remediation snapshot output to TestSuiteJob so test failures can be fed to BFE agents for automated fix cycles.
