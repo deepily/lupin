@@ -28,6 +28,34 @@ BASE_URL = "http://localhost:7999"
 
 
 # ---------------------------------------------------------------------------
+# Test ordering — force visual regression to run FIRST
+# ---------------------------------------------------------------------------
+
+def pytest_collection_modifyitems( config, items ):
+    """
+    Reorder collected tests so visual regression runs before everything else.
+
+    Visual regression tests compare screenshots against pixel baselines captured
+    by pytest-playwright-visual-snapshot. Chromium's font/render cache warms up
+    over the course of test execution, and anti-aliased text renders with
+    slightly different subpixel values in cold vs warm Chromium state. Baselines
+    are captured in the cold state (during isolated -k visual runs), so running
+    visual tests LAST in the suite produces subpixel drift failures even when
+    no real regression exists.
+
+    Forcing visual regression to run FIRST keeps the cache state consistent
+    with baseline capture — matching the pixel-identical conditions of a cold
+    Chromium start.
+
+    See src/rnd/v0.1.6/2026.04.10-visual-regression-cold-warm-drift.md for
+    the full analysis.
+    """
+    visual = [ i for i in items if "test_visual_regression" in str( i.fspath ) ]
+    other  = [ i for i in items if "test_visual_regression" not in str( i.fspath ) ]
+    items[ : ] = visual + other
+
+
+# ---------------------------------------------------------------------------
 # Environment Validation
 # ---------------------------------------------------------------------------
 
