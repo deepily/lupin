@@ -4000,6 +4000,12 @@
     overflow-y: auto;
 }
 
+.job-interactions-section.live-interactions .interactions-content.collapsed {
+    max-height: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
 /* Outgoing messages (user chat bubbles) in unified conversation pane */
 .interactions-content .sender-message.outgoing {
     margin-left: 40px;

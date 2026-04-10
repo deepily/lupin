@@ -4770,8 +4770,9 @@ class NotificationsUI {
                     completed_at    : metadata.completed_at || null,
                     response_text   : metadata.response_text || null,
                     abstract        : metadata.abstract || null,
-                    report_path     : metadata.report_link || null,
-                    cost_summary    : metadata.cost_summary || null,
+                    report_path               : metadata.report_link || null,
+                    remediation_snapshot_path : metadata.remediation_snapshot_path || null,
+                    cost_summary              : metadata.cost_summary || null,
                     is_cache_hit    : metadata.is_cache_hit || false,
                     user_email      : metadata.user_email || null,
                     status          : metadata.status || 'completed',
@@ -5062,9 +5063,10 @@ class NotificationsUI {
         if ( reportPath ) {
             const reportEl = card.querySelector( '.job-report-link' );
             if ( reportEl ) {
-                const agentType = metadata.agent_type || card.dataset.agentType || null;
-                const yamlPath = metadata.yaml_path || null;
-                reportEl.innerHTML = this.renderReportLinkSection( reportPath, agentType, yamlPath );
+                const agentType        = metadata.agent_type || card.dataset.agentType || null;
+                const yamlPath         = metadata.yaml_path || null;
+                const remediationPath  = metadata.remediation_snapshot_path || null;
+                reportEl.innerHTML = this.renderReportLinkSection( reportPath, agentType, yamlPath, remediationPath );
                 reportEl.style.display = 'block';
             }
         }
@@ -5147,6 +5149,7 @@ class NotificationsUI {
     // ========================================
 
     async handleNotificationUpdate( envelope ) {
+        console.log( `[DIAG-JR] ENTER handleNotificationUpdate: id=${envelope?.notification?.id_hash} job_id=${envelope?.notification?.job_id} type=${envelope?.notification?.type} msg=${(envelope?.notification?.message||'').substring(0,50)}` );
         this.log( "Notification queue update received:", envelope );
 
         // Handle real-time notification updates from NotificationFifoQueue
@@ -5210,14 +5213,22 @@ class NotificationsUI {
         // Session 105 FIX: Extract job_id from sender_id suffix if not explicitly provided
         // Pattern: sender_id ends with #<prefix>-<8hex> (e.g., deep.research@lupin.deepily.ai#dr-77b330d8)
         let jobId = notification.job_id;
+        console.log( `[DIAG-JR] notification.job_id=${jobId} sender_id=${notification.sender_id} msg=${(notification.message||'').substring(0,60)}` );
         if ( !jobId && notification.sender_id ) {
             const senderIdMatch = notification.sender_id.match( /#([a-z]+-[a-f0-9]{8})$/ );
             if ( senderIdMatch ) {
                 jobId = senderIdMatch[ 1 ];
-                this.log( `[Phase 6] Extracted job_id from sender_id suffix: ${jobId}` );
+                console.log( `[DIAG-JR] Fallback: extracted jobId=${jobId} from sender_id` );
             }
         }
         if ( jobId ) {
+            const targetEl = document.getElementById( `interactions-content-${jobId}` );
+            const allInteractions = document.querySelectorAll( '[id^="interactions-content-"]' );
+            const existingIds = Array.from( allInteractions ).map( el => el.id );
+            console.log( `[DIAG-JR] DOM lookup: interactions-content-${jobId} → ${targetEl ? 'FOUND' : 'MISSING'}` );
+            if ( !targetEl ) {
+                console.log( `[DIAG-JR] Existing interaction containers:`, existingIds );
+            }
             // Session 107: Simplified - job_state_transition creates cards, we just route
             this.log( `[Session 107] Routing notification to job card: ${jobId}` );
             this.appendNotificationToJobCard( jobId, notification );
@@ -5903,8 +5914,9 @@ class NotificationsUI {
             agent_type       : metadata.agent_type || job.job_type || '',
             response_text    : metadata.response_text || null,
             abstract         : metadata.abstract || null,
-            report_path      : metadata.report_link || null,
-            cost_summary     : metadata.cost_summary || null,
+            report_path               : metadata.report_link || null,
+            remediation_snapshot_path : metadata.remediation_snapshot_path || null,
+            cost_summary              : metadata.cost_summary || null,
             is_cache_hit     : job.is_cache_hit || false,
             has_interactions  : false,
             started_at       : job.started_at,
@@ -6283,6 +6295,16 @@ class NotificationsUI {
         // Insert at top (newest first)
         contentEl.insertBefore( entry, contentEl.firstChild );
 
+        // Auto-expand interactions section if collapsed
+        if ( contentEl.classList.contains( 'collapsed' ) ) {
+            contentEl.classList.remove( 'collapsed' );
+            const sectionEl = contentEl.closest( '.job-interactions-section' );
+            const expandBtn = sectionEl?.querySelector( '.interactions-expand-btn' );
+            if ( expandBtn ) expandBtn.textContent = '▼';
+            const sendMsgEl = sectionEl?.querySelector( '.job-send-message' );
+            if ( sendMsgEl ) sendMsgEl.classList.remove( 'collapsed' );
+        }
+
         // Auto-expand job card to show new notification
         if ( !this.expandedJobCards.has( jobId ) ) {
             this.expandJobCard( jobId );
@@ -6550,9 +6572,12 @@ class NotificationsUI {
      * @param {string} reportPath - Path to the report file
      * @returns {string} HTML content for report link section
      */
-    renderReportLinkSection( reportPath, agentType, yamlPath ) {
+    renderReportLinkSection( reportPath, agentType, yamlPath, remediationPath ) {
         if ( !reportPath ) return '';
         let html = `<a href="/app/docs?path=${encodeURIComponent( reportPath )}" target="_blank" class="report-link-btn">📋 View Full Report</a>`;
+        if ( remediationPath ) {
+            html += ` <a href="/app/docs?path=${encodeURIComponent( remediationPath )}" target="_blank" class="report-link-btn">🔧 Remediation Snapshot</a>`;
+        }
         // Re-render button for presentation jobs with existing YAML
         if ( agentType === 'presentation' && yamlPath ) {
             html += ` <button class="report-link-btn rerender-btn" onclick="window.notificationsUI.submitRerender( '${this.escapeHtml( yamlPath )}' )" title="Re-render from YAML (Phases 6-8 only)">🔄 Re-render</button>`;
@@ -6736,7 +6761,7 @@ class NotificationsUI {
                         ${this.renderAbstractSection( job.abstract )}
                     </div>
                     <div class="job-report-link" style="${job.report_path ? '' : 'display: none'}">
-                        ${this.renderReportLinkSection( job.report_path, job.agent_type, job.yaml_path )}
+                        ${this.renderReportLinkSection( job.report_path, job.agent_type, job.yaml_path, job.remediation_snapshot_path )}
                     </div>
                     <div class="job-cost-summary" style="${job.cost_summary ? '' : 'display: none'}">
                         ${job.cost_summary ? this.renderCostSummaryContent( job.cost_summary, job.duration_seconds ) : ''}

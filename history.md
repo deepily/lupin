@@ -16,6 +16,33 @@
 **Files Modified — Lupin (2)**: `src/lupin_cli/notifications/notification_models.py`, `src/lupin_cli/notifications/notify_user_async.py`
 **Files Modified — CoSA (1)**: `src/cosa/rest/routers/notifications.py`
 
+**Bug Fix 2: CBR prediction showing raw JSON instead of answer string**
+
+**Root cause**: Browser sends MC responses as `JSON.stringify({"answers":{"Commit":"Commit only"}})` — a JSON string. `_store_decision()` in `prediction_engine.py` checked `isinstance(str)` and blindly wrapped it in `{"answers":{"_other": <raw_json_string>}}` without attempting to parse the JSON first. CBR predictions then displayed: `Predicted: _other: {"answers":{"Commit":"Commit only"}}`.
+
+**Fix**: Try `json.loads()` on string values before falling back to `_other` wrapping. If the string is valid JSON with an `answers` key, extract and use the structured answers directly.
+
+**Files Modified — CoSA (1)**: `src/cosa/agents/prediction_engine/prediction_engine.py`
+
+**Bug Fix 3: Activity log collapse toggle broken on job cards**
+
+**Root cause**: CSS specificity — `.live-interactions .interactions-content` set `max-height: 200px` which overrode `.interactions-content.collapsed` `max-height: 0`. Toggle visually did nothing.
+
+**Fix**: Added `.live-interactions .interactions-content.collapsed` rule with matching specificity.
+
+**Files Modified — Lupin (1)**: `src/fastapi_app/static/css/notifications.css`
+
+**Bug Fix 4: Job card activity log not showing live notifications**
+
+**Root cause**: `appendNotificationToJobCard()` inserted entries into `interactions-content` container but never removed its `collapsed` class. `expandJobCard()` only expanded the outer `.job-card-details`, not the inner interactions section.
+
+**Fix**: Auto-expand interactions section (remove `collapsed`, update expand button, show send-message row) when first notification is appended.
+
+**Diagnostics**: Added `[DIAG-JR]` logging to server (`notifications.py`) and browser (`notifications.js`) for job routing verification. Confirmed notifications reach handler, `job_id` present, DOM element found — proved the issue was CSS/visibility, not routing.
+
+**Files Modified — Lupin (1)**: `src/fastapi_app/static/js/notifications.js`
+**Files Modified — CoSA (1)**: `src/cosa/rest/routers/notifications.py` (diagnostic log)
+
 ---
 
 ### 2026.04.09 - Session 6b8670e7 | Bug Fix: CC Listener Sessions Not Appearing
