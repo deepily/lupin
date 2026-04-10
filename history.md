@@ -1,5 +1,51 @@
 # Lupin Project History
 
+### 2026.04.10 - Session 1b8c1cc0 | BFE Phase 6 dry-run smoke test + CJ Flow persistence gaps fix
+
+**Context**: Two back-to-back planning cycles in one session. (1) Plan + implement the Phase 6 dry-run integration smoke test that the BFE parent plan left as Step 8. (2) When end-to-end verification exposed three persistence gaps in `job_history` (`session_id`, `routing_command`, `metadata_json.original_args` all NULL for REST-submitted agentic jobs), plan + fix those too. A bonus regex bug was surfaced while debugging the live server.
+
+**Part 1 — Phase 6 dry-run smoke test** (plan doc 09):
+- Added `force_failure_mode` Literal field to `MockJobSubmitRequest` + REST request models for DR/podcast/presentation; threaded through `agentic_job_factory.create_agentic_job()` into each job constructor
+- Shared `_raise_forced_failure(voice_io)` helper on `AgenticJobBase` — raises `KeyError`/`asyncio.TimeoutError`/`Exception("RateLimitError: 429...")` at end of dry-run breadcrumbs so jobs land in dead queue with realistic error signatures
+- BFE `_execute_dry_run()` extended to package real `DeadJobContext`, strip `force_failure_mode` from `original_args`, build a mocked successful `FixResult`, and call `_resubmit_original_job()` — so `dry_run=True` now exercises the full Phase 6 loop
+- Dead queue watchdog `_submit_bfe()` propagates `dry_run=True` to spawned BFE when the failed job is a dry-run mock
+- New smoke test `src/tests/smoke/test_bfe_phase6_repair_loop_smoke.py` with auto-mode scenarios (WATCHDOG_DISABLED when config is `false`, DR_LOOP_HAPPY when `true`)
+- 12 new unit tests in `test_bfe_phase6.py` (`TestDryRunRepairLoopHooks`, `TestMockJobForceFailureMode`)
+- Both smoke scenarios verified: WATCHDOG_DISABLED PASSED (dead queue hit, no BFE spawn); DR_LOOP_HAPPY end-to-end verified via direct DB inspection
+
+**Part 2 — CJ Flow persistence gaps fix** (plan doc 10):
+- Added `routing_command` + `original_args` attributes to `AgenticJobBase.__init__` (both default `None`); added `original_args` to `AgentBase.__init__` and `SolutionSnapshot.__init__` so every CJ Flow-eligible job has the attributes — enables `TodoFifoQueue.push()` to read them directly without defensive `getattr` fallbacks
+- Removed legacy `self.routing_command = self.JOB_TYPE` line from `AgenticJobBase` (was stale, set bare job_type instead of the full routing command string)
+- Refactored `agentic_job_factory.create_agentic_job()` with direct-assignment pattern: each branch now builds `job = FooJob(...)` and the function returns via a single tail that sets `job.routing_command = command` and `job.original_args = dict(args_dict)` — no wrapper, no indirection
+- Enriched `TodoFifoQueue.push()` metadata dict with `session_id`, `routing_command`, `original_args` via direct attribute reads (no `getattr` defaults)
+- Whitelisted `original_args` in `job_persistence._build_metadata_json()` rich_fields
+- `persist_job_completed_from_metadata()` and `persist_job_failed_from_metadata()` now **merge** existing `metadata_json` with the new rich fields instead of overwriting — preserves `original_args` set at creation through state transitions
+- Cleanup: removed `_JOB_TYPE_TO_ROUTING_COMMAND` lookup table + `or ""` coercions from `dead_job_packager.py` (reverted to direct `row[key]` reads); simplified BFE `_execute_dry_run()` resubmit args block (now `{**original_args, dry_run: True}` with `force_failure_mode` popped)
+- 6 new `TestPersistenceRoundTrip` unit tests
+
+**Part 3 — Bonus regex bugfix in dead_queue_watchdog**:
+- Found that the watchdog's `INFRA_RATE_LIMIT` regex was matching bare `429` anywhere in error text — which caught traceback line numbers (e.g. `File ".../agentic_job_base.py", line 429, in _raise_forced_failure`). This misclassified `KeyError` code-bug failures as rate-limit failures and routed them to `_direct_retry()` instead of `_submit_bfe()`
+- Tightened regex to require HTTP context: `\b(?:HTTP|status|code|error)\s*(?:code\s*)?429\b`
+- `RateLimitError`, `rate.limit`, `Too Many Requests`, `overloaded` patterns still match; all classification unit tests pass
+
+**Files modified** (14 production + 2 tests + 4 plan/index):
+- Prod: `agentic_job_base.py`, `agent_base.py`, `solution_snapshot.py`, `agentic_job_factory.py`, `todo_fifo_queue.py`, `job_persistence.py`, `dead_job_packager.py`, `bug_fix_expediter/job.py`, `dead_queue_watchdog.py`, `running_fifo_queue.py`, `routers/mock_job.py`, `routers/deep_research.py`, `routers/podcast_generator.py`, `routers/presentation_generator.py`, `agents/deep_research/job.py`, `agents/podcast_generator/job.py`, `agents/presentation_generator/job.py`, `conf/lupin-app.ini` (toggled + restored)
+- Tests: `test_bfe_phase6.py` (+18 tests), `test_bfe_phase6_repair_loop_smoke.py` (new)
+- Plans: `09-phase6-dry-run-smoke-test-plan.md` (new), `10-cj-flow-persistence-gaps-plan.md` (new), `00-index.md` (updated)
+
+**Test status**: 76/76 unit tests passing (58 pre-existing + 18 new this session)
+
+**End-to-end verification via direct DB inspection**:
+- `dr-5d4fb37c` (original, status=failed) → `bfe-e9908a2d` (watchdog-spawned BFE) → `dr-4b54fd31` (BFE-resubmitted DR) all present in job_history with complete persistence fields
+- Resubmitted DR has `original_args = {query, budget, audience=expert, dry_run=True}` with `force_failure_mode` correctly stripped — proves BFE's "dry-run fix" round-trip is faithful
+- Note: smoke test in-process observation was frequently interrupted by uvicorn reloads triggered by parallel test_fix_expediter edits in another session; DB rows are the authoritative evidence
+
+**Memory update**: extended `feedback_no_defensive_programming.md` with a concrete "Known incidents" section documenting the `getattr(item, 'routing_command', None)` hedge caught by the user — the rule "add attribute with default to base class, don't hedge at the consumer" now has a fresh example
+
+**Nested repos (not committed from this session)**: All the CoSA-side edits (most of this session's work) live under `src/cosa/` submodule — they need their own commit from a CoSA context per project policy
+
+---
+
 ### 2026.04.10 - Session 85b05d1d (continued) | Lunch-time autonomous run through backlog items #0–#4
 
 **Context**: After the initial E2E count mismatch fix landed (entry below), the user created a 6-item ordered backlog (#0 checkpoint → #1 notifications.js auth refresh → #2 test report filename TZ → #3 move runtime artifacts out of src → #4 visual regression cold/warm drift → #5 research stuck todo jobs) and authorized autonomous execution during their lunch break with three ground rules: no CoSA/deepily-scripts commits from Lupin, no destructive ops without pausing, no GPU workloads.

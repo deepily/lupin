@@ -20,6 +20,8 @@
 | [06-phase5-trust-proxy-git-strategy-plan.md](06-phase5-trust-proxy-git-strategy-plan.md) | Phase 5 detailed implementation plan — trust proxy init, git operations, commit/branch/PR strategy | Complete |
 | [07-phase5-execution-log.md](07-phase5-execution-log.md) | Phase 5 execution log — Session 389 implementation results | Complete |
 | [08-phase6-automated-repair-loop-plan.md](08-phase6-automated-repair-loop-plan.md) | Phase 6 detailed plan — Dead queue watchdog, automated BFE trigger, job resubmission, circuit breakers, failure classification | Planning |
+| [09-phase6-dry-run-smoke-test-plan.md](09-phase6-dry-run-smoke-test-plan.md) | Phase 6 Step 8 — Integration dry-run smoke test plan (force_failure_mode injection, BFE dry-run resubmit, watchdog dry-run propagation, 4-scenario smoke harness) | Complete |
+| [10-cj-flow-persistence-gaps-plan.md](10-cj-flow-persistence-gaps-plan.md) | CJ Flow persistence gaps fix — session_id/routing_command/original_args round-trip + metadata_json merge on state transitions + rate-limit regex bugfix (429 matching line numbers) + packager cleanup | Complete |
 
 ## Context
 

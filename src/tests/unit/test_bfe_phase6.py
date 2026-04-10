@@ -337,3 +337,239 @@ class TestPhase6StateModel:
             metadata_json={ "source_path": "/tmp/research.md" }
         )
         assert ctx.metadata_json[ "source_path" ] == "/tmp/research.md"
+
+
+# =============================================================================
+# Phase 6 Dry-Run Repair Loop Hooks (Step 2-4)
+# =============================================================================
+
+class TestDryRunRepairLoopHooks:
+    """
+    Tests for the Phase 6 dry-run repair loop plumbing:
+      - Watchdog propagates dry_run=True from failed mock jobs to spawned BFE
+      - AgenticJobBase._raise_forced_failure() raises correct exception types
+    """
+
+    @patch( "cosa.rest.queue_extensions.user_job_tracker.register_scoped_job" )
+    @patch( "cosa.rest.agentic_job_factory.create_agentic_job" )
+    def test_watchdog_propagates_dry_run_to_bfe( self, mock_create, mock_register ):
+        """When failed job has dry_run=True, spawned BFE args_dict must contain dry_run=True."""
+        mock_bfe_job = MagicMock()
+        mock_bfe_job.id_hash = "bfx-dryrun-test::user1"
+        mock_create.return_value = mock_bfe_job
+        mock_register.return_value = "bfx-dryrun-test::user1"
+
+        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue() )
+        job = MockJob( "presentation", error="KeyError: 'oops'" )
+        job.dry_run = True
+
+        result = watchdog._submit_bfe( job, attempt_count=0 )
+
+        assert result == "bfx-dryrun-test::user1"
+        mock_create.assert_called_once()
+        call_kwargs = mock_create.call_args.kwargs
+        assert call_kwargs[ "args_dict" ][ "dry_run" ] is True, \
+            "Spawned BFE must inherit dry_run=True when dead job is a dry-run mock"
+        assert call_kwargs[ "args_dict" ][ "dead_job_id" ] == job.id_hash
+
+    @patch( "cosa.rest.queue_extensions.user_job_tracker.register_scoped_job" )
+    @patch( "cosa.rest.agentic_job_factory.create_agentic_job" )
+    def test_watchdog_does_not_propagate_dry_run_for_live_failures( self, mock_create, mock_register ):
+        """Live failures (no dry_run attribute) must not inject dry_run into BFE args."""
+        mock_bfe_job = MagicMock()
+        mock_bfe_job.id_hash = "bfx-live-test::user1"
+        mock_create.return_value = mock_bfe_job
+        mock_register.return_value = "bfx-live-test::user1"
+
+        watchdog = DeadQueueWatchdog( MockConfigMgr(), MockTodoQueue() )
+        job = MockJob( "presentation", error="KeyError: 'oops'" )
+        # no dry_run attribute set → defaults to False via getattr
+
+        watchdog._submit_bfe( job, attempt_count=0 )
+
+        call_kwargs = mock_create.call_args.kwargs
+        assert "dry_run" not in call_kwargs[ "args_dict" ], \
+            "Live failures must not inject dry_run into spawned BFE"
+
+    @pytest.mark.asyncio
+    async def test_raise_forced_failure_code_bug( self ):
+        """force_failure_mode='code_bug' must raise KeyError."""
+        from cosa.agents.agentic_job_base import AgenticJobBase
+
+        stub = MagicMock( spec=AgenticJobBase )
+        stub.id_hash           = "test-123"
+        stub.force_failure_mode = "code_bug"
+        voice_io = MagicMock()
+        voice_io.notify = AsyncMock()
+
+        with pytest.raises( KeyError ) as exc_info:
+            await AgenticJobBase._raise_forced_failure( stub, voice_io )
+        assert "Phase 6" in str( exc_info.value )
+
+    @pytest.mark.asyncio
+    async def test_raise_forced_failure_infra_timeout( self ):
+        """force_failure_mode='infra_timeout' must raise asyncio.TimeoutError."""
+        import asyncio
+        from cosa.agents.agentic_job_base import AgenticJobBase
+
+        stub = MagicMock( spec=AgenticJobBase )
+        stub.id_hash           = "test-123"
+        stub.force_failure_mode = "infra_timeout"
+        voice_io = MagicMock()
+        voice_io.notify = AsyncMock()
+
+        with pytest.raises( asyncio.TimeoutError ):
+            await AgenticJobBase._raise_forced_failure( stub, voice_io )
+
+    @pytest.mark.asyncio
+    async def test_raise_forced_failure_rate_limit( self ):
+        """force_failure_mode='rate_limit' must raise Exception with RateLimitError prefix."""
+        from cosa.agents.agentic_job_base import AgenticJobBase
+
+        stub = MagicMock( spec=AgenticJobBase )
+        stub.id_hash           = "test-123"
+        stub.force_failure_mode = "rate_limit"
+        voice_io = MagicMock()
+        voice_io.notify = AsyncMock()
+
+        with pytest.raises( Exception ) as exc_info:
+            await AgenticJobBase._raise_forced_failure( stub, voice_io )
+        assert "RateLimitError" in str( exc_info.value )
+        assert "429" in str( exc_info.value )
+
+    @pytest.mark.asyncio
+    async def test_raise_forced_failure_unknown_mode( self ):
+        """Unknown force_failure_mode must raise ValueError."""
+        from cosa.agents.agentic_job_base import AgenticJobBase
+
+        stub = MagicMock( spec=AgenticJobBase )
+        stub.id_hash           = "test-123"
+        stub.force_failure_mode = "nonsense"
+        voice_io = MagicMock()
+        voice_io.notify = AsyncMock()
+
+        with pytest.raises( ValueError ) as exc_info:
+            await AgenticJobBase._raise_forced_failure( stub, voice_io )
+        assert "Unknown force_failure_mode" in str( exc_info.value )
+
+    def test_failure_classification_matches_forced_errors( self ):
+        """The exceptions raised by _raise_forced_failure must classify correctly in the watchdog."""
+        # code_bug → CODE_BUG
+        assert classify_failure( "KeyError: 'source_path' — simulated mock failure" ) == FailureCategory.CODE_BUG
+        # infra_timeout → INFRA_TIMEOUT
+        assert classify_failure( "asyncio.TimeoutError: simulated mock timeout" ) == FailureCategory.INFRA_TIMEOUT
+        # rate_limit → INFRA_RATE_LIMIT
+        assert classify_failure( "RateLimitError: 429 Too Many Requests — simulated" ) == FailureCategory.INFRA_RATE_LIMIT
+
+
+# =============================================================================
+# MockJobSubmitRequest force_failure_mode validation (Step 1)
+# =============================================================================
+
+class TestMockJobForceFailureMode:
+    """Tests for the force_failure_mode field on MockJobSubmitRequest."""
+
+    def test_force_failure_mode_defaults_to_none( self ):
+        from cosa.rest.routers.mock_job import MockJobSubmitRequest
+        req = MockJobSubmitRequest()
+        assert req.force_failure_mode is None
+
+    def test_force_failure_mode_accepts_code_bug( self ):
+        from cosa.rest.routers.mock_job import MockJobSubmitRequest
+        req = MockJobSubmitRequest( force_failure_mode="code_bug" )
+        assert req.force_failure_mode == "code_bug"
+
+    def test_force_failure_mode_accepts_infra_timeout( self ):
+        from cosa.rest.routers.mock_job import MockJobSubmitRequest
+        req = MockJobSubmitRequest( force_failure_mode="infra_timeout" )
+        assert req.force_failure_mode == "infra_timeout"
+
+    def test_force_failure_mode_accepts_rate_limit( self ):
+        from cosa.rest.routers.mock_job import MockJobSubmitRequest
+        req = MockJobSubmitRequest( force_failure_mode="rate_limit" )
+        assert req.force_failure_mode == "rate_limit"
+
+    def test_force_failure_mode_rejects_invalid( self ):
+        from cosa.rest.routers.mock_job import MockJobSubmitRequest
+        from pydantic import ValidationError
+        with pytest.raises( ValidationError ):
+            MockJobSubmitRequest( force_failure_mode="garbage" )
+
+
+# =============================================================================
+# Persistence Round-Trip (CJ Flow fix: routing_command + original_args)
+# =============================================================================
+
+class TestPersistenceRoundTrip:
+    """
+    Tests that every CJ Flow job carries `routing_command` and `original_args`
+    and that the persistence layer whitelists and preserves them.
+    """
+
+    def test_agentic_job_base_has_attributes( self ):
+        """Fresh DeepResearchJob (via AgenticJobBase) has the persistence attrs as None defaults."""
+        from cosa.agents.deep_research.job import DeepResearchJob
+        job = DeepResearchJob(
+            query      = "x",
+            user_id    = "u1",
+            user_email = "t@t.com",
+            session_id = "s1",
+        )
+        assert hasattr( job, "routing_command" )
+        assert hasattr( job, "original_args" )
+        assert job.routing_command is None
+        assert job.original_args   is None
+
+    def test_factory_sets_routing_command_and_original_args( self ):
+        """create_agentic_job() must populate both fields on the returned job."""
+        from cosa.rest.agentic_job_factory import create_agentic_job
+        args_dict = { "query": "phase6 test", "budget": 1.0, "audience": "expert" }
+        job = create_agentic_job(
+            command    = "agent router go to deep research",
+            args_dict  = args_dict,
+            user_id    = "u1",
+            user_email = "t@t.com",
+            session_id = "s1",
+        )
+        assert job is not None
+        assert job.routing_command == "agent router go to deep research"
+        assert job.original_args   == { "query": "phase6 test", "budget": 1.0, "audience": "expert" }
+
+    def test_factory_copies_args_dict_defensively( self ):
+        """Mutating args_dict after factory call must NOT mutate job.original_args."""
+        from cosa.rest.agentic_job_factory import create_agentic_job
+        args_dict = { "query": "phase6 test", "budget": 1.0 }
+        job = create_agentic_job(
+            command    = "agent router go to deep research",
+            args_dict  = args_dict,
+            user_id    = "u1",
+            user_email = "t@t.com",
+            session_id = "s1",
+        )
+        args_dict[ "budget" ]  = 999.0
+        args_dict[ "injected" ] = "bad"
+        assert job.original_args[ "budget" ] == 1.0, "factory must defensively copy args_dict"
+        assert "injected" not in job.original_args
+
+    def test_build_metadata_json_preserves_original_args( self ):
+        """_build_metadata_json() whitelists `original_args`."""
+        from cosa.rest.job_persistence import _build_metadata_json
+        result = _build_metadata_json( {
+            "agent_type"   : "deep_research",
+            "original_args": { "query": "q", "budget": 1.0, "audience": "expert" },
+            "stack_trace"  : "traceback...",
+        } )
+        assert result[ "original_args" ] == { "query": "q", "budget": 1.0, "audience": "expert" }
+        assert result[ "stack_trace" ]   == "traceback..."
+
+    def test_build_metadata_json_null_safe_when_original_args_absent( self ):
+        """Missing `original_args` must not appear in the output (not even as None)."""
+        from cosa.rest.job_persistence import _build_metadata_json
+        result = _build_metadata_json( { "agent_type": "deep_research" } )
+        assert "original_args" not in result
+
+    def test_build_metadata_json_drops_explicit_none( self ):
+        """Passing `original_args=None` should also NOT appear in the output."""
+        from cosa.rest.job_persistence import _build_metadata_json
+        result = _build_metadata_json( { "agent_type": "deep_research", "original_args": None } )
+        assert "original_args" not in result
