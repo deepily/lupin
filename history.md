@@ -1,5 +1,47 @@
 # Lupin Project History
 
+### 2026.04.10 - Session 85b05d1d | Bug Fix: E2E Test Result Count Mismatch (3-layer root-cause fix)
+
+**Goal**: User reported last night's scheduled e2e test run showed "FAILURES DETECTED" with summary `"335 passed, 0 failed, 0 skipped"` — numbers that add up to 335 clean but verdict says FAIL. User's question: "why does this not add up properly?" Answer turned out to require fixing three independent bugs.
+
+**Root causes (three layers, each independent)**:
+
+1. **Display bug — the numbers didn't include the errors counter.** `src/cosa/agents/test_suite/job.py` computed `total_errors` correctly but dropped it from five user-facing summary strings (report header, per-suite notification, abstract per-suite line, abstract total, conversational summary) and from the `cost_summary` dict. The report file's Errors column showed 12, but the user-facing line said "0 failed, 0 skipped" with no mention of errors — literally missing digits from the display. The test_suite job was telling the user `335 + 0 + 0 = 335 all good` when the real story was `335 passed + 12 errors on teardown`.
+
+2. **Container config bug — pytest.ini wasn't in the container at all.** The lupin-rest container was started by `scripts/server/start-docker-lupin.sh` (in the separate `deepily/scripts` repo) with bind mounts only for `src/` and `io/`. Root-level files like `pytest.ini` and `requirements*.txt` were invisible inside the container. Confirmed by `docker exec lupin-rest ls /var/lupin/pytest.ini` → "No such file". Consequences: pytest ran with all defaults, custom markers (`manual`, `integration`) were unregistered, `addopts = -m "not manual"` was ignored, and the `playwright-visual-snapshot` plugin's configured path `src/tests/e2e_ui/__snapshots__` was ignored → fell back to `<rootdir>/__snapshots__/` → plugin couldn't find the 12 committed baseline PNGs → every visual test created a "new snapshot" → teardown reported ERROR for each. All 12 visual regression errors were a symptom of this one missing bind mount.
+
+3. **Stale visual regression baselines.** Two of the 12 committed baselines (`profile.png`, `notifications.png`) were captured before Session 383 (Mar 30 2026) changed the main layout width from 800px to 1000px. The CSS commit modified exactly `notifications.css` and `auth/css/auth.css` — the two CSS files that style the two affected pages. The baselines were never refreshed, but the Docker path-mismatch bug from layer #2 was simultaneously creating new snapshots every run, so the stale baselines never actually compared against anything and never failed visibly. Once layer #2 was fixed, the stale baselines surfaced as real "Snapshots DO NOT match!" failures.
+
+**Fix**:
+
+- **Layer 1 (CoSA submodule, working tree edit only)** — `src/cosa/agents/test_suite/job.py`: added `errors` counter to five user-facing summary sites (lines 298, 351, 444, 456, 458) and `total_errors` key to `cost_summary` dict (line 318). After the fix, the validated e2e run shows `"**Total**: 335 passed, 0 failed, 12 errors, 0 skipped"` in the report header and `"Test suite complete: FAILURES DETECTED"` verdict — honest math, error count now visible.
+- **Layer 2 (deepily/scripts repo, working tree edit only)** — `scripts/server/start-docker-lupin.sh:381`: added `-v "$LUPIN_ROOT/pytest.ini:/var/lupin/pytest.ini:ro" \` between the existing `src/` and `io/` bind mounts. User restarted lupin-rest, verified via `docker exec lupin-rest ls /var/lupin/pytest.ini` (886 bytes, uid 1001) and `configfile: pytest.ini` now showing in pytest collection header inside container.
+- **Layer 3 (Lupin parent, re-baseline)** — Ran surgical `./src/scripts/run-e2e-ui-tests.sh --bg --update-snapshots -k "visual and (profile or notifications)"` which wrote fresh PNGs for just the two affected pages, preserving the other 10 healthy baselines. Subsequent `-k visual` clean run: **12 passed, 0 errors in 37.15s** — confirming both the plugin path fix AND the refreshed baselines.
+
+**Validation — full e2e via test_suite job**: Scheduled a full 335-test e2e run via `/schedule-tests` (per the memory rule about using the skill). Result report landed at `io/test-suite/2026.04.10-at-14:53-e2e-results.md` showing the new honest total line: **"Total: 335 passed, 0 failed, 12 errors, 0 skipped"**. The 12 errors this time are different from the original bug — they're `"Snapshots DO NOT match!"` (plugin IS finding baselines, bind mount working) rather than `"New snapshot(s) created"`. The visual diffs show only faint subpixel font anti-aliasing speckles, not structural changes, and include `login`/`register`/`change-password` pages that passed cleanly in the isolated `-k visual` run earlier. This suggests a cold/warm Chromium font-cache drift between isolated and full-suite runs — a separate issue filed as follow-up #4.
+
+**Bug surfaced during the run (separate issue, filed as follow-up #1)**: User tried to click the activity log button on the running e2e job card and got `HTTP 401` from `loadJobInteractions` at `notifications.js:7185`. Investigation revealed the method fetches `/api/get-job-interactions/{job_id}` without calling `await this.ensureValidToken()` first — a programmatic audit found **25 total `getAuthHeader()` fetch sites in notifications.js, of which 9 are compliant and 16 are missing the proactive token refresh**. The 30-min JWT TTL means any user idle during a long-running job will hit 401s on the non-compliant buttons. Full audit and proposed fix (add `authedFetch` helper + migrate all 25 sites) serialized to `src/rnd/v0.1.6/2026.04.10-notifications-js-auth-token-refresh-audit.md`.
+
+**Files Changed — Lupin (3, committed this checkpoint)**:
+- `src/rnd/v0.1.6/2026.04.10-notifications-js-auth-token-refresh-audit.md` — new plan doc for follow-up #1
+- `TODO.md` — added 5 new pending items + 1 completed item for today's work
+- `history.md` — this entry
+- `.claude-session.md` — session 85b05d1d block
+
+**Files Changed — CoSA (1, NOT committed, user commits from CoSA context)**:
+- `src/cosa/agents/test_suite/job.py` — display fix (6 edits across 5 summary strings + cost_summary dict)
+
+**Files Changed — deepily/scripts (1, NOT committed, user commits from that repo)**:
+- `scripts/server/start-docker-lupin.sh` — one-line `pytest.ini` bind mount added at line 381
+
+**Files Changed — Lupin working tree only (2, NOT committed — being relocated by follow-up #3)**:
+- `src/tests/e2e_ui/__snapshots__/test_visual_regression/test_visual_page/profile.png` — re-baselined
+- `src/tests/e2e_ui/__snapshots__/test_visual_regression/test_visual_page/notifications.png` — re-baselined
+
+**Follow-ups filed** (all in TODO.md, ordered): #1 notifications.js auth refresh (plan doc ready), #2 test report filename UTC→EST/EDT, #3 move runtime artifacts out of src tree (user confirmed io/ external backup makes gitignore conflict non-blocking), #4 visual regression cold/warm drift, #5 research 5-6 stuck jobs in todo queue.
+
+---
+
 ### 2026.04.10 - Session 1b8c1cc0 | Bug Fix: Done Bucket Job Card Render Parity
 
 **Goal**: Fix divergence between dynamically-inserted (WS transition) and reload-loaded done-bucket job cards. They render the same logical state (`done`) through different code paths and produce visibly different results: dynamic cards show an irrelevant pause button and lack the trash button; reload cards lack scheduled/monopolize badges. User wants both paths fully equivalent and sharing a single rendering method.
