@@ -1,5 +1,32 @@
 # Lupin Project History
 
+### 2026.04.09 - Session f28d32d1 | Test Suite Remediation Snapshots
+
+**Goal**: Add machine-readable remediation snapshot output to TestSuiteJob so test failures can be fed to BFE agents for automated fix cycles.
+
+**Remediation Snapshot Feature**:
+- Enhanced `_parse_junit_xml()` to extract per-failure details (classname, test name, type, message, traceback) from JUnit XML `<testcase>` elements
+- Added JSON snapshot writer in `do_all()` — produces `*-remediation.json` alongside existing markdown reports in `io/test-suite/` when failures exist
+- Added `remediation_snapshot_path` to API response (`queues.py`), WebSocket transition metadata (`running_fifo_queue.py`), and frontend normalization + rendering (`notifications.js`)
+- 🔧 "Remediation Snapshot" link renders on done/dead job cards next to existing 📋 "View Full Report" link
+
+**Bugs Found & Fixed During Debugging**:
+- **ElementTree falsy Element bug**: `el = failure_el or error_el` evaluates to `None` when `<failure>` element has no child sub-elements (Python's `Element.__bool__()` returns `False` for childless elements). Fix: `el = failure_el if failure_el is not None else error_el`
+- **`ET.parse()` vs `ET.fromstring()`**: Switched to `ET.fromstring()` for XML parsing (read file content first, then parse from string)
+
+**Files Modified — CoSA (8, commit pending)**: `test_suite/job.py` (+82 lines: `json` import, failure detail extraction, JSON snapshot writer, `fromstring` fix, falsy Element fix), `routers/queues.py` (+1 line: `remediation_snapshot_path` in API dict), `running_fifo_queue.py` (+1 line: `remediation_snapshot_path` in WS metadata), plus 5 files from parallel session bacc971a
+**Files Modified — Lupin (0)**: `notifications.js` changes were committed by parallel session bacc971a
+
+**Remediation Snapshot JSON Schema (v1.0)**:
+```json
+{"schema_version": "1.0", "timestamp": "...", "suites_run": ["unit"],
+ "summary": {"total_passed": 2882, "total_failed": 22, ...},
+ "failures": [{"suite": "unit", "classname": "...", "name": "...",
+               "type": "FAILED", "message": "...", "traceback": "..."}]}
+```
+
+---
+
 ### 2026.04.09 - Session bacc971a | Bug Fix: 4x Duplicate Notifications
 
 **Goal**: Fix duplicate notifications (every message appearing 4 times) from overnight test jobs.

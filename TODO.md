@@ -1,13 +1,14 @@
 # TODO
 
-Last updated: 2026-04-09 (Session bacc971a — 4 bug fixes: duplicate notifications, CBR JSON, activity log toggle/rendering)
+Last updated: 2026-04-09 (Session f28d32d1 — Remediation snapshots for test suite)
 
 ## Pending
 
-- [ ] [LUPIN] **CoSA commit pending: Session 97f29034 + a312ee22 + 6b8670e7 + bacc971a (32 files)** — Session bacc971a: `routers/notifications.py` (idempotency cache + reorder persist-before-push), `prediction_engine/prediction_engine.py` (CBR JSON parse fix for MC responses). Session 6b8670e7: `websocket_manager.py` (+emit_to_session_sync), `notification_fifo_queue.py` (cross-user listener delivery), `routers/notifications.py` (cross-user diagnostic), `routers/queues.py` (user_initiated_message listener delivery). Session 97f29034: `websocket_manager.py` (+session_is_admin +emit_to_admins_sync +roles), `queue_util.py` (+admin broadcast), `websocket.py` (+roles param), `cosa_interface.py` (notify→notify_progress), `job.py` (remove View Full Log). Session a312ee22: `util.py` (+get_current_datetime_iso), `fifo_queue.py` (desync guard), 9 REST/WS files, 11 agent job files. Commit from CoSA repo context.
-- [x] [LUPIN] **4x Duplicate Notifications — FIXED Session bacc971a**. Root cause: retry loop in `notify_user_async.py` sent multiple POSTs when user offline; server persisted each as separate notification. Fix: idempotency key (UUID per logical notification) + server-side TTL cache + reordered persist-before-push.
+- [ ] [LUPIN] **CoSA commit pending: Sessions 97f29034 + a312ee22 + 6b8670e7 + bacc971a + f28d32d1 (36 files)** — Session f28d32d1: `test_suite/job.py` (remediation snapshot: JSON writer + failure extraction + fromstring fix + falsy Element fix), `routers/queues.py` (+remediation_snapshot_path), `running_fifo_queue.py` (+remediation_snapshot_path in WS metadata). Previous sessions: see prior TODO entries. Commit from CoSA repo context.
+- [ ] [LUPIN] **Design: Test Suite → BFE Remediation Handoff** — Remediation snapshot JSON is now produced by TestSuiteJob. Need to design how it feeds into BFE for automated fix cycles. Key questions: BFE expects `DeadJobContext` (failed job), but test failures are code bugs not job crashes; 22 failures are really 3 root-cause clusters; need new input mode or new agent type. Options: (1) manual `extra_context` handoff, (2) auto-trigger from TestSuiteJob, (3) new Test Remediation agent. Explore in morning session.
+- [ ] [LUPIN] **Clean up debug code in `test_suite/job.py`** — Remove temporary debug `print()` statements (6+ lines), `loop_count`/`children_count` variables, and re-enable `os.unlink(junit_xml_path)` after confirming remediation snapshot works end-to-end.
 - [ ] [LUPIN] **Remove [DIAG-JR] diagnostic logging** — In `notifications.js` (3 console.log blocks) and `notifications.py` (1 print). Remove after verifying activity log auto-expand works in production.
-- [ ] [LUPIN] **E2E test scheduled 9:26 PM EST** — `ts-efba6552`. Check results next session if not reviewed tonight.
+- [x] [LUPIN] **E2E test scheduled 9:26 PM EST** — `ts-efba6552`. Reviewed Session f28d32d1: 335 passed, 12 visual regression errors (Docker snapshot path mismatch, expected).
 - [ ] [LUPIN] **BFE Phase 6: Live E2E test of automated repair loop**. All code implemented (6A-6F), 58 unit tests passing. Needs live E2E: enable `auto fix enabled = true` in INI, submit a presentation gen job with known-bad mutation, verify watchdog → BFE → resubmit cycle completes. Schedule as monopolized test-suite job after hours.
 - [ ] [LUPIN] **Automated E2E testing workflow**: Design standard pattern for scheduling E2E/integration test runs as monopolized jobs at user-specified times. Becomes the modus operandi for all post-coding verification.
 
