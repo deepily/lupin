@@ -6102,11 +6102,11 @@ class NotificationsUI {
 
     async deleteQueueJob( jobId, queueName ) {
         /**
-         * Forcefully remove a job from an in-memory queue (run, done, dead).
+         * Forcefully remove a job from an in-memory queue (todo, run, done, dead).
          *
          * Requires:
          *     - jobId is a valid job ID string
-         *     - queueName is 'run', 'done', or 'dead'
+         *     - queueName is 'todo', 'run', 'done', or 'dead'
          *     - User is authenticated (admin or job owner)
          *
          * Ensures:
@@ -6804,11 +6804,18 @@ class NotificationsUI {
         // Session 107: Removed provisionalAttr - no longer using provisional registration
         // ═══════════════════════════════════════════════════════════════════
 
-        const hasCancelBtn = ( queueName === 'run' || queueName === 'todo' );
-        const cancelBtnHtml = hasCancelBtn
-            ? `<button type="button" class="job-cancel-button" id="job-cancel-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.cancelJob('${jobId}')" title="Cancel this job">✕</button>`
-            : '';
-        const headerCancelClass = hasCancelBtn ? ' has-cancel' : '';
+        // ✕ button means "make this job go away" — but the mechanism differs by queue:
+        //   run queue:  graceful cancel via cancelJob (POST /api/jobs/{id}/cancel)
+        //   todo queue: forceful delete via deleteQueueJob (DELETE /api/queue/todo/{id})
+        let cancelBtnHtml      = '';
+        let headerCancelClass  = '';
+        if ( queueName === 'run' ) {
+            cancelBtnHtml     = `<button type="button" class="job-cancel-button" id="job-cancel-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.cancelJob('${jobId}')" title="Cancel this job">✕</button>`;
+            headerCancelClass = ' has-cancel';
+        } else if ( queueName === 'todo' ) {
+            cancelBtnHtml     = `<button type="button" class="job-cancel-button" id="job-cancel-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.deleteQueueJob('${jobId}', 'todo')" title="Remove this job">✕</button>`;
+            headerCancelClass = ' has-cancel';
+        }
 
         // Phase 5 CJ Flow: Pause/resume toggle button (todo queue only)
         const pauseBtnHtml = ( queueName === 'todo' )

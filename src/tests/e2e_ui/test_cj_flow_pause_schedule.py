@@ -16,6 +16,8 @@ Requires:
 
 from datetime import datetime, timedelta
 
+import pytest
+
 from .conftest import BASE_URL, wait_for_ws_connected
 
 
@@ -107,13 +109,64 @@ def _get_pause_btn( page, job_id ):
 
 
 # ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def mock_job_tracker( notifications_page ):
+    """
+    Per-test mock job submission tracker with automatic teardown.
+
+    Returns a callable with the same signature as _submit_mock_job (minus the
+    page argument). Each call records the resulting job_id; at teardown, every
+    recorded id is removed from the todo queue via DELETE /api/queue/todo/{id}.
+
+    Requires:
+        - notifications_page fixture is active and authenticated as the E2E test user
+
+    Ensures:
+        - All jobs created via the returned callable are deleted on teardown,
+          regardless of test pass/fail
+        - 404s during teardown (e.g. job already drained out of todo) are tolerated
+        - One delete failure does not block subsequent deletes
+    """
+    page         = notifications_page
+    created_ids  = []
+
+    def submit( scheduled_at=None, monopolize=False, description=None ):
+        result = _submit_mock_job(
+            page,
+            scheduled_at = scheduled_at,
+            monopolize   = monopolize,
+            description  = description,
+        )
+        created_ids.append( result[ "job_id" ] )
+        return result
+
+    yield submit
+
+    # Teardown: best-effort delete every tracked job
+    token = _get_auth_token( page )
+    for job_id in created_ids:
+        try:
+            response = page.request.delete(
+                f"{BASE_URL}/api/queue/todo/{job_id}",
+                headers = { "Authorization": f"Bearer {token}" },
+            )
+            if not response.ok and response.status != 404:
+                print( f"[TEARDOWN] DELETE /api/queue/todo/{job_id} returned {response.status}: {response.text()}" )
+        except Exception as e:
+            print( f"[TEARDOWN] Failed to delete mock job {job_id}: {e}" )
+
+
+# ---------------------------------------------------------------------------
 # Scheduled Badge Tests
 # ---------------------------------------------------------------------------
 
 class TestScheduledBadge:
     """Tests for scheduled_at badge rendering on todo job cards."""
 
-    def test_scheduled_badge_visible( self, notifications_page ):
+    def test_scheduled_badge_visible( self, notifications_page, mock_job_tracker ):
         """
         Job with future scheduled_at shows a scheduled badge.
 
@@ -126,7 +179,7 @@ class TestScheduledBadge:
         """
         page         = notifications_page
         future_time  = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
-        result       = _submit_mock_job( page, scheduled_at=future_time, description="Scheduled test job" )
+        result       = mock_job_tracker( scheduled_at=future_time, description="Scheduled test job" )
         job_id       = result[ "job_id" ]
 
         # WS event creates card from push metadata (includes scheduled_at)
@@ -141,7 +194,7 @@ class TestScheduledBadge:
         assert badge.count() > 0, "Scheduled badge not found on card"
         assert "🕐" in badge.text_content()
 
-    def test_scheduled_badge_not_shown_for_immediate( self, notifications_page ):
+    def test_scheduled_badge_not_shown_for_immediate( self, notifications_page, mock_job_tracker ):
         """
         Job without scheduled_at does NOT show a scheduled badge.
 
@@ -159,7 +212,7 @@ class TestScheduledBadge:
         # monopolize only to test absence — but that job will get consumed.
         # Instead, just verify that the scheduled badge class is specific:
         future_time = ( datetime.now() + timedelta( hours=2 ) ).isoformat()
-        result      = _submit_mock_job( page, scheduled_at=future_time, description="Has schedule" )
+        result      = mock_job_tracker( scheduled_at=future_time, description="Has schedule" )
         job_id      = result[ "job_id" ]
 
         _expand_todo_queue( page )
@@ -181,7 +234,7 @@ class TestScheduledBadge:
 class TestMonopolizeBadge:
     """Tests for monopolize lock badge on job cards."""
 
-    def test_monopolize_badge_visible( self, notifications_page ):
+    def test_monopolize_badge_visible( self, notifications_page, mock_job_tracker ):
         """
         Job with monopolize=True shows a lock badge.
 
@@ -193,7 +246,7 @@ class TestMonopolizeBadge:
         """
         page        = notifications_page
         future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
-        result      = _submit_mock_job( page, scheduled_at=future_time, monopolize=True, description="Monopolize test" )
+        result      = mock_job_tracker( scheduled_at=future_time, monopolize=True, description="Monopolize test" )
         job_id      = result[ "job_id" ]
 
         _expand_todo_queue( page )
@@ -205,7 +258,7 @@ class TestMonopolizeBadge:
         assert badge.count() > 0, "Monopolize badge not found on card"
         assert "🔒" in badge.text_content()
 
-    def test_monopolize_badge_absent_when_false( self, notifications_page ):
+    def test_monopolize_badge_absent_when_false( self, notifications_page, mock_job_tracker ):
         """
         Job with monopolize=False does NOT show a lock badge.
 
@@ -217,7 +270,7 @@ class TestMonopolizeBadge:
         """
         page        = notifications_page
         future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
-        result      = _submit_mock_job( page, scheduled_at=future_time, description="No monopolize" )
+        result      = mock_job_tracker( scheduled_at=future_time, description="No monopolize" )
         job_id      = result[ "job_id" ]
 
         _expand_todo_queue( page )
@@ -236,7 +289,7 @@ class TestMonopolizeBadge:
 class TestPauseButtonRendering:
     """Tests for pause/resume toggle button on todo queue cards."""
 
-    def test_pause_button_present_on_todo_card( self, notifications_page ):
+    def test_pause_button_present_on_todo_card( self, notifications_page, mock_job_tracker ):
         """
         Todo queue job cards have a pause button.
 
@@ -249,7 +302,7 @@ class TestPauseButtonRendering:
         """
         page        = notifications_page
         future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
-        result      = _submit_mock_job( page, scheduled_at=future_time, description="Pause button test" )
+        result      = mock_job_tracker( scheduled_at=future_time, description="Pause button test" )
         job_id      = result[ "job_id" ]
 
         _expand_todo_queue( page )
@@ -259,7 +312,7 @@ class TestPauseButtonRendering:
         assert "⏸" in btn.text_content(), f"Expected ⏸ icon, got: {btn.text_content()}"
         assert "job-pause-button" in btn.get_attribute( "class" )
 
-    def test_pause_button_not_on_non_todo( self, notifications_page ):
+    def test_pause_button_not_on_non_todo( self, notifications_page, mock_job_tracker ):
         """
         Pause button is only rendered on todo queue cards, not on
         done/dead/running cards. Verified by checking a todo card
@@ -270,7 +323,7 @@ class TestPauseButtonRendering:
         """
         page        = notifications_page
         future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
-        result      = _submit_mock_job( page, scheduled_at=future_time, description="Todo only test" )
+        result      = mock_job_tracker( scheduled_at=future_time, description="Todo only test" )
         job_id      = result[ "job_id" ]
 
         _expand_todo_queue( page )
@@ -279,7 +332,7 @@ class TestPauseButtonRendering:
         btn = _get_pause_btn( page, job_id )
         assert btn.count() > 0, "Pause button should be on todo card"
 
-    def test_cancel_and_pause_buttons_coexist( self, notifications_page ):
+    def test_cancel_and_pause_buttons_coexist( self, notifications_page, mock_job_tracker ):
         """
         Both cancel (✕) and pause (⏸/▶) buttons render on a todo card
         and function independently. Pausing does not remove the cancel button.
@@ -294,7 +347,7 @@ class TestPauseButtonRendering:
         """
         page        = notifications_page
         future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
-        result      = _submit_mock_job( page, scheduled_at=future_time, description="Coexist test" )
+        result      = mock_job_tracker( scheduled_at=future_time, description="Coexist test" )
         job_id      = result[ "job_id" ]
 
         # Pause via API immediately (before consumer can pick it up)
@@ -324,7 +377,7 @@ class TestPauseButtonRendering:
 class TestPauseResumeFlow:
     """Tests for pause → visual update → resume → visual update cycle."""
 
-    def test_pause_via_api_shows_paused_state( self, notifications_page ):
+    def test_pause_via_api_shows_paused_state( self, notifications_page, mock_job_tracker ):
         """
         Pausing a job via API renders paused visual state on reload.
 
@@ -340,7 +393,7 @@ class TestPauseResumeFlow:
         """
         page        = notifications_page
         future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
-        result      = _submit_mock_job( page, scheduled_at=future_time, description="Pause API test" )
+        result      = mock_job_tracker( scheduled_at=future_time, description="Pause API test" )
         job_id      = result[ "job_id" ]
 
         # Pause via API
@@ -370,7 +423,7 @@ class TestPauseResumeFlow:
         assert "▶" in btn.text_content(), f"Expected ▶ icon on paused job, got: {btn.text_content()}"
         assert "is-paused" in btn.get_attribute( "class" )
 
-    def test_resume_via_api_clears_paused_state( self, notifications_page ):
+    def test_resume_via_api_clears_paused_state( self, notifications_page, mock_job_tracker ):
         """
         Resuming a paused job clears the paused visual state on reload.
 
@@ -386,7 +439,7 @@ class TestPauseResumeFlow:
         """
         page        = notifications_page
         future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
-        result      = _submit_mock_job( page, scheduled_at=future_time, description="Resume API test" )
+        result      = mock_job_tracker( scheduled_at=future_time, description="Resume API test" )
         job_id      = result[ "job_id" ]
 
         # Pause then resume
@@ -417,7 +470,7 @@ class TestPauseResumeFlow:
         btn_classes = btn.get_attribute( "class" )
         assert "is-paused" not in btn_classes, f"Button should not have .is-paused, got: {btn_classes}"
 
-    def test_paused_state_persists_after_reload( self, notifications_page ):
+    def test_paused_state_persists_after_reload( self, notifications_page, mock_job_tracker ):
         """
         Paused state survives a page reload — the GET API returns paused=true
         and renderJobCard() renders the paused visual state correctly.
@@ -434,7 +487,7 @@ class TestPauseResumeFlow:
         """
         page        = notifications_page
         future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
-        result      = _submit_mock_job( page, scheduled_at=future_time, description="Reload persist test" )
+        result      = mock_job_tracker( scheduled_at=future_time, description="Reload persist test" )
         job_id      = result[ "job_id" ]
 
         # Pause via API
@@ -471,7 +524,7 @@ class TestPauseResumeFlow:
 class TestPauseResumeButtonClick:
     """Tests for clicking the pause/resume button in the browser UI."""
 
-    def test_click_pause_button_updates_card( self, notifications_page ):
+    def test_click_pause_button_updates_card( self, notifications_page, mock_job_tracker ):
         """
         Clicking the ⏸ button on a todo card triggers pause and
         updates the card to paused state via WebSocket event.
@@ -487,7 +540,7 @@ class TestPauseResumeButtonClick:
         """
         page        = notifications_page
         future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
-        result      = _submit_mock_job( page, scheduled_at=future_time, description="Click pause test" )
+        result      = mock_job_tracker( scheduled_at=future_time, description="Click pause test" )
         job_id      = result[ "job_id" ]
 
         _expand_todo_queue( page )
@@ -515,7 +568,7 @@ class TestPauseResumeButtonClick:
         paused_badge = card.locator( ".paused-badge" )
         assert paused_badge.count() > 0, "Paused badge should appear after pause click"
 
-    def test_click_resume_button_clears_paused( self, notifications_page ):
+    def test_click_resume_button_clears_paused( self, notifications_page, mock_job_tracker ):
         """
         Clicking ▶ on a paused job card resumes it and clears paused state.
 
@@ -530,7 +583,7 @@ class TestPauseResumeButtonClick:
         """
         page        = notifications_page
         future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
-        result      = _submit_mock_job( page, scheduled_at=future_time, description="Click resume test" )
+        result      = mock_job_tracker( scheduled_at=future_time, description="Click resume test" )
         job_id      = result[ "job_id" ]
 
         _expand_todo_queue( page )
@@ -568,7 +621,7 @@ class TestPauseResumeButtonClick:
 class TestCombinedStates:
     """Tests for jobs with multiple flags (paused + scheduled, etc.)."""
 
-    def test_paused_and_scheduled_both_visible( self, notifications_page ):
+    def test_paused_and_scheduled_both_visible( self, notifications_page, mock_job_tracker ):
         """
         A paused job with scheduled_at shows BOTH badges.
 
@@ -581,7 +634,7 @@ class TestCombinedStates:
         """
         page        = notifications_page
         future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
-        result      = _submit_mock_job( page, scheduled_at=future_time, description="Both badges test" )
+        result      = mock_job_tracker( scheduled_at=future_time, description="Both badges test" )
         job_id      = result[ "job_id" ]
 
         # Pause the scheduled job
@@ -606,7 +659,7 @@ class TestCombinedStates:
         card_classes = card.get_attribute( "class" )
         assert "job-paused" in card_classes
 
-    def test_scheduled_and_monopolize_together( self, notifications_page ):
+    def test_scheduled_and_monopolize_together( self, notifications_page, mock_job_tracker ):
         """
         A job with both scheduled_at and monopolize shows both badges.
 
@@ -618,7 +671,7 @@ class TestCombinedStates:
         """
         page        = notifications_page
         future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
-        result      = _submit_mock_job( page, scheduled_at=future_time, monopolize=True, description="Sched+Mono test" )
+        result      = mock_job_tracker( scheduled_at=future_time, monopolize=True, description="Sched+Mono test" )
         job_id      = result[ "job_id" ]
 
         _expand_todo_queue( page )
