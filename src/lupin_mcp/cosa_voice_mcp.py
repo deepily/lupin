@@ -327,12 +327,21 @@ def _validate_repo_account( project: str ) -> None:
                 f"3. Check that the password in ~/.lupin/config [{project}] matches"
             )
             return
-    except requests.ConnectionError:
+    except ( requests.ConnectionError, requests.Timeout ) as e:
+        # Catch BOTH ConnectionError (server down) AND Timeout (server up but
+        # unresponsive). Without the Timeout case, a slow server propagates
+        # `requests.ReadTimeout` out of module-import scope and breaks every
+        # test that imports cosa_voice_mcp.
         _ACCOUNT_VALIDATED = False
         _send_validation_error(
-            f"Cannot reach Lupin server at {SERVER_URL}.\n"
+            f"Cannot reach Lupin server at {SERVER_URL} ({type( e ).__name__}).\n"
             f"Ensure FastAPI is running: src/scripts/run-fastapi-lupin.sh"
         )
+        return
+    except Exception as e:
+        # Final fallback — never let validation explode at import time.
+        _ACCOUNT_VALIDATED = False
+        logger.warning( f"Repo account validation aborted: {type( e ).__name__}: {e}" )
         return
 
     _ACCOUNT_VALIDATED = True

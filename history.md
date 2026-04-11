@@ -1,5 +1,80 @@
 # Lupin Project History
 
+### 2026.04.11 - Session 1cfcdf73 (lunch run) | Unified watchdogs facade + TFE auto-fix defaults flipped + per-run override
+
+**Context**: User reported overnight E2E run had 12 visual regression failures but TFE never auto-dispatched. Root-caused two stacked bugs: (1) `init_watchdog()` for TFE was never called in `main.py` startup — only BFE's was — so the done-queue hook silently no-op'd because `get_watchdog()` returned None; (2) both auto-fix flags defaulted to `false` ("opt-in") in the INI, when the user wanted "default = run unless told otherwise". User dictated the fix shape (single `init_watchdogs()` facade, both INI defaults flipped to true, per-request UI override surfaced on submission form, BFE stays INI-only) and went out for lunch with implicit permission to execute.
+
+**Code shipped (16 files, parent-repo + CoSA submodule mixed)**:
+
+- **Unified facade**: `src/cosa/rest/watchdogs.py` (new) — `init_watchdogs(config_mgr, todo_queue, debug, verbose)` brings up both `DeadQueueWatchdog` (BFE) and `TestSuiteCompletionWatchdog` (TFE) singletons in one call. Each constructor wrapped in try/except so a failure in one watchdog cannot block the other. Single `[Watchdogs] BFE={ENABLED|DISABLED}, TFE={ENABLED|DISABLED}` summary log line at startup
+- `src/fastapi_app/main.py` — replaced standalone BFE init (lines 584-587) with the unified `from cosa.rest.watchdogs import init_watchdogs; init_watchdogs(config_mgr, jobs_todo_queue, debug=app_debug)`
+- **INI defaults flipped to true**: `src/conf/lupin-app.ini`
+  - `auto fix enabled` (BFE / dead-queue watchdog master switch) `false → true`
+  - `test fix expediter auto fix enabled` (TFE watchdog master switch) `false → true`
+  - Splainer entries updated to describe new defaults + per-run override semantics
+- **TFE dataclass default flipped**: `src/cosa/agents/test_fix_expediter/config.py` — `auto_fix_enabled: bool = True` (matches INI for consistency when constructing without a config_mgr)
+- **Per-run override threading**:
+  - `src/cosa/agents/test_suite/job.py` — new `auto_fix_on_failure: Optional[bool] = None` constructor kwarg, stored on the job for the watchdog to read
+  - `src/cosa/rest/agentic_job_factory.py` — new `_parse_optional_boolean()` helper (tri-state: None / True / False, no collapse to False); threads `auto_fix_on_failure` through the `agent router go to test suite` elif branch
+  - `src/cosa/rest/routers/test_suite.py` — `TestSuiteSubmitRequest` accepts `auto_fix_on_failure: Optional[bool]`, handler propagates to `args_dict` only when explicitly set
+  - `src/cosa/rest/routers/system.py` — `/api/config/client` now exposes `test_fix_expediter_auto_fix_enabled` so the UI knows the INI default
+  - `src/cosa/rest/test_suite_completion_watchdog.py` — Gate 1 rewritten as tri-state: `override is False` short-circuits regardless of INI; `override is None and not self.enabled` skips per INI default; otherwise proceed
+- **UI checkbox** (notifications dashboard test runner card):
+  - `src/fastapi_app/static/html/notifications.html` — new `🛠️ Auto-fix on failure (TFE)` checkbox below the Dry run checkbox
+  - `src/fastapi_app/static/js/notifications.js` — `submitTestSuiteJob()` reads the checkbox and includes `auto_fix_on_failure` in the request body when toggled away from the default; `fetchClientConfig()` reads `test_fix_expediter_auto_fix_enabled` from `/api/config/client` and syncs the checkbox's initial state
+- **BFE stays INI-only** (per user direction) — no UI override surface, no per-run flag in `/api/bug-fix-expediter/submit`. The dead-queue path is governed entirely by `auto fix enabled` in the INI
+
+**Documentation updates**:
+
+- `src/docs/agents/test-fix-expediter-guide.md` — INI table flipped to `true`, "How to Enable Auto-Fix" rewritten as "How to Enable / Disable" with the per-run override workflow + UI checkbox + API field
+- `src/docs/agents/test-suite-scheduling-guide.md` — cost model + "Interaction with TFE" + troubleshooting all updated for the new default; troubleshooting Check 3 now expects `[Watchdogs] BFE=ENABLED, TFE=ENABLED`
+- `src/docs/agents/bug-fix-expediter-guide.md` — added unified-facade row to the code-locations table; INI tuning section clarifies that `auto fix enabled` is the actual auto-dispatch toggle (not `bug fix expediter enabled`) and is now `true` by default
+
+**Tests added (45 new + 4 updated assertions)**:
+
+- `src/tests/unit/test_test_suite_completion_watchdog.py` — new `TestPerRunOverride` class (6 tests) covering all 4 combinations of (INI true/false × override True/False) plus None passthrough; existing test fixture updated to set `mock.auto_fix_on_failure = None` because MagicMock auto-attributes return truthy children, breaking Gate 1 reads
+- `src/tests/unit/test_watchdogs_facade.py` (new file, 11 tests) — happy-path init + singleton population + queue sharing + enabled-flag propagation + debug propagation + resilience (BFE init failure doesn't block TFE, TFE init failure doesn't block BFE, both failures return two Nones)
+- `src/tests/unit/test_agentic_job_factory_optional_boolean.py` (new file, 24 tests) — parametrized coverage of `_parse_optional_boolean`: None passthrough, explicit bools, truthy/falsy strings, semantic-none strings, unparseable strings (return None instead of False)
+- `src/tests/unit/test_test_suite_job.py` — 2 new tests for the `auto_fix_on_failure` constructor kwarg (default None, explicit True, explicit False), plus 1 assertion added to existing `test_default_creation`
+- `src/tests/unit/test_tfe_config.py` — 2 assertions flipped (dataclass default + from_config) for the new `True` baseline
+
+**Bonus root-cause fixes (8 pre-existing test failures triggered by overnight server slowness, fixed at the source not deferred)**:
+
+1. **`test_cosa_voice_mcp_qualifier`** (6 tests) — `src/lupin_mcp/cosa_voice_mcp.py` `_validate_repo_account()` runs at module import time and only caught `requests.ConnectionError`. When the server is reachable but slow, `requests.ReadTimeout` propagates out of import scope and crashes every test that imports the module. Fixed by catching `(ConnectionError, Timeout)` plus a final `except Exception` fallback so module init never explodes
+2. **`test_presentation_generator_job::test_user_visible_args_protocol`** — subprocess invokes `python -m cosa.agents.presentation_generator` but doesn't pass `PYTHONPATH=src` so the venv interpreter can't find the cosa package. Fixed by passing an explicit env dict built from `cu.get_project_root() + '/src'`
+3. **`test_tfe_config`** (2 tests) — both assertions of `auto_fix_enabled is False` updated to `is True` to match the new INI / dataclass default (caused by my flip, not pre-existing)
+
+**Regression**: 3169 passed, 1 xfailed, **0 failed** in 18m48s (was 3161 passed / 8 failed before fixes). Zero net regression — every previously-failing test now green and 8 new tests added on top.
+
+**Key insight**: The "12 visual regression failures, no TFE" overnight incident was diagnosed as a stacked bug. After this commit + a server restart, expect `[Watchdogs] BFE=ENABLED, TFE=ENABLED` in the startup log and TFE will auto-dispatch on the next failed E2E run unless the submission explicitly opts out via `auto_fix_on_failure: false`.
+
+**Files Changed — Lupin parent (this commit)**:
+- `src/fastapi_app/main.py`
+- `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`
+- `src/fastapi_app/static/html/notifications.html`
+- `src/fastapi_app/static/js/notifications.js`
+- `src/lupin_mcp/cosa_voice_mcp.py`
+- `src/docs/agents/bug-fix-expediter-guide.md`
+- `src/docs/agents/test-fix-expediter-guide.md`
+- `src/docs/agents/test-suite-scheduling-guide.md`
+- `src/tests/unit/test_test_suite_completion_watchdog.py`
+- `src/tests/unit/test_test_suite_job.py`
+- `src/tests/unit/test_tfe_config.py`
+- `src/tests/unit/test_presentation_generator_job.py`
+- `src/tests/unit/test_watchdogs_facade.py` (new)
+- `src/tests/unit/test_agentic_job_factory_optional_boolean.py` (new)
+
+**Files Changed — CoSA submodule (working-tree only, user commits separately)**:
+- `src/cosa/rest/watchdogs.py` (new — unified facade)
+- `src/cosa/rest/test_suite_completion_watchdog.py` (Gate 1 tri-state override)
+- `src/cosa/rest/agentic_job_factory.py` (`_parse_optional_boolean` + factory threading)
+- `src/cosa/rest/routers/test_suite.py` (REST request model + handler)
+- `src/cosa/rest/routers/system.py` (`/api/config/client` exposes TFE default)
+- `src/cosa/agents/test_suite/job.py` (constructor kwarg)
+- `src/cosa/agents/test_fix_expediter/config.py` (dataclass default + smoke test)
+
+---
+
 ### 2026.04.10 - Session 1cfcdf73 | TestFixExpediter (TFE) end-to-end implementation + user-facing docs for BFE/TFE/scheduler
 
 **Context**: Morning session started with TODO.md line 20 — the open design question "how does TestSuiteJob's remediation snapshot JSON feed into BFE for automated fix cycles?" Ultrathink pros/cons analysis of three options (modify BFE, new TFE job type, intermediate clusterer). Chose **Option B: new `TestFixExpediterJob` with shared `FixExecutor` extracted from BFE**, wrote a 20-doc planning package (14 design + 6 execution-log placeholders) under `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/`, then implemented the full 20-step sequence in one session. Afternoon session: shipped the first user-facing documentation for BFE, TFE, and the TestSuiteJob scheduler under a new `src/docs/agents/` subdirectory.

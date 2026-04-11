@@ -580,11 +580,11 @@ async def lifespan( app: FastAPI ):
     consumer_thread = start_todo_producer_run_consumer_thread( jobs_todo_queue, jobs_run_queue )
     print( "[CONSUMER] Todo-producer-run-consumer thread started" )
 
-    # Initialize dead queue watchdog + repair tracker for automated BFE repair (Phase 6)
-    from cosa.rest.dead_queue_watchdog import init_watchdog
+    # Initialize repair tracker + both queue watchdogs (BFE + TFE) via unified facade
+    from cosa.rest.watchdogs import init_watchdogs
     from cosa.rest.repair_attempt_tracker import init_tracker
     init_tracker( config_mgr, debug=app_debug )
-    init_watchdog( config_mgr, jobs_todo_queue, debug=app_debug )
+    init_watchdogs( config_mgr, jobs_todo_queue, debug=app_debug )
 
     # Restore scheduled jobs that survived the restart (preserved by mark_interrupted_jobs)
     try:

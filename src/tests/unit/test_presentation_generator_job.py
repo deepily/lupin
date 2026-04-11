@@ -493,17 +493,29 @@ class TestExpeditorIntegration:
 
     def test_user_visible_args_protocol( self ):
         """--user-visible-args returns correct JSON list via CLI."""
+        import os
         import subprocess
         import sys
         import json
+
+        import cosa.utils.util as cu
+
+        # The subprocess needs the parent project's `src/` on PYTHONPATH so
+        # `python -m cosa.agents.presentation_generator` resolves. Without
+        # this, the venv interpreter has no idea where the cosa package lives.
+        env = os.environ.copy()
+        src_path = os.path.join( cu.get_project_root(), "src" )
+        existing = env.get( "PYTHONPATH", "" )
+        env[ "PYTHONPATH" ] = f"{src_path}:{existing}" if existing else src_path
 
         result = subprocess.run(
             [ sys.executable, "-m", "cosa.agents.presentation_generator", "--user-visible-args" ],
             capture_output = True,
             text           = True,
-            timeout        = 10
+            timeout        = 10,
+            env            = env
         )
-        assert result.returncode == 0
+        assert result.returncode == 0, f"stderr: {result.stderr}"
         args_list = json.loads( result.stdout.strip() )
         assert args_list == [ "source", "target_duration_minutes", "audience", "audience_context", "theme" ]
 

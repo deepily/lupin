@@ -65,6 +65,7 @@ def _make_completed_job(
     snapshot: dict = None,
     metadata: dict = None,
     job_id: str = "ts-abc12345",
+    auto_fix_on_failure=None,
 ):
     mock = MagicMock()
     mock.JOB_TYPE = job_type
@@ -77,6 +78,10 @@ def _make_completed_job(
         "remediation_snapshot_path": "test-suite/fake-remediation.json",
     }
     mock.metadata = metadata
+    # Explicit per-run override (None == use INI default).
+    # MUST be set explicitly because MagicMock auto-creates attrs and would
+    # otherwise return a truthy child Mock from getattr( job, "auto_fix_on_failure", None ).
+    mock.auto_fix_on_failure = auto_fix_on_failure
     return mock
 
 
@@ -119,9 +124,10 @@ class TestGate2JobType:
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),
         )
-        mock = MagicMock( spec=[ "artifacts", "metadata" ] )
+        mock = MagicMock( spec=[ "artifacts", "metadata", "auto_fix_on_failure" ] )
         mock.artifacts = {}
         mock.metadata = None
+        mock.auto_fix_on_failure = None
         # No JOB_TYPE attribute
         assert watchdog.evaluate( mock ) is None
 
@@ -136,6 +142,7 @@ class TestGate3Snapshot:
         mock.JOB_TYPE = "test_suite"
         mock.artifacts = {}  # no remediation_snapshot
         mock.metadata = None
+        mock.auto_fix_on_failure = None
         assert watchdog.evaluate( mock ) is None
 
     def test_non_dict_snapshot_returns_none( self ):
@@ -438,3 +445,73 @@ class TestSingletonHelpers:
         assert get_watchdog() is not None
         reset_watchdog()
         assert get_watchdog() is None
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Per-run override tests (Session 1cfcdf73 — auto_fix_on_failure)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestPerRunOverride:
+    """
+    Gate 1 reads `completed_job.auto_fix_on_failure` as a tri-state:
+        - None  → use INI default (self.enabled)
+        - True  → force-enable (proceed regardless of INI)
+        - False → force-disable (skip regardless of INI)
+    """
+
+    def test_override_false_skips_when_ini_enabled( self ):
+        """Per-run False MUST short-circuit even when INI default is True."""
+        watchdog = TestSuiteCompletionWatchdog(
+            config_mgr=_make_config_mgr( enabled=True ),
+            todo_queue=MagicMock(),
+        )
+        job = _make_completed_job( auto_fix_on_failure=False )
+        assert watchdog.evaluate( job ) is None
+
+    def test_override_true_proceeds_when_ini_disabled( self ):
+        """Per-run True MUST allow dispatch even when INI default is False."""
+        watchdog = TestSuiteCompletionWatchdog(
+            config_mgr=_make_config_mgr( enabled=False ),
+            todo_queue=MagicMock(),
+        )
+        job = _make_completed_job( auto_fix_on_failure=True )
+        result = watchdog.evaluate( job )
+        assert result is not None
+        assert result.startswith( "tfe-" )
+
+    def test_override_none_honors_ini_enabled( self ):
+        """No override + INI True → proceed."""
+        watchdog = TestSuiteCompletionWatchdog(
+            config_mgr=_make_config_mgr( enabled=True ),
+            todo_queue=MagicMock(),
+        )
+        job = _make_completed_job( auto_fix_on_failure=None )
+        assert watchdog.evaluate( job ) is not None
+
+    def test_override_none_honors_ini_disabled( self ):
+        """No override + INI False → skip."""
+        watchdog = TestSuiteCompletionWatchdog(
+            config_mgr=_make_config_mgr( enabled=False ),
+            todo_queue=MagicMock(),
+        )
+        job = _make_completed_job( auto_fix_on_failure=None )
+        assert watchdog.evaluate( job ) is None
+
+    def test_override_true_proceeds_when_ini_enabled( self ):
+        """Per-run True + INI True → no double-negation, just proceeds."""
+        watchdog = TestSuiteCompletionWatchdog(
+            config_mgr=_make_config_mgr( enabled=True ),
+            todo_queue=MagicMock(),
+        )
+        job = _make_completed_job( auto_fix_on_failure=True )
+        assert watchdog.evaluate( job ) is not None
+
+    def test_override_false_skips_when_ini_disabled( self ):
+        """Per-run False + INI False → skipped (the False short-circuit fires first)."""
+        watchdog = TestSuiteCompletionWatchdog(
+            config_mgr=_make_config_mgr( enabled=False ),
+            todo_queue=MagicMock(),
+        )
+        job = _make_completed_job( auto_fix_on_failure=False )
+        assert watchdog.evaluate( job ) is None

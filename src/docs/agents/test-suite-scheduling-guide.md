@@ -360,8 +360,11 @@ However, there are indirect costs:
    profile (nearly $0 direct, risk of triggering TFE again if clusters remain
    unfixed — though the recursion guard prevents cascading).
 
-**Typical cost per scheduled run**: $0 if tests pass, up to $15 if TFE fires
-(assuming `test fix expediter auto fix enabled = true`).
+**Typical cost per scheduled run**: $0 if tests pass, up to $15 if TFE fires.
+Auto-fix is **on by default** as of Session 1cfcdf73 (`test fix expediter auto
+fix enabled = true`); set the per-run `auto_fix_on_failure: false` override on
+`/api/test-suite/submit` (or uncheck the test runner UI checkbox) to suppress
+TFE for an individual run without changing the INI.
 
 **Budget discipline**: if you're running the full pyramid nightly, you're looking
 at $0 per run on green days and up to $15 on red days. Over a month of 30
@@ -372,18 +375,28 @@ nightly runs averaging 2 red days: $30 per month. Tune
 
 ## 9. Interaction with TFE
 
-When `test fix expediter auto fix enabled = true`, every TestSuiteJob that lands
-in the done queue is evaluated by `TestSuiteCompletionWatchdog`. If the job's
-remediation snapshot shows failures, the watchdog auto-dispatches a TFE job. The
-TFE job then walks Phases 0-6 as described in the [TFE guide](test-fix-expediter-guide.md).
+As of Session 1cfcdf73 (2026-04-10), `test fix expediter auto fix enabled = true`
+is the default. Every TestSuiteJob that lands in the done queue is evaluated by
+`TestSuiteCompletionWatchdog`. If the job's remediation snapshot shows failures,
+the watchdog auto-dispatches a TFE job. The TFE job then walks Phases 0-6 as
+described in the [TFE guide](test-fix-expediter-guide.md).
+
+**Per-run override**: pass `auto_fix_on_failure: false` in the
+`/api/test-suite/submit` body (or uncheck the test runner UI checkbox) to skip
+TFE on a single submission without changing the INI default. Pass
+`auto_fix_on_failure: true` to force-enable TFE for one run when the INI default
+is `false`. Omitting the field uses the INI default.
 
 **The recursion guard** is critical: TFE's Phase 6 validation rerun creates a new
 TestSuiteJob with `metadata["triggered_by_tfe"] = <tfe_job_id>`. When the rerun
 completes, the watchdog sees the metadata flag and refuses to dispatch another
 TFE. This is the ONLY thing preventing an infinite rerun loop.
 
-**What if I want manual control?** Leave `test fix expediter auto fix enabled = false`
-and manually submit a TFE job via the REST API when you want it to run:
+**What if I want manual control?** Either flip
+`test fix expediter auto fix enabled = false` globally in the INI, or use the
+per-run `auto_fix_on_failure: false` override on individual submissions. To
+trigger a TFE run manually after suppressing the watchdog, submit it directly
+via the REST API:
 
 ```bash
 curl -X POST http://localhost:7999/api/push \
@@ -452,14 +465,18 @@ Check the job instance after completion: `job.artifacts.get("remediation_snapsho
 
 ### Test suites are running but TFE never fires
 
-**Check 1**: `test fix expediter auto fix enabled = true`?
+**Check 1**: `test fix expediter auto fix enabled = true`? And was the
+submission's `auto_fix_on_failure` field omitted (or set to `true`)? Passing
+`auto_fix_on_failure: false` on the submission disables TFE for that run only,
+even when the INI default is `true`.
 
 **Check 2**: Is the snapshot `all_passed = false`? If all tests actually passed,
 there's nothing for TFE to fix.
 
-**Check 3**: Is the watchdog initialized? Log line at server startup:
-`[TestSuiteCompletionWatchdog] initialized`. Absent → `init_watchdog()` wasn't
-called in `src/fastapi_app/main.py`.
+**Check 3**: Are both watchdogs initialized? Look for the unified summary at
+server startup: `[Watchdogs] BFE=ENABLED, TFE=ENABLED`. Absent or showing
+`DISABLED` → `init_watchdogs()` in `src/cosa/rest/watchdogs.py` wasn't reached
+or one of the watchdog constructors raised. Check the FastAPI startup log.
 
 **Check 4**: Is the metadata recursion guard tripped? Check
 `completed_job.metadata.get("triggered_by_tfe")` — if set, the watchdog skips.

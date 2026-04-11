@@ -65,6 +65,30 @@ class TestJobCreation:
         assert job.pytest_args == []
         assert job.state == JobState.PENDING
         assert job.suite_results == {}
+        # Per-run TFE override defaults to None (use INI default).
+        assert job.auto_fix_on_failure is None
+
+    def test_auto_fix_on_failure_explicit_true( self ):
+        """Per-run override True is stored verbatim for the watchdog to read."""
+        job = TestSuiteJob(
+            test_types          = [ "integration" ],
+            user_id             = "u1",
+            user_email          = "e@e.com",
+            session_id          = "s1",
+            auto_fix_on_failure = True,
+        )
+        assert job.auto_fix_on_failure is True
+
+    def test_auto_fix_on_failure_explicit_false( self ):
+        """Per-run override False is stored verbatim for the watchdog to read."""
+        job = TestSuiteJob(
+            test_types          = [ "integration" ],
+            user_id             = "u1",
+            user_email          = "e@e.com",
+            session_id          = "s1",
+            auto_fix_on_failure = False,
+        )
+        assert job.auto_fix_on_failure is False
 
     def test_single_suite( self, single_suite_job ):
         """Job with single suite should store it correctly."""

@@ -394,7 +394,7 @@ entries live in `src/conf/lupin-app-splainer.ini`.
 |-----|---------|---------|
 | `test fix expediter lead model` | `claude-opus-4-6` | Opus model for Phase 0 refinement, Phase 1 diagnose, Phase 2 propose |
 | `test fix expediter worker model` | `claude-sonnet-4-6` | Sonnet model for Phase 3 Coder and Tester agents |
-| `test fix expediter auto fix enabled` | `false` | Master kill switch for `TestSuiteCompletionWatchdog`. Leave `false` until validated end-to-end in your environment. |
+| `test fix expediter auto fix enabled` | `true` | Master kill switch for `TestSuiteCompletionWatchdog`. Default behavior is now "run unless told otherwise" — flip to `false` to disable globally, or use the per-run override (UI checkbox / `auto_fix_on_failure` field on `/api/test-suite/submit`) to disable on a single submission only. |
 | `test fix expediter max clusters` | `8` | Upper bound K — LLM refinement consolidates seed clusters down to this cap |
 | `test fix expediter max cluster seed failures` | `50` | Watchdog failure count cap — beyond this, defer to humans |
 | `test fix expediter max diagnosis iterations` | `4` | Per-cluster Phase 1 refinement rounds |
@@ -416,17 +416,38 @@ shared `FixExecutor` (which reads `config.budget_usd`) works unchanged.
 
 ---
 
-## 7. How to Enable Auto-Fix
+## 7. How to Enable / Disable Auto-Fix
 
-### Step 1: Flip the master switch
+### Step 1: Master switch (INI default)
+
+As of Session 1cfcdf73 (2026-04-10), auto-fix is **enabled by default**:
 
 ```ini
 # src/conf/lupin-app.ini
 test fix expediter auto fix enabled = true
 ```
 
-Restart the FastAPI server. The `TestSuiteCompletionWatchdog` is re-initialized
-at startup via `init_watchdog()` called from `src/fastapi_app/main.py`.
+The `TestSuiteCompletionWatchdog` is initialized at server startup via the
+unified facade `init_watchdogs()` in `src/cosa/rest/watchdogs.py`, called from
+`src/fastapi_app/main.py`.
+
+To disable auto-fix globally, flip the key to `false` and restart the server.
+
+### Per-run override (no INI round-trip)
+
+For a single submission, override the INI default without changing it:
+
+- **UI**: Check or uncheck the **🛠️ Auto-fix on failure (TFE)** checkbox in the
+  test runner card on the notifications dashboard. The checkbox's initial state
+  mirrors the INI default (read from `/api/config/client`); toggling it applies
+  only to the next submission.
+- **API**: Pass `auto_fix_on_failure` in the `/api/test-suite/submit` body:
+  - `true` → force-enable for this run
+  - `false` → force-disable for this run
+  - omitted/`null` → use the INI default
+
+The override is honored by Gate 1 of `_evaluate_inner` and never mutates the
+INI file.
 
 ### Step 2: Start conservative
 

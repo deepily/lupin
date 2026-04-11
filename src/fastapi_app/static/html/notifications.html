@@ -472,6 +472,10 @@
                                 <input type="checkbox" id="test-suite-dry-run" data-testid="notifications-test-suite-dry-run-checkbox" checked />
                                 <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
                             </label>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 6px;" title="Per-run override for the TestSuiteCompletionWatchdog. Initial state mirrors the INI default; toggling here applies only to this submission.">
+                                <input type="checkbox" id="test-suite-auto-fix" data-testid="notifications-test-suite-auto-fix-checkbox" />
+                                <span style="font-size: 13px;">🛠️ Auto-fix on failure (TFE)</span>
+                            </label>
                         </div>
                         <!-- Scheduling Options -->
                         <div class="schedule-section" data-testid="notifications-test-suite-schedule-section">

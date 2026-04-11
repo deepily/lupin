@@ -589,6 +589,16 @@ class NotificationsUI {
                 this.TOKEN_REFRESH_DEDUP_WINDOW_MS = config.token_refresh_dedup_window_ms;
                 this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = config.websocket_heartbeat_interval_secs;
                 this.appTimezone = config.app_timezone;
+                this.tfeAutoFixDefault = !!config.test_fix_expediter_auto_fix_enabled;
+
+                // Sync the test runner submission card's auto-fix checkbox to the
+                // INI default. The user can still toggle it for any individual
+                // submission — that override travels in the request body and
+                // does NOT round-trip back to the INI.
+                const autoFixCheckbox = document.getElementById( 'test-suite-auto-fix' );
+                if ( autoFixCheckbox ) {
+                    autoFixCheckbox.checked = this.tfeAutoFixDefault;
+                }
 
                 // Log configuration for debugging
                 this.log( "✓ Client config loaded from server:", {
@@ -596,7 +606,8 @@ class NotificationsUI {
                     expiry_threshold       : `${config.token_expiry_threshold_secs / 60} mins`,
                     dedup_window           : `${config.token_refresh_dedup_window_ms / 1000} secs`,
                     heartbeat_interval     : `${config.websocket_heartbeat_interval_secs} secs`,
-                    app_timezone           : config.app_timezone
+                    app_timezone           : config.app_timezone,
+                    tfe_auto_fix_default   : this.tfeAutoFixDefault
                 });
 
             } else if ( response.status === 401 ) {
@@ -618,6 +629,7 @@ class NotificationsUI {
             this.TOKEN_REFRESH_DEDUP_WINDOW_MS = 60 * 1000;         // 60 seconds
             this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = 30;            // 30 seconds
             this.appTimezone = 'America/New_York';                  // Default timezone
+            this.tfeAutoFixDefault = false;                         // Conservative fallback
 
             this.log( "⚠️ Using default client config (server fetch failed)" );
         }
@@ -2973,6 +2985,7 @@ class NotificationsUI {
         const failFastCheckbox = document.getElementById( 'test-suite-fail-fast' );
         const pytestArgsInput = document.getElementById( 'test-suite-pytest-args' );
         const dryRunCheckbox  = document.getElementById( 'test-suite-dry-run' );
+        const autoFixCheckbox = document.getElementById( 'test-suite-auto-fix' );
         const submitButton    = document.getElementById( 'submit-test-suite-job' );
         const loadingSpinner  = document.getElementById( 'test-suite-loading' );
         const statusDiv       = document.getElementById( 'test-suite-submit-status' );
@@ -2982,6 +2995,7 @@ class NotificationsUI {
         const failFast   = failFastCheckbox?.checked || false;
         const pytestArgs = pytestArgsInput.value.trim();
         const dryRun     = dryRunCheckbox.checked;
+        const autoFix    = autoFixCheckbox ? autoFixCheckbox.checked : null;
 
         // Validation: smoke_direct requires a file path
         if ( testTypes === 'smoke_direct' && !filePath ) {
@@ -3019,6 +3033,12 @@ class NotificationsUI {
             };
             if ( combinedArgs ) {
                 body.pytest_args = combinedArgs;
+            }
+            // Per-run override for the TestSuiteCompletionWatchdog (TFE).
+            // Initial state mirrors INI default `test_fix_expediter_auto_fix_enabled`,
+            // but the user can flip it for this submission only without changing the INI.
+            if ( autoFix !== null ) {
+                body.auto_fix_on_failure = autoFix;
             }
 
             // Add scheduling params (schedule checkbox + monopolize is always on)

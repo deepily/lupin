@@ -15,7 +15,8 @@ class TestDefaults:
         config = TestFixExpediterConfig()
         assert config.lead_model == "claude-opus-4-6"
         assert config.worker_model == "claude-sonnet-4-6"
-        assert config.auto_fix_enabled is False
+        # Session 1cfcdf73 (2026-04-10): default flipped from False to True.
+        assert config.auto_fix_enabled is True
         assert config.max_clusters == 8
         assert config.max_cluster_seed_failures == 50
         assert config.max_diagnosis_iterations == 4
@@ -58,7 +59,8 @@ class TestFromConfig:
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         config = TestFixExpediterConfig.from_config( config_mgr, debug=False )
 
-        assert config.auto_fix_enabled is False
+        # Session 1cfcdf73 (2026-04-10): INI default flipped from false to true.
+        assert config.auto_fix_enabled is True
         assert config.max_clusters == 8
         assert config.max_cluster_seed_failures == 50
         assert config.max_diagnosis_iterations == 4

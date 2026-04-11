@@ -224,7 +224,8 @@ verification is in progress in a separate console.
 
 **INI tuning for Phase 6**:
 - `bug fix expediter auto retry on fix` — master switch, default `false`
-- `bug fix expediter enabled` — dead-queue watchdog global enable, default `false`
+- `bug fix expediter enabled` — BFE feature flag (agent router + REST endpoint), default `false`
+- `auto fix enabled` — `DeadQueueWatchdog` master switch (the actual auto-dispatch toggle), default `true` as of Session 1cfcdf73 (run unless told otherwise). BFE is INI-only — there is no per-run override surface.
 
 **See the BFE R&D dir** for Phase 6 implementation details:
 [`src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/08-phase6-automated-repair-loop-plan.md`](../../rnd/v0.1.6/2026.03.27-bug-fix-expediter/08-phase6-automated-repair-loop-plan.md).
@@ -524,6 +525,7 @@ Use this table to find the implementation of any concept mentioned above:
 | Fix prompts | `src/cosa/agents/bug_fix_expediter/prompts/fix.py` | `CODER_SYSTEM_PROMPT`, `TESTER_SYSTEM_PROMPT`, prompt builders, `register_fix_prompts("bfe", ...)` |
 | Git operations | `src/cosa/agents/bug_fix_expediter/git_ops.py` | `GitOps` async wrapper around git + gh CLI |
 | Dead-queue watchdog | `src/cosa/rest/dead_queue_watchdog.py` | `DeadQueueWatchdog`, `init_watchdog`, `RepairAttemptTracker` |
+| Unified watchdog facade | `src/cosa/rest/watchdogs.py` | `init_watchdogs(config_mgr, todo_queue, debug, verbose)` — single entry point for both BFE and TFE watchdog singletons; called from `src/fastapi_app/main.py` at startup |
 | Shared primitives | `src/cosa/agents/shared/` | `PlanWriter`, `GitStrategist`, `FixExecutor`, `FIX_PROMPT_BUILDERS` |
 
 ### R&D archive
