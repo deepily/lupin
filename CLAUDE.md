@@ -420,6 +420,14 @@ When modifying code in these areas, update the corresponding documentation:
 | Auth services (`jwt_service`, `user_service`, etc.) | `src/docs/auth/architecture-overview.md` |
 | Decision proxy / trust logic | `src/docs/proxy-admin-guide.md` |
 | Frontend page routes | `src/docs/rest-api-reference.md` (Pages section) |
+| `src/cosa/agents/bug_fix_expediter/` | `src/docs/agents/bug-fix-expediter-guide.md` |
+| `src/cosa/agents/test_fix_expediter/` | `src/docs/agents/test-fix-expediter-guide.md` |
+| `src/cosa/agents/shared/` (PlanWriter, GitStrategist, FixExecutor) | `src/docs/agents/shared-fix-primitives-reference.md` |
+| `src/cosa/agents/test_suite/` | `src/docs/agents/test-suite-scheduling-guide.md` |
+| `src/cosa/rest/test_suite_completion_watchdog.py` | `src/docs/agents/test-fix-expediter-guide.md` |
+| `lupin-app.ini` `bug fix expediter *` keys | `src/docs/agents/bug-fix-expediter-guide.md` INI Reference |
+| `lupin-app.ini` `test fix expediter *` keys | `src/docs/agents/test-fix-expediter-guide.md` INI Reference |
+| BFE/TFE endpoint rows | `src/docs/rest-api-reference.md` sections 17/17a/17b |
 
 **Documentation index**: `src/docs/README.md` — lists all docs with verification dates.
 

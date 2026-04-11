@@ -1,5 +1,83 @@
 # Lupin Project History
 
+### 2026.04.10 - Session 1cfcdf73 | TestFixExpediter (TFE) end-to-end implementation + user-facing docs for BFE/TFE/scheduler
+
+**Context**: Morning session started with TODO.md line 20 — the open design question "how does TestSuiteJob's remediation snapshot JSON feed into BFE for automated fix cycles?" Ultrathink pros/cons analysis of three options (modify BFE, new TFE job type, intermediate clusterer). Chose **Option B: new `TestFixExpediterJob` with shared `FixExecutor` extracted from BFE**, wrote a 20-doc planning package (14 design + 6 execution-log placeholders) under `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/`, then implemented the full 20-step sequence in one session. Afternoon session: shipped the first user-facing documentation for BFE, TFE, and the TestSuiteJob scheduler under a new `src/docs/agents/` subdirectory.
+
+**Part 1 — TFE implementation** (Phases 0-6 + watchdog + tests):
+
+- **Phase 0 extraction** (3 commits inside `src/cosa/agents/shared/` — a new peer package to BFE/TFE):
+  - `plan_writer.py` — moved verbatim from BFE, standalone smoke test with `SimpleNamespace` mocks so `shared/` has zero back-dependencies on `bug_fix_expediter/`
+  - `git_strategist.py` — new module; extracted `resolve_trust_level`, `generate_slug`, `commit_and_pr_single` (BFE path) from BFE orchestrator. New `commit_and_pr_multi` for TFE's one-branch-N-commits-one-PR strategy
+  - `fix_executor.py` — new module; `FIX_PROMPT_BUILDERS` registry + `FixExecutor.execute_fix()` retry loop. Polymorphic via `prompt_builder_key` ("bfe" | "tfe"). Accepts `delegate_to_coder_fn` / `verify_fix_fn` callbacks so BFE's unit-test patches via `patch.object(orchestrator, "_delegate_to_coder", ...)` still work
+  - BFE `run_fix()` + `run_git_strategy()` → thin shims delegating to the shared engine. 58 BFE Phase-6 unit tests stayed green byte-for-byte through all 3 extraction commits
+- **TFE scaffolding**: 14 files under `src/cosa/agents/test_fix_expediter/` — config, state, snapshot_loader, cluster, cosa_interface, voice_io, orchestrator, job, prompts/ (__init__, cluster, diagnosis, proposal, fix). 16 INI keys + splainer entries. Factory routing via `create_agentic_job("agent router go to test fix expediter", ...)`. `TestFixExpediterJob` extends `AgenticJobBase` with `JOB_TYPE="test_fix_expediter"`, `JOB_PREFIX="tfe"`
+- **Phase 0 clustering**: Real `heuristic_seed()` — pure Python, groups by `(normalized_classname, first_non_pytest_traceback_frame)`. Handles parametrized tests collapsing to one cluster, fixture errors, collection errors, startup crashes. `_cap_enforce()` merges smallest into a "Mixed" tail when K > max_clusters. `llm_refine()` accepts optional async `refine_fn` callback; SDK wiring deferred
+- **Phase 1 diagnose**: `prompts/diagnosis.py` with test-aware `DIAGNOSIS_SYSTEM_PROMPT` (teaches classname::name[param] decoding + 4 failure mode categories: code_bug, test_bug, fixture_bug, env_bug). `TFEOrchestrator.run_phase1_diagnose()` iterates clusters serially via Opus lead agent (read-only SDK tools). Iteration loop with confidence threshold, JSON parser with markdown-fence stripping + backward-walk extraction, low-confidence fallback
+- **Phase 2 propose**: Per-cluster proposal calls, aggregated multi-select voice gate via `ask_multiple_choice(multiSelect=True)`, multi-section plan doc via shared `PlanWriter` with synthetic `DiagnosisResult` aggregation, `per_cluster` voice gate mode as config fallback
+- **Phase 3 fix delegation**: Real `prompts/fix.py` with TFE `CODER_SYSTEM_PROMPT` + `TESTER_SYSTEM_PROMPT` (teaches `pytest -k` filtering to the cluster's failing test names). **Import-time self-registration** into `shared.FIX_PROMPT_BUILDERS["tfe"]`. `run_phase3_fix()` iterates selected fixes, builds `FixContext` as `SimpleNamespace` (duck-typed pass-through instead of Pydantic model per scope reduction), constructs per-cluster `FixExecutor(prompt_builder_key="tfe", ...)`. TFE has its own `_delegate_to_coder` / `_verify_fix` / `_build_tfe_{coder,tester}_options` mirroring BFE's pattern. Dry-run mode synthesizes files from `proposal.changes` so Phase 5 has non-empty commits
+- **Phase 5 multi-cluster git**: `GitStrategist.commit_and_pr_multi()` — L1-L2 commit_only N sequential commits, L3+ branch+push+PR via `gh`, gh-missing degradation to branch_only, empty-files skip with partial-progress semantics. `TFEOrchestrator.run_phase5_git()` builds cluster tuples, resolves trust level via `inherit`/`fixed_l1`/`fixed_l3`/`shadow` modes. Commit message format `fix(tfe): {cluster_id} {title}`. Branch naming `fix/YYYY-MM-DD-tfe-{suite_abbrev}-{K}-clusters`
+- **Phase 6 async rerun validation**: `run_phase6_validation()` constructs a new `TestSuiteJob` via factory + sets `metadata["triggered_by_tfe"] = self.job_id` (the critical recursion guard) + pushes to `fastapi_app.main.jobs_todo_queue`. Does NOT wait on the rerun — peer job. `rerun_scope` config selects `affected` (original suites) vs `full` (all)
+- **TestSuiteCompletionWatchdog**: New `src/cosa/rest/test_suite_completion_watchdog.py` with 6 eligibility gates (enabled, job_type, snapshot valid, recursion guard, failure cap, repair tracker). `evaluate()` wraps all logic in try/except — never crashes the queue consumer. Hook in `running_fifo_queue.py` success-path around line 401, invoked after `jobs_done_queue.push()`. Module-level singleton via `init_watchdog()` / `get_watchdog()` / `reset_watchdog()`
+- **Supporting artifacts**: Proxy Q&A script `src/conf/notification-proxy-scripts/tfe.json` (auto-answer 4 gate patterns). Live pipeline smoke test `src/tests/smoke/test_tfe_live_pipeline.py` (5 scenarios with mocked SDK). Live E2E shell driver `src/tests/e2e/run-tfe-live-e2e.sh` with `--dry-run` / `--live` modes. 6 fixture snapshots under `src/tests/fixtures/tfe/`. PEFT training data: 75 templates in `src/ephemera/prompts/data/synthetic-data-agent-routing-test-fix-expediter.txt`, TFE command registered in `src/conf/training/agent-router-agentic-commands.json`, `AGENTIC_TEMPLATES` whitelist updated in `test_swe_team_training_data.py`
+- **Test coverage**: **197 new TFE test methods** across 13 files (12 unit + 1 smoke): state(9), config(6), snapshot_loader(14), cluster(29), diagnose(17), propose(21), phase3_fix(13), phase5_git(18), phase6_rerun(14), test_suite_completion_watchdog(30), job(9), training_data(12), live_pipeline smoke(5)
+- **Regression gate**: held perfectly through every step. Baseline 2916 → final **3119 passed, 1 xfailed**, **zero regression** across every intermediate commit. Full trajectory: 2916 (extraction P0-P3 landed untouched) → 2954 (+38 scaffolding) → 2989 (+35 Phase 0) → 3006 (+17 Phase 1) → 3040 (+34 Phase 2) → 3072 (+32 Phase 3) → 3119 (+47 Phase 5+6+watchdog+PEFT+live)
+
+**Part 2 — User-facing documentation** (5 new docs, 4 modified):
+
+- `src/docs/agents/` (new subdirectory mirroring `src/docs/auth/` precedent): 5 docs totaling 2,384 lines
+  - `shared-fix-primitives-reference.md` (528 lines) — developer reference for the shared package, how to add a new expediter agent
+  - `bug-fix-expediter-guide.md` (551 lines) — BFE operator + developer guide, 6 phases, 14 INI keys, trust-to-git mapping, observability, troubleshooting
+  - `test-fix-expediter-guide.md` (673 lines) — TFE guide, 6 phases + Phase 0 clustering, watchdog 6 gates, 16 INI keys, key-difference-from-BFE, troubleshooting
+  - `test-suite-scheduling-guide.md` (518 lines) — `TestSuiteJob` + `/schedule-tests` skill, suite types table, monopolize mode, remediation snapshot schema v1.0, REST API, cost model, TFE interaction
+  - `README.md` (114 lines) — subsystem index with "when to read which" decision table + canonical code locations
+- `src/docs/README.md` — added "Agentic Jobs & Recovery" section with 5 entries + 5 verification-date rows
+- `src/docs/rest-api-reference.md` — new sections 17/17a/17b for TestSuite/BFE/TFE endpoints + `bfe-` / `tfe-` prefix rows in Job ID Prefixes table
+- `README.md` (top-level) — new "Agentic jobs, recovery & test scheduling" subsection under Documentation linking to all 4 new guides
+- `CLAUDE.md` DOCUMENTATION TOUCHPOINTS — added 8 rows mapping code paths and INI key groups to the new guides
+- **Verification**: 0 broken links, 30/30 cited INI keys present in both `lupin-app.ini` and `lupin-app-splainer.ini`, all 21 critical code paths resolve, 7 CLAUDE.md touchpoint rows reference `agents/`
+
+**Key scope deviations** (documented inline in execution logs):
+
+1. `FixContext` as `SimpleNamespace` duck-typed pass-through instead of a Pydantic model
+2. BFE's `_delegate_to_coder` / `_verify_fix` / `_build_*_options` stayed on BFE orchestrator; TFE copies the pattern to preserve BFE's test-patch surface
+3. No `api_client.py` / `cost_tracker.py` / `rate_limiter.py` in TFE — follows BFE's SDK-delegated pattern (not deep_research's direct-API)
+4. Phase 0 `llm_refine` uses pure-Python cap-enforcement fallback; real SDK callback infrastructure in place but not wired
+5. `agent_registry.py` TFE entry deferred — factory routing works via direct elif branch
+
+**CoSA submodule rule honored**: all new files under `src/cosa/` (shared package, TFE package, watchdog module, BFE shim edits) are working-tree only. No git commands run in the submodule. User commits CoSA in a separate session.
+
+**Files Changed — Lupin parent (committed this session)**:
+- Plan file: `src/rnd/2026.04.10-test-fix-expediter-plan.md` (serialized approved plan)
+- 20 planning docs under `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/` (14 design + 6 execution logs)
+- 13 new test files under `src/tests/unit/` + 1 smoke test at `src/tests/smoke/test_tfe_live_pipeline.py`
+- 6 fixture JSON files under `src/tests/fixtures/tfe/`
+- E2E shell driver `src/tests/e2e/run-tfe-live-e2e.sh`
+- Conf: `src/conf/lupin-app.ini` (16 TFE keys), `src/conf/lupin-app-splainer.ini` (matching entries), `src/conf/notification-proxy-scripts/tfe.json`, `src/conf/training/agent-router-agentic-commands.json`
+- Training data: `src/ephemera/prompts/data/synthetic-data-agent-routing-test-fix-expediter.txt` (75 templates)
+- Whitelist: `src/tests/unit/test_swe_team_training_data.py` (`AGENTIC_TEMPLATES` set)
+- New user-facing docs: 5 files under `src/docs/agents/`
+- Modified docs: `src/docs/README.md`, `src/docs/rest-api-reference.md`, `README.md`, `CLAUDE.md`
+- Session-end tracking: `history.md`, `TODO.md`, `.claude-session.md`
+
+**Files Changed — CoSA submodule (working-tree only, user commits from CoSA context)**:
+- New `src/cosa/agents/shared/` package (plan_writer.py, git_strategist.py, fix_executor.py, __init__.py)
+- BFE orchestrator shims + prompts/fix.py registration + plan_writer.py re-export shim
+- New `src/cosa/agents/test_fix_expediter/` package (14 files)
+- New `src/cosa/rest/test_suite_completion_watchdog.py` + `running_fifo_queue.py` hook
+- `src/cosa/rest/agentic_job_factory.py` TFE elif branch
+
+**Follow-ups filed on TODO.md** (for next session):
+- Archive `history.md` — token count at 17.7k (70.8% of 25k limit), approaching WARNING threshold
+- Live E2E monopolize TFE run via `/schedule-tests` skill (GPU + real SDK cost gate, user-scheduled after hours)
+- PEFT trainer run on GPU (user-run per memory rule) — templates ready, coordinator generation pending
+- Phase 0 `llm_refine` real SDK wiring
+- BFE Phase 6 live E2E verification (user's parallel console work, state unknown)
+- CoSA submodule commits (user handles in a CoSA session)
+- `agent_registry.py` TFE entry
+
+---
+
 ### 2026.04.10 - Session 1b8c1cc0 | BFE Phase 6 dry-run smoke test + CJ Flow persistence gaps fix
 
 **Context**: Two back-to-back planning cycles in one session. (1) Plan + implement the Phase 6 dry-run integration smoke test that the BFE parent plan left as Step 8. (2) When end-to-end verification exposed three persistence gaps in `job_history` (`session_id`, `routing_command`, `metadata_json.original_args` all NULL for REST-submitted agentic jobs), plan + fix those too. A bonus regex bug was surfaced while debugging the live server.

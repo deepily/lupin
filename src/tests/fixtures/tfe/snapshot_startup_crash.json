@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "timestamp": "2026.04.10-at-14:53",
+  "suites_run": ["unit"],
+  "summary": {
+    "total_passed": 0,
+    "total_failed": 0,
+    "total_skipped": 0,
+    "total_errors": 1,
+    "all_passed": false
+  },
+  "failures": [
+    {
+      "classname": "<pytest startup>",
+      "name": "<conftest import>",
+      "time": "0.000",
+      "type": "ERROR",
+      "message": "ImportError: cannot import name 'get_session' from 'cosa.rest.session_bridge'",
+      "traceback": "File \"src/tests/conftest.py\", line 12, in <module>\n    from cosa.rest.session_bridge import get_session\nE   ImportError: cannot import name 'get_session' from 'cosa.rest.session_bridge' (/mnt/DATA01/.../session_bridge.py)",
+      "suite": "unit"
+    }
+  ]
+}

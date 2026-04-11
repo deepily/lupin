@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "timestamp": "2026.04.10-at-14:53",
+  "suites_run": ["unit"],
+  "summary": {
+    "total_passed": 2914,
+    "total_failed": 2,
+    "total_skipped": 0,
+    "total_errors": 0,
+    "all_passed": false
+  },
+  "failures": [
+    {
+      "classname": "src.tests.unit.test_auth.TestTokenRefresh",
+      "name": "test_refresh_returns_new_token",
+      "time": "0.123",
+      "type": "FAILED",
+      "message": "assert 401 == 200",
+      "traceback": "def test_refresh_returns_new_token():\n>   response = client.post('/auth/refresh')\n    assert response.status_code == 200\nE   assert 401 == 200\n\nFile \"src/cosa/auth/tokens.py\", line 42, in refresh\n    return None  # bug: should return new token",
+      "suite": "unit"
+    },
+    {
+      "classname": "src.tests.unit.test_auth.TestTokenRefresh",
+      "name": "test_refresh_updates_expiry",
+      "time": "0.098",
+      "type": "FAILED",
+      "message": "AttributeError: 'NoneType' object has no attribute 'expiry'",
+      "traceback": "def test_refresh_updates_expiry():\n    token = client.refresh()\n>   assert token.expiry > now()\nE   AttributeError: 'NoneType' object has no attribute 'expiry'\n\nFile \"src/cosa/auth/tokens.py\", line 42, in refresh\n    return None  # bug: should return new token",
+      "suite": "unit"
+    }
+  ]
+}

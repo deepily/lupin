@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "timestamp": "2026.04.10-at-14:53",
+  "suites_run": ["unit"],
+  "summary": {
+    "total_passed": 0,
+    "total_failed": 0,
+    "total_skipped": 0,
+    "total_errors": 2,
+    "all_passed": false
+  },
+  "failures": [
+    {
+      "classname": "src.tests.unit.test_new_module",
+      "name": "<collection error>",
+      "time": "0.001",
+      "type": "ERROR",
+      "message": "ModuleNotFoundError: No module named 'cosa.agents.missing_module'",
+      "traceback": "File \"src/tests/unit/test_new_module.py\", line 8, in <module>\n    from cosa.agents.missing_module import Foo\nE   ModuleNotFoundError: No module named 'cosa.agents.missing_module'",
+      "suite": "unit"
+    },
+    {
+      "classname": "src.tests.unit.test_broken_syntax",
+      "name": "<collection error>",
+      "time": "0.001",
+      "type": "ERROR",
+      "message": "SyntaxError: invalid syntax",
+      "traceback": "File \"src/tests/unit/test_broken_syntax.py\", line 15\n    def test_foo(:\n                 ^\nE   SyntaxError: invalid syntax",
+      "suite": "unit"
+    }
+  ]
+}

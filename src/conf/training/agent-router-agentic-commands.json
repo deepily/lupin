@@ -130,5 +130,16 @@
                 "triggers" : [ "dry run", "dry-run", "dryrun", "trial run", "test run" ]
             }
         }
+    },
+    "agent router go to test fix expediter" : {
+        "template_file"    : "/src/ephemera/prompts/data/synthetic-data-agent-routing-test-fix-expediter.txt",
+        "placeholders"     : {},
+        "args_key"         : "source_test_suite_job_id",
+        "conditional_args" : {
+            "dry_run" : {
+                "value"    : "True",
+                "triggers" : [ "dry run", "dry-run", "dryrun", "trial run", "trial mode", "test run", "dry mode" ]
+            }
+        }
     }
 }

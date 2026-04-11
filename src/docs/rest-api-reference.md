@@ -185,9 +185,35 @@
 
 ## 17. Test Suite (`/api/test-suite/*`)
 
+> **Deep-dive**: See [`agents/test-suite-scheduling-guide.md`](agents/test-suite-scheduling-guide.md)
+
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
-| POST | `/api/test-suite/submit` | JWT | Submit test suite job to queue (always monopolize) |
+| POST | `/api/test-suite/submit` | JWT | Submit test suite job to queue (always monopolize). Accepts `test_types` (comma-separated or list), `pytest_args`, `scheduled_at` (ISO datetime), `dry_run`. Returns `{ job_id, status, scheduled_at, test_types, monopolize }`. Produces a remediation snapshot JSON + Markdown report at completion. |
+
+## 17a. Bug Fix Expediter (`/api/push` with BFE command)
+
+> **Deep-dive**: See [`agents/bug-fix-expediter-guide.md`](agents/bug-fix-expediter-guide.md)
+
+BFE is submitted via the generic `/api/push` endpoint using the agent router command string. Used manually when curating which dead jobs get auto-recovery; automatic dispatch happens via the `DeadQueueWatchdog` when `bug fix expediter enabled = true` in INI.
+
+| Method | Path | Auth | Summary |
+|--------|------|------|---------|
+| POST | `/api/push` | JWT | Submit BFE job with `question = "agent router go to bug fix expediter"` and `args = { dead_job_id, extra_context (optional), dry_run (optional) }`. Returns `{ job_id }` with `bfe-` prefix. |
+
+Watchdog auto-dispatch: requires `bug fix expediter enabled = true` in `lupin-app.ini`. See the BFE guide for full INI reference, trust-to-git mapping, and Phase 6 automated repair loop configuration.
+
+## 17b. Test Fix Expediter (`/api/push` with TFE command)
+
+> **Deep-dive**: See [`agents/test-fix-expediter-guide.md`](agents/test-fix-expediter-guide.md)
+
+TFE is submitted via the generic `/api/push` endpoint using the agent router command string. Normally invoked automatically by `TestSuiteCompletionWatchdog` when a `TestSuiteJob` completes with failures; manual submission is supported for curated fix runs.
+
+| Method | Path | Auth | Summary |
+|--------|------|------|---------|
+| POST | `/api/push` | JWT | Submit TFE job with `question = "agent router go to test fix expediter"` and `args = { remediation_snapshot_path, source_test_suite_job_id, original_test_types (comma-separated), original_pytest_args (optional), dry_run (optional) }`. Returns `{ job_id }` with `tfe-` prefix. |
+
+Watchdog auto-dispatch: requires `test fix expediter auto fix enabled = true` in `lupin-app.ini`. See the TFE guide for full INI reference (16 keys), six-phase pipeline, and the `TestSuiteCompletionWatchdog` eligibility gates.
 
 ## 18. Decision Proxy (`/api/proxy/*`)
 
@@ -279,6 +305,8 @@
 | `cc-` | Claude Code | `/api/claude-code/queue/submit` |
 | `swe-` | SWE Team | `/api/swe-team/submit` |
 | `ts-` | Test Suite | `/api/test-suite/submit` |
+| `bfe-` | Bug Fix Expediter | `/api/push` with `"agent router go to bug fix expediter"` |
+| `tfe-` | Test Fix Expediter | `/api/push` with `"agent router go to test fix expediter"` |
 | `mock-` | Mock Job | `/api/mock-job/submit` |
 
 ---

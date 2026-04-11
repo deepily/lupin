@@ -1,0 +1,74 @@
+run the test fix expediter
+execute test fix expediter
+launch the test fix expediter
+start test fix expediter
+fire up the test fix expediter
+invoke test fix expediter
+initiate TFE
+begin test fix expediter
+kick off the test fix expediter
+trigger test fix expediter
+run TFE
+execute TFE now
+launch test fix expediter immediately
+start TFE now
+go TFE
+run the test fix expediter on the last failure
+fix the failing tests with TFE
+try to auto-fix the test failures
+auto-repair the failing tests
+run TFE against the most recent test run
+apply test fix expediter to the failures
+ask TFE to handle the test breakage
+let TFE try to fix the failing tests
+run test fix expediter on the remediation snapshot
+fix the test bugs with the test fix expediter
+TFE the failed tests
+auto-fix the failing test suite
+handle the last test failures automatically
+repair the broken tests with TFE
+run TFE for the snapshot
+fix the failing tests in the last run
+auto-repair the test failures
+run the test fix expediter against the earlier run
+TFE the failures from earlier
+fix the tests with TFE
+please run the test fix expediter
+could you run TFE
+can you kick off the test fix expediter
+would you launch TFE now
+please try to fix the failing tests with TFE
+can you invoke the test fix expediter
+please execute test fix expediter
+could you auto-repair the failing tests
+would you mind running TFE
+please run the test fix expediter on the snapshot
+can you try TFE
+would you start the test fix expediter
+please have TFE look at the failures
+can you kick off the auto test fix
+please fire up TFE
+I want to auto-fix the failing tests
+I need to repair the test breakage
+I'd like TFE to handle this
+I want the test fix expediter to try
+lets automate fixing the test failures
+I want to run auto-repair on the test run
+I want the tests automatically fixed
+lets have TFE take a shot at it
+I want to try auto-fixing the failures
+lets run TFE on this
+I want to delegate the test repair to TFE
+get the test fix expediter to try a fix
+I want automated test repair
+lets send this to TFE
+I want TFE to handle the test failures
+can we try auto-fixing the failing tests
+TFE please
+run the test fix expediter in dry run mode
+run TFE as a dry run
+try TFE dry-run first
+do a dry run of the test fix expediter
+dry run TFE on the last failure
+run TFE dry mode
+test fix expediter dry run

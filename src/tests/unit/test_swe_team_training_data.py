@@ -345,6 +345,10 @@ class TestSweTeamDryRunCoverage:
             "synthetic-data-agent-routing-research-to-podcast.txt",
             "synthetic-data-agent-routing-deep-research.txt",
             "synthetic-data-agent-routing-test-suite.txt",
+            # Session 1cfcdf73 (2026-04-10): TFE is an agentic agent with
+            # dry_run conditional_args — whitelisted here to allow dry-run
+            # phrases in its training templates.
+            "synthetic-data-agent-routing-test-fix-expediter.txt",
         }
         data_dir     = cu.get_project_root() + TRAINING_DATA_DIR
         contaminated = {}

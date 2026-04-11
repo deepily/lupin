@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0",
+  "timestamp": "2026.04.10-at-14:53",
+  "suites_run": ["e2e"],
+  "summary": {
+    "total_passed": 270,
+    "total_failed": 0,
+    "total_skipped": 0,
+    "total_errors": 12,
+    "all_passed": false
+  },
+  "failures": [
+    {
+      "classname": "src.tests.e2e_ui.test_visual_regression.TestVisualRegression",
+      "name": "test_visual_page[chromium-login]",
+      "time": "3.614",
+      "type": "ERROR",
+      "message": "failed on teardown with 'Failed: [playwright-visual-snapshot] Snapshots DO NOT match! login.png'",
+      "traceback": "def finalize():\n    if failures:\n>       pytest.fail(f'Snapshots DO NOT match! {failed_files}')\nE   Failed: [playwright-visual-snapshot] Snapshots DO NOT match! login.png",
+      "suite": "e2e"
+    },
+    {
+      "classname": "src.tests.e2e_ui.test_visual_regression.TestVisualRegression",
+      "name": "test_visual_page[chromium-register]",
+      "time": "3.421",
+      "type": "ERROR",
+      "message": "failed on teardown with 'Failed: [playwright-visual-snapshot] Snapshots DO NOT match! register.png'",
+      "traceback": "def finalize():\n    if failures:\n>       pytest.fail(f'Snapshots DO NOT match! {failed_files}')\nE   Failed: [playwright-visual-snapshot] Snapshots DO NOT match! register.png",
+      "suite": "e2e"
+    },
+    {
+      "classname": "src.tests.e2e_ui.test_visual_regression.TestVisualRegression",
+      "name": "test_visual_page[chromium-profile]",
+      "time": "3.512",
+      "type": "ERROR",
+      "message": "failed on teardown with 'Failed: [playwright-visual-snapshot] Snapshots DO NOT match! profile.png'",
+      "traceback": "def finalize():\n    if failures:\n>       pytest.fail(f'Snapshots DO NOT match! {failed_files}')\nE   Failed: [playwright-visual-snapshot] Snapshots DO NOT match! profile.png",
+      "suite": "e2e"
+    },
+    {
+      "classname": "src.tests.e2e_ui.test_visual_regression.TestVisualRegression",
+      "name": "test_visual_page[chromium-notifications]",
+      "time": "3.698",
+      "type": "ERROR",
+      "message": "failed on teardown with 'Failed: [playwright-visual-snapshot] Snapshots DO NOT match! notifications.png'",
+      "traceback": "def finalize():\n    if failures:\n>       pytest.fail(f'Snapshots DO NOT match! {failed_files}')\nE   Failed: [playwright-visual-snapshot] Snapshots DO NOT match! notifications.png",
+      "suite": "e2e"
+    }
+  ]
+}
