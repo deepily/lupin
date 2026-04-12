@@ -15,14 +15,23 @@
 #                          schedule via /schedule-tests skill, not ad hoc.
 #
 # PRECONDITIONS:
-#   - Lupin FastAPI server running on port 7999
+#   - Lupin FastAPI test server running at $BASE_URL
+#     (default: http://localhost:8000 — dual-container test server.
+#      Override via LUPIN_TEST_PORT or LUPIN_TEST_BASE_URL for dev server
+#      testing: LUPIN_TEST_PORT=7999 ./run-tfe-live-e2e.sh)
 #   - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL + PASSWORD env vars set
 #   - `test fix expediter auto fix enabled = true` in INI (for --live mode)
 #     OR manual TFE submission (works in both modes)
 #
+# ENVIRONMENT:
+#   LUPIN_TEST_PORT      - Test server port (default: 8000)
+#   LUPIN_TEST_BASE_URL  - Full test server URL (overrides PORT if set)
+#
 # USAGE:
 #   ./src/tests/e2e/run-tfe-live-e2e.sh [--dry-run|--live]
 #
+# Port refactor: 2026-04-12 Session 85b05d1d (dual-container architecture
+#                alignment — matches run-integration-tests.sh + run-e2e-ui-tests.sh)
 
 set -e
 
@@ -46,20 +55,27 @@ TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 LOG_FILE="/tmp/tfe-live-e2e-${TIMESTAMP}.log"
 LUPIN_ROOT="${LUPIN_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/lupin}"
 
+# Target test server (dual-container pattern — matches run-integration-tests.sh
+# and run-e2e-ui-tests.sh). Default: port 8000 (lupin-rest-test container).
+PORT="${LUPIN_TEST_PORT:-8000}"
+BASE_URL="${LUPIN_TEST_BASE_URL:-http://localhost:$PORT}"
+
 echo "=================================================================="
 echo "TFE Live E2E Test Driver (${MODE} mode)"
-echo "Log: ${LOG_FILE}"
+echo "Target: ${BASE_URL}"
+echo "Log:    ${LOG_FILE}"
 echo "=================================================================="
 
 echo ""
 echo "[1/6] Preflight checks..."
 
-if ! curl -sf http://localhost:7999/health >/dev/null 2>&1; then
-    echo "Lupin FastAPI server not responding on port 7999"
-    echo "  Start with: ${LUPIN_ROOT}/src/scripts/run-fastapi-lupin.sh"
+if ! curl -sf "${BASE_URL}/health" >/dev/null 2>&1; then
+    echo "Lupin FastAPI test server not responding at ${BASE_URL}"
+    echo "  Start the test container with: sdlat  (or: docker compose up -d lupin-rest-test)"
+    echo "  For dev-server testing instead: LUPIN_TEST_PORT=7999 $0 $@"
     exit 1
 fi
-echo "  OK Server responding"
+echo "  OK Server responding at ${BASE_URL}"
 
 if [[ -z "${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL}" ]]; then
     echo "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL not set"
@@ -83,7 +99,7 @@ echo "  OK Staged at ${IO_SNAPSHOT}"
 
 echo ""
 echo "[3/6] Authenticating..."
-TOKEN=$(curl -sf -X POST http://localhost:7999/auth/login \
+TOKEN=$(curl -sf -X POST "${BASE_URL}/auth/login" \
     -H "Content-Type: application/json" \
     -d "{\"email\":\"${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL}\",\"password\":\"${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD}\"}" \
     | python3 -c "import sys, json; print( json.load( sys.stdin )[ 'tokens' ][ 'access_token' ] )")
@@ -113,7 +129,7 @@ SUBMIT_PAYLOAD=$(cat <<EOF
 EOF
 )
 
-SUBMIT_RESP=$(curl -sf -X POST http://localhost:7999/api/push \
+SUBMIT_RESP=$(curl -sf -X POST "${BASE_URL}/api/push" \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/json" \
     -d "${SUBMIT_PAYLOAD}")
@@ -133,7 +149,7 @@ POLL_INTERVAL=5
 FINAL_STATE=""
 while [[ $(date +%s) -lt ${DEADLINE} ]]; do
     QUEUE_STATE=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
-        "http://localhost:7999/api/get-queue/done" 2>/dev/null || echo "")
+        "${BASE_URL}/api/get-queue/done" 2>/dev/null || echo "")
 
     if echo "${QUEUE_STATE}" | grep -q "${JOB_ID}"; then
         FINAL_STATE="done"
@@ -141,7 +157,7 @@ while [[ $(date +%s) -lt ${DEADLINE} ]]; do
     fi
 
     DEAD_STATE=$(curl -sf -H "Authorization: Bearer ${TOKEN}" \
-        "http://localhost:7999/api/get-queue/dead" 2>/dev/null || echo "")
+        "${BASE_URL}/api/get-queue/dead" 2>/dev/null || echo "")
     if echo "${DEAD_STATE}" | grep -q "${JOB_ID}"; then
         FINAL_STATE="dead"
         break
