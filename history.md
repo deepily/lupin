@@ -1,5 +1,38 @@
 # Lupin Project History
 
+### 2026.04.12 - Session 1cfcdf73 (follow-on, housekeeping) | Archive history.md — 03.26→04.07 block (CRITICAL token gate resolved)
+
+**Context**: `history.md` reached 23,393 tokens (93.5% of 25k limit, 🚨 CRITICAL per canonical `~/.claude/scripts/get-token-count.sh`). TODO.md had flagged this across Sessions 1b8c1cc0 → 9056c113 → 248e740e. User asked for analysis-before-implementation; full plan written to `~/.claude/plans/binary-spinning-sprout.md` and approved before execution.
+
+**Analysis**:
+- 48 sessions across 14 active days (03.26 → 04.12)
+- Per-day density measured via `wc -w × 1.33`; 04.10 was densest at 6,050 tokens (TFE end-to-end + docs landing day)
+- Option A (5-day retention, 04.08→04.12) chosen over 3-day alternative per the workflow's 5-day minimum validation rule
+- Natural boundary at 04.07/04.08 — BFE-Phase-6 + Sonnet-pivot block vs TFE + UPE + watchdog block
+
+**Execution** (Mode 2 adaptive split per `planning-is-prompting/workflow/history-management.md`):
+- Created `history/2026-03-26-to-04-07-history.md` — 33 session blocks, 10,818 tokens (HEALTHY, 43.2%), raw-preserved
+- Trimmed main `history.md` to lines 1-626 → 16 sessions (04.08 → 04.12), **12,607 tokens** (HEALTHY, 50.4%)
+- Added `## Archives` footer to main pointing at the new archive + full index
+- Updated `history/README.md` with 3 new rows: new archive + 2 pre-existing but unindexed (`2026-03-13-to-26` and `2026-03-03-to-12`)
+- All token measurements via canonical shell script, not chars÷4 estimates
+
+**Reduction**: 10,786 tokens shed from main (~46% smaller). Comfortable headroom (~5k tokens) before the 17k WARNING tier.
+
+**Note**: One pre-existing duplicate `### 2026.03.28 - Session 382 | CJ Flow Phase 5` header in the source was faithfully preserved in the archive (both session blocks carried forward unchanged) — not introduced by the split, out of scope to fix.
+
+**Files Changed — Lupin parent**:
+- `history.md` (trimmed + Archives footer)
+- `history/2026-03-26-to-04-07-history.md` (new)
+- `history/README.md` (+3 index rows)
+- `TODO.md`, `.claude-session.md` (tracking)
+
+**Files Changed — CoSA submodule**: none (archival is a pure parent-repo operation)
+
+**Commit**: `b15226a` (+892 / −878, 5 files)
+
+---
+
 ### 2026.04.12 - Session 248e740e | TFE forensics capture — CoSA submodule commit + push
 
 **Context**: Session-end ritual for prior TFE forensics capture work. All 4 edits were working-tree-only inside `src/cosa/` from the TFE forensics fix plan (`src/rnd/v0.1.6/2026.04.11-tfe-forensics-capture-plan.md`). This session committed them from CoSA repo context per nested-repo rule, then pushed both repos.
