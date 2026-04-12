@@ -1,6 +1,6 @@
-# Lupin
+# Lupin AF
 
-*Named after Arsene Lupin, the gentleman thief. More on that front once Lupin enters multi-user testing on Google Cloud.*
+*Named after Arsene Lupin, the gentleman thief. More about the AF part when the v0.1.6 branch lands in mid-to-late April.*
 
 **A voice-first AI agent platform that closes the voice loop from browser UI through agent execution into developer tooling and back -- with Bayesian trust learning, fine-tuned intent routing, and solution caching built in.**
 
@@ -239,6 +239,8 @@ Bug Fix Expediter (dead-job auto-recovery), Test Fix Expediter (test-failure aut
 ### R&D archive
 
 Over 130 dated planning and research documents in [`src/rnd/`](src/rnd/README.md).
+
+**Codebase metrics**: [Lupin parent vs CoSA comparison](src/rnd/v0.1.6/2026.04.12-codebase-analysis-lupin-vs-cosa.md) — 2026-04-12 snapshot of LoC distribution with mermaid diagram, 60/40 Python split, docstring-ratio observations, and operational implications of the CoSA-never-commit rule.
 
 ---
 

@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-04-11 (Session 1b8c1cc0 continued — TFE forensics fix checkpoint)
+Last updated: 2026-04-12 (Session 1cfcdf73 follow-on — Codebase analysis Lupin parent vs CoSA)
 
 ## Pending — HIGH PRIORITY
 
@@ -36,7 +36,11 @@ Last updated: 2026-04-11 (Session 1b8c1cc0 continued — TFE forensics fix check
 - [ ] [LUPIN] **Automated E2E testing workflow** — Design standard pattern for scheduling E2E/integration test runs as monopolized jobs at user-specified times. Becomes the modus operandi for all post-coding verification.
 - [ ] [LUPIN] **Full E2E re-run needed to verify 2 visual regression errors are pre-existing** (test_visual_regression.py profile + notifications)
 
-## Completed this session (1cfcdf73 lunch run, 2026-04-11)
+## Completed this session (1cfcdf73 follow-on, 2026-04-12)
+
+- [x] [LUPIN] **Codebase analysis: Lupin parent vs CoSA submodule** — Session 1cfcdf73 follow-on. Ran `cosa.repo.run_directory_analyzer` against full project + `src/` + `src/cosa/` + 5 drill-down subdirs. Wrote persistent R&D doc at `src/rnd/v0.1.6/2026.04.12-codebase-analysis-lupin-vs-cosa.md` with Mermaid flowchart (color-coded parent/CoSA/engine), numeric tables, 7 observations, and explicit coupling of the 61/39 Python split with the CoSA-never-commit-from-parent rule. Headline: project is 558k lines total (2,306 files); CoSA submodule is 168k (30%, 88.6% Python, 31.4% docstring ratio — Design-by-Contract manifesting measurably); Lupin parent is 390k (70%, dominated by R&D planning markdown 108k + Dart mobile 43k + JS frontend 22k + tests 90k). Added "Codebase metrics" bullet to top-level `README.md` R&D archive section. Placement corrected from `src/rnd/` root to `src/rnd/v0.1.6/` per convention + fixed relative links.
+
+## Completed earlier (1cfcdf73 lunch run, 2026-04-11)
 
 - [x] [LUPIN] **Unified watchdogs facade + TFE auto-fix defaults + per-run override** — Session 1cfcdf73 lunch run. Root-caused why TFE never fixed the 12 overnight visual regression failures: (1) `init_watchdog()` was never called for TFE in `main.py` startup; (2) both auto-fix flags defaulted to `false`. Shipped: `src/cosa/rest/watchdogs.py` (new `init_watchdogs()` facade brings up BFE + TFE singletons in one call, resilient to one-side failure), `main.py` rewired to use the facade, both INI flags flipped to `true` (default = run unless told otherwise) + splainer entries updated, `TestSuiteJob.auto_fix_on_failure: Optional[bool]` constructor kwarg threading per-run override through factory → REST `/api/test-suite/submit` → watchdog Gate 1 (tri-state precedence: explicit False short-circuits, explicit True overrides INI false, None falls back to INI), `/api/config/client` exposes `test_fix_expediter_auto_fix_enabled` so the UI knows the INI default, new "🛠️ Auto-fix on failure (TFE)" checkbox in the notifications dashboard test runner card with initial state synced from the endpoint. BFE stays INI-only per user direction. Documentation updated in all 3 agent guides (BFE, TFE, scheduler). 45 new unit tests across 3 files (6 per-run override + 11 facade resilience + 24 `_parse_optional_boolean` + 4 TestSuiteJob/TFE config). **Bonus root-cause fixes (8 pre-existing failures, fixed at the source not deferred)**: cosa-voice MCP module-import path now catches `Timeout` in addition to `ConnectionError` (slow server was crashing every test that imported the module); presentation generator subprocess test now passes `PYTHONPATH=src` so the venv interpreter can find the cosa package; TFE config dataclass default flipped to True for consistency. Final regression: **3169 passed, 1 xfailed, 0 failed** (~19 min, was 3161 / 8 failed). Working-tree CoSA edits await user's CoSA-context commit.
 

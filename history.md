@@ -1,5 +1,39 @@
 # Lupin Project History
 
+### 2026.04.12 - Session 1cfcdf73 (follow-on) | Codebase analysis — Lupin parent vs CoSA submodule
+
+**Context**: User requested a code-based comparison of the Lupin parent repo vs the nested CoSA submodule after the lunch-run commit landed. Ran the Directory Analyzer (`python -m cosa.repo.run_directory_analyzer`) against three scopes (full project, `src/`, `src/cosa/`) plus drill-downs into the biggest Lupin-parent subdirs (`tests/`, `rnd/`, `fastapi_app/`, `lupin-mobile/`, `docs/`). Wrote the findings as a persistent R&D doc with a Mermaid diagram.
+
+**Deliverable**: `src/rnd/v0.1.6/2026.04.12-codebase-analysis-lupin-vs-cosa.md` (~190 lines)
+- Mermaid flowchart color-coded by repo side (parent blue, CoSA red, engine-internals yellow)
+- Numeric tables: top-level scopes, Python 60/40 split, parent drill-down
+- 7 observations: engine-vs-wrapper split, non-code weight of parent, R&D docs > parent Python, Design-by-Contract docstring ratio, test pyramid placement, mobile sleeping giant, frontend size
+- Explicit section on 61/39 × CoSA-never-commit coupling with Session 1cfcdf73 paired-commit example
+- Re-run commands + "what this does not cover" honesty section
+- 3 cross-references (all verified to resolve from `v0.1.6/` subdir depth)
+
+**Headline numbers**:
+- Full project: 558,267 lines / 2,306 files
+- CoSA submodule: 168,310 / 568 (30% of project, 88.6% Python, 31.4% docstring ratio)
+- Lupin parent (derived): 389,957 / 1,738 (70% of project, only ~25% Python)
+- Python 60/40: 149k in CoSA vs 97k in parent
+- R&D markdown corpus (108k) > all Lupin-parent Python (97k)
+
+**Placement decision**: Initial landing at `src/rnd/` root was wrong per `src/rnd/README.md` convention ("new docs go in current version dir"). Moved to `src/rnd/v0.1.6/` and fixed the 3 relative links (`../../cosa/…`, `../README.md`, `../../../history.md`) accordingly.
+
+**README link added**: new "Codebase metrics" bullet under the existing R&D archive section in top-level `README.md` pointing at the doc.
+
+**Nature**: Transient analysis — numbers drift with every commit. Doc explicitly states "re-run the analyzer for a current snapshot rather than trusting this doc months from now."
+
+**Files Changed — Lupin parent**:
+- `src/rnd/v0.1.6/2026.04.12-codebase-analysis-lupin-vs-cosa.md` (new)
+- `README.md` (+1 bullet under R&D archive section)
+- `history.md`, `TODO.md`, `.claude-session.md` (tracking)
+
+**Files Changed — CoSA submodule**: none (pure read-only analysis against the existing `cosa.repo.run_directory_analyzer` tool)
+
+---
+
 ### 2026.04.11 - Session 1cfcdf73 (lunch run) | Unified watchdogs facade + TFE auto-fix defaults flipped + per-run override
 
 **Context**: User reported overnight E2E run had 12 visual regression failures but TFE never auto-dispatched. Root-caused two stacked bugs: (1) `init_watchdog()` for TFE was never called in `main.py` startup — only BFE's was — so the done-queue hook silently no-op'd because `get_watchdog()` returned None; (2) both auto-fix flags defaulted to `false` ("opt-in") in the INI, when the user wanted "default = run unless told otherwise". User dictated the fix shape (single `init_watchdogs()` facade, both INI defaults flipped to true, per-request UI override surfaced on submission form, BFE stays INI-only) and went out for lunch with implicit permission to execute.
