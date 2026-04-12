@@ -156,12 +156,16 @@ class TestTfeExecuteVoiceRouting:
             MockCfg.from_config.return_value = MagicMock()
             MockCfg.return_value = MagicMock()
             orch_instance = MagicMock()
-            orch_instance.last_plan_path = None
-            orch_instance.run_phase0_cluster = AsyncMock( return_value=[] )
-            orch_instance.run_phase1_diagnose = AsyncMock( return_value=[] )
-            orch_instance.run_phase2_propose = AsyncMock( return_value=None )
-            orch_instance.run_phase3_fix = AsyncMock( return_value=[] )
-            orch_instance.run_phase5_git = AsyncMock( return_value=None )
+            orch_instance.last_plan_path      = None
+            orch_instance.proposed_fixes      = []
+            orch_instance.selected_fixes      = []
+            orch_instance.diagnoses           = {}
+            orch_instance.remediation_context = MagicMock( failures=[] )
+            orch_instance.run_phase0_cluster    = AsyncMock( return_value=[] )
+            orch_instance.run_phase1_diagnose   = AsyncMock( return_value=[] )
+            orch_instance.run_phase2_propose    = AsyncMock( return_value=None )
+            orch_instance.run_phase3_fix        = AsyncMock( return_value=[] )
+            orch_instance.run_phase5_git        = AsyncMock( return_value=None )
             orch_instance.run_phase6_validation = AsyncMock( return_value=None )
             MockOrch.return_value = orch_instance
 
@@ -341,6 +345,111 @@ class TestDeadQueueSerializerExposesArtifacts:
             "dead-queue branch must call job.artifacts.get('plan_path', ...) to surface partial artifacts"
 
 
+# =============================================================================
+# T9 — Completion voice notification on success path
+# =============================================================================
+
+class TestTfeCompletionReport:
+    """Session 9056c113 — Phase A: TFE sends a voice notification with an
+    activity report (TTS + rich markdown abstract) on successful completion."""
+
+    @pytest.mark.asyncio
+    async def test_completion_notify_called_on_success( self ):
+        """Completion voice_io.notify fires with priority=medium on success path."""
+        tfe = _make_tfe_job()
+
+        with patch( "cosa.agents.test_fix_expediter.voice_io.notify", new_callable=AsyncMock ) as mock_notify, \
+             patch( "cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator" ) as MockOrch, \
+             patch( "cosa.agents.test_fix_expediter.snapshot_loader.load_from_path" ) as mock_load, \
+             patch( "cosa.agents.test_fix_expediter.config.TestFixExpediterConfig" ) as MockCfg:
+            mock_load.return_value = MagicMock( failures=[ {"name": "test_a"}, {"name": "test_b"} ] )
+            MockCfg.from_config.return_value = MagicMock()
+            MockCfg.return_value = MagicMock()
+            orch_instance = MagicMock()
+            orch_instance.last_plan_path      = "/var/lupin/io/swe-team/plans/test/plan.md"
+            orch_instance.proposed_fixes      = [ MagicMock() ]
+            orch_instance.selected_fixes      = []
+            orch_instance.diagnoses           = {
+                "C1": MagicMock( root_cause="stale baselines", confidence=0.82, error_category="env_bug" )
+            }
+            orch_instance.remediation_context = MagicMock( failures=[ {"n": 1}, {"n": 2} ] )
+            orch_instance.run_phase0_cluster    = AsyncMock( return_value=[ MagicMock() ] )
+            orch_instance.run_phase1_diagnose   = AsyncMock( return_value=[] )
+            orch_instance.run_phase2_propose    = AsyncMock( return_value=None )
+            orch_instance.run_phase3_fix        = AsyncMock( return_value=[] )
+            orch_instance.run_phase5_git        = AsyncMock( return_value=None )
+            orch_instance.run_phase6_validation = AsyncMock( return_value=None )
+            MockOrch.return_value = orch_instance
+
+            result = await tfe._execute()
+
+        # notify was called at least once (completion)
+        assert mock_notify.call_count >= 1, "completion voice_io.notify must be called"
+        # Find the completion call (priority=medium, queue_name=run)
+        completion_call = None
+        for call in mock_notify.call_args_list:
+            kwargs = call.kwargs
+            if kwargs.get( "priority" ) == "medium" and kwargs.get( "queue_name" ) == "run":
+                completion_call = call
+                break
+        assert completion_call is not None, "Must have a completion notify with priority=medium, queue_name=run"
+
+        kwargs = completion_call.kwargs
+        # TTS message references completion
+        tts_msg = completion_call.args[ 0 ] if completion_call.args else kwargs.get( "message", "" )
+        assert "complete" in tts_msg.lower(), f"TTS message should mention completion: {tts_msg}"
+
+        # Abstract contains activity report sections
+        abstract = kwargs[ "abstract" ]
+        assert "**TFE Activity Report**" in abstract
+        assert "**Clusters**:" in abstract
+        assert "**Proposed**:" in abstract
+        assert "**Plan**:" in abstract
+        assert "**Cluster Diagnoses:**" in abstract
+        assert "stale baselines" in abstract
+
+        # job_id is set for card routing
+        assert kwargs[ "job_id" ] == tfe.id_hash
+
+    @pytest.mark.asyncio
+    async def test_completion_returns_stats_not_scaffolding_text( self ):
+        """Return string should contain real stats, not the old scaffolding placeholder."""
+        tfe = _make_tfe_job()
+
+        with patch( "cosa.agents.test_fix_expediter.voice_io.notify", new_callable=AsyncMock ), \
+             patch( "cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator" ) as MockOrch, \
+             patch( "cosa.agents.test_fix_expediter.snapshot_loader.load_from_path" ) as mock_load, \
+             patch( "cosa.agents.test_fix_expediter.config.TestFixExpediterConfig" ) as MockCfg:
+            mock_load.return_value = MagicMock( failures=[] )
+            MockCfg.from_config.return_value = MagicMock()
+            MockCfg.return_value = MagicMock()
+            orch_instance = MagicMock()
+            orch_instance.last_plan_path      = None
+            orch_instance.proposed_fixes      = []
+            orch_instance.selected_fixes      = []
+            orch_instance.diagnoses           = {}
+            orch_instance.remediation_context = MagicMock( failures=[] )
+            orch_instance.run_phase0_cluster    = AsyncMock( return_value=[] )
+            orch_instance.run_phase1_diagnose   = AsyncMock( return_value=[] )
+            orch_instance.run_phase2_propose    = AsyncMock( return_value=None )
+            orch_instance.run_phase3_fix        = AsyncMock( return_value=[] )
+            orch_instance.run_phase5_git        = AsyncMock( return_value=None )
+            orch_instance.run_phase6_validation = AsyncMock( return_value=None )
+            MockOrch.return_value = orch_instance
+
+            result = await tfe._execute()
+
+        # Must NOT contain the old scaffolding text
+        assert "scaffolding" not in result.lower(), \
+            f"Return text should not contain scaffolding placeholder: {result}"
+        assert "steps 7-12" not in result, \
+            f"Return text should not reference future steps: {result}"
+        # Must contain real stats
+        assert "TFE complete:" in result
+        assert "proposed" in result
+        assert "selected" in result
+
+
 def test_smoke_all_classes_are_importable():
     """Sanity check — all test classes defined at module level are importable."""
     # If we got here, all the imports at module top worked
@@ -350,3 +459,4 @@ def test_smoke_all_classes_are_importable():
     assert TestTfeOrchestratorNoNotificationTypeKwarg is not None
     assert TestTfeExecuteStoresPlanPath is not None
     assert TestDeadQueueSerializerExposesArtifacts is not None
+    assert TestTfeCompletionReport is not None

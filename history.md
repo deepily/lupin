@@ -1,5 +1,51 @@
 # Lupin Project History
 
+### 2026.04.12 - Session 9056c113 | TFE checkpoint-resume + completion report + agentic-voice-workflow v3.0
+
+**Context**: User reported a successful TFE run (`tfe-7c25082a`) that completed Phases 0-2 but produced no E2E resubmission. Forensic investigation showed the run actually stalled at Phase 2 voice gate with 0 selections (cascading to skipped Phases 3-6). User wanted: (a) completion voice reports for all agents, (b) checkpoint-resume so stalled jobs can continue later, (c) both patterns standardized in the agentic-voice-workflow skill so every new agent gets them by default. Plan serialized to `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/14-checkpoint-resume-and-completion-report.md` — full 5-phase breakdown with step-by-step code snippets, file paths, and test specs.
+
+**Accomplishments (5 phases complete, 35 new tests, 0 regressions)**:
+
+- **Phase A — TFE completion voice report** (`src/cosa/agents/test_fix_expediter/job.py`): Added `self._start_time` at `_execute()` entry, computed agent-specific stats (clusters, proposed/selected/fixed/failed, duration), outcome-aware three-variant TTS message (fixes applied / none selected / fixes failed), rich markdown abstract with per-cluster diagnoses + plan path + rerun status. Replaces the old "scaffolding run complete (phases 0-6 walked)" placeholder with real stats. Mirrors Deep Research pattern (`job.py:338-356`). Wrapped in try/except — notification failure never masks a successful run. 2 new unit tests in `test_tfe_forensics.py` (13 total, 11 pre-existing + 2 new, up from needing the orchestrator mock fix to cover new attributes).
+
+- **Phase B — `STALLED` JobState** (`src/cosa/rest/job_state.py`): New enum member `STALLED = "stalled"`. Transition matrix: `RUNNING → STALLED` (voice gate timeout), `STALLED → RUNNING` (resume), `STALLED → CANCELLED` (user gives up). New `RESUMABLE_STATES = frozenset({STALLED})` convenience set. Maps to `"todo"` UI container. Distinct from `PAUSED` (user-initiated vs system-initiated). 23 assertions updated in `test_job_state.py` (61 tests total, was 38 — added STALLED transition tests, exhaustive/disjoint set tests updated to include RESUMABLE_STATES).
+
+- **Phase C — Checkpoint infrastructure** (CoSA: `state.py`, `orchestrator.py`, `job.py`, `cosa_interface.py`, `job_persistence.py`): New `VoiceGateTimeoutError` + `StalledException` exception types, `CheckpointData` TypedDict (phase_ordinal, phase_name, stall_reason, stalled_at, state_snapshot, artifacts, resume_count), `TFE_PHASE_ORDINALS` mapping (0-6). `TFEOrchestrator.save_checkpoint()` serializes full pipeline state via `.model_dump()`; `load_checkpoint()` reconstructs Pydantic models; `set_resume_phase()` marks phases as completed for skip guards. `_aggregate_voice_gate()` now propagates `VoiceGateTimeoutError` (was: catch-all auto-select). `run_phase2_propose()` wraps voice gate and raises `StalledException` with saved checkpoint. `_execute()` catches `StalledException`, persists checkpoint to `self.artifacts`, sends voice notification, returns `"__STALLED__"` sentinel. `do_all()` detects sentinel and sets `state = JobState.STALLED`. Added `"checkpoint"` to `rich_fields` in `_build_metadata_json()`. 10 new unit tests in `test_tfe_checkpoint.py` (save/load round-trip, Pydantic type preservation, StalledException propagation, do_all STALLED state, artifacts persistence, set_resume_phase, ordinals, rich_fields).
+
+- **Phase D — Resume infrastructure** (CoSA: `job_persistence.py`, `agentic_job_factory.py`, `routers/queues.py`; Lupin: `notifications.js`, `notifications.css`): Two new persistence queries — `get_checkpoint_for_job()` returns checkpoint dict for stalled jobs (checks both `artifacts.checkpoint` and top-level `checkpoint` in metadata_json), `get_original_args_for_job()` returns full reconstruction info (original_args + routing_command + user_id/email/session_id). New `resume_job(job_id_hash, config_mgr)` factory reconstructs job via `create_agentic_job()` and attaches `_resume_checkpoint` attribute with incremented `resume_count`. New REST endpoint `POST /api/jobs/{id_hash}/resume-from-checkpoint` (depends on `get_todo_queue`, pushes reconstructed job to queue). TFE `_execute()` detects `_resume_checkpoint` at orchestrator creation and calls `load_checkpoint()` + `set_resume_phase()`. UI: stalled badge (`⏸` amber), `resumeStalledJob()` JS method (confirms, POSTs, shows toast), "View Plan" + "▶ Resume from Checkpoint" button on stalled cards. CSS: `.completion-badge.stalled { color: #f0ad4e }`.
+
+- **Phase E — agentic-voice-workflow skill v3.0** (`src/workflow/agentic-voice-workflow.md`): Added Phase 11 (Completion Report) and Phase 12 (Checkpoint-Resume) as standard BUILD phases — every new agent now inherits these by default. Phase 11: outcome-aware TTS + rich markdown abstract pattern sourced from Deep Research and TFE. Phase 12: full checkpoint-resume workflow including exception types, save/load contract, voice gate timeout propagation, stall handling, resume flow via REST/UI/file-path, and idempotency guards. Added artifact-based resume pattern table (`.md` plan doc → TFE Phase 3, `.yaml` → Presentation Phase 6, `.md` script → Podcast audio phase). Updated TOC, checklist (Phase 11 MANDATORY, Phase 12 conditional on voice gates), reference implementations table (added TFE + BFE rows), key files section (completion report + checkpoint-resume pattern files), version history (2.1 → 3.0).
+
+**Plan doc**: `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/14-checkpoint-resume-and-completion-report.md` (added to `00-index.md`).
+
+**Test regression**: 135 tests across touched files (test_tfe_forensics, test_tfe_checkpoint, test_job_state, test_tfe_phase*, test_tfe_config) — 0 failures. Previously at 3169 unit tests baseline; this session adds 35 new tests on top.
+
+**Files modified — Lupin parent (this commit)**:
+- `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/14-checkpoint-resume-and-completion-report.md` (new)
+- `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/00-index.md` (added link)
+- `src/workflow/agentic-voice-workflow.md` (v2.1 → v3.0, added Phase 11 + Phase 12)
+- `src/tests/unit/test_tfe_forensics.py` (+2 tests, mock orchestrator fixture updated)
+- `src/tests/unit/test_tfe_checkpoint.py` (new — 10 tests)
+- `src/tests/unit/test_job_state.py` (+23 assertions, updated exhaustive/disjoint)
+- `src/fastapi_app/static/js/notifications.js` (stalled badge + resume button + `resumeStalledJob()`)
+- `src/fastapi_app/static/css/notifications.css` (stalled badge + actions styling)
+
+**Files modified — CoSA submodule (working-tree only, user commits separately)**:
+- `rest/job_state.py` (STALLED + RESUMABLE_STATES + transitions)
+- `rest/job_persistence.py` (checkpoint rich_field + get_checkpoint_for_job + get_original_args_for_job)
+- `rest/agentic_job_factory.py` (resume_job factory function)
+- `rest/routers/queues.py` (POST /api/jobs/{id}/resume-from-checkpoint endpoint)
+- `agents/test_fix_expediter/state.py` (VoiceGateTimeoutError + StalledException + CheckpointData + TFE_PHASE_ORDINALS)
+- `agents/test_fix_expediter/orchestrator.py` (save/load/set_resume_phase + VoiceGateTimeoutError propagation + Phase 2 stall wrapping)
+- `agents/test_fix_expediter/job.py` (completion report + StalledException catch + __STALLED__ sentinel + resume checkpoint detection)
+
+**Deferred to follow-up**:
+- Steps D4b-D4d: File-path-based resume endpoint (`POST /api/test-fix-expediter/resume-from-file`) + "Resume from" input field on TFE submission card — needs auto-detection logic for `.md` plan doc vs `.json` checkpoint
+- Step D5: CLI `--resume` flag in `run-tfe-live-e2e.sh`
+- Steps E1-E2: BFE completion voice notification + BFE checkpoint-resume (follows documented patterns now in skill v3.0)
+
+---
+
 ### 2026.04.12 - Session 1cfcdf73 (follow-on) | Codebase analysis — Lupin parent vs CoSA submodule
 
 **Context**: User requested a code-based comparison of the Lupin parent repo vs the nested CoSA submodule after the lunch-run commit landed. Ran the Directory Analyzer (`python -m cosa.repo.run_directory_analyzer`) against three scopes (full project, `src/`, `src/cosa/`) plus drill-downs into the biggest Lupin-parent subdirs (`tests/`, `rnd/`, `fastapi_app/`, `lupin-mobile/`, `docs/`). Wrote the findings as a persistent R&D doc with a Mermaid diagram.

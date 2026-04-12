@@ -6798,6 +6798,12 @@ class NotificationsUI {
             completionBadge = '<span class="completion-badge failed" title="Failed">✗</span>';
         }
 
+        // Stalled job: amber badge (checkpoint-resume, Session 9056c113)
+        const isStalled = ( job.status === 'stalled' );
+        if ( isStalled ) {
+            completionBadge = '<span class="completion-badge stalled" title="Stalled — awaiting user input">⏸</span>';
+        }
+
         // Interaction indicator for done queue
         let interactionIndicator = '';
         if ( queueName === 'done' && job.has_interactions ) {
@@ -6887,6 +6893,21 @@ class NotificationsUI {
                             <div class="partial-artifact">
                                 <a href="/app/docs?path=${encodeURIComponent( job.remediation_snapshot_path || '' )}" target="_blank" class="report-link-btn">🔍 Remediation Snapshot</a>
                             </div>
+                        ` : ''}
+                    </div>
+                    <!-- Stalled job: resume button + plan link (checkpoint-resume, Session 9056c113) -->
+                    <div class="job-stalled-actions" style="${isStalled ? '' : 'display: none'}">
+                        ${isStalled && job.plan_path ? `
+                            <div class="stalled-artifact">
+                                <a href="/app/docs?path=${encodeURIComponent( job.plan_path || '' )}" target="_blank" class="report-link-btn">📋 View Plan</a>
+                            </div>
+                        ` : ''}
+                        ${isStalled ? `
+                            <button class="btn btn-sm btn-warning mt-1 resume-stalled-btn"
+                                    data-job-id="${job.id_hash || ''}"
+                                    onclick="window.notificationsUI?.resumeStalledJob( '${job.id_hash || ''}' )">
+                                ▶ Resume from Checkpoint
+                            </button>
                         ` : ''}
                     </div>
                     <div class="job-cost-summary" style="${job.cost_summary ? '' : 'display: none'}">
@@ -7090,6 +7111,55 @@ class NotificationsUI {
             if ( cancelBtn ) {
                 cancelBtn.disabled  = false;
                 cancelBtn.innerText = 'Cancel Job';
+            }
+        }
+    }
+
+    async resumeStalledJob( jobId ) {
+        /**
+         * Resume a stalled job from its checkpoint.
+         *
+         * POSTs to /api/jobs/{jobId}/resume-from-checkpoint. On success, a new job
+         * is created and queued, resuming from the phase where it stalled.
+         *
+         * Session 9056c113 — checkpoint-resume infrastructure.
+         *
+         * Requires:
+         *     - jobId is a valid stalled agentic job ID
+         *
+         * Ensures:
+         *     - Confirmation dialog shown before resume
+         *     - Button disabled while request is in-flight
+         *     - Success toast shown with resume phase info
+         */
+        if ( !confirm( 'Resume this job from its checkpoint?' ) ) return;
+
+        const resumeBtn = document.querySelector( `.resume-stalled-btn[data-job-id="${jobId}"]` );
+        if ( resumeBtn ) {
+            resumeBtn.disabled  = true;
+            resumeBtn.innerText = 'Resuming...';
+        }
+
+        try {
+            const response = await this.authedFetch( `/api/jobs/${jobId}/resume-from-checkpoint`, {
+                method : 'POST'
+            } );
+
+            if ( !response.ok ) {
+                const errData = await response.json().catch( () => ( {} ) );
+                throw new Error( errData.detail || `HTTP ${response.status}` );
+            }
+
+            const data = await response.json();
+            this.log( `[JOB-RESUME] Resumed ${jobId} → ${data.resumed_job_id} from phase ${data.phase_name}` );
+            this.showToast( `Resumed from ${data.phase_name} → new job ${data.resumed_job_id}`, 'success' );
+
+        } catch ( error ) {
+            this.error( `[JOB-RESUME] Failed to resume ${jobId}:`, error );
+            alert( `Resume failed: ${error.message}` );
+            if ( resumeBtn ) {
+                resumeBtn.disabled  = false;
+                resumeBtn.innerText = '▶ Resume from Checkpoint';
             }
         }
     }

@@ -36,6 +36,7 @@
 | [11-testing-strategy.md](11-testing-strategy.md) | Unit + smoke + live pipeline + E2E layers | Active |
 | [12-config-inventory.md](12-config-inventory.md) | 12 INI keys + matching splainer entries | Active |
 | [13-peft-training-data-plan.md](13-peft-training-data-plan.md) | Voice routing training templates + xml_coordinator | Active |
+| [14-checkpoint-resume-and-completion-report.md](14-checkpoint-resume-and-completion-report.md) | Checkpoint-resume for stalled voice gates + TFE completion voice report | Active |
 
 ### Execution log docs (placeholders — updated during work)
 

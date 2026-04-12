@@ -13,6 +13,7 @@ from cosa.rest.job_state import (
     TERMINAL_STATES,
     PRE_EXECUTION_STATES,
     ACTIVE_STATES,
+    RESUMABLE_STATES,
     STATE_TO_UI_CONTAINER,
     validate_transition,
     assert_valid_transition,
@@ -26,13 +27,13 @@ from cosa.rest.job_state import (
 class TestJobStateEnum:
     """Test JobState enum values and string behavior."""
 
-    def test_enum_has_nine_members( self ):
-        assert len( JobState ) == 9
+    def test_enum_has_ten_members( self ):
+        assert len( JobState ) == 10
 
     def test_all_expected_values_present( self ):
         expected = {
             "pending", "queued", "scheduled", "paused", "running",
-            "completed", "failed", "interrupted", "cancelled",
+            "completed", "failed", "interrupted", "cancelled", "stalled",
         }
         actual = { s.value for s in JobState }
         assert actual == expected
@@ -115,6 +116,10 @@ class TestValidTransitions:
         ( JobState.RUNNING, JobState.FAILED ),
         ( JobState.RUNNING, JobState.CANCELLED ),
         ( JobState.RUNNING, JobState.INTERRUPTED ),
+        ( JobState.RUNNING, JobState.STALLED ),
+        # STALLED exits
+        ( JobState.STALLED, JobState.RUNNING ),
+        ( JobState.STALLED, JobState.CANCELLED ),
     ] )
     def test_valid_transition( self, from_state, to_state ):
         assert validate_transition( from_state, to_state ) is True
@@ -150,6 +155,9 @@ class TestInvalidTransitions:
         ( JobState.INTERRUPTED, JobState.QUEUED ),
         # Can't go from COMPLETED to FAILED
         ( JobState.COMPLETED, JobState.FAILED ),
+        # STALLED cannot go directly to COMPLETED or FAILED (must go through RUNNING first)
+        ( JobState.STALLED, JobState.COMPLETED ),
+        ( JobState.STALLED, JobState.FAILED ),
         # Self-transitions are not in the matrix
         ( JobState.RUNNING, JobState.RUNNING ),
         ( JobState.QUEUED, JobState.QUEUED ),
@@ -191,16 +199,23 @@ class TestConvenienceSets:
     def test_active_states( self ):
         assert ACTIVE_STATES == frozenset( { JobState.RUNNING } )
 
+    def test_resumable_states( self ):
+        assert RESUMABLE_STATES == frozenset( { JobState.STALLED } )
+
+    def test_stalled_is_not_terminal( self ):
+        assert JobState.STALLED not in TERMINAL_STATES
+
     def test_sets_are_exhaustive( self ):
         """Every JobState member belongs to exactly one convenience set."""
-        all_sets = TERMINAL_STATES | PRE_EXECUTION_STATES | ACTIVE_STATES
+        all_sets = TERMINAL_STATES | PRE_EXECUTION_STATES | ACTIVE_STATES | RESUMABLE_STATES
         assert all_sets == frozenset( JobState )
 
     def test_sets_are_disjoint( self ):
         """No state belongs to more than one convenience set."""
-        assert TERMINAL_STATES & PRE_EXECUTION_STATES == frozenset()
-        assert TERMINAL_STATES & ACTIVE_STATES == frozenset()
-        assert PRE_EXECUTION_STATES & ACTIVE_STATES == frozenset()
+        all_groups = [ TERMINAL_STATES, PRE_EXECUTION_STATES, ACTIVE_STATES, RESUMABLE_STATES ]
+        for i, a in enumerate( all_groups ):
+            for b in all_groups[ i + 1: ]:
+                assert a & b == frozenset(), f"Sets {a} and {b} overlap"
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +242,9 @@ class TestUIContainerMapping:
     def test_failure_states_map_to_dead( self ):
         for state in ( JobState.FAILED, JobState.CANCELLED, JobState.INTERRUPTED ):
             assert STATE_TO_UI_CONTAINER[ state ] == "dead"
+
+    def test_stalled_maps_to_todo( self ):
+        assert STATE_TO_UI_CONTAINER[ JobState.STALLED ] == "todo"
 
     def test_container_values_are_expected_set( self ):
         containers = set( STATE_TO_UI_CONTAINER.values() )
