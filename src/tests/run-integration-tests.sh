@@ -36,6 +36,10 @@ BASE_URL="http://localhost:$PORT"
 PROJECT_ROOT="${LUPIN_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/lupin}"
 ORIGINAL_BLOCK=""
 
+# Use venv python on host, fall back to system python in Docker container
+VENV_PYTHON="$PROJECT_ROOT/src/cosa/.venv/bin/python3"
+if ! "$VENV_PYTHON" --version > /dev/null 2>&1; then VENV_PYTHON="python3"; fi
+
 # --- Background execution support ---
 LOG_DIR="/tmp"
 PID_FILE="/tmp/integration-tests.pid"
@@ -109,7 +113,7 @@ cleanup() {
         echo ""
         echo -e "${YELLOW}[CLEANUP] Restoring original config: $ORIGINAL_BLOCK${NC}"
         local encoded_block="${ORIGINAL_BLOCK// /+}"
-        python3 -c "
+        "$VENV_PYTHON" -c "
 import urllib.request
 try:
     urllib.request.urlopen( '${BASE_URL}/api/init?config_block_id=${encoded_block}' )
@@ -138,7 +142,7 @@ echo "================================================================"
 echo ""
 
 # Ensure PostgreSQL test database is ready (works from host or inside container)
-if ! python3 "$PROJECT_ROOT/src/tests/preflight_test_db.py"; then
+if ! "$VENV_PYTHON" "$PROJECT_ROOT/src/tests/preflight_test_db.py"; then
     echo ""
     echo -e "${RED}[ERROR] PostgreSQL test database pre-flight failed${NC}"
     echo -e "${RED}        If Postgres is stopped, start it from the host:${NC}"
@@ -152,7 +156,7 @@ echo ""
 # Check that dev server IS running (via health endpoint, not lsof — works with Docker too)
 echo -e "${YELLOW}[SERVER] Checking dev server on port $PORT...${NC}"
 
-SERVER_HEALTHY=$(python3 -c "
+SERVER_HEALTHY=$("$VENV_PYTHON" -c "
 import urllib.request
 try:
     urllib.request.urlopen( '${BASE_URL}/health', timeout=3 )
@@ -185,7 +189,7 @@ echo -e "${GREEN}✓ Dev server is running on port $PORT${NC}"
 # Record original config block
 echo -e "${YELLOW}[CONFIG] Querying current server state...${NC}"
 
-ORIGINAL_BLOCK=$(python3 -c "
+ORIGINAL_BLOCK=$("$VENV_PYTHON" -c "
 import urllib.request, json
 try:
     resp = urllib.request.urlopen( '${BASE_URL}/api/server-info', timeout=5 )
@@ -205,7 +209,7 @@ echo -e "${GREEN}✓ Current config: $ORIGINAL_BLOCK${NC}"
 # Hot-swap to Testing config
 echo -e "${YELLOW}[CONFIG] Swapping to [Lupin: Testing] config block...${NC}"
 
-SWAP_RESULT=$(python3 -c "
+SWAP_RESULT=$("$VENV_PYTHON" -c "
 import urllib.request, json
 try:
     resp = urllib.request.urlopen( '${BASE_URL}/api/init?config_block_id=Lupin:+Testing', timeout=10 )
@@ -232,7 +236,7 @@ echo -e "${GREEN}✓ Config block: $SWAP_BLOCK${NC}"
 echo -e "${GREEN}✓ Database: $SWAP_DB_URL${NC}"
 
 # Verify swap via /api/server-info
-VERIFY_DB=$(python3 -c "
+VERIFY_DB=$("$VENV_PYTHON" -c "
 import urllib.request, json
 try:
     resp = urllib.request.urlopen( '${BASE_URL}/api/server-info', timeout=5 )
@@ -266,7 +270,7 @@ cd "$PROJECT_ROOT"
 
 # Run pytest and capture exit code
 set +e  # Don't exit on pytest failure
-"$PROJECT_ROOT/src/cosa/.venv/bin/pytest" src/tests/integration/ "${REMAINING_ARGS[@]}"
+"$VENV_PYTHON" -m pytest src/tests/integration/ "${REMAINING_ARGS[@]}"
 PYTEST_EXIT_CODE=$?
 set -e
 

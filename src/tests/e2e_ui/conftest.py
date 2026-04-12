@@ -28,6 +28,45 @@ BASE_URL = "http://localhost:7999"
 
 
 # ---------------------------------------------------------------------------
+# Deterministic Font Rendering for Visual Regression
+# ---------------------------------------------------------------------------
+
+@pytest.fixture( scope="session" )
+def browser_type_launch_args( browser_type_launch_args ):
+    """
+    Override Chromium launch args to stabilize font rendering across runs.
+
+    Headless Chromium's default font rendering uses LCD subpixel anti-aliasing
+    and platform-dependent font hinting, producing slightly different pixel
+    values depending on session context, cache state, and fontconfig config.
+    These flags disable the non-deterministic rendering paths so visual
+    regression baselines remain stable across cold/warm, isolated/full-suite,
+    and host/container execution modes.
+
+    Requires:
+        - browser_type_launch_args is the default pytest-playwright fixture
+
+    Ensures:
+        - Font hinting disabled (no rasterization variation between sessions)
+        - LCD subpixel rendering disabled (eliminates text ghosting in diffs)
+        - Color profile locked to sRGB (standardizes color pipeline)
+        - Device scale factor locked to 1 (prevents DPI-dependent rendering)
+
+    See src/rnd/v0.1.6/2026.04.10-visual-regression-cold-warm-drift.md
+    """
+    return {
+        **browser_type_launch_args,
+        "args": [
+            *browser_type_launch_args.get( "args", [] ),
+            "--font-render-hinting=none",
+            "--disable-lcd-text",
+            "--force-color-profile=srgb",
+            "--force-device-scale-factor=1",
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Test ordering — force visual regression to run FIRST
 # ---------------------------------------------------------------------------
 
