@@ -4,8 +4,6 @@ Last updated: 2026-04-12 (Session 248e740e — TFE forensics capture committed t
 
 ## Pending — HIGH PRIORITY
 
-- [ ] [LUPIN] **Archive history.md (WARNING: 85.4% / 21.4K tokens)** — Deferred from Session 9056c113 session-end. Approaching 25k limit. Archive sessions older than 14 days as the first action of next session. Use `/history-management mode=archive`.
-
 - [ ] [LUPIN] **CoSA submodule commits for Session 9056c113 work** — Checkpoint-resume + completion report edits. NOTE: Session 248e740e committed 4 TFE forensics-capture files (`agents/test_fix_expediter/{job,orchestrator}.py`, `rest/job_persistence.py`, `rest/routers/queues.py`) as `660dcd8`. Still pending from 9056c113: `rest/job_state.py` (STALLED + RESUMABLE_STATES), `rest/agentic_job_factory.py` (resume_job factory), `rest/routers/queues.py` (POST /api/jobs/{id}/resume-from-checkpoint — may now conflict with dead-queue handler added in 660dcd8, verify on next CoSA session), `agents/test_fix_expediter/state.py` (exceptions + save/load_checkpoint). User commits from CoSA repo context per nested-repo rule.
 
 - [ ] [LUPIN] **Phase D follow-ups: file-path resume + CLI flag** — Deferred from Session 9056c113 Phase D core. Need (a) `POST /api/test-fix-expediter/resume-from-file` endpoint with auto-detection for `.md` plan doc (resume from Phase 3) vs `.json` checkpoint (resume from checkpoint's ordinal) vs `tfe-*` job ID (shortcut to stalled resume) — mirrors Presentation Generator `render_only` + `yaml_path` pattern (`routers/presentation_generator.py:40,172-186`). (b) "Resume from" text input on TFE submission card in `notifications.js`. (c) `--resume <job_id>` and `--resume-from <path>` flags in `src/tests/e2e/run-tfe-live-e2e.sh`. Plan doc: `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/14-checkpoint-resume-and-completion-report.md` Steps D4b-D4d + D5.
@@ -43,7 +41,11 @@ Last updated: 2026-04-12 (Session 248e740e — TFE forensics capture committed t
 - [ ] [LUPIN] **Automated E2E testing workflow** — Design standard pattern for scheduling E2E/integration test runs as monopolized jobs at user-specified times. Becomes the modus operandi for all post-coding verification.
 - [ ] [LUPIN] **Full E2E re-run needed to verify 2 visual regression errors are pre-existing** (test_visual_regression.py profile + notifications)
 
-## Completed this session (248e740e, 2026-04-12)
+## Completed this session (1cfcdf73 follow-on, 2026-04-12)
+
+- [x] [LUPIN] **Archive history.md — 03.26 → 04.07 block (CRITICAL token gate resolved)** — Session 1cfcdf73 follow-on. File was at 23,393 tokens (93.5%, CRITICAL). Split at 04.07/04.08 day boundary per canonical workflow — BFE Phase 6 + Sonnet-pivot block archived, TFE + UPE + watchdog block retained. New archive `history/2026-03-26-to-04-07-history.md` (33 sessions, 10,818 tokens). Main `history.md` now 12,607 tokens (50.4%, HEALTHY) — 16 sessions spanning 04.08 → 04.12. Updated `history/README.md` index with 3 new rows (new archive + 2 pre-existing unindexed archives `2026-03-13-to-26` and `2026-03-03-to-12`). Token counts measured via canonical `~/.claude/scripts/get-token-count.sh`. No CoSA touches.
+
+## Completed earlier this session (248e740e, 2026-04-12)
 
 - [x] [LUPIN] **TFE forensics capture — CoSA submodule commit + push** — Session 248e740e. Committed 4 working-tree-only CoSA edits (`agents/test_fix_expediter/{job,orchestrator}.py`, `rest/job_persistence.py`, `rest/routers/queues.py`) as CoSA commit `660dcd8`: BFE-pattern lifecycle + traceback capture + voice routing fix (TARGET_USER/SENDER_ID) + urgent crash notification + plan_path artifact surfacing; removed invalid `notification_type` kwarg from `notify_progress()`; added `test_fix_expediter` to `AGENTIC_JOB_TYPES` allowlist; new dead-queue handler surfacing partial artifacts from failed agentic jobs. Pushed CoSA (`f210d10..660dcd8`) and Lupin parent (`6c04cd9..685c134` — 4 prior-session commits) to origin.
 
