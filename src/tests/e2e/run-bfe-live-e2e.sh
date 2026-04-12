@@ -15,11 +15,21 @@
 #                          no real git operations, no real resubmit.
 #                          Validates queue flow, watchdog dispatch, job
 #                          lifecycle, artifact storage. $0.
-#   --live               : BFE runs with dry_run=False. Real Opus+Sonnet
-#                          SDK calls, real git branch + commits + PR, real
-#                          auto-resubmit cycle. ~$2-5 per run (BFE budget
-#                          is $2 USD default). Schedule via /schedule-tests
-#                          skill, not ad hoc.
+#   --live               : BFE runs with dry_run=False. Real SDK calls,
+#                          real git branch + commits + PR, real auto-resubmit
+#                          cycle. Models default to INI (production: Opus lead
+#                          + Sonnet worker). ~$2-5 per run.
+#   --cheap              : Orthogonal to --live / --dry-run. Overrides models
+#                          to Sonnet lead + Sonnet worker for cost savings
+#                          (~60-75% reduction). Safe for trivially-fixable
+#                          fixtures. Combine with --live for cheap real runs
+#                          (~$0.50-1.50). No effect on --dry-run (stubbed).
+#
+# COMBINATIONS:
+#   (no flag)            ≡ --dry-run          : stubbed, $0, model irrelevant
+#   --live               : full Opus+Sonnet   : ~$2-5
+#   --live --cheap       : Sonnet-only live   : ~$0.50-1.50
+#   --dry-run --cheap    : stubbed, $0        : (cheap flag effectively inert)
 #
 # PRECONDITIONS:
 #   - Lupin FastAPI test server running at $BASE_URL
@@ -37,20 +47,28 @@
 #   LUPIN_TEST_BASE_URL  - Full test server URL (overrides PORT if set)
 #
 # USAGE:
-#   ./src/tests/e2e/run-bfe-live-e2e.sh [--dry-run|--live]
+#   ./src/tests/e2e/run-bfe-live-e2e.sh [--dry-run|--live] [--cheap]
 #
 # Created: 2026-04-12 Session 85b05d1d (BFE live E2E parity with TFE)
+# Updated: 2026-04-12 Session 85b05d1d (--cheap flag for Sonnet-only cost savings)
 #
 
 set -e
 
+# Cheap-tier model constants (Sonnet lead + Sonnet worker).
+# Change these to adjust the cheap tier globally; see --cheap flag.
+CHEAP_LEAD_MODEL="claude-sonnet-4-6"
+CHEAP_WORKER_MODEL="claude-sonnet-4-6"
+
 MODE="dry-run"
+CHEAP="false"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) MODE="dry-run"; shift ;;
         --live)    MODE="live"; shift ;;
+        --cheap)   CHEAP="true"; shift ;;
         -h|--help)
-            head -50 "$0" | grep -E "^#"
+            head -60 "$0" | grep -E "^#"
             exit 0
             ;;
         *)
@@ -80,6 +98,11 @@ echo "=================================================================="
 echo "BFE Live E2E Test Driver (${MODE} mode)"
 echo "Target: ${BASE_URL}"
 echo "Log:    ${LOG_FILE}"
+if [[ "${CHEAP}" == "true" ]]; then
+    echo "Models: ${CHEAP_LEAD_MODEL} (lead) + ${CHEAP_WORKER_MODEL} (worker) [--cheap]"
+else
+    echo "Models: INI defaults (production: Opus lead + Sonnet worker)"
+fi
 echo "=================================================================="
 
 # ---------------------------------------------------------------------------
@@ -167,6 +190,22 @@ echo ""
 echo "[3/8] Submitting known-bad job (from fixture)..."
 
 SUBMIT_PAYLOAD=$(cat "${FIXTURE}")
+
+# When --cheap, inject bfe_* model override keys into the fixture's args dict.
+# The DeadQueueWatchdog reads these from failed_job.original_args and propagates
+# them to the BFE job it spawns. This way we can control the BFE's model tier
+# without bypassing the watchdog dispatch path (preserves end-to-end validation).
+if [[ "${CHEAP}" == "true" ]]; then
+    SUBMIT_PAYLOAD=$(echo "${SUBMIT_PAYLOAD}" | python3 -c "
+import sys, json
+payload = json.load( sys.stdin )
+payload.setdefault( 'args', {} )
+payload[ 'args' ][ 'bfe_lead_model_override' ]   = '${CHEAP_LEAD_MODEL}'
+payload[ 'args' ][ 'bfe_worker_model_override' ] = '${CHEAP_WORKER_MODEL}'
+print( json.dumps( payload ) )
+")
+    echo "  [MODELS] Injected bfe_lead/worker_model_override=${CHEAP_LEAD_MODEL} into fixture args"
+fi
 
 ORIGINAL_RESP=$(curl -sf -X POST "${BASE_URL}/api/push" \
     -H "Authorization: Bearer ${TOKEN}" \

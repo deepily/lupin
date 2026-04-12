@@ -11,8 +11,20 @@
 #                          Used during development + CI.
 #   --live               : TFE runs with dry_run=False. Real SDK calls,
 #                          real git branch + commits + PR (trust level
-#                          permitting), real validation rerun. Expensive —
-#                          schedule via /schedule-tests skill, not ad hoc.
+#                          permitting), real validation rerun. Models default
+#                          to INI (production: Opus lead + Sonnet worker).
+#                          ~$2-8 per run. Schedule via /schedule-tests skill.
+#   --cheap              : Orthogonal to --live / --dry-run. Overrides models
+#                          to Sonnet lead + Sonnet worker for cost savings
+#                          (~60-75% reduction). Safe for trivially-fixable
+#                          fixtures. Combine with --live for cheap real runs
+#                          (~$0.50-2). No effect on --dry-run (stubbed).
+#
+# COMBINATIONS:
+#   (no flag)            ≡ --dry-run          : stubbed, $0, model irrelevant
+#   --live               : full Opus+Sonnet   : ~$2-8
+#   --live --cheap       : Sonnet-only live   : ~$0.50-2
+#   --dry-run --cheap    : stubbed, $0        : (cheap flag effectively inert)
 #
 # PRECONDITIONS:
 #   - Lupin FastAPI test server running at $BASE_URL
@@ -28,20 +40,26 @@
 #   LUPIN_TEST_BASE_URL  - Full test server URL (overrides PORT if set)
 #
 # USAGE:
-#   ./src/tests/e2e/run-tfe-live-e2e.sh [--dry-run|--live]
+#   ./src/tests/e2e/run-tfe-live-e2e.sh [--dry-run|--live] [--cheap]
 #
-# Port refactor: 2026-04-12 Session 85b05d1d (dual-container architecture
-#                alignment — matches run-integration-tests.sh + run-e2e-ui-tests.sh)
+# Port refactor:     2026-04-12 Session 85b05d1d (dual-container alignment)
+# --cheap flag:      2026-04-12 Session 85b05d1d (Sonnet-only cost savings)
 
 set -e
 
+# Cheap-tier model constants (Sonnet lead + Sonnet worker).
+CHEAP_LEAD_MODEL="claude-sonnet-4-6"
+CHEAP_WORKER_MODEL="claude-sonnet-4-6"
+
 MODE="dry-run"
+CHEAP="false"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) MODE="dry-run"; shift ;;
         --live)    MODE="live"; shift ;;
+        --cheap)   CHEAP="true"; shift ;;
         -h|--help)
-            head -40 "$0" | grep -E "^#"
+            head -50 "$0" | grep -E "^#"
             exit 0
             ;;
         *)
@@ -116,6 +134,19 @@ if [[ "${MODE}" == "dry-run" ]]; then
     DRY_RUN_ARG="true"
 fi
 
+# Cheap-mode overrides (directly on TFE since we're submitting TFE, not a
+# failing job routed via watchdog). Emitted as extra keys in the args dict;
+# the agentic_job_factory reads them and applies them to the TFE's config.
+MODEL_OVERRIDE_JSON=""
+if [[ "${CHEAP}" == "true" ]]; then
+    MODEL_OVERRIDE_JSON=",
+    \"lead_model_override\":   \"${CHEAP_LEAD_MODEL}\",
+    \"worker_model_override\": \"${CHEAP_WORKER_MODEL}\""
+    echo "  [MODELS] Using ${CHEAP_LEAD_MODEL} (lead) + ${CHEAP_WORKER_MODEL} (worker) [--cheap]"
+else
+    echo "  [MODELS] Using INI defaults (production: Opus lead + Sonnet worker)"
+fi
+
 SUBMIT_PAYLOAD=$(cat <<EOF
 {
   "question": "agent router go to test fix expediter",
@@ -123,7 +154,7 @@ SUBMIT_PAYLOAD=$(cat <<EOF
     "remediation_snapshot_path": "${IO_SNAPSHOT}",
     "source_test_suite_job_id": "ts-e2e-${TIMESTAMP}",
     "original_test_types": "unit,integration",
-    "dry_run": "${DRY_RUN_ARG}"
+    "dry_run": "${DRY_RUN_ARG}"${MODEL_OVERRIDE_JSON}
   }
 }
 EOF

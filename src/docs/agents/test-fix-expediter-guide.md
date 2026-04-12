@@ -414,6 +414,23 @@ with type coercion. Source: `src/cosa/agents/test_fix_expediter/config.py`. The
 dataclass exposes `budget_usd` as a post-init alias over `cost_cap_usd` so the
 shared `FixExecutor` (which reads `config.budget_usd`) works unchanged.
 
+### Per-invocation model overrides
+
+`lead model` and `worker model` can be overridden per job submission via
+`args.lead_model_override` / `args.worker_model_override`. The job class
+stores them as `self.lead_model_override` / `self.worker_model_override`
+and applies them in `_execute()` after `from_config()` loads the INI defaults.
+
+Unlike BFE (which gets spawned by a watchdog), TFE is typically submitted
+directly via `/api/push` (or by `TestSuiteCompletionWatchdog` during auto-fix).
+Either path can include the override keys in `args_dict`, and the factory
+(`agentic_job_factory.py`) passes them straight to the constructor.
+
+**Primary use case**: `./src/tests/e2e/run-tfe-live-e2e.sh --live --cheap`
+runs TFE with Sonnet lead + Sonnet worker for ~60-75% cost reduction on
+trivially-fixable E2E fixtures. Watchdog-dispatched TFE (real test-suite
+failures) leaves overrides unset → use INI defaults.
+
 ---
 
 ## 7. How to Enable / Disable Auto-Fix

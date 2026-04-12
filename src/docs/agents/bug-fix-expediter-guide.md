@@ -258,6 +258,24 @@ entries live in `src/conf/lupin-app-splainer.ini`.
 with type coercion (int/float/bool/string) based on dataclass field annotations.
 See `src/cosa/agents/bug_fix_expediter/config.py`.
 
+### Per-invocation model overrides
+
+`lead model` and `worker model` can be overridden per job submission via
+`args.lead_model_override` / `args.worker_model_override`. The job class
+stores them as `self.lead_model_override` / `self.worker_model_override`
+and applies them in `_execute()` after `from_config()` loads the INI defaults.
+
+**Watchdog-spawned BFE**: if the originally failed job carried
+`bfe_lead_model_override` / `bfe_worker_model_override` in its
+`args_dict`, `DeadQueueWatchdog` propagates them to the spawned BFE (same
+pattern as `dry_run` propagation). This lets the E2E script's `--cheap`
+flag flow through the full watchdog → BFE path without bypassing dispatch.
+
+**Primary use case**: `./src/tests/e2e/run-bfe-live-e2e.sh --live --cheap`
+runs BFE with Sonnet lead + Sonnet worker for ~60-75% cost reduction on
+trivially-fixable E2E fixtures. Production dispatch paths (real failures,
+not E2E) leave overrides unset → use INI defaults.
+
 ---
 
 ## 5. Trust-to-Git Mapping
