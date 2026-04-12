@@ -6872,6 +6872,23 @@ class NotificationsUI {
                     <div class="job-report-link" style="${job.report_path ? '' : 'display: none'}">
                         ${this.renderReportLinkSection( job.report_path, job.agent_type, job.yaml_path, job.remediation_snapshot_path )}
                     </div>
+                    <!-- Fix 8c: partial artifacts from failed-before-completion runs (dead queue only).
+                         Surfaces TFE/BFE plan files + remediation snapshots that were written before
+                         the job crashed, so users can recover partial diagnoses without grepping
+                         docker logs. Links to /app/docs?path= for rendered markdown viewing.
+                         See: src/rnd/v0.1.6/2026.04.11-tfe-forensics-capture-plan.md -->
+                    <div class="job-partial-artifacts" style="${( queueName === 'dead' && ( job.plan_path || ( job.remediation_snapshot_path && !job.report_path ) ) ) ? '' : 'display: none'}">
+                        ${queueName === 'dead' && job.plan_path ? `
+                            <div class="partial-artifact">
+                                <a href="/app/docs?path=${encodeURIComponent( job.plan_path || '' )}" target="_blank" class="report-link-btn">📋 Partial Plan (written before failure)</a>
+                            </div>
+                        ` : ''}
+                        ${queueName === 'dead' && job.remediation_snapshot_path && !job.report_path ? `
+                            <div class="partial-artifact">
+                                <a href="/app/docs?path=${encodeURIComponent( job.remediation_snapshot_path || '' )}" target="_blank" class="report-link-btn">🔍 Remediation Snapshot</a>
+                            </div>
+                        ` : ''}
+                    </div>
                     <div class="job-cost-summary" style="${job.cost_summary ? '' : 'display: none'}">
                         ${job.cost_summary ? this.renderCostSummaryContent( job.cost_summary, job.duration_seconds ) : ''}
                     </div>

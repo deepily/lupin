@@ -153,6 +153,36 @@
 
 ---
 
+### 2026.04.11 - Session 1b8c1cc0 (continued) | TFE forensics fix — error capture, persistence, dead-queue UI
+
+**Context**: A real TFE job (`tfe-d9e6b50f`) ran for ~4.5 minutes, completed Phases 0-2 (clustering + diagnosis + proposal), wrote a full plan file to disk, then died at the Phase 2 voice gate with the UI showing only `"Unknown error"`. Forensic investigation this session reconstructed the failure from docker logs + filesystem artifacts and cataloged six independent bugs + a root-cause trigger that collaborate to destroy TFE's forensic signal on death.
+
+**Accomplishments**:
+- Forensic investigation: traced tfe-d9e6b50f's death to `present_choices failed: Cannot resolve target_user` (TFE never set `cosa_interface.TARGET_USER`); recovered the Phase 2 plan file from disk (`io/swe-team/plans/.../c1-plan.md`) which contained a correct diagnosis of 12 stale visual baselines
+- Fix 1: added `test_fix_expediter` to `AGENTIC_JOB_TYPES` frozenset — was missing, causing zero TFE rows in `job_history` ever
+- Fix 2: rewrote TFE `do_all()` to BFE pattern — uses `self.state` (JobState enum) not `self.status` (string), captures full traceback into `self.error`, prints unconditionally to stdout (not gated on `self.debug`)
+- Fix 3+7: wrapped TFE `_execute()` in outer try/except with urgent voice notification (full traceback in abstract field, no truncation); set `bug_fix_expediter.cosa_interface.TARGET_USER` + `SENDER_ID` before orchestrator phases (TFE's cosa_interface is a thin delegator that reads BFE's module-level state)
+- Fix 6: removed `notification_type="progress"` kwarg from TFE's `notify_progress()` calls — was causing hundreds of `[TFE notify error]` log lines per run (kwarg doesn't exist on the method)
+- Fix 8a: TFE stores `self.artifacts["plan_path"] = orchestrator.last_plan_path` after Phase 2 so the artifact survives later failures
+- Fix 8b: added dead-queue branch in `queues.py` that extracts `plan_path`, `remediation_snapshot_path`, `report_path`, `yaml_path`, `cost_summary` from dead agentic jobs (previously fell through to generic todo/run branch with no artifacts)
+- Fix 8c: `renderJobCard()` in `notifications.js` shows clickable "Partial Plan" and "Remediation Snapshot" links on dead cards via `/app/docs?path=` endpoint (reuses existing report-link UI pattern)
+- Plan serialized: `src/rnd/v0.1.6/2026.04.11-tfe-forensics-capture-plan.md` (39 KB)
+- New TODO entry: TFE Phase 6 Live E2E (mirrors BFE Phase 6 Live E2E, separate test)
+
+**Files modified** (CoSA submodule — 4 files, awaiting CoSA commit):
+- `rest/job_persistence.py`, `rest/routers/queues.py`, `agents/test_fix_expediter/job.py`, `agents/test_fix_expediter/orchestrator.py`
+
+**Files modified** (Lupin parent — 1 modified, 2 new, 2 docs):
+- `src/fastapi_app/static/js/notifications.js` (dead-card partial artifacts)
+- `src/tests/unit/test_tfe_forensics.py` (new — 11 assertions)
+- `src/tests/smoke/test_tfe_error_capture_smoke.py` (new — 5-part smoke)
+- `TODO.md` (TFE live E2E entry added)
+- `src/rnd/v0.1.6/2026.04.11-tfe-forensics-capture-plan.md` (new plan)
+
+**Test status**: 87/87 unit tests passing (76 pre-existing + 11 new); smoke test all 5 parts pass; zero `[TFE notify error]` log lines post-fix
+
+---
+
 ### 2026.04.10 - Session 1b8c1cc0 | BFE Phase 6 dry-run smoke test + CJ Flow persistence gaps fix
 
 **Context**: Two back-to-back planning cycles in one session. (1) Plan + implement the Phase 6 dry-run integration smoke test that the BFE parent plan left as Step 8. (2) When end-to-end verification exposed three persistence gaps in `job_history` (`session_id`, `routing_command`, `metadata_json.original_args` all NULL for REST-submitted agentic jobs), plan + fix those too. A bonus regex bug was surfaced while debugging the live server.
