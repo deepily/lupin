@@ -349,6 +349,10 @@ class TestSweTeamDryRunCoverage:
             # dry_run conditional_args — whitelisted here to allow dry-run
             # phrases in its training templates.
             "synthetic-data-agent-routing-test-fix-expediter.txt",
+            # Session 9056c113 doc 16 (2026-04-12): TFE Resume is a voice-driven
+            # resume command that accepts a free-form resume_from description
+            # (job ID, plan path, or natural language). Whitelisted.
+            "synthetic-data-agent-routing-test-fix-expediter-resume.txt",
         }
         data_dir     = cu.get_project_root() + TRAINING_DATA_DIR
         contaminated = {}

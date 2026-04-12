@@ -1874,6 +1874,14 @@ class NotificationsUI {
             });
         }
 
+        // TFE Resume submit button (session 9056c113 — file-path resume)
+        const submitTFEResumeBtn = document.getElementById( 'submit-tfe-resume-job' );
+        if ( submitTFEResumeBtn ) {
+            submitTFEResumeBtn.addEventListener( 'click', () => {
+                this.submitTFEResume();
+            });
+        }
+
         // ── Job Message Send: Event delegation on todo + run queue containers ──
         // Handles dynamically-created job message inputs via bubbling
         this._setupJobMessageDelegation( 'run-jobs-container' );
@@ -7162,6 +7170,111 @@ class NotificationsUI {
                 resumeBtn.innerText = '▶ Resume from Checkpoint';
             }
         }
+    }
+
+    async submitTFEResume() {
+        /**
+         * Smart TFE resume from free-form input (session 9056c113).
+         *
+         * Sends the resume_from text to /api/test-fix-expediter/resume-from which
+         * auto-detects the input type (job ID, plan doc path, natural language) and
+         * either auto-resumes (single match) or returns candidates for disambiguation.
+         */
+        const input = document.getElementById( 'tfe-resume-input' ).value.trim();
+        if ( !input ) {
+            alert( 'Enter a job ID, plan path, or description.' );
+            return;
+        }
+
+        const statusEl     = document.getElementById( 'tfe-resume-submit-status' );
+        const candidatesEl = document.getElementById( 'tfe-resume-candidates' );
+        const submitBtn    = document.getElementById( 'submit-tfe-resume-job' );
+
+        if ( submitBtn )     submitBtn.disabled = true;
+        if ( statusEl )      statusEl.textContent = 'Resolving...';
+        if ( candidatesEl )  candidatesEl.style.display = 'none';
+
+        try {
+            const response = await this.authedFetch( '/api/test-fix-expediter/resume-from', {
+                method  : 'POST',
+                headers : { 'Content-Type': 'application/json' },
+                body    : JSON.stringify( { resume_from: input } )
+            });
+
+            if ( !response.ok ) {
+                const errData = await response.json().catch( () => ({}) );
+                throw new Error( errData.detail || `HTTP ${response.status}` );
+            }
+
+            const data = await response.json();
+
+            if ( data.status === 'ambiguous' ) {
+                // Multi-match disambiguation
+                this._renderTFEResumeCandidates( data.candidates || [], candidatesEl );
+                if ( statusEl ) {
+                    statusEl.textContent = `Found ${( data.candidates || [] ).length} possible matches — pick one.`;
+                }
+                return;
+            }
+
+            if ( data.status === 'resumed' ) {
+                const st = data.source_type || 'unknown';
+                const phase = data.phase_name || `phase ${data.resume_from_phase}`;
+                this.showToast( `Resumed (${st}) from ${phase} → ${data.resumed_job_id}`, 'success' );
+                if ( statusEl ) {
+                    statusEl.textContent = `✓ Resumed via ${st}: ${data.resumed_job_id} from ${phase}`;
+                }
+                document.getElementById( 'tfe-resume-input' ).value = '';
+            }
+        } catch ( error ) {
+            this.error( '[TFE-RESUME] submitTFEResume failed:', error );
+            if ( statusEl ) statusEl.textContent = `✗ ${error.message}`;
+        } finally {
+            if ( submitBtn ) submitBtn.disabled = false;
+        }
+    }
+
+    _renderTFEResumeCandidates( candidates, containerEl ) {
+        /**
+         * Render disambiguation list for ambiguous TFE resume matches.
+         * Each candidate becomes a clickable row that re-submits with the exact job ID.
+         */
+        if ( !containerEl ) return;
+        if ( !candidates.length ) {
+            containerEl.style.display = 'none';
+            return;
+        }
+
+        const html = candidates.map( ( c, i ) => {
+            const conf = c.confidence != null ? `${Math.round( c.confidence * 100 )}%` : '?';
+            const stalled = c.stalled_at ? `stalled ${c.stalled_at}` : '';
+            const summary = this.escapeHtml( c.summary || '' );
+            const jobId = this.escapeHtml( c.job_id );
+            const reason = this.escapeHtml( c.reason || '' );
+            return `
+                <div class="tfe-resume-candidate" style="border: 1px solid #ced4da; border-radius: 4px; padding: 8px; margin-bottom: 4px; cursor: pointer;"
+                     onclick="window.notificationsUI?._pickTFEResumeCandidate('${jobId}')">
+                    <strong>${conf}</strong> · <code>${jobId}</code>
+                    <span style="color: #888;">${stalled}</span>
+                    <div style="font-size: 11px; color: #666;">${summary}${reason ? ' — ' + reason : ''}</div>
+                </div>
+            `;
+        }).join( '' );
+
+        containerEl.innerHTML = `
+            <div style="font-size: 12px; color: #666; margin-bottom: 4px;">
+                Click a candidate to resume it:
+            </div>
+            ${html}
+        `;
+        containerEl.style.display = 'block';
+    }
+
+    _pickTFEResumeCandidate( jobId ) {
+        /** User picked a candidate from the disambiguation list — resubmit with exact job ID. */
+        const inputEl = document.getElementById( 'tfe-resume-input' );
+        if ( inputEl ) inputEl.value = jobId;
+        this.submitTFEResume();
     }
 
     async toggleJobPause( jobId, shouldPause ) {

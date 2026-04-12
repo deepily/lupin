@@ -1,6 +1,6 @@
 # Agentic Voice Workflow: Complete Lifecycle Guide
 
-**Version**: 3.0
+**Version**: 3.2
 **Created**: 2026-01-27
 **Updated**: 2026-04-12
 **Purpose**: Complete lifecycle guide — CONCEPT → BUILD → VALIDATE — for creating CJ Flow agentic background jobs with voice I/O and queue integration
@@ -3257,19 +3257,93 @@ TFE (Phase 2 aggregate select), BFE (Phase 2 fix selection, Phase 5 trust confir
 9. **UI: Resume button** on stalled job cards + "Resume from" text input on agent submission form
    (mirrors Presentation Generator's `render_only` + `yaml_path` auto-detection pattern).
 
-### Artifact-Based Resume Pattern
+### Artifact-Based Resume (Phase 12b)
 
-Jobs can also be resumed from **file artifacts** (plan docs, checkpoint JSON) rather than just
-stalled job IDs. The system auto-detects the file type and infers the resume phase:
+Jobs can be resumed from **file paths** or **natural-language descriptions**, not just stalled
+job IDs. Mirrors Presentation Generator's `render_only` + `yaml_path` auto-detection pattern.
 
-| Agent | File Type | Resume Phase |
-|-------|-----------|-------------|
-| TFE | `.md` plan doc | Phase 3 (fixing) |
-| TFE | `.json` checkpoint | Checkpoint's ordinal |
+**Reference implementation**: TFE (Test Fix Expediter) — see
+`src/rnd/v0.1.6/2026.04.10-test-fix-expediter/15-file-path-resume-and-voice-parsing.md` and
+`src/cosa/agents/test_fix_expediter/resume_resolver.py`.
+
+**Four input types → one endpoint**:
+
+```
+User input (typed or voice) → smart dispatcher
+                                  │
+    ┌─────────────────────────────┼─────────────────────────────┐
+    │            │              │                              │
+  tfe-*        *.md         *.json                          natural
+(job ID)   (plan doc)  (checkpoint)                         language
+    │            │              │                              │
+    └────────────┴──────────────┴──────────┬───────────────────┘
+                                           │
+                                    LLM fuzzy match
+                                           │
+                                           ▼
+                           resume_job(resolved_id_hash)
+```
+
+**Components**:
+
+1. **Resume resolver module** (`{agent}/resume_resolver.py`):
+   - `ResumeTarget` Pydantic model (job_id, source_type, confidence, candidates, diagnostic)
+   - `resolve_resume_target(resume_from, user_email)` → dispatches by input shape
+   - Exact match paths: job ID (no file I/O), plan doc path (filename regex + DB lookup)
+   - Fuzzy path: `list_resume_candidates()` + `fuzzy_match_candidates()` (LLM-ranked)
+
+2. **Smart endpoint** (`POST /api/{agent}/resume-from`):
+   - Accepts `resume_from: str` (free-form)
+   - Returns `{status: "resumed"|"ambiguous"|"not_found", ...}`
+   - Ambiguous case returns candidates for UI disambiguation
+   - Delegates single-match to existing `resume_job(id_hash)` factory
+
+3. **LLM fuzzy match infrastructure** (new per agent):
+   - New INI keys: `llm spec key for {agent} resume matching`, `prompt template for {agent} resume matching`
+   - Splainer entries for both keys
+   - XML prompt template in `src/conf/prompts/{agent}-resume-matching.txt` using `{{PYDANTIC_XML_EXAMPLE}}` marker
+   - XML response Pydantic model (e.g., `TFEResumeMatchResponse`) with `matches: str` field + `get_matches_list()`
+   - Auto-select threshold: confidence >= 0.9 AND status == "stalled"
+   - Disambiguation: return top 3 candidates with confidence + reason
+
+4. **UI submission card** in notifications dashboard:
+   - Textarea for free-form input (job ID, path, or description)
+   - Submit button → POST to `/api/{agent}/resume-from`
+   - Candidate list div that renders ambiguous responses as clickable rows
+   - Click candidate → re-submits with exact job ID for auto-resume
+
+5. **Voice training data**:
+   - 30+ templates covering date/status/content/ID phrasings
+   - Examples: "the plan from April 12", "the most recent stalled one", "job tfe-*"
+   - Add to `src/ephemera/prompts/data/` + register in `agent-router-agentic-commands.json`
+
+**Pattern anchors by agent**:
+
+| Agent | Primary input | Resume phase |
+|-------|---------------|--------------|
+| TFE | `.md` plan doc | Phase 3 (fixing) — skips cluster/diagnose/propose |
+| TFE | `.json` checkpoint | Checkpoint's ordinal (arbitrary) |
 | Presentation | `.yaml` intermediate | Phase 6 (render-only) |
 | Podcast | `.md` script | Audio generation phase |
 
-This pattern is exposed via `POST /api/{agent}/resume-from-file` with a `resume_from` field.
+**When to add**: Any agent with long-running phases that produces durable artifacts
+(plan docs, outlines, scripts, YAML intermediates). Without this, users must remember
+exact job IDs to resume anything.
+
+### Phase 12b TodoWrite Template
+
+```
+[LUPIN] Create {agent}/resume_resolver.py with ResumeTarget + dispatcher
+[LUPIN] Add {Agent}ResumeMatchResponse to io_models/xml_models.py
+[LUPIN] Create src/conf/prompts/{agent}-resume-matching.txt template
+[LUPIN] Add INI keys: llm spec key + prompt template for {agent} resume matching
+[LUPIN] Add matching splainer entries
+[LUPIN] Add POST /api/{agent}/resume-from endpoint with TFEResumeFromRequest model
+[LUPIN] Add UI submission card + submitTFEResume() + candidate disambiguation
+[LUPIN] Unit tests for resolver (dispatch + job ID + plan path + fuzzy match)
+[LUPIN] Unit tests for endpoint (resumed / ambiguous / not_found / 400 / 404 paths)
+[LUPIN] (Optional) Voice routing training data + expeditor handler
+```
 
 ### Phase 12 TodoWrite Template
 
@@ -4247,7 +4321,7 @@ For complete working examples, see:
 | podcast_generator | `src/cosa/agents/podcast_generator/` | File input, TTS generation, audio stitching, script review checkpoint |
 | deep_research_to_podcast | `src/cosa/agents/deep_research_to_podcast/` | Chained workflow pattern |
 | test_fix_expediter | `src/cosa/agents/test_fix_expediter/` | Multi-cluster, checkpoint-resume, completion report, voice gate stall |
-| bug_fix_expediter | `src/cosa/agents/bug_fix_expediter/` | Dead-queue repair, shared FixExecutor, trust-level git strategy |
+| bug_fix_expediter | `src/cosa/agents/bug_fix_expediter/` | Dead-queue repair, shared FixExecutor, trust-level git strategy, checkpoint-resume (re-exports TFE exception types), completion report |
 
 ### Key Files to Reference
 
@@ -4330,6 +4404,8 @@ src/cosa/rest/routers/queues.py                     # POST /api/jobs/{id}/resume
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 3.2 | 2026-04-12 | Phase E cross-agent rollout: BFE gets completion voice report + checkpoint-resume (re-exports TFE exception types VoiceGateTimeoutError / StalledException / CheckpointData — single source of truth). Podcast Generator gets completion voice report (no checkpoint-resume; audio generation is stateless). 18 new unit tests across 3 files (4 BFE completion + 3 Podcast completion + 11 BFE checkpoint). Session 9056c113 Phase E. |
+| 3.1 | 2026-04-12 | Phase 12b (Artifact-Based Resume) expanded with full component breakdown — ResumeTarget model, smart endpoint, LLM fuzzy match infrastructure (INI keys + XML response model + prompt template), UI submission card, voice training data. TFE reference implementation complete (Session 9056c113 Phase 2-5 follow-ups). |
 | 3.0 | 2026-04-12 | Phase 11 (Completion Report) + Phase 12 (Checkpoint-Resume) added. STALLED JobState for voice gate timeouts. Artifact-based resume pattern. Cross-agent patterns from TFE forensics (Session 9056c113). Reference implementations updated with TFE + BFE entries. |
 | 2.1 | 2026-02-07 | Completeness review: fixed training template naming + JSON path (Surface 4), added agent_registry.py + agentic_job_factory.py registration (Phase 5), added FastAPI router template (Phase 5b), added notification UI submission card guide (Surface 3), added artifact storage pattern + WebSocket state transition notes (Phase 5), added model string convention note (Phase 6), expanded final checklist |
 | 2.0 | 2026-02-06 | Complete lifecycle guide: Part I CONCEPT, Part II BUILD expanded (Phases 6-10), Part III VALIDATE Testing Ladder (5 surfaces), Part IV Reference Implementations |

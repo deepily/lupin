@@ -37,6 +37,8 @@
 | [12-config-inventory.md](12-config-inventory.md) | 12 INI keys + matching splainer entries | Active |
 | [13-peft-training-data-plan.md](13-peft-training-data-plan.md) | Voice routing training templates + xml_coordinator | Active |
 | [14-checkpoint-resume-and-completion-report.md](14-checkpoint-resume-and-completion-report.md) | Checkpoint-resume for stalled voice gates + TFE completion voice report | Active |
+| [15-file-path-resume-and-voice-parsing.md](15-file-path-resume-and-voice-parsing.md) | Smart file-path resume endpoint + voice path parsing (LLM fuzzy match against stalled jobs + plan docs) | Active |
+| [16-final-mile-mcp-timeouts-voice-resume-e2e.md](16-final-mile-mcp-timeouts-voice-resume-e2e.md) | MCP timeout detection (trigger VoiceGateTimeoutError via exit_code==2) + voice expeditor integration for TFE resume + live E2E validation | Active |
 
 ### Execution log docs (placeholders — updated during work)
 

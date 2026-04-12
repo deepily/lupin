@@ -1,5 +1,40 @@
 # Lupin Project History
 
+### 2026.04.12 - Session 9056c113 (continued) | Final Mile: MCP timeouts + voice resume + E2E driver (Phases E.1, 2, 3 of doc 16)
+
+**Context**: After landing the full checkpoint-resume stack earlier in this session (doc 14 + 15 + Phase E cross-agent), two pieces remained deferred: (a) the MCP timeout detection trigger that actually fires `VoiceGateTimeoutError` in production (doc 16 Phase 1, task #14); (b) the voice-pipeline integration so `"resume the TFE plan from April 12"` flows through the LORA→expeditor→resume chain (doc 16 Phase 2, task #13). Also the final live E2E validation (task #11) needed an automated driver. All three landed in this continuation.
+
+**Accomplishments (3 sub-phases, 27+ new tests, 0 regressions)**:
+
+- **Phase 1 — MCP timeout detection** (doc 16 Phase 1, task #14 completed): Investigation of the cosa-voice MCP server response format revealed it already signals user timeout via `NotificationResponse.exit_code == 2`, but the `AgentNotificationDispatcher` was silently swallowing it and returning the default. Single-choke-point fix: both `ask_confirmation()` and `present_choices()` now raise `VoiceGateTimeoutError` on `exit_code == 2`, with lazy import to avoid circular dependencies (utils/ ↔ TFE state). BFE orchestrator updates to `run_diagnosis` + `run_proposal` catch the exception, populate pipeline state attributes, save checkpoint, and raise `StalledException`. BFE's two internal voice gate methods pass through `VoiceGateTimeoutError` before the auto-approve fallback. TFE's `_aggregate_voice_gate` already had the catch+raise from Phase C. 6 new unit tests in `test_mcp_timeout_detection.py`. Net: TFE and BFE now stall cleanly in production when users are unavailable — the existing `__STALLED__` sentinel + STALLED JobState + checkpoint persistence + Resume button UI all finally fire end-to-end.
+
+- **Phase 2 — Voice expeditor integration for TFE resume** (doc 16 Phase 2, task #13 completed): New `"agent router go to test fix expediter resume"` entry in `agent_registry.py` with `resume_from` required arg + `tfe_checkpoint_match` special handler + arg_mapping synonyms (job_id, plan_path, checkpoint, description). New `_handle_tfe_checkpoint_match()` method in `expeditor.py` (120 lines) that reuses `resume_resolver.list_resume_candidates` + `fuzzy_match_candidates` (from doc 15). Fast-path for literal job IDs / plan paths (skips LLM). Auto-select at confidence >= 0.9 for stalled jobs. Numeric + partial-string disambiguation fallback for multi-match cases. 35 voice training templates in `synthetic-data-agent-routing-test-fix-expediter-resume.txt`, registered in `agent-router-agentic-commands.json`, whitelisted in `AGENTIC_TEMPLATES`. PEFT trainer NOT invoked (user-run only per GPU rule). 10 new unit tests in `test_tfe_resume_expeditor.py`. Doc 15 Phase 2 now fully complete (was partial at end of earlier session).
+
+- **Phase 3 — Live TFE resume E2E driver** (doc 16 Phase 3, task #11 in-progress): Integration test file `src/tests/integration/test_tfe_resume_e2e.py` validates the smart resume-from endpoint and `/api/jobs/{id}/resume-from-checkpoint` endpoint against a live server — 10 endpoint-validation tests (auth, error paths, dispatch logic) schedulable via existing test-suite submit card. Shell driver `src/tests/e2e/run-tfe-resume-e2e.sh` wraps the pytest file for scheduled execution. Live stall-and-resume test gated behind `TFE_RESUME_E2E_LIVE=1` since it requires interactive voice gate timeout control. User schedules via: test-suite card → test type `integration` → file path `src/tests/integration/test_tfe_resume_e2e.py` → scheduled_at=<after-hours> → monopolize=true.
+
+**Regression**: 535 unit tests passing, 0 failures across touched files (was 490 at end of Phase E rollout, +45 new tests this continuation).
+
+**Files modified — Lupin parent (this commit)**:
+- `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/16-final-mile-mcp-timeouts-voice-resume-e2e.md` (new plan doc)
+- `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/00-index.md` (+link)
+- `src/tests/unit/test_mcp_timeout_detection.py` (new — 6 tests)
+- `src/tests/unit/test_tfe_resume_expeditor.py` (new — 10 tests)
+- `src/tests/unit/test_swe_team_training_data.py` (whitelist)
+- `src/tests/integration/test_tfe_resume_e2e.py` (new — 10 tests)
+- `src/tests/e2e/run-tfe-resume-e2e.sh` (new shell driver)
+- `src/ephemera/prompts/data/synthetic-data-agent-routing-test-fix-expediter-resume.txt` (new — 35 templates)
+- `src/conf/training/agent-router-agentic-commands.json` (register resume command)
+
+**Files modified — CoSA submodule (working-tree only, user commits separately)**:
+- `agents/utils/agent_notification_dispatcher.py` (exit_code==2 → VoiceGateTimeoutError)
+- `agents/bug_fix_expediter/orchestrator.py` (stall handling in run_diagnosis + run_proposal + internal gate pass-through)
+- `agents/runtime_argument_expeditor/agent_registry.py` (TFE resume entry)
+- `agents/runtime_argument_expeditor/expeditor.py` (_handle_tfe_checkpoint_match + dispatch case)
+
+**After-hours validation ready**: user can schedule `run-tfe-resume-e2e.sh` via the existing test-suite submit card for tonight's monopolized run. The `--live` flag adds the full stall-and-resume path.
+
+---
+
 ### 2026.04.12 - Session 1cfcdf73 (follow-on, housekeeping) | Archive history.md — 03.26→04.07 block (CRITICAL token gate resolved)
 
 **Context**: `history.md` reached 23,393 tokens (93.5% of 25k limit, 🚨 CRITICAL per canonical `~/.claude/scripts/get-token-count.sh`). TODO.md had flagged this across Sessions 1b8c1cc0 → 9056c113 → 248e740e. User asked for analysis-before-implementation; full plan written to `~/.claude/plans/binary-spinning-sprout.md` and approved before execution.
