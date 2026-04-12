@@ -1,5 +1,32 @@
 # Lupin Project History
 
+### 2026.04.12 - Session 248e740e | TFE forensics capture — CoSA submodule commit + push
+
+**Context**: Session-end ritual for prior TFE forensics capture work. All 4 edits were working-tree-only inside `src/cosa/` from the TFE forensics fix plan (`src/rnd/v0.1.6/2026.04.11-tfe-forensics-capture-plan.md`). This session committed them from CoSA repo context per nested-repo rule, then pushed both repos.
+
+**CoSA-side changes committed** (commit `660dcd8`):
+- `agents/test_fix_expediter/job.py` — BFE-pattern `JobState` enum lifecycle (`RUNNING`/`COMPLETED`/`FAILED`/`CANCELLED`) replacing bare string status, full Python traceback captured into `self.error` on failure, unconditional stdout print of traceback (not gated behind `self.debug`) so Docker logs always have forensics, cancellation support via `_cancel_requested` flag, `cu.get_current_datetime_iso()` timestamps replacing `datetime.now().isoformat()`. Voice routing fix (Fix 7): `_execute()` now sets `_bfe_ci.TARGET_USER = self.user_email` and `_bfe_ci.SENDER_ID` before entering the pipeline — fixes `tfe-d9e6b50f`'s "Cannot resolve target_user" crash. Urgent crash notification (Fix 3): pipeline wrapped in try/except that emits `voice_io.notify()` with `priority="urgent"` + full traceback in `abstract` field before re-raising. Plan path artifact (Fix 8a): `self.artifacts["plan_path"]` set after Phase 2 so the Phase 2 plan survives if a later phase crashes.
+- `agents/test_fix_expediter/orchestrator.py` — Fix 6: Removed invalid `notification_type="progress"` kwarg from `notify_progress()` call. The dispatcher sets `NotificationType.PROGRESS` internally; passing it as a kwarg caused `TypeError` on every call, resulting in hundreds of `[TFE notify error]` log lines per run with zero progress notifications delivered.
+- `rest/job_persistence.py` — Added `"test_fix_expediter"` to `AGENTIC_JOB_TYPES` frozenset. Without this, every TFE failure landed in the UI as "Unknown error" because the entire persistence layer was gated behind this allowlist.
+- `rest/routers/queues.py` — New dead-queue branch in `get_queue()` surfaces partial artifacts (`plan_path`, `remediation_snapshot_path`, `report_path`, `yaml_path`, `cost_summary`) from failed-before-completion agentic jobs. Previously fell through to the generic todo/run branch which only returned basic fields — failed TFE jobs had a Phase 2 plan on disk with no UI link.
+
+**Push outcomes**:
+- CoSA: `f210d10..660dcd8` → `origin/wip-v0.1.6-2026.03.12-tracking-lupin-work`
+- Lupin parent: `6c04cd9..685c134` (4 prior-session commits) → `origin/wip-v0.1.6-2026.03.12-cjflow-upe-and-playwrite`
+
+**Files Changed — Lupin parent (this commit)**:
+- `history.md` (this entry)
+- `TODO.md` (marked CoSA submodule commits items complete)
+
+**Files Changed — CoSA submodule (already committed & pushed as `660dcd8`)**:
+- `agents/test_fix_expediter/job.py`
+- `agents/test_fix_expediter/orchestrator.py`
+- `rest/job_persistence.py`
+- `rest/routers/queues.py`
+- `history.md` (Session 248e740e entry)
+
+---
+
 ### 2026.04.12 - Session 9056c113 | TFE checkpoint-resume + completion report + agentic-voice-workflow v3.0
 
 **Context**: User reported a successful TFE run (`tfe-7c25082a`) that completed Phases 0-2 but produced no E2E resubmission. Forensic investigation showed the run actually stalled at Phase 2 voice gate with 0 selections (cascading to skipped Phases 3-6). User wanted: (a) completion voice reports for all agents, (b) checkpoint-resume so stalled jobs can continue later, (c) both patterns standardized in the agentic-voice-workflow skill so every new agent gets them by default. Plan serialized to `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/14-checkpoint-resume-and-completion-report.md` — full 5-phase breakdown with step-by-step code snippets, file paths, and test specs.
