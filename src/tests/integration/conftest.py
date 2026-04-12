@@ -30,8 +30,9 @@ from pathlib import Path
 
 # Python path configured by src/tests/conftest.py
 
-# Test server configuration
-BASE_URL = "http://localhost:7999"
+# Test server configuration — defaults to the dedicated test container (port 8000).
+# Override via LUPIN_TEST_BASE_URL env var for custom setups or Docker-internal routing.
+BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 
 @pytest.fixture( scope="session", autouse=True )

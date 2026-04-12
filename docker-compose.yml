@@ -17,6 +17,7 @@ services:
       - ./src/conf/long-term-memory/postgresql-dev-data:/var/lib/postgresql/data
       - ./src/scripts/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
       - ./src/scripts/sql/seed_dev_data.sql:/docker-entrypoint-initdb.d/02-seed.sql
+      - ./src/scripts/sql/init-test-db.sql:/docker-entrypoint-initdb.d/03-init-test-db.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U lupin_dev -d lupin_db_dev"]
       interval: 5s
@@ -25,6 +26,90 @@ services:
       start_period: 10s
     networks:
       - lupin-dev-network
+
+  # Lupin REST API — Development (port 7999)
+  # Always runs [Lupin: Development] config with lupin_db_dev.
+  # uvicorn --reload enabled for live code changes during development.
+  lupin-rest-dev:
+    image: lupin:0.9.0
+    container_name: lupin-rest-dev
+    restart: unless-stopped
+    ports:
+      - "7999:7999"
+    volumes:
+      - ./src:/var/lupin/src
+      - ./io:/var/lupin/io
+      - ./pytest.ini:/var/lupin/pytest.ini:ro
+      - ~/.lora_env:/root/.lora_env:ro
+      - ~/.lupin:/root/.lupin:ro
+      - ~/.claude/.credentials.json:/root/.claude/.credentials.json:ro
+    environment:
+      LUPIN_ROOT: /var/lupin
+      LUPIN_ENV: development
+      LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
+      DB_HOST: lupin-postgres-dev
+      PYTHONUNBUFFERED: 1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - lupin-dev-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Lupin REST API — Testing (port 8000 on host, 7999 internally)
+  # Always runs [Lupin: Testing] config with lupin_db_test.
+  # uvicorn --reload DISABLED for stable test execution (no deadlock risk).
+  # Companion credentials (admin user + API key) auto-seeded from dev DB
+  # on every startup via seed_test_companions.py.
+  lupin-rest-test:
+    image: lupin:0.9.0
+    container_name: lupin-rest-test
+    restart: unless-stopped
+    command: ["/bin/bash", "/var/lupin/src/scripts/run-fastapi-lupin-test.sh"]
+    ports:
+      - "8000:7999"
+    volumes:
+      - ./src:/var/lupin/src
+      - ./io:/var/lupin/io
+      - ./pytest.ini:/var/lupin/pytest.ini:ro
+      - ~/.lora_env:/root/.lora_env:ro
+    environment:
+      LUPIN_ROOT: /var/lupin
+      LUPIN_ENV: testing
+      LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
+      DB_HOST: lupin-postgres-dev
+      LUPIN_DEV_EMAIL: ricardo.felipe.ruiz@gmail.com
+      PYTHONUNBUFFERED: 1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - lupin-dev-network
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # Optional: pgAdmin for database management
   pgadmin:

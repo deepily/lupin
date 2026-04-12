@@ -23,8 +23,9 @@ os.environ[ "LUPIN_CONFIG_MGR_CLI_ARGS" ] = "config_path=/src/conf/lupin-app.ini
 import pytest
 import requests
 
-# Test server configuration
-BASE_URL = "http://localhost:7999"
+# Test server configuration — defaults to the dedicated test container (port 8000).
+# Override via LUPIN_TEST_BASE_URL env var for custom setups or Docker-internal routing.
+BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 
 # ---------------------------------------------------------------------------

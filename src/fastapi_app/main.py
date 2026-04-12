@@ -797,7 +797,7 @@ if __name__ == "__main__":
 
     # Detect environment: disable reload for test and production, enable for local dev
     lupin_env = os.environ.get( "LUPIN_ENV", "" ).lower()
-    is_production_or_test = lupin_env in ["production", "test"]
+    is_production_or_test = lupin_env in ["production", "test", "testing"]
 
     uvicorn.run(
         "fastapi_app.main:app",
