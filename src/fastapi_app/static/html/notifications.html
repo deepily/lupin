@@ -434,6 +434,7 @@
                                         <option value="unit">Unit Tests</option>
                                         <option value="smoke">Smoke Tests (pytest discovery)</option>
                                         <option value="smoke_direct">Smoke Direct (python-main-style, needs file path)</option>
+                                        <option value="pytest_direct">Pytest Direct (arbitrary pytest file, needs file path)</option>
                                         <option value="websocket">WebSocket Tests</option>
                                         <option value="integration">Integration Only</option>
                                         <option value="e2e">E2E Only</option>
@@ -448,8 +449,8 @@
                                 </select>
                             </div>
                             <div id="test-suite-file-path-row" style="display: none;" data-testid="notifications-test-suite-file-path-row">
-                                <label for="test-suite-file-path" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Test File Path <span style="color: #dc3545;">*required for smoke_direct</span>:</label>
-                                <input type="text" id="test-suite-file-path" data-testid="notifications-test-suite-file-path-input" placeholder="src/tests/smoke/test_presentation_live_smoke.py" style="width: 340px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;" />
+                                <label for="test-suite-file-path" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Test File Path <span style="color: #dc3545;">*required for smoke_direct / pytest_direct</span>:</label>
+                                <input type="text" id="test-suite-file-path" data-testid="notifications-test-suite-file-path-input" placeholder="src/tests/integration/test_tfe_resume_e2e.py" style="width: 340px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;" />
                             </div>
                             <label id="test-suite-fail-fast-row" style="display: none; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;" data-testid="notifications-test-suite-fail-fast-row">
                                 <input type="checkbox" id="test-suite-fail-fast" data-testid="notifications-test-suite-fail-fast-checkbox" />
@@ -460,11 +461,16 @@
                                 <input type="text" id="test-suite-pytest-args" data-testid="notifications-test-suite-pytest-args-input" placeholder="-v -k test_auth  (or --auto-proxy --cost-cap-usd 2.00 for smoke_direct)" style="width: 340px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;" />
                             </div>
                             <script>
+                                // Test types that accept a file path as the first positional arg.
+                                // Keep this set in sync with FILE_DRIVEN_TEST_TYPES in notifications.js
+                                // and cosa/agents/test_suite/job.py (single source of truth).
+                                const FILE_DRIVEN_TEST_TYPES_HTML = new Set( [ 'smoke_direct', 'pytest_direct' ] );
+
                                 // Visibility toggle for conditional fields based on suite type selection
                                 function onTestSuiteTypeChange( value ) {
                                     const filePathRow = document.getElementById( 'test-suite-file-path-row' );
                                     const failFastRow = document.getElementById( 'test-suite-fail-fast-row' );
-                                    filePathRow.style.display = ( value === 'smoke_direct' ) ? 'block' : 'none';
+                                    filePathRow.style.display = FILE_DRIVEN_TEST_TYPES_HTML.has( value ) ? 'block' : 'none';
                                     failFastRow.style.display = ( value === 'all' ) ? 'flex' : 'none';
                                 }
                             </script>

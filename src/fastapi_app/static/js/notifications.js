@@ -4,6 +4,13 @@
  * Handles WebSocket connections, authentication, Q&A, and TTS functionality
  */
 
+// Test types that take a file path as the first positional pytest arg.
+// Keep this in sync with FILE_DRIVEN_TEST_TYPES in cosa/agents/test_suite/job.py —
+// a test type belongs here iff its shell script delegates to "$@" (i.e., accepts
+// the file path as the first arg rather than fanning out to a fixed suite).
+// Also mirrored in notifications.html inline <script> as FILE_DRIVEN_TEST_TYPES_HTML.
+const FILE_DRIVEN_TEST_TYPES = new Set( [ 'smoke_direct', 'pytest_direct' ] );
+
 class NotificationsUI {
     constructor() {
         // Configuration
@@ -3005,18 +3012,19 @@ class NotificationsUI {
         const dryRun     = dryRunCheckbox.checked;
         const autoFix    = autoFixCheckbox ? autoFixCheckbox.checked : null;
 
-        // Validation: smoke_direct requires a file path
-        if ( testTypes === 'smoke_direct' && !filePath ) {
-            statusDiv.textContent = '✗ Error: smoke_direct requires a test file path';
+        // Validation: file-driven test types require a file path
+        if ( FILE_DRIVEN_TEST_TYPES.has( testTypes ) && !filePath ) {
+            statusDiv.textContent = `✗ Error: ${testTypes} requires a test file path`;
             statusDiv.style.color = '#dc3545';
             return;
         }
 
         // Build combined pytest_args:
-        //   - smoke_direct: prepend file path so runner does `python3 <file> <args>`
+        //   - file-driven types (smoke_direct, pytest_direct): prepend file path so
+        //     runner delegates to `python3 <file>` or `pytest <file>` respectively
         //   - all + fail-fast: append --fail-fast flag
         let combinedArgs = pytestArgs;
-        if ( testTypes === 'smoke_direct' && filePath ) {
+        if ( FILE_DRIVEN_TEST_TYPES.has( testTypes ) && filePath ) {
             combinedArgs = combinedArgs ? `${filePath} ${combinedArgs}` : filePath;
         }
         if ( testTypes === 'all' && failFast ) {
