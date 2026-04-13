@@ -1,5 +1,28 @@
 # Lupin Project History
 
+### 2026.04.13 - Session 98a19cc0 | Test-container auth fix + TFE Resume E2E scheduled
+
+**Context**: User asked to schedule the TFE Resume E2E (Tier 1) against the test-server scheduler on port 8000. Submission failed with 401 on `/auth/login`. Diagnosed root cause and fixed in-session.
+
+**Accomplishments**:
+
+- **Root cause isolated**: `$LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL = interactive.job.tester@lupin.deepily.ai` existed in `lupin_db_dev` but was missing from `lupin_db_test`. The seed script `src/scripts/seed_test_companions.py:52` had a 3-user `COMPANION_EMAILS` allowlist that didn't include the interactive/mock job testers.
+- **Ruled out** via live container probes: DB mis-binding (engine correctly on `lupin_db_test`), password pepper (none — plain passlib bcrypt), image/code drift, and JWT secret mismatch (real but cosmetic for this bug).
+- **Phase A — seed fix**: Added `INTERACTIVE_TESTER` + `MOCK_TESTER` constants to `seed_test_companions.py`, extended `COMPANION_EMAILS`. Ran `docker exec lupin-rest-dev python3 /var/lupin/src/scripts/seed_test_companions.py` → 2 users inserted into `lupin_db_test`. `curl POST http://localhost:8000/auth/login` → HTTP 200 + JWT.
+- **Phase B — regression guard**: New `src/tests/integration/test_cross_container_auth.py` parametrized over `:7999` (dev) and `:8000` (test); skips unreachable containers. Pytest result: 2 passed, 1 skipped (dev `/health` slow during run).
+- **Phase C — TFE Resume E2E scheduled**: Job `ts-9522f777::50c73ba7-36dd-4eaf-a7e2-63256252c84f` queued via test-server scheduler (:8000), fires 2026-04-13T18:20:00-04:00, pytest target `src/tests/integration/test_tfe_resume_e2e.py -v --tb=short`, monopolize=false.
+
+**Files changed (3 files, 1 plan doc)**:
+- `src/scripts/seed_test_companions.py` — seed allowlist extended
+- `src/tests/integration/test_cross_container_auth.py` — new regression guard
+- `src/rnd/2026.04.13-test-container-auth-fix-plan.md` — diagnosis + resolution plan (new)
+- `history.md` — this entry
+
+**Memory updates** (user-scope, not in repo):
+- New reference: `reference_port_routing_dual_container.md` — host→test=:8000, host→dev=:7999, inside-container=:7999.
+
+---
+
 ### 2026.04.13 - Session 248e740e | Bug Fix Session: UI env label, Imagen 4.0, history card persistence
 
 **Context**: Multi-bug fixing session addressing four UI and backend issues discovered during daily use of the new Docker-based dev/test setup.

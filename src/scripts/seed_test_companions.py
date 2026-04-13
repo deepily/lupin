@@ -17,7 +17,7 @@ Records seeded:
     - All api_keys rows owned by the service account
 
 Environment variables:
-    DB_HOST           - PostgreSQL hostname (default: lupin-postgres-dev)
+    DB_HOST           - PostgreSQL hostname (default: lupin-postgres)
     DB_PORT           - PostgreSQL port (default: 5432)
     DB_USER           - PostgreSQL user (default: lupin_dev)
     DB_PASSWORD       - PostgreSQL password (default: dev_password)
@@ -36,7 +36,7 @@ import psycopg2
 # Configuration from environment
 # ---------------------------------------------------------------------------
 
-DB_HOST     = os.environ.get( "DB_HOST", "lupin-postgres-dev" )
+DB_HOST     = os.environ.get( "DB_HOST", "lupin-postgres" )
 DB_PORT     = os.environ.get( "DB_PORT", "5432" )
 DB_USER     = os.environ.get( "DB_USER", "lupin_dev" )
 DB_PASSWORD = os.environ.get( "DB_PASSWORD", "dev_password" )
@@ -45,11 +45,13 @@ DEV_DB      = "lupin_db_dev"
 TEST_DB     = "lupin_db_test"
 
 # Companion emails to seed from dev → test
-ADMIN_EMAIL   = os.environ.get( "LUPIN_DEV_EMAIL", "ricardo.felipe.ruiz@gmail.com" )
-SYSTEM_ADMIN  = "admin@lupin.deepily.ai"
-SERVICE_ACCT  = "claude.code@deepily.ai"
+ADMIN_EMAIL        = os.environ.get( "LUPIN_DEV_EMAIL", "ricardo.felipe.ruiz@gmail.com" )
+SYSTEM_ADMIN       = "admin@lupin.deepily.ai"
+SERVICE_ACCT       = "claude.code@deepily.ai"
+INTERACTIVE_TESTER = "interactive.job.tester@lupin.deepily.ai"
+MOCK_TESTER        = "mock.job.tester@lupin.deepily.ai"
 
-COMPANION_EMAILS = [ ADMIN_EMAIL, SYSTEM_ADMIN, SERVICE_ACCT ]
+COMPANION_EMAILS = [ ADMIN_EMAIL, SYSTEM_ADMIN, SERVICE_ACCT, INTERACTIVE_TESTER, MOCK_TESTER ]
 
 # ANSI colors
 GREEN  = "\033[0;32m"
@@ -136,12 +138,18 @@ def seed_if_missing():
 
             uid, email, pw_hash, created_at, email_verified, is_active, roles = row
 
+            # roles is jsonb in postgres — psycopg2 returns it as a Python
+            # list but won't auto-cast back to jsonb on insert. Serialize
+            # to JSON string and cast explicitly.
+            import json as _json
+            roles_json = _json.dumps( roles ) if isinstance( roles, ( list, dict ) ) else roles
+
             test_cur.execute(
                 "INSERT INTO users ( id, email, password_hash, created_at, "
                 "email_verified, is_active, roles ) "
-                "VALUES ( %s, %s, %s, %s, %s, %s, %s ) "
+                "VALUES ( %s, %s, %s, %s, %s, %s, %s::jsonb ) "
                 "ON CONFLICT ( id ) DO NOTHING",
-                ( uid, email, pw_hash, created_at, email_verified, is_active, roles )
+                ( uid, email, pw_hash, created_at, email_verified, is_active, roles_json )
             )
             # Check if the row was actually inserted (vs. already existed)
             if test_cur.rowcount > 0:
