@@ -238,12 +238,18 @@ async def clock_loop():
         asyncio.CancelledError: When task is cancelled during shutdown
         Exception: For any other errors during clock updates
     """
+    lupin_env = os.environ.get( "LUPIN_ENV", "" ).lower()
+    if lupin_env in [ "test", "testing" ]:
+        env_label = "TEST"
+    else:
+        env_label = "DEVELOPMENT"
+
     print( "[CLOCK] Starting clock update loop..." )
     while True:
         try:
             # Emit time update to all connected WebSocket clients
             current_time = du.get_current_time( format="%Y-%m-%d @ %H:%M" )
-            await websocket_manager.async_emit( 'sys_time_update', { 'date': current_time } )
+            await websocket_manager.async_emit( 'sys_time_update', { 'date': current_time, 'env_label': env_label } )
             
             # Debug logging (only if verbose mode)
             if app_debug and app_verbose:

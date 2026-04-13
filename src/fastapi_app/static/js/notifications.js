@@ -597,6 +597,8 @@ class NotificationsUI {
                 this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = config.websocket_heartbeat_interval_secs;
                 this.appTimezone = config.app_timezone;
                 this.tfeAutoFixDefault = !!config.test_fix_expediter_auto_fix_enabled;
+                this.envLabel = config.env_label || "DEVELOPMENT";
+                this.updateElement( "env-label", `[${this.envLabel}]: ` );
 
                 // Sync the test runner submission card's auto-fix checkbox to the
                 // INI default. The user can still toggle it for any individual
@@ -2330,6 +2332,10 @@ class NotificationsUI {
                     if ( envelope.date ) {
                         this.updateElement( "clock", envelope.date );
                         this.log( `Clock updated: ${envelope.date}` );
+                    }
+                    if ( envelope.env_label ) {
+                        this.envLabel = envelope.env_label;
+                        this.updateElement( "env-label", `[${this.envLabel}]: ` );
                     }
                     break;
                     
@@ -6037,6 +6043,7 @@ class NotificationsUI {
             abstract         : metadata.abstract || null,
             report_path               : metadata.report_link || null,
             remediation_snapshot_path : metadata.remediation_snapshot_path || null,
+            yaml_path                 : metadata.yaml_path || ( metadata.artifacts && metadata.artifacts.yaml_path ) || null,
             cost_summary              : metadata.cost_summary || null,
             is_cache_hit     : job.is_cache_hit || false,
             has_interactions  : false,
@@ -12483,17 +12490,12 @@ class NotificationsUI {
             // Phase 2.4.1: Real-time validation for open-ended input
             const validateInput = () => {
                 const value = input.value.trim();
-                const isValid = value.length > 0 && value.length <= 500;
+                const isValid = value.length > 0;
 
                 submitButton.disabled = !isValid;
 
-                // Visual feedback
                 if ( input.value.length > 0 ) {
-                    if ( value.length > 500 ) {
-                        input.classList.add( 'invalid' );
-                    } else {
-                        input.classList.remove( 'invalid' );
-                    }
+                    input.classList.remove( 'invalid' );
                 }
 
                 return isValid;

@@ -1,5 +1,32 @@
 # Lupin Project History
 
+### 2026.04.13 - Session 248e740e | Bug Fix Session: UI env label, Imagen 4.0, history card persistence
+
+**Context**: Multi-bug fixing session addressing four UI and backend issues discovered during daily use of the new Docker-based dev/test setup.
+
+**Accomplishments (4 bugs fixed)**:
+
+- **Bug 1 — Environment label in notifications header**: Neither the dev (port 7999) nor test (port 8000) notifications UI indicated which server it was bound to. Added `<span id="env-label">` to the HTML header, populated via `/api/config/client` (immediate) and `sys_time_update` WebSocket payload (maintained on each clock tick). Environment detection uses `LUPIN_ENV` only (not port — both containers bind to 7999 internally).
+
+- **Bug 2 — 500-char limit on open-ended responses**: The `converse()` MCP tool's text input had a hardcoded 500-character validation limit in the JS. Removed the cap — only non-empty validation remains.
+
+- **Bug 3 — Imagen 3.0 model retired by Google**: Presentation image generation was failing with 404 because `imagen-3.0-generate-002` was removed from the Gemini API. Listed available models via API, upgraded to `imagen-4.0-generate-001` across INI config, splainer, gemini_client.py default, and unit test assertion. All 27 nano-banana unit tests pass.
+
+- **Bug 4 — Missing Rerender button in job history cards**: Presentation jobs lost their "Re-render" button after browser refresh because `yaml_path` and `remediation_snapshot_path` were silently dropped during PostgreSQL persistence. Root cause: `_build_metadata_json()` in `job_persistence.py` has a field whitelist (`rich_fields`) and both fields were missing from it. Added both fields. Also updated `renderHistoryCard` in JS to extract `yaml_path` from the persisted metadata.
+
+**Files modified (11 files)**:
+- `src/fastapi_app/static/html/notifications.html` (env-label span)
+- `src/fastapi_app/static/js/notifications.js` (env label, 500-char limit removal, yaml_path in history cards)
+- `src/fastapi_app/main.py` (env_label in clock loop payload)
+- `src/cosa/rest/routers/system.py` (env_label in client config)
+- `src/conf/lupin-app.ini` (imagen-4.0-generate-001)
+- `src/conf/lupin-app-splainer.ini` (updated model docs)
+- `src/cosa/agents/presentation_generator/gemini_client.py` (default model)
+- `src/tests/unit/test_presentation_nano_banana_renderer.py` (assertion update)
+- `src/cosa/rest/job_persistence.py` (yaml_path + remediation_snapshot_path in rich_fields)
+
+---
+
 ### 2026.04.12 - Session 9056c113 (continued) | Final Mile: MCP timeouts + voice resume + E2E driver (Phases E.1, 2, 3 of doc 16)
 
 **Context**: After landing the full checkpoint-resume stack earlier in this session (doc 14 + 15 + Phase E cross-agent), two pieces remained deferred: (a) the MCP timeout detection trigger that actually fires `VoiceGateTimeoutError` in production (doc 16 Phase 1, task #14); (b) the voice-pipeline integration so `"resume the TFE plan from April 12"` flows through the LORA→expeditor→resume chain (doc 16 Phase 2, task #13). Also the final live E2E validation (task #11) needed an automated driver. All three landed in this continuation.

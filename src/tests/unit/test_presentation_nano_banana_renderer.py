@@ -44,7 +44,7 @@ class TestGeminiImageClient:
     def test_construction_defaults( self ):
         """GeminiImageClient initializes with correct defaults."""
         client = GeminiImageClient()
-        assert client.model == "imagen-3.0-generate-002"
+        assert client.model == "imagen-4.0-generate-001"
         assert client.aspect_ratio == "16:9"
         assert client.budget_limit == 1.00
         assert client.cost_total == 0.0
