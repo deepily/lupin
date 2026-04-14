@@ -93,30 +93,36 @@
 
 ---
 
-### 2026.04.13 - Session 248e740e | Bug Fix Session: UI env label, Imagen 4.0, history card persistence
+### 2026.04.13 - Session 248e740e | Bug Fix Session + Marp PPTX Export Feature
 
-**Context**: Multi-bug fixing session addressing four UI and backend issues discovered during daily use of the new Docker-based dev/test setup.
+**Context**: Extended bug fixing and feature session addressing UI bugs, Gemini API migration, presentation pipeline improvements, and agentic job notification auth.
 
-**Accomplishments (4 bugs fixed)**:
+**Accomplishments (8 bugs fixed, 1 feature added)**:
 
-- **Bug 1 — Environment label in notifications header**: Neither the dev (port 7999) nor test (port 8000) notifications UI indicated which server it was bound to. Added `<span id="env-label">` to the HTML header, populated via `/api/config/client` (immediate) and `sys_time_update` WebSocket payload (maintained on each clock tick). Environment detection uses `LUPIN_ENV` only (not port — both containers bind to 7999 internally).
+- **Bug 1 — Environment label in notifications header**: Added `[DEVELOPMENT]`/`[TEST]` label to notifications page header via `/api/config/client` + `sys_time_update` WebSocket payload. Uses `LUPIN_ENV` only (not port).
+- **Bug 2 — 500-char limit on open-ended responses**: Removed hardcoded 500-char validation from `converse()` text input in JS.
+- **Bug 3 — Imagen 3.0 retired by Google**: Upgraded to `imagen-4.0-generate-001` across INI, splainer, gemini_client.py, and unit test. 27 tests pass.
+- **Bug 4 — Missing Rerender button in job history**: Added `yaml_path` + `remediation_snapshot_path` to `rich_fields` in `job_persistence.py` and `renderHistoryCard` normalization.
+- **Bug 5 — Trashcan/delete button redundancy**: Removed trashcan from all queue cards and history cards. Unified on ✕ button across todo/run/done/dead queues. History cards route ✕ to `deleteHistoryJob()` via `_isHistory` flag.
+- **Bug 6 — Imagen 4.0 safety filter**: `BLOCK_MEDIUM_AND_ABOVE` not supported by Imagen 4.0, changed to `BLOCK_LOW_AND_ABOVE`.
+- **Bug 7 — Rerender path mismatch**: `yaml_path` in artifacts is relative to `io/` but submit endpoint resolves relative to project root. Added `io/` prefix in `submitRerender`.
+- **Bug 8 — D2 icon CDN 403**: terrastruct.com icon CDN returning 403. Strip `icon:` lines referencing that CDN before passing D2 code to CLI.
+- **Bug 9 — Agentic job notifications 401 Unauthorized**: `~/.lupin/config` contains host paths that don't exist inside Docker containers. Added `LUPIN_API_URL` + `LUPIN_API_KEY_FILE` env vars to docker-compose.yml for both services.
+- **Feature — Marp CLI PPTX export**: Added Marp CLI v4.3.1 standalone binary to Dockerfile (new layer before non-root section). New Phase 8.5 in orchestrator converts Marp MD → PPTX via `marp --pptx --allow-local-files`. INI toggle `pptx export enabled`. PPTX download button in done card UI. `/api/io/file` now supports `.pptx` media type + `download=true` query param.
+- **Renderer improvement**: Moved `before_after` and `icon_only` visual types from PlaceholderRenderer to NanoBananaRenderer (Imagen). Added style modifiers for both.
 
-- **Bug 2 — 500-char limit on open-ended responses**: The `converse()` MCP tool's text input had a hardcoded 500-character validation limit in the JS. Removed the cap — only non-empty validation remains.
+**Commits**: `f3e58bc` (bugs 1-4), plus this commit (bugs 5-9, PPTX feature, renderer changes)
 
-- **Bug 3 — Imagen 3.0 model retired by Google**: Presentation image generation was failing with 404 because `imagen-3.0-generate-002` was removed from the Gemini API. Listed available models via API, upgraded to `imagen-4.0-generate-001` across INI config, splainer, gemini_client.py default, and unit test assertion. All 27 nano-banana unit tests pass.
+**Lupin parent files modified**: `docker/lupin/Dockerfile`, `docker-compose.yml`, `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/fastapi_app/static/html/notifications.html`, `src/fastapi_app/static/js/notifications.js`, `src/fastapi_app/main.py`, `src/tests/unit/test_presentation_nano_banana_renderer.py`, `src/rnd/v0.1.6/2026.04.13-marp-cli-pptx-export-plan.md`
 
-- **Bug 4 — Missing Rerender button in job history cards**: Presentation jobs lost their "Re-render" button after browser refresh because `yaml_path` and `remediation_snapshot_path` were silently dropped during PostgreSQL persistence. Root cause: `_build_metadata_json()` in `job_persistence.py` has a field whitelist (`rich_fields`) and both fields were missing from it. Added both fields. Also updated `renderHistoryCard` in JS to extract `yaml_path` from the persisted metadata.
+**CoSA submodule changes (uncommitted — user commits separately)**: `rest/routers/system.py`, `rest/routers/queues.py`, `rest/routers/io_files.py`, `rest/job_persistence.py`, `rest/running_fifo_queue.py`, `agents/presentation_generator/orchestrator.py`, `job.py`, `config.py`, `gemini_client.py`, `renderers/nano_banana.py`, `placeholder.py`, `d2_renderer.py`, `prompts/image_gen.py`
 
-**Files modified (11 files)**:
-- `src/fastapi_app/static/html/notifications.html` (env-label span)
-- `src/fastapi_app/static/js/notifications.js` (env label, 500-char limit removal, yaml_path in history cards)
-- `src/fastapi_app/main.py` (env_label in clock loop payload)
-- `src/cosa/rest/routers/system.py` (env_label in client config)
-- `src/conf/lupin-app.ini` (imagen-4.0-generate-001)
-- `src/conf/lupin-app-splainer.ini` (updated model docs)
-- `src/cosa/agents/presentation_generator/gemini_client.py` (default model)
-- `src/tests/unit/test_presentation_nano_banana_renderer.py` (assertion update)
-- `src/cosa/rest/job_persistence.py` (yaml_path + remediation_snapshot_path in rich_fields)
+### Session Summary
+- **Total Fixes**: 9
+- **Features Added**: 1 (Marp PPTX export)
+- **Commits**: f3e58bc + this commit
+
+**Status**: Session closed 2026.04.13
 
 ---
 

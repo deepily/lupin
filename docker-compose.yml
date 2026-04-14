@@ -49,6 +49,8 @@ services:
       LUPIN_ENV: development
       LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
       DB_HOST: lupin-postgres
+      LUPIN_API_URL: http://localhost:7999
+      LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}
       CHROME_PATH: /home/rruiz/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome
@@ -95,6 +97,8 @@ services:
       LUPIN_ENV: testing
       LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
       DB_HOST: lupin-postgres
+      LUPIN_API_URL: http://localhost:7999
+      LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
       LUPIN_DEV_EMAIL: ricardo.felipe.ruiz@gmail.com
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}

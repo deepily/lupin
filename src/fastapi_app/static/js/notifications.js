@@ -2973,7 +2973,7 @@ class NotificationsUI {
                     'Content-Type'  : 'application/json'
                 },
                 body: JSON.stringify({
-                    source_path : yamlPath,
+                    source_path : yamlPath.startsWith( 'io/' ) || yamlPath.startsWith( '/io/' ) ? yamlPath : 'io/' + yamlPath,
                     render_only : true
                 })
             });
@@ -5201,7 +5201,8 @@ class NotificationsUI {
                 const agentType        = metadata.agent_type || card.dataset.agentType || null;
                 const yamlPath         = metadata.yaml_path || null;
                 const remediationPath  = metadata.remediation_snapshot_path || null;
-                reportEl.innerHTML = this.renderReportLinkSection( reportPath, agentType, yamlPath, remediationPath );
+                const pptxPath         = metadata.pptx_path || null;
+                reportEl.innerHTML = this.renderReportLinkSection( reportPath, agentType, yamlPath, remediationPath, pptxPath );
                 reportEl.style.display = 'block';
             }
         }
@@ -6044,6 +6045,7 @@ class NotificationsUI {
             report_path               : metadata.report_link || null,
             remediation_snapshot_path : metadata.remediation_snapshot_path || null,
             yaml_path                 : metadata.yaml_path || ( metadata.artifacts && metadata.artifacts.yaml_path ) || null,
+            pptx_path                 : metadata.pptx_path || ( metadata.artifacts && metadata.artifacts.pptx_path ) || null,
             cost_summary              : metadata.cost_summary || null,
             is_cache_hit     : job.is_cache_hit || false,
             has_interactions  : false,
@@ -6056,7 +6058,8 @@ class NotificationsUI {
             user_email       : job.user_email || metadata.user_email || null,
             scheduled_at     : metadata.scheduled_at || null,
             monopolize       : metadata.monopolize || false,
-            paused           : metadata.paused || false
+            paused           : metadata.paused || false,
+            _isHistory       : true
         };
 
         // Map history status to queue name for styling
@@ -6097,14 +6100,13 @@ class NotificationsUI {
         const canRetry     = [ 'failed', 'interrupted' ].includes( job.status );
         const questionSafe = ( job.question_text || '' ).replace( /'/g, "\\'" ).replace( /"/g, '&quot;' ).substring( 0, 100 );
 
+        if ( !canRetry ) return '';
+
         return `
             <div class="history-action-buttons">
-                ${canRetry ? `<button class="history-action-btn retry-btn"
+                <button class="history-action-btn retry-btn"
                     onclick="event.stopPropagation(); window.notificationsUI.retryHistoryJob( '${job.id_hash}', '${questionSafe}' )"
-                    >↻ Retry</button>` : ''}
-                <button class="history-action-btn delete-btn"
-                    onclick="event.stopPropagation(); window.notificationsUI.deleteHistoryJob( '${job.id_hash}' )"
-                    >🗑 Delete</button>
+                    >↻ Retry</button>
             </div>
         `;
     }
@@ -6698,7 +6700,7 @@ class NotificationsUI {
      * @param {string} reportPath - Path to the report file
      * @returns {string} HTML content for report link section
      */
-    renderReportLinkSection( reportPath, agentType, yamlPath, remediationPath ) {
+    renderReportLinkSection( reportPath, agentType, yamlPath, remediationPath, pptxPath ) {
         if ( !reportPath ) return '';
         let html = `<a href="/app/docs?path=${encodeURIComponent( reportPath )}" target="_blank" class="report-link-btn">📋 View Full Report</a>`;
         if ( remediationPath ) {
@@ -6707,6 +6709,10 @@ class NotificationsUI {
         // Re-render button for presentation jobs with existing YAML
         if ( agentType === 'presentation' && yamlPath ) {
             html += ` <button class="report-link-btn rerender-btn" onclick="window.notificationsUI.submitRerender( '${this.escapeHtml( yamlPath )}' )" title="Re-render from YAML (Phases 6-8 only)">🔄 Re-render</button>`;
+        }
+        // PPTX download button for presentation jobs
+        if ( pptxPath ) {
+            html += ` <a href="/api/io/file?path=${encodeURIComponent( pptxPath )}&download=true" class="report-link-btn">📊 Download PPTX</a>`;
         }
         return html;
     }
@@ -6861,8 +6867,11 @@ class NotificationsUI {
         if ( queueName === 'run' ) {
             cancelBtnHtml     = `<button type="button" class="job-cancel-button" id="job-cancel-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.cancelJob('${jobId}')" title="Cancel this job">✕</button>`;
             headerCancelClass = ' has-cancel';
-        } else if ( queueName === 'todo' ) {
-            cancelBtnHtml     = `<button type="button" class="job-cancel-button" id="job-cancel-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.deleteQueueJob('${jobId}', 'todo')" title="Remove this job">✕</button>`;
+        } else if ( queueName === 'todo' || queueName === 'done' || queueName === 'dead' ) {
+            const deleteAction = job._isHistory
+                ? `window.notificationsUI.deleteHistoryJob('${jobId}')`
+                : `window.notificationsUI.deleteQueueJob('${jobId}', '${queueName}')`;
+            cancelBtnHtml     = `<button type="button" class="job-cancel-button" id="job-cancel-${jobId}" onclick="event.stopPropagation(); ${deleteAction}" title="Remove this job">✕</button>`;
             headerCancelClass = ' has-cancel';
         }
 
@@ -6871,11 +6880,7 @@ class NotificationsUI {
             ? `<button type="button" class="job-pause-button${job.paused ? ' is-paused' : ''}" id="job-pause-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.toggleJobPause('${jobId}', ${!job.paused})" title="${job.paused ? 'Resume this job' : 'Pause this job'}">${job.paused ? '▶' : '⏸'}</button>`
             : '';
 
-        // Delete button for run/done/dead queues (forceful removal)
-        const hasDeleteBtn = ( queueName === 'run' || queueName === 'done' || queueName === 'dead' );
-        const deleteBtnHtml = hasDeleteBtn
-            ? `<button type="button" class="job-delete-button" id="job-delete-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.deleteQueueJob('${jobId}', '${queueName}')" title="Remove from ${queueName} queue">🗑</button>`
-            : '';
+        const deleteBtnHtml = '';
 
         return `
             <div class="job-card ${statusClass}${pausedCardClass}" id="job-card-${jobId}" data-job-id="${jobId}" data-paused="${job.paused ? 'true' : 'false'}">
@@ -6899,7 +6904,7 @@ class NotificationsUI {
                         ${this.renderAbstractSection( job.abstract )}
                     </div>
                     <div class="job-report-link" style="${job.report_path ? '' : 'display: none'}">
-                        ${this.renderReportLinkSection( job.report_path, job.agent_type, job.yaml_path, job.remediation_snapshot_path )}
+                        ${this.renderReportLinkSection( job.report_path, job.agent_type, job.yaml_path, job.remediation_snapshot_path, job.pptx_path )}
                     </div>
                     <!-- Fix 8c: partial artifacts from failed-before-completion runs (dead queue only).
                          Surfaces TFE/BFE plan files + remediation snapshots that were written before
