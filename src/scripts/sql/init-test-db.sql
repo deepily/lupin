@@ -4,7 +4,7 @@
 -- container. Runs automatically on FIRST postgres startup (when the data
 -- directory is empty). For existing installations, run manually:
 --
---   docker exec lupin-postgres-dev psql -U lupin_dev -f /docker-entrypoint-initdb.d/03-init-test-db.sql
+--   docker exec lupin-postgres psql -U lupin_dev -f /docker-entrypoint-initdb.d/03-init-test-db.sql
 --
 -- Idempotent: safe to run multiple times.
 --

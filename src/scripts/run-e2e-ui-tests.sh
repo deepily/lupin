@@ -136,7 +136,7 @@ echo ""
 if ! "$VENV_PYTHON" "$PROJECT_ROOT/src/tests/preflight_test_db.py"; then
     echo ""
     echo -e "${RED}[ERROR] PostgreSQL test database pre-flight failed${NC}"
-    echo -e "${RED}        Is lupin-postgres-dev running? Try: $PROJECT_ROOT/src/scripts/run-postgresql-dev.sh${NC}"
+    echo -e "${RED}        Is lupin-postgres running? Try: $PROJECT_ROOT/src/scripts/run-postgresql-dev.sh${NC}"
     echo ""
     exit 1
 fi

@@ -11,7 +11,7 @@ Section: API Key Security Requirements (lines 83-151)
 
 PostgreSQL Migration: Phase 2.6.2 (November 2025)
 - Uses SQLAlchemy ORM with repository pattern
-- Stores in PostgreSQL-in-Docker (lupin-postgres-dev)
+- Stores in PostgreSQL-in-Docker (lupin-postgres)
 - Replaces SQLite-based create_service_account.py
 
 Usage:
@@ -353,7 +353,7 @@ Environment Variables:
         print( f"     cat {key_file}" )
         print()
         print( f"  2. Verify PostgreSQL registration:" )
-        print( f"     docker exec -it lupin-postgres-dev psql -U lupin_dev -d lupin_auth -c \\" )
+        print( f"     docker exec -it lupin-postgres psql -U lupin_dev -d lupin_auth -c \\" )
         print( f'       "SELECT id, email, roles FROM users WHERE email = \'{args.email}\';"' )
         print()
         print( f"  3. Test notification:" )
@@ -380,10 +380,10 @@ Environment Variables:
         traceback.print_exc()
         print()
         print( "Troubleshooting:" )
-        print( "  - Check PostgreSQL is running: docker ps | grep lupin-postgres-dev" )
+        print( "  - Check PostgreSQL is running: docker ps | grep lupin-postgres" )
         print( "  - Check LUPIN_ENV is set: echo $LUPIN_ENV" )
         print( "  - Check LUPIN_ROOT is set: echo $LUPIN_ROOT" )
-        print( "  - Check database connection: docker exec -it lupin-postgres-dev psql -U lupin_dev -d lupin_auth" )
+        print( "  - Check database connection: docker exec -it lupin-postgres psql -U lupin_dev -d lupin_auth" )
         return 1
 
 

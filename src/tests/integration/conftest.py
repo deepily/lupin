@@ -118,8 +118,8 @@ def clean_test_db():
         - DROP/CREATE provides complete isolation between tests
 
     Requires:
-        - PostgreSQL Docker container running (lupin-postgres-dev)
-        - Server hot-swapped to Testing config (lupin_db_test)
+        - PostgreSQL Docker container running (lupin-postgres)
+        - Test server running on port 8000 with [Lupin: Testing] config (lupin_db_test)
 
     Ensures:
         - Fresh database schema before each test

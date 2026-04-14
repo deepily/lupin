@@ -341,11 +341,13 @@ def main():
         reset_stop_block_count( session_id )
         last_assistant_message = payload.get( "last_assistant_message" )
 
-        if _should_ask_anything_else( last_assistant_message, session_id ):
-            result = _ask_anything_else( session_id, last_assistant_message, cwd=payload.get( "cwd" ) )
-            emit_json( result )
-        else:
-            emit_json( {} )
+        # disable temporarily
+        # if _should_ask_anything_else( last_assistant_message, session_id ):
+        #     result = _ask_anything_else( session_id, last_assistant_message, cwd=payload.get( "cwd" ) )
+        #     emit_json( result )
+        # else:
+        #     emit_json( {} )
+        emit_json( {} )
 
 
 if __name__ == "__main__":
