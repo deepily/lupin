@@ -6,6 +6,56 @@
 
 User invoked `/plan-bug-fix-mode-start`. Active work: Bug #1 — BFE/TFE job cards show "No interactions recorded" and have no results-document link. Plan serialized to `src/rnd/v0.1.6/2026.04.14-bfe-tfe-interactions-and-reports.md`. Investigation phase first (Postgres query against test DB `notifications` table to pinpoint RC-1 break point) before writing any fix code. RC-2 (missing final-report generator for BFE and TFE) is orthogonal and independent of the investigation outcome.
 
+#### Checkpoint 4 | 2026.04.14 19:30 EDT | Bug #1 code complete — RC-1 voice_io decoupling + RC-2 ReportWriter
+
+**Investigation findings** (SQL against `lupin_db_test.notifications`):
+- Test DB `notifications` table: **0 rows ever**. Entire pipeline silently dropping on test server.
+- Dev DB healthy: 20+ BFE rows from Apr 10 with correct compound `job_id` (`bfe-XXX::userid`) and `sender_id` — proving code works when env is clean.
+- Direct `curl POST /api/notify` with `X-API-Key` to `:8000` → persists correctly. Endpoint healthy.
+- User's failing BFE job `bfe-79df11f2::...`: ran 1.04s, hit "dead job not found" dry-run branch, should have emitted ≥1 notification. Zero persisted.
+- Card `has_interactions: true` is misleading — derived from `bool(session_id)`, not actual DB rows.
+
+**RC-1 root cause** (`src/cosa/agents/utils/voice_io.py:296`): the notify() gate conflated *voice availability* with *persistence dispatch*:
+```python
+if _force_cli_mode or _cosa_interface is None or not await is_voice_available():
+    print( f"  {message}" ); return   # skips dispatcher → skips DB → skips WebSocket → skips UI
+```
+`is_voice_available()` itself calls `_cosa_interface.notify_progress()` as a probe and caches the result. One probe failure for any reason locks `_voice_available = False` for the process lifetime — every subsequent notify becomes a bare `print()`. That was the full explanation for the empty test DB.
+
+**RC-1 fix**: removed the `is_voice_available()` clause from `notify()`'s gate. Two legitimate CLI modes preserved: `_cosa_interface is None` (standalone/tests/pre-configure race) and `_force_cli_mode` (explicit `set_cli_mode(True)` opt-out). Rationale documented: TTS is one subscriber downstream of the WebSocket fanout; gating *dispatch* on *voice availability* was a layering error. The TTS decision belongs at the voice-bridge subscriber.
+
+**RC-2 fix**: no final report existed for BFE or TFE — only intermediate plans via PlanWriter. Surface infrastructure (`renderReportLinkSection()` in notifications.js, `artifacts["report_path"]` extraction in `queues.py:348-352`) was already in place but unused.
+- NEW `src/cosa/agents/shared/report_writer.py` — agent-agnostic markdown writer. Path: `{project_root}/io/swe-team/reports/{email}/YYYY.MM.DD-at-HH:MM-EST-{slug}-{agent}-report.md`. America/New_York zoneinfo handles EST/EDT automatically; `EST` in the filename is a fixed token per the project filename convention.
+- `src/cosa/agents/bug_fix_expediter/job.py` — added `_write_final_report()` with full artifact serialization (dead_job_context, diagnosis, proposed_fixes, selected_fix, fix_result, resubmitted_job_id, stall checkpoint, failure traceback). Wired into **five** terminal exits: dry-run dead-job-not-found, live dead-job-not-found, happy path, stall, and `do_all()` generic exception handler.
+- `src/cosa/agents/test_fix_expediter/job.py` — same pattern, TFE-specific artifacts (source_test_suite_job_id, cluster_count, fix_count, validation_run_job_id, orchestrator.clusters + proposed_fixes). Wired into **three** exits: happy, stall, generic exception.
+- Both helpers populate `self.artifacts["report_path"]` → UI `renderReportLinkSection()` fires → "📋 View Full Report" link opens at `/app/docs?path=...`.
+
+**User correction #1**: early Explore agent asserted `mock_token_email_*` was canonical. Wrong. `src/cosa/rest/auth.py:80-125` dispatches on `auth mode=jwt` (from `lupin-app.ini:497` in `[Lupin: Baseline]`, inherited by every configured env). Mock tokens are legacy dev-mode only. Canonical paths are JWT from `/auth/login` or global `X-API-Key`. Saved as `feedback_mock_tokens_are_legacy.md`.
+
+**User correction #2**: TFE/BFE did not write a final report on generic failure — only happy path and stall. Fixed in this checkpoint by adding a `status="failed"` report-write in both `do_all()` exception handlers. Reports stash `failure_message` + `failure_traceback` (first 4000 chars) in artifacts and render a `## Failure` section. Failure is the case where the report matters *most*; gap closed.
+
+**Tests (new, all passing)**:
+- `src/tests/unit/test_report_writer.py` (12 tests): slug sanitization boundary cases, path shape (regex match on full filename), content assertions (title + agent + body), empty-body placeholder, email partitioning, agent suffix.
+- `src/tests/unit/test_voice_io_notify_decoupling.py` (6 regression tests): dispatches when configured, prints when cosa_interface None, respects `_force_cli_mode`, falls back on dispatcher raise, **does not invoke `is_voice_available()` probe** (explicit — pins the bad gate stays removed), dispatches even when `_voice_available = False` is cached.
+- **Totals**: 30 of 30 passing across `test_report_writer.py` (12) + `test_voice_io_notify_decoupling.py` (6) + `test_peer_proxy.py` (12 unchanged from CP2/CP3).
+
+**Files changed this checkpoint (6 Lupin-side; 4 CoSA-side uncommitted)**:
+- `.claude-session.md` — CP4 manifest section
+- `bug-fix-queue.md` — session registered + bug #1 claimed
+- `history.md` — this entry
+- `src/rnd/v0.1.6/2026.04.14-bfe-tfe-interactions-and-reports.md` (new — serialized plan)
+- `src/tests/unit/test_report_writer.py` (new — 12 tests)
+- `src/tests/unit/test_voice_io_notify_decoupling.py` (new — 6 regression tests)
+- **Uncommitted, CoSA submodule** (user commits separately per nested-repo rules): `src/cosa/agents/utils/voice_io.py`, `src/cosa/agents/shared/report_writer.py` (new, ~160 lines), `src/cosa/agents/bug_fix_expediter/job.py` (+130 lines), `src/cosa/agents/test_fix_expediter/job.py` (+105 lines)
+
+**Next**: User restarts test server, dispatches a fresh BFE run (likely another dead-job-not-found dry run to match original scenario), and checks the card:
+1. Notification Conversation should show the notify breadcrumbs from the run (RC-1 validated).
+2. "📋 View Full Report" link renders on the done card → opens populated markdown report (RC-2 validated).
+
+If both surface: bug #1 passes live verification, ready for /plan-bug-fix-mode-wrap.
+
+---
+
 #### Checkpoint 3 | 2026.04.14 14:05 EDT | Peer Queue Watch live — three bug fixes + root-cause discovery
 
 **Context**: User tested the freshly-shipped Peer Queue Watch UI and hit three issues in sequence, each peeling back a layer. Fix-as-you-go session resulting in a working end-to-end drain-notification pipeline AND a bonus fix for the user's pre-existing test-UI admin lockout.

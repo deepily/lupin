@@ -45,6 +45,7 @@
 | 5329e0ea | 2026-03-27T14:00:00 | 2026-03-27T16:15:00 | closed |
 | a312ee22 | 2026-04-08T11:00:00 | 2026-04-08T15:45:00 | committed |
 | 1b8c1cc0 | 2026-04-10T09:30:00 | 2026-04-10T11:00:00 | closed |
+| 5a620729 | 2026-04-14T14:20:00 | 2026-04-14T14:30:00 | active |
 
 ---
 
@@ -66,7 +67,7 @@
 
 (Claimed by a specific session)
 
-(none)
+- [ ] **BFE & TFE job cards lack interactions and results documents** — Notification Conversation shows "No interactions recorded" on BFE `dr-6f48863c::...` and TFE `ts-0df7387f::...` done cards; no report-link artifact surfaced. Two orthogonal RCs: (1) notification→DB→lookup pipeline drops rows somewhere; (2) neither agent writes a final report, only an intermediate plan. Plan: `src/rnd/v0.1.6/2026.04.14-bfe-tfe-interactions-and-reports.md`. → Session 5a620729 (active)
 
 ---
 
