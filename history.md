@@ -1,5 +1,27 @@
 # Lupin Project History
 
+### 2026.04.13 - Session 9a488d40 | TFE Resume Live E2E scheduled (pytest_direct, 21:00 EDT)
+
+**Context**: Plan-mode session per Runbook 17 (`src/rnd/v0.1.6/2026.04.10-test-fix-expediter/17-schedule-tfe-resume-live-e2e-runbook.md`) to schedule the TFE Resume Live E2E tonight against the test container (port 8000, isolated from dev-server edits on 7999).
+
+**Accomplishments**:
+
+- Scheduled `src/tests/integration/test_tfe_resume_e2e.py` as a `pytest_direct` test-suite job for 2026-04-13T21:00:00-04:00 via `POST http://localhost:8000/api/test-suite/submit`. Job ID `ts-a70a4b8a::50c73ba7-36dd-4eaf-a7e2-63256252c84f`, queue position 1, exclusive on, dry_run off, extra args `-v --tb=short`.
+- Caught port-routing mistake: initial plan targeted 7999; per `reference_port_routing_dual_container` memory, host → test = 8000, host → dev = 7999. Updated plan and submission accordingly.
+- Documented CJ Flow persistence posture for scheduled jobs: todo/run/done/dead queues are in-memory (`FifoQueue.queue_list`, `src/cosa/rest/fifo_queue.py:47`). `job_history` in Postgres is an audit trail only — `persist_job_created_from_metadata()` writes rows on state transitions, but there is no startup rehydration. Implication: a test-container restart before 21:00 would drop the scheduled job.
+- Plan file at `/home/rruiz/.claude/plans/foamy-enchanting-rocket.md` (operational scheduling plan; not copied into `src/rnd/` since the work is captured in Runbook 17 and `src/rnd/2026.04.13-tfe-resume-live-e2e-scheduling.md`).
+
+**Files changed (3 files)**:
+- `TODO.md` — HIGH PRIORITY "Schedule TFE Resume Live E2E tonight" closed
+- `.claude-session.md` — this session's manifest section
+- `history.md` — this entry
+
+**Verification after 21:00 EDT fire**:
+- `tail -50 /tmp/pytest-direct-latest.log` — expect 10 tests pass (1 skipped: `test_live_stall_and_resume`)
+- Done queue: `test_suite` job labeled `pytest_direct` with non-error `response_text`
+
+---
+
 ### 2026.04.13 - Session 23f409c8 | Option C Docker non-root + rsync error surfacing + CHROME_PATH
 
 **Context**: Session started with a TODO triage producing 12 HIGH PRIORITY items (red), 3 TFE follow-ups (yellow), 14 older carry-overs (green). Serialized the triage to `src/rnd/v0.1.6/` and worked through the first three red items.
