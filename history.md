@@ -1,6 +1,67 @@
 # Lupin Project History
 
-### 2026.04.14 - Session 5a620729 | Test server (:8000) force-refresh + peer queue watch UI
+### 2026.04.14 - Session 5a620729 | Test server force-refresh + peer queue watch (live)
+
+#### Checkpoint 3 | 2026.04.14 14:05 EDT | Peer Queue Watch live — three bug fixes + root-cause discovery
+
+**Context**: User tested the freshly-shipped Peer Queue Watch UI and hit three issues in sequence, each peeling back a layer. Fix-as-you-go session resulting in a working end-to-end drain-notification pipeline AND a bonus fix for the user's pre-existing test-UI admin lockout.
+
+**Bug 1 — empty host combo box**:
+- **Symptom**: "Peer host field isn't editable and isn't populated with any pre-slug addresses."
+- **Root cause**: `peer-queue-watch.js` guarded `DOMContentLoaded` init with `if ( !( await requireAdmin() ) ) return;` — but `auth.js:517-525`'s `requireAdmin()` has no explicit `return` (returns `undefined`), so `!undefined === true` short-circuited every init and `populateHostSelector()` never ran.
+- **Fix**: populate UI and wire buttons FIRST, then `await requireAdmin()` inside a try/catch (auth.js handles redirect on failure). Hard-reload picks up new JS immediately.
+
+**Bug 2 — upstream connection refused**:
+- **Symptom**: `ClientConnectorError: Cannot connect to host localhost:8000 ssl:default [Connect call failed ('127.0.0.1', 8000)]`.
+- **Root cause**: proxy runs INSIDE the `lupin-rest-dev` container where `localhost:8000` is the container itself, not the host's mapped port. Peer containers on the docker-compose network are reachable by service name + the in-container port `7999`.
+- **Verified**: `docker exec lupin-rest-dev curl -fsS http://lupin-rest-test:7999/health` → 200.
+- **Fix**: whitelist in `lupin-app.ini` changed from `localhost:8000,localhost:7999` → `lupin-rest-test:7999,lupin-rest-dev:7999`. JS `ALLOWED_HOSTS` restructured as `[{value, label}]` so the dropdown shows friendly labels ("lupin-rest-test:7999 (test server, host :8000)") while the `<option>` value is the canonical container hostname. Splainer updated. Added container-network clarification to `peer.py` module docstring (side effect: forces uvicorn --reload since INI files alone aren't watched).
+
+**Bug 3 — 401 "User not found"**:
+- **Symptom**: `HTTP 502: upstream http://lupin-rest-test:7999/api/get-queue/run returned 401: {"detail":"User not found"}`.
+- **Investigation**: `verify_jwt_token` (`src/cosa/rest/auth.py:128-204`) decodes+validates the JWT signature (shared secret works → "`lupin-rest-test` accepted the token as genuine"), then calls `get_user_by_id(payload["sub"])`. Dev and test use SEPARATE PostgreSQL databases (`lupin_db_dev` vs `lupin_db_test`) — so the dev user's UUID doesn't exist in the test DB → 401. **JWT pass-through (plan's Option A) was fundamentally broken** — shared signing secret is necessary but not sufficient; shared user store is also required.
+- **Pivot to Option B (service-account login)**: dev backend POSTs to test-server `/auth/login` with `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL`/`_PASSWORD` env vars (already set in dev container, confirmed via `docker exec lupin-rest-dev env`). Cache JWT per-host with 25min expiry (Lupin tokens are 30min). On upstream 401, invalidate cache and retry once.
+- **Implementation** in `src/cosa/rest/routers/peer.py` (CoSA submodule — uncommitted):
+  - NEW `_peer_jwt_cache: Dict[host, {token, expires_at}]`.
+  - NEW helpers `_login_to_peer(session, host)`, `_get_peer_jwt(session, host)`, `_invalidate_peer_jwt(host)`.
+  - `_fetch_queue` no longer accepts an `authorization` param — acquires its own token via `_get_peer_jwt`. On 401 retries once after cache invalidation.
+  - Removed `Header` import; removed `authorization` parameter from `get_peer_queue`, `start_watcher`, and `_watcher_loop` signatures.
+  - Module docstring updated to document the Option A → Option B pivot and why.
+
+**Service-account login itself initially failed with 401 "Invalid email or password"**, revealing the real root cause:
+- **Test DB was missing every seeded user**. Query: `SELECT email FROM users WHERE email = 'interactive.job.tester@lupin.deepily.ai'` → empty in `lupin_db_test`, present in `lupin_db_dev`. `src/scripts/seed_test_companions.py` is SUPPOSED to copy the companion rows at test-container startup, but clearly hadn't run successfully against the current test DB (either recent DB wipe without a container restart, or a silent failure on last startup).
+- **Manually ran** `docker exec lupin-rest-test python3 /var/lupin/src/scripts/seed_test_companions.py` → 5 users seeded: `ricardo.felipe.ruiz@gmail.com` (admin+user), `admin@lupin.deepily.ai` (admin+user), `claude.code@deepily.ai` (service_account), `interactive.job.tester@lupin.deepily.ai` (user), `mock.job.tester@lupin.deepily.ai` (user). Plus 1 API key row.
+- **Bonus win — test-UI admin lockout ALSO resolved** (the item flagged as out-of-scope back at session start). User was never actually "locked out" in the sense of role/permission — their user row simply didn't exist in the test DB. With the row now present, normal admin credentials log in on :8000.
+
+**End-to-end verification from dev container**:
+```
+docker exec lupin-rest-dev bash -c 'TOKEN=$(curl -sS -X POST http://lupin-rest-test:7999/auth/login
+  -H "Content-Type: application/json"
+  -d "{\"email\":\"$LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL\",\"password\":\"$LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD\"}"
+  | python3 -c "import sys,json;print(json.load(sys.stdin)[\"tokens\"][\"access_token\"])");
+  curl -sS -H "Authorization: Bearer $TOKEN" http://lupin-rest-test:7999/api/get-queue/run'
+→ {"run_jobs_metadata":[],"filtered_by":"50c73ba7-...","is_admin_view":false,"total_jobs":0}
+```
+(test run queue was already drained — user's big job collection had completed during debugging.)
+
+**User confirmed "Pier Q watch works" from the admin UI widget.**
+
+**Files changed this checkpoint (4 Lupin-side; 1 CoSA-side uncommitted)**:
+- `src/conf/lupin-app.ini` — whitelist changed to container names
+- `src/conf/lupin-app-splainer.ini` — splainer entry updated with container-network rationale
+- `src/fastapi_app/static/html/admin/js/peer-queue-watch.js` — requireAdmin guard order; ALLOWED_HOSTS shape `[{value, label}]`; stale-host guard in `restoreSettings`
+- `history.md` + `.claude-session.md`
+- **Uncommitted, CoSA submodule**: `src/cosa/rest/routers/peer.py` (Option B implementation, ~60 net lines added for service-account login + cache; `_fetch_queue` signature change; module docstring rewritten)
+
+**Ops action (not a code change)**: ran `seed_test_companions.py` manually on `lupin-rest-test`. Users/API-keys now present in test DB. If the test DB is reset again, re-run the script or restart the container (seed hook fires on startup).
+
+**Unit tests**: 12/12 `test_peer_proxy.py` still pass after signature change.
+
+**Next / followups**:
+- Why did the test-DB seed fail silently on last container startup? Worth investigating so this doesn't recur. Not done this session.
+- CoSA-side commit of `peer.py` (Option B overhaul) + earlier `pages.py` (peer-queue-watch route) + `admin.py` (refresh-source from CP1) — yours to stage in the CoSA context.
+
+---
 
 #### Checkpoint 2 | 2026.04.14 12:10 EDT | Peer Queue Watch (dev UI → test server)
 

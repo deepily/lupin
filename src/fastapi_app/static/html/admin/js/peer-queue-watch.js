@@ -13,10 +13,15 @@
 ( function() {
     'use strict';
 
-    // Default allowed hosts. Populated by config at some point; for now
-    // we hardcode the same values as the config whitelist. If the user
-    // adds more to 'peer queue allowed hosts', mirror them here.
-    const ALLOWED_HOSTS = [ 'localhost:8000', 'localhost:7999' ];
+    // Allowed peer hosts. Values MUST match the config whitelist
+    // ('peer queue allowed hosts' in lupin-app.ini). These are the
+    // docker-compose service names + in-container port (7999), not the
+    // host-mapped ports — the dev container reaches peers via the
+    // compose network, not via localhost.
+    const ALLOWED_HOSTS = [
+        { value: 'lupin-rest-test:7999', label: 'lupin-rest-test:7999 (test server, host :8000)' },
+        { value: 'lupin-rest-dev:7999',  label: 'lupin-rest-dev:7999 (dev server,  host :7999)' }
+    ];
 
     const STORAGE_KEY     = 'lupin:pqw:settings';
     const STATUS_POLL_MS  = 10000;   // UI refresh rate (separate from watcher interval)
@@ -220,8 +225,8 @@
         const sel = qs().hostSel;
         ALLOWED_HOSTS.forEach( h => {
             const opt = document.createElement( 'option' );
-            opt.value = h;
-            opt.textContent = h + ( h === 'localhost:8000' ? ' (test server)' : h === 'localhost:7999' ? ' (dev server)' : '' );
+            opt.value = h.value;
+            opt.textContent = h.label;
             sel.appendChild( opt );
         } );
     }
@@ -230,23 +235,26 @@
         const s = loadSettings();
         if ( !s ) return;
         const el = qs();
-        if ( s.host && ALLOWED_HOSTS.includes( s.host ) ) el.hostSel.value = s.host;
+        const validHosts = ALLOWED_HOSTS.map( h => h.value );
+        if ( s.host && validHosts.includes( s.host ) ) el.hostSel.value = s.host;
         if ( s.signal )     el.signalSel.value   = s.signal;
         if ( s.interval )   el.intervalIn.value  = s.interval;
         if ( s.stable_for ) el.stableForIn.value = s.stable_for;
     }
 
     document.addEventListener( 'DOMContentLoaded', async function() {
-        if ( typeof requireAdmin === 'function' ) {
-            const ok = await requireAdmin();
-            if ( !ok ) return;
-        }
-
+        // Populate UI first so the page is usable even if the admin guard
+        // is async or non-returning. If requireAdmin() redirects on failure,
+        // we never reach startStatusPolling() anyway.
         populateHostSelector();
         restoreSettings();
 
         qs().startBtn.addEventListener( 'click', onStart );
         qs().stopBtn.addEventListener(  'click', onStop  );
+
+        if ( typeof requireAdmin === 'function' ) {
+            try { await requireAdmin(); } catch ( e ) { /* auth.js handles redirect */ }
+        }
 
         log( 'Widget initialized. Backend will fire voice notification on drain.' );
         startStatusPolling();
