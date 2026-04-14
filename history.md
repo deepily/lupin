@@ -1,5 +1,43 @@
 # Lupin Project History
 
+### 2026.04.14 - Session 5a620729 | Test server (:8000) force-refresh mechanism
+
+**Context**: The dev server (:7999) auto-reloads source via `uvicorn --reload`, but the test server (:8000) runs with `reload=False` (main.py:813) so bind-mounted source edits are ignored until the Python process restarts. No friction-free refresh mechanism existed; manual `docker restart lupin-rest-test` + visual health poll was the only path. User requested design exploration of options (including the SIGHUP avenue — a dead end since the container runs plain uvicorn with no gunicorn master). Plan file: `~/.claude/plans/rosy-watching-quilt.md`.
+
+#### Checkpoint | 2026.04.14 11:15 EDT | Layer A + B implemented, live verification deferred
+
+**Design choices confirmed (via ask_multiple_choice)**:
+- **Scope**: Layer A (shell script + slash command) + Layer B (admin endpoint). Hook-based auto-refresh rejected — defeats snapshot semantics the user wants to preserve.
+- **State**: Cold restart only. In-memory state (queues, WS sessions, consumer thread) discarded by design. `importlib.reload()` graph-walk rejected as fragile (stale closures, class identity, thread-held refs).
+
+**Layer A — host side (committed in this checkpoint)**:
+- `src/scripts/refresh-test-server.sh` (new, +62 lines) — wraps `docker restart lupin-rest-test` + polls `http://localhost:8000/health` at 500ms intervals up to 30s; on failure prints `docker logs --tail 50`; supports `--quiet` for automation.
+- `.claude/commands/refresh-test.md` (new) — `/refresh-test` slash command, picked up by the harness this turn.
+
+**Layer B — admin endpoint (CoSA submodule edit, NOT committed from this context)**:
+- `src/cosa/rest/routers/admin.py` (+79 lines) — new `POST /admin/refresh-source` endpoint. Double gate: `LUPIN_ENV ∈ {test, testing}` AND config key `admin refresh source enabled = true`. Uses `BackgroundTasks` to schedule an `os.execv()` re-exec after a 0.2s sleep so the 202 response flushes before the process image is replaced. `os.execv` chosen over `sys.exit` to keep container lifecycle stable and avoid brief network teardown. Reuses existing `require_admin` dep from `cosa.rest.auth_middleware`. Added `BackgroundTasks` to the top-level fastapi import.
+
+**Lupin-side config**:
+- `src/conf/lupin-app.ini` — `admin refresh source enabled = false` in `[Lupin: Baseline]`; overridden to `true` in `[Lupin: Testing]` and `[Lupin: Testing-GCS]`.
+- `src/conf/lupin-app-splainer.ini` — splainer entry matching the new key.
+
+**Verification status**:
+- Static: `py_compile.compile('.../admin.py')` → OK. `bash -n refresh-test-server.sh` → OK. Both pre-flight.
+- Live: deferred — test server is currently running a large job collection per user; no container restart attempted.
+- Pending: unit test for `_refresh_source_allowed()` guard function (pure, trivial to add when live verification runs).
+
+**Files changed (5 Lupin-side in this checkpoint; 1 CoSA-side uncommitted)**:
+- `src/scripts/refresh-test-server.sh` (new)
+- `.claude/commands/refresh-test.md` (new)
+- `src/conf/lupin-app.ini` (+3 config lines across 3 blocks)
+- `src/conf/lupin-app-splainer.ini` (+1 splainer line)
+- `.claude-session.md` (session 5a620729 section)
+- **Uncommitted, CoSA submodule**: `src/cosa/rest/routers/admin.py` (+79 lines — user to commit in cosa context per nested-repo rules)
+
+**Next**: When test server is idle — run `./src/scripts/refresh-test-server.sh` to verify Layer A end-to-end, add unit test for Layer B guard, then `curl -X POST /admin/refresh-source` with admin JWT to verify the full re-exec path.
+
+---
+
 ### 2026.04.14 - Session 9614fdd1 | Bug Fix (checkpoint): `all`-suite aggregation black hole + history-card toggle
 
 **Context**: Overnight `all` test-suite run (2026-04-14 00:42 EDT) produced `0 passed, 0 failed, 1 error, 0 skipped`, `failures: []`, despite a 4661.7s (~78min) wall time. Two orthogonal bugs surfaced: (Bug 1) monolithic `all` subprocess hit the 60min timeout and the timeout-return path discarded captured stdout AND synthesized no failure record, so `TestSuiteCompletionWatchdog` Gate 3 refused to dispatch TFE on `len(failures)==0`; (Bug 2) job cards loaded from `/api/job-history` won't expand when the scroll-toggle is clicked, while live done-queue cards work.
