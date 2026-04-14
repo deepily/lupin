@@ -1,10 +1,55 @@
 # Lupin Project History
 
-### 2026.04.14 - Session 5a620729 | Test server (:8000) force-refresh mechanism
+### 2026.04.14 - Session 5a620729 | Test server (:8000) force-refresh + peer queue watch UI
+
+#### Checkpoint 2 | 2026.04.14 12:10 EDT | Peer Queue Watch (dev UI → test server)
+
+**Context**: User locked out of test server (:8000) admin UI; needed visibility into its running queue while a large overnight job collection was executing. Decision via `ask_multiple_choice`: architect as dev-server-side proxy + server-side watcher + admin UI widget on `:7999` (where auth works). Backend fires the high-priority voice notification so the drain alert survives the user closing the browser tab. Plan file: `~/.claude/plans/rosy-watching-quilt.md` (rewritten from Checkpoint 1's refresh-server plan).
+
+**Key corrections during planning** (captured in memory for future work):
+- **mock_token_email_* is NOT canonical**. `src/cosa/rest/auth.py:80-125` dispatches on config key `auth mode`, which is `jwt` in `[Lupin: Baseline]` (`lupin-app.ini:497`) — inherited by every configured environment. `verify_mock_token` is labeled "legacy development mode" and is not reached. CLAUDE.md + AUTH-TESTING-GUIDE.md references to mock tokens are stale; `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` env vars are **login credentials for `POST /auth/login`**, not mock-token inputs. Saved as `feedback_mock_tokens_are_legacy.md` in auto-memory.
+- **Cosa-voice CAN fire from the backend**. Initial Explore agent wrongly concluded cosa-voice was MCP-only. `src/cosa/agents/utils/sync_notify.py:20-87` posts to `/api/notify` with an `X-API-Key` header — the WebSocket fanout routes it to cosa-voice for TTS. Any backend code path can trigger the voice alert via this helper.
+- **JWT pass-through viable**. `jwt_service.py:25-32` reads `JWT_SECRET_KEY` with a fallback dev string; `docker-compose.yml` sets the env var on NEITHER dev nor test container, so both fall back to the same string → a JWT minted by dev verifies on test. Zero credential-juggling needed for the proxy.
+
+**Backend (CoSA submodule — NOT committed from Lupin context)**:
+- `src/cosa/rest/routers/peer.py` (new, 289 lines): four endpoints. `GET /api/admin/peer-queue/{queue_name}` proxies to `http://{host}/api/get-queue/{name}` with whitelist validation + JWT pass-through. `POST /api/admin/peer-queue-watch/{start,stop}` + `GET .../status` manage one `asyncio.Task` per admin that polls the peer and fires `sync_notify.notify(priority="high")` via `asyncio.to_thread` when `consecutive_zero >= stable_for`. Host whitelist read from config `peer queue allowed hosts`. Per-admin state dict keyed by `uid`/`email`. Pure helpers (`_is_host_allowed`, `_validate_host_and_queue`) exposed for unit testing.
+- `src/cosa/rest/routers/pages.py`: added `/app/admin/peer-queue-watch` route + `_ROUTE_TABLE` entry.
+
+**Lupin-side**:
+- `src/fastapi_app/main.py`: imported `peer` router, registered via `app.include_router(peer.router)`, added shutdown handler `await peer.cancel_all_watchers_on_shutdown()` in lifespan cleanup block.
+- `src/fastapi_app/static/html/admin/peer-queue-watch.html` (new): widget page with host selector, signal toggle (`run` vs `run+todo`), interval/stable-for inputs, live status panel (run/todo counts, consecutive zeros, last poll, last error), event log. Breadcrumb: Home > Admin > Dev Tools > Peer Queue Watch.
+- `src/fastapi_app/static/html/admin/js/peer-queue-watch.js` (new, 218 lines): thin controller. `setInterval(10s)` polls `/status`; start/stop buttons call respective endpoints. `requireAdmin()` guard. `localStorage` persistence (key `lupin:pqw:settings`). Drain transition detected via `drained_at` timestamp change → logged in UI (voice alert already dispatched by backend). Uses existing `apiCall()` from `auth/js/auth.js:137-200`.
+- `src/fastapi_app/static/html/dev-tools.html`: added "Peer Queue Monitoring" section with card linking to the new page.
+- `src/conf/lupin-app.ini`: `peer queue allowed hosts = localhost:8000,localhost:7999` in `[Lupin: Baseline]`.
+- `src/conf/lupin-app-splainer.ini`: matching splainer entry.
+
+**Tests**:
+- `src/tests/unit/test_peer_proxy.py` (new): 12 tests across `_is_host_allowed` (exact-match semantics, port-sensitivity, empty whitelist, substring-rejection), `_validate_host_and_queue` (HTTPException raising with correct status codes and detail text, all four queue names accepted), and `_watcher_state` isolation. All 12 pass.
+- Live reachability (curl, no auth): proxy → 401, `watch/status` → 401, `/app/admin/peer-queue-watch` page → 200. Dev server auto-reloaded cleanly.
+- Integration test with mocked aiohttp — deferred; the critical pure logic is covered by the unit tier, and auth/network paths are thin enough to validate in-browser.
+
+**Auto-memory updates**:
+- NEW `feedback_mock_tokens_are_legacy.md` — canonical auth paths are JWT (from `/auth/login`) or `X-API-Key`; mock tokens are rejected in every configured environment.
+- MEMORY.md index updated.
+
+**Files changed (7 Lupin-side in this checkpoint; 2 CoSA-side uncommitted)**:
+- `src/conf/lupin-app.ini` (+3 lines)
+- `src/conf/lupin-app-splainer.ini` (+1 line)
+- `src/fastapi_app/main.py` (+9 lines: import, router register, shutdown hook)
+- `src/fastapi_app/static/html/dev-tools.html` (+8 lines: monitoring section)
+- `src/fastapi_app/static/html/admin/peer-queue-watch.html` (new)
+- `src/fastapi_app/static/html/admin/js/peer-queue-watch.js` (new)
+- `src/tests/unit/test_peer_proxy.py` (new)
+- `history.md` + `.claude-session.md`
+- **Uncommitted, CoSA submodule**: `src/cosa/rest/routers/peer.py` (new, +289 lines), `src/cosa/rest/routers/pages.py` (+5 lines: new page route)
+
+**Next**: User opens `http://localhost:7999/app/admin/peer-queue-watch`, clicks Start against `localhost:8000` with the current live job collection. Voice drain notification fires when the test server's run+todo queues both hit 0 for two consecutive polls. Separately, test-server admin auth lockout still to be investigated (deferred out-of-scope; likely role-seeding regression in test DB fixture).
+
+---
 
 **Context**: The dev server (:7999) auto-reloads source via `uvicorn --reload`, but the test server (:8000) runs with `reload=False` (main.py:813) so bind-mounted source edits are ignored until the Python process restarts. No friction-free refresh mechanism existed; manual `docker restart lupin-rest-test` + visual health poll was the only path. User requested design exploration of options (including the SIGHUP avenue — a dead end since the container runs plain uvicorn with no gunicorn master). Plan file: `~/.claude/plans/rosy-watching-quilt.md`.
 
-#### Checkpoint | 2026.04.14 11:15 EDT | Layer A + B implemented, live verification deferred
+#### Checkpoint 1 | 2026.04.14 11:15 EDT | Layer A + B implemented, live verification deferred
 
 **Design choices confirmed (via ask_multiple_choice)**:
 - **Scope**: Layer A (shell script + slash command) + Layer B (admin endpoint). Hook-based auto-refresh rejected — defeats snapshot semantics the user wants to preserve.
