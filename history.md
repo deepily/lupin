@@ -1,6 +1,10 @@
 # Lupin Project History
 
-### 2026.04.14 - Session 5a620729 | Test server force-refresh + peer queue watch (live)
+### 2026.04.14 - Session 5a620729 | Test server force-refresh + peer queue watch + bug-fix mode
+
+#### Bug Fix Mode | 2026.04.14 14:35 EDT | Session entered bug-fix mode
+
+User invoked `/plan-bug-fix-mode-start`. Active work: Bug #1 — BFE/TFE job cards show "No interactions recorded" and have no results-document link. Plan serialized to `src/rnd/v0.1.6/2026.04.14-bfe-tfe-interactions-and-reports.md`. Investigation phase first (Postgres query against test DB `notifications` table to pinpoint RC-1 break point) before writing any fix code. RC-2 (missing final-report generator for BFE and TFE) is orthogonal and independent of the investigation outcome.
 
 #### Checkpoint 3 | 2026.04.14 14:05 EDT | Peer Queue Watch live — three bug fixes + root-cause discovery
 
@@ -148,7 +152,41 @@ docker exec lupin-rest-dev bash -c 'TOKEN=$(curl -sS -X POST http://lupin-rest-t
 
 **Context**: Overnight `all` test-suite run (2026-04-14 00:42 EDT) produced `0 passed, 0 failed, 1 error, 0 skipped`, `failures: []`, despite a 4661.7s (~78min) wall time. Two orthogonal bugs surfaced: (Bug 1) monolithic `all` subprocess hit the 60min timeout and the timeout-return path discarded captured stdout AND synthesized no failure record, so `TestSuiteCompletionWatchdog` Gate 3 refused to dispatch TFE on `len(failures)==0`; (Bug 2) job cards loaded from `/api/job-history` won't expand when the scroll-toggle is clicked, while live done-queue cards work.
 
-#### Checkpoint | 2026.04.14 10:05 EDT | Bug 1A/1B complete, Bug 2 deferred
+#### Checkpoint 2 | 2026.04.14 15:30 EDT | P0 regressions from fan-out: WebSocket `--junit-xml` + smoke budget
+
+**Context**: Post-fix `all` run at 12:26 EDT verified Bug 1A/1B working (3828 pass / 46 tagged failures distributed across 4 suites, TFE Gate 3 now has signal). The run also revealed two **P0 regressions caused by Bug 1B's fan-out** plus 44 "real" failures needing triage before TFE dispatch.
+
+**Regressions fixed this checkpoint**:
+
+- **P0A — WebSocket `--junit-xml` incompatibility**: `_run_suite` unconditionally appended `--junit-xml=<path>` to the child command. Pre-fan-out, that landed on `run-all-tests.sh` which delegates to pytest internally and accepts the flag. Post-fan-out, each `SUITE_SCRIPTS[...]` script gets it directly — and `src/scripts/run-websocket-smoke-tests.sh` is a custom async orchestrator (`smoke_test_runner.py`), NOT pytest. Its `*)` catch-all at lines 347-351 logged `Unknown option:` and `exit 1`ed — 0 websocket tests ran, 0.0s duration, no structured output. Fix in `src/cosa/agents/test_suite/job.py`: added `SUITES_SUPPORTING_JUNIT_XML` frozenset (union of pytest-backed suites), gated the injection block on membership, added `if not xml_path: return result` guard at `_parse_junit_xml` top so non-pytest suites get zero-counts without raising.
+- **P0B — Smoke suite budget overrun**: observed 1036.2s wall time vs 600s budget. Raised `SUITE_TIMEOUTS_SECONDS["smoke"]` from 600 to 1800 (≈73% headroom above observed). If smoke later exceeds 1800s that's a real regression deserving profiling — budget won't be silently kicked again.
+
+**Triage of remaining 46 failures**:
+
+| Bucket | Count | Remediation class |
+|---|---|---|
+| Unit stale data (registry count, PRODUCT_NAMES, profile coverage) | 16 | **TFE dispatch candidate** (post-P0 re-run) |
+| E2E history-card delete flows | 8 | **Bug 2 fallout** — defer to UI session |
+| E2E visual-regression snapshot drift | 12 | Human UI review → `--update-snapshots` |
+| Auth 401 (test_tfe_resume_e2e + cross-container) | 8 | Needs mock→JWT migration (per `mock_tokens_are_legacy` memory) |
+| Integration dispatcher config path | 1 | TFE dispatch candidate |
+| Synthetic smoke timeout (now eliminated by P0B) | 1 | N/A post-fix |
+
+**Tests (5 new)**: `TestJunitFlagGating` class — pytest suites receive flag, websocket does not, set-membership guard, `_parse_junit_xml(None)` + `("")` both return zeros. 93/93 `test_test_suite_*` regression pass.
+
+**Files changed this checkpoint (3 Lupin; 1 CoSA uncommitted)**:
+- `src/tests/unit/test_test_suite_job.py` (+~80 lines — TestJunitFlagGating)
+- `history.md` — this checkpoint entry
+- `.claude-session.md` — session 9614fdd1 section updated
+- **Uncommitted, CoSA submodule**: `src/cosa/agents/test_suite/job.py` (incremental edits on top of prior uncommitted fix — user to commit in cosa context)
+
+**Parallel session 5a620729 note**: active from 10:30 EDT (bug-fix mode on BFE/TFE interactions). No file-level overlap. Their `refresh-test-server.sh` is the tool the user will use to bounce `:8000` for the next verification run.
+
+**Next**: bounce `:8000` via `./src/scripts/refresh-test-server.sh` (or after 5a620729 quiesces), re-run `all` suite, confirm WebSocket section populates with captured stdout and smoke runs to completion, then hand the cleaner remediation.json to TFE for the ~17 mechanical fixes (unit stale data + integration dispatcher).
+
+---
+
+#### Checkpoint 1 | 2026.04.14 10:05 EDT | Bug 1A/1B complete, Bug 2 deferred
 
 **Accomplishments**:
 

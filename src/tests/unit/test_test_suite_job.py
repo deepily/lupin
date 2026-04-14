@@ -8,7 +8,12 @@ dry run mode, and voice_io integration.
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from cosa.agents.test_suite.job import TestSuiteJob, ALL_SUITE_COMPONENTS, _expand_all
+from cosa.agents.test_suite.job import (
+    TestSuiteJob,
+    ALL_SUITE_COMPONENTS,
+    SUITES_SUPPORTING_JUNIT_XML,
+    _expand_all,
+)
 from cosa.rest.job_state import JobState
 
 
@@ -710,3 +715,85 @@ class TestAllExpansion:
         assert set( job.suite_results.keys() ) == set( ALL_SUITE_COMPONENTS )
         # test_types unchanged — user-visible label and report filename stay "all"
         assert job.test_types == [ "all" ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# --junit-xml Flag Gating (2026-04-14 regression — WebSocket runner is custom async,
+# not pytest; flag was killing the subprocess before any tests ran)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestJunitFlagGating:
+    """
+    Regression tests for the post-fan-out discovery that not every suite script
+    is a pytest wrapper. `run-websocket-smoke-tests.sh` is a custom async
+    orchestrator — appending --junit-xml triggers its `Unknown option` branch
+    and exit 1, causing 0 tests to run.
+    """
+
+    @staticmethod
+    def _capture_popen_args( tmp_path, suite_type, job, monkeypatch ):
+        """Shared setup: stub the suite script, intercept Popen, return captured cmd args."""
+        from cosa.agents.test_suite import job as job_mod
+
+        script_rel = job_mod.SUITE_SCRIPTS[ suite_type ]
+        script = tmp_path / script_rel
+        script.parent.mkdir( parents=True, exist_ok=True )
+        script.write_text( "#!/usr/bin/env bash\necho noop\n" )
+        script.chmod( 0o755 )
+
+        captured = {}
+        class FakeProc:
+            stdout     = None
+            returncode = 0
+            def __init__( self ): self.stdout = _NullStdout()
+            def poll( self ): return 0
+            def wait( self, timeout=None ): return 0
+            def terminate( self ): pass
+            def kill( self ): pass
+
+        class _NullStdout:
+            def readline( self ): return ""
+            def read( self ): return ""
+
+        def fake_popen( cmd, **kwargs ):
+            captured[ "cmd" ] = cmd
+            return FakeProc()
+
+        monkeypatch.setattr( job_mod.subprocess, "Popen", fake_popen )
+        job._run_suite( suite_type, str( tmp_path ) )
+        return captured.get( "cmd", [] )
+
+    def test_junit_xml_injected_for_pytest_suites( self, single_suite_job, tmp_path, monkeypatch ):
+        """pytest-backed suites (unit) must receive --junit-xml=<path>."""
+        cmd = self._capture_popen_args( tmp_path, "integration", single_suite_job, monkeypatch )
+        assert any( arg.startswith( "--junit-xml=" ) for arg in cmd ), \
+            f"Expected --junit-xml= in cmd for integration suite, got: {cmd}"
+
+    def test_junit_xml_not_injected_for_websocket( self, tmp_path, monkeypatch ):
+        """WebSocket's custom async runner must NOT receive --junit-xml."""
+        job = TestSuiteJob(
+            test_types = [ "websocket" ],
+            user_id    = "user-123",
+            user_email = "test@test.com",
+            session_id = "wise-penguin",
+        )
+        cmd = self._capture_popen_args( tmp_path, "websocket", job, monkeypatch )
+        assert not any( arg.startswith( "--junit-xml" ) for arg in cmd ), \
+            f"websocket must not get --junit-xml; got: {cmd}"
+
+    def test_websocket_excluded_from_junit_support_set( self ):
+        """Guard against someone accidentally adding websocket to the allow-list."""
+        assert "websocket" not in SUITES_SUPPORTING_JUNIT_XML
+        # Sanity-check the expected members are present
+        for s in ( "unit", "smoke", "integration", "e2e" ):
+            assert s in SUITES_SUPPORTING_JUNIT_XML
+
+    def test_parse_junit_xml_handles_none_path( self ):
+        """_parse_junit_xml(None) returns zero-counts dict without raising."""
+        result = TestSuiteJob._parse_junit_xml( None )
+        assert result == { "passed": 0, "failed": 0, "skipped": 0, "errors": 0 }
+
+    def test_parse_junit_xml_handles_empty_string( self ):
+        """Empty-string path treated same as None (non-pytest suites)."""
+        result = TestSuiteJob._parse_junit_xml( "" )
+        assert result == { "passed": 0, "failed": 0, "skipped": 0, "errors": 0 }
