@@ -1,6 +1,10 @@
 # TODO
 
-Last updated: 2026-04-13 (Session 1cfcdf73 follow-on — LanceDB permission root cause identified + Option C plan filed)
+Last updated: 2026-04-13 (Session 23f409c8 — Option C Docker non-root + rsync error surfacing + CHROME_PATH landed + committed 309f98c)
+
+## 🔖 Resume tomorrow — active triage plan
+
+**Triage doc**: `src/rnd/v0.1.6/2026.04.13-session-triage-and-option-c-docker-non-root.md` — 12 HIGH PRIORITY items (red), 3 TFE follow-ups (yellow), 14 older carry-overs (green). Items #1 #2 #3 closed this session. **Resume at item #9** (quick win: grep today's startup log for `[Watchdogs] BFE=ENABLED, TFE=ENABLED` to confirm already satisfied by rebuild), then #5 (schedule TFE Resume Live E2E) or #6 / #7 (Phase D/E follow-ups).
 
 ## Pending — HIGH PRIORITY
 

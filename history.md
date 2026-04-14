@@ -78,6 +78,19 @@
 **Memory updates** (user-scope, not in repo):
 - New reference: `reference_port_routing_dual_container.md` — host→test=:8000, host→dev=:7999, inside-container=:7999.
 
+**Post-checkpoint addendum (session-end)**:
+
+- **18:20 EDT report analyzed**: Tier 1 run returned 2 passed / 8 skipped / 0 failed. Root cause of the 8 skips: the `auth_token` module-scope fixture in `test_tfe_resume_e2e.py:43-58` calls `pytest.skip()` when `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/PASSWORD` are unset, and the test-suite scheduler subprocess inside `lupin-rest-test` didn't inherit those vars. 7 tests depend on `auth_headers` → all cascaded-skipped. The 8th (`test_live_stall_and_resume`) is intentional — gated behind `TFE_RESUME_E2E_LIVE=1`.
+- **Fix — docker-compose env propagation**: Added `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_{EMAIL,PASSWORD}: ${VAR:?must be set}` to the `environment:` block of both `lupin-rest-dev` and `lupin-rest-test` in `docker-compose.yml`. `:?` fail-fast ensures the shell env must be populated at `docker compose up` time. `docker compose up -d lupin-rest-test lupin-rest-dev` recreated both containers — no image rebuild needed since `lupin:0.9.0` uses bind-mounted code.
+- **Verified**: `docker exec lupin-rest-test printenv LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` returns the address in both containers.
+- **Re-submitted TFE Resume E2E** at 21:00 EDT via :8000 scheduler: `ts-46184de2::50c73ba7-36dd-4eaf-a7e2-63256252c84f`. **Note**: parallel session 9a488d40 independently scheduled the same test at 21:00 EDT as `pytest_direct` (`ts-a70a4b8a`) at queue position 1 — my submission landed as queue position 2 and is redundant. Post-21:00 report will reveal whether the env-var fix worked (expected: 9 passed, 1 skipped).
+
+**Checkpoint commits this session**:
+- `b8189a8` (checkpoint 1) — seed fix + regression guard + initial E2E submission
+- Session-end commit (this commit) — history addendum + manifest close
+
+**Note on docker-compose.yml**: the env-var lines added during this session were captured in the parallel session's commits (`309f98c` / `67ba02c`) alongside unrelated changes (CHROME_PATH, non-root user, rsync error surfacing). No double-commit — my edits were already in the working tree when the parallel session staged the file. Attribution noted here for traceability.
+
 ---
 
 ### 2026.04.13 - Session 248e740e | Bug Fix Session: UI env label, Imagen 4.0, history card persistence
