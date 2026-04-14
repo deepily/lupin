@@ -1,10 +1,10 @@
 version: '3.8'
 
 services:
-  # PostgreSQL database for local development
+  # PostgreSQL database server (hosts both lupin_db_dev and lupin_db_test)
   postgres:
     image: postgres:16.3-alpine
-    container_name: lupin-postgres-dev
+    container_name: lupin-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: lupin_db_dev
@@ -34,20 +34,24 @@ services:
     image: lupin:0.9.0
     container_name: lupin-rest-dev
     restart: unless-stopped
+    user: "1001:1001"
     ports:
       - "7999:7999"
     volumes:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
       - ./pytest.ini:/var/lupin/pytest.ini:ro
-      - ~/.lora_env:/root/.lora_env:ro
-      - ~/.lupin:/root/.lupin:ro
-      - ~/.claude/.credentials.json:/root/.claude/.credentials.json:ro
+      - ~/.lora_env:/home/rruiz/.lora_env:ro
+      - ~/.lupin:/home/rruiz/.lupin:ro
+      - ~/.claude/.credentials.json:/home/rruiz/.claude/.credentials.json:ro
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: development
       LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
-      DB_HOST: lupin-postgres-dev
+      DB_HOST: lupin-postgres
+      LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
+      LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}
+      CHROME_PATH: /home/rruiz/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome
       PYTHONUNBUFFERED: 1
     deploy:
       resources:
@@ -77,6 +81,7 @@ services:
     image: lupin:0.9.0
     container_name: lupin-rest-test
     restart: unless-stopped
+    user: "1001:1001"
     command: ["/bin/bash", "/var/lupin/src/scripts/run-fastapi-lupin-test.sh"]
     ports:
       - "8000:7999"
@@ -84,13 +89,16 @@ services:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
       - ./pytest.ini:/var/lupin/pytest.ini:ro
-      - ~/.lora_env:/root/.lora_env:ro
+      - ~/.lora_env:/home/rruiz/.lora_env:ro
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: testing
       LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
-      DB_HOST: lupin-postgres-dev
+      DB_HOST: lupin-postgres
       LUPIN_DEV_EMAIL: ricardo.felipe.ruiz@gmail.com
+      LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
+      LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}
+      CHROME_PATH: /home/rruiz/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome
       PYTHONUNBUFFERED: 1
     deploy:
       resources:

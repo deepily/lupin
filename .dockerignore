@@ -3,6 +3,21 @@ src/conf/long-term-memory/postgresql-dev-data
 src/conf/long-term-memory/postgresql-dev-data/**
 src/conf/long-term-memory/*.lancedb.backup-*
 
+# Runtime bind-mount dirs (container writes here; never COPY'd into image)
+# Excluded to avoid "permission denied" on container-owned files during build context send.
+io/
+io/**
+src/rnd/
+src/rnd/**
+src/tests/
+src/tests/**
+src/lupin-plugin-firefox/
+src/lupin-plugin-firefox/**
+src/lupin-mobile/
+src/lupin-mobile/**
+src/ephemera/
+src/ephemera/**
+
 # Python cache
 __pycache__
 *.pyc

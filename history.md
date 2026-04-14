@@ -1,5 +1,40 @@
 # Lupin Project History
 
+### 2026.04.13 - Session 23f409c8 | Option C Docker non-root + rsync error surfacing + CHROME_PATH
+
+**Context**: Session started with a TODO triage producing 12 HIGH PRIORITY items (red), 3 TFE follow-ups (yellow), 14 older carry-overs (green). Serialized the triage to `src/rnd/v0.1.6/` and worked through the first three red items.
+
+#### Checkpoint | 2026.04.13 21:03 | Option C + rsync + CHROME_PATH
+
+**Accomplishments**:
+
+- **HIGH PRIORITY #2 — Option C (Docker non-root user)**: `lupin-rest-dev` and `lupin-rest-test` now run as UID 1001(rruiz). Dockerfile adds `useradd -m`, `ENV HOME=/home/rruiz`, `ENV HF_HOME=/home/rruiz/.cache/huggingface`, a guard RUN that relocates any `/root/.cache` into `/home/rruiz/.cache` (protects against Docker layer-cache reuse), and `USER rruiz` before CMD. docker-compose.yml gains `user: "1001:1001"` on both services + 4 bind-mount repoints (`/root/…` → `/home/rruiz/…`). run-fastapi-lupin-test.sh line 21 updated to match. Full rebuild (128 GB image). Verified: `id` returns uid=1001 on both containers; HF cache present under `/home/rruiz/.cache/huggingface/hub`; marp v4.3.1, d2, claude all resolvable; `/health` HTTP 200 on :7999 + :8000; 0 root-owned files under `lupin.lancedb/` + `io/` after runtime. End-to-end execution log: `src/rnd/v0.1.6/2026.04.13-option-c-execution-log.md`.
+- **Side-fixes required during Option C integration**: `.dockerignore` expanded to exclude `io/`, `src/rnd/`, `src/tests/`, `src/ephemera/`, sub-repos (BuildKit walks FS before applying ignores, hit permission denials on container-written dirs). User re-ran `sudo chown -R rruiz:rruiz lupin.lancedb io/` (1,663 root-owned files accumulated between Option B and container stop). User `sudo chmod -R g+rX postgresql-dev-data` so BuildKit can traverse past mode-700 dir without violating postgres ownership.
+- **HIGH PRIORITY #3 — rsync error surfacing**: `src/scripts/backup.sh` now tees rsync stderr to `/tmp/rsync-backup-<timestamp>.log` during the call; on non-zero exit prints error line count + full log path + last 20 error lines. Option (b)+(c) from TODO combined. Validated by `bash -n` + dry-run.
+- **CHROME_PATH env for marp Chromium**: Added `CHROME_PATH=/home/rruiz/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome` to both `lupin-rest-dev` and `lupin-rest-test` in docker-compose.yml. Bounced + verified both containers show the env correctly; `/health` remains 200 on both ports. Unblocks orchestrator marp subprocess discovery.
+- **Triage doc serialized**: `src/rnd/v0.1.6/2026.04.13-session-triage-and-option-c-docker-non-root.md` captures the red/yellow/green triage; `src/rnd/README.md` v0.1.6 file count bumped 33→34.
+
+**Files changed (9 files)**:
+- `docker/lupin/Dockerfile` — Option C user creation, HF_HOME, cache relocation, USER rruiz (marp install section landed in parallel session, bundled here)
+- `docker-compose.yml` — `user: "1001:1001"`, bind-mount repoints, `CHROME_PATH` env on both services
+- `.dockerignore` — excluded runtime bind-mount dirs (io/, rnd/, tests/, ephemera/, sub-repos)
+- `src/scripts/run-fastapi-lupin-test.sh` — `/root/.lupin/` → `/home/rruiz/.lupin/`
+- `src/scripts/backup.sh` — stderr tee'd to persistent log; failure path surfaces error details
+- `TODO.md` — HIGH PRIORITY #2 and #3 closed
+- `src/rnd/README.md` — v0.1.6 file count + focus keyword
+- `src/rnd/v0.1.6/2026.04.13-session-triage-and-option-c-docker-non-root.md` (new) — this session's triage + Option C plan
+- `src/rnd/v0.1.6/2026.04.13-option-c-execution-log.md` (new) — end-to-end execution log with hurdles, hotfixes, final verification
+- `history.md` — this entry
+
+**Commit**: 28c8fca
+
+**Open items** (from same triage, pending):
+- HIGH PRIORITY #4-12 (CoSA commits, TFE Resume E2E, Phase D/E follow-ups, FastAPI restart verifications, PEFT trainer, BFE Phase 6)
+- 3 yellow TFE follow-ups
+- 14 green older carry-overs
+
+---
+
 ### 2026.04.13 - Session 98a19cc0 | Test-container auth fix + TFE Resume E2E scheduled
 
 **Context**: User asked to schedule the TFE Resume E2E (Tier 1) against the test-server scheduler on port 8000. Submission failed with 401 on `/auth/login`. Diagnosed root cause and fixed in-session.

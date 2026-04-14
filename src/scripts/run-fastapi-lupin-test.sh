@@ -18,7 +18,7 @@ python3 scripts/seed_test_companions.py
 
 # Source test environment credentials (for scheduled test jobs that run
 # inside this container and need LUPIN_TEST_INTERACTIVE_MOCK_JOBS_* vars)
-[ -f /root/.lupin/test-env.sh ] && source /root/.lupin/test-env.sh
+[ -f /home/rruiz/.lupin/test-env.sh ] && source /home/rruiz/.lupin/test-env.sh
 
 # Start FastAPI (LUPIN_ENV=testing set by docker-compose env block)
 python3 -m fastapi_app.main

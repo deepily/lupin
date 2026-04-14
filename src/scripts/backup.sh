@@ -151,15 +151,20 @@ if [[ -f "$POSTGRES_BACKUP_SCRIPT" ]]; then
     echo ""
 fi
 
-# Run rsync
-echo -e "${MODE_COLOR}Running rsync...${NC}\n"
+# Run rsync — capture stderr to a persistent log so per-file errors survive
+# terminal/output truncation (e.g. 63k "Permission denied" errors were hidden
+# by a `tail -30` display clip on 2026-04-12).
+RSYNC_ERROR_LOG="/tmp/rsync-backup-$( date +%Y%m%d-%H%M%S ).log"
+echo -e "${MODE_COLOR}Running rsync...${NC}"
+echo -e "${BLUE}(stderr captured to: ${RSYNC_ERROR_LOG})${NC}\n"
 
 rsync -avh $DRY_RUN \
     --delete \
     --stats \
     --exclude-from="$EXCLUDE_FILE" \
     "$SOURCE_DIR" \
-    "$DEST_DIR"
+    "$DEST_DIR" \
+    2> >( tee "$RSYNC_ERROR_LOG" >&2 )
 
 RSYNC_EXIT=$?
 
@@ -183,5 +188,12 @@ else
     echo -e "${RED}  SYNC FAILED${NC}"
     echo -e "${RED}========================================${NC}"
     echo -e "Rsync exited with code: $RSYNC_EXIT"
+    if [[ -s "$RSYNC_ERROR_LOG" ]]; then
+        ERROR_COUNT=$( wc -l < "$RSYNC_ERROR_LOG" )
+        echo -e "${RED}Errors captured: ${ERROR_COUNT} lines${NC}"
+        echo -e "Full error log: ${YELLOW}${RSYNC_ERROR_LOG}${NC}"
+        echo -e "\n${RED}Last 20 errors:${NC}"
+        tail -20 "$RSYNC_ERROR_LOG"
+    fi
     exit $RSYNC_EXIT
 fi

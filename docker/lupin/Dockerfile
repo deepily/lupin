@@ -6,6 +6,22 @@ FROM nvidia/cuda:12.2.2-base-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
+# ============================================================================
+# NON-ROOT USER (Option C: permanent fix for bind-mount permissions)
+# ============================================================================
+# Container writes to bind-mounted host paths (./src, ./io) must be owned by
+# UID 1001 on the host (rruiz). Creating the user early lets subsequent caches
+# (pip, huggingface, d2, claude) land under /home/rruiz with HOME set below.
+# Final `USER rruiz` + `chown -R` happens at the end of the Dockerfile.
+ARG LUPIN_UID=1001
+ARG LUPIN_GID=1001
+RUN groupadd -g ${LUPIN_GID} rruiz && \
+    useradd -m -u ${LUPIN_UID} -g ${LUPIN_GID} -s /bin/bash rruiz
+ENV HOME=/home/rruiz
+# Pin HF cache to rruiz's home so runtime (UID 1001) finds pre-downloaded models
+# regardless of whether HOME expansion varies across build stages.
+ENV HF_HOME=/home/rruiz/.cache/huggingface
+
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential \
@@ -125,10 +141,10 @@ RUN pip install --no-cache-dir seaborn==0.13.2
 # ============================================================================
 # D2 is a modern diagramming language compiled to SVG. Used by D2Renderer
 # for flowchart_d2 and architecture visual types in presentation generation.
-# Installed via official installer; binary lands in /root/.local/bin/d2.
+# Installed via official installer; binary lands in $HOME/.local/bin/d2 (/home/rruiz/.local/bin/d2).
 # Placed late in Dockerfile to avoid invalidating earlier cached layers.
 RUN curl -fsSL https://d2lang.com/install.sh | sh
-ENV PATH="/root/.local/bin:${PATH}"
+ENV PATH="/home/rruiz/.local/bin:${PATH}"
 
 # ============================================================================
 # RUNTIME CONFIGURATION (Can be overridden via docker run -e or Cloud Run)
@@ -225,11 +241,11 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 RUN pip install --no-cache-dir claude-agent-sdk==0.1.56
 
 # Create Claude config directory and copy pre-configured settings
-RUN mkdir -p /root/.claude
+RUN mkdir -p /home/rruiz/.claude
 
 # Copy MCP configuration (cosa-voice with container paths) and settings
-COPY docker/lupin/claude-config/settings.json /root/.claude/settings.json
-COPY docker/lupin/claude-config/mcp.json /root/.claude/.mcp.json
+COPY docker/lupin/claude-config/settings.json /home/rruiz/.claude/settings.json
+COPY docker/lupin/claude-config/mcp.json /home/rruiz/.claude/.mcp.json
 
 # ============================================================================
 # END CLAUDE CODE CLI INSTALLATION
@@ -273,6 +289,42 @@ RUN sed -i 's/from structlog_config import configure_logger/try:\n    from struc
 # ============================================================================
 # END PLAYWRIGHT E2E TESTING
 # ============================================================================
+
+# ============================================================================
+# MARP CLI — Presentation PPTX Export
+# ============================================================================
+# Standalone binary (no Node.js needed). Uses Playwright Chromium for rendering.
+# Ref: https://github.com/marp-team/marp-cli/releases
+
+RUN MARP_VERSION="4.3.1" && \
+    wget -q "https://github.com/marp-team/marp-cli/releases/download/v${MARP_VERSION}/marp-cli-v${MARP_VERSION}-linux.tar.gz" \
+      -O /tmp/marp-cli.tar.gz && \
+    tar -xzf /tmp/marp-cli.tar.gz -C /usr/local/bin/ && \
+    chmod +x /usr/local/bin/marp && \
+    rm /tmp/marp-cli.tar.gz
+
+# ============================================================================
+# END MARP CLI
+# ============================================================================
+
+# ============================================================================
+# NON-ROOT RUNTIME (Option C: drop to UID 1001 before CMD)
+# ============================================================================
+# Relocate any caches that landed in /root/.cache from Docker layer-cache reuse
+# (HF/pip/claude pre-downloads baked into cached RUN layers from before Option C).
+# Safe no-op when layers were rebuilt fresh with HOME=/home/rruiz.
+RUN if [ -d /root/.cache ]; then \
+        mkdir -p /home/rruiz/.cache && \
+        cp -an /root/.cache/. /home/rruiz/.cache/ && \
+        rm -rf /root/.cache; \
+    fi
+
+# Ensure rruiz owns its HOME (where d2, claude, huggingface caches landed as root
+# during build) and the /var/lupin tree (installs, pre-downloaded models, code).
+# Bind-mounted paths (./src, ./io) inherit host ownership at runtime — those are
+# fine since Option B already chowned LanceDB to rruiz:rruiz on the host.
+RUN chown -R rruiz:rruiz /home/rruiz /var/lupin
+USER rruiz
 
 # CMD ["/bin/bash", "-c", "echo '-- OR -- Run `python3 -m fastapi_app.main` to spin up FastAPI server' && exec /bin/bash"]
 # Run the script: /var/lupin/src/scripts/run-fastapi-lupin.sh
