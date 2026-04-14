@@ -8,7 +8,7 @@ dry run mode, and voice_io integration.
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from cosa.agents.test_suite.job import TestSuiteJob
+from cosa.agents.test_suite.job import TestSuiteJob, ALL_SUITE_COMPONENTS, _expand_all
 from cosa.rest.job_state import JobState
 
 
@@ -543,3 +543,170 @@ class TestRunSuite:
         result = job._run_suite( "integration", "/nonexistent/path" )
         assert result[ "exit_code" ] == 1
         assert "Script not found" in result.get( "error", "" )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Synthetic Failure Records (Bug 1A — timeout/exception paths)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSyntheticFailureRecords:
+    """
+    Regression tests for the 2026-04-14 `all`-suite aggregation bug:
+    the timeout and generic-exception paths must return `errors:1` plus a
+    single `failure_details` entry so TestSuiteCompletionWatchdog Gate 3
+    (`len(failures) > 0`) can dispatch TFE instead of silently dropping
+    an 80-minute run on the floor.
+    """
+
+    def test_timeout_populates_failure_details( self, single_suite_job, tmp_path, monkeypatch ):
+        """Timeout branch must return errors=1 + one synthetic failure_details entry + log_path."""
+        script = tmp_path / "src" / "tests" / "run-integration-tests.sh"
+        script.parent.mkdir( parents=True )
+        # Long-running shell that exceeds the patched 1s budget
+        script.write_text( "#!/usr/bin/env bash\nfor i in $(seq 1 20); do echo line-$i; sleep 0.2; done\n" )
+        script.chmod( 0o755 )
+
+        from cosa.agents.test_suite import job as job_mod
+        monkeypatch.setitem( job_mod.SUITE_TIMEOUTS_SECONDS, "integration", 1 )
+
+        result = single_suite_job._run_suite( "integration", str( tmp_path ) )
+
+        assert result[ "errors" ] == 1
+        assert result[ "passed" ] == 0
+        assert result[ "failed" ] == 0
+        assert result[ "exit_code" ] == -2
+        assert "Timeout" in result[ "error" ]
+        # Core regression guard: non-empty failure_details so watchdog Gate 3 fires
+        fd = result.get( "failure_details" )
+        assert isinstance( fd, list ) and len( fd ) == 1
+        assert fd[ 0 ][ "type" ] == "ERROR"
+        assert fd[ 0 ][ "name" ] == "timeout"
+        assert fd[ 0 ][ "classname" ] == "TestSuiteJob.integration"
+        assert "Subprocess killed after 1s" in fd[ 0 ][ "message" ]
+        # Captured stdout tail survives the terminate()
+        assert "line-" in fd[ 0 ][ "traceback" ]
+        # Log file was actually written
+        assert result[ "log_path" ] and result[ "log_path" ].startswith( "/tmp/integration-" )
+
+    def test_exception_populates_failure_details( self, single_suite_job, tmp_path, monkeypatch ):
+        """Exception branch must return errors=1 (not 0) + one synthetic failure_details entry."""
+        script = tmp_path / "src" / "tests" / "run-integration-tests.sh"
+        script.parent.mkdir( parents=True )
+        script.write_text( "#!/usr/bin/env bash\necho hi\n" )
+        script.chmod( 0o755 )
+
+        from cosa.agents.test_suite import job as job_mod
+        def boom( *a, **kw ):
+            raise RuntimeError( "simulated popen failure" )
+        monkeypatch.setattr( job_mod.subprocess, "Popen", boom )
+
+        result = single_suite_job._run_suite( "integration", str( tmp_path ) )
+
+        # Was errors=0 before the fix — watchdog silently ignored crashed subprocesses
+        assert result[ "errors" ] == 1
+        assert "simulated popen failure" in result[ "error" ]
+        fd = result.get( "failure_details" )
+        assert isinstance( fd, list ) and len( fd ) == 1
+        assert fd[ 0 ][ "type" ] == "ERROR"
+        assert fd[ 0 ][ "name" ] == "exception"
+        assert "RuntimeError" in fd[ 0 ][ "message" ]
+        # format_exc() output lands in traceback (best-effort; at minimum non-empty fallback)
+        assert fd[ 0 ][ "traceback" ]
+
+    def test_write_stdout_log_refreshes_symlink( self, tmp_path, monkeypatch ):
+        """_write_stdout_log returns actual log path and points the canonical symlink at it."""
+        import pathlib
+        from cosa.agents.test_suite.job import TestSuiteJob
+
+        # Redirect _LOG_SYMLINKS to a tmp location so the test doesn't stomp /tmp/unit-latest.log
+        link = tmp_path / "unit-latest.log"
+        monkeypatch.setattr( TestSuiteJob, "_LOG_SYMLINKS", { "unit": str( link ) } )
+
+        path1 = TestSuiteJob._write_stdout_log( "unit", "first run\n" )
+        assert path1 is not None
+        assert pathlib.Path( path1 ).read_text() == "first run\n"
+        assert pathlib.Path( link ).resolve() == pathlib.Path( path1 ).resolve()
+
+        # Unknown suite → no-op
+        assert TestSuiteJob._write_stdout_log( "bogus", "ignored" ) is None
+        # Empty text → no-op even for known suite
+        assert TestSuiteJob._write_stdout_log( "unit", "" ) is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# "all" Expansion (Bug 1B — per-component suite_results)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAllExpansion:
+    """
+    Regression tests for the 2026-04-14 `all`-suite aggregation bug:
+    passing test_types=["all"] must fan out into per-component runs so a
+    timeout in one suite doesn't nuke every other suite's results.
+    """
+
+    def test_all_components_order( self ):
+        """Canonical pyramid order: unit → smoke → websocket → integration → e2e."""
+        assert ALL_SUITE_COMPONENTS == [ "unit", "smoke", "websocket", "integration", "e2e" ]
+
+    def test_expand_all_fans_out( self ):
+        assert _expand_all( [ "all" ] ) == ALL_SUITE_COMPONENTS
+
+    def test_expand_passthrough_for_non_all( self ):
+        assert _expand_all( [ "integration" ] )         == [ "integration" ]
+        assert _expand_all( [ "unit", "e2e" ] )         == [ "unit", "e2e" ]
+        assert _expand_all( [] )                        == []
+
+    def test_expand_dedupes_first_wins( self ):
+        # "all" + redundant component → expansion deduped, order preserved
+        assert _expand_all( [ "all", "unit" ] )         == ALL_SUITE_COMPONENTS
+        assert _expand_all( [ "unit", "all" ] )         == ALL_SUITE_COMPONENTS
+        # Caller-supplied duplicates also deduped
+        assert _expand_all( [ "unit", "unit" ] )        == [ "unit" ]
+
+    def test_expand_does_not_mutate_input( self ):
+        original = [ "all" ]
+        _expand_all( original )
+        assert original == [ "all" ]
+
+    def test_run_task_runs_each_component( self, monkeypatch ):
+        """
+        When test_types=["all"], run_task must invoke _run_suite once per
+        component and store each result under its own key in suite_results.
+        Pre-fix this was a single "all" entry — a timeout anywhere lost everything.
+        """
+        import asyncio
+        job = TestSuiteJob(
+            test_types = [ "all" ],
+            user_id    = "user-123",
+            user_email = "test@test.com",
+            session_id = "wise-penguin",
+        )
+
+        called_with = []
+        def fake_run_suite( self_ref, suite_type, project_root ):
+            called_with.append( suite_type )
+            return {
+                "passed"    : 1,
+                "failed"    : 0,
+                "skipped"   : 0,
+                "errors"    : 0,
+                "exit_code" : 0,
+                "log_path"  : None,
+                "duration"  : 0.1,
+            }
+        monkeypatch.setattr( TestSuiteJob, "_run_suite", fake_run_suite )
+
+        # Patch voice_io to keep the coroutine inert in unit context
+        import cosa.agents.test_suite.voice_io as voice_io
+        monkeypatch.setattr( voice_io, "reconfigure", lambda: None )
+        monkeypatch.setattr( voice_io, "set_job_id", lambda _id: None )
+        monkeypatch.setattr( voice_io, "clear_job_id", lambda: None )
+        async def fake_notify( *a, **kw ): return None
+        monkeypatch.setattr( voice_io, "notify", fake_notify )
+
+        asyncio.run( job._execute() )
+
+        assert called_with == ALL_SUITE_COMPONENTS
+        assert set( job.suite_results.keys() ) == set( ALL_SUITE_COMPONENTS )
+        # test_types unchanged — user-visible label and report filename stay "all"
+        assert job.test_types == [ "all" ]

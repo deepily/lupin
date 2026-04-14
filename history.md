@@ -1,5 +1,30 @@
 # Lupin Project History
 
+### 2026.04.14 - Session 9614fdd1 | Bug Fix (checkpoint): `all`-suite aggregation black hole + history-card toggle
+
+**Context**: Overnight `all` test-suite run (2026-04-14 00:42 EDT) produced `0 passed, 0 failed, 1 error, 0 skipped`, `failures: []`, despite a 4661.7s (~78min) wall time. Two orthogonal bugs surfaced: (Bug 1) monolithic `all` subprocess hit the 60min timeout and the timeout-return path discarded captured stdout AND synthesized no failure record, so `TestSuiteCompletionWatchdog` Gate 3 refused to dispatch TFE on `len(failures)==0`; (Bug 2) job cards loaded from `/api/job-history` won't expand when the scroll-toggle is clicked, while live done-queue cards work.
+
+#### Checkpoint | 2026.04.14 10:05 EDT | Bug 1A/1B complete, Bug 2 deferred
+
+**Accomplishments**:
+
+- **Root cause Bug 1 confirmed**: `src/cosa/agents/test_suite/job.py` timeout branch (original lines 682–698) returned `errors:1` with NO `failure_details` key and NO `log_path`. The aggregation snapshot writer (lines 421–447) iterates `result.get("failure_details", [])`, which was empty, producing `failures: []`. The generic `except Exception` path (760–771) had a separate latent bug: returned `errors:0` — silently hiding subprocess crashes from the watchdog. The monolithic `all` design meant one suite's timeout vaporized every other suite's output since there was only ever a single `self.suite_results["all"]` bucket.
+- **Bug 1A fix (timeout/exception preservation)**: added `_write_stdout_log` classmethod (DRYs the happy-path log writer at 714-734) and `_synth_failure_detail` staticmethod. Timeout branch now drains residual stdout after `terminate()`, persists to `/tmp/<suite>-<ts>.log`, and returns a populated `failure_details` ERROR entry with the last 40 lines of captured output. Generic exception branch now returns `errors:1` with `traceback.format_exc()` in the synthetic entry.
+- **Bug 1B fix ("all" fan-out)**: added `ALL_SUITE_COMPONENTS = ["unit","smoke","websocket","integration","e2e"]` + `_expand_all()` helper. `_execute()` expands `test_types=["all"]` into per-component iteration so each runs with its own timeout (unit 180s, smoke 600s, websocket 300s, integration 1200s, e2e 2400s) and its own `self.suite_results[component]` entry. `self.test_types` is preserved so report filenames ("all-results.md") and user-visible labels stay meaningful. Fan-out is dedup'd and order-preserved (first wins).
+- **Tests (9 new)**: `TestSyntheticFailureRecords` × 3 (real-subprocess timeout simulation, Popen-raises simulation, symlink refresh) + `TestAllExpansion` × 6 (order, fan-out, passthrough, dedup, no-mutation, end-to-end `_execute()` with mocked voice_io). All pass.
+- **Pre-existing failure check**: full unit tier = 3280 pass, 16 fail. All 16 reproduce on pre-change baseline (stashed verification) — orthogonal to this fix, located in test_stop_hook, test_notification_proxy, test_presentation_visual_renderer, test_runtime_argument_expeditor. Post-fix, a fresh `all` run will feed these 16 into TFE via the per-suite `failure_details` path the `unit` junit parser already produces.
+- **Bug 2 deferred**: UI devtools confirmation (ID-collision hypothesis between live Done and History sections) postponed until user is at the keyboard. Plan documented in `src/rnd/v0.1.6/2026.04.14-all-suite-aggregation-and-history-card-toggle.md` Step 3.
+
+**Files changed (3 files in parent Lupin; 1 file in CoSA submodule NOT committed from this context)**:
+- `src/tests/unit/test_test_suite_job.py` (+168 lines — TestSyntheticFailureRecords + TestAllExpansion)
+- `src/rnd/v0.1.6/2026.04.14-all-suite-aggregation-and-history-card-toggle.md` (new — plan)
+- `.claude-session.md` — session 9614fdd1 section
+- **Uncommitted, CoSA submodule**: `src/cosa/agents/test_suite/job.py` (+151/−36 — user to commit in cosa context per nested-repo rules)
+
+**Next**: User runs `all` suite against the fix to verify TFE ingests the 16 pre-existing failures; then returns to Bug 2 Step 0 devtools check + Step 3 DOM-id namespacing.
+
+---
+
 ### 2026.04.13 - Session 9a488d40 | TFE Resume Live E2E scheduled (pytest_direct, 21:00 EDT)
 
 **Context**: Plan-mode session per Runbook 17 (`src/rnd/v0.1.6/2026.04.10-test-fix-expediter/17-schedule-tfe-resume-live-e2e-runbook.md`) to schedule the TFE Resume Live E2E tonight against the test container (port 8000, isolated from dev-server edits on 7999).
