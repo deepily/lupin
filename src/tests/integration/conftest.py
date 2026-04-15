@@ -106,24 +106,36 @@ def verify_test_environment():
 @pytest.fixture( scope="function" )
 def clean_test_db():
     """
-    Clean PostgreSQL test database before each test.
+    Clean PostgreSQL test database before each test, then re-seed companion users.
 
     Uses hot-swap mechanism: the integration test runner calls /api/init
     to swap the running dev server to [Lupin: Testing] config block,
     which points to lupin_db_test.
 
+    Companion seed restoration:
+        After drop+recreate, immediately re-runs the same companion seed that
+        the test container runs at startup (src/scripts/seed_test_companions.py).
+        This keeps service-account logins (e.g. PQW polling :8000) working
+        across the whole `all`-suite run instead of failing 401 mid-suite the
+        moment the first user-management test wipes the users table.
+
     Safety Mechanism:
         - Asserts engine.url contains 'lupin_db_test' before any destructive ops
-        - Verifies users table is empty after schema reset
-        - DROP/CREATE provides complete isolation between tests
+        - Verifies users table contains exactly the companion rows after reset
+          (anything else is a leftover from a prior test or seed regression)
+        - DROP/CREATE provides complete isolation between tests EXCEPT for the
+          companion seed, which is intentional shared infrastructure
 
     Requires:
         - PostgreSQL Docker container running (lupin-postgres)
         - Test server running on port 8000 with [Lupin: Testing] config (lupin_db_test)
+        - lupin_db_dev populated with companion users (seed source)
 
     Ensures:
         - Fresh database schema before each test
-        - Complete isolation between tests
+        - Complete isolation between tests for application data
+        - Companion users (interactive.job.tester@..., admin@..., etc.) always
+          present at test entry
         - Tests never affect development database
     """
     # Re-import to get the current (possibly hot-swapped) engine
@@ -142,10 +154,29 @@ def clean_test_db():
     # Recreate all tables with fresh schema
     Base.metadata.create_all( bind=engine )
 
-    # Verify the reset worked
+    # Re-seed companion users from lupin_db_dev so service-account logins
+    # (e.g. Peer Queue Watcher) keep working across the suite. The seed
+    # script lives in src/scripts/ and is normally invoked at container
+    # startup; we add it to sys.path on demand and call its idempotent
+    # function. ON CONFLICT DO NOTHING in the script makes repeat calls safe.
+    import sys as _sys, pathlib as _pathlib, cosa.utils.util as _cu
+    _scripts_dir = _pathlib.Path( _cu.get_project_root() ) / "src" / "scripts"
+    if str( _scripts_dir ) not in _sys.path:
+        _sys.path.insert( 0, str( _scripts_dir ) )
+    from seed_test_companions import seed_if_missing, COMPANION_EMAILS
+    seed_if_missing()
+
+    # Verify the reset + reseed worked: users table should contain exactly the
+    # companion rows. Any deviation means either the seed silently failed
+    # (companion source missing in lupin_db_dev) or a prior test left rows
+    # the drop_all somehow missed.
     with engine.connect() as conn:
         count = conn.execute( text( "SELECT count(*) FROM users" ) ).scalar()
-        assert count == 0, f"SAFETY: users table not empty after clean ({count} rows)"
+        expected = len( COMPANION_EMAILS )
+        assert count == expected, (
+            f"SAFETY: expected {expected} companion rows after clean+reseed, "
+            f"got {count}"
+        )
 
     yield
 

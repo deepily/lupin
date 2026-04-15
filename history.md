@@ -202,6 +202,37 @@ docker exec lupin-rest-dev bash -c 'TOKEN=$(curl -sS -X POST http://lupin-rest-t
 
 **Context**: Overnight `all` test-suite run (2026-04-14 00:42 EDT) produced `0 passed, 0 failed, 1 error, 0 skipped`, `failures: []`, despite a 4661.7s (~78min) wall time. Two orthogonal bugs surfaced: (Bug 1) monolithic `all` subprocess hit the 60min timeout and the timeout-return path discarded captured stdout AND synthesized no failure record, so `TestSuiteCompletionWatchdog` Gate 3 refused to dispatch TFE on `len(failures)==0`; (Bug 2) job cards loaded from `/api/job-history` won't expand when the scroll-toggle is clicked, while live done-queue cards work.
 
+#### Checkpoint 3 | 2026.04.14 19:55 EDT | PQW 502/401 root-caused — clean_test_db wipes companion seed mid-suite
+
+**Context**: During the in-flight 19:16 `all` run on `:8000`, Peer Queue Watcher (running on dev `:7999`) started emitting `HTTP 502: peer login http://lupin-rest-test:7999/auth/login returned 401: {"detail":"Invalid email or password"}`. Same env-var creds worked against `:7999` (HTTP 200) but failed against `:8000` (HTTP 401). Direct evidence the test DB had lost the `interactive.job.tester@lupin.deepily.ai` companion row mid-run.
+
+**Root cause** (read-only investigation, in-flight run untouched): `src/tests/integration/conftest.py:106-150` `clean_test_db` fixture (function scope) does `Base.metadata.drop_all(engine)` + `Base.metadata.create_all(engine)` before every test using `multiple_test_users` / `create_test_user` / `create_test_admin` (test_admin_users.py runs ~12 such tests). Companion users seeded ONLY at container startup via `src/scripts/seed_test_companions.py` (idempotent `ON CONFLICT DO NOTHING`). When tests drop the table, companion rows are gone for the rest of the run since the seed script never re-fires. PQW's correct cache-invalidate-and-retry-once 401 handler (`peer.py:157-193`) gives up after the second 401 and surfaces the 502 to the user. The 502 is a passthrough diagnostic, not a proxy fault — payload tells you upstream rejected. Login API deliberately returns the same `401 "Invalid email or password"` for "no row" vs. "wrong hash" (timing-attack mitigation, `user_service.py:117,125`), which is why the symptom looks like wrong credentials.
+
+**Audit (Step 3 in plan)**: searched `src/tests/integration/test_admin_users.py` for any `DELETE /admin/users/{id}` or raw `DELETE FROM users` targeting a companion email/UUID. Every DELETE call targets a `user_id` returned from a paired earlier `POST /admin/users` (test-prefixed users only). Companion seed is safe from explicit deletion — the only risk vector is `clean_test_db.drop_all`, which is exactly what this fix addresses.
+
+**Fix**:
+
+- **`src/tests/integration/conftest.py`**: after `create_all(bind=engine)`, on-demand-add `src/scripts/` to `sys.path`, import `seed_if_missing` and `COMPANION_EMAILS` from `seed_test_companions`, call `seed_if_missing()`. Reframed safety assertion from `count == 0` to `count == len(COMPANION_EMAILS)` (5 today). Updated docstring with companion-restoration policy. PQW + cosa-voice MCP key-owner lookups + any other service-account flow now survives every `clean_test_db` cycle within the same fixture invocation (sub-millisecond gap).
+- **No changes** to `peer.py` (PQW handling is correct), `user_service.py` (auth ambiguity is intentional security policy), or `seed_test_companions.py` (already a clean importable function with idempotent SQL).
+
+**Tests (3 new, integration tier)**: `src/tests/integration/test_conftest_clean_test_db.py` — `test_clean_test_db_preserves_companions`, `test_clean_test_db_removes_prior_test_users`, `test_companion_emails_constant_nonempty`. Live verification deferred — must not interrupt the in-flight 19:16 run.
+
+**Files changed (3 Lupin)**:
+- `src/tests/integration/conftest.py` — clean_test_db fixture body + docstring
+- `src/tests/integration/test_conftest_clean_test_db.py` (new)
+- `history.md` (this Checkpoint 3 entry) + `.claude-session.md`
+- **No CoSA edits needed.** Earlier-session uncommitted CoSA file (`agents/test_suite/job.py`, ~2 incremental Checkpoints worth) still pending in user's cosa-context queue — unchanged here.
+
+**Parallel session 5a620729** (active in BFE/TFE bug-fix mode): zero file overlap. Their TODO.md / docker-compose.yml / src/rnd/v0.1.6/2026.04.13-session-triage.md edits left untouched and unstaged here.
+
+**Next**:
+1. Wait for 19:16 `all` job to finish on `:8000`.
+2. Run `docker exec lupin-rest-test python3 /var/lupin/src/scripts/seed_test_companions.py` to restore the post-run DB state so PQW recovers immediately (without waiting for next container restart).
+3. Live-verify the fix: `./src/tests/run-integration-tests.sh --bg -v` while tailing PQW for 502s — expect zero. If new safety assertion (`count == len(COMPANION_EMAILS)`) is violated by some pre-existing test that asserted the old `count == 0` shape, fix that test in a follow-up.
+4. Schedule another full `all` run; confirm zero PQW 502s during the run.
+
+---
+
 #### Checkpoint 2 | 2026.04.14 15:30 EDT | P0 regressions from fan-out: WebSocket `--junit-xml` + smoke budget
 
 **Context**: Post-fix `all` run at 12:26 EDT verified Bug 1A/1B working (3828 pass / 46 tagged failures distributed across 4 suites, TFE Gate 3 now has signal). The run also revealed two **P0 regressions caused by Bug 1B's fan-out** plus 44 "real" failures needing triage before TFE dispatch.
