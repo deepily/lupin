@@ -202,6 +202,43 @@ def clean_test_db():
     yield
 
 
+@pytest.fixture( scope="session", autouse=True )
+def restore_companions_after_suite():
+    """
+    Re-seed companion users into lupin_db_test after the E2E UI suite exits.
+
+    Why: Per-test `clean_test_db` drops+recreates all tables and asserts an
+    empty users table, then `logged_in_page` registers e2e_test@example.com
+    via the browser UI. When the suite finishes, lupin_db_test is left with
+    only that one row, so the operator can no longer log into :8000 with
+    normal credentials (ricardo.felipe.ruiz@gmail.com and service accounts
+    are missing). This teardown restores the 5 companion users so the test
+    server remains operator-accessible between suite runs.
+    """
+    yield
+
+    import os as _os
+    _os.environ.setdefault( "DB_HOST", "localhost" )
+
+    import sys as _sys, pathlib as _pathlib, cosa.utils.util as _cu
+    _scripts = _pathlib.Path( _cu.get_project_root() ) / "src" / "scripts"
+    if str( _scripts ) not in _sys.path:
+        _sys.path.insert( 0, str( _scripts ) )
+
+    from cosa.rest.db import database as db_module
+    from cosa.rest.postgres_models import Base
+
+    engine = db_module.engine
+    assert "lupin_db_test" in str( engine.url ), \
+        f"SAFETY: restore_companions_after_suite must only run against lupin_db_test, got: {engine.url}"
+
+    Base.metadata.drop_all( bind=engine )
+    Base.metadata.create_all( bind=engine )
+
+    from seed_test_companions import seed_if_missing
+    seed_if_missing()
+
+
 # ---------------------------------------------------------------------------
 # Test Credentials
 # ---------------------------------------------------------------------------

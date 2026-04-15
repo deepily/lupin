@@ -133,6 +133,14 @@ def seed_if_missing():
             )
             row = dev_cur.fetchone()
             if row is None:
+                if email == ADMIN_EMAIL:
+                    # Primary admin missing from dev DB means the test server
+                    # will lock the operator out on startup. Fail loud instead
+                    # of silently continuing (which caused Session 2026-04-15's
+                    # hours-long investigation when the E2E suite ran without
+                    # subsequent reseed).
+                    _warn( f"PRIMARY ADMIN '{email}' missing from {DEV_DB} — aborting seed" )
+                    sys.exit( 2 )
                 _warn( f"User '{email}' not found in {DEV_DB} — skipping" )
                 continue
 

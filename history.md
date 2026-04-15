@@ -1,5 +1,61 @@
 # Lupin Project History
 
+### 2026.04.15 - Session f01fdc2f | SDK creds mount + 11 TFE/BFE observability + lifecycle fixes
+
+**Context**: Started with operator locked out of test server (401s, companions wiped from `lupin_db_test` by E2E UI suite teardown). Morning fix cascaded into a full audit of why last night's scheduled `ts-d2d890ed` TFE auto-dispatch produced "8 clusters, 0 proposed, 0 fixed" — SDK credentials weren't mounted in test container, voice gate fired at wrong priority, stalled rows mis-persisted as failed, resume re-ran Phase 0/1 unnecessarily. Ten bugs fixed + a tonight-run scheduled.
+
+**Root cause #1 — SDK auth**: `~/.claude/.credentials.json` mount missing from `lupin-rest-test` compose service; `claude-agent-sdk` CLI returned `"Not logged in · Please run /login"` for every Phase 1 delegation → 0 diagnoses → Phase 2 skip at `orchestrator.py:628` → 0 proposals. Fix: add compose volume mount; re-probe shows live SDK response. Validated end-to-end by replaying `io/test-suite/2026.04.15-at-00:56-EDT-all-remediation.json`: 19 proposals generated (tfe-225d4df2 / tfe-e115ec67 / tfe-152111fe).
+
+**Root cause #2 — voice gate silence**: dispatcher hardcoded `priority="medium"`; `TFE_FEEDBACK_TIMEOUT_SECONDS_OVERRIDE=3` left as test-container env; operator email (ricardo) wasn't the job target (interactive.job.tester was). Three separate fixes.
+
+**Bugs landed** (Lupin parent):
+- **Bug 1** (`src/cosa/rest/routers/io_files.py`): strip relative `io/` prefix so report links resolve.
+- **Bug 2** (`src/fastapi_app/static/js/notifications.js`): Done/History job-card duplication — `refreshAllQueueLists` now awaits live-queue fetches before history so `exclude_ids` is populated.
+- **Bug 4** (`docker-compose.yml`): remove `TFE_FEEDBACK_TIMEOUT_SECONDS_OVERRIDE:"3"` from `lupin-rest-test` env. Also add `~/.claude/.credentials.json` mount.
+- **Bug 8** UI labels (`notifications.js`): badge differentiation via `stall_reason` — `⏸ Stalled` vs `⏸ Paused` vs `✕ Stopped`.
+- **Bug 10** INI + splainer (`src/conf/lupin-app*.ini`): `voice gate operator email` + `voice gate service accounts` — dispatcher swaps target_user for service accounts so TTS reaches a real human.
+- **Test-harness hardening** (`src/tests/e2e_ui/conftest.py`, `src/scripts/seed_test_companions.py`): post-suite companion reseed fixture; seed script fails loud when primary admin missing from `lupin_db_dev`.
+
+**Bugs landed** (CoSA submodule — uncommitted, user to land from inside CoSA):
+- Bug 3: dispatcher `priority="high"` default + `priority` param on ask_confirmation/get_feedback/present_choices.
+- Bug 5: rewrite stale TFE orchestrator phase-status docstring (Phases 2/3/5/6 are REAL, not stubs).
+- Bug 6: resume phase-skip guards at phase 0/1/2 entries — `_resume_from_ordinal` honored.
+- Bug 7: dispatcher normalizes empty answers to `VoiceGateTimeoutError` (not silent empty selection).
+- Bug 10 dispatcher: `_resolve_routing()` helper + `_prepend_operator_routing()` abstract prefix + `response_default` param on 3 blocking methods + BFE `cosa_interface` wrapper pass-through.
+- Bug 11: `JobState.STALLED` → `persist_job_stalled_from_metadata` via `queue_util` route; `running_fifo_queue` recognizes STALLED as a first-class terminal (pushes to Done, not Dead, skips auto-fix watchdog).
+- Resume factory fix: `resume_job()` dropped invalid `config_mgr` kwarg that was crashing `create_agentic_job`.
+
+**Plan artifacts** (`src/rnd/v0.1.6/`):
+- `2026.04.10-test-fix-expediter/18-post-tfe-validation-cleanup.md` (10-step plan doc; 18 in the TFE numbered series) + index updated.
+- `2026.04.15-tfe-empty-clusters-and-bfe-dead-job-race.md` (earlier draft superseded by 18-).
+
+**Validated end-to-end**:
+- tfe-225d4df2 (dry_run=true, 1st resume): Phase 0+1 skipped ✓, voice gate auto-bypassed by dry_run ✓, status=completed with 2/2/2 dry synthetic successes.
+- tfe-e115ec67 (dry_run=false, pre-op-routing): voice gate fired but MCP 503 (interactive.job.tester offline) → exposed Bug 10 + Bug 11.
+- tfe-152111fe (post-op-routing): request correctly targets `ricardo.felipe.ruiz@gmail.com` → MCP 200 + `[NOTIFY-QUEUE] Notification queued` → TTS spoken → 5-min timeout → `status=stalled`, checkpoint intact, no error, re-resumable.
+
+**Tonight** (scheduled before session-end at 19:27 EDT): `ts-79829a75` @ 19:30 EDT, `test_types=all`, `auto_fix_on_failure=true`, cheap-tier TFE via temporary `[Lupin: Testing]` INI override (`test fix expediter lead model = claude-sonnet-4-6`). TFE will auto-dispatch on failures; voice gate routes to ricardo via Bug 10; if unanswered, stalls cleanly per Bug 11 for morning resume per Bug 6.
+
+**Deferred** (picked up next session):
+- Bug 8b (wire Pause/Stop buttons end-to-end).
+- Bug 9 (TFE/BFE Phase 3/5 in git worktree for isolation).
+- `feedback_timeout_action` knob (stall/skip/auto_select_high_confidence).
+- D1 BFE dead-job race (eager snapshot + packager fallback).
+- D2 full TFE live attended (Phase 3/5/6 real commits + PR).
+- D3 pre-merge E2E gate.
+
+**Files touched this session** (Lupin parent, 8 modified + 3 new):
+- `docker-compose.yml`, `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/fastapi_app/static/js/notifications.js`, `src/scripts/seed_test_companions.py`, `src/tests/e2e_ui/conftest.py`, `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/00-index.md`, `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/18-post-tfe-validation-cleanup.md` (new), `src/rnd/v0.1.6/2026.04.15-tfe-empty-clusters-and-bfe-dead-job-race.md` (new).
+- **Not mine**: `src/tests/e2e_ui/test_job_history_ui.py`, `src/rnd/v0.1.6/2026.04.15-done-card-toggle-id-collision.md` (parallel session artifact).
+
+**⚠️ Follow-up for next session**:
+1. Archive history.md — this entry pushed us past 25k token limit (was 95.3% before write).
+2. Morning: check tonight's `ts-79829a75` outcome; resume `tfe-*` stalled row via UI Resume button; answer voice gate → validate Phase 3/5/6.
+3. Revert `[Lupin: Testing]` cheap-tier INI override once overnight run completes (or keep if desired).
+4. Land the 9 CoSA-side changes from inside the CoSA repo.
+
+---
+
 ### 2026.04.14 - Session 6ae2513c | TFE Resume E2E live path + env-vars API + test-suite scheduling
 
 **Context**: Two scheduled TFE Resume E2E runs (21:00 + 21:39 EDT) had silently failed with `ConnectionError`. Root cause: scheduled pytest subprocesses executed inside `lupin-rest-test` where the server lives on internal port 7999, but `conftest.py` (via caller-set env var with `:8000` default) was hitting the host-side mapping. Secondary: `test_live_stall_and_resume` was a `pytest.skip()` placeholder with no body; needed real stall/resume plumbing; and no way to pass env vars through the test-suite scheduling API.

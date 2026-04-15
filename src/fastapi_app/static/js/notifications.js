@@ -5776,19 +5776,20 @@ class NotificationsUI {
          */
         this.log( 'Refreshing all queue lists...' );
         try {
-            const refreshTasks = [
+            // Fetch live queues first — loadJobHistory() reads queueCategoryState.done/dead
+            // to build exclude_ids. Running history in parallel with the live fetches
+            // races: history may be queried while done/dead are still empty, so
+            // exclude_ids is never sent and completed jobs appear in both panels.
+            await Promise.all( [
                 this.updateQueueLists( 'todo' ),
                 this.updateQueueLists( 'run' ),
                 this.updateQueueLists( 'done' ),
                 this.updateQueueLists( 'dead' )
-            ];
+            ] );
 
-            // Also refresh history if it's currently expanded
             if ( this.queueCategoryState.history.expanded ) {
-                refreshTasks.push( this.loadJobHistory() );
+                await this.loadJobHistory();
             }
-
-            await Promise.all( refreshTasks );
             this.log( 'All queues refreshed successfully' );
         } catch ( error ) {
             this.error( 'Error refreshing queues:', error );
@@ -6764,6 +6765,12 @@ class NotificationsUI {
         const cacheHitBadge = job.is_cache_hit ? '<span class="cache-hit-badge" title="Result from cache">⚡ Cached</span>' : '';
         const timestamp = this.formatJobTimestamp( job.timestamp );
         const jobId = job.job_id || `job-${Date.now()}`;
+        // History cards get a `history-` ID prefix so their DOM ids cannot
+        // collide with the same job rendered in a live queue (Done, etc.).
+        // All external lookups (websocket handlers, interaction appenders)
+        // address live cards by bare jobId, so this prefix only applies to
+        // history renders — `toggleJobCard` applies the same rule.
+        const idKey = job._isHistory ? `history-${jobId}` : jobId;
 
         // ═══════════════════════════════════════════════════════════════════
         // Phase 7: Enhanced indicators based on queue type
@@ -6827,10 +6834,31 @@ class NotificationsUI {
             completionBadge = '<span class="completion-badge failed" title="Failed">✗</span>';
         }
 
-        // Stalled job: amber badge (checkpoint-resume, Session 9056c113)
+        // Stalled / paused job: ⏸ badge with label varying by stall_reason
+        // (Session 2026-04-15 Bug 8). Checkpoint-resume jobs share JobState.STALLED
+        // but differentiate their label via stall_reason:
+        //   voice_gate_timeout → "Stalled" (default, amber) — nobody answered
+        //   user_pause         → "Paused"  (blue)           — user deferred deliberately
+        //   rate_limit         → "Stalled" (amber)          — infrastructure throttle
         const isStalled = ( job.status === 'stalled' );
         if ( isStalled ) {
-            completionBadge = '<span class="completion-badge stalled" title="Stalled — awaiting user input">⏸</span>';
+            const stallReason = (
+                ( job.checkpoint && job.checkpoint.stall_reason )
+                || ( job.metadata_json && job.metadata_json.checkpoint && job.metadata_json.checkpoint.stall_reason )
+                || 'voice_gate_timeout'
+            );
+            const isPaused = ( stallReason === 'user_pause' );
+            const label    = isPaused ? 'Paused' : 'Stalled';
+            const cls      = isPaused ? 'paused' : 'stalled';
+            const tip      = isPaused
+                ? 'Paused — user deferred; resume when ready'
+                : 'Stalled — awaiting user input';
+            completionBadge = `<span class="completion-badge ${cls}" title="${tip}">⏸ ${label}</span>`;
+        }
+
+        // Stopped job: user explicitly cancelled mid-run. Terminal, not resumable.
+        if ( job.status === 'cancelled' ) {
+            completionBadge = '<span class="completion-badge stopped" title="Stopped — user cancelled">✕ Stopped</span>';
         }
 
         // Interaction indicator for done queue
@@ -6871,20 +6899,20 @@ class NotificationsUI {
             const deleteAction = job._isHistory
                 ? `window.notificationsUI.deleteHistoryJob('${jobId}')`
                 : `window.notificationsUI.deleteQueueJob('${jobId}', '${queueName}')`;
-            cancelBtnHtml     = `<button type="button" class="job-cancel-button" id="job-cancel-${jobId}" onclick="event.stopPropagation(); ${deleteAction}" title="Remove this job">✕</button>`;
+            cancelBtnHtml     = `<button type="button" class="job-cancel-button" id="job-cancel-${idKey}" onclick="event.stopPropagation(); ${deleteAction}" title="Remove this job">✕</button>`;
             headerCancelClass = ' has-cancel';
         }
 
         // Phase 5 CJ Flow: Pause/resume toggle button (todo queue only)
         const pauseBtnHtml = ( queueName === 'todo' )
-            ? `<button type="button" class="job-pause-button${job.paused ? ' is-paused' : ''}" id="job-pause-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.toggleJobPause('${jobId}', ${!job.paused})" title="${job.paused ? 'Resume this job' : 'Pause this job'}">${job.paused ? '▶' : '⏸'}</button>`
+            ? `<button type="button" class="job-pause-button${job.paused ? ' is-paused' : ''}" id="job-pause-${idKey}" onclick="event.stopPropagation(); window.notificationsUI.toggleJobPause('${jobId}', ${!job.paused})" title="${job.paused ? 'Resume this job' : 'Pause this job'}">${job.paused ? '▶' : '⏸'}</button>`
             : '';
 
         const deleteBtnHtml = '';
 
         return `
-            <div class="job-card ${statusClass}${pausedCardClass}" id="job-card-${jobId}" data-job-id="${jobId}" data-paused="${job.paused ? 'true' : 'false'}">
-                <div class="job-card-header${headerCancelClass}" onclick="window.notificationsUI.toggleJobCard('${jobId}', '${queueName}')">
+            <div class="job-card ${statusClass}${pausedCardClass}" id="job-card-${idKey}" data-job-id="${jobId}" data-paused="${job.paused ? 'true' : 'false'}">
+                <div class="job-card-header${headerCancelClass}" onclick="window.notificationsUI.toggleJobCard('${idKey}')">
                     ${cancelBtnHtml}${pauseBtnHtml}${deleteBtnHtml}
                     ${agentBadge}${ownerBadge}${cacheHitBadge}${completionBadge}${pausedBadge}${scheduledBadge}${monopolizeBadge}
                     <span class="job-question">${this.escapeHtml( truncatedQuestion )}</span>
@@ -6892,7 +6920,7 @@ class NotificationsUI {
                     <span class="job-timestamp">${timestamp}</span>
                     <button class="job-expand-btn">▶</button>
                 </div>
-                <div class="job-card-details collapsed" id="job-details-${jobId}">
+                <div class="job-card-details collapsed" id="job-details-${idKey}">
                     ${durationSection}
                     <div class="job-full-question">
                         <strong>Question:</strong> ${this.escapeHtml( job.question_text || '' )}
@@ -6949,36 +6977,36 @@ class NotificationsUI {
                         <span>Time: ${timestamp}</span>
                     </div>
                     ${( queueName === 'run' || queueName === 'todo' ) ? `
-                    <div class="job-interactions-section live-interactions" id="job-interactions-${jobId}">
+                    <div class="job-interactions-section live-interactions" id="job-interactions-${idKey}">
                         <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${jobId}', event)">
                             <span>📋 Activity Log</span>
                             <button class="interactions-expand-btn">▶</button>
                         </div>
-                        <div class="job-send-message collapsed" id="job-send-msg-${jobId}">
+                        <div class="job-send-message collapsed" id="job-send-msg-${idKey}">
                             <div class="job-send-message-row">
-                                <button type="button" class="stt-button" id="job-msg-stt-${jobId}"
+                                <button type="button" class="stt-button" id="job-msg-stt-${idKey}"
                                         title="Click to record (30s max, ESC to cancel)">🎤</button>
-                                <input type="text" id="job-msg-input-${jobId}" class="job-msg-input"
+                                <input type="text" id="job-msg-input-${idKey}" class="job-msg-input"
                                        placeholder="Send message to job..." />
                                 <label class="urgent-toggle" title="Mark as urgent (interrupts current task)">
-                                    <input type="checkbox" id="job-msg-urgent-${jobId}" />
+                                    <input type="checkbox" id="job-msg-urgent-${idKey}" />
                                     ⚡
                                 </label>
                                 <button type="button" class="response-submit-button"
-                                        id="job-msg-submit-${jobId}">Send</button>
+                                        id="job-msg-submit-${idKey}">Send</button>
                             </div>
                         </div>
-                        <div class="interactions-content collapsed" id="interactions-content-${jobId}">
+                        <div class="interactions-content collapsed" id="interactions-content-${idKey}">
                         </div>
                     </div>
                     ` : ''}
                     ${queueName === 'done' ? `
-                    <div class="job-interactions-section" id="job-interactions-${jobId}">
+                    <div class="job-interactions-section" id="job-interactions-${idKey}">
                         <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${jobId}', event)">
                             <span>📋 Notification Conversation</span>
                             <button class="interactions-expand-btn">▶</button>
                         </div>
-                        <div class="interactions-content collapsed" id="interactions-content-${jobId}">
+                        <div class="interactions-content collapsed" id="interactions-content-${idKey}">
                             <div class="interactions-loading">Loading...</div>
                         </div>
                     </div>
@@ -6988,28 +7016,33 @@ class NotificationsUI {
         `;
     }
 
-    toggleJobCard( jobId, queueName ) {
+    toggleJobCard( idKey ) {
         /**
          * Toggle expand/collapse for individual job card.
+         *
+         * idKey is either a bare jobId (live queues) or `history-${jobId}`
+         * (history section) — renderJobCard emits the corresponding DOM ids.
+         * Namespacing history cards prevents getElementById() collision with
+         * the same job rendered in the live Done section.
          */
-        const details = document.getElementById( `job-details-${jobId}` );
-        const card = document.getElementById( `job-card-${jobId}` );
+        const details = document.getElementById( `job-details-${idKey}` );
+        const card    = document.getElementById( `job-card-${idKey}` );
 
         if ( !details || !card ) {
-            this.error( `Job card elements not found: ${jobId}` );
+            this.error( `Job card elements not found: ${idKey}` );
             return;
         }
 
         const expandBtn = card.querySelector( '.job-expand-btn' );
 
-        if ( this.expandedJobCards.has( jobId ) ) {
+        if ( this.expandedJobCards.has( idKey ) ) {
             details.classList.add( 'collapsed' );
             if ( expandBtn ) expandBtn.textContent = '▶';
-            this.expandedJobCards.delete( jobId );
+            this.expandedJobCards.delete( idKey );
         } else {
             details.classList.remove( 'collapsed' );
             if ( expandBtn ) expandBtn.textContent = '▼';
-            this.expandedJobCards.add( jobId );
+            this.expandedJobCards.add( idKey );
         }
     }
 

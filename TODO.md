@@ -1,12 +1,33 @@
 # TODO
 
-Last updated: 2026-04-14 (Session 6ae2513c — TFE Resume E2E live path implementation + env_vars plumbing + test-suite scheduling)
+Last updated: 2026-04-15 (Session f01fdc2f — SDK creds mount + 11 TFE/BFE fixes (Bugs 1-8, 10, 11) + operator routing + overnight `ts-79829a75` scheduled)
 
-## 🔖 First-thing tomorrow — review midnight `all` run outputs
+## 🚨 First-thing next session — archive history + review overnight run
 
-User will schedule a fresh `all` test-suite run on the test container (`:8000`) at **midnight tonight (2026-04-15 00:00 EDT)**, monopolize on. Validates Bug 1A/1B (test-suite aggregation, CoSA Checkpoints 1+2) + conftest re-seed (Lupin Checkpoints 3+4) + WebSocket gate + smoke 1800s budget all together.
+**CRITICAL**: history.md is at 99.1% of 25k token limit (24,797 tokens). **Archive BEFORE adding any new session entry.**
 
-- [ ] [LUPIN] **Review midnight `all` run outputs** — `io/test-suite/2026.04.15-at-00:00-EDT-all-{results.md,remediation.json}`. Expected: WebSocket section with captured stdout (no `Unknown option` exit), smoke runs to completion (no synthetic-timeout entry), no PQW 502s during the run, ~37 real failure entries. Then dispatch the cleaned `remediation.json` to TFE for unit-stale-data + integration-dispatcher buckets.
+- [ ] [LUPIN] **Archive history.md** — run `/history-management mode=archive` as step 1 of next session-start. See `~/.claude/scripts/get-token-count.sh /mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md` for live status.
+- [ ] [LUPIN] **Review `ts-79829a75` outcome** — scheduled 2026-04-15 19:30 EDT, `test_types=all`, auto-fix=true, cheap-tier TFE (Sonnet lead via INI override). Expected path: suite → failures → TFE auto-dispatch → voice gate routed to ricardo via Bug 10. If answered live, Phase 3/5/6 ran and may have created real commits/PR with Sonnet-cheap proposals. If unanswered, `tfe-*` row sits in Done bucket with ⏸ Stalled badge — click **Resume** button; Bug 6 skips Phase 0/1 re-work; answer voice gate; Phase 3/5/6 complete.
+- [ ] [LUPIN] **Revert overnight INI override** — `[Lupin: Testing]` block in `src/conf/lupin-app.ini` has `test fix expediter lead model = claude-sonnet-4-6` (added for cheap overnight run). Decide whether to keep or revert to Baseline default (Opus lead).
+- [ ] [LUPIN] **CoSA commit** — 9 submodule files need committing from inside `src/cosa/` repo: `agents/utils/agent_notification_dispatcher.py`, `agents/bug_fix_expediter/cosa_interface.py`, `agents/test_fix_expediter/orchestrator.py`, `agents/test_fix_expediter/state.py`, `rest/agentic_job_factory.py`, `rest/job_persistence.py`, `rest/queue_util.py`, `rest/running_fifo_queue.py`, `rest/routers/io_files.py`.
+
+## 🆕 New follow-ups from Session f01fdc2f
+
+- [ ] [LUPIN] **Bug 8b — wire Pause/Stop voice-gate buttons end-to-end** — MVP UI labels landed via `stall_reason`. Still missing: (1) dedicated "Pause (resume later)" + "Stop" buttons in `present_choices` question options, (2) dispatcher must recognize these answers (not treat as empty via Bug 7), (3) new `PauseRequested` exception class parallel to `VoiceGateTimeoutError`, (4) orchestrator `_aggregate_voice_gate` handling to save checkpoint with `stall_reason="user_pause"` vs raise cancel for Stop. Files: `src/cosa/agents/utils/agent_notification_dispatcher.py`, `src/cosa/agents/test_fix_expediter/state.py`, `src/cosa/agents/test_fix_expediter/orchestrator.py`.
+
+- [ ] [LUPIN] **Bug 9 — TFE/BFE Phase 3/5 git worktree isolation** — `FixExecutor` currently edits the live working tree directly and `GitStrategist` does `git checkout -b <slug>` to move the edits, meaning operator's uncommitted changes can contaminate the fix PR. Fix: pre-flight `git worktree add ../.tfe-sandbox/<slug> <base_sha>`, pass `cwd=worktree_path` through `FixExecutor` + `GitStrategist`, post-flight `git worktree remove`. Files: `src/cosa/agents/shared/git_strategist.py`, `src/cosa/agents/shared/fix_executor.py`, `src/cosa/agents/bug_fix_expediter/git_ops.py`.
+
+- [ ] [LUPIN] **Design knob — `test fix expediter feedback timeout action`** — options: `stall` (default, current behavior), `skip` (complete with 0 selected), `auto_select_high_confidence` (select proposals ≥ 0.85 confidence). INI + splainer + config.py + orchestrator._aggregate_voice_gate timeout branch. Low priority — stall is fine today.
+
+- [ ] [LUPIN] **BFE dead-job race — eager snapshot + packager fallback (D1)** — `dead_queue_watchdog._submit_bfe` captures only `dead_job_id` string; BFE's later DB lookup fails if row evicted (done/dead rotation, TTL, or E2E `clean_test_db` drop). Fix: snapshot dead-job context at dispatch, have `package_dead_job()` accept snapshot-first. Files: `src/cosa/rest/dead_queue_watchdog.py:393-470`, `src/cosa/agents/bug_fix_expediter/dead_job_packager.py:38-42`, `src/cosa/agents/bug_fix_expediter/job.py:~227`.
+
+- [ ] [LUPIN] **Full attended TFE live run (D2)** — schedule a live TFE where operator answers voice gate, selects real proposals, walks Phase 3/5/6 with real commits + PR. Prereq: overnight `ts-79829a75` outcome reviewed + Bug 9 worktree isolation ideally landed first (so operator's working tree can't contaminate PR).
+
+- [ ] [LUPIN] **Pre-merge E2E gate (D3)** — parallel session's proposed `POST /api/test-suite/submit` with `test_types="e2e"` + `monopolize=true`. Fine to run post-archive; exercises all today's UI fixes (Bug 1 io/file, Bug 2 dedup, Bug 8 labels) but NOT the Claude Agent SDK path.
+
+## 🔖 Carryover TODO entries (from 2026-04-14 and earlier)
+
+- [ ] [LUPIN] **Review midnight `all` run outputs** (Session 6ae2513c — ran as `ts-d2d890ed` 2026-04-15 00:56 EDT) — SUPERSEDED by Session f01fdc2f which surfaced the SDK creds + ops routing issues. New overnight run `ts-79829a75` replaces this.
 
 ## 🔖 Resume tomorrow — active triage plan
 
