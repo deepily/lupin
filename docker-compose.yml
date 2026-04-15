@@ -104,6 +104,7 @@ services:
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}
       CHROME_PATH: /home/rruiz/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome
       PYTHONUNBUFFERED: 1
+      TFE_FEEDBACK_TIMEOUT_SECONDS_OVERRIDE: "3"
     deploy:
       resources:
         reservations:
@@ -124,22 +125,26 @@ services:
         condition: service_healthy
 
   # Optional: pgAdmin for database management
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: lupin-pgadmin
-    restart: unless-stopped
-    environment:
-      PGADMIN_DEFAULT_EMAIL: dev@lupin.local
-      PGADMIN_DEFAULT_PASSWORD: admin
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
-    ports:
-      - "5050:80"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    networks:
-      - lupin-dev-network
-    depends_on:
-      - postgres
+  # DISABLED 2026-04-14 (Session 6ae2513c): crash-looping because
+  # PGADMIN_DEFAULT_EMAIL=dev@lupin.local is rejected as non-deliverable.
+  # Not actively used. Re-enable by uncommenting + switching to a real-looking
+  # email (e.g., dev@lupin.dev) if the web GUI is needed.
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   container_name: lupin-pgadmin
+  #   restart: unless-stopped
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: dev@lupin.local
+  #     PGADMIN_DEFAULT_PASSWORD: admin
+  #     PGADMIN_CONFIG_SERVER_MODE: 'False'
+  #   ports:
+  #     - "5050:80"
+  #   volumes:
+  #     - pgadmin_data:/var/lib/pgadmin
+  #   networks:
+  #     - lupin-dev-network
+  #   depends_on:
+  #     - postgres
 
 volumes:
   pgadmin_data:

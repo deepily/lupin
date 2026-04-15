@@ -1,5 +1,43 @@
 # Lupin Project History
 
+### 2026.04.14 - Session 6ae2513c | TFE Resume E2E live path + env-vars API + test-suite scheduling
+
+**Context**: Two scheduled TFE Resume E2E runs (21:00 + 21:39 EDT) had silently failed with `ConnectionError`. Root cause: scheduled pytest subprocesses executed inside `lupin-rest-test` where the server lives on internal port 7999, but `conftest.py` (via caller-set env var with `:8000` default) was hitting the host-side mapping. Secondary: `test_live_stall_and_resume` was a `pytest.skip()` placeholder with no body; needed real stall/resume plumbing; and no way to pass env vars through the test-suite scheduling API.
+
+**Phase 1 — Unblock scheduled runs**:
+- `src/cosa/agents/test_suite/job.py`: subprocess env now sets `LUPIN_TEST_BASE_URL=http://localhost:$PORT` (defaults 7999) so container-side pytest reaches the server. Caller-set value wins.
+- `src/tests/integration/test_tfe_resume_e2e.py`: added `test_resume_from_checkpoint_happy_path_if_available` — queries `/api/job-history?status=stalled`, exercises resume endpoint if a stalled TFE job exists, skips cleanly otherwise.
+- Host-side verified: `9 passed, 2 skipped` in 0.38s (was `9 errors`).
+
+**Phase 2 — Real live stall-and-resume body**:
+- `src/cosa/agents/test_fix_expediter/config.py`: `from_config()` now honors `TFE_FEEDBACK_TIMEOUT_SECONDS_OVERRIDE` env var, overriding the INI value for `feedback_timeout_seconds`. Round-trip verified (300 → 3).
+- `src/tests/integration/test_tfe_resume_e2e.py`: replaced `pytest.skip()` placeholder with real body — `_poll_job_state` helper, submits TFE job via `/api/agentic-jobs/submit`, polls for STALLED, calls `/api/jobs/{id}/resume-from-checkpoint`, asserts response shape. Gated by `TFE_RESUME_E2E_LIVE=1` + `TFE_REMEDIATION_SNAPSHOT_FIXTURE=<path>`.
+- `src/tests/e2e/run-tfe-resume-e2e.sh`: `--live` mode exports the timeout override + warns if fixture missing.
+
+**env_vars plumbing end-to-end (Lupin + CoSA)**:
+- `src/cosa/rest/routers/test_suite.py`: `TestSuiteSubmitRequest` gains optional `env_vars: Dict[str, str]` field with prefix-allowlist description.
+- `src/cosa/rest/agentic_job_factory.py`: threads `env_vars` into `TestSuiteJob` constructor.
+- `src/cosa/agents/test_suite/job.py`: new constructor arg + `_filter_env_vars` classmethod (prefix allowlist: `TFE_`, `BFE_`, `LUPIN_TEST_`). Accepted vars merge into subprocess env, overriding defaults. Disallowed keys dropped with warning.
+
+**Other**:
+- `docker-compose.yml`: commented out crash-looping `lupin-pgadmin` service (`PGADMIN_DEFAULT_EMAIL=dev@lupin.local` rejected by deliverability validator); added `TFE_FEEDBACK_TIMEOUT_SECONDS_OVERRIDE=3` to `lupin-rest-test` env block. Container bounced clean at 23:11 EDT.
+- TODO.md item #2 stale "NOT COMMITTED" note replaced with commit hash `309f98c`. Triage doc `2026.04.13-session-triage-and-option-c-docker-non-root.md` marked ✅ completed.
+- Deleted stale `src/conf/long-term-memory/lupin.lancedb.backup-2026-01-22/` directory (user-run sudo).
+
+**Planning docs (new)**:
+- `src/rnd/v0.1.6/2026.04.14-tfe-resume-e2e-live-implementation.md` (design)
+- `src/rnd/v0.1.6/2026.04.14-tfe-resume-e2e-live-execution-log.md` (paired execution log)
+- `io/test-suite/fixtures/tfe/sample-remediation-snapshot.json` (synthetic 1-failure fixture for live path)
+
+**Scheduled at session-end (23:12 EDT)**:
+- `ts-1139f28d` @ 23:15 — TFE dry run (expect `9 passed, 2 skipped`)
+- `ts-996dafbc` @ 23:20 — TFE live run (env_vars with `TFE_RESUME_E2E_LIVE=1` + fixture path)
+- `ts-d2d890ed` @ 23:25 — full `all` suite (60-min pyramid)
+
+**Verified end-to-end**: py_compile on all touched files, shell syntax, YAML parse, Pydantic round-trip (`env_vars` payload), snapshot_loader.load_from_path round-trip, allowlist filter drops non-prefix keys.
+
+---
+
 ### 2026.04.14 - Session 5a620729 | Test server force-refresh + peer queue watch + bug-fix mode bug #1 closed
 
 #### Checkpoint 5 | 2026.04.14 23:00 EDT | Session-end — Bug #1 live-validated; NEW /api/push-agentic endpoint unblocks harness

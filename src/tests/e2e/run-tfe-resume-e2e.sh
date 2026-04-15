@@ -77,7 +77,18 @@ export LUPIN_TEST_BASE_URL="${BASE_URL}"
 
 if [[ "${MODE}" == "live" ]]; then
     export TFE_RESUME_E2E_LIVE=1
-    echo "  [LIVE MODE] Full stall-and-resume enabled (requires INI timeout tuning)"
+    # Defaults a 3s voice-gate timeout for the server to pick up. NOTE: this
+    # env var only takes effect if the FastAPI server process also has it set
+    # — client-side export in the test process does not propagate. For a real
+    # live run, either add the env to the test container's docker-compose
+    # block and bounce, or ensure the server was started with this value set.
+    export TFE_FEEDBACK_TIMEOUT_SECONDS_OVERRIDE="${TFE_FEEDBACK_TIMEOUT_SECONDS_OVERRIDE:-3}"
+    echo "  [LIVE MODE] stall forcing via TFE_FEEDBACK_TIMEOUT_SECONDS_OVERRIDE=${TFE_FEEDBACK_TIMEOUT_SECONDS_OVERRIDE} (server-side)"
+    if [[ -z "${TFE_REMEDIATION_SNAPSHOT_FIXTURE:-}" ]]; then
+        echo "  [LIVE MODE] WARNING: TFE_REMEDIATION_SNAPSHOT_FIXTURE is not set — live test will skip"
+    else
+        echo "  [LIVE MODE] snapshot fixture: ${TFE_REMEDIATION_SNAPSHOT_FIXTURE}"
+    fi
 fi
 
 cd "${LUPIN_ROOT}"

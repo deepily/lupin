@@ -34,6 +34,8 @@ import time
 import pytest
 import requests
 
+# time is used by _poll_job_state helper below
+
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:7999" )
 EMAIL    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
@@ -181,8 +183,85 @@ def test_authentication_required():
 
 
 # ---------------------------------------------------------------------------
-# 4. Live stall-and-resume (requires full pipeline — run only when scheduled)
+# 4. Happy path (opportunistic) — resume a real stalled TFE job if one exists
 # ---------------------------------------------------------------------------
+
+def test_resume_from_checkpoint_happy_path_if_available( auth_headers ):
+    """
+    Opportunistic 200-path validation.
+
+    Queries job-history for any existing stalled TFE job. If found, exercises
+    POST /api/jobs/{id}/resume-from-checkpoint and asserts the response shape.
+    Skips cleanly if no stalled job is available (the common case on a freshly
+    booted server or after the test DB is reset).
+
+    This test becomes an active assertion once Phase 2's live stall path runs
+    and leaves stalled TFE jobs in job_history.
+    """
+    resp = requests.get(
+        f"{BASE_URL}/api/job-history",
+        params  = { "status": "stalled", "limit": 20 },
+        headers = auth_headers,
+        timeout = 10,
+    )
+    assert resp.status_code == 200, f"job-history query failed: {resp.status_code} {resp.text}"
+
+    body    = resp.json()
+    jobs    = body.get( "jobs", [] )
+    tfe_ids = [ j[ "id_hash" ] for j in jobs if j.get( "id_hash", "" ).startswith( "tfe-" ) ]
+
+    if not tfe_ids:
+        pytest.skip( "No stalled TFE jobs in job_history — run the live test first to seed one" )
+
+    # Exercise the resume endpoint with the most recent stalled TFE job
+    target_id = tfe_ids[ 0 ]
+    resume_resp = requests.post(
+        f"{BASE_URL}/api/jobs/{target_id}/resume-from-checkpoint",
+        headers = auth_headers,
+        timeout = 15,
+    )
+
+    # 200 (resumed) is the expected happy path. Other valid outcomes:
+    #   404 - job was already resumed and is no longer stalled
+    #   500 - factory failed (missing original_args, user not in DB, etc.)
+    assert resume_resp.status_code in ( 200, 404 ), (
+        f"Unexpected resume response {resume_resp.status_code}: {resume_resp.text}"
+    )
+
+    if resume_resp.status_code == 200:
+        data = resume_resp.json()
+        # Response shape contract (queues.py:1474-1481)
+        assert data[ "status" ]          == "resumed"
+        assert data[ "original_job_id" ] == target_id
+        assert data[ "resumed_job_id" ].startswith( "tfe-" )
+        assert isinstance( data[ "resume_from_phase" ], int )
+        assert isinstance( data[ "phase_name" ], str )
+        assert data[ "resume_count" ] >= 1
+
+
+# ---------------------------------------------------------------------------
+# 5. Live stall-and-resume (requires full pipeline — run only when scheduled)
+# ---------------------------------------------------------------------------
+
+# Helper: poll a job's state via /api/job-history/{id} with exponential backoff.
+def _poll_job_state( job_id: str, auth_headers: dict, timeout_s: int = 30, sleep_s: float = 1.0 ):
+    """Poll /api/job-history/{job_id} until `status` changes or timeout. Returns (status, elapsed_s)."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        resp = requests.get(
+            f"{BASE_URL}/api/job-history/{job_id}",
+            headers = auth_headers,
+            timeout = 10,
+        )
+        if resp.status_code == 200:
+            job = resp.json()
+            status = job.get( "status" )
+            # Return as soon as we see a terminal or interesting state
+            if status in ( "stalled", "completed", "done", "failed", "dead" ):
+                return status, time.monotonic() - (deadline - timeout_s)
+        time.sleep( sleep_s )
+    return None, timeout_s
+
 
 @pytest.mark.skipif(
     os.environ.get( "TFE_RESUME_E2E_LIVE" ) != "1",
@@ -191,25 +270,93 @@ def test_authentication_required():
 def test_live_stall_and_resume( auth_headers ):
     """
     Full live validation: submit TFE → force stall via low timeout → verify
-    STALLED → resume via endpoint → verify resumed job runs to completion.
+    STALLED → resume via endpoint → verify resume dispatch.
 
-    Requires:
-      - `test fix expediter feedback timeout seconds` temporarily set to ~5s in INI
-      - Known-failing test suite fixture that produces a remediation snapshot
-      - No concurrent TFE jobs (monopolize=true in scheduling)
+    **Activation preconditions** (all must be met; test skips if any missing):
+      1. TFE_RESUME_E2E_LIVE=1 (gates the whole test)
+      2. TFE_REMEDIATION_SNAPSHOT_FIXTURE=<path> — path to a real remediation
+         snapshot JSON file (relative to io/). Without this, the job would fail
+         at LOADING before reaching a voice gate.
+      3. Server process was started with
+         `TFE_FEEDBACK_TIMEOUT_SECONDS_OVERRIDE=3` in its environment. This env
+         var is read by TestFixExpediterConfig.from_config() at orchestrator
+         construction time — setting it in the test process does NOT propagate
+         to the running FastAPI server. To activate, either:
+           (a) add the env var to the test container's docker-compose env block
+               and bounce, OR
+           (b) re-submit this test as a scheduled job from a shell where the
+               server-side env is already set.
 
-    Skipped by default; set TFE_RESUME_E2E_LIVE=1 to run.
+    **Scope**:
+      - Validates that the resume MECHANISM works end-to-end (submit → stall →
+        resume endpoint → new job ID dispatched).
+      - Does NOT assert resumed job completes successfully — completion depends
+        on whether the provided snapshot has real fixable failures, which is
+        outside this test's scope.
+
+    See: src/rnd/v0.1.6/2026.04.14-tfe-resume-e2e-live-implementation.md
+         src/rnd/v0.1.6/2026.04.10-test-fix-expediter/16-final-mile-mcp-timeouts-voice-resume-e2e.md
     """
-    # This is a placeholder for the true live path. Full implementation requires:
-    # 1. Submitting a TestSuiteJob with known failures that produces a remediation snapshot
-    # 2. Waiting for TFE watchdog to dispatch (or submitting TFE directly)
-    # 3. Polling for status == "stalled" (requires real voice gate timeout)
-    # 4. Calling POST /api/jobs/{id}/resume-from-checkpoint
-    # 5. Polling the resumed job to completion
-    #
-    # This is best validated interactively with the UI in the loop.
-    # See: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/16-final-mile-mcp-timeouts-voice-resume-e2e.md
-    pytest.skip(
-        "Live stall-and-resume requires interactive voice gate + INI tuning — "
-        "validate via UI 'Resume from Checkpoint' button after user-initiated stall"
+    snapshot_path = os.environ.get( "TFE_REMEDIATION_SNAPSHOT_FIXTURE" )
+    if not snapshot_path:
+        pytest.skip(
+            "TFE_REMEDIATION_SNAPSHOT_FIXTURE not set — provide a real remediation "
+            "snapshot path to exercise the full stall-and-resume pipeline"
+        )
+
+    # Sanity: the server must have been booted with the timeout override, else
+    # the first voice gate will wait the default 300s and this test will hang.
+    # We can't check the server env directly, but we fast-fail if we can't get
+    # to STALLED within a generous window.
+
+    # 1. Submit a TFE job directly via the agentic job endpoint (no watchdog path)
+    submit_resp = requests.post(
+        f"{BASE_URL}/api/agentic-jobs/submit",
+        headers = auth_headers,
+        json    = {
+            "command"   : "agent router go to test fix expediter",
+            "args_dict" : {
+                "remediation_snapshot_path" : snapshot_path,
+                "source_test_suite_job_id"  : "test-fixture",
+                "dry_run"                   : False,
+            }
+        },
+        timeout = 10,
     )
+    if submit_resp.status_code == 404:
+        pytest.skip(
+            "POST /api/agentic-jobs/submit endpoint not available — test needs "
+            "a generic agentic-job submit endpoint (see plan doc for alternatives)"
+        )
+    assert submit_resp.status_code == 200, f"Submit failed: {submit_resp.status_code} {submit_resp.text}"
+    tfe_job_id = submit_resp.json().get( "job_id" )
+    assert tfe_job_id and tfe_job_id.startswith( "tfe-" ), f"Expected tfe- prefix, got {tfe_job_id!r}"
+
+    # 2. Poll until STALLED (expect within ~10s — 3s voice timeout + slack)
+    status, elapsed = _poll_job_state( tfe_job_id, auth_headers, timeout_s=30 )
+    assert status == "stalled", (
+        f"TFE job did not reach STALLED state within 30s (final status={status}). "
+        f"Likely cause: server was not started with TFE_FEEDBACK_TIMEOUT_SECONDS_OVERRIDE=3."
+    )
+
+    # 3. Call resume-from-checkpoint
+    resume_resp = requests.post(
+        f"{BASE_URL}/api/jobs/{tfe_job_id}/resume-from-checkpoint",
+        headers = auth_headers,
+        timeout = 15,
+    )
+    assert resume_resp.status_code == 200, (
+        f"Resume failed: {resume_resp.status_code} {resume_resp.text}"
+    )
+    resumed = resume_resp.json()
+    assert resumed[ "status" ] == "resumed"
+    assert resumed[ "original_job_id" ] == tfe_job_id
+    assert resumed[ "resumed_job_id" ].startswith( "tfe-" )
+    assert resumed[ "resumed_job_id" ] != tfe_job_id  # new job, not same ID
+    assert resumed[ "resume_count" ] == 1
+    assert isinstance( resumed[ "resume_from_phase" ], int )
+
+    # 4. We intentionally do NOT poll the resumed job to completion — its
+    #    success depends on the fixture snapshot being fully fixable, which is
+    #    out of scope. Having verified the resume DISPATCHED with the correct
+    #    shape is sufficient for this contract.

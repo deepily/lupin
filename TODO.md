@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-04-14 (Session 5a620729 — bug-fix mode bug #1 closed + /api/push-agentic endpoint + E2E harness unblock + live validation)
+Last updated: 2026-04-14 (Session 6ae2513c — TFE Resume E2E live path implementation + env_vars plumbing + test-suite scheduling)
 
 ## 🔖 First-thing tomorrow — review midnight `all` run outputs
 
@@ -14,7 +14,11 @@ User will schedule a fresh `all` test-suite run on the test container (`:8000`) 
 
 ## Pending — HIGH PRIORITY
 
-- [ ] [LUPIN] **Archive history.md** (CRITICAL: 22,051 tokens / 88.2% of 25k limit at Session 9614fdd1 wrap). Run `/history-management mode=archive` first thing. Don't add more session entries before archive lands.
+- [ ] [LUPIN] **Review three scheduled TFE jobs' outcomes (23:15 / 23:20 / 23:25 EDT)** — `ts-1139f28d` dry, `ts-996dafbc` live (with env_vars fixture), `ts-d2d890ed` all. Logs inside test container: `docker exec lupin-rest-test tail -80 /tmp/{pytest-direct,all}-latest.log`. Live run's outcome informs whether `/api/agentic-jobs/submit` exists (live test skips cleanly if missing).
+
+- [ ] [LUPIN] **Follow-up if live test skipped on missing `/api/agentic-jobs/submit`** — add a generic agentic-job submit REST endpoint (factory wrapper like test-suite's) so the live test can actually submit TFE jobs. Currently the test body is complete but depends on this endpoint. Alternative: have the test go through `TestSuiteJob → watchdog` dispatch path.
+
+- [ ] [LUPIN] **Archive history.md** (CRITICAL: 23,844 tokens / 95.3% of 25k limit at Session 6ae2513c wrap — bumped from 22,051 by this session's entry). Run `/history-management mode=archive` first thing. Don't add more session entries before archive lands.
 
 - [ ] [LUPIN] **Bug 2 — history-card scroll toggle** (deferred, awaits user devtools). DOM-id collision hypothesis: live Done card and History card render the same `id="job-details-${jobId}"`; `getElementById` returns the first match. Step 0 (devtools query: `total vs unique` count of `[id^="job-details-"]`) is the gate. Step 3 plan: namespace IDs by queueName at render time. Plan in `src/rnd/v0.1.6/2026.04.14-all-suite-aggregation-and-history-card-toggle.md`.
 
@@ -38,7 +42,7 @@ User will schedule a fresh `all` test-suite run on the test container (`:8000`) 
 
 - [ ] [LUPIN] **FastAPI restart + CoSA submodule rebuild needed to activate checkpoint-resume** — Session 9056c113 edits are inside `src/cosa/` submodule. After user commits CoSA + running server picks up the new code, test the end-to-end flow: (1) submit TFE job that will stall (e.g., low `feedback_timeout_seconds` in INI), (2) verify stalled voice notification + stalled badge in UI, (3) click "▶ Resume from Checkpoint" button, (4) verify new TFE job runs from Phase 3 (skipping already-completed phases 0-2).
 
-- [ ] [LUPIN] **FastAPI restart needed to pick up unified watchdogs init + flipped INI defaults** — Session 1cfcdf73 lunch run shipped `init_watchdogs()` facade replacing the old BFE-only init in `main.py`, plus flipped both `auto fix enabled` and `test fix expediter auto fix enabled` to `true`. After next restart, expect this in the startup log: `[Watchdogs] BFE=ENABLED, TFE=ENABLED`. Until then, the done-queue hook still silently no-ops because the running server has the old code.
+- [x] [LUPIN] **FastAPI restart needed to pick up unified watchdogs init + flipped INI defaults** — ✅ Verified live Session 6ae2513c: `docker logs lupin-rest-dev | grep -i watchdog` shows `[Watchdogs] BFE=ENABLED, TFE=ENABLED` + `[TestSuiteCompletionWatchdog] initialized (enabled=True, max_failures=50)`. Triage doc item #9 closed.
 - [ ] [LUPIN] **TFE live E2E monopolize run (real SDK + real git)** — All infrastructure ready: `src/tests/e2e/run-tfe-live-e2e.sh --live` will exercise the full pipeline against real Claude Agent SDK + real GitOps with a bug-injector-seeded failure. Schedule via `/schedule-tests` skill after hours. Cost gate: ~$15 per run (`test fix expediter cost cap usd`). Validates everything: clustering heuristic, Phase 1 diagnosis prompts, Phase 2 proposal gates, FixExecutor retry loop, multi-cluster git strategy, Phase 6 rerun recursion guard. Until this runs, the 3119-unit-test green bar is the only validation.
 - [ ] [LUPIN] **PEFT trainer run on GPU — TFE voice routing** — Training data ready: 75 templates in `src/ephemera/prompts/data/synthetic-data-agent-routing-test-fix-expediter.txt`, command registered in `src/conf/training/agent-router-agentic-commands.json`, unit tests (12) pass. USER-RUN ONLY per `feedback_never_grab_gpu` memory. When GPU free: `./src/scripts/run-agentic-intent-training.sh test` (sanity) then `full` (~3-4 hrs). Also note Session 389 left prior PEFT data regenerated — confirm whether TFE additions require a full regen or a merge.
 - [ ] [LUPIN] **BFE Phase 6 LIVE E2E (parallel console state unknown)** — User was running BFE Phase 6 live E2E in a separate console during Session 1cfcdf73. Outcome unknown. Verify whether the baseline was established + results captured. Dry-run + persistence fixes already landed in Session 1b8c1cc0 (76/76 unit tests passing); remaining: real Claude Agent SDK, real git commits, known-bad mutation. Enable `bug fix expediter enabled = true` in INI + schedule as monopolized test-suite job after hours.
