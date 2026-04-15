@@ -46,6 +46,14 @@ class TestSlugSanitizer:
     def test_collapses_multiple_hyphens( self ):
         assert ReportWriter._sanitize_slug( "foo    bar" ) == "foo-bar"
 
+    def test_underscores_normalized_to_hyphens( self ):
+        # Status tokens like "dead_job_not_found_dry_run" must survive as
+        # readable hyphen-separated words, not collapse to one long run.
+        assert ReportWriter._sanitize_slug( "dead_job_not_found_dry_run" ) == "dead-job-not-found-dry-run"
+
+    def test_mixed_underscore_and_space( self ):
+        assert ReportWriter._sanitize_slug( "foo_bar baz_qux" ) == "foo-bar-baz-qux"
+
 
 class TestWrite:
 

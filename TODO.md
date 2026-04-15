@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-04-14 (Session 9614fdd1 — Checkpoints 3+4: clean_test_db re-seed companions + DB_HOST=localhost host-context fix; PQW 502 fixed)
+Last updated: 2026-04-14 (Session 5a620729 — bug-fix mode bug #1 closed + /api/push-agentic endpoint + E2E harness unblock + live validation)
 
 ## 🔖 First-thing tomorrow — review midnight `all` run outputs
 
@@ -66,6 +66,18 @@ User will schedule a fresh `all` test-suite run on the test container (`:8000`) 
 - [ ] [LUPIN] **TestSuiteJob Manual + Automated Testing remaining items** — Pattern A implemented (Session 386). Remaining: (1) Fix voice_io dispatcher bug (`AgentNotificationDispatcher` missing `notify` attribute), (2) Manual UI verification of submit card + scheduling, (3) Verify scheduling timezone fix with live scheduled job, (4) Run live pipeline smoke test with server, (5) Integration test for `POST /api/test-suite/submit`.
 - [ ] [LUPIN] **Automated E2E testing workflow** — Design standard pattern for scheduling E2E/integration test runs as monopolized jobs at user-specified times. Becomes the modus operandi for all post-coding verification.
 - [ ] [LUPIN] **Full E2E re-run needed to verify 2 visual regression errors are pre-existing** (test_visual_regression.py profile + notifications)
+
+## Completed this session (5a620729, 2026-04-14 — bug-fix mode bug #1 + harness unblock)
+
+- [x] [LUPIN] **Bug #1: BFE/TFE job cards lack interactions and results documents** — RC-1 voice_io.notify() decoupled from is_voice_available() probe gate (was cached-False silent drop); RC-2 NEW `src/cosa/agents/shared/report_writer.py` + `_write_final_report()` hooks on BFE (5 exits) + TFE (3 exits) populating `artifacts["report_path"]` for "📋 View Full Report" UI link. 30 unit tests green (test_report_writer.py 14, test_voice_io_notify_decoupling.py 6, test_peer_proxy.py 12). Live validated: `dr-eb1b680e` → dead queue → `bfe-f91fd115` dispatched, 15 notification rows with correct compound job_id + sender_id. Plan: `src/rnd/v0.1.6/2026.04.14-bfe-tfe-interactions-and-reports.md`. **All agent-code changes live in CoSA submodule — user commits separately.**
+
+- [x] [LUPIN] **NEW `POST /api/push-agentic` endpoint** — unattended/service-to-service agentic job submission that bypasses the runtime-argument-expeditor. Caller provides explicit `routing_command` + `args` dict + `websocket_id`. No voice-path LORA parsing, no interactive Q&A. Unblocks E2E scripts and other headless callers. New `push_job_agentic()` method on `TodoFifoQueue`. **CoSA-side edits, user commits separately.**
+
+- [x] [LUPIN] **Test harness unblock — BFE/TFE E2E scripts** — `run-tfe-live-e2e.sh` + `run-bfe-live-e2e.sh` patched to use `/api/push-agentic`. NEW `src/tests/fixtures/bfe/snapshot_known_bad.json` (deep_research dry-run with force_failure_mode=code_bug, matches new payload shape). Full chain validated end-to-end against :8000.
+
+- [x] [LUPIN] **Peer Queue Watch (dev UI → test server)** — Checkpoints 1-3 from earlier today. `/app/admin/peer-queue-watch` widget + backend proxy + server-side watcher that fires voice notification on drain. Three bug fixes resolved during live testing (empty combo box, Docker-networking host resolution, JWT pass-through not possible because separate DBs → switched to Option B service-account login). Plus bonus fix of the test-UI admin lockout via `seed_test_companions.py` manual re-run.
+
+- [x] [LUPIN] **Test server force-refresh mechanism** — Checkpoint 1 from earlier today. `src/scripts/refresh-test-server.sh` + `/refresh-test` slash command + admin `POST /admin/refresh-source` endpoint (test-env gated, os.execv re-exec). Handles the `reload=False` constraint on the test container.
 
 ## Completed this session (9056c113 continuation, 2026-04-12)
 

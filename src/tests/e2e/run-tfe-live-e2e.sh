@@ -149,7 +149,9 @@ fi
 
 SUBMIT_PAYLOAD=$(cat <<EOF
 {
-  "question": "agent router go to test fix expediter",
+  "routing_command": "agent router go to test fix expediter",
+  "websocket_id": "unattended-tfe-live",
+  "question": "TFE E2E live test (dry-run=${DRY_RUN_ARG})",
   "args": {
     "remediation_snapshot_path": "${IO_SNAPSHOT}",
     "source_test_suite_job_id": "ts-e2e-${TIMESTAMP}",
@@ -160,7 +162,7 @@ SUBMIT_PAYLOAD=$(cat <<EOF
 EOF
 )
 
-SUBMIT_RESP=$(curl -sf -X POST "${BASE_URL}/api/push" \
+SUBMIT_RESP=$(curl -sf -X POST "${BASE_URL}/api/push-agentic" \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/json" \
     -d "${SUBMIT_PAYLOAD}")

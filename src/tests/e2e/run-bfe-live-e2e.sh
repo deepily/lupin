@@ -207,7 +207,7 @@ print( json.dumps( payload ) )
     echo "  [MODELS] Injected bfe_lead/worker_model_override=${CHEAP_LEAD_MODEL} into fixture args"
 fi
 
-ORIGINAL_RESP=$(curl -sf -X POST "${BASE_URL}/api/push" \
+ORIGINAL_RESP=$(curl -sf -X POST "${BASE_URL}/api/push-agentic" \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/json" \
     -d "${SUBMIT_PAYLOAD}")

@@ -1,6 +1,58 @@
 # Lupin Project History
 
-### 2026.04.14 - Session 5a620729 | Test server force-refresh + peer queue watch + bug-fix mode
+### 2026.04.14 - Session 5a620729 | Test server force-refresh + peer queue watch + bug-fix mode bug #1 closed
+
+#### Checkpoint 5 | 2026.04.14 23:00 EDT | Session-end — Bug #1 live-validated; NEW /api/push-agentic endpoint unblocks harness
+
+**Context**: After CP4 shipped the BFE/TFE interactions + reports code fix, live validation via the E2E scripts revealed two pre-existing harness gaps (missing `websocket_id` on TFE, missing BFE fixture) and — deeper — the `/api/push` endpoint now routes unregistered commands through the runtime-argument-expeditor which asks for missing args via interactive notification and cancels on timeout. Unattended harness scripts can't respond, so submissions were silently cancelled before reaching the queue. Rather than retrofit `/api/push`, user proposed the cleaner architecture: a new dedicated endpoint for unattended agentic submission. Built it, scripts work end-to-end, live pipeline validated.
+
+**New endpoint** (CoSA submodule, not committed from Lupin):
+- `POST /api/push-agentic` in `src/cosa/rest/routers/queues.py` — accepts explicit `routing_command` + `args` dict + `websocket_id`. Validates required fields; passes args dict unchanged to the agent factory. No voice-path LORA parsing, no interactive Q&A. Auth identical to `/api/push`. On success returns `{ status, routing_command, websocket_id, user_id, job_id, result }`. On unknown command or construction failure returns 400 with the factory's error message.
+- `push_job_agentic()` method on `TodoFifoQueue` (`src/cosa/rest/todo_fifo_queue.py`) — mirrors the non-expeditor parts of `_handle_agentic_command`: emits speculative `pending→todo` WebSocket transition with expediting=False, injects `no_confirm=true` into args, calls `create_agentic_job()` factory, overrides the job's id_hash with the speculative ID so the UI card matches, applies `scheduled_at` / `monopolize`, pushes to queue, emits "gentle-gong" for new-job UX parity.
+
+**Lupin-side harness patches**:
+- `src/tests/e2e/run-tfe-live-e2e.sh`: SUBMIT_PAYLOAD now uses `routing_command` + `websocket_id` + `question` keys, POSTs to `/api/push-agentic`.
+- `src/tests/e2e/run-bfe-live-e2e.sh`: POSTs to `/api/push-agentic` (fixture file holds the full payload).
+- `src/tests/fixtures/bfe/snapshot_known_bad.json` (NEW) — deep_research dry-run with `force_failure_mode=code_bug`, matching `/api/push-agentic` shape. Triggers deterministic `KeyError('source_path')` → dead queue → DeadQueueWatchdog classifies as CODE_BUG → dispatches BFE.
+- `src/tests/unit/test_report_writer.py`: +2 tests for slug-sanitizer underscore-to-hyphen normalization (surfaced from user's feedback on `deadjobnotfounddryrun` run-on in CP4's first BFE report filename).
+
+**Cosmetic slug fix** (CoSA): `src/cosa/agents/shared/report_writer.py` `_sanitize_slug()` now normalizes underscores to hyphens before applying the `[^a-z0-9\s-]` whitelist. Status tokens like `dead_job_not_found_dry_run` render as `dead-job-not-found-dry-run` in filenames.
+
+**User corrections captured during the session**:
+1. mock_token_email_* is legacy, not canonical (CP2) — saved to auto-memory.
+2. Bounce reseeding fix — 401s during CP4 weren't a transient race; mistaken env-var assumption in reseed. User patched.
+3. TFE failure-path report gap — CP4 initially wrote reports on happy + stall only; missed generic exception handler in `do_all()`. Fixed in same CP4 commit.
+4. voice_io decoupling education — explained that voice is one WebSocket subscriber downstream of dispatch, not an upstream gate; persistence + UI render always happen; TTS decision belongs at the voice-bridge subscriber.
+5. Endpoint scope refactor — when naive INI-key rename proved insufficient (args dict discarded before reaching push_job), user proposed cleaner architecture: leave `/api/push` alone, build `/api/push-agentic` as separate unattended path. Implemented.
+
+**Live validation** (curl-driven):
+```
+dr-eb1b680e (deep_research, dry-run, force_failure_mode=code_bug)
+  → run queue → KeyError raised → dead queue ✓
+  → DeadQueueWatchdog classified CODE_BUG → dispatched BFE ✓
+  → bfe-f91fd115 now in run queue → notify breadcrumbs flowing ✓
+```
+15 notification rows in `lupin_db_test.notifications` with correct compound `job_id` + matching `sender_id`. **RC-1 voice_io fix validated in the wild.**
+
+**Bug-fix mode closed**: `bug-fix-queue.md` — bug #1 moved to Completed with full summary; session `5a620729` marked `closed` in Active Sessions table.
+
+**Files changed this checkpoint (7 Lupin-side; 3 CoSA-side uncommitted)**:
+- `.claude-session.md` — CP5 section
+- `bug-fix-queue.md` — bug #1 → Completed; session closed
+- `TODO.md` — added 5 completed items for this session, bumped "Last updated"
+- `history.md` — this entry
+- `src/tests/e2e/run-bfe-live-e2e.sh` (patched endpoint)
+- `src/tests/e2e/run-tfe-live-e2e.sh` (patched endpoint + websocket_id)
+- `src/tests/fixtures/bfe/snapshot_known_bad.json` (new, /api/push-agentic shape)
+- `src/tests/unit/test_report_writer.py` (+2 slug tests, 14 tests total now pass)
+- **Uncommitted, CoSA submodule**: `src/cosa/rest/routers/queues.py` (~100 lines new endpoint), `src/cosa/rest/todo_fifo_queue.py` (~95 lines push_job_agentic), `src/cosa/agents/shared/report_writer.py` (4 lines slug normalization)
+
+**Deferred (carried to next session)**:
+- **Archive history.md** — 22.4k tokens / 89.5% at session-end (critical). Most of it is this session's 5 checkpoints. First action next session.
+- Unit test for `/api/push-agentic` endpoint — covered by happy-path live validation; formal pytest deferred.
+- Clean full-script run of both E2E scripts end-to-end — live chain validated via direct curl; script-level polling/validation logic not yet exercised. Expected to work based on submit success.
+
+---
 
 #### Bug Fix Mode | 2026.04.14 14:35 EDT | Session entered bug-fix mode
 

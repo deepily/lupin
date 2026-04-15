@@ -45,7 +45,7 @@
 | 5329e0ea | 2026-03-27T14:00:00 | 2026-03-27T16:15:00 | closed |
 | a312ee22 | 2026-04-08T11:00:00 | 2026-04-08T15:45:00 | committed |
 | 1b8c1cc0 | 2026-04-10T09:30:00 | 2026-04-10T11:00:00 | closed |
-| 5a620729 | 2026-04-14T14:20:00 | 2026-04-14T14:30:00 | active |
+| 5a620729 | 2026-04-14T14:20:00 | 2026-04-14T23:00:00 | closed |
 
 ---
 
@@ -67,11 +67,21 @@
 
 (Claimed by a specific session)
 
-- [ ] **BFE & TFE job cards lack interactions and results documents** — Notification Conversation shows "No interactions recorded" on BFE `dr-6f48863c::...` and TFE `ts-0df7387f::...` done cards; no report-link artifact surfaced. Two orthogonal RCs: (1) notification→DB→lookup pipeline drops rows somewhere; (2) neither agent writes a final report, only an intermediate plan. Plan: `src/rnd/v0.1.6/2026.04.14-bfe-tfe-interactions-and-reports.md`. → Session 5a620729 (active)
+(none)
 
 ---
 
 ### Completed
+
+- [x] **BFE & TFE job cards lack interactions and results documents** → Session 5a620729 | Live validated 2026-04-14
+  - **Symptom**: Notification Conversation showed "No interactions recorded" on BFE/TFE done cards; no report-link artifact rendered.
+  - **RC-1**: `voice_io.notify()` gate conflated voice availability with persistence dispatch. `is_voice_available()` cached-False from a probe error caused silent drops of every subsequent notify. Fix: decoupled — `notify()` always dispatches via `cosa_interface.notify_progress()` when configured; TTS decision moved to voice-bridge subscriber.
+  - **RC-2**: Neither agent wrote a final report (only an intermediate plan via PlanWriter). Fix: new `src/cosa/agents/shared/report_writer.py` + `_write_final_report()` hooks on BFE (5 exits: dry-run dead-not-found, live dead-not-found, happy, stall, generic exception) and TFE (3 exits: happy, stall, generic exception). Populates `artifacts["report_path"]` → UI renderReportLinkSection fires.
+  - **Test-harness gaps discovered and fixed**: E2E scripts blocked by missing `websocket_id` on `/api/push` and no BFE fixture. Solved via NEW `POST /api/push-agentic` endpoint (explicit routing_command + args, bypasses runtime-argument-expeditor for unattended callers) + `push_job_agentic()` method on TodoFifoQueue. Scripts patched; fixture created.
+  - **Live validation**: `dr-eb1b680e` (deep_research dry-run, force_failure_mode=code_bug) → dead queue → DeadQueueWatchdog dispatched `bfe-f91fd115` → BFE breadcrumbs landed in `lupin_db_test.notifications` with correct compound job_id + sender_id. 15 rows persisted. Chain fully green.
+  - **Plan**: `src/rnd/v0.1.6/2026.04.14-bfe-tfe-interactions-and-reports.md`.
+  - **Commits (Lupin)**: `62a85e1` (CP4 — initial fix + ReportWriter + unit tests), plus CP5 (session-end commit with push-agentic endpoint wiring + E2E script patches).
+  - **CoSA-side changes (user commits separately)**: `src/cosa/agents/utils/voice_io.py`, `src/cosa/agents/shared/report_writer.py`, `src/cosa/agents/bug_fix_expediter/job.py`, `src/cosa/agents/test_fix_expediter/job.py`, `src/cosa/rest/routers/queues.py` (new endpoint), `src/cosa/rest/todo_fifo_queue.py` (new method), `src/cosa/rest/routers/peer.py` (from CP2/CP3), `src/cosa/rest/routers/pages.py` (peer-queue-watch route), `src/cosa/rest/routers/admin.py` (refresh-source from CP1).
 
 - [x] **Done bucket job card render parity** → commit: 3faec04 | By: 1b8c1cc0
   - **Symptom 1**: Dynamically-inserted done cards (WS transition) showed an irrelevant pause button and lacked a trash button
