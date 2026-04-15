@@ -202,6 +202,27 @@ docker exec lupin-rest-dev bash -c 'TOKEN=$(curl -sS -X POST http://lupin-rest-t
 
 **Context**: Overnight `all` test-suite run (2026-04-14 00:42 EDT) produced `0 passed, 0 failed, 1 error, 0 skipped`, `failures: []`, despite a 4661.7s (~78min) wall time. Two orthogonal bugs surfaced: (Bug 1) monolithic `all` subprocess hit the 60min timeout and the timeout-return path discarded captured stdout AND synthesized no failure record, so `TestSuiteCompletionWatchdog` Gate 3 refused to dispatch TFE on `len(failures)==0`; (Bug 2) job cards loaded from `/api/job-history` won't expand when the scroll-toggle is clicked, while live done-queue cards work.
 
+#### Checkpoint 5 | 2026.04.14 21:55 EDT | Session-end: live verification clean, midnight `all` run scheduled by user
+
+**Verification of Checkpoint 4 fix**: re-ran `./src/tests/run-integration-tests.sh --bg -v` after killing the poisoned in-flight run. New run reached 93% with **zero `clean_test_db` cascade ERRORs** and **zero PQW 502s** for the entire duration. User killed at 93% (stalled, not failed) — that's enough signal: the destructive fixtures all run in the first ~80% of the suite, so passing 80%+ with no fixture-setup errors confirms the re-seed is landing on every cycle.
+
+**Pre-existing issues identified and queued for follow-up**:
+- `history.md` at 22,051 tokens (88.2% of 25k limit) — CRITICAL per workflow. User chose "defer to next session" rather than block on archive. Top of TODO.md.
+- 12 visual-regression snapshot drifts, 8 auth 401s (mock_tokens_are_legacy migration), Bug 2 (UI history-card toggle) all queued in TODO.md HIGH PRIORITY for separate sessions.
+
+**Next step (user-driven)**: schedule midnight (2026-04-15 00:00 EDT) `all` run on `:8000`. Validates CoSA Checkpoints 1+2 + Lupin Checkpoints 3+4 end-to-end. Morning review TODO added at top of TODO.md.
+
+**Session totals (4 checkpoints, 4 commits, ~13.5h elapsed)**:
+- `ece969e` — Checkpoint 1: Bug 1A/1B fix (test-suite aggregation)
+- `a9fffc4` — Checkpoint 2: P0 regressions from fan-out (websocket gate + smoke budget)
+- `eedbf8e` — Checkpoint 3: clean_test_db re-seeds companions
+- `0590458` — Checkpoint 4: DB_HOST=localhost host-context fix
+- (this commit) — Checkpoint 5: session-end ritual
+
+**CoSA submodule**: `agents/test_suite/job.py` carries Checkpoints 1+2's stacked edits, still uncommitted from Lupin context per nested-repo rules. User to commit in cosa context next session.
+
+---
+
 #### Checkpoint 4 | 2026.04.14 20:25 EDT | Fix-of-the-fix: seed env-var DB_HOST defaults wrong from host context
 
 **Symptom**: First post-Checkpoint-3 verification (`./src/tests/run-integration-tests.sh --bg -v` from host) emitted a cascade of `ERROR [%]` results across most `clean_test_db`-using tests. PQW kept emitting 502s as before.
