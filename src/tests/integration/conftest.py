@@ -159,6 +159,18 @@ def clean_test_db():
     # script lives in src/scripts/ and is normally invoked at container
     # startup; we add it to sys.path on demand and call its idempotent
     # function. ON CONFLICT DO NOTHING in the script makes repeat calls safe.
+    #
+    # Postgres host: integration tests run on the HOST (pytest in user shell),
+    # so postgres is reachable on localhost:5432 (docker-compose port mapping).
+    # The seed script defaults to DB_HOST=lupin-postgres (the docker-network
+    # service name) which is unresolvable from host — silently fails the
+    # connect and skips the seed, then our safety assertion below fires
+    # and every test using clean_test_db ERRORs at fixture setup.
+    # Use setdefault so that runs from inside a container (where
+    # DB_HOST=lupin-postgres IS valid) are not overridden.
+    import os as _os
+    _os.environ.setdefault( "DB_HOST", "localhost" )
+
     import sys as _sys, pathlib as _pathlib, cosa.utils.util as _cu
     _scripts_dir = _pathlib.Path( _cu.get_project_root() ) / "src" / "scripts"
     if str( _scripts_dir ) not in _sys.path:

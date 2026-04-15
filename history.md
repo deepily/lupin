@@ -202,6 +202,29 @@ docker exec lupin-rest-dev bash -c 'TOKEN=$(curl -sS -X POST http://lupin-rest-t
 
 **Context**: Overnight `all` test-suite run (2026-04-14 00:42 EDT) produced `0 passed, 0 failed, 1 error, 0 skipped`, `failures: []`, despite a 4661.7s (~78min) wall time. Two orthogonal bugs surfaced: (Bug 1) monolithic `all` subprocess hit the 60min timeout and the timeout-return path discarded captured stdout AND synthesized no failure record, so `TestSuiteCompletionWatchdog` Gate 3 refused to dispatch TFE on `len(failures)==0`; (Bug 2) job cards loaded from `/api/job-history` won't expand when the scroll-toggle is clicked, while live done-queue cards work.
 
+#### Checkpoint 4 | 2026.04.14 20:25 EDT | Fix-of-the-fix: seed env-var DB_HOST defaults wrong from host context
+
+**Symptom**: First post-Checkpoint-3 verification (`./src/tests/run-integration-tests.sh --bg -v` from host) emitted a cascade of `ERROR [%]` results across most `clean_test_db`-using tests. PQW kept emitting 502s as before.
+
+**Root cause**: `src/scripts/seed_test_companions.py:39` reads `DB_HOST = os.environ.get("DB_HOST", "lupin-postgres")` at module import time. `lupin-postgres` is the docker-compose service name — resolvable from inside containers, **unresolvable from host**. The host pytest process couldn't connect, the seed script's try/except silently skipped (its design when DBs unreachable), Checkpoint 3's safety assertion (`count == len(COMPANION_EMAILS)`, expecting 5) tripped on the still-empty users table, and every fixture-using test ERRORed at setup. The original PQW 502 problem persisted because companion rows still weren't being restored.
+
+**Verified in flight** (host-side reproduction):
+- `psycopg2.connect(host="localhost", port=5432, ...)` → OK, queryable
+- `psycopg2.connect(host="lupin-postgres", port=5432, ...)` → `OperationalError: could not translate host name`
+- Direct `DB_HOST=localhost python3 src/scripts/seed_test_companions.py` → seeds all 5 companions; `:8000/auth/login` → HTTP 200 immediately
+
+**Fix**: in `clean_test_db` (`src/tests/integration/conftest.py`), call `os.environ.setdefault( "DB_HOST", "localhost" )` BEFORE importing the seed module. `setdefault` is intentional — inside-container runs (where docker-compose sets `DB_HOST=lupin-postgres`) keep their existing value; only host-context runs (where the var is absent) get the localhost override. One-liner; no other changes needed.
+
+**Files changed (1 Lupin)**:
+- `src/tests/integration/conftest.py` — added the setdefault before the seed import + comment block explaining the host-vs-container resolution split.
+- `history.md` (this Checkpoint 4 entry) + `.claude-session.md`.
+
+**Verification**: py_compile OK; direct seed-from-host confirmed re-populating users table; `:8000/auth/login` returned HTTP 200. Live integration-tier rerun deferred to the user (the in-flight 19:16 broken run was at ~92% when this was diagnosed).
+
+**Lesson saved**: this is exactly the kind of import-time env-var capture trap CLAUDE.md's `feedback_no_defensive_programming` warns about — module-level constants make tests of host-vs-container assumptions essential.
+
+---
+
 #### Checkpoint 3 | 2026.04.14 19:55 EDT | PQW 502/401 root-caused — clean_test_db wipes companion seed mid-suite
 
 **Context**: During the in-flight 19:16 `all` run on `:8000`, Peer Queue Watcher (running on dev `:7999`) started emitting `HTTP 502: peer login http://lupin-rest-test:7999/auth/login returned 401: {"detail":"Invalid email or password"}`. Same env-var creds worked against `:7999` (HTTP 200) but failed against `:8000` (HTTP 401). Direct evidence the test DB had lost the `interactive.job.tester@lupin.deepily.ai` companion row mid-run.
