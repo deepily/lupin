@@ -43,7 +43,22 @@
 /plan-session-end
 ```
 
-Invoked when wrapping up a work session to ensure all documentation, history, and commits are properly managed.
+Invoked when ending the **entire work session** for the day.
+
+**Natural language triggers** (any of these should invoke THIS command):
+- "Let's end the session"
+- "Session end"
+- "Wrap up the session"
+- "Done for the day"
+- "Calling it for today"
+- "Close out the session"
+- "That's it for today"
+
+**⚠️ DISAMBIGUATION — do NOT confuse with `/plan-bug-fix-mode-wrap`**:
+- This command ends the **entire work session** (history archive, full commit, session close)
+- `/plan-bug-fix-mode-wrap` wraps a **single bug fix** (document + commit one fix, stay in session)
+- Key signal: if the user mentions "session", "done for the day", "calling it" → use THIS command
+- Key signal: if the user mentions "bug", "fix", or "this" → use `/plan-bug-fix-mode-wrap`
 
 ---
 
