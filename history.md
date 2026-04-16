@@ -10,6 +10,13 @@
 - **Commit**: 29a6fd4
 - **History archive**: `history.md` was at 38,821 tokens (155% of 25k limit). Archived 23 sessions (2026-04-08 to 2026-04-14) to `history/2026-04-08-to-14-history.md`. Retained 4 recent sessions (10,008 tokens). **Commit**: 2879cbf
 - **PQW HTTP 500 fix**: `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/_PASSWORD` were missing from the running `lupin-rest-dev` container (container predated the env var additions to docker-compose.yml). Fix: `docker rm -f lupin-rest-dev && docker compose up -d lupin-rest-dev`. Env vars confirmed injected; watcher confirmed running. No code changes — deployment-only fix.
+- **Skill routing disambiguation**: Added explicit natural-language trigger lists + DISAMBIGUATION blocks to both `.claude/commands/plan-bug-fix-mode-wrap.md` and `plan-session-end.md` so "wrap up this bug" reliably routes to bug-fix-mode-wrap. **Commit**: 5f2713a
+
+**Session Summary**
+- **Total Fixes**: 4 (CJ Flow Delete All, history archive, PQW HTTP 500, skill routing)
+- **Commits (Lupin)**: 29a6fd4, 5f2713a, 2879cbf, 4e3c510, 91c3856
+- **CoSA-side changes (user commits separately)**: `queues.py` (2 new endpoints), `job_persistence.py` (`delete_job_history_bulk`)
+- **Status**: Session closed 2026.04.16
 
 ---
 
