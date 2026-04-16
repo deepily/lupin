@@ -9,6 +9,7 @@
 - **Plan**: serialized to `src/rnd/v0.1.6/2026.04.16-cj-flow-delete-all-buttons.md`
 - **Commit**: 29a6fd4
 - **History archive**: `history.md` was at 38,821 tokens (155% of 25k limit). Archived 23 sessions (2026-04-08 to 2026-04-14) to `history/2026-04-08-to-14-history.md`. Retained 4 recent sessions (10,008 tokens). **Commit**: 2879cbf
+- **PQW HTTP 500 fix**: `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/_PASSWORD` were missing from the running `lupin-rest-dev` container (container predated the env var additions to docker-compose.yml). Fix: `docker rm -f lupin-rest-dev && docker compose up -d lupin-rest-dev`. Env vars confirmed injected; watcher confirmed running. No code changes — deployment-only fix.
 
 ---
 

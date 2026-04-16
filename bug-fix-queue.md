@@ -55,7 +55,6 @@
 
 - [ ] **`/plan-bug-fix-mode-wrap` skill not triggered — session-end invoked instead** — Skill trigger verbiage for `/plan-bug-fix-mode-wrap` and `/plan-session-end` overlaps; "wrap up" or "let's wrap" phrases route to session-end instead of bug-fix-mode-wrap. Fix: tighten natural language triggers in each skill's SKILL.md / wrapper to distinguish "wrap this bug/fix" from "end session / wrap up the session."
 
-- [ ] **PQW HTTP 500 — peer-queue auth env vars not set on dev server** — `Last error: HTTP 500: LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/_PASSWORD env vars must be set on the dev server for peer-queue auth`. PQW (Peer Queue Watcher) is failing because the dev server at :7999 doesn't have the test credential env vars set. Fix: either inject them into the dev server's startup environment or make PQW auth use a different credential path that doesn't require test env vars on the dev server.
 
 - [x] ~~**target_user "Cannot resolve" error in Docker**~~ → Session 304 | By: 05faae8b
 - [x] ~~**Fuzzy matching via voice**~~ → Session 304 | By: 05faae8b
@@ -76,6 +75,9 @@
 ---
 
 ### Completed
+
+- [x] **PQW HTTP 500 — peer-queue auth env vars not set on dev server** → no-code fix | By: eb50bd56 | 2026-04-16
+  - Container predated env var additions to docker-compose.yml. Fix: `docker rm -f lupin-rest-dev && docker compose up -d lupin-rest-dev`. Watcher confirmed running post-fix.
 
 - [x] **History archive — history.md at 38,821 tokens (155% of 25k limit)** → commit: 2879cbf | By: eb50bd56 | 2026-04-16
   - Archived 23 sessions (2026-04-08 to 2026-04-14) to `history/2026-04-08-to-14-history.md`. Retained 4 sessions, 10,008 tokens.
