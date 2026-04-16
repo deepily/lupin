@@ -2,11 +2,9 @@
 
 Last updated: 2026-04-16 afternoon (Session f01fdc2f continuation — Bug 12 + Bug 9 landed + `ts-e4089cf2` scheduled)
 
-## 🚨 First-thing next session — archive history (still pending from 2026-04-15)
+## ~~🚨 First-thing next session — archive history (still pending from 2026-04-15)~~ ✅ DONE 2026-04-16
 
-**CRITICAL**: history.md still at 99.1% of 25k limit (24,797 tokens). Intentionally NOT updated this morning to avoid pushing over. **Archive BEFORE adding any new session entry.**
-
-- [ ] [LUPIN] **Archive history.md** — `/history-management mode=archive`. 14-day retention target; archive prior content to `history/2026-01-20-to-04-02-history.md` (or similar partial-month filename per project convention). Most recent existing archive ends 2026-01-19. After archive, backfill session-f01fdc2f + 2026-04-16 forensics entries + 2026-04-16 afternoon (Bug 12 + Bug 9 + ts-e4089cf2).
+- [x] [LUPIN] **Archive history.md** — ✅ DONE Session eb50bd56. Archived 23 sessions (2026-04-08 to 2026-04-14) → `history/2026-04-08-to-14-history.md`. history.md now 10,008 tokens (down from 38,821). Commit: 2879cbf.
 
 - [ ] [LUPIN] **Review `ts-e4089cf2` outcome** (scheduled 2026-04-16 17:24:00 EDT on :8000 test server; full `all` suite ~60 min; TFE voice gate expected ~18:25-18:40 EDT). **Acceptance criteria** for Bug 12 validation:
   - [ ] Test suite completes with ~38 failures (same reproducible baseline)
@@ -57,7 +55,7 @@ Last updated: 2026-04-16 afternoon (Session f01fdc2f continuation — Bug 12 + B
 
 - [ ] [LUPIN] **Follow-up if live test skipped on missing `/api/agentic-jobs/submit`** — add a generic agentic-job submit REST endpoint (factory wrapper like test-suite's) so the live test can actually submit TFE jobs. Currently the test body is complete but depends on this endpoint. Alternative: have the test go through `TestSuiteJob → watchdog` dispatch path.
 
-- [ ] [LUPIN] **Archive history.md** (CRITICAL: 23,844 tokens / 95.3% of 25k limit at Session 6ae2513c wrap — bumped from 22,051 by this session's entry). Run `/history-management mode=archive` first thing. Don't add more session entries before archive lands.
+- [x] [LUPIN] **Archive history.md** ✅ DONE Session eb50bd56 — commit 2879cbf. See above.
 
 - [ ] [LUPIN] **Bug 2 — history-card scroll toggle** (deferred, awaits user devtools). DOM-id collision hypothesis: live Done card and History card render the same `id="job-details-${jobId}"`; `getElementById` returns the first match. Step 0 (devtools query: `total vs unique` count of `[id^="job-details-"]`) is the gate. Step 3 plan: namespace IDs by queueName at render time. Plan in `src/rnd/v0.1.6/2026.04.14-all-suite-aggregation-and-history-card-toggle.md`.
 

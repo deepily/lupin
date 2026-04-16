@@ -77,7 +77,10 @@
 
 ### Completed
 
-- [x] **CJ Flow — Delete All button for 5 queue panes** → commit: 54336cd | By: eb50bd56 | 2026-04-16
+- [x] **History archive — history.md at 38,821 tokens (155% of 25k limit)** → commit: 2879cbf | By: eb50bd56 | 2026-04-16
+  - Archived 23 sessions (2026-04-08 to 2026-04-14) to `history/2026-04-08-to-14-history.md`. Retained 4 sessions, 10,008 tokens.
+
+- [x] **CJ Flow — Delete All button for 5 queue panes** → commit: 29a6fd4 | By: eb50bd56 | 2026-04-16
   - Added 🗑️ Delete All to each of todo/run/done/dead/history pane headers. Non-admins delete own jobs; admins clear entire queue. History respects time-window filter.
   - **Backend** (CoSA — user commits separately): `DELETE /api/queue/{name}/all`, `DELETE /api/job-history/all?days=N`, `delete_job_history_bulk()`.
   - **Frontend** (Lupin): `notifications.html` (5 buttons), `notifications.js` (`deleteAllQueueJobs()`), `notifications.css` (`.queue-delete-all-btn`).

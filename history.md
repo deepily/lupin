@@ -1,6 +1,6 @@
 # Lupin Project History
 
-### 2026.04.16 - Session eb50bd56 | CJ Flow Delete All buttons (5 panes)
+### 2026.04.16 - Session eb50bd56 | CJ Flow Delete All buttons (5 panes) + history archive
 
 - 🗑️ Delete All button added to each of the 5 CJ flow pane headers (todo/run/done/dead/history). Non-admins delete own jobs only; admins clear entire queue. History pane respects the active time-window filter.
 - **Backend** (CoSA — user commits from inside `src/cosa/`): `DELETE /api/queue/{name}/all` + `DELETE /api/job-history/all?days=N` + `delete_job_history_bulk()` in `job_persistence.py` + `queues.py`.
@@ -8,6 +8,7 @@
 - PQW HTTP 500 env-var bug filed in `bug-fix-queue.md` (Queued).
 - **Plan**: serialized to `src/rnd/v0.1.6/2026.04.16-cj-flow-delete-all-buttons.md`
 - **Commit**: 29a6fd4
+- **History archive**: `history.md` was at 38,821 tokens (155% of 25k limit). Archived 23 sessions (2026-04-08 to 2026-04-14) to `history/2026-04-08-to-14-history.md`. Retained 4 recent sessions (10,008 tokens). **Commit**: 2879cbf
 
 ---
 
