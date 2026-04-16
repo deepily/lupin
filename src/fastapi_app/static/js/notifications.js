@@ -6187,6 +6187,64 @@ class NotificationsUI {
         }
     }
 
+    async deleteAllQueueJobs( queueName ) {
+        /**
+         * Bulk delete all jobs from a queue pane (todo, run, done, dead, or history).
+         *
+         * Requires:
+         *     - queueName is 'todo', 'run', 'done', 'dead', or 'history'
+         *     - User is authenticated
+         *
+         * Ensures:
+         *     - Prompts user for confirmation with job count and, for 'run', a
+         *       cancellation warning
+         *     - Sends DELETE /api/queue/{queueName}/all  OR
+         *              DELETE /api/job-history/all?days={N}
+         *     - Refreshes the pane and resets count badge on success
+         */
+        let count, confirmMsg, url;
+
+        if ( queueName === 'history' ) {
+            const state    = this.queueCategoryState && this.queueCategoryState.history;
+            count          = ( state && state.total ) || 0;
+            const select   = document.getElementById( 'history-time-window' );
+            const days     = select ? select.value : 'all';
+            const dayLabel = days === 'all' ? 'all time' : `last ${days} day${days === '1' ? '' : 's'}`;
+            confirmMsg     = `Delete all ${count} history entries from ${dayLabel}?`;
+            const daysParam = days === 'all' ? 'all' : days;
+            url            = `/api/job-history/all?days=${daysParam}`;
+        } else {
+            count          = ( this.queueCounts && this.queueCounts[ queueName ] ) || 0;
+            const label    = queueName === 'run' ? 'running' : queueName;
+            confirmMsg     = queueName === 'run'
+                ? `Cancel and remove all ${count} running job${count === 1 ? '' : 's'}? This will interrupt active jobs.`
+                : `Remove all ${count} job${count === 1 ? '' : 's'} from the ${label} queue?`;
+            url            = `/api/queue/${queueName}/all`;
+        }
+
+        if ( !confirm( confirmMsg ) ) return;
+
+        try {
+            const response = await this.authedFetch( url, { method: 'DELETE' } );
+
+            if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
+
+            if ( queueName === 'history' ) {
+                this.loadJobHistory();
+            } else {
+                this.queueCounts[ queueName ] = 0;
+                this.updateQueueCountBadge( queueName, 0 );
+                this.loadQueueJobCards( queueName );
+            }
+
+            this.log( `[DELETE ALL] ${queueName} queue cleared` );
+
+        } catch ( error ) {
+            this.error( `Error clearing ${queueName} queue:`, error );
+            alert( `Failed to clear ${queueName} queue` );
+        }
+    }
+
     async retryHistoryJob( jobId, questionText ) {
         /**
          * Retry a failed/interrupted job by re-submitting to the todo queue.

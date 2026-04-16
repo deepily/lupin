@@ -2945,6 +2945,21 @@
     padding: 4px;
 }
 
+.queue-delete-all-btn {
+    background   : none;
+    border       : none;
+    color        : #dc3545;
+    cursor       : pointer;
+    font-size    : 13px;
+    padding      : 4px;
+    opacity      : 0.55;
+    margin-right : 2px;
+}
+
+.queue-delete-all-btn:hover {
+    opacity: 1.0;
+}
+
 /* Jobs Container */
 .queue-jobs-container {
     padding: 10px;

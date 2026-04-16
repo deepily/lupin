@@ -1,5 +1,16 @@
 # Lupin Project History
 
+### 2026.04.16 - Session eb50bd56 | CJ Flow Delete All buttons (5 panes)
+
+- 🗑️ Delete All button added to each of the 5 CJ flow pane headers (todo/run/done/dead/history). Non-admins delete own jobs only; admins clear entire queue. History pane respects the active time-window filter.
+- **Backend** (CoSA — user commits from inside `src/cosa/`): `DELETE /api/queue/{name}/all` + `DELETE /api/job-history/all?days=N` + `delete_job_history_bulk()` in `job_persistence.py` + `queues.py`.
+- **Frontend** (Lupin): `notifications.html` (5 buttons w/ data-testid), `notifications.js` (`deleteAllQueueJobs()` method), `notifications.css` (`.queue-delete-all-btn` ghost style, red tint).
+- PQW HTTP 500 env-var bug filed in `bug-fix-queue.md` (Queued).
+- **Plan**: serialized to `src/rnd/v0.1.6/2026.04.16-cj-flow-delete-all-buttons.md`
+- **Commit**: 54336cd
+
+---
+
 ### 2026.04.15 - Session f01fdc2f | SDK creds mount + 11 TFE/BFE observability + lifecycle fixes
 
 **Context**: Started with operator locked out of test server (401s, companions wiped from `lupin_db_test` by E2E UI suite teardown). Morning fix cascaded into a full audit of why last night's scheduled `ts-d2d890ed` TFE auto-dispatch produced "8 clusters, 0 proposed, 0 fixed" — SDK credentials weren't mounted in test container, voice gate fired at wrong priority, stalled rows mis-persisted as failed, resume re-ran Phase 0/1 unnecessarily. Ten bugs fixed + a tonight-run scheduled.

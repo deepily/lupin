@@ -677,6 +677,10 @@
                         <span class="queue-status-indicator status-todo">🟡</span>
                         <h4>TODO</h4>
                         <span class="queue-count-badge" id="todo-count-badge">0</span>
+                        <button class="queue-delete-all-btn" id="todo-delete-all"
+                                data-testid="notifications-queue-todo-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('todo')"
+                                title="Delete all TODO jobs">🗑️</button>
                         <button class="queue-expand-btn" id="todo-expand" data-testid="notifications-queue-todo-expand-btn">▶</button>
                     </div>
                     <div class="queue-jobs-container collapsed" id="todo-jobs-container" data-testid="notifications-queue-todo-jobs">
@@ -690,6 +694,10 @@
                         <span class="queue-status-indicator status-running">🔵</span>
                         <h4>Running</h4>
                         <span class="queue-count-badge" id="run-count-badge">0</span>
+                        <button class="queue-delete-all-btn" id="run-delete-all"
+                                data-testid="notifications-queue-running-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('run')"
+                                title="Cancel and delete all running jobs">🗑️</button>
                         <button class="queue-expand-btn" id="run-expand" data-testid="notifications-queue-running-expand-btn">▶</button>
                     </div>
                     <div class="queue-jobs-container collapsed" id="run-jobs-container">
@@ -703,6 +711,10 @@
                         <span class="queue-status-indicator status-done">✅</span>
                         <h4>Done</h4>
                         <span class="queue-count-badge" id="done-count-badge">0</span>
+                        <button class="queue-delete-all-btn" id="done-delete-all"
+                                data-testid="notifications-queue-done-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('done')"
+                                title="Delete all Done jobs">🗑️</button>
                         <button class="queue-expand-btn" id="done-expand" data-testid="notifications-queue-done-expand-btn">▶</button>
                     </div>
                     <div class="queue-jobs-container collapsed" id="done-jobs-container">
@@ -716,6 +728,10 @@
                         <span class="queue-status-indicator status-dead">❌</span>
                         <h4>Dead</h4>
                         <span class="queue-count-badge" id="dead-count-badge">0</span>
+                        <button class="queue-delete-all-btn" id="dead-delete-all"
+                                data-testid="notifications-queue-dead-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('dead')"
+                                title="Delete all Dead jobs">🗑️</button>
                         <button class="queue-expand-btn" id="dead-expand" data-testid="notifications-queue-dead-expand-btn">▶</button>
                     </div>
                     <div class="queue-jobs-container collapsed" id="dead-jobs-container">
@@ -751,6 +767,10 @@
                             <option value="all">All</option>
                         </select>
                         <span class="queue-count-badge" id="history-count-badge">0</span>
+                        <button class="queue-delete-all-btn" id="history-delete-all"
+                                data-testid="notifications-queue-history-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('history')"
+                                title="Delete all visible history">🗑️</button>
                         <button class="queue-expand-btn" id="history-expand" data-testid="notifications-queue-history-expand-btn">▶</button>
                     </div>
                     <div class="queue-jobs-container collapsed" id="history-jobs-container" data-testid="notifications-queue-history-jobs">

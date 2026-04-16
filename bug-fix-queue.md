@@ -53,6 +53,10 @@
 
 (Available for any session to claim)
 
+- [ ] **`/plan-bug-fix-mode-wrap` skill not triggered — session-end invoked instead** — Skill trigger verbiage for `/plan-bug-fix-mode-wrap` and `/plan-session-end` overlaps; "wrap up" or "let's wrap" phrases route to session-end instead of bug-fix-mode-wrap. Fix: tighten natural language triggers in each skill's SKILL.md / wrapper to distinguish "wrap this bug/fix" from "end session / wrap up the session."
+
+- [ ] **PQW HTTP 500 — peer-queue auth env vars not set on dev server** — `Last error: HTTP 500: LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/_PASSWORD env vars must be set on the dev server for peer-queue auth`. PQW (Peer Queue Watcher) is failing because the dev server at :7999 doesn't have the test credential env vars set. Fix: either inject them into the dev server's startup environment or make PQW auth use a different credential path that doesn't require test env vars on the dev server.
+
 - [x] ~~**target_user "Cannot resolve" error in Docker**~~ → Session 304 | By: 05faae8b
 - [x] ~~**Fuzzy matching via voice**~~ → Session 304 | By: 05faae8b
 - [x] ~~**Job card contact failure**~~ → Session 304 | By: 05faae8b
@@ -72,6 +76,12 @@
 ---
 
 ### Completed
+
+- [x] **CJ Flow — Delete All button for 5 queue panes** → commit: 54336cd | By: eb50bd56 | 2026-04-16
+  - Added 🗑️ Delete All to each of todo/run/done/dead/history pane headers. Non-admins delete own jobs; admins clear entire queue. History respects time-window filter.
+  - **Backend** (CoSA — user commits separately): `DELETE /api/queue/{name}/all`, `DELETE /api/job-history/all?days=N`, `delete_job_history_bulk()`.
+  - **Frontend** (Lupin): `notifications.html` (5 buttons), `notifications.js` (`deleteAllQueueJobs()`), `notifications.css` (`.queue-delete-all-btn`).
+  - **Plan**: `src/rnd/v0.1.6/2026.04.16-cj-flow-delete-all-buttons.md`
 
 - [x] **BFE & TFE job cards lack interactions and results documents** → Session 5a620729 | Live validated 2026-04-14
   - **Symptom**: Notification Conversation showed "No interactions recorded" on BFE/TFE done cards; no report-link artifact rendered.
