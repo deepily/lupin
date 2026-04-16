@@ -1,12 +1,23 @@
 # TODO
 
-Last updated: 2026-04-16 afternoon (Session f01fdc2f continuation — Bug 12 + Bug 9 landed)
+Last updated: 2026-04-16 afternoon (Session f01fdc2f continuation — Bug 12 + Bug 9 landed + `ts-e4089cf2` scheduled)
 
 ## 🚨 First-thing next session — archive history (still pending from 2026-04-15)
 
 **CRITICAL**: history.md still at 99.1% of 25k limit (24,797 tokens). Intentionally NOT updated this morning to avoid pushing over. **Archive BEFORE adding any new session entry.**
 
-- [ ] [LUPIN] **Archive history.md** — `/history-management mode=archive`. 14-day retention target; archive prior content to `history/2026-01-20-to-04-02-history.md` (or similar partial-month filename per project convention). Most recent existing archive ends 2026-01-19. After archive, backfill session-f01fdc2f + 2026-04-16 forensics entries.
+- [ ] [LUPIN] **Archive history.md** — `/history-management mode=archive`. 14-day retention target; archive prior content to `history/2026-01-20-to-04-02-history.md` (or similar partial-month filename per project convention). Most recent existing archive ends 2026-01-19. After archive, backfill session-f01fdc2f + 2026-04-16 forensics entries + 2026-04-16 afternoon (Bug 12 + Bug 9 + ts-e4089cf2).
+
+- [ ] [LUPIN] **Review `ts-e4089cf2` outcome** (scheduled 2026-04-16 17:24:00 EDT on :8000 test server; full `all` suite ~60 min; TFE voice gate expected ~18:25-18:40 EDT). **Acceptance criteria** for Bug 12 validation:
+  - [ ] Test suite completes with ~38 failures (same reproducible baseline)
+  - [ ] `TestSuiteCompletionWatchdog` auto-dispatches a TFE job
+  - [ ] TFE reaches Phase 2 voice gate (generates ~21 proposals across 8 clusters)
+  - [ ] Voice gate fires while operator offline → MCP 503 "User is offline"
+  - [ ] **POST-FIX EXPECTED**: dispatcher raises `VoiceGateTimeoutError` → orchestrator saves checkpoint → raises `StalledException` → job persisted with `state=STALLED` (NOT `completed`)
+  - [ ] UI History panel shows ⏸ Resume button for the TFE row
+  - [ ] DB `metadata_json["checkpoint"]` contains rehydrated proposals for Resume-to-review
+  - [ ] Worktree isolation status: with `[cosa_worktree] enabled=false` (default), confirm no worktree was created (Phase 3 not reached due to stall). If stall path fails, we'd see an unintended worktree attempt — that's also useful signal.
+  - **If any criterion fails**: forensic capture + patch, do NOT escalate to Doc 18 D2 (attended Resume-apply) until Phase 5 stall-validation passes clean.
 
 - [x] [LUPIN] **Bug 12 — MCP 503 should raise VoiceGateTimeoutError** ✅ DONE 2026-04-16 afternoon. Session-in-progress continuation of f01fdc2f. Scope narrowed after exploration: `present_choices` was already fixed by commit `49c238d` (Bug 7 side-effect); fix locus was `ask_confirmation` (line 300) + `get_feedback` (line 355) — both now raise `VoiceGateTimeoutError` on any non-0/2 exit code (HTTP 503, connection errors). 13/13 unit tests in `test_mcp_timeout_detection.py` pass (all three methods). Design doc: `src/rnd/v0.1.6/2026.04.16-bug-12-mcp-503-to-voice-gate-timeout.md`. Live re-creation scheduled next.
 
