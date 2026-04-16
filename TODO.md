@@ -1,13 +1,18 @@
 # TODO
 
-Last updated: 2026-04-15 (Session f01fdc2f — SDK creds mount + 11 TFE/BFE fixes (Bugs 1-8, 10, 11) + operator routing + overnight `ts-79829a75` scheduled)
+Last updated: 2026-04-16 morning (Session f01fdc2f continuation — overnight forensics + Bug 12 filed)
 
-## 🚨 First-thing next session — archive history + review overnight run
+## 🚨 First-thing next session — archive history (still pending from 2026-04-15)
 
-**CRITICAL**: history.md is at 99.1% of 25k token limit (24,797 tokens). **Archive BEFORE adding any new session entry.**
+**CRITICAL**: history.md still at 99.1% of 25k limit (24,797 tokens). Intentionally NOT updated this morning to avoid pushing over. **Archive BEFORE adding any new session entry.**
 
-- [ ] [LUPIN] **Archive history.md** — run `/history-management mode=archive` as step 1 of next session-start. See `~/.claude/scripts/get-token-count.sh /mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md` for live status.
-- [ ] [LUPIN] **Review `ts-79829a75` outcome** — scheduled 2026-04-15 19:30 EDT, `test_types=all`, auto-fix=true, cheap-tier TFE (Sonnet lead via INI override). Expected path: suite → failures → TFE auto-dispatch → voice gate routed to ricardo via Bug 10. If answered live, Phase 3/5/6 ran and may have created real commits/PR with Sonnet-cheap proposals. If unanswered, `tfe-*` row sits in Done bucket with ⏸ Stalled badge — click **Resume** button; Bug 6 skips Phase 0/1 re-work; answer voice gate; Phase 3/5/6 complete.
+- [ ] [LUPIN] **Archive history.md** — `/history-management mode=archive`. 14-day retention target; archive prior content to `history/2026-01-20-to-04-02-history.md` (or similar partial-month filename per project convention). Most recent existing archive ends 2026-01-19. After archive, backfill session-f01fdc2f + 2026-04-16 forensics entries.
+
+- [ ] [LUPIN] **Bug 12 — MCP 503 should raise VoiceGateTimeoutError** (NEW — filed 2026-04-16 forensics). Overnight `ts-79829a75`/`tfe-7e8d3888` generated 21 proposals but ended `status=completed` not `stalled` because dispatcher's generic `except Exception` swallowed the 503 and returned empty-answers. Fix: in `ask_confirmation` / `get_feedback` / `present_choices` exception handlers, detect HTTPStatusError with 503 + body containing "User is offline" and raise `VoiceGateTimeoutError`. Without this, every overnight TFE where operator is asleep loses the Bug 11 stalled-badge + Resume-button UX. CoSA commit. See `src/rnd/v0.1.6/2026.04.16-overnight-forensics-ts-79829a75.md` for full context.
+
+- [ ] [LUPIN] **Act on overnight TFE's 21 proposals** — report at `io/swe-team/reports/interactive.job.tester@lupin.deepily.ai/2026.04.15-at-21:41-EST-ts-79829a75-completed-test_fix_expediter-report.md`. Four 1-liner wins would retire 27 of 38 failures: (1) `len(AGENTIC_AGENTS) == 9` → `== 10` in 3 sites, (2) re-capture 12 visual baselines via `--update-snapshots`, (3) add `PRODUCT_NAMES` entry for TFE Resume agent, (4) add `resume_from` key to `all_agents` profile. Option: land these directly OR re-run TFE (post-Bug-12) to get a proper stalled row.
+
+- [ ] [LUPIN] **Review `ts-79829a75` outcome** — ✅ Ran 2026-04-15 21:05 EDT. 3647/3671 pass. Same 38 failures as morning baseline (reproducible). TFE auto-dispatched → 21 proposals → 0 selected due to Bug 12. Full forensics: `src/rnd/v0.1.6/2026.04.16-overnight-forensics-ts-79829a75.md`.
 - [ ] [LUPIN] **Revert overnight INI override** — `[Lupin: Testing]` block in `src/conf/lupin-app.ini` has `test fix expediter lead model = claude-sonnet-4-6` (added for cheap overnight run). Decide whether to keep or revert to Baseline default (Opus lead).
 - [ ] [LUPIN] **CoSA commit** — 9 submodule files need committing from inside `src/cosa/` repo: `agents/utils/agent_notification_dispatcher.py`, `agents/bug_fix_expediter/cosa_interface.py`, `agents/test_fix_expediter/orchestrator.py`, `agents/test_fix_expediter/state.py`, `rest/agentic_job_factory.py`, `rest/job_persistence.py`, `rest/queue_util.py`, `rest/running_fifo_queue.py`, `rest/routers/io_files.py`.
 
