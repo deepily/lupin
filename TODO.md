@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-04-16 morning (Session f01fdc2f continuation — overnight forensics + Bug 12 filed)
+Last updated: 2026-04-16 afternoon (Session f01fdc2f continuation — Bug 12 + Bug 9 landed)
 
 ## 🚨 First-thing next session — archive history (still pending from 2026-04-15)
 
@@ -8,7 +8,7 @@ Last updated: 2026-04-16 morning (Session f01fdc2f continuation — overnight fo
 
 - [ ] [LUPIN] **Archive history.md** — `/history-management mode=archive`. 14-day retention target; archive prior content to `history/2026-01-20-to-04-02-history.md` (or similar partial-month filename per project convention). Most recent existing archive ends 2026-01-19. After archive, backfill session-f01fdc2f + 2026-04-16 forensics entries.
 
-- [ ] [LUPIN] **Bug 12 — MCP 503 should raise VoiceGateTimeoutError** (NEW — filed 2026-04-16 forensics). Overnight `ts-79829a75`/`tfe-7e8d3888` generated 21 proposals but ended `status=completed` not `stalled` because dispatcher's generic `except Exception` swallowed the 503 and returned empty-answers. Fix: in `ask_confirmation` / `get_feedback` / `present_choices` exception handlers, detect HTTPStatusError with 503 + body containing "User is offline" and raise `VoiceGateTimeoutError`. Without this, every overnight TFE where operator is asleep loses the Bug 11 stalled-badge + Resume-button UX. CoSA commit. See `src/rnd/v0.1.6/2026.04.16-overnight-forensics-ts-79829a75.md` for full context.
+- [x] [LUPIN] **Bug 12 — MCP 503 should raise VoiceGateTimeoutError** ✅ DONE 2026-04-16 afternoon. Session-in-progress continuation of f01fdc2f. Scope narrowed after exploration: `present_choices` was already fixed by commit `49c238d` (Bug 7 side-effect); fix locus was `ask_confirmation` (line 300) + `get_feedback` (line 355) — both now raise `VoiceGateTimeoutError` on any non-0/2 exit code (HTTP 503, connection errors). 13/13 unit tests in `test_mcp_timeout_detection.py` pass (all three methods). Design doc: `src/rnd/v0.1.6/2026.04.16-bug-12-mcp-503-to-voice-gate-timeout.md`. Live re-creation scheduled next.
 
 - [ ] [LUPIN] **Act on overnight TFE's 21 proposals** — report at `io/swe-team/reports/interactive.job.tester@lupin.deepily.ai/2026.04.15-at-21:41-EST-ts-79829a75-completed-test_fix_expediter-report.md`. Four 1-liner wins would retire 27 of 38 failures: (1) `len(AGENTIC_AGENTS) == 9` → `== 10` in 3 sites, (2) re-capture 12 visual baselines via `--update-snapshots`, (3) add `PRODUCT_NAMES` entry for TFE Resume agent, (4) add `resume_from` key to `all_agents` profile. Option: land these directly OR re-run TFE (post-Bug-12) to get a proper stalled row.
 
@@ -20,9 +20,11 @@ Last updated: 2026-04-16 morning (Session f01fdc2f continuation — overnight fo
 
 - [ ] [LUPIN] **Bug 8b — wire Pause/Stop voice-gate buttons end-to-end** — MVP UI labels landed via `stall_reason`. Still missing: (1) dedicated "Pause (resume later)" + "Stop" buttons in `present_choices` question options, (2) dispatcher must recognize these answers (not treat as empty via Bug 7), (3) new `PauseRequested` exception class parallel to `VoiceGateTimeoutError`, (4) orchestrator `_aggregate_voice_gate` handling to save checkpoint with `stall_reason="user_pause"` vs raise cancel for Stop. Files: `src/cosa/agents/utils/agent_notification_dispatcher.py`, `src/cosa/agents/test_fix_expediter/state.py`, `src/cosa/agents/test_fix_expediter/orchestrator.py`.
 
-- [ ] [LUPIN] **Bug 9 — TFE/BFE Phase 3/5 git worktree isolation** — `FixExecutor` currently edits the live working tree directly and `GitStrategist` does `git checkout -b <slug>` to move the edits, meaning operator's uncommitted changes can contaminate the fix PR. Fix: pre-flight `git worktree add ../.tfe-sandbox/<slug> <base_sha>`, pass `cwd=worktree_path` through `FixExecutor` + `GitStrategist`, post-flight `git worktree remove`. Files: `src/cosa/agents/shared/git_strategist.py`, `src/cosa/agents/shared/fix_executor.py`, `src/cosa/agents/bug_fix_expediter/git_ops.py`.
+- [x] [LUPIN] **Bug 9 — TFE/BFE Phase 3/5 git worktree isolation** ✅ DONE 2026-04-16 afternoon. `WorktreeContext` async context manager at `src/cosa/agents/shared/worktree_context.py` wraps Phase 3+5 in an isolated `git worktree add <sandbox>/<job_id> <base_ref>`. `[cosa_worktree]` INI section (default `enabled=false` for opt-in). Both BFE and TFE orchestrators have `worktree_scope()` + `_warn_on_uncommitted_changes_if_any()` uncommitted-changes safety guard. `_build_coder/tester_options` use `self._worktree_cwd or cu.get_project_root()`. `FixExecutor` accepts `worktree_cwd` for audit. 8/8 worktree_context tests + 13/13 fix_executor plumbing tests pass. Design doc: `src/rnd/v0.1.6/2026.04.16-bug-9-worktree-isolation.md`.
 
 - [ ] [LUPIN] **Design knob — `test fix expediter feedback timeout action`** — options: `stall` (default, current behavior), `skip` (complete with 0 selected), `auto_select_high_confidence` (select proposals ≥ 0.85 confidence). INI + splainer + config.py + orchestrator._aggregate_voice_gate timeout branch. Low priority — stall is fine today.
+
+- [ ] [LUPIN] **Worktree maintenance CLI + monitoring** (Bug 9 follow-up) — (1) `src/scripts/worktree-cleanup.sh` to prune orphaned worktrees and report disk usage under `.claude/worktrees/`, (2) periodic cleanup of worktrees older than 7 days even if `auto_cleanup=false` was set, (3) telemetry for worktree disk usage in the admin dashboard. Out of scope for the initial Bug 9 landing.
 
 - [ ] [LUPIN] **BFE dead-job race — eager snapshot + packager fallback (D1)** — `dead_queue_watchdog._submit_bfe` captures only `dead_job_id` string; BFE's later DB lookup fails if row evicted (done/dead rotation, TTL, or E2E `clean_test_db` drop). Fix: snapshot dead-job context at dispatch, have `package_dead_job()` accept snapshot-first. Files: `src/cosa/rest/dead_queue_watchdog.py:393-470`, `src/cosa/agents/bug_fix_expediter/dead_job_packager.py:38-42`, `src/cosa/agents/bug_fix_expediter/job.py:~227`.
 
