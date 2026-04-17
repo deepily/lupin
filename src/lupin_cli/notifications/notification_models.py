@@ -169,8 +169,7 @@ class NotificationRequest(BaseModel):
     message: str = Field(
         ...,
         min_length=1,
-        max_length=5000,
-        description="Notification message text"
+        description="Notification message text (no upper bound — Bug 13, 2026-04-16: removed 5000-char cap that silently failed agentic voice gates)"
     )
 
     response_type: ResponseType = Field(
@@ -225,8 +224,7 @@ class NotificationRequest(BaseModel):
 
     abstract: Optional[str] = Field(
         default=None,
-        max_length=5000,
-        description="Supplementary context for the notification (plan details, URLs, markdown). Displayed alongside message in action-required cards."
+        description="Supplementary context for the notification (plan details, URLs, markdown). Displayed alongside message in action-required cards. (Bug 13, 2026-04-16: removed 5000-char cap that silently failed agentic voice gates.)"
     )
 
     session_name: Optional[str] = Field(
@@ -601,8 +599,7 @@ class AsyncNotificationRequest(BaseModel):
     message: str = Field(
         ...,
         min_length=1,
-        max_length=5000,
-        description="Notification message text"
+        description="Notification message text (no upper bound — Bug 13, 2026-04-16: removed 5000-char cap.)"
     )
 
     notification_type: NotificationType = Field(
@@ -635,8 +632,7 @@ class AsyncNotificationRequest(BaseModel):
 
     abstract: Optional[str] = Field(
         default=None,
-        max_length=5000,
-        description="Supplementary context for the notification (plan details, URLs, markdown). Displayed alongside message in action-required cards."
+        description="Supplementary context for the notification (plan details, URLs, markdown). Displayed alongside message in action-required cards. (Bug 13, 2026-04-16: removed 5000-char cap that silently failed agentic voice gates.)"
     )
 
     session_name: Optional[str] = Field(

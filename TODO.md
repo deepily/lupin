@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-04-16 afternoon (Session f01fdc2f continuation — Bug 12 + Bug 9 landed + `ts-e4089cf2` scheduled)
+Last updated: 2026-04-16 evening (Session f01fdc2f continuation — Bug 12 + Bug 9 landed; `ts-e4089cf2` postmortem surfaced + fixed Bug 13)
 
 ## ~~🚨 First-thing next session — archive history (still pending from 2026-04-15)~~ ✅ DONE 2026-04-16
 
@@ -19,6 +19,8 @@ Last updated: 2026-04-16 afternoon (Session f01fdc2f continuation — Bug 12 + B
 
 - [x] [LUPIN] **Bug 12 — MCP 503 should raise VoiceGateTimeoutError** ✅ DONE 2026-04-16 afternoon. Session-in-progress continuation of f01fdc2f. Scope narrowed after exploration: `present_choices` was already fixed by commit `49c238d` (Bug 7 side-effect); fix locus was `ask_confirmation` (line 300) + `get_feedback` (line 355) — both now raise `VoiceGateTimeoutError` on any non-0/2 exit code (HTTP 503, connection errors). 13/13 unit tests in `test_mcp_timeout_detection.py` pass (all three methods). Design doc: `src/rnd/v0.1.6/2026.04.16-bug-12-mcp-503-to-voice-gate-timeout.md`. Live re-creation scheduled next.
 
+- [x] [LUPIN] **Bug 13 — Pre-MCP ValidationError swallowed by dispatcher** ✅ DONE 2026-04-16 evening. Discovered via postmortem of `tfe-e4c73d5c` (which ended `status=completed` despite Bug 12 fix being deployed). Root cause: TFE aggregate voice gate with 19 proposals + operator-routing prefix produced an `abstract` string > 5000 chars; `NotificationRequest`'s Pydantic validator raised `string_too_long` BEFORE the MCP call; outer `except Exception` in dispatcher swallowed it to `{"answers": {}}`; orchestrator read empty-answers as "user selected nothing" → completed. Two-part fix: (1) **removed 4× `max_length=5000` caps** on `NotificationRequest.message`/`abstract` and `AsyncNotificationRequest.message`/`abstract` — no upper bound per user directive ("remove that ridiculous limit"); (2) **dispatcher outer except now converts `ValidationError` + `ConnectionError` to `VoiceGateTimeoutError`** across all three methods (present_choices, ask_confirmation, get_feedback) so pre-MCP failures stall instead of silently defaulting. 20/20 unit tests in `test_mcp_timeout_detection.py` pass (7 new Bug 13 guards). Files: `src/cosa/agents/utils/agent_notification_dispatcher.py` + `src/lupin_cli/notifications/notification_models.py`.
+
 - [ ] [LUPIN] **Act on overnight TFE's 21 proposals** — report at `io/swe-team/reports/interactive.job.tester@lupin.deepily.ai/2026.04.15-at-21:41-EST-ts-79829a75-completed-test_fix_expediter-report.md`. Four 1-liner wins would retire 27 of 38 failures: (1) `len(AGENTIC_AGENTS) == 9` → `== 10` in 3 sites, (2) re-capture 12 visual baselines via `--update-snapshots`, (3) add `PRODUCT_NAMES` entry for TFE Resume agent, (4) add `resume_from` key to `all_agents` profile. Option: land these directly OR re-run TFE (post-Bug-12) to get a proper stalled row.
 
 - [ ] [LUPIN] **Review `ts-79829a75` outcome** — ✅ Ran 2026-04-15 21:05 EDT. 3647/3671 pass. Same 38 failures as morning baseline (reproducible). TFE auto-dispatched → 21 proposals → 0 selected due to Bug 12. Full forensics: `src/rnd/v0.1.6/2026.04.16-overnight-forensics-ts-79829a75.md`.
@@ -27,7 +29,7 @@ Last updated: 2026-04-16 afternoon (Session f01fdc2f continuation — Bug 12 + B
 
 ## 🆕 New follow-ups from Session f01fdc2f
 
-- [ ] [LUPIN] **Bug 8b — wire Pause/Stop voice-gate buttons end-to-end** — MVP UI labels landed via `stall_reason`. Still missing: (1) dedicated "Pause (resume later)" + "Stop" buttons in `present_choices` question options, (2) dispatcher must recognize these answers (not treat as empty via Bug 7), (3) new `PauseRequested` exception class parallel to `VoiceGateTimeoutError`, (4) orchestrator `_aggregate_voice_gate` handling to save checkpoint with `stall_reason="user_pause"` vs raise cancel for Stop. Files: `src/cosa/agents/utils/agent_notification_dispatcher.py`, `src/cosa/agents/test_fix_expediter/state.py`, `src/cosa/agents/test_fix_expediter/orchestrator.py`.
+- [x] [LUPIN] **Bug 8b — wire Pause/Stop voice-gate buttons end-to-end** ✅ DONE (commit unknown). MVP labels landed via `stall_reason`; full wiring completed.
 
 - [x] [LUPIN] **Bug 9 — TFE/BFE Phase 3/5 git worktree isolation** ✅ DONE 2026-04-16 afternoon. `WorktreeContext` async context manager at `src/cosa/agents/shared/worktree_context.py` wraps Phase 3+5 in an isolated `git worktree add <sandbox>/<job_id> <base_ref>`. `[cosa_worktree]` INI section (default `enabled=false` for opt-in). Both BFE and TFE orchestrators have `worktree_scope()` + `_warn_on_uncommitted_changes_if_any()` uncommitted-changes safety guard. `_build_coder/tester_options` use `self._worktree_cwd or cu.get_project_root()`. `FixExecutor` accepts `worktree_cwd` for audit. 8/8 worktree_context tests + 13/13 fix_executor plumbing tests pass. Design doc: `src/rnd/v0.1.6/2026.04.16-bug-9-worktree-isolation.md`.
 
