@@ -6,7 +6,18 @@ Last updated: 2026-04-16 evening (Session f01fdc2f continuation — Bug 12 + Bug
 
 - [x] [LUPIN] **Archive history.md** — ✅ DONE Session eb50bd56. Archived 23 sessions (2026-04-08 to 2026-04-14) → `history/2026-04-08-to-14-history.md`. history.md now 10,008 tokens (down from 38,821). Commit: 2879cbf.
 
-- [ ] [LUPIN] **Review `ts-e4089cf2` outcome** (scheduled 2026-04-16 17:24:00 EDT on :8000 test server; full `all` suite ~60 min; TFE voice gate expected ~18:25-18:40 EDT). **Acceptance criteria** for Bug 12 validation:
+- [ ] [LUPIN] **Review `ts-d3df4d87` outcome** (RERUN after Bug 13 fix, scheduled 2026-04-16 20:08:00 EDT on :8000; full `all` suite ~60 min; TFE voice gate expected ~21:00-21:20 EDT). **Acceptance criteria for Bug 13 validation**:
+  - [ ] Test suite completes with ~38 failures (same reproducible baseline as ts-79829a75, ts-e4089cf2)
+  - [ ] `TestSuiteCompletionWatchdog` auto-dispatches a TFE (`tfe-XXXXXXXX`)
+  - [ ] TFE reaches Phase 2 voice gate — **server logs should NOT show `present_choices failed: 1 validation error` / `abstract String should have at most 5000 characters`**
+  - [ ] Voice gate actually fires to ricardo's UI (Operator routing kicks in — interactive.job.tester → ricardo)
+  - [ ] **If ricardo online**: voice gate displays abstract (possibly very long) — fix Bug 13 success
+  - [ ] **If ricardo offline**: MCP 503 → dispatcher raises VoiceGateTimeoutError → `state=STALLED` (Bug 12 success)
+  - [ ] TFE row ends in either `state=completed` (with real user-selected fixes) or `state=stalled` — NOT the "0 selected, 0 fixed, status=completed" false-success pattern seen in ts-e4089cf2
+
+- [x] [LUPIN] **Review `ts-e4089cf2` outcome** — ❌ Bug 12 regression exposed Bug 13. Ran 2026-04-16 17:24 EDT, completed 19:39 EDT. TFE `tfe-e4c73d5c` produced 19 proposals across 8 clusters, voice gate hit `abstract > 5000 chars` validation error, dispatcher swallowed it, job ended `status=completed (0 selected, 0 fixed)` instead of stalled. Root-caused, filed as Bug 13, fixed in commit `3709139`. Retried as `ts-d3df4d87`.
+
+- [ ] [LUPIN] **Previously**: Review `ts-e4089cf2` outcome (scheduled 2026-04-16 17:24:00 EDT on :8000 test server; full `all` suite ~60 min; TFE voice gate expected ~18:25-18:40 EDT). **Acceptance criteria** for Bug 12 validation:
   - [ ] Test suite completes with ~38 failures (same reproducible baseline)
   - [ ] `TestSuiteCompletionWatchdog` auto-dispatches a TFE job
   - [ ] TFE reaches Phase 2 voice gate (generates ~21 proposals across 8 clusters)
