@@ -1,6 +1,74 @@
 # TODO
 
-Last updated: 2026-04-16 22:35 EDT (Session f01fdc2f continuation — Bug 12 + 13 VALIDATED LIVE via `ts-d3df4d87`/`tfe-3436c5b8`)
+Last updated: 2026-04-16 22:55 EDT (Session f01fdc2f close — Bug 12 + 13 landed + validated; Resume primed for morning)
+
+---
+
+## 🌅 MORNING BRIEFING — 2026-04-17
+
+### TL;DR
+
+Bug 12 + Bug 13 landed and **validated live tonight** via `tfe-3436c5b8`. A stalled TFE with 8 clusters + 17 proposals is waiting on `:8000` — primed for the **first real end-to-end TFE Resume** (Doc 18 D2 first half). Intentionally did NOT apply any of the proposed fixes manually tonight so you can exercise the Resume path in the morning.
+
+### Boot-up sequence (strict order)
+
+1. **Finish your DB seed-protection migration work first** — `src/scripts/seed_test_companions.py`, `src/tests/unit/test_admin_protected_accounts.py`, `src/tests/integration/conftest.py`, `src/tests/e2e_ui/conftest.py`, `bug-fix-queue.md` are all in-flight on your side. Commit/stash before step 2.
+2. **Then bounce `lupin-rest-test`** — `docker restart lupin-rest-test`. Required because `cosa worktree enabled` was flipped to `true` tonight (commit `aed7c6d`) but the running container cached `false` at startup. Without the bounce, clicking Resume uses the pre-Bug-9 live-tree path and your in-flight work would be pulled into the TFE's fix PR.
+3. **Then click Resume** on `tfe-3436c5b8` in the UI (or `POST http://localhost:8000/api/jobs/tfe-3436c5b8/resume`).
+
+### What to expect on Resume
+
+- Phase 2 voice gate re-fires with its full (formerly >5000 char) abstract visible — this is the FIRST real proof the Bug 13 cap removal works in the Resume path, not just fresh runs.
+- You select proposals you trust. TFE's first 4 proposals are the same 4 one-liners that keep reappearing: `PRODUCT_NAMES` entry, `len == 9 → 10` in 3 sites, `resume_from` in `all_agents`, placeholder type assertion cleanup. Retires ~27 of 38 failures if all four land.
+- Phase 3 FixExecutor writes inside `.claude/worktrees/tfe-3436c5b8/` (NOT your live tree, since worktree default is now `true` + container has been bounced to pick it up).
+- Phase 5 GitStrategist creates branch + commits + PR from the worktree.
+- Phase 6 auto-queues a validation `TestSuiteJob` to confirm the selected fixes retired the failures.
+
+### What Bug 9 worktree isolation DOES and does NOT cover
+
+Covered (safe from contamination): Python + JS source edits under `src/` via FixExecutor's `Edit` / `Write` tool calls; the GitStrategist branch cut off `origin/main`.
+
+NOT covered (reasons it might still hit your tree): visual-baseline PNG regeneration (TFE proposal 1, needs `pytest --update-snapshots` outside the FixExecutor pattern) — if you select that, it'll run `pytest` against your live Chromium install, not the worktree. Skip it unless you've stashed your dev work.
+
+### Rollback points if you're unhappy
+
+| target | what it undoes |
+|---|---|
+| `git reset --hard aed7c6d^` | drops worktree `enabled=true` flip; keeps Bug 12 + 13 + validation commits |
+| `git reset --hard bcbf5af` | drops Bug 13 fix + worktree flip; keeps Bug 12 + Bug 9 scaffolding |
+| `git reset --hard 67dbd21^` | reverts ALL of tonight's work back to pre-session state |
+
+CoSA submodule changes on disk (dispatcher + orchestrator edits + new `worktree_context.py`) are NOT git-committed by me — `git checkout -- agents/...` inside `src/cosa/` reverts those independently. `src/cosa/agents/shared/worktree_context.py` is untracked; delete it manually if rolling back.
+
+### What I did NOT do tonight (intentional)
+
+- No manual code fixes for the 38 failures — saved for Resume to exercise
+- No `pytest` runs — respected your in-flight DB work
+- No test-server interaction beyond the single `aed7c6d` INI flip (the running container hasn't seen it yet)
+- No CoSA git commits — yours to handle when ready
+
+### If Resume misbehaves
+
+1. First: verify container bounce happened after the INI flip — `docker exec lupin-rest-test grep "cosa worktree enabled" /var/lupin/src/conf/lupin-app.ini` should show `true`.
+2. Second: check `git status` inside `src/cosa/` — tonight's edits are uncommitted there and expected.
+3. Third: full root-cause + context in `~/.claude/plans/let-s-start-a-new-zany-thimble.md` (postmortem-style plan file) and `src/rnd/v0.1.6/2026.04.16-bug-13-*.md` (design doc — wait, I never wrote one for Bug 13; see commit `3709139` message instead).
+4. Fourth: if truly stuck, the 4 one-liner fixes are safe to apply by hand — same as TFE's first 4 proposals.
+
+### Tonight's commit chain (newest → oldest)
+
+```
+aed7c6d  worktree enabled=true (default flip)
+a389bc4  session close — Bug 12+13 validated via tfe-3436c5b8
+bcbf5af  checkpoint: ts-d3df4d87 scheduled for Bug 13 validation
+3709139  Bug 13: remove 5000-char caps + ValidationError→stall
+029a55c  checkpoint: ts-e4089cf2 scheduled
+5817533  Bug 12 + Bug 9 + 34 unit tests
+67dbd21  overnight forensics + Bug 12 filed
+```
+
+---
+
+## Active TODO below
 
 ## ~~🚨 First-thing next session — archive history (still pending from 2026-04-15)~~ ✅ DONE 2026-04-16
 
