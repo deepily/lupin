@@ -1,19 +1,12 @@
 # TODO
 
-Last updated: 2026-04-16 evening (Session f01fdc2f continuation — Bug 12 + Bug 9 landed; `ts-e4089cf2` postmortem surfaced + fixed Bug 13)
+Last updated: 2026-04-16 22:35 EDT (Session f01fdc2f continuation — Bug 12 + 13 VALIDATED LIVE via `ts-d3df4d87`/`tfe-3436c5b8`)
 
 ## ~~🚨 First-thing next session — archive history (still pending from 2026-04-15)~~ ✅ DONE 2026-04-16
 
 - [x] [LUPIN] **Archive history.md** — ✅ DONE Session eb50bd56. Archived 23 sessions (2026-04-08 to 2026-04-14) → `history/2026-04-08-to-14-history.md`. history.md now 10,008 tokens (down from 38,821). Commit: 2879cbf.
 
-- [ ] [LUPIN] **Review `ts-d3df4d87` outcome** (RERUN after Bug 13 fix, scheduled 2026-04-16 20:08:00 EDT on :8000; full `all` suite ~60 min; TFE voice gate expected ~21:00-21:20 EDT). **Acceptance criteria for Bug 13 validation**:
-  - [ ] Test suite completes with ~38 failures (same reproducible baseline as ts-79829a75, ts-e4089cf2)
-  - [ ] `TestSuiteCompletionWatchdog` auto-dispatches a TFE (`tfe-XXXXXXXX`)
-  - [ ] TFE reaches Phase 2 voice gate — **server logs should NOT show `present_choices failed: 1 validation error` / `abstract String should have at most 5000 characters`**
-  - [ ] Voice gate actually fires to ricardo's UI (Operator routing kicks in — interactive.job.tester → ricardo)
-  - [ ] **If ricardo online**: voice gate displays abstract (possibly very long) — fix Bug 13 success
-  - [ ] **If ricardo offline**: MCP 503 → dispatcher raises VoiceGateTimeoutError → `state=STALLED` (Bug 12 success)
-  - [ ] TFE row ends in either `state=completed` (with real user-selected fixes) or `state=stalled` — NOT the "0 selected, 0 fixed, status=completed" false-success pattern seen in ts-e4089cf2
+- [x] [LUPIN] **Review `ts-d3df4d87` outcome — BUG 12 + BUG 13 VALIDATED LIVE** ✅ DONE 2026-04-16 22:31 EDT. Ran on :8000, scheduled 20:08, completed 22:05. TFE `tfe-3436c5b8` auto-dispatched, reached Phase 2, voice gate fired to ricardo (not answered within 300s → real timeout), dispatcher raised VoiceGateTimeoutError, orchestrator saved checkpoint (8 clusters, 17 proposals, plan_path), job persisted with **`status=stalled`** (NOT completed). Stall notification sent with resume instructions. Report filename: `2026.04.16-at-22:31-EST-ts-d3df4d87-stalled-test_fix_expediter-report.md`. No `string_too_long` validation errors in the run → Bug 13 cap removal confirmed working in container. Dead-queue BFE dispatch also validated (`bfe-e29a16ec` from `dr-f9d615a4` mock).
 
 - [x] [LUPIN] **Review `ts-e4089cf2` outcome** — ❌ Bug 12 regression exposed Bug 13. Ran 2026-04-16 17:24 EDT, completed 19:39 EDT. TFE `tfe-e4c73d5c` produced 19 proposals across 8 clusters, voice gate hit `abstract > 5000 chars` validation error, dispatcher swallowed it, job ended `status=completed (0 selected, 0 fixed)` instead of stalled. Root-caused, filed as Bug 13, fixed in commit `3709139`. Retried as `ts-d3df4d87`.
 
@@ -45,6 +38,10 @@ Last updated: 2026-04-16 evening (Session f01fdc2f continuation — Bug 12 + Bug
 - [x] [LUPIN] **Bug 9 — TFE/BFE Phase 3/5 git worktree isolation** ✅ DONE 2026-04-16 afternoon. `WorktreeContext` async context manager at `src/cosa/agents/shared/worktree_context.py` wraps Phase 3+5 in an isolated `git worktree add <sandbox>/<job_id> <base_ref>`. `[cosa_worktree]` INI section (default `enabled=false` for opt-in). Both BFE and TFE orchestrators have `worktree_scope()` + `_warn_on_uncommitted_changes_if_any()` uncommitted-changes safety guard. `_build_coder/tester_options` use `self._worktree_cwd or cu.get_project_root()`. `FixExecutor` accepts `worktree_cwd` for audit. 8/8 worktree_context tests + 13/13 fix_executor plumbing tests pass. Design doc: `src/rnd/v0.1.6/2026.04.16-bug-9-worktree-isolation.md`.
 
 - [ ] [LUPIN] **Design knob — `test fix expediter feedback timeout action`** — options: `stall` (default, current behavior), `skip` (complete with 0 selected), `auto_select_high_confidence` (select proposals ≥ 0.85 confidence). INI + splainer + config.py + orchestrator._aggregate_voice_gate timeout branch. Low priority — stall is fine today.
+
+- [ ] [LUPIN] **Validate Resume** (Doc 18 D2 first half, safe without Bug 9 activation) — `tfe-3436c5b8` is stalled on :8000 with full checkpoint + 17 proposals + plan_path. Click Resume in UI (or `POST http://localhost:8000/api/jobs/tfe-3436c5b8/resume`) while you're online → should rehydrate checkpoint, re-fire voice gate with the full abstract visible (this is the critical Bug 13 regression guard — the abstract length cap removal makes the resumed gate display-able for the first time). Phase 3 apply is SAFE today because `[cosa_worktree] enabled=false` — the FixExecutor path is guarded behind that flag; if resumed, voice gate answer goes through selection but Phase 3 is opt-out until you flip the flag. Fresh-stall row ready for the Resume smoke.
+
+- [ ] [LUPIN] **TFE report rendering bug** — markdown report shows `Duration: 0.0s` and `C1 — 0 failure(s)` through `C8 — 0 failure(s)` even though `state_snapshot` has full cluster data (12 failure_indices on C1, etc.). The printer in `test_fix_expediter/job.py` or `report_writer.py` reads from a different data path than what gets persisted. Mentioned in 2026-04-16 overnight forensics + postmortem but never filed as an action item until now. Affected files: `src/cosa/agents/shared/report_writer.py` (render function) and `src/cosa/agents/test_fix_expediter/job.py` (report builder). Not blocking — cluster data is correct in the DB.
 
 - [ ] [LUPIN] **Worktree maintenance CLI + monitoring** (Bug 9 follow-up) — (1) `src/scripts/worktree-cleanup.sh` to prune orphaned worktrees and report disk usage under `.claude/worktrees/`, (2) periodic cleanup of worktrees older than 7 days even if `auto_cleanup=false` was set, (3) telemetry for worktree disk usage in the admin dashboard. Out of scope for the initial Bug 9 landing.
 
