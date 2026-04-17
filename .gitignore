@@ -14,6 +14,7 @@ src/cosa
 ._*
 
 # Claude Code - track team configs, ignore personal overrides
+.claude/scheduled_tasks.lock
 .claude/settings.local.json
 .claude/cache/
 .claude/*.log
