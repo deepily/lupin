@@ -950,3 +950,126 @@ class TestJobHistoryEdgeCases:
 
         # Failed card still in history after retry
         assert failed_card.count() == 1, "Original failed card should remain after admin retry"
+
+
+# ===========================================================================
+# Toggle ID-Collision Regression (Session aff39d3f — 2026.04.15)
+# ===========================================================================
+#
+# Bug: History job cards and live Done cards for the same job_id emitted
+# identical DOM ids (`job-details-{jobId}`). Clicking the visible History
+# copy's toggle silently flipped the hidden Done copy's `.collapsed` class,
+# so the History card appeared frozen.
+#
+# Fix: `renderJobCard` now prefixes internal ids with `history-` when
+# `job._isHistory` is truthy; `toggleJobCard` takes a compound `idKey` arg.
+#
+# Plan: src/rnd/v0.1.6/2026.04.15-done-card-toggle-id-collision.md
+# ===========================================================================
+
+class TestJobCardToggleIDCollision:
+    """Regression tests for the history-card toggle ID-collision fix."""
+
+    def test_history_card_ids_are_prefixed( self, seeded_history_page ):
+        """
+        History cards emit `job-details-history-{id_hash}` / `job-card-history-{id_hash}`.
+
+        Requires:
+            - Seeded history rows
+
+        Ensures:
+            - Every `.job-card` in the history container has id `job-card-history-*`
+            - Every `.job-card-details` in the history container has id `job-details-history-*`
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        container = page.locator( "#history-jobs-container" )
+        cards     = container.locator( ".job-card" )
+        assert cards.count() == len( records )
+
+        for i in range( cards.count() ):
+            card_id = cards.nth( i ).get_attribute( "id" ) or ""
+            assert card_id.startswith( "job-card-history-" ), \
+                f"Expected prefixed id, got: {card_id!r}"
+
+        details = container.locator( ".job-card-details" )
+        for i in range( details.count() ):
+            details_id = details.nth( i ).get_attribute( "id" ) or ""
+            assert details_id.startswith( "job-details-history-" ), \
+                f"Expected prefixed id, got: {details_id!r}"
+
+    def test_all_job_details_ids_unique( self, seeded_history_page ):
+        """
+        Every `[id^='job-details-']` in the DOM is unique after expanding history.
+
+        This is the exact devtools probe the user ran to confirm the bug:
+            total ids vs unique set. Pre-fix: total > unique. Post-fix: equal.
+
+        Requires:
+            - Seeded history rows (guarantees history cards render)
+
+        Ensures:
+            - No duplicate `job-details-*` ids anywhere on the page
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        counts = page.evaluate(
+            """() => {
+                const ids = [ ...document.querySelectorAll( '[id^="job-details-"]' ) ]
+                    .map( e => e.id );
+                return { total: ids.length, unique: new Set( ids ).size };
+            }"""
+        )
+        assert counts[ "total" ] == counts[ "unique" ], \
+            f"Duplicate job-details ids: total={counts['total']}, unique={counts['unique']}"
+        assert counts[ "total" ] > 0, "Expected at least one job-details element"
+
+    def test_history_card_header_click_expands_that_card( self, seeded_history_page ):
+        """
+        Clicking a history card's header expands that specific card (not a ghost).
+
+        Requires:
+            - Seeded history rows
+
+        Ensures:
+            - Target card's `.job-card-details` starts with `.collapsed`
+            - After click on its header, `.collapsed` is removed on that card
+            - No other history card's collapsed state changed
+        """
+        page, records = seeded_history_page
+        expand_history_section( page )
+
+        target_hash = records[ 0 ][ "id_hash" ]
+        target_card = page.locator(
+            f"#history-jobs-container .job-card[data-job-id='{target_hash}']"
+        )
+        assert target_card.count() == 1
+
+        details = target_card.locator( ".job-card-details" )
+        assert "collapsed" in ( details.get_attribute( "class" ) or "" ), \
+            "Details should start collapsed"
+
+        # Snapshot collapsed-state of siblings to prove independence
+        container    = page.locator( "#history-jobs-container" )
+        all_details  = container.locator( ".job-card-details" )
+        before_state = [
+            "collapsed" in ( all_details.nth( i ).get_attribute( "class" ) or "" )
+            for i in range( all_details.count() )
+        ]
+
+        target_card.locator( ".job-card-header" ).click()
+        page.wait_for_timeout( 150 )
+
+        assert "collapsed" not in ( details.get_attribute( "class" ) or "" ), \
+            "Target card did not expand after header click"
+
+        # All non-target cards must retain their prior collapsed state
+        for i in range( all_details.count() ):
+            card_id = all_details.nth( i ).locator( ".." ).get_attribute( "data-job-id" )
+            if card_id == target_hash:
+                continue
+            is_collapsed_now = "collapsed" in ( all_details.nth( i ).get_attribute( "class" ) or "" )
+            assert is_collapsed_now == before_state[ i ], \
+                f"Sibling card {card_id!r} toggle state changed unexpectedly"
