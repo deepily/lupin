@@ -140,7 +140,6 @@ def clean_test_db():
     """
     # Re-import to get the current (possibly hot-swapped) engine
     from cosa.rest.db import database as db_module
-    from cosa.rest.postgres_models import Base
     from sqlalchemy import text
 
     engine = db_module.engine
@@ -148,46 +147,25 @@ def clean_test_db():
     assert "lupin_db_test" in db_url, \
         f"SAFETY: clean_test_db must only run against lupin_db_test, got: {db_url}"
 
-    # Drop all tables (complete cleanup)
-    Base.metadata.drop_all( bind=engine )
-
-    # Recreate all tables with fresh schema
-    Base.metadata.create_all( bind=engine )
-
-    # Re-seed companion users from lupin_db_dev so service-account logins
-    # (e.g. Peer Queue Watcher) keep working across the suite. The seed
-    # script lives in src/scripts/ and is normally invoked at container
-    # startup; we add it to sys.path on demand and call its idempotent
-    # function. ON CONFLICT DO NOTHING in the script makes repeat calls safe.
-    #
-    # Postgres host: integration tests run on the HOST (pytest in user shell),
-    # so postgres is reachable on localhost:5432 (docker-compose port mapping).
-    # The seed script defaults to DB_HOST=lupin-postgres (the docker-network
-    # service name) which is unresolvable from host — silently fails the
-    # connect and skips the seed, then our safety assertion below fires
-    # and every test using clean_test_db ERRORs at fixture setup.
-    # Use setdefault so that runs from inside a container (where
-    # DB_HOST=lupin-postgres IS valid) are not overridden.
-    import os as _os
-    _os.environ.setdefault( "DB_HOST", "localhost" )
-
     import sys as _sys, pathlib as _pathlib, cosa.utils.util as _cu
     _scripts_dir = _pathlib.Path( _cu.get_project_root() ) / "src" / "scripts"
     if str( _scripts_dir ) not in _sys.path:
         _sys.path.insert( 0, str( _scripts_dir ) )
-    from seed_test_companions import seed_if_missing, COMPANION_EMAILS
-    seed_if_missing()
+    from seed_test_companions import COMPANION_EMAILS
 
-    # Verify the reset + reseed worked: users table should contain exactly the
-    # companion rows. Any deviation means either the seed silently failed
-    # (companion source missing in lupin_db_dev) or a prior test left rows
-    # the drop_all somehow missed.
+    # Row-level DELETE: wipe test-generated rows, companions survive via is_protected
+    with engine.begin() as conn:
+        conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
+        conn.execute( text(
+            "TRUNCATE TABLE auth_audit_log, failed_login_attempts, "
+            "job_history, proxy_decisions, trust_states"
+        ) )
+
     with engine.connect() as conn:
-        count = conn.execute( text( "SELECT count(*) FROM users" ) ).scalar()
+        count    = conn.execute( text( "SELECT count(*) FROM users WHERE is_protected" ) ).scalar()
         expected = len( COMPANION_EMAILS )
         assert count == expected, (
-            f"SAFETY: expected {expected} companion rows after clean+reseed, "
-            f"got {count}"
+            f"SAFETY: expected {expected} protected companions after teardown, got {count}"
         )
 
     yield

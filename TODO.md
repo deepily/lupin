@@ -12,8 +12,8 @@ Bug 12 + Bug 13 landed and **validated live tonight** via `tfe-3436c5b8`. A stal
 
 ### Boot-up sequence (strict order)
 
-1. **Finish your DB seed-protection migration work first** — `src/scripts/seed_test_companions.py`, `src/tests/unit/test_admin_protected_accounts.py`, `src/tests/integration/conftest.py`, `src/tests/e2e_ui/conftest.py`, `bug-fix-queue.md` are all in-flight on your side. Commit/stash before step 2.
-2. **Then bounce `lupin-rest-test`** — `docker restart lupin-rest-test`. Required because `cosa worktree enabled` was flipped to `true` tonight (commit `aed7c6d`) but the running container cached `false` at startup. Without the bounce, clicking Resume uses the pre-Bug-9 live-tree path and your in-flight work would be pulled into the TFE's fix PR.
+1. ~~**Finish your DB seed-protection migration work first**~~ ✅ DONE Session eb50bd56. `is_protected` column deployed to both DBs; 3-layer guard landed; 4 unit tests pass. Committed this session.
+2. **Then bounce `lupin-rest-test`** — ✅ DONE Session eb50bd56 (`docker restart lupin-rest-test`). Seed script confirmed companions present on startup.
 3. **Then click Resume** on `tfe-3436c5b8` in the UI (or `POST http://localhost:8000/api/jobs/tfe-3436c5b8/resume`).
 
 ### What to expect on Resume

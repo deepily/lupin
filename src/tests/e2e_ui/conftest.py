@@ -192,12 +192,26 @@ def clean_test_db():
     assert "lupin_db_test" in db_url, \
         f"SAFETY: clean_test_db must only run against lupin_db_test, got: {db_url}"
 
-    Base.metadata.drop_all( bind=engine )
-    Base.metadata.create_all( bind=engine )
+    import sys as _sys, pathlib as _pathlib, cosa.utils.util as _cu
+    _scripts = _pathlib.Path( _cu.get_project_root() ) / "src" / "scripts"
+    if str( _scripts ) not in _sys.path:
+        _sys.path.insert( 0, str( _scripts ) )
+    from seed_test_companions import COMPANION_EMAILS
+
+    # Row-level DELETE: wipe test-generated rows, companions survive via is_protected
+    with engine.begin() as conn:
+        conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
+        conn.execute( text(
+            "TRUNCATE TABLE auth_audit_log, failed_login_attempts, "
+            "job_history, proxy_decisions, trust_states"
+        ) )
 
     with engine.connect() as conn:
-        count = conn.execute( text( "SELECT count(*) FROM users" ) ).scalar()
-        assert count == 0, f"SAFETY: users table not empty after clean ({count} rows)"
+        count    = conn.execute( text( "SELECT count(*) FROM users WHERE is_protected" ) ).scalar()
+        expected = len( COMPANION_EMAILS )
+        assert count == expected, (
+            f"SAFETY: expected {expected} protected companions after teardown, got {count}"
+        )
 
     yield
 
@@ -205,15 +219,11 @@ def clean_test_db():
 @pytest.fixture( scope="session", autouse=True )
 def restore_companions_after_suite():
     """
-    Re-seed companion users into lupin_db_test after the E2E UI suite exits.
+    Belt-and-suspenders: ensure companions are present after the E2E suite exits.
 
-    Why: Per-test `clean_test_db` drops+recreates all tables and asserts an
-    empty users table, then `logged_in_page` registers e2e_test@example.com
-    via the browser UI. When the suite finishes, lupin_db_test is left with
-    only that one row, so the operator can no longer log into :8000 with
-    normal credentials (ricardo.felipe.ruiz@gmail.com and service accounts
-    are missing). This teardown restores the 5 companion users so the test
-    server remains operator-accessible between suite runs.
+    With is_protected teardown, companions survive every clean_test_db call so
+    this fixture is now a lightweight safety net rather than a full DROP+RECREATE.
+    seed_if_missing() is idempotent — it's a no-op if all 5 are already present.
     """
     yield
 
@@ -224,16 +234,6 @@ def restore_companions_after_suite():
     _scripts = _pathlib.Path( _cu.get_project_root() ) / "src" / "scripts"
     if str( _scripts ) not in _sys.path:
         _sys.path.insert( 0, str( _scripts ) )
-
-    from cosa.rest.db import database as db_module
-    from cosa.rest.postgres_models import Base
-
-    engine = db_module.engine
-    assert "lupin_db_test" in str( engine.url ), \
-        f"SAFETY: restore_companions_after_suite must only run against lupin_db_test, got: {engine.url}"
-
-    Base.metadata.drop_all( bind=engine )
-    Base.metadata.create_all( bind=engine )
 
     from seed_test_companions import seed_if_missing
     seed_if_missing()

@@ -164,6 +164,12 @@ def seed_if_missing():
                 users_seeded += 1
                 _success( f"Seeded user: {email} ({uid})" )
 
+            # Always ensure companion is marked protected (idempotent)
+            test_cur.execute(
+                "UPDATE users SET is_protected = TRUE WHERE email = %s",
+                ( email, )
+            )
+
         # ── Step 2: Seed API keys owned by companion users ──
         keys_seeded = 0
         for email in COMPANION_EMAILS:

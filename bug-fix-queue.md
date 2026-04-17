@@ -46,6 +46,7 @@
 | a312ee22 | 2026-04-08T11:00:00 | 2026-04-08T15:45:00 | committed |
 | 1b8c1cc0 | 2026-04-10T09:30:00 | 2026-04-10T11:00:00 | closed |
 | 5a620729 | 2026-04-14T14:20:00 | 2026-04-14T23:00:00 | closed |
+| eb50bd56 | 2026-04-16T22:30:00 | 2026-04-17T00:30:00 | closed |
 
 ---
 
@@ -53,7 +54,7 @@
 
 (Available for any session to claim)
 
-- [ ] **`/plan-bug-fix-mode-wrap` skill not triggered — session-end invoked instead** — Skill trigger verbiage for `/plan-bug-fix-mode-wrap` and `/plan-session-end` overlaps; "wrap up" or "let's wrap" phrases route to session-end instead of bug-fix-mode-wrap. Fix: tighten natural language triggers in each skill's SKILL.md / wrapper to distinguish "wrap this bug/fix" from "end session / wrap up the session."
+- [x] ~~**`/plan-bug-fix-mode-wrap` skill not triggered — session-end invoked instead**~~ → fixed commit 5f2713a | By: eb50bd56 | 2026-04-16
 
 
 - [x] ~~**target_user "Cannot resolve" error in Docker**~~ → Session 304 | By: 05faae8b
@@ -81,6 +82,10 @@
 
 - [x] **History archive — history.md at 38,821 tokens (155% of 25k limit)** → commit: 2879cbf | By: eb50bd56 | 2026-04-16
   - Archived 23 sessions (2026-04-08 to 2026-04-14) to `history/2026-04-08-to-14-history.md`. Retained 4 sessions, 10,008 tokens.
+
+- [x] **Seed account protection — companions wiped by E2E/integration test teardown** → commit: this session | By: eb50bd56 | 2026-04-16
+  - 3-layer protection: `is_protected` column on `User` model; `seed_test_companions.py` marks companions `TRUE` on every upsert; E2E + integration `clean_test_db` switched to row-level `DELETE WHERE NOT is_protected` + TRUNCATE; `admin_delete_user()` API guard rejects deletion of protected accounts. DEV + TEST DBs migrated. 4 unit tests in `test_admin_protected_accounts.py`. Zero lockout windows for operator or PQW during test runs.
+  - **CoSA files** (user commits from `src/cosa/`): `postgres_models.py`, `admin_service.py`
 
 - [x] **CJ Flow — Delete All button for 5 queue panes** → commit: 29a6fd4 | By: eb50bd56 | 2026-04-16
   - Added 🗑️ Delete All to each of todo/run/done/dead/history pane headers. Non-admins delete own jobs; admins clear entire queue. History respects time-window filter.
