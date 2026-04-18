@@ -1,5 +1,21 @@
 # Lupin Project History
 
+### 2026.04.17 - Session e55f7ac8 | Bug 2 intercession — resume plan queued for morning
+
+#### Checkpoint | 2026.04.17 16:35 | Evening pause, pickup plan queued
+
+- Resumed Bug 2 (Done-card toggle silently no-ops — DOM ID collision). Read plan doc `src/rnd/v0.1.6/2026.04.15-done-card-toggle-id-collision.md` + current `notifications.js` state. Zero repo edits this session.
+- Verified JS fix landed in commit `1a25b9c` (Session f01fdc2f): `idKey` namespacing at `notifications.js:6831` — `const idKey = job._isHistory ? \`history-${jobId}\` : jobId;` + propagated through `renderJobCard`/`toggleJobCard`/`expandedJobCards`.
+- Verified 3 Playwright regression tests (`TestJobCardToggleIDCollision` in `src/tests/e2e_ui/test_job_history_ui.py`) landed in commit `15f24d5` (Session aff39d3f) but have **never been executed** against the dev server (no `/tmp/e2e-ui-*.log`).
+- Morning pickup queued: run targeted E2E (`./src/scripts/run-e2e-ui-tests.sh --bg -v -k TestJobCardToggleIDCollision`) → audit 12 bare-`jobId` DOM lookups for latent history-card misses → manual browser verification → flip `TODO.md:138` → session-end.
+- Pickup plan (full detail): `~/.claude/plans/let-s-start-a-new-adaptive-engelbart.md`
+- Parallel session detected editing `notifications.{js,css,html}` + `.claude-session.md` during this session — intercession intentionally isolated to `history.md` only.
+
+**Files**: history.md (only)
+**Commit**: e33d169
+
+---
+
 ### 2026.04.16 - Session eb50bd56 | CJ Flow Delete All buttons (5 panes) + history archive
 
 - 🗑️ Delete All button added to each of the 5 CJ flow pane headers (todo/run/done/dead/history). Non-admins delete own jobs only; admins clear entire queue. History pane respects the active time-window filter.
