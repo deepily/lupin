@@ -6823,6 +6823,10 @@ class NotificationsUI {
         const cacheHitBadge = job.is_cache_hit ? '<span class="cache-hit-badge" title="Result from cache">⚡ Cached</span>' : '';
         const timestamp = this.formatJobTimestamp( job.timestamp );
         const jobId = job.job_id || `job-${Date.now()}`;
+        // Display-only: BFE jobs carry scoped IDs like "bfe-XXXXXXXX::<uuid>".
+        // Truncate at :: for the badge so the row layout stays tight; the full
+        // jobId is still used for DOM lookups, tooltip, and clipboard copy.
+        const jobIdDisplay = jobId.split( "::" )[ 0 ];
         // History cards get a `history-` ID prefix so their DOM ids cannot
         // collide with the same job rendered in a live queue (Done, etc.).
         // All external lookups (websocket handlers, interaction appenders)
@@ -6973,7 +6977,7 @@ class NotificationsUI {
                 <div class="job-card-header${headerCancelClass}" onclick="window.notificationsUI.toggleJobCard('${idKey}')">
                     ${cancelBtnHtml}${pauseBtnHtml}${deleteBtnHtml}
                     ${agentBadge}${ownerBadge}${cacheHitBadge}${completionBadge}${pausedBadge}${scheduledBadge}${monopolizeBadge}
-                    <span class="job-id-chip" title="Click to copy job ID" onclick="event.stopPropagation(); navigator.clipboard.writeText('${jobId}'); this.classList.add('copied'); setTimeout(() => this.classList.remove('copied'), 900)">${jobId}</span>
+                    <span class="job-id-chip" title="${jobId} — click to copy" onclick="event.stopPropagation(); navigator.clipboard.writeText('${jobId}'); this.classList.add('copied'); setTimeout(() => this.classList.remove('copied'), 900)">${jobIdDisplay}</span>
                     <span class="job-question">${this.escapeHtml( truncatedQuestion )}</span>
                     ${statusIndicator}${interactionIndicator}
                     <span class="job-timestamp">${timestamp}</span>

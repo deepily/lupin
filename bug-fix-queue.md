@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-04-08T12:00:00
+**Last Updated**: 2026-04-18T13:30:00
 
 ---
 
@@ -47,6 +47,7 @@
 | 1b8c1cc0 | 2026-04-10T09:30:00 | 2026-04-10T11:00:00 | closed |
 | 5a620729 | 2026-04-14T14:20:00 | 2026-04-14T23:00:00 | closed |
 | eb50bd56 | 2026-04-16T22:30:00 | 2026-04-17T00:30:00 | closed |
+| 8ed95029 | 2026-04-18T13:20:00 | 2026-04-18T13:30:00 | active |
 
 ---
 
@@ -76,6 +77,9 @@
 ---
 
 ### Completed
+
+- [x] **CJ Flow badge — BFE compound IDs overflow `.job-id-chip`** → commit: 5b3e305 | By: 8ed95029 | 2026-04-18
+  - `bfe-XXXXXXXX::<uuid>` (60+ chars) blew out the badge while `tfe-XXXXXXXX` fit fine. Truncated visible text at `::` in `renderJobCard` (`notifications.js:6829,6980`); tooltip now reveals the full compound ID on hover, and `data-job-id`, DOM ids, and clipboard copy still carry the full scoped form. Mirrors backend `AgenticJobBase.base_id` pattern. User live-confirmed working after hard-refresh.
 
 - [x] **PQW HTTP 500 — peer-queue auth env vars not set on dev server** → no-code fix | By: eb50bd56 | 2026-04-16
   - Container predated env var additions to docker-compose.yml. Fix: `docker rm -f lupin-rest-dev && docker compose up -d lupin-rest-dev`. Watcher confirmed running post-fix.

@@ -1,5 +1,19 @@
 # Lupin Project History
 
+### 2026.04.18 - Session 8ed95029 | Bug Fix: Truncate BFE job ID badge at `::` boundary
+
+**Accomplishments**:
+
+- **UI Bug — BFE badge overflow in CJ flow panels** — The `.job-id-chip` in each job card rendered the full scoped ID for BFE jobs (`bfe-XXXXXXXX::<uuid>` ~60 chars), distorting row layout. TFE and other prefixless IDs (`tfe-XXXXXXXX`) fit fine. Truncated the visible badge text at the `::` boundary while preserving the full compound ID for the tooltip, clipboard copy, `data-job-id`, and all DOM lookups. Mirrors the backend `AgenticJobBase.base_id` pattern (CoSA `agentic_job_base.py:153`).
+- **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js` — added `const jobIdDisplay = jobId.split( "::" )[ 0 ];` after line 6825; badge span on line 6980 now renders `${jobIdDisplay}` with `title="${jobId} — click to copy"`. Three-line change in one file.
+- **Verification**: Hard-reload → user confirmed live: BFE badge shows only `bfe-XXXXXXXX`; tooltip reveals full scoped ID on hover; click-copy still yields full compound form. Node syntax-check clean. E2E visual regression run deferred (user-gated; trivial change).
+- **Plan**: `~/.claude/plans/let-s-start-a-new-crispy-iverson.md` (approved via ExitPlanMode). Trivial one-file fix — R&D companion doc under `src/rnd/v0.1.6/` not warranted; captured feedback memory `feedback_skip_rnd_doc_for_trivial_fixes.md` so I apply this threshold in future sessions.
+- **Session admin**: Session 8ed95029 retro-registered in Active Sessions table (was never formally initialized via `/plan-bug-fix-mode-start` — user opened with natural language).
+
+**Commit**: 5b3e305
+
+---
+
 ### 2026.04.17 - Session 44581b8c | Morning briefing → Resume path validated: Bugs 14 / 9a / 15 landed, Phase 3 blocker surfaced + fixed, Phase 3 observation deferred to tomorrow
 
 **Status**: TO BE CONTINUED TOMORROW MORNING. All fix code + unit tests green; container bounce + Resume retry on `tfe-72adc928` + Phase 3/5/6 observation are the entry points for next session.
