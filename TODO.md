@@ -1,6 +1,64 @@
 # TODO
 
-Last updated: 2026-04-16 22:55 EDT (Session f01fdc2f close — Bug 12 + 13 landed + validated; Resume primed for morning)
+Last updated: 2026-04-17 17:30 EDT (Session 44581b8c close — 3 bugs + UI polish landed; Resume path 99% validated, Phase 3 observation deferred to tomorrow)
+
+---
+
+## 🌅 NEXT-MORNING BRIEFING — 2026-04-18
+
+### TL;DR
+
+Session 44581b8c spent the day walking the TFE Resume path end-to-end. Every blocker that surfaced was root-caused and fixed in order — **Bugs X1/X2 (UI jobId/toggle), 14 (watchdog routing_command), 9a (container .git), 500-char cap, showToast, 15 (SDK streaming wrap)**. Unit tests **42/42 green**. Container recreation required AFTER the .git mount (requires `docker rm -f` + `compose up -d` — a `docker restart` does NOT pick up new volume mounts). Last step — Phase 3 `FixExecutor` actually **applying** fixes — deferred to tomorrow because it needs the Bug 15 CoSA code to be live in the container.
+
+### Boot-up sequence (strict order, tomorrow morning)
+
+1. **Commit CoSA submodule changes** — from inside `src/cosa/`, user commits the 7 files the Bug 14 + 15 + 500-char-cap fixes touched:
+   - `agents/swe_team/hooks.py` (wrap_prompt_for_streaming helper)
+   - `agents/swe_team/__init__.py` (export)
+   - `agents/swe_team/orchestrator.py` (3 call sites)
+   - `agents/bug_fix_expediter/orchestrator.py` (2 call sites + import)
+   - `agents/test_fix_expediter/orchestrator.py` (2 call sites + import)
+   - `rest/test_suite_completion_watchdog.py` (Bug 14 forward fix via create_agentic_job)
+   - `rest/routers/notifications.py` (500-char response_value cap removed)
+2. **Bounce `lupin-rest-test`** — `docker restart lupin-rest-test` (now sufficient, not recreate — only code changed, no volume mount changes). Wait for `/health` → 200.
+3. **Click Resume** on `tfe-72adc928` (the more-recent stalled row — both rows now show their `tfe-*` ID chip in the header thanks to the UI-chip work).
+4. **Re-select the 11 proposals** at the voice gate (previous responses lost with `tfe-445f9e4b` and `tfe-60431542` crashes).
+5. **Observe Phase 3** — each "Applying fix N/11" notification should NOW be followed by successful Edit/Write tool blocks in the worktree at `/var/lupin/.claude/worktrees/tfe-<new>/`. `Phase 3 complete: K/11 cluster(s) fixed` with K > 0.
+6. **Observe Phase 5** — first time reaching `GitStrategist.commit_and_pr_multi()` from inside the container's worktree. May surface `gh` CLI / GitHub credentials follow-up (mount `~/.config/gh` into the container?).
+7. **Observe Phase 6** — auto-queues a validation `TestSuiteJob` to verify the applied fixes retired their failures.
+
+### Today's landings (reference)
+
+- ✅ **UI Bug X1** (Resume button empty jobId) + **Bug X2** (history-card toggle ID collision, = briefing's Bug 2).
+- ✅ **Bug 14** (watchdog bypassed `create_agentic_job`) — factory-routed forward fix + DB patch on `tfe-3436c5b8`. 36/36 watchdog unit tests green.
+- ✅ **showToast undefined method** — swapped to `this.log` at 2 sites.
+- ✅ **500-char response_value cap** (pre-existing) removed at `src/cosa/rest/routers/notifications.py:849` (XSS sanitization + empty check preserved).
+- ✅ **Bug 9a** (container missing `.git` for worktree) — bind-mount added to both dev + test services in `docker-compose.yml`.
+- ✅ **UI job-id chip** — clickable copy-to-clipboard on every card header + ID line in details.
+- ✅ **Bug 15** (`can_use_tool` AsyncIterable requirement, upstream [#18735](https://github.com/anthropics/claude-code/issues/18735) unresolved) — `wrap_prompt_for_streaming()` helper + 7 call sites swapped with inline WORKAROUND comment + URL. 6 new unit tests (42/42 overall green).
+- ✅ **Session manifest `.claude-session.md`** — created 44581b8c section mid-session after user flagged missing status.
+
+### Postmortems filed today
+
+- `src/rnd/v0.1.6/2026.04.17-bug-14-auto-dispatched-tfe-lacks-routing-command.md`
+- `src/rnd/v0.1.6/2026.04.17-bug-9a-container-missing-git-for-worktree.md`
+- `src/rnd/v0.1.6/2026.04.17-bug-15-claude-agent-sdk-streaming-mode-workaround.md`
+
+### Deferred / backlog
+
+- [ ] [LUPIN] **Phase 3/5/6 observation** on fresh `tfe-<resumed>` (tomorrow, step 5-7 above).
+- [ ] [LUPIN] **Investigate cosa-voice `set_session_status` MCP tool** — user's earlier directive ("set session status using cosa-voice MCP at beginning of every session"). My ToolSearch found only `set_session_topic`, `get_session_info`, `notify` (has `session_name` arg). Need to find the tool they mean or confirm the startup-ritual protocol in `~/.claude/CLAUDE.md` should be updated.
+- [ ] [LUPIN] **Revert 500-char cap decision** if on deep review we want it back with higher ceiling (e.g., 10k) instead of fully removed. Current state: removed, relying on XSS sanitization + empty check only.
+- [ ] [LUPIN] **`gh` CLI / credentials mount** for Phase 5 in container (anticipated; worth reading tomorrow if Phase 5 trips).
+- [ ] [LUPIN] **Upstream watch** — https://github.com/anthropics/claude-code/issues/18735 — when closed/fixed, delete `wrap_prompt_for_streaming()` helper and revert the 7 call sites (grep for `wrap_prompt_for_streaming` finds them all).
+
+---
+
+## 🌅 MORNING STATUS — 2026-04-17 11:20 EDT (historical — superseded by NEXT-MORNING BRIEFING above)
+
+The Bug 14 decision gate captured here was answered later today (factory-routed + DB patch chosen). Kept for session-continuity reference.
+
+---
 
 ---
 

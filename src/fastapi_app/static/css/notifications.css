@@ -3024,6 +3024,28 @@
     text-transform: uppercase;
 }
 
+.job-id-chip {
+    display          : inline-block;
+    padding          : 2px 6px;
+    margin-right     : 6px;
+    border-radius    : 3px;
+    font-family      : ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size        : 11px;
+    background-color : rgba( 120, 120, 120, 0.15 );
+    color            : #666;
+    cursor           : pointer;
+    user-select      : all;
+}
+.job-id-chip:hover  { background-color: rgba( 120, 120, 120, 0.28 ); }
+.job-id-chip.copied { background-color: rgba(  60, 200, 120, 0.28 ); color: #0a5; }
+
+.job-id-line {
+    font-family : ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size   : 12px;
+    padding     : 2px 0;
+    color       : #555;
+}
+
 .owner-badge {
     display: inline-block;
     background: #d4edda;

@@ -333,6 +333,14 @@ class TestDispatch:
         assert pushed_tfe.user_email == "t@t.com"
         assert pushed_tfe.original_test_types == [ "unit" ]
 
+        # Bug 14 regression guard — auto-dispatched TFE must be Resume-capable.
+        # Factory-routed dispatch sets routing_command + original_args on the
+        # constructed job; without them, resume_job() returns None → 404.
+        assert pushed_tfe.routing_command == "agent router go to test fix expediter"
+        assert pushed_tfe.original_args, "original_args must be non-empty for Resume capability"
+        assert pushed_tfe.original_args[ "remediation_snapshot_path" ] == "test-suite/fake-remediation.json"
+        assert pushed_tfe.original_args[ "source_test_suite_job_id"  ] == "ts-xyz98765"
+
     def test_missing_snapshot_path_returns_none( self ):
         watchdog = TestSuiteCompletionWatchdog(
             config_mgr=_make_config_mgr( enabled=True ),

@@ -6973,6 +6973,7 @@ class NotificationsUI {
                 <div class="job-card-header${headerCancelClass}" onclick="window.notificationsUI.toggleJobCard('${idKey}')">
                     ${cancelBtnHtml}${pauseBtnHtml}${deleteBtnHtml}
                     ${agentBadge}${ownerBadge}${cacheHitBadge}${completionBadge}${pausedBadge}${scheduledBadge}${monopolizeBadge}
+                    <span class="job-id-chip" title="Click to copy job ID" onclick="event.stopPropagation(); navigator.clipboard.writeText('${jobId}'); this.classList.add('copied'); setTimeout(() => this.classList.remove('copied'), 900)">${jobId}</span>
                     <span class="job-question">${this.escapeHtml( truncatedQuestion )}</span>
                     ${statusIndicator}${interactionIndicator}
                     <span class="job-timestamp">${timestamp}</span>
@@ -6980,6 +6981,9 @@ class NotificationsUI {
                 </div>
                 <div class="job-card-details collapsed" id="job-details-${idKey}">
                     ${durationSection}
+                    <div class="job-id-line">
+                        <strong>ID:</strong> <code>${jobId}</code>
+                    </div>
                     <div class="job-full-question">
                         <strong>Question:</strong> ${this.escapeHtml( job.question_text || '' )}
                     </div>
@@ -7018,8 +7022,8 @@ class NotificationsUI {
                         ` : ''}
                         ${isStalled ? `
                             <button class="btn btn-sm btn-warning mt-1 resume-stalled-btn"
-                                    data-job-id="${job.id_hash || ''}"
-                                    onclick="window.notificationsUI?.resumeStalledJob( '${job.id_hash || ''}' )">
+                                    data-job-id="${jobId}"
+                                    onclick="window.notificationsUI?.resumeStalledJob( '${jobId}' )">
                                 ▶ Resume from Checkpoint
                             </button>
                         ` : ''}
@@ -7036,7 +7040,7 @@ class NotificationsUI {
                     </div>
                     ${( queueName === 'run' || queueName === 'todo' ) ? `
                     <div class="job-interactions-section live-interactions" id="job-interactions-${idKey}">
-                        <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${jobId}', event)">
+                        <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${idKey}', event)">
                             <span>📋 Activity Log</span>
                             <button class="interactions-expand-btn">▶</button>
                         </div>
@@ -7060,7 +7064,7 @@ class NotificationsUI {
                     ` : ''}
                     ${queueName === 'done' ? `
                     <div class="job-interactions-section" id="job-interactions-${idKey}">
-                        <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${jobId}', event)">
+                        <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${idKey}', event)">
                             <span>📋 Notification Conversation</span>
                             <button class="interactions-expand-btn">▶</button>
                         </div>
@@ -7271,7 +7275,7 @@ class NotificationsUI {
 
             const data = await response.json();
             this.log( `[JOB-RESUME] Resumed ${jobId} → ${data.resumed_job_id} from phase ${data.phase_name}` );
-            this.showToast( `Resumed from ${data.phase_name} → new job ${data.resumed_job_id}`, 'success' );
+            this.log( `[JOB-RESUME] ✓ Resumed from ${data.phase_name} → new job ${data.resumed_job_id}` );
 
         } catch ( error ) {
             this.error( `[JOB-RESUME] Failed to resume ${jobId}:`, error );
@@ -7331,7 +7335,7 @@ class NotificationsUI {
             if ( data.status === 'resumed' ) {
                 const st = data.source_type || 'unknown';
                 const phase = data.phase_name || `phase ${data.resume_from_phase}`;
-                this.showToast( `Resumed (${st}) from ${phase} → ${data.resumed_job_id}`, 'success' );
+                this.log( `[TFE-RESUME] ✓ Resumed (${st}) from ${phase} → ${data.resumed_job_id}` );
                 if ( statusEl ) {
                     statusEl.textContent = `✓ Resumed via ${st}: ${data.resumed_job_id} from ${phase}`;
                 }
@@ -7491,18 +7495,25 @@ class NotificationsUI {
         }
     }
 
-    async toggleJobInteractions( jobId, event ) {
+    async toggleJobInteractions( idKey, event ) {
         /**
          * Toggle and lazy-load interaction history for a job.
          *
          * THE KEY FEATURE: Shows notification conversation history
          * associated with a completed job.
+         *
+         * Accepts `idKey` (possibly `history-` prefixed) so the DOM lookup
+         * finds the correct card — history cards prefix their DOM ids to
+         * avoid collision with the same job rendered in a live queue.
+         * The bare `jobId` is used for API + cache calls.
          */
         event.stopPropagation();  // Don't toggle parent card
 
-        const contentEl = document.getElementById( `interactions-content-${jobId}` );
+        const jobId = idKey.startsWith( 'history-' ) ? idKey.substring( 8 ) : idKey;
+
+        const contentEl = document.getElementById( `interactions-content-${idKey}` );
         if ( !contentEl ) {
-            this.error( `Interactions content not found: ${jobId}` );
+            this.error( `Interactions content not found: ${idKey}` );
             return;
         }
 
@@ -7524,7 +7535,7 @@ class NotificationsUI {
 
             // Lazy load interactions if not cached
             if ( !this.jobInteractionsCache.has( jobId ) ) {
-                await this.loadJobInteractions( jobId );
+                await this.loadJobInteractions( jobId, idKey );
             }
 
             // Scroll the interactions section header to the top of the viewport
@@ -7534,11 +7545,16 @@ class NotificationsUI {
         }
     }
 
-    async loadJobInteractions( jobId ) {
+    async loadJobInteractions( jobId, idKey = null ) {
         /**
          * Fetch notification interactions for a job from API.
+         *
+         * `jobId` is the bare job id (always used for API + cache).
+         * `idKey` is the DOM id suffix — defaults to `jobId` for live-queue
+         * callers, but history-card callers pass the `history-` prefixed form.
          */
-        const contentEl = document.getElementById( `interactions-content-${jobId}` );
+        const domKey = idKey || jobId;
+        const contentEl = document.getElementById( `interactions-content-${domKey}` );
         if ( !contentEl ) return;
 
         try {

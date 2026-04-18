@@ -2169,7 +2169,7 @@ Users submit responses via `POST /api/notify/response`.
 **Processing flow**:
 
 1. **Validation** -- `notification_id` and `response_value` are required. String
-   responses are sanitized (HTML tags stripped) and length-checked (max 500 chars).
+   responses are sanitized (HTML tags stripped) and must be non-empty after stripping whitespace.
 2. **PostgreSQL update** -- The notification record is updated via
    `NotificationRepository.update_response()`. The notification must be in
    `delivered` state, or in `expired` state within the grace period.
@@ -2191,7 +2191,7 @@ where users may step away and return after the timeout.
 | `404` | Notification not found |
 | `400` | Already responded, or grace period exceeded |
 | `422` | Missing `notification_id` or `response_value` |
-| `400` | Response too long (> 500 chars) or empty |
+| `400` | Response empty (after whitespace strip) |
 
 ---
 

@@ -1,5 +1,30 @@
 # Lupin Project History
 
+### 2026.04.17 - Session 44581b8c | Morning briefing → Resume path validated: Bugs 14 / 9a / 15 landed, Phase 3 blocker surfaced + fixed, Phase 3 observation deferred to tomorrow
+
+**Status**: TO BE CONTINUED TOMORROW MORNING. All fix code + unit tests green; container bounce + Resume retry on `tfe-72adc928` + Phase 3/5/6 observation are the entry points for next session.
+
+**Accomplishments** (from morning briefing → through Resume-path Phase 3 blocker):
+
+- **UI Bug X1** — Resume button onclick sent empty jobId for history cards (`job.id_hash` stripped by normalization). Fixed at `notifications.js:7021-7022` (bare `jobId`). Confirmed working live.
+- **UI Bug X2** (briefing's Bug 2) — history-card interactions toggle ID collision. Fixed by routing `idKey` (history-prefixed) to DOM lookups while keeping bare `jobId` for API/cache in `toggleJobInteractions` + `loadJobInteractions`. Live user confirmed 268 interactions loaded.
+- **Bug 14** — Auto-dispatched TFE unresumable (empty `routing_command`, no `original_args`). Root cause: `_dispatch_tfe` bypassed `create_agentic_job()`. Fix: factory-routed dispatch (CoSA `test_suite_completion_watchdog.py`). Data-patched `tfe-3436c5b8` via SQL with pre-patch row snapshot for rollback. Unit test extended (36/36 green). Postmortem at `src/rnd/v0.1.6/2026.04.17-bug-14-*.md`.
+- **showToast + 500-char response cap** — `notifications.js` showToast-undefined bug fixed (swap to `this.log`). Removed 500-char cap on `response_value` in `src/cosa/rest/routers/notifications.py` (was blocking 11-proposal voice-gate reply). Doc + cache-bust updated.
+- **Bug 9a** — Test container missing `.git` bind-mount → `git worktree add` failed. Fixed in `docker-compose.yml` (both dev + test services). Container recreated (`docker rm -f` + `compose up -d` required; `--force-recreate` hit name conflict). Postmortem at `src/rnd/v0.1.6/2026.04.17-bug-9a-*.md`. Validated: `git rev-parse --is-inside-work-tree` → true inside container.
+- **UI — job-ID chip** — Cards with identical labels from shared source-job were visually indistinguishable. Added click-to-copy `tfe-*` chip to card header + details line. CSS rules + cache-bust `v=20260417c`.
+- **Bug 15** — `claude-agent-sdk v0.1.56` rejects string prompt when `can_use_tool` is set. Root-caused via SDK source. Community confirmed unresolved (upstream [issue #18735](https://github.com/anthropics/claude-code/issues/18735)). Helper `wrap_prompt_for_streaming()` added to `swe_team/hooks.py`; 7 call sites swapped in TFE/BFE/SWE orchestrators with inline WORKAROUND comment + URL at each site. New unit test (6 asserts). **42/42 passed** (6 new + 36 Bug 14 regression). Postmortem at `src/rnd/v0.1.6/2026.04.17-bug-15-*.md`.
+- **Session manifest lapse** — Created `.claude-session.md` section for 44581b8c mid-session after user flagged missing status (protocol lapse: should have happened at session-start).
+
+**Files modified this session (parent repo)**: `.claude-session.md`, `TODO.md`, `docker-compose.yml`, `src/docs/notification-api.md`, `src/fastapi_app/static/css/notifications.css`, `src/fastapi_app/static/html/notifications.html`, `src/fastapi_app/static/js/notifications.js`, `src/tests/unit/test_test_suite_completion_watchdog.py`.
+
+**New files**: `src/rnd/v0.1.6/2026.04.17-bug-14-*.md`, `src/rnd/v0.1.6/2026.04.17-bug-9a-*.md`, `src/rnd/v0.1.6/2026.04.17-bug-15-*.md`, `src/tests/unit/test_wrap_prompt_for_streaming.py`.
+
+**CoSA-side uncommitted** (user commits from inside `src/cosa/`): `agents/swe_team/hooks.py` (helper), `agents/swe_team/__init__.py` (export), `agents/swe_team/orchestrator.py` (3 call sites), `agents/bug_fix_expediter/orchestrator.py` (2 call sites + 1 import), `agents/test_fix_expediter/orchestrator.py` (2 call sites + 1 import), `rest/test_suite_completion_watchdog.py` (Bug 14 forward fix), `rest/routers/notifications.py` (500-char cap removal).
+
+**DB state**: `lupin_db_test.job_history` row `tfe-3436c5b8` patched in-place (routing_command + metadata_json.original_args); pre-patch snapshot at `/tmp/tfe-3436c5b8-pre-patch.json` for rollback. Both `tfe-3436c5b8` and `tfe-72adc928` remain stalled and ready for tomorrow's Resume retry.
+
+---
+
 ### 2026.04.17 - Session e55f7ac8 | Bug 2 intercession — resume plan queued for morning
 
 #### Checkpoint | 2026.04.17 16:35 | Evening pause, pickup plan queued

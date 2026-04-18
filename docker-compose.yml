@@ -41,6 +41,7 @@ services:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
       - ./pytest.ini:/var/lupin/pytest.ini:ro
+      - ./.git:/var/lupin/.git
       - ~/.lora_env:/home/rruiz/.lora_env:ro
       - ~/.lupin:/home/rruiz/.lupin:ro
       - ~/.claude/.credentials.json:/home/rruiz/.claude/.credentials.json:ro
@@ -91,6 +92,7 @@ services:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
       - ./pytest.ini:/var/lupin/pytest.ini:ro
+      - ./.git:/var/lupin/.git
       - ~/.lora_env:/home/rruiz/.lora_env:ro
       - ~/.claude/.credentials.json:/home/rruiz/.claude/.credentials.json:ro
     environment:
