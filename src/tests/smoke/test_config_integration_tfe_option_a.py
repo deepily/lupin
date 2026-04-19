@@ -39,18 +39,21 @@ def tfe_config( config_mgr ):
 class TestTFEOptionAConfig:
 
     def test_coder_budget_small_turns_matches_ini( self, tfe_config ):
-        # INI: `test fix expediter coder budget small turns = 30`
+        # INI: `test fix expediter coder budget small turns = 50`
+        # Bumped 2026-04-19 from 30 after tfe-a1c6e15a ran short.
         # If this breaks, the key_map wiring in config.py is wrong.
-        assert tfe_config.coder_budget_small_turns == 30, (
-            f"Expected 30 from INI; got {tfe_config.coder_budget_small_turns} "
+        assert tfe_config.coder_budget_small_turns == 50, (
+            f"Expected 50 from INI; got {tfe_config.coder_budget_small_turns} "
             f"(likely silent fallback to dataclass default — check key_map)"
         )
 
     def test_coder_budget_medium_turns_matches_ini( self, tfe_config ):
-        assert tfe_config.coder_budget_medium_turns == 50
+        # Bumped 2026-04-19 from 50 → 80.
+        assert tfe_config.coder_budget_medium_turns == 80
 
     def test_coder_budget_large_turns_matches_ini( self, tfe_config ):
-        assert tfe_config.coder_budget_large_turns == 80
+        # Bumped 2026-04-19 from 80 → 150.
+        assert tfe_config.coder_budget_large_turns == 150
 
     def test_all_three_tiers_strictly_ascending( self, tfe_config ):
         # Sanity: small < medium < large. A flipped pair would be a silent

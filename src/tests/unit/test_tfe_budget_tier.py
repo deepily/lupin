@@ -59,6 +59,66 @@ def test_empty_changes_is_medium():
     ) == "medium"
 
 
+# ──────────────────────────────────────────────────────────────────
+# 2026-04-19 fix: when proposed.changes is empty, fall back to
+# cluster.affected_files_guess. Validated via tfe-a1c6e15a post-game
+# where every TFE proposal had empty `changes` → everything fell
+# through to `medium` instead of matching the correct tier.
+# ──────────────────────────────────────────────────────────────────
+
+
+def _cluster( files: list ) -> SimpleNamespace:
+    return SimpleNamespace( affected_files_guess=files )
+
+
+def test_cluster_fallback_single_file_test_patch_is_small():
+    # Proposed with empty changes, but cluster says 1 file → small
+    assert TFEOrchestrator._derive_budget_tier(
+        _fix( "test_patch", 0 ),
+        cluster=_cluster( [ "src/tests/unit/test_x.py" ] ),
+    ) == "small"
+
+
+def test_cluster_fallback_five_files_is_large():
+    # Proposed with empty changes, cluster says 5 files → large
+    assert TFEOrchestrator._derive_budget_tier(
+        _fix( "test_patch", 0 ),
+        cluster=_cluster( [ f"f{i}.py" for i in range( 5 ) ] ),
+    ) == "large"
+
+
+def test_cluster_fallback_two_files_is_medium():
+    assert TFEOrchestrator._derive_budget_tier(
+        _fix( "code_patch", 0 ),
+        cluster=_cluster( [ "a.py", "b.py" ] ),
+    ) == "medium"
+
+
+def test_proposed_changes_preferred_over_cluster():
+    # When proposed.changes is populated, it wins even if cluster disagrees
+    assert TFEOrchestrator._derive_budget_tier(
+        _fix( "test_patch", 1 ),
+        cluster=_cluster( [ f"f{i}.py" for i in range( 5 ) ] ),
+    ) == "small"
+
+
+def test_cluster_none_defaults_to_medium_when_changes_empty():
+    # No cluster passed, empty changes → medium (original behavior)
+    assert TFEOrchestrator._derive_budget_tier(
+        SimpleNamespace( fix_type="code_patch", changes=[] ),
+        cluster=None,
+    ) == "medium"
+
+
+def test_cluster_with_no_affected_files_guess_attribute_is_medium():
+    # Defensive: cluster exists but missing the attribute
+    cluster = SimpleNamespace()  # no affected_files_guess
+    assert TFEOrchestrator._derive_budget_tier(
+        _fix( "test_patch", 0 ),
+        cluster=cluster,
+    ) == "medium"
+
+
 if __name__ == "__main__":
     import sys
     import pytest
