@@ -1,5 +1,32 @@
 # Lupin Project History
 
+### 2026.04.18 - Session be57a252 | TFE Option A tier budgets + container preflight + gh CLI + worktree preservation + enriched completion report
+
+**Status**: TFE resume underway at session-end per user request — polling for terminal state on new tfe-* job spawned from `tfe-72adc928`. Post-game analysis will compare Phase 3 outcomes vs. prior 0/11 baseline once the job lands done or dead.
+
+**Accomplishments** (afternoon → evening):
+
+- **Container preflight smoke tier** (new) — `src/scripts/preflight-test-container.sh` + `src/tests/smoke/test_container_preflight.py`. 5 blocking probes + 2 WARN (gh auth, worktree bind-mount end-to-end). Catches `docker-compose.yml` mount drift (the class of bug that silently recurred Bug 9a today).
+- **GitHub CLI in container image** — Dockerfile edit via official apt repo (bottom of file to preserve the expensive Python/CUDA/torch/flash-attn/Chromium/MARP layers). `GH_TOKEN` env pass-through in `docker-compose.yml` for both services. Validated in-container: `gh auth status` → logged in as `deepily` with scopes `repo, workflow` (sufficient for personal-repo PR creation; `read:org` warning cosmetic). `gh pr list deepily/{lupin,cosa}` green.
+- **Host worktree bind-mount** — `./.claude/worktrees:/var/lupin/.claude/worktrees` so preserved sandboxes survive `docker rm`.
+- **`.dockerignore` additions** — nested `.venv/.git/.idea/.pytest_cache` globs (reclaims ~8.6 GB of build context transfer). Filed 37 GB `lupin.lancedb` as future runtime-bind-mount candidate.
+- **TFE Option A — auto-tiered Coder turn budget** — new INI keys `test fix expediter coder budget {small,medium,large} turns = 30/50/80`. Replaces flat `max_fix_attempts * 10 = 20` that caused 11/11 `error_max_turns` in `tfe-8b2eaeda`. Orchestrator derives tier from proposal metadata (`fix_type` + affected-file count).
+- **`cosa worktree auto cleanup = false`** — preserves worktree directory + commits for operator inspection after Phase 5 exit.
+- **Completion abstract — Worktree Artifacts section** (TFE + BFE parity) — per-cluster outcome ✓/✗ + files, branch/commits/PR, inspection commands. Refactored into pure `render_worktree_artifacts_abstract()` helpers for unit-testability.
+- **Coder tool-use breadcrumbs** — `Coder: Bash` → `Coder: Bash: pytest src/tests/unit/test_x.py`, etc. New `_summarize_tool_use` helper in TFE + BFE orchestrators.
+- **Test coverage added** (45 new tests): `test_tfe_budget_tier` (7), `test_coder_tool_summary` (9), `test_container_preflight` (7), `test_config_integration_tfe_option_a` (6), `test_worktree_artifacts_abstract` (16).
+- **Regression guard** — full unit suite sweep caught 6 genuine regressions (4 BFE completion from my refactor, 2 pre-existing SWE verification Bug 15 test-gap) and fixed all. 3394/3410 unit tests pass; remaining 16 failures are the exact TFE proposal targets (C2-C6, C8).
+
+**Files modified this session (parent repo)**: `.claude-session.md`, `.claude/skills/testing-patterns/SKILL.md`, `.dockerignore`, `CLAUDE.md`, `TODO.md`, `docker-compose.yml`, `docker/lupin/Dockerfile`, `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/tests/unit/test_swe_team_verification.py`, `history.md` (this entry).
+
+**New files**: `src/rnd/v0.1.6/2026.04.18-container-preflight-smoke{,-execution}.md`, `src/rnd/v0.1.6/2026.04.18-tfe-coder-turn-budget-option-a.md`, `src/scripts/preflight-test-container.sh`, `src/tests/smoke/test_config_integration_tfe_option_a.py`, `src/tests/smoke/test_container_preflight.py`, `src/tests/unit/test_coder_tool_summary.py`, `src/tests/unit/test_tfe_budget_tier.py`, `src/tests/unit/test_worktree_artifacts_abstract.py`.
+
+**CoSA-side uncommitted** (user commits from inside `src/cosa/`): `agents/test_fix_expediter/{config,orchestrator,job}.py`, `agents/bug_fix_expediter/{orchestrator,job}.py`.
+
+**Commits**: `6c9fe77` (checkpoint — Option A + infra + tests), session-end history commit (this entry).
+
+---
+
 ### 2026.04.18 - Session 8ed95029 | Bug Fix: Truncate BFE job ID badge at `::` boundary
 
 **Accomplishments**:
