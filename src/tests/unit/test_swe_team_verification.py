@@ -433,7 +433,18 @@ class TestRedelegateWithFeedback:
 
         async def mock_messages( **kwargs ):
             nonlocal captured_prompt
-            captured_prompt = kwargs.get( "prompt", "" )
+            prompt_arg = kwargs.get( "prompt", "" )
+            # Bug 15 workaround (2026-04-17): prompt is now an async generator
+            # yielding SDK message dicts, not a raw string. Extract content.
+            if hasattr( prompt_arg, "__aiter__" ):
+                collected = []
+                async for chunk in prompt_arg:
+                    content = chunk.get( "message", {} ).get( "content", "" )
+                    if content:
+                        collected.append( content )
+                captured_prompt = "".join( collected )
+            else:
+                captured_prompt = prompt_arg
             from claude_agent_sdk import TextBlock
             yield TextBlock( text="Fixed" )
 
@@ -459,7 +470,18 @@ class TestRedelegateWithFeedback:
 
         async def mock_messages( **kwargs ):
             nonlocal captured_prompt
-            captured_prompt = kwargs.get( "prompt", "" )
+            prompt_arg = kwargs.get( "prompt", "" )
+            # Bug 15 workaround (2026-04-17): prompt is now an async generator
+            # yielding SDK message dicts, not a raw string. Extract content.
+            if hasattr( prompt_arg, "__aiter__" ):
+                collected = []
+                async for chunk in prompt_arg:
+                    content = chunk.get( "message", {} ).get( "content", "" )
+                    if content:
+                        collected.append( content )
+                captured_prompt = "".join( collected )
+            else:
+                captured_prompt = prompt_arg
             from claude_agent_sdk import TextBlock
             yield TextBlock( text="Fixed" )
 

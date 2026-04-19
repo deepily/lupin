@@ -42,6 +42,10 @@ services:
       - ./io:/var/lupin/io
       - ./pytest.ini:/var/lupin/pytest.ini:ro
       - ./.git:/var/lupin/.git
+      # TFE/BFE worktrees preserved under host project root so operator can
+      # inspect agent commits after Phase 5 even across container rm.
+      # Added 2026-04-18 Session be57a252 alongside auto_cleanup=false flip.
+      - ./.claude/worktrees:/var/lupin/.claude/worktrees
       - ~/.lora_env:/home/rruiz/.lora_env:ro
       - ~/.lupin:/home/rruiz/.lupin:ro
       - ~/.claude/.credentials.json:/home/rruiz/.claude/.credentials.json:ro
@@ -54,6 +58,11 @@ services:
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}
+      # GitHub CLI token pass-through for TFE/BFE Phase 5 (`gh pr create`).
+      # Optional — empty default means no hard requirement if the operator
+      # doesn't have GH_TOKEN set. Phase 5 will fail loudly if auth missing.
+      # Added 2026-04-18 Session be57a252 to pair with preflight probe 6.
+      GH_TOKEN: ${GH_TOKEN:-}
       CHROME_PATH: /home/rruiz/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome
       PYTHONUNBUFFERED: 1
     deploy:
@@ -93,6 +102,10 @@ services:
       - ./io:/var/lupin/io
       - ./pytest.ini:/var/lupin/pytest.ini:ro
       - ./.git:/var/lupin/.git
+      # TFE/BFE worktrees preserved under host project root so operator can
+      # inspect agent commits after Phase 5 even across container rm.
+      # Added 2026-04-18 Session be57a252 alongside auto_cleanup=false flip.
+      - ./.claude/worktrees:/var/lupin/.claude/worktrees
       - ~/.lora_env:/home/rruiz/.lora_env:ro
       - ~/.claude/.credentials.json:/home/rruiz/.claude/.credentials.json:ro
     environment:
@@ -105,6 +118,11 @@ services:
       LUPIN_DEV_EMAIL: ricardo.felipe.ruiz@gmail.com
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}
+      # GitHub CLI token pass-through for TFE/BFE Phase 5 (`gh pr create`).
+      # Optional — empty default means no hard requirement if the operator
+      # doesn't have GH_TOKEN set. Phase 5 will fail loudly if auth missing.
+      # Added 2026-04-18 Session be57a252 to pair with preflight probe 6.
+      GH_TOKEN: ${GH_TOKEN:-}
       CHROME_PATH: /home/rruiz/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome
       PYTHONUNBUFFERED: 1
     deploy:

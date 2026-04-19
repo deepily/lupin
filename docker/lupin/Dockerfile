@@ -308,6 +308,33 @@ RUN MARP_VERSION="4.3.1" && \
 # ============================================================================
 
 # ============================================================================
+# GITHUB CLI — TFE/BFE Phase 5 `gh pr create`
+# ============================================================================
+# Placed near the bottom of the Dockerfile so the expensive earlier layers
+# (Python 3.11 source build, CUDA toolkit, torch, flash-attn, HF model
+# downloads, Playwright Chromium, MARP) remain cached on rebuild. Only this
+# layer and the chown/USER tail are recomputed when gh changes.
+#
+# Uses the official GitHub CLI apt repo (https://cli.github.com/packages)
+# rather than Ubuntu 22.04 universe (which carries a stale gh 2.4.0 vs.
+# upstream's current 2.40+). Runtime authentication is via the GH_TOKEN env
+# var passed through docker-compose.yml (added 2026-04-18 Session be57a252).
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gnupg ca-certificates && \
+    mkdir -p -m 755 /etc/apt/keyrings && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends gh && \
+    rm -rf /var/lib/apt/lists/*
+# ============================================================================
+# END GITHUB CLI
+# ============================================================================
+
+# ============================================================================
 # NON-ROOT RUNTIME (Option C: drop to UID 1001 before CMD)
 # ============================================================================
 # Relocate any caches that landed in /root/.cache from Docker layer-cache reuse

@@ -21,6 +21,7 @@ Lupin uses a **three-tier testing strategy** for comprehensive validation.
 | WebSocket | `src/tests/websocket_smoke/` | varies | WS functionality | `src/scripts/run-websocket-smoke-tests.sh` |
 | Live Pipeline | `src/tests/smoke/test_*_live_pipeline.py` | 10-120s | Full LLM pipeline | `python src/tests/smoke/test_calculator_live_pipeline.py` |
 | UI E2E | `src/tests/e2e_ui/` | 1-5s | Browser-level visual + functional | `./src/scripts/run-e2e-ui-tests.sh --bg -v` |
+| Container Preflight | `src/tests/smoke/test_container_preflight.py` | <5s | Catch docker-compose.yml mount drift before TFE/BFE Resume or live E2E | `src/scripts/preflight-test-container.sh` or `pytest src/tests/smoke/test_container_preflight.py -v` |
 
 ## Quick Commands
 
