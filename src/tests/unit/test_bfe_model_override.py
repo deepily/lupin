@@ -17,7 +17,7 @@ value).
 import pytest
 
 
-def _make_bfe_job( lead_override=None, worker_override=None ):
+def _make_bfe_job( lead_override=None, worker_override=None, thinking_effort=None ):
     """Construct a BFE job instance with minimal required args + optional overrides."""
     from cosa.agents.bug_fix_expediter.job import BugFixExpediterJob
     return BugFixExpediterJob(
@@ -27,8 +27,45 @@ def _make_bfe_job( lead_override=None, worker_override=None ):
         session_id            = "test-session",
         lead_model_override   = lead_override,
         worker_model_override = worker_override,
+        thinking_effort       = thinking_effort,
         debug                 = False,
     )
+
+
+class TestBfeThinkingEffort:
+    """Constructor accepts and stores thinking_effort. Factory + config plumb it through."""
+
+    def test_default_is_none( self ):
+        bfe = _make_bfe_job()
+        assert bfe.thinking_effort is None
+
+    def test_thinking_effort_stored( self ):
+        bfe = _make_bfe_job( thinking_effort="high" )
+        assert bfe.thinking_effort == "high"
+
+    def test_factory_wires_thinking_effort( self ):
+        from cosa.rest.agentic_job_factory import create_agentic_job
+
+        job = create_agentic_job(
+            command    = "agent router go to bug fix expediter",
+            args_dict  = {
+                "dead_job_id"     : "dr-abc12345::user1",
+                "thinking_effort" : "xhigh",
+            },
+            user_id    = "user1",
+            user_email = "factory-test@test.com",
+            session_id = "test-session",
+        )
+        assert job is not None
+        assert job.thinking_effort == "xhigh"
+
+    def test_config_exposes_thinking_effort( self ):
+        from cosa.agents.bug_fix_expediter.config import BugFixExpediterConfig
+        c = BugFixExpediterConfig()
+        assert hasattr( c, "thinking_effort" )
+        assert c.thinking_effort is None
+        c.thinking_effort = "high"
+        assert c.thinking_effort == "high"
 
 
 class TestBfeModelOverride:

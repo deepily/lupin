@@ -1,5 +1,69 @@
 # Lupin Project History
 
+### 2026.04.20 - Session d8831785 | TFE-to-CC Opus 4.7 + thinking-effort parameterization (Phases A–G + Playwright verify)
+
+**Status**: Matrix runner shipped; user-driven A/B/C/D sweep pending CoSA commit + test-container bounce.
+
+**Context**: Phase 3 Run D (2026-04-19) landed 4/11 fixes in 8 min on Sonnet + no-effort vs. 0/11 × 3 SDK runs (63/120/180 min, $6.50–$15 paper cost each). Open question: how much of the win was engine (CC + Task subagents) vs. model choice? User asked for Opus 4.7 + runtime-configurable thinking effort + UI dropdowns + automated matrix sweep. Seven phases + Playwright verification delivered tonight.
+
+**Earlier commits this session** (pre-checkpoint):
+
+- `4b531fd` — stop.py re-enable `_ask_anything_else` + tune MEDIUM/60s notification; supersedes worktree C8 `dea2c76`.
+- `ad55c29` — TFE-to-CC Phase 3 harness + live-test artifacts (11 files, 3277+): design doc 19-*, Phase 1+3 execution logs 20-*/21-*, harness scripts, 5 unit tests.
+- `16299a5` — cherry-pick C6 `908ecf5` (agent-count 9→10) with conflict resolved in favor of C6 (registry verified 10 entries).
+- 4 research worktrees reclaimed (194 MB); commits preserved in object DB.
+
+**This checkpoint covers Phases A–G + Playwright verify**:
+
+- **Phase A** — `src/scripts/tfe_to_cc_phase3_live.py`: argparse `--model` / `--effort` / `--max-budget-usd`. `DEFAULT_MODEL=claude-opus-4-7`, `DEFAULT_EFFORT=high`. Production default flipped from Sonnet to Opus per harness comment that already flagged Sonnet as a testing-mode override.
+- **Phase B** — Changes-summary emitter in same harness: `_parse_worktree_commits`, `_derive_cluster_rows` (introduces `already_clean` verdict for fixed+null-SHA clusters — closes the validator contract gap from 21-*.md), `_compute_overall`, `_detect_submodule_leaks`, `_build_changes_artifact`, `_render_changes_md`, `_write_changes_artifacts`. Writes `/tmp/tfe-to-cc-changes-{ts}.{json,md}` per run.
+- **Phase C** (CoSA — user commits) — `TestFixExpediterJob` + `BugFixExpediterJob` gain `thinking_effort` constructor param; propagates to `config.thinking_effort`; all 8 `ClaudeAgentOptions(...)` builders in both orchestrators pass `effort=self.config.thinking_effort` (None → SDK default, verified via live inspection of `ClaudeAgentOptions` dataclass).
+- **Phase D** (CoSA — user commits) — `queues.py`: new `ResumeFromCheckpointRequest` body model for generic `/api/jobs/{id}/resume-from-checkpoint` endpoint (backward-compatible via `Body(default_factory=...)`); `TFEResumeFromRequest` extended with 3 optional override fields. `resume_job()` in `agentic_job_factory.py` accepts `args_overrides` dict + merges into `original_args` before factory reconstruction. `Literal["low","medium","high","xhigh","max"]` constrains `thinking_effort` at the API boundary.
+- **Phase E** (Lupin JS) — `src/fastapi_app/static/js/notifications.js`: inline Model + Effort `<select>` dropdowns on stalled TFE/BFE job cards only (gated on `isResumableWithOverrides(job)`). `localStorage` persists last choice (`notifications_resume_model` / `notifications_resume_effort`). `resumeStalledJob()` reads DOM selections → POST body carries `lead_model_override` / `worker_model_override` / `thinking_effort`. Non-TFE/BFE cards unaffected.
+- **Phase F** — Tests. Lupin new `test_tfe_to_cc_changes_artifact.py` (24): emitter pipeline, verdict remap, aggregation, submodule leak detection, argparse surface, production-default contract. Lupin extended `test_tfe_model_override.py` + `test_bfe_model_override.py`: 4 new thinking-effort tests per file (constructor storage, factory wiring via `args_dict`, config field presence). **44 tests green locally in 0.5s.**
+- **Phase G** — New `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/22-model-effort-matrix-plan.md`: A/B/C/D matrix design (Sonnet+high vs. Opus+{low,high,xhigh}), measurement method, read-out protocol (fixes-landed, fixes/min, tail-chasing proxy via stream-json); `00-index.md` row added for 22-*.
+- **Phase E-verify** — Automated Playwright test `src/tests/e2e_ui/test_resume_overrides.py` (18 tests across 4 classes): agent-type detection, dropdown rendering + option counts + defaults, localStorage pre-selection, onchange persistence, POST body interception via `page.route()` proves override fields land in the correct shape. Uses sandbox injection (no live stalled-job seeding needed) so the suite runs in ~20s vs. typical minutes.
+- **Matrix runner bonus** — `src/scripts/tfe_to_cc_matrix.sh`: one-shot A/B/C/D sequential runner with Docker preflight, `--arms` / `--dry-run` / `--strict` flags, per-arm logs, summary table emission. User can `nohup` it and walk away; harness per-arm notifications via cosa-voice keep them in the loop.
+
+**Design decisions captured**:
+
+- UI placement: inline dropdowns (not popup) — discoverable + low-friction for repeat use; button label stays simple.
+- Thinking ROI is untested for this workload; matrix designed precisely to measure it. Prior: higher effort helps reasoning + planning, flat-to-negative on "apply known fix" work; tail-chasing risk grows at `xhigh` / `max`. Max subscription → $0 incremental so experiment is free.
+- CoSA boundary clarification: the existing `feedback_lupin_only_never_cosa.md` says git ops in CoSA are off-limits but code edits are fine. Over-applied the rule earlier in the plan; user course-corrected ("you do all the work, I manage the cosa repo separately"). Acting on the correct interpretation from here — no new memory needed.
+
+**Files modified this checkpoint (Lupin)**: `src/scripts/tfe_to_cc_phase3_live.py`, `src/fastapi_app/static/js/notifications.js`, `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/00-index.md`, `src/tests/unit/test_tfe_model_override.py`, `src/tests/unit/test_bfe_model_override.py`, `.claude-session.md` (appended d8831785 section).
+
+**New files this checkpoint (Lupin)**: `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/22-model-effort-matrix-plan.md`, `src/scripts/tfe_to_cc_matrix.sh`, `src/tests/e2e_ui/test_resume_overrides.py`, `src/tests/unit/test_tfe_to_cc_changes_artifact.py`.
+
+**CoSA-side uncommitted** (user commits from `src/cosa/` context, NOT in this checkpoint): `agents/test_fix_expediter/{config,job,orchestrator}.py`, `agents/bug_fix_expediter/{config,job,orchestrator}.py`, `rest/agentic_job_factory.py`, `rest/routers/queues.py`.
+
+**Preliminary matrix results** (user kicked off `src/scripts/tfe_to_cc_matrix.sh` in parallel while I built Phase F/G + Playwright — arms A/B/C complete, D still running at checkpoint time):
+
+| Arm | Model | Effort | Fixed | Already-clean | Unclear | Failed | Duration |
+|---|---|---|---|---|---|---|---|
+| **A** | Sonnet 4.6 | high | **3** | 2 | 6 | 0 | 17 m |
+| **B** | Opus 4.7 | low | 0 | 0 | **11** | 0 | 4 m |
+| **C** | Opus 4.7 | high | 1 | 0 | **9** | 1 | 6 m |
+| D | Opus 4.7 | xhigh | _running_ | | | | |
+
+Effective "actionable" count (fixed + already_clean) — A: **5/11**. B: **0/11**. C: **1/11**. **Sonnet baseline dominates Opus by a factor of 5×**, regardless of effort at low/high. Opus at low effort just returns `unclear` for everything (shorter duration — it gives up). Opus at high effort still craters. Hypothesis: Opus is more conservative on this workload — marks "unclear" where Sonnet would attempt; or extended thinking is actively causing over-analysis / tail-chasing. Arm D pending.
+
+This **inverts the matrix-plan hypothesis** (Model > Effort, Opus > Sonnet). Follow-up doc `23-*` will propose default stays Sonnet + high until further investigation explains the Opus regression.
+
+**Remaining steps for user**:
+
+1. Commit CoSA-side edits from inside `src/cosa/` context (thinking_effort plumbing).
+2. `./src/scripts/refresh-test-server.sh --quiet` to bounce test container for the Python changes (only needed if running UI/E2E tests — the matrix harness doesn't hit the server).
+3. `PYTHONPATH=src pytest src/tests/e2e_ui/test_resume_overrides.py -v` — verify Phase E live (~20 s).
+4. Wait on Arm D (xhigh) to complete the matrix; write `23-model-effort-matrix-results.md` with the finding + recommendation.
+
+#### Checkpoint | 2026.04.20 21:30 | Phases A–G + Playwright verify
+
+**Files**: 5 Lupin modified + 4 new Lupin (+ .claude-session.md).
+**Commit**: `b9eeeef`
+
+---
+
 ### 2026.04.18 - Session be57a252 | TFE Option A tier budgets + container preflight + gh CLI + worktree preservation + enriched completion report
 
 **Status**: TFE resume underway at session-end per user request — polling for terminal state on new tfe-* job spawned from `tfe-72adc928`. Post-game analysis will compare Phase 3 outcomes vs. prior 0/11 baseline once the job lands done or dead.

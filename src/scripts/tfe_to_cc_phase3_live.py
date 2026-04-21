@@ -16,6 +16,7 @@ Paired design/log:
     src/rnd/v0.1.6/2026.04.10-test-fix-expediter/21-tfe-to-cc-phase3-live-test.md
 """
 
+import argparse
 import json
 import os
 import subprocess
@@ -37,7 +38,8 @@ from cosa.agents.tfe_to_cc.prompts.output_contract import (
 
 
 CONTAINER        = "lupin-rest-test"
-MODEL            = "claude-sonnet-4-6"    # testing-mode override; production default is opus-4-7
+DEFAULT_MODEL    = "claude-opus-4-7"      # production default; override via --model
+DEFAULT_EFFORT   = "high"                 # extended-thinking effort; override via --effort (low/medium/high/xhigh/max/none)
 MAX_TURNS        = 200                    # coordinator budget; subagents have their own internal budgets
 WALL_CLOCK_LIMIT = 3600                   # 1 hour — user is watching a movie
 EXECUTION_LOG    = (
@@ -339,25 +341,46 @@ def _write_prompt_to_container( prompt: str, host_scratch: Path ) -> tuple:
     return container_path, host_path
 
 
-def _invoke_claude_p( container_prompt_path: str, worktree_path: str,
-                      stream_out: Path, stderr_out: Path ) -> int:
+def _invoke_claude_p(
+    container_prompt_path : str,
+    worktree_path         : str,
+    stream_out            : Path,
+    stderr_out            : Path,
+    model                 : str,
+    effort                : str,
+    max_budget_usd        : float | None,
+) -> int:
     """Invoke the coordinator claude -p with full Phase 3 allowlist."""
+    flags = [
+        f'--model {model}',
+        '--output-format stream-json',
+        '--verbose',
+        f'--max-turns {MAX_TURNS}',
+    ]
+    if effort and effort != "none":
+        flags.append( f'--effort {effort}' )
+    if max_budget_usd is not None:
+        flags.append( f'--max-budget-usd {max_budget_usd}' )
+    flags.append(
+        '--allowedTools "Read Edit Write Bash Grep Glob Task TodoWrite '
+        'mcp__cosa-voice__notify mcp__cosa-voice__ask_yes_no mcp__cosa-voice__ask_multiple_choice"'
+    )
+    flags.append(
+        '--disallowedTools "mcp__cosa-voice__converse mcp__cosa-voice__ask_open_ended_batch WebSearch WebFetch"'
+    )
     cmd = [
         "docker", "exec",
         "-w", worktree_path,
         CONTAINER, "sh", "-c",
-        (
-            f'claude -p "$(cat {container_prompt_path})" '
-            f'--model {MODEL} '
-            f'--output-format stream-json '
-            f'--verbose '
-            f'--max-turns {MAX_TURNS} '
-            f'--allowedTools "Read Edit Write Bash Grep Glob Task TodoWrite '
-            f'mcp__cosa-voice__notify mcp__cosa-voice__ask_yes_no mcp__cosa-voice__ask_multiple_choice" '
-            f'--disallowedTools "mcp__cosa-voice__converse mcp__cosa-voice__ask_open_ended_batch WebSearch WebFetch"'
-        ),
+        f'claude -p "$(cat {container_prompt_path})" ' + " ".join( flags ),
     ]
-    print( f"[HARNESS] Dispatching coordinator (max_turns={MAX_TURNS}, timeout={WALL_CLOCK_LIMIT}s)...", flush=True )
+    effort_str = f", effort={effort}" if effort and effort != "none" else ""
+    budget_str = f", budget=${max_budget_usd}" if max_budget_usd is not None else ""
+    print(
+        f"[HARNESS] Dispatching coordinator (model={model}{effort_str}, "
+        f"max_turns={MAX_TURNS}{budget_str}, timeout={WALL_CLOCK_LIMIT}s)...",
+        flush=True,
+    )
     start = time.time()
     with open( stream_out, "wb" ) as out, open( stderr_out, "wb" ) as err:
         try:
@@ -438,6 +461,223 @@ def _git_diff_stat( worktree_path: str ) -> str:
     return proc.stdout if proc.returncode == 0 else ""
 
 
+# ──────────────────────── Changes-summary artifact ────────────────────────
+# Pure functions — importable by unit tests. Consume data that main() already
+# has in hand (parsed tfe-result, git log output, etc.) and emit a JSON + MD
+# pair to /tmp so we stop doing ad-hoc analysis per run.
+
+SUBMODULE_PATHS = ( "src/cosa/", )
+
+
+def _parse_worktree_commits( git_log_output: str ) -> list:
+    """Parse `git log --oneline` output into [{sha, subject}] dicts."""
+    commits = []
+    for line in ( git_log_output or "" ).splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split( " ", 1 )
+        if len( parts ) != 2:
+            continue
+        commits.append( { "sha": parts[ 0 ], "subject": parts[ 1 ] } )
+    return commits
+
+
+def _derive_cluster_rows( parsed: dict | None, selected_fixes: list ) -> list:
+    """Normalize per-cluster data, apply already_clean remapping, tag submodule touches.
+
+    already_clean remap: a subagent reports verdict=fixed with commit_sha=null
+    when the cluster's target state was already correct before the run — nothing
+    to commit. That's not 'fixed', it's 'already_clean'. Closes the validator
+    contract gap we identified in 21-tfe-to-cc-phase3-live-test.md.
+    """
+    rows = []
+    parsed_clusters = ( parsed or {} ).get( "clusters" ) or {}
+    for fix in selected_fixes:
+        cid = fix[ "cluster_id" ]
+        data = parsed_clusters.get( cid ) or {}
+        verdict_raw = data.get( "verdict" ) if isinstance( data, dict ) else None
+        commit_sha  = data.get( "commit_sha" ) if isinstance( data, dict ) else None
+        files       = data.get( "files" ) or []
+        pytest_ok   = data.get( "pytest_passed" ) if isinstance( data, dict ) else None
+        notes       = data.get( "notes" ) if isinstance( data, dict ) else None
+
+        has_sha = isinstance( commit_sha, str ) and commit_sha.strip() != ""
+        if verdict_raw == "fixed" and not has_sha:
+            verdict = "already_clean"
+        elif verdict_raw in ( "fixed", "unclear", "failed" ):
+            verdict = verdict_raw
+        else:
+            verdict = "unknown"
+
+        touches = sorted( {
+            prefix for prefix in SUBMODULE_PATHS
+            if any( ( f or "" ).startswith( prefix ) for f in files )
+        } )
+
+        rows.append( {
+            "id"                 : cid,
+            "title"              : fix.get( "title", "" ),
+            "verdict"            : verdict,
+            "verdict_raw"        : verdict_raw,
+            "commit_sha"         : commit_sha if has_sha else None,
+            "files"              : list( files ),
+            "pytest_passed"      : pytest_ok,
+            "notes"              : notes,
+            "touches_submodules" : touches,
+        } )
+    return rows
+
+
+def _compute_overall( cluster_rows: list, total: int ) -> dict:
+    counts = { "fixed": 0, "already_clean": 0, "unclear": 0, "failed": 0, "unknown": 0 }
+    for r in cluster_rows:
+        counts[ r[ "verdict" ] ] = counts.get( r[ "verdict" ], 0 ) + 1
+    return { "clusters_total": total, **counts }
+
+
+def _detect_submodule_leaks( cluster_rows: list ) -> dict:
+    """Group submodule-touching clusters by submodule path."""
+    leaks: dict = {}
+    for r in cluster_rows:
+        for sub in r[ "touches_submodules" ]:
+            leaks.setdefault( sub, [] ).append( r[ "id" ] )
+    return leaks
+
+
+def _build_changes_artifact(
+    *,
+    run_id            : str,
+    model_requested   : str,
+    model_reported    : str | None,
+    effort            : str,
+    max_budget_usd    : float | None,
+    worktree          : str,
+    started_at        : datetime,
+    ended_at          : datetime,
+    duration_s        : float,
+    exit_code         : int,
+    validation_ok     : bool,
+    validation_issues : list,
+    selected_fixes    : list,
+    parsed            : dict | None,
+    git_log_output    : str,
+    git_diffstat      : str,
+) -> dict:
+    cluster_rows     = _derive_cluster_rows( parsed, selected_fixes )
+    worktree_commits = _parse_worktree_commits( git_log_output )
+    overall          = _compute_overall( cluster_rows, total=len( selected_fixes ) )
+    leaks            = _detect_submodule_leaks( cluster_rows )
+    return {
+        "run_id"                        : run_id,
+        "model"                         : model_requested,
+        "model_reported"                : model_reported,
+        "effort"                        : effort,
+        "max_budget_usd"                : max_budget_usd,
+        "worktree"                      : worktree,
+        "started_at"                    : started_at.isoformat( timespec="seconds" ),
+        "ended_at"                      : ended_at.isoformat( timespec="seconds" ),
+        "duration_s"                    : round( duration_s, 2 ),
+        "exit_code"                     : exit_code,
+        "validation_ok"                 : bool( validation_ok ),
+        "validation_issues"             : list( validation_issues or [] ),
+        "overall"                       : overall,
+        "clusters"                      : cluster_rows,
+        "worktree_commits"              : worktree_commits,
+        "git_diffstat"                  : ( git_diffstat or "" ).rstrip(),
+        "possibly_leaked_to_submodules" : leaks,
+    }
+
+
+def _render_changes_md( changes: dict ) -> str:
+    """Pretty-print the artifact as Markdown."""
+    o = changes[ "overall" ]
+    reported_suffix = ""
+    if changes[ "model_reported" ] and changes[ "model_reported" ] != changes[ "model" ]:
+        reported_suffix = f" (reported: `{changes[ 'model_reported' ]}`)"
+    budget_str = f"${changes[ 'max_budget_usd' ]}" if changes[ "max_budget_usd" ] is not None else "none"
+
+    lines = [
+        f"# TFE-to-CC Changes Report — {changes[ 'run_id' ]}",
+        "",
+        f"- **Started**: {changes[ 'started_at' ]}",
+        f"- **Ended**: {changes[ 'ended_at' ]}",
+        f"- **Duration**: {changes[ 'duration_s' ]}s",
+        f"- **Model**: `{changes[ 'model' ]}`{reported_suffix}",
+        f"- **Effort**: `{changes[ 'effort' ]}`",
+        f"- **Max budget**: {budget_str}",
+        f"- **Worktree**: `{changes[ 'worktree' ]}`",
+        f"- **Exit code**: `{changes[ 'exit_code' ]}`",
+        f"- **Validation OK**: `{changes[ 'validation_ok' ]}`",
+        "",
+        "## Overall",
+        "",
+        "| Total | Fixed | Already clean | Unclear | Failed | Unknown |",
+        "|---|---|---|---|---|---|",
+        f"| {o[ 'clusters_total' ]} | {o[ 'fixed' ]} | {o[ 'already_clean' ]} | {o[ 'unclear' ]} | {o[ 'failed' ]} | {o[ 'unknown' ]} |",
+        "",
+        "## Clusters",
+        "",
+        "| ID | Verdict | Commit | Files | Pytest |",
+        "|---|---|---|---|---|",
+    ]
+    for r in changes[ "clusters" ]:
+        commit = r[ "commit_sha" ] or "—"
+        files  = ", ".join( f"`{f}`" for f in ( r[ "files" ] or [] ) ) or "—"
+        if r[ "pytest_passed" ] is True:
+            pytest = "✓"
+        elif r[ "pytest_passed" ] is False:
+            pytest = "✗"
+        else:
+            pytest = "—"
+        lines.append( f"| **{r[ 'id' ]}** | `{r[ 'verdict' ]}` | `{commit}` | {files} | {pytest} |" )
+
+    if changes[ "worktree_commits" ]:
+        lines += [ "", "## Worktree commits", "", "```" ]
+        for c in changes[ "worktree_commits" ]:
+            lines.append( f"{c[ 'sha' ]} {c[ 'subject' ]}" )
+        lines.append( "```" )
+
+    if changes[ "git_diffstat" ]:
+        lines += [
+            "",
+            "## Worktree diffstat vs origin/main",
+            "",
+            "```",
+            changes[ "git_diffstat" ],
+            "```",
+        ]
+
+    if changes[ "possibly_leaked_to_submodules" ]:
+        lines += [
+            "",
+            "## ⚠️ Possibly leaked to submodules",
+            "",
+            "Subagents reported touching files under these submodule paths. "
+            "Any commits (if made) live in the submodule's git, not the outer worktree. "
+            "Inspect and commit from each submodule's context separately.",
+            "",
+        ]
+        for sub, cids in sorted( changes[ "possibly_leaked_to_submodules" ].items() ):
+            lines.append( f"- **`{sub}`** — clusters: {', '.join( cids )}" )
+
+    if changes[ "validation_issues" ]:
+        lines += [ "", "## Validation issues", "" ]
+        for issue in changes[ "validation_issues" ]:
+            lines.append( f"- {issue}" )
+
+    return "\n".join( lines ) + "\n"
+
+
+def _write_changes_artifacts( changes: dict, scratch: Path, timestamp: str ) -> tuple:
+    """Write the JSON + MD artifacts; return (json_path, md_path)."""
+    json_path = scratch / f"tfe-to-cc-changes-{timestamp}.json"
+    md_path   = scratch / f"tfe-to-cc-changes-{timestamp}.md"
+    json_path.write_text( json.dumps( changes, indent=2 ) + "\n" )
+    md_path.write_text( _render_changes_md( changes ) )
+    return json_path, md_path
+
+
 def _append_to_execution_log( section_md: str ) -> None:
     existing = EXECUTION_LOG.read_text() if EXECUTION_LOG.exists() else (
         "# 21 — TFE-to-CC Phase 3 (Apply Fixes) — Live Test Execution Log\n\n"
@@ -489,11 +729,40 @@ def _send_high_priority_notify( message: str, abstract: str ) -> None:
 # ────────────────────────────────────────────────────────────────────────
 
 def main() -> int:
-    _banner( f"TFE-to-CC Phase 3 LIVE — {len( SELECTED_FIXES )} fixes" )
+    parser = argparse.ArgumentParser(
+        description="TFE-to-CC Phase 3 LIVE harness — parallel Claude Code dispatch of bundled fixes.",
+    )
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help=f"Claude model for coordinator + subagents (default: {DEFAULT_MODEL}). "
+             "Accepts full IDs (claude-opus-4-7) or aliases (opus / sonnet / haiku).",
+    )
+    parser.add_argument(
+        "--effort",
+        default=DEFAULT_EFFORT,
+        choices=[ "low", "medium", "high", "xhigh", "max", "none" ],
+        help=f"Extended-thinking effort level (default: {DEFAULT_EFFORT}). "
+             "Use 'none' to omit the --effort flag entirely.",
+    )
+    parser.add_argument(
+        "--max-budget-usd",
+        type=float,
+        default=None,
+        help="Optional per-invocation USD budget cap (forwarded to --max-budget-usd).",
+    )
+    args = parser.parse_args()
 
-    scratch = Path( "/tmp" )
-    stream_path = scratch / f"tfe-to-cc-phase3-stream-{_ts()}.jsonl"
-    stderr_path = scratch / f"tfe-to-cc-phase3-stderr-{_ts()}.log"
+    banner_extras = f"model={args.model} | effort={args.effort}"
+    if args.max_budget_usd is not None:
+        banner_extras += f" | budget=${args.max_budget_usd}"
+    _banner( f"TFE-to-CC Phase 3 LIVE — {len( SELECTED_FIXES )} fixes | {banner_extras}" )
+
+    started_at  = datetime.now().astimezone()
+    scratch     = Path( "/tmp" )
+    run_ts      = _ts()
+    stream_path = scratch / f"tfe-to-cc-phase3-stream-{run_ts}.jsonl"
+    stderr_path = scratch / f"tfe-to-cc-phase3-stderr-{run_ts}.log"
 
     # 1. Create fresh worktree
     worktree = _create_smoke_worktree()
@@ -512,7 +781,17 @@ def main() -> int:
     container_prompt_path, host_prompt_path = _write_prompt_to_container( prompt, scratch )
 
     # 4. Dispatch coordinator
-    exit_code = _invoke_claude_p( container_prompt_path, worktree, stream_path, stderr_path )
+    exit_code = _invoke_claude_p(
+        container_prompt_path,
+        worktree,
+        stream_path,
+        stderr_path,
+        model          = args.model,
+        effort         = args.effort,
+        max_budget_usd = args.max_budget_usd,
+    )
+    ended_at   = datetime.now().astimezone()
+    duration_s = ( ended_at - started_at ).total_seconds()
 
     # 5. Parse
     summary = _parse_stream( stream_path )
@@ -544,6 +823,30 @@ def main() -> int:
     else:
         fixed_count = 0
 
+    # 8.5 Build & persist changes-summary artifact (JSON + MD) so we stop
+    # doing ad-hoc per-run analysis by hand.
+    changes = _build_changes_artifact(
+        run_id            = worktree.split( "/" )[ -1 ],
+        model_requested   = args.model,
+        model_reported    = summary.get( "model" ),
+        effort            = args.effort,
+        max_budget_usd    = args.max_budget_usd,
+        worktree          = worktree,
+        started_at        = started_at,
+        ended_at          = ended_at,
+        duration_s        = duration_s,
+        exit_code         = exit_code,
+        validation_ok     = validation_ok,
+        validation_issues = validation_issues,
+        selected_fixes    = SELECTED_FIXES,
+        parsed            = parsed,
+        git_log_output    = git_log,
+        git_diffstat      = diff_stat,
+    )
+    changes_json_path, changes_md_path = _write_changes_artifacts( changes, scratch, run_ts )
+    print( f"[HARNESS] Changes (JSON): {changes_json_path}", flush=True )
+    print( f"[HARNESS] Changes  (MD):  {changes_md_path}", flush=True )
+
     # 9. Build execution log section
     ts_now = datetime.now().astimezone().isoformat( timespec="seconds" )
     lines: list = [
@@ -552,10 +855,13 @@ def main() -> int:
         f"**Worktree**: `{worktree}`",
         f"**Prompt**: {len( prompt )} bytes | host: `{host_prompt_path}` | container: `{container_prompt_path}`",
         f"**Stream**: `{stream_path}`",
+        f"**Changes artifact**: `{changes_json_path}` (JSON) | `{changes_md_path}` (MD)",
         "",
         "**SDK/CC path confirmation**:",
         f"- apiKeySource: `{summary.get( 'api_key_source' )}`",
-        f"- model: `{summary.get( 'model' )}`",
+        f"- model: `{summary.get( 'model' )}` (requested: `{args.model}`)",
+        f"- effort: `{args.effort}`"
+        + ( f" | budget: `${args.max_budget_usd}`" if args.max_budget_usd is not None else "" ),
         "",
         "**Outcome**:",
         f"- Exit code: `{exit_code}`",
@@ -610,15 +916,19 @@ def main() -> int:
         f"(SDK baseline tfe-a1c6e15a was 0/11)\n\n"
         f"Full analysis + per-cluster JSON verdicts in "
         f"`src/rnd/v0.1.6/2026.04.10-test-fix-expediter/21-tfe-to-cc-phase3-live-test.md`.\n"
+        f"Machine-parseable changes artifact: `{changes_json_path}` (JSON) + `{changes_md_path}` (MD).\n"
         f"Worktree preserved at `.claude/worktrees/{worktree.split( '/' )[-1]}/` for review."
     )
     _send_high_priority_notify( msg, abstract )
 
     # Console summary
     _banner( "SUMMARY" )
-    print( f"Fixed: {fixed_count} / {len( SELECTED_FIXES )}", flush=True )
+    o = changes[ "overall" ]
+    print( f"Fixed / Already-clean / Unclear / Failed: {o[ 'fixed' ]} / {o[ 'already_clean' ]} / {o[ 'unclear' ]} / {o[ 'failed' ]}  (total {o[ 'clusters_total' ]})", flush=True )
     print( f"Parser: {'fallback' if fallback_used else 'primary'}", flush=True )
     print( f"Validation: {'OK' if validation_ok else 'ISSUES'}", flush=True )
+    print( f"Changes (JSON): {changes_json_path}", flush=True )
+    print( f"Changes  (MD):  {changes_md_path}", flush=True )
 
     return 0 if ( fixed_count > 0 and validation_ok ) else 1
 

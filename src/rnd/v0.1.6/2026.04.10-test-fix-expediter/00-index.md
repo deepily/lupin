@@ -42,6 +42,7 @@
 | [17-schedule-tfe-resume-live-e2e-runbook.md](17-schedule-tfe-resume-live-e2e-runbook.md) | Runbook for scheduling the live resume E2E via /schedule-tests | Active |
 | [18-post-tfe-validation-cleanup.md](18-post-tfe-validation-cleanup.md) | 2026-04-15 post-validation bug-fix plan: 3s-timeout env var, voice-gate priority, io/file 404, Done/History dup, stale docstring, status=stalled normalization, resume phase-skip, Pause/Stop semantics | Active |
 | [19-tfe-to-cc-design.md](19-tfe-to-cc-design.md) | 2026-04-19 parallel Claude Code engine for Phases 1 + 3: runtime fork via INI flags, bundled BOUNDED ClaudeCodeJob per phase, MCP interactivity mid-run, both SDK + CC paths permanently maintained | Design (Phase 1) |
+| [22-model-effort-matrix-plan.md](22-model-effort-matrix-plan.md) | 2026-04-20 A/B/C/D matrix for Sonnet vs Opus + low/high/xhigh effort; harness parameterization, changes-summary artifact, UI dropdowns for per-resume overrides | Active |
 
 ### Execution log docs (placeholders — updated during work)
 

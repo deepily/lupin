@@ -141,6 +141,8 @@ class NotificationsUI {
         this.ACTION_REQUIRED_KEY = 'notifications_action_required';  // Persist action-required notifications
         this.TTS_QUEUE_KEY = 'notifications_tts_queue';  // Persist TTS queue across refresh
         this.SESSION_NAMES_KEY = 'notifications_session_names';  // Persist user-edited session names
+        this.RESUME_MODEL_PREF_KEY  = 'notifications_resume_model';   // Default model for stalled-job resume (TFE/BFE)
+        this.RESUME_EFFORT_PREF_KEY = 'notifications_resume_effort';  // Default thinking-effort for stalled-job resume
         this.CURRENT_VERSION = '2.0.0'; // Increment to invalidate old cache - date grouping release
 
         // Session names cache (loaded from localStorage)
@@ -7024,6 +7026,7 @@ class NotificationsUI {
                                 <a href="/app/docs?path=${encodeURIComponent( job.plan_path || '' )}" target="_blank" class="report-link-btn">📋 View Plan</a>
                             </div>
                         ` : ''}
+                        ${isStalled && this.isResumableWithOverrides( job ) ? this.renderResumeOverrideControls( jobId ) : ''}
                         ${isStalled ? `
                             <button class="btn btn-sm btn-warning mt-1 resume-stalled-btn"
                                     data-job-id="${jobId}"
@@ -7242,6 +7245,58 @@ class NotificationsUI {
         }
     }
 
+    isResumableWithOverrides( job ) {
+        /**
+         * Return true iff this job type supports per-resume model + effort overrides
+         * (currently TFE and BFE). Used to gate the inline dropdown UI on stalled cards.
+         */
+        const agentType = job.agent_type || '';
+        return agentType.includes( 'TestFixExpediter' ) || agentType.includes( 'BugFixExpediter' );
+    }
+
+    renderResumeOverrideControls( jobId ) {
+        /**
+         * Render Model + Effort dropdowns for a stalled TFE/BFE card. Defaults
+         * come from localStorage; user's last selection persists across reloads.
+         */
+        const modelPref  = localStorage.getItem( this.RESUME_MODEL_PREF_KEY )  || 'claude-opus-4-7';
+        const effortPref = localStorage.getItem( this.RESUME_EFFORT_PREF_KEY ) || 'high';
+        const sel = ( optVal, prefVal ) => ( optVal === prefVal ? 'selected' : '' );
+        return `
+            <div class="resume-override-controls" data-job-id="${jobId}" style="display: inline-flex; gap: 0.5em; align-items: center; margin-right: 0.5em;">
+                <label style="font-size: 0.85em;">
+                    Model
+                    <select class="resume-model-select" data-job-id="${jobId}"
+                            onchange="window.notificationsUI?.saveResumeModelPref( this.value )">
+                        <option value="claude-opus-4-7"           ${sel( 'claude-opus-4-7', modelPref )}>Opus 4.7</option>
+                        <option value="claude-sonnet-4-6"         ${sel( 'claude-sonnet-4-6', modelPref )}>Sonnet 4.6</option>
+                        <option value="claude-haiku-4-5-20251001" ${sel( 'claude-haiku-4-5-20251001', modelPref )}>Haiku 4.5</option>
+                    </select>
+                </label>
+                <label style="font-size: 0.85em;">
+                    Effort
+                    <select class="resume-effort-select" data-job-id="${jobId}"
+                            onchange="window.notificationsUI?.saveResumeEffortPref( this.value )">
+                        <option value=""       ${sel( '',       effortPref )}>(default)</option>
+                        <option value="low"    ${sel( 'low',    effortPref )}>low</option>
+                        <option value="medium" ${sel( 'medium', effortPref )}>medium</option>
+                        <option value="high"   ${sel( 'high',   effortPref )}>high</option>
+                        <option value="xhigh"  ${sel( 'xhigh',  effortPref )}>xhigh</option>
+                        <option value="max"    ${sel( 'max',    effortPref )}>max</option>
+                    </select>
+                </label>
+            </div>
+        `;
+    }
+
+    saveResumeModelPref( value ) {
+        localStorage.setItem( this.RESUME_MODEL_PREF_KEY, value || '' );
+    }
+
+    saveResumeEffortPref( value ) {
+        localStorage.setItem( this.RESUME_EFFORT_PREF_KEY, value || '' );
+    }
+
     async resumeStalledJob( jobId ) {
         /**
          * Resume a stalled job from its checkpoint.
@@ -7250,6 +7305,7 @@ class NotificationsUI {
          * is created and queued, resuming from the phase where it stalled.
          *
          * Session 9056c113 — checkpoint-resume infrastructure.
+         * Session d8831785 — optional model + thinking-effort overrides for TFE/BFE.
          *
          * Requires:
          *     - jobId is a valid stalled agentic job ID
@@ -7257,7 +7313,8 @@ class NotificationsUI {
          * Ensures:
          *     - Confirmation dialog shown before resume
          *     - Button disabled while request is in-flight
-         *     - Success toast shown with resume phase info
+         *     - If the card has Model + Effort dropdowns, their values are sent
+         *       as lead_model_override / worker_model_override / thinking_effort
          */
         if ( !confirm( 'Resume this job from its checkpoint?' ) ) return;
 
@@ -7267,9 +7324,23 @@ class NotificationsUI {
             resumeBtn.innerText = 'Resuming...';
         }
 
+        // Read override selections from the card's dropdowns (if present).
+        const modelSelect  = document.querySelector( `.resume-model-select[data-job-id="${jobId}"]` );
+        const effortSelect = document.querySelector( `.resume-effort-select[data-job-id="${jobId}"]` );
+        const overrides = {};
+        if ( modelSelect?.value ) {
+            overrides.lead_model_override   = modelSelect.value;
+            overrides.worker_model_override = modelSelect.value;
+        }
+        if ( effortSelect?.value ) {
+            overrides.thinking_effort = effortSelect.value;
+        }
+
         try {
             const response = await this.authedFetch( `/api/jobs/${jobId}/resume-from-checkpoint`, {
-                method : 'POST'
+                method  : 'POST',
+                headers : { 'Content-Type': 'application/json' },
+                body    : JSON.stringify( overrides ),
             } );
 
             if ( !response.ok ) {
