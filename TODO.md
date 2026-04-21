@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-04-17 17:30 EDT (Session 44581b8c close — 3 bugs + UI polish landed; Resume path 99% validated, Phase 3 observation deferred to tomorrow)
+Last updated: 2026-04-20 22:30 EDT (Session d8831785 close — TFE-to-CC Phases A–G shipped + 5-arm matrix complete; Sonnet beats Opus ~5× on this workload)
 
 ---
 
@@ -44,7 +44,18 @@ Session 44581b8c spent the day walking the TFE Resume path end-to-end. Every blo
 - `src/rnd/v0.1.6/2026.04.17-bug-9a-container-missing-git-for-worktree.md`
 - `src/rnd/v0.1.6/2026.04.17-bug-15-claude-agent-sdk-streaming-mode-workaround.md`
 
-### Deferred / backlog
+### New follow-ups from Session d8831785 (2026-04-20)
+
+- [ ] [LUPIN] **Flip harness `DEFAULT_MODEL` back to Sonnet** — matrix 23-*.md proved Sonnet beats Opus ~5× on this workload. `src/scripts/tfe_to_cc_phase3_live.py:40` currently says `claude-opus-4-7`; change to `claude-sonnet-4-6`. Keep `DEFAULT_EFFORT=high`.
+- [ ] [LUPIN] **Flip UI localStorage fallback to Sonnet** — `src/fastapi_app/static/js/notifications.js` `renderResumeOverrideControls()` defaults to `'claude-opus-4-7'` when localStorage is empty. Change to `'claude-sonnet-4-6'`. (First-time UI users would otherwise get the worse arm by default.)
+- [ ] [LUPIN] **Why does Opus default to `unclear`?** — three Opus arms (B/C/D) returned 10–11 unclear verdicts regardless of effort. Inspect a failing Opus cluster's stream-json tool-use trace to see whether the Coder subagent even attempted the edit, or returned `unclear` without trying. Most interesting unanswered question from tonight's matrix.
+- [ ] [LUPIN] **Sonnet + medium arm** — find out whether effort saturates below `high`. If Sonnet+medium ≈ Sonnet+high, we've been over-spending thinking budget.
+- [ ] [LUPIN] **Cross-workload matrix validation** — run the 5-arm matrix against a fresh TFE cluster set (different failure profile) to confirm the Sonnet-wins pattern isn't specific to `tfe-72adc928`.
+- [ ] [LUPIN] **Tighten `confidence` prompt semantics** — `src/cosa/agents/test_fix_expediter/prompts/proposal.py` tells the LLM to "rank by confidence" but never defines WHAT the number measures. Observed values conflate "confidence in root cause" with "quality of approach". Consider splitting into two fields or pinning the semantic explicitly to one dimension (and using `risk_level` for the other).
+- [ ] [LUPIN] **Revisit validator "Validation OK: ISSUES"** — harness's `validate_result_payload` still flags `verdict=fixed + commit_sha=null` as an error even though Phase B's `already_clean` verdict correctly handles that case. Update the validator to accept `already_clean` as a terminal state.
+- [ ] [LUPIN] **Cache-bust discipline** — bumped `notifications.html` v=20260417c → v=20260420a tonight after forgetting to bump it with the Phase E UI change. Consider a pre-commit hook that verifies any `notifications.js` diff also touches the v= token in `notifications.html`.
+
+### Deferred / backlog (carried from prior sessions)
 
 - [ ] [LUPIN] **Phase 3/5/6 observation** on fresh `tfe-<resumed>` (tomorrow, step 5-7 above).
 - [ ] [LUPIN] **Investigate cosa-voice `set_session_status` MCP tool** — user's earlier directive ("set session status using cosa-voice MCP at beginning of every session"). My ToolSearch found only `set_session_topic`, `get_session_info`, `notify` (has `session_name` arg). Need to find the tool they mean or confirm the startup-ritual protocol in `~/.claude/CLAUDE.md` should be updated.

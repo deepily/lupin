@@ -62,6 +62,44 @@ This **inverts the matrix-plan hypothesis** (Model > Effort, Opus > Sonnet). Fol
 **Files**: 5 Lupin modified + 4 new Lupin (+ .claude-session.md).
 **Commit**: `b9eeeef`
 
+#### Session wrap | 2026.04.20 22:30 | 5-arm matrix complete + snake_case UI fix
+
+**Post-checkpoint landings**:
+- Fixed `isResumableWithOverrides` to match snake_case `job.agent_type` (was CamelCase-only → never matched real jobs). Added regression-guard Playwright test so this can't repeat. Bumped `notifications.html` cache-bust v=20260417c → v=20260420a so browser picks up the new JS.
+- Created `23-model-effort-matrix-results.md` with full 5-arm analysis + recommendations; 22-*.md marked Closed.
+- TODO.md updated with 8 new follow-ups (default flips, Opus investigation, cross-workload validation, confidence prompt tightening, validator fix, cache-bust discipline).
+
+**Final matrix results** (all 5 arms complete — full analysis in `23-*.md`):
+
+| Arm | Model | Effort | Effective | Duration | Fixes/min |
+|---|---|---|---|---|---|
+| A | Sonnet 4.6 | high | **5/11** | 17.1 m | 0.29 |
+| B | Opus 4.7 | low | 0/11 | 4.3 m | 0.00 |
+| C | Opus 4.7 | high | 1/11 | 5.9 m | 0.17 |
+| D | Opus 4.7 | xhigh | 1/11 | 7.7 m | 0.13 |
+| E | Sonnet 4.6 | xhigh | **4/11** | 7.4 m | **0.54** |
+
+Headline: **Sonnet beats Opus by ~5× on this workload, regardless of effort.** Opus defaults to `unclear` at every effort level (B/C/D all land 0–1). Sonnet+xhigh is 2.3× faster than Sonnet+high with only slightly fewer fixes — best throughput arm. Matrix-plan hypotheses (Model>Effort, diminishing returns past `high`) were correct in shape but **direction inverted on Opus vs Sonnet**.
+
+**Recommendations landing in follow-up commits**:
+1. Flip harness `DEFAULT_MODEL` back to Sonnet
+2. Flip UI localStorage fallback to Sonnet
+3. Investigate Opus's `unclear` default (most interesting open question)
+
+**Session commits** (four on wip branch):
+- `4b531fd` — stop.py re-enable `_ask_anything_else`
+- `ad55c29` — Phase 3 harness + artifacts (11 files, 3277+)
+- `16299a5` — cherry-pick C6 (9→10)
+- `3d95284` — checkpoint: Phases A–G + Playwright verify
+- (this commit) — session-end wrap: matrix results + snake_case fix + cache-bust bump
+
+**Next-session boot sequence**:
+1. Read history.md + TODO.md (follow-ups from tonight listed first)
+2. User commits CoSA Phases C/D edits from inside `src/cosa/` (config.py, job.py, orchestrator.py × 2; agentic_job_factory.py; rest/routers/queues.py)
+3. `./src/scripts/refresh-test-server.sh --quiet`
+4. If tackling follow-ups: apply the two default-flip TODOs first (harness + UI), commit, bounce, verify
+5. If investigating Opus: `jq '.' /tmp/tfe-to-cc-changes-20260421T014055Z.json` (arm B) or pull the stream-json `/tmp/tfe-to-cc-phase3-stream-20260421T014055Z.jsonl` and grep for `verdict.*unclear` lines in the tool-use events
+
 ---
 
 ### 2026.04.18 - Session be57a252 | TFE Option A tier budgets + container preflight + gh CLI + worktree preservation + enriched completion report

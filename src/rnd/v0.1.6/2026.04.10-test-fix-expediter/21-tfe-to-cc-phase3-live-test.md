@@ -575,3 +575,268 @@ $ git diff --stat origin/main
 src/tests/unit/test_runtime_argument_expeditor.py | 6 +++---
  1 file changed, 3 insertions(+), 3 deletions(-)
 ```
+
+### 2026-04-20T21:58:51-04:00 — LIVE 11-fix run
+
+**Worktree**: `/var/lupin/.claude/worktrees/phase3-live-20260421T015106Z`
+**Prompt**: 16327 bytes | host: `/tmp/tfe_to_cc_phase3_prompt_20260421T015107Z.md` | container: `/tmp/tfe_to_cc_phase3_prompt_20260421T015107Z.md`
+**Stream**: `/tmp/tfe-to-cc-phase3-stream-20260421T015106Z.jsonl`
+**Changes artifact**: `/tmp/tfe-to-cc-changes-20260421T015106Z.json` (JSON) | `/tmp/tfe-to-cc-changes-20260421T015106Z.md` (MD)
+
+**SDK/CC path confirmation**:
+- apiKeySource: `none`
+- model: `claude-opus-4-7` (requested: `claude-opus-4-7`)
+- effort: `xhigh`
+
+**Outcome**:
+- Exit code: `0`
+- result.subtype: `success`
+- result.is_error: `False`
+- result.num_turns (coordinator): `2`
+- result.duration_ms: `43031`
+- result.total_cost_usd (informational): `6.776622499999998`
+- Raw event count: 255
+- Tool use count: 15
+- Tool breakdown: {'ToolSearch': 1, 'TodoWrite': 3, 'Agent': 11}
+
+**Verdict**: **1 / 11 fixes landed** (vs. SDK path's 0/11 baseline)
+- Parser: primary (tfe-result fence)
+- Validation OK: True
+
+**Per-cluster verdicts**:
+
+```json
+{
+  "clusters": {
+    "C1": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": false,
+      "notes": "Target files absent: no io/test-suite/visual-baselines/ directory and no src/tests/e2e_ui/conftest.py. No test named test_visual_page and no browser_type_launch_args fixture in this worktree. The described Playwright visual regression suite is not present on this branch; additionally recapture requires Chromium/Playwright interactive run which is not available."
+    },
+    "C2": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": false,
+      "notes": "Target file src/cosa/rest/todo_fifo_queue.py does not exist. The entire src/cosa/ directory is absent from this worktree (HEAD 949cf6e v0.1.5) and no .gitmodules wires it in. Cannot edit a file that is not checked out."
+    },
+    "C3": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": false,
+      "notes": "Targets partially missing. test_deep_research_to_presentation.py does not exist on this branch; src/cosa/agents/runtime_argument_expeditor/agent_registry.py does not exist (cosa submodule absent); test_runtime_argument_expeditor.py exists but has test_registry_has_five_agents asserting ==5, not ==9. No assert len(AGENTIC_AGENTS) == 9 anywhere in the tree. Proposal stale relative to branch state."
+    },
+    "C3b": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": false,
+      "notes": "Target file src/tests/unit/test_deep_research_to_presentation.py does not exist in this worktree (HEAD 949cf6e v0.1.5). File exists on other branches per git log but not current HEAD. No test_registry_agent_count anywhere. Likely superseded by C3 or wrong branch."
+    },
+    "C4": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": false,
+      "notes": "Target file src/cosa/agents/notification_proxy/config.py does not exist. The entire src/cosa/ directory is missing \u2014 no .gitmodules, no submodule configured. CoSA submodule must be initialized, or the fix should be applied in the CoSA repo directly."
+    },
+    "C5": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": false,
+      "notes": "Target file src/tests/unit/test_presentation_visual_renderer.py does not exist. No matches for *visual_renderer*, PlaceholderRenderer, or test_placeholder_supported_types anywhere in the worktree. Proposal appears to target code not present on this branch."
+    },
+    "C5b": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": false,
+      "notes": "Target file not found. Globs for *visual_renderer*, *NanoBanana*, *nano_banana*, *presentation* returned zero matches. Grep for NanoBananaRenderer returned zero results. Proposal appears to target a different project/branch."
+    },
+    "C6": {
+      "verdict": "fixed",
+      "commit_sha": "ad923be",
+      "files": [
+        "src/tests/unit/test_runtime_argument_expeditor.py"
+      ],
+      "pytest_passed": true,
+      "notes": "Renamed test_registry_has_five_agents -> test_registry_has_ten_agents and updated assertion from ==5 to ==10 (plus docstring). agent_registry.py smoke test in the CoSA submodule already asserts ==10; per nested-repo rules it was not modified from the parent context. Pytest: 1 passed."
+    },
+    "C8": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": true,
+      "notes": "stop.py is already in the expected restored state: main()'s else branch calls _ask_anything_else unconditionally with timeout_seconds=300, priority=HIGH, title='Continue Session?'. No '# disable temporarily' block present. notifications.js contains no renderHistoryActions function (13606 lines, earlier version; lines 6089-6113 are loadJobInteractions). All 23 TestVoiceBlocking/TestNotifyUserSync tests PASS. The real bugs described appear to live on the live tree outside the worktree."
+    },
+    "C8b": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": true,
+      "notes": "Superseded by C8. Target pattern (# disable temporarily comments + bare emit_json({}) at lines 344-350) does not exist in stop.py (file is only 259 lines; _ask_anything_else branch is already active at lines 249-254). No edits necessary. All 23 TestVoiceBlocking/TestNotifyUserSync tests pass."
+    },
+    "C8c": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": false,
+      "notes": "Function renderHistoryActions does not exist in notifications.js nor anywhere in the worktree. Identifiers canRetry, deleteHistoryJob, .retry-btn are not present. No tests match -k renderHistoryActions (0 collected). A prior tfe commit c009a6d 'fix(tfe): C8' only touched pytest.ini and conftest.py, suggesting the described JS code never existed on this branch."
+    }
+  },
+  "summary": "1/11 fixed"
+}
+```
+
+**Git state in worktree**:
+
+```
+$ git log --oneline origin/main..HEAD
+ad923be fix(tfe): C6 Update stale agent-count assertion from 9 to 10
+
+$ git diff --stat origin/main
+src/tests/unit/test_runtime_argument_expeditor.py | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+```
+
+### 2026-04-20T22:18:55-04:00 — LIVE 11-fix run
+
+**Worktree**: `/var/lupin/.claude/worktrees/phase3-live-20260421T021129Z`
+**Prompt**: 16327 bytes | host: `/tmp/tfe_to_cc_phase3_prompt_20260421T021129Z.md` | container: `/tmp/tfe_to_cc_phase3_prompt_20260421T021129Z.md`
+**Stream**: `/tmp/tfe-to-cc-phase3-stream-20260421T021129Z.jsonl`
+**Changes artifact**: `/tmp/tfe-to-cc-changes-20260421T021129Z.json` (JSON) | `/tmp/tfe-to-cc-changes-20260421T021129Z.md` (MD)
+
+**SDK/CC path confirmation**:
+- apiKeySource: `none`
+- model: `claude-sonnet-4-6` (requested: `claude-sonnet-4-6`)
+- effort: `xhigh`
+
+**Outcome**:
+- Exit code: `0`
+- result.subtype: `success`
+- result.is_error: `False`
+- result.num_turns (coordinator): `2`
+- result.duration_ms: `42263`
+- result.total_cost_usd (informational): `3.951914149999998`
+- Raw event count: 319
+- Tool use count: 16
+- Tool breakdown: {'ToolSearch': 1, 'TodoWrite': 4, 'Agent': 11}
+
+**Verdict**: **4 / 11 fixes landed** (vs. SDK path's 0/11 baseline)
+- Parser: primary (tfe-result fence)
+- Validation OK: False
+- Validation issues:
+    - cluster 'C2': verdict=fixed but commit_sha is missing or not a string
+    - cluster 'C4': verdict=fixed but commit_sha is missing or not a string
+
+**Per-cluster verdicts**:
+
+```json
+{
+  "clusters": {
+    "C1": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": false,
+      "notes": "Neither target path exists in this worktree. No `io/test-suite/visual-baselines/` directory and no `src/tests/e2e_ui/conftest.py` \u2014 visual regression infrastructure is entirely absent. Requires an interactive update-snapshots run with Chromium/Playwright available."
+    },
+    "C2": {
+      "verdict": "fixed",
+      "commit_sha": null,
+      "files": [
+        "/var/lupin/src/cosa/rest/todo_fifo_queue.py"
+      ],
+      "pytest_passed": true,
+      "notes": "PRODUCT_NAMES entry for 'agent router go to test fix expediter resume' already present at line 951 with value 'Test Fix Expediter Resume (resume a stalled TFE job)'. Test passes. Fix was pre-applied; no commit needed."
+    },
+    "C3": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": true,
+      "notes": "Already fixed in this worktree \u2014 test already named `test_registry_has_ten_agents` with `== 10`, all 135 tests pass. Failing test names `test_registry_agent_count` and `test_registry_has_nine_agents` do not exist. `test_deep_research_to_presentation.py` also absent from worktree."
+    },
+    "C3b": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": false,
+      "notes": "Target file `src/tests/unit/test_deep_research_to_presentation.py` does not exist in this worktree. Cannot apply the fix."
+    },
+    "C4": {
+      "verdict": "fixed",
+      "commit_sha": null,
+      "files": [
+        "/var/lupin/src/cosa/agents/notification_proxy/config.py"
+      ],
+      "pytest_passed": true,
+      "notes": "`resume_from` key already present at line 114 with value 'tfe-mock1234::user1'. Test `test_all_agents_profile_covers_all_arg_names` passes. Fix was pre-applied; no commit needed."
+    },
+    "C5": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": false,
+      "notes": "Target file `src/tests/unit/test_presentation_visual_renderer.py` does not exist in the worktree. No references to `PlaceholderRenderer`, `NanoBananaRenderer`, `icon_only`, or `before_after` anywhere in the codebase."
+    },
+    "C5b": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": false,
+      "notes": "Target file `src/tests/unit/test_presentation_visual_renderer.py` does not exist. No `NanoBananaRenderer` anywhere in the codebase. Prerequisite code entirely absent."
+    },
+    "C6": {
+      "verdict": "fixed",
+      "commit_sha": "f042a56",
+      "files": [
+        "src/tests/unit/test_runtime_argument_expeditor.py"
+      ],
+      "pytest_passed": true,
+      "notes": "Test was named `test_registry_has_five_agents` asserting `== 5` (prior TFE partial edit). Renamed to `test_registry_has_ten_agents`, updated docstring and assertion to `== 10`. `agent_registry.py` smoke test already had `== 10`. One file modified and committed."
+    },
+    "C8": {
+      "verdict": "fixed",
+      "commit_sha": "9dfc4b3",
+      "files": [
+        "src/lupin_cli/claude_code/hooks/stop.py"
+      ],
+      "pytest_passed": true,
+      "notes": "Test `TestNotifyUserSync::test_notify_called_with_correct_params` expected `timeout_seconds=300`, `title='Continue Session?'`, `priority=HIGH`. Production stop.py (at /var/lupin) had wrong values (60s, 'Stop hook: Anything else?', MEDIUM). Updated production file to match. `renderHistoryActions` portion was inapplicable \u2014 function not present in notifications.js. All 14 tests pass."
+    },
+    "C8b": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [
+        "src/lupin_cli/claude_code/hooks/stop.py"
+      ],
+      "pytest_passed": true,
+      "notes": "No commented-out `_ask_anything_else` branch or 'disable temporarily' markers exist in stop.py (file is only 259 lines). Else branch at lines 249-254 already correctly calls _ask_anything_else(). 23 tests matched and all passed. Superseded by C8 before this worktree was created."
+    },
+    "C8c": {
+      "verdict": "unclear",
+      "commit_sha": null,
+      "files": [],
+      "pytest_passed": false,
+      "notes": "Function `renderHistoryActions` does not exist in `src/fastapi_app/static/js/notifications.js` (13606 lines). No `canRetry`, `retry-btn`, `delete-btn`, or `deleteHistoryJob` patterns found. Lines 6089-6113 contain `loadJobInteractions`. `pytest -k renderHistoryActions` collects 0 tests. Code described in proposal does not exist in this worktree."
+    }
+  },
+  "summary": "4/11 fixed"
+}
+```
+
+**Git state in worktree**:
+
+```
+$ git log --oneline origin/main..HEAD
+f042a56 fix(tfe): C6 Update stale agent-count assertion from 9 to 10
+
+$ git diff --stat origin/main
+src/tests/unit/test_runtime_argument_expeditor.py | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+```

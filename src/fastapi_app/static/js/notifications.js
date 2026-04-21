@@ -7249,9 +7249,13 @@ class NotificationsUI {
         /**
          * Return true iff this job type supports per-resume model + effort overrides
          * (currently TFE and BFE). Used to gate the inline dropdown UI on stalled cards.
+         *
+         * Matches the snake_case JOB_TYPE class attrs emitted by the backend:
+         *     TestFixExpediterJob.JOB_TYPE = "test_fix_expediter"
+         *     BugFixExpediterJob.JOB_TYPE  = "bug_fix_expediter"
          */
         const agentType = job.agent_type || '';
-        return agentType.includes( 'TestFixExpediter' ) || agentType.includes( 'BugFixExpediter' );
+        return agentType === 'test_fix_expediter' || agentType === 'bug_fix_expediter';
     }
 
     renderResumeOverrideControls( jobId ) {

@@ -83,21 +83,29 @@ class TestIsResumableWithOverrides:
     def test_tfe_agent_returns_true( self, logged_in_page ):
         _nav_notifications( logged_in_page )
         r = logged_in_page.evaluate(
-            "() => window.notificationsUI.isResumableWithOverrides( { agent_type: 'TestFixExpediterJob' } )"
+            "() => window.notificationsUI.isResumableWithOverrides( { agent_type: 'test_fix_expediter' } )"
         )
         assert r is True
 
     def test_bfe_agent_returns_true( self, logged_in_page ):
         _nav_notifications( logged_in_page )
         r = logged_in_page.evaluate(
-            "() => window.notificationsUI.isResumableWithOverrides( { agent_type: 'BugFixExpediterJob' } )"
+            "() => window.notificationsUI.isResumableWithOverrides( { agent_type: 'bug_fix_expediter' } )"
         )
         assert r is True
 
     def test_other_agent_returns_false( self, logged_in_page ):
         _nav_notifications( logged_in_page )
         r = logged_in_page.evaluate(
-            "() => window.notificationsUI.isResumableWithOverrides( { agent_type: 'DeepResearchJob' } )"
+            "() => window.notificationsUI.isResumableWithOverrides( { agent_type: 'deep_research' } )"
+        )
+        assert r is False
+
+    def test_camelcase_agent_returns_false( self, logged_in_page ):
+        """Regression guard: JOB_TYPE is snake_case, not CamelCase."""
+        _nav_notifications( logged_in_page )
+        r = logged_in_page.evaluate(
+            "() => window.notificationsUI.isResumableWithOverrides( { agent_type: 'TestFixExpediterJob' } )"
         )
         assert r is False
 
