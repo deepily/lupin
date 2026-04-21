@@ -239,10 +239,10 @@ def _ask_anything_else( session_id, last_assistant_message=None, cwd=None ):
         request = NotificationRequest(
             message                  = message,
             response_type            = ResponseType.YES_NO,
-            priority                 = NotificationPriority.MEDIUM,
-            timeout_seconds          = 60,
+            priority                 = NotificationPriority.HIGH,
+            timeout_seconds          = 300,
             response_default         = "no",
-            title                    = "Stop hook: Anything else?",
+            title                    = "Continue Session?",
             sender_id                = sender_id,
             abstract                 = abstract,
             display_qualifier_widget = True
