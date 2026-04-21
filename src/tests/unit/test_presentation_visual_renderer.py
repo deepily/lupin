@@ -77,8 +77,7 @@ class TestPlaceholderRenderer:
 
     def test_placeholder_supported_types( self ):
         assert "screenshot" in PlaceholderRenderer.SUPPORTED_TYPES
-        assert "icon_only" in PlaceholderRenderer.SUPPORTED_TYPES
-        assert "before_after" in PlaceholderRenderer.SUPPORTED_TYPES
+        assert PlaceholderRenderer.SUPPORTED_TYPES == [ "screenshot" ]
 
     def test_placeholder_none_description( self ):
         renderer = PlaceholderRenderer()

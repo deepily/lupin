@@ -22,6 +22,7 @@ import pytest
 from unittest.mock import patch, MagicMock, call
 
 from lupin_cli.claude_code.hooks.stop import main, _summarize_task, _should_ask_anything_else
+from lupin_cli.notifications.notification_models import NotificationPriority
 from cosa.utils.notification_utils import extract_qualifier_comment
 
 
@@ -700,7 +701,7 @@ class TestNotifyUserSync:
     def test_notify_called_with_correct_params( self, mock_notify, mock_sender, mock_read,
                                                  mock_log, mock_session, mock_drain, mock_emit,
                                                  mock_reset, mock_summarize, mock_resolve, mock_gate ):
-        """Verify notify_user_sync is called with 5min timeout, default 'no', display_qualifier_widget=True."""
+        """Verify notify_user_sync is called with MEDIUM priority, 60s timeout, 'Stop hook: Anything else?' title."""
         mock_response = MagicMock()
         mock_response.response_value = "no"
         mock_notify.return_value = mock_response
@@ -711,10 +712,11 @@ class TestNotifyUserSync:
         # Verify the NotificationRequest was built correctly
         call_args = mock_notify.call_args
         request = call_args[ 0 ][ 0 ]  # First positional arg
-        assert request.timeout_seconds == 300
+        assert request.priority == NotificationPriority.MEDIUM
+        assert request.timeout_seconds == 60
         assert request.response_default == "no"
         assert request.display_qualifier_widget is True
-        assert request.title == "Continue Session?"
+        assert request.title == "Stop hook: Anything else?"
 
     @patch( "lupin_cli.claude_code.hooks.stop._should_ask_anything_else", return_value=True )
     @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )

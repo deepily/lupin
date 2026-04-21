@@ -239,10 +239,10 @@ def _ask_anything_else( session_id, last_assistant_message=None, cwd=None ):
         request = NotificationRequest(
             message                  = message,
             response_type            = ResponseType.YES_NO,
-            priority                 = NotificationPriority.HIGH,
-            timeout_seconds          = 300,
+            priority                 = NotificationPriority.MEDIUM,
+            timeout_seconds          = 60,
             response_default         = "no",
-            title                    = "Continue Session?",
+            title                    = "Stop hook: Anything else?",
             sender_id                = sender_id,
             abstract                 = abstract,
             display_qualifier_widget = True
@@ -340,7 +340,7 @@ def main():
         # No voice input → Phase 2: ask user "Anything else?" via notification
         reset_stop_block_count( session_id )
         last_assistant_message = payload.get( "last_assistant_message" )
-        result = _ask_anything_else( session_id, last_assistant_message )
+        result = _ask_anything_else( session_id, last_assistant_message, cwd=payload.get( "cwd" ) )
         emit_json( result )
 
 if __name__ == "__main__":

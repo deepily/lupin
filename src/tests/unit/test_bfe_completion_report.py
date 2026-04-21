@@ -133,7 +133,7 @@ class TestBfeCompletionReport:
         bfe = _make_bfe_job()
 
         # Fix failed
-        mock_fix_result = MagicMock( success=False, applied=False, pr_url=None )
+        mock_fix_result = MagicMock( success=False, applied=False, pr_url=None, attempts=0, last_stderr=None )
         mock_fix_result.model_dump.return_value = {}
         mock_diagnosis = MagicMock( root_cause="Unknown error" )
         mock_diagnosis.model_dump.return_value = {}

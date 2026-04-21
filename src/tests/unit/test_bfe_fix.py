@@ -164,6 +164,27 @@ class TestFixResult:
         result = FixResult( applied=False, success=False, details="Safety limit: timeout exceeded" )
         assert "Safety limit" in result.details
 
+    def test_fix_result_last_stderr_fields_default_gracefully( self ):
+        """last_stderr + attempts default to None/0 so BFE's abstract guard
+        `if not fix_applied and fix_result.last_stderr` evaluates cleanly on
+        the 'no fix selected' branch (job.py:322-323)."""
+        minimal = FixResult( applied=False, success=False, details="No fix selected" )
+        assert minimal.attempts    == 0
+        assert minimal.last_stderr is None
+
+    def test_fix_result_last_stderr_populated_on_auto_reject( self ):
+        """Simulates what shared/fix_executor.py writes when max_fix_attempts
+        is exhausted and the fix is auto-rejected."""
+        rejected = FixResult(
+            applied     = False,
+            success     = False,
+            details     = "Auto-rejected after 2 verification attempt(s)",
+            attempts    = 2,
+            last_stderr = "FAILED test_foo — AssertionError: expected 9, got 10",
+        )
+        assert rejected.attempts    == 2
+        assert "AssertionError" in rejected.last_stderr
+
 
 # =============================================================================
 # 4. Tester Verification (4 tests, mock sdk_query + run_pytest)

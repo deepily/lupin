@@ -1,5 +1,52 @@
 # Lupin Project History
 
+### 2026.04.21 - Session 9934d315 | TFE telemetry demotion + stop.py rebaseline + BFE stderr parity
+
+**Context**: Overnight `tfe-10b2963e` ran 17 fixes, all failed verification, and triggered 3 blocking operator-intervention prompts ("Fix Verification Failed after 2 attempt(s)") because `shared/fix_executor.py` escalated via `present_choices()` after `max_fix_attempts`. The user wanted those demoted to fire-and-forget telemetry, wanted their intentional stop.py tweaks locked into unit-test baseline so TFE can't revert them, and wanted stderr tails surfaced in end-of-run reports without a worktree dig. Second-phase ask: mirror the parity change in BFE.
+
+#### Checkpoint | 2026.04.21 13:15 | Part 1 + Part 2 code changes (parent Lupin only)
+
+**Part 1 — TFE/shared telemetry + stop.py rebaseline** (4 parent-Lupin files; 3 CoSA submodule files deferred to user's CoSA session):
+
+- `src/lupin_cli/claude_code/hooks/stop.py` — priority MEDIUM, timeout 60s, title "Stop hook: Anything else?" (mirrors user's 4b531fd); `_ask_anything_else` caller now passes `cwd=payload.get("cwd")`.
+- `src/tests/unit/test_stop_hook.py` — `TestNotifyUserSync::test_notify_called_with_correct_params` asserts all three rebaselined fields; `NotificationPriority` imported from `lupin_cli.notifications.notification_models`.
+- `src/tests/unit/test_deep_research_to_presentation.py:386` — stale `== 9` → `== 10` (TFE C3 straggler).
+- `src/tests/unit/test_presentation_visual_renderer.py:78-80` — PlaceholderRenderer SUPPORTED_TYPES asserts only `["screenshot"]` (TFE C5 straggler).
+
+**Part 1 — CoSA submodule changes, deferred to user's CoSA session**:
+
+- `src/cosa/agents/shared/fix_executor.py` — replaced blocking `present_choices()` after `max_fix_attempts` with fire-and-forget `notify(priority="low")` + auto-reject `FixResult`. New `_tail_lines()` helper for stderr distillation.
+- `src/cosa/agents/bug_fix_expediter/state.py` — `FixResult` grows `attempts: int = 0` and `last_stderr: Optional[str] = None`.
+- `src/cosa/agents/test_fix_expediter/job.py` — end-of-run abstract appends "Failed fix diagnostics" section with top-5 stderr tails.
+
+**Part 2 — BFE stderr parity** (2 parent-Lupin test files; 1 CoSA submodule file deferred):
+
+- `src/cosa/agents/bug_fix_expediter/job.py` — mirrors TFE's Failed-fix-diagnostics block (no top-N cap, single-fix work unit). **Deferred to CoSA session.**
+- `src/tests/unit/test_bfe_fix.py` — 2 new `TestFixResult` tests locking `attempts`/`last_stderr` defaults + auto-reject shape.
+- `src/tests/unit/test_bfe_completion_report.py` — 3 `MagicMock` fixtures extended with `attempts=0, last_stderr=None` to fix `MagicMock > 0` TypeError (fix-at-source per memory).
+
+**Design artifacts**:
+
+- `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/2026.04.21-bfe-parity-with-tfe.md` — verification matrix showing BFE already had `worktree_scope` + safety guard + Phase 3+5 wrapping (Session Bug 9, 2026-04-16). Only remaining gap was the stderr section Part 2 closed.
+
+**Verification**:
+
+- **Unit suite**: 3544 passed, 1 xfailed (`test_ini_key_naming.py:121` pre-existing splainer gap), 0 failed. Runtime ~2m14s.
+- **Integration suite**: started then killed — 44 auth 401 failures unrelated to my changes (stale test-container JWT/key drift). Resolved by test-container bounce in Phase 3 below.
+
+**Phase 3 operational sequence** (user go-ahead 12:05 EDT, Claude executed end-to-end per `feedback_approved_sequences_execute_end_to_end`):
+
+1. `src/scripts/preflight-test-container.sh` — all probes green (git mount, worktree add/remove, credentials, gh CLI).
+2. `docker rm -f lupin-rest-test` + `docker compose up -d lupin-rest-test` — healthy, HTTP 200 on :8000.
+3. `/schedule-tests all :8000` T+2min — job **`ts-f55d172d::50c73ba7-36dd-4eaf-a7e2-63256252c84f`**, queue position 1, started 12:08:52 EDT.
+
+**Memory added**: `feedback_approved_sequences_execute_end_to_end.md` — one go-ahead covers the declared sequence; don't re-ask at each sub-step.
+
+**Files**: stop.py, test_stop_hook.py, test_bfe_fix.py, test_bfe_completion_report.py, test_deep_research_to_presentation.py, test_presentation_visual_renderer.py, 2026.04.21-bfe-parity-with-tfe.md (+ manifest + history)
+**Commit**: 3902f81
+
+---
+
 ### 2026.04.20 - Session d8831785 | TFE-to-CC Opus 4.7 + thinking-effort parameterization (Phases A–G + Playwright verify)
 
 **Status**: Matrix runner shipped; user-driven A/B/C/D sweep pending CoSA commit + test-container bounce.
