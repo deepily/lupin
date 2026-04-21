@@ -6825,10 +6825,11 @@ class NotificationsUI {
         const cacheHitBadge = job.is_cache_hit ? '<span class="cache-hit-badge" title="Result from cache">⚡ Cached</span>' : '';
         const timestamp = this.formatJobTimestamp( job.timestamp );
         const jobId = job.job_id || `job-${Date.now()}`;
-        // Display-only: BFE jobs carry scoped IDs like "bfe-XXXXXXXX::<uuid>".
-        // Truncate at :: for the badge so the row layout stays tight; the full
-        // jobId is still used for DOM lookups, tooltip, and clipboard copy.
-        const jobIdDisplay = jobId.split( "::" )[ 0 ];
+        // Display-only: show the first 8 chars + "..." in the header chip so
+        // the row layout stays tight. The full jobId is still stored in
+        // data-job-id, the tooltip, clipboard copy, and the expanded details
+        // block — every API call and DOM lookup uses it intact.
+        const jobIdDisplay = jobId.length > 8 ? jobId.substring( 0, 8 ) + "..." : jobId;
         // History cards get a `history-` ID prefix so their DOM ids cannot
         // collide with the same job rendered in a live queue (Done, etc.).
         // All external lookups (websocket handlers, interaction appenders)
