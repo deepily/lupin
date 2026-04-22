@@ -6,7 +6,7 @@
 
 `FastAPI` | `Voice I/O` | `PEFT/LoRA` | `LanceDB` | `Claude Agent SDK` | `Bayesian Trust` | `MCP Protocol`
 
-Current version: **v0.1.5** | License: [Apache 2.0](LICENSE)
+Current version: **v0.1.6** | License: [Apache 2.0](LICENSE)
 
 ---
 
@@ -105,8 +105,18 @@ Voice flows end-to-end: browser microphone through agent execution into Claude C
 | DeepResearchAgent | Background research with automatic report generation |
 | PodcastGeneratorAgent | Convert documents to audio podcast format |
 | ResearchToPodcastAgent | Chained research-to-podcast pipeline |
+| PresentationGeneratorAgent | Multi-phase pipeline: outline → elaborate → render → deliver (Phases 1-8) |
+| ResearchToPresentationAgent | Chained research-to-presentation pipeline |
 | ClaudeCodeAgent | Claude Agent SDK tasks (BOUNDED or INTERACTIVE mode) |
 | SWETeamAgent | 4-phase dev team: Lead, Coder, Tester, Trust Proxy |
+
+### Auto-recovery agents (self-healing via Claude Agent SDK + worktree isolation)
+
+| Agent | Purpose |
+|-------|---------|
+| BugFixExpediter (BFE) | Dead-job auto-recovery: diagnose → propose → fix → git → retry |
+| TestFixExpediter (TFE) | Test-failure auto-fix: cluster → diagnose → propose → fix → git → rerun |
+| TestSuiteJob | Scheduled test-suite runs via CJ Flow with watchdog-triggered TFE handoff |
 
 ### Infrastructure agents
 
@@ -171,16 +181,17 @@ The first decision proxy for AI agents with academic-grade statistical rigor:
 - **Morning coffee batch review**: Non-urgent decisions queued for human review at your convenience
 - **Ratification API**: Post-hoc approval with trust feedback loop
 
-### Battle-tested -- 2,075+ automated tests
+### Battle-tested -- 4,180+ automated tests
 
 | Suite | Count | Coverage |
 |-------|-------|----------|
-| Unit tests | 2,075+ | Core logic, trust engine, hooks, credentials, prediction engine |
+| Unit tests | 3,549+ | Core logic, trust engine, hooks, credentials, prediction engine, agentic orchestrators |
 | WebSocket tests | 50 | Connection, auth, event routing, session management |
-| Integration tests | 136+ | End-to-end API workflows with hot-swap test infrastructure |
+| Integration tests | 228+ | End-to-end API workflows against dedicated dual-container test server |
+| E2E UI (Playwright) | 357+ | Full browser-driven flows including 12-page visual regression |
 | Interactive proxy tests | 12 scenarios | Calculator, CRUD, and Expediter agents via auto-proxy |
 
-Built and maintained by a single engineer. Every PR must pass all three tiers before merge.
+Built and maintained by a single engineer. Every PR must pass all five tiers before merge.
 
 ---
 
@@ -198,9 +209,10 @@ src/scripts/run-fastapi-lupin.sh          # FastAPI on port 7999
 src/scripts/run-lupin-gui.sh              # Browser GUI client
 
 # Run tests
-pytest src/tests/unit/                     # 2,075+ unit tests
+pytest src/tests/unit/                     # 3,549+ unit tests
 src/scripts/run-websocket-smoke-tests.sh   # 50 WebSocket tests
-src/tests/run-integration-tests.sh -v      # Integration gate
+src/tests/run-integration-tests.sh --bg -v # Integration gate (dual-container, :8000)
+src/scripts/run-e2e-ui-tests.sh --bg -v    # 357+ Playwright tests incl. visual regression
 
 # Install cosa-voice MCP server (for Claude Code voice I/O)
 claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.py
@@ -246,6 +258,8 @@ Over 130 dated planning and research documents in [`src/rnd/`](src/rnd/README.md
 
 ## Version history
 
+**v0.1.6** (April 2026) — Presentation Generator agent (multi-phase outline → elaborate → render → deliver, 8 phases). CJ Flow persistence: PostgreSQL write-through for todo/running/done queues with startup recovery, timed execution + monopolize + pause flags, and Job History UI (5th collapsible section with time-window filter). Auto-recovery agent family: Bug Fix Expediter and Test Fix Expediter with Claude Agent SDK worktree isolation and Resume-with-overrides UI. Playwright E2E suite expanded from ~100 to 357 tests across 8 phases, including 12-page visual regression with deterministic font rendering. Dual-container test architecture (`lupin-rest-test` on `:8000`). `set_session_topic()` MCP tool for stop-hook context. Graceful STT degradation (server starts without GPU). Claude Agent SDK config migration to INI keys. 3,549+ unit tests.
+
 **v0.1.5** (March 2026) — Voice-first human-in-the-loop. Full voice loop inside Claude Code via 6 system hooks + cosa-voice MCP. Trust-aware Decision Proxy with Universal Prediction Engine, Bayesian Beta-Bernoulli trust, Thompson Sampling, and conformal prediction. Credential consolidation. Stable session identity architecture. 2,075+ tests.
 
 **v0.1.4** — cosa-voice MCP server, SWE Team Agent, Calculator Agent, CRUD Agent, Notification Proxy, 881 to 1170 unit tests, 39,871 training examples, local GPU embeddings
@@ -258,7 +272,7 @@ Over 130 dated planning and research documents in [`src/rnd/`](src/rnd/README.md
 
 ## Project status
 
-Lupin is an active research platform at v0.1.5. Developed by a solo engineer, it combines voice-first agent orchestration, PEFT fine-tuning, and Bayesian decision theory into a production-grade stack backed by 2,075+ automated tests, full CI discipline, and a FastAPI + PostgreSQL + LanceDB architecture. Through a series of ambitious refactorings made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology, Lupin has evolved from single-user PoC sketches into a multi-user platform entering GCP testing.
+Lupin is an active research platform at v0.1.6. Developed by a solo engineer, it combines voice-first agent orchestration, PEFT fine-tuning, and Bayesian decision theory into a production-grade stack backed by 4,180+ automated tests across five tiers (unit, WebSocket, integration, Playwright E2E, interactive proxy), full CI discipline, and a FastAPI + PostgreSQL + LanceDB architecture. Through a series of ambitious refactorings made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology, Lupin has evolved from single-user PoC sketches into a multi-user platform entering GCP testing.
 
 ---
 
