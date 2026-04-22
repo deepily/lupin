@@ -96,9 +96,9 @@
 
 ### Completed
 
-- [x] **DRY refactor: extract `_emit_notification_added` helper on NotificationFifoQueue** → commit: 8a15ffb | By: 9b840935 | 2026-04-22
+- [x] **DRY refactor: extract `_emit_notification_added` helper on NotificationFifoQueue** → commit: cd4e5e6 | By: 9b840935 | 2026-04-22
   - Collapsed ~44 lines of near-identical emission code (push lines 244-267 + push_notification lines 343-365) into a single shared helper. Both call sites now `self._emit_notification_added(notification)`. Unified debug-print strings (dropped the "priority" qualifier). Verified no behavior change via CoSA unit 5/5, Lupin integration 3/3, Lupin notification unit 27/27, module smoke (priority + mark_played paths).
-- [x] **NotificationFifoQueue `_emit_queue_update` 500 + Chrome `/played` silence** → commit: 8a15ffb | By: 9b840935 | 2026-04-22
+- [x] **NotificationFifoQueue `_emit_queue_update` 500 + Chrome `/played` silence** → commit: cd4e5e6 | By: 9b840935 | 2026-04-22
   - **Fix 1 (CoSA, user commits from CoSA session)**: added `_emit_queue_update()` method to `NotificationFifoQueue` at `src/cosa/rest/notification_fifo_queue.py`. Broadcasts `notification_queue_update` with `queue_name`, `value`, `unplayed_count`. Silent no-op when `websocket_mgr=None` or `emit_enabled=False`. 5 new unit tests in `src/cosa/tests/unit/rest/test_notification_fifo_queue.py` (all pass). Module smoke test still green.
   - **Fix 2 (Lupin)**: `playNotificationAudio` in `src/fastapi_app/static/js/notifications.js:10509` now fires fire-and-forget `POST /api/notifications/{id}/played` after successful playback. `notifications.html` cache-bust bumped to `v=20260422a`. 3 new in-process TestClient regression tests in `src/tests/integration/test_notifications_integration.py::TestMarkPlayedEndpoint` (all pass).
   - **Verification**: CoSA unit 5/5, Lupin integration 3/3, Lupin notification units 27/27, module smoke OK, live probe on :7999 confirmed endpoint reachable + updated JS served. User manually confirmed Chrome path works end-to-end after browser restart.

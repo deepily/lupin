@@ -17,7 +17,7 @@
   - `src/cosa/rest/notification_fifo_queue.py` (CoSA submodule — user commits separately) — new `_emit_queue_update` method
   - `src/cosa/tests/unit/rest/test_notification_fifo_queue.py` (new — CoSA submodule, user commits separately) — 5 regression tests
 - **Test**: CoSA unit 5/5 PASS, module smoke test PASS, Lupin-side notification unit tests 27/27 PASS
-- **Commit (Lupin)**: 8a15ffb (this commit; combined with Fix 2 and Fix 3)
+- **Commit (Lupin)**: cd4e5e6 (this commit; combined with Fix 2 and Fix 3)
 - **Commit (CoSA)**: separate — user commits from CoSA session
 
 ##### Fix 2: Chrome — wire `playNotificationAudio` to `POST /played` after playback
@@ -29,7 +29,7 @@
   - `src/fastapi_app/static/html/notifications.html` — cache-bust `v=20260421c` → `v=20260422a`
   - `src/tests/integration/test_notifications_integration.py` — new `TestMarkPlayedEndpoint` class with 3 in-process TestClient tests (200 on happy path, emission payload assertion, 404 on unknown id)
 - **Test**: Lupin integration 3/3 PASS. Live verified on `:7999`: `/health` returns 200, updated `notifications.js` served with cache-bust (new `mark-played POST failed` string confirmed in response body), `/played` endpoint reachable (clean 404 on bogus id — not the 500 the bug previously threw). **User manually confirmed end-to-end** after browser restart cleared a stale-keepalive socket cluster.
-- **Commit (Lupin)**: 8a15ffb (this commit; combined with Fix 2 and Fix 3)
+- **Commit (Lupin)**: cd4e5e6 (this commit; combined with Fix 2 and Fix 3)
 
 ##### Fix 3: DRY refactor — extract `_emit_notification_added()` helper
 - **Source**: follow-up to Fix 1 investigation; surfaced duplicated emission block across `push()` (lines 244-267) and `push_notification()` high/urgent branch (lines 343-365). ~22 lines of near-identical `event_data` construction + `emit_to_user_sync` / `emit` / `emit_to_session_sync` fan-out in each, differing only in debug-print strings ("notification" vs "priority notification").
@@ -38,7 +38,7 @@
 - **Files**:
   - `src/cosa/rest/notification_fifo_queue.py` (CoSA submodule, user commits separately) — new `_emit_notification_added` method; both original blocks replaced with calls to it
 - **Test**: CoSA unit 5/5 PASS (my `_emit_queue_update` regression tests still green — they exercise `push_notification` which is the high/urgent path; smoke test exercises both normal and high paths), Lupin integration 3/3 PASS, Lupin notification unit 27/27 PASS, module smoke test PASS (priority insertion + mark_played both verified). No behavior change intended or observed.
-- **Commit (Lupin)**: 8a15ffb (this commit; combined with Fix 2 and Fix 3)
+- **Commit (Lupin)**: cd4e5e6 (this commit; combined with Fix 2 and Fix 3)
 - **Commit (CoSA)**: separate — bundled with Fix 1's CoSA commit or as its own commit at user's discretion
 
 ### Session Summary
