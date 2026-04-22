@@ -6096,20 +6096,26 @@ class NotificationsUI {
          *     - job has id_hash and status fields
          *
          * Ensures:
+         *     - Delete button always shown (invokes deleteHistoryJob)
          *     - Retry button shown only for failed/interrupted jobs
-         *     - Delete button always shown
          *     - Buttons use stopPropagation to prevent card toggle
          */
         const canRetry     = [ 'failed', 'interrupted' ].includes( job.status );
         const questionSafe = ( job.question_text || '' ).replace( /'/g, "\\'" ).replace( /"/g, '&quot;' ).substring( 0, 100 );
 
-        if ( !canRetry ) return '';
+        const retryBtn = canRetry
+            ? `<button class="history-action-btn retry-btn"
+                    onclick="event.stopPropagation(); window.notificationsUI.retryHistoryJob( '${job.id_hash}', '${questionSafe}' )"
+                    >↻ Retry</button>`
+            : '';
+
+        const deleteBtn = `<button class="history-action-btn delete-btn"
+                    onclick="event.stopPropagation(); window.notificationsUI.deleteHistoryJob( '${job.id_hash}' )"
+                    >🗑 Delete</button>`;
 
         return `
             <div class="history-action-buttons">
-                <button class="history-action-btn retry-btn"
-                    onclick="event.stopPropagation(); window.notificationsUI.retryHistoryJob( '${job.id_hash}', '${questionSafe}' )"
-                    >↻ Retry</button>
+                ${retryBtn}${deleteBtn}
             </div>
         `;
     }

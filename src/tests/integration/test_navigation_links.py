@@ -9,10 +9,12 @@ Tests against live FastAPI server (requires server running on port 7999).
 Generated on: 2026-02-21
 """
 
+import os
+
 import pytest
 import requests
 
-BASE_URL = "http://localhost:7999"
+BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 
 # ============================================================================

@@ -1,6 +1,43 @@
 # TODO
 
-Last updated: 2026-04-21 21:00 EDT (Session f9838819 close — CJ Flow async + multi-lane design review serialized for v0.1.7; deferred to post-v0.1.6 ship)
+Last updated: 2026-04-21 22:30 EDT (Session 9934d315 close — massive test-health cleanup: auth.js + 12 integration BASE_URL hardcodes fixed; unit 3549 / WS 50 / integration 226 all green except pre-existing env/fixture bugs)
+
+---
+
+## 🌅 NEXT-MORNING BRIEFING — 2026-04-22
+
+### TL;DR
+
+Session 9934d315 (2026-04-21 afternoon/evening) cleared a deep stack of silent test-health bugs that had been breaking dual-container mode for weeks. Two root causes, two tiny fixes, massive unlock:
+
+1. **`auth.js` hardcoded `http://localhost:7999`** → every auth-dependent E2E test under dual-container mode (browser served by :8000) was POSTing credentials to :7999. Session cookies went to the wrong server, page loads on :8000 had no auth, screenshots captured the login redirect instead of the target page. Fixed to `${window.location.origin}`.
+2. **12 integration test files hardcoded `BASE_URL = "http://localhost:7999"`** (copy-paste propagation) → every integration test was silently hitting the dev server. Fixed all 12 to use `os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )` to match the conftest pattern.
+
+Plus the smaller straggler cleanup (Phase A.1-A.3): WS cred var rename, smoke/integration timeout bumps in `test_suite/job.py`, and `notifications.js` `renderHistoryActions` surgery.
+
+### Pending work for 2026-04-22
+
+**Block 1 — 6 remaining integration failures** (triaged, none are routing bugs):
+
+- **5 × `test_lancedb_gcs_integration.py::TestLanceDBGCSIntegration::*`** — all `RuntimeError: CUDA out of memory` in `ProseEmbeddingEngine` (nomic-bert-2048 embedding model). GPU pressure from user's other workloads. **USER-RUN territory** per `feedback_never_grab_gpu`. Options: (a) force these tests onto CPU, (b) skip when CUDA unavailable via `pytest.mark.skipif`, (c) defer to a quieter GPU window.
+- **1 × `test_conftest_clean_test_db.py::test_clean_test_db_removes_prior_test_users`** — `psycopg2.errors.DatatypeMismatch: column "id" is of type uuid but expression is of type text`. Pre-existing fixture bug in the meta-test. Fix: cast `gen_random_uuid()` explicitly, or use Python `uuid.uuid4()` + server-side generation.
+
+**Block 2 — 2 remaining E2E failures** (separate root causes, NOT auth.js):
+
+- **`test_cj_flow_pause_schedule.py::TestPauseResumeButtonClick::test_click_pause_button_updates_card`** — Playwright click-retry log shows `<div class="queue-category">`, `<div class="queue-header">`, and `<a class="lupin-nav-active">` all intercepting pointer events on the pause button. CSS z-index / pointer-events layering bug. Possibly related to parallel session b802e633's commit `82243e4` ("Fix bulk-delete 404 + truncate job-id chip") which touched `notifications.js`.
+- **`test_job_history_ui.py::TestJobHistoryEdgeCases::test_admin_can_manage_other_users_jobs`** — Admin user tries to retry another user's failed job via `.retry-btn` click; Playwright times out 30s waiting for `/retry` response. Either retry endpoint is broken for admin→other-user path, the button click doesn't fire the request, or the endpoint auth boundary is mis-configured.
+
+**Block 3 — uncommitted work from this session** (session-end will stage what's mine):
+
+- Parent Lupin: `auth.js`, 12 integration test files, `run-websocket-smoke-tests.sh`, `notifications.js` (from Phase C earlier), `fifo_queue.py` (wait — that's CoSA), plus 5 regenerated visual baseline PNGs under `io/test-suite/visual-baselines/`, plus `test_fifo_queue_notify_abstract.py` new test file (Phase 3 Item A).
+- CoSA submodule (user commits separately from CoSA session): `shared/fix_executor.py`, `bug_fix_expediter/state.py`, `bug_fix_expediter/job.py`, `test_fix_expediter/job.py`, `test_suite/job.py`, `rest/fifo_queue.py`.
+
+### Today's landings (reference)
+
+- Part 1 (stop.py rebaseline + TFE telemetry demotion + stderr capture) + Part 2 (BFE parity) checkpoint committed as `f533c08` at 13:20 EDT.
+- Straggler Phase A+C completed earlier in afternoon.
+- auth.js + integration BASE_URL bulk fix completed evening.
+- Test-health final: unit **3549** / WS **50/50** / integration **226 passed, 6 failed** (all 6 pre-existing env/fixture bugs) / E2E visual **12/12** / E2E full **355 passed, 2 failed** (pause-button + admin retry, both separate bugs).
 
 ---
 

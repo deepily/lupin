@@ -82,7 +82,7 @@ REQUIREMENTS:
     - FastAPI server running on http://localhost:7999
     - Python 3.7+ with asyncio, websockets, httpx packages
     - WebSocket endpoints /ws/queue/ and /ws/audio/ accessible
-    - LUPIN_TEST_EMAIL and LUPIN_TEST_PASSWORD environment variables set
+    - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD environment variables set
 
 FILES:
     Configuration: $CONFIG_FILE
@@ -165,16 +165,16 @@ except Exception:
 check_test_credentials() {
     log_info "Checking test credentials..."
 
-    if [ -z "$LUPIN_TEST_EMAIL" ] || [ -z "$LUPIN_TEST_PASSWORD" ]; then
+    if [ -z "$LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" ] || [ -z "$LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" ]; then
         log_error "Test credentials not set!"
         log_info "WebSocket tests require JWT authentication."
         log_info "Set these environment variables:"
-        log_info "  export LUPIN_TEST_EMAIL='your@email.com'"
-        log_info "  export LUPIN_TEST_PASSWORD='yourpassword'"
+        log_info "  export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL='your@email.com'"
+        log_info "  export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD='yourpassword'"
         return 1
     fi
 
-    log_success "Test credentials configured (LUPIN_TEST_EMAIL=$LUPIN_TEST_EMAIL)"
+    log_success "Test credentials configured (LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL=$LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL)"
     return 0
 }
 
@@ -256,7 +256,7 @@ run_smoke_tests() {
     # Set up Python path for proper module imports
     export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
 
-    # JWT authentication is used - credentials from LUPIN_TEST_EMAIL/PASSWORD env vars
+    # JWT authentication is used - credentials from LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/PASSWORD env vars
     # No longer using AUTH_MODE=mock as server runs in JWT mode
 
     # Run the test suite as a module from project root

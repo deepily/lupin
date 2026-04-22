@@ -8,6 +8,8 @@ against live server.
 Phase 6 additions (Session 372): Data-driven tests with seeded job_history rows.
 """
 
+import os
+
 import pytest
 import requests
 from datetime import datetime, timedelta, timezone
@@ -17,7 +19,7 @@ from tests.integration.conftest import get_auth_header
 
 
 # Test server configuration
-BASE_URL = "http://localhost:7999"
+BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 
 class TestJobHistoryApi:

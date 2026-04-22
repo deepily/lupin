@@ -128,6 +128,33 @@
 **Files**: stop.py, test_stop_hook.py, test_bfe_fix.py, test_bfe_completion_report.py, test_deep_research_to_presentation.py, test_presentation_visual_renderer.py, 2026.04.21-bfe-parity-with-tfe.md (+ manifest + history)
 **Commit**: 3902f81
 
+#### Afternoon / Evening | Part 3 abstract propagation + straggler remediation + two large test-health unblocks
+
+**Part 3 — job-complete abstract propagation** (CoSA):
+- `src/cosa/rest/fifo_queue.py:563-627` — `_notify()` auto-reads `job.artifacts["abstract"]` when no explicit override given; passes through to `AsyncNotificationRequest`. Closes the gap where rich report abstracts were only landing on the secondary progress row, not the primary task-card.
+- `src/tests/unit/test_fifo_queue_notify_abstract.py` (new) — 5 tests covering auto-read, explicit override, missing-key, no-attr, no-job paths.
+
+**Straggler Phase A** (1-line fixes):
+- `src/scripts/run-websocket-smoke-tests.sh` — renamed 6 occurrences of legacy `LUPIN_TEST_EMAIL/PASSWORD` → canonical `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/PASSWORD` (matches Session 267 unification).
+- `src/cosa/agents/test_suite/job.py:67,71` — smoke timeout 1800s→3600s, integration timeout 1200s→2000s (per TFE Fix 4 + Fix 9 proposals from `tfe-e830cd75` report).
+
+**Straggler Phase C** — `src/fastapi_app/static/js/notifications.js` — `renderHistoryActions()` restructured: removed `if (!canRetry) return ''` early-return, always emits `.delete-btn`, `.retry-btn` now conditional on `canRetry` only. Matches the docstring's "Delete button always shown" contract.
+
+**Two test-health unblocks (both silent wrong-server-routing bugs)**:
+
+- `src/fastapi_app/static/html/auth/js/auth.js:138` — hardcoded `http://localhost:7999${endpoint}` → `${window.location.origin}${endpoint}`. Every auth form served by the test container was silently POSTing to the dev server. Broke every auth-dependent E2E under dual-container mode. Diagnosed via Playwright `--tracing=on`; one-line fix.
+- 12 integration test files + `conftest.py` had hardcoded `BASE_URL = "http://localhost:7999"` — copy-paste propagation across `test_admin_users.py`, `test_auth_integration.py`, `test_job_history_api.py`, `test_job_queue_progressive_disclosure.py`, `test_navigation_links.py`, `test_notification_auth.py`, `test_prediction_engine_e2e.py`, `test_proxy_ui_content.py`, `test_queue_filtering_integration.py`, `test_swe_team_pipeline.py`. All switched to `os.environ.get("LUPIN_TEST_BASE_URL", "http://localhost:8000")` (conftest pattern) via sed. Also added `import os` to files that lacked it.
+
+**Visual baselines regenerated** (5 of 12 actually drifted once auth flow worked): `login.png`, `register.png`, `notifications.png`, `admin-users.png`, `dev-tools.png`. The other 7 matched the April 12 baselines — the "drift" was never real; it was screenshot-of-wrong-page from the auth bug.
+
+**Verification totals**:
+- Unit: **3549 passed, 1 xfailed** (pre-existing splainer gap)
+- WebSocket: **50 / 50 passed** (was startup-crashing before Phase A.1)
+- Integration: **226 passed, 6 failed** — all 6 are pre-existing environmental issues (5 × CUDA OOM in LanceDB-GCS embedding tests, 1 × UUID type-cast bug in fixture meta-test). Was 9 failed / 208 passed last run; now 2000s timeout gives clean finish in 17:57.
+- E2E UI: **355 passed, 2 failed** (2 non-auth-related UI bugs triaged for tomorrow)
+
+**Next-morning pickup** recorded in TODO.md for 2026-04-22: debug the 2 remaining E2E bugs (pause-button z-index layering + admin cross-user retry endpoint), decide CUDA-OOM strategy (skip/CPU/queue for quiet GPU window), fix UUID fixture bug.
+
 ---
 
 ### 2026.04.20 - Session d8831785 | TFE-to-CC Opus 4.7 + thinking-effort parameterization (Phases A–G + Playwright verify)

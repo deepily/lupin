@@ -5,12 +5,14 @@ Tests the /api/get-queue endpoint with user filtering and role-based access cont
 Validates full authentication and authorization workflow.
 """
 
+import os
+
 import pytest
 import requests
 
 
 # Test server configuration
-BASE_URL = "http://localhost:7999"
+BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 
 @pytest.mark.xfail( reason="API response format changed: 'todo_jobs' → 'todo_jobs_metadata' — tests need update" )

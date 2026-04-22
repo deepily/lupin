@@ -4,6 +4,8 @@ Integration tests for admin user management endpoints.
 Tests authorization, user listing, role management, status toggling, and password resets.
 """
 
+import os
+
 import pytest
 import requests
 
@@ -86,7 +88,7 @@ def multiple_test_users( clean_test_db ):
 # ============================================================================
 
 # Test server configuration
-BASE_URL = "http://localhost:7999"
+BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 
 def test_list_users_requires_admin( auth_headers):

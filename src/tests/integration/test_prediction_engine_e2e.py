@@ -16,6 +16,8 @@ Run:
     OR: pytest src/tests/integration/test_prediction_engine_e2e.py -v
 """
 
+import os
+
 import json
 import time
 import uuid
@@ -28,7 +30,7 @@ import pytest
 import cosa.utils.util as cu
 
 # Test server
-BASE_URL = "http://localhost:7999"
+BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 # Test-specific LanceDB table name (prevents contaminating production data)
 TEST_LANCEDB_TABLE = "prediction_decisions_test"

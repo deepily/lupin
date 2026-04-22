@@ -135,7 +135,10 @@ async function ensureValidToken() {
  * @returns {Promise<object>} Response data
  */
 async function apiCall( endpoint, method = 'GET', data = null, includeAuth = true, retryCount = 0 ) {
-    const url = `http://localhost:7999${endpoint}`;
+    // Use the page's origin so auth forms served by the test container (:8000)
+    // POST back to the test server, not the dev server. Previously hardcoded to
+    // :7999 which broke every auth-dependent e2e test under dual-container mode.
+    const url = `${window.location.origin}${endpoint}`;
 
     const headers = {
         'Content-Type': 'application/json'
