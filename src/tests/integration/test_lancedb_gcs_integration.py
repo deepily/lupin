@@ -4,10 +4,23 @@ Integration tests for LanceDBSolutionManager with real GCS bucket.
 Tests end-to-end GCS operations including manager initialization,
 CRUD operations, question-based search, and data persistence.
 
+GPU contention avoidance (Bug B fix 2026-04-22):
+    Every embedding operation in this module is routed to the FastAPI
+    server's `/api/embeddings/batch` endpoint via the `http_embedding_provider`
+    autouse fixture (class-scoped monkeypatch of `EmbeddingProvider` and
+    `EmbeddingManager` `.generate_embedding`). The pytest process never loads
+    `ProseEmbeddingEngine` and never touches GPU 0. The server's already-
+    loaded singleton serves every embedding via HTTP.
+
+    See feedback memory `feedback_tests_call_server_api_not_instantiate`
+    and design doc `src/rnd/v0.1.6/2026.04.22-tfe-model-flip-and-lancedb-cuda-oom-plan.md`.
+
 Prerequisites:
-- GCS bucket: gs://lupin-lancedb-test/
-- GCS authentication configured (gcloud auth application-default login)
-- Test configuration block: [Lupin: Testing-GCS]
+    - GCS bucket: gs://lupin-lancedb-test/
+    - GCS authentication configured (`gcloud auth application-default login`)
+    - Test configuration block: [Lupin: Testing-GCS]
+    - Test server running with companion users seeded
+    - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/PASSWORD env vars
 """
 
 import os
@@ -17,9 +30,8 @@ from typing import List, Dict
 
 # Bootstrap path - LUPIN_ROOT must be set
 import sys
-import os as os_sys
 
-lupin_root = os_sys.environ.get( 'LUPIN_ROOT' )
+lupin_root = os.environ.get( 'LUPIN_ROOT' )
 if lupin_root is None:
     raise RuntimeError(
         "LUPIN_ROOT environment variable not set.\n"
@@ -28,7 +40,7 @@ if lupin_root is None:
         "  pytest src/tests/integration/test_lancedb_gcs_integration.py"
     )
 
-src_path = os_sys.path.join( lupin_root, 'src' )
+src_path = os.path.join( lupin_root, 'src' )
 if src_path not in sys.path:
     sys.path.insert( 0, src_path )
 
@@ -40,22 +52,64 @@ from cosa.config.configuration_manager import ConfigurationManager
 class TestLanceDBGCSIntegration:
     """Integration test suite for LanceDB with GCS backend."""
 
-    @pytest.fixture(scope="class")
-    def gcs_test_bucket_uri(self):
+    @pytest.fixture( scope="class", autouse=True )
+    def http_embedding_provider( self, server_embedder ):
+        """
+        Route every embedding call in this test class to the server's
+        HTTP endpoint. Monkeypatches `EmbeddingProvider.generate_embedding`
+        and `EmbeddingManager.generate_embedding` at class scope so any
+        code path in the CoSA memory stack (SolutionSnapshot.__init__,
+        QuestionEmbeddingsTable.get_embedding, CanonicalSynonymsTable, etc.)
+        is transparently redirected — no `ProseEmbeddingEngine` load, no
+        GPU allocation in the pytest process.
+
+        Restores originals on class teardown so other tests are unaffected.
+
+        Ensures:
+            - All `_embedding_provider.generate_embedding(...)` calls HTTP
+            - All `_embedding_manager.generate_embedding(...)` calls HTTP
+            - No `torch.cuda.*` memory is allocated by this process
+
+        Raises:
+            - RuntimeError if import of EmbeddingProvider/EmbeddingManager fails
+        """
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        from cosa.memory.embedding_manager  import EmbeddingManager
+
+        original_provider = EmbeddingProvider.generate_embedding
+        original_manager  = EmbeddingManager.generate_embedding
+
+        def http_generate_provider( self, text, content_type="prose", **kwargs ):
+            return server_embedder( text, content_type )
+
+        def http_generate_manager( self, text, normalize_for_cache=True, **kwargs ):
+            # EmbeddingManager produces prose embeddings; server endpoint handles normalization
+            return server_embedder( text, "prose" )
+
+        EmbeddingProvider.generate_embedding = http_generate_provider
+        EmbeddingManager.generate_embedding  = http_generate_manager
+
+        yield
+
+        EmbeddingProvider.generate_embedding = original_provider
+        EmbeddingManager.generate_embedding  = original_manager
+
+    @pytest.fixture( scope="class" )
+    def gcs_test_bucket_uri( self ):
         """Provide GCS test bucket URI with timestamp to avoid conflicts."""
         return f"gs://lupin-lancedb-test/integration-test-{int( time.time() )}.lancedb"
 
-    @pytest.fixture(scope="class")
-    def gcs_config(self, gcs_test_bucket_uri):
+    @pytest.fixture( scope="class" )
+    def gcs_config( self, gcs_test_bucket_uri ):
         """Configuration for GCS-backed manager."""
         return {
-            "storage backend": "gcs",
-            "gcs_uri": gcs_test_bucket_uri,
-            "table_name": "solution_snapshots"
+            "storage backend" : "gcs",
+            "gcs_uri"         : gcs_test_bucket_uri,
+            "table_name"      : "solution_snapshots"
         }
 
-    @pytest.fixture(scope="class")
-    def gcs_manager(self, gcs_config, gcs_credentials_available):
+    @pytest.fixture( scope="class" )
+    def gcs_manager( self, gcs_config, gcs_credentials_available ):
         """
         Create LanceDB manager with GCS backend for testing.
         Uses a timestamped database to avoid conflicts between test runs.
@@ -63,7 +117,6 @@ class TestLanceDBGCSIntegration:
         Requires:
             gcs_credentials_available: Ensures GCS auth validated before initialization
         """
-        # gcs_credentials_available fixture already validated or skipped all tests
         manager = LanceDBSolutionManager( gcs_config, debug=True, verbose=False )
         manager.initialize()
 
@@ -71,7 +124,7 @@ class TestLanceDBGCSIntegration:
 
         # Cleanup: GCS bucket has 7-day lifecycle, so manual cleanup not critical
 
-    def test_manager_initialization_with_gcs(self, gcs_manager, gcs_test_bucket_uri):
+    def test_manager_initialization_with_gcs( self, gcs_manager, gcs_test_bucket_uri ):
         """
         Test that manager initializes correctly with GCS backend.
         """
@@ -80,9 +133,10 @@ class TestLanceDBGCSIntegration:
         assert gcs_manager.db_path == gcs_test_bucket_uri
         assert gcs_manager.table_name == "solution_snapshots"
 
-    def test_add_snapshot_to_gcs(self, gcs_manager):
+    def test_add_snapshot_to_gcs( self, gcs_manager ):
         """
         Test adding solution snapshots to GCS bucket.
+        Embeddings flow through the HTTP endpoint via the autouse monkeypatch.
         """
         # Create test snapshot
         snapshot = SolutionSnapshot(
@@ -100,7 +154,7 @@ class TestLanceDBGCSIntegration:
         # Small delay for GCS consistency
         time.sleep( 2 )
 
-    def test_query_by_question_from_gcs(self, gcs_manager):
+    def test_query_by_question_from_gcs( self, gcs_manager ):
         """
         Test querying snapshots by question from GCS.
         """
@@ -122,7 +176,7 @@ class TestLanceDBGCSIntegration:
         assert any( "sort" in snapshot.question.lower() for score, snapshot in results )
 
     @pytest.mark.xfail( reason="Known normalization mismatch between insert and query paths — not GCS-specific" )
-    def test_data_persistence_across_manager_instances(self, gcs_test_bucket_uri, gcs_config):
+    def test_data_persistence_across_manager_instances( self, gcs_test_bucket_uri, gcs_config ):
         """
         Test that data persists in GCS across manager instances.
         """
@@ -152,7 +206,7 @@ class TestLanceDBGCSIntegration:
         assert len( results ) > 0
         assert any( "test persistence" in snapshot.question.lower() for score, snapshot in results )
 
-    def test_multiple_snapshots_and_retrieval(self, gcs_manager):
+    def test_multiple_snapshots_and_retrieval( self, gcs_manager ):
         """
         Test adding multiple snapshots and retrieving them.
         """
@@ -178,7 +232,7 @@ class TestLanceDBGCSIntegration:
             results = gcs_manager.get_snapshots_by_question( q )
             assert len( results ) > 0, f"Failed to retrieve: {q}"
 
-    def test_configuration_block_loading(self):
+    def test_configuration_block_loading( self ):
         """
         Test that manager can be initialized from [Lupin: Testing-GCS] config block.
         """
@@ -215,7 +269,7 @@ class TestLanceDBGCSIntegration:
             if "LUPIN_CONFIG_MGR_CLI_ARGS_TEST" in os.environ:
                 del os.environ["LUPIN_CONFIG_MGR_CLI_ARGS_TEST"]
 
-    def test_update_existing_snapshot(self, gcs_manager):
+    def test_update_existing_snapshot( self, gcs_manager ):
         """
         Test updating an existing snapshot in GCS.
         """
@@ -246,7 +300,7 @@ class TestLanceDBGCSIntegration:
         results = gcs_manager.get_snapshots_by_question( "Original question for update test" )
         assert len( results ) > 0
 
-    def test_gcs_backend_handles_special_characters(self, gcs_manager):
+    def test_gcs_backend_handles_special_characters( self, gcs_manager ):
         """
         Test that GCS backend handles questions with special characters.
         """

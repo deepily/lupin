@@ -1,6 +1,27 @@
 # TODO
 
-Last updated: 2026-04-21 22:30 EDT (Session 9934d315 close — massive test-health cleanup: auth.js + 12 integration BASE_URL hardcodes fixed; unit 3549 / WS 50 / integration 226 all green except pre-existing env/fixture bugs)
+Last updated: 2026-04-22 16:50 EDT (Session b486e9dc checkpoint — Bug A TFE model flip + Bug B LanceDB-GCS CUDA OOM via server endpoint routing)
+
+---
+
+## 🌅 SESSION-CLOSE BRIEFING — 2026-04-22 Session b486e9dc
+
+### Landed this session
+
+- ✅ [LUPIN] **Bug A: Flip TFE DEFAULT_MODEL back to Sonnet 4.6** — `src/scripts/tfe_to_cc_phase3_live.py:41` + `notifications.js:7279` localStorage fallback + `notifications.html:925` cache-bust bumped to `v=20260422b`. Dropdown option at `:7288` preserved so Opus is still explicitly selectable. Keep `DEFAULT_EFFORT=high` per matrix 23-*.
+- ✅ [LUPIN] **Bug B: LanceDB-GCS tests stop touching GPU** — class-scoped autouse monkeypatch of `EmbeddingProvider.generate_embedding` + `EmbeddingManager.generate_embedding` routes every embed call through `POST /api/embeddings/batch`. **Zero CoSA edits**, zero engine modification. Validated by xfail test running the full embedding path without OOM. 6 unrelated GCS-creds skips filed as follow-up.
+- ✅ [LUPIN] **Top-10 TODO briefing serialized** — `src/rnd/v0.1.6/2026.04.22-session-start-top-10-briefing.md` captures the 2026-04-21 triage state in a stable location for future sessions.
+- ✅ [LUPIN] **Memory saved** — `feedback_tests_call_server_api_not_instantiate` prevents future plans from proposing in-process engine instantiation for tests.
+
+### New follow-ups from Session b486e9dc
+
+- [ ] [LUPIN] **Mount host `~/.config/gcloud/` into `lupin-rest-test` container** — 6 tests in `test_lancedb_gcs_integration.py` skip because `gcs_credentials_available` fixture finds no Application Default Credentials inside the container. Fix: add bind-mount to `docker-compose.yml` `lupin-rest-test` service (mirrors the pending `gh` CLI creds mount for Phase 5 `git push`). Once landed, all 7 non-xfail tests should run and pass.
+- [ ] [LUPIN] **Browser-verify Bug A on fresh localStorage** — clear `RESUME_MODEL_PREF_KEY` in dev tools, reload notifications page, open a stalled TFE card, confirm Resume dropdown defaults to "Sonnet 4.6" (not Opus).
+- [ ] [LUPIN] **Validate `server_embedder` fixture pattern adopted by future integration tests** — this session sets the precedent. Any future test that needs embeddings should use the fixture rather than instantiating `ProseEmbeddingEngine` or `EmbeddingProvider` in-process. `feedback_tests_call_server_api_not_instantiate` captures the rule.
+
+### Bug B Block 1a status update
+
+The Block 1a item from Session 9934d315 ("5 × `test_lancedb_gcs_integration.py` — CUDA OOM") is **RESOLVED by design** — tests no longer touch GPU regardless of GCS credential availability. The 6 current skips are a separate environmental issue (ADC mount), not a fix regression.
 
 ---
 

@@ -7276,7 +7276,7 @@ class NotificationsUI {
          * Render Model + Effort dropdowns for a stalled TFE/BFE card. Defaults
          * come from localStorage; user's last selection persists across reloads.
          */
-        const modelPref  = localStorage.getItem( this.RESUME_MODEL_PREF_KEY )  || 'claude-opus-4-7';
+        const modelPref  = localStorage.getItem( this.RESUME_MODEL_PREF_KEY )  || 'claude-sonnet-4-6';
         const effortPref = localStorage.getItem( this.RESUME_EFFORT_PREF_KEY ) || 'high';
         const sel = ( optVal, prefVal ) => ( optVal === prefVal ? 'selected' : '' );
         return `

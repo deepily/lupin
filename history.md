@@ -1,5 +1,70 @@
 # Lupin Project History
 
+### 2026.04.22 - Session b486e9dc | Session-start briefing + TFE model flip (Bug A) + LanceDB-GCS CUDA OOM via server endpoint (Bug B)
+
+**Context**: User asked for a session-start summary of the top-10 outstanding TODOs on `wip-v0.1.6-2026.03.12-cjflow-upe-and-playwrite`, then selected two bugs from the list to tackle: (A) flip TFE default model back to Sonnet 4.6 per the 2026-04-20 matrix verdict, and (B) stop `test_lancedb_gcs_integration.py` from CUDA-OOMing the GPU. User also asked to serialize the top-10 briefing itself because "it's extremely valuable."
+
+**Parallel session context**: Session `6a30b98c` active simultaneously working on PR-readiness testing (different files — no overlap detected). Session `9b840935` completed earlier in the day and committed as `cd4e5e6` + `2fb829c` + `64c4c30` before this session began.
+
+#### Accomplishments
+
+##### Phase 0 — Documentation-first (3 new R&D docs)
+- `src/rnd/v0.1.6/2026.04.22-session-start-top-10-briefing.md` — scannable top-10 table, ordered freshness × blast-radius, with full "not in top 10 but worth flagging" appendix
+- `src/rnd/v0.1.6/2026.04.22-tfe-model-flip-and-lancedb-cuda-oom-plan.md` — two-bug design doc with canonical facts from code exploration + quoted user rationale
+- `src/rnd/v0.1.6/2026.04.22-90-execution-log.md` — phase-by-phase step log with timestamps, status, and results
+- `src/rnd/README.md` — v0.1.6 file count 34 → 37
+
+##### Bug A — TFE default model Opus → Sonnet 4.6 (harness + UI)
+- **Source**: carryover from Session d8831785 (2026-04-20) matrix report `src/rnd/v0.1.6/23-model-effort-matrix-results.md`. Winning arm: Sonnet 4.6 + effort=`high`, 5/11 effective fixes (3 fixed + 2 already-clean), 17.1 min, 0.29 fixes/min. All three Opus arms landed 0–1 effective — Sonnet ~5× lift on this workload.
+- **Root cause**: two surface-level defaults still pinned to Opus 4.7 after the matrix — harness `DEFAULT_MODEL` and UI `renderResumeOverrideControls()` localStorage fallback.
+- **Files**:
+  - `src/scripts/tfe_to_cc_phase3_live.py:41` — `DEFAULT_MODEL = "claude-opus-4-7"` → `"claude-sonnet-4-6"`; `DEFAULT_EFFORT = "high"` unchanged (matrix recommendation)
+  - `src/fastapi_app/static/js/notifications.js:7279` — localStorage fallback `|| 'claude-opus-4-7'` → `|| 'claude-sonnet-4-6'`
+  - `src/fastapi_app/static/html/notifications.html:925` — cache-bust `v=20260422a` → `v=20260422b` (bumped past today's earlier 9b840935 bump to force reload for THIS JS change)
+- **Preserved**: `<option value="claude-opus-4-7">Opus 4.7</option>` at `notifications.js:7288` left intact so users can still explicitly select Opus from the dropdown.
+- **Out of scope** (intentional): `src/conf/lupin-app.ini:887` and `src/cosa/agents/test_fix_expediter/config.py:33` both pin `claude-opus-4-6` (production orchestrator, Opus 4.6 not 4.7); the separate "why does Opus default to `unclear`" open question is a different investigation.
+- **Test**: `py_compile` OK on the Python file; no new unit tests (3-constant flip).
+
+##### Bug B — LanceDB-GCS integration tests: route embeddings via server endpoint (not in-process engine)
+- **Source**: carryover from Session 9934d315 close (Block 1a — 5 `TestLanceDBGCSIntegration` tests all `RuntimeError: CUDA out of memory` in `ProseEmbeddingEngine` loading `nomic-ai/nomic-embed-text-v1.5` onto GPU 0, competing with FastAPI-server models on user's already-saturated card).
+- **User's framing** (2026-04-22, quoted): "Nobody should be touching the GPU at any point, so why is GPU Available ram even an issue? It is so tightly packed on the GPU that I barely have 1GB Available After all the models are loaded onto the first GPU card."
+- **Design pivot mid-plan**: initial draft proposed an env-var `LUPIN_FORCE_CPU_EMBEDDINGS=1` CPU fallback knob on `ProseEmbeddingEngine` plus an autouse fixture + singleton reset. User rejected: "You don't ever have to worry about memory or creating a new embedding generator. One is automatically and explicitly made available from the fast API server, which also has an API end point, which allows you to call for batch embedding generation. Why are you complicating this?" Revised to a class-scoped autouse monkeypatch of `EmbeddingProvider.generate_embedding` + `EmbeddingManager.generate_embedding` routing every embed call through `POST /api/embeddings/batch`. **Zero CoSA edits, zero engine modification, zero `ProseEmbeddingEngine` instantiation in the pytest process.**
+- **Canonical server hooks** (discovered but not modified): endpoint at `src/cosa/rest/routers/embeddings.py:85-110` (`POST /api/embeddings/batch`, 768-dim, auth `require_api_key_or_jwt`, uses server's cached singleton via `get_embedding_provider()`); singleton loaded at boot in `src/fastapi_app/main.py:520-536` (lifespan).
+- **Chokepoint analysis**: grep for `.generate_embedding(` found ~20 call sites — all route through `EmbeddingProvider.generate_embedding` (lancedb_solution_manager, question_embeddings_table, input_and_output_table, file_based_solution_manager, solution_snapshot `__init__` × 5, decision_proxy/responder) or `EmbeddingManager.generate_embedding` (canonical_synonyms_table). Class-level monkeypatch on both covers everything transparently.
+- **Files** (parent Lupin only — NO CoSA):
+  - `src/tests/smoke/test_embedding_api_smoke.py` (NEW) — 2 smoke tests locking in the HTTP contract: single-text prose returns 768-dim, batch of 3 returns matching count all 768-dim. Uses companion creds from env vars. Both tests pass against `:7999` in 0.24s.
+  - `src/tests/integration/conftest.py` — added session-scoped `server_embedder` fixture: logs in once with `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` companion creds, returns a callable `embed(text, content_type="prose") -> list[float]`.
+  - `src/tests/integration/test_lancedb_gcs_integration.py` — full rewrite: removed `torch` import + `_skip_cuda_gcs_tests()` function + `LUPIN_ALLOW_CUDA_TESTS=1` opt-in skip gate (no longer needed — tests don't touch GPU); added class-scoped autouse `http_embedding_provider` fixture that monkeypatches `EmbeddingProvider.generate_embedding` + `EmbeddingManager.generate_embedding` to route through `server_embedder`, with restoration on teardown.
+- **Validation** (`./src/tests/run-integration-tests.sh --bg -v -k test_lancedb_gcs_integration` against `:8000` test container, 6.02s, log `/tmp/integration-20260422-161404.log`):
+  - Summary: `1 passed, 6 skipped, 290 deselected, 1 xfailed, 60 warnings in 6.02s` — script exits "✓ All tests passed"
+  - **No CUDA OOM, no traceback, no GPU activity in the pytest process**
+  - **Fix validated by xfail path**: `test_data_persistence_across_manager_instances` does NOT depend on the `gcs_manager` class fixture (creates its own manager inline), so `gcs_credentials_available` skip doesn't apply. It ran through the full embedding path — `SolutionSnapshot(question="Test persistence question", ...)` auto-embeds 5× via `_embedding_provider.generate_embedding` in `__init__`, then `get_snapshots_by_question(...)` embeds for the vector search. All embedding traffic routed through the HTTP monkeypatch. Test then xfailed on its pre-existing known normalization mismatch (unrelated to Bug B).
+  - 6 skipped tests all cascade from `gcs_credentials_available` fixture calling `pytest.skip()` — the `lupin-rest-test` container doesn't have Google Application Default Credentials configured. Environmental, not a fix regression. Filed as follow-up.
+
+##### Memory saved for future sessions
+- `feedback_tests_call_server_api_not_instantiate` — "tests HTTP-call the server's canonical resources via endpoints like `/api/embeddings/batch`; never instantiate server-canonical resources (embedding engines, LLMs, loaded models) in pytest process replicas." Preserves the user's explicit direction for reuse on every future test that touches heavy infra.
+
+**Files Modified** (parent Lupin only — zero CoSA touches this session):
+- `src/scripts/tfe_to_cc_phase3_live.py` (Bug A)
+- `src/fastapi_app/static/js/notifications.js` (Bug A)
+- `src/fastapi_app/static/html/notifications.html` (Bug A)
+- `src/tests/smoke/test_embedding_api_smoke.py` (Bug B NEW)
+- `src/tests/integration/conftest.py` (Bug B)
+- `src/tests/integration/test_lancedb_gcs_integration.py` (Bug B)
+- `src/rnd/v0.1.6/2026.04.22-session-start-top-10-briefing.md` (Phase 0 NEW)
+- `src/rnd/v0.1.6/2026.04.22-tfe-model-flip-and-lancedb-cuda-oom-plan.md` (Phase 0 NEW)
+- `src/rnd/v0.1.6/2026.04.22-90-execution-log.md` (Phase 0 NEW)
+- `src/rnd/README.md` (v0.1.6 count)
+- `history.md` + `TODO.md` + `.claude-session.md`
+
+**Follow-ups filed** (see TODO.md):
+- Mount host `~/.config/gcloud/` into `lupin-rest-test` container so GCS Application Default Credentials are available and the 6 skipped tests actually run (mirrors the pending `gh` CLI creds mount for Phase 5 `git push`).
+- User browser-verification of Bug A on fresh localStorage: Resume dropdown should default to Sonnet 4.6.
+
+**Commit**: [pending — this checkpoint commit]
+
+---
+
 ### 2026.04.22 - Session 9b840935 | Bug Fix Mode
 
 **Context**: Lupin-mobile session (separate console) flagged a cross-repo bug: `POST /api/notifications/{id}/played` 500s because `NotificationFifoQueue.mark_played()` calls an undefined `self._emit_queue_update()` method. Client silently swallows the error; server unread-count tracking diverges. Investigation also uncovered a longstanding latent bug in Chrome's `notifications.js` — `playNotificationAudio` never calls `POST /played` at all, so Chrome-originated playbacks never update the server's `played` column. User approved a two-part fix (CoSA + Chrome) in the same session.

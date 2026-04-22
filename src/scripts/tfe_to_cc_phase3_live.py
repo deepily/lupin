@@ -38,7 +38,7 @@ from cosa.agents.tfe_to_cc.prompts.output_contract import (
 
 
 CONTAINER        = "lupin-rest-test"
-DEFAULT_MODEL    = "claude-opus-4-7"      # production default; override via --model
+DEFAULT_MODEL    = "claude-sonnet-4-6"    # production default (matrix 23-* winner 2026-04-20: 5× Opus on this workload); override via --model
 DEFAULT_EFFORT   = "high"                 # extended-thinking effort; override via --effort (low/medium/high/xhigh/max/none)
 MAX_TURNS        = 200                    # coordinator budget; subagents have their own internal budgets
 WALL_CLOCK_LIMIT = 3600                   # 1 hour — user is watching a movie

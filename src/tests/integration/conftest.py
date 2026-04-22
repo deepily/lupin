@@ -523,3 +523,67 @@ def gcs_credentials_available():
     # Credentials valid - print success message
     print( f"\n✓ GCS credentials validated: {message}" )
     return True
+
+
+# Server-Side Embedding Fixture (prevents test-process GPU contention)
+
+@pytest.fixture( scope="session" )
+def server_embedder():
+    """
+    Return a callable that HTTP-embeds text via the running server's
+    batch endpoint (`POST /api/embeddings/batch`).
+
+    Tests use this to avoid instantiating `ProseEmbeddingEngine` in the
+    pytest process, which would collide with the FastAPI server's already-
+    loaded models on GPU 0 (user's GPU is maximally packed, <1 GB free
+    after server warm-up). The server exposes its cached singleton via
+    HTTP; tests just call the endpoint.
+
+    Scope:
+        session — one login per test run; companion user is protected from
+        `clean_test_db`, so the token stays valid across function-scoped
+        database resets.
+
+    Requires:
+        - Test server running at BASE_URL with [Lupin: Testing] config
+        - Companion seed present (interactive.job.tester@lupin.deepily.ai)
+        - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/PASSWORD env vars set
+
+    Returns:
+        Callable[[str, str], list[float]]:
+            `embed(text, content_type="prose") -> 768-dim vector`
+
+    See:
+        - Feedback memory `feedback_tests_call_server_api_not_instantiate`
+        - Design doc `src/rnd/v0.1.6/2026.04.22-tfe-model-flip-and-lancedb-cuda-oom-plan.md`
+    """
+    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
+    if not email or not password:
+        pytest.skip(
+            "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and "
+            "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD must be set"
+        )
+
+    login_resp = requests.post(
+        f"{BASE_URL}/auth/login",
+        json={ "email": email, "password": password },
+        timeout=5,
+    )
+    assert login_resp.status_code == 200, (
+        f"server_embedder login failed: {login_resp.status_code} {login_resp.text}"
+    )
+    token   = login_resp.json()[ "tokens" ][ "access_token" ]
+    headers = { "Authorization": f"Bearer {token}" }
+
+    def embed( text: str, content_type: str = "prose" ) -> list[ float ]:
+        resp = requests.post(
+            f"{BASE_URL}/api/embeddings/batch",
+            json={ "texts": [ text ], "content_type": content_type },
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()[ "embeddings" ][ 0 ]
+
+    return embed
