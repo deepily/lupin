@@ -64,12 +64,22 @@
 - **Test**: Not run (UI-only; user will verify in browser); no automated coverage added for this chip's display text since no `data-testid` hook exists and no prior tests assert on it
 - **Commit**: 0f67635
 
-**Queue state**:
-- 1 bug still queued: Backend FCM/APNs push for off-screen notification audio (MEDIUM, filed 2026-04-21 by mobile session `214c47b6`)
-- 1 bug in progress: the truncation refinement above
+**Queue state at close**:
+- 3 bugs fixed this session (all ad-hoc, all committed)
+- 0 bugs still in progress (refinement wrapped in `0f67635`)
+- 0 bugs carried over from this session's work
 
 **Memory updates**:
 - Strengthened [Ad-hoc dev work always targets :7999](memory/feedback_small_ad_hoc_runs_go_to_7999.md) — user: "Working against the dev server always. The test server is isolated so it's not your concern."
+
+### Session Summary
+- **Total Fixes**: 3 (route-ordering 404, job-id chip truncation, compound-prefix refinement)
+- **Lupin-side files changed**: `src/fastapi_app/static/js/notifications.js`, `src/fastapi_app/static/html/notifications.html`, `src/tests/integration/test_queue_delete_all.py` (new), `src/rnd/v0.1.6/2026.04.16-cj-flow-delete-all-buttons.md`, `bug-fix-queue.md`, `history.md`, `.claude-session.md`
+- **CoSA submodule (deferred to CoSA session)**: `src/cosa/rest/routers/queues.py` (route reorder)
+- **GitHub Issues Closed**: none (all bugs were ad-hoc user reports)
+- **Commits**: `82243e4` (Fix 1 + Fix 2 + integration test), `0f67635` (Fix 3 refinement + bug-fix-mode infra), `85629e6` (doc hash-reference correction), `<close commit>` (session summary)
+
+**Status**: Session closed 2026.04.21
 
 ---
 
