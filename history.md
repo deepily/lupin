@@ -42,7 +42,17 @@
 - **Commit (CoSA)**: separate — bundled with Fix 1's CoSA commit or as its own commit at user's discretion
 
 ### Session Summary
-(Will be completed at session close)
+
+- **Total Fixes**: 3 (Fix 1 CoSA `_emit_queue_update` method, Fix 2 Chrome `/played` wiring, Fix 3 DRY refactor extracting `_emit_notification_added` helper)
+- **Lupin files changed** (cd4e5e6): `src/fastapi_app/static/js/notifications.js`, `src/fastapi_app/static/html/notifications.html`, `src/tests/integration/test_notifications_integration.py`, `bug-fix-queue.md`, `history.md`, `.claude-session.md`
+- **CoSA submodule files** (user commits separately from CoSA session): `src/cosa/rest/notification_fifo_queue.py` (Fix 1 + Fix 3), `src/cosa/tests/unit/rest/test_notification_fifo_queue.py` (new, 5 regression tests)
+- **Tests added**: 5 CoSA unit tests + 3 Lupin in-process TestClient tests (all pass). No new automated coverage for Chrome's `/played` fetch (Playwright audio-playback infra would be out of scope — manual browser verification sufficient)
+- **GitHub Issues Closed**: none (cross-repo bug flagged by lupin-mobile session via `src/lupin-mobile/history.md:149`, no Lupin GitHub issue)
+- **Commits**: `cd4e5e6` (main fix — 6 files, +279/-8), `2fb829c` (hash-pin follow-up after wrap-mode amend — 3 files, +6/-6)
+- **Queued follow-ups filed**: (1) 9 pre-existing CoSA unit test failures in `test_fifo_queue.py::test_websocket_emission` + 8 × `test_notifications_router.py::*` (surface-level drift, unrelated to this bug), (2) `ERR_CONNECTION_RESET` on `/notify/response` + audio WS (user-reported during manual verification; confirmed via direct Python probe to be stale HTTP keep-alive artifact after uvicorn auto-reload, repro gate added — hard refresh + 60s idle before real investigation)
+- **Parallel session coexistence**: session `6a30b98c` active throughout on PR-readiness testing. Zero file overlap; v2.0 manifest isolation ensured selective staging caught only my 6 Lupin files, leaving their 11 files untouched.
+
+**Status**: Session closed 2026.04.22
 
 ---
 
