@@ -77,7 +77,7 @@
 - **Lupin-side files changed**: `src/fastapi_app/static/js/notifications.js`, `src/fastapi_app/static/html/notifications.html`, `src/tests/integration/test_queue_delete_all.py` (new), `src/rnd/v0.1.6/2026.04.16-cj-flow-delete-all-buttons.md`, `bug-fix-queue.md`, `history.md`, `.claude-session.md`
 - **CoSA submodule (deferred to CoSA session)**: `src/cosa/rest/routers/queues.py` (route reorder)
 - **GitHub Issues Closed**: none (all bugs were ad-hoc user reports)
-- **Commits**: `82243e4` (Fix 1 + Fix 2 + integration test), `0f67635` (Fix 3 refinement + bug-fix-mode infra), `85629e6` (doc hash-reference correction), `<close commit>` (session summary)
+- **Commits**: `82243e4` (Fix 1 + Fix 2 + integration test), `0f67635` (Fix 3 refinement + bug-fix-mode infra), `85629e6` (doc hash-reference correction), `0cf92e2` (session-close summary)
 
 **Status**: Session closed 2026.04.21
 
