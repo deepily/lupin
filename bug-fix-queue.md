@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-04-18T13:30:00
+**Last Updated**: 2026-04-21T00:40:00
 
 ---
 
@@ -47,7 +47,8 @@
 | 1b8c1cc0 | 2026-04-10T09:30:00 | 2026-04-10T11:00:00 | closed |
 | 5a620729 | 2026-04-14T14:20:00 | 2026-04-14T23:00:00 | closed |
 | eb50bd56 | 2026-04-16T22:30:00 | 2026-04-17T00:30:00 | closed |
-| 8ed95029 | 2026-04-18T13:20:00 | 2026-04-18T13:30:00 | active |
+| 8ed95029 | 2026-04-18T13:20:00 | 2026-04-18T13:30:00 | stale |
+| b802e633 | 2026-04-21T00:00:00 | 2026-04-21T00:40:00 | active |
 
 ---
 
@@ -78,6 +79,12 @@
 
 ### Completed
 
+- [x] **Refine job-id chip truncation — preserve compound prefixes** → commit: 7b6b28e | By: b802e633 | 2026-04-21
+  - Fix 2's `length>8` rule over-truncated short non-compound ids (`foo-a1b2c9b2`) and reasonable BFE prefixes (`bfe-a1b2c3d4::<uuid>` → `bfe-a1b2c3d4` should stay). New rule in `notifications.js:6835`: `idPrefix = jobId.split("::")[0]`; truncate only if `idPrefix.length > 16`. Effectively restores `8ed95029`'s original `::`-split (5b3e305) plus a safety fallback for 64-char sha prefixes. Cache-bust `v=20260421c`.
+- [x] **DELETE /api/queue/{name}/all returned 404 on test server** → commit: 82243e4 | By: b802e633 | 2026-04-21
+  - `DELETE /api/queue/done/all` (and the latent `/job-history/all` sibling) returned 404 because the parameterized `/{job_id}` route was declared BEFORE the literal `/all` route in `src/cosa/rest/routers/queues.py` — FastAPI matched `/{job_id}`, bound `job_id="all"`, failed to find a job by that id, and raised 404. Same shadowing defect existed for the job-history pair, so the history bulk-delete was broken too (user hadn't hit it yet). Reorder fix lives in the CoSA submodule (deferred to CoSA session); Lupin-side pieces committed here — Fix History appended to `src/rnd/v0.1.6/2026.04.16-cj-flow-delete-all-buttons.md`, plus new `src/tests/integration/test_queue_delete_all.py` (6 lock-in cases). HTTP probe against `:7999` confirms 8/8 regression assertions.
+- [x] **CJ Flow accordion — enormously long job-ids overflow header chip** → commit: 82243e4 | By: b802e633 | 2026-04-21
+  - Cards displayed full id_hash strings (64-char sha + `::` + UUID). Truncated the header chip in `renderJobCard()` (`notifications.js:6832`) to first 8 chars + `"..."`; full `jobId` stays in `data-job-id`, `title` tooltip, clipboard-on-click, and the expanded `<code>` details block — every API call and DOM lookup unaffected. Cache-bust v=20260420a → v=20260421a. **Follow-up bug filed above**: the simple length>8 rule over-truncates short non-compound ids (see In Progress).
 - [x] **CJ Flow badge — BFE compound IDs overflow `.job-id-chip`** → commit: 5b3e305 | By: 8ed95029 | 2026-04-18
   - `bfe-XXXXXXXX::<uuid>` (60+ chars) blew out the badge while `tfe-XXXXXXXX` fit fine. Truncated visible text at `::` in `renderJobCard` (`notifications.js:6829,6980`); tooltip now reveals the full compound ID on hover, and `data-job-id`, DOM ids, and clipboard copy still carry the full scoped form. Mirrors backend `AgenticJobBase.base_id` pattern. User live-confirmed working after hard-refresh.
 

@@ -1,5 +1,63 @@
 # Lupin Project History
 
+### 2026.04.21 - Session b802e633 | Bug Fix Mode: DELETE /queue/all 404 + CJ-flow job-id chip truncation
+
+**Context**: Retroactive Bug Fix Mode session (user invoked `/plan-bug-fix-mode-start` after fixes were already committed). Two user-reported bugs plus an in-flight refinement:
+
+1. Test server logged `DELETE /api/queue/done/all → 404 Not Found` with the `[API]` line preceding the 404, pointing to a shadowed handler rather than a missing route. Investigation confirmed the parameterized `/queue/{queue_name}/{job_id}` route was declared before the literal `/queue/{queue_name}/all` in `src/cosa/rest/routers/queues.py`, so FastAPI bound `job_id="all"` and raised 404. Same defect existed on the `/job-history/all` vs `/job-history/{job_id}` pair (latent, not yet user-reported).
+2. CJ Flow accordion cards rendered full 64-char sha + `::` + UUID id_hash strings, blowing out the header chip.
+3. Follow-up tweak: the initial `length>8` truncation rule over-collapsed short non-compound ids like `foo-a1b2c9b2` and reasonable BFE prefixes like `bfe-a1b2c3d4::<uuid>`.
+
+#### Fix 1: DELETE /api/queue/{name}/all and /job-history/all route shadowing
+
+- **Source**: ad-hoc (user-reported from test-server logs)
+- **Root cause**: route declaration order in `src/cosa/rest/routers/queues.py`
+- **Fix**: moved literal `/all` routes above their `/{id}` siblings (both queue and job-history pairs); added docstring route-order note to both bulk handlers. CoSA submodule edit — user commits separately from CoSA context.
+- **Lupin-side files** (in commit 82243e4):
+  - `src/rnd/v0.1.6/2026.04.16-cj-flow-delete-all-buttons.md` — appended Fix History section
+  - `src/tests/integration/test_queue_delete_all.py` — new, 6 lock-in tests (4 parametrized `/queue/{name}/all`, 400-on-bogus, 404-on-unknown-id for both pairs)
+- **Verification**:
+  - `py_compile` on `queues.py` + the new test file → OK
+  - Route-table introspection: `/api/queue/{queue_name}/all` now precedes `/api/queue/{queue_name}/{job_id}`, same for job-history
+  - Standalone HTTP probe against `:7999` dev (test server was occupied): 8/8 assertions pass (4 queues × `/all→200`, bogus→400, unknown-id→404 for queue and history)
+- **Commit**: 82243e4
+
+#### Fix 2: CJ Flow accordion — truncate enormously long job_ids in header chip
+
+- **Source**: ad-hoc (follow-on user ask after Fix 1 verified)
+- **Root cause**: `jobIdDisplay = jobId.split("::")[0]` still exposed 64-char sha prefixes
+- **Fix**: initial rule `length>8 → jobId.substring(0,8) + "..."` in `renderJobCard()` (`notifications.js:6832`). Full `jobId` preserved in `data-job-id`, `title` tooltip, clipboard on-click, and the expanded `<code>` block — every API call and DOM lookup unaffected.
+- **Files** (in commit 82243e4):
+  - `src/fastapi_app/static/js/notifications.js` — truncation logic + updated comment
+  - `src/fastapi_app/static/html/notifications.html` — cache-bust `v=20260420a → v=20260421a`
+- **Test**: Not run (UI-only, user will verify in browser)
+- **Commit**: 82243e4
+
+#### Fix 3: Refine job-id chip truncation — preserve compound prefixes
+
+- **Source**: ad-hoc follow-up after user observed Fix 2 was too aggressive on short ids (`foo-a1b2c9b2` and `bfe-a1b2c3d4::<uuid>` both got collapsed)
+- **Root cause**: Fix 2's `length>8` rule didn't know about `::` (the canonical compound split point), so reasonable prefixes like `bfe-a1b2c3d4` (12 chars) got truncated even though they fit in the chip
+- **New rule**: show the part before `::`; if that prefix is still >16 chars (64-char sha-style), fall back to `8 + "..."`. Effectively restores session `8ed95029`'s original `::`-split behavior (commit `5b3e305`) while adding a safety fallback for pathologically long prefixes.
+- **Truth table**:
+  - `cda8e7ed643cbc...::62d97559...` (prefix 64 chars) → `cda8e7ed...`
+  - `bfe-a1b2c3d4::abc-def-uuid` (prefix 12 chars) → `bfe-a1b2c3d4`
+  - `foo-a1b2c9b2` (no `::`, 12 chars) → `foo-a1b2c9b2`
+  - `a::b` (prefix 1 char) → `a`
+- **Files**:
+  - `src/fastapi_app/static/js/notifications.js:6835` — compound-aware truncation (`idPrefix = jobId.split("::")[0]`; truncate only if `idPrefix.length > 16`)
+  - `src/fastapi_app/static/html/notifications.html` — cache-bust `v=20260421a → v=20260421c` (two intermediate steps across the compound-awareness iterations)
+- **Test**: Not run (UI-only; user will verify in browser); no automated coverage added for this chip's display text since no `data-testid` hook exists and no prior tests assert on it
+- **Commit**: 7b6b28e
+
+**Queue state**:
+- 1 bug still queued: Backend FCM/APNs push for off-screen notification audio (MEDIUM, filed 2026-04-21 by mobile session `214c47b6`)
+- 1 bug in progress: the truncation refinement above
+
+**Memory updates**:
+- Strengthened [Ad-hoc dev work always targets :7999](memory/feedback_small_ad_hoc_runs_go_to_7999.md) — user: "Working against the dev server always. The test server is isolated so it's not your concern."
+
+---
+
 ### 2026.04.21 - Session 9934d315 | TFE telemetry demotion + stop.py rebaseline + BFE stderr parity
 
 **Context**: Overnight `tfe-10b2963e` ran 17 fixes, all failed verification, and triggered 3 blocking operator-intervention prompts ("Fix Verification Failed after 2 attempt(s)") because `shared/fix_executor.py` escalated via `present_choices()` after `max_fix_attempts`. The user wanted those demoted to fire-and-forget telemetry, wanted their intentional stop.py tweaks locked into unit-test baseline so TFE can't revert them, and wanted stderr tails surfaced in end-of-run reports without a worktree dig. Second-phase ask: mirror the parity change in BFE.
