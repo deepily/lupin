@@ -377,7 +377,7 @@ def quick_smoke_test():
         - Returns True if all 6 scenarios pass
     """
     test = SweTeamEndpointSmokeTest()
-    return test.run()
+    return test.run( argv=[] )
 
 
 def test_swe_team_endpoint():

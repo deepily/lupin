@@ -61,6 +61,67 @@ function getUserData() {
 }
 
 // ============================================================================
+// Token Validation (Proactive Refresh — Pattern A)
+// ============================================================================
+
+/**
+ * Check if a JWT access token is expired or near-expiry.
+ *
+ * Decodes the JWT payload and compares the `exp` claim (Unix seconds) to
+ * Date.now() with a safety buffer. Returns true on any failure — missing,
+ * malformed, no exp claim, or past exp. Treating "unsure" as "expired" is
+ * the safe default for a proactive refresh check.
+ *
+ * @param {string|null} token - JWT access token (or null/undefined)
+ * @param {number} bufferSeconds - Refresh threshold in seconds (default 30)
+ * @returns {boolean} True if token should be refreshed before use
+ */
+function isTokenExpired( token, bufferSeconds = 30 ) {
+    if ( !token ) return true;
+    try {
+        const parts = token.split( '.' );
+        if ( parts.length !== 3 ) return true;
+        const payload = JSON.parse( atob( parts[ 1 ] ) );
+        if ( !payload.exp ) return true;
+        const now = Math.floor( Date.now() / 1000 );
+        return ( payload.exp - bufferSeconds ) <= now;
+    } catch ( e ) {
+        return true;
+    }
+}
+
+/**
+ * Ensure the current access token is valid, proactively refreshing if expired.
+ *
+ * Call this before any authenticated fetch to eliminate stale-token 401s.
+ * Safe to call when no token exists — returns false without throwing, and
+ * the caller's fetch will then fail with 401 and the reactive retry path
+ * in apiCall() will handle the redirect-to-login flow.
+ *
+ * @returns {Promise<boolean>} True if a valid token is now available,
+ *                              false if no token exists or refresh failed
+ */
+async function ensureValidToken() {
+    const token = getAccessToken();
+    if ( !token ) {
+        // No token — nothing to refresh. Let the caller's fetch fail with 401
+        // and the reactive retry path handle the redirect.
+        return false;
+    }
+    if ( !isTokenExpired( token ) ) {
+        // Fast path — token still valid
+        return true;
+    }
+    console.log( '⚠️ Access token near expiry — refreshing proactively' );
+    const refreshed = await refreshAccessToken();
+    if ( !refreshed ) {
+        console.error( '🛑 Proactive refresh failed — will fall through to reactive retry' );
+        return false;
+    }
+    return true;
+}
+
+// ============================================================================
 // API Calls
 // ============================================================================
 
@@ -74,13 +135,23 @@ function getUserData() {
  * @returns {Promise<object>} Response data
  */
 async function apiCall( endpoint, method = 'GET', data = null, includeAuth = true, retryCount = 0 ) {
-    const url = `http://localhost:7999${endpoint}`;
+    // Use the page's origin so auth forms served by the test container (:8000)
+    // POST back to the test server, not the dev server. Previously hardcoded to
+    // :7999 which broke every auth-dependent e2e test under dual-container mode.
+    const url = `${window.location.origin}${endpoint}`;
 
     const headers = {
         'Content-Type': 'application/json'
     };
 
     if ( includeAuth ) {
+        // Proactive refresh (Pattern A) — catches expiry BEFORE the fetch.
+        // Skipped on retries (retryCount > 0) because the retry was triggered
+        // by the reactive path below which just refreshed the token.
+        if ( retryCount === 0 ) {
+            await ensureValidToken();
+        }
+
         const token = getAccessToken();
         if ( token ) {
             headers[ 'Authorization' ] = `Bearer ${token}`;

@@ -129,7 +129,7 @@ class TestRunningQueueThresholdGuard:
     def test_threshold_defaults_to_90_without_config( self ):
         """threshold_confirmation defaults to 90.0 when config_mgr is None."""
         config_mgr = None
-        threshold  = 90.0 if config_mgr is None else config_mgr.get( "similarity_threshold_confirmation", default=90.0, return_type="float" )
+        threshold  = 90.0 if config_mgr is None else config_mgr.get( "similarity threshold confirmation", default=90.0, return_type="float" )
 
         assert threshold == 90.0
 
@@ -138,10 +138,10 @@ class TestRunningQueueThresholdGuard:
         config_mgr = MagicMock()
         config_mgr.get.return_value = 85.0
 
-        threshold = 90.0 if config_mgr is None else config_mgr.get( "similarity_threshold_confirmation", default=90.0, return_type="float" )
+        threshold = 90.0 if config_mgr is None else config_mgr.get( "similarity threshold confirmation", default=90.0, return_type="float" )
 
         assert threshold == 85.0
-        config_mgr.get.assert_called_once_with( "similarity_threshold_confirmation", default=90.0, return_type="float" )
+        config_mgr.get.assert_called_once_with( "similarity threshold confirmation", default=90.0, return_type="float" )
 
     # ==================== Edge Cases ====================
 

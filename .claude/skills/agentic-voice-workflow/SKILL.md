@@ -3,8 +3,8 @@ name: agentic-voice-workflow
 description: Building Claude Agent SDK background jobs with voice I/O. Use when creating new agents, building background jobs, implementing agentic services, adding voice notifications to agents, or integrating with RunningFifoQueue.
 metadata:
   author: lupin-team
-  version: "1.2"
-  last-updated: "2026-02-20"
+  version: "1.3"
+  last-updated: "2026-03-27"
 ---
 
 # Agentic Voice Workflow
@@ -72,15 +72,30 @@ class OrchestratorState( Enum ):
 ## Voice Notification Integration
 
 ```python
-# Progress update
-notify( "Starting research phase", priority="low" )
+# Job lifecycle: set_job_id at start, clear in finally
+voice_io.set_job_id( self.id_hash )
+try:
+    # Progress update (MUST include queue_name="run")
+    await voice_io.notify( "Starting research phase", priority="low", queue_name="run" )
 
-# Human-in-the-loop
-response = ask_yes_no( "Approve this plan?", default="yes" )
+    # Human-in-the-loop
+    response = ask_yes_no( "Approve this plan?", default="yes" )
 
-# Completion
-notify( "Agent completed successfully", priority="medium" )
+    # Completion
+    await voice_io.notify( "Agent completed successfully", priority="medium", queue_name="run" )
+
+    # Progressive breadcrumbs (inside loops or long phases)
+    for i, item in enumerate( items ):
+        await voice_io.notify( f"Processing {i + 1} of {len( items )}", priority="low", queue_name="run" )
+finally:
+    voice_io.clear_job_id()
 ```
+
+**CRITICAL**: Every `notify()` call MUST include `queue_name="run"` for proper queue routing.
+`set_job_id()` / `clear_job_id()` enables job card activity log routing in the UI.
+
+**Breadcrumb notifications** are required for loops, long phases (>10s), and
+dry-run mode. See "Progressive Breadcrumb Notifications" in the full workflow doc.
 
 ## Key Interfaces
 
@@ -95,6 +110,39 @@ notify( "Agent completed successfully", priority="medium" )
 - Status updates via WebSocket events
 - Progress tracking for UI display
 
+## AgenticJobBase Compliance Checklist
+
+**MANDATE**: Every new agentic job MUST satisfy ALL items before merge.
+This checklist was created after a Session 381 audit found consistency gaps
+across 6 existing job implementations (see `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/`).
+
+### Config
+- [ ] Config class has `from_config( config_mgr, debug )` classmethod
+- [ ] INI keys added to `lupin-app.ini` under agent-specific prefix
+- [ ] Matching explanations added to `lupin-app-splainer.ini`
+
+### Job Lifecycle (`_execute` method)
+- [ ] `voice_io.set_job_id( self.id_hash )` called at start of `_execute()`
+- [ ] `voice_io.clear_job_id()` called in `finally` block
+- [ ] ALL `notify()` calls include `queue_name="run"` (live AND dry-run)
+- [ ] `self.answer_conversational` set before job completes
+- [ ] `self.error` set on failure with descriptive message
+
+### Dry-Run Mode
+- [ ] `_execute_dry_run()` is a separate method (not flag check in `_execute()`)
+- [ ] Breadcrumb notifications include `job_id=self.id_hash` and `queue_name="run"`
+- [ ] Completion notification includes `abstract` with mock cost summary
+- [ ] Cost summary stored in `self.artifacts[ "cost_summary" ]`
+
+### Registration & Routing
+- [ ] Entry added to `agent_registry.py` with `required_params` and `fallback_questions`
+- [ ] Factory branch added to `agentic_job_factory.py`
+- [ ] Dedicated REST router in `src/cosa/rest/routers/`
+
+### Reference Implementation
+Use `src/cosa/agents/deep_research/job.py` as the gold standard — it satisfies
+every item in this checklist.
+
 ## Detailed Reference
 
 **Full Workflow Document**: `src/workflow/agentic-voice-workflow.md`
@@ -105,6 +153,47 @@ Contains:
 - Testing procedures
 - Integration patterns
 
+## Runtime Scheduling (Automatic — No Per-Agent Work Needed)
+
+All agentic jobs automatically support timed execution and exclusive mode. These are
+**runtime infrastructure concerns**, not agent-specific features. No per-agent registration,
+factory changes, or `_execute()` modifications needed.
+
+### How It Works
+
+**UI form path**: Every job submission card includes a "Schedule for later" checkbox +
+datetime picker and an "Exclusive mode" checkbox. The JS `_getSchedulingParams()` helper
+adds `scheduled_at` (ISO string) and `monopolize` (bool) to the POST body when set.
+
+**Voice path**: The Runtime Argument Expeditor's confirmation summary automatically includes:
+```
+---
+**Scheduling**
+- **run_at**: immediately
+- **exclusive_mode**: no
+```
+Users can modify via the existing `[comment: ...]` pattern:
+- *"yes, but schedule it for tomorrow at 2am"* → sets `scheduled_at`
+- *"yes, but run it in exclusive mode"* → sets `monopolize = True`
+
+**Runtime arg extraction**: In `_handle_agentic_command()`, `scheduled_at` and `monopolize`
+are popped from `args_dict` before the factory creates the job, then set directly on the
+job object. The factory never sees these — they're infrastructure, not agent params.
+
+### Queue Consumer Behavior
+
+- `scheduled_at = None` → immediate execution (default)
+- `scheduled_at = "2026-03-31T02:00:00"` → consumer sleeps until that time
+- `monopolize = True` → no-op in serial mode; when Hybrid Fast Lane is added, blocks
+  all concurrent jobs until this one completes
+
+### What You Do NOT Need to Do
+
+- Add `scheduled_at` / `monopolize` to your agent's registry entry
+- Handle scheduling in your agent's `_execute()` method
+- Add UI controls for scheduling (already present on all forms)
+- Modify the confirmation prompt template
+
 ## Anti-Patterns
 
 - **Don't** skip Phase 0 discovery - design before coding
@@ -112,6 +201,10 @@ Contains:
 - **Don't** ignore state machine - enables proper job tracking
 - **Don't** hardcode job IDs - use the prefix pattern
 - **Don't** skip Q&A scripts - smoke tests stall without them
+- **Don't** omit `queue_name="run"` from `notify()` calls - breaks queue routing
+- **Don't** skip `set_job_id()` / `clear_job_id()` - breaks job card activity log
+- **Don't** construct config directly - use `from_config()` classmethod
+- **Don't** use a different notification API than `voice_io` without strong justification
 
 ## CRITICAL: Automated Testing Is Mandatory
 

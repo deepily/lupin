@@ -177,7 +177,7 @@ class TestSDKOptions:
 
         from claude_agent_sdk import ClaudeAgentOptions
 
-        options = ClaudeAgentOptions( model="claude-sonnet-4-20250514" )
+        options = ClaudeAgentOptions( model="claude-sonnet-4-6" )
 
         assert options is not None
         print( "\n✓ ClaudeAgentOptions created with model parameter" )

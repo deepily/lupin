@@ -83,3 +83,89 @@ Spin up a podcast on RESEARCH_TOPIC
 I want an audio episode about RESEARCH_TOPIC
 Please create a listenable episode on RESEARCH_TOPIC
 Make me an audio show about RESEARCH_TOPIC
+
+# ── Audience level variants (RESEARCH_TOPIC + AUDIENCE) ──────────────────────
+create a podcast about RESEARCH_TOPIC for AUDIENCE
+generate a podcast on RESEARCH_TOPIC for AUDIENCE audience
+make a podcast about RESEARCH_TOPIC aimed at AUDIENCE
+podcast about RESEARCH_TOPIC targeting AUDIENCE
+create a podcast episode on RESEARCH_TOPIC for AUDIENCE listeners
+make an AUDIENCE level podcast about RESEARCH_TOPIC
+generate an AUDIENCE podcast covering RESEARCH_TOPIC
+please create a podcast on RESEARCH_TOPIC for AUDIENCE
+I want a podcast about RESEARCH_TOPIC for AUDIENCE audience
+make a podcast on RESEARCH_TOPIC geared to AUDIENCE
+build a podcast about RESEARCH_TOPIC for AUDIENCE
+produce a podcast on RESEARCH_TOPIC for AUDIENCE level
+I'd like a podcast about RESEARCH_TOPIC for AUDIENCE
+generate a podcast episode about RESEARCH_TOPIC for AUDIENCE
+can you create a podcast about RESEARCH_TOPIC for AUDIENCE
+record a podcast on RESEARCH_TOPIC for AUDIENCE audience
+spin up a podcast on RESEARCH_TOPIC targeting AUDIENCE
+generate a podcast on RESEARCH_TOPIC aimed at AUDIENCE listeners
+cook up a podcast episode about RESEARCH_TOPIC for AUDIENCE
+podcast about RESEARCH_TOPIC for an AUDIENCE audience
+create an audio episode on RESEARCH_TOPIC for AUDIENCE
+make an audio podcast on RESEARCH_TOPIC for AUDIENCE
+
+# ── Audience context variants (RESEARCH_TOPIC + AUDIENCE_CONTEXT) ────────────
+create a podcast about RESEARCH_TOPIC for AUDIENCE_CONTEXT
+generate a podcast on RESEARCH_TOPIC for AUDIENCE_CONTEXT
+make a podcast about RESEARCH_TOPIC designed for AUDIENCE_CONTEXT
+podcast about RESEARCH_TOPIC tailored to AUDIENCE_CONTEXT
+create a podcast episode on RESEARCH_TOPIC for AUDIENCE_CONTEXT
+make a podcast about RESEARCH_TOPIC aimed at AUDIENCE_CONTEXT
+I want a podcast on RESEARCH_TOPIC for AUDIENCE_CONTEXT
+please generate a podcast about RESEARCH_TOPIC for AUDIENCE_CONTEXT
+can you create a podcast on RESEARCH_TOPIC for AUDIENCE_CONTEXT
+record a podcast about RESEARCH_TOPIC for AUDIENCE_CONTEXT
+produce a podcast on RESEARCH_TOPIC targeting AUDIENCE_CONTEXT
+cook up a podcast about RESEARCH_TOPIC for AUDIENCE_CONTEXT
+generate a podcast episode on RESEARCH_TOPIC for AUDIENCE_CONTEXT
+make an audio podcast about RESEARCH_TOPIC written for AUDIENCE_CONTEXT
+I'd like a podcast on RESEARCH_TOPIC for AUDIENCE_CONTEXT
+build a podcast about RESEARCH_TOPIC speaking to AUDIENCE_CONTEXT
+create an audio episode on RESEARCH_TOPIC for AUDIENCE_CONTEXT
+make a podcast on RESEARCH_TOPIC for the audience of AUDIENCE_CONTEXT
+spin up a podcast about RESEARCH_TOPIC for AUDIENCE_CONTEXT
+generate a listenable podcast on RESEARCH_TOPIC for AUDIENCE_CONTEXT
+
+# ── Language variants (trigger target_languages via conditional_args) ────────
+create a podcast about RESEARCH_TOPIC in mexican spanish
+generate a podcast on RESEARCH_TOPIC in mexican spanish please
+make a podcast about RESEARCH_TOPIC in mexican spanish
+podcast about RESEARCH_TOPIC in mexican
+create a podcast about RESEARCH_TOPIC in peninsula spanish
+generate a podcast on RESEARCH_TOPIC in castilian spanish
+make a podcast about RESEARCH_TOPIC in castilian spanish
+podcast about RESEARCH_TOPIC in spanish from spain
+I want a podcast on RESEARCH_TOPIC in peninsula spanish
+create a podcast about RESEARCH_TOPIC in iberian spanish
+make a podcast on RESEARCH_TOPIC in argentinian spanish
+generate a podcast about RESEARCH_TOPIC in argentinian spanish
+podcast about RESEARCH_TOPIC in argentine spanish
+create a podcast on RESEARCH_TOPIC in argentina spanish
+make a podcast about RESEARCH_TOPIC in rioplatense
+create a podcast about RESEARCH_TOPIC in english
+generate a podcast on RESEARCH_TOPIC in english language
+make a podcast about RESEARCH_TOPIC in french
+podcast about RESEARCH_TOPIC in french language
+create a podcast about RESEARCH_TOPIC in german
+podcast about RESEARCH_TOPIC in german language
+
+# ── Scheduling variants ──────────────────────────────────────────────────────
+schedule a podcast about RESEARCH_TOPIC for tonight
+make a podcast about RESEARCH_TOPIC tonight
+create a podcast on RESEARCH_TOPIC at midnight
+schedule the podcast for later
+schedule podcast generation for RESEARCH_TOPIC overnight
+queue up a podcast about RESEARCH_TOPIC
+run the podcast generator tonight on RESEARCH_TOPIC
+record a podcast about RESEARCH_TOPIC later tonight
+schedule a podcast on RESEARCH_TOPIC at two am
+create a podcast about RESEARCH_TOPIC in the morning
+schedule a podcast episode about RESEARCH_TOPIC for later
+do a dry run podcast about RESEARCH_TOPIC
+dry run the podcast generator on RESEARCH_TOPIC
+trial run a podcast about RESEARCH_TOPIC
+test run the podcast on RESEARCH_TOPIC

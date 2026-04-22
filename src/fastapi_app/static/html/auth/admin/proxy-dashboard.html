@@ -14,9 +14,9 @@
     <div class="admin-container">
         <!-- Breadcrumb -->
         <div class="breadcrumb">
-            <a href="/app">Home</a>
+            <a href="/app" data-testid="trust-breadcrumb-home">Home</a>
             <span class="separator">></span>
-            <a href="/app/admin">Admin</a>
+            <a href="/app/admin" data-testid="trust-breadcrumb-admin">Admin</a>
             <span class="separator">></span>
             <span class="current">Trust Dashboard</span>
         </div>
@@ -26,7 +26,8 @@
             <h1>Decision Proxy — Trust Dashboard</h1>
             <div class="admin-actions">
                 <button class="btn btn-secondary btn-small"
-                        onclick="window.location.href='/app/admin'">
+                        onclick="window.location.href='/app/admin'"
+                        data-testid="trust-back-btn">
                     ← Back to Admin
                 </button>
             </div>
@@ -49,7 +50,7 @@
             <div class="mode-bar" id="mode-bar">
                 <div class="mode-item">
                     <span class="mode-label">Trust Mode:</span>
-                    <select class="mode-selector" id="mode-trust-select">
+                    <select class="mode-selector" id="mode-trust-select" data-testid="trust-mode-select">
                         <option value="disabled">DISABLED</option>
                         <option value="shadow" selected>SHADOW</option>
                         <option value="suggest">SUGGEST</option>
@@ -59,23 +60,23 @@
                 </div>
                 <div class="mode-item">
                     <span class="mode-label">Domain:</span>
-                    <span class="mode-value" id="mode-domain">swe</span>
+                    <span class="mode-value" id="mode-domain" data-testid="trust-mode-domain">swe</span>
                 </div>
                 <div class="mode-item">
                     <span class="mode-label">User:</span>
-                    <span class="mode-value" id="mode-user">—</span>
+                    <span class="mode-value" id="mode-user" data-testid="trust-mode-user">—</span>
                 </div>
             </div>
 
             <!-- Trust Cards Grid -->
-            <div class="trust-cards-grid" id="trust-cards-grid">
+            <div class="trust-cards-grid" id="trust-cards-grid" data-testid="trust-cards-grid">
                 <!-- Populated by JavaScript -->
             </div>
 
             <!-- Recent Decisions Section -->
             <div class="recent-decisions-header">
                 <h2>Recent Decisions</h2>
-                <select id="category-selector" class="category-selector">
+                <select id="category-selector" class="category-selector" data-testid="trust-category-select">
                     <option value="">All Categories</option>
                     <option value="deployment">Deployment</option>
                     <option value="testing">Testing</option>
@@ -99,7 +100,7 @@
                             <th>State</th>
                         </tr>
                     </thead>
-                    <tbody id="decisions-tbody">
+                    <tbody id="decisions-tbody" data-testid="trust-decisions-table">
                         <!-- Populated by JavaScript -->
                     </tbody>
                 </table>
@@ -113,11 +114,11 @@
 
             <!-- Pagination -->
             <div class="pagination" id="pagination-container">
-                <button id="prev-page" class="btn btn-secondary btn-small" onclick="previousPage()" disabled>
+                <button id="prev-page" class="btn btn-secondary btn-small" onclick="previousPage()" disabled data-testid="trust-prev-page-btn">
                     ← Previous
                 </button>
-                <span id="page-info">Page 1</span>
-                <button id="next-page" class="btn btn-secondary btn-small" onclick="nextPage()">
+                <span id="page-info" data-testid="trust-page-info">Page 1</span>
+                <button id="next-page" class="btn btn-secondary btn-small" onclick="nextPage()" data-testid="trust-next-page-btn">
                     Next →
                 </button>
             </div>

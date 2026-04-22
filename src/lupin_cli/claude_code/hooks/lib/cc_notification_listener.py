@@ -253,6 +253,13 @@ class CCNotificationListener( BaseWebSocketListener ):
                 f"job_id={job_id}, target={self.session_id_hash}"
             )
 
+        # Action notifications: title-based routing (e.g., "action:set_session_topic")
+        title = notification.get( "title", "" )
+        if title.startswith( "action:" ) and job_id in self.accepted_ids:
+            action = title[ len( "action:" ): ]
+            self._handle_action( action, notification )
+            return
+
         # Filter: must be user_initiated_message AND match our session
         if notif_type != "user_initiated_message":
             if self.debug:
@@ -269,6 +276,55 @@ class CCNotificationListener( BaseWebSocketListener ):
         if message_text:
             self._inject_via_tmux( message_text )
         self._send_gist_response( notification )
+
+    def _handle_action( self, action, notification ):
+        """
+        Handle action notifications routed by title prefix.
+
+        Requires:
+            - action is a string (the part after "action:" in title)
+            - notification is a dict with at least a "message" key
+
+        Ensures:
+            - Routes to appropriate handler based on action name
+            - Logs unknown actions without raising
+        """
+        if action == "set_session_topic":
+            topic = notification.get( "message", "" ).strip()
+            if topic:
+                self._update_session_topic( topic )
+        else:
+            self._log( f"{self.LOG_PREFIX} Unknown action: {action}" )
+
+    def _update_session_topic( self, topic ):
+        """
+        Write session_topic to session bridge file.
+
+        Requires:
+            - topic is a non-empty string
+
+        Ensures:
+            - Bridge file is updated with session_topic key
+            - Logs success or failure without raising
+        """
+        try:
+            from lupin_cli.claude_code.hooks.lib.session_bridge import get_session_metadata
+            import json
+
+            meta        = get_session_metadata()
+            bridge_path = meta.get( "_bridge_path" )
+            if not bridge_path:
+                self._log( f"{self.LOG_PREFIX} No bridge path found, cannot set session topic" )
+                return
+
+            with open( bridge_path ) as f:
+                data = json.load( f )
+            data[ "session_topic" ] = topic
+            with open( bridge_path, "w" ) as f:
+                json.dump( data, f, indent=2 )
+            self._log( f"{self.LOG_PREFIX} Session topic set: {topic}" )
+        except Exception as e:
+            self._log( f"{self.LOG_PREFIX} Failed to set session topic: {e}" )
 
     def _resolve_tmux_session( self ):
         """

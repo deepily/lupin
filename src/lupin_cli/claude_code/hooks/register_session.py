@@ -36,10 +36,15 @@ _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
 if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
+import urllib.request
+import urllib.error
+
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
+from cosa.agents.utils.sender_id import detect_project
+from cosa.utils.notification_utils import is_known_project
 
 
 def _find_tmux_session( cc_pid ):
@@ -413,6 +418,92 @@ def _cleanup_old_listener( old_session_data, new_session_id ):
                 pass  # Best-effort
 
 
+def _check_cosa_voice_status():
+    """
+    Quick non-blocking checks for cosa-voice prerequisites.
+
+    Requires:
+        - Called from within a SessionStart hook context
+
+    Ensures:
+        - Returns a formatted status block string (never raises)
+        - Each check has 1s timeout max to avoid blocking session start
+    """
+    checks = []
+    sep    = "=" * 42
+
+    # ── Check 1: MCP registration ────────────────────────────────────
+    mcp_status = "not found"
+    try:
+        settings_path = os.path.expanduser( "~/.claude/settings.json" )
+        if os.path.exists( settings_path ):
+            with open( settings_path ) as f:
+                settings = json.load( f )
+            mcp_servers = settings.get( "mcpServers", {} )
+            if "cosa-voice" in mcp_servers:
+                mcp_status = "registered (user scope)"
+        # Also check local .mcp.json in cwd
+        local_mcp = os.path.join( os.getcwd(), ".mcp.json" )
+        if os.path.exists( local_mcp ):
+            with open( local_mcp ) as f:
+                local_cfg = json.load( f )
+            if "cosa-voice" in local_cfg.get( "mcpServers", {} ):
+                mcp_status = "registered (local scope — consider migrating to global)"
+    except Exception:
+        mcp_status = "check failed"
+
+    # ── Check 2: Project detection ───────────────────────────────────
+    try:
+        project      = detect_project()
+        known        = is_known_project( project )
+        proj_source  = "known" if known else "basename"
+        proj_status  = f"{project} ({proj_source})"
+    except Exception:
+        proj_status  = "detection failed"
+
+    # ── Check 3: Hook count ──────────────────────────────────────────
+    hook_count = 0
+    try:
+        settings_path = os.path.expanduser( "~/.claude/settings.json" )
+        if os.path.exists( settings_path ):
+            with open( settings_path ) as f:
+                settings = json.load( f )
+            hooks = settings.get( "hooks", {} )
+            for hook_name, hook_list in hooks.items():
+                if isinstance( hook_list, list ) and len( hook_list ) > 0:
+                    hook_count += 1
+    except Exception:
+        pass
+    hook_status = f"{hook_count}/8 active"
+
+    # ── Check 4: Server reachable ────────────────────────────────────
+    server_url = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
+    try:
+        req  = urllib.request.Request( f"{server_url}/docs", method="HEAD" )
+        resp = urllib.request.urlopen( req, timeout=1 )
+        server_status = f"reachable ({server_url})"
+    except Exception:
+        server_status = f"unreachable ({server_url})"
+
+    # ── Check 5: Config file ─────────────────────────────────────────
+    config_path   = os.path.expanduser( "~/.lupin/config" )
+    config_status = "found" if os.path.exists( config_path ) else "MISSING"
+
+    # ── Build status block ───────────────────────────────────────────
+    lines = [
+        sep,
+        "  cosa-voice — Session Start",
+        sep,
+        f"  MCP     : {mcp_status}",
+        f"  Project : {proj_status}",
+        f"  Hooks   : {hook_status}",
+        f"  Server  : {server_status}",
+        f"  Config  : ~/.lupin/config {config_status}",
+        sep,
+    ]
+    return "\n".join( lines )
+
+
 def main():
 
     # ── Phase 1: Read hook input ──────────────────────────────────────────
@@ -428,6 +519,7 @@ def main():
     # ── Phase 2: Write session bridge file ────────────────────────────────
     session_dir  = os.path.expanduser( "~/.claude/sessions" )
     session_file = None
+    old_data     = None
     is_context_clear = False
 
     if session_id:
@@ -487,9 +579,18 @@ def main():
 
         tmux_session = _find_tmux_session( cc_pid )
 
+        # Build session_ids list — accumulate across context clears
+        # old_data was already read at line 471-480 for context-clear detection
+        existing_ids = old_data.get( "session_ids", [] ) if old_data else []
+        if stable_session_id not in existing_ids:
+            existing_ids.append( stable_session_id )
+        if session_id not in existing_ids:
+            existing_ids.append( session_id )
+
         session_data = {
             "session_id"        : session_id,
             "stable_session_id" : stable_session_id,
+            "session_ids"       : existing_ids,
             "transcript_path"   : transcript_path,
             "cwd"               : cwd,
             "ppid"              : cc_pid,
@@ -552,10 +653,14 @@ def main():
     # ── Phase 6: Log full payload ─────────────────────────────────────────
     log_payload( "session_start", payload )
 
-    # ── Phase 7: Emit response ────────────────────────────────────────────
+    # ── Phase 7: Emit response with cosa-voice status ─────────────────────
     if session_id:
+        try:
+            status_block = _check_cosa_voice_status()
+        except Exception:
+            status_block = ""
         emit_json( {
-            "additionalContext": f"Session ID: {session_id}"
+            "additionalContext": f"Session ID: {session_id}\n\n{status_block}"
         } )
     else:
         emit_json( {} )

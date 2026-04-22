@@ -6,6 +6,22 @@ FROM nvidia/cuda:12.2.2-base-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
+# ============================================================================
+# NON-ROOT USER (Option C: permanent fix for bind-mount permissions)
+# ============================================================================
+# Container writes to bind-mounted host paths (./src, ./io) must be owned by
+# UID 1001 on the host (rruiz). Creating the user early lets subsequent caches
+# (pip, huggingface, d2, claude) land under /home/rruiz with HOME set below.
+# Final `USER rruiz` + `chown -R` happens at the end of the Dockerfile.
+ARG LUPIN_UID=1001
+ARG LUPIN_GID=1001
+RUN groupadd -g ${LUPIN_GID} rruiz && \
+    useradd -m -u ${LUPIN_UID} -g ${LUPIN_GID} -s /bin/bash rruiz
+ENV HOME=/home/rruiz
+# Pin HF cache to rruiz's home so runtime (UID 1001) finds pre-downloaded models
+# regardless of whether HOME expansion varies across build stages.
+ENV HF_HOME=/home/rruiz/.cache/huggingface
+
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential \
@@ -44,16 +60,11 @@ RUN apt-get update && apt-get install -y \
     && apt-get install libportaudio2 libportaudiocpp0 portaudio19-dev libasound-dev libsndfile1-dev ffmpeg -y \
     && pip install pyaudio
 
-RUN pip install -U pip
+# Re-establish Python 3.11 symlinks (apt-get install pip above restores python3 → 3.10)
+RUN ln -sf /usr/local/bin/python3.11 /usr/bin/python3 && \
+    ln -sf /usr/local/bin/pip3.11 /usr/bin/pip3
 
-#######################################
-# Specific versions needed to support web socket Io
-#######################################
-#RUN pip install Flask==2.1.3
-#RUN pip install Flask-SocketIO==5.0.1
-#RUN pip install eventlet==0.30.2
-#RUN pip install Werkzeug==2.0.3
-#RUN pip install requests==2.31.0
+RUN pip install -U pip
 
 RUN pip install pandas
 
@@ -61,29 +72,17 @@ RUN pip install pydub
 
 RUN pip install pyperclip
 
-# RUN pip install flask_cors
-
-# RUN #pip install duckduckgo-search
-
-# RUN pip install jupyterlab
-#
-# RUN pip install ipywidgets
-
 RUN pip install tabulate
 
 RUN pip install tiktoken
 
 RUN pip install --upgrade --no-cache-dir openai
 
-# RUN pip install --upgrade --no-cache-dir langchain[llms]
-
-# RUN pip install --upgrade --no-cache-dir wandb
-
 RUN pip install --upgrade --no-cache-dir transformers
 
 RUN pip install --upgrade --no-cache-dir accelerate
 
-RUN pip install --upgrade --no-cache-dir torch
+RUN pip install --upgrade --no-cache-dir torch==2.7.0
 
 RUN pip install pyaudio
 
@@ -130,6 +129,24 @@ RUN pip install --no-cache-dir fastmcp==2.14.2
 RUN pip install --no-cache-dir pydub==0.25.1
 
 # ============================================================================
+# VISUAL RENDERING DEPENDENCIES (Phase 9A, v0.1.6)
+# ============================================================================
+# Matplotlib is already installed as a transitive dep. Pin seaborn explicitly
+# for presentation generator chart rendering (MatplotlibRenderer).
+# Placed late in Dockerfile to avoid invalidating earlier cached layers.
+RUN pip install --no-cache-dir seaborn==0.13.2
+
+# ============================================================================
+# D2 DIAGRAMMING CLI (Phase 9B, v0.1.6)
+# ============================================================================
+# D2 is a modern diagramming language compiled to SVG. Used by D2Renderer
+# for flowchart_d2 and architecture visual types in presentation generation.
+# Installed via official installer; binary lands in $HOME/.local/bin/d2 (/home/rruiz/.local/bin/d2).
+# Placed late in Dockerfile to avoid invalidating earlier cached layers.
+RUN curl -fsSL https://d2lang.com/install.sh | sh
+ENV PATH="/home/rruiz/.local/bin:${PATH}"
+
+# ============================================================================
 # RUNTIME CONFIGURATION (Can be overridden via docker run -e or Cloud Run)
 # ============================================================================
 # This Docker image is multi-environment capable. The ENV values below are
@@ -157,6 +174,13 @@ RUN pip install --no-cache-dir pydub==0.25.1
 #
 # Available config blocks: Lupin:+Development, Lupin:+Testing, Lupin:+Testing-GCS, Lupin:+Production
 # Note: '+' is URL encoding for space - becomes "Lupin: Development" internally
+#
+# LUPIN_API_KEY: Required for agentic job notifications from inside the container.
+# Without it, jobs running via RunningFifoQueue (presentation, podcast, research)
+# cannot POST to /api/notify and all notifications get 401 Unauthorized.
+# Passed at runtime (never baked in):
+#   Local dev:  start-docker-lupin.sh reads from ~/.lupin/config automatically
+#   Cloud Run:  --set-secrets="LUPIN_API_KEY=lupin-api-key:latest"
 # ============================================================================
 
 env LUPIN_ROOT=/var/lupin
@@ -210,24 +234,18 @@ RUN mkdir -p /var/lupin/io
 #   gcloud run deploy lupin --set-secrets="ANTHROPIC_API_KEY=anthropic-api-key:latest"
 # ============================================================================
 
-# Install Node.js 20.x LTS (required for Claude Code CLI)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
+# Install Claude Code native binary
+RUN curl -fsSL https://claude.ai/install.sh | bash
 
-# Install Claude Code CLI globally (gets latest version at build time)
-# To update: rebuild this image. Auto-update disabled for container immutability.
-RUN npm install -g @anthropic-ai/claude-code
-
-# latest, as of feb 10 2026
-RUN pip install claude-agent-sdk==0.1.36
+# latest, as of April 6, 2026
+RUN pip install --no-cache-dir claude-agent-sdk==0.1.56
 
 # Create Claude config directory and copy pre-configured settings
-RUN mkdir -p /root/.claude
+RUN mkdir -p /home/rruiz/.claude
 
 # Copy MCP configuration (cosa-voice with container paths) and settings
-COPY docker/lupin/claude-config/settings.json /root/.claude/settings.json
-COPY docker/lupin/claude-config/mcp.json /root/.claude/.mcp.json
+COPY docker/lupin/claude-config/settings.json /home/rruiz/.claude/settings.json
+COPY docker/lupin/claude-config/mcp.json /home/rruiz/.claude/.mcp.json
 
 # ============================================================================
 # END CLAUDE CODE CLI INSTALLATION
@@ -240,6 +258,100 @@ RUN pip install --no-cache-dir llama-index==0.14.14 llama-index-embeddings-nomic
 # Pre-download embedding models (avoids first-request latency in container)
 RUN python3 -c "from sentence_transformers import SentenceTransformer; SentenceTransformer( 'nomic-ai/CodeRankEmbed', trust_remote_code=True )"
 RUN python3 -c "from transformers import AutoModel, AutoTokenizer; AutoModel.from_pretrained( 'nomic-ai/nomic-embed-text-v1.5', trust_remote_code=True ); AutoTokenizer.from_pretrained( 'bert-base-uncased' )"
+
+# ============================================================================
+# PLAYWRIGHT E2E TESTING (Phases 1-8, v0.1.6)
+# ============================================================================
+# E2E UI tests run against the container from host or CI.
+# Playwright browsers are installed inside the container for CI execution.
+
+# Testing framework (pytest already may be installed as transitive dep — pin explicitly)
+RUN pip install --no-cache-dir pytest==8.4.2 pytest-asyncio==1.2.0
+
+# Playwright + pytest integration
+RUN pip install --no-cache-dir pytest-playwright==0.7.2
+
+# Playwright browser binaries (Chromium only — keeps image smaller)
+RUN playwright install --with-deps chromium
+
+# Visual regression dependencies (pillow + pixelmatch already installed if not present)
+RUN pip install --no-cache-dir pillow==11.1.0 pixelmatch==0.4.0
+
+# Visual snapshot plugin — installed with --no-deps to avoid starlette version conflict
+# (structlog-config transitive dep requires starlette >=0.49.1, FastAPI 0.115.12 pins <0.47.0)
+# The plugin only uses pillow + pixelmatch at runtime; structlog-config is never imported.
+RUN pip install --no-cache-dir --no-deps pytest-playwright-visual-snapshot==0.5.1
+
+# Patch __init__.py to make structlog import optional (same as local dev setup)
+RUN sed -i 's/from structlog_config import configure_logger/try:\n    from structlog_config import configure_logger\nexcept ImportError:\n    import logging; configure_logger = lambda: logging.getLogger(__name__)/' \
+    /usr/local/lib/python3.11/site-packages/pytest_playwright_visual_snapshot/__init__.py
+
+# ============================================================================
+# END PLAYWRIGHT E2E TESTING
+# ============================================================================
+
+# ============================================================================
+# MARP CLI — Presentation PPTX Export
+# ============================================================================
+# Standalone binary (no Node.js needed). Uses Playwright Chromium for rendering.
+# Ref: https://github.com/marp-team/marp-cli/releases
+
+RUN MARP_VERSION="4.3.1" && \
+    wget -q "https://github.com/marp-team/marp-cli/releases/download/v${MARP_VERSION}/marp-cli-v${MARP_VERSION}-linux.tar.gz" \
+      -O /tmp/marp-cli.tar.gz && \
+    tar -xzf /tmp/marp-cli.tar.gz -C /usr/local/bin/ && \
+    chmod +x /usr/local/bin/marp && \
+    rm /tmp/marp-cli.tar.gz
+
+# ============================================================================
+# END MARP CLI
+# ============================================================================
+
+# ============================================================================
+# GITHUB CLI — TFE/BFE Phase 5 `gh pr create`
+# ============================================================================
+# Placed near the bottom of the Dockerfile so the expensive earlier layers
+# (Python 3.11 source build, CUDA toolkit, torch, flash-attn, HF model
+# downloads, Playwright Chromium, MARP) remain cached on rebuild. Only this
+# layer and the chown/USER tail are recomputed when gh changes.
+#
+# Uses the official GitHub CLI apt repo (https://cli.github.com/packages)
+# rather than Ubuntu 22.04 universe (which carries a stale gh 2.4.0 vs.
+# upstream's current 2.40+). Runtime authentication is via the GH_TOKEN env
+# var passed through docker-compose.yml (added 2026-04-18 Session be57a252).
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gnupg ca-certificates && \
+    mkdir -p -m 755 /etc/apt/keyrings && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends gh && \
+    rm -rf /var/lib/apt/lists/*
+# ============================================================================
+# END GITHUB CLI
+# ============================================================================
+
+# ============================================================================
+# NON-ROOT RUNTIME (Option C: drop to UID 1001 before CMD)
+# ============================================================================
+# Relocate any caches that landed in /root/.cache from Docker layer-cache reuse
+# (HF/pip/claude pre-downloads baked into cached RUN layers from before Option C).
+# Safe no-op when layers were rebuilt fresh with HOME=/home/rruiz.
+RUN if [ -d /root/.cache ]; then \
+        mkdir -p /home/rruiz/.cache && \
+        cp -an /root/.cache/. /home/rruiz/.cache/ && \
+        rm -rf /root/.cache; \
+    fi
+
+# Ensure rruiz owns its HOME (where d2, claude, huggingface caches landed as root
+# during build) and the /var/lupin tree (installs, pre-downloaded models, code).
+# Bind-mounted paths (./src, ./io) inherit host ownership at runtime — those are
+# fine since Option B already chowned LanceDB to rruiz:rruiz on the host.
+RUN chown -R rruiz:rruiz /home/rruiz /var/lupin
+USER rruiz
 
 # CMD ["/bin/bash", "-c", "echo '-- OR -- Run `python3 -m fastapi_app.main` to spin up FastAPI server' && exec /bin/bash"]
 # Run the script: /var/lupin/src/scripts/run-fastapi-lupin.sh

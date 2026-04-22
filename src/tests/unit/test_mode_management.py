@@ -7,10 +7,10 @@ get_available_modes() methods on TodoFifoQueue.
 
 Validates that:
   - All 7 agent-base modes are accepted
-  - All 5 agentic modes are accepted
+  - All 6 agentic modes are accepted
   - Invalid modes are rejected with ValueError
   - AGENTIC_MODE_MAP values are valid AGENTIC_AGENTS keys
-  - get_available_modes() returns all 13 entries (system + 7 agents + 5 agentic)
+  - get_available_modes() returns all 15 entries (system + 7 agents + 7 agentic)
   - MODE_METADATA has entries for every mode key plus "system"
 """
 
@@ -68,9 +68,9 @@ class TestModuleDicts:
                 f"AGENTIC_MODE_MAP['{mode_key}'] = '{command}' is not a valid AGENTIC_AGENTS key"
             )
 
-    def test_agentic_mode_map_has_five_entries( self ):
-        """AGENTIC_MODE_MAP should have exactly 5 entries (one per agentic agent)."""
-        assert len( AGENTIC_MODE_MAP ) == 5
+    def test_agentic_mode_map_has_seven_entries( self ):
+        """AGENTIC_MODE_MAP should have exactly 7 entries (one per agentic agent)."""
+        assert len( AGENTIC_MODE_MAP ) == 8
 
     def test_mode_to_agent_has_seven_entries( self ):
         """MODE_TO_AGENT should have exactly 7 entries (the original agent-base agents)."""
@@ -89,9 +89,9 @@ class TestModuleDicts:
             f"Missing: {expected_keys - actual_keys}, Extra: {actual_keys - expected_keys}"
         )
 
-    def test_mode_metadata_has_thirteen_entries( self ):
-        """MODE_METADATA should have 13 entries: 1 system + 7 agent + 5 agentic."""
-        assert len( MODE_METADATA ) == 13
+    def test_mode_metadata_has_fourteen_entries( self ):
+        """MODE_METADATA should have 15 entries: 1 system + 7 agent + 7 agentic."""
+        assert len( MODE_METADATA ) == 16
 
     def test_mode_metadata_entries_have_required_fields( self ):
         """Every MODE_METADATA entry must have display_name and description."""
@@ -100,8 +100,8 @@ class TestModuleDicts:
             assert "description" in meta, f"MODE_METADATA['{key}'] missing 'description'"
 
     def test_agentic_mode_map_specific_keys( self ):
-        """Verify the specific 5 agentic mode keys."""
-        expected = { "deep_research", "podcast", "research_to_podcast", "claude_code", "swe_team" }
+        """Verify the specific 7 agentic mode keys."""
+        expected = { "deep_research", "podcast", "research_to_podcast", "claude_code", "swe_team", "presentation", "research_to_presentation", "test_suite" }
         assert set( AGENTIC_MODE_MAP.keys() ) == expected
 
 
@@ -163,10 +163,10 @@ class TestSetUserMode:
 class TestGetAvailableModes:
     """Tests for get_available_modes()."""
 
-    def test_returns_thirteen_modes( self, queue ):
-        """get_available_modes() should return 13 mode dicts."""
+    def test_returns_fifteen_modes( self, queue ):
+        """get_available_modes() should return 15 mode dicts."""
         modes = queue.get_available_modes()
-        assert len( modes ) == 13
+        assert len( modes ) == 16
 
     def test_system_mode_is_present( self, queue ):
         """System mode must be in the returned list."""

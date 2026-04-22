@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -746,6 +747,55 @@ def reset_stop_block_count( session_id ):
         path.unlink( missing_ok=True )
     except OSError:
         pass
+
+
+# ── Turn Start Marker (duration gating for stop hook) ─────────────────────────
+
+TURN_MARKER_DIR = Path( "/tmp" )
+
+
+def write_turn_start_marker( session_id ):
+    """
+    Write epoch timestamp to /tmp/cc-turn-start-{session_id[:8]}.
+
+    Called by UserPromptSubmit hook to record when the user's prompt was submitted.
+    The stop hook reads this marker to compute turn duration for gating.
+
+    Requires:
+        - session_id is a non-empty string
+
+    Ensures:
+        - Creates/overwrites marker file with current epoch timestamp
+        - Never raises exceptions
+    """
+    try:
+        marker = TURN_MARKER_DIR / f"cc-turn-start-{session_id[ :8 ]}"
+        marker.write_text( str( time.time() ) )
+    except OSError:
+        pass  # Marker write failure is non-fatal
+
+
+def get_turn_elapsed_seconds( session_id ):
+    """
+    Read turn start marker and return elapsed seconds since user prompt.
+
+    Requires:
+        - session_id is a non-empty string
+
+    Ensures:
+        - Returns float elapsed seconds if marker exists and is readable
+        - Returns None if marker missing or unreadable (safe fallback)
+        - Never raises exceptions
+
+    Returns:
+        float or None: Elapsed seconds since turn start, or None
+    """
+    try:
+        marker      = TURN_MARKER_DIR / f"cc-turn-start-{session_id[ :8 ]}"
+        start_epoch = float( marker.read_text().strip() )
+        return time.time() - start_epoch
+    except ( FileNotFoundError, ValueError, OSError ):
+        return None
 
 
 # ── Voice Buffer Functions ────────────────────────────────────────────────────

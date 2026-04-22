@@ -7,6 +7,8 @@ to database validation. Requires running FastAPI server.
 Design reference: src/rnd/2025.11.10-phase-2.5-notification-authentication.md
 """
 
+import os
+
 import pytest
 import requests
 import bcrypt
@@ -80,7 +82,7 @@ def test_api_key( clean_test_db ):
 class TestNotificationAuthentication:
     """Integration tests for notification endpoint authentication."""
 
-    BASE_URL = "http://localhost:7999"
+    BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
     def test_valid_api_key_allows_access( self, test_api_key ):
         """Test that valid API key allows notification to be sent."""
@@ -258,7 +260,7 @@ class TestNotificationAuthentication:
 class TestMultipleAPIKeys:
     """Test scenarios with multiple API keys."""
 
-    BASE_URL = "http://localhost:7999"
+    BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
     def test_multiple_keys_for_same_user( self, test_api_key ):
         """Test that user can have multiple active API keys."""
@@ -304,7 +306,7 @@ class TestMultipleAPIKeys:
 class TestSecurityHeaders:
     """Test security-related headers and responses."""
 
-    BASE_URL = "http://localhost:7999"
+    BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
     def test_no_api_key_leakage_in_errors( self, test_api_key ):
         """Test that API keys are not leaked in error messages."""

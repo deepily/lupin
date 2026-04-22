@@ -16,6 +16,8 @@ Run:
     OR: pytest src/tests/integration/test_prediction_engine_e2e.py -v
 """
 
+import os
+
 import json
 import time
 import uuid
@@ -28,7 +30,7 @@ import pytest
 import cosa.utils.util as cu
 
 # Test server
-BASE_URL = "http://localhost:7999"
+BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 # Test-specific LanceDB table name (prevents contaminating production data)
 TEST_LANCEDB_TABLE = "prediction_decisions_test"
@@ -109,13 +111,19 @@ def _get_prediction_log( session_factory, notification_id ):
     Query prediction_log for a specific notification.
 
     Returns:
-        PredictionLog object or None
+        PredictionLog object (detached) or None
     """
+    from sqlalchemy.orm import make_transient
     from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository
 
     with session_factory() as session:
         repo = PredictionLogRepository( session )
-        return repo.get_by_notification_id( notification_id )
+        log  = repo.get_by_notification_id( notification_id )
+        if log is not None:
+            # Eagerly load all columns before detaching from session
+            session.refresh( log )
+            make_transient( log )
+        return log
 
 
 def _get_all_prediction_logs( session_factory ):
@@ -123,20 +131,24 @@ def _get_all_prediction_logs( session_factory ):
     Get all prediction_log entries.
 
     Returns:
-        list of PredictionLog objects
+        list of PredictionLog objects (detached)
     """
+    from sqlalchemy.orm import make_transient
     from cosa.rest.db.repositories.prediction_log_repository import PredictionLogRepository
 
     with session_factory() as session:
         repo = PredictionLogRepository( session )
-        return repo.get_recent( limit=100 )
+        logs = repo.get_recent( limit=100 )
+        for log in logs:
+            session.refresh( log )
+            make_transient( log )
+        return logs
 
 
 # ===========================================================================
 # TestPredictionEngineE2E — full cycle tests
 # ===========================================================================
 
-@pytest.mark.skip( reason="Requires prediction engine server-side state (LanceDB + prediction_log table init) — deferred to UPE live E2E validation" )
 class TestPredictionEngineE2E:
     """
     E2E tests for the predict-respond-record cycle.
@@ -149,17 +161,40 @@ class TestPredictionEngineE2E:
     """
 
     @pytest.fixture( autouse=True )
-    def setup_auth( self, create_test_user ):
-        """Set up authentication for all tests."""
-        self.user_data    = create_test_user
-        self.auth_headers = { "Authorization": f"Bearer {create_test_user[ 'access_token' ]}" }
-        self.target_email = create_test_user[ "email" ]
+    def setup_auth( self, ws_connection ):
+        """Set up authentication + WebSocket for all tests."""
+        self.user_data    = ws_connection
+        self.auth_headers = { "Authorization": f"Bearer {ws_connection[ 'access_token' ]}" }
+        self.target_email = ws_connection[ "email" ]
 
     @pytest.fixture( autouse=True )
     def setup_db( self ):
         """Provide DB session factory for verification queries."""
         from cosa.rest.db.database import get_db
         self._get_db = get_db
+
+    @pytest.fixture( autouse=True )
+    def clean_lancedb( self ):
+        """
+        Drop test LanceDB table and reset server-side PredictionEngine before each test.
+
+        Ensures:
+            - Server drops the test LanceDB table (server has root write permission)
+            - PredictionEngine singleton is destroyed and re-created with clean state
+            - No cross-test contamination from prior decisions
+
+        Note:
+            Both table drop and singleton reset MUST happen server-side — the server
+            process runs as root (Docker) and owns the LanceDB files. The test process
+            (running as user) cannot drop the table due to permission denied.
+        """
+        # Server-side: drop test table + reset PredictionEngine singleton
+        requests.get( f"{BASE_URL}/api/prediction-engine/reset", params={ "drop_table": "true" } )
+
+        yield
+
+        # Post-test cleanup: drop table + reset again
+        requests.get( f"{BASE_URL}/api/prediction-engine/reset", params={ "drop_table": "true" } )
 
     def _send_and_respond( self, message, response_type, response_value,
                            timeout_seconds=10, response_options=None,
@@ -500,7 +535,6 @@ class TestPredictionEngineE2E:
 # TestPredictionEngineWarm — warm CBR prediction tests
 # ===========================================================================
 
-@pytest.mark.skip( reason="Requires prediction engine server-side state (LanceDB + embeddings) — deferred to UPE live E2E validation" )
 class TestPredictionEngineWarm:
     """
     Warm E2E tests that seed LanceDB with real embeddings (via HTTP fallback)
@@ -514,14 +548,14 @@ class TestPredictionEngineWarm:
     """
 
     @pytest.fixture( autouse=True )
-    def setup_auth( self, create_test_user ):
-        """Set up authentication for all tests."""
-        self.user_data    = create_test_user
-        self.auth_headers = { "Authorization": f"Bearer {create_test_user[ 'access_token' ]}" }
-        self.target_email = create_test_user[ "email" ]
+    def setup_auth( self, ws_connection ):
+        """Set up authentication + WebSocket for all tests."""
+        self.user_data    = ws_connection
+        self.auth_headers = { "Authorization": f"Bearer {ws_connection[ 'access_token' ]}" }
+        self.target_email = ws_connection[ "email" ]
 
-        # API key for HTTP embedding calls
-        self.api_key = cu.get_api_key( "notification-api-claude-code-dev" )
+        # Use JWT for HTTP embedding calls (API key may not be seeded in test DB)
+        self.embedding_headers = self.auth_headers
 
     @pytest.fixture( autouse=True )
     def setup_db( self ):
@@ -532,27 +566,20 @@ class TestPredictionEngineWarm:
     @pytest.fixture( autouse=True )
     def setup_prediction_engine( self ):
         """
-        Reset PredictionEngine singleton and configure with test table.
-        Cleans up test LanceDB table after each test.
-        """
-        from cosa.agents.prediction_engine.prediction_engine import PredictionEngine
+        Reset server-side PredictionEngine singleton and clean test LanceDB table.
 
-        # Reset to get fresh instance
-        PredictionEngine.reset()
+        Ensures:
+            - Server drops test LanceDB table (server has root write permission)
+            - PredictionEngine singleton re-created with test config
+            - No cross-test contamination from prior decisions
+        """
+        # Server-side: drop test table + reset PredictionEngine singleton
+        requests.get( f"{BASE_URL}/api/prediction-engine/reset", params={ "drop_table": "true" } )
 
         yield
 
-        # Cleanup: drop the test LanceDB table
-        try:
-            import lancedb
-            lancedb_path = cu.get_project_root() + "/src/conf/long-term-memory/lupin.lancedb"
-            db = lancedb.connect( lancedb_path )
-            if TEST_LANCEDB_TABLE in db.table_names():
-                db.drop_table( TEST_LANCEDB_TABLE )
-        except Exception:
-            pass  # Best effort cleanup
-
-        PredictionEngine.reset()
+        # Post-test cleanup
+        requests.get( f"{BASE_URL}/api/prediction-engine/reset", params={ "drop_table": "true" } )
 
     def _generate_embedding_http( self, text ):
         """
@@ -560,7 +587,7 @@ class TestPredictionEngineWarm:
 
         Requires:
             - FastAPI server running with embeddings endpoint
-            - API key available
+            - Valid JWT from ws_connection fixture
 
         Ensures:
             - Returns list of 768 floats
@@ -568,7 +595,7 @@ class TestPredictionEngineWarm:
         response = requests.post(
             f"{BASE_URL}/api/embeddings/generate",
             json    = { "text": text, "content_type": "prose" },
-            headers = { "X-API-Key": self.api_key },
+            headers = self.embedding_headers,
             timeout = 10
         )
         assert response.status_code == 200, f"Embedding generation failed: {response.text}"

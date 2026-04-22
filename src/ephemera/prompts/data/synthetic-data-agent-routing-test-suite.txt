@@ -1,0 +1,154 @@
+run the test suite
+run the tests
+kick off the tests
+start the test suite
+run all tests
+execute the test suite
+launch the tests
+run my tests
+start running tests
+trigger the test suite
+run integration tests
+run the integration test suite
+kick off integration tests
+start the integration tests
+execute the integration tests
+run end to end tests
+run the e2e tests
+run e2e tests
+kick off the end to end tests
+start e2e testing
+execute e2e tests
+run the end to end test suite
+run both integration and e2e tests
+run integration and end to end tests
+kick off both test suites
+run all test suites
+start both integration and e2e
+run the full test suite
+execute both test suites
+run everything integration and e2e
+please run the tests
+can you run the test suite
+I want to run the tests
+could you run the integration tests
+please start the test suite
+can you kick off the e2e tests
+I need to run the tests
+would you run the full test suite
+go ahead and run the tests
+lets run the test suite
+run tests for me
+run tests please
+go run the integration tests
+start running the e2e tests
+I want to run end to end tests
+can you start the integration test suite
+please execute the test suite
+go ahead and kick off the tests
+run the full integration and e2e suite
+I need the test suite to run
+time to run the tests
+lets kick off the test suite
+we need to run integration tests
+schedule the tests
+schedule the test suite for later
+run the tests tonight
+schedule integration tests for tonight
+run the test suite at midnight
+kick off tests at two am
+schedule e2e tests for later tonight
+run the full test suite overnight
+set up a test run for tonight
+queue up the test suite
+run tests in exclusive mode
+run the test suite in monopolize mode
+run tests with exclusive access
+run the test suite with exclusive access
+run the tests in exclusive mode
+run integration tests in exclusive mode
+run e2e tests in monopolize mode
+run the full test suite in exclusive mode
+kick off the tests in monopolize mode
+run the test suite when idle
+schedule tests for when the system is idle
+run tests overnight with exclusive access
+run the test suite overnight
+run e2e tests overnight
+run integration tests with exclusive access
+schedule tests in exclusive mode for tonight
+run tests with monopolize flag
+execute the test suite in exclusive mode
+run everything in monopolize mode
+kick off tests with exclusive access tonight
+run integration tests exclusive
+lets run the test suite in exclusive mode
+run unit tests
+run the unit tests
+run pytest unit tests
+kick off unit tests
+start unit testing
+execute unit tests
+trigger the unit tests
+just run unit tests
+run only the unit tests
+run the unit test suite
+run smoke tests
+run the smoke tests
+kick off smoke tests
+execute smoke tests
+run smoke testing
+trigger smoke tests
+start the smoke tests
+run all smoke tests
+run the smoke test suite
+run websocket tests
+run the websocket tests
+run ws smoke tests
+kick off websocket tests
+execute websocket tests
+run the websocket smoke suite
+trigger ws tests
+run the websocket test suite
+run all tests
+run every test
+run the full test suite
+run everything
+run the complete test suite
+run all the tests
+execute all tests
+kick off everything
+run the full regression
+run all test suites
+run every single test
+execute the full suite
+run all tests at midnight
+schedule all tests for midnight
+run the full suite at midnight
+run all tests tonight at midnight
+run every test at midnight
+run all tests at one am
+schedule the test suite for midnight
+run unit tests at eight pm tonight
+schedule unit tests for tonight at 8pm
+run smoke tests in thirty minutes
+schedule smoke tests for tomorrow morning
+run e2e tests at ten pm
+run integration tests at nine pm tonight
+schedule integration tests for tomorrow
+kick off the test suite in an hour
+run all tests in two hours
+queue up all tests for midnight
+run everything at three am
+schedule the full regression for tomorrow
+run unit tests in fifteen minutes
+run all tests tomorrow morning
+schedule e2e tests for overnight
+run the test suite at six thirty
+run unit and smoke tests
+run unit smoke and websocket tests
+run unit tests then smoke tests
+run unit and smoke and websocket
+run integration and e2e together
+run unit tests followed by smoke tests
+run smoke and websocket tests

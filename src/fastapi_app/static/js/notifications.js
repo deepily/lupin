@@ -4,6 +4,13 @@
  * Handles WebSocket connections, authentication, Q&A, and TTS functionality
  */
 
+// Test types that take a file path as the first positional pytest arg.
+// Keep this in sync with FILE_DRIVEN_TEST_TYPES in cosa/agents/test_suite/job.py —
+// a test type belongs here iff its shell script delegates to "$@" (i.e., accepts
+// the file path as the first arg rather than fanning out to a fixed suite).
+// Also mirrored in notifications.html inline <script> as FILE_DRIVEN_TEST_TYPES_HTML.
+const FILE_DRIVEN_TEST_TYPES = new Set( [ 'smoke_direct', 'pytest_direct' ] );
+
 class NotificationsUI {
     constructor() {
         // Configuration
@@ -76,7 +83,8 @@ class NotificationsUI {
         // State management
         this.isConnecting = false;
         this.connectionRetries = 0;
-        this.maxRetries = 5;
+        this.queueWsConnected = false;
+        this.audioWsConnected = false;
         this.authRefreshAttempted = false; // Track refresh attempts to prevent loops
         this.isInitialLoad = false;        // Track initial load vs runtime for card ordering
         
@@ -133,6 +141,8 @@ class NotificationsUI {
         this.ACTION_REQUIRED_KEY = 'notifications_action_required';  // Persist action-required notifications
         this.TTS_QUEUE_KEY = 'notifications_tts_queue';  // Persist TTS queue across refresh
         this.SESSION_NAMES_KEY = 'notifications_session_names';  // Persist user-edited session names
+        this.RESUME_MODEL_PREF_KEY  = 'notifications_resume_model';   // Default model for stalled-job resume (TFE/BFE)
+        this.RESUME_EFFORT_PREF_KEY = 'notifications_resume_effort';  // Default thinking-effort for stalled-job resume
         this.CURRENT_VERSION = '2.0.0'; // Increment to invalidate old cache - date grouping release
 
         // Session names cache (loaded from localStorage)
@@ -148,11 +158,13 @@ class NotificationsUI {
         // ========================================
         // State management for expandable queue categories and job cards
         this.queueCategoryState = {
-            todo : { expanded: false, loaded: false, jobs: [] },
-            run  : { expanded: false, loaded: false, jobs: [] },
-            done : { expanded: false, loaded: false, jobs: [] },
-            dead : { expanded: false, loaded: false, jobs: [] }
+            todo    : { expanded: false, loaded: false, jobs: [] },
+            run     : { expanded: false, loaded: false, jobs: [] },
+            done    : { expanded: false, loaded: false, jobs: [] },
+            dead    : { expanded: false, loaded: false, jobs: [] },
+            history : { expanded: false, loaded: false, jobs: [], offset: 0, total: 0, timeWindow: 30 }
         };
+        this.queueCounts = { todo: 0, run: 0, done: 0, dead: 0 };
         this.expandedJobCards = new Set();         // Track which job cards are expanded
         this.jobInteractionsCache = new Map();     // Cache loaded interactions: job_id → interactions[]
 
@@ -570,11 +582,10 @@ class NotificationsUI {
          */
         try {
             // Authenticated API call (requires valid JWT token)
-            const response = await fetch( '/api/config/client', {
+            const response = await this.authedFetch( '/api/config/client', {
                 method: 'GET',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': this.getAuthHeader()  // JWT authentication required
+                    'Content-Type': 'application/json'
                 }
             });
 
@@ -587,6 +598,18 @@ class NotificationsUI {
                 this.TOKEN_REFRESH_DEDUP_WINDOW_MS = config.token_refresh_dedup_window_ms;
                 this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = config.websocket_heartbeat_interval_secs;
                 this.appTimezone = config.app_timezone;
+                this.tfeAutoFixDefault = !!config.test_fix_expediter_auto_fix_enabled;
+                this.envLabel = config.env_label || "DEVELOPMENT";
+                this.updateElement( "env-label", `[${this.envLabel}]: ` );
+
+                // Sync the test runner submission card's auto-fix checkbox to the
+                // INI default. The user can still toggle it for any individual
+                // submission — that override travels in the request body and
+                // does NOT round-trip back to the INI.
+                const autoFixCheckbox = document.getElementById( 'test-suite-auto-fix' );
+                if ( autoFixCheckbox ) {
+                    autoFixCheckbox.checked = this.tfeAutoFixDefault;
+                }
 
                 // Log configuration for debugging
                 this.log( "✓ Client config loaded from server:", {
@@ -594,7 +617,8 @@ class NotificationsUI {
                     expiry_threshold       : `${config.token_expiry_threshold_secs / 60} mins`,
                     dedup_window           : `${config.token_refresh_dedup_window_ms / 1000} secs`,
                     heartbeat_interval     : `${config.websocket_heartbeat_interval_secs} secs`,
-                    app_timezone           : config.app_timezone
+                    app_timezone           : config.app_timezone,
+                    tfe_auto_fix_default   : this.tfeAutoFixDefault
                 });
 
             } else if ( response.status === 401 ) {
@@ -616,6 +640,7 @@ class NotificationsUI {
             this.TOKEN_REFRESH_DEDUP_WINDOW_MS = 60 * 1000;         // 60 seconds
             this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = 30;            // 30 seconds
             this.appTimezone = 'America/New_York';                  // Default timezone
+            this.tfeAutoFixDefault = false;                         // Conservative fallback
 
             this.log( "⚠️ Using default client config (server fetch failed)" );
         }
@@ -813,16 +838,17 @@ class NotificationsUI {
         const audioNeedsReconnect = !this.audioWS || this.audioWS.readyState !== WebSocket.OPEN;
 
         if ( queueNeedsReconnect || audioNeedsReconnect ) {
-            // Disconnection detected
-            this.log( `Health check: Disconnected WebSockets detected (queue=${queueNeedsReconnect}, audio=${audioNeedsReconnect})` );
+            // Disconnection detected — reconnect only what's broken
+            const target = ( queueNeedsReconnect && audioNeedsReconnect ) ? 'both'
+                         : queueNeedsReconnect ? 'queue' : 'audio';
+            this.wsDiag( `Health check: Disconnected WebSockets detected (queue=${queueNeedsReconnect}, audio=${audioNeedsReconnect}) → reconnecting ${target}` );
             this.updateHealthStatus( "Reconnecting...", "status-warning" );
 
-            // Reset retry counter to give reconnection a fresh start
-            // (scheduleReconnect gives up after 5 attempts, but health monitor provides unlimited retries)
+            // Reset retry counter to give reconnection a fresh start from health monitor
             this.connectionRetries = 0;
 
-            // Trigger existing reconnection logic
-            this.scheduleReconnect();
+            // Trigger targeted reconnection
+            this.scheduleReconnect( target );
         } else {
             // Both WebSockets healthy
             this.updateHealthStatus( `✓ Healthy (checked ${now.toLocaleTimeString()})`, "status-success" );
@@ -901,6 +927,39 @@ class NotificationsUI {
             const elapsed = ( performance.now() - startTime ).toFixed( 1 );
             this.log( `✓ Token valid (checked in ${elapsed}ms)` );
         }
+    }
+
+    async authedFetch( url, options = {} ) {
+        /**
+         * Authenticated fetch wrapper.
+         *
+         * Proactively refreshes the JWT access token (via ensureValidToken) before
+         * firing the request, then injects the Authorization header. Use this for
+         * every authenticated API call from notifications.js — it eliminates the
+         * 401s that occur when a user is idle longer than the JWT TTL and the
+         * browser still holds a stale token.
+         *
+         * Requires:
+         *     - this.ensureValidToken() and this.getAuthHeader() are available
+         *     - options is a plain object (or omitted)
+         *
+         * Ensures:
+         *     - Token is refreshed if expired before the fetch fires
+         *     - Authorization header is injected (caller headers take precedence
+         *       if they also define Authorization)
+         *     - All other fetch options (method, body, signal, etc.) pass through
+         *     - Returns the Response object as-is — caller handles status checking
+         *
+         * Raises:
+         *     - Whatever ensureValidToken() raises (auth failure after refresh)
+         *     - Whatever fetch() raises (network failure)
+         */
+        await this.ensureValidToken();
+        const headers = {
+            'Authorization': this.getAuthHeader(),
+            ...( options.headers || {} )
+        };
+        return fetch( url, { ...options, headers } );
     }
 
     async refreshAccessToken() {
@@ -1385,13 +1444,34 @@ class NotificationsUI {
         });
 
         // Queue filter toggle (admin only - buttons may not exist for regular users)
-        const filterOwnBtn = document.getElementById( 'filter-own-jobs' );
-        const filterAllBtn = document.getElementById( 'filter-all-jobs' );
+        const filterOwnBtn    = document.getElementById( 'filter-own-jobs' );
+        const filterOthersBtn = document.getElementById( 'filter-others-jobs' );
+        const filterAllBtn    = document.getElementById( 'filter-all-jobs' );
 
         if ( filterOwnBtn && filterAllBtn ) {
             filterOwnBtn.addEventListener( 'click', () => this.setFilterMode( 'own' ) );
+            if ( filterOthersBtn ) {
+                filterOthersBtn.addEventListener( 'click', () => this.setFilterMode( 'others' ) );
+            }
             filterAllBtn.addEventListener( 'click', () => this.setFilterMode( 'all' ) );
             this.log( "Filter button event listeners added" );
+        }
+
+        // Filter mode badges in section headers (click to show + scroll to filter panel)
+        const notifFilterBadge  = document.getElementById( 'notifications-filter-badge' );
+        const queuesFilterBadge = document.getElementById( 'queues-filter-badge' );
+
+        if ( notifFilterBadge ) {
+            notifFilterBadge.addEventListener( 'click', ( e ) => {
+                e.stopPropagation();  // Prevent section toggle
+                this.showAndScrollToFilterPanel();
+            } );
+        }
+        if ( queuesFilterBadge ) {
+            queuesFilterBadge.addEventListener( 'click', ( e ) => {
+                e.stopPropagation();  // Prevent section toggle
+                this.showAndScrollToFilterPanel();
+            } );
         }
 
         // Clear all notifications button
@@ -1685,6 +1765,18 @@ class NotificationsUI {
             });
         }
 
+        // Mutual exclusivity: podcast and presentation checkboxes
+        const podcastCb = document.getElementById( 'research-with-podcast' );
+        const presentationCb = document.getElementById( 'research-with-presentation' );
+        if ( podcastCb && presentationCb ) {
+            podcastCb.addEventListener( 'change', () => {
+                if ( podcastCb.checked ) presentationCb.checked = false;
+            });
+            presentationCb.addEventListener( 'change', () => {
+                if ( presentationCb.checked ) podcastCb.checked = false;
+            });
+        }
+
         // Podcast submit button
         const submitPodcastBtn = document.getElementById( 'submit-podcast-job' );
         if ( submitPodcastBtn ) {
@@ -1755,6 +1847,49 @@ class NotificationsUI {
                     e.preventDefault();
                     this.submitSweTeamJob();
                 }
+            });
+        }
+
+        // Presentation Generator submit button
+        const submitPresentationBtn = document.getElementById( 'submit-presentation-job' );
+        if ( submitPresentationBtn ) {
+            submitPresentationBtn.addEventListener( 'click', () => {
+                this.submitPresentationJob();
+            });
+        }
+
+        // Presentation Generator STT button (voice input)
+        const presentationSttBtn = document.getElementById( 'presentation-stt-button' );
+        if ( presentationSttBtn ) {
+            presentationSttBtn.addEventListener( 'click', () => {
+                this.handleSTTButtonClick( 'presentation-source', presentationSttBtn );
+            });
+        }
+
+        // Enter key in Presentation source input
+        const presentationSourceInput = document.getElementById( 'presentation-source' );
+        if ( presentationSourceInput ) {
+            presentationSourceInput.addEventListener( 'keydown', ( e ) => {
+                if ( e.key === 'Enter' ) {
+                    e.preventDefault();
+                    this.submitPresentationJob();
+                }
+            });
+        }
+
+        // Test Suite submit button
+        const submitTestSuiteBtn = document.getElementById( 'submit-test-suite-job' );
+        if ( submitTestSuiteBtn ) {
+            submitTestSuiteBtn.addEventListener( 'click', () => {
+                this.submitTestSuiteJob();
+            });
+        }
+
+        // TFE Resume submit button (session 9056c113 — file-path resume)
+        const submitTFEResumeBtn = document.getElementById( 'submit-tfe-resume-job' );
+        if ( submitTFEResumeBtn ) {
+            submitTFEResumeBtn.addEventListener( 'click', () => {
+                this.submitTFEResume();
             });
         }
 
@@ -1920,29 +2055,30 @@ class NotificationsUI {
     // WEBSOCKET CONNECTIONS
     // ========================================
     
-    async connectWebSockets() {
-        this.log( "Connecting WebSockets..." );
-        
+    async connectWebSockets( target = 'both' ) {
+        this.log( `Connecting WebSockets (target=${target})...` );
+
         try {
-            // Get session IDs
+            // Get session IDs (cached in localStorage — no network call)
             this.queueSessionId = await this.getOrCreateSessionId( 'queue' );
             this.audioSessionId = await this.getOrCreateSessionId( 'audio' );
-            
+
             // Update UI with session IDs
             this.updateElement( "queue-session", this.queueSessionId );
             this.updateElement( "audio-session", this.audioSessionId );
-            
-            // Connect both WebSockets
-            await Promise.all([
-                this.connectQueueWebSocket(),
-                this.connectAudioWebSocket()
-            ]);
-            
-            this.log( "Both WebSockets connected successfully" );
-            
+
+            // Connect only the requested WebSocket(s)
+            const promises = [];
+            if ( target === 'both' || target === 'queue' ) promises.push( this.connectQueueWebSocket() );
+            if ( target === 'both' || target === 'audio' ) promises.push( this.connectAudioWebSocket() );
+
+            await Promise.all( promises );
+
+            this.log( `WebSocket(s) connected successfully (target=${target})` );
+
         } catch ( error ) {
             this.error( "WebSocket connection failed:", error );
-            this.scheduleReconnect();
+            this.scheduleReconnect( target );
         }
     }
     
@@ -1956,23 +2092,26 @@ class NotificationsUI {
                 this.queueWS = new WebSocket( wsUrl );
                 
                 this.queueWS.onopen = () => {
-                    this.log( "Queue WebSocket connected" );
-                    this.updateStatus( "queue-ws-status", "Connected", "good" );
+                    this.wsDiag( "Queue WebSocket TCP open, authenticating..." );
+                    this.queueWsConnected = true;
+                    this.updateStatus( "queue-ws-status", "Authenticating...", "warning" );
                     this.authenticateQueueWebSocket();
                 };
-                
+
                 this.queueWS.onmessage = ( event ) => {
                     this.handleQueueMessage( event );
                 };
-                
+
                 this.queueWS.onclose = ( event ) => {
-                    this.log( `Queue WebSocket closed: ${event.code} ${event.reason}` );
+                    this.wsDiag( `Queue WebSocket closed: code=${event.code} reason=${event.reason}` );
+                    this.queueWsConnected = false;
                     this.updateStatus( "queue-ws-status", "Disconnected", "error" );
-                    this.scheduleReconnect();
+                    this.scheduleReconnect( 'queue' );
                 };
-                
+
                 this.queueWS.onerror = ( error ) => {
-                    this.error( "Queue WebSocket error:", error );
+                    this.wsDiag( `Queue WebSocket error: ${error}` );
+                    this.queueWsConnected = false;
                     this.updateStatus( "queue-ws-status", "Error", "error" );
                     reject( error );
                 };
@@ -2003,23 +2142,26 @@ class NotificationsUI {
                 this.audioWS = new WebSocket( wsUrl );
                 
                 this.audioWS.onopen = () => {
-                    this.log( "Audio WebSocket connected" );
-                    this.updateStatus( "audio-ws-status", "Connected", "good" );
+                    this.wsDiag( "Audio WebSocket TCP open, authenticating..." );
+                    this.audioWsConnected = true;
+                    this.updateStatus( "audio-ws-status", "Authenticating...", "warning" );
                     this.authenticateAudioWebSocket();
                 };
-                
+
                 this.audioWS.onmessage = ( event ) => {
                     this.handleAudioMessage( event );
                 };
-                
+
                 this.audioWS.onclose = ( event ) => {
-                    this.log( `Audio WebSocket closed: ${event.code} ${event.reason}` );
+                    this.wsDiag( `Audio WebSocket closed: code=${event.code} reason=${event.reason}` );
+                    this.audioWsConnected = false;
                     this.updateStatus( "audio-ws-status", "Disconnected", "error" );
-                    this.scheduleReconnect();
+                    this.scheduleReconnect( 'audio' );
                 };
-                
+
                 this.audioWS.onerror = ( error ) => {
-                    this.error( "Audio WebSocket error:", error );
+                    this.wsDiag( `Audio WebSocket error: ${error}` );
+                    this.audioWsConnected = false;
                     this.updateStatus( "audio-ws-status", "Error", "error" );
                     reject( error );
                 };
@@ -2029,7 +2171,10 @@ class NotificationsUI {
                 
                 // Set timeout for connection
                 setTimeout( () => {
-                    if ( this.audioWS.readyState !== WebSocket.OPEN ) {
+                    if ( this.audioWS && this.audioWS.readyState !== WebSocket.OPEN ) {
+                        this.audioWsConnected = false;
+                        this.updateStatus( "audio-ws-status", "Timeout", "error" );
+                        try { this.audioWS.close(); } catch ( e ) { /* ignore close errors */ }
                         reject( new Error( "Audio WebSocket connection timeout" ) );
                     }
                 }, 10000 );
@@ -2047,12 +2192,14 @@ class NotificationsUI {
             session_id: this.queueSessionId,
             subscribed_events: [
                 "job_state_transition",
+                "job_removed",
                 "tts_job_request",
                 "sys_time_update",
                 "notification_play_sound",
                 "notification_queue_update",
                 "notification_responded",  // Phase 2.2 SSE - multi-device sync
                 "notification_expired",    // Phase 2.2 SSE - timeout handling
+                // job_paused/job_resumed removed — now handled as job_state_transition events
                 "auth_success",
                 "auth_error",
                 "connect",
@@ -2061,9 +2208,9 @@ class NotificationsUI {
         };
         
         this.queueWS.send( JSON.stringify( authMessage ) );
-        this.log( "Queue WebSocket authentication sent" );
+        this.wsDiag( "Queue WebSocket auth_request sent" );
     }
-    
+
     authenticateAudioWebSocket() {
         const authMessage = {
             type: "auth_request",
@@ -2082,7 +2229,7 @@ class NotificationsUI {
         };
         
         this.audioWS.send( JSON.stringify( authMessage ) );
-        this.log( "Audio WebSocket authentication sent" );
+        this.wsDiag( "Audio WebSocket auth_request sent" );
     }
     
     // ========================================
@@ -2097,19 +2244,22 @@ class NotificationsUI {
             
             switch ( envelope.type ) {
                 case "auth_success":
-                    this.log( `Queue WebSocket authenticated for user: ${envelope.user_id}` );
+                    this.wsDiag( `Queue WebSocket authenticated for user: ${envelope.user_id}` );
+                    this.updateStatus( "queue-ws-status", "Connected", "good" );
                     this.updateStatus( "auth-status", `Authenticated as ${envelope.user_id}`, "good" );
-                    
+                    this.connectionRetries = 0; // Reset backoff on successful auth
+
                     // Store the server-provided user ID for notifications
                     this.notificationState.userId = envelope.user_id;
-                    this.log( `Notification state updated with server user ID: ${envelope.user_id}` );
-                    
+                    this.wsDiag( `Notification state updated with server user ID: ${envelope.user_id}` );
+
                     // Load initial data now that we have the correct user ID
                     this.loadInitialData();
                     break;
-                    
+
                 case "auth_error":
-                    this.error( `Queue WebSocket auth failed: ${envelope.message}` );
+                    this.wsDiag( `Queue WebSocket auth FAILED: ${envelope.message}` );
+                    this.updateStatus( "queue-ws-status", "Auth Failed", "error" );
                     this.updateStatus( "auth-status", `Auth failed: ${envelope.message}`, "error" );
 
                     // Attempt token refresh once
@@ -2149,6 +2299,17 @@ class NotificationsUI {
                     this.handleJobStateTransition( envelope );
                     break;
 
+                case "job_removed":
+                    // Remove card from DOM when another client/session deletes a job
+                    const removedCard = document.getElementById( `job-card-${envelope.job_id}` );
+                    if ( removedCard ) removedCard.remove();
+                    if ( envelope.queue && this.queueCounts[ envelope.queue ] !== undefined ) {
+                        this.queueCounts[ envelope.queue ] = Math.max( 0, this.queueCounts[ envelope.queue ] - 1 );
+                        this.updateQueueCountBadge( envelope.queue, this.queueCounts[ envelope.queue ] );
+                        this.updateQueueEmptyMessage( envelope.queue );
+                    }
+                    break;
+
                 case "notification_queue_update":
                     this.handleNotificationUpdate( envelope );
                     break;
@@ -2173,6 +2334,10 @@ class NotificationsUI {
                     if ( envelope.date ) {
                         this.updateElement( "clock", envelope.date );
                         this.log( `Clock updated: ${envelope.date}` );
+                    }
+                    if ( envelope.env_label ) {
+                        this.envLabel = envelope.env_label;
+                        this.updateElement( "env-label", `[${this.envLabel}]: ` );
                     }
                     break;
                     
@@ -2203,11 +2368,13 @@ class NotificationsUI {
             
             switch ( envelope.type ) {
                 case "auth_success":
-                    this.log( `Audio WebSocket authenticated for user: ${envelope.user_id}` );
+                    this.wsDiag( `Audio WebSocket authenticated for user: ${envelope.user_id}` );
+                    this.updateStatus( "audio-ws-status", "Connected", "good" );
                     break;
-                    
+
                 case "auth_error":
-                    this.error( `Audio WebSocket auth failed: ${envelope.message}` );
+                    this.wsDiag( `Audio WebSocket auth FAILED: ${envelope.message}` );
+                    this.updateStatus( "audio-ws-status", "Auth Failed", "error" );
                     this.updateStatus( "auth-status", "Auth failed", "error" );
 
                     // Audio WebSocket auth error - delegate to queue handler logic
@@ -2445,6 +2612,7 @@ class NotificationsUI {
         const topicInput = document.getElementById( 'research-topic' );
         const budgetInput = document.getElementById( 'research-budget' );
         const withPodcastCheckbox = document.getElementById( 'research-with-podcast' );
+        const withPresentationCheckbox = document.getElementById( 'research-with-presentation' );
         const dryRunCheckbox = document.getElementById( 'research-dry-run' );
         const submitButton = document.getElementById( 'submit-research-job' );
         const loadingSpinner = document.getElementById( 'research-loading' );
@@ -2453,6 +2621,7 @@ class NotificationsUI {
         const topic = topicInput.value.trim();
         const budget = parseFloat( budgetInput.value ) || 3.00;
         const withPodcast = withPodcastCheckbox.checked;
+        const withPresentation = withPresentationCheckbox ? withPresentationCheckbox.checked : false;
         const dryRun = dryRunCheckbox.checked;
 
         if ( !topic ) {
@@ -2471,14 +2640,21 @@ class NotificationsUI {
             // Ensure token is valid before API call
             await this.ensureValidToken();
 
-            // Choose endpoint based on checkbox
-            const endpoint = withPodcast
-                ? '/api/deep-research-to-podcast/submit'
-                : '/api/deep-research/submit';
+            // Choose endpoint based on checkboxes (mutually exclusive)
+            let endpoint = '/api/deep-research/submit';
+            if ( withPresentation ) {
+                endpoint = '/api/deep-research-to-presentation/submit';
+            } else if ( withPodcast ) {
+                endpoint = '/api/deep-research-to-podcast/submit';
+            }
 
-            const body = withPodcast
-                ? { query: topic, budget: budget, target_languages: [ 'en' ], dry_run: dryRun }
-                : { query: topic, budget: budget, dry_run: dryRun };
+            const schedulingParams = this._getSchedulingParams( 'research' );
+            let body = { query: topic, budget: budget, dry_run: dryRun, ...schedulingParams };
+            if ( withPodcast ) {
+                body.target_languages = [ 'en' ];
+            } else if ( withPresentation ) {
+                body.target_duration_minutes = 15;
+            }
 
             this.log( `Submitting research job to ${endpoint}: ${topic.substring( 0, 50 )}...` );
 
@@ -2563,7 +2739,8 @@ class NotificationsUI {
                 body: JSON.stringify({
                     research_source: source,
                     target_languages: [ 'en' ],
-                    dry_run: dryRun
+                    dry_run: dryRun,
+                    ...this._getSchedulingParams( 'podcast' )
                 })
             });
 
@@ -2660,6 +2837,8 @@ class NotificationsUI {
                 body.trust_mode = trustMode;
             }
 
+            Object.assign( body, this._getSchedulingParams( 'swe' ) );
+
             const response = await fetch( '/api/swe-team/submit', {
                 method  : 'POST',
                 headers : {
@@ -2685,6 +2864,238 @@ class NotificationsUI {
 
         } catch ( error ) {
             this.error( "SWE Team job submission failed:", error );
+            statusDiv.textContent = `✗ Error: ${error.message}`;
+            statusDiv.style.color = '#dc3545';
+        } finally {
+            submitButton.disabled = false;
+            loadingSpinner.style.display = 'none';
+        }
+    }
+
+    /**
+     * Submit a Presentation Generator job.
+     *
+     * Sends source document to /api/presentation-generator/submit for
+     * asynchronous slide generation via the CJ Flow queue.
+     */
+    async submitPresentationJob() {
+        const sourceInput      = document.getElementById( 'presentation-source' );
+        const audienceSelect   = document.getElementById( 'presentation-audience' );
+        const durationInput    = document.getElementById( 'presentation-duration' );
+        const dryRunCheckbox   = document.getElementById( 'presentation-dry-run' );
+        const submitButton     = document.getElementById( 'submit-presentation-job' );
+        const loadingSpinner   = document.getElementById( 'presentation-loading' );
+        const statusDiv        = document.getElementById( 'presentation-submit-status' );
+
+        const source   = sourceInput.value.trim();
+        const audience = audienceSelect.value;
+        const duration = parseInt( durationInput.value ) || 15;
+        const dryRun   = dryRunCheckbox.checked;
+
+        if ( !source ) {
+            statusDiv.textContent = '⚠️ Please enter a source document path.';
+            statusDiv.style.color = '#dc3545';
+            return;
+        }
+
+        try {
+            // Update UI
+            submitButton.disabled = true;
+            loadingSpinner.style.display = 'inline-block';
+            statusDiv.textContent = 'Submitting presentation job...';
+            statusDiv.style.color = '#666';
+
+            // Ensure token is valid before API call
+            await this.ensureValidToken();
+
+            this.log( `Submitting presentation job: ${source.substring( 0, 50 )}...` );
+
+            const response = await fetch( '/api/presentation-generator/submit', {
+                method  : 'POST',
+                headers : {
+                    'Authorization' : this.getAuthHeader(),
+                    'X-Session-ID'  : this.queueSessionId,
+                    'Content-Type'  : 'application/json'
+                },
+                body: JSON.stringify({
+                    source_path              : source,
+                    audience                 : audience,
+                    target_duration_minutes  : duration,
+                    dry_run                  : dryRun,
+                    ...this._getSchedulingParams( 'presentation' )
+                })
+            });
+
+            if ( !response.ok ) {
+                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
+                throw new Error( errorData.detail || `HTTP ${response.status}` );
+            }
+
+            const result = await response.json();
+            this.log( "Presentation job response:", result );
+
+            // Success feedback
+            statusDiv.textContent = `✓ Presentation job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
+            statusDiv.style.color = '#28a745';
+            sourceInput.value = '';
+
+        } catch ( error ) {
+            this.error( "Presentation job submission failed:", error );
+            statusDiv.textContent = `✗ Error: ${error.message}`;
+            statusDiv.style.color = '#dc3545';
+        } finally {
+            submitButton.disabled = false;
+            loadingSpinner.style.display = 'none';
+        }
+    }
+
+    /**
+     * Submit a render-only presentation job from an existing YAML.
+     *
+     * Called from the "Re-render" button on completed presentation job cards.
+     * Submits to the same endpoint with render_only=true, skipping Phases 1-5.
+     *
+     * @param {string} yamlPath - Relative path to the YAML intermediate file
+     */
+    async submitRerender( yamlPath ) {
+        if ( !yamlPath ) {
+            console.error( '[Notifications] submitRerender called without yamlPath' );
+            return;
+        }
+
+        try {
+            await this.ensureValidToken();
+            this.log( `Submitting render-only job for: ${yamlPath}` );
+
+            const response = await fetch( '/api/presentation-generator/submit', {
+                method  : 'POST',
+                headers : {
+                    'Authorization' : this.getAuthHeader(),
+                    'X-Session-ID'  : this.queueSessionId,
+                    'Content-Type'  : 'application/json'
+                },
+                body: JSON.stringify({
+                    source_path : yamlPath.startsWith( 'io/' ) || yamlPath.startsWith( '/io/' ) ? yamlPath : 'io/' + yamlPath,
+                    render_only : true
+                })
+            });
+
+            if ( !response.ok ) {
+                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
+                throw new Error( errorData.detail || `HTTP ${response.status}` );
+            }
+
+            const result = await response.json();
+            this.log( "Render-only job response:", result );
+            alert( `✓ Re-render job submitted! Job ID: ${result.job_id}` );
+
+        } catch ( error ) {
+            this.error( "Re-render submission failed:", error );
+            alert( `✗ Re-render failed: ${error.message}` );
+        }
+    }
+
+    /**
+     * Submit a Test Suite job.
+     *
+     * Sends test suite parameters to /api/test-suite/submit for
+     * asynchronous execution via the CJ Flow queue. Always runs
+     * with monopolize=True (DB hot-swap is exclusive).
+     */
+    async submitTestSuiteJob() {
+        const typesSelect     = document.getElementById( 'test-suite-types' );
+        const filePathInput   = document.getElementById( 'test-suite-file-path' );
+        const failFastCheckbox = document.getElementById( 'test-suite-fail-fast' );
+        const pytestArgsInput = document.getElementById( 'test-suite-pytest-args' );
+        const dryRunCheckbox  = document.getElementById( 'test-suite-dry-run' );
+        const autoFixCheckbox = document.getElementById( 'test-suite-auto-fix' );
+        const submitButton    = document.getElementById( 'submit-test-suite-job' );
+        const loadingSpinner  = document.getElementById( 'test-suite-loading' );
+        const statusDiv       = document.getElementById( 'test-suite-submit-status' );
+
+        const testTypes  = typesSelect.value;
+        const filePath   = ( filePathInput?.value || "" ).trim();
+        const failFast   = failFastCheckbox?.checked || false;
+        const pytestArgs = pytestArgsInput.value.trim();
+        const dryRun     = dryRunCheckbox.checked;
+        const autoFix    = autoFixCheckbox ? autoFixCheckbox.checked : null;
+
+        // Validation: file-driven test types require a file path
+        if ( FILE_DRIVEN_TEST_TYPES.has( testTypes ) && !filePath ) {
+            statusDiv.textContent = `✗ Error: ${testTypes} requires a test file path`;
+            statusDiv.style.color = '#dc3545';
+            return;
+        }
+
+        // Build combined pytest_args:
+        //   - file-driven types (smoke_direct, pytest_direct): prepend file path so
+        //     runner delegates to `python3 <file>` or `pytest <file>` respectively
+        //   - all + fail-fast: append --fail-fast flag
+        let combinedArgs = pytestArgs;
+        if ( FILE_DRIVEN_TEST_TYPES.has( testTypes ) && filePath ) {
+            combinedArgs = combinedArgs ? `${filePath} ${combinedArgs}` : filePath;
+        }
+        if ( testTypes === 'all' && failFast ) {
+            combinedArgs = combinedArgs ? `${combinedArgs} --fail-fast` : '--fail-fast';
+        }
+
+        try {
+            // Update UI
+            submitButton.disabled = true;
+            loadingSpinner.style.display = 'inline-block';
+            statusDiv.textContent = 'Submitting test suite job...';
+            statusDiv.style.color = '#666';
+
+            // Ensure token is valid before API call
+            await this.ensureValidToken();
+
+            this.log( `Submitting test suite job: types=${testTypes}, dryRun=${dryRun}, args="${combinedArgs}"` );
+
+            const body = {
+                test_types : testTypes,
+                dry_run    : dryRun,
+            };
+            if ( combinedArgs ) {
+                body.pytest_args = combinedArgs;
+            }
+            // Per-run override for the TestSuiteCompletionWatchdog (TFE).
+            // Initial state mirrors INI default `test_fix_expediter_auto_fix_enabled`,
+            // but the user can flip it for this submission only without changing the INI.
+            if ( autoFix !== null ) {
+                body.auto_fix_on_failure = autoFix;
+            }
+
+            // Add scheduling params (schedule checkbox + monopolize is always on)
+            const scheduleCheckbox = document.getElementById( 'test-suite-schedule' );
+            const scheduleTime     = document.getElementById( 'test-suite-scheduled-time' );
+            if ( scheduleCheckbox?.checked && scheduleTime?.value ) {
+                body.scheduled_at = new Date( scheduleTime.value ).toISOString();
+            }
+
+            const response = await fetch( '/api/test-suite/submit', {
+                method  : 'POST',
+                headers : {
+                    'Authorization' : this.getAuthHeader(),
+                    'X-Session-ID'  : this.queueSessionId,
+                    'Content-Type'  : 'application/json'
+                },
+                body: JSON.stringify( body )
+            });
+
+            if ( !response.ok ) {
+                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
+                throw new Error( errorData.detail || `HTTP ${response.status}` );
+            }
+
+            const result = await response.json();
+            this.log( "Test suite job response:", result );
+
+            // Success feedback
+            statusDiv.textContent = `✓ Test suite job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;
+            statusDiv.style.color = '#28a745';
+
+        } catch ( error ) {
+            this.error( "Test suite job submission failed:", error );
             statusDiv.textContent = `✗ Error: ${error.message}`;
             statusDiv.style.color = '#dc3545';
         } finally {
@@ -3111,7 +3522,8 @@ class NotificationsUI {
                     task_type: taskType,
                     max_turns: taskType === 'INTERACTIVE' ? 200 : 50,
                     websocket_id: this.sessionId,
-                    dry_run: dryRun
+                    dry_run: dryRun,
+                    ...this._getSchedulingParams( 'cc' )
                 } )
             } );
 
@@ -4329,15 +4741,57 @@ class NotificationsUI {
 
     /**
      * Handle job_state_transition WebSocket event.
+     * Map a JobState value to its UI container name.
+     *
+     * @param {string} state - JobState value (pending, queued, scheduled, paused, running, completed, failed, interrupted, cancelled)
+     * @returns {string} UI container name (todo, run, done, dead)
+     */
+    stateToContainer( state ) {
+        const mapping = {
+            'pending'     : 'todo',
+            'queued'      : 'todo',
+            'scheduled'   : 'todo',
+            'paused'      : 'todo',
+            'running'     : 'run',
+            'completed'   : 'done',
+            'failed'      : 'dead',
+            'interrupted' : 'dead',
+            'cancelled'   : 'dead',
+        };
+        return mapping[ state ] || 'todo';
+    }
+
+    /**
      * Moves job cards between queue containers via DOM reparenting.
      *
-     * @param {Object} event - WebSocket event with job_id, from_queue, to_queue, metadata
+     * @param {Object} event - WebSocket event with job_id, from_state, to_state, metadata
      */
     handleJobStateTransition( event ) {
-        const { job_id: jobId, from_queue: fromQueue, to_queue: toQueue, metadata } = event;
+        const { job_id: jobId, from_state: fromState, to_state: toState, metadata } = event;
 
-        if ( !jobId || !fromQueue || !toQueue ) {
+        // Map states to UI containers
+        const fromQueue = this.stateToContainer( fromState );
+        const toQueue   = this.stateToContainer( toState );
+
+        if ( !jobId || !fromState || !toState ) {
             this.error( '[JOB-TRANSITION] Invalid event:', event );
+            return;
+        }
+
+        // Filter by queue view mode — admins with "own" filter skip other users' jobs
+        const eventEmail = metadata?.user_email;
+        if ( this.queueFilterMode === 'own' && eventEmail && eventEmail !== this.currentUserEmail ) {
+            this.log( `[JOB-TRANSITION] Filtered out (own mode, job belongs to ${eventEmail})` );
+            return;
+        }
+        if ( this.queueFilterMode === 'others' && eventEmail && eventEmail === this.currentUserEmail ) {
+            this.log( `[JOB-TRANSITION] Filtered out (others mode, job belongs to self)` );
+            return;
+        }
+
+        // Handle pause/resume as in-place card updates (no container move needed)
+        if ( toState === 'paused' || ( fromState === 'paused' && toState === 'queued' ) ) {
+            this.handleJobPauseStateChange( event, toState === 'paused' );
             return;
         }
 
@@ -4392,14 +4846,19 @@ class NotificationsUI {
                     completed_at    : metadata.completed_at || null,
                     response_text   : metadata.response_text || null,
                     abstract        : metadata.abstract || null,
-                    report_path     : metadata.report_link || null,
-                    cost_summary    : metadata.cost_summary || null,
+                    report_path               : metadata.report_link || null,
+                    remediation_snapshot_path : metadata.remediation_snapshot_path || null,
+                    cost_summary              : metadata.cost_summary || null,
                     is_cache_hit    : metadata.is_cache_hit || false,
+                    user_email      : metadata.user_email || null,
                     status          : metadata.status || 'completed',
                     error           : metadata.error || null,
                     has_interactions: metadata.has_interactions || false,
                     duration_seconds: metadata.duration_seconds || null,
-                    expediting      : metadata.expediting || false
+                    expediting      : metadata.expediting || false,
+                    scheduled_at    : metadata.scheduled_at || null,
+                    monopolize      : metadata.monopolize || false,
+                    paused          : metadata.paused || false
                 };
 
                 // Remove empty message if present
@@ -4410,14 +4869,76 @@ class NotificationsUI {
                 toContainer.insertAdjacentHTML( 'afterbegin', cardHtml );
                 this.log( `[JOB-TRANSITION] Created new card in ${toQueue} container` );
 
-                // Update count badge for target queue
-                this.updateQueueCountFromDOM( toQueue );
+                // Update count badge for target queue (local counter, not DOM-based)
+                this.queueCounts[ toQueue ] = ( this.queueCounts[ toQueue ] || 0 ) + 1;
+                this.updateQueueCountBadge( toQueue, this.queueCounts[ toQueue ] );
             } else {
                 this.log( `[JOB-TRANSITION] No metadata provided, cannot create card` );
             }
             return;
         }
 
+        // Terminal states (done/dead): full re-render via renderJobCard for parity with reload path.
+        // Eliminates surgical-morph divergence: pause-button-persists, missing-trash-button,
+        // missing scheduled/monopolize badges. Single source of truth shared with reload/history paths.
+        if ( ( toQueue === 'done' || toQueue === 'dead' ) && metadata ) {
+            const targetContainer = document.getElementById( `${toQueue}-jobs-container` );
+            if ( !targetContainer ) {
+                this.error( `[JOB-TRANSITION] Target container not found: ${toQueue}-jobs-container` );
+                return;
+            }
+
+            // Build complete job object — same shape as cold-start branch above (lines 4764-4786)
+            const job = {
+                job_id          : jobId,
+                question_text   : metadata.question_text || 'Processing...',
+                agent_type      : metadata.agent_type || 'Unknown',
+                timestamp       : metadata.timestamp || new Date().toISOString(),
+                started_at      : metadata.started_at || null,
+                completed_at    : metadata.completed_at || null,
+                response_text   : metadata.response_text || null,
+                abstract        : metadata.abstract || null,
+                report_path               : metadata.report_link || metadata.report_path || null,
+                yaml_path                 : metadata.yaml_path || null,
+                remediation_snapshot_path : metadata.remediation_snapshot_path || null,
+                cost_summary              : metadata.cost_summary || null,
+                is_cache_hit    : metadata.is_cache_hit || false,
+                user_email      : metadata.user_email || null,
+                status          : metadata.status || ( toQueue === 'dead' ? 'failed' : 'completed' ),
+                error           : metadata.error || null,
+                has_interactions: metadata.has_interactions || false,
+                duration_seconds: metadata.duration_seconds || null,
+                expediting      : metadata.expediting || false,
+                scheduled_at    : metadata.scheduled_at || null,
+                monopolize      : metadata.monopolize || false,
+                paused          : metadata.paused || false
+            };
+
+            // Remove empty message in target container if present
+            const targetEmptyMsg = targetContainer.querySelector( '.queue-empty-message' );
+            if ( targetEmptyMsg ) targetEmptyMsg.remove();
+
+            // Remove the old card and insert freshly-rendered HTML at top of target
+            card.remove();
+            const newCardHtml = this.renderJobCard( job, toQueue );
+            targetContainer.insertAdjacentHTML( 'afterbegin', newCardHtml );
+            this.log( `[JOB-TRANSITION] Re-rendered ${jobId} into ${toQueue} via renderJobCard` );
+
+            // Update empty message for source container
+            this.updateQueueEmptyMessage( fromQueue );
+
+            // Update count badges for both queues
+            if ( fromQueue !== toQueue ) {
+                this.queueCounts[ fromQueue ] = Math.max( 0, ( this.queueCounts[ fromQueue ] || 0 ) - 1 );
+                this.updateQueueCountBadge( fromQueue, this.queueCounts[ fromQueue ] );
+                this.queueCounts[ toQueue ] = ( this.queueCounts[ toQueue ] || 0 ) + 1;
+                this.updateQueueCountBadge( toQueue, this.queueCounts[ toQueue ] );
+            }
+            return;
+        }
+
+        // Non-terminal transitions (todo/run), or terminal transitions without metadata —
+        // fall back to reparent + surgical morph
         // Update status class
         card.classList.remove( `status-${fromQueue}` );
         card.classList.add( `status-${toQueue}` );
@@ -4541,9 +5062,110 @@ class NotificationsUI {
             this.insertJobMetadata( jobId, card, metadata );
         }
 
-        // Update count badges for both queues
-        this.updateQueueCountFromDOM( fromQueue );
-        this.updateQueueCountFromDOM( toQueue );
+        // Update count badges for both queues (local counter, not DOM-based)
+        if ( fromQueue !== toQueue ) {
+            this.queueCounts[ fromQueue ] = Math.max( 0, ( this.queueCounts[ fromQueue ] || 0 ) - 1 );
+            this.updateQueueCountBadge( fromQueue, this.queueCounts[ fromQueue ] );
+            this.queueCounts[ toQueue ] = ( this.queueCounts[ toQueue ] || 0 ) + 1;
+            this.updateQueueCountBadge( toQueue, this.queueCounts[ toQueue ] );
+        }
+    }
+
+    handleJobPauseStateChange( event, isPaused ) {
+        /**
+         * Handle job_paused / job_resumed WebSocket event.
+         * Updates card in-place without full queue reload.
+         *
+         * Requires:
+         *     - event.data.job_id identifies a card in the todo queue
+         *     - isPaused is boolean indicating new state
+         *
+         * Ensures:
+         *     - Card classes toggled (job-paused added/removed)
+         *     - Paused badge added/removed
+         *     - Status indicator swapped
+         *     - Pause button icon/state updated
+         *     - data-paused attribute updated
+         */
+        const jobId = event.data?.job_id || event.job_id;
+        if ( !jobId ) {
+            this.error( '[JOB-PAUSE] Missing job_id in event:', event );
+            return;
+        }
+
+        this.log( `[JOB-PAUSE] ${isPaused ? 'Paused' : 'Resumed'}: ${jobId}` );
+
+        const card = document.getElementById( `job-card-${jobId}` );
+        if ( !card ) {
+            this.log( `[JOB-PAUSE] Card not found: ${jobId} (may not be rendered)` );
+            return;
+        }
+
+        const header = card.querySelector( '.job-card-header' );
+
+        // 1. Toggle card-level paused class and data attribute
+        if ( isPaused ) {
+            card.classList.add( 'job-paused' );
+            card.dataset.paused = 'true';
+        } else {
+            card.classList.remove( 'job-paused' );
+            card.dataset.paused = 'false';
+        }
+
+        // 2. Toggle paused badge
+        const existingPausedBadge = header?.querySelector( '.paused-badge' );
+        if ( isPaused && !existingPausedBadge && header ) {
+            const badge = document.createElement( 'span' );
+            badge.className = 'paused-badge';
+            badge.title     = 'Paused — consumer will skip';
+            badge.textContent = '⏸ Paused';
+            const refNode = header.querySelector( '.job-question' );
+            if ( refNode ) {
+                header.insertBefore( badge, refNode );
+            }
+        } else if ( !isPaused && existingPausedBadge ) {
+            existingPausedBadge.remove();
+        }
+
+        // 3. Toggle status indicator
+        const existingIndicator = header?.querySelector( '.status-indicator' );
+        if ( isPaused ) {
+            if ( existingIndicator ) {
+                existingIndicator.className   = 'status-indicator paused-icon';
+                existingIndicator.title       = 'Paused';
+                existingIndicator.textContent = '⏸';
+            } else if ( header ) {
+                const indicator = document.createElement( 'span' );
+                indicator.className   = 'status-indicator paused-icon';
+                indicator.title       = 'Paused';
+                indicator.textContent = '⏸';
+                const timestampSpan = header.querySelector( '.job-timestamp' );
+                if ( timestampSpan ) header.insertBefore( indicator, timestampSpan );
+            }
+        } else {
+            // Remove paused indicator (un-paused todo job has no spinning indicator unless expediting)
+            if ( existingIndicator && existingIndicator.classList.contains( 'paused-icon' ) ) {
+                existingIndicator.remove();
+            }
+        }
+
+        // 4. Update pause/resume button
+        const pauseBtn = document.getElementById( `job-pause-${jobId}` );
+        if ( pauseBtn ) {
+            pauseBtn.disabled    = false;
+            pauseBtn.textContent = isPaused ? '▶' : '⏸';
+            pauseBtn.title       = isPaused ? 'Resume this job' : 'Pause this job';
+            pauseBtn.onclick     = ( e ) => {
+                e.stopPropagation();
+                window.notificationsUI.toggleJobPause( jobId, !isPaused );
+            };
+
+            if ( isPaused ) {
+                pauseBtn.classList.add( 'is-paused' );
+            } else {
+                pauseBtn.classList.remove( 'is-paused' );
+            }
+        }
     }
 
     /**
@@ -4578,7 +5200,11 @@ class NotificationsUI {
         if ( reportPath ) {
             const reportEl = card.querySelector( '.job-report-link' );
             if ( reportEl ) {
-                reportEl.innerHTML = this.renderReportLinkSection( reportPath );
+                const agentType        = metadata.agent_type || card.dataset.agentType || null;
+                const yamlPath         = metadata.yaml_path || null;
+                const remediationPath  = metadata.remediation_snapshot_path || null;
+                const pptxPath         = metadata.pptx_path || null;
+                reportEl.innerHTML = this.renderReportLinkSection( reportPath, agentType, yamlPath, remediationPath, pptxPath );
                 reportEl.style.display = 'block';
             }
         }
@@ -4661,6 +5287,7 @@ class NotificationsUI {
     // ========================================
 
     async handleNotificationUpdate( envelope ) {
+        console.log( `[DIAG-JR] ENTER handleNotificationUpdate: id=${envelope?.notification?.id_hash} job_id=${envelope?.notification?.job_id} type=${envelope?.notification?.type} msg=${(envelope?.notification?.message||'').substring(0,50)}` );
         this.log( "Notification queue update received:", envelope );
 
         // Handle real-time notification updates from NotificationFifoQueue
@@ -4682,8 +5309,19 @@ class NotificationsUI {
         this.notificationState.notifications.push( notification );
         this.log( `Processing new notification: ${notification.type}/${notification.priority} - ${notification.message}` );
 
-        // Approach D: Append user_initiated_message to live interaction pane on running job card
+        // Session topic control message — update header span, skip history card
         const notifType = notification.type || notification.notification_type;
+        if ( notifType === 'session_topic' && notification.session_name ) {
+            const parsed = this.parseSenderId( this.resolveSenderId( notification ) );
+            if ( parsed.sessionId ) {
+                this.saveSessionName( parsed.sessionId, notification.session_name, { fromServer: true } );
+                this.refreshSessionNameDisplay( parsed.sessionId, notification.session_name );
+            }
+            this.log( `Session topic updated for ${parsed.sessionId}: ${notification.session_name}` );
+            return;
+        }
+
+        // Approach D: Append user_initiated_message to live interaction pane on running job card
         if ( notifType === 'user_initiated_message' && notification.job_id ) {
             // Skip DOM append — optimistic render in sendJobMessage() already added the bubble
             return;
@@ -4713,14 +5351,22 @@ class NotificationsUI {
         // Session 105 FIX: Extract job_id from sender_id suffix if not explicitly provided
         // Pattern: sender_id ends with #<prefix>-<8hex> (e.g., deep.research@lupin.deepily.ai#dr-77b330d8)
         let jobId = notification.job_id;
+        console.log( `[DIAG-JR] notification.job_id=${jobId} sender_id=${notification.sender_id} msg=${(notification.message||'').substring(0,60)}` );
         if ( !jobId && notification.sender_id ) {
             const senderIdMatch = notification.sender_id.match( /#([a-z]+-[a-f0-9]{8})$/ );
             if ( senderIdMatch ) {
                 jobId = senderIdMatch[ 1 ];
-                this.log( `[Phase 6] Extracted job_id from sender_id suffix: ${jobId}` );
+                console.log( `[DIAG-JR] Fallback: extracted jobId=${jobId} from sender_id` );
             }
         }
         if ( jobId ) {
+            const targetEl = document.getElementById( `interactions-content-${jobId}` );
+            const allInteractions = document.querySelectorAll( '[id^="interactions-content-"]' );
+            const existingIds = Array.from( allInteractions ).map( el => el.id );
+            console.log( `[DIAG-JR] DOM lookup: interactions-content-${jobId} → ${targetEl ? 'FOUND' : 'MISSING'}` );
+            if ( !targetEl ) {
+                console.log( `[DIAG-JR] Existing interaction containers:`, existingIds );
+            }
             // Session 107: Simplified - job_state_transition creates cards, we just route
             this.log( `[Session 107] Routing notification to job card: ${jobId}` );
             this.appendNotificationToJobCard( jobId, notification );
@@ -4837,26 +5483,21 @@ class NotificationsUI {
     // CONNECTION MANAGEMENT
     // ========================================
 
-    scheduleReconnect() {
+    scheduleReconnect( target = 'both' ) {
         if ( this.isConnecting ) {
             return; // Already attempting to reconnect
         }
-        
-        if ( this.connectionRetries >= this.maxRetries ) {
-            this.error( "Max reconnection attempts reached" );
-            this.updateStatus( "queue-ws-status", "Failed", "error" );
-            this.updateStatus( "audio-ws-status", "Failed", "error" );
-            return;
-        }
-        
+
         this.connectionRetries++;
-        const delay = Math.min( 1000 * Math.pow( 2, this.connectionRetries ), 30000 ); // Exponential backoff, max 30s
-        
-        this.log( `Scheduling reconnect attempt ${this.connectionRetries}/${this.maxRetries} in ${delay}ms` );
-        
+        // Exponential backoff: 2s, 4s, 8s, 16s, 30s... then cap at 60s after 10 failures
+        const maxDelay = this.connectionRetries > 10 ? 60000 : 30000;
+        const delay = Math.min( 1000 * Math.pow( 2, this.connectionRetries ), maxDelay );
+
+        this.wsDiag( `Scheduling reconnect attempt #${this.connectionRetries} for ${target} in ${delay}ms` );
+
         setTimeout( () => {
             this.isConnecting = true;
-            this.connectWebSockets().finally( () => {
+            this.connectWebSockets( target ).finally( () => {
                 this.isConnecting = false;
             });
         }, delay );
@@ -4870,7 +5511,32 @@ class NotificationsUI {
         // Use the hardcoded email as per original queue.js pattern
         return "ricardo.felipe.ruiz@gmail.com";
     }
-    
+
+    /**
+     * Read scheduling controls for a job submission form.
+     *
+     * Requires:
+     *     - formPrefix matches the HTML id prefix (e.g. "research", "cc", "swe")
+     *
+     * Ensures:
+     *     - returns object with scheduled_at (ISO string) and/or monopolize (true) when set
+     *     - returns empty object when no scheduling options are selected
+     */
+    _getSchedulingParams( formPrefix ) {
+        const params = {};
+        const scheduleCheckbox   = document.getElementById( `${formPrefix}-schedule` );
+        const scheduleTime       = document.getElementById( `${formPrefix}-scheduled-time` );
+        const monopolizeCheckbox = document.getElementById( `${formPrefix}-monopolize` );
+
+        if ( scheduleCheckbox?.checked && scheduleTime?.value ) {
+            params.scheduled_at = new Date( scheduleTime.value ).toISOString();
+        }
+        if ( monopolizeCheckbox?.checked ) {
+            params.monopolize = true;
+        }
+        return params;
+    }
+
     getAuthHeader() {
         // Return JWT access token for authentication
         if ( this.authToken ) {
@@ -4896,27 +5562,26 @@ class NotificationsUI {
     async updateQueueLists( queueName ) {
         this.log( `Updating queue list for: ${queueName}` );
 
-        // Build URL with user_filter parameter for admins viewing all jobs
+        // Build URL with user_filter parameter for admins viewing filtered jobs
         let url = `/api/get-queue/${queueName}`;
         if ( this.isAdmin && this.queueFilterMode === 'all' ) {
             url += '?user_filter=*';  // Admin viewing all jobs
             this.log( `Admin mode: fetching ALL users' jobs for ${queueName}` );
+        } else if ( this.isAdmin && this.queueFilterMode === 'others' ) {
+            url += '?user_filter=!self';  // Admin viewing other users' jobs only
+            this.log( `Admin mode: fetching OTHER users' jobs for ${queueName}` );
         } else {
             this.log( `Fetching own jobs only for ${queueName}` );
         }
         // Regular users and admins in 'own' mode: no parameter = own jobs only
 
         try {
-            const response = await fetch( url, {
-                headers: {
-                    'Authorization': this.getAuthHeader()
-                }
-            });
-            
+            const response = await this.authedFetch( url );
+
             if ( !response.ok ) {
                 throw new Error( `HTTP error! status: ${response.status}` );
             }
-            
+
             const data = await response.json();
             this.log( `Data received for ${queueName}:`, data );
             
@@ -4928,6 +5593,7 @@ class NotificationsUI {
                 // Update count badge for progressive disclosure UI
                 const countBadge = document.getElementById( "todo-count-badge" );
                 if ( countBadge ) countBadge.textContent = data.total_jobs;
+                this.queueCounts.todo = data.total_jobs;
                 // Store metadata for progressive disclosure job cards
                 this.queueCategoryState.todo.jobs = data.todo_jobs_metadata || [];
                 // Also refresh job cards if category is expanded
@@ -4935,6 +5601,7 @@ class NotificationsUI {
             } else if ( queueName === "run" ) {
                 const countBadge = document.getElementById( "run-count-badge" );
                 if ( countBadge ) countBadge.textContent = data.total_jobs;
+                this.queueCounts.run = data.total_jobs;
                 // Store metadata for progressive disclosure job cards
                 this.queueCategoryState.run.jobs = data.run_jobs_metadata || [];
                 this.updateQueueCategoryIfExpanded( "run", data.total_jobs );
@@ -4943,12 +5610,14 @@ class NotificationsUI {
                 await this.handleDoneQueueUpdate( data );
                 const countBadge = document.getElementById( "done-count-badge" );
                 if ( countBadge ) countBadge.textContent = data.total_jobs;
+                this.queueCounts.done = data.total_jobs;
                 // Store metadata for progressive disclosure job cards
                 this.queueCategoryState.done.jobs = data.done_jobs_metadata || [];
                 this.updateQueueCategoryIfExpanded( "done", data.total_jobs );
             } else if ( queueName === "dead" ) {
                 const countBadge = document.getElementById( "dead-count-badge" );
                 if ( countBadge ) countBadge.textContent = data.total_jobs;
+                this.queueCounts.dead = data.total_jobs;
                 // Store metadata for progressive disclosure job cards
                 this.queueCategoryState.dead.jobs = data.dead_jobs_metadata || [];
                 this.updateQueueCategoryIfExpanded( "dead", data.total_jobs );
@@ -4973,11 +5642,12 @@ class NotificationsUI {
          *     - Regular users cannot change filter mode (warning logged)
          *     - Admin users can toggle between 'own' and 'all'
          *     - UI buttons update to reflect active mode
+         *     - All three indicator locations update (toolbar, notifications header, queue header)
          *     - Filter preference persists in localStorage
-         *     - All queues refresh with new filter applied
+         *     - All queues refresh and conversation history reloads with new filter applied
          *
          * Args:
-         *     mode: 'own' (user's jobs only) or 'all' (all users' jobs)
+         *     mode: 'own' (user's jobs only), 'others' (not user's jobs), or 'all' (all users' jobs)
          */
         if ( !this.isAdmin ) {
             this.warn( 'Only admin users can change filter mode' );
@@ -4986,18 +5656,66 @@ class NotificationsUI {
 
         this.queueFilterMode = mode;
 
-        // Update UI button states
+        // Mode display config
+        const modeConfig = {
+            own    : { icon: '👤', label: 'Mine',     displayText: 'Your jobs only' },
+            others : { icon: '🚫', label: 'Not Mine', displayText: 'Other users\' jobs' },
+            all    : { icon: '👥', label: 'All Users', displayText: 'All users\' jobs' }
+        };
+
+        const config = modeConfig[ mode ] || modeConfig.own;
+
+        // Update filter panel button states
         document.getElementById( 'filter-own-jobs' ).classList.toggle( 'active', mode === 'own' );
+        const othersBtn = document.getElementById( 'filter-others-jobs' );
+        if ( othersBtn ) othersBtn.classList.toggle( 'active', mode === 'others' );
         document.getElementById( 'filter-all-jobs' ).classList.toggle( 'active', mode === 'all' );
-        document.getElementById( 'filter-mode-display' ).textContent =
-            mode === 'own' ? 'Your jobs only' : 'All users\' jobs';
+        document.getElementById( 'filter-mode-display' ).textContent = config.displayText;
+
+        // Update indicator Location 1: Notifications section header badge
+        const notifBadge = document.getElementById( 'notifications-filter-badge' );
+        if ( notifBadge ) {
+            notifBadge.textContent = `${config.icon} ${config.label}`;
+            notifBadge.setAttribute( 'data-mode', mode );
+        }
+
+        // Update indicator Location 2: Queue section header badge
+        const queueBadge = document.getElementById( 'queues-filter-badge' );
+        if ( queueBadge ) {
+            queueBadge.textContent = `${config.icon} ${config.label}`;
+            queueBadge.setAttribute( 'data-mode', mode );
+        }
 
         // Save preference to localStorage
         localStorage.setItem( this.QUEUE_FILTER_PREF_KEY, mode );
 
-        // Refresh all queues with new filter
-        this.log( `Filter mode changed to: ${mode} - refreshing queues` );
+        // Refresh all queues and reload conversation history with new filter
+        this.log( `Filter mode changed to: ${mode} - refreshing queues and notifications` );
         this.refreshAllQueues();
+        this.clearSenderGroups();  // Clear existing sender cards before reloading with new filter
+        this.loadConversationHistory();
+    }
+
+    showAndScrollToFilterPanel() {
+        /**
+         * Show the filter settings panel and scroll it into view.
+         *
+         * Called when clicking the filter mode badges in section headers.
+         * Ensures the filter panel is visible (removes section-hidden),
+         * activates the toolbar button, and smooth-scrolls to the panel.
+         */
+        const filterSection = document.getElementById( 'filter-settings-section' );
+        const filterBtn = document.querySelector( '.toolbar-btn[data-section="filter-settings-section"]' );
+
+        if ( !filterSection ) return;
+
+        // Show the section if hidden
+        filterSection.classList.remove( 'section-hidden' );
+        if ( filterBtn ) filterBtn.classList.add( 'active' );
+        this.saveSectionVisibility();
+
+        // Scroll to filter panel
+        this.scrollIntoViewIfNeeded( filterSection );
     }
 
     initializeFilterUI() {
@@ -5009,31 +5727,35 @@ class NotificationsUI {
          *     - Filter panel HTML elements exist
          *
          * Ensures:
-         *     - Admin users see filter panel, regular users don't
+         *     - Admin users see filter panel + header badge indicators
          *     - Admin filter preference loaded from localStorage (default: 'own')
-         *     - UI button states match current filter mode
+         *     - UI button states and all indicators match current filter mode
          *     - Filter mode defaulted to 'own' for regular users
          */
-        const filterSection = document.getElementById( 'filter-settings-section' );
+        const filterSection      = document.getElementById( 'filter-settings-section' );
+        const notifFilterBadge   = document.getElementById( 'notifications-filter-badge' );
+        const queuesFilterBadge  = document.getElementById( 'queues-filter-badge' );
 
         if ( this.isAdmin ) {
-            // Show filter panel for admins
+            // Show filter panel and header badges for admins
             filterSection.style.display = 'block';
+            if ( notifFilterBadge )  notifFilterBadge.style.display  = 'inline-flex';
+            if ( queuesFilterBadge ) queuesFilterBadge.style.display = 'inline-flex';
 
             // Load saved preference or default to 'own'
             const savedFilter = localStorage.getItem( this.QUEUE_FILTER_PREF_KEY );
-            this.queueFilterMode = ( savedFilter === 'all' ) ? 'all' : 'own';
+            const validModes = [ 'own', 'others', 'all' ];
+            this.queueFilterMode = validModes.includes( savedFilter ) ? savedFilter : 'own';
 
-            // Update button states
-            document.getElementById( 'filter-own-jobs' ).classList.toggle( 'active', this.queueFilterMode === 'own' );
-            document.getElementById( 'filter-all-jobs' ).classList.toggle( 'active', this.queueFilterMode === 'all' );
-            document.getElementById( 'filter-mode-display' ).textContent =
-                this.queueFilterMode === 'own' ? 'Your jobs only' : 'All users\' jobs';
+            // Use setFilterMode to update both indicator locations consistently
+            this.setFilterMode( this.queueFilterMode );
 
             this.log( `Admin filter UI initialized - mode: ${this.queueFilterMode}` );
         } else {
             // Hide for regular users
             filterSection.style.display = 'none';
+            if ( notifFilterBadge )  notifFilterBadge.style.display  = 'none';
+            if ( queuesFilterBadge ) queuesFilterBadge.style.display = 'none';
             this.queueFilterMode = 'own';  // Force own jobs only
 
             this.log( 'Regular user - filter locked to own jobs' );
@@ -5049,18 +5771,27 @@ class NotificationsUI {
          *     - Authentication complete
          *
          * Ensures:
-         *     - All four queues (todo, run, done, dead) are refreshed
+         *     - All four live queues (todo, run, done, dead) are refreshed
+         *     - Job history refreshed if currently expanded
          *     - Fetches use current queueFilterMode setting
          *     - Errors logged but don't block other queues
          */
         this.log( 'Refreshing all queue lists...' );
         try {
+            // Fetch live queues first — loadJobHistory() reads queueCategoryState.done/dead
+            // to build exclude_ids. Running history in parallel with the live fetches
+            // races: history may be queried while done/dead are still empty, so
+            // exclude_ids is never sent and completed jobs appear in both panels.
             await Promise.all( [
                 this.updateQueueLists( 'todo' ),
                 this.updateQueueLists( 'run' ),
                 this.updateQueueLists( 'done' ),
                 this.updateQueueLists( 'dead' )
             ] );
+
+            if ( this.queueCategoryState.history.expanded ) {
+                await this.loadJobHistory();
+            }
             this.log( 'All queues refreshed successfully' );
         } catch ( error ) {
             this.error( 'Error refreshing queues:', error );
@@ -5076,11 +5807,12 @@ class NotificationsUI {
          * Toggle expand/collapse for a queue category.
          *
          * Requires:
-         *     - queueName is 'todo', 'run', 'done', or 'dead'
+         *     - queueName is 'todo', 'run', 'done', 'dead', or 'history'
          *
          * Ensures:
          *     - Category container visibility toggles
          *     - First expansion triggers lazy load of job cards
+         *     - History category routes to loadJobHistory() instead of loadQueueJobCards()
          *     - Expand button icon updates (▶ / ▼)
          */
         const state = this.queueCategoryState[ queueName ];
@@ -5100,7 +5832,11 @@ class NotificationsUI {
 
             // Lazy load job cards on first expansion
             if ( !state.loaded ) {
-                this.loadQueueJobCards( queueName );
+                if ( queueName === 'history' ) {
+                    this.loadJobHistory();
+                } else {
+                    this.loadQueueJobCards( queueName );
+                }
             }
         } else {
             container.classList.add( 'collapsed' );
@@ -5160,9 +5896,7 @@ class NotificationsUI {
                 url += '?user_filter=*';
             }
 
-            const response = await fetch( url, {
-                headers: { 'Authorization': this.getAuthHeader() }
-            } );
+            const response = await this.authedFetch( url );
 
             if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
 
@@ -5203,6 +5937,387 @@ class NotificationsUI {
             this.error( `Error loading ${queueName} job cards:`, error );
             container.innerHTML = '<div class="queue-error-message">Error loading jobs</div>';
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // JOB HISTORY — PostgreSQL-backed persistent job history
+    //
+    // OVERLAY MODEL: The live queue (Done/Dead) shows jobs from the CURRENT
+    // server session only (in-memory). Job History queries PostgreSQL for ALL
+    // persisted agentic jobs. To avoid duplicates, we collect job IDs from
+    // the live Done and Dead queues and pass them as `exclude_ids` to the API.
+    //
+    // This means: a job appears in EITHER the live queue OR history, never
+    // both. When the server restarts, previously-live jobs move to history
+    // automatically (they are no longer in memory).
+    // ═══════════════════════════════════════════════════════════════════════
+
+    async loadJobHistory( append = false ) {
+        /**
+         * Fetch and render job history cards from PostgreSQL persistence.
+         *
+         * Requires:
+         *     - Authentication is established
+         *     - queueCategoryState.history is initialized
+         *
+         * Ensures:
+         *     - Fetches from /api/job-history with time window + exclude_ids
+         *     - Live Done/Dead job IDs excluded to prevent duplicates
+         *     - Cards rendered with management actions (delete, retry)
+         *     - Pagination via "Load More" button
+         */
+        const state      = this.queueCategoryState.history;
+        const container  = document.getElementById( 'history-jobs-container' );
+        const countBadge = document.getElementById( 'history-count-badge' );
+
+        if ( !container ) return;
+
+        try {
+            // Collect live Done/Dead job IDs for deduplication
+            const liveJobIds = [
+                ...( this.queueCategoryState.done.jobs || [] ).map( j => j.job_id ),
+                ...( this.queueCategoryState.dead.jobs || [] ).map( j => j.job_id )
+            ].filter( Boolean );
+
+            // Build URL with filters
+            const params = new URLSearchParams();
+            if ( state.timeWindow !== 'all' ) params.set( 'days', state.timeWindow );
+            params.set( 'limit', '20' );
+            params.set( 'offset', append ? state.offset : '0' );
+            if ( liveJobIds.length > 0 ) params.set( 'exclude_ids', liveJobIds.join( ',' ) );
+
+            const response = await this.authedFetch( `/api/job-history?${params}` );
+
+            if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
+
+            const data = await response.json();
+
+            if ( append ) {
+                state.jobs = [ ...state.jobs, ...data.jobs ];
+            } else {
+                state.jobs = data.jobs;
+            }
+            state.total  = data.total;
+            state.offset = state.jobs.length;
+            state.loaded = true;
+
+            // Update badge
+            if ( countBadge ) countBadge.textContent = data.total;
+
+            // Render
+            if ( state.jobs.length === 0 ) {
+                container.innerHTML = '<div class="queue-empty-message">No job history found</div>';
+            } else {
+                container.innerHTML = state.jobs.map( job => this.renderHistoryCard( job ) ).join( '' );
+            }
+
+            // Show/hide Load More
+            const pagination = document.getElementById( 'history-pagination' );
+            if ( pagination ) {
+                pagination.style.display = state.jobs.length < state.total ? 'block' : 'none';
+            }
+
+        } catch ( error ) {
+            this.error( 'Error loading job history:', error );
+            container.innerHTML = '<div class="queue-error-message">Error loading job history</div>';
+        }
+    }
+
+    renderHistoryCard( job ) {
+        /**
+         * Adapt a PostgreSQL job history record to renderJobCard() format.
+         *
+         * Requires:
+         *     - job is a dict from /api/job-history with id_hash, metadata_json, etc.
+         *
+         * Ensures:
+         *     - Normalizes DB record shape to renderJobCard expected shape
+         *     - Maps status to queue name for correct styling
+         *     - Appends management action buttons (delete, retry)
+         */
+        const metadata = job.metadata_json || {};
+
+        // Normalize history record to match renderJobCard expected shape
+        const normalized = {
+            job_id           : job.id_hash,
+            question_text    : job.question_text || '',
+            timestamp        : job.created_at,
+            agent_type       : metadata.agent_type || job.job_type || '',
+            response_text    : metadata.response_text || null,
+            abstract         : metadata.abstract || null,
+            report_path               : metadata.report_link || null,
+            remediation_snapshot_path : metadata.remediation_snapshot_path || null,
+            yaml_path                 : metadata.yaml_path || ( metadata.artifacts && metadata.artifacts.yaml_path ) || null,
+            pptx_path                 : metadata.pptx_path || ( metadata.artifacts && metadata.artifacts.pptx_path ) || null,
+            cost_summary              : metadata.cost_summary || null,
+            is_cache_hit     : job.is_cache_hit || false,
+            has_interactions  : false,
+            started_at       : job.started_at,
+            completed_at     : job.completed_at,
+            duration_seconds : job.duration_seconds,
+            status           : job.status,
+            error            : job.error,
+            session_id       : job.session_id,
+            user_email       : job.user_email || metadata.user_email || null,
+            scheduled_at     : metadata.scheduled_at || null,
+            monopolize       : metadata.monopolize || false,
+            paused           : metadata.paused || false,
+            _isHistory       : true
+        };
+
+        // Map history status to queue name for styling
+        const statusToQueue = {
+            completed   : 'done',
+            failed      : 'dead',
+            interrupted : 'dead',
+            pending     : 'todo',
+            running     : 'run'
+        };
+        const queueName = statusToQueue[ job.status ] || 'done';
+
+        // Render using existing renderJobCard
+        let cardHtml = this.renderJobCard( normalized, queueName );
+
+        // Inject management action buttons before the last closing </div> of the card
+        const actionsHtml = this.renderHistoryActions( job );
+        const lastDivClose = cardHtml.lastIndexOf( '</div>' );
+        if ( lastDivClose > 0 ) {
+            cardHtml = cardHtml.substring( 0, lastDivClose ) + actionsHtml + cardHtml.substring( lastDivClose );
+        }
+
+        return cardHtml;
+    }
+
+    renderHistoryActions( job ) {
+        /**
+         * Render management action buttons for a history job card.
+         *
+         * Requires:
+         *     - job has id_hash and status fields
+         *
+         * Ensures:
+         *     - Delete button always shown (invokes deleteHistoryJob)
+         *     - Retry button shown only for failed/interrupted jobs
+         *     - Buttons use stopPropagation to prevent card toggle
+         */
+        const canRetry     = [ 'failed', 'interrupted' ].includes( job.status );
+        const questionSafe = ( job.question_text || '' ).replace( /'/g, "\\'" ).replace( /"/g, '&quot;' ).substring( 0, 100 );
+
+        const retryBtn = canRetry
+            ? `<button class="history-action-btn retry-btn"
+                    onclick="event.stopPropagation(); window.notificationsUI.retryHistoryJob( '${job.id_hash}', '${questionSafe}' )"
+                    >↻ Retry</button>`
+            : '';
+
+        const deleteBtn = `<button class="history-action-btn delete-btn"
+                    onclick="event.stopPropagation(); window.notificationsUI.deleteHistoryJob( '${job.id_hash}' )"
+                    >🗑 Delete</button>`;
+
+        return `
+            <div class="history-action-buttons">
+                ${retryBtn}${deleteBtn}
+            </div>
+        `;
+    }
+
+    async deleteHistoryJob( jobId ) {
+        /**
+         * Delete a job from PostgreSQL history.
+         *
+         * Requires:
+         *     - jobId is a valid id_hash string
+         *     - User is authenticated (admin or job owner)
+         *
+         * Ensures:
+         *     - Prompts user for confirmation before deleting
+         *     - Sends DELETE /api/job-history/{jobId}
+         *     - Removes from local state and re-renders on success
+         */
+        if ( !confirm( 'Delete this job from history?' ) ) return;
+
+        try {
+            const response = await this.authedFetch( `/api/job-history/${jobId}`, {
+                method : 'DELETE'
+            } );
+
+            if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
+
+            // Remove from local state and re-render
+            const state = this.queueCategoryState.history;
+            state.jobs  = state.jobs.filter( j => j.id_hash !== jobId );
+            state.total = Math.max( 0, state.total - 1 );
+            this.loadJobHistory();
+
+        } catch ( error ) {
+            this.error( 'Error deleting job:', error );
+            alert( 'Failed to delete job from history' );
+        }
+    }
+
+    async deleteQueueJob( jobId, queueName ) {
+        /**
+         * Forcefully remove a job from an in-memory queue (todo, run, done, dead).
+         *
+         * Requires:
+         *     - jobId is a valid job ID string
+         *     - queueName is 'todo', 'run', 'done', or 'dead'
+         *     - User is authenticated (admin or job owner)
+         *
+         * Ensures:
+         *     - Prompts user for confirmation before removing
+         *     - Sends DELETE /api/queue/{queueName}/{jobId}
+         *     - Removes card from DOM and updates count badge on success
+         */
+        const label = queueName === 'run' ? 'running' : queueName;
+        if ( !confirm( `Remove this job from the ${label} queue?` ) ) return;
+
+        try {
+            const response = await this.authedFetch( `/api/queue/${queueName}/${jobId}`, {
+                method : 'DELETE'
+            } );
+
+            if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
+
+            // Remove card from DOM
+            const card = document.getElementById( `job-card-${jobId}` );
+            if ( card ) card.remove();
+
+            // Update local count badge
+            this.queueCounts[ queueName ] = Math.max( 0, ( this.queueCounts[ queueName ] || 0 ) - 1 );
+            this.updateQueueCountBadge( queueName, this.queueCounts[ queueName ] );
+            this.updateQueueEmptyMessage( queueName );
+
+            this.log( `[DELETE] Job ${jobId} removed from ${queueName} queue` );
+
+        } catch ( error ) {
+            this.error( `Error removing job from ${queueName} queue:`, error );
+            alert( `Failed to remove job from ${label} queue` );
+        }
+    }
+
+    async deleteAllQueueJobs( queueName ) {
+        /**
+         * Bulk delete all jobs from a queue pane (todo, run, done, dead, or history).
+         *
+         * Requires:
+         *     - queueName is 'todo', 'run', 'done', 'dead', or 'history'
+         *     - User is authenticated
+         *
+         * Ensures:
+         *     - Prompts user for confirmation with job count and, for 'run', a
+         *       cancellation warning
+         *     - Sends DELETE /api/queue/{queueName}/all  OR
+         *              DELETE /api/job-history/all?days={N}
+         *     - Refreshes the pane and resets count badge on success
+         */
+        let count, confirmMsg, url;
+
+        if ( queueName === 'history' ) {
+            const state    = this.queueCategoryState && this.queueCategoryState.history;
+            count          = ( state && state.total ) || 0;
+            const select   = document.getElementById( 'history-time-window' );
+            const days     = select ? select.value : 'all';
+            const dayLabel = days === 'all' ? 'all time' : `last ${days} day${days === '1' ? '' : 's'}`;
+            confirmMsg     = `Delete all ${count} history entries from ${dayLabel}?`;
+            const daysParam = days === 'all' ? 'all' : days;
+            url            = `/api/job-history/all?days=${daysParam}`;
+        } else {
+            count          = ( this.queueCounts && this.queueCounts[ queueName ] ) || 0;
+            const label    = queueName === 'run' ? 'running' : queueName;
+            confirmMsg     = queueName === 'run'
+                ? `Cancel and remove all ${count} running job${count === 1 ? '' : 's'}? This will interrupt active jobs.`
+                : `Remove all ${count} job${count === 1 ? '' : 's'} from the ${label} queue?`;
+            url            = `/api/queue/${queueName}/all`;
+        }
+
+        if ( !confirm( confirmMsg ) ) return;
+
+        try {
+            const response = await this.authedFetch( url, { method: 'DELETE' } );
+
+            if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
+
+            if ( queueName === 'history' ) {
+                this.loadJobHistory();
+            } else {
+                this.queueCounts[ queueName ] = 0;
+                this.updateQueueCountBadge( queueName, 0 );
+                this.loadQueueJobCards( queueName );
+            }
+
+            this.log( `[DELETE ALL] ${queueName} queue cleared` );
+
+        } catch ( error ) {
+            this.error( `Error clearing ${queueName} queue:`, error );
+            alert( `Failed to clear ${queueName} queue` );
+        }
+    }
+
+    async retryHistoryJob( jobId, questionText ) {
+        /**
+         * Retry a failed/interrupted job by re-submitting to the todo queue.
+         *
+         * Requires:
+         *     - jobId is a valid id_hash of a failed/interrupted job
+         *     - questionText is the original question for display
+         *     - Active WebSocket connection with valid websocketId
+         *
+         * Ensures:
+         *     - Prompts user for confirmation before retrying
+         *     - Sends POST /api/job-history/{jobId}/retry with websocket_id
+         *     - Refreshes history and live queues on success
+         */
+        if ( !confirm( `Retry this job?\n\n"${questionText}"` ) ) return;
+
+        try {
+            const response = await this.authedFetch( `/api/job-history/${jobId}/retry`, {
+                method  : 'POST',
+                headers : { 'Content-Type': 'application/json' },
+                body    : JSON.stringify( { websocket_id: this.queueSessionId } )
+            } );
+
+            if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
+
+            const data = await response.json();
+            this.log( `Job retried: ${JSON.stringify( data )}` );
+
+            // Refresh history and live queues
+            this.loadJobHistory();
+            this.refreshAllQueues();
+
+        } catch ( error ) {
+            this.error( 'Error retrying job:', error );
+            alert( 'Failed to retry job' );
+        }
+    }
+
+    onHistoryTimeWindowChange( value ) {
+        /**
+         * Handle time window dropdown change.
+         *
+         * Requires:
+         *     - value is '7', '14', '30', or 'all'
+         *
+         * Ensures:
+         *     - Updates state.timeWindow
+         *     - Reloads history if section is expanded
+         *     - Marks as unloaded if collapsed (will reload on next expand)
+         */
+        const state = this.queueCategoryState.history;
+        state.timeWindow = value === 'all' ? 'all' : parseInt( value );
+        state.offset = 0;
+        if ( state.expanded ) {
+            this.loadJobHistory();
+        } else {
+            state.loaded = false;
+        }
+    }
+
+    loadMoreHistory() {
+        /**
+         * Load next page of history results (append mode).
+         */
+        this.loadJobHistory( true );
     }
 
     extractQuestionFromHtml( html ) {
@@ -5374,6 +6489,16 @@ class NotificationsUI {
 
         // Insert at top (newest first)
         contentEl.insertBefore( entry, contentEl.firstChild );
+
+        // Auto-expand interactions section if collapsed
+        if ( contentEl.classList.contains( 'collapsed' ) ) {
+            contentEl.classList.remove( 'collapsed' );
+            const sectionEl = contentEl.closest( '.job-interactions-section' );
+            const expandBtn = sectionEl?.querySelector( '.interactions-expand-btn' );
+            if ( expandBtn ) expandBtn.textContent = '▼';
+            const sendMsgEl = sectionEl?.querySelector( '.job-send-message' );
+            if ( sendMsgEl ) sendMsgEl.classList.remove( 'collapsed' );
+        }
 
         // Auto-expand job card to show new notification
         if ( !this.expandedJobCards.has( jobId ) ) {
@@ -5642,9 +6767,21 @@ class NotificationsUI {
      * @param {string} reportPath - Path to the report file
      * @returns {string} HTML content for report link section
      */
-    renderReportLinkSection( reportPath ) {
+    renderReportLinkSection( reportPath, agentType, yamlPath, remediationPath, pptxPath ) {
         if ( !reportPath ) return '';
-        return `<a href="/api/io/file?path=${encodeURIComponent( reportPath )}" target="_blank" class="report-link-btn">📋 View Full Report</a>`;
+        let html = `<a href="/app/docs?path=${encodeURIComponent( reportPath )}" target="_blank" class="report-link-btn">📋 View Full Report</a>`;
+        if ( remediationPath ) {
+            html += ` <a href="/app/docs?path=${encodeURIComponent( remediationPath )}" target="_blank" class="report-link-btn">🔧 Remediation Snapshot</a>`;
+        }
+        // Re-render button for presentation jobs with existing YAML
+        if ( agentType === 'presentation' && yamlPath ) {
+            html += ` <button class="report-link-btn rerender-btn" onclick="window.notificationsUI.submitRerender( '${this.escapeHtml( yamlPath )}' )" title="Re-render from YAML (Phases 6-8 only)">🔄 Re-render</button>`;
+        }
+        // PPTX download button for presentation jobs
+        if ( pptxPath ) {
+            html += ` <a href="/api/io/file?path=${encodeURIComponent( pptxPath )}&download=true" class="report-link-btn">📊 Download PPTX</a>`;
+        }
+        return html;
     }
 
     /**
@@ -5688,9 +6825,29 @@ class NotificationsUI {
         const statusClass = `status-${queueName}`;
         const truncatedQuestion = this.truncateText( job.question_text || 'No question', 60 );
         const agentBadge = job.agent_type ? `<span class="agent-badge">${( job.agent_type || '' ).replace( 'Agent', '' )}</span>` : '';
+        const ownerBadge = ( this.isAdmin && this.queueFilterMode !== 'own' && job.user_email )
+            ? `<span class="owner-badge">${this.escapeHtml( job.user_email )}</span>`
+            : '';
         const cacheHitBadge = job.is_cache_hit ? '<span class="cache-hit-badge" title="Result from cache">⚡ Cached</span>' : '';
         const timestamp = this.formatJobTimestamp( job.timestamp );
         const jobId = job.job_id || `job-${Date.now()}`;
+        // Display-only: show the prefix before "::" (our canonical compound
+        // split point) — e.g. "bfe-a1b2c3d4::<uuid>" renders as
+        // "bfe-a1b2c3d4". If that prefix is still insanely long (64-char
+        // sha-style ids like "<sha>::<uuid>"), collapse to 8 chars + "...".
+        // The full jobId stays in data-job-id, the tooltip, clipboard copy,
+        // and the expanded details block — every API call and DOM lookup
+        // uses it intact.
+        const idPrefix = jobId.split( "::" )[ 0 ];
+        const jobIdDisplay = idPrefix.length > 16
+            ? idPrefix.substring( 0, 8 ) + "..."
+            : idPrefix;
+        // History cards get a `history-` ID prefix so their DOM ids cannot
+        // collide with the same job rendered in a live queue (Done, etc.).
+        // All external lookups (websocket handlers, interaction appenders)
+        // address live cards by bare jobId, so this prefix only applies to
+        // history renders — `toggleJobCard` applies the same rule.
+        const idKey = job._isHistory ? `history-${jobId}` : jobId;
 
         // ═══════════════════════════════════════════════════════════════════
         // Phase 7: Enhanced indicators based on queue type
@@ -5707,6 +6864,37 @@ class NotificationsUI {
             statusIndicator = '<span class="status-indicator expediting" title="Setting up...">⟳</span>';
         }
 
+        // ═══════════════════════════════════════════════════════════════════
+        // Phase 5 CJ Flow: Paused / Scheduled / Monopolize indicators
+        // ═══════════════════════════════════════════════════════════════════
+
+        // Paused job: muted card with pause icon
+        let pausedBadge = '';
+        let pausedCardClass = '';
+        if ( queueName === 'todo' && job.paused ) {
+            pausedBadge = '<span class="paused-badge" title="Paused — consumer will skip">⏸ Paused</span>';
+            pausedCardClass = ' job-paused';
+            statusIndicator = '<span class="status-indicator paused-icon" title="Paused">⏸</span>';
+        }
+
+        // Scheduled job: show clock badge with formatted time
+        // Renders for any queue when job has scheduled_at — for done/dead the time is in the past
+        // but the badge is still meaningful as historical context
+        let scheduledBadge = '';
+        if ( job.scheduled_at ) {
+            const schedDate = new Date( job.scheduled_at );
+            const tz = this.appTimezone || 'America/New_York';
+            const schedTimeStr = schedDate.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit', timeZone: tz } );
+            const schedDateStr = schedDate.toLocaleDateString( [], { month: 'short', day: 'numeric', timeZone: tz } );
+            scheduledBadge = `<span class="scheduled-badge" title="Scheduled for ${schedDate.toISOString()}">🕐 ${schedDateStr} ${schedTimeStr}</span>`;
+        }
+
+        // Monopolize job: subtle lock badge (no-op in serial mode)
+        let monopolizeBadge = '';
+        if ( job.monopolize ) {
+            monopolizeBadge = '<span class="monopolize-badge" title="Exclusive execution — no concurrent jobs">🔒</span>';
+        }
+
         // Done job: completion badge
         let completionBadge = '';
         if ( queueName === 'done' ) {
@@ -5721,6 +6909,33 @@ class NotificationsUI {
         // Dead job: error badge
         if ( queueName === 'dead' ) {
             completionBadge = '<span class="completion-badge failed" title="Failed">✗</span>';
+        }
+
+        // Stalled / paused job: ⏸ badge with label varying by stall_reason
+        // (Session 2026-04-15 Bug 8). Checkpoint-resume jobs share JobState.STALLED
+        // but differentiate their label via stall_reason:
+        //   voice_gate_timeout → "Stalled" (default, amber) — nobody answered
+        //   user_pause         → "Paused"  (blue)           — user deferred deliberately
+        //   rate_limit         → "Stalled" (amber)          — infrastructure throttle
+        const isStalled = ( job.status === 'stalled' );
+        if ( isStalled ) {
+            const stallReason = (
+                ( job.checkpoint && job.checkpoint.stall_reason )
+                || ( job.metadata_json && job.metadata_json.checkpoint && job.metadata_json.checkpoint.stall_reason )
+                || 'voice_gate_timeout'
+            );
+            const isPaused = ( stallReason === 'user_pause' );
+            const label    = isPaused ? 'Paused' : 'Stalled';
+            const cls      = isPaused ? 'paused' : 'stalled';
+            const tip      = isPaused
+                ? 'Paused — user deferred; resume when ready'
+                : 'Stalled — awaiting user input';
+            completionBadge = `<span class="completion-badge ${cls}" title="${tip}">⏸ ${label}</span>`;
+        }
+
+        // Stopped job: user explicitly cancelled mid-run. Terminal, not resumable.
+        if ( job.status === 'cancelled' ) {
+            completionBadge = '<span class="completion-badge stopped" title="Stopped — user cancelled">✕ Stopped</span>';
         }
 
         // Interaction indicator for done queue
@@ -5749,24 +6964,45 @@ class NotificationsUI {
         // Session 107: Removed provisionalAttr - no longer using provisional registration
         // ═══════════════════════════════════════════════════════════════════
 
-        const hasCancelBtn = ( queueName === 'run' || queueName === 'todo' );
-        const cancelBtnHtml = hasCancelBtn
-            ? `<button type="button" class="job-cancel-button" id="job-cancel-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.cancelJob('${jobId}')" title="Cancel this job">✕</button>`
+        // ✕ button means "make this job go away" — but the mechanism differs by queue:
+        //   run queue:  graceful cancel via cancelJob (POST /api/jobs/{id}/cancel)
+        //   todo queue: forceful delete via deleteQueueJob (DELETE /api/queue/todo/{id})
+        let cancelBtnHtml      = '';
+        let headerCancelClass  = '';
+        if ( queueName === 'run' ) {
+            cancelBtnHtml     = `<button type="button" class="job-cancel-button" id="job-cancel-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.cancelJob('${jobId}')" title="Cancel this job">✕</button>`;
+            headerCancelClass = ' has-cancel';
+        } else if ( queueName === 'todo' || queueName === 'done' || queueName === 'dead' ) {
+            const deleteAction = job._isHistory
+                ? `window.notificationsUI.deleteHistoryJob('${jobId}')`
+                : `window.notificationsUI.deleteQueueJob('${jobId}', '${queueName}')`;
+            cancelBtnHtml     = `<button type="button" class="job-cancel-button" id="job-cancel-${idKey}" onclick="event.stopPropagation(); ${deleteAction}" title="Remove this job">✕</button>`;
+            headerCancelClass = ' has-cancel';
+        }
+
+        // Phase 5 CJ Flow: Pause/resume toggle button (todo queue only)
+        const pauseBtnHtml = ( queueName === 'todo' )
+            ? `<button type="button" class="job-pause-button${job.paused ? ' is-paused' : ''}" id="job-pause-${idKey}" onclick="event.stopPropagation(); window.notificationsUI.toggleJobPause('${jobId}', ${!job.paused})" title="${job.paused ? 'Resume this job' : 'Pause this job'}">${job.paused ? '▶' : '⏸'}</button>`
             : '';
-        const headerCancelClass = hasCancelBtn ? ' has-cancel' : '';
+
+        const deleteBtnHtml = '';
 
         return `
-            <div class="job-card ${statusClass}" id="job-card-${jobId}" data-job-id="${jobId}">
-                <div class="job-card-header${headerCancelClass}" onclick="window.notificationsUI.toggleJobCard('${jobId}', '${queueName}')">
-                    ${cancelBtnHtml}
-                    ${agentBadge}${cacheHitBadge}${completionBadge}
+            <div class="job-card ${statusClass}${pausedCardClass}" id="job-card-${idKey}" data-job-id="${jobId}" data-paused="${job.paused ? 'true' : 'false'}">
+                <div class="job-card-header${headerCancelClass}" onclick="window.notificationsUI.toggleJobCard('${idKey}')">
+                    ${cancelBtnHtml}${pauseBtnHtml}${deleteBtnHtml}
+                    ${agentBadge}${ownerBadge}${cacheHitBadge}${completionBadge}${pausedBadge}${scheduledBadge}${monopolizeBadge}
+                    <span class="job-id-chip" title="${jobId} — click to copy" onclick="event.stopPropagation(); navigator.clipboard.writeText('${jobId}'); this.classList.add('copied'); setTimeout(() => this.classList.remove('copied'), 900)">${jobIdDisplay}</span>
                     <span class="job-question">${this.escapeHtml( truncatedQuestion )}</span>
                     ${statusIndicator}${interactionIndicator}
                     <span class="job-timestamp">${timestamp}</span>
                     <button class="job-expand-btn">▶</button>
                 </div>
-                <div class="job-card-details collapsed" id="job-details-${jobId}">
+                <div class="job-card-details collapsed" id="job-details-${idKey}">
                     ${durationSection}
+                    <div class="job-id-line">
+                        <strong>ID:</strong> <code>${jobId}</code>
+                    </div>
                     <div class="job-full-question">
                         <strong>Question:</strong> ${this.escapeHtml( job.question_text || '' )}
                     </div>
@@ -5777,7 +7013,40 @@ class NotificationsUI {
                         ${this.renderAbstractSection( job.abstract )}
                     </div>
                     <div class="job-report-link" style="${job.report_path ? '' : 'display: none'}">
-                        ${this.renderReportLinkSection( job.report_path )}
+                        ${this.renderReportLinkSection( job.report_path, job.agent_type, job.yaml_path, job.remediation_snapshot_path, job.pptx_path )}
+                    </div>
+                    <!-- Fix 8c: partial artifacts from failed-before-completion runs (dead queue only).
+                         Surfaces TFE/BFE plan files + remediation snapshots that were written before
+                         the job crashed, so users can recover partial diagnoses without grepping
+                         docker logs. Links to /app/docs?path= for rendered markdown viewing.
+                         See: src/rnd/v0.1.6/2026.04.11-tfe-forensics-capture-plan.md -->
+                    <div class="job-partial-artifacts" style="${( queueName === 'dead' && ( job.plan_path || ( job.remediation_snapshot_path && !job.report_path ) ) ) ? '' : 'display: none'}">
+                        ${queueName === 'dead' && job.plan_path ? `
+                            <div class="partial-artifact">
+                                <a href="/app/docs?path=${encodeURIComponent( job.plan_path || '' )}" target="_blank" class="report-link-btn">📋 Partial Plan (written before failure)</a>
+                            </div>
+                        ` : ''}
+                        ${queueName === 'dead' && job.remediation_snapshot_path && !job.report_path ? `
+                            <div class="partial-artifact">
+                                <a href="/app/docs?path=${encodeURIComponent( job.remediation_snapshot_path || '' )}" target="_blank" class="report-link-btn">🔍 Remediation Snapshot</a>
+                            </div>
+                        ` : ''}
+                    </div>
+                    <!-- Stalled job: resume button + plan link (checkpoint-resume, Session 9056c113) -->
+                    <div class="job-stalled-actions" style="${isStalled ? '' : 'display: none'}">
+                        ${isStalled && job.plan_path ? `
+                            <div class="stalled-artifact">
+                                <a href="/app/docs?path=${encodeURIComponent( job.plan_path || '' )}" target="_blank" class="report-link-btn">📋 View Plan</a>
+                            </div>
+                        ` : ''}
+                        ${isStalled && this.isResumableWithOverrides( job ) ? this.renderResumeOverrideControls( jobId ) : ''}
+                        ${isStalled ? `
+                            <button class="btn btn-sm btn-warning mt-1 resume-stalled-btn"
+                                    data-job-id="${jobId}"
+                                    onclick="window.notificationsUI?.resumeStalledJob( '${jobId}' )">
+                                ▶ Resume from Checkpoint
+                            </button>
+                        ` : ''}
                     </div>
                     <div class="job-cost-summary" style="${job.cost_summary ? '' : 'display: none'}">
                         ${job.cost_summary ? this.renderCostSummaryContent( job.cost_summary, job.duration_seconds ) : ''}
@@ -5790,36 +7059,36 @@ class NotificationsUI {
                         <span>Time: ${timestamp}</span>
                     </div>
                     ${( queueName === 'run' || queueName === 'todo' ) ? `
-                    <div class="job-interactions-section live-interactions" id="job-interactions-${jobId}">
-                        <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${jobId}', event)">
+                    <div class="job-interactions-section live-interactions" id="job-interactions-${idKey}">
+                        <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${idKey}', event)">
                             <span>📋 Activity Log</span>
                             <button class="interactions-expand-btn">▶</button>
                         </div>
-                        <div class="job-send-message" id="job-send-msg-${jobId}">
+                        <div class="job-send-message collapsed" id="job-send-msg-${idKey}">
                             <div class="job-send-message-row">
-                                <button type="button" class="stt-button" id="job-msg-stt-${jobId}"
+                                <button type="button" class="stt-button" id="job-msg-stt-${idKey}"
                                         title="Click to record (30s max, ESC to cancel)">🎤</button>
-                                <input type="text" id="job-msg-input-${jobId}" class="job-msg-input"
+                                <input type="text" id="job-msg-input-${idKey}" class="job-msg-input"
                                        placeholder="Send message to job..." />
                                 <label class="urgent-toggle" title="Mark as urgent (interrupts current task)">
-                                    <input type="checkbox" id="job-msg-urgent-${jobId}" />
+                                    <input type="checkbox" id="job-msg-urgent-${idKey}" />
                                     ⚡
                                 </label>
                                 <button type="button" class="response-submit-button"
-                                        id="job-msg-submit-${jobId}">Send</button>
+                                        id="job-msg-submit-${idKey}">Send</button>
                             </div>
                         </div>
-                        <div class="interactions-content collapsed" id="interactions-content-${jobId}">
+                        <div class="interactions-content collapsed" id="interactions-content-${idKey}">
                         </div>
                     </div>
                     ` : ''}
                     ${queueName === 'done' ? `
-                    <div class="job-interactions-section" id="job-interactions-${jobId}">
-                        <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${jobId}', event)">
+                    <div class="job-interactions-section" id="job-interactions-${idKey}">
+                        <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${idKey}', event)">
                             <span>📋 Notification Conversation</span>
                             <button class="interactions-expand-btn">▶</button>
                         </div>
-                        <div class="interactions-content collapsed" id="interactions-content-${jobId}">
+                        <div class="interactions-content collapsed" id="interactions-content-${idKey}">
                             <div class="interactions-loading">Loading...</div>
                         </div>
                     </div>
@@ -5829,28 +7098,33 @@ class NotificationsUI {
         `;
     }
 
-    toggleJobCard( jobId, queueName ) {
+    toggleJobCard( idKey ) {
         /**
          * Toggle expand/collapse for individual job card.
+         *
+         * idKey is either a bare jobId (live queues) or `history-${jobId}`
+         * (history section) — renderJobCard emits the corresponding DOM ids.
+         * Namespacing history cards prevents getElementById() collision with
+         * the same job rendered in the live Done section.
          */
-        const details = document.getElementById( `job-details-${jobId}` );
-        const card = document.getElementById( `job-card-${jobId}` );
+        const details = document.getElementById( `job-details-${idKey}` );
+        const card    = document.getElementById( `job-card-${idKey}` );
 
         if ( !details || !card ) {
-            this.error( `Job card elements not found: ${jobId}` );
+            this.error( `Job card elements not found: ${idKey}` );
             return;
         }
 
         const expandBtn = card.querySelector( '.job-expand-btn' );
 
-        if ( this.expandedJobCards.has( jobId ) ) {
+        if ( this.expandedJobCards.has( idKey ) ) {
             details.classList.add( 'collapsed' );
             if ( expandBtn ) expandBtn.textContent = '▶';
-            this.expandedJobCards.delete( jobId );
+            this.expandedJobCards.delete( idKey );
         } else {
             details.classList.remove( 'collapsed' );
             if ( expandBtn ) expandBtn.textContent = '▼';
-            this.expandedJobCards.add( jobId );
+            this.expandedJobCards.add( idKey );
         }
     }
 
@@ -5913,13 +7187,10 @@ class NotificationsUI {
         }
 
         try {
-            const response = await fetch( `/api/jobs/${jobId}/message`, {
+            const response = await this.authedFetch( `/api/jobs/${jobId}/message`, {
                 method  : 'POST',
-                headers : {
-                    'Content-Type'  : 'application/json',
-                    'Authorization' : this.getAuthHeader(),
-                },
-                body: JSON.stringify( { message, priority } ),
+                headers : { 'Content-Type': 'application/json' },
+                body    : JSON.stringify( { message, priority } ),
             } );
 
             if ( !response.ok ) {
@@ -5965,9 +7236,8 @@ class NotificationsUI {
         }
 
         try {
-            const response = await fetch( `/api/jobs/${jobId}/cancel`, {
-                method  : 'POST',
-                headers : { 'Authorization': this.getAuthHeader() },
+            const response = await this.authedFetch( `/api/jobs/${jobId}/cancel`, {
+                method : 'POST'
             } );
 
             if ( !response.ok ) {
@@ -5984,6 +7254,281 @@ class NotificationsUI {
             if ( cancelBtn ) {
                 cancelBtn.disabled  = false;
                 cancelBtn.innerText = 'Cancel Job';
+            }
+        }
+    }
+
+    isResumableWithOverrides( job ) {
+        /**
+         * Return true iff this job type supports per-resume model + effort overrides
+         * (currently TFE and BFE). Used to gate the inline dropdown UI on stalled cards.
+         *
+         * Matches the snake_case JOB_TYPE class attrs emitted by the backend:
+         *     TestFixExpediterJob.JOB_TYPE = "test_fix_expediter"
+         *     BugFixExpediterJob.JOB_TYPE  = "bug_fix_expediter"
+         */
+        const agentType = job.agent_type || '';
+        return agentType === 'test_fix_expediter' || agentType === 'bug_fix_expediter';
+    }
+
+    renderResumeOverrideControls( jobId ) {
+        /**
+         * Render Model + Effort dropdowns for a stalled TFE/BFE card. Defaults
+         * come from localStorage; user's last selection persists across reloads.
+         */
+        const modelPref  = localStorage.getItem( this.RESUME_MODEL_PREF_KEY )  || 'claude-sonnet-4-6';
+        const effortPref = localStorage.getItem( this.RESUME_EFFORT_PREF_KEY ) || 'high';
+        const sel = ( optVal, prefVal ) => ( optVal === prefVal ? 'selected' : '' );
+        return `
+            <div class="resume-override-controls" data-job-id="${jobId}" style="display: inline-flex; gap: 0.5em; align-items: center; margin-right: 0.5em;">
+                <label style="font-size: 0.85em;">
+                    Model
+                    <select class="resume-model-select" data-job-id="${jobId}"
+                            onchange="window.notificationsUI?.saveResumeModelPref( this.value )">
+                        <option value="claude-opus-4-7"           ${sel( 'claude-opus-4-7', modelPref )}>Opus 4.7</option>
+                        <option value="claude-sonnet-4-6"         ${sel( 'claude-sonnet-4-6', modelPref )}>Sonnet 4.6</option>
+                        <option value="claude-haiku-4-5-20251001" ${sel( 'claude-haiku-4-5-20251001', modelPref )}>Haiku 4.5</option>
+                    </select>
+                </label>
+                <label style="font-size: 0.85em;">
+                    Effort
+                    <select class="resume-effort-select" data-job-id="${jobId}"
+                            onchange="window.notificationsUI?.saveResumeEffortPref( this.value )">
+                        <option value=""       ${sel( '',       effortPref )}>(default)</option>
+                        <option value="low"    ${sel( 'low',    effortPref )}>low</option>
+                        <option value="medium" ${sel( 'medium', effortPref )}>medium</option>
+                        <option value="high"   ${sel( 'high',   effortPref )}>high</option>
+                        <option value="xhigh"  ${sel( 'xhigh',  effortPref )}>xhigh</option>
+                        <option value="max"    ${sel( 'max',    effortPref )}>max</option>
+                    </select>
+                </label>
+            </div>
+        `;
+    }
+
+    saveResumeModelPref( value ) {
+        localStorage.setItem( this.RESUME_MODEL_PREF_KEY, value || '' );
+    }
+
+    saveResumeEffortPref( value ) {
+        localStorage.setItem( this.RESUME_EFFORT_PREF_KEY, value || '' );
+    }
+
+    async resumeStalledJob( jobId ) {
+        /**
+         * Resume a stalled job from its checkpoint.
+         *
+         * POSTs to /api/jobs/{jobId}/resume-from-checkpoint. On success, a new job
+         * is created and queued, resuming from the phase where it stalled.
+         *
+         * Session 9056c113 — checkpoint-resume infrastructure.
+         * Session d8831785 — optional model + thinking-effort overrides for TFE/BFE.
+         *
+         * Requires:
+         *     - jobId is a valid stalled agentic job ID
+         *
+         * Ensures:
+         *     - Confirmation dialog shown before resume
+         *     - Button disabled while request is in-flight
+         *     - If the card has Model + Effort dropdowns, their values are sent
+         *       as lead_model_override / worker_model_override / thinking_effort
+         */
+        if ( !confirm( 'Resume this job from its checkpoint?' ) ) return;
+
+        const resumeBtn = document.querySelector( `.resume-stalled-btn[data-job-id="${jobId}"]` );
+        if ( resumeBtn ) {
+            resumeBtn.disabled  = true;
+            resumeBtn.innerText = 'Resuming...';
+        }
+
+        // Read override selections from the card's dropdowns (if present).
+        const modelSelect  = document.querySelector( `.resume-model-select[data-job-id="${jobId}"]` );
+        const effortSelect = document.querySelector( `.resume-effort-select[data-job-id="${jobId}"]` );
+        const overrides = {};
+        if ( modelSelect?.value ) {
+            overrides.lead_model_override   = modelSelect.value;
+            overrides.worker_model_override = modelSelect.value;
+        }
+        if ( effortSelect?.value ) {
+            overrides.thinking_effort = effortSelect.value;
+        }
+
+        try {
+            const response = await this.authedFetch( `/api/jobs/${jobId}/resume-from-checkpoint`, {
+                method  : 'POST',
+                headers : { 'Content-Type': 'application/json' },
+                body    : JSON.stringify( overrides ),
+            } );
+
+            if ( !response.ok ) {
+                const errData = await response.json().catch( () => ( {} ) );
+                throw new Error( errData.detail || `HTTP ${response.status}` );
+            }
+
+            const data = await response.json();
+            this.log( `[JOB-RESUME] Resumed ${jobId} → ${data.resumed_job_id} from phase ${data.phase_name}` );
+            this.log( `[JOB-RESUME] ✓ Resumed from ${data.phase_name} → new job ${data.resumed_job_id}` );
+
+        } catch ( error ) {
+            this.error( `[JOB-RESUME] Failed to resume ${jobId}:`, error );
+            alert( `Resume failed: ${error.message}` );
+            if ( resumeBtn ) {
+                resumeBtn.disabled  = false;
+                resumeBtn.innerText = '▶ Resume from Checkpoint';
+            }
+        }
+    }
+
+    async submitTFEResume() {
+        /**
+         * Smart TFE resume from free-form input (session 9056c113).
+         *
+         * Sends the resume_from text to /api/test-fix-expediter/resume-from which
+         * auto-detects the input type (job ID, plan doc path, natural language) and
+         * either auto-resumes (single match) or returns candidates for disambiguation.
+         */
+        const input = document.getElementById( 'tfe-resume-input' ).value.trim();
+        if ( !input ) {
+            alert( 'Enter a job ID, plan path, or description.' );
+            return;
+        }
+
+        const statusEl     = document.getElementById( 'tfe-resume-submit-status' );
+        const candidatesEl = document.getElementById( 'tfe-resume-candidates' );
+        const submitBtn    = document.getElementById( 'submit-tfe-resume-job' );
+
+        if ( submitBtn )     submitBtn.disabled = true;
+        if ( statusEl )      statusEl.textContent = 'Resolving...';
+        if ( candidatesEl )  candidatesEl.style.display = 'none';
+
+        try {
+            const response = await this.authedFetch( '/api/test-fix-expediter/resume-from', {
+                method  : 'POST',
+                headers : { 'Content-Type': 'application/json' },
+                body    : JSON.stringify( { resume_from: input } )
+            });
+
+            if ( !response.ok ) {
+                const errData = await response.json().catch( () => ({}) );
+                throw new Error( errData.detail || `HTTP ${response.status}` );
+            }
+
+            const data = await response.json();
+
+            if ( data.status === 'ambiguous' ) {
+                // Multi-match disambiguation
+                this._renderTFEResumeCandidates( data.candidates || [], candidatesEl );
+                if ( statusEl ) {
+                    statusEl.textContent = `Found ${( data.candidates || [] ).length} possible matches — pick one.`;
+                }
+                return;
+            }
+
+            if ( data.status === 'resumed' ) {
+                const st = data.source_type || 'unknown';
+                const phase = data.phase_name || `phase ${data.resume_from_phase}`;
+                this.log( `[TFE-RESUME] ✓ Resumed (${st}) from ${phase} → ${data.resumed_job_id}` );
+                if ( statusEl ) {
+                    statusEl.textContent = `✓ Resumed via ${st}: ${data.resumed_job_id} from ${phase}`;
+                }
+                document.getElementById( 'tfe-resume-input' ).value = '';
+            }
+        } catch ( error ) {
+            this.error( '[TFE-RESUME] submitTFEResume failed:', error );
+            if ( statusEl ) statusEl.textContent = `✗ ${error.message}`;
+        } finally {
+            if ( submitBtn ) submitBtn.disabled = false;
+        }
+    }
+
+    _renderTFEResumeCandidates( candidates, containerEl ) {
+        /**
+         * Render disambiguation list for ambiguous TFE resume matches.
+         * Each candidate becomes a clickable row that re-submits with the exact job ID.
+         */
+        if ( !containerEl ) return;
+        if ( !candidates.length ) {
+            containerEl.style.display = 'none';
+            return;
+        }
+
+        const html = candidates.map( ( c, i ) => {
+            const conf = c.confidence != null ? `${Math.round( c.confidence * 100 )}%` : '?';
+            const stalled = c.stalled_at ? `stalled ${c.stalled_at}` : '';
+            const summary = this.escapeHtml( c.summary || '' );
+            const jobId = this.escapeHtml( c.job_id );
+            const reason = this.escapeHtml( c.reason || '' );
+            return `
+                <div class="tfe-resume-candidate" style="border: 1px solid #ced4da; border-radius: 4px; padding: 8px; margin-bottom: 4px; cursor: pointer;"
+                     onclick="window.notificationsUI?._pickTFEResumeCandidate('${jobId}')">
+                    <strong>${conf}</strong> · <code>${jobId}</code>
+                    <span style="color: #888;">${stalled}</span>
+                    <div style="font-size: 11px; color: #666;">${summary}${reason ? ' — ' + reason : ''}</div>
+                </div>
+            `;
+        }).join( '' );
+
+        containerEl.innerHTML = `
+            <div style="font-size: 12px; color: #666; margin-bottom: 4px;">
+                Click a candidate to resume it:
+            </div>
+            ${html}
+        `;
+        containerEl.style.display = 'block';
+    }
+
+    _pickTFEResumeCandidate( jobId ) {
+        /** User picked a candidate from the disambiguation list — resubmit with exact job ID. */
+        const inputEl = document.getElementById( 'tfe-resume-input' );
+        if ( inputEl ) inputEl.value = jobId;
+        this.submitTFEResume();
+    }
+
+    async toggleJobPause( jobId, shouldPause ) {
+        /**
+         * Toggle pause/resume state of a todo queue job.
+         *
+         * Requires:
+         *     - jobId is a valid todo queue job ID
+         *     - shouldPause is boolean (true=pause, false=resume)
+         *
+         * Ensures:
+         *     - Calls PATCH /api/queue/todo/{jobId}/pause or /resume
+         *     - Button updated optimistically, reverted on failure
+         *     - WebSocket event will confirm state change
+         */
+        const action = shouldPause ? 'pause' : 'resume';
+        const btn = document.getElementById( `job-pause-${jobId}` );
+
+        // Optimistic UI update
+        if ( btn ) {
+            btn.disabled    = true;
+            btn.textContent = '...';
+        }
+
+        try {
+            const response = await this.authedFetch( `/api/queue/todo/${jobId}/${action}`, {
+                method : 'PATCH'
+            } );
+
+            if ( !response.ok ) {
+                const errData = await response.json().catch( () => ( {} ) );
+                throw new Error( errData.detail || `HTTP ${response.status}` );
+            }
+
+            this.log( `[JOB-PAUSE] ${action} requested for ${jobId}` );
+            // WebSocket event (job_paused/job_resumed) will apply final UI state
+
+        } catch ( error ) {
+            this.error( `[JOB-PAUSE] Failed to ${action} ${jobId}:`, error );
+            alert( `${action} failed: ${error.message}` );
+
+            // Revert optimistic update
+            if ( btn ) {
+                btn.disabled = false;
+                const wasPaused = !shouldPause;
+                btn.textContent = wasPaused ? '▶' : '⏸';
+                btn.title       = wasPaused ? 'Resume this job' : 'Pause this job';
             }
         }
     }
@@ -6042,57 +7587,70 @@ class NotificationsUI {
         }
     }
 
-    async toggleJobInteractions( jobId, event ) {
+    async toggleJobInteractions( idKey, event ) {
         /**
          * Toggle and lazy-load interaction history for a job.
          *
          * THE KEY FEATURE: Shows notification conversation history
          * associated with a completed job.
+         *
+         * Accepts `idKey` (possibly `history-` prefixed) so the DOM lookup
+         * finds the correct card — history cards prefix their DOM ids to
+         * avoid collision with the same job rendered in a live queue.
+         * The bare `jobId` is used for API + cache calls.
          */
         event.stopPropagation();  // Don't toggle parent card
 
-        const contentEl = document.getElementById( `interactions-content-${jobId}` );
+        const jobId = idKey.startsWith( 'history-' ) ? idKey.substring( 8 ) : idKey;
+
+        const contentEl = document.getElementById( `interactions-content-${idKey}` );
         if ( !contentEl ) {
-            this.error( `Interactions content not found: ${jobId}` );
+            this.error( `Interactions content not found: ${idKey}` );
             return;
         }
 
-        const headerEl = contentEl.previousElementSibling;
+        const sectionEl = contentEl.closest( '.job-interactions-section' );
+        const headerEl  = sectionEl ? sectionEl.querySelector( '.interactions-header' ) : null;
         const expandBtn = headerEl ? headerEl.querySelector( '.interactions-expand-btn' ) : null;
 
         const isExpanded = !contentEl.classList.contains( 'collapsed' );
+        const sendMsgEl  = sectionEl ? sectionEl.querySelector( '.job-send-message' ) : null;
 
         if ( isExpanded ) {
             contentEl.classList.add( 'collapsed' );
+            if ( sendMsgEl ) sendMsgEl.classList.add( 'collapsed' );
             if ( expandBtn ) expandBtn.textContent = '▶';
         } else {
             contentEl.classList.remove( 'collapsed' );
+            if ( sendMsgEl ) sendMsgEl.classList.remove( 'collapsed' );
             if ( expandBtn ) expandBtn.textContent = '▼';
 
             // Lazy load interactions if not cached
             if ( !this.jobInteractionsCache.has( jobId ) ) {
-                await this.loadJobInteractions( jobId );
+                await this.loadJobInteractions( jobId, idKey );
             }
 
-            // Scroll the "Notification Conversation" header to the top of the viewport
-            const sectionEl = headerEl ? headerEl.closest( '.job-interactions-section' ) : null;
+            // Scroll the interactions section header to the top of the viewport
             if ( sectionEl ) {
                 sectionEl.scrollIntoView( { behavior: 'smooth', block: 'start' } );
             }
         }
     }
 
-    async loadJobInteractions( jobId ) {
+    async loadJobInteractions( jobId, idKey = null ) {
         /**
          * Fetch notification interactions for a job from API.
+         *
+         * `jobId` is the bare job id (always used for API + cache).
+         * `idKey` is the DOM id suffix — defaults to `jobId` for live-queue
+         * callers, but history-card callers pass the `history-` prefixed form.
          */
-        const contentEl = document.getElementById( `interactions-content-${jobId}` );
+        const domKey = idKey || jobId;
+        const contentEl = document.getElementById( `interactions-content-${domKey}` );
         if ( !contentEl ) return;
 
         try {
-            const response = await fetch( `/api/get-job-interactions/${jobId}`, {
-                headers: { 'Authorization': this.getAuthHeader() }
-            } );
+            const response = await this.authedFetch( `/api/get-job-interactions/${encodeURIComponent( jobId )}` );
 
             if ( !response.ok ) throw new Error( `HTTP ${response.status}` );
 
@@ -6253,10 +7811,11 @@ class NotificationsUI {
             const cleaned = timestamp.replace( ' @ ', 'T' ).replace( ' EST', '' ).replace( ' EDT', '' );
             const date = new Date( cleaned );
             return date.toLocaleString( 'en-US', {
-                month  : 'short',
-                day    : 'numeric',
-                hour   : 'numeric',
-                minute : '2-digit'
+                month    : 'short',
+                day      : 'numeric',
+                hour     : 'numeric',
+                minute   : '2-digit',
+                timeZone : this.appTimezone || 'America/New_York'
             } );
         } catch ( e ) {
             return timestamp;
@@ -6514,6 +8073,9 @@ class NotificationsUI {
             section.classList.remove( 'section-hidden' );
             btn?.classList.add( 'active' );
             this.log( `Section shown: ${sectionId}` );
+
+            // Scroll the newly-shown section into view
+            this.scrollIntoViewIfNeeded( section );
         }
 
         this.saveSectionVisibility();
@@ -7070,11 +8632,42 @@ class NotificationsUI {
      * Save a session name to localStorage.
      * @param {string} sessionId - Session ID (hex string)
      * @param {string} name - Session name to save
+     * @param {object} options - Optional flags: { fromServer: true } to skip push-back
      */
-    saveSessionName( sessionId, name ) {
+    saveSessionName( sessionId, name, options = {} ) {
         this.sessionNames[ sessionId ] = name;
         localStorage.setItem( this.SESSION_NAMES_KEY, JSON.stringify( this.sessionNames ) );
         this.log( `Saved session name for ${sessionId}: ${name}` );
+        // Only push back to server if this came from the UI (not from server)
+        if ( !options.fromServer ) {
+            this.pushSessionTopicNotification( sessionId, name );
+        }
+    }
+
+    /**
+     * Push a session topic notification so the CC listener can update the session bridge file.
+     * Uses hybrid encoding: type=custom, title=action:set_session_topic, job_id=sessionHash.
+     * @param {string} sessionId - Session ID (8-char hex hash)
+     * @param {string} topic - The session topic text
+     */
+    async pushSessionTopicNotification( sessionId, topic ) {
+        try {
+            await fetch( '/api/notify', {
+                method  : 'POST',
+                headers : { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
+                body    : JSON.stringify( {
+                    message       : topic,
+                    type          : 'custom',
+                    title         : 'action:set_session_topic',
+                    job_id        : sessionId,
+                    priority      : 'low',
+                    suppress_ding : true
+                } )
+            } );
+            this.log( `Pushed session topic notification for ${sessionId}: ${topic}` );
+        } catch ( error ) {
+            this.log( `Failed to push session topic: ${error.message}` );
+        }
     }
 
     /**
@@ -7455,7 +9048,7 @@ class NotificationsUI {
         if ( notification.session_name ) {
             const parsed = this.parseSenderId( senderId );
             if ( parsed.sessionId ) {
-                this.saveSessionName( parsed.sessionId, notification.session_name );
+                this.saveSessionName( parsed.sessionId, notification.session_name, { fromServer: true } );
             }
         }
 
@@ -8263,7 +9856,14 @@ class NotificationsUI {
         try {
             // Get list of senders with visible (non-hidden) notifications
             const sendersUrl = `/api/notifications/senders-visible/${encodeURIComponent( this.currentUserEmail )}`;
-            const params = this.historyWindowHours ? `?hours=${this.historyWindowHours}` : '';
+            const queryParams = new URLSearchParams();
+            if ( this.historyWindowHours ) {
+                queryParams.append( 'hours', this.historyWindowHours );
+            }
+            if ( this.isAdmin && this.queueFilterMode === 'others' ) {
+                queryParams.append( 'exclude_own_jobs', 'true' );
+            }
+            const params = queryParams.toString() ? `?${queryParams.toString()}` : '';
 
             const sendersResponse = await fetch( sendersUrl + params, {
                 headers: this.getAuthHeaders()
@@ -8906,7 +10506,15 @@ class NotificationsUI {
             }
             
             this.log( `Successfully ${restart ? 'restarted' : 'played'} ${type}/${priority} notification` );
-            
+
+            // Fire-and-forget: tell the server this notification was played so unread-count
+            // tracking stays consistent across clients (mobile + other web sessions).
+            // Playback already succeeded locally; a failed POST is a consistency concern
+            // we log-only, not a user-visible error.
+            fetch( `/api/notifications/${notificationId}/played?api_key=${this.notificationState.apiKey}`, {
+                method: "POST"
+            } ).catch( err => this.log( `mark-played POST failed (non-fatal): ${err.message}` ) );
+
         } catch ( error ) {
             this.error( `Failed to ${restart ? 'restart' : 'play'} notification audio:`, error );
             // Reset UI state on error
@@ -9120,6 +10728,9 @@ class NotificationsUI {
             if ( this.historyWindowHours !== null ) {
                 params.append( 'hours', this.historyWindowHours );
             }
+            if ( this.isAdmin && this.queueFilterMode === 'others' ) {
+                params.append( 'exclude_own_jobs', 'true' );
+            }
 
             const url = `/api/notifications/bulk/${encodeURIComponent( this.currentUserEmail )}?${params}`;
             const response = await fetch( url, {
@@ -9311,6 +10922,11 @@ class NotificationsUI {
     error( message, ...args ) {
         console.error( `[Notifications ERROR] ${message}`, ...args );
         this.addDebugMessage( `ERROR: ${message}`, 'error' );
+    }
+
+    wsDiag( message, ...args ) {
+        console.log( `[WS-DIAG] ${message}`, ...args );
+        this.addDebugMessage( `WS-DIAG: ${message}` );
     }
     
     addDebugMessage( message, type = 'info' ) {
@@ -10557,7 +12173,7 @@ class NotificationsUI {
         // Compute safety timeout from notification's own timeout + buffer
         // (guardState already fetched above and validated as non-null/non-resolved)
         const notifTimeoutMs = guardState?.timeoutSeconds
-            ? state.timeoutSeconds * 1000 + this.TTS_FOCUS_MODE_BUFFER_MS
+            ? guardState.timeoutSeconds * 1000 + this.TTS_FOCUS_MODE_BUFFER_MS
             : this.TTS_FOCUS_MODE_FALLBACK_MS;
         this.focusModeTimeoutMs = notifTimeoutMs;
 
@@ -10991,12 +12607,18 @@ class NotificationsUI {
 
         const predictionHintSection = this.buildPredictionHintSection( notification );
 
+        // Extract project badge from sender_id (same pattern as renderMultipleChoiceUI)
+        const project      = this.getProjectFromSenderId( notification.sender_id );
+        const projectBadge = project && project !== 'UNKNOWN'
+            ? `<span class="mc-project-badge">[${project}]</span> `
+            : '';
+
         card.innerHTML = `
             <div class="action-required-header">
                 <button class="action-required-cancel-btn" data-notification-id="${notification.id}" title="Cancel and use default (Esc)">
                     ✕
                 </button>
-                <div class="action-required-title">${this.renderMarkdown( notification.title || notification.message )}</div>
+                <div class="action-required-title">${projectBadge}${notification.title || notification.message}</div>
                 <div class="action-required-timer-controls">
                     <button class="action-required-pause-btn" id="pause-btn-${notification.id}" title="Pause timer and audio (P)">
                         \u23F8\uFE0F
@@ -11080,17 +12702,12 @@ class NotificationsUI {
             // Phase 2.4.1: Real-time validation for open-ended input
             const validateInput = () => {
                 const value = input.value.trim();
-                const isValid = value.length > 0 && value.length <= 500;
+                const isValid = value.length > 0;
 
                 submitButton.disabled = !isValid;
 
-                // Visual feedback
                 if ( input.value.length > 0 ) {
-                    if ( value.length > 500 ) {
-                        input.classList.add( 'invalid' );
-                    } else {
-                        input.classList.remove( 'invalid' );
-                    }
+                    input.classList.remove( 'invalid' );
                 }
 
                 return isValid;
@@ -11901,7 +13518,30 @@ class NotificationsUI {
 
         const state = this.actionRequiredNotifications.get( notificationId );
         if ( !state || state.isResponded ) {
-            this.log( "Already responded or notification not found" );
+            this.log( "Already responded or notification not found — performing UI cleanup" );
+
+            // Defense in depth: ensure card and focus mode are cleaned up
+            if ( state?.isResponded ) {
+                const card = document.getElementById( `action-required-${notificationId}` );
+                if ( card ) card.remove();
+
+                const minimized = document.getElementById( `action-required-minimized-${notificationId}` );
+                if ( minimized ) minimized.remove();
+
+                this.actionRequiredNotifications.delete( notificationId );
+                this.updateActionRequiredCount();
+                this.saveActionRequiredState();
+
+                if ( this.activeActionRequiredId === notificationId ) {
+                    this.activeActionRequiredId = null;
+                    this.activateNextNotification();
+                }
+
+                if ( this.focusModeNotificationId === notificationId ) {
+                    this.exitTTSFocusMode();
+                }
+            }
+
             return;
         }
 
@@ -11929,11 +13569,10 @@ class NotificationsUI {
                 response_value: response
             };
 
-            const apiResponse = await fetch( '/api/notify/response', {
+            const apiResponse = await this.authedFetch( '/api/notify/response', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': this.getAuthHeader()
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify( payload )
             } );
@@ -12631,7 +14270,32 @@ class NotificationsUI {
         }
 
         if ( state.isResponded ) {
-            this.log( `cancelActionRequired: Notification ${notificationId} already responded` );
+            this.log( `cancelActionRequired: Notification ${notificationId} already responded — performing UI cleanup` );
+
+            // Response already sent (e.g., by another session via WebSocket)
+            // but cleanup hasn't fired yet. Force immediate cleanup.
+            const card = document.getElementById( `action-required-${notificationId}` );
+            if ( card ) card.remove();
+
+            const minimized = document.getElementById( `action-required-minimized-${notificationId}` );
+            if ( minimized ) minimized.remove();
+
+            // Cleanup action-required state (idempotent — safe if already deleted)
+            this.actionRequiredNotifications.delete( notificationId );
+            this.updateActionRequiredCount();
+            this.saveActionRequiredState();
+
+            // QUEUE SYSTEM: Promote next pending notification
+            if ( this.activeActionRequiredId === notificationId ) {
+                this.activeActionRequiredId = null;
+                this.activateNextNotification();
+            }
+
+            // TTS FOCUS MODE: Exit if this notification triggered focus mode
+            if ( this.focusModeNotificationId === notificationId ) {
+                this.exitTTSFocusMode();
+            }
+
             return;
         }
 

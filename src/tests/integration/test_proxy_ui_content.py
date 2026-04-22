@@ -10,10 +10,12 @@ Requires:
 Generated on: 2026-02-23
 """
 
+import os
+
 import pytest
 import requests
 
-BASE_URL = "http://localhost:7999"
+BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 
 # ============================================================================

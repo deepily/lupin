@@ -12,6 +12,10 @@ This directory contains archived session history from the Lupin project, organiz
 
 | Archive | Period | Sessions | Key Topics |
 |---------|--------|----------|------------|
+| [2026-04-08-to-14](2026-04-08-to-14-history.md) | Apr 8-14, 2026 | 23 sessions | TFE E2E live path, BFE Phase 6 completion, checkpoint-resume, MCP-503 stall fix, SDK creds mount, TFE/BFE observability, lifecycle fixes |
+| [2026-03-26-to-04-07](2026-03-26-to-04-07-history.md) | Mar 26 - Apr 7, 2026 | 379-a47f938e | BFE Phase 6 (automated repair loop, dead-queue watchdog), CJ Flow persistence gaps fix, Presentation Generator Phases 6-10 (visual renderers: Matplotlib, D2, NanoBanana, Veo), Sonnet automated-testing default, UPE LanceDB test isolation, E2E background execution, SDK 0.1.36→0.1.56 upgrade, Test Suite CJ Flow agentic job, CJ Flow Scheduling UI + Voice Runtime Args |
+| [2026-03-13-to-26](2026-03-13-to-26-history.md) | Mar 13-26, 2026 | 349-378 | INI config key naming convention rollout, prediction engine validation, Phase D collision root cause |
+| [2026-03-03-to-12](2026-03-03-to-12-history.md) | Mar 3-12, 2026 | 304-348 | Continuing UPE + voice hook + CC session work |
 | [2026-02-24-to-03-03](2026-02-24-to-03-03-history.md) | Feb 24 - Mar 3, 2026 | 260-303 | Voice Module Refactoring, Preference Learning, Universal Prediction Engine, Voice Hook Phases 0-1, CC Session Voice Input |
 | [2026-02-16-to-23](2026-02-16-to-23-history.md) | Feb 16-23, 2026 | 214-258 | Bug Fix Mode, SWE Team Proxy Phases 6-8, Preference Learning, Playwright E2E Planning |
 | [2026-02-10-to-14](2026-02-10-to-14-history.md) | Feb 10-14, 2026 | 171-213 | Notification Proxy Agent, SWE Team Phases 2-4, Unified Smoke Test Framework |
@@ -54,10 +58,10 @@ This directory contains archived session history from the Lupin project, organiz
 
 ## Quick Stats
 
-- **Total Archives**: 15 files
-- **Date Range**: May 2025 - March 2026
-- **Total Sessions Documented**: 303+
+- **Total Archives**: 16 files
+- **Date Range**: May 2025 - April 2026
+- **Total Sessions Documented**: 326+
 
 ---
 
-*Last updated: 2026-03-09*
+*Last updated: 2026-04-16*

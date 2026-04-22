@@ -125,6 +125,7 @@ class NotificationType(str, Enum):
     ALERT                  = "alert"
     CUSTOM                 = "custom"
     USER_INITIATED_MESSAGE = "user_initiated_message"
+    SESSION_TOPIC          = "session_topic"
 
 
 class NotificationPriority(str, Enum):
@@ -168,8 +169,7 @@ class NotificationRequest(BaseModel):
     message: str = Field(
         ...,
         min_length=1,
-        max_length=5000,
-        description="Notification message text"
+        description="Notification message text (no upper bound — Bug 13, 2026-04-16: removed 5000-char cap that silently failed agentic voice gates)"
     )
 
     response_type: ResponseType = Field(
@@ -213,7 +213,7 @@ class NotificationRequest(BaseModel):
 
     sender_id: Optional[str] = Field(
         default=None,
-        pattern=r'^[a-z]+(\.[a-z]+)+@[a-z]+\.deepily\.ai(#([a-f0-9]{8}|[a-z]+(-[a-z]+)*|[a-z]+-[a-f0-9]{8}))?$',
+        pattern=r'^[a-z]+(\.[a-z]+)+@[a-z][a-z0-9]*(-[a-z0-9]+)*\.deepily\.ai(#([a-f0-9]{8}|[a-z]+(-[a-z]+)*|[a-z]+-[a-f0-9]{8}))?$',
         description="Sender ID (e.g., claude.code@lupin.deepily.ai#a1b2c3d4, claude.code.job@lupin.deepily.ai#cc-a0ebba60). Supports 2+ word agent names, hex suffix, hyphenated topic, or job ID (prefix-hex)."
     )
 
@@ -224,13 +224,12 @@ class NotificationRequest(BaseModel):
 
     abstract: Optional[str] = Field(
         default=None,
-        max_length=5000,
-        description="Supplementary context for the notification (plan details, URLs, markdown). Displayed alongside message in action-required cards."
+        description="Supplementary context for the notification (plan details, URLs, markdown). Displayed alongside message in action-required cards. (Bug 13, 2026-04-16: removed 5000-char cap that silently failed agentic voice gates.)"
     )
 
     session_name: Optional[str] = Field(
         default=None,
-        max_length=50,
+        max_length=64,
         description="Human-readable session name (e.g., 'cats vs dogs comparison'). If provided, used instead of auto-generated name in UI."
     )
 
@@ -600,8 +599,7 @@ class AsyncNotificationRequest(BaseModel):
     message: str = Field(
         ...,
         min_length=1,
-        max_length=5000,
-        description="Notification message text"
+        description="Notification message text (no upper bound — Bug 13, 2026-04-16: removed 5000-char cap.)"
     )
 
     notification_type: NotificationType = Field(
@@ -628,19 +626,18 @@ class AsyncNotificationRequest(BaseModel):
 
     sender_id: Optional[str] = Field(
         default=None,
-        pattern=r'^[a-z]+(\.[a-z]+)+@[a-z]+\.deepily\.ai(#([a-f0-9]{8}|[a-z]+(-[a-z]+)*|[a-z]+-[a-f0-9]{8}))?$',
+        pattern=r'^[a-z]+(\.[a-z]+)+@[a-z][a-z0-9]*(-[a-z0-9]+)*\.deepily\.ai(#([a-f0-9]{8}|[a-z]+(-[a-z]+)*|[a-z]+-[a-f0-9]{8}))?$',
         description="Sender ID (e.g., claude.code@lupin.deepily.ai#a1b2c3d4, claude.code.job@lupin.deepily.ai#cc-a0ebba60). Supports 2+ word agent names, hex suffix, hyphenated topic, or job ID (prefix-hex)."
     )
 
     abstract: Optional[str] = Field(
         default=None,
-        max_length=5000,
-        description="Supplementary context for the notification (plan details, URLs, markdown). Displayed alongside message in action-required cards."
+        description="Supplementary context for the notification (plan details, URLs, markdown). Displayed alongside message in action-required cards. (Bug 13, 2026-04-16: removed 5000-char cap that silently failed agentic voice gates.)"
     )
 
     session_name: Optional[str] = Field(
         default=None,
-        max_length=50,
+        max_length=64,
         description="Human-readable session name (e.g., 'cats vs dogs comparison'). If provided, used instead of auto-generated name in UI."
     )
 
@@ -665,6 +662,12 @@ class AsyncNotificationRequest(BaseModel):
         default=None,
         pattern=r'^[a-z]{2,3}-[a-f0-9]{6,8}(-\d+)?$',
         description="Progress group ID for in-place DOM updates. Format: {prefix}-{hex} or {prefix}-{hex}-{batch}. Supports pg-XXXXXXXX (existing) and pr-XXXXXXXX-N+ (proxy batches, unbounded)."
+    )
+
+    idempotency_key: Optional[str] = Field(
+        default=None,
+        description="UUID idempotency key to prevent duplicate notifications on retry. "
+                    "Generated once per logical notification, sent with all retry attempts."
     )
 
     @field_validator( 'message' )
@@ -749,6 +752,10 @@ class AsyncNotificationRequest(BaseModel):
         # Add progress_group_id for in-place DOM updates
         if self.progress_group_id is not None:
             params["progress_group_id"] = self.progress_group_id
+
+        # Add idempotency_key for retry deduplication
+        if self.idempotency_key is not None:
+            params["idempotency_key"] = self.idempotency_key
 
         return params
 

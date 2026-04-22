@@ -64,3 +64,80 @@ convert this research into a podcast episode
 turn DOCUMENT_PATH into audio podcast format
 transform the research document at DOCUMENT_PATH into a podcast
 convert this document into a podcast and make it engaging
+
+# ── Audience level variants (DOCUMENT_PATH + AUDIENCE) ───────────────────────
+turn DOCUMENT_PATH into a podcast for AUDIENCE
+convert DOCUMENT_PATH to a podcast for AUDIENCE audience
+make a podcast from DOCUMENT_PATH aimed at AUDIENCE
+generate a podcast from DOCUMENT_PATH for AUDIENCE
+turn the research at DOCUMENT_PATH into a podcast for AUDIENCE
+convert the document at DOCUMENT_PATH into a podcast for AUDIENCE
+make a podcast out of DOCUMENT_PATH for AUDIENCE level
+produce a podcast from DOCUMENT_PATH for AUDIENCE listeners
+create a podcast from DOCUMENT_PATH targeting AUDIENCE
+turn DOCUMENT_PATH into an AUDIENCE level podcast
+I need a podcast from DOCUMENT_PATH for AUDIENCE
+please make a podcast from DOCUMENT_PATH for AUDIENCE
+can you turn DOCUMENT_PATH into a podcast for AUDIENCE
+convert DOCUMENT_PATH to a podcast geared to AUDIENCE
+generate a podcast from the research at DOCUMENT_PATH for AUDIENCE
+build a podcast from DOCUMENT_PATH for AUDIENCE
+record a podcast from DOCUMENT_PATH for AUDIENCE audience
+make a podcast episode from DOCUMENT_PATH for AUDIENCE
+turn the document at DOCUMENT_PATH into a podcast for an AUDIENCE crowd
+convert the content at DOCUMENT_PATH into a podcast for AUDIENCE
+
+# ── Audience context variants (DOCUMENT_PATH + AUDIENCE_CONTEXT) ─────────────
+turn DOCUMENT_PATH into a podcast for AUDIENCE_CONTEXT
+convert DOCUMENT_PATH to a podcast for AUDIENCE_CONTEXT
+make a podcast from DOCUMENT_PATH aimed at AUDIENCE_CONTEXT
+generate a podcast from DOCUMENT_PATH for AUDIENCE_CONTEXT
+turn the research at DOCUMENT_PATH into a podcast for AUDIENCE_CONTEXT
+convert the document at DOCUMENT_PATH into a podcast for AUDIENCE_CONTEXT
+make a podcast from DOCUMENT_PATH tailored to AUDIENCE_CONTEXT
+produce a podcast from DOCUMENT_PATH designed for AUDIENCE_CONTEXT
+create a podcast from DOCUMENT_PATH for AUDIENCE_CONTEXT
+turn DOCUMENT_PATH into a podcast speaking to AUDIENCE_CONTEXT
+I need a podcast from DOCUMENT_PATH for AUDIENCE_CONTEXT
+please make a podcast from DOCUMENT_PATH for AUDIENCE_CONTEXT
+can you turn DOCUMENT_PATH into a podcast for AUDIENCE_CONTEXT
+convert DOCUMENT_PATH to a podcast written for AUDIENCE_CONTEXT
+generate a podcast from the research at DOCUMENT_PATH for AUDIENCE_CONTEXT
+build a podcast from DOCUMENT_PATH targeting AUDIENCE_CONTEXT
+record a podcast from DOCUMENT_PATH for AUDIENCE_CONTEXT
+make a podcast episode from DOCUMENT_PATH for AUDIENCE_CONTEXT
+turn the document at DOCUMENT_PATH into a podcast for AUDIENCE_CONTEXT
+convert the content at DOCUMENT_PATH into a podcast for AUDIENCE_CONTEXT
+
+# ── Language variants (trigger target_languages via conditional_args) ────────
+turn DOCUMENT_PATH into a podcast in mexican spanish
+convert DOCUMENT_PATH to a podcast in mexican spanish
+make a podcast from DOCUMENT_PATH in mexican
+turn DOCUMENT_PATH into a podcast in peninsula spanish
+convert DOCUMENT_PATH to a podcast in castilian spanish
+make a podcast from DOCUMENT_PATH in castilian spanish
+turn the research at DOCUMENT_PATH into a podcast in spanish from spain
+convert DOCUMENT_PATH to a podcast in iberian spanish
+make a podcast from DOCUMENT_PATH in argentinian spanish
+turn DOCUMENT_PATH into a podcast in argentine spanish
+convert DOCUMENT_PATH to a podcast in argentina spanish
+make a podcast from DOCUMENT_PATH in rioplatense
+turn DOCUMENT_PATH into a podcast in english
+convert DOCUMENT_PATH to a podcast in english language
+turn DOCUMENT_PATH into a podcast in french
+make a podcast from DOCUMENT_PATH in french language
+convert DOCUMENT_PATH to a podcast in german
+turn DOCUMENT_PATH into a podcast in german language
+
+# ── Scheduling variants ──────────────────────────────────────────────────────
+turn DOCUMENT_PATH into a podcast tonight
+schedule a podcast from DOCUMENT_PATH for later
+convert DOCUMENT_PATH to a podcast overnight
+schedule DOCUMENT_PATH to podcast conversion for tonight
+make a podcast from DOCUMENT_PATH at midnight
+queue up a podcast from DOCUMENT_PATH
+schedule research to podcast from DOCUMENT_PATH for later tonight
+run the research to podcast on DOCUMENT_PATH at two am
+turn DOCUMENT_PATH into a podcast tomorrow morning
+do a dry run podcast from DOCUMENT_PATH
+dry run the podcast conversion on DOCUMENT_PATH

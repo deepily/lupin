@@ -426,6 +426,7 @@ def get_session_metadata() -> dict:
                 data = json.load( f )
             data["source"]            = "session_file"
             data["resolution_source"] = resolution_source
+            data["_bridge_path"]      = str( session_file )
             # Ensure stable_session_id is always present (backward compat)
             if "stable_session_id" not in data:
                 data["stable_session_id"] = data.get( "session_id" )
@@ -479,10 +480,19 @@ def find_session_by_id( session_id ):
             with open( path ) as f:
                 data = json.load( f )
 
-            file_sid = data.get( "session_id", "" )
-            # Full match or 8-char prefix match
-            if file_sid == session_id or file_sid[:8] == session_id[:8]:
-                return data
+            # Check all known IDs: session_ids list (preferred), plus legacy fields
+            all_ids = list( data.get( "session_ids", [] ) )
+            # Backward compat: also check session_id and stable_session_id directly
+            for field in ( "session_id", "stable_session_id" ):
+                val = data.get( field, "" )
+                if val and val not in all_ids:
+                    all_ids.append( val )
+
+            # Full match or 8-char prefix match against any known ID
+            for known_id in all_ids:
+                if known_id == session_id or known_id[:8] == session_id[:8]:
+                    return data
+
         except ( json.JSONDecodeError, OSError ):
             continue
 

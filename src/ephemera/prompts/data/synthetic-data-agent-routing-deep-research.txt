@@ -63,3 +63,76 @@ I need a comprehensive deep research study on RESEARCH_TOPIC
 investigate and analyze RESEARCH_TOPIC in depth
 give me a deep dive analysis of RESEARCH_TOPIC
 start deep research examining every aspect of RESEARCH_TOPIC
+
+# ── Audience level variants (RESEARCH_TOPIC + AUDIENCE) ──────────────────────
+do deep research on RESEARCH_TOPIC for AUDIENCE
+investigate RESEARCH_TOPIC for AUDIENCE audience
+research RESEARCH_TOPIC at the AUDIENCE level
+deep dive into RESEARCH_TOPIC for AUDIENCE
+study RESEARCH_TOPIC for AUDIENCE readers
+research RESEARCH_TOPIC targeting AUDIENCE
+analyze RESEARCH_TOPIC for AUDIENCE audience
+explore RESEARCH_TOPIC at the AUDIENCE level
+research RESEARCH_TOPIC aimed at AUDIENCE
+do deep research on RESEARCH_TOPIC geared to AUDIENCE
+investigate RESEARCH_TOPIC for AUDIENCE viewers
+please research RESEARCH_TOPIC for AUDIENCE
+can you investigate RESEARCH_TOPIC for AUDIENCE
+research RESEARCH_TOPIC tailored to AUDIENCE
+I need deep research on RESEARCH_TOPIC for AUDIENCE
+study RESEARCH_TOPIC deeply for AUDIENCE
+research RESEARCH_TOPIC and present findings for AUDIENCE
+do a deep dive on RESEARCH_TOPIC for AUDIENCE level
+explore RESEARCH_TOPIC for AUDIENCE readers
+investigate RESEARCH_TOPIC deeply for AUDIENCE
+research RESEARCH_TOPIC thoroughly for AUDIENCE audience
+analyze RESEARCH_TOPIC at the AUDIENCE level
+deep dive into RESEARCH_TOPIC for AUDIENCE audience
+research RESEARCH_TOPIC and write it up for AUDIENCE
+do deep research on RESEARCH_TOPIC at the AUDIENCE level
+
+# ── Audience context variants (RESEARCH_TOPIC + AUDIENCE_CONTEXT) ────────────
+do deep research on RESEARCH_TOPIC for AUDIENCE_CONTEXT
+investigate RESEARCH_TOPIC for AUDIENCE_CONTEXT
+research RESEARCH_TOPIC tailored to AUDIENCE_CONTEXT
+deep dive into RESEARCH_TOPIC for AUDIENCE_CONTEXT
+study RESEARCH_TOPIC for AUDIENCE_CONTEXT
+research RESEARCH_TOPIC written for AUDIENCE_CONTEXT
+analyze RESEARCH_TOPIC for AUDIENCE_CONTEXT
+explore RESEARCH_TOPIC for AUDIENCE_CONTEXT
+research RESEARCH_TOPIC aimed at AUDIENCE_CONTEXT
+do deep research on RESEARCH_TOPIC designed for AUDIENCE_CONTEXT
+investigate RESEARCH_TOPIC targeting AUDIENCE_CONTEXT
+please research RESEARCH_TOPIC for AUDIENCE_CONTEXT
+can you investigate RESEARCH_TOPIC for AUDIENCE_CONTEXT
+research RESEARCH_TOPIC speaking to AUDIENCE_CONTEXT
+I need deep research on RESEARCH_TOPIC for AUDIENCE_CONTEXT
+study RESEARCH_TOPIC deeply for AUDIENCE_CONTEXT
+research RESEARCH_TOPIC geared toward AUDIENCE_CONTEXT
+do a deep dive on RESEARCH_TOPIC for AUDIENCE_CONTEXT
+explore RESEARCH_TOPIC for AUDIENCE_CONTEXT
+investigate RESEARCH_TOPIC thoroughly for AUDIENCE_CONTEXT
+research RESEARCH_TOPIC and summarize for AUDIENCE_CONTEXT
+analyze RESEARCH_TOPIC for the audience of AUDIENCE_CONTEXT
+deep dive into RESEARCH_TOPIC tailored to AUDIENCE_CONTEXT
+research RESEARCH_TOPIC and write it up for AUDIENCE_CONTEXT
+do deep research on RESEARCH_TOPIC for AUDIENCE_CONTEXT readers
+
+# ── Scheduling variants ──────────────────────────────────────────────────────
+schedule deep research on RESEARCH_TOPIC for tonight
+do deep research on RESEARCH_TOPIC tonight
+research RESEARCH_TOPIC at midnight
+schedule research on RESEARCH_TOPIC for later
+investigate RESEARCH_TOPIC overnight
+schedule a deep research job on RESEARCH_TOPIC for tonight
+run deep research on RESEARCH_TOPIC overnight
+queue up research on RESEARCH_TOPIC
+schedule RESEARCH_TOPIC research for later tonight
+research RESEARCH_TOPIC at two am
+do deep research on RESEARCH_TOPIC tomorrow morning
+schedule research on RESEARCH_TOPIC for the morning
+start deep research on RESEARCH_TOPIC later tonight
+dry run deep research on RESEARCH_TOPIC
+do a dry run research on RESEARCH_TOPIC
+trial run deep research on RESEARCH_TOPIC
+test run research on RESEARCH_TOPIC

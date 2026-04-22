@@ -10,6 +10,8 @@ Tests complete user flows end-to-end across multiple components:
 Tests against live FastAPI server (requires server running with LUPIN_TEST_MODE=true)
 """
 
+import os
+
 import pytest
 import requests
 import time
@@ -17,7 +19,7 @@ import json
 from pathlib import Path
 
 # Test configuration
-BASE_URL = "http://localhost:7999"
+BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 
 # ============================================================================

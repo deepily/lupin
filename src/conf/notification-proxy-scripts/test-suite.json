@@ -1,0 +1,37 @@
+{
+    "profile_name"  : "test_suite",
+    "description"   : "Q&A script for test suite expediter questions",
+    "sender_ids"    : [ "arg.expeditor@lupin.deepily.ai" ],
+    "entries" : [
+        {
+            "question_pattern" : "Which test suites",
+            "answer"           : "integration,e2e",
+            "arg_name"         : "test_types",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "question_pattern" : "Any extra pytest arguments",
+            "answer"           : "none",
+            "arg_name"         : "pytest_args",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "question_pattern" : "dry run mode",
+            "answer"           : "no",
+            "arg_name"         : "dry_run",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "question_pattern" : "proceed",
+            "answer"           : "yes",
+            "arg_name"         : "confirmation",
+            "response_types"   : [ "yes_no" ]
+        },
+        {
+            "question_pattern" : "confirm",
+            "answer"           : "yes",
+            "arg_name"         : "confirmation",
+            "response_types"   : [ "yes_no" ]
+        }
+    ]
+}

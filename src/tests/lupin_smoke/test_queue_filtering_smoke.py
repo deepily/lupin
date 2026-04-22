@@ -5,9 +5,14 @@ End-to-end validation of multi-user queue isolation and filtering.
 Tests real-world user scenarios with minimal mocking.
 """
 
+import os
 import pytest
 import requests
 from typing import Dict
+
+# Admin credentials from environment
+ADMIN_EMAIL    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL", "admin@test.com" )
+ADMIN_PASSWORD = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD", "test123" )
 
 
 class TestQueueFilteringSmoke:
@@ -87,7 +92,7 @@ class TestQueueFilteringSmoke:
         # Create three users
         user_a = create_user("smoke_user_a@test.com")
         user_b = create_user("smoke_user_b@test.com")
-        admin_user = create_user("ricardo.felipe.ruiz@gmail.com", "pswfJ^WP&1AXA1nB")
+        admin_user = create_user( ADMIN_EMAIL, ADMIN_PASSWORD )
 
         # User A pushes job
         push_job(user_a["access_token"], "What is 2+2?")
@@ -155,7 +160,7 @@ class TestQueueFilteringSmoke:
         """Admin can toggle between own jobs and all jobs."""
 
         # Get admin user
-        admin = create_user("ricardo.felipe.ruiz@gmail.com", "pswfJ^WP&1AXA1nB")
+        admin = create_user( ADMIN_EMAIL, ADMIN_PASSWORD )
 
         # Push job as admin
         push_job(admin["access_token"], "Admin question")
@@ -181,7 +186,7 @@ class TestQueueFilteringSmoke:
 
         # Create target user and admin
         target_user = create_user("smoke_target@test.com")
-        admin = create_user("ricardo.felipe.ruiz@gmail.com", "pswfJ^WP&1AXA1nB")
+        admin = create_user( ADMIN_EMAIL, ADMIN_PASSWORD )
 
         # Push job as target user
         push_job(target_user["access_token"], "Target user question")

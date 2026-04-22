@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Player — Lupin</title>
+
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
+    <style>
+        .audio-player-container {
+            max-width: 860px;
+            margin: 32px auto;
+            padding: 0 24px 48px;
+        }
+
+        .audio-player-loading {
+            text-align: center;
+            padding: 64px 0;
+            color: #6b7280;
+            font-size: 15px;
+        }
+
+        .audio-player-error {
+            text-align: center;
+            padding: 64px 0;
+            color: #dc2626;
+            font-size: 15px;
+        }
+
+        .audio-player-content h1.audio-player-title {
+            font-size: 28px;
+            font-weight: 700;
+            margin: 32px 0 16px;
+            color: #111827;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 8px;
+        }
+
+        .audio-player-subtitle {
+            font-size: 14px;
+            color: #6b7280;
+            margin: -8px 0 24px;
+        }
+
+        .audio-player-element {
+            width: 100%;
+            margin: 24px 0;
+            border-radius: 8px;
+        }
+
+        .audio-player-actions {
+            margin: 16px 0 24px;
+        }
+
+        .audio-player-download {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #4f46e5;
+            color: #ffffff;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.15s;
+        }
+        .audio-player-download:hover {
+            background: #4338ca;
+            text-decoration: none;
+        }
+
+        .audio-player-details {
+            margin: 24px 0 0;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .audio-player-details summary {
+            padding: 10px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #6b7280;
+            background: #f9fafb;
+            cursor: pointer;
+            user-select: none;
+        }
+        .audio-player-details summary:hover { background: #f3f4f6; }
+        .audio-player-details dl {
+            display: grid;
+            grid-template-columns: max-content 1fr;
+            gap: 4px 16px;
+            padding: 12px 16px;
+            margin: 0;
+            font-size: 13px;
+        }
+        .audio-player-details dt { font-weight: 600; color: #374151; }
+        .audio-player-details dd { margin: 0; color: #6b7280; word-break: break-word; }
+    </style>
+</head>
+<body>
+    <div class="audio-player-container">
+        <div id="audio-player-target" class="audio-player-loading">Loading audio player...</div>
+    </div>
+
+    <script src="/static/js/lupin-nav.js" defer></script>
+    <script>
+        ( async function() {
+            const target = document.getElementById( 'audio-player-target' );
+            const params = new URLSearchParams( window.location.search );
+            const path   = params.get( 'path' );
+
+            if ( !path ) {
+                target.className = 'audio-player-error';
+                target.textContent = 'No audio path specified. Use ?path=podcasts/...';
+                return;
+            }
+
+            // Set page title from filename
+            const filename = path.split( '/' ).pop();
+            if ( filename ) document.title = filename + ' — Lupin';
+
+            // Derive display title from filename
+            const displayTitle = filename
+                .replace( /\.[^.]+$/, '' )
+                .replace( /[-_]/g, ' ' )
+                .replace( /\b\w/g, c => c.toUpperCase() );
+
+            const audioSrc = '/api/io/file?path=' + encodeURIComponent( path );
+
+            // Try HEAD request for file size
+            let fileSizeStr = 'Unknown';
+            try {
+                const head = await fetch( audioSrc, { method: 'HEAD' } );
+                if ( head.ok ) {
+                    const bytes = parseInt( head.headers.get( 'content-length' ) || '0' );
+                    if ( bytes > 0 ) fileSizeStr = ( bytes / ( 1024 * 1024 ) ).toFixed( 1 ) + ' MB';
+                }
+            } catch ( e ) { /* ignore */ }
+
+            // Try to load companion script file for richer metadata
+            let subtitle = '';
+            try {
+                const scriptPath = path.replace( /\.mp3$/i, '-script.md' );
+                const scriptSrc  = '/api/io/file?path=' + encodeURIComponent( scriptPath );
+                const scriptResp = await fetch( scriptSrc );
+                if ( scriptResp.ok ) {
+                    const scriptText = await scriptResp.text();
+                    // Try frontmatter title first
+                    const fmMatch = scriptText.match( /^---\n[\s\S]*?\ntitle:\s*['"]?(.+?)['"]?\s*\n[\s\S]*?\n---/ );
+                    if ( fmMatch ) {
+                        subtitle = fmMatch[ 1 ];
+                    } else {
+                        // Fall back to first H1
+                        const h1Match = scriptText.match( /^#\s+(.+)$/m );
+                        if ( h1Match ) subtitle = h1Match[ 1 ];
+                    }
+                }
+            } catch ( e ) { /* graceful fallback — no subtitle */ }
+
+            const subtitleHtml = subtitle
+                ? `<p class="audio-player-subtitle">${subtitle.replace( /</g, '&lt;' ).replace( />/g, '&gt;' )}</p>`
+                : '';
+
+            target.className = 'audio-player-content';
+            target.innerHTML = `
+                <h1 class="audio-player-title">&#127911; ${displayTitle}</h1>
+                ${subtitleHtml}
+                <audio class="audio-player-element" controls preload="metadata"
+                       src="${audioSrc}">
+                    Your browser does not support the audio element.
+                </audio>
+                <div class="audio-player-actions">
+                    <a href="${audioSrc}" download="${filename}" class="audio-player-download">
+                        &#128229; Download MP3
+                    </a>
+                </div>
+                <details class="audio-player-details">
+                    <summary>File Details</summary>
+                    <dl>
+                        <dt>Filename</dt><dd>${filename}</dd>
+                        <dt>Path</dt><dd>${path}</dd>
+                        <dt>Size</dt><dd>${fileSizeStr}</dd>
+                    </dl>
+                </details>`;
+        } )();
+    </script>
+</body>
+</html>

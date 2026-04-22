@@ -47,7 +47,7 @@ processor       = PromptTemplateProcessor( debug=True )
 prompt_template = processor.process_template( prompt_template, "agent router go to crud for dataframes" )
 
 # Build context (same as agent.__init__)
-storage         = DataFrameStorage( user_email="ricardo.felipe.ruiz@gmail.com", base_path=cu.get_project_root() + "/io/dfs" )
+storage         = DataFrameStorage( user_email=os.environ.get( "LUPIN_TEST_EMAIL", "test@example.com" ), base_path=cu.get_project_root() + "/io/dfs" )
 available_lists = storage.get_all_lists_metadata()
 
 # Format available lists (same as agent._format_lists_for_prompt)

@@ -5,6 +5,8 @@
 - Run GUI client: `src/scripts/run-lupin-gui.sh`
 - Docker build: `docker build -f docker/lupin/Dockerfile .`
 - Run GSM8K benchmarks: `src/scripts/run-gsm8k.sh --help`
+- Install cosa-voice MCP (global): `src/scripts/install-cosa-voice.sh` (user scope, all repos)
+- Regenerate API docs: `src/scripts/generate-api-docs.sh` (requires server on port 7999, `--offline` for saved JSON)
 
 ## CLAUDE CODE SLASH COMMANDS
 - `/smoke-test-baseline [scope]` - Establish comprehensive baseline before changes
@@ -42,7 +44,7 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 - `src/cosa/rest/running_fifo_queue.py` — Execution engine
 - `src/cosa/rest/queue_consumer.py` — Background consumer thread
 
-**Packaging Guide**: `src/rnd/2026.02.12-cj-flow-bounded-job-packaging-guide.md`
+**Packaging Guide**: `src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md`
 
 ## CODE STYLE
 - **Imports**: Group by stdlib, third-party, local
@@ -114,7 +116,7 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 - **Agentic Voice Integration**: `src/workflow/agentic-voice-workflow.md`
 - **Decision Proxy Admin Guide**: `src/docs/proxy-admin-guide.md` (Trust Dashboard + Ratification how-to)
 - **Interactive Proxy Testing**: `src/docs/automated-interactive-testing.md` (proxy auto-answer testing guide)
-- **R&D Planning Docs**: `src/rnd/2025.10.15-sse-notifications/` (historical)
+- **R&D Planning Docs**: `src/rnd/v0.1.0/2025.10.15-sse-notifications/` (historical)
 
 ## STARTUP PROCEDURE
 - The first thing you should do when you start a session is read the global Claude configuration file and follow its instructions.
@@ -135,6 +137,7 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 
 ## RUNNING/TESTING FASTAPI APPLICATIONS
 - Please assume that there is a Fast API server instance bound to port 7999. I will start and stop it if needed. You never need to spin up another instance unless it's for a ephemeral use on port 8000.
+- **Before clicking Resume on any TFE/BFE stalled job, or before scheduling a live E2E run on `:8000`**, run `src/scripts/preflight-test-container.sh` (or `pytest src/tests/smoke/test_container_preflight.py -v`). This catches docker-compose.yml drift — cases where a `.git`, credentials, or other bind-mount change has not been applied to the running container because only `docker rm -f` + `docker compose up -d` picks up new mounts (not `docker restart`). Failure output includes the exact remedy.
 
 ## GIT REPOSITORY MANAGEMENT
 
@@ -239,27 +242,51 @@ Lupin uses a three-tier testing strategy for comprehensive validation:
    - End-to-end user flow validation (100-1000ms per test)
    - Test complete workflows across API, database, and authentication
    - Coverage: 43 comprehensive tests (auth, admin user management, queue filtering)
-   - Run: `./src/tests/run-integration-tests.sh -v` (automated with server management)
+   - **CRITICAL**: Always use `--bg` flag from Claude Code (suite can exceed 10min Bash timeout under load)
+   - Run: `./src/tests/run-integration-tests.sh --bg -v`
+   - Monitor: `tail -20 /tmp/integration-latest.log`
+   - Status: `kill -0 $(cat /tmp/integration-tests.pid) 2>/dev/null && echo running || echo done`
 
 4. **WebSocket Tests** (`src/tests/websocket_smoke/`)
    - WebSocket functionality validation
    - Coverage: 50 tests
    - Run: `src/scripts/run-websocket-smoke-tests.sh`
 
-5. **Interactive Proxy Tests** (`src/tests/smoke/test_proxy_integration.py`)
+5. **E2E UI Tests** (`src/tests/e2e_ui/`)
+   - Playwright Chromium headless browser tests against live server
+   - Coverage: 285 functional tests + 12 visual regression
+   - **CRITICAL**: Always use `--bg` flag from Claude Code (suite takes ~17min, exceeds 10min Bash timeout)
+   - Run: `./src/scripts/run-e2e-ui-tests.sh --bg -v`
+   - Visual only: `./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual`
+   - Update baselines: `./src/scripts/run-e2e-ui-tests.sh --bg --update-snapshots -k visual`
+   - Monitor: `tail -20 /tmp/e2e-ui-latest.log`
+   - Status: `kill -0 $(cat /tmp/e2e-ui-tests.pid) 2>/dev/null && echo running || echo done`
+   - Snapshots: `src/tests/e2e_ui/__snapshots__/` (version-controlled)
+
+6. **Interactive Proxy Tests** (`src/tests/smoke/test_proxy_integration.py`)
    - Automated interactive testing with notification proxy auto-answer
    - Coverage: 12 scenarios across Calculator, CRUD, and Expediter agents
    - Tests submit-and-poll pipelines with proxy-driven notification responses
    - Run: `python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-confirm`
    - **Guide**: `src/docs/automated-interactive-testing.md`
 
+7. **Presentation Regression** (`src/tests/run-presentation-regression.sh`)
+   - Sequential pyramid: render-only → Sonnet full → (optional) Opus + R2P chain
+   - **CRITICAL**: Always use `--bg` flag or schedule via test-suite endpoint
+   - Default (nightly): `./src/tests/run-presentation-regression.sh --bg` (~$0.46, ~10min)
+   - With Opus: `./src/tests/run-presentation-regression.sh --bg --include-opus` (~$2.89)
+   - Full weekly: `./src/tests/run-presentation-regression.sh --bg --all` (~$10, ~45min)
+   - Schedule: `POST /api/test-suite/submit {"test_types": "presentation", "scheduled_at": "..."}`
+   - Monitor: `tail -20 /tmp/presentation-regression-latest.log`
+   - **Strategy doc**: `src/rnd/v0.1.6/2026.03.14-presentation-generator/2026.04.07-e2e-testing-strategy.md`
+
 ### Running Tests
 
 ```bash
 # Integration tests (RECOMMENDED - automated)
-./src/tests/run-integration-tests.sh -v              # All integration tests
-./src/tests/run-integration-tests.sh -v -s           # Very verbose
-./src/tests/run-integration-tests.sh test_auth*.py   # Specific pattern
+./src/tests/run-integration-tests.sh --bg -v         # All (background, recommended)
+./src/tests/run-integration-tests.sh --bg -v -s      # Very verbose (background)
+./src/tests/run-integration-tests.sh test_auth*.py   # Specific pattern (foreground OK for quick runs)
 
 # Unit tests
 pytest src/tests/unit/                               # All unit tests
@@ -282,7 +309,7 @@ pytest --cov=cosa.rest --cov-report=html src/tests/
 
 ### Test Coverage
 
-- **Total Tests**: ~122 (14+ unit, ~50 smoke, 8 integration, 50 WebSocket)
+- **Total Tests**: ~387+ (14+ unit, ~50 smoke, 43 integration, 50 WebSocket, 265 E2E UI)
 - **Auth System Coverage**: 85-90%
 - **Critical Paths**: Login, registration, token refresh, password change all tested
 
@@ -298,7 +325,9 @@ See `src/tests/README.md` for comprehensive testing documentation.
 |------------|---------|-------------|
 | Unit Tests | `pytest src/tests/unit/` | 100% pass |
 | WebSocket Tests | `./src/scripts/run-websocket-smoke-tests.sh` | 100% pass |
-| Integration Tests | `./src/tests/run-integration-tests.sh -v` | 100% pass (FINAL GATE) |
+| E2E UI Tests | `./src/scripts/run-e2e-ui-tests.sh --bg -v` | 100% pass |
+| Visual Regression | `./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual` | 100% pass |
+| Integration Tests | `./src/tests/run-integration-tests.sh --bg -v` | 100% pass (FINAL GATE) |
 
 ### Integration Tests are the Final Gate
 
@@ -316,8 +345,15 @@ Integration tests are the **FINAL validation step** before any branch merge to m
 # Complete pre-merge validation sequence
 pytest src/tests/unit/ -v && \
 ./src/scripts/run-websocket-smoke-tests.sh && \
-./src/tests/run-integration-tests.sh -v
+./src/scripts/run-e2e-ui-tests.sh --bg -v && \
+./src/tests/run-integration-tests.sh --bg -v
 ```
+
+**Note**: E2E UI and integration tests run in background (`--bg`) — monitor via:
+- E2E: `tail -20 /tmp/e2e-ui-latest.log`
+- Integration: `tail -20 /tmp/integration-latest.log`
+
+Wait for E2E completion before launching integration tests (the final gate). Both have PID-file overlap protection to prevent concurrent runs.
 
 ### When Tests Fail
 
@@ -368,6 +404,35 @@ if not email or not password:
 - Protocol verification tests that need real user context
 
 **Reference**: See `src/tests/AUTH-TESTING-GUIDE.md` for credential patterns. For pipeline testing, always use automated smoke tests — never manual curl.
+
+## DOCUMENTATION TOUCHPOINTS
+
+When modifying code in these areas, update the corresponding documentation:
+
+| Code Area Changed | Update These Docs |
+|-------------------|-------------------|
+| `routers/*.py` endpoint decorators | `/docs` auto-updates; run `src/scripts/generate-api-docs.sh` to update `src/docs/fastapi/` |
+| `websocket_manager.py` | `src/docs/websocket-architecture.md` |
+| `routers/websocket.py` | `src/docs/websocket-events.md`, `websocket-architecture.md` |
+| `routers/notifications.py` architecture | `src/docs/notification-api.md` |
+| `lupin-app.ini` WebSocket keys | `src/docs/websocket-configuration.md` |
+| `lupin-app.ini` `websocket available events` | `src/docs/websocket-events.md`, `websocket-configuration.md` |
+| New router added | `src/docs/rest-api-reference.md` quick-reference table |
+| Auth services (`jwt_service`, `user_service`, etc.) | `src/docs/auth/architecture-overview.md` |
+| Decision proxy / trust logic | `src/docs/proxy-admin-guide.md` |
+| Frontend page routes | `src/docs/rest-api-reference.md` (Pages section) |
+| `src/cosa/agents/bug_fix_expediter/` | `src/docs/agents/bug-fix-expediter-guide.md` |
+| `src/cosa/agents/test_fix_expediter/` | `src/docs/agents/test-fix-expediter-guide.md` |
+| `src/cosa/agents/shared/` (PlanWriter, GitStrategist, FixExecutor) | `src/docs/agents/shared-fix-primitives-reference.md` |
+| `src/cosa/agents/test_suite/` | `src/docs/agents/test-suite-scheduling-guide.md` |
+| `src/cosa/rest/test_suite_completion_watchdog.py` | `src/docs/agents/test-fix-expediter-guide.md` |
+| `lupin-app.ini` `bug fix expediter *` keys | `src/docs/agents/bug-fix-expediter-guide.md` INI Reference |
+| `lupin-app.ini` `test fix expediter *` keys | `src/docs/agents/test-fix-expediter-guide.md` INI Reference |
+| BFE/TFE endpoint rows | `src/docs/rest-api-reference.md` sections 17/17a/17b |
+
+**Documentation index**: `src/docs/README.md` — lists all docs with verification dates.
+
+**Principle**: FastAPI `/docs` and `/redoc` are the authoritative API reference. Hand-written docs cover architecture, concepts, and operations only.
 
 ## HISTORY STRUCTURE NOTES
 - **Project Span**: December 2024 - Present (Lupin evolution from Genie-in-the-Box)

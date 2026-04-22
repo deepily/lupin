@@ -93,6 +93,45 @@ class TestQueueAuthorization:
 
         assert result == "*"
 
+    # ==================== "!self" (Not Mine) Filter Scenarios ====================
+
+    def test_admin_not_self_returns_exclamation_prefix(self):
+        """Admin requesting '!self' gets '!<own_user_id>' sentinel."""
+        user = {"uid": "admin_123", "roles": ["admin", "user"]}
+
+        result = authorize_queue_filter( user, "!self" )
+
+        assert result == "!admin_123"
+
+    def test_admin_not_self_preserves_user_id(self):
+        """'!self' sentinel contains the requesting admin's actual user_id."""
+        user = {"uid": "ricardo_felipe_ruiz_6bdc", "roles": ["admin"]}
+
+        result = authorize_queue_filter( user, "!self" )
+
+        assert result == "!ricardo_felipe_ruiz_6bdc"
+        assert result.startswith( "!" )
+        assert result[ 1: ] == "ricardo_felipe_ruiz_6bdc"
+
+    def test_regular_user_not_self_raises_403(self):
+        """Regular user requesting '!self' raises 403 Forbidden."""
+        user = {"uid": "user_123", "roles": ["user"]}
+
+        with pytest.raises( HTTPException ) as exc:
+            authorize_queue_filter( user, "!self" )
+
+        assert exc.value.status_code == 403
+        assert "admin" in exc.value.detail.lower()
+
+    def test_empty_roles_not_self_raises_403(self):
+        """User with empty roles requesting '!self' raises 403."""
+        user = {"uid": "user_789", "roles": []}
+
+        with pytest.raises( HTTPException ) as exc:
+            authorize_queue_filter( user, "!self" )
+
+        assert exc.value.status_code == 403
+
     # ==================== Edge Cases ====================
 
     def test_empty_roles_treated_as_regular_user(self):
@@ -149,6 +188,11 @@ class TestQueueAuthorization:
             authorize_queue_filter(user, "*")
         assert exc.value.status_code == 403
 
+        # "!self" → 403 ✗
+        with pytest.raises(HTTPException) as exc:
+            authorize_queue_filter(user, "!self")
+        assert exc.value.status_code == 403
+
         # other_id → 403 ✗
         with pytest.raises(HTTPException) as exc:
             authorize_queue_filter(user, "other_user")
@@ -166,6 +210,9 @@ class TestQueueAuthorization:
 
         # "*" → "*" ✓
         assert authorize_queue_filter(user, "*") == "*"
+
+        # "!self" → "!admin_user" ✓
+        assert authorize_queue_filter(user, "!self") == "!admin_user"
 
         # other_id → other_id ✓
         assert authorize_queue_filter(user, "other_user") == "other_user"

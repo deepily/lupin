@@ -31,7 +31,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     drain_and_acknowledge, format_voice_context, build_stop_block,
     inject_qualifier_via_tmux,
     enrich_voice_context, get_stop_block_count, increment_stop_block_count,
-    reset_stop_block_count, MAX_STOP_BLOCKS
+    reset_stop_block_count, get_turn_elapsed_seconds, MAX_STOP_BLOCKS
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, build_sender_id_for_cc, resolve_stable_session_id
@@ -118,7 +118,86 @@ def _summarize_task( last_assistant_message ):
 #         return None
 
 
-def _ask_anything_else( session_id, last_assistant_message=None ):
+# Minimum turn duration (seconds) to consider work "substantive"
+MIN_TURN_DURATION_SECONDS = 10
+
+
+def _should_ask_anything_else( last_assistant_message, session_id ):
+    """
+    Determine whether the stop hook should prompt "Anything else?"
+
+    Two-signal gate:
+        1. Empty last_assistant_message → no work done → skip
+        2. Turn duration < threshold → trivial turn → skip
+
+    Requires:
+        - last_assistant_message is a string or None
+        - session_id is a string
+
+    Ensures:
+        - Returns False if no substantive work was done
+        - Returns True if both signals indicate real work
+    """
+    # Signal 1: No assistant output at all
+    if not last_assistant_message or not last_assistant_message.strip():
+        log_to_stream( "stop", {}, extra={
+            "phase"  : "gate_skip",
+            "reason" : "empty last_assistant_message"
+        } )
+        return False
+
+    # Signal 2: Turn was too short
+    elapsed = get_turn_elapsed_seconds( session_id )
+    if elapsed is not None and elapsed < MIN_TURN_DURATION_SECONDS:
+        log_to_stream( "stop", {}, extra={
+            "phase"   : "gate_skip",
+            "reason"  : "turn_too_short",
+            "elapsed" : round( elapsed, 1 )
+        } )
+        return False
+
+    return True
+
+
+def _get_session_context( cwd ):
+    """
+    Read session topic from bridge file + git branch name.
+
+    Requires:
+        - cwd is a string path or None
+
+    Ensures:
+        - Returns (topic, branch) tuple
+        - topic is a string or None (from bridge file's session_topic)
+        - branch is a string or None (from git rev-parse)
+        - Never raises exceptions
+    """
+    topic  = None
+    branch = None
+
+    # Session topic from bridge file
+    try:
+        from lupin_cli.claude_code.hooks.lib.session_bridge import get_session_metadata
+        meta  = get_session_metadata()
+        topic = meta.get( "session_topic" )
+    except Exception:
+        pass
+
+    # Git branch
+    if cwd:
+        try:
+            import subprocess
+            branch = subprocess.check_output(
+                [ "git", "rev-parse", "--abbrev-ref", "HEAD" ],
+                cwd=cwd, text=True, timeout=5
+            ).strip()
+        except Exception:
+            pass
+
+    return topic, branch
+
+
+def _ask_anything_else( session_id, last_assistant_message=None, cwd=None ):
     """
     Ask the user "Anything else?" via notify_user_sync with a 5-minute timeout.
 
@@ -128,6 +207,7 @@ def _ask_anything_else( session_id, last_assistant_message=None ):
     Requires:
         - session_id is a string for sender_id resolution
         - last_assistant_message is a string or None
+        - cwd is a string path or None (for session context resolution)
 
     Ensures:
         - Returns dict suitable for emit_json()
@@ -143,18 +223,28 @@ def _ask_anything_else( session_id, last_assistant_message=None ):
 
         gist = _summarize_task( last_assistant_message )
         if gist:
-            message = f'[LUPIN] I\'m finished *"...{gist}"*. Is there anything else you want me to do?'
+            message = f'I\'m finished *"...{gist}"*. Is there anything else you want me to do?'
         else:
-            message = "[LUPIN] I've finished the current task. Is there anything else you'd like me to do?"
+            message = "I've finished the current task. Is there anything else you'd like me to do?"
+
+        # Build abstract with session-level context
+        topic, branch = _get_session_context( cwd )
+        parts = []
+        if topic:
+            parts.append( f"**Session**: {topic}" )
+        if branch:
+            parts.append( f"**Branch**: `{branch}`" )
+        abstract = "  \n".join( parts ) if parts else None
 
         request = NotificationRequest(
             message                  = message,
             response_type            = ResponseType.YES_NO,
-            priority                 = NotificationPriority.HIGH,
-            timeout_seconds          = 300,
+            priority                 = NotificationPriority.MEDIUM,
+            timeout_seconds          = 60,
             response_default         = "no",
-            title                    = "Continue Session?",
+            title                    = "Stop hook: Anything else?",
             sender_id                = sender_id,
+            abstract                 = abstract,
             display_qualifier_widget = True
         )
 
@@ -250,9 +340,8 @@ def main():
         # No voice input → Phase 2: ask user "Anything else?" via notification
         reset_stop_block_count( session_id )
         last_assistant_message = payload.get( "last_assistant_message" )
-        result = _ask_anything_else( session_id, last_assistant_message )
+        result = _ask_anything_else( session_id, last_assistant_message, cwd=payload.get( "cwd" ) )
         emit_json( result )
-
 
 if __name__ == "__main__":
     main()

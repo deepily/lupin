@@ -1,0 +1,137 @@
+# ── Tier A: Core utterances (RESEARCH_TOPIC only) ────────────────────────────
+research RESEARCH_TOPIC and make a presentation
+investigate RESEARCH_TOPIC then create slides
+do deep research on RESEARCH_TOPIC and turn it into a slide deck
+research RESEARCH_TOPIC and generate a presentation
+study RESEARCH_TOPIC and make slides from it
+investigate RESEARCH_TOPIC and build a presentation
+research RESEARCH_TOPIC then build a slide deck
+do research on RESEARCH_TOPIC and create a presentation
+analyze RESEARCH_TOPIC and make slides
+explore RESEARCH_TOPIC and generate a slide deck
+deep dive into RESEARCH_TOPIC and create a presentation
+research RESEARCH_TOPIC and turn the findings into slides
+investigate RESEARCH_TOPIC and produce a presentation
+study RESEARCH_TOPIC and create a slide deck
+research RESEARCH_TOPIC and present the results
+explore RESEARCH_TOPIC and build slides
+research RESEARCH_TOPIC thoroughly and make a presentation
+do a deep dive on RESEARCH_TOPIC and create slides
+investigate RESEARCH_TOPIC in depth and make a slide deck
+research RESEARCH_TOPIC and generate presentation slides
+look into RESEARCH_TOPIC and turn it into a presentation
+research RESEARCH_TOPIC and make a deck of slides
+explore RESEARCH_TOPIC deeply and create a presentation
+do comprehensive research on RESEARCH_TOPIC and make slides
+study RESEARCH_TOPIC and turn it into a presentation
+research RESEARCH_TOPIC and present it as slides
+research RESEARCH_TOPIC and convert the findings to a presentation
+investigate RESEARCH_TOPIC and deliver a slide deck
+research RESEARCH_TOPIC and make a presentation about it
+do some deep research on RESEARCH_TOPIC and create a presentation
+can you research RESEARCH_TOPIC and make slides
+please research RESEARCH_TOPIC and create a presentation
+I need you to research RESEARCH_TOPIC and build a slide deck
+research RESEARCH_TOPIC for me and make a presentation
+um research RESEARCH_TOPIC and then make slides
+hey research RESEARCH_TOPIC and turn it into a presentation
+so like research RESEARCH_TOPIC and create some slides
+could you research RESEARCH_TOPIC and produce a presentation
+I want a presentation about RESEARCH_TOPIC based on deep research
+research RESEARCH_TOPIC and present the findings as slides
+go deep on RESEARCH_TOPIC and make a slide deck
+dig into RESEARCH_TOPIC and create a presentation
+I'd like deep research on RESEARCH_TOPIC with a presentation
+research RESEARCH_TOPIC and generate a slide deck from the findings
+do a thorough investigation of RESEARCH_TOPIC and make slides
+research RESEARCH_TOPIC comprehensively and build a presentation
+analyze RESEARCH_TOPIC in depth and create slides
+investigate RESEARCH_TOPIC and turn the report into a presentation
+research RESEARCH_TOPIC from every angle and make slides
+start deep research on RESEARCH_TOPIC and create a presentation
+
+# ── Tier B: Duration compound commands (RESEARCH_TOPIC + DURATION_MINUTES) ────
+research RESEARCH_TOPIC and make a DURATION_MINUTES minute presentation
+investigate RESEARCH_TOPIC then build a DURATION_MINUTES minute slide deck
+deep dive into RESEARCH_TOPIC and create a DURATION_MINUTES minute presentation
+do research on RESEARCH_TOPIC and make a DURATION_MINUTES minute slide deck
+research RESEARCH_TOPIC and produce a DURATION_MINUTES minute deck
+study RESEARCH_TOPIC and build a DURATION_MINUTES minute presentation
+explore RESEARCH_TOPIC and generate a DURATION_MINUTES minute slide deck
+research RESEARCH_TOPIC and give me a DURATION_MINUTES minute presentation
+analyze RESEARCH_TOPIC and create a DURATION_MINUTES minute deck
+investigate RESEARCH_TOPIC and deliver a DURATION_MINUTES minute presentation
+research RESEARCH_TOPIC and make a DURATION_MINUTES min deck
+please research RESEARCH_TOPIC and build a DURATION_MINUTES minute slide deck
+can you research RESEARCH_TOPIC and make DURATION_MINUTES minutes of slides
+I need a DURATION_MINUTES minute presentation on RESEARCH_TOPIC after deep research
+research RESEARCH_TOPIC and build a DURATION_MINUTES minute talk
+launch research on RESEARCH_TOPIC and make a DURATION_MINUTES minute presentation
+research RESEARCH_TOPIC thoroughly and build a DURATION_MINUTES minute deck
+I want a DURATION_MINUTES minute deck on RESEARCH_TOPIC based on research
+explore RESEARCH_TOPIC and make a DURATION_MINUTES minute slide deck
+research RESEARCH_TOPIC and prepare a DURATION_MINUTES minute presentation
+do deep research on RESEARCH_TOPIC and put together a DURATION_MINUTES minute deck
+research RESEARCH_TOPIC and turn the findings into a DURATION_MINUTES minute deck
+investigate RESEARCH_TOPIC deeply and make a DURATION_MINUTES minute presentation
+look into RESEARCH_TOPIC and build a DURATION_MINUTES minute slide deck
+research RESEARCH_TOPIC and make it into a DURATION_MINUTES minute talk
+
+# ── Tier C: Audience level (RESEARCH_TOPIC + AUDIENCE) ───────────────────────
+research RESEARCH_TOPIC and make a presentation for AUDIENCE
+investigate RESEARCH_TOPIC and build a slide deck for AUDIENCE audience
+do deep research on RESEARCH_TOPIC and create a presentation for AUDIENCE
+study RESEARCH_TOPIC and make slides for AUDIENCE viewers
+research RESEARCH_TOPIC and create a deck for AUDIENCE
+explore RESEARCH_TOPIC and produce a presentation for AUDIENCE
+deep dive into RESEARCH_TOPIC and make slides for AUDIENCE
+research RESEARCH_TOPIC and build an AUDIENCE level presentation
+investigate RESEARCH_TOPIC and create AUDIENCE level slides
+research RESEARCH_TOPIC and make a presentation aimed at AUDIENCE
+please research RESEARCH_TOPIC and make a presentation for AUDIENCE
+can you research RESEARCH_TOPIC and create slides for AUDIENCE
+research RESEARCH_TOPIC and deliver a presentation for AUDIENCE
+I need an AUDIENCE level presentation on RESEARCH_TOPIC after research
+research RESEARCH_TOPIC and produce slides for AUDIENCE
+analyze RESEARCH_TOPIC and create a deck for AUDIENCE audience
+investigate RESEARCH_TOPIC and make a deck geared toward AUDIENCE
+research RESEARCH_TOPIC and present the findings to AUDIENCE
+do research on RESEARCH_TOPIC and create slides tailored to AUDIENCE
+research RESEARCH_TOPIC and make slides for the AUDIENCE level
+
+# ── Tier D: Audience context (RESEARCH_TOPIC + AUDIENCE_CONTEXT) ─────────────
+research RESEARCH_TOPIC and make a presentation for AUDIENCE_CONTEXT
+investigate RESEARCH_TOPIC and build a slide deck for AUDIENCE_CONTEXT
+do deep research on RESEARCH_TOPIC and create a presentation for AUDIENCE_CONTEXT
+research RESEARCH_TOPIC and generate slides tailored to AUDIENCE_CONTEXT
+study RESEARCH_TOPIC and make a deck for AUDIENCE_CONTEXT
+explore RESEARCH_TOPIC and produce slides for AUDIENCE_CONTEXT
+research RESEARCH_TOPIC and make a presentation aimed at AUDIENCE_CONTEXT
+investigate RESEARCH_TOPIC and build slides designed for AUDIENCE_CONTEXT
+research RESEARCH_TOPIC and create a deck geared toward AUDIENCE_CONTEXT
+deep dive into RESEARCH_TOPIC and prepare a presentation for AUDIENCE_CONTEXT
+please research RESEARCH_TOPIC and make slides for AUDIENCE_CONTEXT
+can you research RESEARCH_TOPIC and create a deck for AUDIENCE_CONTEXT
+research RESEARCH_TOPIC and deliver a presentation to AUDIENCE_CONTEXT
+I need a presentation on RESEARCH_TOPIC for AUDIENCE_CONTEXT
+analyze RESEARCH_TOPIC and produce slides speaking to AUDIENCE_CONTEXT
+research RESEARCH_TOPIC thoroughly and make a deck for AUDIENCE_CONTEXT
+investigate RESEARCH_TOPIC and create a presentation written for AUDIENCE_CONTEXT
+do research on RESEARCH_TOPIC and make slides for AUDIENCE_CONTEXT
+research RESEARCH_TOPIC and build a presentation targeting AUDIENCE_CONTEXT
+study RESEARCH_TOPIC and make a deck written for AUDIENCE_CONTEXT
+
+# ── Tier E: Scheduling variants ──────────────────────────────────────────────
+research RESEARCH_TOPIC and make a presentation tonight
+schedule research on RESEARCH_TOPIC and a presentation for later
+research RESEARCH_TOPIC and build a slide deck overnight
+schedule deep research on RESEARCH_TOPIC with a presentation for tonight
+research RESEARCH_TOPIC at midnight and make a presentation
+schedule a research to presentation job for RESEARCH_TOPIC tonight
+run deep research on RESEARCH_TOPIC overnight and generate slides
+research RESEARCH_TOPIC as a dry run and build a presentation
+do a dry run research on RESEARCH_TOPIC and make a deck
+trial run research on RESEARCH_TOPIC and create slides
+research RESEARCH_TOPIC later tonight and build a presentation
+schedule research and presentation on RESEARCH_TOPIC for tomorrow morning
+queue up research on RESEARCH_TOPIC and a presentation

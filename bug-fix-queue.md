@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-03-11T11:30:00
+**Last Updated**: 2026-04-22T16:50:00-04:00
 
 ---
 
@@ -34,12 +34,47 @@
 | 98958f70 | 2026-02-28T23:00:00 | 2026-02-28T23:45:00 | closed |
 | 9f656de9 | 2026-03-11T10:00:00 | 2026-03-12T17:30:00 | closed |
 | 59afa5ba | 2026-03-12T17:25:00 | 2026-03-12T18:15:00 | committed |
+| 135a6b16 | 2026-03-18T12:00:00 | 2026-03-18T12:00:00 | stale |
+| 7d02176c | 2026-03-19T12:00:00 | 2026-03-19T13:00:00 | committed |
+| cd0fd61a | 2026-03-23T16:30:00 | 2026-03-23T17:00:00 | committed |
+| 0015f34e | 2026-03-24T12:00:00 | 2026-03-24T12:15:00 | committed |
+| f52e3261 | 2026-03-24T15:00:00 | 2026-03-24T15:30:00 | committed |
+| 1e9b946f | 2026-03-25T13:00:00 | 2026-03-25T13:30:00 | committed |
+| e3c3bab8 | 2026-03-25T18:02:00 | 2026-03-25T18:35:00 | committed |
+| 5b508f0e | 2026-03-26T15:50:00 | 2026-03-26T16:30:00 | committed |
+| 5329e0ea | 2026-03-27T14:00:00 | 2026-03-27T16:15:00 | closed |
+| a312ee22 | 2026-04-08T11:00:00 | 2026-04-08T15:45:00 | committed |
+| 1b8c1cc0 | 2026-04-10T09:30:00 | 2026-04-10T11:00:00 | closed |
+| 5a620729 | 2026-04-14T14:20:00 | 2026-04-14T23:00:00 | closed |
+| eb50bd56 | 2026-04-16T22:30:00 | 2026-04-17T00:30:00 | closed |
+| 8ed95029 | 2026-04-18T13:20:00 | 2026-04-18T13:30:00 | stale |
+| b802e633 | 2026-04-21T00:00:00 | 2026-04-21T01:00:00 | closed |
+| 9b840935 | 2026-04-22T14:55:15 | 2026-04-22T16:50:00 | closed |
 
 ---
 
 ### Queued
 
 (Available for any session to claim)
+
+- [ ] **`POST /api/notify/response` ERR_CONNECTION_RESET + audio WebSocket connect failure** (possibly related to session 9b840935's notification fixes — filed 2026-04-22, USER-REPORTED while manually testing)
+  - **Browser console traces**:
+    - `POST http://localhost:7999/api/notify/response net::ERR_CONNECTION_RESET` at `notifications.js:962` (`authedFetch`) → propagated from `submitResponse` (line 13572) ← `submitYesNoWithComment` (line 15050) ← inline handler (line 12666). `TypeError: Failed to fetch` caught and logged as `[Notifications ERROR] Failed to submit response`.
+    - `WebSocket connection to 'ws://localhost:7999/ws/audio/slow%20zebra' failed:` (trailing colon, no reason) at `connectAudioWebSocket` (line 2136). Session-name "slow zebra" URL-encodes correctly; not a URL-encoding issue at first glance.
+    - Queue WebSocket not shown failing in the snippet — only audio WebSocket.
+  - **Symptom correlation**: `ERR_CONNECTION_RESET` on an HTTP POST + near-simultaneous WebSocket connect failure usually means the server dropped the connection mid-request OR briefly became unresponsive. Uvicorn auto-reload during session 9b840935's `notifications.js` edits could have caused a transient window; worth confirming with fresh repro that isn't timed near a code-reload.
+  - **Open questions**: (1) is this still reproducible after :7999 has been stable for several minutes? (2) does the queue WebSocket also break or only audio? (3) does a non-space session name (`foolish-goat` vs `slow zebra`) change behavior? (4) any server-side exception in the :7999 log at the timestamp of the ERR_CONNECTION_RESET?
+  - **Possibly-related files**: `src/cosa/rest/routers/notifications.py` (`/notify/response` endpoint), `src/cosa/rest/routers/websocket.py` (`/ws/audio/{session_id}` endpoint), `src/fastapi_app/static/js/notifications.js:962 / :13572 / :2136 / :2142`.
+  - **Update 2026-04-22 15:26 EDT**: a second ERR_CONNECTION_RESET observed on `POST /auth/login` (totally unrelated route). Direct Python probe to the SAME endpoint at the same time returned a clean `401 Invalid email or password` in 14ms — server is healthy. Strongly suggests stale HTTP keep-alive TCP sockets in the browser after uvicorn auto-reload dropped connections during this session's `notifications.js` edits.
+  - **Repro gate before investing investigation time**: (a) hard-refresh the page (Ctrl+Shift+R), (b) let :7999 sit idle with no source edits for 60+ seconds, (c) retry. If ERR_CONNECTION_RESET still appears → real bug, investigate. If not → close as "transient stale-keepalive artifact from auto-reload", no code bug.
+  - **Deferred until**: session 9b840935's main fix is wrapped + committed, then revisit with the repro gate above.
+
+- [x] ~~**DRY refactor: extract emission helper on NotificationFifoQueue**~~ → claimed by 9b840935 on 2026-04-22 (moved to In Progress)
+- [ ] **Repair 9 pre-existing CoSA unit test failures unrelated to notification fifo** — surfaced while running adjacent tests during session 9b840935. Two categories:
+  - `test_fifo_queue.py::TestFifoQueue::test_websocket_emission` (1 test) — expects `_emit_queue_update` on parent `FifoQueue`; parent was refactored to not have it. Either restore `_emit_queue_update` on parent with inline emission, or update the test to match current behavior (push is bare append, emission is per-subclass).
+  - `test_notifications_router.py::TestNotificationsRouter::*` (8 tests) — expect config key `"app_timezone"` (underscore); code at `routers/notifications.py:112` uses `"app timezone"` (space). Update the test assertions to match. This is cosmetic test-drift, not a runtime issue.
+- [x] ~~**`/plan-bug-fix-mode-wrap` skill not triggered — session-end invoked instead**~~ → fixed commit 5f2713a | By: eb50bd56 | 2026-04-16
+
 
 - [x] ~~**target_user "Cannot resolve" error in Docker**~~ → Session 304 | By: 05faae8b
 - [x] ~~**Fuzzy matching via voice**~~ → Session 304 | By: 05faae8b
@@ -60,6 +95,172 @@
 ---
 
 ### Completed
+
+- [x] **DRY refactor: extract `_emit_notification_added` helper on NotificationFifoQueue** → commit: cd4e5e6 | By: 9b840935 | 2026-04-22
+  - Collapsed ~44 lines of near-identical emission code (push lines 244-267 + push_notification lines 343-365) into a single shared helper. Both call sites now `self._emit_notification_added(notification)`. Unified debug-print strings (dropped the "priority" qualifier). Verified no behavior change via CoSA unit 5/5, Lupin integration 3/3, Lupin notification unit 27/27, module smoke (priority + mark_played paths).
+- [x] **NotificationFifoQueue `_emit_queue_update` 500 + Chrome `/played` silence** → commit: cd4e5e6 | By: 9b840935 | 2026-04-22
+  - **Fix 1 (CoSA, user commits from CoSA session)**: added `_emit_queue_update()` method to `NotificationFifoQueue` at `src/cosa/rest/notification_fifo_queue.py`. Broadcasts `notification_queue_update` with `queue_name`, `value`, `unplayed_count`. Silent no-op when `websocket_mgr=None` or `emit_enabled=False`. 5 new unit tests in `src/cosa/tests/unit/rest/test_notification_fifo_queue.py` (all pass). Module smoke test still green.
+  - **Fix 2 (Lupin)**: `playNotificationAudio` in `src/fastapi_app/static/js/notifications.js:10509` now fires fire-and-forget `POST /api/notifications/{id}/played` after successful playback. `notifications.html` cache-bust bumped to `v=20260422a`. 3 new in-process TestClient regression tests in `src/tests/integration/test_notifications_integration.py::TestMarkPlayedEndpoint` (all pass).
+  - **Verification**: CoSA unit 5/5, Lupin integration 3/3, Lupin notification units 27/27, module smoke OK, live probe on :7999 confirmed endpoint reachable + updated JS served. User manually confirmed Chrome path works end-to-end after browser restart.
+- [x] **Refine job-id chip truncation — preserve compound prefixes** → commit: 0f67635 | By: b802e633 | 2026-04-21
+  - Fix 2's `length>8` rule over-truncated short non-compound ids (`foo-a1b2c9b2`) and reasonable BFE prefixes (`bfe-a1b2c3d4::<uuid>` → `bfe-a1b2c3d4` should stay). New rule in `notifications.js:6835`: `idPrefix = jobId.split("::")[0]`; truncate only if `idPrefix.length > 16`. Effectively restores `8ed95029`'s original `::`-split (5b3e305) plus a safety fallback for 64-char sha prefixes. Cache-bust `v=20260421c`.
+- [x] **DELETE /api/queue/{name}/all returned 404 on test server** → commit: 82243e4 | By: b802e633 | 2026-04-21
+  - `DELETE /api/queue/done/all` (and the latent `/job-history/all` sibling) returned 404 because the parameterized `/{job_id}` route was declared BEFORE the literal `/all` route in `src/cosa/rest/routers/queues.py` — FastAPI matched `/{job_id}`, bound `job_id="all"`, failed to find a job by that id, and raised 404. Same shadowing defect existed for the job-history pair, so the history bulk-delete was broken too (user hadn't hit it yet). Reorder fix lives in the CoSA submodule (deferred to CoSA session); Lupin-side pieces committed here — Fix History appended to `src/rnd/v0.1.6/2026.04.16-cj-flow-delete-all-buttons.md`, plus new `src/tests/integration/test_queue_delete_all.py` (6 lock-in cases). HTTP probe against `:7999` confirms 8/8 regression assertions.
+- [x] **CJ Flow accordion — enormously long job-ids overflow header chip** → commit: 82243e4 | By: b802e633 | 2026-04-21
+  - Cards displayed full id_hash strings (64-char sha + `::` + UUID). Truncated the header chip in `renderJobCard()` (`notifications.js:6832`) to first 8 chars + `"..."`; full `jobId` stays in `data-job-id`, `title` tooltip, clipboard-on-click, and the expanded `<code>` details block — every API call and DOM lookup unaffected. Cache-bust v=20260420a → v=20260421a. **Follow-up bug filed above**: the simple length>8 rule over-truncates short non-compound ids (see In Progress).
+- [x] **CJ Flow badge — BFE compound IDs overflow `.job-id-chip`** → commit: 5b3e305 | By: 8ed95029 | 2026-04-18
+  - `bfe-XXXXXXXX::<uuid>` (60+ chars) blew out the badge while `tfe-XXXXXXXX` fit fine. Truncated visible text at `::` in `renderJobCard` (`notifications.js:6829,6980`); tooltip now reveals the full compound ID on hover, and `data-job-id`, DOM ids, and clipboard copy still carry the full scoped form. Mirrors backend `AgenticJobBase.base_id` pattern. User live-confirmed working after hard-refresh.
+
+- [x] **PQW HTTP 500 — peer-queue auth env vars not set on dev server** → no-code fix | By: eb50bd56 | 2026-04-16
+  - Container predated env var additions to docker-compose.yml. Fix: `docker rm -f lupin-rest-dev && docker compose up -d lupin-rest-dev`. Watcher confirmed running post-fix.
+
+- [x] **History archive — history.md at 38,821 tokens (155% of 25k limit)** → commit: 2879cbf | By: eb50bd56 | 2026-04-16
+  - Archived 23 sessions (2026-04-08 to 2026-04-14) to `history/2026-04-08-to-14-history.md`. Retained 4 sessions, 10,008 tokens.
+
+- [x] **Seed account protection — companions wiped by E2E/integration test teardown** → commit: this session | By: eb50bd56 | 2026-04-16
+  - 3-layer protection: `is_protected` column on `User` model; `seed_test_companions.py` marks companions `TRUE` on every upsert; E2E + integration `clean_test_db` switched to row-level `DELETE WHERE NOT is_protected` + TRUNCATE; `admin_delete_user()` API guard rejects deletion of protected accounts. DEV + TEST DBs migrated. 4 unit tests in `test_admin_protected_accounts.py`. Zero lockout windows for operator or PQW during test runs.
+  - **CoSA files** (user commits from `src/cosa/`): `postgres_models.py`, `admin_service.py`
+
+- [x] **CJ Flow — Delete All button for 5 queue panes** → commit: 29a6fd4 | By: eb50bd56 | 2026-04-16
+  - Added 🗑️ Delete All to each of todo/run/done/dead/history pane headers. Non-admins delete own jobs; admins clear entire queue. History respects time-window filter.
+  - **Backend** (CoSA — user commits separately): `DELETE /api/queue/{name}/all`, `DELETE /api/job-history/all?days=N`, `delete_job_history_bulk()`.
+  - **Frontend** (Lupin): `notifications.html` (5 buttons), `notifications.js` (`deleteAllQueueJobs()`), `notifications.css` (`.queue-delete-all-btn`).
+  - **Plan**: `src/rnd/v0.1.6/2026.04.16-cj-flow-delete-all-buttons.md`
+
+- [x] **BFE & TFE job cards lack interactions and results documents** → Session 5a620729 | Live validated 2026-04-14
+  - **Symptom**: Notification Conversation showed "No interactions recorded" on BFE/TFE done cards; no report-link artifact rendered.
+  - **RC-1**: `voice_io.notify()` gate conflated voice availability with persistence dispatch. `is_voice_available()` cached-False from a probe error caused silent drops of every subsequent notify. Fix: decoupled — `notify()` always dispatches via `cosa_interface.notify_progress()` when configured; TTS decision moved to voice-bridge subscriber.
+  - **RC-2**: Neither agent wrote a final report (only an intermediate plan via PlanWriter). Fix: new `src/cosa/agents/shared/report_writer.py` + `_write_final_report()` hooks on BFE (5 exits: dry-run dead-not-found, live dead-not-found, happy, stall, generic exception) and TFE (3 exits: happy, stall, generic exception). Populates `artifacts["report_path"]` → UI renderReportLinkSection fires.
+  - **Test-harness gaps discovered and fixed**: E2E scripts blocked by missing `websocket_id` on `/api/push` and no BFE fixture. Solved via NEW `POST /api/push-agentic` endpoint (explicit routing_command + args, bypasses runtime-argument-expeditor for unattended callers) + `push_job_agentic()` method on TodoFifoQueue. Scripts patched; fixture created.
+  - **Live validation**: `dr-eb1b680e` (deep_research dry-run, force_failure_mode=code_bug) → dead queue → DeadQueueWatchdog dispatched `bfe-f91fd115` → BFE breadcrumbs landed in `lupin_db_test.notifications` with correct compound job_id + sender_id. 15 rows persisted. Chain fully green.
+  - **Plan**: `src/rnd/v0.1.6/2026.04.14-bfe-tfe-interactions-and-reports.md`.
+  - **Commits (Lupin)**: `62a85e1` (CP4 — initial fix + ReportWriter + unit tests), plus CP5 (session-end commit with push-agentic endpoint wiring + E2E script patches).
+  - **CoSA-side changes (user commits separately)**: `src/cosa/agents/utils/voice_io.py`, `src/cosa/agents/shared/report_writer.py`, `src/cosa/agents/bug_fix_expediter/job.py`, `src/cosa/agents/test_fix_expediter/job.py`, `src/cosa/rest/routers/queues.py` (new endpoint), `src/cosa/rest/todo_fifo_queue.py` (new method), `src/cosa/rest/routers/peer.py` (from CP2/CP3), `src/cosa/rest/routers/pages.py` (peer-queue-watch route), `src/cosa/rest/routers/admin.py` (refresh-source from CP1).
+
+- [x] **Done bucket job card render parity** → commit: 3faec04 | By: 1b8c1cc0
+  - **Symptom 1**: Dynamically-inserted done cards (WS transition) showed an irrelevant pause button and lacked a trash button
+  - **Symptom 2**: Reload-loaded done cards lacked the scheduled (🕐) and monopolize (🔒) badges that dynamic cards displayed
+  - **Symptom 3**: History-tab cards lacked the trash button (`_isHistory` gate) and the scheduled/monopolize badges
+  - **Root Cause**: 4 defects across 2 files — backend `/api/get-queue/done` omitted 3 fields; `renderJobCard` gated scheduled badge to `queueName==='todo'`; `handleJobStateTransition` surgically morphed cards on transition instead of re-rendering; `renderHistoryCard` omitted same 3 fields and stamped `_isHistory:true`
+  - **Fix**: Single source of truth via `renderJobCard()` — fed it complete data from every path; ungated the scheduled badge; switched terminal-state (done/dead) WS transitions to full re-render via `renderJobCard`; normalized history card fields; dropped the unused `_isHistory` gate
+  - **Files (Lupin)**: `notifications.js`, `src/rnd/v0.1.6/2026.04.10-done-card-render-parity.md`
+  - **Files (CoSA, separate commit)**: `routers/queues.py`
+
+- [x] **Queue badge counts stale + process owner badge missing** → commit: a149363 | By: a312ee22
+  - **Bug 1**: Badge counts used DOM element counting on collapsed (empty) containers. Fixed with local counter tracker.
+  - **Bug 2**: `user_email` not propagated to frontend. Added to API responses + all WebSocket metadata dicts + UI badge.
+
+- [x] **Timezone UTC→EST + queue job delete button** → commit: 7e71e1a | By: a312ee22
+  - **Bug 3**: `datetime.now().isoformat()` produced naive UTC strings. Added `get_current_datetime_iso()` utility, replaced ~65 call sites across 20 files.
+  - **Bug 4**: No delete for stuck/done jobs. Added `DELETE /api/queue/{name}/{id}` + 🗑 button + `job_removed` WS event.
+
+- [x] **Agentic job factory scattered imports** → commit: 18ff764 (docs), CoSA pending | By: 65e3162f
+  - **Symptom**: 9 imports scattered across function body — 4 at top, 5 inline in `elif` branches
+  - **Fix**: Consolidated into single alphabetically-sorted, vertically-aligned block
+  - **File (CoSA)**: `agentic_job_factory.py`
+
+- [x] **SentenceTransformer contacts HuggingFace Hub on every startup** → CoSA pending | By: 28f07da3 (Session 383)
+  - **Root Cause**: Missing `local_files_only=True` — every load checked Hub for updates
+  - **Fix**: Added `local_files_only=True` to `SentenceTransformer()` constructor
+  - **Files**: `local_embedding_engine.py` (CoSA)
+
+- [x] **Main container max-width too narrow (800px → 1000px)** → commit: 5c2ba91 | By: 28f07da3 (Session 383)
+  - **Root Cause**: `.container` and `.profile-container` both set `max-width: 800px`
+  - **Fix**: Changed to `1000px` in both CSS files + toolbar `calc()` updated
+  - **Files**: `notifications.css`, `auth/css/auth.css`
+
+- [x] **Config manager visual grouping broken by space-separated keys** → commit: 94044ab (docs), CoSA pending | By: 2098634b (Session 382b)
+  - **Root Cause**: `key.split( "_" )[ 0 ]` returns entire key when no underscores present
+  - **Fix**: Changed to `key.split()[ 0 ]` — splits on whitespace
+  - **Files**: `configuration_manager.py`
+
+- [x] **set_session_topic() UI propagation + notify retry** → commit: d9cd6f0 | By: 5329e0ea (Session 380b)
+- [x] **Job interactions 404 for compound IDs** → commit: d9cd6f0 | By: 5329e0ea (Session 380b)
+- [x] **Stack trace not captured on dead jobs** → commit: d9cd6f0 | By: 5329e0ea (Session 380b)
+- [x] **Cost summary missing from PresentationGenerator + DeepResearch** → commit: d9cd6f0 | By: 5329e0ea (Session 380b)
+- [x] **Job History missing "1 day" time window filter** → commit: d83882f | By: 5329e0ea (Session 380b)
+- [x] **FastAPI startup crash — missing Field import in podcast_generator** → commit: 8f0b214 (docs), CoSA pending | By: 5329e0ea (Session 380b)
+
+- [x] **Presentation Generator dry-run sends zero progress notifications** → commit: 8b749b0 | By: 5b508f0e (Session 376)
+  - **Symptom**: Dry run completes but UI shows no breadcrumb notifications
+  - **Root Cause**: `_execute_dry_run()` was dead code; orchestrator path lacked identity setup → `is_voice_available()` cached False
+  - **Fix**: Wired `_execute_dry_run()` with identity setup (matching podcast pattern) + added breadcrumb docs to agentic workflow skill
+  - **Files**: `job.py`, `agentic-voice-workflow.md`, `SKILL.md`
+
+- [x] **session_name max_length=50 silently rejects long session topics** → commit: 0cadd52 | By: 5b508f0e (Session 376)
+  - **Symptom**: `set_session_topic()` returns OK but UI never updates for topics > 50 chars
+  - **Fix**: Truncate to 64 chars before `_notify_impl()`, bump `max_length` to 64, surface failures in logs
+  - **Files**: `cosa_voice_mcp.py`, `notification_models.py`
+
+- [x] **set_session_topic() FunctionTool not callable (second root cause)** → commit: ab2cf50 | By: e3c3bab8 (Session 373)
+  - **Symptom**: Session 372b pipeline fix worked, but `set_session_topic()` still never sent the notification
+  - **Root Cause**: FastMCP 2.14.2 `@mcp.tool` converts functions to `FunctionTool` objects — not callable as Python functions. `except Exception: pass` swallowed the TypeError.
+  - **Fix**: Extracted `_notify_impl()` private function, both MCP tool and internal callers use it directly
+  - **Files**: `cosa_voice_mcp.py`
+
+- [x] **set_session_topic() not propagating to notification UI header** → commit: f2420ed (Lupin), CoSA pending | By: 1e9b946f (Session 372b)
+  - **Symptom**: MCP `set_session_topic()` writes to bridge file but UI `sender-session-name` span never updates
+  - **Root Cause**: `session_name` field existed in model but server pipeline never plumbed it through `/api/notify` → `NotificationItem` → WebSocket
+  - **Fix**: Added `SESSION_TOPIC` notification type, plumbed `session_name` through full pipeline, frontend intercept with anti-feedback
+  - **Files**: `notification_models.py`, `notification_fifo_queue.py`, `notifications.py`, `cosa_voice_mcp.py`, `notifications.js`
+
+- [x] **Action-required card stuck + WS send-after-close crash** → commit: d3ad8bf (Lupin), CoSA pending | By: f52e3261 (Session 371b)
+  - **Symptom**: Notification card refuses dismissal (spinner cursor), FastAPI console spams RuntimeError on every WS disconnect
+  - **Fix**: cancelActionRequired/submitResponse cleanup guards, audio WS timeout state cleanup, WebSocketDisconnect exception handling
+  - **Files**: `notifications.js`, `websocket.py`
+
+- [x] **Stop hook "Continue Session?" lacks project/task context** → commit: 47a3f8a | By: 0015f34e (Session 369b)
+  - **Symptom**: Notification card shows generic "Continue Session?" with no project badge or session topic. User can't tell which session is asking.
+  - **Fix**: Project badge from sender_id on all action-required cards, session topic pipeline (UI → listener → bridge → stop hook abstract), MCP tool
+  - **Files**: `notifications.js`, `stop.py`, `cc_notification_listener.py`, `session_bridge.py`, `cosa_voice_mcp.py`
+
+- [x] **WS queue crash (`app_verbose` undefined) + TTS focus mode crash (`state` undefined)** → commit: d7f00b5 | By: 0015f34e (Session 369)
+  - **Symptom**: WebSocket queue handler crashes on every message receive, killing connection. Notifications stop until page refresh. TTS focus mode also crashes on playback complete.
+  - **Root Cause 1**: `websocket_queue_endpoint()` extracts `app_debug` but omits `app_verbose` from `main_module` — NameError at line 488
+  - **Root Cause 2**: `enterTTSFocusMode()` uses `state.timeoutSeconds` instead of `guardState.timeoutSeconds` — ReferenceError at line 10664
+  - **Fix**: Added `app_verbose = main_module.app_verbose` (CoSA); changed `state.` → `guardState.` (Lupin)
+  - **Files (CoSA)**: `websocket.py` — 1 line added
+  - **Files (Lupin)**: `notifications.js` — 1 word changed
+
+- [x] **WebSocket reconnection gives up after 5 failures + missing notification events** → pending commit | By: cd0fd61a (Session 366)
+  - **Symptom**: Notifications stop rendering until force page refresh. Has been broken ~2 days.
+  - **Root Cause**: `scheduleReconnect()` gave up after 5 retries; `Promise.all` coupled both WS reconnects; `notification_expired`/`notification_responded` silently filtered from subscriptions
+  - **Fix**: Infinite retry with backoff, independent WS reconnection, added 2 events to INI config
+  - **Files (Lupin)**: `notifications.js`, `lupin-app.ini`, `lupin-app-splainer.ini`, `websocket-events.md`, `test_ini_key_naming.py`
+
+- [x] **LanceDB proxy_decisions schema mismatch (non-fatal)** → CoSA pending commit | By: cd0fd61a (Session 366)
+  - **Symptom**: `find_similar failed: No field named response_type` on every proxy prediction
+  - **Root Cause**: Session 345 added `response_type` to schema but existing table predates the change
+  - **Fix**: Schema validation in `_ensure_table()` — drop+recreate on mismatch
+  - **Files (CoSA)**: `proxy_decision_embeddings.py`
+
+- [x] **Race condition: old WS handler disconnect() kills new connection** → pending commit | By: cd0fd61a (Session 366)
+  - **Symptom**: Browser shows connected but server says `not in active_connections`. Notifications lost.
+  - **Root Cause**: Reconnect with same session_id → old handler's `finally` calls `disconnect()` deleting the NEW connection
+  - **Fix**: Identity guard in finally blocks, dedup user_sessions, orphan cleanup in emit_to_user
+  - **Files (CoSA)**: `websocket.py`, `websocket_manager.py`
+
+- [x] **Config key underscore/space mismatch in `/api/config/client`** → pending commit | By: cd0fd61a (Session 366)
+  - **Symptom**: 4 config keys not found, falling back to defaults with ¿WUH? warnings
+  - **Root Cause**: `system.py` used underscores, INI uses spaces
+  - **Fix**: 4 `config_mgr.get()` calls fixed + 3 JWT splainer entries added
+  - **Files (CoSA)**: `system.py`; **(Lupin)**: `lupin-app-splainer.ini`
+
+- [x] **Periodic CUDA OOM on Whisper transcription** → pending commit | By: 73bf201f (Session 359)
+  - **Symptom**: Periodic 500 errors on `/api/upload-and-transcribe-mp3` — CUDA OOM despite ~290 MiB reserved (fragmentation)
+  - **Root Cause**: PyTorch CUDA allocator fragmentation from co-resident Whisper + embedding models; can't find contiguous 16 MiB block
+  - **Fix**: `_run_whisper_with_retry()` with `gc.collect()` + `torch.cuda.empty_cache()` + retry; `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`; 503 with Retry-After instead of 500
+  - **Files (Lupin)**: `main.py`; **(CoSA)**: `speech.py`
+
+- [x] **CUDA Memory Optimization — loading order, warmup & embedding OOM retry** → commit: b2d709b | By: 7d02176c (Session 365)
+  - **Follow-up to Session 359**: Reduced VLLM 0.70→0.55, reordered model loading (smallest→largest), added multi-batch warmup + 85s chunked Whisper warmup, added `_run_with_cuda_retry()` to both embedding engines
+  - **Files (Lupin)**: `main.py`, `whisper-warmup-85s.mp3`; **(CoSA)**: `local_embedding_engine.py`; **(Tests)**: `test_local_embedding_engine.py` (8 new)
+
+- [x] **find_session_by_id() fails after context clear — qualifier silently dropped** → commit: 98c0072 | By: 638212c2 (Session 350)
+  - **Symptom**: Stop hook qualifier dropped with `qualifier_tmux_inject_skip reason: "no session found"` for stable ID when bridge file has different transient `session_id`
+  - **Root Cause**: `find_session_by_id()` only checked `data["session_id"]` (latest transient UUID), not the stable ID passed by the stop hook
+  - **Fix**: Added `session_ids` accumulator list to bridge file; `find_session_by_id()` checks full list + backward-compat fallback
+  - **Files**: `register_session.py`, `session_bridge.py`
 
 - [x] **TTS audio not stopped on notification dismissal** → commit: e861b46 | By: a0d314eb (Session 347)
   - **Symptom**: TTS audio keeps playing after user responds to action-required notification; queue can't advance until audio naturally finishes

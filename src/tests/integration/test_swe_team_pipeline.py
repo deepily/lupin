@@ -24,7 +24,7 @@ import pytest
 import requests
 
 # Server configuration
-BASE_URL = "http://localhost:7999"
+BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 
 # =============================================================================

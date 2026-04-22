@@ -30,8 +30,9 @@ from pathlib import Path
 
 # Python path configured by src/tests/conftest.py
 
-# Test server configuration
-BASE_URL = "http://localhost:7999"
+# Test server configuration — defaults to the dedicated test container (port 8000).
+# Override via LUPIN_TEST_BASE_URL env var for custom setups or Docker-internal routing.
+BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
 
 @pytest.fixture( scope="session", autouse=True )
@@ -105,29 +106,40 @@ def verify_test_environment():
 @pytest.fixture( scope="function" )
 def clean_test_db():
     """
-    Clean PostgreSQL test database before each test.
+    Clean PostgreSQL test database before each test, then re-seed companion users.
 
     Uses hot-swap mechanism: the integration test runner calls /api/init
     to swap the running dev server to [Lupin: Testing] config block,
     which points to lupin_db_test.
 
+    Companion seed restoration:
+        After drop+recreate, immediately re-runs the same companion seed that
+        the test container runs at startup (src/scripts/seed_test_companions.py).
+        This keeps service-account logins (e.g. PQW polling :8000) working
+        across the whole `all`-suite run instead of failing 401 mid-suite the
+        moment the first user-management test wipes the users table.
+
     Safety Mechanism:
         - Asserts engine.url contains 'lupin_db_test' before any destructive ops
-        - Verifies users table is empty after schema reset
-        - DROP/CREATE provides complete isolation between tests
+        - Verifies users table contains exactly the companion rows after reset
+          (anything else is a leftover from a prior test or seed regression)
+        - DROP/CREATE provides complete isolation between tests EXCEPT for the
+          companion seed, which is intentional shared infrastructure
 
     Requires:
-        - PostgreSQL Docker container running (lupin-postgres-dev)
-        - Server hot-swapped to Testing config (lupin_db_test)
+        - PostgreSQL Docker container running (lupin-postgres)
+        - Test server running on port 8000 with [Lupin: Testing] config (lupin_db_test)
+        - lupin_db_dev populated with companion users (seed source)
 
     Ensures:
         - Fresh database schema before each test
-        - Complete isolation between tests
+        - Complete isolation between tests for application data
+        - Companion users (interactive.job.tester@..., admin@..., etc.) always
+          present at test entry
         - Tests never affect development database
     """
     # Re-import to get the current (possibly hot-swapped) engine
     from cosa.rest.db import database as db_module
-    from cosa.rest.postgres_models import Base
     from sqlalchemy import text
 
     engine = db_module.engine
@@ -135,16 +147,26 @@ def clean_test_db():
     assert "lupin_db_test" in db_url, \
         f"SAFETY: clean_test_db must only run against lupin_db_test, got: {db_url}"
 
-    # Drop all tables (complete cleanup)
-    Base.metadata.drop_all( bind=engine )
+    import sys as _sys, pathlib as _pathlib, cosa.utils.util as _cu
+    _scripts_dir = _pathlib.Path( _cu.get_project_root() ) / "src" / "scripts"
+    if str( _scripts_dir ) not in _sys.path:
+        _sys.path.insert( 0, str( _scripts_dir ) )
+    from seed_test_companions import COMPANION_EMAILS
 
-    # Recreate all tables with fresh schema
-    Base.metadata.create_all( bind=engine )
+    # Row-level DELETE: wipe test-generated rows, companions survive via is_protected
+    with engine.begin() as conn:
+        conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
+        conn.execute( text(
+            "TRUNCATE TABLE auth_audit_log, failed_login_attempts, "
+            "job_history, proxy_decisions, trust_states"
+        ) )
 
-    # Verify the reset worked
     with engine.connect() as conn:
-        count = conn.execute( text( "SELECT count(*) FROM users" ) ).scalar()
-        assert count == 0, f"SAFETY: users table not empty after clean ({count} rows)"
+        count    = conn.execute( text( "SELECT count(*) FROM users WHERE is_protected" ) ).scalar()
+        expected = len( COMPANION_EMAILS )
+        assert count == expected, (
+            f"SAFETY: expected {expected} protected companions after teardown, got {count}"
+        )
 
     yield
 
@@ -270,6 +292,108 @@ def create_test_admin( clean_test_db, test_admin_credentials ):
         "access_token": tokens["access_token"],
         "refresh_token": tokens["refresh_token"]
     }
+
+
+@pytest.fixture( scope="function" )
+def ws_connection( create_test_user ):
+    """
+    Establish a WebSocket connection for the test user so
+    is_user_connected() returns True during notification tests.
+
+    Requires:
+        - create_test_user fixture (provides access_token)
+        - FastAPI server running on port 7999
+
+    Ensures:
+        - WebSocket connected and authenticated before test runs
+        - Connection closed after test completes
+        - User appears "online" to notification router
+    """
+    import threading
+    import asyncio
+    import json
+    import urllib.parse
+    import websockets
+
+    token      = create_test_user[ "access_token" ]
+    session_id = "test penguin"
+    encoded    = urllib.parse.quote( session_id )
+    uri        = f"ws://{BASE_URL.replace( 'http://', '' )}/ws/queue/{encoded}"
+
+    connected_event = threading.Event()
+    stop_event      = threading.Event()
+    ws_error        = {}
+
+    def run_ws():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop( loop )
+
+        async def connect_and_hold():
+            try:
+                async with websockets.connect( uri ) as ws:
+                    auth_msg = {
+                        "type"              : "auth_request",
+                        "token"             : f"Bearer {token}",
+                        "subscribed_events" : [
+                            "auth_success", "auth_error",
+                            "notification_new", "notification_response_required"
+                        ]
+                    }
+                    await ws.send( json.dumps( auth_msg ) )
+                    response = await asyncio.wait_for( ws.recv(), timeout=5.0 )
+                    data = json.loads( response )
+
+                    if data.get( "type" ) != "auth_success":
+                        ws_error[ "msg" ] = f"WebSocket auth failed: {data}"
+                        connected_event.set()
+                        return
+
+                    connected_event.set()
+
+                    # Hold connection open until test signals stop
+                    while not stop_event.is_set():
+                        try:
+                            await asyncio.wait_for( ws.recv(), timeout=0.5 )
+                        except asyncio.TimeoutError:
+                            pass
+            except Exception as e:
+                ws_error[ "msg" ] = str( e )
+                connected_event.set()
+
+        loop.run_until_complete( connect_and_hold() )
+        loop.close()
+
+    thread = threading.Thread( target=run_ws, daemon=True )
+    thread.start()
+
+    connected_event.wait( timeout=10.0 )
+    if ws_error:
+        pytest.fail( f"WebSocket connection failed: {ws_error[ 'msg' ]}" )
+
+    yield create_test_user
+
+    stop_event.set()
+    thread.join( timeout=5.0 )
+
+
+@pytest.fixture( scope="function" )
+def seeded_job_history( create_test_user ):
+    """
+    Seed 5 standard job_history rows owned by the test user.
+
+    Requires:
+        - create_test_user fixture (chains through clean_test_db)
+
+    Ensures:
+        - 5 rows inserted: 2 completed, 1 failed, 1 interrupted, 1 pending
+        - Returns dict with 'records' list and 'user' dict
+    """
+    from tests.helpers.job_history_seed import seed_standard_job_set
+    records = seed_standard_job_set(
+        user_id    = create_test_user[ "user_id" ],
+        user_email = create_test_user[ "email" ]
+    )
+    return { "records": records, "user": create_test_user }
 
 
 @pytest.fixture( scope="function" )
@@ -399,3 +523,67 @@ def gcs_credentials_available():
     # Credentials valid - print success message
     print( f"\n✓ GCS credentials validated: {message}" )
     return True
+
+
+# Server-Side Embedding Fixture (prevents test-process GPU contention)
+
+@pytest.fixture( scope="session" )
+def server_embedder():
+    """
+    Return a callable that HTTP-embeds text via the running server's
+    batch endpoint (`POST /api/embeddings/batch`).
+
+    Tests use this to avoid instantiating `ProseEmbeddingEngine` in the
+    pytest process, which would collide with the FastAPI server's already-
+    loaded models on GPU 0 (user's GPU is maximally packed, <1 GB free
+    after server warm-up). The server exposes its cached singleton via
+    HTTP; tests just call the endpoint.
+
+    Scope:
+        session — one login per test run; companion user is protected from
+        `clean_test_db`, so the token stays valid across function-scoped
+        database resets.
+
+    Requires:
+        - Test server running at BASE_URL with [Lupin: Testing] config
+        - Companion seed present (interactive.job.tester@lupin.deepily.ai)
+        - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/PASSWORD env vars set
+
+    Returns:
+        Callable[[str, str], list[float]]:
+            `embed(text, content_type="prose") -> 768-dim vector`
+
+    See:
+        - Feedback memory `feedback_tests_call_server_api_not_instantiate`
+        - Design doc `src/rnd/v0.1.6/2026.04.22-tfe-model-flip-and-lancedb-cuda-oom-plan.md`
+    """
+    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
+    if not email or not password:
+        pytest.skip(
+            "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and "
+            "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD must be set"
+        )
+
+    login_resp = requests.post(
+        f"{BASE_URL}/auth/login",
+        json={ "email": email, "password": password },
+        timeout=5,
+    )
+    assert login_resp.status_code == 200, (
+        f"server_embedder login failed: {login_resp.status_code} {login_resp.text}"
+    )
+    token   = login_resp.json()[ "tokens" ][ "access_token" ]
+    headers = { "Authorization": f"Bearer {token}" }
+
+    def embed( text: str, content_type: str = "prose" ) -> list[ float ]:
+        resp = requests.post(
+            f"{BASE_URL}/api/embeddings/batch",
+            json={ "texts": [ text ], "content_type": content_type },
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()[ "embeddings" ][ 0 ]
+
+    return embed

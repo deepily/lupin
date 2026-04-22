@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "timestamp": "2026.04.10-at-14:53",
+  "suites_run": ["integration"],
+  "summary": {
+    "total_passed": 40,
+    "total_failed": 0,
+    "total_skipped": 0,
+    "total_errors": 3,
+    "all_passed": false
+  },
+  "failures": [
+    {
+      "classname": "src.tests.integration.test_auth_flow.TestLogin",
+      "name": "test_login_returns_jwt",
+      "time": "0.234",
+      "type": "ERROR",
+      "message": "failed on setup with 'psycopg2.OperationalError: connection failed'",
+      "traceback": "File \"src/tests/conftest.py\", line 45, in db_session\n    conn = psycopg2.connect(dsn)\nE   psycopg2.OperationalError: connection failed",
+      "suite": "integration"
+    },
+    {
+      "classname": "src.tests.integration.test_auth_flow.TestLogin",
+      "name": "test_login_rejects_bad_password",
+      "time": "0.218",
+      "type": "ERROR",
+      "message": "failed on setup with 'psycopg2.OperationalError: connection failed'",
+      "traceback": "File \"src/tests/conftest.py\", line 45, in db_session\n    conn = psycopg2.connect(dsn)\nE   psycopg2.OperationalError: connection failed",
+      "suite": "integration"
+    },
+    {
+      "classname": "src.tests.integration.test_queue_flow.TestJobLifecycle",
+      "name": "test_submit_and_complete",
+      "time": "0.301",
+      "type": "ERROR",
+      "message": "failed on setup with 'psycopg2.OperationalError: connection failed'",
+      "traceback": "File \"src/tests/conftest.py\", line 45, in db_session\n    conn = psycopg2.connect(dsn)\nE   psycopg2.OperationalError: connection failed",
+      "suite": "integration"
+    }
+  ]
+}

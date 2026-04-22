@@ -23,42 +23,35 @@ All notification tools support these optional parameters:
 
 ## Installation
 
-### 1. Add MCP Server to Claude Code
+### One-Command Setup (Recommended)
 
 ```bash
-claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.py
+$LUPIN_ROOT/src/scripts/install-cosa-voice.sh
 ```
 
-### 2. Configure Environment Variables
+This registers cosa-voice at **user scope** (global) — one registration works in every repo. The MCP server auto-detects the project from your working directory.
 
-Create or update your MCP config file (`~/.claude/cosa_mcp.json`):
+See `src/docs/cosa-voice-onboarding.md` for the full onboarding guide.
 
-```json
-{
-  "mcpServers": {
-    "cosa-voice": {
-      "type": "stdio",
-      "command": "python",
-      "args": ["${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.py"],
-      "env": {
-        "MCP_PROJECT": "lupin",
-        "LUPIN_APP_SERVER_URL": "http://localhost:7999"
-      }
-    }
-  }
-}
+### Manual Registration
+
+```bash
+claude mcp add --scope user --transport stdio \
+  -e "PYTHONPATH=$LUPIN_ROOT/src" \
+  -e "LUPIN_ROOT=$LUPIN_ROOT" \
+  cosa-voice -- "$LUPIN_ROOT/src/cosa/.venv/bin/python" \
+  "$LUPIN_ROOT/src/lupin_mcp/cosa_voice_mcp.py"
 ```
-
-**Important**: `MCP_PROJECT` is set by the config file, not manually by the user.
 
 ## Environment Variables
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `MCP_PROJECT` | Yes | - | Project name (set by MCP config) |
+| `LUPIN_ROOT` | Yes | - | Project root path (set by installer) |
+| `PYTHONPATH` | Yes | - | Must include `$LUPIN_ROOT/src` (set by installer) |
+| `MCP_PROJECT` | No | auto-detected | Optional override — auto-detection from CWD is preferred |
 | `LUPIN_APP_SERVER_URL` | No | `http://localhost:7999` | Lupin server URL |
 | `MCP_DEBUG` | No | - | Enable debug logging |
-| `LUPIN_ROOT` | No | - | Project root path |
 
 ## Usage Examples
 
@@ -136,7 +129,7 @@ Notifications are tagged with a sender ID:
 claude.code@{project}.deepily.ai
 ```
 
-For example, with `MCP_PROJECT=lupin`:
+The project name is auto-detected from your working directory. For example, running Claude Code from the Lupin project directory:
 ```
 claude.code@lupin.deepily.ai
 ```
@@ -152,13 +145,12 @@ This allows the Lupin UI to group notifications by project.
 
 ## Troubleshooting
 
-### MCP_PROJECT not set
+### Tools not available
 
+Run the bootstrapper in check-only mode to diagnose:
+```bash
+$LUPIN_ROOT/src/scripts/install-cosa-voice.sh --check-only
 ```
-Error: MCP_PROJECT environment variable required
-```
-
-**Solution**: Add `"MCP_PROJECT": "your-project"` to your MCP config's env section.
 
 ### Server connection failed
 
@@ -173,12 +165,7 @@ Failed: Connection refused
 
 ### Debug mode
 
-Enable debug logging:
-```json
-{
-  "env": {
-    "MCP_PROJECT": "lupin",
-    "MCP_DEBUG": "1"
-  }
-}
+Set `MCP_DEBUG=1` in your shell environment before starting Claude Code, or add to the MCP registration:
+```bash
+claude mcp add --scope user -e "MCP_DEBUG=1" ...
 ```

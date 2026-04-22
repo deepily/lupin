@@ -80,7 +80,7 @@
     <div class="admin-dashboard-container">
         <!-- Dashboard Header -->
         <div class="dashboard-header">
-            <div class="landing-greeting" id="greeting"></div>
+            <div class="landing-greeting" id="greeting" data-testid="landing-greeting"></div>
             <h1>Lupin</h1>
             <p class="subtitle">Your AI assistant hub</p>
         </div>
@@ -88,11 +88,11 @@
         <!-- Quick Stats -->
         <div class="stats-strip" id="stats-strip">
             <div class="stat-chip">
-                <span class="stat-value" id="stat-time-saved">—</span>
+                <span class="stat-value" id="stat-time-saved" data-testid="landing-stat-time-saved">—</span>
                 <span class="stat-label">Time Saved</span>
             </div>
             <div class="stat-chip">
-                <span class="stat-value" id="stat-replays">—</span>
+                <span class="stat-value" id="stat-replays" data-testid="landing-stat-replays">—</span>
                 <span class="stat-label">Solution Replays</span>
             </div>
         </div>
@@ -113,7 +113,7 @@
                         </div>
                         <h2 class="card-title">Notifications &amp; Q&amp;A</h2>
                         <p class="card-description">Submit questions, run agentic jobs, and view notification queues</p>
-                        <a href="/app/notifications" class="card-link">
+                        <a href="/app/notifications" class="card-link" data-testid="landing-card-notifications">
                             <button class="btn-primary">Open Notifications</button>
                         </a>
                     </div>
@@ -128,7 +128,7 @@
                         </div>
                         <h2 class="card-title">Profile</h2>
                         <p class="card-description">View your account details, roles, and change your password</p>
-                        <a href="/app/auth/profile" class="card-link">
+                        <a href="/app/auth/profile" class="card-link" data-testid="landing-card-profile">
                             <button class="btn-primary">Open Profile</button>
                         </a>
                     </div>
@@ -136,7 +136,7 @@
             </div>
 
             <!-- Admin Section (role-gated) -->
-            <div id="admin-section" style="display: none;">
+            <div id="admin-section" data-testid="landing-admin-section" style="display: none;">
                 <h2 class="section-title">Administration</h2>
                 <div class="admin-tools-grid">
 
@@ -152,7 +152,7 @@
                         </div>
                         <h2 class="card-title">User Management</h2>
                         <p class="card-description">View, edit, and manage user accounts, roles, and permissions</p>
-                        <a href="/app/admin/users" class="card-link">
+                        <a href="/app/admin/users" class="card-link" data-testid="landing-card-users">
                             <button class="btn-primary">Open User Management</button>
                         </a>
                     </div>
@@ -169,7 +169,7 @@
                         </div>
                         <h2 class="card-title">Solution Snapshots</h2>
                         <p class="card-description">Search, view, and manage solution snapshot database entries</p>
-                        <a href="/app/admin/snapshots" class="card-link">
+                        <a href="/app/admin/snapshots" class="card-link" data-testid="landing-card-snapshots">
                             <button class="btn-primary">Open Snapshots</button>
                         </a>
                     </div>
@@ -184,7 +184,7 @@
                         </div>
                         <h2 class="card-title">Decision Ratification</h2>
                         <p class="card-description">Review and approve pending proxy decisions</p>
-                        <a href="/app/admin/proxy-ratify" class="card-link">
+                        <a href="/app/admin/proxy-ratify" class="card-link" data-testid="landing-card-ratify">
                             <button class="btn-primary">Open Ratification Queue</button>
                         </a>
                     </div>
@@ -199,7 +199,7 @@
                         </div>
                         <h2 class="card-title">Trust Dashboard</h2>
                         <p class="card-description">Monitor proxy trust levels, success rates, and circuit breaker status</p>
-                        <a href="/app/admin/proxy-dashboard" class="card-link">
+                        <a href="/app/admin/proxy-dashboard" class="card-link" data-testid="landing-card-trust">
                             <button class="btn-primary">Open Trust Dashboard</button>
                         </a>
                     </div>
@@ -213,7 +213,7 @@
                         </div>
                         <h2 class="card-title">Dev Tools</h2>
                         <p class="card-description">Test pages, diagnostic tools, and development utilities</p>
-                        <a href="/app/admin/dev-tools" class="card-link">
+                        <a href="/app/admin/dev-tools" class="card-link" data-testid="landing-card-dev-tools">
                             <button class="btn-primary">Open Dev Tools</button>
                         </a>
                     </div>

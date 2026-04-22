@@ -1,0 +1,34 @@
+{
+    "profile_name" : "tfe",
+    "description"  : "Auto-approve TestFixExpediter voice gates for CI + live pipeline tests. Session 1cfcdf73 (2026-04-10), step 15.",
+    "sender_ids"   : [ "test_fix_expediter@lupin.deepily.ai" ],
+    "entries" : [
+        {
+            "question_pattern" : "Diagnosis complete\\..*Proceed to proposal phase",
+            "answer"           : "yes",
+            "arg_name"         : "tfe_phase1_proceed",
+            "response_types"   : [ "yes_no" ]
+        },
+        {
+            "question_pattern" : "Select fixes to apply",
+            "answer"           : "__all__",
+            "arg_name"         : "tfe_phase2_select_all",
+            "response_types"   : [ "multiple_choice" ],
+            "notes": "For aggregate-mode multi-select gate: the __all__ sentinel tells the proxy to select every option presented (all proposed fixes across all clusters)."
+        },
+        {
+            "question_pattern" : "Apply fix for .* cluster",
+            "answer"           : "yes",
+            "arg_name"         : "tfe_per_cluster_gate",
+            "response_types"   : [ "yes_no" ],
+            "notes": "Per-cluster mode fallback. Accepts every cluster fix. Only fires when voice_gate_mode=per_cluster."
+        },
+        {
+            "question_pattern" : "Fix '.*' failed verification.*What next",
+            "answer"           : "Accept without tests",
+            "arg_name"         : "tfe_phase3_escalation",
+            "response_types"   : [ "multiple_choice" ],
+            "notes": "Phase 3 fix verification escalation — inherited from shared FixExecutor behavior. Auto-accept to let the pipeline complete; manual review happens in the PR."
+        }
+    ]
+}

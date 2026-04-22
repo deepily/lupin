@@ -29,7 +29,8 @@ if _src_path not in sys.path:
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, drain_and_acknowledge,
-    format_voice_context, enrich_voice_context, build_additional_context
+    format_voice_context, enrich_voice_context, build_additional_context,
+    write_turn_start_marker
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id, resolve_stable_session_id
 
@@ -46,6 +47,9 @@ def main():
 
     # Resolve session_id: payload first (future-proof), then session bridge fallback
     session_id = resolve_stable_session_id( payload.get( "session_id", "" ) ) or get_claude_session_id()
+
+    # Record turn start time for stop hook duration gating
+    write_turn_start_marker( session_id )
 
     # Drain voice buffer and inject as additionalContext
     messages  = drain_and_acknowledge( session_id )

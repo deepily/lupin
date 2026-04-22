@@ -1,10 +1,10 @@
 version: '3.8'
 
 services:
-  # PostgreSQL database for local development
+  # PostgreSQL database server (hosts both lupin_db_dev and lupin_db_test)
   postgres:
     image: postgres:16.3-alpine
-    container_name: lupin-postgres-dev
+    container_name: lupin-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: lupin_db_dev
@@ -17,6 +17,7 @@ services:
       - ./src/conf/long-term-memory/postgresql-dev-data:/var/lib/postgresql/data
       - ./src/scripts/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
       - ./src/scripts/sql/seed_dev_data.sql:/docker-entrypoint-initdb.d/02-seed.sql
+      - ./src/scripts/sql/init-test-db.sql:/docker-entrypoint-initdb.d/03-init-test-db.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U lupin_dev -d lupin_db_dev"]
       interval: 5s
@@ -26,23 +27,144 @@ services:
     networks:
       - lupin-dev-network
 
-  # Optional: pgAdmin for database management
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: lupin-pgadmin
+  # Lupin REST API — Development (port 7999)
+  # Always runs [Lupin: Development] config with lupin_db_dev.
+  # uvicorn --reload enabled for live code changes during development.
+  lupin-rest-dev:
+    image: lupin:0.9.0
+    container_name: lupin-rest-dev
     restart: unless-stopped
-    environment:
-      PGADMIN_DEFAULT_EMAIL: dev@lupin.local
-      PGADMIN_DEFAULT_PASSWORD: admin
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    user: "1001:1001"
     ports:
-      - "5050:80"
+      - "7999:7999"
     volumes:
-      - pgadmin_data:/var/lib/pgadmin
+      - ./src:/var/lupin/src
+      - ./io:/var/lupin/io
+      - ./pytest.ini:/var/lupin/pytest.ini:ro
+      - ./.git:/var/lupin/.git
+      # TFE/BFE worktrees preserved under host project root so operator can
+      # inspect agent commits after Phase 5 even across container rm.
+      # Added 2026-04-18 Session be57a252 alongside auto_cleanup=false flip.
+      - ./.claude/worktrees:/var/lupin/.claude/worktrees
+      - ~/.lora_env:/home/rruiz/.lora_env:ro
+      - ~/.lupin:/home/rruiz/.lupin:ro
+      - ~/.claude/.credentials.json:/home/rruiz/.claude/.credentials.json:ro
+    environment:
+      LUPIN_ROOT: /var/lupin
+      LUPIN_ENV: development
+      LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
+      DB_HOST: lupin-postgres
+      LUPIN_API_URL: http://localhost:7999
+      LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
+      LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
+      LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}
+      # GitHub CLI token pass-through for TFE/BFE Phase 5 (`gh pr create`).
+      # Optional — empty default means no hard requirement if the operator
+      # doesn't have GH_TOKEN set. Phase 5 will fail loudly if auth missing.
+      # Added 2026-04-18 Session be57a252 to pair with preflight probe 6.
+      GH_TOKEN: ${GH_TOKEN:-}
+      CHROME_PATH: /home/rruiz/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome
+      PYTHONUNBUFFERED: 1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     networks:
       - lupin-dev-network
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+
+  # Lupin REST API — Testing (port 8000 on host, 7999 internally)
+  # Always runs [Lupin: Testing] config with lupin_db_test.
+  # uvicorn --reload DISABLED for stable test execution (no deadlock risk).
+  # Companion credentials (admin user + API key) auto-seeded from dev DB
+  # on every startup via seed_test_companions.py.
+  lupin-rest-test:
+    image: lupin:0.9.0
+    container_name: lupin-rest-test
+    restart: unless-stopped
+    user: "1001:1001"
+    command: ["/bin/bash", "/var/lupin/src/scripts/run-fastapi-lupin-test.sh"]
+    ports:
+      - "8000:7999"
+    volumes:
+      - ./src:/var/lupin/src
+      - ./io:/var/lupin/io
+      - ./pytest.ini:/var/lupin/pytest.ini:ro
+      - ./.git:/var/lupin/.git
+      # TFE/BFE worktrees preserved under host project root so operator can
+      # inspect agent commits after Phase 5 even across container rm.
+      # Added 2026-04-18 Session be57a252 alongside auto_cleanup=false flip.
+      - ./.claude/worktrees:/var/lupin/.claude/worktrees
+      - ~/.lora_env:/home/rruiz/.lora_env:ro
+      - ~/.claude/.credentials.json:/home/rruiz/.claude/.credentials.json:ro
+    environment:
+      LUPIN_ROOT: /var/lupin
+      LUPIN_ENV: testing
+      LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
+      DB_HOST: lupin-postgres
+      LUPIN_API_URL: http://localhost:7999
+      LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
+      LUPIN_DEV_EMAIL: ricardo.felipe.ruiz@gmail.com
+      LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
+      LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}
+      # GitHub CLI token pass-through for TFE/BFE Phase 5 (`gh pr create`).
+      # Optional — empty default means no hard requirement if the operator
+      # doesn't have GH_TOKEN set. Phase 5 will fail loudly if auth missing.
+      # Added 2026-04-18 Session be57a252 to pair with preflight probe 6.
+      GH_TOKEN: ${GH_TOKEN:-}
+      CHROME_PATH: /home/rruiz/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome
+      PYTHONUNBUFFERED: 1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - lupin-dev-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Optional: pgAdmin for database management
+  # DISABLED 2026-04-14 (Session 6ae2513c): crash-looping because
+  # PGADMIN_DEFAULT_EMAIL=dev@lupin.local is rejected as non-deliverable.
+  # Not actively used. Re-enable by uncommenting + switching to a real-looking
+  # email (e.g., dev@lupin.dev) if the web GUI is needed.
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   container_name: lupin-pgadmin
+  #   restart: unless-stopped
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: dev@lupin.local
+  #     PGADMIN_DEFAULT_PASSWORD: admin
+  #     PGADMIN_CONFIG_SERVER_MODE: 'False'
+  #   ports:
+  #     - "5050:80"
+  #   volumes:
+  #     - pgadmin_data:/var/lib/pgadmin
+  #   networks:
+  #     - lupin-dev-network
+  #   depends_on:
+  #     - postgres
 
 volumes:
   pgadmin_data:

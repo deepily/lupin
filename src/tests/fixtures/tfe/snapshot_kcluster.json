@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "timestamp": "2026.04.10-at-14:53",
+  "suites_run": ["unit", "integration"],
+  "summary": {
+    "total_passed": 2900,
+    "total_failed": 5,
+    "total_skipped": 0,
+    "total_errors": 0,
+    "all_passed": false
+  },
+  "failures": [
+    {
+      "classname": "src.tests.unit.test_auth.TestTokenRefresh",
+      "name": "test_refresh_returns_new_token",
+      "time": "0.123",
+      "type": "FAILED",
+      "message": "assert 401 == 200",
+      "traceback": "File \"src/cosa/auth/tokens.py\", line 42, in refresh\n    return None\n>   assert response.status_code == 200\nE   assert 401 == 200",
+      "suite": "unit"
+    },
+    {
+      "classname": "src.tests.unit.test_queue.TestTodoQueue",
+      "name": "test_push_increments_size",
+      "time": "0.045",
+      "type": "FAILED",
+      "message": "assert 0 == 1",
+      "traceback": "File \"src/cosa/rest/todo_fifo_queue.py\", line 87, in push\n    pass  # bug: never increments size counter\n>   assert q.size() == 1\nE   assert 0 == 1",
+      "suite": "unit"
+    },
+    {
+      "classname": "src.tests.unit.test_queue.TestTodoQueue",
+      "name": "test_size_decrements_on_pop",
+      "time": "0.052",
+      "type": "FAILED",
+      "message": "assert 1 == 0",
+      "traceback": "File \"src/cosa/rest/todo_fifo_queue.py\", line 87, in push\n    pass\n>   assert q.size() == 0\nE   assert 1 == 0",
+      "suite": "unit"
+    },
+    {
+      "classname": "src.tests.integration.test_websocket.TestAudioWS",
+      "name": "test_audio_stream_connects",
+      "time": "2.134",
+      "type": "FAILED",
+      "message": "ConnectionRefusedError: [Errno 111] Connection refused",
+      "traceback": "File \"src/cosa/rest/routers/websocket.py\", line 205, in audio_endpoint\n    raise ConnectionRefusedError\n>   async with connect(ws_url) as ws:",
+      "suite": "integration"
+    },
+    {
+      "classname": "src.tests.integration.test_websocket.TestAudioWS",
+      "name": "test_audio_stream_auth_request",
+      "time": "1.876",
+      "type": "FAILED",
+      "message": "ConnectionRefusedError: [Errno 111] Connection refused",
+      "traceback": "File \"src/cosa/rest/routers/websocket.py\", line 205, in audio_endpoint\n    raise ConnectionRefusedError\n>   async with connect(ws_url) as ws:",
+      "suite": "integration"
+    }
+  ]
+}

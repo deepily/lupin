@@ -1,0 +1,13 @@
+{
+  "routing_command": "agent router go to deep research",
+  "websocket_id": "unattended-bfe-live",
+  "question": "BFE E2E fixture — known-bad deep_research job (force_failure_mode=code_bug)",
+  "args": {
+    "query": "BFE E2E fixture — deterministic code_bug failure for DeadQueueWatchdog + BFE dispatch validation",
+    "budget": "no limit",
+    "audience": "expert",
+    "audience_context": "none",
+    "dry_run": true,
+    "force_failure_mode": "code_bug"
+  }
+}

@@ -810,7 +810,7 @@ def quick_smoke_test():
         - Returns True if all scenarios pass (or skip)
     """
     test = ApproachDUserMessageSmokeTest()
-    return test.run()
+    return test.run( argv=[] )
 
 
 def test_approach_d_user_messages():

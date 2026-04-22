@@ -7,6 +7,7 @@ Validates user-specific job retrieval and filtering logic.
 
 import pytest
 from cosa.rest.fifo_queue import FifoQueue
+from cosa.rest.job_state import JobState
 
 
 class MockJob:
@@ -40,11 +41,15 @@ class MockJob:
         self.answer                = f"Answer to {content}"
         self.answer_conversational = f"Here's the answer to {content}"
 
-        # Status tracking
+        # State tracking
         self.job_type              = "MockJob"
         self.is_cache_hit          = False
-        self.status                = "pending"
+        self.state                 = JobState.PENDING
         self.error                 = None
+
+        # Scheduling attributes (CJ Flow)
+        self.scheduled_at          = None
+        self.monopolize            = False
 
     def do_all( self ):
         """Execute the job (mock implementation)."""

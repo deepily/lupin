@@ -66,12 +66,12 @@ def verify_lupin_server():
         if response.status_code == 200:
             print( "\n✓ Lupin server accessible on port 7999" )
             return True
-    except requests.exceptions.ConnectionError:
+    except ( requests.exceptions.ConnectionError, requests.exceptions.Timeout ):
         pass
 
     pytest.skip(
         "\n" + "=" * 60 + "\n"
-        "Lupin server not running on port 7999\n\n"
+        "Lupin server not running or unhealthy on port 7999\n\n"
         "Start with: ./src/scripts/run-fastapi-lupin.sh\n"
         + "=" * 60 + "\n"
     )

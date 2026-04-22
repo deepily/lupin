@@ -231,9 +231,9 @@ class TestNonNotificationEvents:
     def test_job_state_transition_ignored( self, client, msg_queue ):
         """job_state_transition events are ignored."""
         asyncio.run( client._on_event( "job_state_transition", {
-            "job_id"    : "swe-abc123",
-            "from_queue": "todo",
-            "to_queue"  : "run",
+            "job_id"     : "swe-abc123",
+            "from_state" : "queued",
+            "to_state"   : "running",
         } ) )
 
         assert msg_queue.empty()

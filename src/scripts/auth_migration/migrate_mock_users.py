@@ -102,10 +102,11 @@ def migrate_users( debug=True ):
 
     du.print_banner( "JWT Authentication Migration - Mock to JWT", prepend_nl=True )
 
-    # Define users to migrate
+    # Define users to migrate (intentional hardcoded emails — these are the canonical seed users)
+    admin_email = os.environ.get( "LUPIN_DEV_EMAIL", "ricardo.felipe.ruiz@gmail.com" )
     users_to_migrate = [
         {
-            "email" : "ricardo.felipe.ruiz@gmail.com",
+            "email" : admin_email,
             "roles" : [ "user", "admin" ]  # SUPERUSER!
         },
         {
@@ -213,7 +214,7 @@ def migrate_users( debug=True ):
     print()
     print( "Next steps:")
     print( "   1. Open browser: http://localhost:7999/static/html/auth/login.html")
-    print( "   2. Login with ricardo.felipe.ruiz@gmail.com + password above")
+    print( f"   2. Login with {admin_email} + password above" )
     print( "   3. Go to profile → Change password")
     print( "   4. Logout and login with YOUR new password")
     print()

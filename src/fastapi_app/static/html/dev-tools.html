@@ -63,26 +63,35 @@
             <p class="subtitle">Test pages, diagnostic tools, and development utilities</p>
         </div>
 
+        <!-- Peer Queue Monitoring -->
+        <h3 class="dev-section-title">Peer Queue Monitoring</h3>
+        <div class="dev-tools-grid">
+            <a href="/app/admin/peer-queue-watch" class="dev-card" data-testid="devtools-link-peer-queue-watch">
+                <h4 class="dev-card-title">Peer Queue Watch</h4>
+                <p class="dev-card-desc">Monitor run/todo queues on a peer Lupin server (test or dev) and get a high-priority voice notification when they drain. Watcher runs server-side.</p>
+            </a>
+        </div>
+
         <!-- WebSocket & Session Tests -->
         <h3 class="dev-section-title">WebSocket &amp; Session</h3>
         <div class="dev-tools-grid">
-            <a href="/static/html/test/diagnostic-websocket-test.html" class="dev-card">
+            <a href="/static/html/test/diagnostic-websocket-test.html" class="dev-card" data-testid="devtools-link-ws-diagnostics">
                 <h4 class="dev-card-title">WebSocket Diagnostics</h4>
                 <p class="dev-card-desc">Comprehensive WebSocket connection diagnostics and message inspector</p>
             </a>
-            <a href="/static/html/test/test_event_subscription.html" class="dev-card">
+            <a href="/static/html/test/test_event_subscription.html" class="dev-card" data-testid="devtools-link-event-subscription">
                 <h4 class="dev-card-title">Event Subscription</h4>
                 <p class="dev-card-desc">Test WebSocket event subscription and filtering</p>
             </a>
-            <a href="/static/html/test/test_session_persistence.html" class="dev-card">
+            <a href="/static/html/test/test_session_persistence.html" class="dev-card" data-testid="devtools-link-session-persistence">
                 <h4 class="dev-card-title">Session Persistence</h4>
                 <p class="dev-card-desc">Verify localStorage session persistence across reloads</p>
             </a>
-            <a href="/static/html/test/test_session_cleanup.html" class="dev-card">
+            <a href="/static/html/test/test_session_cleanup.html" class="dev-card" data-testid="devtools-link-session-cleanup">
                 <h4 class="dev-card-title">Session Cleanup</h4>
                 <p class="dev-card-desc">Test automatic session cleanup and expiry</p>
             </a>
-            <a href="/static/html/test/test_heartbeat_cleanup.html" class="dev-card">
+            <a href="/static/html/test/test_heartbeat_cleanup.html" class="dev-card" data-testid="devtools-link-heartbeat-cleanup">
                 <h4 class="dev-card-title">Heartbeat Cleanup</h4>
                 <p class="dev-card-desc">Verify WebSocket heartbeat mechanism and dead connection removal</p>
             </a>
@@ -91,39 +100,39 @@
         <!-- Audio & TTS Tests -->
         <h3 class="dev-section-title">Audio &amp; TTS</h3>
         <div class="dev-tools-grid">
-            <a href="/static/html/test/test-audio.html" class="dev-card">
+            <a href="/static/html/test/test-audio.html" class="dev-card" data-testid="devtools-link-audio-test">
                 <h4 class="dev-card-title">Audio Test</h4>
                 <p class="dev-card-desc">Basic audio recording and playback test</p>
             </a>
-            <a href="/static/html/test/test-audio-hybrid.html" class="dev-card">
+            <a href="/static/html/test/test-audio-hybrid.html" class="dev-card" data-testid="devtools-link-audio-hybrid">
                 <h4 class="dev-card-title">Audio Hybrid Mode</h4>
                 <p class="dev-card-desc">Test hybrid audio mode combining WebSocket and REST</p>
             </a>
-            <a href="/static/html/test/test_tts_websocket_routing.html" class="dev-card">
+            <a href="/static/html/test/test_tts_websocket_routing.html" class="dev-card" data-testid="devtools-link-tts-routing">
                 <h4 class="dev-card-title">TTS WebSocket Routing</h4>
                 <p class="dev-card-desc">Verify TTS audio routing via WebSocket channels</p>
             </a>
-            <a href="/static/html/test/test-hybrid-tts-module.html" class="dev-card">
+            <a href="/static/html/test/test-hybrid-tts-module.html" class="dev-card" data-testid="devtools-link-tts-hybrid">
                 <h4 class="dev-card-title">Hybrid TTS Module</h4>
                 <p class="dev-card-desc">Test the hybrid TTS module integration</p>
             </a>
-            <a href="/static/html/test/test-hybrid-tts-cache.html" class="dev-card">
+            <a href="/static/html/test/test-hybrid-tts-cache.html" class="dev-card" data-testid="devtools-link-tts-cache">
                 <h4 class="dev-card-title">TTS Cache Test</h4>
                 <p class="dev-card-desc">Verify TTS audio caching and cache hit/miss behavior</p>
             </a>
-            <a href="/static/html/test/experimental-tts.html" class="dev-card">
+            <a href="/static/html/test/experimental-tts.html" class="dev-card" data-testid="devtools-link-tts-experimental">
                 <h4 class="dev-card-title">Experimental TTS</h4>
                 <p class="dev-card-desc">Experimental text-to-speech features and prototypes</p>
             </a>
-            <a href="/static/html/test/chunk-sequencing-test.html" class="dev-card">
+            <a href="/static/html/test/chunk-sequencing-test.html" class="dev-card" data-testid="devtools-link-chunk-sequencing">
                 <h4 class="dev-card-title">Chunk Sequencing</h4>
                 <p class="dev-card-desc">Test audio chunk sequencing and ordering</p>
             </a>
-            <a href="/static/html/test/pcm-streaming-demo.html" class="dev-card">
+            <a href="/static/html/test/pcm-streaming-demo.html" class="dev-card" data-testid="devtools-link-pcm-streaming">
                 <h4 class="dev-card-title">PCM Streaming Demo</h4>
                 <p class="dev-card-desc">Raw PCM audio streaming demonstration</p>
             </a>
-            <a href="/static/html/test/notification_sound_tester.html" class="dev-card">
+            <a href="/static/html/test/notification_sound_tester.html" class="dev-card" data-testid="devtools-link-notification-sounds">
                 <h4 class="dev-card-title">Notification Sounds</h4>
                 <p class="dev-card-desc">Test notification sound alerts and priority levels</p>
             </a>

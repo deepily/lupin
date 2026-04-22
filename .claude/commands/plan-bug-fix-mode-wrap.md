@@ -19,11 +19,21 @@
 
 `/plan-bug-fix-mode-wrap` - Wrap up a completed bug fix with documentation and commit
 
-**Natural language triggers**:
-- "Bug fixed, wrap it"
-- "Bug fixed, update all appropriate documentation and commit"
-- "Done with the fix, wrap up"
+**Natural language triggers** (any of these should invoke THIS command):
+- "Wrap up this bug"
 - "Wrap this bug"
+- "Bug fixed, wrap it"
+- "Let's wrap up this bug"
+- "Done with the fix, wrap up"
+- "Bug fixed, update all appropriate documentation and commit"
+- "Wrap the fix"
+- "Commit this fix"
+
+**⚠️ DISAMBIGUATION — do NOT confuse with `/plan-session-end`**:
+- This command wraps a **single bug fix** (document + commit one fix, stay in session)
+- `/plan-session-end` ends the **entire work session** (history archive, full commit, session close)
+- Key signal: if the user mentions "bug", "fix", or "this" → use THIS command
+- Key signal: if the user mentions "session", "done for the day", "calling it" → use `/plan-session-end`
 
 ---
 

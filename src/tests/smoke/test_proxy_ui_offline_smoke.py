@@ -223,11 +223,11 @@ class TestRatifyHtmlStructure:
         assert len( options ) == 5, f"Expected 5 action options, got {len( options )}"
 
     def test_decisions_table_headers( self ):
-        """Decisions table has 8 column headers."""
+        """Decisions table has 9 column headers (checkbox, source, category, question, action, trust, confidence, age, actions)."""
         thead_block = re.search( r'<thead>(.+?)</thead>', self.html, re.DOTALL )
         assert thead_block, "Decisions table thead not found"
         headers = re.findall( r'<th', thead_block.group( 1 ) )
-        assert len( headers ) == 8, f"Expected 8 table headers, got {len( headers )}"
+        assert len( headers ) == 9, f"Expected 9 table headers, got {len( headers )}"
 
     def test_bulk_actions_present( self ):
         """Bulk actions bar with approve/reject buttons exists."""

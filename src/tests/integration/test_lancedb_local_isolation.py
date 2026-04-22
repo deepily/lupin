@@ -63,7 +63,7 @@ class TestLanceDBLocalIsolation:
     def local_config(self, temp_db_dir):
         """Configuration for local-backed manager."""
         return {
-            "storage_backend": "local",
+            "storage backend": "local",
             "db_path": temp_db_dir,
             "table_name": "solution_snapshots"
         }
@@ -307,7 +307,7 @@ def run_standalone_tests():
     db_path = os.path.join( temp_dir, "test.lancedb" )
 
     local_config = {
-        "storage_backend": "local",
+        "storage backend": "local",
         "db_path": db_path,
         "table_name": "solution_snapshots"
     }

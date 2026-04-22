@@ -45,6 +45,9 @@ src_path = os.path.join( lupin_root, 'src' )
 if src_path not in sys.path:
     sys.path.insert( 0, src_path )
 
+# Reduce CUDA memory fragmentation (prevents periodic OOM on Whisper inference)
+os.environ.setdefault( "PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True" )
+
 import torch
 from transformers import pipeline
 
@@ -60,12 +63,21 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, podcast_generator, deep_research_to_podcast, swe_team, decision_proxy, pages
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
+from cosa.rest.job_persistence import mark_interrupted_jobs
 
 # Suppress noisy LanceDB warnings
 import logging
 logging.getLogger( "lance" ).setLevel( logging.ERROR )
+
+def _log_vram( label ):
+    """Log CUDA VRAM snapshot after model load."""
+    if torch.cuda.is_available():
+        alloc    = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        print( f"  [VRAM] {label}: Allocated {alloc:.2f} GiB, Reserved {reserved:.2f} GiB" )
+
 
 # Global variables
 config_mgr = None
@@ -226,12 +238,18 @@ async def clock_loop():
         asyncio.CancelledError: When task is cancelled during shutdown
         Exception: For any other errors during clock updates
     """
+    lupin_env = os.environ.get( "LUPIN_ENV", "" ).lower()
+    if lupin_env in [ "test", "testing" ]:
+        env_label = "TEST"
+    else:
+        env_label = "DEVELOPMENT"
+
     print( "[CLOCK] Starting clock update loop..." )
     while True:
         try:
             # Emit time update to all connected WebSocket clients
             current_time = du.get_current_time( format="%Y-%m-%d @ %H:%M" )
-            await websocket_manager.async_emit( 'sys_time_update', { 'date': current_time } )
+            await websocket_manager.async_emit( 'sys_time_update', { 'date': current_time, 'env_label': env_label } )
             
             # Debug logging (only if verbose mode)
             if app_debug and app_verbose:
@@ -393,9 +411,9 @@ async def lifespan( app: FastAPI ):
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
     # Get configuration flags (needed for debug output below)
-    app_debug   = config_mgr.get( "app_debug",   default=False, return_type="boolean" )
-    app_verbose = config_mgr.get( "app_verbose", default=False, return_type="boolean" )
-    app_silent  = config_mgr.get( "app_silent",  default=True,  return_type="boolean" )
+    app_debug   = config_mgr.get( "app debug",   default=False, return_type="boolean" )
+    app_verbose = config_mgr.get( "app verbose", default=False, return_type="boolean" )
+    app_silent  = config_mgr.get( "app silent",  default=True,  return_type="boolean" )
 
     # Suppress LanceDB cosmetic warnings if configured
     # These warnings are non-functional - queries execute correctly regardless
@@ -444,7 +462,7 @@ async def lifespan( app: FastAPI ):
             
     else:
         # # Use file-based backend (default)
-        # path_to_snapshots_dir_wo_root = config_mgr.get( "path_to_snapshots_dir_wo_root" )
+        # path_to_snapshots_dir_wo_root = config_mgr.get( "path to snapshots dir wo root" )
         # path_to_snapshots = du.get_project_root() + path_to_snapshots_dir_wo_root
         #
         # config = {"path": path_to_snapshots}
@@ -482,26 +500,62 @@ async def lifespan( app: FastAPI ):
     #   - production: Cloud SQL (automatic schema creation via Alembic migrations)
     print( "[AUTH] Using PostgreSQL authentication database" )
 
-    # Load STT model on startup
-    global whisper_pipeline
-    print( "Loading distill whisper engine... ", end="" )
-    whisper_pipeline = await load_stt_model()
-    print( "Done!" )
+    # CJ Flow Persistence: Mark in-flight jobs as interrupted, preserve scheduled jobs
+    try:
+        counts = mark_interrupted_jobs()
+        total_interrupted = counts.get( "running", 0 ) + counts.get( "pending_interrupted", 0 )
+        preserved         = counts.get( "pending_preserved", 0 )
+        if total_interrupted > 0 or preserved > 0:
+            print( f"[CJ-PERSIST] Startup recovery: {total_interrupted} interrupted, {preserved} scheduled preserved" )
+        else:
+            print( "[CJ-PERSIST] No interrupted or scheduled jobs found" )
+    except Exception as e:
+        print( f"[WARN] CJ Flow startup recovery failed: {e}" )
 
-    # Load local embedding models on startup (claim VRAM before vLLM)
+    # ===================================================================
+    # GPU Model Loading (smallest → largest to minimize CUDA fragmentation)
+    # ===================================================================
+
+    # 1. CodeRankEmbed — Load + multi-batch warmup
     from cosa.memory.local_embedding_engine import get_code_engine, get_prose_engine
 
     print( "Loading CodeRankEmbed embedding engine... ", end="" )
     code_engine = get_code_engine( debug=app_debug, verbose=app_verbose )
-    code_engine.encode_code( [ "warmup" ] )
+    code_engine.encode_code( [ "def hello(): return 'world'" ] )
+    code_engine.encode_query( [ "How do I sort a list in Python?" ] )
+    code_engine.encode_code( [ "import os\nimport sys\n\ndef main():\n    path = os.getcwd()\n    print( path )\n    return 0" ] )
     print( "Done!" )
+    _log_vram( "CodeRankEmbed" )
 
+    # 2. Prose Embedding — Load + multi-batch warmup
     print( "Loading nomic-embed-text-v1.5 embedding engine... ", end="" )
     prose_engine = get_prose_engine( debug=app_debug, verbose=app_verbose )
-    prose_engine.encode_query( [ "warmup" ] )
+    prose_engine.encode_query( [ "What is the meaning of life?" ] )
+    prose_engine.encode_document( [ "The quick brown fox jumps over the lazy dog. This is a longer document to exercise memory allocation patterns." ] )
+    prose_engine.encode_query( [ "Explain quantum computing in simple terms" ] )
     print( "Done!" )
+    _log_vram( "Prose Embedding" )
 
-    # Initialize Prediction Engine singleton (Universal Decision Proxy)
+    # 3. Whisper STT — Load + warmup transcription (LAST, largest GPU footprint)
+    global whisper_pipeline
+    print( "Loading distill whisper engine... ", end="" )
+    try:
+        whisper_pipeline = await load_stt_model()
+        # Warmup: transcribe audio to establish stable CUDA footprint
+        warmup_path = du.get_project_root() + "/src/conf/warmup/whisper-warmup-85s.mp3"
+        if os.path.exists( warmup_path ):
+            whisper_pipeline( warmup_path, chunk_length_s=30, stride_length_s=5, return_timestamps=False )
+            print( "Done! (with warmup)" )
+        else:
+            print( "Done! (no warmup file)" )
+    except Exception as e:
+        whisper_pipeline = None
+        print( "FAILED!" )
+        print( f"[WARN] Whisper STT model failed to load: {e}" )
+        print( "[WARN] STT endpoints will return 503. All other endpoints remain functional." )
+    _log_vram( "Whisper" )
+
+    # 4. Prediction Engine — no GPU model, just initialization
     from cosa.agents.prediction_engine import get_prediction_engine
     prediction_engine = get_prediction_engine( config_mgr=config_mgr, debug=app_debug )
     print( f"[PREDICTION] Prediction engine initialized (enabled={prediction_engine.enabled})" )
@@ -531,7 +585,50 @@ async def lifespan( app: FastAPI ):
     print( "[CONSUMER] Starting todo-producer-run-consumer thread..." )
     consumer_thread = start_todo_producer_run_consumer_thread( jobs_todo_queue, jobs_run_queue )
     print( "[CONSUMER] Todo-producer-run-consumer thread started" )
-    
+
+    # Initialize repair tracker + both queue watchdogs (BFE + TFE) via unified facade
+    from cosa.rest.watchdogs import init_watchdogs
+    from cosa.rest.repair_attempt_tracker import init_tracker
+    init_tracker( config_mgr, debug=app_debug )
+    init_watchdogs( config_mgr, jobs_todo_queue, debug=app_debug )
+
+    # Restore scheduled jobs that survived the restart (preserved by mark_interrupted_jobs)
+    try:
+        from cosa.rest.job_persistence import get_restorable_jobs
+        from cosa.rest.agentic_job_factory import create_agentic_job
+
+        restorable = get_restorable_jobs()
+        for job_data in restorable:
+            routing_cmd = job_data[ "routing_command" ]
+            if not routing_cmd:
+                print( f"[CJ-PERSIST] Cannot restore {job_data[ 'id_hash' ]}: no routing_command" )
+                continue
+
+            job = create_agentic_job(
+                command    = routing_cmd,
+                args_dict  = job_data.get( "metadata_json", {} ),
+                user_id    = job_data[ "user_id" ],
+                user_email = job_data[ "user_email" ],
+                session_id = job_data[ "session_id" ],
+                debug      = app_debug,
+            )
+            if job is None:
+                print( f"[CJ-PERSIST] Cannot restore {job_data[ 'id_hash' ]}: factory returned None" )
+                continue
+
+            job.scheduled_at = job_data[ "scheduled_at" ]
+            if job_data.get( "monopolize" ):
+                job.monopolize = True
+
+            jobs_todo_queue.push( job )
+            print( f"[CJ-PERSIST] Restored scheduled job: {job_data[ 'id_hash' ]} "
+                   f"(type={job_data[ 'job_type' ]}, scheduled_at={job_data[ 'scheduled_at' ]})" )
+
+        if restorable:
+            print( f"[CJ-PERSIST] Restored {len( restorable )} scheduled job(s)" )
+    except Exception as e:
+        print( f"[WARN] Scheduled job restoration failed: {e}" )
+
     print( f"FastAPI startup complete at {datetime.now()}" )
     
     yield
@@ -585,6 +682,14 @@ async def lifespan( app: FastAPI ):
         else:
             print( "[CONSUMER] Todo-producer-run-consumer thread stopped successfully" )
     
+    # Cancel any active peer-queue watchers
+    try:
+        print( "[PEER-WATCH] Cancelling active peer-queue watchers..." )
+        await peer.cancel_all_watchers_on_shutdown()
+        print( "[PEER-WATCH] Peer-queue watchers cancelled" )
+    except Exception as e:
+        print( f"[PEER-WATCH] Error cancelling watchers: {e}" )
+
     # Add any other cleanup code here if needed
 
 app = FastAPI(
@@ -653,10 +758,15 @@ app.include_router(deep_research.router)
 app.include_router(io_files.router)
 app.include_router(mock_job.router)
 app.include_router(podcast_generator.router)
+app.include_router(presentation_generator.router)
 app.include_router(deep_research_to_podcast.router)
+app.include_router(deep_research_to_presentation.router)
 app.include_router(swe_team.router)
+app.include_router(bug_fix_expediter.router)
+app.include_router(test_suite.router)
 app.include_router(decision_proxy.router)
 app.include_router(pages.router)
+app.include_router(peer.router)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -683,8 +793,8 @@ async def load_stt_model():
         KeyError: If required config values are missing
     """
     torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-    stt_device_id = config_mgr.get( "stt_device_id", default="cuda:0" )
-    stt_model_id = config_mgr.get( "stt_model_id" )
+    stt_device_id = config_mgr.get( "stt device id", default="cuda:0" )
+    stt_model_id = config_mgr.get( "stt model id" )
     
     pipe = pipeline(
         "automatic-speech-recognition",
@@ -702,7 +812,7 @@ if __name__ == "__main__":
 
     # Detect environment: disable reload for test and production, enable for local dev
     lupin_env = os.environ.get( "LUPIN_ENV", "" ).lower()
-    is_production_or_test = lupin_env in ["production", "test"]
+    is_production_or_test = lupin_env in ["production", "test", "testing"]
 
     uvicorn.run(
         "fastapi_app.main:app",

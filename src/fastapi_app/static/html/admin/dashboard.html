@@ -18,13 +18,13 @@
         <!-- Page Header -->
         <header class="page-header">
             <div class="breadcrumb">
-                <a href="/app">Home</a>
+                <a href="/app" data-testid="admin-dash-breadcrumb-home">Home</a>
                 <span class="separator">></span>
                 <span class="current">Admin</span>
             </div>
             <div class="user-info">
-                <span class="user-email" id="userEmail">Loading...</span>
-                <button id="logoutBtn" class="btn-secondary">Logout</button>
+                <span class="user-email" id="userEmail" data-testid="admin-dash-user-email">Loading...</span>
+                <button id="logoutBtn" data-testid="admin-dash-logout-btn" class="btn-secondary">Logout</button>
             </div>
         </header>
 
@@ -48,7 +48,7 @@
                 </div>
                 <h2 class="card-title">User Management</h2>
                 <p class="card-description">View, edit, and manage user accounts, roles, and permissions</p>
-                <a href="/app/admin/users" class="card-link">
+                <a href="/app/admin/users" class="card-link" data-testid="admin-dash-card-users">
                     <button class="btn-primary">Open User Management</button>
                 </a>
             </div>
@@ -65,7 +65,7 @@
                 </div>
                 <h2 class="card-title">Solution Snapshots</h2>
                 <p class="card-description">Search, view, and manage solution snapshot database entries</p>
-                <a href="/app/admin/snapshots" class="card-link">
+                <a href="/app/admin/snapshots" class="card-link" data-testid="admin-dash-card-snapshots">
                     <button class="btn-primary">Open Snapshots</button>
                 </a>
             </div>
@@ -80,7 +80,7 @@
                 </div>
                 <h2 class="card-title">Decision Ratification</h2>
                 <p class="card-description">Review and approve pending proxy decisions. See what the AI decided and ratify or reject.</p>
-                <a href="/app/admin/proxy-ratify" class="card-link">
+                <a href="/app/admin/proxy-ratify" class="card-link" data-testid="admin-dash-card-ratify">
                     <button class="btn-primary">Open Ratification Queue</button>
                 </a>
             </div>
@@ -95,7 +95,7 @@
                 </div>
                 <h2 class="card-title">Trust Dashboard</h2>
                 <p class="card-description">Monitor proxy trust levels, success rates, and circuit breaker status across all categories.</p>
-                <a href="/app/admin/proxy-dashboard" class="card-link">
+                <a href="/app/admin/proxy-dashboard" class="card-link" data-testid="admin-dash-card-trust">
                     <button class="btn-primary">Open Trust Dashboard</button>
                 </a>
             </div>

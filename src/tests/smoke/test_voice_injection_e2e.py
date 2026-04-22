@@ -64,7 +64,9 @@ def test_e2e_voice_injection():
              patch( "sys.stdin", io.StringIO( json.dumps( payload ) ) ), \
              patch( "sys.stdout", captured ), \
              patch( "lupin_cli.claude_code.hooks.lib.hook_common.log_payload" ), \
-             patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_claude_session_id",
+             patch( "lupin_cli.claude_code.hooks.user_prompt_submit.resolve_stable_session_id",
+                    return_value=session_id ), \
+             patch( "lupin_cli.claude_code.hooks.user_prompt_submit.get_claude_session_id",
                     return_value=session_id ):
             try:
                 user_prompt_submit.main()

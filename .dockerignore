@@ -3,6 +3,21 @@ src/conf/long-term-memory/postgresql-dev-data
 src/conf/long-term-memory/postgresql-dev-data/**
 src/conf/long-term-memory/*.lancedb.backup-*
 
+# Runtime bind-mount dirs (container writes here; never COPY'd into image)
+# Excluded to avoid "permission denied" on container-owned files during build context send.
+io/
+io/**
+src/rnd/
+src/rnd/**
+src/tests/
+src/tests/**
+src/lupin-plugin-firefox/
+src/lupin-plugin-firefox/**
+src/lupin-mobile/
+src/lupin-mobile/**
+src/ephemera/
+src/ephemera/**
+
 # Python cache
 __pycache__
 *.pyc
@@ -11,26 +26,37 @@ __pycache__
 .Python
 
 # Virtual environments
+# Bare-name patterns match only at the root; use **/ for nested venvs
+# (e.g., src/cosa/.venv is a host-only 8.6 GB venv never used in the image).
 .venv
 venv/
 ENV/
 env/
+**/.venv/
+**/.venv
+**/venv/
 
-# IDE
+# IDE (top-level + nested)
 .vscode/
 .idea/
 *.swp
 *.swo
+**/.idea/
+**/.vscode/
+**/.claude/
 
-# Git
+# Git (top-level + any nested repos like src/cosa/.git)
 .git/
 .gitignore
+**/.git/
+**/.git
 
-# Testing
+# Testing (top-level + nested)
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
+**/.pytest_cache/
 
 # Build artifacts
 *.egg-info/

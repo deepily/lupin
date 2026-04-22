@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peer Queue Watch — Lupin Admin</title>
+
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+    <link rel="stylesheet" href="/static/html/admin/css/admin-dashboard.css">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
+    <style>
+        .pqw-container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        .pqw-panel {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+
+        .pqw-panel h2 {
+            margin: 0 0 16px 0;
+            font-size: 16px;
+            color: #111827;
+        }
+
+        .pqw-controls {
+            display: grid;
+            grid-template-columns: repeat( auto-fit, minmax( 180px, 1fr ) );
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .pqw-controls label {
+            display: flex;
+            flex-direction: column;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .pqw-controls input,
+        .pqw-controls select {
+            margin-top: 4px;
+            padding: 6px 8px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .pqw-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        .pqw-buttons button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .pqw-btn-start {
+            background: #10b981;
+            color: white;
+        }
+        .pqw-btn-start:hover  { background: #059669; }
+        .pqw-btn-start:disabled { background: #d1d5db; cursor: not-allowed; }
+
+        .pqw-btn-stop {
+            background: #ef4444;
+            color: white;
+        }
+        .pqw-btn-stop:hover { background: #dc2626; }
+        .pqw-btn-stop:disabled { background: #d1d5db; cursor: not-allowed; }
+
+        .pqw-status {
+            display: grid;
+            grid-template-columns: repeat( auto-fit, minmax( 140px, 1fr ) );
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .pqw-stat {
+            background: #f9fafb;
+            padding: 12px;
+            border-radius: 4px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .pqw-stat-label {
+            font-size: 11px;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .pqw-stat-value {
+            font-size: 22px;
+            font-weight: 600;
+            color: #111827;
+            margin-top: 4px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .pqw-stat-value.drained {
+            color: #10b981;
+        }
+
+        .pqw-stat-value.running {
+            color: #6366f1;
+        }
+
+        .pqw-stat-value.error {
+            color: #ef4444;
+        }
+
+        .pqw-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 6px;
+            background: #9ca3af;
+        }
+        .pqw-indicator.active { background: #10b981; box-shadow: 0 0 8px #10b98180; }
+
+        .pqw-log {
+            max-height: 240px;
+            overflow-y: auto;
+            background: #111827;
+            color: #e5e7eb;
+            padding: 12px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .pqw-log-entry {
+            margin: 0 0 2px 0;
+        }
+        .pqw-log-entry.drain { color: #10b981; font-weight: bold; }
+        .pqw-log-entry.error { color: #f87171; }
+    </style>
+</head>
+<body>
+    <div class="admin-dashboard-container">
+        <!-- Page Header -->
+        <header class="page-header">
+            <div class="breadcrumb">
+                <a href="/app">Home</a>
+                <span class="separator">&gt;</span>
+                <a href="/app/admin">Admin</a>
+                <span class="separator">&gt;</span>
+                <a href="/app/admin/dev-tools">Dev Tools</a>
+                <span class="separator">&gt;</span>
+                <span class="current">Peer Queue Watch</span>
+            </div>
+            <div class="user-info">
+                <span class="user-email" id="userEmail">Loading...</span>
+                <button id="logoutBtn" class="btn-secondary">Logout</button>
+            </div>
+        </header>
+
+        <div class="dashboard-header">
+            <h1>Peer Queue Watch</h1>
+            <p class="subtitle">Monitor the run/todo queues on a peer Lupin server and get a high-priority voice notification when they drain. Watcher runs server-side — close this tab and the alert still fires.</p>
+        </div>
+
+        <div class="pqw-container">
+            <!-- Controls -->
+            <div class="pqw-panel">
+                <h2>Controls</h2>
+                <div class="pqw-controls">
+                    <label>
+                        Peer host
+                        <select id="pqw-host" data-testid="pqw-host">
+                            <!-- Populated from allowed hosts whitelist -->
+                        </select>
+                    </label>
+                    <label>
+                        Signal
+                        <select id="pqw-signal" data-testid="pqw-signal">
+                            <option value="run+todo">run + todo (both drained)</option>
+                            <option value="run">run only</option>
+                        </select>
+                    </label>
+                    <label>
+                        Interval (seconds)
+                        <input type="number" id="pqw-interval" min="10" max="600" value="60" data-testid="pqw-interval">
+                    </label>
+                    <label>
+                        Stable-for (consecutive zero polls)
+                        <input type="number" id="pqw-stable-for" min="1" max="10" value="2" data-testid="pqw-stable-for">
+                    </label>
+                </div>
+                <div class="pqw-buttons">
+                    <button id="pqw-start-btn" class="pqw-btn-start" data-testid="pqw-start">Start Watcher</button>
+                    <button id="pqw-stop-btn" class="pqw-btn-stop" data-testid="pqw-stop" disabled>Stop Watcher</button>
+                </div>
+            </div>
+
+            <!-- Status -->
+            <div class="pqw-panel">
+                <h2><span class="pqw-indicator" id="pqw-indicator"></span>Status</h2>
+                <div class="pqw-status">
+                    <div class="pqw-stat">
+                        <div class="pqw-stat-label">State</div>
+                        <div class="pqw-stat-value" id="pqw-state">inactive</div>
+                    </div>
+                    <div class="pqw-stat">
+                        <div class="pqw-stat-label">Host</div>
+                        <div class="pqw-stat-value" id="pqw-host-val" style="font-size: 14px;">—</div>
+                    </div>
+                    <div class="pqw-stat">
+                        <div class="pqw-stat-label">Run jobs</div>
+                        <div class="pqw-stat-value" id="pqw-run-val">—</div>
+                    </div>
+                    <div class="pqw-stat">
+                        <div class="pqw-stat-label">Todo jobs</div>
+                        <div class="pqw-stat-value" id="pqw-todo-val">—</div>
+                    </div>
+                    <div class="pqw-stat">
+                        <div class="pqw-stat-label">Consecutive zeros</div>
+                        <div class="pqw-stat-value" id="pqw-zero-val">0</div>
+                    </div>
+                    <div class="pqw-stat">
+                        <div class="pqw-stat-label">Last poll</div>
+                        <div class="pqw-stat-value" id="pqw-last-poll" style="font-size: 12px;">—</div>
+                    </div>
+                </div>
+                <div id="pqw-error" style="color: #ef4444; margin-top: 12px; font-size: 13px; display: none;"></div>
+            </div>
+
+            <!-- Log -->
+            <div class="pqw-panel">
+                <h2>Event Log</h2>
+                <div class="pqw-log" id="pqw-log"></div>
+            </div>
+        </div>
+
+        <footer class="dashboard-footer">
+            <p>Lupin Peer Queue Watch</p>
+        </footer>
+    </div>
+
+    <script src="/static/js/lupin-nav.js" defer></script>
+    <script src="/static/html/auth/js/auth.js"></script>
+    <script src="/static/html/admin/js/peer-queue-watch.js"></script>
+</body>
+</html>

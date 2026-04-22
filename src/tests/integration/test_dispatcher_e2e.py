@@ -80,12 +80,12 @@ def verify_lupin_server():
         if response.status_code == 200:
             print( "\n✓ Lupin server accessible on port 7999" )
             return True
-    except requests.exceptions.ConnectionError:
+    except ( requests.exceptions.ConnectionError, requests.exceptions.Timeout ):
         pass
 
     pytest.skip(
         "\n" + "="*60 + "\n"
-        "Lupin server not running on port 7999\n\n"
+        "Lupin server not running or unhealthy on port 7999\n\n"
         "Start with: ./src/scripts/run-fastapi-lupin.sh\n"
         + "="*60 + "\n"
     )
@@ -592,7 +592,12 @@ class TestDispatcherInteractive:
 # Mock Tests (Test command construction without Claude)
 # ============================================================================
 
-@pytest.mark.xfail( reason="Mock patching path mismatch — subprocess.run mock not matching actual call site" )
+@pytest.mark.skip(
+    reason="Mock patching path mismatch — subprocess.run mock not matching actual call site. "
+           "Converted from xfail to skip: the xfail report formatter hits a pytest+CPython internal "
+           "bug (SystemError: AST constructor recursion depth mismatch) that aborts the whole suite "
+           "at this test. Skipping preserves the collected tests as known-broken without crashing pytest."
+)
 class TestDispatcherMocked:
     """Tests using mocked subprocess to verify command construction."""
 

@@ -1,0 +1,43 @@
+{
+    "profile_name"  : "research_to_presentation",
+    "description"   : "Q&A script for research-to-presentation chained workflow expediter questions",
+    "sender_ids"    : [ "arg.expeditor@lupin.deepily.ai" ],
+    "entries" : [
+        {
+            "question_pattern" : "What topic should I research and present? Describe the topic or question.",
+            "answer"           : "artificial intelligence safety research 2026",
+            "arg_name"         : "query",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "question_pattern" : "Research budget in USD? Say a number, or 'default' for unlimited.",
+            "answer"           : "no limit",
+            "arg_name"         : "budget",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "question_pattern" : "How long should the presentation be? Say minutes, or 'default' for 15.",
+            "answer"           : "default",
+            "arg_name"         : "target_duration_minutes",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "question_pattern" : "Presentation theme? Say 'default' or a theme name.",
+            "answer"           : "default",
+            "arg_name"         : "theme",
+            "response_types"   : [ "open_ended", "open_ended_batch" ]
+        },
+        {
+            "question_pattern" : "Who is the target audience? Options: beginner, general, expert, or academic.",
+            "answer"           : "academic",
+            "arg_name"         : "audience",
+            "response_types"   : [ "open_ended", "open_ended_batch", "multiple_choice" ]
+        },
+        {
+            "question_pattern" : "Would you like to proceed with these settings?",
+            "answer"           : "yes",
+            "arg_name"         : "confirmation",
+            "response_types"   : [ "yes_no" ]
+        }
+    ]
+}

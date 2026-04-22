@@ -20,6 +20,7 @@ Environment Variables:
 import os
 import sys
 import time
+import uuid as uuid_mod
 import requests
 import argparse
 from typing import Optional
@@ -155,6 +156,10 @@ def notify_user_async(
         from lupin_cli.notifications.notification_models import resolve_target_user
         request = request.model_copy( update={ "target_user": resolve_target_user() } )
 
+    # Generate idempotency key ONCE for all retry attempts (prevents duplicate notifications)
+    if request.idempotency_key is None:
+        request = request.model_copy( update={ "idempotency_key": str( uuid_mod.uuid4() ) } )
+
     # Calculate retry intervals based on timeout (Phase 2.7 - adaptive retry for WebSocket auth)
     retry_intervals = calculate_retry_intervals( request.timeout )
     all_delays = [ 0 ] + retry_intervals  # First attempt immediate, then configured delays
@@ -223,7 +228,17 @@ def notify_user_async(
                 )
 
             else:
-                # HTTP error - don't retry, fail immediately
+                # Retry transient HTTP errors (server overload / rate limiting)
+                retryable = response.status_code in ( 429, 502, 503, 504 )
+                if retryable and not is_last_attempt:
+                    retry_after = response.headers.get( "Retry-After" )
+                    if retry_after and retry_after.isdigit():
+                        time.sleep( min( int( retry_after ), 5 ) )
+                    if debug:
+                        print( f"[DEBUG] HTTP {response.status_code} (attempt {attempt_idx}), will retry...", file=sys.stderr )
+                    continue
+
+                # Non-retryable or last attempt — fail
                 error_text = response.text if response.text else "No error message"
                 return AsyncNotificationResponse(
                     success     = False,
@@ -233,7 +248,10 @@ def notify_user_async(
                 )
 
         except requests.exceptions.ConnectionError:
-            # Network errors - don't retry, fail immediately
+            if not is_last_attempt:
+                if debug:
+                    print( f"[DEBUG] ConnectionError (attempt {attempt_idx}), will retry...", file=sys.stderr )
+                continue
             return AsyncNotificationResponse(
                 success     = False,
                 status      = "connection_error",
@@ -242,7 +260,10 @@ def notify_user_async(
             )
 
         except requests.exceptions.Timeout:
-            # Timeout - don't retry, fail immediately
+            if not is_last_attempt:
+                if debug:
+                    print( f"[DEBUG] Timeout (attempt {attempt_idx}), will retry...", file=sys.stderr )
+                continue
             return AsyncNotificationResponse(
                 success     = False,
                 status      = "timeout",

@@ -1,6 +1,6 @@
 # Lupin Testing Strategy
 
-Comprehensive testing approach with three tiers of validation to ensure code quality, reliability, and security.
+Comprehensive six-tier testing approach to ensure code quality, reliability, and security.
 
 ## Test Hierarchy
 
@@ -15,40 +15,24 @@ Comprehensive testing approach with three tiers of validation to ensure code qua
 - Test both success and failure paths
 - High coverage of edge cases
 
-**Coverage**:
-- `jwt_service.py` - 14 tests for JWT token operations
-- `password_service.py` - Password hashing and validation
-- `user_service.py` - User CRUD operations
-- `rate_limiter.py` - Rate limiting logic
-- Additional service modules
+**Coverage**: 2,832 tests across 104 test files covering:
+- Auth subsystem (JWT, password, user, rate limiter, API keys)
+- Agent orchestrators (BFE, SWE Team, Calculator, CRUD)
+- Notification system (models, hooks, proxy, predictions)
+- Queue management (job state, persistence, filtering, timed execution)
+- Presentation generator (renderers, prompts, API client)
+- WebSocket validators, session bridge, trust tracking, and more
 
 **Run Command**:
 ```bash
 # Run all unit tests
-pytest src/tests/unit/
-
-# Run with verbose output
-pytest -v src/tests/unit/
+pytest src/tests/unit/ -v
 
 # Run specific test file
 pytest src/tests/unit/test_jwt_service.py
 
 # Run specific test
 pytest src/tests/unit/test_jwt_service.py::test_create_access_token_valid_user
-```
-
-**Example**:
-```python
-def test_create_access_token_valid_user():
-    """Test creating JWT access token with valid user data."""
-    token = create_access_token(
-        user_id="test_user_123",
-        email="test@example.com",
-        roles=["user"]
-    )
-
-    assert token is not None
-    assert len( token.split( '.' ) ) == 3  # JWT format
 ```
 
 ---
@@ -62,98 +46,52 @@ def test_create_access_token_valid_user():
 - Module-level validation
 - Test core functions exist and can be called
 - Minimal dependencies
-- Run during development
 
-**Coverage**:
-- All major REST modules (`jwt_service`, `auth`, `user_service`, etc.)
-- Agent modules (math, calendar, todos, etc.)
-- ~50 smoke tests across codebase
+**Coverage**: ~50 smoke tests across all major modules
 
 **Run Command**:
 ```bash
 # Run smoke test for specific module
 python -m cosa.rest.jwt_service
 
-# Run smoke test for auth module
-python -m cosa.rest.auth
-
-# Run all smoke tests (custom script needed)
-./src/scripts/run-all-smoke-tests.sh
-```
-
-**Example**:
-```python
-def quick_smoke_test():
-    """JWT service smoke test - validates basic functionality."""
-    print( "Testing JWT token creation..." )
-
-    token = create_access_token( "test_user", "test@example.com" )
-    if token and len( token.split( '.' ) ) == 3:
-        print( "✓ JWT creation working" )
-    else:
-        print( "✗ JWT creation failed" )
+# Run all smoke tests via runner scripts
+./src/scripts/run-smoke-tests.sh
+./src/scripts/run-smoke-direct.sh    # Direct execution (no pytest)
 ```
 
 ---
 
 ### 3. Integration Tests (`src/tests/integration/`)
 
-**Purpose**: Test complete user flows end-to-end across multiple components
+**Purpose**: Test complete user flows end-to-end across API, database, and authentication
 
 **Characteristics**:
-- Slower execution (100-1000ms per test)
-- Test full system interaction
-- Use real HTTP requests (not mocked)
+- Medium execution (100-1000ms per test)
+- Test full system interaction with real HTTP requests
 - Verify database state changes
-- Test error paths and edge cases
+- Require a running FastAPI server on port 7999
+- **CRITICAL**: Always use `--bg` flag from Claude Code (suite can exceed 10min Bash timeout under load)
 
-**Coverage**:
-- 8 comprehensive authentication flow tests:
-  1. Complete registration flow
-  2. Login with valid credentials
-  3. Failed login rate limiting
-  4. Token refresh flow
-  5. Password change flow
-  6. Email verification flow
-  7. Password reset flow
-  8. WebSocket JWT authentication
+**Coverage**: 263 tests across 20 test files covering:
+- Complete authentication flows (register, login, refresh, logout, password reset)
+- Admin user management (listing, roles, status, password reset)
+- Queue filtering and job management
+- API key operations
+- Token validation and proactive refresh
 
 **Run Command**:
 ```bash
-# Ensure FastAPI server is running first!
-src/scripts/run-fastapi-lupin.sh
+# Recommended (background, avoids Bash timeout)
+./src/tests/run-integration-tests.sh --bg -v
 
-# Run all integration tests
-pytest src/tests/integration/
+# Monitor progress
+tail -20 /tmp/integration-latest.log
 
-# Run specific integration test
-pytest src/tests/integration/test_auth_integration.py::test_complete_registration_flow
+# Check if still running
+kill -0 $(cat /tmp/integration-tests.pid) 2>/dev/null && echo running || echo done
 
-# Run with verbose output
-pytest -v src/tests/integration/
-```
-
-**Example**:
-```python
-def test_complete_registration_flow( test_user_credentials ):
-    """Test full user registration from API to database to login."""
-    # Register user via API
-    response = requests.post(
-        f"{BASE_URL}/auth/register",
-        json={"email": email, "password": password}
-    )
-    assert response.status_code == 200
-
-    # Verify in database
-    user = get_user_by_email( email )
-    assert user is not None
-
-    # Login with new credentials
-    login_response = requests.post(
-        f"{BASE_URL}/auth/login",
-        json={"email": email, "password": password}
-    )
-    assert "tokens" in login_response.json()
+# Quick foreground run (specific pattern only)
+./src/tests/run-integration-tests.sh test_auth*.py
 ```
 
 ---
@@ -163,25 +101,64 @@ def test_complete_registration_flow( test_user_credentials ):
 **Purpose**: Validate WebSocket functionality and event handling
 
 **Characteristics**:
-- Medium execution time
-- Tests WebSocket connections
-- Validates event subscription and delivery
+- Custom test runner (not pytest-based)
+- Tests WebSocket connections, authentication, event delivery
 - Tests both queue and audio WebSocket endpoints
 
-**Coverage**:
-- 50 WebSocket tests
-- Connection, authentication, event delivery
+**Coverage**: 50 WebSocket tests
 
 **Run Command**:
 ```bash
 # Run WebSocket smoke tests
-src/scripts/run-websocket-smoke-tests.sh
-
-# Run specific WebSocket test scenario
-python src/tests/websocket_smoke/test_basic_connection.py
+./src/scripts/run-websocket-smoke-tests.sh
 ```
 
-### 5. Interactive Proxy Tests (`src/tests/smoke/test_proxy_integration.py`)
+---
+
+### 5. E2E UI Tests (`src/tests/e2e_ui/`)
+
+**Purpose**: End-to-end browser testing with Playwright Chromium headless
+
+**Characteristics**:
+- Playwright Chromium headless browser against live server
+- Covers all pages (public, auth, admin)
+- Parametrized page smoke tests, auth flows, navigation, WebSocket tests
+- Visual regression via `pytest-playwright-visual-snapshot`
+- **CRITICAL**: Always use `--bg` flag from Claude Code (suite takes ~17min, exceeds 10min Bash timeout)
+
+**Coverage**: 328 tests across 30 test files including:
+- Functional tests (page loads, auth flows, navigation, admin, WebSocket, CJ Flow)
+- Visual regression snapshot tests (profile, notifications, landing, etc.)
+- Pause/resume, scheduling, and job history UI tests
+
+**Run Command**:
+```bash
+# All E2E tests (background, recommended)
+./src/scripts/run-e2e-ui-tests.sh --bg -v
+
+# Visual regression only
+./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual
+
+# Update baselines after intentional UI changes
+./src/scripts/run-e2e-ui-tests.sh --bg --update-snapshots -k visual
+
+# Monitor progress
+tail -20 /tmp/e2e-ui-latest.log
+
+# Check if still running
+kill -0 $(cat /tmp/e2e-ui-tests.pid) 2>/dev/null && echo running || echo done
+```
+
+**Visual Regression Workflow**:
+1. First run creates baseline screenshots in `src/tests/e2e_ui/__snapshots__/`
+2. Subsequent runs compare against baselines (10% pixel threshold)
+3. After intentional UI changes: `--update-snapshots` to regenerate baselines
+4. Failures produce diff images in `src/tests/e2e_ui/snapshot_failures/`
+5. Baselines are version-controlled; failure diffs are gitignored
+
+---
+
+### 6. Interactive Proxy Tests (`src/tests/smoke/test_proxy_integration.py`)
 
 **Purpose**: Automated interactive testing with notification proxy auto-answer
 
@@ -215,13 +192,47 @@ pytest src/tests/smoke/test_proxy_integration.py -v
 
 ## Test Comparison Matrix
 
-| Test Type | Count | Speed | Scope | Dependencies | Purpose |
+| Test Type | Count | Files | Speed | Dependencies | Purpose |
 |-----------|-------|-------|-------|--------------|---------|
-| **Unit** | 14+ | Very Fast (1-10ms) | Single function | Mocked | Function validation |
-| **Smoke** | ~50 | Fast (10-100ms) | Single module | Minimal | Module sanity check |
-| **Integration** | 8 | Medium (100-1000ms) | Full flow | Real (API, DB) | End-to-end validation |
-| **WebSocket** | 50 | Medium | WebSocket layer | Real (WS server) | WebSocket functionality |
-| **Interactive Proxy** | 12 | Slow (5-60s) | Full pipeline | Server + Proxy + LLM | Interactive agent validation |
+| **Unit** | 2,832 | 104 | Very Fast (1-10ms) | Mocked | Function validation |
+| **Smoke** | ~50 | Inline | Fast (10-100ms) | Minimal | Module sanity check |
+| **Integration** | 263 | 20 | Medium (100-1000ms) | Server + DB | End-to-end validation |
+| **WebSocket** | 50 | Custom | Medium | WS server | WebSocket functionality |
+| **E2E UI** | 328 | 30 | Slow (~17min total) | Server + Chromium | Visual + functional browser |
+| **Interactive Proxy** | 12 | 1 | Slow (5-60s) | Server + Proxy + LLM | Interactive agent validation |
+
+**Total**: ~3,535 tests
+
+---
+
+## Pre-Merge Test Checklist
+
+**All 5 layers MUST pass before merging any branch to main.**
+
+| Step | Suite | Command | Requirement |
+|------|-------|---------|-------------|
+| 1 | Unit Tests | `pytest src/tests/unit/ -v` | 100% pass |
+| 2 | WebSocket Tests | `./src/scripts/run-websocket-smoke-tests.sh` | 100% pass |
+| 3 | E2E UI Tests | `./src/scripts/run-e2e-ui-tests.sh --bg -v` | 100% pass |
+| 4 | Visual Regression | `./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual` | 100% pass |
+| 5 | Integration Tests | `./src/tests/run-integration-tests.sh --bg -v` | 100% pass (FINAL GATE) |
+
+```bash
+# Complete pre-merge validation sequence
+pytest src/tests/unit/ -v && \
+./src/scripts/run-websocket-smoke-tests.sh && \
+./src/scripts/run-e2e-ui-tests.sh --bg -v && \
+./src/tests/run-integration-tests.sh --bg -v
+```
+
+**Note**: E2E UI and integration tests run in background (`--bg`) — monitor via log files. Wait for E2E completion before launching integration tests (the final gate). Both have PID-file overlap protection to prevent concurrent runs.
+
+### Run All Tests (Sequential Pyramid)
+
+```bash
+# Run all 7 test tiers sequentially (continues on failure by default)
+./src/scripts/run-all-tests.sh
+```
 
 ---
 
@@ -232,115 +243,40 @@ pytest src/tests/smoke/test_proxy_integration.py -v
 | Manual `curl` to `/api/push` + polling | Non-repeatable, no validation, no reporting | `LivePipelineTestBase` or `InteractiveSmokeTest` |
 | Bespoke shell scripts with curl | Unmaintainable, no framework integration | Automated smoke test scripts |
 | Copy-paste curl from API docs into tests | Fragile, no auth lifecycle management | Test base classes handle auth, submit, poll, validate |
+| Running E2E/integration without `--bg` | Exceeds 10min Claude Code Bash timeout | Always use `--bg` flag |
+| Overlapping test runs | PID conflicts, unreliable results | PID-file overlap protection prevents this |
 
 **Acceptable curl usage**: API reference documentation, deployment health checks (`curl /health`), one-off debugging (never committed).
 
 ---
 
-## Running All Tests
+## Test Credentials
 
-### Run Everything
-
-```bash
-# Run all pytest tests (unit + integration)
-pytest src/tests/
-
-# Run with coverage
-pytest --cov=cosa.rest --cov-report=html src/tests/
-
-# View coverage report
-open htmlcov/index.html
-```
-
-### Run by Type
+**CRITICAL**: Never hardcode test credentials. Always use environment variables.
 
 ```bash
-# Unit tests only
-pytest src/tests/unit/
-
-# Integration tests only (requires server running!)
-pytest src/tests/integration/
-
-# Smoke tests (run individually)
-python -m cosa.rest.jwt_service
-python -m cosa.rest.auth
-python -m cosa.rest.user_service
-
-# WebSocket tests
-src/scripts/run-websocket-smoke-tests.sh
+export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL="your@email.com"
+export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD="yourpassword"
 ```
 
-### Verbose Output
+All smoke tests, proxy tests, and pipeline tests use the `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` prefix to ensure test and proxy authenticate as the same user (same WebSocket channel).
 
-```bash
-# Show detailed output
-pytest -v src/tests/
-
-# Show print statements too
-pytest -v -s src/tests/
-
-# Stop at first failure
-pytest -x src/tests/
-```
-
----
-
-## Test Coverage Summary
-
-### Current Coverage (Phase 9)
-
-| Module | Unit Tests | Smoke Tests | Integration Tests |
-|--------|-----------|-------------|-------------------|
-| `jwt_service.py` | ✅ 14 tests | ✅ Yes | ✅ All flows |
-| `password_service.py` | ✅ Yes | ✅ Yes | ✅ Change flow |
-| `user_service.py` | ✅ Yes | ✅ Yes | ✅ CRUD flows |
-| `auth.py` | ✅ Yes | ✅ Yes | ✅ Auth flows |
-| `rate_limiter.py` | ✅ Yes | ✅ Yes | ✅ Lockout test |
-| WebSocket auth | ⚠️ Partial | ✅ Yes | ✅ JWT auth test |
-
-**Total Test Count**: ~122 tests
-- Unit: 14+
-- Smoke: ~50
-- Integration: 8
-- WebSocket: 50
-
-**Overall Coverage**: ~85-90% for authentication system
+**Reference**: See `src/tests/AUTH-TESTING-GUIDE.md` for credential patterns.
 
 ---
 
 ## When to Use Each Test Type
 
-### Use Unit Tests When:
-- Testing a specific function or method
-- Need to test edge cases and error handling
-- Want fast feedback during development
-- Testing complex logic in isolation
-
-### Use Smoke Tests When:
-- Verifying a module loads and runs
-- Quick sanity check after changes
-- Testing during development
-- Checking for import/dependency issues
-
-### Use Integration Tests When:
-- Testing complete user workflows
-- Verifying system components work together
-- Testing API endpoints with real database
-- Validating security and authentication flows
-- Before deploying to production
-
-### Use WebSocket Tests When:
-- Testing WebSocket connections
-- Verifying event delivery
-- Testing real-time features
-- Validating WebSocket authentication
-
-### Use Interactive Proxy Tests When:
-- Testing agents that require user interaction (notifications)
-- Validating expediter argument resolution end-to-end
-- Testing CRUD operations that require delete confirmation
-- Verifying the notification proxy auto-answer pipeline
-- Running pre-merge integration validation for interactive agents
+| Situation | Recommended Tier |
+|-----------|-----------------|
+| Testing a specific function or method | Unit |
+| Verifying a module loads after changes | Smoke |
+| Testing complete user workflows | Integration |
+| Testing WebSocket connections/events | WebSocket |
+| Testing UI interactions in browser | E2E UI |
+| Verifying UI hasn't visually regressed | E2E UI (visual) |
+| Testing agents with notification interactions | Interactive Proxy |
+| Before merging to main | All 5 layers (pre-merge checklist) |
 
 ---
 
@@ -353,100 +289,35 @@ pytest -x src/tests/
 3. Test one function per test
 4. Include success and failure cases
 5. Mock external dependencies
-
-### Writing New Smoke Tests
-
-1. Add `quick_smoke_test()` function to module
-2. Test core functionality only
-3. Print clear pass/fail indicators
-4. Keep it fast (<100ms)
-5. Handle exceptions gracefully
+6. Use `tempfile.TemporaryDirectory()` for storage isolation
 
 ### Writing New Integration Tests
 
-1. Add test to `src/tests/integration/test_auth_integration.py`
+1. Add test to `src/tests/integration/`
 2. Use fixtures from `conftest.py`
 3. Test complete user flow
 4. Verify database state
 5. Clean up after test (automatic via fixtures)
 6. Document test purpose in docstring
 
----
+### Writing New E2E UI Tests
 
-## Continuous Integration
-
-### Pre-Commit Checks
-
-Before committing code, run:
-```bash
-# Fast validation
-pytest src/tests/unit/
-python -m cosa.rest.jwt_service  # Key module smoke test
-
-# Full validation (requires server)
-pytest src/tests/
-```
-
-### CI/CD Pipeline
-
-Recommended test sequence for CI/CD:
-1. **Unit tests** - Fast validation (1-2 seconds)
-2. **Smoke tests** - Module validation (5-10 seconds)
-3. **Integration tests** - Full validation (5-10 seconds, requires server)
-4. **WebSocket tests** - Real-time feature validation (10-20 seconds)
-
-**Total CI runtime**: ~30-45 seconds
-
----
-
-## Troubleshooting
-
-### Common Issues
-
-**Tests fail with `ModuleNotFoundError`**
-- Solution: Run from project root, ensure `PYTHONPATH` includes `src/`
-
-**Integration tests fail with connection errors**
-- Solution: Start FastAPI server: `src/scripts/run-fastapi-lupin.sh`
-
-**Database permission errors in integration tests**
-- Solution: Close any tools accessing test database
-
-**Async WebSocket test timeouts**
-- Solution: Ensure server is running and WebSocket endpoint accessible
-
-### Getting Help
-
-1. Check test output for detailed error messages
-2. Review specific test type README:
-   - Integration: `src/tests/integration/README.md`
-   - Unit: Test files have inline documentation
-3. Run with verbose output: `pytest -v -s`
-4. Check server logs if integration tests fail
+1. Add test to `src/tests/e2e_ui/`
+2. Use Playwright page fixtures
+3. Always run via `run-e2e-ui-tests.sh` (handles server config hot-swap)
+4. For visual tests, use snapshot comparison pattern
+5. Test against live server on port 7999
 
 ---
 
 ## Related Documentation
 
 - **Integration Tests**: `src/tests/integration/README.md`
-- **Interactive Proxy Tests**: [`src/docs/automated-interactive-testing.md`](../docs/automated-interactive-testing.md) — Comprehensive proxy testing guide
-- **Smoke Tests**: [`src/tests/smoke/README.md`](smoke/README.md) — Quick-start guide for smoke tests
-- **JWT Authentication**: `src/rnd/2025.09.29-jwt-oauth/README.md`
-- **API Documentation**: (Phase 10 - coming soon)
+- **Interactive Proxy Tests**: [`src/docs/automated-interactive-testing.md`](../docs/automated-interactive-testing.md)
+- **Smoke Tests**: [`src/tests/smoke/README.md`](smoke/README.md)
+- **Auth Testing Guide**: `src/tests/AUTH-TESTING-GUIDE.md`
 - **Project CLAUDE.md**: Development guidelines and testing section
 
 ---
 
-## Test Philosophy
-
-> **"Test the behavior, not the implementation"**
-
-- Focus on what the code does, not how it does it
-- Test user-facing functionality
-- Validate security and error handling
-- Ensure backward compatibility
-- Make tests readable and maintainable
-
----
-
-**Last Updated**: October 2025 (Phase 9 - Integration Tests Added)
+**Last Updated**: April 2026 (Session db376295)

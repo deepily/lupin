@@ -2,9 +2,16 @@
 """
 Reset User Password - Simple password reset utility.
 
-Usage:
-    python src/scripts/reset_user_password.py ricardo.felipe.ruiz@gmail.com "NewPassword123!"
-    python src/scripts/reset_user_password.py --use-original ricardo.felipe.ruiz@gmail.com
+IMPORTANT: Run from inside the Docker container. The host .venv has bcrypt 5.x
+which is incompatible with passlib. The container has bcrypt 3.2.2 which works.
+
+Usage (Docker — recommended):
+    docker exec -it lupin-rest python3 -m scripts.reset_user_password user@example.com "NewPassword123!"
+    docker exec -it lupin-rest python3 -m scripts.reset_user_password --use-original user@example.com
+
+Usage (host — only if bcrypt <4.1 is installed in .venv):
+    python src/scripts/reset_user_password.py user@example.com "NewPassword123!"
+    python src/scripts/reset_user_password.py --use-original user@example.com
 """
 
 import sys
@@ -136,13 +143,17 @@ def reset_password( email, new_password=None, use_original=False, debug=True ):
 
 if __name__ == "__main__":
     if len( sys.argv ) < 2:
-        print( "Usage:" )
-        print( "  python src/scripts/reset_user_password.py <email> <new_password>" )
-        print( "  python src/scripts/reset_user_password.py --use-original <email>" )
+        print( "Usage (run from inside Docker container — host has bcrypt version mismatch):" )
+        print()
+        print( "  docker exec -it lupin-rest python3 -m scripts.reset_user_password <email> <new_password>" )
+        print( "  docker exec -it lupin-rest python3 -m scripts.reset_user_password --use-original <email>" )
         print()
         print( "Examples:" )
-        print( '  python src/scripts/reset_user_password.py ricardo.felipe.ruiz@gmail.com "NewPass123!"' )
-        print( '  python src/scripts/reset_user_password.py --use-original ricardo.felipe.ruiz@gmail.com' )
+        print( '  docker exec -it lupin-rest python3 -m scripts.reset_user_password user@example.com "NewPass123!"' )
+        print( '  docker exec -it lupin-rest python3 -m scripts.reset_user_password --use-original user@example.com' )
+        print()
+        print( "Host usage (only if bcrypt <4.1 installed in .venv):" )
+        print( '  python src/scripts/reset_user_password.py user@example.com "NewPass123!"' )
         sys.exit( 1 )
 
     use_original = False

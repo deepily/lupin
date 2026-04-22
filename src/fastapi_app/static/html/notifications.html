@@ -10,21 +10,21 @@
 <body>
     <!-- Floating Section Visibility Toolbar -->
     <div class="section-toolbar" id="section-toolbar">
-        <button class="toolbar-btn active" data-section="section-qa" title="Q&A Interface">❓</button>
-        <button class="toolbar-btn active" data-section="section-job-submit" title="Submit Agentic Jobs">📝</button>
-        <button class="toolbar-btn active" data-section="action-required-section" title="Action Required">⚠️</button>
-        <button class="toolbar-btn active" data-section="tts-queue-section" title="TTS Queue">🔊</button>
-        <button class="toolbar-btn active" data-section="section-notifications" title="Notifications">💬</button>
-        <button class="toolbar-btn active" data-section="filter-settings-section" title="Filter Settings (Admin)">⚙️</button>
-        <button class="toolbar-btn active" data-section="section-queues" title="Job Queues">📋</button>
-        <button class="toolbar-btn active" data-section="section-time-saved" title="Time Saved">⏱️</button>
-        <button class="toolbar-btn active" data-section="section-status" title="System Status">📊</button>
-        <button class="toolbar-btn active" data-section="section-direct-tts" title="Direct TTS Test">🔧</button>
-        <button class="toolbar-btn active" data-section="section-debug" title="Debug Info">🐛</button>
+        <button class="toolbar-btn active" data-section="section-qa" data-testid="notifications-toolbar-qa" title="Q&A Interface">❓</button>
+        <button class="toolbar-btn active" data-section="section-job-submit" data-testid="notifications-toolbar-jobs" title="Submit Agentic Jobs">📝</button>
+        <button class="toolbar-btn active" data-section="action-required-section" data-testid="notifications-toolbar-action" title="Action Required">⚠️</button>
+        <button class="toolbar-btn active" data-section="tts-queue-section" data-testid="notifications-toolbar-tts" title="TTS Queue">🔊</button>
+        <button class="toolbar-btn active" data-section="section-notifications" data-testid="notifications-toolbar-notifs" title="Notifications">💬</button>
+        <button class="toolbar-btn active" data-section="filter-settings-section" data-testid="notifications-toolbar-filters" title="Filter Settings (Admin)">⚙️</button>
+        <button class="toolbar-btn active" data-section="section-queues" data-testid="notifications-toolbar-queues" title="Job Queues">📋</button>
+        <button class="toolbar-btn active" data-section="section-time-saved" data-testid="notifications-toolbar-time" title="Time Saved">⏱️</button>
+        <button class="toolbar-btn active" data-section="section-status" data-testid="notifications-toolbar-status" title="System Status">📊</button>
+        <button class="toolbar-btn active" data-section="section-direct-tts" data-testid="notifications-toolbar-direct-tts" title="Direct TTS Test">🔧</button>
+        <button class="toolbar-btn active" data-section="section-debug" data-testid="notifications-toolbar-debug" title="Debug Info">🐛</button>
     </div>
 
     <div class="container">
-        <h2>Notifications <span id="clock"></span></h2>
+        <h2><span id="env-label"></span>Notifications <span id="clock"></span></h2>
         
         <!-- Q&A Section -->
         <div class="collapsible-section" id="section-qa">
@@ -36,7 +36,7 @@
                 <!-- Agent Mode Selector -->
                 <div class="mode-selector-container" style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 8px 12px; background: #f8f9fa; border-radius: 4px;">
                     <label for="agent-mode" style="font-size: 13px; font-weight: 500; color: #495057;">Agent Mode:</label>
-                    <select id="agent-mode" class="agent-mode-select" style="padding: 6px 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px; min-width: 150px;">
+                    <select id="agent-mode" data-testid="notifications-qa-mode-select" class="agent-mode-select" style="padding: 6px 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px; min-width: 150px;">
                         <option value="system" selected>System (Auto-Route)</option>
                         <optgroup label="Quick Agents">
                             <option value="math">Math Agent</option>
@@ -53,6 +53,9 @@
                             <option value="research_to_podcast">Research to Podcast</option>
                             <option value="claude_code">Claude Code</option>
                             <option value="swe_team">SWE Team</option>
+                            <option value="presentation">Presentation Generator</option>
+                            <option value="research_to_presentation">Research to Presentation</option>
+                            <option value="test_suite">Test Suite</option>
                         </optgroup>
                     </select>
                     <span id="mode-badge" class="mode-badge" style="display: none; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; text-transform: uppercase; background: #0d6efd; color: white; cursor: pointer;" title="Click to return to System mode">
@@ -64,20 +67,20 @@
                 </div>
 
                 <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
-                    <button id="qa-stt-button" type="button" class="qa-stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
-                    <input type="text" id="qa-input" placeholder="Type your question here..." style="flex: 1; line-height: 1;" />
-                    <select id="tts-mode" style="width: auto; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
+                    <button id="qa-stt-button" data-testid="notifications-qa-stt-btn" type="button" class="qa-stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                    <input type="text" id="qa-input" data-testid="notifications-qa-input" placeholder="Type your question here..." style="flex: 1; line-height: 1;" />
+                    <select id="tts-mode" data-testid="notifications-qa-tts-mode-select" style="width: auto; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
                         <option value="instant" selected>Instant (11labs Streaming)</option>
                         <option value="reliable">Reliable (OpenAI Batch)</option>
                     </select>
-                    <button id="submit-qa" type="button" style="white-space: nowrap;">
+                    <button id="submit-qa" data-testid="notifications-qa-submit-btn" type="button" style="white-space: nowrap;">
                         Submit Q&A
                         <span id="submit-loading" class="loading" style="display: none;">
                             <span class="spinner"></span>
                         </span>
                     </button>
                 </div>
-                <div id="qa-metrics" class="qa-metrics" style="display: none;">
+                <div id="qa-metrics" data-testid="notifications-qa-metrics" class="qa-metrics" style="display: none;">
                     <span class="metric"><span class="metric-label">TTT:</span> <span id="metric-ttt">--</span></span>
                     <span class="metric"><span class="metric-label">TTFA:</span> <span id="metric-ttfa">--</span></span>
                     <span class="metric"><span class="metric-label">RTT:</span> <span id="metric-rtt">--</span></span>
@@ -95,7 +98,7 @@
             <div class="section-content" id="job-submit-section">
 
                 <!-- Claude Code Dispatcher Card -->
-                <div class="job-submit-card" id="claude-code-submit-card">
+                <div class="job-submit-card" id="claude-code-submit-card" data-testid="notifications-cc-card">
                     <div class="job-submit-card-header" onclick="toggleSection('claude-code-section')">
                         <h4>🤖 Claude Code Dispatcher</h4>
                         <button class="toggle-button" id="claude-code-toggle">▶</button>
@@ -104,7 +107,7 @@
                         <div class="form-group" style="display: flex; gap: 12px; margin-bottom: 12px;">
                             <div style="flex: 0 0 auto;">
                                 <label for="cc-project" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Project:</label>
-                                <select id="cc-project" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                                <select id="cc-project" data-testid="notifications-cc-project-select" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
                                     <option value="lupin" selected>lupin</option>
                                     <option value="cosa">cosa</option>
                                     <option value="plan">plan</option>
@@ -113,8 +116,8 @@
                             <div style="flex: 1;">
                                 <label for="cc-prompt" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Task:</label>
                                 <div class="cc-prompt-container">
-                                    <button type="button" id="cc-stt-button" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
-                                    <textarea id="cc-prompt" rows="2" placeholder="Enter task prompt..." style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; resize: vertical;"></textarea>
+                                    <button type="button" id="cc-stt-button" data-testid="notifications-cc-stt-btn" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                    <textarea id="cc-prompt" data-testid="notifications-cc-prompt-textarea" rows="2" placeholder="Enter task prompt..." style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; resize: vertical;"></textarea>
                                 </div>
                             </div>
                         </div>
@@ -122,23 +125,23 @@
                         <div class="form-group" style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
                             <div style="display: flex; align-items: center; gap: 6px;">
                                 <label for="cc-task-type" style="font-size: 12px; color: #666;">Task:</label>
-                                <select id="cc-task-type" style="padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
+                                <select id="cc-task-type" data-testid="notifications-cc-task-type-select" style="padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
                                     <option value="BOUNDED" selected>Bounded</option>
                                     <option value="INTERACTIVE">Unbounded (Interactive)</option>
                                 </select>
                             </div>
                             <div style="display: flex; align-items: center; gap: 6px;">
                                 <label for="cc-execution-mode" style="font-size: 12px; color: #666;">Flow:</label>
-                                <select id="cc-execution-mode" style="padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
+                                <select id="cc-execution-mode" data-testid="notifications-cc-execution-mode-select" style="padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
                                     <option value="queue" selected>CJ Flow</option>
                                     <option value="direct">Socket</option>
                                 </select>
                             </div>
                             <div style="display: flex; align-items: center; gap: 6px;">
-                                <input type="checkbox" id="cc-dry-run" checked />
+                                <input type="checkbox" id="cc-dry-run" data-testid="notifications-cc-dry-run-checkbox" checked />
                                 <span style="font-size: 13px;">🧪 Dry run</span>
                             </div>
-                            <button id="cc-submit" type="button" style="padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            <button id="cc-submit" data-testid="notifications-cc-submit-btn" type="button" style="padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
                                 🚀 Submit
                                 <span id="cc-loading" class="loading" style="display: none;">
                                     <span class="spinner"></span>
@@ -146,25 +149,40 @@
                             </button>
                         </div>
 
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-cc-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="cc-schedule" data-testid="notifications-cc-schedule-checkbox" onchange="document.getElementById('cc-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="cc-scheduled-time" data-testid="notifications-cc-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="cc-monopolize" data-testid="notifications-cc-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
+                        </div>
+
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Response:</label>
-                            <pre id="cc-response" style="background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 4px; min-height: 100px; max-height: 300px; overflow-y: auto; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;"></pre>
+                            <pre id="cc-response" data-testid="notifications-cc-response" style="background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 4px; min-height: 100px; max-height: 300px; overflow-y: auto; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;"></pre>
                         </div>
 
                         <!-- Option B Controls (hidden by default) -->
                         <div id="cc-option-b-controls" style="display: none; padding: 12px; background: #f8f9fa; border-radius: 4px; margin-bottom: 12px;">
                             <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
-                                <input type="text" id="cc-inject-input" placeholder="Follow-up message..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
-                                <button id="cc-inject-btn" type="button" style="padding: 8px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">💬 Inject</button>
+                                <input type="text" id="cc-inject-input" data-testid="notifications-cc-inject-input" placeholder="Follow-up message..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                                <button id="cc-inject-btn" data-testid="notifications-cc-inject-btn" type="button" style="padding: 8px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">💬 Inject</button>
                             </div>
                             <div style="display: flex; gap: 8px;">
-                                <button id="cc-interrupt-btn" type="button" style="padding: 8px 12px; background: #ffc107; color: #212529; border: none; border-radius: 4px; cursor: pointer;">⏹️ Interrupt</button>
-                                <button id="cc-end-btn" type="button" style="padding: 8px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">🛑 End Session</button>
+                                <button id="cc-interrupt-btn" data-testid="notifications-cc-interrupt-btn" type="button" style="padding: 8px 12px; background: #ffc107; color: #212529; border: none; border-radius: 4px; cursor: pointer;">⏹️ Interrupt</button>
+                                <button id="cc-end-btn" data-testid="notifications-cc-end-btn" type="button" style="padding: 8px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">🛑 End Session</button>
                             </div>
                         </div>
 
                         <!-- Session Info -->
-                        <div id="cc-session-info" style="display: none; padding: 8px 12px; background: #e7f3ff; border-radius: 4px; font-size: 12px;">
+                        <div id="cc-session-info" data-testid="notifications-cc-session-info" style="display: none; padding: 8px 12px; background: #e7f3ff; border-radius: 4px; font-size: 12px;">
                             <span style="margin-right: 16px;">Task ID: <code id="cc-task-id">--</code></span>
                             <span style="margin-right: 16px;">Status: <span id="cc-status">--</span></span>
                             <span>Cost: <span id="cc-cost">$0.00</span></span>
@@ -182,25 +200,43 @@
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label for="research-topic" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Research Topic:</label>
                             <div style="display: flex; gap: 8px; align-items: center;">
-                                <button type="button" id="research-stt-button" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
-                                <input type="text" id="research-topic" placeholder="Enter your research question..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                                <button type="button" id="research-stt-button" data-testid="notifications-research-stt-btn" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <input type="text" id="research-topic" data-testid="notifications-research-topic-input" placeholder="Enter your research question..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
                             </div>
                         </div>
                         <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px;">
                             <div>
                                 <label for="research-budget" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Budget (USD):</label>
-                                <input type="number" id="research-budget" value="3.00" min="0.50" max="20.00" step="0.50" style="width: 80px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                                <input type="number" id="research-budget" data-testid="notifications-research-budget-input" value="3.00" min="0.50" max="20.00" step="0.50" style="width: 80px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
                             </div>
                             <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
-                                <input type="checkbox" id="research-with-podcast" />
+                                <input type="checkbox" id="research-with-podcast" data-testid="notifications-research-podcast-checkbox" />
                                 <span style="font-size: 13px;">Also generate podcast from research</span>
                             </label>
                             <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
-                                <input type="checkbox" id="research-dry-run" checked />
+                                <input type="checkbox" id="research-with-presentation" data-testid="notifications-research-presentation-checkbox" />
+                                <span style="font-size: 13px;">Also generate presentation from research</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                                <input type="checkbox" id="research-dry-run" data-testid="notifications-research-dry-run-checkbox" checked />
                                 <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
                             </label>
                         </div>
-                        <button id="submit-research-job" type="button" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-research-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="research-schedule" data-testid="notifications-research-schedule-checkbox" onchange="document.getElementById('research-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="research-scheduled-time" data-testid="notifications-research-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="research-monopolize" data-testid="notifications-research-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
+                        </div>
+                        <button id="submit-research-job" data-testid="notifications-research-submit-btn" type="button" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
                             🚀 Submit Research Job
                             <span id="research-loading" class="loading" style="display: none;">
                                 <span class="spinner"></span>
@@ -220,8 +256,8 @@
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label for="podcast-source" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Research Source:</label>
                             <div style="display: flex; gap: 8px; align-items: center;">
-                                <button type="button" id="podcast-stt-button" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
-                                <input type="text" id="podcast-source" placeholder="Describe your research or paste file path..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                                <button type="button" id="podcast-stt-button" data-testid="notifications-podcast-stt-btn" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <input type="text" id="podcast-source" data-testid="notifications-podcast-source-input" placeholder="Describe your research or paste file path..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
                             </div>
                             <div style="margin-top: 6px; font-size: 11px; color: #888;">
                                 💡 <strong>Smart input:</strong> Describe research → confirm selection | Paste path → generates immediately
@@ -229,11 +265,25 @@
                         </div>
                         <div style="margin-bottom: 12px;">
                             <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                                <input type="checkbox" id="podcast-dry-run" checked />
+                                <input type="checkbox" id="podcast-dry-run" data-testid="notifications-podcast-dry-run-checkbox" checked />
                                 <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
                             </label>
                         </div>
-                        <button id="submit-podcast-job" type="button" style="padding: 10px 20px; background: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-podcast-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="podcast-schedule" data-testid="notifications-podcast-schedule-checkbox" onchange="document.getElementById('podcast-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="podcast-scheduled-time" data-testid="notifications-podcast-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="podcast-monopolize" data-testid="notifications-podcast-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
+                        </div>
+                        <button id="submit-podcast-job" data-testid="notifications-podcast-submit-btn" type="button" style="padding: 10px 20px; background: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
                             🎙️ Generate Podcast
                             <span id="podcast-loading" class="loading" style="display: none;">
                                 <span class="spinner"></span>
@@ -253,26 +303,26 @@
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label for="swe-task" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Engineering Task:</label>
                             <div style="display: flex; gap: 8px; align-items: flex-start;">
-                                <button type="button" id="swe-stt-button" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
-                                <textarea id="swe-task" rows="3" placeholder="Describe the engineering task..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; resize: vertical; font-family: inherit;"></textarea>
+                                <button type="button" id="swe-stt-button" data-testid="notifications-swe-stt-btn" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <textarea id="swe-task" data-testid="notifications-swe-task-textarea" rows="3" placeholder="Describe the engineering task..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; resize: vertical; font-family: inherit;"></textarea>
                             </div>
                         </div>
                         <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
                             <div>
                                 <label for="swe-budget" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Budget (USD):</label>
-                                <input type="number" id="swe-budget" placeholder="no limit" min="0.50" max="100" step="0.50" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                                <input type="number" id="swe-budget" data-testid="notifications-swe-budget-input" placeholder="no limit" min="0.50" max="100" step="0.50" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
                             </div>
                             <div>
                                 <label for="swe-timeout" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Timeout (seconds):</label>
-                                <input type="number" id="swe-timeout" placeholder="default" min="60" max="7200" step="60" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                                <input type="number" id="swe-timeout" data-testid="notifications-swe-timeout-input" placeholder="default" min="60" max="7200" step="60" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
                             </div>
                             <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
-                                <input type="checkbox" id="swe-dry-run" checked />
+                                <input type="checkbox" id="swe-dry-run" data-testid="notifications-swe-dry-run-checkbox" checked />
                                 <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
                             </label>
                             <div>
                                 <label for="swe-trust-mode" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Trust Mode:</label>
-                                <select id="swe-trust-mode" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
+                                <select id="swe-trust-mode" data-testid="notifications-swe-trust-mode-select" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
                                     <option value="">server default</option>
                                     <option value="disabled">disabled</option>
                                     <option value="shadow">shadow</option>
@@ -281,7 +331,21 @@
                                 </select>
                             </div>
                         </div>
-                        <button id="submit-swe-job" type="button" style="padding: 10px 20px; background: #fd7e14; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-swe-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="swe-schedule" data-testid="notifications-swe-schedule-checkbox" onchange="document.getElementById('swe-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="swe-scheduled-time" data-testid="notifications-swe-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="swe-monopolize" data-testid="notifications-swe-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
+                        </div>
+                        <button id="submit-swe-job" data-testid="notifications-swe-submit-btn" type="button" style="padding: 10px 20px; background: #fd7e14; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
                             🛠️ Submit SWE Task
                             <span id="swe-loading" class="loading" style="display: none;">
                                 <span class="spinner"></span>
@@ -291,23 +355,199 @@
                     </div>
                 </div>
 
+                <!-- Presentation Generator Submission Card -->
+                <div class="job-submit-card" id="presentation-submit-card" data-testid="notifications-presentation-card">
+                    <div class="job-submit-card-header" onclick="toggleSection('presentation-submit-section')">
+                        <h4>📊 Generate Presentation from Document</h4>
+                        <button class="toggle-button" id="presentation-submit-toggle">▶</button>
+                    </div>
+                    <div class="section-content collapsed" id="presentation-submit-section">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label for="presentation-source" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Source Document:</label>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <button type="button" id="presentation-stt-button" data-testid="notifications-presentation-stt-btn" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <input type="text" id="presentation-source" data-testid="notifications-presentation-source-input" placeholder="Path to markdown or text document..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                            </div>
+                            <div style="margin-top: 6px; font-size: 11px; color: #888;">
+                                💡 <strong>Smart input:</strong> Paste file path to a markdown, text, or research document
+                            </div>
+                        </div>
+                        <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+                            <div>
+                                <label for="presentation-audience" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Audience:</label>
+                                <select id="presentation-audience" data-testid="notifications-presentation-audience-select" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
+                                    <option value="general" selected>General</option>
+                                    <option value="beginner">Beginner</option>
+                                    <option value="expert">Expert</option>
+                                    <option value="academic">Academic</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="presentation-duration" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Duration (minutes):</label>
+                                <input type="number" id="presentation-duration" data-testid="notifications-presentation-duration-input" value="15" min="5" max="60" step="5" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                            </div>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                                <input type="checkbox" id="presentation-dry-run" data-testid="notifications-presentation-dry-run-checkbox" checked />
+                                <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
+                            </label>
+                        </div>
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-presentation-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="presentation-schedule" data-testid="notifications-presentation-schedule-checkbox" onchange="document.getElementById('presentation-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="presentation-scheduled-time" data-testid="notifications-presentation-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="presentation-monopolize" data-testid="notifications-presentation-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
+                        </div>
+                        <button id="submit-presentation-job" data-testid="notifications-presentation-submit-btn" type="button" style="padding: 10px 20px; background: #20c997; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                            📊 Generate Presentation
+                            <span id="presentation-loading" class="loading" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                        <div id="presentation-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+                    </div>
+                </div>
+
+                <!-- Test Suite Submit Card -->
+                <div class="job-submit-card" id="test-suite-submit-card" data-testid="notifications-test-suite-card">
+                    <div class="job-submit-card-header" onclick="toggleSection('test-suite-submit-section')">
+                        <h4>🧪 Run Test Suite</h4>
+                        <button class="toggle-button" id="test-suite-submit-toggle">▶</button>
+                    </div>
+                    <div class="section-content collapsed" id="test-suite-submit-section">
+                        <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+                            <div>
+                                <label for="test-suite-types" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Test Suites:</label>
+                                <select id="test-suite-types" data-testid="notifications-test-suite-types-select" onchange="onTestSuiteTypeChange(this.value)" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
+                                    <optgroup label="Aggregate">
+                                        <option value="all">All (unit → smoke → websocket → integration → e2e)</option>
+                                        <option value="integration,e2e" selected>Both (Integration + E2E)</option>
+                                    </optgroup>
+                                    <optgroup label="Individual suites">
+                                        <option value="unit">Unit Tests</option>
+                                        <option value="smoke">Smoke Tests (pytest discovery)</option>
+                                        <option value="smoke_direct">Smoke Direct (python-main-style, needs file path)</option>
+                                        <option value="pytest_direct">Pytest Direct (arbitrary pytest file, needs file path)</option>
+                                        <option value="websocket">WebSocket Tests</option>
+                                        <option value="integration">Integration Only</option>
+                                        <option value="e2e">E2E Only</option>
+                                    </optgroup>
+                                    <optgroup label="Combined">
+                                        <option value="unit,smoke">Fast Tier (Unit + Smoke)</option>
+                                        <option value="unit,smoke,websocket">Non-server-hotswap (Unit + Smoke + WebSocket)</option>
+                                    </optgroup>
+                                    <optgroup label="Agentic Regression">
+                                        <option value="presentation">Presentation Regression (render-only + Sonnet)</option>
+                                    </optgroup>
+                                </select>
+                            </div>
+                            <div id="test-suite-file-path-row" style="display: none;" data-testid="notifications-test-suite-file-path-row">
+                                <label for="test-suite-file-path" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Test File Path <span style="color: #dc3545;">*required for smoke_direct / pytest_direct</span>:</label>
+                                <input type="text" id="test-suite-file-path" data-testid="notifications-test-suite-file-path-input" placeholder="src/tests/integration/test_tfe_resume_e2e.py" style="width: 340px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;" />
+                            </div>
+                            <label id="test-suite-fail-fast-row" style="display: none; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;" data-testid="notifications-test-suite-fail-fast-row">
+                                <input type="checkbox" id="test-suite-fail-fast" data-testid="notifications-test-suite-fail-fast-checkbox" />
+                                <span style="font-size: 13px;">⚡ Fail-fast (abort on first failing suite — default is continue-on-failure)</span>
+                            </label>
+                            <div>
+                                <label for="test-suite-pytest-args" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Extra Pytest Args:</label>
+                                <input type="text" id="test-suite-pytest-args" data-testid="notifications-test-suite-pytest-args-input" placeholder="-v -k test_auth  (or --auto-proxy --cost-cap-usd 2.00 for smoke_direct)" style="width: 340px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;" />
+                            </div>
+                            <script>
+                                // Test types that accept a file path as the first positional arg.
+                                // Keep this set in sync with FILE_DRIVEN_TEST_TYPES in notifications.js
+                                // and cosa/agents/test_suite/job.py (single source of truth).
+                                const FILE_DRIVEN_TEST_TYPES_HTML = new Set( [ 'smoke_direct', 'pytest_direct' ] );
+
+                                // Visibility toggle for conditional fields based on suite type selection
+                                function onTestSuiteTypeChange( value ) {
+                                    const filePathRow = document.getElementById( 'test-suite-file-path-row' );
+                                    const failFastRow = document.getElementById( 'test-suite-fail-fast-row' );
+                                    filePathRow.style.display = FILE_DRIVEN_TEST_TYPES_HTML.has( value ) ? 'block' : 'none';
+                                    failFastRow.style.display = ( value === 'all' ) ? 'flex' : 'none';
+                                }
+                            </script>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                                <input type="checkbox" id="test-suite-dry-run" data-testid="notifications-test-suite-dry-run-checkbox" checked />
+                                <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 6px;" title="Per-run override for the TestSuiteCompletionWatchdog. Initial state mirrors the INI default; toggling here applies only to this submission.">
+                                <input type="checkbox" id="test-suite-auto-fix" data-testid="notifications-test-suite-auto-fix-checkbox" />
+                                <span style="font-size: 13px;">🛠️ Auto-fix on failure (TFE)</span>
+                            </label>
+                        </div>
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-test-suite-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="test-suite-schedule" data-testid="notifications-test-suite-schedule-checkbox" onchange="document.getElementById('test-suite-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="test-suite-scheduled-time" data-testid="notifications-test-suite-scheduled-time" style="display: none;" />
+                                <span style="font-size: 12px; color: #888;" title="Test suites always run in exclusive mode (DB hot-swap)">🔒 Exclusive mode (always on)</span>
+                            </div>
+                        </div>
+                        <button id="submit-test-suite-job" data-testid="notifications-test-suite-submit-btn" type="button" style="padding: 10px 20px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; margin-top: 8px;">
+                            🧪 Run Tests
+                            <span id="test-suite-loading" class="loading" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                        <div id="test-suite-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+                    </div>
+                </div>
+
+                <!-- TFE Resume Submit Card (Session 9056c113 — file-path resume) -->
+                <div class="job-submit-card" id="tfe-resume-submit-card" data-testid="notifications-tfe-resume-card">
+                    <div class="job-submit-header">
+                        <h4>🔄 Resume Stalled TFE Job</h4>
+                    </div>
+                    <div class="job-submit-body">
+                        <p style="font-size: 12px; color: #666; margin-bottom: 6px;">
+                            Paste or describe: a job ID (<code>tfe-*</code>), a plan doc path
+                            (<code>*-plan.md</code>), or a description (<em>"the plan from April 12"</em>,
+                            <em>"most recent stalled"</em>).
+                        </p>
+                        <textarea id="tfe-resume-input"
+                                  data-testid="notifications-tfe-resume-input"
+                                  rows="2"
+                                  placeholder="tfe-7c25082a  OR  io/swe-team/plans/.../c1-plan.md  OR  'the stalled one from today'"
+                                  style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px; font-family: monospace;"></textarea>
+                        <button id="submit-tfe-resume-job" data-testid="notifications-tfe-resume-submit-btn" type="button" style="padding: 10px 20px; background: #f0ad4e; color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; margin-top: 8px;">
+                            ▶ Resume
+                            <span id="tfe-resume-loading" class="loading" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                        <div id="tfe-resume-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+                        <div id="tfe-resume-candidates" style="margin-top: 8px; display: none;"></div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
         <!-- Action Required Section (Response-Required Notifications) - Phase 2.2 always visible -->
-        <div class="collapsible-section" id="action-required-section">
+        <div class="collapsible-section" id="action-required-section" data-testid="notifications-action-section">
             <div class="section-header" onclick="toggleSection('action-required-content')">
                 <h3>⚠️ Action Required: <span id="action-required-count">0</span></h3>
                 <button class="toggle-button" id="action-required-toggle">▼</button>
             </div>
             <div class="section-content" id="action-required-content">
                 <!-- Active notification slot (only ONE notification fully displayed at a time) -->
-                <div id="action-required-active-slot">
+                <div id="action-required-active-slot" data-testid="notifications-action-active-slot">
                     <!-- Full-size active notification renders here -->
                 </div>
 
                 <!-- Pending queue (minimized notifications waiting their turn) -->
-                <div id="action-required-pending-queue">
+                <div id="action-required-pending-queue" data-testid="notifications-action-pending-queue">
                     <!-- Minimized notification one-liners render here -->
                 </div>
 
@@ -331,15 +571,15 @@
 
                 <!-- Pause/Play Controls - RIGHT of title, before toggle arrow -->
                 <div class="tts-playback-controls" onclick="event.stopPropagation();">
-                    <button id="tts-pause-btn" class="tts-control-button disabled"
+                    <button id="tts-pause-btn" data-testid="notifications-tts-pause-btn" class="tts-control-button disabled"
                             title="Pause playback"
                             onclick="window.notificationsUI.pauseTTS()">⏸️</button>
-                    <button id="tts-play-btn" class="tts-control-button disabled"
+                    <button id="tts-play-btn" data-testid="notifications-tts-play-btn" class="tts-control-button disabled"
                             title="Resume playback"
                             onclick="window.notificationsUI.resumeTTS()">▶️</button>
                 </div>
 
-                <button id="tts-clear-all-btn" class="tts-clear-all-button"
+                <button id="tts-clear-all-btn" data-testid="notifications-tts-clear-btn" class="tts-clear-all-button"
                         style="display: none;" disabled
                         title="Clear all pending queue items"
                         onclick="event.stopPropagation(); window.notificationsUI.clearTTSQueue()">
@@ -350,10 +590,10 @@
             </div>
             <div class="section-content" id="tts-queue-content">
                 <!-- Currently playing TTS -->
-                <div id="tts-active-slot"></div>
+                <div id="tts-active-slot" data-testid="notifications-tts-active-slot"></div>
 
                 <!-- Pending queue (minimized cards waiting their turn) -->
-                <div id="tts-pending-queue"></div>
+                <div id="tts-pending-queue" data-testid="notifications-tts-pending-queue"></div>
 
                 <!-- Empty state (shown when queue is empty) -->
                 <div id="tts-queue-empty" class="tts-queue-empty-state">
@@ -366,6 +606,8 @@
         <div class="collapsible-section" id="section-notifications">
             <div class="section-header" onclick="toggleSection('notifications-section')">
                 <h3>Claude Code Notifications: <span id="notifications-count">0</span></h3>
+                <span class="filter-mode-badge" id="notifications-filter-badge" style="display: none;"
+                      data-testid="notifications-filter-badge" title="Current filter mode">👤 Mine</span>
                 <div id="history-dropdown-container" style="margin-left: auto;"></div>
                 <!-- Refresh button commented out - filter dropdown now works correctly
                 <button id="refresh-notifications" type="button"
@@ -402,10 +644,13 @@
                         <strong>View Mode:</strong>
                     </label>
                     <div style="display: flex; gap: 10px;">
-                        <button id="filter-own-jobs" class="filter-button active" type="button">
+                        <button id="filter-own-jobs" data-testid="notifications-filter-own-btn" class="filter-button active" type="button">
                             👤 My Jobs Only
                         </button>
-                        <button id="filter-all-jobs" class="filter-button" type="button">
+                        <button id="filter-others-jobs" data-testid="notifications-filter-others-btn" class="filter-button" type="button">
+                            🚫 Not My Jobs
+                        </button>
+                        <button id="filter-all-jobs" data-testid="notifications-filter-all-btn" class="filter-button" type="button">
                             👥 All Users' Jobs
                         </button>
                     </div>
@@ -420,30 +665,40 @@
         <div class="collapsible-section" id="section-queues">
             <div class="section-header" onclick="toggleSection('queues-section')">
                 <h3>Cosa Jobs Flow: Current States</h3>
+                <span class="filter-mode-badge" id="queues-filter-badge" style="display: none;"
+                      data-testid="queues-filter-badge" title="Current filter mode">👤 Mine</span>
                 <button class="toggle-button" id="queues-toggle">▼</button>
             </div>
             <div class="section-content" id="queues-section">
 
                 <!-- TODO Queue Category -->
-                <div class="queue-category" id="queue-category-todo">
+                <div class="queue-category" id="queue-category-todo" data-testid="notifications-queue-todo">
                     <div class="queue-header" onclick="window.notificationsUI.toggleQueueCategory('todo')">
                         <span class="queue-status-indicator status-todo">🟡</span>
                         <h4>TODO</h4>
                         <span class="queue-count-badge" id="todo-count-badge">0</span>
-                        <button class="queue-expand-btn" id="todo-expand">▶</button>
+                        <button class="queue-delete-all-btn" id="todo-delete-all"
+                                data-testid="notifications-queue-todo-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('todo')"
+                                title="Delete all TODO jobs">🗑️</button>
+                        <button class="queue-expand-btn" id="todo-expand" data-testid="notifications-queue-todo-expand-btn">▶</button>
                     </div>
-                    <div class="queue-jobs-container collapsed" id="todo-jobs-container">
+                    <div class="queue-jobs-container collapsed" id="todo-jobs-container" data-testid="notifications-queue-todo-jobs">
                         <!-- Job cards will be populated here -->
                     </div>
                 </div>
 
                 <!-- Running Queue Category -->
-                <div class="queue-category" id="queue-category-run">
+                <div class="queue-category" id="queue-category-run" data-testid="notifications-queue-running">
                     <div class="queue-header" onclick="window.notificationsUI.toggleQueueCategory('run')">
                         <span class="queue-status-indicator status-running">🔵</span>
                         <h4>Running</h4>
                         <span class="queue-count-badge" id="run-count-badge">0</span>
-                        <button class="queue-expand-btn" id="run-expand">▶</button>
+                        <button class="queue-delete-all-btn" id="run-delete-all"
+                                data-testid="notifications-queue-running-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('run')"
+                                title="Cancel and delete all running jobs">🗑️</button>
+                        <button class="queue-expand-btn" id="run-expand" data-testid="notifications-queue-running-expand-btn">▶</button>
                     </div>
                     <div class="queue-jobs-container collapsed" id="run-jobs-container">
                         <!-- Job cards will be populated here -->
@@ -451,12 +706,16 @@
                 </div>
 
                 <!-- Done Queue Category -->
-                <div class="queue-category" id="queue-category-done">
+                <div class="queue-category" id="queue-category-done" data-testid="notifications-queue-done">
                     <div class="queue-header" onclick="window.notificationsUI.toggleQueueCategory('done')">
                         <span class="queue-status-indicator status-done">✅</span>
                         <h4>Done</h4>
                         <span class="queue-count-badge" id="done-count-badge">0</span>
-                        <button class="queue-expand-btn" id="done-expand">▶</button>
+                        <button class="queue-delete-all-btn" id="done-delete-all"
+                                data-testid="notifications-queue-done-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('done')"
+                                title="Delete all Done jobs">🗑️</button>
+                        <button class="queue-expand-btn" id="done-expand" data-testid="notifications-queue-done-expand-btn">▶</button>
                     </div>
                     <div class="queue-jobs-container collapsed" id="done-jobs-container">
                         <!-- Job cards will be populated here -->
@@ -464,15 +723,63 @@
                 </div>
 
                 <!-- Dead Queue Category -->
-                <div class="queue-category" id="queue-category-dead">
+                <div class="queue-category" id="queue-category-dead" data-testid="notifications-queue-dead">
                     <div class="queue-header" onclick="window.notificationsUI.toggleQueueCategory('dead')">
                         <span class="queue-status-indicator status-dead">❌</span>
                         <h4>Dead</h4>
                         <span class="queue-count-badge" id="dead-count-badge">0</span>
-                        <button class="queue-expand-btn" id="dead-expand">▶</button>
+                        <button class="queue-delete-all-btn" id="dead-delete-all"
+                                data-testid="notifications-queue-dead-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('dead')"
+                                title="Delete all Dead jobs">🗑️</button>
+                        <button class="queue-expand-btn" id="dead-expand" data-testid="notifications-queue-dead-expand-btn">▶</button>
                     </div>
                     <div class="queue-jobs-container collapsed" id="dead-jobs-container">
                         <!-- Job cards will be populated here -->
+                    </div>
+                </div>
+
+                <!-- ═══════════════════════════════════════════════════════════
+                     JOB HISTORY (PostgreSQL Persistence)
+
+                     OVERLAY MODEL: The 4 live queues above (TODO/Running/Done/Dead)
+                     show jobs from the CURRENT server session only (in-memory).
+                     This history section queries PostgreSQL for ALL persisted agentic
+                     jobs, EXCLUDING job IDs currently visible in the live Done/Dead
+                     queues to avoid duplicates.
+
+                     A job appears in EITHER the live queue OR history, never both.
+                     When the server restarts, previously-live jobs move to history
+                     automatically (they are no longer in memory).
+                     ═══════════════════════════════════════════════════════════ -->
+                <div class="queue-category history-section" id="queue-category-history" data-testid="notifications-queue-history">
+                    <div class="queue-header history-header" onclick="window.notificationsUI.toggleQueueCategory('history')">
+                        <span class="queue-status-indicator status-history">📋</span>
+                        <h4>Job History</h4>
+                        <select id="history-time-window" class="history-time-select"
+                                onclick="event.stopPropagation()"
+                                onchange="window.notificationsUI.onHistoryTimeWindowChange( this.value )"
+                                data-testid="history-time-window-select">
+                            <option value="1">1 day</option>
+                            <option value="7">7 days</option>
+                            <option value="14">14 days</option>
+                            <option value="30" selected>30 days</option>
+                            <option value="all">All</option>
+                        </select>
+                        <span class="queue-count-badge" id="history-count-badge">0</span>
+                        <button class="queue-delete-all-btn" id="history-delete-all"
+                                data-testid="notifications-queue-history-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('history')"
+                                title="Delete all visible history">🗑️</button>
+                        <button class="queue-expand-btn" id="history-expand" data-testid="notifications-queue-history-expand-btn">▶</button>
+                    </div>
+                    <div class="queue-jobs-container collapsed" id="history-jobs-container" data-testid="notifications-queue-history-jobs">
+                        <!-- History job cards populated from PostgreSQL via /api/job-history -->
+                    </div>
+                    <div class="history-pagination" id="history-pagination" style="display: none;">
+                        <button class="history-load-more-btn" id="history-load-more"
+                                onclick="window.notificationsUI.loadMoreHistory()"
+                                data-testid="history-load-more-btn">Load More</button>
                     </div>
                 </div>
 
@@ -489,25 +796,25 @@
             <div class="section-content" id="time-saved-section">
                 <div class="stats-grid">
                     <div class="stat-item">
-                        <span class="stat-value" id="time-saved-total">--</span>
+                        <span class="stat-value" id="time-saved-total" data-testid="notifications-time-total">--</span>
                         <span class="stat-label">Time Saved (You)</span>
                     </div>
                     <div class="stat-item">
-                        <span class="stat-value" id="time-saved-others">--</span>
+                        <span class="stat-value" id="time-saved-others" data-testid="notifications-time-others">--</span>
                         <span class="stat-label">Time Saved for Others</span>
                     </div>
                     <div class="stat-item">
-                        <span class="stat-value" id="solutions-created">--</span>
+                        <span class="stat-value" id="solutions-created" data-testid="notifications-solutions-created">--</span>
                         <span class="stat-label">Solutions Created</span>
                     </div>
                     <div class="stat-item">
-                        <span class="stat-value" id="replays-benefited">--</span>
+                        <span class="stat-value" id="replays-benefited" data-testid="notifications-replays-benefited">--</span>
                         <span class="stat-label">Cache Hits (You)</span>
                     </div>
                 </div>
                 <div class="top-solutions" id="top-solutions-container">
                     <h4>🏆 Most Helpful Solutions</h4>
-                    <div id="top-solutions-list">Loading...</div>
+                    <div id="top-solutions-list" data-testid="notifications-top-solutions">Loading...</div>
                 </div>
             </div>
         </div>
@@ -517,7 +824,7 @@
             <div class="section-header" onclick="toggleSection('status-section')">
                 <h3>System Status</h3>
                 <div class="section-header-actions">
-                    <button id="refresh-status-btn" type="button" class="refresh-link"
+                    <button id="refresh-status-btn" data-testid="notifications-status-refresh-btn" type="button" class="refresh-link"
                             onclick="event.stopPropagation(); window.notificationsUI.refreshAllStatus()"
                             title="Refresh all status information">
                         ↻
@@ -528,20 +835,20 @@
             <div class="section-content" id="status-section">
                 <div class="status-item">
                     <strong>Queue WebSocket:</strong>
-                    <span id="queue-ws-status" class="status-warning">Disconnected</span>
+                    <span id="queue-ws-status" data-testid="notifications-ws-queue-status" class="status-warning">Disconnected</span>
                 </div>
                 <div class="status-item">
                     <strong>Audio WebSocket:</strong>
-                    <span id="audio-ws-status" class="status-warning">Disconnected</span>
+                    <span id="audio-ws-status" data-testid="notifications-ws-audio-status" class="status-warning">Disconnected</span>
                 </div>
                 <div class="status-item">
                     <strong>Authentication:</strong>
-                    <span id="auth-status" class="status-warning">Not authenticated</span>
+                    <span id="auth-status" data-testid="notifications-auth-status" class="status-warning">Not authenticated</span>
                 </div>
                 <div class="status-item">
                     <strong>User:</strong>
                     <span id="user-display">Loading...</span>
-                    <button id="logout-button" type="button" style="margin-left: 10px; padding: 4px 12px; font-size: 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;" onclick="window.freshQueueUI.logout()">Logout</button>
+                    <button id="logout-button" data-testid="notifications-logout-btn" type="button" style="margin-left: 10px; padding: 4px 12px; font-size: 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;" onclick="window.freshQueueUI.logout()">Logout</button>
                 </div>
                 <div class="status-item">
                     <strong>Sessions:</strong>
@@ -564,7 +871,7 @@
                 </div>
                 <div class="status-item">
                     <strong>Config:</strong>
-                    <button id="reinit-config-btn" type="button"
+                    <button id="reinit-config-btn" data-testid="notifications-config-reload-btn" type="button"
                             style="margin-left: 10px; padding: 4px 12px; font-size: 12px; background: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer;"
                             onclick="window.notificationsUI.reinitializeConfig()">
                         ↻ Reload
@@ -582,11 +889,11 @@
             </div>
             <div class="section-content" id="direct-tts-section">
                 <div class="audio-controls" style="display: flex; align-items: center; gap: 12px;">
-                    <input type="text" id="direct-tts-input" placeholder="Type text to speak directly..." />
-                    <button id="direct-tts-button" type="button">🔊 Speak Now</button>
-                    <button id="test-instant-tts" type="button">Test Instant TTS</button>
-                    <button id="test-reliable-tts" type="button">Test Reliable TTS</button>
-                    <button id="stop-audio" type="button">Stop Audio</button>
+                    <input type="text" id="direct-tts-input" data-testid="notifications-direct-tts-input" placeholder="Type text to speak directly..." />
+                    <button id="direct-tts-button" data-testid="notifications-direct-tts-btn" type="button">🔊 Speak Now</button>
+                    <button id="test-instant-tts" data-testid="notifications-test-instant-tts-btn" type="button">Test Instant TTS</button>
+                    <button id="test-reliable-tts" data-testid="notifications-test-reliable-tts-btn" type="button">Test Reliable TTS</button>
+                    <button id="stop-audio" data-testid="notifications-stop-audio-btn" type="button">Stop Audio</button>
                 </div>
             </div>
         </div>
@@ -615,7 +922,7 @@
     <script src="/static/js/tts-audio-cache.js"></script>
     <script src="/static/js/job-completion-cache.js"></script>
     <script src="/static/js/audio-recorder.js"></script>
-    <script src="/static/js/notifications.js?v=20260310b"></script>
+    <script src="/static/js/notifications.js?v=20260422b"></script>
     <script>
         function toggleSection(sectionId) {
             const content = document.getElementById(sectionId);

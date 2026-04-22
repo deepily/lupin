@@ -244,6 +244,107 @@ def sse_test_client():
     pass
 
 
+class TestMarkPlayedEndpoint:
+    """
+    In-process regression coverage for `POST /api/notifications/{id}/played`.
+
+    Bug being locked in: `NotificationFifoQueue.mark_played()` called an undefined
+    `self._emit_queue_update()` method, raising AttributeError which the router
+    wrapped into HTTP 500. Mobile clients silently swallowed the error, server
+    unread-count tracking diverged.
+
+    These tests use FastAPI TestClient + dependency_overrides so they run without
+    a live server or database. They would NOT have caught the bug before the fix:
+    that's exactly the point — they lock in the fixed behavior now.
+    """
+
+    @pytest.fixture
+    def app_with_mock_queue( self ):
+        """
+        Build a minimal FastAPI app with just the notifications router and
+        a NotificationFifoQueue wired to a mock websocket_mgr. Mocks out
+        `get_local_timestamp` since it imports `fastapi_app.main` at call time.
+        """
+        from unittest.mock import MagicMock, patch
+
+        # Patch InputAndOutputTable BEFORE importing the queue, so construction
+        # doesn't hit a real database.
+        io_tbl_patcher = patch( "cosa.rest.notification_fifo_queue.InputAndOutputTable" )
+        mock_io_tbl_cls = io_tbl_patcher.start()
+        mock_io_tbl_cls.return_value = MagicMock()
+
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+            from cosa.rest.notification_fifo_queue import NotificationFifoQueue
+            from cosa.rest.routers.notifications import router as notifications_router, get_notification_queue
+
+            mock_ws = MagicMock()
+            queue   = NotificationFifoQueue( websocket_mgr=mock_ws, emit_enabled=True )
+
+            app = FastAPI()
+            app.include_router( notifications_router )
+            app.dependency_overrides[ get_notification_queue ] = lambda: queue
+
+            # get_local_timestamp() imports fastapi_app.main; short-circuit it.
+            with patch(
+                "cosa.rest.routers.notifications.get_local_timestamp",
+                return_value="2026-04-22T15:00:00-04:00"
+            ):
+                yield {
+                    "client"  : TestClient( app ),
+                    "queue"   : queue,
+                    "mock_ws" : mock_ws
+                }
+        finally:
+            io_tbl_patcher.stop()
+
+    def test_mark_played_returns_200( self, app_with_mock_queue ):
+        """Regression: previously returned 500 due to AttributeError."""
+        ctx   = app_with_mock_queue
+        queue = ctx[ "queue" ]
+
+        notif = queue.push_notification(
+            message="regression test notification",
+            type="task",
+            priority="medium",
+            user_id="u1"
+        )
+
+        response = ctx[ "client" ].post( f"/api/notifications/{notif.id_hash}/played" )
+
+        assert response.status_code == 200, f"expected 200, got {response.status_code}: {response.text}"
+        body = response.json()
+        assert body[ "status" ]          == "success"
+        assert body[ "notification_id" ] == notif.id_hash
+
+    def test_mark_played_emits_notification_queue_update( self, app_with_mock_queue ):
+        """`POST /played` should fire a `notification_queue_update` broadcast."""
+        ctx     = app_with_mock_queue
+        queue   = ctx[ "queue" ]
+        mock_ws = ctx[ "mock_ws" ]
+
+        notif_1 = queue.push_notification( message="m1", user_id="u1" )
+        queue.push_notification( message="m2", user_id="u1" )  # unplayed
+
+        mock_ws.emit.reset_mock()
+
+        response = ctx[ "client" ].post( f"/api/notifications/{notif_1.id_hash}/played" )
+        assert response.status_code == 200
+
+        assert mock_ws.emit.call_count == 1
+        event_name, event_data = mock_ws.emit.call_args[ 0 ]
+        assert event_name                         == "notification_queue_update"
+        assert event_data[ "queue_name" ]         == "notification"
+        assert event_data[ "value" ]              == 2
+        assert event_data[ "unplayed_count" ]     == 1
+
+    def test_mark_played_unknown_id_returns_404( self, app_with_mock_queue ):
+        """Unknown notification id should still be a clean 404, not a 500."""
+        response = app_with_mock_queue[ "client" ].post( "/api/notifications/does-not-exist/played" )
+        assert response.status_code == 404
+
+
 if __name__ == "__main__":
     print( "Run with: pytest src/tests/integration/test_notifications_integration.py -v" )
-    print( "\nNOTE: All tests are currently skipped (Phase 2.1+ implementation required)" )
+    print( "\nNOTE: Phase 2.1 stubs are skipped; TestMarkPlayedEndpoint regression tests are live." )

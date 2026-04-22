@@ -13,9 +13,9 @@
            ======================================== */
         .section-toolbar {
             position: fixed;
-            /* Position just left of container (800px max-width, centered) */
-            /* Container center = 50%, half container = 400px, plus toolbar width + gap */
-            left: calc( 50% - 400px - 60px );
+            /* Position just left of container (1000px max-width, centered) */
+            /* Container center = 50%, half container = 500px, plus toolbar width + gap */
+            left: calc( 50% - 500px - 60px );
             top: 136px;  /* Below nav bar (56px) + header, aligned with container top */
             display: flex;
             flex-direction: column;
@@ -57,13 +57,50 @@
             opacity: 0.7;
         }
 
+        /* Filter mode badge (appears in section headers, clickable) */
+        .filter-mode-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+            margin-left: 8px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .filter-mode-badge:hover {
+            opacity: 0.8;
+        }
+
+        .filter-mode-badge[data-mode="own"] {
+            background: #e7f1ff;
+            color: #0056b3;
+            border: 1px solid #b8daff;
+        }
+
+        .filter-mode-badge[data-mode="others"] {
+            background: #fff3e0;
+            color: #e65100;
+            border: 1px solid #ffcc80;
+        }
+
+        .filter-mode-badge[data-mode="all"] {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #a5d6a7;
+        }
+
         /* Hidden section styling */
         .collapsible-section.section-hidden {
             display: none !important;
         }
 
         .container {
-            max-width: 800px;
+            max-width: 1000px;
             margin: 0 auto;
             background-color: white;
             padding: 20px;
@@ -2908,6 +2945,21 @@
     padding: 4px;
 }
 
+.queue-delete-all-btn {
+    background   : none;
+    border       : none;
+    color        : #dc3545;
+    cursor       : pointer;
+    font-size    : 13px;
+    padding      : 4px;
+    opacity      : 0.55;
+    margin-right : 2px;
+}
+
+.queue-delete-all-btn:hover {
+    opacity: 1.0;
+}
+
 /* Jobs Container */
 .queue-jobs-container {
     padding: 10px;
@@ -2970,6 +3022,39 @@
     font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
+}
+
+.job-id-chip {
+    display          : inline-block;
+    padding          : 2px 6px;
+    margin-right     : 6px;
+    border-radius    : 3px;
+    font-family      : ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size        : 11px;
+    background-color : rgba( 120, 120, 120, 0.15 );
+    color            : #666;
+    cursor           : pointer;
+    user-select      : all;
+}
+.job-id-chip:hover  { background-color: rgba( 120, 120, 120, 0.28 ); }
+.job-id-chip.copied { background-color: rgba(  60, 200, 120, 0.28 ); color: #0a5; }
+
+.job-id-line {
+    font-family : ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size   : 12px;
+    padding     : 2px 0;
+    color       : #555;
+}
+
+.owner-badge {
+    display: inline-block;
+    background: #d4edda;
+    color: #155724;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    margin-left: 4px;
 }
 
 .job-question {
@@ -3220,6 +3305,19 @@
     color: #dc3545;
 }
 
+/* Stalled badge (checkpoint-resume, Session 9056c113) */
+.completion-badge.stalled {
+    color: #f0ad4e;
+}
+
+.job-stalled-actions {
+    padding: 6px 0;
+}
+
+.resume-stalled-btn {
+    font-size: 0.85rem;
+}
+
 /* Duration Line (for running jobs) */
 .job-duration-line {
     display: flex;
@@ -3344,6 +3442,107 @@
     line-height: 1.4;
     color: #721c24;
     word-break: break-word;
+}
+
+/* ========================================
+   JOB HISTORY SECTION
+   ======================================== */
+
+/* History section header — visual distinction from live queues */
+.history-header {
+    background: #f0f4f8;
+    border-top: 2px solid #6c757d;
+}
+
+.history-header:hover {
+    background: #e3e8ed;
+}
+
+/* History status indicator */
+.status-history {
+    color: #6c757d;
+}
+
+/* Interrupted job card — orange left border */
+.job-card.status-interrupted {
+    border-left-color: #fd7e14;
+}
+
+/* Time window dropdown (inline in header) */
+.history-time-select {
+    padding: 2px 8px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 12px;
+    background: white;
+    margin-left: 10px;
+    cursor: pointer;
+}
+
+.history-time-select:focus {
+    outline: none;
+    border-color: #007bff;
+}
+
+/* Management action buttons on history cards */
+.history-action-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed #dee2e6;
+}
+
+.history-action-btn {
+    padding: 4px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    background: white;
+    transition: background 0.2s, color 0.2s;
+}
+
+.history-action-btn.delete-btn {
+    color: #dc3545;
+    border-color: #dc3545;
+}
+
+.history-action-btn.delete-btn:hover {
+    background: #dc3545;
+    color: white;
+}
+
+.history-action-btn.retry-btn {
+    color: #007bff;
+    border-color: #007bff;
+}
+
+.history-action-btn.retry-btn:hover {
+    background: #007bff;
+    color: white;
+}
+
+/* Load More pagination button */
+.history-pagination {
+    padding: 10px;
+    text-align: center;
+}
+
+.history-load-more-btn {
+    padding: 6px 20px;
+    border: 1px solid #6c757d;
+    border-radius: 4px;
+    background: white;
+    color: #6c757d;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.2s, color 0.2s;
+}
+
+.history-load-more-btn:hover {
+    background: #6c757d;
+    color: white;
 }
 
 /* ========================================
@@ -3851,6 +4050,12 @@
     overflow-y: auto;
 }
 
+.job-interactions-section.live-interactions .interactions-content.collapsed {
+    max-height: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
 /* Outgoing messages (user chat bubbles) in unified conversation pane */
 .interactions-content .sender-message.outgoing {
     margin-left: 40px;
@@ -3908,6 +4113,43 @@
     background-color: #6c757d;
     color: white;
     cursor: not-allowed;
+}
+
+.job-delete-button {
+    position: absolute;
+    top: 4px;
+    left: 34px;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 2px solid #dc3545;
+    border-radius: 4px;
+    background-color: white;
+    color: #dc3545;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    z-index: 10;
+}
+
+.job-delete-button:hover {
+    background-color: #dc3545;
+    color: white;
+}
+
+/* When no cancel button, shift delete to left edge */
+.job-card.status-done .job-delete-button,
+.job-card.status-dead .job-delete-button {
+    left: 6px;
+}
+
+/* Make room for delete button on done/dead cards (no cancel button present) */
+.job-card.status-done .job-card-header,
+.job-card.status-dead .job-card-header {
+    padding-left: 36px;
 }
 
 .job-cancel-button:disabled {
@@ -3998,4 +4240,114 @@
 .batch-retired-indicator {
     margin-left: 6px;
     font-size: 14px;
+}
+
+/* ==========================================================================
+   CJ Flow Phase 5: Paused / Scheduled / Monopolize States
+   ========================================================================== */
+
+/* Paused job card — muted appearance with amber left border */
+.job-card.job-paused {
+    opacity: 0.65;
+    border-left-color: #ffc107 !important;
+}
+
+.job-card.job-paused .job-card-header {
+    background: #fffbeb;
+}
+
+/* Paused badge — amber, matches existing action-required-pause styling */
+.paused-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    background: #fff3cd;
+    color: #856404;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 3px;
+    border: 1px solid #ffc107;
+    margin-left: 4px;
+}
+
+/* Paused status indicator — static pause icon with pulse */
+.status-indicator.paused-icon {
+    color: #ffc107;
+    animation: pausePulse 2s ease-in-out infinite;
+}
+
+/* Scheduled badge — soft purple to distinguish from running blue */
+.scheduled-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    background: #e8d5f5;
+    color: #6f42c1;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 3px;
+    border: 1px solid #b794d6;
+    margin-left: 4px;
+}
+
+/* Monopolize badge — subtle lock indicator (no-op in serial mode) */
+.monopolize-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    background: #e9ecef;
+    color: #6c757d;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 3px;
+    margin-left: 4px;
+}
+
+/* Pause/resume toggle button on todo job cards */
+.job-pause-button {
+    padding: 2px 8px;
+    border: 1px solid #6c757d;
+    border-radius: 4px;
+    background: transparent;
+    color: #6c757d;
+    font-size: 14px;
+    cursor: pointer;
+    line-height: 1;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+    margin-left: 4px;
+}
+
+.job-pause-button:hover {
+    background: #f8f9fa;
+    border-color: #495057;
+}
+
+.job-pause-button.is-paused {
+    background: #fff3cd;
+    border-color: #ffc107;
+    color: #856404;
+}
+
+.job-pause-button.is-paused:hover {
+    background: #ffe69c;
+}
+
+/* ───────── Scheduling section in job submission forms ───────── */
+
+.schedule-section {
+    border-top: 1px solid #e9ecef;
+    padding-top: 10px;
+    margin-top: 10px;
+    margin-bottom: 12px;
+}
+
+.schedule-section input[type="datetime-local"] {
+    padding: 6px 8px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.schedule-section input[type="datetime-local"]:focus {
+    border-color: #86b7fe;
+    outline: 0;
+    box-shadow: 0 0 0 0.2rem rgba( 13, 110, 253, 0.25 );
 }

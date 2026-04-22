@@ -1,8 +1,8 @@
 # Agentic Voice Workflow: Complete Lifecycle Guide
 
-**Version**: 2.1
+**Version**: 3.2
 **Created**: 2026-01-27
-**Updated**: 2026-02-07
+**Updated**: 2026-04-12
 **Purpose**: Complete lifecycle guide — CONCEPT → BUILD → VALIDATE — for creating CJ Flow agentic background jobs with voice I/O and queue integration
 
 **Pattern Source**: Derived from `deep_research`, `podcast_generator`, and `deep_research_to_podcast` agents.
@@ -14,6 +14,7 @@
 - [Part I: CONCEPT](#part-i-concept)
   - [Why Agentic Jobs Exist](#why-agentic-jobs-exist)
   - [Architecture Overview](#architecture-overview)
+  - [The Runtime Argument Expeditor](#the-runtime-argument-expeditor)
   - [Agentic Jobs vs Traditional Agents](#agentic-jobs-vs-traditional-agents)
   - [When to Use Agentic Jobs](#when-to-use-agentic-jobs)
   - [Decision Checklist](#decision-checklist)
@@ -28,6 +29,8 @@
   - [Phase 8: Rate Limiting](#phase-8-rate-limiting)
   - [Phase 9: External Service Integration](#phase-9-external-service-integration-patterns)
   - [Phase 10: Advanced Orchestration Patterns](#phase-10-advanced-orchestration-patterns)
+  - [Phase 11: Completion Report](#phase-11-completion-report)
+  - [Phase 12: Checkpoint-Resume](#phase-12-checkpoint-resume)
 - [Part III: VALIDATE — The Testing Ladder](#part-iii-validate--the-testing-ladder)
   - [Surface 1: Unit Tests + Inline Smoke Tests](#surface-1-unit-tests--inline-smoke-tests-free-1s)
   - [Surface 2: Mock Job Endpoint](#surface-2-mock-job-endpoint-free-1s-server-required)
@@ -111,6 +114,48 @@ tasks need a fundamentally different execution model.
 **Key flow**: User submits via browser or CLI → FastAPI router receives request → Expeditor
 parses arguments → Factory creates the right Job subclass → Queue manages lifecycle (todo → run →
 done) → Job's `do_all()` runs the Orchestrator → Voice notifications keep user informed throughout.
+
+## The Runtime Argument Expeditor
+
+The **Runtime Argument Expeditor** bridges the gap between a natural-language voice command and the structured arguments an agentic job needs to start.
+
+When a user says *"make me a podcast about quantum computing"*, the voice pipeline (ASR → LORA router) identifies the command (`agent router go to podcast generator`) and extracts raw arguments. But the job constructor may need additional parameters — research file path, target audience, languages. The Expeditor's role is to:
+
+1. **Gap Analysis**: Compare extracted args against the agent's required + optional arg list (defined in `agent_registry.py`)
+2. **Collection**: For each missing arg, prompt the user via voice — either one-by-one or as a batch form
+3. **Confirmation**: Present the full arg set for user review, allowing tweaks or approval
+4. **Injection**: Add system-provided args (user_email, session_id) that the user never sees
+
+Without Expeditor registration, an agent **cannot be invoked via voice commands** — only via direct REST API calls. This makes it a mandatory integration step for any agent that participates in the voice-first UX.
+
+### Runtime Scheduling (Automatic)
+
+The confirmation step (step 3 above) also displays **runtime scheduling options** that apply universally to all agents:
+
+```
+---
+**Scheduling**
+- **run_at**: immediately
+- **exclusive_mode**: no
+```
+
+Users can modify these via the `[comment: ...]` pattern — e.g., *"yes, but schedule it for 2am"*. These are **not agent-specific args** — they're infrastructure concerns consumed by the queue consumer, not by the job's `_execute()` method.
+
+| Runtime Arg | Default | Purpose |
+|-------------|---------|---------|
+| `scheduled_at` | `None` (immediate) | ISO datetime for delayed execution |
+| `monopolize` | `False` | When True, blocks concurrent jobs (future Hybrid Fast Lane) |
+
+**No per-agent work needed**: Runtime args are automatically included in every confirmation summary and extracted in `_handle_agentic_command()` before the factory creates the job. New agents get scheduling for free.
+
+**UI form path**: Every job submission card also includes a "Schedule for later" checkbox + datetime picker and an "Exclusive mode" checkbox, producing the same `scheduled_at` and `monopolize` fields in the POST body.
+
+**Key files**:
+- `src/cosa/agents/runtime_argument_expeditor/agent_registry.py` — Agent registry with arg specs
+- `src/cosa/agents/runtime_argument_expeditor/expeditor.py` — Gap analysis + collection logic
+- `src/cosa/rest/agentic_job_factory.py` — `args_dict` → Job constructor mapping
+
+See [Expeditor Registration](#expeditor-registration-agent_registrypy) in Part II for the how-to.
 
 ## Agentic Jobs vs Traditional Agents
 
@@ -307,7 +352,7 @@ Register your agent's config keys in `lupin-app.ini` so they can be tuned withou
 
 ```ini
 # In src/conf/lupin-app.ini under [Lupin: Baseline]
-{agent_name} model           = claude-sonnet-4-20250514
+{agent_name} model           = claude-sonnet-4-6
 {agent_name} max iterations  = 10
 {agent_name} timeout seconds = 300
 {agent_name} budget usd      = 5.00
@@ -447,7 +492,7 @@ class {AgentName}Config:
     """
 
     # === Model Selection ===
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-6"
 
     # === Execution Limits ===
     max_iterations: int = 10
@@ -470,7 +515,7 @@ def quick_smoke_test():
     try:
         print( "Testing default config..." )
         config = {AgentName}Config()
-        assert config.model == "claude-sonnet-4-20250514"
+        assert config.model == "claude-sonnet-4-6"
         print( "✓ Default config created" )
 
         print( "\\n✓ {AgentName}Config smoke test completed successfully" )
@@ -1194,6 +1239,53 @@ await voice_io.notify(
 # 5. Errors
 await voice_io.notify( f"Error: {error_msg}", priority="urgent" )
 ```
+
+### Progressive Breadcrumb Notifications (Loop-Level)
+
+For long-running phases that iterate over multiple items, send **low-priority
+breadcrumb notifications** so the user knows work is progressing. Without these,
+the UI appears frozen between phase-level transitions.
+
+**When to add breadcrumbs:**
+- Loops that process multiple items (e.g., per-topic research, per-language TTS)
+- Phases that take >10 seconds with no other visible output
+- Dry-run mode — breadcrumbs are the ONLY sign of life since no real work happens
+
+**Pattern:**
+```python
+# Inside a loop — notify on each iteration
+for i, topic in enumerate( topics ):
+    await voice_io.notify(
+        f"Researching topic {i + 1} of {len( topics )}: {topic[ :60 ]}",
+        priority="low"
+    )
+    result = await process_topic( topic )
+
+# Inside dry-run — breadcrumbs simulate the real workflow
+async def _execute_dry_run( self, voice_io, cosa_interface ):
+    # Identity setup (required — dry run bails out before normal setup)
+    cosa_interface.SENDER_ID   = cosa_interface._get_sender_id( suffix=self.base_id )
+    cosa_interface.TARGET_USER = self.user_email
+    voice_io.set_job_id( self.id_hash )
+
+    try:
+        await voice_io.notify( "Dry run: Skipping phase 1...", priority="low", job_id=self.id_hash )
+        await asyncio.sleep( 0.5 )
+        # ... one breadcrumb per simulated phase ...
+        await voice_io.notify( "Dry run complete!", priority="medium", job_id=self.id_hash )
+    finally:
+        voice_io.clear_job_id()
+```
+
+**Frequency guidance:**
+- One notification per loop iteration is fine for <20 items
+- For >20 items, notify every Nth iteration (e.g., every 5th) to avoid spam
+- Always include the count/total so user knows progress (e.g., "3 of 12")
+
+**Reference implementations:**
+- `deep_research/cli.py` — per-topic research notifications (~line 570)
+- `podcast_generator/orchestrator.py` — per-language TTS notifications (~line 572)
+- `presentation_generator/job.py` — dry-run breadcrumbs (~line 313)
 
 ### Phase 3-4 Smoke Test Checklist
 
@@ -2128,8 +2220,8 @@ class {AgentName}Config:
     # ... existing fields ...
 
     # === Model Routing (Phase 6) ===
-    lead_model    : str = "claude-opus-4-20250514"      # Primary reasoning
-    subagent_model: str = "claude-sonnet-4-20250514"    # Supporting tasks
+    lead_model    : str = "claude-opus-4-6"      # Primary reasoning
+    subagent_model: str = "claude-sonnet-4-6"    # Supporting tasks
     max_tokens    : int = 16000
 ```
 
@@ -2211,9 +2303,9 @@ CACHE_READ_MULTIPLIER     = 0.10   # 90% discount on cached reads
 
 # Model string → tier mapping
 MODEL_TO_TIER = {
-    "claude-opus-4-20250514"   : ModelTier.OPUS_4,
-    "claude-sonnet-4-20250514" : ModelTier.SONNET_4,
-    "claude-haiku-4-20250514"  : ModelTier.HAIKU_4,
+    "claude-opus-4-6"   : ModelTier.OPUS_4,
+    "claude-sonnet-4-6" : ModelTier.SONNET_4,
+    "claude-haiku-4-5-20251001"  : ModelTier.HAIKU_4,
 }
 
 
@@ -2380,7 +2472,7 @@ def quick_smoke_test():
         print( "1. Testing cost calculation..." )
         tracker = {AgentName}CostTracker( budget_limit_usd=1.00, debug=True )
         cost = tracker.record_call(
-            model         = "claude-sonnet-4-20250514",
+            model         = "claude-sonnet-4-6",
             input_tokens  = 1000,
             output_tokens = 500,
             call_type     = "test"
@@ -2392,7 +2484,7 @@ def quick_smoke_test():
         try:
             # Try to record a massive call that exceeds budget
             tracker.record_call(
-                model         = "claude-opus-4-20250514",
+                model         = "claude-opus-4-6",
                 input_tokens  = 1_000_000,
                 output_tokens = 1_000_000,
                 call_type     = "budget_test"
@@ -3039,6 +3131,235 @@ async def run_parallel_subagents(
 [LUPIN] Run smoke tests for orchestration logic
 ```
 
+## Phase 11: Completion Report
+
+### Overview
+
+Every agentic job should send a **voice notification on successful completion** with a brief TTS message
+and a rich markdown abstract. Without this, the user has no audio signal that the job finished — they
+must actively check the terminal or notifications dashboard.
+
+**Pattern source**: `src/cosa/agents/deep_research/job.py:338-356` (TTS + abstract + job_id routing)
+**TFE reference**: `src/cosa/agents/test_fix_expediter/job.py` (outcome-aware three-variant TTS)
+
+### What to Implement
+
+1. **Record start time** at top of `_execute()`:
+   ```python
+   import time
+   self._start_time = time.time()
+   ```
+
+2. **Compute agent-specific summary stats** from orchestrator state at end of `_execute()`.
+   The stats are agent-dependent — Deep Research reports cost/tokens/duration, TFE reports
+   clusters/proposals/fixes, Podcast reports segments/languages.
+
+3. **Brief TTS message** — keep under 2 sentences, spoken via voice_io. Make it **outcome-aware**
+   with 2-3 variants:
+   - Success with results: `"Research complete! Cost: $0.42"`
+   - Success but no action: `"TFE complete. 2 clusters diagnosed, no fixes selected."`
+   - Partial success: `"Podcast complete. 3 of 5 languages rendered."`
+
+4. **Rich markdown abstract** — NOT spoken, shown in notification UI card. Include:
+   - Agent-specific stats table (key metrics)
+   - Artifact paths (report, plan, audio, etc.)
+   - Duration
+   - Per-item detail if applicable (per-cluster diagnoses, per-segment status)
+
+5. **Call voice_io.notify()** with `priority="medium"`, `job_id=self.id_hash`, `queue_name="run"`.
+   Wrap in try/except — notification failure must never mask a successful job.
+
+6. **Conversational answer** — replace generic scaffolding text with real stats.
+
+### Phase 11 TodoWrite Template
+
+```
+[LUPIN] Add self._start_time = time.time() at _execute() entry
+[LUPIN] Compute agent-specific completion stats
+[LUPIN] Write outcome-aware TTS message (2-3 variants)
+[LUPIN] Write rich markdown abstract with stats + artifact paths
+[LUPIN] Call voice_io.notify() in success path (try/except wrapped)
+[LUPIN] Replace scaffolding return text with real stats
+[LUPIN] Add completion notification unit test
+```
+
+---
+
+## Phase 12: Checkpoint-Resume
+
+### Overview
+
+When an agentic job hits a **voice gate** (human-in-the-loop decision point) and the user is
+unavailable, the job should **stall** at that phase rather than silently completing with nothing
+done. The job saves its intermediate state (clusters, diagnoses, proposals — whatever it has
+computed so far) as a **checkpoint**, transitions to `STALLED`, and waits for the user to resume.
+
+Without this, all intermediate work (which may have cost real API tokens) is lost.
+
+**When to add**: Any agent with voice gates (blocking user prompts during execution). Currently:
+TFE (Phase 2 aggregate select), BFE (Phase 2 fix selection, Phase 5 trust confirmation), Podcast
+(script review gate).
+
+**Pattern source**: `src/cosa/agents/test_fix_expediter/` (full reference implementation)
+**State machine**: `src/cosa/rest/job_state.py` (STALLED state + transitions)
+
+### Key Concepts
+
+1. **STALLED state** — system-initiated (voice gate timeout), distinct from PAUSED (user-initiated).
+   Transition: `RUNNING → STALLED → RUNNING` (on resume) or `STALLED → CANCELLED`.
+
+2. **VoiceGateTimeoutError** — raised when a blocking voice gate times out without user response.
+   The orchestrator catches this and raises `StalledException` with the checkpoint.
+
+3. **StalledException** — carries the serialized checkpoint dict. Caught by `_execute()` to
+   transition cleanly to STALLED (not treated as a failure).
+
+4. **CheckpointData** — TypedDict with `phase_ordinal`, `phase_name`, `stall_reason`,
+   `stalled_at`, `state_snapshot`, `artifacts`, `resume_count`. Stored in `metadata_json`.
+
+5. **Resume** — `POST /api/jobs/{id}/resume-from-checkpoint` reconstructs the job from
+   `original_args` + loads checkpoint → pushes to todo queue → orchestrator resumes from
+   stall phase.
+
+### What to Implement
+
+1. **Exception types** in `state.py`:
+   ```python
+   class VoiceGateTimeoutError( Exception ):
+       def __init__( self, phase, message="" ): ...
+
+   class StalledException( Exception ):
+       def __init__( self, checkpoint, phase, message="" ): ...
+   ```
+
+2. **Phase ordinal mapping** — map each phase enum to an integer ordinal for resume ordering.
+
+3. **save_checkpoint() / load_checkpoint()** on orchestrator — serialize/restore all pipeline
+   state. Pydantic models → dicts via `.model_dump()`, reconstruct via `Model(**dict)`.
+
+4. **set_resume_phase()** — marks phases up to the checkpoint ordinal as completed so phase
+   methods skip work that has already been done.
+
+5. **Voice gate timeout propagation** — in the aggregate/per-cluster voice gate methods, catch
+   `VoiceGateTimeoutError` before the generic `Exception` handler (which auto-selects all).
+   Wrap the voice gate call in `run_phase2_propose()` to save checkpoint and raise
+   `StalledException`.
+
+6. **Stall handling in _execute()** — catch `StalledException`, persist checkpoint in
+   `self.artifacts["checkpoint"]`, send voice notification, return `"__STALLED__"` sentinel.
+
+7. **Stall detection in do_all()** — check if result is `"__STALLED__"`, set
+   `self.state = JobState.STALLED`.
+
+8. **Resume in _execute()** — at top after orchestrator creation, check for `_resume_checkpoint`
+   attribute and call `load_checkpoint()` + `set_resume_phase()`.
+
+9. **UI: Resume button** on stalled job cards + "Resume from" text input on agent submission form
+   (mirrors Presentation Generator's `render_only` + `yaml_path` auto-detection pattern).
+
+### Artifact-Based Resume (Phase 12b)
+
+Jobs can be resumed from **file paths** or **natural-language descriptions**, not just stalled
+job IDs. Mirrors Presentation Generator's `render_only` + `yaml_path` auto-detection pattern.
+
+**Reference implementation**: TFE (Test Fix Expediter) — see
+`src/rnd/v0.1.6/2026.04.10-test-fix-expediter/15-file-path-resume-and-voice-parsing.md` and
+`src/cosa/agents/test_fix_expediter/resume_resolver.py`.
+
+**Four input types → one endpoint**:
+
+```
+User input (typed or voice) → smart dispatcher
+                                  │
+    ┌─────────────────────────────┼─────────────────────────────┐
+    │            │              │                              │
+  tfe-*        *.md         *.json                          natural
+(job ID)   (plan doc)  (checkpoint)                         language
+    │            │              │                              │
+    └────────────┴──────────────┴──────────┬───────────────────┘
+                                           │
+                                    LLM fuzzy match
+                                           │
+                                           ▼
+                           resume_job(resolved_id_hash)
+```
+
+**Components**:
+
+1. **Resume resolver module** (`{agent}/resume_resolver.py`):
+   - `ResumeTarget` Pydantic model (job_id, source_type, confidence, candidates, diagnostic)
+   - `resolve_resume_target(resume_from, user_email)` → dispatches by input shape
+   - Exact match paths: job ID (no file I/O), plan doc path (filename regex + DB lookup)
+   - Fuzzy path: `list_resume_candidates()` + `fuzzy_match_candidates()` (LLM-ranked)
+
+2. **Smart endpoint** (`POST /api/{agent}/resume-from`):
+   - Accepts `resume_from: str` (free-form)
+   - Returns `{status: "resumed"|"ambiguous"|"not_found", ...}`
+   - Ambiguous case returns candidates for UI disambiguation
+   - Delegates single-match to existing `resume_job(id_hash)` factory
+
+3. **LLM fuzzy match infrastructure** (new per agent):
+   - New INI keys: `llm spec key for {agent} resume matching`, `prompt template for {agent} resume matching`
+   - Splainer entries for both keys
+   - XML prompt template in `src/conf/prompts/{agent}-resume-matching.txt` using `{{PYDANTIC_XML_EXAMPLE}}` marker
+   - XML response Pydantic model (e.g., `TFEResumeMatchResponse`) with `matches: str` field + `get_matches_list()`
+   - Auto-select threshold: confidence >= 0.9 AND status == "stalled"
+   - Disambiguation: return top 3 candidates with confidence + reason
+
+4. **UI submission card** in notifications dashboard:
+   - Textarea for free-form input (job ID, path, or description)
+   - Submit button → POST to `/api/{agent}/resume-from`
+   - Candidate list div that renders ambiguous responses as clickable rows
+   - Click candidate → re-submits with exact job ID for auto-resume
+
+5. **Voice training data**:
+   - 30+ templates covering date/status/content/ID phrasings
+   - Examples: "the plan from April 12", "the most recent stalled one", "job tfe-*"
+   - Add to `src/ephemera/prompts/data/` + register in `agent-router-agentic-commands.json`
+
+**Pattern anchors by agent**:
+
+| Agent | Primary input | Resume phase |
+|-------|---------------|--------------|
+| TFE | `.md` plan doc | Phase 3 (fixing) — skips cluster/diagnose/propose |
+| TFE | `.json` checkpoint | Checkpoint's ordinal (arbitrary) |
+| Presentation | `.yaml` intermediate | Phase 6 (render-only) |
+| Podcast | `.md` script | Audio generation phase |
+
+**When to add**: Any agent with long-running phases that produces durable artifacts
+(plan docs, outlines, scripts, YAML intermediates). Without this, users must remember
+exact job IDs to resume anything.
+
+### Phase 12b TodoWrite Template
+
+```
+[LUPIN] Create {agent}/resume_resolver.py with ResumeTarget + dispatcher
+[LUPIN] Add {Agent}ResumeMatchResponse to io_models/xml_models.py
+[LUPIN] Create src/conf/prompts/{agent}-resume-matching.txt template
+[LUPIN] Add INI keys: llm spec key + prompt template for {agent} resume matching
+[LUPIN] Add matching splainer entries
+[LUPIN] Add POST /api/{agent}/resume-from endpoint with TFEResumeFromRequest model
+[LUPIN] Add UI submission card + submitTFEResume() + candidate disambiguation
+[LUPIN] Unit tests for resolver (dispatch + job ID + plan path + fuzzy match)
+[LUPIN] Unit tests for endpoint (resumed / ambiguous / not_found / 400 / 404 paths)
+[LUPIN] (Optional) Voice routing training data + expeditor handler
+```
+
+### Phase 12 TodoWrite Template
+
+```
+[LUPIN] Add VoiceGateTimeoutError + StalledException to state.py
+[LUPIN] Add phase ordinal mapping
+[LUPIN] Implement save_checkpoint() / load_checkpoint() on orchestrator
+[LUPIN] Implement set_resume_phase() with phase skip guards
+[LUPIN] Propagate VoiceGateTimeoutError in voice gate methods
+[LUPIN] Add StalledException catch in _execute() + __STALLED__ sentinel in do_all()
+[LUPIN] Add _resume_checkpoint detection in _execute() entry
+[LUPIN] Add Resume button on stalled job cards in notifications.js
+[LUPIN] Add checkpoint round-trip unit tests
+[LUPIN] Add resume flow unit tests
+```
+
 ---
 
 # Part III: VALIDATE — The Testing Ladder
@@ -3174,13 +3495,13 @@ class Test{AgentName}Config:
 
     def test_default_values( self ):
         config = {AgentName}Config()
-        assert config.model == "claude-sonnet-4-20250514"
+        assert config.model == "claude-sonnet-4-6"
         assert config.max_iterations > 0
         assert config.timeout_seconds > 0
 
     def test_custom_values( self ):
-        config = {AgentName}Config( model="claude-opus-4-20250514", max_iterations=5 )
-        assert config.model == "claude-opus-4-20250514"
+        config = {AgentName}Config( model="claude-opus-4-6", max_iterations=5 )
+        assert config.model == "claude-opus-4-6"
         assert config.max_iterations == 5
 
 
@@ -3530,6 +3851,28 @@ spinner toggle, color-coded status feedback (#28a745 = green success, #dc3545 = 
 
 **CRITICAL**: This surface MUST come before Surface 5 (voice routing). The LORA classifier
 can't route to an agent it hasn't been trained on.
+
+### Mandatory New-Agent Automation Checklist
+
+**EVERY new agentic agent or chained workflow requires ALL of the following.** Do not plan
+an agent implementation without including these artifacts. If any item is not applicable,
+explicitly state why — never silently omit.
+
+| # | Artifact | Location | Purpose |
+|---|----------|----------|---------|
+| 1 | Utterance template (65+ lines) | `src/ephemera/prompts/data/synthetic-data-agent-routing-{agent}.txt` | PEFT training data |
+| 2 | Agentic commands config entry | `src/conf/training/agent-router-agentic-commands.json` | Maps command to template |
+| 3 | Prompt template `<command>` | `src/conf/prompts/agent-router-template-completion.txt` | LLM router knows the command |
+| 4 | `AGENTIC_MODE_MAP` entry | `src/cosa/rest/todo_fifo_queue.py` | UI dropdown → queue routing |
+| 5 | `MODE_METADATA` entry | `src/cosa/rest/todo_fifo_queue.py` | Mode display name + description |
+| 6 | `PRODUCT_NAMES` entry | `src/cosa/rest/todo_fifo_queue.py` | Disambiguation display name |
+| 7 | Proxy Q&A script | `src/conf/notification-proxy-scripts/{agent}.json` | Proxy auto-answers expediter |
+| 8 | Proxy config profile | `src/cosa/agents/notification_proxy/config.py` | `TEST_PROFILES` dict entry |
+| 9 | Proxy integration scenarios | `src/tests/smoke/test_proxy_integration.py` | Happy + missing-arg paths |
+| 10 | Dry-run smoke test | `src/tests/smoke/test_{agent}_dry_run_smoke.py` | Submit→poll→validate lifecycle |
+| 11 | E2E UI card tests | `src/tests/e2e_ui/test_job_dispatch.py` | DOM element verification |
+| 12 | UI elements | `notifications.html` + `notifications.js` | Card, checkbox, dropdown |
+| 13 | Unit tests | `src/tests/unit/test_{agent}.py` | State, job, factory, registry |
 
 ### Why This Surface Exists
 
@@ -3900,6 +4243,26 @@ Phase 6-10: Advanced (as needed)
 [ ] External service integrations (Phase 9)
 [ ] Advanced orchestration patterns (Phase 10)
 
+Phase 11: Completion Report (MANDATORY)
+[ ] self._start_time at _execute() entry
+[ ] Agent-specific completion stats
+[ ] Outcome-aware TTS message (2-3 variants)
+[ ] Rich markdown abstract with stats + artifact paths
+[ ] voice_io.notify() in success path (try/except wrapped)
+[ ] Real stats in conversational answer (no scaffolding text)
+[ ] Completion notification unit test
+
+Phase 12: Checkpoint-Resume (if agent has voice gates)
+[ ] VoiceGateTimeoutError + StalledException in state.py
+[ ] Phase ordinal mapping
+[ ] save_checkpoint() / load_checkpoint() on orchestrator
+[ ] set_resume_phase() with phase skip guards
+[ ] VoiceGateTimeoutError propagation in voice gate methods
+[ ] StalledException catch in _execute() + __STALLED__ sentinel
+[ ] _resume_checkpoint detection in _execute() entry
+[ ] Resume button on stalled job cards
+[ ] Checkpoint round-trip + resume flow unit tests
+
 ═══════════════════════════════════════════════════════════════
   VALIDATE — The Testing Ladder
 ═══════════════════════════════════════════════════════════════
@@ -3954,9 +4317,11 @@ For complete working examples, see:
 
 | Agent | Location | Key Features |
 |-------|----------|--------------|
-| deep_research | `src/cosa/agents/deep_research/` | Web search, report synthesis, human-in-the-loop |
-| podcast_generator | `src/cosa/agents/podcast_generator/` | File input, TTS generation, audio stitching |
+| deep_research | `src/cosa/agents/deep_research/` | Web search, report synthesis, human-in-the-loop, completion report |
+| podcast_generator | `src/cosa/agents/podcast_generator/` | File input, TTS generation, audio stitching, script review checkpoint |
 | deep_research_to_podcast | `src/cosa/agents/deep_research_to_podcast/` | Chained workflow pattern |
+| test_fix_expediter | `src/cosa/agents/test_fix_expediter/` | Multi-cluster, checkpoint-resume, completion report, voice gate stall |
+| bug_fix_expediter | `src/cosa/agents/bug_fix_expediter/` | Dead-queue repair, shared FixExecutor, trust-level git strategy, checkpoint-resume (re-exports TFE exception types), completion report |
 
 ### Key Files to Reference
 
@@ -4020,6 +4385,17 @@ src/tests/smoke/test_deep_research_dry_run_smoke.py
 
 # Unit test example (Surface 1)
 src/tests/unit/test_runtime_argument_expeditor.py
+
+# Completion report pattern (Phase 11)
+src/cosa/agents/test_fix_expediter/job.py  # Outcome-aware TTS + rich abstract
+src/cosa/agents/deep_research/job.py       # Original pattern (cost + tokens + duration)
+
+# Checkpoint-resume pattern (Phase 12)
+src/cosa/agents/test_fix_expediter/state.py        # VoiceGateTimeoutError, StalledException, CheckpointData
+src/cosa/agents/test_fix_expediter/orchestrator.py  # save_checkpoint, load_checkpoint, set_resume_phase
+src/cosa/rest/job_state.py                          # STALLED state + transitions
+src/cosa/rest/agentic_job_factory.py                # resume_job() factory function
+src/cosa/rest/routers/queues.py                     # POST /api/jobs/{id}/resume-from-checkpoint
 ```
 
 ---
@@ -4028,6 +4404,9 @@ src/tests/unit/test_runtime_argument_expeditor.py
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 3.2 | 2026-04-12 | Phase E cross-agent rollout: BFE gets completion voice report + checkpoint-resume (re-exports TFE exception types VoiceGateTimeoutError / StalledException / CheckpointData — single source of truth). Podcast Generator gets completion voice report (no checkpoint-resume; audio generation is stateless). 18 new unit tests across 3 files (4 BFE completion + 3 Podcast completion + 11 BFE checkpoint). Session 9056c113 Phase E. |
+| 3.1 | 2026-04-12 | Phase 12b (Artifact-Based Resume) expanded with full component breakdown — ResumeTarget model, smart endpoint, LLM fuzzy match infrastructure (INI keys + XML response model + prompt template), UI submission card, voice training data. TFE reference implementation complete (Session 9056c113 Phase 2-5 follow-ups). |
+| 3.0 | 2026-04-12 | Phase 11 (Completion Report) + Phase 12 (Checkpoint-Resume) added. STALLED JobState for voice gate timeouts. Artifact-based resume pattern. Cross-agent patterns from TFE forensics (Session 9056c113). Reference implementations updated with TFE + BFE entries. |
 | 2.1 | 2026-02-07 | Completeness review: fixed training template naming + JSON path (Surface 4), added agent_registry.py + agentic_job_factory.py registration (Phase 5), added FastAPI router template (Phase 5b), added notification UI submission card guide (Surface 3), added artifact storage pattern + WebSocket state transition notes (Phase 5), added model string convention note (Phase 6), expanded final checklist |
 | 2.0 | 2026-02-06 | Complete lifecycle guide: Part I CONCEPT, Part II BUILD expanded (Phases 6-10), Part III VALIDATE Testing Ladder (5 surfaces), Part IV Reference Implementations |
 | 1.0 | 2026-01-27 | Initial workflow documentation (BUILD phases 0-5 only) |

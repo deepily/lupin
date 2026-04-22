@@ -183,8 +183,12 @@ class AdminSnapshotsDashboard {
 
     async apiCall( endpoint, method = 'GET', data = null ) {
         const url = `${window.location.origin}${endpoint}`;
-        const token = getAccessToken();
 
+        // Proactive refresh (Pattern A) — catches expiry BEFORE the fetch.
+        // ensureValidToken is a global from auth.js, loaded on every admin page.
+        await ensureValidToken();
+
+        const token = getAccessToken();
         const headers = {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`

@@ -14,26 +14,27 @@ Sender ID Format: claude.code@{project}.deepily.ai#{session_id}
     - Derived from the session bridge (env > file > fallback), shared with hooks
     - A background thread upgrades the ID once the SessionStart hook writes it
 
-Project Detection (automatic):
+Project Detection (automatic — no MCP_PROJECT needed):
     1. Auto-detects from current working directory (checked in order):
        - cosa → "cosa" (checked first - may be submodule of lupin)
        - lupin → "lupin"
        - planning-is-prompting → "plan"
-    2. Falls back to MCP_PROJECT env var if cwd detection fails
-    3. Falls back to "unknown" with console warning if neither works
+       - anything else → CWD basename (works in any repo)
+    2. Falls back to MCP_PROJECT env var if cwd detection raises an exception
+    3. Last resort: uses CWD basename with warning (never crashes)
 
 Environment Variables:
-    MCP_PROJECT: Fallback project name (optional, auto-detection preferred)
+    MCP_PROJECT: Optional override (auto-detection is preferred and sufficient)
     LUPIN_APP_SERVER_URL: Server URL (default: http://localhost:7999)
     MCP_DEBUG: Enable debug logging (optional)
 
-Usage:
-    # One MCP registration works for all projects via auto-detection
-    claude mcp add cosa-voice -- python /path/to/cosa_voice_mcp.py
+Installation (global — one registration for all repos):
+    install-cosa-voice.sh   # registers at user scope via claude mcp add --scope user
 """
 
 import logging
 import os
+import re
 import requests
 import signal
 import sys
@@ -115,7 +116,8 @@ def _detect_project_from_cwd() -> Optional[ str ]:
         return None
 
 
-_PROJECT_SOURCE = "unknown"  # Set by _get_project(): "known" | "basename" | "env_var"
+_PROJECT_SOURCE    = "unknown"  # Set by _get_project(): "known" | "basename" | "env_var"
+_ACCOUNT_VALIDATED = None       # Set by _validate_repo_account(): True | False | None (not yet checked)
 
 
 def _get_project() -> str:
@@ -154,27 +156,73 @@ def _get_project() -> str:
         logger.info( f"Project from MCP_PROJECT env var: {project.lower()}" )
         return project.lower()
 
-    # Priority 3: Hard failure — refuse to run as "unknown"
-    logger.critical( "=" * 60 )
-    logger.critical( "PROJECT DETECTION FAILED — MCP SERVER CANNOT START" )
-    logger.critical( "=" * 60 )
-    logger.critical( f"Current working directory: {os.getcwd()}" )
-    logger.critical( "Could not detect project from path, and MCP_PROJECT env var not set." )
-    logger.critical( "" )
-    logger.critical( "To fix, either:" )
-    logger.critical( "  1. Run Claude Code from within a known project directory" )
-    logger.critical( "  2. Set MCP_PROJECT in your MCP config's env section:" )
-    logger.critical( '     "env": { "MCP_PROJECT": "your-project-name" }' )
-    logger.critical( "=" * 60 )
+    # Priority 3: Last-resort fallback — use CWD basename with warning
+    fallback = os.path.basename( os.getcwd() ).lower() or "unknown"
+    _PROJECT_SOURCE = "basename"
+    logger.warning( "=" * 60 )
+    logger.warning( f"PROJECT DETECTION FALLBACK — using CWD basename: {fallback}" )
+    logger.warning( "=" * 60 )
+    logger.warning( f"Current working directory: {os.getcwd()}" )
+    logger.warning( "Auto-detection raised an exception, and MCP_PROJECT env var not set." )
+    logger.warning( f"Falling back to basename '{fallback}' — notifications may route incorrectly." )
+    logger.warning( "=" * 60 )
 
-    os._exit( 1 )
+    return fallback
+
+
+def _resolve_canonical_project( detected: str ) -> str:
+    """
+    Resolve canonical project identifier from ~/.lupin/config.
+
+    The cwd-detected project name (e.g., "ampe-to-meridian") may differ from
+    the canonical identity used in the user's Lupin account email. For example,
+    the user's config may map [ampe-to-meridian] -> claude.code@ampe2meridian.deepily.ai,
+    and THAT canonical identifier ("ampe2meridian") is what should be used for
+    sender_id construction — not the raw cwd basename.
+
+    The config file is the source of truth: if a matching section exists and
+    contains a parseable email, extract the identifier from between '@' and
+    '.deepily.ai'. Otherwise, return the detected name unchanged.
+
+    Requires:
+        - detected is a non-empty string (project name from cwd detection)
+
+    Ensures:
+        - Returns canonical project identifier from ~/.lupin/config if mapped
+        - Returns detected name unchanged if no config section or unparseable email
+        - Never raises — all lookups are best-effort
+
+    Args:
+        detected: Project name detected from cwd
+
+    Returns:
+        str: Canonical project identifier for sender_id construction
+    """
+    try:
+        from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
+        email, _ = get_hook_credentials( detected )
+        # Parse: {agent}@{identifier}.deepily.ai -> identifier
+        match = re.match( r"^[a-z]+(?:\.[a-z]+)+@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\.deepily\.ai$", email )
+        if match:
+            canonical = match.group( 1 )
+            if canonical != detected:
+                logger.info( f"Canonical project identity from config: {detected} -> {canonical}" )
+            return canonical
+        logger.warning( f"Config email for [{detected}] does not match expected format: {email}" )
+    except ( FileNotFoundError, ValueError ) as e:
+        logger.debug( f"No canonical project mapping for '{detected}' in ~/.lupin/config ({e.__class__.__name__})" )
+    except Exception as e:
+        logger.warning( f"Unexpected error resolving canonical project for '{detected}': {e}" )
+    return detected
 
 
 def _get_sender_id( project: str, session_id: str = None ) -> str:
     """
     Generate sender_id with optional session identifier.
 
-    Delegates to the shared build_sender_id() utility.
+    Delegates to the shared build_sender_id() utility. The caller is expected
+    to pass the CANONICAL project identifier (from _resolve_canonical_project),
+    not the raw cwd-detected name.
 
     Examples:
         _get_sender_id( "lupin" ) -> "claude.code@lupin.deepily.ai"
@@ -237,6 +285,7 @@ def _validate_repo_account( project: str ) -> None:
         - On success: logs confirmation, returns normally
         - On failure: sends urgent notification, logs critical, returns normally
     """
+    global _ACCOUNT_VALIDATED
     from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
 
     expected_email = f"claude.code@{project}.deepily.ai"
@@ -245,6 +294,7 @@ def _validate_repo_account( project: str ) -> None:
     try:
         email, password = get_hook_credentials( project )
     except ( FileNotFoundError, ValueError ) as e:
+        _ACCOUNT_VALIDATED = False
         _send_validation_error(
             f"No credentials for project '{project}'.\n{e}\n\n"
             f"To fix:\n"
@@ -267,6 +317,7 @@ def _validate_repo_account( project: str ) -> None:
             timeout=5
         )
         if resp.status_code != 200:
+            _ACCOUNT_VALIDATED = False
             _send_validation_error(
                 f"Login failed for {email} (HTTP {resp.status_code}).\n"
                 f"Account may not exist or may be disabled.\n\n"
@@ -276,13 +327,24 @@ def _validate_repo_account( project: str ) -> None:
                 f"3. Check that the password in ~/.lupin/config [{project}] matches"
             )
             return
-    except requests.ConnectionError:
+    except ( requests.ConnectionError, requests.Timeout ) as e:
+        # Catch BOTH ConnectionError (server down) AND Timeout (server up but
+        # unresponsive). Without the Timeout case, a slow server propagates
+        # `requests.ReadTimeout` out of module-import scope and breaks every
+        # test that imports cosa_voice_mcp.
+        _ACCOUNT_VALIDATED = False
         _send_validation_error(
-            f"Cannot reach Lupin server at {SERVER_URL}.\n"
+            f"Cannot reach Lupin server at {SERVER_URL} ({type( e ).__name__}).\n"
             f"Ensure FastAPI is running: src/scripts/run-fastapi-lupin.sh"
         )
         return
+    except Exception as e:
+        # Final fallback — never let validation explode at import time.
+        _ACCOUNT_VALIDATED = False
+        logger.warning( f"Repo account validation aborted: {type( e ).__name__}: {e}" )
+        return
 
+    _ACCOUNT_VALIDATED = True
     logger.info( f"Repo account validated: {email}" )
 
 
@@ -302,20 +364,35 @@ signal.signal( signal.SIGTERM, _handle_sigterm )
 # Initialize at module load
 # ============================================================================
 
-PROJECT         = _get_project()
-SESSION_ID      = get_claude_session_id()[:8]  # 8-char hex from session bridge (env > file > fallback)
-SENDER_ID       = _get_sender_id( PROJECT, SESSION_ID )
-SERVER_URL      = _get_server_url()
-_session_ready  = threading.Event()   # Gate: blocks tool calls until session ID resolved
-_session_failed = False               # True if real ID never arrived (fallback only)
-
-logger.info( f"Project: {PROJECT} (source: {_PROJECT_SOURCE})" )
-logger.info( f"Session ID: {SESSION_ID}" )
-logger.info( f"Sender ID: {SENDER_ID}" )
-logger.info( f"Server URL: {SERVER_URL}" )
+PROJECT           = _get_project()
+CANONICAL_PROJECT = _resolve_canonical_project( PROJECT )  # Config-mapped identity for sender_id
+SESSION_ID        = get_claude_session_id()[:8]  # 8-char hex from session bridge (env > file > fallback)
+SENDER_ID         = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
+SERVER_URL        = _get_server_url()
+_session_ready    = threading.Event()   # Gate: blocks tool calls until session ID resolved
+_session_failed   = False               # True if real ID never arrived (fallback only)
 
 # Validate repo service account (non-blocking — logs + notifies on failure)
 _validate_repo_account( PROJECT )
+
+# ── Startup banner (consolidated status to stderr) ──────────────────────
+_account_status = "validated" if _ACCOUNT_VALIDATED else "FAILED" if _ACCOUNT_VALIDATED is False else "skipped"
+_project_line   = f"  Project : {PROJECT} ({_PROJECT_SOURCE})" if PROJECT == CANONICAL_PROJECT else f"  Project : {PROJECT} ({_PROJECT_SOURCE}) -> {CANONICAL_PROJECT} (config)"
+_banner_lines   = [
+    "",
+    "=" * 42,
+    f"  cosa-voice MCP v{__version__} — Runtime",
+    "=" * 42,
+    _project_line,
+    f"  Session : {SESSION_ID}",
+    f"  Sender  : {SENDER_ID}",
+    f"  Server  : {SERVER_URL}",
+    f"  Account : {_account_status}",
+    "=" * 42,
+    "",
+]
+for _line in _banner_lines:
+    logger.info( _line )
 
 
 def _session_watcher_thread():
@@ -345,7 +422,7 @@ def _session_watcher_thread():
         if new_suffix != SESSION_ID:
             old_sender = SENDER_ID
             SESSION_ID = new_suffix
-            SENDER_ID  = _get_sender_id( PROJECT, SESSION_ID )
+            SENDER_ID  = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
             logger.info( f"Session ID upgraded: {old_sender} -> {SENDER_ID}" )
 
         # Verify we got a real session ID, not the fallback
@@ -404,7 +481,7 @@ def _session_watcher_thread():
             if new_suffix != last_session_id:
                 old_sender     = SENDER_ID
                 SESSION_ID     = new_suffix
-                SENDER_ID      = _get_sender_id( PROJECT, SESSION_ID )
+                SENDER_ID      = _get_sender_id( CANONICAL_PROJECT, SESSION_ID )
                 last_session_id = new_suffix
                 logger.info(
                     f"Session ID changed: {old_sender} -> {SENDER_ID} "
@@ -555,43 +632,49 @@ def converse(
         return f"[error: {response.status}]"
 
 
-@mcp.tool
-def notify(
+def _notify_impl(
     message: str,
     notification_type: str = "progress",
     priority: str = "medium",
     abstract: Optional[ str ] = None,
     job_id: Optional[ str ] = None,
     suppress_ding: bool = False,
-    progress_group_id: Optional[ str ] = None
+    progress_group_id: Optional[ str ] = None,
+    session_name: Optional[ str ] = None
 ) -> str:
     """
-    Announce something to the user without waiting for response.
+    Core notify implementation — plain Python function callable from anywhere.
 
-    Use this for status updates, progress reports, or FYI messages.
-    The message will be converted to speech (TTS) and played to the user.
-    This call returns immediately - it does not wait for acknowledgment.
+    FastMCP 2.x @mcp.tool converts decorated functions into FunctionTool objects
+    that are NOT callable as regular Python functions. This private function holds
+    the actual logic so that both the MCP tool and internal callers (e.g.,
+    set_session_topic) can invoke it directly.
+
+    Requires:
+        - message is a non-empty string
+        - notification_type is a valid NotificationType value
+        - priority is a valid NotificationPriority value
+
+    Ensures:
+        - Returns a status string (never raises)
+        - Sends notification via HTTP POST to /api/notify
 
     Args:
         message: What to announce to the user
-        notification_type: "task", "progress", "alert", or "custom"
+        notification_type: "task", "progress", "alert", "custom", or "session_topic"
         priority: "low", "medium", "high", or "urgent"
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
         suppress_ding: Suppress notification sound while still speaking via TTS (default False)
         progress_group_id: Optional progress group ID (pg-{8 hex chars}) for in-place DOM updates.
             Notifications sharing this ID update a single element instead of appending new ones.
+        session_name: Optional human-readable session name for UI header display.
+            When set, updates the sender-session-name span in notification history card.
 
     Returns:
         Delivery status message
-
-    Examples:
-        notify("Starting code analysis...", notification_type="progress")
-        notify("Build completed successfully", notification_type="task")
-        notify("Warning: deprecated API detected", notification_type="alert", priority="high")
-        notify("Task complete", suppress_ding=True)  # TTS only, no ding
     """
-    logger.debug( f"notify() called: {message[:50]}..." )
+    logger.debug( f"_notify_impl() called: {message[:50]}..." )
 
     try:
         request = AsyncNotificationRequest(
@@ -602,7 +685,8 @@ def notify(
             abstract=_normalize_abstract( abstract ),
             job_id=job_id,
             suppress_ding=suppress_ding,
-            progress_group_id=progress_group_id
+            progress_group_id=progress_group_id,
+            session_name=session_name
         )
     except ( ValidationError, ValueError ) as e:
         logger.error( f"Validation error: {e}" )
@@ -614,6 +698,57 @@ def notify(
         return f"Notification sent ({response.status})"
     else:
         return f"Failed: {response.message}"
+
+
+@mcp.tool
+def notify(
+    message: str,
+    notification_type: str = "progress",
+    priority: str = "medium",
+    abstract: Optional[ str ] = None,
+    job_id: Optional[ str ] = None,
+    suppress_ding: bool = False,
+    progress_group_id: Optional[ str ] = None,
+    session_name: Optional[ str ] = None
+) -> str:
+    """
+    Announce something to the user without waiting for response.
+
+    Use this for status updates, progress reports, or FYI messages.
+    The message will be converted to speech (TTS) and played to the user.
+    This call returns immediately - it does not wait for acknowledgment.
+
+    Args:
+        message: What to announce to the user
+        notification_type: "task", "progress", "alert", "custom", or "session_topic"
+        priority: "low", "medium", "high", or "urgent"
+        abstract: Optional supplementary context (plan details, URLs, markdown)
+        job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
+        suppress_ding: Suppress notification sound while still speaking via TTS (default False)
+        progress_group_id: Optional progress group ID (pg-{8 hex chars}) for in-place DOM updates.
+            Notifications sharing this ID update a single element instead of appending new ones.
+        session_name: Optional human-readable session name for UI header display.
+            When set, updates the sender-session-name span in notification history card.
+
+    Returns:
+        Delivery status message
+
+    Examples:
+        notify("Starting code analysis...", notification_type="progress")
+        notify("Build completed successfully", notification_type="task")
+        notify("Warning: deprecated API detected", notification_type="alert", priority="high")
+        notify("Task complete", suppress_ding=True)  # TTS only, no ding
+    """
+    return _notify_impl(
+        message=message,
+        notification_type=notification_type,
+        priority=priority,
+        abstract=abstract,
+        job_id=job_id,
+        suppress_ding=suppress_ding,
+        progress_group_id=progress_group_id,
+        session_name=session_name
+    )
 
 
 @mcp.tool
@@ -939,6 +1074,64 @@ def _parse_open_ended_batch_response( response_value: Optional[ str ] ) -> dict:
     except ( json.JSONDecodeError, TypeError ) as e:
         logger.warning( f"Could not parse open-ended batch response: {e}" )
         return { "answers": { "response": response_value } }
+
+
+@mcp.tool
+def set_session_topic( topic: str ) -> dict:
+    """
+    Set the current session's topic/description for context in stop hook notifications.
+
+    The topic appears in the "Continue Session?" notification abstract so users
+    know WHAT they'd be continuing. Call this at session start, after plan
+    approval, or when switching tasks.
+
+    The full topic is stored in the bridge file. For UI propagation, topics
+    longer than 64 characters are truncated with "..." because the notification
+    header has minimal display space.
+
+    Args:
+        topic: Brief description of current work (e.g., "Bug Fix: WS queue crash")
+
+    Returns:
+        dict with status and the topic that was set
+    """
+    import json
+
+    meta        = _get_cc_metadata()
+    bridge_path = meta.get( "_bridge_path" )
+    if not bridge_path:
+        return { "status": "error", "reason": "No bridge file found" }
+
+    try:
+        with open( bridge_path ) as f:
+            data = json.load( f )
+        data[ "session_topic" ] = topic
+        with open( bridge_path, "w" ) as f:
+            json.dump( data, f, indent=2 )
+
+        # Also push to notification UI for real-time header update
+        # Truncate session_name for UI display (max 64 chars)
+        MAX_SESSION_NAME = 64
+        if len( topic ) > MAX_SESSION_NAME:
+            display_topic = topic[ :MAX_SESSION_NAME - 3 ] + "..."
+        else:
+            display_topic = topic
+
+        result = _notify_impl(
+            message           = display_topic,
+            notification_type = "session_topic",
+            priority          = "low",
+            session_name      = display_topic,
+            suppress_ding     = True
+        )
+        ui_ok = not ( result.startswith( "[validation error" ) or result.startswith( "Failed:" ) )
+
+        if not ui_ok:
+            logger.warning( f"set_session_topic() UI push failed: {result}" )
+
+        return { "status": "ok", "topic": topic, "ui_push": "ok" if ui_ok else result }
+    except Exception as e:
+        return { "status": "error", "reason": str( e ) }
 
 
 @mcp.tool

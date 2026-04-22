@@ -28,7 +28,7 @@ set -e  # Exit on error
 # ============================================================
 # Configuration
 # ============================================================
-CONTAINER_NAME="lupin-postgres-dev"
+CONTAINER_NAME="lupin-postgres"
 DB_USER="lupin_dev"
 DB_PASSWORD="dev_password"
 DB_NAME="lupin_db_dev"
