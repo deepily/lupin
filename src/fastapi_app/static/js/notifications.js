@@ -10506,7 +10506,15 @@ class NotificationsUI {
             }
             
             this.log( `Successfully ${restart ? 'restarted' : 'played'} ${type}/${priority} notification` );
-            
+
+            // Fire-and-forget: tell the server this notification was played so unread-count
+            // tracking stays consistent across clients (mobile + other web sessions).
+            // Playback already succeeded locally; a failed POST is a consistency concern
+            // we log-only, not a user-visible error.
+            fetch( `/api/notifications/${notificationId}/played?api_key=${this.notificationState.apiKey}`, {
+                method: "POST"
+            } ).catch( err => this.log( `mark-played POST failed (non-fatal): ${err.message}` ) );
+
         } catch ( error ) {
             this.error( `Failed to ${restart ? 'restart' : 'play'} notification audio:`, error );
             // Reset UI state on error

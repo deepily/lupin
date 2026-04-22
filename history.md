@@ -1,5 +1,51 @@
 # Lupin Project History
 
+### 2026.04.22 - Session 9b840935 | Bug Fix Mode
+
+**Context**: Lupin-mobile session (separate console) flagged a cross-repo bug: `POST /api/notifications/{id}/played` 500s because `NotificationFifoQueue.mark_played()` calls an undefined `self._emit_queue_update()` method. Client silently swallows the error; server unread-count tracking diverges. Investigation also uncovered a longstanding latent bug in Chrome's `notifications.js` — `playNotificationAudio` never calls `POST /played` at all, so Chrome-originated playbacks never update the server's `played` column. User approved a two-part fix (CoSA + Chrome) in the same session.
+
+**Parallel session context**: Session `6a30b98c` active simultaneously working on PR-readiness testing (different files — no overlap detected).
+
+#### Fixes
+
+##### Fix 1: CoSA — add `_emit_queue_update()` method to `NotificationFifoQueue`
+- **Source**: cross-repo ad-hoc (reported by lupin-mobile session via `src/lupin-mobile/history.md:149`)
+- **Root cause**: `mark_played()` at `src/cosa/rest/notification_fifo_queue.py:409` calls `self._emit_queue_update()`, but that method was never defined on `NotificationFifoQueue` or its parent `FifoQueue`. The parent's auto-emission was refactored away at some earlier date and the emission logic was inlined into subclass `push()` overrides; `mark_played` was not updated to match. Three `patch.object(queue, '_emit_queue_update')` calls in `test_fifo_queue.py:446-458` masked the defect during unit testing (they fail too, but nobody noticed because they're tagged pre-existing).
+- **Failure path**: `POST /api/notifications/{id}/played` → handler (`notifications.py:1090`) → `mark_played` updates played/play_count/last_played + logs to io_tbl → `AttributeError` on `_emit_queue_update` → router catches and wraps into `HTTPException(500)`. Mobile client swallowed the error silently; state mutation landed on server but client thought the call failed.
+- **Fix**: added `_emit_queue_update()` method on `NotificationFifoQueue` (lines ~416-446). Broadcasts `notification_queue_update` with `{queue_name="notification", value=size, unplayed_count}`. Silent no-op when `websocket_mgr=None` or `emit_enabled=False`. Broadcast-not-per-user because `mark_played` only has the id; badge recomputation is cheap.
+- **Files**:
+  - `src/cosa/rest/notification_fifo_queue.py` (CoSA submodule — user commits separately) — new `_emit_queue_update` method
+  - `src/cosa/tests/unit/rest/test_notification_fifo_queue.py` (new — CoSA submodule, user commits separately) — 5 regression tests
+- **Test**: CoSA unit 5/5 PASS, module smoke test PASS, Lupin-side notification unit tests 27/27 PASS
+- **Commit (Lupin)**: 8a15ffb (this commit; combined with Fix 2 and Fix 3)
+- **Commit (CoSA)**: separate — user commits from CoSA session
+
+##### Fix 2: Chrome — wire `playNotificationAudio` to `POST /played` after playback
+- **Source**: ad-hoc follow-on from Fix 1 investigation
+- **Root cause**: `src/fastapi_app/static/js/notifications.js:10480-10523` plays audio, updates DOM via `updateAudioControlStates()` (pure DOM helper with no network calls), logs success, exits. It **never** calls `POST /played`. Result: server `played` column stays `False` forever for every Chrome-originated playback, and mobile's unread-count reads are stale. Longstanding latent bug — not a regression; no Lupin `.js` file has ever contained a `/played` URL literal (confirmed via `grep -rn "/played" src/`).
+- **Fix**: inside `playNotificationAudio` `try` block, right after the success log (line 10509), added a fire-and-forget `fetch(...POST /played)` with catch-logging for non-fatal failures. `notificationId` already in scope as the function parameter; `api_key` query-param pattern matches sibling GET and DELETE calls on the same module.
+- **Files**:
+  - `src/fastapi_app/static/js/notifications.js` — added fetch POST after success log
+  - `src/fastapi_app/static/html/notifications.html` — cache-bust `v=20260421c` → `v=20260422a`
+  - `src/tests/integration/test_notifications_integration.py` — new `TestMarkPlayedEndpoint` class with 3 in-process TestClient tests (200 on happy path, emission payload assertion, 404 on unknown id)
+- **Test**: Lupin integration 3/3 PASS. Live verified on `:7999`: `/health` returns 200, updated `notifications.js` served with cache-bust (new `mark-played POST failed` string confirmed in response body), `/played` endpoint reachable (clean 404 on bogus id — not the 500 the bug previously threw). **User manually confirmed end-to-end** after browser restart cleared a stale-keepalive socket cluster.
+- **Commit (Lupin)**: 8a15ffb (this commit; combined with Fix 2 and Fix 3)
+
+##### Fix 3: DRY refactor — extract `_emit_notification_added()` helper
+- **Source**: follow-up to Fix 1 investigation; surfaced duplicated emission block across `push()` (lines 244-267) and `push_notification()` high/urgent branch (lines 343-365). ~22 lines of near-identical `event_data` construction + `emit_to_user_sync` / `emit` / `emit_to_session_sync` fan-out in each, differing only in debug-print strings ("notification" vs "priority notification").
+- **Risk analysis surfaced during planning**: user asked about execution order on "duplicate blocks" — confirmed both blocks are LIVE code on mutually exclusive priority paths (normal → `push`; high/urgent → inline in `push_notification`), not dead code. Neither could be commented out without breaking its path.
+- **Fix**: extracted new private method `_emit_notification_added(notification)` (sibling to `_emit_queue_update`, different payload — includes the full `notification.to_dict()` for newly-added items). Replaced both call sites with `self._emit_notification_added(notification)`. Unified debug-print strings (dropped the "priority" qualifier). Net diff: ~44 lines of duplication collapsed to ~22 lines of shared helper + 2 call-site lines.
+- **Files**:
+  - `src/cosa/rest/notification_fifo_queue.py` (CoSA submodule, user commits separately) — new `_emit_notification_added` method; both original blocks replaced with calls to it
+- **Test**: CoSA unit 5/5 PASS (my `_emit_queue_update` regression tests still green — they exercise `push_notification` which is the high/urgent path; smoke test exercises both normal and high paths), Lupin integration 3/3 PASS, Lupin notification unit 27/27 PASS, module smoke test PASS (priority insertion + mark_played both verified). No behavior change intended or observed.
+- **Commit (Lupin)**: 8a15ffb (this commit; combined with Fix 2 and Fix 3)
+- **Commit (CoSA)**: separate — bundled with Fix 1's CoSA commit or as its own commit at user's discretion
+
+### Session Summary
+(Will be completed at session close)
+
+---
+
 ### 2026.04.21 - Session f9838819 | CJ Flow Async + Multi-Lane Design Review (v0.1.7 planning)
 
 **Context**: User restarted the design conversation begun in Session 237 (2026-02-19) about migrating CJ Flow from strictly serial job execution to a concurrent dispatcher model. Two-part question: (1) what does the prior design (Approach C: Hybrid Fast Lane + Bounded Agentic Pool) actually look like, and (2) what changes — beyond raw throughput — when you go from serial to async?

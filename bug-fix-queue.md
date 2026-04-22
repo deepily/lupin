@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-04-21T01:00:00
+**Last Updated**: 2026-04-22T14:55:15-04:00
 
 ---
 
@@ -49,6 +49,7 @@
 | eb50bd56 | 2026-04-16T22:30:00 | 2026-04-17T00:30:00 | closed |
 | 8ed95029 | 2026-04-18T13:20:00 | 2026-04-18T13:30:00 | stale |
 | b802e633 | 2026-04-21T00:00:00 | 2026-04-21T01:00:00 | closed |
+| 9b840935 | 2026-04-22T14:55:15 | 2026-04-22T14:55:15 | active |
 
 ---
 
@@ -56,6 +57,22 @@
 
 (Available for any session to claim)
 
+- [ ] **`POST /api/notify/response` ERR_CONNECTION_RESET + audio WebSocket connect failure** (possibly related to session 9b840935's notification fixes — filed 2026-04-22, USER-REPORTED while manually testing)
+  - **Browser console traces**:
+    - `POST http://localhost:7999/api/notify/response net::ERR_CONNECTION_RESET` at `notifications.js:962` (`authedFetch`) → propagated from `submitResponse` (line 13572) ← `submitYesNoWithComment` (line 15050) ← inline handler (line 12666). `TypeError: Failed to fetch` caught and logged as `[Notifications ERROR] Failed to submit response`.
+    - `WebSocket connection to 'ws://localhost:7999/ws/audio/slow%20zebra' failed:` (trailing colon, no reason) at `connectAudioWebSocket` (line 2136). Session-name "slow zebra" URL-encodes correctly; not a URL-encoding issue at first glance.
+    - Queue WebSocket not shown failing in the snippet — only audio WebSocket.
+  - **Symptom correlation**: `ERR_CONNECTION_RESET` on an HTTP POST + near-simultaneous WebSocket connect failure usually means the server dropped the connection mid-request OR briefly became unresponsive. Uvicorn auto-reload during session 9b840935's `notifications.js` edits could have caused a transient window; worth confirming with fresh repro that isn't timed near a code-reload.
+  - **Open questions**: (1) is this still reproducible after :7999 has been stable for several minutes? (2) does the queue WebSocket also break or only audio? (3) does a non-space session name (`foolish-goat` vs `slow zebra`) change behavior? (4) any server-side exception in the :7999 log at the timestamp of the ERR_CONNECTION_RESET?
+  - **Possibly-related files**: `src/cosa/rest/routers/notifications.py` (`/notify/response` endpoint), `src/cosa/rest/routers/websocket.py` (`/ws/audio/{session_id}` endpoint), `src/fastapi_app/static/js/notifications.js:962 / :13572 / :2136 / :2142`.
+  - **Update 2026-04-22 15:26 EDT**: a second ERR_CONNECTION_RESET observed on `POST /auth/login` (totally unrelated route). Direct Python probe to the SAME endpoint at the same time returned a clean `401 Invalid email or password` in 14ms — server is healthy. Strongly suggests stale HTTP keep-alive TCP sockets in the browser after uvicorn auto-reload dropped connections during this session's `notifications.js` edits.
+  - **Repro gate before investing investigation time**: (a) hard-refresh the page (Ctrl+Shift+R), (b) let :7999 sit idle with no source edits for 60+ seconds, (c) retry. If ERR_CONNECTION_RESET still appears → real bug, investigate. If not → close as "transient stale-keepalive artifact from auto-reload", no code bug.
+  - **Deferred until**: session 9b840935's main fix is wrapped + committed, then revisit with the repro gate above.
+
+- [x] ~~**DRY refactor: extract emission helper on NotificationFifoQueue**~~ → claimed by 9b840935 on 2026-04-22 (moved to In Progress)
+- [ ] **Repair 9 pre-existing CoSA unit test failures unrelated to notification fifo** — surfaced while running adjacent tests during session 9b840935. Two categories:
+  - `test_fifo_queue.py::TestFifoQueue::test_websocket_emission` (1 test) — expects `_emit_queue_update` on parent `FifoQueue`; parent was refactored to not have it. Either restore `_emit_queue_update` on parent with inline emission, or update the test to match current behavior (push is bare append, emission is per-subclass).
+  - `test_notifications_router.py::TestNotificationsRouter::*` (8 tests) — expect config key `"app_timezone"` (underscore); code at `routers/notifications.py:112` uses `"app timezone"` (space). Update the test assertions to match. This is cosmetic test-drift, not a runtime issue.
 - [x] ~~**`/plan-bug-fix-mode-wrap` skill not triggered — session-end invoked instead**~~ → fixed commit 5f2713a | By: eb50bd56 | 2026-04-16
 
 
@@ -79,6 +96,12 @@
 
 ### Completed
 
+- [x] **DRY refactor: extract `_emit_notification_added` helper on NotificationFifoQueue** → commit: 8a15ffb | By: 9b840935 | 2026-04-22
+  - Collapsed ~44 lines of near-identical emission code (push lines 244-267 + push_notification lines 343-365) into a single shared helper. Both call sites now `self._emit_notification_added(notification)`. Unified debug-print strings (dropped the "priority" qualifier). Verified no behavior change via CoSA unit 5/5, Lupin integration 3/3, Lupin notification unit 27/27, module smoke (priority + mark_played paths).
+- [x] **NotificationFifoQueue `_emit_queue_update` 500 + Chrome `/played` silence** → commit: 8a15ffb | By: 9b840935 | 2026-04-22
+  - **Fix 1 (CoSA, user commits from CoSA session)**: added `_emit_queue_update()` method to `NotificationFifoQueue` at `src/cosa/rest/notification_fifo_queue.py`. Broadcasts `notification_queue_update` with `queue_name`, `value`, `unplayed_count`. Silent no-op when `websocket_mgr=None` or `emit_enabled=False`. 5 new unit tests in `src/cosa/tests/unit/rest/test_notification_fifo_queue.py` (all pass). Module smoke test still green.
+  - **Fix 2 (Lupin)**: `playNotificationAudio` in `src/fastapi_app/static/js/notifications.js:10509` now fires fire-and-forget `POST /api/notifications/{id}/played` after successful playback. `notifications.html` cache-bust bumped to `v=20260422a`. 3 new in-process TestClient regression tests in `src/tests/integration/test_notifications_integration.py::TestMarkPlayedEndpoint` (all pass).
+  - **Verification**: CoSA unit 5/5, Lupin integration 3/3, Lupin notification units 27/27, module smoke OK, live probe on :7999 confirmed endpoint reachable + updated JS served. User manually confirmed Chrome path works end-to-end after browser restart.
 - [x] **Refine job-id chip truncation — preserve compound prefixes** → commit: 0f67635 | By: b802e633 | 2026-04-21
   - Fix 2's `length>8` rule over-truncated short non-compound ids (`foo-a1b2c9b2`) and reasonable BFE prefixes (`bfe-a1b2c3d4::<uuid>` → `bfe-a1b2c3d4` should stay). New rule in `notifications.js:6835`: `idPrefix = jobId.split("::")[0]`; truncate only if `idPrefix.length > 16`. Effectively restores `8ed95029`'s original `::`-split (5b3e305) plus a safety fallback for 64-char sha prefixes. Cache-bust `v=20260421c`.
 - [x] **DELETE /api/queue/{name}/all returned 404 on test server** → commit: 82243e4 | By: b802e633 | 2026-04-21
