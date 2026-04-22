@@ -1,5 +1,20 @@
 # Lupin Project History
 
+### 2026.04.21 - Session f9838819 | CJ Flow Async + Multi-Lane Design Review (v0.1.7 planning)
+
+**Context**: User restarted the design conversation begun in Session 237 (2026-02-19) about migrating CJ Flow from strictly serial job execution to a concurrent dispatcher model. Two-part question: (1) what does the prior design (Approach C: Hybrid Fast Lane + Bounded Agentic Pool) actually look like, and (2) what changes — beyond raw throughput — when you go from serial to async?
+
+**Accomplishments**:
+- Mapped the existing serial baseline against the Approach C design and recapped the seven core moves (dispatcher refactor, fast lane inline, `ThreadPoolExecutor` for agentics, `Future.add_done_callback` completion, `threading.RLock()` on `FifoQueue`, `delete_by_id_hash()` over `pop()` in agentic paths, single INI knob `cj flow max concurrent agentic jobs`).
+- Enumerated nine implications beyond throughput: concurrency safety + RLock discipline, ordering/determinism shift (start-FIFO preserved, completion-order is not), failure-mode geometry (N in-flight → N lost on crash, ghost-job risk if `_on_agentic_complete` raises), resource contention moving from CPU to API rate-limits + multiplicative spend, observability debt (pool-status promoted to Phase 2), testing complexity (concurrency tests, new mandatory unit files, concurrent-happy-path E2E), shutdown semantics + BFE/TFE checkpoint-resume alignment, UI + cosa-voice TTS debounce/batching needs, and ClaudeCodeJob INTERACTIVE worker-slot starvation as the case for a third "interactive" lane.
+- Flagged seven open design questions before any code touches: interactive-lane scope, ship-default `= 1` vs `= 3`, cost-guardrail at the dispatcher, ghost-job watchdog, pool-status endpoint phase placement, per-job-type pools, and Approach D coupling for inbound user messages.
+- **User decision**: defer all implementation to the v0.1.7 wip branch — current focus stays on landing v0.1.6 (TFE work). Default concurrency confirmed at `= 3` for first deploy.
+- Created `src/rnd/v0.1.7/` subdirectory and serialized first version of the design review there for v0.1.7 future work.
+
+**Files Modified**: 1 new (`src/rnd/v0.1.7/2026.04.21-cj-flow-async-multi-lane-design-review.md`, 18 332 bytes). No code changes — discussion + planning only.
+
+---
+
 ### 2026.04.21 - Session b802e633 | Bug Fix Mode: DELETE /queue/all 404 + CJ-flow job-id chip truncation
 
 **Context**: Retroactive Bug Fix Mode session (user invoked `/plan-bug-fix-mode-start` after fixes were already committed). Two user-reported bugs plus an in-flight refinement:

@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-04-20 22:30 EDT (Session d8831785 close — TFE-to-CC Phases A–G shipped + 5-arm matrix complete; Sonnet beats Opus ~5× on this workload)
+Last updated: 2026-04-21 21:00 EDT (Session f9838819 close — CJ Flow async + multi-lane design review serialized for v0.1.7; deferred to post-v0.1.6 ship)
 
 ---
 
@@ -247,6 +247,10 @@ bcbf5af  checkpoint: ts-d3df4d87 scheduled for Bug 13 validation
 - [ ] [LUPIN] **TFE Phase 0 `llm_refine` real SDK wiring** — Infrastructure in place: `llm_refine(ctx, seeds, max_clusters, refine_fn=None)` accepts async callback. MVP uses pure-Python `_cap_enforce()` fallback. Plugging in real Opus SDK call would refine clusters beyond the heuristic. Lives in `src/cosa/agents/test_fix_expediter/cluster.py`.
 - [ ] [LUPIN] **TFE `agent_registry.py` entry** — Deferred during scaffolding. Factory routing works via direct elif in `agentic_job_factory.py`. Adding the `agent_registry.py` entry would enable uniform agent discovery and match the pattern used by deep_research/podcast_generator.
 - [ ] [LUPIN] **`FixContext` Pydantic model (optional refactor)** — TFE currently uses `SimpleNamespace` duck-typed pass-through to `shared.FixExecutor`. Formalizing as a Pydantic model would add validation + serialization. Not blocking any work.
+
+## Pending — v0.1.7 future work (deferred until v0.1.6 ships)
+
+- [ ] [LUPIN] **CJ Flow: serial → async + hybrid multi-lane (Approach C)** — Resume the design conversation from Session 237. Design review for v0.1.7 wip lives at `src/rnd/v0.1.7/2026.04.21-cj-flow-async-multi-lane-design-review.md`; original Approach C design at `src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md` with 11-step Phase 1/2/3 breakdown. **User decision (2026-04-21)**: pursue ONLY in v0.1.7 wip branch after v0.1.6 lands; default `cj flow max concurrent agentic jobs = 3` for first deploy. Open design questions still need decisions before any code (interactive lane Y/N, cost-guardrail at dispatcher, ghost-job watchdog, pool-status endpoint phase, per-job-type pools, Approach D coupling). Reconcile against `src/workflow/agentic-voice-workflow.md` before exiting plan mode on the implementation plan.
 
 ## Pending — Older items carrying over
 
