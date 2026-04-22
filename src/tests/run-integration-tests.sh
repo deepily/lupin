@@ -201,6 +201,10 @@ echo ""
 export LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
 export LUPIN_ENV="testing"
 export LUPIN_TEST_BASE_URL="$BASE_URL"
+# Host-side seed_test_companions.py default DB_HOST is 'lupin-postgres' (docker-internal DNS).
+# Override to localhost so fixtures that re-run the seed from the pytest client process
+# (e.g. clean_test_db in conftest.py) can reach the shared Postgres over the bridged port.
+export DB_HOST="${DB_HOST:-localhost}"
 
 # Run pytest with all arguments passed through
 echo "================================================================"

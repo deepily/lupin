@@ -47,6 +47,19 @@ NORMALIZE_DYNAMIC_CONTENT_JS = """
         const el = document.querySelector( sel );
         if ( el ) el.textContent = text;
     }
+    // Admin users table: Created (td:nth-child(6)) and Last Login (td:nth-child(7))
+    // columns render via formatDate() which returns relative times ("Just now",
+    // "3 hours ago") that drift every test run. Normalize both columns so the
+    // visual snapshot is stable across runs regardless of when users were seeded
+    // or when the admin test fixture logged in.
+    const rows = document.querySelectorAll( '#users-tbody tr' );
+    rows.forEach( ( row ) => {
+        const tds = row.children;
+        if ( tds.length >= 7 ) {
+            tds[ 5 ].textContent = '1/1/2026';  // Created column
+            tds[ 6 ].textContent = 'Never';     // Last Login column
+        }
+    } );
 }
 """
 

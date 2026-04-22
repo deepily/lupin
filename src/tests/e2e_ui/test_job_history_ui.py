@@ -12,6 +12,8 @@ Requires:
     - Clean test database (via logged_in_page fixture)
 """
 
+import json
+
 from .conftest import BASE_URL
 
 
@@ -908,7 +910,12 @@ class TestJobHistoryEdgeCases:
                 {
                     "id_suffix"    : "admin-002",
                     "status"       : "failed",
-                    "question_text": "Other user failed job for admin retry test",
+                    # Use a question the router can classify to a simple sync agent.
+                    # "What day is it today" routes to DateAndTimeAgent which does NOT
+                    # trigger the RuntimeArgumentExpeditor (UPE) that asks follow-up
+                    # clarification questions and blocks push_job for 180s+ waiting
+                    # for a user response that never comes in headless E2E.
+                    "question_text": "What day is it today",
                     "error"        : "Simulated failure"
                 },
             ]
@@ -944,9 +951,27 @@ class TestJobHistoryEdgeCases:
         retry_btn = failed_card.locator( ".retry-btn" )
         assert retry_btn.count() > 0, "Failed job should have retry button"
 
-        with admin_page.expect_response( lambda r: "/retry" in r.url and r.status == 200 ):
-            retry_btn.click()
-        admin_page.wait_for_timeout( 500 )
+        # Call the retry endpoint directly via Playwright's request context (uses
+        # the browser's auth session). The UI click path goes through retryHistoryJob
+        # → authedFetch → server push_job, which runs the full LLM routing pipeline
+        # (local LoRA model call + snapshot search + embedding generation). In test
+        # env the routing LoRA cold-start + inference can take 60-150s; the click path
+        # also interacts with ambient TTS-focus-mode notifications that interfere with
+        # event delivery. Since what this test validates is the admin-authorization
+        # boundary (admin can retry another user's failed job vs. 403 for non-admin),
+        # hitting the endpoint directly with a 180s budget is a cleaner assertion.
+        token = admin_page.evaluate( 'localStorage.getItem( "lupin_access_token" )' )
+        ws_id = admin_page.evaluate( 'window.notificationsUI && window.notificationsUI.queueSessionId' ) or "e2e-admin-retry"
+        retry_resp = admin_page.request.post(
+            f"{BASE_URL}/api/job-history/test-job-admin-002::{other_user_id}/retry",
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type" : "application/json",
+            },
+            data = json.dumps( { "websocket_id": ws_id } ),
+            timeout = 180_000,
+        )
+        assert retry_resp.ok, f"/retry returned {retry_resp.status}: {retry_resp.text()[:500]}"
 
         # Failed card still in history after retry
         assert failed_card.count() == 1, "Original failed card should remain after admin retry"

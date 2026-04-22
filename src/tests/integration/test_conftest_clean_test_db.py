@@ -68,7 +68,7 @@ def test_clean_test_db_removes_prior_test_users( clean_test_db ):
     with engine.begin() as conn:
         conn.execute( text(
             "INSERT INTO users ( id, email, password_hash, is_active, email_verified, roles ) "
-            "VALUES ( gen_random_uuid()::text, :email, 'x', true, true, '[\"user\"]'::jsonb )"
+            "VALUES ( gen_random_uuid(), :email, 'x', true, true, '[\"user\"]'::jsonb )"
         ), { "email": fake_email } )
 
     assert fake_email in _query_user_emails(), "test setup: fake user did not insert"

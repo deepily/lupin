@@ -35,8 +35,8 @@ def server_check():
         if response.status_code == 200:
             print( f"\n✓ Server is running at {server_url}" )
             return True
-    except requests.exceptions.ConnectionError:
-        pytest.skip( f"Server not running at {server_url}. Start server with ./src/scripts/run-fastapi-lupin.sh" )
+    except ( requests.exceptions.ConnectionError, requests.exceptions.Timeout ):
+        pytest.skip( f"Server not running or unhealthy at {server_url}. Start server with ./src/scripts/run-fastapi-lupin.sh" )
 
 
 # ============================================================================

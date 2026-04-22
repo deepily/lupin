@@ -14,7 +14,8 @@ Requires:
     - Clean test database (via notifications_page fixture)
 """
 
-from datetime import datetime, timedelta
+import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -59,10 +60,18 @@ def _submit_mock_job( page, scheduled_at=None, monopolize=False, description=Non
     if scheduled_at:  body[ "scheduled_at" ] = scheduled_at
     if monopolize:    body[ "monopolize" ]   = True
 
+    # MUST send JSON with explicit Content-Type. Playwright's default for data=<dict>
+    # is form-urlencoded, which FastAPI does NOT parse into the Pydantic request_body
+    # model — it silently falls back to defaults, dropping scheduled_at/monopolize.
+    # With scheduled_at dropped, the consumer picks the job up immediately and the
+    # pause button test loses its window to click before the card leaves todo.
     response = page.request.post(
         f"{BASE_URL}/api/mock-job/submit",
-        headers = { "Authorization": f"Bearer {token}" },
-        data    = body,
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type" : "application/json",
+        },
+        data    = json.dumps( body ),
     )
     assert response.ok, f"Mock job submit failed: {response.status} {response.text()}"
     return response.json()
@@ -178,7 +187,7 @@ class TestScheduledBadge:
             - Scheduled badge (🕐) is visible with formatted time
         """
         page         = notifications_page
-        future_time  = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        future_time  = ( datetime.now( timezone.utc ) + timedelta( hours=1 ) ).isoformat()
         result       = mock_job_tracker( scheduled_at=future_time, description="Scheduled test job" )
         job_id       = result[ "job_id" ]
 
@@ -211,7 +220,7 @@ class TestScheduledBadge:
         # schedule and verify the badge IS present, then submit another with
         # monopolize only to test absence — but that job will get consumed.
         # Instead, just verify that the scheduled badge class is specific:
-        future_time = ( datetime.now() + timedelta( hours=2 ) ).isoformat()
+        future_time = ( datetime.now( timezone.utc ) + timedelta( hours=2 ) ).isoformat()
         result      = mock_job_tracker( scheduled_at=future_time, description="Has schedule" )
         job_id      = result[ "job_id" ]
 
@@ -245,7 +254,7 @@ class TestMonopolizeBadge:
             - Lock badge (🔒) is visible on the card
         """
         page        = notifications_page
-        future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        future_time = ( datetime.now( timezone.utc ) + timedelta( hours=1 ) ).isoformat()
         result      = mock_job_tracker( scheduled_at=future_time, monopolize=True, description="Monopolize test" )
         job_id      = result[ "job_id" ]
 
@@ -269,7 +278,7 @@ class TestMonopolizeBadge:
             - No monopolize badge on the card
         """
         page        = notifications_page
-        future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        future_time = ( datetime.now( timezone.utc ) + timedelta( hours=1 ) ).isoformat()
         result      = mock_job_tracker( scheduled_at=future_time, description="No monopolize" )
         job_id      = result[ "job_id" ]
 
@@ -301,7 +310,7 @@ class TestPauseButtonRendering:
             - Button has correct CSS class
         """
         page        = notifications_page
-        future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        future_time = ( datetime.now( timezone.utc ) + timedelta( hours=1 ) ).isoformat()
         result      = mock_job_tracker( scheduled_at=future_time, description="Pause button test" )
         job_id      = result[ "job_id" ]
 
@@ -322,7 +331,7 @@ class TestPauseButtonRendering:
         this test focuses on confirming the conditional rendering.)
         """
         page        = notifications_page
-        future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        future_time = ( datetime.now( timezone.utc ) + timedelta( hours=1 ) ).isoformat()
         result      = mock_job_tracker( scheduled_at=future_time, description="Todo only test" )
         job_id      = result[ "job_id" ]
 
@@ -346,7 +355,7 @@ class TestPauseButtonRendering:
             - After pausing, pause button shows ▶ (resume icon)
         """
         page        = notifications_page
-        future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        future_time = ( datetime.now( timezone.utc ) + timedelta( hours=1 ) ).isoformat()
         result      = mock_job_tracker( scheduled_at=future_time, description="Coexist test" )
         job_id      = result[ "job_id" ]
 
@@ -392,7 +401,7 @@ class TestPauseResumeFlow:
             - Pause button shows ▶ (resume icon) and has .is-paused class
         """
         page        = notifications_page
-        future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        future_time = ( datetime.now( timezone.utc ) + timedelta( hours=1 ) ).isoformat()
         result      = mock_job_tracker( scheduled_at=future_time, description="Pause API test" )
         job_id      = result[ "job_id" ]
 
@@ -438,7 +447,7 @@ class TestPauseResumeFlow:
             - Button shows ⏸ (pause icon) without .is-paused class
         """
         page        = notifications_page
-        future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        future_time = ( datetime.now( timezone.utc ) + timedelta( hours=1 ) ).isoformat()
         result      = mock_job_tracker( scheduled_at=future_time, description="Resume API test" )
         job_id      = result[ "job_id" ]
 
@@ -486,7 +495,7 @@ class TestPauseResumeFlow:
             - data-paused attribute is 'true'
         """
         page        = notifications_page
-        future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        future_time = ( datetime.now( timezone.utc ) + timedelta( hours=1 ) ).isoformat()
         result      = mock_job_tracker( scheduled_at=future_time, description="Reload persist test" )
         job_id      = result[ "job_id" ]
 
@@ -539,7 +548,7 @@ class TestPauseResumeButtonClick:
             - Paused badge appears
         """
         page        = notifications_page
-        future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        future_time = ( datetime.now( timezone.utc ) + timedelta( hours=1 ) ).isoformat()
         result      = mock_job_tracker( scheduled_at=future_time, description="Click pause test" )
         job_id      = result[ "job_id" ]
 
@@ -582,7 +591,7 @@ class TestPauseResumeButtonClick:
             - Paused badge removed
         """
         page        = notifications_page
-        future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        future_time = ( datetime.now( timezone.utc ) + timedelta( hours=1 ) ).isoformat()
         result      = mock_job_tracker( scheduled_at=future_time, description="Click resume test" )
         job_id      = result[ "job_id" ]
 
@@ -633,7 +642,7 @@ class TestCombinedStates:
             - Card has .job-paused class (muted appearance)
         """
         page        = notifications_page
-        future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        future_time = ( datetime.now( timezone.utc ) + timedelta( hours=1 ) ).isoformat()
         result      = mock_job_tracker( scheduled_at=future_time, description="Both badges test" )
         job_id      = result[ "job_id" ]
 
@@ -670,7 +679,7 @@ class TestCombinedStates:
             - Both .scheduled-badge and .monopolize-badge visible
         """
         page        = notifications_page
-        future_time = ( datetime.now() + timedelta( hours=1 ) ).isoformat()
+        future_time = ( datetime.now( timezone.utc ) + timedelta( hours=1 ) ).isoformat()
         result      = mock_job_tracker( scheduled_at=future_time, monopolize=True, description="Sched+Mono test" )
         job_id      = result[ "job_id" ]
 
