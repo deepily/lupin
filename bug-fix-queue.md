@@ -79,7 +79,7 @@
 
 ### Completed
 
-- [x] **Refine job-id chip truncation — preserve compound prefixes** → commit: 7b6b28e | By: b802e633 | 2026-04-21
+- [x] **Refine job-id chip truncation — preserve compound prefixes** → commit: 0f67635 | By: b802e633 | 2026-04-21
   - Fix 2's `length>8` rule over-truncated short non-compound ids (`foo-a1b2c9b2`) and reasonable BFE prefixes (`bfe-a1b2c3d4::<uuid>` → `bfe-a1b2c3d4` should stay). New rule in `notifications.js:6835`: `idPrefix = jobId.split("::")[0]`; truncate only if `idPrefix.length > 16`. Effectively restores `8ed95029`'s original `::`-split (5b3e305) plus a safety fallback for 64-char sha prefixes. Cache-bust `v=20260421c`.
 - [x] **DELETE /api/queue/{name}/all returned 404 on test server** → commit: 82243e4 | By: b802e633 | 2026-04-21
   - `DELETE /api/queue/done/all` (and the latent `/job-history/all` sibling) returned 404 because the parameterized `/{job_id}` route was declared BEFORE the literal `/all` route in `src/cosa/rest/routers/queues.py` — FastAPI matched `/{job_id}`, bound `job_id="all"`, failed to find a job by that id, and raised 404. Same shadowing defect existed for the job-history pair, so the history bulk-delete was broken too (user hadn't hit it yet). Reorder fix lives in the CoSA submodule (deferred to CoSA session); Lupin-side pieces committed here — Fix History appended to `src/rnd/v0.1.6/2026.04.16-cj-flow-delete-all-buttons.md`, plus new `src/tests/integration/test_queue_delete_all.py` (6 lock-in cases). HTTP probe against `:7999` confirms 8/8 regression assertions.

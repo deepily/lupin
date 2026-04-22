@@ -47,7 +47,7 @@
   - `src/fastapi_app/static/js/notifications.js:6835` — compound-aware truncation (`idPrefix = jobId.split("::")[0]`; truncate only if `idPrefix.length > 16`)
   - `src/fastapi_app/static/html/notifications.html` — cache-bust `v=20260421a → v=20260421c` (two intermediate steps across the compound-awareness iterations)
 - **Test**: Not run (UI-only; user will verify in browser); no automated coverage added for this chip's display text since no `data-testid` hook exists and no prior tests assert on it
-- **Commit**: 7b6b28e
+- **Commit**: 0f67635
 
 **Queue state**:
 - 1 bug still queued: Backend FCM/APNs push for off-screen notification audio (MEDIUM, filed 2026-04-21 by mobile session `214c47b6`)
