@@ -1,5 +1,44 @@
 # Lupin Project History
 
+### 2026.04.23 - Session 6a30b98c-v017-async | CJ Flow Async Multi-Lane — Phase 0 documentation
+
+**Context**: Resumed Session 237's long-standing async design conversation and Session f9838819's 2026-04-21 design review. Walked the seven open design calls from §3 of the design-review doc (interactive-lane count, default N, cost/contention guardrail, ghost-job detection, pool-status endpoint timing, single vs per-type pool, Approach D coupling) one at a time via UI questions; each decision captured inline in the plan file. Key deviation from the review-doc recommendations: the "cost guardrail" question was reframed into a **centralized `ApiResourceManager` singleton** that will absorb the scattered per-agent rate-limit logic (starting with `WebSearchRateLimiter`) rather than layering a spend cap on top of the dispatcher.
+
+**Decisions locked** (for the v0.1.7 async-pool milestone):
+- 2-lane now (short inline + long agentic pool); interactive lane deferred
+- `cj flow max concurrent agentic jobs = 1` prod default, `= 3` dev override
+- New `ApiResourceManager` singleton stub in Phase 1; wraps existing `WebSearchRateLimiter`, placeholder for other providers
+- Ghost-job protection: defensive callback (Phase 2) + watchdog sweep (Phase 3) — belt + suspenders
+- `/api/queue/pool-status` promoted from "optional Phase 3" to required Phase 2
+- Single shared pool (not per-job-type)
+- Approach D (user→job check-in buffering) parked with interactive-lane work
+
+#### Checkpoint | 2026.04.23 14:35 | CJ Flow async Phase 0 documentation
+
+**Files** (9): six new docs + the pre-existing 2026.04.21 design-review relocated under `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/`, superseded banner on v0.1.5 anchor, session manifest updated. **Zero code touched** — Phase 1 implementation gated on explicit user go-ahead in a future turn.
+
+All planning artifacts live under `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/`:
+
+- `00-design-review.md` (pre-existing 2026-04-21 anchor, moved in via `git mv` and renamed; Q1–Q7 context)
+- `01-phase-1-rlock-config-and-resource-manager.md` (new; RLock + INI key + ApiResourceManager stub)
+- `02-phase-2-dispatcher-pool-and-pool-status.md` (new; dispatcher refactor + pool + defensive callback + /api/queue/pool-status endpoint)
+- `03-phase-3-ghost-watchdog-and-e2e.md` (new; ghost-job watchdog + Deep Research migration to ApiResourceManager + full regression)
+- `90-phase-1-execution-log.md` (new, skeleton)
+- `91-phase-2-execution-log.md` (new, skeleton)
+- `92-phase-3-execution-log.md` (new, skeleton)
+
+Also modified:
+- `src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md` (SUPERSEDED banner added, pointing at the new subdir; 7 scope changes listed)
+- `.claude-session.md` (new slice section `6a30b98c-v017-async-planning`)
+
+**Naming-convention cleanup**: dropped redundant `2026.04.23-` and `approach-c-` prefixes from the 6 new filenames — the dir name (`2026.04.23-cj-flow-async-multi-lane/`) already carries the date and the body-of-work identifier. Mirrors the BFE sibling pattern `src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/NN-*.md`.
+
+**Commit**: 83900c3
+
+**Commit**: [pending]
+
+---
+
 ### 2026.04.22 - Session 6a30b98c | PR Readiness — close 100%-green testing gap across all 4 layers
 
 **Context**: User asked to return to yesterday's testing work (Session 9934d315 closed at 226 passed / 6 failed integration + 355 passed / 2 failed E2E) and close the remaining gap so a PR can land today off `wip-v0.1.6-2026.03.12-cjflow-upe-and-playwrite`. Plan drafted in plan mode, approved, then iterated through root-cause diagnosis of each failing test.
