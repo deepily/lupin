@@ -253,6 +253,8 @@ Total: **~400 LOC, 3 new files, 3 modified files**.
 
 Phase 1 is pure infra + tests. No new endpoint, no WebSocket event, no UI.
 
+> **Executor contract**: every step in this section is `EXECUTOR: AI` — the AI executes against `:7999` itself, captures output, and reports results. No step in this phase is `EXECUTOR: HUMAN`. See `00-working-contract.md` for the full mandate.
+
 | Layer | Command | Expected |
 |---|---|---|
 | **py_compile** | `python -c "import py_compile; py_compile.compile( 'src/cosa/rest/fifo_queue.py', doraise=True )"` | No errors (project mandate after every `.py` edit) |
@@ -266,7 +268,7 @@ Phase 1 is pure infra + tests. No new endpoint, no WebSocket event, no UI.
 
 **Test scheduling note**: any `:8000` live runs need explicit user approval. Unit + smoke + WS + E2E + integration against the dev `:7999` server run on-demand per user request.
 
-**Manual E2E**: not required for Phase 1 (no behaviour change).
+**Protocol E2E**: not required for Phase 1 (no behaviour change). If Phase 1 did require one, it would be `EXECUTOR: AI` by default.
 
 ---
 

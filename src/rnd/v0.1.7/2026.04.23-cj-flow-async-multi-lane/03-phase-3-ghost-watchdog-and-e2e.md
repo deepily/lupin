@@ -12,7 +12,7 @@
 
 Phase 3 closes the loop. Phase 2 shipped the pool with a defensive callback (belt). Phase 3 adds the **watchdog sweep** that catches the one case the callback can't: when the callback thread itself dies before firing. Phase 3 also **migrates the first agents to call `ApiResourceManager.acquire()`** (the singleton stub landed empty in Phase 1), and **enriches the `/api/queue/pool-status` endpoint** with per-provider contention state.
 
-Finally, Phase 3 runs the full automated regression across all four layers (the same layers Phase 1 and 2 ran, re-run together to catch integration drift), a manual concurrent-happy-path E2E, and documentation updates.
+Finally, Phase 3 runs the full automated regression across all four layers (the same layers Phase 1 and 2 ran, re-run together to catch integration drift), a concurrent-happy-path Protocol E2E (AI-executed), and documentation updates.
 
 After Phase 3 lands, the v0.1.7 async-pool milestone is complete. Bumping the prod default from `= 1` to `= 3` becomes a separate deliberate action.
 
@@ -26,7 +26,7 @@ After Phase 3 lands, the v0.1.7 async-pool milestone is complete. Bumping the pr
 - **`ApiResourceManager` caller migration (first wave)** — migrate `WebSearchRateLimiter` callers in `src/cosa/agents/deep_research/` to call the singleton. Other agents (podcast, presentation) stay on their `_call_with_retry()` patterns; their migration is follow-up work.
 - **`/api/queue/pool-status` enrichment** — add `api_resource_manager` section to the response payload.
 - **Full regression pass** across all four automated layers (unit, smoke, WebSocket, E2E, integration).
-- **Manual concurrent-happy-path E2E** (two agentic + one math, simultaneous).
+- **Protocol E2E — concurrent-happy-path** (two agentic + one math, simultaneous; AI-executed).
 - **Documentation updates** — `notification-api.md`, `websocket-architecture.md`, `rest-api-reference.md`, the v0.1.5 anchor doc (mark phases complete).
 
 ### Out of scope (explicit)
@@ -238,7 +238,9 @@ The `api_resource_manager` key is populated by calling `ApiResourceManager.get_i
 
 ## Step 3.4 — Full regression (all four automated layers)
 
-This is the pre-merge gate per project rule. Run in this order, each passing before proceeding:
+This is the pre-merge gate per project rule. Run in this order, each passing before proceeding.
+
+> **Executor contract**: every row below is `EXECUTOR: AI`. The AI runs the commands against `:7999`, captures output, and reports pass/fail. No row is `EXECUTOR: HUMAN`. See `00-working-contract.md`.
 
 | # | Layer | Command | Gate |
 |---|---|---|---|
@@ -251,19 +253,19 @@ This is the pre-merge gate per project rule. Run in this order, each passing bef
 
 `--bg` is MANDATORY for E2E and integration (both exceed the 10min Bash timeout). Monitor via `tail -20 /tmp/e2e-ui-latest.log` and `tail -20 /tmp/integration-latest.log`. Wait for E2E to finish before launching integration (PID-file overlap protection is in place).
 
-### Manual concurrent-happy-path E2E
+### Protocol E2E — Phase 3 mandatory concurrent-happy-path (AI-executed)
 
-**REQUIRED** for Phase 3 sign-off (this is the behaviour-validation that automated tests can't express):
+**REQUIRED** for Phase 3 sign-off (this is the behaviour-validation that automated tests can't express). Every step is executed by the AI via the API against `:7999`:
 
-1. Restart dev `:7999` with `cj flow max concurrent agentic jobs = 3`.
-2. Submit two DeepResearch dry-run jobs (sequential submission, seconds apart).
-3. While they're running, submit a MathAgent question ("what is 17 * 23?").
-4. **Expected**:
-   - Both research jobs show as `running` simultaneously on the notifications page.
-   - MathAgent returns in <5s, not blocked by the pool.
-   - `GET /api/queue/pool-status` mid-run returns `{active_agentic_jobs: 2, max_agentic_workers: 3, pending_in_pool: 0, api_resource_manager: {...}}`.
-   - Both research jobs complete independently; `running_queue` size eventually returns to 0.
-   - No jobs stuck in `running_queue` after both finish.
+1. EXECUTOR: AI — Set `cj flow max concurrent agentic jobs = 3` (`:7999` auto-reloads).
+2. EXECUTOR: AI — POST /api/push × 2 (DeepResearch dry-run) sequentially, seconds apart; capture both `job_id`s.
+3. EXECUTOR: AI — While both research jobs are running, POST /api/push (MathAgent, "what is 17 * 23?"); capture `job_id`.
+4. EXECUTOR: AI — Poll `/api/get-queue/running` while DRs run; assert both DR `job_id`s present simultaneously.
+5. EXECUTOR: AI — Poll `/api/get-queue/done` until MathAgent completes; assert elapsed < 5s.
+6. EXECUTOR: AI — GET `/api/queue/pool-status` mid-run; assert payload shape `{active_agentic_jobs: 2, max_agentic_workers: 3, pending_in_pool: 0, api_resource_manager: {...}}`.
+7. EXECUTOR: AI — Continue polling until both DRs complete; assert `running_queue` size returns to 0.
+8. EXECUTOR: AI — Assert no jobs stuck in `running_queue` after both finish.
+9. EXECUTOR: AI — Report all observed values (timings, pool-status payload, final queue sizes) via cosa-voice `notify`.
 
 ### Post-regression checks
 
@@ -329,7 +331,7 @@ If only the sweeper is problematic: set `cj flow ghost job sweep interval second
 
 - All three phases' design docs landed with paired execution logs fully populated.
 - All four automated test layers pass (unit 915+, smoke no-regression, WS 50/50, E2E 285/285, integration 43/43).
-- Manual concurrent-happy-path E2E observed green.
+- Protocol E2E — concurrent-happy-path observed green (AI-executed with reported values).
 - `/api/queue/pool-status` returns correct payload during mixed workload.
 - v0.1.5 anchor doc bannered as superseded; v0.1.7 design-review doc points at implementation docs.
 - TODO.md line 340 parent task checked off (with dated completion note); follow-up items (agent migration for podcast/presentation/BFE/TFE) captured as new TODO entries.

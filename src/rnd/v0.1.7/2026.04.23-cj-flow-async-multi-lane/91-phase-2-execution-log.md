@@ -65,22 +65,27 @@
 
 ### Phase 2 verification
 
+> **Executor contract**: every checkbox below is `EXECUTOR: AI`. The AI runs against `:7999`, captures output, and reports pass/fail via cosa-voice before marking `[x]`. See `00-working-contract.md`.
+
 - [ ] Full unit regression passes (`pytest src/tests/unit/ -v`)
 - [ ] `/smoke-test-remediation FULL` — no regressions
 - [ ] `./src/scripts/run-websocket-smoke-tests.sh` — 50/50
 - [ ] `./src/scripts/run-e2e-ui-tests.sh --bg -v` — 285/285 (`--bg` MANDATORY)
 - [ ] `./src/tests/run-integration-tests.sh --bg -v` — 43/43 (`--bg` MANDATORY, final gate)
 
-### Phase 2 manual E2E (REQUIRED for behaviour-changing work)
+### Phase 2 Protocol E2E — mandatory (AI-executed)
 
-- [ ] Dev `:7999` restarted with `cj flow max concurrent agentic jobs = 3`
-- [ ] Submit two DeepResearch (dry-run) jobs back-to-back
-- [ ] Submit MathAgent query during agentic jobs
-- [ ] Confirm: math returns in <5s
-- [ ] Confirm: both research jobs show `running` simultaneously
-- [ ] Confirm: `GET /api/queue/pool-status` shows `{active: 2, max: 3, pending: 0}`
-- [ ] Confirm: both research jobs complete; running_queue returns to size 0
-- [ ] Confirm: no phantom `running` rows after server restart
+"Protocol E2E" = "not yet in pytest." Every checkbox below is `EXECUTOR: AI`, executed via the API against `:7999`:
+
+- [ ] EXECUTOR: AI — `cj flow max concurrent agentic jobs = 3` set in `src/conf/lupin-app.ini` (`:7999` auto-reloads)
+- [ ] EXECUTOR: AI — POST /api/push × 2 (DeepResearch dry-run) back-to-back; capture both `job_id`s
+- [ ] EXECUTOR: AI — POST /api/push (MathAgent query) during agentic runs; capture `job_id`
+- [ ] EXECUTOR: AI — Poll `/api/get-queue/done` until MathAgent completes; assert elapsed < 5s
+- [ ] EXECUTOR: AI — GET `/api/queue/running` during research runs; assert both DR `job_id`s present simultaneously
+- [ ] EXECUTOR: AI — GET `/api/queue/pool-status` mid-run; assert payload `{active_agentic_jobs: 2, max_agentic_workers: 3, pending_in_pool: 0}`
+- [ ] EXECUTOR: AI — Poll `/api/get-queue/done` until both DRs complete; assert `running_queue` size returns to 0
+- [ ] EXECUTOR: AI — Server shutdown cleanly; on next start, assert no phantom `running` rows
+- [ ] EXECUTOR: AI — Report all observed values to user via cosa-voice `notify`
 
 ---
 
@@ -147,7 +152,7 @@ $ tail -20 /tmp/integration-latest.log
 (TBD — expect 43/43)
 ```
 
-### Manual E2E evidence
+### Protocol E2E evidence (AI-captured)
 
 ```
 # Pool status during mixed workload
@@ -168,7 +173,7 @@ DeepResearch-2 finished: (TBD)
 ## Phase 2 sign-off criteria
 
 - All checkboxes above marked `[x]`.
-- Manual E2E observations recorded.
+- Protocol E2E observations recorded (AI-captured values via cosa-voice report).
 - Verification results filled in with actual command output.
 - Commit hash(es) recorded.
 - No blockers outstanding.

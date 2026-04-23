@@ -61,6 +61,8 @@
 
 Run in order. Each step must pass before next starts.
 
+> **Executor contract**: every checkbox below is `EXECUTOR: AI`. The AI runs against `:7999`, captures output, and reports pass/fail via cosa-voice before marking `[x]`. See `00-working-contract.md`.
+
 - [ ] **1. py_compile**: compile all modified `.py` files individually
 - [ ] **2. Unit**: `pytest src/tests/unit/ -v` — 915 baseline + Phase 1/2/3 new tests all green
 - [ ] **3. Smoke**: `/smoke-test-remediation FULL` — no regressions
@@ -68,21 +70,24 @@ Run in order. Each step must pass before next starts.
 - [ ] **5. E2E UI** (`--bg` MANDATORY): `./src/scripts/run-e2e-ui-tests.sh --bg -v` — 285/285
 - [ ] **6. Integration (final gate)** (`--bg` MANDATORY): `./src/tests/run-integration-tests.sh --bg -v` — 43/43
 
-### Phase 3 manual concurrent-happy-path E2E (REQUIRED)
+### Phase 3 Protocol E2E — mandatory concurrent-happy-path (AI-executed)
 
-- [ ] Dev `:7999` restarted with `cj flow max concurrent agentic jobs = 3`
-- [ ] Submit two DeepResearch dry-run jobs sequentially
-- [ ] Submit MathAgent ("17 * 23?") during agentic runs
-- [ ] Math returns in <5s
-- [ ] Both research jobs show `running` simultaneously
-- [ ] `/api/queue/pool-status` mid-run returns expected shape (including `api_resource_manager` section)
-- [ ] Both research jobs complete; running_queue returns to 0
-- [ ] No stuck `running` rows
-- [ ] Server shutdown clean; next start has no phantom rows
+"Protocol E2E" = "not yet in pytest." Every checkbox below is `EXECUTOR: AI`, executed via the API against `:7999`:
+
+- [ ] EXECUTOR: AI — `cj flow max concurrent agentic jobs = 3` set in `src/conf/lupin-app.ini` (`:7999` auto-reloads)
+- [ ] EXECUTOR: AI — POST /api/push × 2 (DeepResearch dry-run) sequentially; capture both `job_id`s
+- [ ] EXECUTOR: AI — POST /api/push (MathAgent, "17 * 23?") during agentic runs; capture `job_id`
+- [ ] EXECUTOR: AI — Poll `/api/get-queue/done` until MathAgent completes; assert elapsed < 5s
+- [ ] EXECUTOR: AI — GET `/api/queue/running` during DRs; assert both DR `job_id`s present simultaneously
+- [ ] EXECUTOR: AI — GET `/api/queue/pool-status` mid-run; assert expected shape (including `api_resource_manager` section)
+- [ ] EXECUTOR: AI — Poll `/api/get-queue/done` until both DRs complete; assert `running_queue` returns to 0
+- [ ] EXECUTOR: AI — Assert no stuck `running` rows
+- [ ] EXECUTOR: AI — Server shutdown cleanly; on next start, assert no phantom rows
+- [ ] EXECUTOR: AI — Report all observed values to user via cosa-voice `notify`
 
 ### Serial-fallback re-verification
 
-- [ ] Restart with `= 1`; submit same workload; observe serial processing preserved
+- [ ] EXECUTOR: AI — Set `cj flow max concurrent agentic jobs = 1`; submit same workload via API; assert serial processing preserved (second DR starts only after first completes)
 
 ---
 
@@ -142,7 +147,7 @@ $ tail -20 /tmp/integration-latest.log
 (TBD — 43/43)
 ```
 
-### Manual E2E evidence
+### Protocol E2E evidence (AI-captured)
 
 ```
 Config at test time: cj flow max concurrent agentic jobs = (3 | 1)
@@ -171,7 +176,7 @@ DeepResearch-2 finished:   (TBD)
 ## Phase 3 sign-off criteria (= v0.1.7 async-pool milestone sign-off)
 
 - All checkboxes in this log marked `[x]`.
-- Manual E2E observations recorded.
+- Protocol E2E observations recorded (AI-captured values via cosa-voice report).
 - All four automated layers green (results filled in above).
 - Serial-fallback verified.
 - v0.1.5 anchor doc bannered as superseded.

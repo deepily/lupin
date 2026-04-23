@@ -35,6 +35,38 @@ Also modified:
 
 **Commit**: 83900c3
 
+#### Checkpoint 2 | 2026.04.23 17:45 | Working contract + EXECUTOR labels + memory refactor
+
+User-initiated behavioral experiment before context clear: "make the docs self-sufficient for transmitting the `user is never a tester` rule." Added three layers of reinforcement:
+
+- **`CLAUDE.local.md`** — added "THE USER IS NEVER A TESTER" mandate section (5 rules, Lupin-specific operational form; cross-project general version separately lives in planning-is-prompting repo). Note: `CLAUDE.local.md` is git-tracked (not .gitignored as the system-load hint implied — empirically verified via `git ls-files`).
+- **Milestone working contract** — new file `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/00-working-contract.md` operationalizes the rule for this milestone (AI executes all verification layers; user gated to design decisions + :8000 slot confirmation + rare human-judgment calls).
+- **EXECUTOR labels across all 7 subdir docs**: 47 `EXECUTOR: AI` tags prefixing verification steps; 4 `EXECUTOR: HUMAN` references (all explanatory, in contract disclaimer boxes — zero actual human-step assignments). "Manual E2E" renamed to "Protocol E2E (AI-executed)" throughout.
+
+Also refactored memory: deleted two stale feedback entries (`schedule_tests_default_port`, `no_scheduled_tests_without_approval`), wrote one consolidated entry (`test_server_monopolize_mode.md`) that corrects the mental model — :8000 protocol is **monopolize-mode collision avoidance**, not budget gatekeeping. The user-ask for :8000 submissions is slot-availability coordination (user has the schedule visibility AI doesn't), not approval-for-spend.
+
+**Files**:
+- `CLAUDE.local.md` (USER IS NEVER A TESTER section added)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/00-working-contract.md` (new)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/00-design-review.md` (1 Manual E2E → Protocol E2E)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/01-phase-1-rlock-config-and-resource-manager.md` (disclaimer + rename)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/02-phase-2-dispatcher-pool-and-pool-status.md` (disclaimer + full E2E rewrite with AI tags)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/03-phase-3-ghost-watchdog-and-e2e.md` (5 edits: intro, in-scope, disclaimer, full E2E rewrite, DoD)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/90-phase-1-execution-log.md` (disclaimer)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/91-phase-2-execution-log.md` (disclaimer + full E2E rewrite + evidence rename + sign-off)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/92-phase-3-execution-log.md` (disclaimer + full E2E rewrite + serial-fallback tag + evidence rename + sign-off)
+- `.claude-session.md` (manifest)
+
+Also (outside the repo, not in this commit):
+- `~/.claude/projects/-mnt-DATA01-include-www-deepily-ai-projects-lupin/memory/feedback_test_server_monopolize_mode.md` (new)
+- `~/.claude/projects/-mnt-DATA01-include-www-deepily-ai-projects-lupin/memory/feedback_schedule_tests_default_port.md` (DELETED)
+- `~/.claude/projects/-mnt-DATA01-include-www-deepily-ai-projects-lupin/memory/feedback_no_scheduled_tests_without_approval.md` (DELETED)
+- `~/.claude/projects/-mnt-DATA01-include-www-deepily-ai-projects-lupin/memory/MEMORY.md` (index updated)
+
+Next step: user clears context + memory, next AI instance starts Phase 1 implementation reading only the committed docs + CLAUDE.local.md + the single remaining memory entry. The experiment tests whether the reinforcement layers suffice to prevent the next instance from defaulting to "user tests this."
+
+**Commit**: 9d00c08
+
 **Commit**: [pending]
 
 ---

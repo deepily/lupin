@@ -64,6 +64,8 @@ Mark each sub-step as work lands. Format: `[ ]` pending, `[~]` in progress, `[x]
 
 ### Phase 1 verification
 
+> **Executor contract**: every checkbox below is `EXECUTOR: AI`. The AI runs against `:7999`, captures output, and reports pass/fail via cosa-voice before marking `[x]`. Phase 1 has no `EXECUTOR: HUMAN` steps. See `00-working-contract.md`.
+
 - [ ] Both new test files pass (`pytest ... -v`)
 - [ ] Full unit regression passes (`pytest src/tests/unit/ -v`)
 - [ ] `/smoke-test-remediation FULL` — no regressions

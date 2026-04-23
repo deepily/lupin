@@ -301,6 +301,8 @@ Total: **~575 LOC, 1 new file, 7 modified files**.
 
 ## Verification (all four automated layers)
 
+> **Executor contract**: every step in this section is `EXECUTOR: AI` unless explicitly tagged otherwise. The AI runs the commands against `:7999`, captures output, and reports pass/fail. Any step requiring human judgment must be tagged `EXECUTOR: HUMAN` with a same-line justification. See `00-working-contract.md`.
+
 | Layer | Command | Expected |
 |---|---|---|
 | **py_compile** | Compile all modified `.py` files (mandate after every edit) | No errors |
@@ -312,16 +314,20 @@ Total: **~575 LOC, 1 new file, 7 modified files**.
 | **E2E UI** (`--bg` MANDATORY) | `./src/scripts/run-e2e-ui-tests.sh --bg -v` | 285/285 pass |
 | **Integration (final gate)** (`--bg` MANDATORY) | `./src/tests/run-integration-tests.sh --bg -v` | 43/43 pass |
 
-### Manual E2E (Phase 2 REQUIRED verification)
+### Protocol E2E — Phase 2 mandatory (AI-executed)
 
-Per project mandate for behaviour-changing work:
-1. Start dev `:7999` with `cj flow max concurrent agentic jobs = 3`.
-2. Submit two DeepResearch (dry-run) jobs via the UI back-to-back.
-3. Submit a math query immediately after.
-4. Expected: math answer returns within seconds (not blocked). Both research jobs show as `running` simultaneously on the notifications page. Both finish independently; running-queue size returns to 0.
-5. `GET /api/queue/pool-status` mid-run returns `{active: 2, max: 3, pending: 0}`.
+Per project mandate for behaviour-changing work. "Protocol E2E" means "not yet in pytest" — it does NOT mean "user does it." Every step below is executed by the AI via the API against `:7999`:
 
-**No `:8000` test-suite submission required for Phase 2**; that's an explicit user-approval action.
+1. EXECUTOR: AI — Set `cj flow max concurrent agentic jobs = 3` in `src/conf/lupin-app.ini` (`:7999` auto-reloads; no restart needed).
+2. EXECUTOR: AI — POST /api/push × 2 (DeepResearch dry-run) back-to-back; capture both `job_id`s.
+3. EXECUTOR: AI — POST /api/push (MathAgent, e.g. "17 * 23?") immediately after; capture `job_id`.
+4. EXECUTOR: AI — Poll `/api/get-queue/done` until MathAgent `job_id` appears; assert elapsed < 5s.
+5. EXECUTOR: AI — GET `/api/queue/running` during the research runs; assert both DR `job_id`s present simultaneously.
+6. EXECUTOR: AI — GET `/api/queue/pool-status` mid-run; assert `{active_agentic_jobs: 2, max_agentic_workers: 3, pending_in_pool: 0}`.
+7. EXECUTOR: AI — Continue polling `/api/get-queue/done` until both DR jobs complete; assert `running_queue` size returns to 0.
+8. EXECUTOR: AI — Report all observed values (timings, pool-status payload, final queue sizes) to the user via cosa-voice `notify`.
+
+**No `:8000` test-suite submission required for Phase 2** — if one were needed, the AI would still execute the submission via `/api/test-suite/submit`, but would first ask the user to confirm the `scheduled_at` slot does not collide with other scheduled tests (monopolize-mode coordination, not budget approval).
 
 ---
 
