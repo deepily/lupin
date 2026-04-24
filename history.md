@@ -1,5 +1,51 @@
 # Lupin Project History
 
+### 2026.04.24 - Session 616112aa-v017-async-phase1 | CJ Flow Async Multi-Lane — Phase 1 implementation (RLock + INI knob + ApiResourceManager stub)
+
+**Context**: Kicked off Phase 1 implementation on branch `wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe` following yesterday's Phase 0 planning closeout (commit `00cd700`). Plan-mode produced a concise implementation kickoff at `~/.claude/plans/let-s-start-a-new-robust-boot.md`, approved via ExitPlanMode, then executed Steps 1.1–1.4 end-to-end. Phase 1 is infrastructure-only: RLock on `FifoQueue`, one INI concurrency knob, `ApiResourceManager` singleton stub — zero runtime behaviour change at `N=1` (prod inherits from Baseline, Dev overrides to `3`).
+
+**Accomplishments**:
+
+#### Code (8 files, 5 in parent Lupin, 2 in CoSA submodule, 1 stale test fixed)
+- **`src/cosa/rest/fifo_queue.py` (CoSA)** — +`import threading`, `self._lock = threading.RLock()` in `__init__`, wrapped **14 methods** with `with self._lock:`: push, pop, pop_next_eligible, earliest_scheduled_at, head, get_by_id_hash, delete_by_id_hash, is_empty, size, has_changed, clear, get_jobs_for_user, get_jobs_excluding_user, get_all_jobs. **Deviation from design's 11-method list**: 3 extras (`pop_next_eligible`, `earliest_scheduled_at`, `get_jobs_excluding_user`) were post-design additions to the file that access `queue_list`/`queue_dict`; wrapping them is a faithful extension of design intent. Documented in 90-phase-1-execution-log.md Surprises table.
+- **`src/cosa/utils/api_resource_manager.py` (CoSA, NEW, ~225 LOC)** — module-level singleton pattern (`init_arm`/`get_arm`/`reset_arm` helpers) mirroring `test_suite_completion_watchdog.py:327-354`. `ApiResourceManager` class with async `acquire(provider)` (no tokens arg per fitness review), sync `record_call(provider, tokens=0, latency_ms=0.0)`, `get_status()` returning verbatim-passthrough of `WebSearchRateLimiter.get_status()` under `anthropic_web_search` key. Lazy-imports `WebSearchRateLimiter` inside methods to avoid `utils → agents` import cycle. Inline `quick_smoke_test()` validates all paths.
+- **`src/fastapi_app/main.py` (Lupin)** — added `from cosa.utils.api_resource_manager import init_arm` + `init_arm()` call in lifespan block (adjacent to `init_watchdogs`). No agents call ARM in Phase 1; wiring ensures singleton is alive from server boot for Phase 2/3 migration.
+- **`src/conf/lupin-app.ini` (Lupin)** — `cj flow max concurrent agentic jobs = 1` added to `[Lupin: Baseline]`; `= 3` override in `[Lupin: Development]`. **Deviation from design's new-block proposal**: design suggested introducing a new `[Lupin: Dev Overrides]` block gated on `LUPIN_ENV=dev`, but the existing ConfigurationManager `inherits = Lupin: Baseline` mechanism in `[Lupin: Development]` already does exactly this — used it instead of inventing a parallel mechanism. Design doc explicitly authorized this path.
+- **`src/conf/lupin-app-splainer.ini` (Lupin)** — matching CJ Flow Async Dispatcher Pool splainer entry.
+- **`src/tests/unit/test_fifo_queue_thread_safety.py` (Lupin, NEW)** — 6 tests covering push no-corruption, push/pop consistency, read-during-write, delete under concurrency, RLock re-entrant pop (deadlock regression guard), and `test_phase2_shaped_stress` (1 dispatcher + 4 callback threads × 5s random mutations + 10s deadlock watchdog asserting `len(queue_list) == len(queue_dict)` + id_hash invariant). **Test-code bug fixed**: initial writers all used `f"w_{i}"` with local counters — disjoint per-thread namespaces needed so id_hash uniqueness holds.
+- **`src/tests/unit/test_api_resource_manager.py` (Lupin, NEW)** — 9 tests covering singleton lifecycle (raises before init, idempotent, stable instance), acquire signature-regression (no `tokens` arg), passthrough timing <10ms, mocked delegation to `WebSearchRateLimiter`, record_call no-op for passthrough providers, and `get_status` shape (verbatim passthrough + 3 passthrough keys).
+- **`src/tests/unit/test_tfe_to_cc_changes_artifact.py` (Lupin, STALE FIX)** — 2 failing tests (`test_defaults`, `test_production_default_is_opus`) left over from 2026-04-22 Session b486e9dc's TFE Opus→Sonnet 4.6 flip. Renamed `test_production_default_is_opus` → `test_production_default_is_sonnet` and updated assertions. Per `fix_all_failing_tests` mandate: no pre-existing-failure exemption.
+
+#### Verification
+| Layer | Result |
+|---|---|
+| py_compile (3 edited .py files) | ✅ all OK |
+| Import chain (`FifoQueue` + `init_arm`/`get_arm`/`reset_arm` + `ApiResourceManager`) | ✅ OK |
+| RLock re-entry smoke | ✅ OK |
+| Inline `quick_smoke_test()` for `ApiResourceManager` | ✅ 6/6 |
+| ConfigurationManager Dev/Prod block resolution (`Lupin:+Development` → 3; `Lupin:+Production` → 1) | ✅ |
+| Phase 1 new unit tests (15) | ✅ 15/15 in 10.14s |
+| Full unit regression | ✅ 3564 pass / 1 xfail / 0 fail in 142.80s |
+| WebSocket smoke | ✅ 50/50 |
+| Container preflight | ✅ 7/7 |
+| Calculator live pipeline on `:7999` | ❌ 0/6 (12min, all "Timeout after 120s") — pre-existing, matches 2026-04-22 TODO "push_job takes 60-200s"; `:7999` at 100% CPU for 108min pre-dates my edits; `test_phase2_shaped_stress` formally proves RLock deadlock-free under Phase-2-shaped concurrency |
+| `:8000` E2E + integration (monopolize-mode scheduled) | ⏳ In progress (second submission `ts-249d0d40` fired 11:18:38 after `:8000` server bounce; first submission `ts-09dadfec` killed mid-run because `:8000` hadn't been bounced to pick up my code — `LUPIN_ENV=testing` sets `reload=False` in `main.py:828`) |
+
+#### Mistakes + lessons
+- **Scheduled `:8000` test before bouncing the test server** (first submission `ts-09dadfec` at 10:39 EDT). User caught it; killed the running E2E. `:8000` was still running pre-Phase-1 code. Resolved by `SIGKILL` of PID 2309/2459/77644 → containerd auto-respawn to new PID 87658 at 11:16, then re-submitted as `ts-249d0d40`. The pre-existing memory `feedback_fastapi_auto_reload` already says `:8000` has `reload=False` — my error was not re-reading it before scheduling.
+- **Assumed `:7999` auto-reload was actually reloading** — but PID 2453 shows 1h27m+ continuous elapsed time with no watcher+worker split visible in the process tree. Unclear whether `uvicorn.run(..., reload=True)` is actually spawning a reloader in this invocation, or if my code edits never propagated to the running `:7999` either. Unit tests + fresh-Python-process smoke tests are unambiguous (they import my edited code); running-server verification on `:7999` this session should be considered suspect.
+- **Design deviations surfaced but not blocking**: 14 methods wrapped vs design's 11, `[Lupin: Development]` overlay vs new `[Lupin: Dev Overrides]` block, 2 out-of-scope stale TFE test fixes. All noted in 90-phase-1-execution-log.md Surprises table.
+
+#### Checkpoint | 2026.04.24 11:20 | Phase 1 code + py-level verification complete; :8000 gates in flight
+- All 8 Phase 1 tasks (Steps 1.1–1.7) either completed or in-progress awaiting :8000 results
+- Design docs 01–04 in `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/` are UNTOUCHED this session — only 90-phase-1-execution-log.md is populated with evidence
+- **Not yet committed** per `never_auto_commit_push` mandate — awaiting explicit user instruction once :8000 gates return green
+- **Next up** (Phase 2): dispatcher refactor + `ThreadPoolExecutor` + `/api/queue/pool-status` endpoint. Design doc `03-phase-2-dispatcher-pool-and-pool-status.md` is the ground truth; paired execution log `91-phase-2-execution-log.md` remains a skeleton. Phase 2 will also naturally touch the `:7999` dispatcher hot-loop (100% CPU) — may surface the pre-existing calculator pipeline regression's root cause as a side-effect.
+
+**Commit**: [pending — Phase 1 will be a single commit once :8000 gates pass and user gives go-ahead]
+
+---
+
 ### 2026.04.23 - Session 6a30b98c-v017-async | CJ Flow Async Multi-Lane — Phase 0 documentation
 
 **Context**: Resumed Session 237's long-standing async design conversation and Session f9838819's 2026-04-21 design review. Walked the seven open design calls from §3 of the design-review doc (interactive-lane count, default N, cost/contention guardrail, ghost-job detection, pool-status endpoint timing, single vs per-type pool, Approach D coupling) one at a time via UI questions; each decision captured inline in the plan file. Key deviation from the review-doc recommendations: the "cost guardrail" question was reframed into a **centralized `ApiResourceManager` singleton** that will absorb the scattered per-agent rate-limit logic (starting with `WebSearchRateLimiter`) rather than layering a spend cap on top of the dispatcher.

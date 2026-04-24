@@ -1,17 +1,33 @@
 # TODO
 
-Last updated: 2026-04-23 EDT (Session 6a30b98c-v017-async-planning session-end — CJ Flow async-multi-lane Phase 0 documentation complete, two review passes + FIFO-audit checklist grounded)
+Last updated: 2026-04-24 EDT (Session 616112aa-v017-async-phase1 checkpoint — CJ Flow async Phase 1 code + py-level verification complete, :8000 gates in flight, not yet committed)
 
 ---
 
-## 🌅 FIRST THING IN THE MORNING — 2026-04-24
+## 🔥 IN FLIGHT — Session 616112aa 2026-04-24
 
-- [ ] [LUPIN] **Start CJ Flow async-multi-lane Phase 1 implementation**. Branch `wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe` is ready. All 8 planning docs in `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/` finalized through two review passes (adversarial + fitness-to-implement) plus a pre-flip FIFO-audit checklist (design anchor 01 §3b, paired execution 92 Steps F.1–F.8). Entry point:
-  - Read `00-working-contract.md` first (behavioral foundation — "user is never a tester")
-  - Then `01-design-review.md` §3 (Q1–Q7 FROZEN decisions — 2-lane, N=1 prod / N=3 dev, `ApiResourceManager` singleton, defensive callback + watchdog, pool-status in Phase 2, single pool, Approach D deferred)
-  - Then `02-phase-1-rlock-config-and-resource-manager.md` + paired log `90-phase-1-execution-log.md`
-  - Phase 1 Step 1.1: add `threading.RLock` to `src/cosa/rest/fifo_queue.py` — 11 methods wrapped; `py_compile` verify; inline `test_phase2_shaped_stress` to guard the Phase-1/Phase-2 boundary
-  - All verification steps tagged `EXECUTOR: AI` — no manual QA hand-offs permitted
+- [x] [LUPIN] **Phase 1 Steps 1.1–1.4 code work** — RLock on `FifoQueue` (14 methods), `cj flow max concurrent agentic jobs` INI knob, `ApiResourceManager` singleton stub, `init_arm()` wired into FastAPI lifespan, 15 new unit tests. Evidence in `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/90-phase-1-execution-log.md`.
+- [x] [LUPIN] **Unit regression green post-changes** — 3564 pass / 1 xfail / 0 fail. 2 stale TFE Opus-default tests fixed inline per `fix_all_failing_tests`.
+- [x] [LUPIN] **WebSocket smoke 50/50, container preflight 7/7** on pre-bounce `:7999`.
+- [ ] [LUPIN] **`:8000` E2E UI gate** — re-submission `ts-249d0d40` running since 11:18:38 EDT (after bounce of stale `:8000` that was still running pre-Phase-1 code). ~40min runtime.
+- [ ] [LUPIN] **`:8000` integration gate (FINAL)** — runs after E2E. ~20min.
+- [ ] [LUPIN] **Commit Phase 1 once `:8000` gates pass** — awaiting explicit user go. Parent-Lupin files only (INI/splainer/main.py/2 new unit tests/1 stale fix/90-log.md + history.md + TODO.md + manifest). CoSA edits (`fifo_queue.py` modify, `api_resource_manager.py` new) are user's to commit separately from CoSA context.
+
+---
+
+## ⚠️ SURFACED THIS SESSION — investigate in Phase 2 or follow-up
+
+- [ ] [LUPIN] **`:7999` CPU hot loop (pre-existing)** — PID 2453 at 100% CPU for 108min of CPU time over 2h wall; consistent with 2026-04-22 TODO "push_job takes 60-200s in test env". Not a Phase 1 regression (`test_phase2_shaped_stress` proves RLock is deadlock-free). Phase 2's dispatcher refactor will touch this surface — may root-cause as a side-effect.
+- [ ] [LUPIN] **Calculator live pipeline failing 0/6 on `:7999`** — all "Timeout after 120s"; 13 stale dead-queue entries with `status: pending` + empty error field (odd). Related to the `:7999` CPU issue above. Surface as a Phase 2 diagnostic target.
+- [ ] [LUPIN] **`:7999` `uvicorn.run(reload=True)` may not actually reload** — process tree shows no watcher+worker split; PID 2453 elapsed time monotonically increases with no reset visible through 11 code edits this session. Either uvicorn reload isn't firing despite `LUPIN_ENV=development` setting `reload=True` in `main.py:828`, or it's reloading in-place. Needs a controlled experiment next session to confirm. If reload isn't working on `:7999`, the operational assumption baked into `feedback_fastapi_auto_reload` memory needs revisiting.
+
+---
+
+## 🎯 NEXT MILESTONE — Phase 2 (after Phase 1 merge)
+
+- [ ] [LUPIN] **Read `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/03-phase-2-dispatcher-pool-and-pool-status.md`** (design) + `91-phase-2-execution-log.md` (paired log skeleton)
+- [ ] [LUPIN] **Phase 2 scope**: dispatcher refactor, `ThreadPoolExecutor` for agentic pool, `Future.add_done_callback` for completion handling, `/api/queue/pool-status` endpoint, defensive callback ghost-job protection
+- [ ] [LUPIN] **Phase 2 blocks Phase 3 (ghost-job watchdog + full E2E + FIFO-audit)**
 
 ---
 

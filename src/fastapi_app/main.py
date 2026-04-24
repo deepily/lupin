@@ -592,6 +592,12 @@ async def lifespan( app: FastAPI ):
     init_tracker( config_mgr, debug=app_debug )
     init_watchdogs( config_mgr, jobs_todo_queue, debug=app_debug )
 
+    # Initialize API Resource Manager singleton (Phase 1 CJ Flow async multi-lane).
+    # No agents call it yet — wiring ensures the infrastructure is alive from boot
+    # so Phase 2/3 can migrate callers without a startup-plumbing pass.
+    from cosa.utils.api_resource_manager import init_arm
+    init_arm()
+
     # Restore scheduled jobs that survived the restart (preserved by mark_interrupted_jobs)
     try:
         from cosa.rest.job_persistence import get_restorable_jobs
