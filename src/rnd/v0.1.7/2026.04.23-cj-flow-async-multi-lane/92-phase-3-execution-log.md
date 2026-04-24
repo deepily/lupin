@@ -1,7 +1,7 @@
 # Approach C — Phase 3 Execution Log
 
 **Status**: NOT STARTED (skeleton only — populate as implementation proceeds)
-**Paired design doc**: `03-phase-3-ghost-watchdog-and-e2e.md`
+**Paired design doc**: `04-phase-3-ghost-watchdog-and-e2e.md`
 **Depends on**: Phases 1 and 2 complete (all checkboxes `[x]` in `90-phase-1-execution-log.md` and `91-phase-2-execution-log.md`)
 **Branch**: `wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe`
 

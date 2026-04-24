@@ -67,6 +67,49 @@ Next step: user clears context + memory, next AI instance starts Phase 1 impleme
 
 **Commit**: 9d00c08
 
+#### Checkpoint 3 | 2026.04.23 18:45 | File reorder — working contract now sorts first
+
+Final tidying before context clear. User directive: "re-order those files" so the behavioral foundation (`00-working-contract.md`) lexicographically precedes the design review and phase docs. Executed the BFE-style renumber (NN as reading-order sequence, not phase number):
+
+| Old filename | New filename |
+|---|---|
+| `00-design-review.md` | `01-design-review.md` |
+| `01-phase-1-rlock-config-and-resource-manager.md` | `02-phase-1-rlock-config-and-resource-manager.md` |
+| `02-phase-2-dispatcher-pool-and-pool-status.md` | `03-phase-2-dispatcher-pool-and-pool-status.md` |
+| `03-phase-3-ghost-watchdog-and-e2e.md` | `04-phase-3-ghost-watchdog-and-e2e.md` |
+
+`00-working-contract.md` stays at 00. Logs stay at 90/91/92 per the paired-log convention. Phase numbers remain in filename content (e.g. `02-phase-1-*`) so the phase→file relationship is still obvious.
+
+Cross-references updated:
+- 7 intra-subdir references (Paired execution log, Depends on, Step 3.5 doc-updates table, Design decisions reference in working contract)
+- 4 references in the v0.1.5 anchor superseded banner (with new "Working contract (read first)" bullet added)
+
+Checkpoint 1 and Checkpoint 2 file lists above reference the OLD filenames — that's historically accurate (those were the names at commit time). Git tracks the rename properly via `git mv`, so `git log --follow` resolves the history.
+
+**Files touched in Checkpoint 3**:
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/00-design-review.md` → `01-design-review.md` (git mv)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/01-phase-1-rlock-config-and-resource-manager.md` → `02-...` (git mv)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/02-phase-2-dispatcher-pool-and-pool-status.md` → `03-...` (git mv)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/03-phase-3-ghost-watchdog-and-e2e.md` → `04-...` (git mv, + 3 internal refs edited)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/00-working-contract.md` (1 ref edit)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/03-phase-2-dispatcher-pool-and-pool-status.md` (1 ref edit — post-rename)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/90-phase-1-execution-log.md` (1 ref edit)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/91-phase-2-execution-log.md` (1 ref edit)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/92-phase-3-execution-log.md` (1 ref edit)
+- `src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md` (superseded banner refs updated + working-contract entry added)
+- `history.md` (this entry)
+- `.claude-session.md` (Checkpoint 3 section)
+
+**Commit**: 0d2f732
+
+**Note for the fresh AI**: the entry-point prompt given before the context clear references OLD filenames. Use the new names:
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/00-working-contract.md`
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/01-design-review.md`
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/02-phase-1-rlock-config-and-resource-manager.md`
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/03-phase-2-dispatcher-pool-and-pool-status.md`
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/04-phase-3-ghost-watchdog-and-e2e.md`
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/90/91/92-phase-N-execution-log.md`
+
 **Commit**: [pending]
 
 ---

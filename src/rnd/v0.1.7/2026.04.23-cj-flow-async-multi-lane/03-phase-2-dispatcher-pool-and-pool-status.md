@@ -3,7 +3,7 @@
 **Status**: DESIGN (implementation not started)
 **Branch**: `wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe`
 **Paired execution log**: `91-phase-2-execution-log.md`
-**Depends on**: Phase 1 (`01-phase-1-rlock-config-and-resource-manager.md`) landed and green
+**Depends on**: Phase 1 (`02-phase-1-rlock-config-and-resource-manager.md`) landed and green
 **Decisions driving this phase**: Q1 (2-lane), Q2 (`= 1` prod / `= 3` dev), Q4 (defensive callback), Q5 (pool-status in Phase 2), Q6 (single pool)
 
 ---

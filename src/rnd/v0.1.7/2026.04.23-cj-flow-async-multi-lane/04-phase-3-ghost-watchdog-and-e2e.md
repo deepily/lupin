@@ -3,7 +3,7 @@
 **Status**: DESIGN (implementation not started)
 **Branch**: `wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe`
 **Paired execution log**: `92-phase-3-execution-log.md`
-**Depends on**: Phase 1 (`01-phase-1-rlock-config-and-resource-manager.md`) and Phase 2 (`02-phase-2-dispatcher-pool-and-pool-status.md`) landed and green
+**Depends on**: Phase 1 (`02-phase-1-rlock-config-and-resource-manager.md`) and Phase 2 (`03-phase-2-dispatcher-pool-and-pool-status.md`) landed and green
 **Decisions driving this phase**: Q3 (ApiResourceManager caller migration), Q4 (watchdog sweep = suspenders to Phase 2's defensive callback belt), Q5 (ApiResourceManager state joins pool-status in Phase 3)
 
 ---
@@ -282,7 +282,7 @@ This is the pre-merge gate per project rule. Run in this order, each passing bef
 | `src/docs/websocket-architecture.md` | Note that `job_state_transition` events for concurrent jobs interleave non-deterministically |
 | `src/docs/rest-api-reference.md` | Add `GET /api/queue/pool-status` row with response shape |
 | `src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md` | Add completion banner pointing at the v0.1.7 implementation; mark all 11 sub-steps complete |
-| `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/00-design-review.md` | Add postmortem-pointer: "Implemented per `0{1,2,3}-phase-N-*.md` in the same dir" |
+| `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/01-design-review.md` | Add postmortem-pointer: "Implemented per `0{2,3,4}-phase-N-*.md` in the same dir" |
 
 ---
 

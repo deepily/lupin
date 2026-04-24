@@ -1,7 +1,7 @@
 # Approach C — Phase 2 Execution Log
 
 **Status**: NOT STARTED (skeleton only — populate as implementation proceeds)
-**Paired design doc**: `02-phase-2-dispatcher-pool-and-pool-status.md`
+**Paired design doc**: `03-phase-2-dispatcher-pool-and-pool-status.md`
 **Depends on**: Phase 1 complete (all checkboxes `[x]` in `90-phase-1-execution-log.md`)
 **Branch**: `wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe`
 

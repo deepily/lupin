@@ -14,7 +14,7 @@ on its own initiative:
 
 The user's involvement is gated to three things and ONLY these three:
 
-1. **Design decisions** — already captured in `00-design-review.md` Q1–Q7.
+1. **Design decisions** — already captured in `01-design-review.md` Q1–Q7.
    New design choices discovered during implementation must be surfaced
    via cosa-voice `ask_multiple_choice` or `converse`, never silently
    decided by the AI.

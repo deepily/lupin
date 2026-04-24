@@ -1,7 +1,7 @@
 # Approach C — Phase 1 Execution Log
 
 **Status**: NOT STARTED (skeleton only — populate as implementation proceeds)
-**Paired design doc**: `01-phase-1-rlock-config-and-resource-manager.md`
+**Paired design doc**: `02-phase-1-rlock-config-and-resource-manager.md`
 **Branch**: `wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe`
 
 ---
