@@ -190,9 +190,15 @@ class TestDispatcherUnit:
         assert result.exit_code == -1
 
     def test_dispatcher_creation( self, dispatcher ):
-        """Test ClaudeCodeDispatcher instantiation."""
+        """Test ClaudeCodeDispatcher instantiation.
+
+        Accepts either the host-path config file (`cosa_mcp.json`) OR the
+        container-path variant (`cosa_mcp_docker.json`) which is what the
+        dispatcher resolves to when LUPIN_ROOT is `/var/lupin` (Docker).
+        Per TFE analysis 2026-04-24 on ts-ff11fb27.
+        """
         assert dispatcher is not None
-        assert dispatcher.mcp_config_path.endswith( "cosa_mcp.json" )
+        assert dispatcher.mcp_config_path.endswith( ( "cosa_mcp.json", "cosa_mcp_docker.json" ) )
         assert dispatcher.mcp_server_path.endswith( "cosa_voice_mcp.py" )
 
     def test_dispatcher_active_sessions( self, dispatcher ):

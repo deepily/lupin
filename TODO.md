@@ -1,6 +1,32 @@
 # TODO
 
-Last updated: 2026-04-24 EDT (Session 616112aa — Phase 3 complete. Phase 1 fe932ba, Phase 2 9adfc26, Phase 2 fix 9eb764b. Phase 3 pending commit. v0.1.7 async-pool milestone code complete. Concurrent-happy-path Live API probe on :7999 green 7/7. :8000 Phase 2 gate running since 15:59 EDT.)
+Last updated: 2026-04-24 EDT session-end (Session 616112aa — v0.1.7 async-pool code complete. Phase 1 fe932ba, Phase 2 9adfc26, Phase 2 fix 9eb764b, Phase 3 2379233, docs polish d35a330. Phase 2 :8000 gate ran GREEN vs yesterday's Phase 1 baseline. Evening jobs scheduled before stepping away.)
+
+---
+
+## 🌅 FIRST THING IN THE MORNING — 2026-04-25
+
+**Review evening test runs** (both scheduled before user stepped away):
+
+1. **`ts-e81ca54c`** (submitted 17:42 EDT for 17:44 EDT) — `e2e --update-snapshots -k visual` regeneration. Rewrites the 12 stale visual-regression PNG baselines under `io/test-suite/visual-baselines/test_visual_regression/test_visual_page/`. On completion, the baselines are current against Phase 2+fix code. Check `docker exec lupin-rest-test tail -30 /tmp/e2e-ui-latest.log` for exit code.
+
+2. **`ts-4139484f`** (Phase 3 validation run, scheduled 17:49:24 EDT against freshly-bounced :8000 carrying Phase 3 code at commit `2379233`) — full `e2e,integration` gate. Expected: 0 failures in integration (dispatcher test now accepts both cosa_mcp variants per 17:40 fix); 0 failures in e2e (Opus→Sonnet fix from 14:40 + fresh visual baselines from ts-e81ca54c).
+
+   If Phase 3 gate is green → v0.1.7 async-pool ready for PR/merge.
+   If new failures appear → investigate vs Phase 2 baseline (today's 17:19 EDT TFE report saved at `io/swe-team/reports/interactive.job.tester@lupin.deepily.ai/2026.04.24-at-17:19-EST-ts-ff11fb27-completed-test_fix_expediter-report.md`).
+
+3. **Decision on prod `N=1 → N=3` bump** — separate deliberate action after morning review. Edit `[Lupin: Baseline]` from `= 1` to `= 3`, redeploy.
+
+4. **Pre-flip FIFO audit** (8-step checklist in `92-phase-3-execution-log.md §F.1–F.8`) — required before prod bump. Grep for tests implicitly assuming "queue size 1" or "first-submitted is first-done"; categorize low/med/high; re-verify under N=3 dev.
+
+5. **Deferred items** (non-gating, pick up as bandwidth allows):
+   - 9 Phase 2 MVP unit tests still deferred (see `91-phase-2-execution-log.md` Step 2.4 rationale)
+   - DR `cli.py::estimate_total_time` migration — dev utility only
+   - Visual regression: commit the regenerated baselines if the tool stores them under a gitignored path (`io/test-suite/visual-baselines/`) they don't get committed; if under `src/tests/e2e_ui/__snapshots__/` they need commit. Check which path was written.
+
+---
+
+## 🔥 SESSION 616112aa — COMPLETE WORK (2026-04-24)
 
 ---
 

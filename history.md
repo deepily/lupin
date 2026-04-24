@@ -80,6 +80,37 @@ Per `CLAUDE.md` and memory `feedback_lupin_only_never_cosa.md`: the two CoSA sub
 - **Assumed `:7999` auto-reload was actually reloading** — but PID 2453 shows 1h27m+ continuous elapsed time with no watcher+worker split visible in the process tree. Unclear whether `uvicorn.run(..., reload=True)` is actually spawning a reloader in this invocation, or if my code edits never propagated to the running `:7999` either. Unit tests + fresh-Python-process smoke tests are unambiguous (they import my edited code); running-server verification on `:7999` this session should be considered suspect.
 - **Design deviations surfaced but not blocking**: 14 methods wrapped vs design's 11, `[Lupin: Development]` overlay vs new `[Lupin: Dev Overrides]` block, 2 out-of-scope stale TFE test fixes. All noted in 90-phase-1-execution-log.md Surprises table.
 
+#### Checkpoint | 2026.04.24 17:45 | Session-end — dispatcher test fix + evening scheduled runs
+
+Final checkpoint for the day before user stepping away. Phase 2 `:8000` gate results came in 17:19 EDT (`ts-ff11fb27`): **227 integration pass / 1 fail / 357 e2e pass / 12 e2e err** — a significant improvement over yesterday's Phase 1 baseline (was 220 integration pass / 8 fail + 356 e2e pass / 1 fail / 12 e2e err). **The 7 newly-passing `test_swe_team_pipeline` tests are direct Phase 2 wins** — the pool kept the consumer thread unblocked during their `submit_and_wait` polling, so they no longer time out at 120s.
+
+TFE auto-dispatched on the failure and produced a correct diagnosis (report at `io/swe-team/reports/interactive.job.tester@lupin.deepily.ai/2026.04.24-at-17:19-EST-ts-ff11fb27-completed-test_fix_expediter-report.md`): 2 failure clusters, both pre-existing — stale visual baselines (12 errors) + hardcoded `cosa_mcp.json` assertion (1 fail). TFE proposed 5 fixes, selected 3, applied 0 (TFE analyzes but doesn't auto-apply in current config).
+
+**Evening actions taken before user stepped away**:
+1. **Fixed `test_dispatcher_creation`** — `src/tests/integration/test_dispatcher_e2e.py:195` broadened from `.endswith("cosa_mcp.json")` to `.endswith(("cosa_mcp.json", "cosa_mcp_docker.json"))`. Environment-agnostic; documents both known valid paths. TFE's proposed fix variant #4.
+2. **Scheduled visual-baseline regeneration** — `ts-e81ca54c` at 17:44 EDT: `e2e --update-snapshots -k visual`. Filters to the 12 visual tests only (~5 min vs full 21min E2E). Rewrites `io/test-suite/visual-baselines/test_visual_regression/test_visual_page/*.png` against Phase 2+fix rendered UI.
+3. **Bounce `:8000` after regen** — loads Phase 3 code (commit `2379233`) onto the test server.
+4. **Scheduled Phase 3 validation run** — `ts-4139484f` at 17:49:24 EDT (2min after `:8000` bounce completed). Full `e2e,integration` against Phase 3 code + fresh visual baselines + dispatcher fix.
+
+**Expected morning result** (2026-04-25 AM review): Phase 3 gate green (0 e2e fail + 0 e2e err + 0 integration fail) → v0.1.7 async-pool ready for PR/merge. If new regressions appear, they'd be Phase-3-specific and need investigation; but the surface area (ghost sweeper silent + DR migration behaviour-identical + pool-status enrichment unreached by tests) makes new failures unlikely.
+
+**Session 616112aa total commits**:
+- `fe932ba` Phase 1 (RLock + INI + ARM stub)
+- `9adfc26` Phase 2 (dispatcher + pool + endpoint)
+- `9eb764b` Phase 2 fix (`_process_job` passed-job)
+- `2379233` Phase 3 (ghost sweeper + DR→ARM + enrichment + docs)
+- `d35a330` Docs polish (CLAUDE.md CJ Flow + v0.1.5 before/after Mermaid)
+- **`<this commit>` Session-end (dispatcher test fix + evening scheduled runs + tomorrow-review TODO note)**
+
+**Session statistics**:
+- Unit tests: **3600 pass / 1 xfail / 0 fail** (baseline 3549 → +43 new + 8 in-session fixes)
+- Agentic pool tests: 26/26 pass (18 Phase 2 + 1 Phase 2 fix regression + 7 Phase 3 ghost-sweeper)
+- ARM tests: 12/12 pass (9 Phase 1 + 3 Phase 3 DR migration)
+- `:7999` Live API probe concurrent-happy-path: 7/7 green
+- `:8000` Phase 2 gate: +7 tests newly passing; 1 pre-existing integration fail + 12 pre-existing e2e errors (both addressed in evening actions)
+
+**Commit**: [pending]
+
 #### Checkpoint | 2026.04.24 16:15 | Phase 3 complete — ghost sweeper + DR→ARM migration + pool-status enrichment
 
 Phase 3 landed the v0.1.7 async-pool milestone's final pieces while Phase 2's :8000 gate ran in parallel (ts-ff11fb27 submitted 15:55, fired 15:59 against Phase 2 fix commit 9eb764b). Concurrent-happy-path Live API probe on :7999 **GREEN 7/7**.
