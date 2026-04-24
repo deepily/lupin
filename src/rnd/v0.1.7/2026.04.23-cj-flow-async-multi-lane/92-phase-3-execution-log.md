@@ -9,7 +9,7 @@
 
 ## Progress ledger
 
-> **Implementation steps below (Steps 3.1 – 3.6) are EXECUTOR: AI throughout** — these are code-writing checkboxes. Verification steps in the "Full regression" and "Phase 3 Protocol E2E" sections later in this file carry their own per-line `EXECUTOR:` tags.
+> **Implementation steps below (Steps 3.1 – 3.6) are EXECUTOR: AI throughout** — these are code-writing checkboxes. Verification steps in the "Full regression" and "Phase 3 Live API probe" sections later in this file carry their own per-line `EXECUTOR:` tags.
 
 ### Step 3.1 — Ghost-job watchdog
 
@@ -81,9 +81,9 @@ Run in order. Each step must pass before next starts.
 - [ ] EXECUTOR: AI — **6. E2E UI**: `POST /api/test-suite/submit {"test_types": "e2e_ui", "scheduled_at": "<user-confirmed>"}` (local fallback: `./src/scripts/run-e2e-ui-tests.sh --bg -v`) — 285/285
 - [ ] EXECUTOR: AI — **7. Integration (final gate)**: `POST /api/test-suite/submit {"test_types": "integration", "scheduled_at": "<user-confirmed>"}` (local fallback: `./src/tests/run-integration-tests.sh --bg -v`) — 43/43
 
-### Phase 3 Protocol E2E — mandatory concurrent-happy-path (AI-executed)
+### Phase 3 Live API probe — mandatory concurrent-happy-path (AI-executed)
 
-"Protocol E2E" = "not yet in pytest." Every checkbox below is `EXECUTOR: AI`, executed via the API against `:7999`:
+"Live API probe" = "not yet in pytest." Every checkbox below is `EXECUTOR: AI`, executed via the API against `:7999`:
 
 - [ ] EXECUTOR: AI — `cj flow max concurrent agentic jobs = 3` set in `src/conf/lupin-app.ini` (`:7999` auto-reloads)
 - [ ] EXECUTOR: AI — **Warmup**: POST /api/push (MathAgent, trivial query); poll `/api/get-queue/done` until returned; discard. Warms fast-lane Phi-4-GPTQ path.
@@ -225,7 +225,7 @@ $ tail -20 /tmp/integration-latest.log
 (TBD — 43/43)
 ```
 
-### Protocol E2E evidence (AI-captured)
+### Live API probe evidence (AI-captured)
 
 ```
 Config at test time: cj flow max concurrent agentic jobs = (3 | 1)
@@ -254,7 +254,7 @@ DeepResearch-2 finished:   (TBD)
 ## Phase 3 sign-off criteria (= v0.1.7 async-pool milestone sign-off)
 
 - All checkboxes in this log marked `[x]`.
-- Protocol E2E observations recorded (AI-captured values via cosa-voice report).
+- Live API probe observations recorded (AI-captured values via cosa-voice report).
 - All four automated layers green (results filled in above).
 - Serial-fallback verified.
 - v0.1.5 anchor doc bannered as superseded.

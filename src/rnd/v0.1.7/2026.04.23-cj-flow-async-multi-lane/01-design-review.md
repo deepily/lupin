@@ -392,7 +392,7 @@ At that point we'd re-open the interactive-lane question as a follow-up, informe
 - `./src/scripts/run-websocket-smoke-tests.sh` (50 tests)
 - `./src/scripts/run-e2e-ui-tests.sh --bg -v` (285 tests, ~17 min — `--bg` mandatory)
 - `./src/tests/run-integration-tests.sh --bg -v` (43 tests — final gate)
-- Protocol E2E (`EXECUTOR: AI` — see `00-working-contract.md`): two concurrent deep-research (dry-run) + a math query; AI asserts math returns in seconds and both research jobs finish.
+- Live API probe (`EXECUTOR: AI` — see `00-working-contract.md`): two concurrent deep-research (dry-run) + a math query; AI asserts math returns in seconds and both research jobs finish.
 
 ---
 

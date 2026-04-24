@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-04-24 EDT (Session 616112aa-v017-async-phase1 checkpoint — Phase 2 code complete, 18 pool unit tests pass, Phase 1 committed as fe932ba, Phase 2 commit pending user go-ahead after review)
+Last updated: 2026-04-24 EDT (Session 616112aa-v017-async-phase1 — Phase 2 fix checkpoint. Phase 1 committed fe932ba, Phase 2 committed 9adfc26, Phase 2 fix pending commit. Live API probe on :7999 green after fix.)
 
 ---
 
@@ -12,9 +12,10 @@ Last updated: 2026-04-24 EDT (Session 616112aa-v017-async-phase1 checkpoint — 
 - [ ] [LUPIN] **`:8000` E2E UI gate** — re-submission `ts-249d0d40` running since 11:18:38 EDT (after bounce of stale `:8000` that was still running pre-Phase-1 code). ~40min runtime.
 - [ ] [LUPIN] **`:8000` integration gate (FINAL)** — runs after E2E. ~20min.
 - [x] [LUPIN] **Phase 1 committed** — `fe932ba` (parent Lupin, 10 files, +811/−190). CoSA files still yours to commit separately.
-- [x] [LUPIN] **Phase 2 code complete** — RunningFifoQueue dispatcher + pool + /queue/pool-status endpoint + shutdown hook + 18 new unit tests. Full unit regression 3582/0, WS smoke 50/50. Pending commit.
-- [ ] [LUPIN] **Phase 2 Protocol E2E against :7999** — needs you to bounce :7999 first so new code loads. Then: push DR-dry-run × 2 + math query, assert math <5s while DRs run, GET /queue/pool-status asserts inflight=2.
-- [ ] [LUPIN] **Phase 2 :8000 gates + commit** — after you bounce :8000 to pick up Phase 2 code + confirm a scheduled_at slot. Then schedule E2E + integration, record results in 91-phase-2-execution-log.md, commit Phase 2.
+- [x] [LUPIN] **Phase 2 code committed (9adfc26)** — RunningFifoQueue dispatcher + pool + /queue/pool-status endpoint + shutdown hook + 18 new unit tests. Then FIX to `_process_job` dispatcher (passed job vs self.head()) + regression test pending separate commit.
+- [x] [LUPIN] **Phase 2 Live API probe on :7999** — ran 2026-04-24 surfacing Bug 2A phantom + Bug 2B duplicate done-queue. Root-caused to `self.head()` in `_process_job`; fixed + re-probed green (run=0, done=1, dead=0, inflight=0 at terminal).
+- [ ] [LUPIN] **Phase 2 :8000 gates** — after you bounce :8000 to pick up Phase 2 + fix + confirm a scheduled_at slot. Then submit e2e,integration via /api/test-suite/submit, record results in 91-phase-2-execution-log.md.
+- [ ] [LUPIN] **Receptionist agent multiple issues** — filed 2026-04-24 in bug-fix-queue.md (active queue). Context-length overrun + BFE correctly filtered it out per eligibility config + classifier miss on "maximum context length" pattern. Not a Phase 1/2 regression.
 
 ---
 

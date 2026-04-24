@@ -12,7 +12,7 @@
 
 Phase 3 closes the loop. Phase 2 shipped the pool with a defensive callback (belt). Phase 3 adds the **watchdog sweep** that catches the one case the callback can't: when the callback thread itself dies before firing. Phase 3 also **migrates the first agents to call `ApiResourceManager.acquire()`** (the singleton stub landed empty in Phase 1), and **enriches the `/api/queue/pool-status` endpoint** with per-provider contention state.
 
-Finally, Phase 3 runs the full automated regression across all four layers (the same layers Phase 1 and 2 ran, re-run together to catch integration drift), a concurrent-happy-path Protocol E2E (AI-executed), and documentation updates.
+Finally, Phase 3 runs the full automated regression across all four layers (the same layers Phase 1 and 2 ran, re-run together to catch integration drift), a concurrent-happy-path Live API probe (AI-executed), and documentation updates.
 
 After Phase 3 lands, the v0.1.7 async-pool milestone is complete. Bumping the prod default from `= 1` to `= 3` becomes a separate deliberate action.
 
@@ -26,7 +26,7 @@ After Phase 3 lands, the v0.1.7 async-pool milestone is complete. Bumping the pr
 - **`ApiResourceManager` caller migration (first wave)** — migrate `WebSearchRateLimiter` callers in `src/cosa/agents/deep_research/` to call the singleton. Other agents (podcast, presentation) stay on their `_call_with_retry()` patterns; their migration is follow-up work.
 - **`/api/queue/pool-status` enrichment** — add `api_resource_manager` section to the response payload.
 - **Full regression pass** across all four automated layers (unit, smoke, WebSocket, E2E, integration).
-- **Protocol E2E — concurrent-happy-path** (two agentic + one math, simultaneous; AI-executed).
+- **Live API probe — concurrent-happy-path** (two agentic + one math, simultaneous; AI-executed).
 - **Documentation updates** — `notification-api.md`, `websocket-architecture.md`, `rest-api-reference.md`, the v0.1.5 anchor doc (mark phases complete).
 
 ### Out of scope (explicit)
@@ -337,7 +337,7 @@ The `--bg` forms below are **local-foreground fallback**, not the primary path f
 
 For local-fallback monitoring only: `tail -20 /tmp/e2e-ui-latest.log` and `tail -20 /tmp/integration-latest.log`. Primary path is the scheduled submission — wait for each `:8000` slot to drain between submissions.
 
-### Protocol E2E — Phase 3 mandatory concurrent-happy-path (AI-executed)
+### Live API probe — Phase 3 mandatory concurrent-happy-path (AI-executed)
 
 **REQUIRED** for Phase 3 sign-off (this is the behaviour-validation that automated tests can't express). Every step is executed by the AI via the API against `:7999`:
 
@@ -416,7 +416,7 @@ If only the sweeper is problematic: set `cj flow ghost job sweep interval second
 
 - All three phases' design docs landed with paired execution logs fully populated.
 - All four automated test layers pass (unit 915+, smoke no-regression, WS 50/50, E2E 285/285, integration 43/43).
-- Protocol E2E — concurrent-happy-path observed green (AI-executed with reported values).
+- Live API probe — concurrent-happy-path observed green (AI-executed with reported values).
 - `/api/queue/pool-status` returns correct payload during mixed workload.
 - v0.1.5 anchor doc bannered as superseded; v0.1.7 design-review doc points at implementation docs.
 - TODO.md line 340 parent task checked off (with dated completion note); follow-up items (agent migration for podcast/presentation/BFE/TFE) captured as new TODO entries.

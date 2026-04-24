@@ -319,7 +319,7 @@ def get_pool_status( self ) -> dict:
     }
 ```
 
-> **Note on naming migration**: the earlier field name was `active_agentic_jobs`, but "active" is ambiguous (running vs submitted). The new `inflight_agentic_jobs` is unambiguous. Update all downstream docs (rest-api-reference.md, websocket-architecture.md, Protocol E2E assertions) to use the new field name.
+> **Note on naming migration**: the earlier field name was `active_agentic_jobs`, but "active" is ambiguous (running vs submitted). The new `inflight_agentic_jobs` is unambiguous. Update all downstream docs (rest-api-reference.md, websocket-architecture.md, Live API probe assertions) to use the new field name.
 
 ### `shutdown_pool()` (new)
 
@@ -500,9 +500,12 @@ The `--bg` commands are **local-foreground fallback**, not the primary path from
 | **E2E UI** | `POST /api/test-suite/submit {"test_types": "e2e_ui", "scheduled_at": "..."}` — fallback: `./src/scripts/run-e2e-ui-tests.sh --bg -v` | 285/285 pass |
 | **Integration (final gate)** | `POST /api/test-suite/submit {"test_types": "integration", "scheduled_at": "..."}` — fallback: `./src/tests/run-integration-tests.sh --bg -v` | 43/43 pass |
 
-### Protocol E2E — Phase 2 mandatory (AI-executed)
+### Live API probe — Phase 2 mandatory (AI-executed)
 
-Per project mandate for behaviour-changing work. "Protocol E2E" means "not yet in pytest" — it does NOT mean "user does it." Every step below is executed by the AI via the API against `:7999`:
+> **Terminology** (renamed 2026-04-24 from the misleading "Protocol E2E"):
+> "Live API probe" is an **AI-executed ad-hoc HTTP probe** — `POST /api/push` + poll `/api/get-queue/done` + `GET /api/queue/pool-status`. It is **NOT** the Playwright E2E UI test suite (`src/tests/e2e_ui/`, `run-e2e-ui-tests.sh`). Per CLAUDE.md §TESTING VENUES, Playwright E2E UI is `:8000`-monopolize-mode-only and never runs on `:7999`. This probe fits the `:7999` AI-discretionary rubric: non-destructive, under 2 minutes, no monopoly requirement.
+
+Per project mandate for behaviour-changing work. "Live API probe" means "not yet in pytest" — it does NOT mean "user does it." Every step below is executed by the AI via the API against `:7999`:
 
 1. EXECUTOR: AI — Set `cj flow max concurrent agentic jobs = 3` in `src/conf/lupin-app.ini` (`:7999` auto-reloads; no restart needed).
 2. EXECUTOR: AI — **Warmup**: POST /api/push (MathAgent, any trivial query); poll `/api/get-queue/done` until it returns; discard the result. This warms the fast-lane Phi-4-GPTQ path so the measured MathAgent in step 4 isn't confounded by cold-GPU model-load latency (3–8s).

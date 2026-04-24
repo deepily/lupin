@@ -36,6 +36,44 @@
 - **Assumed `:7999` auto-reload was actually reloading** — but PID 2453 shows 1h27m+ continuous elapsed time with no watcher+worker split visible in the process tree. Unclear whether `uvicorn.run(..., reload=True)` is actually spawning a reloader in this invocation, or if my code edits never propagated to the running `:7999` either. Unit tests + fresh-Python-process smoke tests are unambiguous (they import my edited code); running-server verification on `:7999` this session should be considered suspect.
 - **Design deviations surfaced but not blocking**: 14 methods wrapped vs design's 11, `[Lupin: Development]` overlay vs new `[Lupin: Dev Overrides]` block, 2 out-of-scope stale TFE test fixes. All noted in 90-phase-1-execution-log.md Surprises table.
 
+#### Checkpoint | 2026.04.24 14:40 | Phase 2 pool bug fix — `_process_job` uses passed `job`, not `self.head()`
+
+Two bugs surfaced by the 2026-04-24 Live API probe on :7999 (Session 616112aa, against Phase 2 commit `9adfc26`) — both root-caused and fixed same session.
+
+**The bugs**:
+- **2A phantom**: agentic job stuck in running queue after future completes; pool-status `inflight=0` but job never transitioned out.
+- **2B duplicate**: same `job_id` appeared 3× in done queue, identical timestamps.
+
+**Root cause**: `_process_job(job)` at `running_fifo_queue.py:148` did `running_job = self.head()` instead of using the passed `job` parameter. Pre-Phase-2 (serial agentic processing in `_handle_agentic_job`), `self.head()` coincidentally == the newly-pushed job because agentic jobs always drained the running queue before the next push arrived. Phase 2 submits agentic jobs to a pool and returns immediately, so the running queue can hold MULTIPLE in-flight jobs — `self.head()` then returns the OLDEST job, not the one the consumer just pushed. Consequence: (a) newly-pushed job orphaned in run queue (Bug 2A), (b) older job re-submitted to pool every time a new job arrives (Bug 2B — one duplicate done-queue push per re-submit).
+
+**The fix (one line)**: `running_job = job` at line 166, replacing `running_job = self.head()`. Explanatory comment added above.
+
+**Regression test added**: `test_process_job_uses_passed_job_not_queue_head` in `test_agentic_pool.py`. The test pushes TWO agentic jobs A and B onto the running queue, calls `_process_job(B)`, asserts B (not A) gets dispatched to the pool. Would have caught this pre-merge if Phase 2's unit tests had covered the `_process_job` dispatch path (they mocked at a finer level and missed it).
+
+**Other cleanups this turn**:
+- Renamed "Protocol E2E" → "Live API probe" across 7 design/log files to prevent future terminology collision with Playwright E2E UI tests (which are `:8000`-monopolize-only per CLAUDE.md §TESTING VENUES). Added explicit disambiguation callouts in both the Phase 2 design doc and 91-phase-2-execution-log.md.
+- Filed bug-queue entry for the **Receptionist agent multiple issues** (context-length overrun on 8192-token model, BFE correctly filtered out by job-type eligibility, classifier miss on "maximum context length" pattern). Separate bug, not a Phase 2 regression.
+
+**Verification (:7999 AI-discretionary layers)**:
+- **Fresh Live API probe on :7999** after fix + bounce (14:34:06): submitted 1 DR dry-run → timeline `t=0.2s inflight=1 → t=3.3s run=1 inflight=1 → t=39.9s run=1 inflight=0 (future done) → t=46.0s run=0 done=1 inflight=0 (callback transitioned)`. **Exactly 1 copy in done queue, 0 phantoms, 0 dead-letters**. Both 2A and 2B eliminated.
+- **Agentic pool unit tests**: 19/19 pass in 6.24s (18 existing + 1 regression test).
+- **Full unit regression**: 3590 passed / 1 xfailed / 0 failed in 147.26s.
+- **py_compile**: `running_fifo_queue.py` + `test_agentic_pool.py` both OK.
+
+**Files in this checkpoint commit** (parent Lupin only):
+- `bug-fix-queue.md` — Receptionist + Phase 2 bug entries with fix-resolution marker
+- `src/tests/unit/test_agentic_pool.py` — new `test_process_job_uses_passed_job_not_queue_head`
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/{00,01,02,03,04,91,92}-*.md` — terminology rename + Step 2.7 evidence
+
+**CoSA submodule** (user commits separately from CoSA context): `src/cosa/rest/running_fifo_queue.py` one-line fix at `_process_job`.
+
+**Dev-server bounce protocol** (new memory saved): User has authorized AI to bounce :7999 without per-bounce approval, but AI must advise the user beforehand OR at minimum verify run+todo queues empty before SIGKILL so parallel work isn't lost. `:8000` remains strictly user-owned (monopolize-mode protocol).
+
+**In flight when this checkpoint lands**:
+- Phase 2 :8000 gates (needs :8000 bounce — user-owned — + slot-check; then submit e2e,integration)
+
+**Commit**: [pending]
+
 #### Checkpoint | 2026.04.24 13:00 | Phase 2 code complete — pool + dispatcher + endpoint + 18 unit tests
 
 Following the Phase 1 commit (`fe932ba` at 11:25), ran the `:8000` gates for Phase 1 validation and user kicked off Phase 2 in parallel. `:8000` returned 1 fail + 12 errors + 8 pre-existing integration failures; root-cause analysis showed all are pre-existing or stale-test issues, none Phase-1-caused (`test_dispatcher_creation` tests a different dispatcher entirely; SWE team pipeline timeouts match yesterday's push_job-slowness TODO). Fixed the stale E2E `test_default_model_is_opus_4_7` (flipped Opus→Sonnet 4.6 per 2026-04-22).

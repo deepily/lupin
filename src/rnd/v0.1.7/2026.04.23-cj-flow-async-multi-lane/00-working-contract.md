@@ -13,7 +13,7 @@ on its own initiative:
   §TESTING VENUES. Never inject via curl, direct `/api/push`, or in-process
   instantiation.
 - Every step listed in the Phase N "Verification" section.
-- Every checkbox in the paired 9N execution log's "Protocol E2E" group
+- Every checkbox in the paired 9N execution log's "Live API probe" group
   (these are AI-executed via the API against :7999 — submit via
   /api/push, poll /api/get-queue/done, read /api/queue/pool-status,
   observe WebSocket events — they are NOT human operator steps).

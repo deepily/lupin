@@ -325,7 +325,7 @@ The `--bg` commands below are the **local-foreground fallback**, not the primary
 
 **Test scheduling note**: any `:8000` submissions require a fresh user slot-check (monopolize-mode coordination, not budget approval) — submit via `POST /api/test-suite/submit` with a user-confirmed `scheduled_at` that does not overlap other scheduled runs. See `00-working-contract.md` and project CLAUDE.md §TESTING VENUES. Unit + py_compile + import-chain + WS smoke + non-destructive smoke against `:7999` are AI-discretionary and run without ask.
 
-**Protocol E2E**: not required for Phase 1 (no behaviour change). If Phase 1 did require one, it would be `EXECUTOR: AI` by default.
+**Live API probe**: not required for Phase 1 (no behaviour change). If Phase 1 did require one, it would be `EXECUTOR: AI` by default.
 
 ---
 

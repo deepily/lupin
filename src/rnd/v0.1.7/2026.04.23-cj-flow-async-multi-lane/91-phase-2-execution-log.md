@@ -9,15 +9,15 @@
 
 ## Progress ledger
 
-> **Implementation steps below (Steps 2.0 – 2.5) are EXECUTOR: AI throughout** — these are code-writing checkboxes. Verification steps in the "Phase 2 verification" and "Phase 2 Protocol E2E" sections later in this file carry their own per-line `EXECUTOR:` tags.
+> **Implementation steps below (Steps 2.0 – 2.5) are EXECUTOR: AI throughout** — these are code-writing checkboxes. Verification steps in the "Phase 2 verification" and "Phase 2 Live API probe" sections later in this file carry their own per-line `EXECUTOR:` tags.
 
 ### Step 2.0 — Pre-flight: confirm DeepResearch dry-run is AI-runnable (no real API spend)
 
-Phase 2 (and Phase 3) Protocol E2E fires `POST /api/push` for "DeepResearch dry-run" twice per run. If no dry-run mode exists, each run burns real Anthropic spend (~$0.50–$5 per DR).
+Phase 2 (and Phase 3) Live API probe fires `POST /api/push` for "DeepResearch dry-run" twice per run. If no dry-run mode exists, each run burns real Anthropic spend (~$0.50–$5 per DR).
 
 - [ ] EXECUTOR: AI — AI greps `src/cosa/agents/deep_research/` and the `/api/push` handler for a `dry_run` / `dry-run` / `dry_run_mode` parameter or construction flag. AI reports the finding (present or absent) in "Verification results" with file:line references.
-- [ ] EXECUTOR: AI — If absent, AI surfaces the gap via cosa-voice `ask_multiple_choice`: (a) add `dry_run=true` support to `DeepResearchJob` (real fixture-backed replacement of LLM calls) — ~30min work; (b) replace Protocol E2E with a mock `AgenticJobBase` subclass that sleeps 30s (proves pool mechanics without spend) — ~15min work. Await user choice before Protocol E2E runs.
-- [ ] EXECUTOR: AI — Once the mechanism is confirmed, AI documents the exact `/api/push` payload (including `user_id`, `question`, any `dry_run` flag) and captures it as a reusable helper in `src/tests/smoke/utilities.py` (or nearest equivalent location — grep `src/tests/smoke/` for existing helper-module conventions). Phase 2 and Phase 3 Protocol E2Es reuse this helper; do not duplicate the payload inline.
+- [ ] EXECUTOR: AI — If absent, AI surfaces the gap via cosa-voice `ask_multiple_choice`: (a) add `dry_run=true` support to `DeepResearchJob` (real fixture-backed replacement of LLM calls) — ~30min work; (b) replace Live API probe with a mock `AgenticJobBase` subclass that sleeps 30s (proves pool mechanics without spend) — ~15min work. Await user choice before Live API probe runs.
+- [ ] EXECUTOR: AI — Once the mechanism is confirmed, AI documents the exact `/api/push` payload (including `user_id`, `question`, any `dry_run` flag) and captures it as a reusable helper in `src/tests/smoke/utilities.py` (or nearest equivalent location — grep `src/tests/smoke/` for existing helper-module conventions). Phase 2 and Phase 3 Live API probes reuse this helper; do not duplicate the payload inline.
 
 ### Step 2.1 — Dispatcher refactor in `RunningFifoQueue`
 
@@ -41,14 +41,14 @@ Phase 2 (and Phase 3) Protocol E2E fires `POST /api/push` for "DeepResearch dry-
 
 - [x] EXECUTOR: AI — Confirmed `@asynccontextmanager def lifespan(app)` pattern is in use (`main.py` line 388; `FastAPI(lifespan=lifespan)` at line 703). No `@app.on_event` in the file.
 - [x] Added `jobs_run_queue.shutdown_pool( wait=True, timeout=30.0 )` in lifespan teardown block BEFORE the consumer-stop code. `hasattr` guard for backward-compat when running with older Phase-1-only build.
-- [ ] EXECUTOR: AI — Ordering banner-line assertion via actual server shutdown: deferred to Protocol E2E (Step 2.7) so a realistic pool+consumer interaction is observed rather than synthetic timestamps.
+- [ ] EXECUTOR: AI — Ordering banner-line assertion via actual server shutdown: deferred to Live API probe (Step 2.7) so a realistic pool+consumer interaction is observed rather than synthetic timestamps.
 - [x] EXECUTOR: AI — py_compile OK.
 
 ### Step 2.3 — `/api/queue/pool-status` endpoint
 
 - [x] Added `GET /queue/pool-status` to `src/cosa/rest/routers/queues.py` (plural) with `Depends(get_current_user)` + `Depends(get_running_queue)`. Returns `running_queue.get_pool_status()` payload verbatim.
 - [x] Updated `src/docs/rest-api-reference.md` quick-reference table with the new endpoint row.
-- [ ] EXECUTOR: AI — Live 401-without-auth + 200-with-auth verification: deferred to Protocol E2E (Step 2.7) after bounce of :7999 so the code is actually live.
+- [ ] EXECUTOR: AI — Live 401-without-auth + 200-with-auth verification: deferred to Live API probe (Step 2.7) after bounce of :7999 so the code is actually live.
 
 ### Step 2.4 — Unit tests (`test_agentic_pool.py`)
 
@@ -92,9 +92,11 @@ Phase 2 (and Phase 3) Protocol E2E fires `POST /api/push` for "DeepResearch dry-
 - [ ] EXECUTOR: AI — E2E UI via `POST /api/test-suite/submit {"test_types": "e2e_ui", "scheduled_at": "<user-confirmed>"}` (local fallback: `./src/scripts/run-e2e-ui-tests.sh --bg -v`) — 285/285
 - [ ] EXECUTOR: AI — Integration (final gate) via `POST /api/test-suite/submit {"test_types": "integration", "scheduled_at": "<user-confirmed>"}` (local fallback: `./src/tests/run-integration-tests.sh --bg -v`) — 43/43
 
-### Phase 2 Protocol E2E — mandatory (AI-executed)
+### Phase 2 Live API probe — mandatory (AI-executed)
 
-"Protocol E2E" = "not yet in pytest." Every checkbox below is `EXECUTOR: AI`, executed via the API against `:7999`:
+> **Terminology**: "Live API probe" is an **AI-executed ad-hoc HTTP probe** sequence — `POST /api/push` + poll `/api/get-queue/done` + `GET /api/queue/pool-status`. It is **NOT** the Playwright E2E UI test suite (`src/tests/e2e_ui/`, `run-e2e-ui-tests.sh`). Playwright E2E UI is `:8000`-monopolize-mode-only per CLAUDE.md §TESTING VENUES — it never runs on `:7999`. This probe runs on `:7999` because it is AI-discretionary, non-destructive, and takes under 2 minutes — it fits the `:7999` eligibility rubric exactly.
+
+Every checkbox below is `EXECUTOR: AI`, executed via the API against `:7999`:
 
 - [ ] EXECUTOR: AI — `LUPIN_ENV=dev` is set for this server process so the `[Lupin: Dev Overrides]` block loads. Set or confirm `cj flow max concurrent agentic jobs = 3` in the dev-overrides block (not the baseline).
 - [ ] EXECUTOR: AI — Touch a Python file in the FastAPI reload-watch set (e.g. `touch src/cosa/rest/running_fifo_queue.py`) to force a reload; wait for reload log line. **INI edits alone do not trigger reload** — `_pool_max_workers` is captured at `__init__`, so the pool needs a fresh `__init__` to pick up the new value.
@@ -181,7 +183,7 @@ $ tail -20 /tmp/integration-latest.log
 (TBD — expect 43/43)
 ```
 
-### Protocol E2E evidence (AI-captured)
+### Live API probe evidence (AI-captured)
 
 ```
 # Pool status during mixed workload — captured via requests.get (see shape-check stanza above, line ~137)
@@ -201,7 +203,7 @@ DeepResearch-2 finished: (TBD)
 ## Phase 2 sign-off criteria
 
 - All checkboxes above marked `[x]`.
-- Protocol E2E observations recorded (AI-captured values via cosa-voice report).
+- Live API probe observations recorded (AI-captured values via cosa-voice report).
 - Verification results filled in with actual command output.
 - Commit hash(es) recorded.
 - No blockers outstanding.

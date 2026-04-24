@@ -222,6 +222,48 @@ class TestDispatch:
         assert ran_on_thread[ 0 ] != consumer_thread_name, \
             "agentic job should NOT run inline on the consumer thread"
 
+    def test_process_job_uses_passed_job_not_queue_head( self, rq ):
+        """
+        Regression: _process_job MUST dispatch the job passed as a parameter, NOT
+        whatever happens to sit at the head of the running queue. Under Phase 2,
+        the running queue can hold multiple in-flight agentic jobs (pool retains
+        them until their callbacks fire), so self.head() != the newly-pushed job.
+
+        This regression fired as Bug 2A/2B in the 2026-04-24 Live API probe:
+        `_process_job(B)` did `running_job = self.head()` which returned an
+        earlier stuck job A, re-submitting A to the pool (→ duplicate done-queue
+        pushes) while B was orphaned in the running queue (→ phantom).
+
+        Asserts: when both A and B are in the running queue and _process_job(B)
+        is called, B — NOT A — gets submitted to the pool.
+        """
+        dispatched = [ ]  # collects the job that reached the pool worker
+
+        def trace_do_all( j ):
+            dispatched.append( j.id_hash )
+            return "ok"
+
+        job_a = MockAgenticJob( do_all_fn=trace_do_all )
+        job_b = MockAgenticJob( do_all_fn=trace_do_all )
+
+        # Simulate the Phase 2 steady-state: A is already in the running queue
+        # (phantom or in-flight), consumer just pushed B.
+        rq.push( job_a )
+        rq.push( job_b )
+        assert rq.size() == 2
+        assert rq.head().id_hash == job_a.id_hash  # A is the head
+
+        # Consumer calls _process_job(B). Pre-fix this wrongly used self.head()=A;
+        # fixed version uses the passed job B.
+        rq._process_job( job_b )
+
+        # Give the pool a moment to execute
+        assert _wait_until( lambda: len( dispatched ) >= 1, timeout=3.0 )
+        assert job_b.id_hash in dispatched, \
+            f"Expected {job_b.id_hash[:8]} (passed job B) to be dispatched; got {dispatched}"
+        assert job_a.id_hash not in dispatched, \
+            f"Regression: queue-head job A ({job_a.id_hash[:8]}) was dispatched instead of passed job B"
+
     def test_submit_pushes_to_running_queue( self, rq ):
         """After consumer+submit, get_by_id_hash finds the job (ghost-sweeper precondition)."""
         job = MockAgenticJob( do_all_fn=lambda j: time.sleep( 0.2 ) or "ok" )
