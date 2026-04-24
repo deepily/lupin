@@ -8587,7 +8587,10 @@ class NotificationsUI {
      * @returns {string} - Project name in uppercase (e.g., "LUPIN")
      */
     getProjectFromSenderId( senderId ) {
-        const match = senderId.match( /^claude\.code@([a-z]+)\.deepily\.ai/ );
+        // Project segment must allow hyphens for nested repos like
+        // "lupin-mobile" and "lupin-plugin-firefox". Matches the canonical
+        // pattern used by cosa_voice_mcp.py and notification_models.py.
+        const match = senderId.match( /^claude\.code@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\.deepily\.ai/ );
         if ( match ) {
             return match[1].toUpperCase();
         }
@@ -8614,8 +8617,9 @@ class NotificationsUI {
             sessionId = null;
         }
 
-        // Parse agent type and project
-        const match = base.match( /^([^@]+)@([a-z]+)\.deepily\.ai$/ );
+        // Parse agent type and project. Project segment must allow hyphens
+        // for nested repos like "lupin-mobile" and "lupin-plugin-firefox".
+        const match = base.match( /^([^@]+)@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\.deepily\.ai$/ );
         const agentType = match ? match[ 1 ] : 'unknown';
         const project = match ? match[ 2 ] : 'unknown';
 

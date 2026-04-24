@@ -50,6 +50,7 @@
 | 8ed95029 | 2026-04-18T13:20:00 | 2026-04-18T13:30:00 | stale |
 | b802e633 | 2026-04-21T00:00:00 | 2026-04-21T01:00:00 | closed |
 | 9b840935 | 2026-04-22T14:55:15 | 2026-04-22T16:50:00 | closed |
+| 52a71953 | 2026-04-24T15:50:00 | 2026-04-24T17:40:00 | committed |
 
 ---
 
@@ -115,6 +116,13 @@
 ---
 
 ### Completed
+
+- [x] **cosa-voice MCP misidentifies nested repos as "lupin" + UI shows [UNKNOWN] for hyphenated projects** → commit: f549b20 (Lupin), CoSA submodule files committed by user separately | By: 52a71953 | 2026-04-24
+  - **Bug #1 (CoSA)**: `detect_project()` substring matching collapsed `/lupin/src/cosa/`, `/lupin/src/lupin-mobile/`, `/lupin/src/lupin-plugin-firefox/` all to `"lupin"`. Replaced with git-repo-boundary walk-up. Extended `KNOWN_PROJECTS` for the two new nested repos.
+  - **Bug #2 (Lupin)**: `notifications.js` regexes at lines 8590 + 8618 used `[a-z]+` for project segment, rejecting hyphens. Both bumped to canonical `[a-z][a-z0-9]*(?:-[a-z0-9]+)*` matching the Python pattern in `cosa_voice_mcp.py:205` and `notification_models.py:216,629`. Surfaced as `[UNKNOWN]` sender label after Bug #1 made hyphenated projects representable end-to-end.
+  - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js`, `src/tests/unit/test_sender_id.py` (rewrite, +7 tests), `src/rnd/v0.1.7/2026.04.24-cosa-voice-nested-repo-detection-fix.md` (NEW R&D companion doc).
+  - **Files (CoSA, user-commits)**: `src/cosa/agents/utils/sender_id.py`, `src/cosa/utils/notification_utils.py`.
+  - **Tests**: 23 unit tests in `test_sender_id.py` (all green) + V2.5 real-FS detect from 4 cwds + V3 live MCP module-load from 4 cwds (subprocess banner capture) + V4 full unit regression 3590 pass / 1 xfail. User-confirmed live MCP from `/src/lupin-mobile/` reports correct `lupin-mobile` identity.
 
 - [x] **DRY refactor: extract `_emit_notification_added` helper on NotificationFifoQueue** → commit: cd4e5e6 | By: 9b840935 | 2026-04-22
   - Collapsed ~44 lines of near-identical emission code (push lines 244-267 + push_notification lines 343-365) into a single shared helper. Both call sites now `self._emit_notification_added(notification)`. Unified debug-print strings (dropped the "priority" qualifier). Verified no behavior change via CoSA unit 5/5, Lupin integration 3/3, Lupin notification unit 27/27, module smoke (priority + mark_played paths).
