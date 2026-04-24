@@ -102,6 +102,31 @@ Checkpoint 1 and Checkpoint 2 file lists above reference the OLD filenames — t
 
 **Commit**: 0d2f732
 
+#### Checkpoint 4 | 2026.04.23 19:30 | Two review-gate prompts persisted to subdir
+
+Final pre-clear addition. Wrote two paste-ready review prompts into the subdir so the fresh AI has persistent, explicit instructions for the pre-implementation gates (vs. relying on the user to re-paste from conversation memory).
+
+- `05-adversarial-review-prompt.md` — gate 1: behavioral enforcement. Finds residual places where "done" could be claimed without AI execution, where manual/ambiguous verbs remain, where EXECUTOR tags are missing. Output is a findings table for wording/tagging fixes.
+- `06-fitness-review-prompt.md` — gate 2: design quality. Fills the 5 enumerated TBDs (ApiResourceManager location, sync vs async signature, watchdog placement, pool-status endpoint router, `_transition_to_done/_dead` extraction source lines), surfaces ambiguity/reuse/scope/risk-surface gaps, and flags any Q1–Q7 decisions the design pressure-tests.
+
+Each prompt file includes:
+- When to use (sequencing)
+- Expected outputs
+- The verbatim prompt in a code block (copy-pasteable)
+- What to do with the findings (review with user, apply fixes, then advance to the next gate / Phase 1)
+
+Subdir now has the complete pre-implementation sequence in lexicographic order: contract → design-review → phase designs → gate 1 → gate 2 → (implementation) → logs.
+
+**Files touched in Checkpoint 4**:
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/05-adversarial-review-prompt.md` (new)
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/06-fitness-review-prompt.md` (new)
+- `.claude-session.md` (Checkpoint 4 section)
+- `history.md` (this entry)
+
+**Commit**: 69f5097
+
+The session's full arc, in one paragraph for the fresh AI: we walked the 7 open design calls in `01-design-review.md §3` on 2026-04-23, decided them, produced 3 phase design docs + 3 paired execution-log skeletons, then added the working contract + CLAUDE.local.md mandate + EXECUTOR labels as three reinforcement layers for the "user is never a tester" rule. Memory was refactored to correct the :8000 mental model (monopolize-mode collision avoidance, not budget gatekeeping). Finally, these two review prompts were written so the fresh AI runs explicit adversarial + fitness gates before any code is touched. Zero code was written across the whole session. Phase 1 implementation begins only after both gates resolve.
+
 **Note for the fresh AI**: the entry-point prompt given before the context clear references OLD filenames. Use the new names:
 - `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/00-working-contract.md`
 - `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/01-design-review.md`
