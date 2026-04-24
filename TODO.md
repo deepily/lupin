@@ -1,6 +1,17 @@
 # TODO
 
-Last updated: 2026-04-22 17:00 EDT (Session 6a30b98c session-end — PR-readiness testing-gap close, all 4 layers green)
+Last updated: 2026-04-23 EDT (Session 6a30b98c-v017-async-planning session-end — CJ Flow async-multi-lane Phase 0 documentation complete, two review passes + FIFO-audit checklist grounded)
+
+---
+
+## 🌅 FIRST THING IN THE MORNING — 2026-04-24
+
+- [ ] [LUPIN] **Start CJ Flow async-multi-lane Phase 1 implementation**. Branch `wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe` is ready. All 8 planning docs in `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/` finalized through two review passes (adversarial + fitness-to-implement) plus a pre-flip FIFO-audit checklist (design anchor 01 §3b, paired execution 92 Steps F.1–F.8). Entry point:
+  - Read `00-working-contract.md` first (behavioral foundation — "user is never a tester")
+  - Then `01-design-review.md` §3 (Q1–Q7 FROZEN decisions — 2-lane, N=1 prod / N=3 dev, `ApiResourceManager` singleton, defensive callback + watchdog, pool-status in Phase 2, single pool, Approach D deferred)
+  - Then `02-phase-1-rlock-config-and-resource-manager.md` + paired log `90-phase-1-execution-log.md`
+  - Phase 1 Step 1.1: add `threading.RLock` to `src/cosa/rest/fifo_queue.py` — 11 methods wrapped; `py_compile` verify; inline `test_phase2_shaped_stress` to guard the Phase-1/Phase-2 boundary
+  - All verification steps tagged `EXECUTOR: AI` — no manual QA hand-offs permitted
 
 ---
 

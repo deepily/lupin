@@ -140,7 +140,7 @@ The serial architecture was its own backpressure: only one job spent money at a 
 Serial made debugging easy: "look at the consumer thread, it's either in the job or waiting." Under a pool:
 
 - Log lines need thread-prefix discipline (design already specifies `AgenticPool-N` thread names).
-- **`/api/queue/pool-status`** endpoint (`{active_agentic_jobs, max_agentic_workers, pending_in_pool}`) is listed as "optional Phase 3" in the original plan — in practice it's table-stakes for debugging a live deployment, so treat it as Phase 2.
+- **`/api/queue/pool-status`** endpoint (`{inflight_agentic_jobs, max_agentic_workers, pending_in_pool}`) is listed as "optional Phase 3" in the original plan — in practice it's table-stakes for debugging a live deployment, so treat it as Phase 2.
 - The Notifications / WebSocket UI already renders multiple `running` cards correctly (keyed by `job_id`). But there's no *admin* visualization of "here's what the pool is doing right now" — we should add a minimal admin card.
 - Watchdog interactions (dead-queue watchdog, test-suite completion watchdog) need to be reviewed for pool-awareness; most are already state-machine-driven, not order-driven, so likely fine.
 
@@ -176,17 +176,182 @@ Serial shutdown just stops the consumer thread. Pool shutdown must:
 
 ---
 
-## 3. Open questions worth deciding before implementation
+## 3. Design decisions (FROZEN 2026-04-23)
 
-These are the design calls that Session 237's plan either deferred or left implicit. Worth deciding together *before* touching code:
+The seven calls that Session 237's plan deferred or left implicit. All seven were decided together on **2026-04-23** and are the authoritative anchor for Phase 1/2/3 implementation docs. Any later deviation must be surfaced via cosa-voice `ask_multiple_choice` and the decision updated here before code lands.
 
-1. **Interactive lane — yes or no?** Two-lane ships faster. Three-lane (short / long / interactive) prevents ClaudeCodeJob INTERACTIVE from starving the pool. Recommendation: keep Phase 1/2 as two-lane, but plan the third lane now so we don't refactor twice.
-2. **Default concurrency**: ship with `= 1` (no behavioural change, pure infra) then bump, vs. ship with `= 3` from day one. Recommendation: `= 1` default, dev env on `= 3` for testing.
-3. **Cost guardrail**: add a per-user or per-session spend cap that the dispatcher checks before submitting to the pool? Or leave cost-control entirely out of CJ Flow?
-4. **Ghost-job detection**: add a small watchdog that sweeps `running_queue` for jobs whose pool `Future` is done but whose transition never happened? Or rely on the callback always firing?
-5. **Pool-status endpoint**: move from "Phase 3 optional" to "Phase 2 required"? (My read: yes.)
-6. **Per-job-type pools** (e.g., separate pool for TestSuiteJob so a 60-min E2E run doesn't starve research)? Or single pool?
-7. **Approach D coupling**: Approach D (inbound user messages buffered, drained at check-in) is the natural complement for interactive-lane jobs. Should it land in the same milestone or stay separate?
+### Q1 — Interactive lane: 2 lanes now, or 3?
+
+**Decision**: ✅ **2-lane now; 3rd lane designed later.**
+
+**Rationale**: 2-lane ships faster. 3rd lane would prevent `ClaudeCodeJob INTERACTIVE` from starving the agentic pool, but we accept that risk for v0.1.7 because if it actually bites in practice, adding the 3rd lane is a small follow-up refactor — and pre-scaffolding lane-routing abstractions now would be speculative.
+
+**Implication for Phase 1/2/3**: `ClaudeCodeJob INTERACTIVE` goes through the agentic pool alongside other agentic jobs. Do NOT introduce lane-routing abstractions.
+
+### Q2 — Default `N` on first deploy: `= 1` or `= 3`?
+
+**Decision**: ✅ **`= 1` prod default, `= 3` dev override.**
+
+**Rationale**: Prod `= 1` is byte-identical to today's serial behaviour — the safest ship. Dev `= 3` validates pool mechanics under realistic load. Prod bump happens later as a separate deliberate action informed by Phase 2/3 observability.
+
+**Implication for Phase 1/2/3**: `src/conf/lupin-app.ini` ships `cj flow max concurrent agentic jobs = 1`. No feature flag; the pool code path is the only path going forward. Dev override uses a `[Lupin: Dev Overrides]` INI block active when `LUPIN_ENV=dev` (decided 2026-04-23 fitness review; see Phase 1 Step 1.2 for the exact mechanism).
+
+### Q3 — Cost / contention guardrail: spend cap, or something else?
+
+**Decision**: ✅ **Stub a global `ApiResourceManager` singleton; centralize the contention decision point.**
+
+**Rationale**: The original question was "spend cap yes/no." The answer reframes it as **resource-contention management**, which is the real underlying problem (limited API quota across multiple providers). A global singleton is the right surface for scaling to per-provider policies later.
+
+**Phase 1 scope (stub)**: Create `src/cosa/utils/api_resource_manager.py`. Wrap existing `WebSearchRateLimiter` verbatim. No behaviour change.
+
+**Phase 3 scope (first-wave migration)**: Both `deep_research/api_client.py::_call_with_retry()` AND `deep_research/cli.py` (which currently calls `rate_limiter.estimate_total_time(...)` directly — a hidden third caller surfaced during fitness review 2026-04-23). Podcast/presentation/BFE/TFE/ClaudeCode stay on existing `_call_with_retry()` patterns — see §3a below (two-path invariant).
+
+**Future scope (post-v0.1.7)**: Per-provider call history, cost estimation, dispatcher back-pressure.
+
+**Implication**: Dispatcher does not consult `ApiResourceManager` in v0.1.7; agents call `acquire()` before each external request.
+
+### Q4 — Ghost-job detection: defensive callback, watchdog, or both?
+
+**Decision**: ✅ **Both — defensive callback + watchdog sweep.**
+
+**Rationale**: Defensive callback (belt) catches most cases — any exception in `_on_agentic_complete` body dead-letters the job with the exception message as cause. Watchdog sweep (suspenders) catches the one case the callback can't: when the callback thread itself dies before firing. Two independent mechanisms; small cost; high value for debuggability.
+
+**Implication for Phase 2**: `_on_agentic_complete` body wraps in try/except; any exception leads to `_transition_to_dead`.
+
+**Implication for Phase 3**: Periodic sweeper scans `running_queue` for jobs whose `Future.done()` is True but whose transition never happened. Load-bearing invariant: **`_on_agentic_complete` MUST pop from `_agentic_futures` BEFORE transitioning**, so the sweeper can distinguish "never transitioned" from "transition in flight." This invariant is restated in `03-phase-2-*.md` Step 2.1 and `04-phase-3-*.md` Step 3.1.
+
+### Q5 — `/api/queue/pool-status` endpoint: Phase 2 or Phase 3?
+
+**Decision**: ✅ **Phase 2 (ships with the dispatcher refactor).**
+
+**Rationale**: Observability is table-stakes for debugging a live pool from the moment it exists. Shipping the endpoint in the same phase that introduces concurrency prevents a debugging-blind window.
+
+**Phase 2 payload** (minimum): `{inflight_agentic_jobs, max_agentic_workers, pending_in_pool}`.
+
+**Phase 3 payload** (enrichment): adds `api_resource_manager` section with per-provider contention state.
+
+### Q6 — Single pool, or per-job-type pools?
+
+**Decision**: ✅ **Single shared agentic pool.**
+
+**Rationale**: One `ThreadPoolExecutor`, one config key, one thing to reason about. If real-world saturation becomes a pain point (e.g., long `TestSuiteJob` runs starving research), revisit — the likely evolution is a second INI key for a named second pool, not a wholesale refactor.
+
+**Implication**: All `AgenticJobBase` subclasses compete for the same N slots.
+
+### Q7 — Approach D coupling: same milestone or separate?
+
+**Decision**: ✅ **Ship separately — Approach C first, D later.**
+
+**Rationale**: Approach D (SWE Team orchestrator user→job check-in buffering) is the natural pairing for the interactive lane, which we deferred in Q1. Since D has no role absent the 3rd lane, it stays parked until interactive-lane work begins.
+
+**Implication**: No code, no stub for Approach D in v0.1.7. The existing design doc at `src/rnd/v0.1.4/2026.02.13-claude-code-agentic-dev-team/2026.02.18-approach-d-hybrid-queue-checkin.md` remains valid; re-review if/when we pick it up.
+
+---
+
+### §3a — Two-path rate-limiter invariant (Q3 sub-decision)
+
+Because Q3 migrates only `deep_research/api_client.py` to `ApiResourceManager` in Phase 3, the v0.1.7 milestone **ships with two parallel rate-limit mechanisms coexisting indefinitely**:
+
+| Path | Who uses it | How long |
+|---|---|---|
+| `ApiResourceManager.acquire()` / `.record_call()` | `deep_research/api_client.py` AND `deep_research/cli.py` (both migrate in Phase 3) | From v0.1.7 onward |
+| `_call_with_retry()` per-agent | `podcast_generator/api_client.py`, `presentation_generator/api_client.py`, BFE/TFE/ClaudeCode paths | Until a **named future milestone** migrates them |
+
+**This is an explicit permanent fork until deliberately retired**, NOT an "address in a follow-up" aspiration. Both paths are first-class until the retirement milestone ships.
+
+**Invariants both paths must uphold** (enforced by code review, not by type system):
+
+1. **Back-pressure honoured**: both paths wait before making a rate-limited call when the provider is saturated.
+2. **Retry-with-jitter on `429` / rate-limit**: both paths back off and retry; no burst-retry on the same token bucket.
+3. **Structured logging**: every call emits `provider | tokens | latency_ms` in a form consumable by observability.
+4. **No divergent defaults**: if `WebSearchRateLimiter`'s RPM/TPM parameters change, `ApiResourceManager` must track; if `ApiResourceManager` gains a new provider policy, the corresponding `_call_with_retry()` must mirror it OR explicitly call `ApiResourceManager.acquire()` (preferred).
+
+**Retirement trigger (fires on ANY of):**
+1. The v0.1.8 milestone-planning round reviews this two-path reality — scheduled re-evaluation prevents "follow-up" rot regardless of whether a new provider lands.
+2. A production bug is traced to provider-policy drift between the two paths (e.g., `ApiResourceManager` learned a new Anthropic backoff policy but `_call_with_retry` paths didn't).
+3. A third rate-limiting mechanism is proposed (three-path reality would be a strict regression).
+4. A second `ApiResourceManager`-native provider (e.g., OpenAI tokens under a real policy, not passthrough) is added.
+
+When any of the above fires, finishing the migration is almost always cheaper than extending the second path — this is the expected resolution.
+
+---
+
+### §3b — Pre-flip `run_pool.size() > 1` FIFO assumption audit checklist
+
+**Context**: Phases 1–3 ship with `cj flow max concurrent agentic jobs = 1`. At `N=1` the system is byte-identical to today, and every existing test passes unchanged — that's the Q2 ship-safe invariant. But **flipping to `N > 1`** will expose any test, watchdog, or consumer that implicitly assumed:
+- The running queue has size 1 during agentic processing, OR
+- First-submitted job is first-completed, OR
+- `/api/get-queue/*` endpoint responses preserve submission order, OR
+- A single "running" card in the UI represents the entire in-flight state.
+
+These assumptions are not bugs today. They become bugs the moment the pool picks up its second concurrent job.
+
+**When this checklist runs**: the audit is **NOT** executed during Phases 1–3. It runs at the **flip boundary** — after Phase 3 closes out with `N=1` infrastructure fully green, and before the deliberate bump to `N=3` prod (or the first `N=3` dev run that will be used as a flip-readiness check). The execution steps live in `92-phase-3-execution-log.md` §"Pre-flip FIFO audit" and are gated on Phase 3 sign-off.
+
+**Why grounded now, not later**: the suspect list below was compiled from a full grep survey on 2026-04-23 — it names the exact files a future-us (or a different implementer) needs to inspect. Capturing it now prevents the "we'll remember" failure mode; capturing it at flip time would mean re-discovering the survey under deadline pressure.
+
+**How the audit works**: for each suspect file, inspect test bodies for:
+- `processed == [ ... ]` list-equality assertions over multi-job flows
+- `[0]` indexing into `done_jobs` / `running_jobs` / `done_jobs_metadata` where identity (not just shape) matters
+- `queue.size() == 1` assertions while agentic work is in flight
+- Assertions that N-th submitted job appears at N-th position of a response
+- Visual regression snapshots that capture UI state during agentic processing (a single-running-card snapshot will diff against a three-running-card reality)
+
+For each true positive: migrate from ordering-assertions to `job_id`-keyed lookups (the pattern `src/tests/smoke/utilities/live_pipeline_base.py::_poll_done_queue` already demonstrates — it matches by `job_id`, not by first-done-is-first-submitted).
+
+#### Pre-grounded suspect list (from 2026-04-23 grep survey)
+
+**LOW risk — already uses `job_id` lookup or is N=1-safe under design**:
+
+| File | Why low | Action |
+|---|---|---|
+| `src/tests/smoke/utilities/live_pipeline_base.py` | `_poll_done_queue` matches by `job_id` (not ordering). Canonical good pattern. | Verify at audit time; no change expected. |
+| `src/tests/integration/test_queue_filtering_integration.py` | `[0]` indexing at line 254 validates metadata SHAPE only, not identity/ordering. | Verify at audit time; no change expected. |
+| `src/tests/unit/test_crud_queue_integration.py` | `call_args[0][0]` after a single push — not ordering-dependent. | No change expected. |
+| `src/tests/unit/test_timed_execution.py` | Tests TODO-queue timing ordering. TODO queue ordering is preserved under pool concurrency (pool only changes RUNNING/DONE ordering, not TODO). | No change expected. |
+| `src/tests/unit/test_fifo_queue_filtering.py` | `get_jobs_for_user` returns items in queue-list insertion order, protected by the Phase-1 RLock. | No change expected. |
+
+**MEDIUM risk — may have ordering assertions that break at `N>1`; audit line-by-line**:
+
+| File | What to check | Suspected break mode |
+|---|---|---|
+| `src/tests/unit/test_consumer_timed.py` | All 10 test functions (lines 102–294) — look for `processed == [a, b, c]` list-equality when multi-push → multi-process is tested. | Consumer dispatch stays FIFO into dispatch layer, but post-dispatch the pool can complete out of order; tests that track a single `processed` list of post-completion callbacks will see non-deterministic orderings under `N>1`. |
+| `src/tests/integration/test_queue_filtering_integration.py` | Any assertion that job sequence in `done_jobs` response matches submission order. | `done_jobs` is append-order of completion, which diverges from submission under pool. |
+| `src/cosa/rest/dead_queue_watchdog.py` (PRODUCTION, not test) | Grep for `running_queue.head(` or `running_queue.pop(` or `running_queue._queue_list[0]`. | If it assumes "head of running == my job", pool concurrency breaks it. |
+| `src/cosa/rest/test_suite_completion_watchdog.py` (PRODUCTION) | Same grep as above. | Same break mode. |
+| `src/cosa/rest/repair_attempt_tracker.py` (PRODUCTION, if exists at flip time) | Same grep. | Same break mode. |
+
+**HIGH risk — near-certain breakage at `N>1`; plan migration as part of flip readiness**:
+
+| File / area | What breaks | Migration approach |
+|---|---|---|
+| `src/tests/e2e_ui/` visual regression snapshots | Any baseline that captured a single "running" card during agentic processing. Under `N=3`, three cards render; the diff is a guaranteed mismatch. | (1) Identify snapshots that include the notifications/queue/dashboard page during an agentic run; (2) regenerate those snapshots with `N=3` AFTER infrastructure confidence is established; (3) check in the new baselines in the same commit as the `N=3` flip. |
+| Any E2E test that asserts only one "running" card exists mid-run | Hard failure on UI-level assertion. | Switch to: "at least one running card exists" OR "the specific running card with `data-job-id=X` exists". |
+| Tests that poll `/api/queue/running` and assert `size == 1` during agentic processing | Will see `size >= 2`. | Switch to `size >= 1` OR `size in [1, N]` OR `job_id in running_jobs`. |
+| Smoke tests that submit 2+ agentic jobs in sequence and assert they complete in order (none currently found, but check exhaustively) | Fail under pool. | Switch to `job_id`-keyed lookups; drop inter-job order assertions unless verifying serial mode specifically. |
+
+**Unknown — full re-scan needed at flip boundary**:
+
+Between now and the flip, new tests will be added. The audit executor MUST re-run the grep survey at audit time against the THEN-current tree. The survey commands:
+
+```bash
+# Suspect identification
+grep -rnE "queue\.head\(|_queue_list\[0\]|done_jobs\[0\]|running_jobs\[0\]" src/tests/ src/cosa/
+grep -rnE "processed == \[|processed\[0\]|\.id_hash ==" src/tests/
+grep -rn "size() == 1" src/tests/
+grep -rn "assert.*first.*submitted\|assert.*first.*done\|assert.*in order" src/tests/
+```
+
+#### Exit criteria for the flip
+
+The `N=3` flip is cleared when:
+- Every MEDIUM and HIGH suspect has been inspected (checkbox per file in `92-phase-3-execution-log.md`).
+- Every true positive has been migrated from ordering-based to `job_id`-keyed assertions.
+- A full test-suite regression passes with `cj flow max concurrent agentic jobs = 3` on the dev box (`LUPIN_ENV=dev` overlay).
+- Unit/smoke/WS/E2E/integration all green at `N=3` before the prod INI edit.
+- A serial-fallback re-verification (`N=1` one more time) also passes, confirming no regressions in the `N=1` path during audit-migration work.
+
+Breakage AT the flip is not a flip failure — it's a design-audit failure. Gate accordingly.
 
 ---
 

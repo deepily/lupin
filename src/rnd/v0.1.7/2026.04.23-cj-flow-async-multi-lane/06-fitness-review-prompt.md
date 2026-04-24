@@ -1,4 +1,4 @@
-# Fitness-to-Implement Review Prompt (second-pass gate before Phase 1 implementation)
+# [DONE, DO NOT REEXECUTE] Fitness-to-Implement Review Prompt (second-pass gate before Phase 1 implementation)
 
 **When to use**: AFTER `05-adversarial-review-prompt.md` has been run and its findings resolved. This is the SECOND of two review passes.
 
@@ -19,7 +19,7 @@
 Paste this AFTER the adversarial-review pass has been resolved, as your next message. You do not need to re-read the docs — use the context from the previous pass.
 
 ```
-Now do a FITNESS-TO-IMPLEMENT REVIEW of the same 9 docs you read in the
+Now do a FITNESS-TO-IMPLEMENT REVIEW of the same 8 docs you read in the
 previous pass. Goal: find places where the design is not yet detailed
 enough that a competent but unfamiliar engineer could implement it
 without asking clarifying questions.

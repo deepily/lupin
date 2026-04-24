@@ -1,4 +1,4 @@
-# Adversarial Review Prompt (first-pass gate before Phase 1 implementation)
+# [DONE, DO NOT REEXECUTE] Adversarial Review Prompt (first-pass gate before Phase 1 implementation)
 
 **When to use**: After a fresh context clear, before any code is written. This is the FIRST of two review passes (the second is `06-fitness-review-prompt.md`). Paste the code block below as your opening message to Claude Code.
 

@@ -70,21 +70,22 @@ Phase 2's `_on_agentic_complete()` is defensively wrapped (belt). If the callbac
 
 Second failure mode it covers: callback never fires at all because the callback thread died (extremely rare, but the cost of not handling it is "job stuck forever, no observability").
 
-### Placement options
+### Placement (pre-resolved 2026-04-23 fitness review)
 
-Two implementation shapes. Pick one during impl:
+**Decision**: New dedicated thread inside `RunningFifoQueue` — `_ghost_job_sweeper_thread`.
 
-**A. New thread inside `RunningFifoQueue`.**
-- Pros: self-contained, lives with the thing it watches, easy start/stop in `shutdown_pool()`.
-- Cons: one more long-lived thread.
+**Why (not the alternative)**: the reuse-map survey showed existing watchdogs (`dead_queue_watchdog`, `test_suite_completion_watchdog`) are **event-driven / on-demand** — they have no periodic tick loop to piggyback on. Piggybacking would require inventing a new tick cadence inside them, which is not cheaper than a dedicated thread. Option A is the only feasible shape given the existing codebase; Option B was discarded.
 
-**B. Tick inside an existing watchdog** (e.g. `dead_queue_watchdog` or `test_suite_completion_watchdog`).
-- Pros: no new thread, reuses existing scheduling infrastructure.
-- Cons: couples async-pool health to a loosely related watchdog's cadence.
-
-**Recommendation**: Option A — `_ghost_job_sweeper_thread` owned by `RunningFifoQueue`. Clearer ownership, easier to test.
+**Benefits**:
+- Self-contained; lives with the queue state it watches.
+- Start/stop lifecycle is trivial (owned by `RunningFifoQueue.__init__` / `shutdown_pool`).
+- Precedent exists: `RunningFifoQueue` already owns ephemeral daemon threads (`_fire_correctness_check_async` spawns one per completion — see `running_fifo_queue.py:864-923`).
 
 ### Behavior
+
+> **Load-bearing invariant (defined in `03-phase-2-*.md` Step 2.1, relied on here)**: `_on_agentic_complete` pops from `_agentic_futures` **BEFORE** transitioning. The sweeper uses "still in `_agentic_futures` AND `Future.done()`" as the signal that a transition never happened. If the callback is later re-ordered to pop-after-transition, this sweeper starts dead-lettering jobs that were just moved to `done_queue`. Phase-3 tests include a regression test that fails on re-ordering (see `test_on_agentic_complete_pops_before_transition`).
+>
+> **Second safeguard — `get_by_id_hash` None-check**: the sweeper reads `dict(self._agentic_futures)` under lock to get a snapshot, then iterates WITHOUT the lock. If a completion callback fires DURING iteration and pops its id_hash + transitions to done_queue, the sweeper's stale snapshot still shows the future as "tracked and done" — the per-future check of `self.get_by_id_hash(id_hash)` returns `None` (job already moved out of running_queue), and the sweeper skips. This is not a race; it's the designed safe-flow. The pop-before-transition invariant AND the sweeper's None-check together ensure no double-transition under concurrent completion.
 
 ```python
 def _ghost_job_sweep( self ):
@@ -92,6 +93,9 @@ def _ghost_job_sweep( self ):
     Scan running_queue for agentic jobs whose Future is done() but are still
     in running_queue (i.e., the transition never happened). Dead-letter them.
     Runs periodically; interval configurable via INI.
+
+    INVARIANT DEPENDENCY: relies on _on_agentic_complete popping from
+    _agentic_futures BEFORE transitioning. See 03-phase-2 Step 2.1 callout.
     """
     with self._agentic_futures_lock:
         futures_snapshot = dict( self._agentic_futures )
@@ -138,18 +142,58 @@ cj flow ghost job sweep interval seconds = How often the ghost-job watchdog scan
 
 ### Thread lifecycle
 
-- Started in `RunningFifoQueue.__init__` after the pool.
-- Uses `threading.Event` for sleep + early-wakeup at shutdown.
-- Stopped as the **first** step in `shutdown_pool()` so the sweeper isn't racing against the drain.
+Concrete `__init__` ordering — append to the Phase 2 init sequence (`03-phase-2-*.md` Step 2.1):
+
+```python
+def __init__( self, config_mgr, ... ):
+    # ... Phase 2 init (pool + futures + lock) already present ...
+
+    # Phase 3: ghost-job sweeper
+    self._ghost_job_sweeper_stop_event = threading.Event()
+    self._ghost_job_sweeper_thread     = threading.Thread(
+        target = self._ghost_job_sweep_loop,
+        daemon = True,
+        name   = "GhostJobSweeper",
+    )
+    self._ghost_job_sweeper_thread.start()
+
+def _ghost_job_sweep_loop( self ):
+    """Main loop — daemon thread. Runs until stop_event is set."""
+    interval_seconds = self._config_mgr.get(
+        "cj flow ghost job sweep interval seconds", default=30, return_type="int"
+    )
+    while not self._ghost_job_sweeper_stop_event.is_set():
+        try:
+            self._ghost_job_sweep()
+        except Exception as e:
+            du.print_banner(
+                f"Ghost-job sweeper loop caught exception (continuing): {e!r}",
+                error=True
+            )
+        # stop_event.wait returns True if event set (early wakeup) — loop exits next iter.
+        self._ghost_job_sweeper_stop_event.wait( timeout=interval_seconds )
+```
+
+- Uses `threading.Event.wait(timeout=N)` for sleep — lets `shutdown_pool()` interrupt the nap immediately without waiting up to `interval_seconds`.
+- Stopped as the **first** step in `shutdown_pool()` (before the pool drain) so the sweeper isn't racing against the drain. The `shutdown_pool()` prelude becomes:
+  ```python
+  self._ghost_job_sweeper_stop_event.set()
+  self._ghost_job_sweeper_thread.join( timeout=5.0 )  # should exit within one wait-cycle
+  # ... existing pool shutdown ...
+  ```
+- Daemon thread — dies with the process if anything goes wrong with graceful shutdown.
 
 ### Tests
 
 | Test | What it proves |
 |---|---|
-| `test_ghost_job_detected_and_dead_lettered` | Manually set a Future to done, leave its job in `running_queue`, trigger sweep → job lands in `dead_queue` |
+| `test_ghost_job_detected_and_dead_lettered` | Test fixture (monkeypatched) sets a Future to done, leaves its job in `running_queue`, triggers sweep → job lands in `dead_queue` |
 | `test_ghost_job_sweep_idempotent` | Sweep twice in a row; second run is a no-op (futures dict cleaned) |
 | `test_ghost_job_sweep_ignores_live_futures` | In-flight (not done) futures untouched |
-| `test_ghost_job_sweeper_stops_on_shutdown` | `shutdown_pool()` returns within timeout; sweeper thread exits |
+| `test_ghost_job_sweep_get_by_id_hash_none_skips` | **Second-safeguard regression**: during sweep iteration, simulate a callback finishing between snapshot and per-future check — `get_by_id_hash(id_hash)` returns None (already transitioned). Assert sweeper skips; no double-transition; no exception |
+| `test_ghost_job_sweeper_loop_survives_exception` | Force `_ghost_job_sweep` to raise `RuntimeError` once. Assert `_ghost_job_sweep_loop` catches it, logs banner, and continues on the next tick (thread does not die) |
+| `test_ghost_job_sweeper_stops_on_shutdown` | `shutdown_pool()` returns within timeout; sweeper thread exits within one tick of `stop_event.set()` |
+| `test_on_agentic_complete_pops_before_transition` | **Invariant regression test**: monkeypatch `_transition_to_done` to record the state of `_agentic_futures` at entry; assert `job.id_hash not in _agentic_futures` at that point. Fails if the pop is ever re-ordered to run after the transition. |
 
 These go into `src/tests/unit/test_agentic_pool.py` (extending the Phase 2 file).
 
@@ -159,7 +203,11 @@ These go into `src/tests/unit/test_agentic_pool.py` (extending the Phase 2 file)
 
 ### Scope
 
-ONLY Deep Research in Phase 3. It's the agent with the richest existing rate-limit logic (already uses `WebSearchRateLimiter`), so migration validates the singleton shape against real callers without inventing patterns.
+ONLY Deep Research in Phase 3, but **both callers** of `WebSearchRateLimiter`:
+- `src/cosa/agents/deep_research/api_client.py::_call_with_retry()` — the primary production caller.
+- `src/cosa/agents/deep_research/cli.py` — a direct caller of `rate_limiter.estimate_total_time(...)` (surfaced by the fitness-review reuse-map survey as a hidden third caller; migrating it too keeps the "two-path" invariant in `01-design-review.md` §3a honest — DR side is fully on ARM, everything else is on legacy).
+
+Migration validates the singleton shape against real callers without inventing patterns. Podcast/presentation/BFE/TFE/ClaudeCode stay on legacy `_call_with_retry()` patterns — see `01-design-review.md` §3a for the retirement triggers.
 
 ### Changes
 
@@ -168,17 +216,17 @@ ONLY Deep Research in Phase 3. It's the agent with the richest existing rate-lim
 Before (today):
 ```python
 # Existing pseudocode
-await self._rate_limiter.wait_if_needed( tokens=estimated_tokens )
+await self._rate_limiter.wait_if_needed()  # wait_if_needed takes NO args — reactive
 response = await self._client.messages.create( ... )
-self._rate_limiter.record_call( tokens=response.usage.input_tokens )
+self._rate_limiter.record_usage( tokens=response.usage.input_tokens )
 ```
 
 After (Phase 3):
 ```python
-from cosa.utils.api_resource_manager import ApiResourceManager
+from cosa.utils.api_resource_manager import get_arm  # module-level accessor, not class-method
 
-arm = ApiResourceManager.get_instance()
-await arm.acquire( provider="anthropic_web_search", tokens=estimated_tokens )
+arm = get_arm()
+await arm.acquire( provider="anthropic_web_search" )  # no tokens arg — passthrough to reactive limiter
 response = await self._client.messages.create( ... )
 arm.record_call(
     provider    = "anthropic_web_search",
@@ -187,16 +235,37 @@ arm.record_call(
 )
 ```
 
+**`src/cosa/agents/deep_research/cli.py`** — direct `rate_limiter.estimate_total_time(...)` calls:
+
+Current (direct):
+```python
+# Wherever cli.py imports and uses the module-level rate_limiter
+total_time = rate_limiter.estimate_total_time( len( subqueries ) )
+```
+
+After (via ARM):
+```python
+from cosa.utils.api_resource_manager import get_arm
+
+arm = get_arm()
+# ARM exposes estimate_total_time as a passthrough method on the WebSearchRateLimiter.
+# Expose via get_arm().get_web_search_limiter().estimate_total_time(...) OR
+# add a dedicated ARM helper method. Pick the simpler path at impl time.
+total_time = arm.get_web_search_limiter().estimate_total_time( len( subqueries ) )
+```
+
+(If this cli.py usage is purely a CLI helper / dev utility and not a production path, leaving it on the direct `rate_limiter` import is acceptable — document that decision in the execution log.)
+
 ### Compatibility note
 
 The singleton's `acquire("anthropic_web_search", ...)` delegates internally to the same `WebSearchRateLimiter` that existed before. **Runtime behavior is identical** — just the call site moves.
 
-**Agents NOT migrated in Phase 3** (stay on current patterns):
+**Agents NOT migrated in Phase 3** (stay on legacy `_call_with_retry()` per 01 §3a two-path invariant):
 - `src/cosa/agents/podcast_generator/api_client.py::_call_with_retry()`
 - `src/cosa/agents/presentation_generator/api_client.py::_call_with_retry()` (if present)
 - Any `ClaudeCodeJob` / `BFE` / `TFE` code paths
 
-Their migration is a follow-up — tracked in TODO.md as a separate post-v0.1.7 item.
+These stay on legacy patterns indefinitely until a retirement trigger from `01-design-review.md` §3a fires. This is not an "address soon" TODO — the two-path reality is permanent-until-triggered.
 
 ### Tests
 
@@ -216,14 +285,17 @@ Phase 2 shipped the endpoint with minimal payload. Phase 3 adds:
 
 ```json
 {
-    "active_agentic_jobs" : 2,
-    "max_agentic_workers" : 3,
-    "pending_in_pool"     : 0,
-    "api_resource_manager" : {
+    "inflight_agentic_jobs" : 2,
+    "max_agentic_workers"   : 3,
+    "pending_in_pool"       : 0,
+    "api_resource_manager"  : {
         "anthropic_web_search" : {
-            "tokens_used_in_window" : 12500,
-            "window_seconds"        : 60,
-            "current_wait_ms"       : 0
+            "tokens_in_window"          : 12500,
+            "tokens_per_minute_limit"   : 30000,
+            "calls_in_window"           : 3,
+            "window_seconds"            : 60.0,
+            "time_until_oldest_expires" : 42.5,
+            "would_need_delay"          : false
         },
         "anthropic" : { "provider_wait_state" : "passthrough" },
         "openai"    : { "provider_wait_state" : "passthrough" },
@@ -231,6 +303,8 @@ Phase 2 shipped the endpoint with minimal payload. Phase 3 adds:
     }
 }
 ```
+
+Note: the `anthropic_web_search` section is a **verbatim passthrough** of `WebSearchRateLimiter.get_status()` — no key renames. The legacy field `active_agentic_jobs` has been renamed to `inflight_agentic_jobs` to disambiguate running vs submitted (the UI's "running" label derives as `inflight - pending`).
 
 The `api_resource_manager` key is populated by calling `ApiResourceManager.get_instance().get_status()` (the Phase 1 stub already returns this shape).
 
@@ -240,32 +314,43 @@ The `api_resource_manager` key is populated by calling `ApiResourceManager.get_i
 
 This is the pre-merge gate per project rule. Run in this order, each passing before proceeding.
 
-> **Executor contract**: every row below is `EXECUTOR: AI`. The AI runs the commands against `:7999`, captures output, and reports pass/fail. No row is `EXECUTOR: HUMAN`. See `00-working-contract.md`.
+> **Executor contract**: every row below is `EXECUTOR: AI`. No row is `EXECUTOR: HUMAN`. See `00-working-contract.md` and §TESTING VENUES for venue routing.
+
+#### A. `:7999` (AI-discretionary — AI runs without asking)
 
 | # | Layer | Command | Gate |
 |---|---|---|---|
-| 1 | **py_compile** | Compile all modified `.py` files individually | No errors |
+| 1 | **py_compile** | Compile each modified `.py` file: `python -c "import py_compile; py_compile.compile('<path>', doraise=True)"` | Exit 0; no stderr |
 | 2 | **Unit** | `pytest src/tests/unit/ -v` | 915 baseline + Phase 1 + 2 + 3 tests; all green |
-| 3 | **Smoke** | `/smoke-test-remediation FULL` | No regressions against baseline |
+| 3 | **Non-destructive smoke** | `/smoke-test-remediation SELECTIVE` (excludes `test_proxy_integration.py` and any other `:8000`-routed suite — see sub-table B) | No regressions against baseline |
 | 4 | **WebSocket smoke** | `./src/scripts/run-websocket-smoke-tests.sh` | 50/50 pass |
-| 5 | **E2E UI** (`--bg` MANDATORY) | `./src/scripts/run-e2e-ui-tests.sh --bg -v` | 285/285 pass |
-| 6 | **Integration (final gate)** (`--bg` MANDATORY) | `./src/tests/run-integration-tests.sh --bg -v` | 43/43 pass |
 
-`--bg` is MANDATORY for E2E and integration (both exceed the 10min Bash timeout). Monitor via `tail -20 /tmp/e2e-ui-latest.log` and `tail -20 /tmp/integration-latest.log`. Wait for E2E to finish before launching integration (PID-file overlap protection is in place).
+#### B. `:8000` (scheduled monopolize-mode — AI submits via `/api/test-suite/submit` after user slot-check)
+
+The `--bg` forms below are **local-foreground fallback**, not the primary path from Claude Code.
+
+| # | Layer | Submission | Gate |
+|---|---|---|---|
+| 5 | **Destructive smoke** (proxy integration) | `POST /api/test-suite/submit {"test_types": "smoke", "scheduled_at": "..."}` — fallback: `python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-confirm` | 100% pass |
+| 6 | **E2E UI** | `POST /api/test-suite/submit {"test_types": "e2e_ui", "scheduled_at": "..."}` — fallback: `./src/scripts/run-e2e-ui-tests.sh --bg -v` | 285/285 pass |
+| 7 | **Integration (final gate)** | `POST /api/test-suite/submit {"test_types": "integration", "scheduled_at": "..."}` — fallback: `./src/tests/run-integration-tests.sh --bg -v` | 43/43 pass |
+
+For local-fallback monitoring only: `tail -20 /tmp/e2e-ui-latest.log` and `tail -20 /tmp/integration-latest.log`. Primary path is the scheduled submission — wait for each `:8000` slot to drain between submissions.
 
 ### Protocol E2E — Phase 3 mandatory concurrent-happy-path (AI-executed)
 
 **REQUIRED** for Phase 3 sign-off (this is the behaviour-validation that automated tests can't express). Every step is executed by the AI via the API against `:7999`:
 
 1. EXECUTOR: AI — Set `cj flow max concurrent agentic jobs = 3` (`:7999` auto-reloads).
-2. EXECUTOR: AI — POST /api/push × 2 (DeepResearch dry-run) sequentially, seconds apart; capture both `job_id`s.
-3. EXECUTOR: AI — While both research jobs are running, POST /api/push (MathAgent, "what is 17 * 23?"); capture `job_id`.
-4. EXECUTOR: AI — Poll `/api/get-queue/running` while DRs run; assert both DR `job_id`s present simultaneously.
-5. EXECUTOR: AI — Poll `/api/get-queue/done` until MathAgent completes; assert elapsed < 5s.
-6. EXECUTOR: AI — GET `/api/queue/pool-status` mid-run; assert payload shape `{active_agentic_jobs: 2, max_agentic_workers: 3, pending_in_pool: 0, api_resource_manager: {...}}`.
-7. EXECUTOR: AI — Continue polling until both DRs complete; assert `running_queue` size returns to 0.
-8. EXECUTOR: AI — Assert no jobs stuck in `running_queue` after both finish.
-9. EXECUTOR: AI — Report all observed values (timings, pool-status payload, final queue sizes) via cosa-voice `notify`.
+2. EXECUTOR: AI — **Warmup**: POST /api/push (MathAgent, trivial query); poll `/api/get-queue/done` until returned; discard. Warms fast-lane Phi-4-GPTQ path so the measured MathAgent in step 6 isn't confounded by cold-GPU load (3–8s).
+3. EXECUTOR: AI — POST /api/push × 2 (DeepResearch dry-run — uses the mechanism confirmed in `91-phase-2-execution-log.md` Step 2.0) sequentially, seconds apart; capture both `job_id`s.
+4. EXECUTOR: AI — While both research jobs are running, POST /api/push (MathAgent, "what is 17 * 23?"); capture `job_id`.
+5. EXECUTOR: AI — Poll `/api/get-queue/running` while DRs run; assert both DR `job_id`s present simultaneously.
+6. EXECUTOR: AI — Poll `/api/get-queue/done` until MathAgent completes; assert elapsed < 5s.
+7. EXECUTOR: AI — GET `/api/queue/pool-status` mid-run (with auth); assert payload shape `{inflight_agentic_jobs: 2, max_agentic_workers: 3, pending_in_pool: 0, api_resource_manager: {...}}`.
+8. EXECUTOR: AI — Continue polling until both DRs complete; assert `running_queue` size returns to 0.
+9. EXECUTOR: AI — Assert no jobs stuck in `running_queue` after both finish.
+10. EXECUTOR: AI — Report all observed values (timings, pool-status payload, final queue sizes) via cosa-voice `notify`.
 
 ### Post-regression checks
 
@@ -318,12 +403,12 @@ If only the sweeper is problematic: set `cj flow ghost job sweep interval second
 
 ---
 
-## Open sub-questions for impl
+## Pre-resolved design decisions (2026-04-23 fitness review)
 
-1. **Sweeper cadence**: 30s default. Adjust based on observed Future-transition latency in dev. Should NOT be below 5s (noise) or above 300s (too slow to catch ghosts).
-2. **Deep Research `_rate_limiter` field**: after migration, the existing `self._rate_limiter` reference can be removed OR kept as a private alias to `ApiResourceManager`. Lean: remove it — fewer paths to maintain, the public `ApiResourceManager.get_instance()` is the canonical handle.
-3. **`record_call` timing semantics**: should it fire on response receipt (what Deep Research does today) or at request start? Phase 3 keeps current semantics (receipt-time) to avoid behaviour drift.
-4. **Documentation depth**: update one anchor doc + one rest-api reference row, or write a dedicated `src/docs/cj-flow-async-pool.md` too? Lean: update existing docs only; dedicated doc can follow if v0.1.7 ships widely.
+1. **Sweeper cadence**: **30s default** (kept). Bounded to [5s, 300s] via splainer note; below 5s is noise, above 300s is too slow to catch ghosts in realistic workloads.
+2. **Deep Research `_rate_limiter` field**: **remove** it during migration. Fewer paths to maintain; `get_arm()` is the canonical handle. If any legacy reference remains after migration, the grep-style regression test catches it.
+3. **`record_call` timing semantics**: **receipt-time** (kept). Matches Deep Research's current behaviour; no drift during migration. Any future predictive / pre-flight accounting can add a separate `record_intent()` method without changing existing semantics.
+4. **Documentation depth**: **update existing docs only** — `notification-api.md`, `websocket-architecture.md`, `rest-api-reference.md`. No dedicated `cj-flow-async-pool.md` in Phase 3. A dedicated doc can follow if the milestone ships widely and needs one.
 
 ---
 

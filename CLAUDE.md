@@ -220,25 +220,74 @@ find . -name ".git" -type d | grep -v "^./.git$"
 - Manage as independent project
 - Has own git history and workflows
 
+## TESTING VENUES
+
+**MANDATE**: Every automated test runs on exactly one of two servers. Pick by rubric, never by habit.
+
+### :7999 (dev) — AI-discretionary
+
+The AI may run these at any time without asking the user.
+
+Eligible **iff all three**:
+- No persistent-state mutation (no DB writes outliving the test, no writes outside `/tmp`, no real-work queue enqueues).
+- Runtime ≤ 2 minutes end-to-end.
+- No monopoly requirement.
+
+Suites that qualify:
+- `pytest src/tests/unit/`
+- Inline `quick_smoke_test()` blocks + `py_compile` + import-chain checks
+- `src/tests/smoke/test_calculator_live_pipeline.py`
+- `src/tests/smoke/test_container_preflight.py`
+- `src/tests/websocket_smoke/` (run via `src/scripts/run-websocket-smoke-tests.sh`)
+
+### :8000 (test) — monopolize mode, scheduled only
+
+Submit via `POST /api/test-suite/submit` with a `scheduled_at` the user has confirmed does not overlap other scheduled runs. **Never** inject via ad-hoc curl, direct queue push, or in-process server instantiation — side-door injection collides with in-flight scheduled runs and poisons both.
+
+Eligible if **any**:
+- Mutates persistent state (DB rows, shared files, LLM API spend, enqueues jobs).
+- Runtime > 2 minutes.
+- Needs server monopoly (E2E UI, integration, regression sweeps).
+
+Suites that qualify:
+- `src/tests/smoke/test_proxy_integration.py` (any scenario — CRUD + expediter mutate state)
+- `src/tests/run-integration-tests.sh` (final merge gate)
+- `src/scripts/run-e2e-ui-tests.sh` (functional + visual)
+- `src/tests/run-presentation-regression.sh` (all variants)
+
+The user-ask for :8000 is **slot availability**, not budget approval or tester-duty deferral. The AI owns executing the test; the user owns calendar coordination.
+
+### The `src/tests/smoke/` caveat
+
+The directory name is not a venue marker. Files living in `src/tests/smoke/` can still be destructive or long-running (e.g. `test_proxy_integration.py`). Route each file by the rubric above, not by folder.
+
+### When in doubt → :8000
+
+:7999 is an optimization for truly fast, truly read-only work. If you cannot prove a test meets all three :7999 criteria, schedule it on :8000.
+
 ## TESTING
 
-Lupin uses a three-tier testing strategy for comprehensive validation:
+Lupin uses a three-tier testing strategy for comprehensive validation. See §TESTING VENUES above for the :7999 / :8000 routing rules referenced per-suite below.
 
 ### Test Types
 
 1. **Unit Tests** (`src/tests/unit/`)
+   - **Venue**: :7999 (AI-discretionary)
    - Fast, isolated function tests (1-10ms per test)
    - Test individual functions with mocked dependencies
    - Coverage: jwt_service (14 tests), password_service, user_service, etc.
    - Run: `pytest src/tests/unit/`
 
 2. **Smoke Tests** (inline `quick_smoke_test()` functions)
+   - **Venue**: :7999 (AI-discretionary) — inline blocks are always non-destructive + fast
    - Quick module-level sanity checks (10-100ms per module)
    - Validate modules load and core functions work
    - Coverage: ~50 tests across all major modules
    - Run: `python -m cosa.rest.jwt_service` (per module)
+   - **Note**: Files under `src/tests/smoke/` are heterogeneous — route each by §TESTING VENUES rubric (e.g. `test_calculator_live_pipeline.py` → :7999; `test_proxy_integration.py` → :8000).
 
 3. **Integration Tests** (`src/tests/integration/`)
+   - **Venue**: :8000 (scheduled via `/api/test-suite/submit` + user slot-check)
    - End-to-end user flow validation (100-1000ms per test)
    - Test complete workflows across API, database, and authentication
    - Coverage: 43 comprehensive tests (auth, admin user management, queue filtering)
@@ -248,11 +297,13 @@ Lupin uses a three-tier testing strategy for comprehensive validation:
    - Status: `kill -0 $(cat /tmp/integration-tests.pid) 2>/dev/null && echo running || echo done`
 
 4. **WebSocket Tests** (`src/tests/websocket_smoke/`)
+   - **Venue**: :7999 (AI-discretionary) — non-destructive connection/auth/event validation
    - WebSocket functionality validation
    - Coverage: 50 tests
    - Run: `src/scripts/run-websocket-smoke-tests.sh`
 
 5. **E2E UI Tests** (`src/tests/e2e_ui/`)
+   - **Venue**: :8000 (scheduled via `/api/test-suite/submit` + user slot-check)
    - Playwright Chromium headless browser tests against live server
    - Coverage: 285 functional tests + 12 visual regression
    - **CRITICAL**: Always use `--bg` flag from Claude Code (suite takes ~17min, exceeds 10min Bash timeout)
@@ -264,6 +315,7 @@ Lupin uses a three-tier testing strategy for comprehensive validation:
    - Snapshots: `src/tests/e2e_ui/__snapshots__/` (version-controlled)
 
 6. **Interactive Proxy Tests** (`src/tests/smoke/test_proxy_integration.py`)
+   - **Venue**: :8000 (scheduled via `/api/test-suite/submit` + user slot-check) — mutates state (CRUD deletes, expediter writes), ~180s/scenario
    - Automated interactive testing with notification proxy auto-answer
    - Coverage: 12 scenarios across Calculator, CRUD, and Expediter agents
    - Tests submit-and-poll pipelines with proxy-driven notification responses
@@ -271,6 +323,7 @@ Lupin uses a three-tier testing strategy for comprehensive validation:
    - **Guide**: `src/docs/automated-interactive-testing.md`
 
 7. **Presentation Regression** (`src/tests/run-presentation-regression.sh`)
+   - **Venue**: :8000 (scheduled via `/api/test-suite/submit` + user slot-check) — long-running + real LLM spend
    - Sequential pyramid: render-only → Sonnet full → (optional) Opus + R2P chain
    - **CRITICAL**: Always use `--bg` flag or schedule via test-suite endpoint
    - Default (nightly): `./src/tests/run-presentation-regression.sh --bg` (~$0.46, ~10min)
@@ -321,13 +374,15 @@ See `src/tests/README.md` for comprehensive testing documentation.
 
 ### Pre-Merge Test Checklist
 
-| Test Suite | Command | Requirement |
-|------------|---------|-------------|
-| Unit Tests | `pytest src/tests/unit/` | 100% pass |
-| WebSocket Tests | `./src/scripts/run-websocket-smoke-tests.sh` | 100% pass |
-| E2E UI Tests | `./src/scripts/run-e2e-ui-tests.sh --bg -v` | 100% pass |
-| Visual Regression | `./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual` | 100% pass |
-| Integration Tests | `./src/tests/run-integration-tests.sh --bg -v` | 100% pass (FINAL GATE) |
+| Test Suite | Venue | Command | Requirement |
+|------------|-------|---------|-------------|
+| Unit Tests | :7999 | `pytest src/tests/unit/` | 100% pass |
+| WebSocket Tests | :7999 | `./src/scripts/run-websocket-smoke-tests.sh` | 100% pass |
+| E2E UI Tests | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v` | 100% pass |
+| Visual Regression | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual` | 100% pass |
+| Integration Tests | :8000 (scheduled) | `./src/tests/run-integration-tests.sh --bg -v` | 100% pass (FINAL GATE) |
+
+**Note**: `:8000 (scheduled)` rows are submitted via `POST /api/test-suite/submit` with a user-confirmed `scheduled_at` slot (see §TESTING VENUES). The `--bg` commands shown are the local-foreground fallback, not the primary path from Claude Code.
 
 ### Integration Tests are the Final Gate
 
@@ -366,6 +421,8 @@ Wait for E2E completion before launching integration tests (the final gate). Bot
 - **NEVER** use `curl` commands for pipeline or integration testing — use automated test scripts
 - **NEVER** manually POST to `/api/push` and poll `/api/get-queue/done` — use `LivePipelineTestBase`
 - **NEVER** create bespoke curl scripts as a substitute for repeatable test automation
+- **NEVER** run :8000-bucket tests (integration, E2E UI, proxy-integration, presentation regression) against :7999. The dev server is not a stand-in for the test server; correctness for these suites depends on server monopoly.
+- **NEVER** side-door inject :8000 tests via curl, direct `/api/push`, in-process server instantiation, or any path other than `POST /api/test-suite/submit` with a user-confirmed `scheduled_at`. Side-door injection collides with in-flight scheduled runs and poisons both.
 - Manual curl is acceptable ONLY for: API reference documentation, deployment health checks, one-off debugging (never committed)
 - When building new agents, create an automated smoke test — see `.claude/skills/agentic-voice-workflow/SKILL.md`
 

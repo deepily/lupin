@@ -3,9 +3,15 @@
 Before closing any phase of this milestone, the AI MUST have executed,
 on its own initiative:
 
-- All automated layers against :7999 — unit, smoke (`/smoke-test-remediation FULL`),
-  WebSocket smoke, E2E UI (`--bg` mandatory), integration (`--bg` mandatory,
-  final gate).
+- **:7999 (AI-discretionary) layers** — unit, non-destructive smoke
+  (calculator, container_preflight, inline `quick_smoke_test()` blocks),
+  WebSocket smoke. Run proactively at every phase-close without user ask.
+- **:8000 (scheduled) layers** — integration (`run-integration-tests.sh`),
+  E2E UI (`run-e2e-ui-tests.sh` — functional + visual), destructive smoke
+  (`test_proxy_integration.py`), presentation regression. Submit via
+  `POST /api/test-suite/submit` with user slot-check per project CLAUDE.md
+  §TESTING VENUES. Never inject via curl, direct `/api/push`, or in-process
+  instantiation.
 - Every step listed in the Phase N "Verification" section.
 - Every checkbox in the paired 9N execution log's "Protocol E2E" group
   (these are AI-executed via the API against :7999 — submit via
@@ -23,6 +29,8 @@ The user's involvement is gated to three things and ONLY these three:
    monopolize-mode protocol, any /api/test-suite/submit call requires
    a fresh user ask to confirm the scheduled_at slot does not collide
    with other scheduled tests. This is coordination, not approval-for-spend.
+   See project CLAUDE.md §TESTING VENUES for the full :7999 / :8000 triage
+   rubric and the authoritative per-suite routing table.
 
 3. **Genuine human-judgment calls** — visual pixel comparison in a
    subjective sense, UX intent, copy tone. These must be flagged
