@@ -471,11 +471,11 @@ class TestPoolStatus:
 
     def test_get_pool_status_empty( self, rq ):
         status = rq.get_pool_status()
-        assert status == {
-            "inflight_agentic_jobs": 0,
-            "max_agentic_workers" : 2,
-            "pending_in_pool"     : 0,
-        }
+        # Phase 3 added api_resource_manager enrichment; pool core fields unchanged
+        assert status[ "inflight_agentic_jobs" ] == 0
+        assert status[ "max_agentic_workers" ]   == 2
+        assert status[ "pending_in_pool" ]       == 0
+        assert "api_resource_manager" in status
 
     def test_get_pool_status_shape_with_inflight( self, rq_single ):
         """max_workers=1, submit 2 jobs → 1 running + 1 pending, total inflight=2."""
@@ -571,6 +571,157 @@ class TestShutdown:
 # =============================================================================
 # Grep regression — design doc table + 91-phase-2-execution-log.md Step 2.1
 # =============================================================================
+
+class TestGhostJobSweeper:
+    """Phase 3 ghost-job sweeper tests (suspenders to Phase 2's callback belt)."""
+
+    def test_ghost_job_detected_and_dead_lettered( self, rq ):
+        """Future.done() + job still in running_queue → sweeper dead-letters it."""
+        # Monkeypatched mock future that reports done() True with no exception/result
+        class _FakeDoneFuture:
+            def done( self ): return True
+            def exception( self ): return None
+            def running( self ): return False
+            def result( self, timeout=None ): return "ok"
+
+        job = MockAgenticJob( do_all_fn=lambda j: "ok" )
+        rq.push( job )
+        with rq._agentic_futures_lock:
+            rq._agentic_futures[ job.id_hash ] = _FakeDoneFuture()
+
+        # Pre-conditions: job in run_queue, tracked as done future, NOT in done/dead
+        assert rq.get_by_id_hash( job.id_hash ) is job
+        assert rq.jobs_done_queue.size() == 0
+        assert rq.jobs_dead_queue.size() == 0
+
+        rq._ghost_job_sweep()
+
+        # Post-conditions: job dead-lettered, tracker cleaned
+        assert rq.jobs_dead_queue.size() == 1
+        with rq._agentic_futures_lock:
+            assert job.id_hash not in rq._agentic_futures
+
+    def test_ghost_job_sweep_idempotent( self, rq ):
+        """Second sweep with empty tracker is a no-op (no exception, no state change)."""
+        size_before_dead = rq.jobs_dead_queue.size()
+        rq._ghost_job_sweep()
+        rq._ghost_job_sweep()
+        assert rq.jobs_dead_queue.size() == size_before_dead
+
+    def test_ghost_job_sweep_ignores_live_futures( self, rq ):
+        """In-flight futures (not done()) are left alone."""
+        class _LiveFuture:
+            def done( self ): return False
+            def running( self ): return True
+            def exception( self ): return None
+
+        job = MockAgenticJob( do_all_fn=lambda j: "ok" )
+        rq.push( job )
+        with rq._agentic_futures_lock:
+            rq._agentic_futures[ job.id_hash ] = _LiveFuture()
+
+        rq._ghost_job_sweep()
+
+        # Live future still tracked; job still in running queue; nothing dead-lettered
+        assert rq.get_by_id_hash( job.id_hash ) is job
+        with rq._agentic_futures_lock:
+            assert job.id_hash in rq._agentic_futures
+        assert rq.jobs_dead_queue.size() == 0
+
+    def test_ghost_job_sweep_get_by_id_hash_none_skips( self, rq ):
+        """
+        Second-safeguard regression: during sweep iteration, if a callback
+        finished between the snapshot and per-future check (id_hash no longer
+        in queue_dict), sweeper skips — no double-transition.
+        """
+        class _FakeDoneFuture:
+            def done( self ): return True
+            def exception( self ): return None
+            def running( self ): return False
+            def result( self, timeout=None ): return "ok"
+
+        job = MockAgenticJob( do_all_fn=lambda j: "ok" )
+        # Tracker has entry, but queue_dict does NOT (simulating post-callback state)
+        with rq._agentic_futures_lock:
+            rq._agentic_futures[ job.id_hash ] = _FakeDoneFuture()
+        # Do NOT push — job is absent from running_queue (callback already transitioned it)
+
+        rq._ghost_job_sweep()
+
+        # No dead-letter (skipped); tracker cleaned up
+        assert rq.jobs_dead_queue.size() == 0
+        with rq._agentic_futures_lock:
+            assert job.id_hash not in rq._agentic_futures
+
+    def test_ghost_job_sweeper_loop_survives_exception( self, rq, monkeypatch ):
+        """Force _ghost_job_sweep to raise; assert the loop keeps running."""
+        calls = [ 0 ]
+        def bad_sweep():
+            calls[ 0 ] += 1
+            if calls[ 0 ] == 1:
+                raise RuntimeError( "injected sweeper fault" )
+            # Second call is a no-op
+        monkeypatch.setattr( rq, "_ghost_job_sweep", bad_sweep )
+
+        # Run the loop body twice manually (the real loop sleeps interval_seconds
+        # between iterations; here we just exercise the try/except directly).
+        # Fake out the wait and stop-event to run TWO passes and then stop.
+        class _TwoShot:
+            def __init__( self ):
+                self._count = 0
+            def is_set( self ):
+                return self._count >= 2
+            def wait( self, timeout=None ):
+                self._count += 1
+                return False  # didn't receive event
+        monkeypatch.setattr( rq, "_ghost_job_sweeper_stop_event", _TwoShot() )
+
+        # Run the loop; should NOT raise even though first sweep fails
+        rq._ghost_job_sweep_loop()
+        assert calls[ 0 ] == 2  # second call ran (loop survived the first exception)
+
+    def test_ghost_job_sweeper_stops_on_shutdown( self ):
+        """shutdown_pool() stops the sweeper within the 5s join timeout."""
+        rq = _make_running_queue( max_workers=1 )
+        assert rq._ghost_job_sweeper_thread.is_alive()
+
+        import time
+        t0 = time.time()
+        rq.shutdown_pool( wait=False )
+        elapsed = time.time() - t0
+
+        assert not rq._ghost_job_sweeper_thread.is_alive(), \
+            "sweeper should have exited within shutdown_pool's join timeout"
+        assert elapsed < 6.0, \
+            f"shutdown_pool took {elapsed:.1f}s (sweeper join timeout is 5s)"
+
+    def test_on_agentic_complete_pops_before_transition( self, rq ):
+        """
+        Invariant regression: _on_agentic_complete MUST pop from _agentic_futures
+        BEFORE calling _transition_to_done. The ghost-sweeper's correctness
+        depends on 'still in _agentic_futures AND done' meaning 'transition
+        never happened'. If pop is ever re-ordered to run after transition,
+        the sweeper would dead-letter jobs that moved to done_queue.
+        """
+        saw_in_futures_at_transition = [ None ]
+        original_transition = rq._transition_to_done
+
+        def traced_transition( job, formatted_output=None ):
+            with rq._agentic_futures_lock:
+                saw_in_futures_at_transition[ 0 ] = job.id_hash in rq._agentic_futures
+            original_transition( job, formatted_output )
+
+        rq._transition_to_done = traced_transition
+
+        job = MockAgenticJob( do_all_fn=lambda j: "ok" )
+        rq.push( job )
+        rq._submit_agentic_job( job )
+
+        assert _wait_until( lambda: saw_in_futures_at_transition[ 0 ] is not None, timeout=3.0 )
+        assert saw_in_futures_at_transition[ 0 ] is False, \
+            "Regression: _transition_to_done saw id_hash still in _agentic_futures. " \
+            "Pop must happen BEFORE transition for ghost-sweeper correctness."
+
 
 class TestGrepRegression:
 

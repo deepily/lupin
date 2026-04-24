@@ -15,6 +15,13 @@ The Lupin WebSocket architecture provides real-time bidirectional communication 
 - **Dual-Session Architecture**: Separate channels for queue management and audio streaming
 - **Thread-Safe Emission**: Background threads emit via `asyncio.run_coroutine_threadsafe`
 - **Session Persistence**: localStorage-based session management across page reloads
+- **Concurrent `job_state_transition` events** (v0.1.7+): with the agentic pool
+  active (`cj flow max concurrent agentic jobs > 1`), multiple agentic jobs
+  may emit `RUNNING → COMPLETED/FAILED` transitions **simultaneously** from
+  different pool worker threads. Cross-job event order is non-deterministic;
+  clients MUST key cards by `job_id` (as they already do). Within a single
+  `job_id`, sequence is preserved by the pop-before-transition invariant in
+  `RunningFifoQueue._on_agentic_complete`.
 
 ---
 

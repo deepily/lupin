@@ -36,6 +36,61 @@
 - **Assumed `:7999` auto-reload was actually reloading** — but PID 2453 shows 1h27m+ continuous elapsed time with no watcher+worker split visible in the process tree. Unclear whether `uvicorn.run(..., reload=True)` is actually spawning a reloader in this invocation, or if my code edits never propagated to the running `:7999` either. Unit tests + fresh-Python-process smoke tests are unambiguous (they import my edited code); running-server verification on `:7999` this session should be considered suspect.
 - **Design deviations surfaced but not blocking**: 14 methods wrapped vs design's 11, `[Lupin: Development]` overlay vs new `[Lupin: Dev Overrides]` block, 2 out-of-scope stale TFE test fixes. All noted in 90-phase-1-execution-log.md Surprises table.
 
+#### Checkpoint | 2026.04.24 16:15 | Phase 3 complete — ghost sweeper + DR→ARM migration + pool-status enrichment
+
+Phase 3 landed the v0.1.7 async-pool milestone's final pieces while Phase 2's :8000 gate ran in parallel (ts-ff11fb27 submitted 15:55, fired 15:59 against Phase 2 fix commit 9eb764b). Concurrent-happy-path Live API probe on :7999 **GREEN 7/7**.
+
+**Phase 3 Step 3.1 — Ghost-job sweeper daemon thread**:
+- `src/cosa/rest/running_fifo_queue.py`: added `_ghost_job_sweeper_stop_event` + `_ghost_job_sweeper_thread` (daemon, name=GhostJobSweeper) to `RunningFifoQueue.__init__`. Thread calls `_ghost_job_sweep_loop()` which calls `_ghost_job_sweep()` every `cj flow ghost job sweep interval seconds` (INI, default 30s). Sweep: snapshot `_agentic_futures` under lock, iterate without lock, per-entry `Future.done()` check + `get_by_id_hash(id_hash) is None` second-safeguard, dead-letter via `_transition_to_dead`. `shutdown_pool()` updated to stop sweeper FIRST (before pool drain) with 5s join timeout.
+- `src/conf/lupin-app.ini` + splainer: `cj flow ghost job sweep interval seconds = 30` in `[Lupin: Baseline]`.
+- 7 new unit tests in `test_agentic_pool.py`: detection, idempotency, skip-live-futures, second-safeguard None-check, loop-survives-exception, stops-on-shutdown, pop-before-transition invariant regression.
+
+**Phase 3 Step 3.2 — DeepResearch migration to ApiResourceManager**:
+- `src/cosa/agents/deep_research/api_client.py::call_subagent()`: the 2 web-search rate-limiter call sites (`wait_if_needed` at ~line 292 + `record_usage` at ~line 311) now route through `get_arm().acquire("anthropic_web_search")` and `get_arm().record_call(provider="anthropic_web_search", tokens=...)`. Fallback to the local `_rate_limiter` preserved when `get_arm()` raises `RuntimeError` (ARM not initialised — e.g., unit tests, pre-startup). Runtime behaviour identical when ARM is initialised (ARM wraps the same WebSearchRateLimiter class internally).
+- 3 new unit tests in `test_api_resource_manager.py`: acquire-through-singleton, record_call-after-success, falls-back-when-uninitialised.
+
+**Phase 3 Step 3.3 — `/api/queue/pool-status` enrichment**:
+- `RunningFifoQueue.get_pool_status()` extended to call `get_arm().get_status()` and merge under `api_resource_manager` key. Graceful `{"state": "uninitialised"}` marker when ARM not set up. Existing `test_get_pool_status_empty` updated to assert key presence.
+
+**Phase 3 Step 3.5 — Docs**:
+- `src/docs/notification-api.md` header: v0.1.7 concurrent-notifications callout.
+- `src/docs/websocket-architecture.md` Key Principles: concurrent `job_state_transition` events note.
+- `src/docs/rest-api-reference.md`: `/api/queue/pool-status` row updated to mention Phase 3 `api_resource_manager` enrichment.
+- `src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md`: **✅ Implementation Complete (2026-04-24)** banner added with all phase commit hashes + test count summary.
+
+**Deviations captured in 92-phase-3-execution-log.md Surprises table**:
+- Design doc referenced `_call_with_retry()` in DR api_client; actual migration target was `call_subagent()` (doc was imprecise; behaviour identical).
+- Kept per-agent `_rate_limiter` field as fallback (design called for removal; scope-minimization + safety for unit tests).
+- Deferred `deep_research/cli.py::estimate_total_time(...)` migration — dev utility, no rate-limiting side effect.
+- `test_deep_research_records_call_even_on_error` renamed to `test_deep_research_falls_back_when_arm_uninitialised` — more load-bearing invariant.
+
+**Verification (:7999 AI-discretionary layers)**:
+- py_compile on all modified .py files: OK
+- Full unit regression: **3600 passed / 1 xfailed / 0 failed** in 147.53s (Phase 0 baseline 3549 + Phase 1 15 + Phase 2 18 + Phase 2 fix 1 + Phase 3 10 + in-session fixes 7 = 3600).
+- Agentic pool tests: 26/26 pass in 6.42s (18 Phase 2 + 1 Phase 2 fix regression + 7 Phase 3 ghost-sweeper).
+- ARM tests: 12/12 pass in 0.20s (9 Phase 1 + 3 Phase 3 migration).
+- **Live API probe on `:7999` 2026-04-24 16:08**: `max_workers=3` confirmed (Phase 1 dev overlay), `inflight=2` mid-run (Phase 2 pool concurrent), math 14.5s while DRs running (Phase 2 consumer unblocked), both DRs completed, final `inflight=0`, `api_resource_manager` payload present. **7/7 checks green**.
+
+**Files in this Phase 3 commit** (parent Lupin only; CoSA submodule files user commits separately):
+- `src/conf/lupin-app.ini` + `src/conf/lupin-app-splainer.ini` — new ghost-sweeper INI key
+- `src/tests/unit/test_agentic_pool.py` — +7 ghost-sweeper tests
+- `src/tests/unit/test_api_resource_manager.py` — +3 DR migration tests
+- `src/docs/notification-api.md`, `websocket-architecture.md`, `rest-api-reference.md` — async-pool callouts
+- `src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md` — completion banner
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/92-phase-3-execution-log.md` — evidence populated
+- `history.md`, `TODO.md`, `.claude-session.md` — bookkeeping
+
+**CoSA submodule** (user commits separately from CoSA context):
+- `src/cosa/rest/running_fifo_queue.py` — ghost sweeper + pool-status enrichment
+- `src/cosa/agents/deep_research/api_client.py` — 2 web-search call sites migrated to ARM
+
+**In flight when this checkpoint lands**:
+- `:8000` Phase 2 gate run (ts-ff11fb27) running since 15:59 EDT. Results will validate Phase 1+2+fix. Phase 3 changes are either non-runtime-visible (ghost sweeper silent) or untouched by E2E/integration tests, so a Phase 3 :8000 re-run is optional-not-gating if Phase 2 gate is green.
+
+**v0.1.7 async-pool milestone status**: code complete. Prod default bump from `N=1` to `N=3` is a separate deliberate action after :8000 results validate.
+
+**Commit**: [pending]
+
 #### Checkpoint | 2026.04.24 14:40 | Phase 2 pool bug fix — `_process_job` uses passed `job`, not `self.head()`
 
 Two bugs surfaced by the 2026-04-24 Live API probe on :7999 (Session 616112aa, against Phase 2 commit `9adfc26`) — both root-caused and fixed same session.

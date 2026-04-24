@@ -2,8 +2,15 @@
 
 > **One-stop reference** for the Lupin notification system — from architecture to testing.
 >
-> **Last Updated**: 2026-03-20
+> **Last Updated**: 2026-04-24
 > **Source of Truth**: This document supersedes all R&D planning docs in `src/rnd/2025.10.15-sse-notifications/`.
+>
+> **v0.1.7 CJ Flow async note**: when `cj flow max concurrent agentic jobs > 1`,
+> multiple agentic jobs may emit notifications concurrently from different pool
+> worker threads. `notification_id` + `job_id` routing remains the canonical way
+> to correlate responses; no ordering guarantee exists ACROSS different jobs.
+> Within a single job, the pop-before-transition invariant in
+> `RunningFifoQueue._on_agentic_complete` preserves TTS → emit → queue transition.
 
 ---
 

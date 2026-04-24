@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-04-24 EDT (Session 616112aa-v017-async-phase1 — Phase 2 fix checkpoint. Phase 1 committed fe932ba, Phase 2 committed 9adfc26, Phase 2 fix pending commit. Live API probe on :7999 green after fix.)
+Last updated: 2026-04-24 EDT (Session 616112aa — Phase 3 complete. Phase 1 fe932ba, Phase 2 9adfc26, Phase 2 fix 9eb764b. Phase 3 pending commit. v0.1.7 async-pool milestone code complete. Concurrent-happy-path Live API probe on :7999 green 7/7. :8000 Phase 2 gate running since 15:59 EDT.)
 
 ---
 
@@ -12,10 +12,15 @@ Last updated: 2026-04-24 EDT (Session 616112aa-v017-async-phase1 — Phase 2 fix
 - [ ] [LUPIN] **`:8000` E2E UI gate** — re-submission `ts-249d0d40` running since 11:18:38 EDT (after bounce of stale `:8000` that was still running pre-Phase-1 code). ~40min runtime.
 - [ ] [LUPIN] **`:8000` integration gate (FINAL)** — runs after E2E. ~20min.
 - [x] [LUPIN] **Phase 1 committed** — `fe932ba` (parent Lupin, 10 files, +811/−190). CoSA files still yours to commit separately.
-- [x] [LUPIN] **Phase 2 code committed (9adfc26)** — RunningFifoQueue dispatcher + pool + /queue/pool-status endpoint + shutdown hook + 18 new unit tests. Then FIX to `_process_job` dispatcher (passed job vs self.head()) + regression test pending separate commit.
-- [x] [LUPIN] **Phase 2 Live API probe on :7999** — ran 2026-04-24 surfacing Bug 2A phantom + Bug 2B duplicate done-queue. Root-caused to `self.head()` in `_process_job`; fixed + re-probed green (run=0, done=1, dead=0, inflight=0 at terminal).
-- [ ] [LUPIN] **Phase 2 :8000 gates** — after you bounce :8000 to pick up Phase 2 + fix + confirm a scheduled_at slot. Then submit e2e,integration via /api/test-suite/submit, record results in 91-phase-2-execution-log.md.
-- [ ] [LUPIN] **Receptionist agent multiple issues** — filed 2026-04-24 in bug-fix-queue.md (active queue). Context-length overrun + BFE correctly filtered it out per eligibility config + classifier miss on "maximum context length" pattern. Not a Phase 1/2 regression.
+- [x] [LUPIN] **Phase 1 committed (fe932ba)** — RLock + INI knob + ApiResourceManager stub
+- [x] [LUPIN] **Phase 2 committed (9adfc26)** — dispatcher + pool + /queue/pool-status endpoint + shutdown hook + 18 unit tests
+- [x] [LUPIN] **Phase 2 fix committed (9eb764b)** — _process_job uses passed job (not self.head()) + regression test. Fixes Bug 2A (phantom) + Bug 2B (duplicate done-queue). Live API probe on :7999 green.
+- [x] [LUPIN] **Phase 3 code complete** — ghost sweeper + DR→ARM migration + pool-status enrichment + docs + 10 new unit tests. Concurrent-happy-path Live API probe on :7999 green 7/7. Commit pending.
+- [ ] [LUPIN] **:8000 Phase 2 gate in flight** — ts-ff11fb27 fired 15:59 EDT against Phase 1+2+fix. Results pending. Will interpret for Phase 2 validation.
+- [ ] [LUPIN] **:8000 Phase 3 re-run** (conditional) — only if Phase 2 gate is green AND conservative-re-run is desired. Phase 3 adds non-test-visible behaviour (ghost sweeper runs silent, DR path not hit by E2E, pool-status endpoint not hit by E2E). Low value; probably skip.
+- [ ] [LUPIN] **v0.1.7 prod N=1 → N=3 bump** — separate deliberate action after :8000 gates validate. Not part of this session.
+- [ ] [LUPIN] **Receptionist agent multiple issues** — filed 2026-04-24 in bug-fix-queue.md (active queue). Context-length overrun + BFE filter + classifier miss. Not a Phase 1/2/3 regression.
+- [ ] [LUPIN] **DR cli.py estimate_total_time migration** — deferred from Phase 3. Dev utility, not production critical. Follow-up when convenient.
 
 ---
 

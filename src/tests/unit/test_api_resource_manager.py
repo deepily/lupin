@@ -166,5 +166,108 @@ class TestGetStatus:
             assert status[ provider ] == { "provider_wait_state" : "passthrough" }
 
 
+class TestDeepResearchMigration:
+    """
+    Phase 3 regression tests: DeepResearch api_client routes rate-limit
+    decisions through ApiResourceManager instead of its own _rate_limiter.
+    Falls back to local _rate_limiter when ARM is uninitialised (test/startup).
+    """
+
+    def _make_mock_client_and_response( self ):
+        """Build a minimal ResearchAPIClient stub + fake response for tests."""
+        from unittest.mock import MagicMock
+
+        # Fake APIResponse
+        fake_response = MagicMock()
+        fake_response.input_tokens = 5000
+
+        # Minimal config stub
+        class _Cfg:
+            subagent_model = "claude-sonnet-4-6"
+
+        # MagicMock spec'd off the real class, with _call_api coroutine mocked
+        from cosa.agents.deep_research.api_client import ResearchAPIClient
+        client = ResearchAPIClient.__new__( ResearchAPIClient )
+        client.config        = _Cfg()
+        client.debug         = False
+        client._rate_limiter = MagicMock()  # local fallback; tests check it's NOT called
+        async def _noop_async( *a, **kw ): return fake_response
+        client._call_api     = _noop_async
+        return client, fake_response
+
+    def test_deep_research_calls_acquire_through_singleton( self, monkeypatch ):
+        """call_subagent(use_web_search=True) triggers arm.acquire('anthropic_web_search')."""
+        import asyncio
+        from cosa.utils import api_resource_manager as arm_mod
+
+        client, _ = self._make_mock_client_and_response()
+
+        # Init ARM + instrument
+        arm = init_arm()
+        called_with = [ ]
+        async def traced_acquire( provider ):
+            called_with.append( provider )
+        monkeypatch.setattr( arm, "acquire", traced_acquire )
+        monkeypatch.setattr( arm, "record_call", lambda **kw: None )
+
+        asyncio.run( client.call_subagent(
+            system_prompt  = "sys",
+            user_message   = "msg",
+            subquery_index = 0,
+            use_web_search = True,
+        ) )
+
+        assert called_with == [ "anthropic_web_search" ]
+        # Local fallback was NOT consulted
+        client._rate_limiter.wait_if_needed.assert_not_called()
+
+    def test_deep_research_records_call_after_success( self, monkeypatch ):
+        """After successful call_subagent, arm.record_call fires with matching tokens."""
+        import asyncio
+
+        client, fake_response = self._make_mock_client_and_response()
+        arm = init_arm()
+        monkeypatch.setattr( arm, "acquire", lambda provider: _async_noop() )
+        record_calls = [ ]
+        monkeypatch.setattr( arm, "record_call", lambda **kw: record_calls.append( kw ) )
+
+        asyncio.run( client.call_subagent(
+            system_prompt  = "sys",
+            user_message   = "msg",
+            subquery_index = 0,
+            use_web_search = True,
+        ) )
+
+        assert len( record_calls ) == 1
+        assert record_calls[ 0 ][ "provider" ] == "anthropic_web_search"
+        assert record_calls[ 0 ][ "tokens" ]   == 5000
+        client._rate_limiter.record_usage.assert_not_called()
+
+    def test_deep_research_falls_back_when_arm_uninitialised( self, monkeypatch ):
+        """When get_arm() raises RuntimeError (ARM not initialised), DR uses its local _rate_limiter."""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        reset_arm()  # ensure ARM is UNinitialised
+        client, _ = self._make_mock_client_and_response()
+        # local limiter returns an awaitable delay of 0s
+        client._rate_limiter.wait_if_needed = AsyncMock( return_value=0.0 )
+
+        asyncio.run( client.call_subagent(
+            system_prompt  = "sys",
+            user_message   = "msg",
+            subquery_index = 0,
+            use_web_search = True,
+        ) )
+
+        # Local limiter was consulted (fallback worked)
+        client._rate_limiter.wait_if_needed.assert_called_once()
+        client._rate_limiter.record_usage.assert_called_once()
+
+
+async def _async_noop( *a, **kw ):
+    return None
+
+
 if __name__ == "__main__":
     pytest.main( [ __file__, "-v" ] )
