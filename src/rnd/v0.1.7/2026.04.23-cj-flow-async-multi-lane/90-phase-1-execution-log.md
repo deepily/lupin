@@ -127,7 +127,8 @@ Mark each sub-step as work lands. Format: `[ ]` pending, `[~]` in progress, `[x]
 
 | Date | Commit hash | Summary | Files |
 |---|---|---|---|
-| — | — | — | — |
+| 2026-04-24 | `fe932ba` (parent Lupin) | Checkpoint: Phase 1 code + py-level verification complete, :8000 gates in flight | 10 files, 811+/190− |
+| — | pending (CoSA) | User commits separately from CoSA context | `src/cosa/rest/fifo_queue.py` (modify), `src/cosa/utils/api_resource_manager.py` (new) |
 
 ---
 

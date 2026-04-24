@@ -385,6 +385,8 @@ class TestCrudQueueCompletion:
 
     def _create_queue_and_agent( self, tmp_storage_dir ):
         """Helper: Create a minimal RunningFifoQueue + CRUD agent for completion tests."""
+        import threading
+        from collections import OrderedDict
         from cosa.rest.running_fifo_queue import RunningFifoQueue
 
         queue = RunningFifoQueue.__new__( RunningFifoQueue )
@@ -397,6 +399,18 @@ class TestCrudQueueCompletion:
         queue.io_tbl          = MagicMock()
         queue.gist_normalizer = MagicMock()
         queue.user_job_tracker = MagicMock()
+        # Phase 1 (RLock) + Phase 2 (pool) require these attributes normally set
+        # by FifoQueue.__init__ / RunningFifoQueue.__init__. Since the test uses
+        # __new__ to skip __init__, set them manually here.
+        queue._lock           = threading.RLock()
+        queue.queue_list      = [ ]
+        queue.queue_dict      = OrderedDict()
+        queue.push_counter    = 0
+        queue.last_queue_size = 0
+        queue._blocking_object = None
+        queue._accepting_jobs  = True
+        queue._agentic_futures      = { }
+        queue._agentic_futures_lock = threading.RLock()
 
         # Create a CRUD agent that has already completed do_all()
         agent = _create_mock_agent( tmp_dir=tmp_storage_dir, operation="add" )

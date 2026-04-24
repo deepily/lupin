@@ -67,6 +67,7 @@
 |--------|------|------|---------|
 | POST | `/api/push` | JWT | Submit question to processing queue |
 | GET | `/api/get-queue/{queue_name}` | JWT | Get queue contents (user-filtered) |
+| GET | `/api/queue/pool-status` | JWT | CJ Flow agentic-pool state (inflight/pending/max-workers, Phase 2) |
 | POST | `/api/reset-queues` | JWT | Clear all queues for current user |
 | GET | `/api/get-job-interactions/{job_id}` | JWT | Get interaction history for a job |
 | POST | `/api/jobs/{job_id}/message` | JWT | Send message to running job |

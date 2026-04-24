@@ -36,6 +36,55 @@
 - **Assumed `:7999` auto-reload was actually reloading** — but PID 2453 shows 1h27m+ continuous elapsed time with no watcher+worker split visible in the process tree. Unclear whether `uvicorn.run(..., reload=True)` is actually spawning a reloader in this invocation, or if my code edits never propagated to the running `:7999` either. Unit tests + fresh-Python-process smoke tests are unambiguous (they import my edited code); running-server verification on `:7999` this session should be considered suspect.
 - **Design deviations surfaced but not blocking**: 14 methods wrapped vs design's 11, `[Lupin: Development]` overlay vs new `[Lupin: Dev Overrides]` block, 2 out-of-scope stale TFE test fixes. All noted in 90-phase-1-execution-log.md Surprises table.
 
+#### Checkpoint | 2026.04.24 13:00 | Phase 2 code complete — pool + dispatcher + endpoint + 18 unit tests
+
+Following the Phase 1 commit (`fe932ba` at 11:25), ran the `:8000` gates for Phase 1 validation and user kicked off Phase 2 in parallel. `:8000` returned 1 fail + 12 errors + 8 pre-existing integration failures; root-cause analysis showed all are pre-existing or stale-test issues, none Phase-1-caused (`test_dispatcher_creation` tests a different dispatcher entirely; SWE team pipeline timeouts match yesterday's push_job-slowness TODO). Fixed the stale E2E `test_default_model_is_opus_4_7` (flipped Opus→Sonnet 4.6 per 2026-04-22).
+
+**Phase 2 Step 2.1 — Dispatcher refactor + agentic pool in `RunningFifoQueue`**:
+- Added `ThreadPoolExecutor` + `_agentic_futures` dict + `_agentic_futures_lock` (RLock, see deviation) to `__init__`
+- New methods: `_submit_agentic_job`, `_execute_agentic_in_pool`, `_on_agentic_complete` (defensive BaseException outer + isinstance-Exception branching inside), `_transition_to_done`, `_transition_to_dead`, `_process_fast_lane`, `get_pool_status`, `shutdown_pool`
+- Switched `_process_job` agentic branch to submit to pool + return immediately (consumer thread freed)
+- Migrated all 9 `self.pop()` sites → `self.delete_by_id_hash(<job>.id_hash)` — "head of queue" no longer deterministic under pool-callback concurrency
+
+**Phase 2 Step 2.2 — Shutdown hook**: `jobs_run_queue.shutdown_pool(wait=True, timeout=30.0)` added to `main.py` lifespan teardown BEFORE consumer stop.
+
+**Phase 2 Step 2.3 — `/api/queue/pool-status` endpoint**: new `GET /queue/pool-status` in `queues.py` with `Depends(get_current_user)` + `Depends(get_running_queue)`; returns `{inflight_agentic_jobs, max_agentic_workers, pending_in_pool}`. Added to `rest-api-reference.md`.
+
+**Phase 2 Step 2.4 — `test_agentic_pool.py`**: 18 tests covering dispatch routing, submit atomicity, completion done/dead paths, defensive callback paths (Exception / BaseException / both-transitions-fail), concurrent + serial execution, pool-status shape, shutdown drain + timeout dead-lettering, `test_no_pop_calls_remain_in_running_fifo_queue` grep regression. All pass in 6.24s. 9 additional tests deferred (see 91-phase-2-execution-log.md Step 2.4 rationale).
+
+**Deviations surfaced during impl** (all captured in 91-phase-2-execution-log.md Surprises table):
+- `_agentic_futures_lock` MUST be `threading.RLock()` not `threading.Lock()`: ThreadPoolExecutor fires synchronous callbacks on the submitting thread when work completes before `add_done_callback` returns — caught by fixture deadlock during test dev.
+- `_submit_agentic_job` does NOT duplicate consumer's `push(job)` + emit: `queue_consumer.py::consumer_worker` already does both before calling `_process_job`.
+- BaseException survivors (KeyboardInterrupt/SystemExit/GeneratorExit) are log-only in `_on_agentic_complete`, NOT dead-lettered (test enforced; design-doc intent preserved).
+- Fast-lane remains on today's inline dispatch for Phase 2 MVP; `_process_fast_lane` added as scaffolding for Phase 3 cleanup.
+- `_transition_to_done/_dead` extracted only for the pool callback path; existing inline completion blocks unchanged for Phase 2 MVP.
+
+**Verification** (:7999 AI-discretionary layers):
+- py_compile on all modified .py files: OK
+- Full unit regression: **3582 passed, 1 xfailed, 0 failed** in 147.64s (3564 Phase-1 baseline + 18 Phase-2 new). 3 `test_crud_queue_integration` tests fixed in-session (missing `_lock` after `__new__` bypass of `__init__`) per `fix_all_failing_tests` mandate.
+- WebSocket smoke: 50/50 in 44s
+- Note: :7999 reload is still suspect this session (PID 2453 continuous uptime); running-server-path verification deferred to Protocol E2E in Step 2.7 after a :7999 bounce.
+
+**Files modified this Phase 2 commit** (pending):
+Parent Lupin:
+- `src/fastapi_app/main.py` — shutdown hook
+- `src/cosa/rest/routers/queues.py` (CoSA — user commits separately) — /queue/pool-status endpoint
+- `src/docs/rest-api-reference.md` — endpoint row
+- `src/tests/unit/test_agentic_pool.py` — NEW 18 tests
+- `src/tests/unit/test_crud_queue_integration.py` — helper fix for Phase-1 `_lock` + Phase-2 `_agentic_futures*`
+- `src/tests/e2e_ui/test_resume_overrides.py` — stale Opus→Sonnet fix from :8000 gate
+- `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/91-phase-2-execution-log.md` — populated through Step 2.5 with evidence + Surprises table
+
+CoSA submodule (user commits separately from CoSA context):
+- `src/cosa/rest/running_fifo_queue.py` — main Phase 2 refactor (~450 LOC net)
+
+**In flight / not blocking this checkpoint**:
+- Phase 2 Step 2.7 (Protocol E2E against :7999) — needs :7999 bounce first (user-owned)
+- Phase 2 Step 2.8 (:8000 gates) — user slot-check required after :8000 bounce
+- Phase 3 design (ghost-sweeper + unify fast-lane transitions + deferred unit tests) awaits Phase 2 merge
+
+**Commit**: [pending]
+
 #### Checkpoint | 2026.04.24 11:20 | Phase 1 code + py-level verification complete; :8000 gates in flight
 - All 8 Phase 1 tasks (Steps 1.1–1.7) either completed or in-progress awaiting :8000 results
 - Design docs 01–04 in `src/rnd/v0.1.7/2026.04.23-cj-flow-async-multi-lane/` are UNTOUCHED this session — only 90-phase-1-execution-log.md is populated with evidence

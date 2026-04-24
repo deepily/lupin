@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-04-24 EDT (Session 616112aa-v017-async-phase1 checkpoint — CJ Flow async Phase 1 code + py-level verification complete, :8000 gates in flight, not yet committed)
+Last updated: 2026-04-24 EDT (Session 616112aa-v017-async-phase1 checkpoint — Phase 2 code complete, 18 pool unit tests pass, Phase 1 committed as fe932ba, Phase 2 commit pending user go-ahead after review)
 
 ---
 
@@ -11,7 +11,10 @@ Last updated: 2026-04-24 EDT (Session 616112aa-v017-async-phase1 checkpoint — 
 - [x] [LUPIN] **WebSocket smoke 50/50, container preflight 7/7** on pre-bounce `:7999`.
 - [ ] [LUPIN] **`:8000` E2E UI gate** — re-submission `ts-249d0d40` running since 11:18:38 EDT (after bounce of stale `:8000` that was still running pre-Phase-1 code). ~40min runtime.
 - [ ] [LUPIN] **`:8000` integration gate (FINAL)** — runs after E2E. ~20min.
-- [ ] [LUPIN] **Commit Phase 1 once `:8000` gates pass** — awaiting explicit user go. Parent-Lupin files only (INI/splainer/main.py/2 new unit tests/1 stale fix/90-log.md + history.md + TODO.md + manifest). CoSA edits (`fifo_queue.py` modify, `api_resource_manager.py` new) are user's to commit separately from CoSA context.
+- [x] [LUPIN] **Phase 1 committed** — `fe932ba` (parent Lupin, 10 files, +811/−190). CoSA files still yours to commit separately.
+- [x] [LUPIN] **Phase 2 code complete** — RunningFifoQueue dispatcher + pool + /queue/pool-status endpoint + shutdown hook + 18 new unit tests. Full unit regression 3582/0, WS smoke 50/50. Pending commit.
+- [ ] [LUPIN] **Phase 2 Protocol E2E against :7999** — needs you to bounce :7999 first so new code loads. Then: push DR-dry-run × 2 + math query, assert math <5s while DRs run, GET /queue/pool-status asserts inflight=2.
+- [ ] [LUPIN] **Phase 2 :8000 gates + commit** — after you bounce :8000 to pick up Phase 2 code + confirm a scheduled_at slot. Then schedule E2E + integration, record results in 91-phase-2-execution-log.md, commit Phase 2.
 
 ---
 

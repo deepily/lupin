@@ -1,8 +1,8 @@
 # Approach C — Phase 2 Execution Log
 
-**Status**: NOT STARTED (skeleton only — populate as implementation proceeds)
+**Status**: IN PROGRESS (Session 616112aa, 2026-04-24, continuing from Phase 1 commit `fe932ba`)
 **Paired design doc**: `03-phase-2-dispatcher-pool-and-pool-status.md`
-**Depends on**: Phase 1 complete (all checkboxes `[x]` in `90-phase-1-execution-log.md`)
+**Depends on**: Phase 1 complete (commit `fe932ba`; :8000 gates ran on fe932ba with 1 stale-test fail + 12 visual errors + 8 pre-existing failures — none Phase-1-caused per root-cause analysis in history.md)
 **Branch**: `wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe`
 
 ---
@@ -21,69 +21,61 @@ Phase 2 (and Phase 3) Protocol E2E fires `POST /api/push` for "DeepResearch dry-
 
 ### Step 2.1 — Dispatcher refactor in `RunningFifoQueue`
 
-- [ ] Add `from concurrent.futures import ThreadPoolExecutor` + `import threading, time` imports
-- [ ] Add `from cosa.agents.agentic_job_base import AgenticJobBase` (may already exist)
-- [ ] Add `_pool_max_workers`, `_agentic_pool`, `_agentic_futures`, `_agentic_futures_lock` to `__init__` per the ordered sequence in `03-phase-2-*.md` Step 2.1 §"New `__init__` fields"
-- [ ] Refactor `_process_job()` to dispatch by `isinstance( job, AgenticJobBase )` → `_submit_agentic_job`; `isinstance( job, (AgentBase, SolutionSnapshot) )` → `_process_fast_lane`; ELSE raise `TypeError` (no silent fallthrough)
-- [ ] Implement `_submit_agentic_job( job )` with the 3-step ordering: (1) `self.push(job)` into running_queue; (2) `emit_job_state_transition(job, from_state="todo", to_state="running")`; (3) ACQUIRE `_agentic_futures_lock` → `submit()` → assign `_agentic_futures[id_hash]` → `add_done_callback` — all inside the lock to close the fast-future race
-- [ ] Implement `_execute_agentic_in_pool( job )` — single call to `job.do_all()`, no post-processing in this layer
-- [ ] Implement `_on_agentic_complete( job, future )` with **outer `except BaseException`** (belt for KeyboardInterrupt/SystemExit survivors → log + leave for Phase-3 sweeper); **inner `except Exception`** (suspenders for dead-letter attempt); pop from `_agentic_futures` BEFORE transitioning (load-bearing invariant per 03 Step 2.1 callout)
-- [ ] Implement `_transition_to_done( job, formatted_output )` — extract from `running_fifo_queue.py` lines 411–480 (agentic success) + 725–751 (agent success) + 1044 (cache-hit). Reads derived values from `job.*` attributes (do_all() side effects); formatted_output used for I/O logging only.
-- [ ] Implement `_transition_to_dead( job, cause )` — extract from `running_fifo_queue.py` lines 482–532 (status-check fail) + 534–592 (exception) + 252 (outer crash) + 278 (error case). `cause` may be `Exception | str`; body normalises both.
-- [ ] Implement `_process_fast_lane( job )` — internally dispatches by isinstance to `_handle_base_agent` (with cache-check + CRUD sub-branch) or `_handle_solution_snapshot`. Preserves today's exact fast-lane behaviour; only pop() calls change.
-- [ ] Replace `self.pop()` with `self.delete_by_id_hash( running_job.id_hash )` at **ALL 9 CALL SITES** in `running_fifo_queue.py` per the table in `03-phase-2-*.md` Step 2.1: lines 252, 278, 394, 455, 528, 588, 747, 829, 1044. Not just agentic paths — fast-lane too (fast-lane runs concurrently with pool callbacks under Phase 2).
-- [ ] EXECUTOR: AI — `grep -n "self\.pop(" src/cosa/rest/running_fifo_queue.py` — AI asserts NO MATCHES (zero output). Regression-test `test_no_pop_calls_remain_in_running_fifo_queue` in the unit suite enforces this at every subsequent test run.
-- [ ] Implement `get_pool_status()` returning `{inflight_agentic_jobs, max_agentic_workers, pending_in_pool}` (note renamed field — `inflight` replaces the previous `active` to disambiguate running vs submitted)
-- [ ] Implement `shutdown_pool( wait, timeout )` with deadline-based drain + dead-letter on overshoot
-- [ ] EXECUTOR: AI — `python -c "import py_compile; py_compile.compile('src/cosa/rest/running_fifo_queue.py', doraise=True)"` — AI asserts exit code 0, reports stdout verbatim in "Verification results"
+- [x] Added `from concurrent.futures import ThreadPoolExecutor` import; `threading` + `time` already present
+- [x] `AgenticJobBase` + `AgentBase` + `SolutionSnapshot` already imported
+- [x] Added `_pool_max_workers`, `_agentic_pool`, `_agentic_futures`, `_agentic_futures_lock` to `__init__`. **Deviation from design**: `_agentic_futures_lock` is `threading.RLock()` not `Lock()` — required because when a submitted Future completes BEFORE `add_done_callback` returns (fast work, e.g. sleep(0)), the callback fires synchronously on the same thread inside `add_done_callback`. The callback's `with self._agentic_futures_lock:` would deadlock a plain Lock. RLock permits same-thread re-entry. Caught by unit test fixture hang; fix is safe (cross-thread contention still serialized).
+- [x] Refactored `_process_job()` agentic branch to call `_submit_agentic_job` + return (consumer thread freed immediately). AgentBase/SolutionSnapshot branches unchanged (kept today's inline path for Phase 2 MVP; design's `_process_fast_lane` extraction moved to code but not yet wired as the Phase 2 MVP dispatcher kept the existing isinstance tree for diff minimization).
+- [x] Implemented `_submit_agentic_job( job )`. **Deviation from design**: consumer thread already does `push(job)` + `emit_job_state_transition(QUEUED→RUNNING)` before `_process_job`. `_submit_agentic_job` therefore does NOT duplicate those two steps — it only does the atomic-under-lock submit+track+callback. Design-doc 3-step ordering is preserved system-wide (consumer does push+emit, submit_agentic_job does submit+track+callback).
+- [x] Implemented `_execute_agentic_in_pool( job )` — single call to `job.do_all()`
+- [x] Implemented `_on_agentic_complete( job, future )` with outer `except BaseException` + inner per-exception-type branching. **Design clarification during impl**: BaseException-but-not-Exception survivors (KeyboardInterrupt/SystemExit/GeneratorExit) log-only and leave the job for the Phase-3 sweeper — do NOT call `_transition_to_dead(exc)` because passing a BaseException into the dead-letter path has been observed to cause chained failures. Only `isinstance(exc, Exception)` triggers `_transition_to_dead`. pop from `_agentic_futures` BEFORE transitioning invariant preserved.
+- [x] Implemented `_transition_to_done( job, formatted_output )` per design doc. Phase 2 MVP scope: shared with the pool callback only; fast-lane paths still use their existing inline completion logic (extraction to unify them is Phase 3 cleanup to minimize Phase 2 diff risk).
+- [x] Implemented `_transition_to_dead( job, cause )` per design doc. `cause` accepts `Exception | str`; body normalises both. Same Phase 2 MVP scope as `_transition_to_done`.
+- [x] Added `_process_fast_lane( job )` as a new method (not yet wired as the dispatcher's fast-lane branch — kept in place as scaffolding for Phase 3 unification).
+- [x] Replaced `self.pop()` with `self.delete_by_id_hash( <job>.id_hash )` at **all 9 call sites** (252 failed_job, 278 running_job, 394 running_job, 455 running_job, 528 running_job, 588 running_job, 747 running_job, 829 running_job, 1044 original_job).
+- [x] EXECUTOR: AI — `grep -n "self\.pop(" src/cosa/rest/running_fifo_queue.py` returned no matches (exit 1). Regression test `test_no_pop_calls_remain_in_running_fifo_queue` in `test_agentic_pool.py` enforces this on every test run.
+- [x] Implemented `get_pool_status()` returning `{inflight_agentic_jobs, max_agentic_workers, pending_in_pool}`
+- [x] Implemented `shutdown_pool( wait, timeout )` with deadline-based drain + dead-letter on overshoot
+- [x] EXECUTOR: AI — `py_compile running_fifo_queue.py`: OK. Runtime smoke: `RunningFifoQueue` instantiates, `get_pool_status()` returns the expected 3-key dict, `shutdown_pool(wait=False)` clean.
 
 ### Step 2.2 — Shutdown hook
 
-- [ ] EXECUTOR: AI — AI greps `src/fastapi_app/main.py` for existing shutdown-pattern (`@app.on_event("shutdown")` vs `@asynccontextmanager def lifespan(app)` + `FastAPI(lifespan=...)`). AI reports which pattern is in use; new hook follows the same style.
-- [ ] Add `running_queue.shutdown_pool( wait=True, timeout=30.0 )` call to the existing shutdown/lifespan-teardown block in `src/fastapi_app/main.py` — placed BEFORE the consumer-stop code AND BEFORE any HTTP socket close, so in-flight pool workers can still emit WS events as they finish
-- [ ] EXECUTOR: AI — `shutdown_pool` and the consumer-stop path both emit distinguishable banner lines (`shutdown_pool returning`, `consumer thread stopped`). AI submits a long-running mock agentic job, triggers server shutdown, greps captured stderr/log, asserts the `shutdown_pool returning` timestamp precedes `consumer thread stopped` timestamp; reports both timestamps verbatim.
-- [ ] EXECUTOR: AI — `python -c "import py_compile; py_compile.compile('src/fastapi_app/main.py', doraise=True)"` — AI asserts exit code 0
+- [x] EXECUTOR: AI — Confirmed `@asynccontextmanager def lifespan(app)` pattern is in use (`main.py` line 388; `FastAPI(lifespan=lifespan)` at line 703). No `@app.on_event` in the file.
+- [x] Added `jobs_run_queue.shutdown_pool( wait=True, timeout=30.0 )` in lifespan teardown block BEFORE the consumer-stop code. `hasattr` guard for backward-compat when running with older Phase-1-only build.
+- [ ] EXECUTOR: AI — Ordering banner-line assertion via actual server shutdown: deferred to Protocol E2E (Step 2.7) so a realistic pool+consumer interaction is observed rather than synthetic timestamps.
+- [x] EXECUTOR: AI — py_compile OK.
 
 ### Step 2.3 — `/api/queue/pool-status` endpoint
 
-- [ ] Router file is `src/cosa/rest/routers/queues.py` (plural — confirmed in fitness review). Add `GET /api/queue/pool-status` endpoint there.
-- [ ] Endpoint requires auth via `current_user: dict = Depends(get_current_user)` — matches sibling convention (every other `/api/queue/*` endpoint uses this). Import `from cosa.rest.auth import get_current_user` is already present in the file at line 23.
-- [ ] Endpoint returns `running_queue.get_pool_status()` payload — keys `{inflight_agentic_jobs, max_agentic_workers, pending_in_pool}`
-- [ ] EXECUTOR: AI — `python -c "import requests; r = requests.get('http://localhost:7999/api/queue/pool-status'); assert r.status_code == 401, f'expected 401 without auth, got {r.status_code}'"` — AI asserts unauthenticated request is rejected with 401 (regression for the auth requirement).
-- [ ] EXECUTOR: AI — using a valid JWT (see `src/tests/AUTH-TESTING-GUIDE.md` pattern), `python -c "import requests; h = {'Authorization': f'Bearer {TOKEN}'}; r = requests.get('http://localhost:7999/api/queue/pool-status', headers=h); assert r.status_code == 200; body = r.json(); assert set(body.keys()) >= {'inflight_agentic_jobs', 'max_agentic_workers', 'pending_in_pool'}; print(body)"` — AI asserts 200 + all three keys present; reports body verbatim.
+- [x] Added `GET /queue/pool-status` to `src/cosa/rest/routers/queues.py` (plural) with `Depends(get_current_user)` + `Depends(get_running_queue)`. Returns `running_queue.get_pool_status()` payload verbatim.
+- [x] Updated `src/docs/rest-api-reference.md` quick-reference table with the new endpoint row.
+- [ ] EXECUTOR: AI — Live 401-without-auth + 200-with-auth verification: deferred to Protocol E2E (Step 2.7) after bounce of :7999 so the code is actually live.
 
 ### Step 2.4 — Unit tests (`test_agentic_pool.py`)
 
-- [ ] Create `src/tests/unit/test_agentic_pool.py`
-- [ ] `test_agentic_job_submitted_to_pool`
-- [ ] `test_sync_agent_processed_inline`
-- [ ] `test_solution_snapshot_processed_inline`
-- [ ] `test_dispatcher_raises_on_unknown_job_type`
-- [ ] `test_submit_pushes_to_running_queue` — ghost-sweeper precondition
-- [ ] `test_submit_emits_running_transition` — UX regression
-- [ ] `test_submit_lock_ordering_atomic` — fast-future race regression
-- [ ] `test_concurrent_agentic_execution` (3 mock jobs, max_workers=3, total <1s)
-- [ ] `test_fast_lane_not_blocked_by_agentic`
-- [ ] `test_completion_moves_to_done`
-- [ ] `test_failure_moves_to_dead`
-- [ ] `test_no_pop_calls_remain_in_running_fifo_queue` — grep regression
-- [ ] `test_defensive_callback_swallows_exception_on_transition`
-- [ ] `test_defensive_callback_both_transitions_fail_no_raise` — last-resort path
-- [ ] `test_defensive_callback_handles_base_exception` — KeyboardInterrupt/SystemExit survivors
-- [ ] `test_get_pool_status_accurate` — 3-state payload (running / pending / done)
-- [ ] `test_shutdown_pool_waits_for_inflight`
-- [ ] `test_shutdown_pool_dead_letters_timeouts`
-- [ ] `test_pool_saturation_queues_work`
-- [ ] `test_completion_order_not_fifo`
-- [ ] `test_concurrent_transition_to_done_sqlite_thread_safe` — SQLite WAL under concurrent callbacks
-- [ ] `test_concurrent_notify_from_callbacks` — TTS + WS emit under concurrent callbacks
-- [ ] `test_concurrent_tfe_watchdog_evaluate` — TFE watchdog under concurrent callbacks
+- [x] Created `src/tests/unit/test_agentic_pool.py` — 18 tests pass in 6.24s. Test-set covers all core Phase 2 mechanics; deferred broader-scope tests noted below.
+- [x] `test_agentic_job_submitted_to_pool` (pool thread name `AgenticPool*` validated)
+- [x] `test_dispatcher_agentic_goes_to_pool` (consumer thread != pool thread)
+- [x] `test_submit_pushes_to_running_queue` — ghost-sweeper precondition
+- [x] `test_submit_registers_future_in_dict`
+- [x] `test_concurrent_agentic_execution` (3 mock jobs, max_workers=3, completes <1s)
+- [x] `test_serial_execution_with_one_worker` (max_workers=1 serialises)
+- [x] `test_completion_moves_to_done`
+- [x] `test_failure_moves_to_dead`
+- [x] `test_no_pop_calls_remain_in_running_fifo_queue` — grep regression
+- [x] `test_defensive_callback_swallows_exception_on_transition`
+- [x] `test_defensive_callback_both_transitions_fail_no_raise` — last-resort path
+- [x] `test_defensive_callback_handles_base_exception` — BaseException survivors log-only, NOT dead-lettered (corrected during impl — see Step 2.1 deviation)
+- [x] `test_get_pool_status_empty` + `test_get_pool_status_shape_with_inflight` — running/pending payload
+- [x] `test_shutdown_pool_waits_for_inflight`
+- [x] `test_shutdown_pool_dead_letters_timeouts`
+- [x] `test_pool_saturation_queues_work`
+- [x] `test_completion_order_not_fifo`
+- [ ] **Deferred to Phase 3 or a follow-up** (not blocking Phase 2 commit): `test_sync_agent_processed_inline`, `test_solution_snapshot_processed_inline`, `test_dispatcher_raises_on_unknown_job_type`, `test_submit_emits_running_transition`, `test_submit_lock_ordering_atomic`, `test_fast_lane_not_blocked_by_agentic`, `test_concurrent_transition_to_done_sqlite_thread_safe`, `test_concurrent_notify_from_callbacks`, `test_concurrent_tfe_watchdog_evaluate`. Rationale: fast-lane/sync tests assume the Phase 3 dispatcher switch to `_process_fast_lane` (Phase 2 kept the existing inline dispatch to minimize diff risk); concurrent-SQLite/notify/TFE tests are broader-scope stress tests that don't gate Phase 2 behavioural correctness.
 
 ### Step 2.5 — Documentation touches
 
-- [ ] `src/docs/notification-api.md` — note concurrent `running` cards
-- [ ] `src/docs/websocket-architecture.md` — note interleaved `job_state_transition` events
-- [ ] `src/docs/rest-api-reference.md` — add `/api/queue/pool-status` row
+- [x] `src/docs/rest-api-reference.md` — added `/api/queue/pool-status` row to queue-endpoints table (CLAUDE.md mandatory touchpoint for new router)
+- [ ] **Deferred to a follow-up doc sweep** (not blocking Phase 2 commit): `src/docs/notification-api.md` + `src/docs/websocket-architecture.md` concurrent-running-jobs notes. Rationale: Phase 2 with `N=1` prod default has no observable UX change; Phase 3 + prod N=3 flip are when the docs meaningfully drift.
 
 ### Phase 2 verification
 
@@ -91,9 +83,9 @@ Phase 2 (and Phase 3) Protocol E2E fires `POST /api/push` for "DeepResearch dry-
 
 #### A. `:7999` AI-discretionary
 
-- [ ] EXECUTOR: AI — Full unit regression passes: `pytest src/tests/unit/ -v` (915 baseline + Phase 1 + Phase 2 new tests)
-- [ ] EXECUTOR: AI — `/smoke-test-remediation SELECTIVE` (non-destructive only) — no regressions
-- [ ] EXECUTOR: AI — `./src/scripts/run-websocket-smoke-tests.sh` — 50/50
+- [x] EXECUTOR: AI — Full unit regression: 3582 passed, 1 xfailed, 0 failed in 147.64s (3564 Phase-1 baseline + 18 Phase-2 new = 3582; 3 `test_crud_queue_integration` tests fixed in-session for missing `_lock` after `__new__` bypass of `__init__`).
+- [ ] EXECUTOR: AI — Non-destructive smoke: deferred per :7999 auto-reload suspicion (same as Phase 1 caveat; :7999 server hasn't demonstrably picked up my changes this session).
+- [x] EXECUTOR: AI — `./src/scripts/run-websocket-smoke-tests.sh` — 50/50 pass in 44s.
 
 #### B. `:8000` scheduled monopolize-mode (AI submits via `/api/test-suite/submit` after user slot-check)
 
@@ -131,7 +123,13 @@ Phase 2 (and Phase 3) Protocol E2E fires `POST /api/push` for "DeepResearch dry-
 
 | Date | What diverged | Why |
 |---|---|---|
-| — | — | — |
+| 2026-04-24 | `_agentic_futures_lock` is `threading.RLock()` not `threading.Lock()` | Surfaced during unit-test fixture hang: when a Future completes BEFORE `add_done_callback` returns (fast work, e.g. `sleep(0)` or no-op `do_all`), the callback fires synchronously on the same thread inside `add_done_callback`. That thread is already holding the lock from `_submit_agentic_job`; re-acquiring via `_on_agentic_complete`'s `with self._agentic_futures_lock:` deadlocks a plain Lock. RLock permits same-thread re-entry; cross-thread contention still serialized by RLock semantics. |
+| 2026-04-24 | `_submit_agentic_job` does NOT do the design's step 1 (push) and step 2 (emit) | Lupin's consumer thread in `queue_consumer.py::consumer_worker` already does `running_queue.push(job)` (line 104) + `emit_job_state_transition(QUEUED→RUNNING)` (line 101) before invoking `_process_job` → `_submit_agentic_job`. Doing them again would push-twice and emit a redundant/incorrect RUNNING→RUNNING transition. Design-doc 3-step ordering is preserved system-wide. |
+| 2026-04-24 | Phase 2 MVP kept existing inline fast-lane dispatch in `_process_job`; `_process_fast_lane` added as new method but not yet wired | Scope-minimization: Phase 2 commits only the CODE PATH that changes behaviour (agentic → pool). Fast-lane is semantically identical to today (consumer inline). Phase 3 cleanup can unify via `_process_fast_lane`. Diff-risk tradeoff explicit in history.md. |
+| 2026-04-24 | `_transition_to_done` / `_transition_to_dead` extracted as **new** methods used only by pool callback; existing inline completion blocks in `_handle_agentic_job` / `_handle_base_agent` / `_handle_solution_snapshot` / `_format_cached_result` left in place for Phase 2 MVP | Same scope-minimization. Under `N=1` serial execution, only one codepath runs at a time; the pool-callback path is exercised exactly when agentic jobs complete. Phase 3 cleanup can consolidate; Phase 2 diff contained. |
+| 2026-04-24 | BaseException survivors (KeyboardInterrupt/SystemExit/GeneratorExit) in `_on_agentic_complete` are log-only; NOT dead-lettered | Design doc said "dead-letter on Exception; leave for sweeper on BaseException." Initial impl dead-lettered ALL exceptions from `future.exception()`. Corrected during test development (`test_defensive_callback_handles_base_exception` enforced the distinction). |
+| 2026-04-24 | 9 test cases in `test_agentic_pool.py` deferred | Phase 2 MVP scope; see Step 2.4 for the list + rationale. |
+| 2026-04-24 | `notification-api.md` + `websocket-architecture.md` updates deferred | Phase 2 at N=1 has no observable UX change; Phase 3 / N=3 prod flip is when docs drift. |
 
 ---
 
@@ -139,7 +137,7 @@ Phase 2 (and Phase 3) Protocol E2E fires `POST /api/push` for "DeepResearch dry-
 
 | Date | Commit hash | Summary | Files |
 |---|---|---|---|
-| — | — | — | — |
+| 2026-04-24 | pending | Phase 2 (pool + dispatcher + endpoint + tests + stale E2E fix) | 6 parent-Lupin files modify + 1 new test file; `src/cosa/rest/running_fifo_queue.py` (CoSA) modified — user commits separately |
 
 ---
 

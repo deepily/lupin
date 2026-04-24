@@ -674,13 +674,24 @@ async def lifespan( app: FastAPI ):
         except Exception as e:
             print( f"[WS-CLEANUP] Error during cleanup task shutdown: {e}" )
     
+    # Phase 2 (CJ Flow async multi-lane): drain agentic pool BEFORE consumer stops
+    # and BEFORE HTTP socket closes. In-flight pool workers need the WebSocket
+    # channel alive long enough to emit their final job_state_transition events
+    # as they finish (or are dead-lettered on timeout).
+    if jobs_run_queue is not None and hasattr( jobs_run_queue, "shutdown_pool" ):
+        try:
+            print( "[AGENTIC-POOL] Draining agentic pool before consumer stop..." )
+            jobs_run_queue.shutdown_pool( wait=True, timeout=30.0 )
+        except Exception as e:
+            print( f"[AGENTIC-POOL] Error during pool drain (continuing): {e}" )
+
     # Shutdown consumer thread
     if consumer_thread:
         print( "[CONSUMER] Stopping todo-producer-run-consumer thread..." )
         with jobs_todo_queue.condition:
             jobs_todo_queue.consumer_running = False
             jobs_todo_queue.condition.notify()
-        
+
         # Wait for consumer thread to finish
         consumer_thread.join( timeout=5.0 )
         if consumer_thread.is_alive():
