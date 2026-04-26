@@ -67,9 +67,19 @@ class TestPodcastCompletionReport:
 
         abstract = completion_call.kwargs[ "abstract" ]
         assert "**Segments**: 5" in abstract
-        assert "io/podcasts/user1/final.mp3" in abstract
-        assert "io/podcasts/user1/script.md" in abstract
+        # Audio: Listen routes to the in-app player; Download streams raw mp3.
+        assert "/app/audio?path=podcasts/user1/final.mp3" in abstract
+        assert "/api/io/file?path=podcasts/user1/final.mp3&download=true" in abstract
+        assert "Listen" in abstract and "Download" in abstract
+        # Script: in-app docs viewer link
+        assert "/app/docs?path=podcasts/user1/script.md" in abstract
         assert "~3.5 min" in abstract
+
+        # Artifacts must store RELATIVE paths (UI job-card builds URLs from these,
+        # matches presentation_generator convention).
+        assert podcast.artifacts[ "audio_path" ]  == "podcasts/user1/final.mp3"
+        assert podcast.artifacts[ "script_path" ] == "podcasts/user1/script.md"
+        assert podcast.artifacts[ "report_path" ] == "podcasts/user1/script.md"
 
     @pytest.mark.asyncio
     async def test_completion_notify_called_on_script_only( self ):
@@ -104,6 +114,56 @@ class TestPodcastCompletionReport:
         tts_msg = completion_call.args[ 0 ]
         assert "script complete" in tts_msg.lower()
         assert "audio rendering pending" in tts_msg.lower()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize( "audio_in, script_in", [
+        # absolute path under project_root/io/
+        ( "/var/lupin/io/podcasts/u/final.mp3", "/var/lupin/io/podcasts/u/script.md" ),
+        # relative with "io/" prefix
+        ( "io/podcasts/u/final.mp3",            "io/podcasts/u/script.md" ),
+        # leading slash, no io/
+        ( "/podcasts/u/final.mp3",              "/podcasts/u/script.md" ),
+    ] )
+    async def test_completion_url_path_normalization( self, audio_in, script_in, monkeypatch ):
+        """Audio/script paths in any form → relative under io/ in artifacts + URLs."""
+        # Pin project_root so the absolute-prefix branch matches
+        monkeypatch.setattr( "cosa.utils.util.get_project_root", lambda: "/var/lupin" )
+
+        podcast = _make_podcast_job()
+
+        mock_script = MagicMock()
+        mock_script.get_segment_count.return_value = 1
+        mock_script.estimated_duration_minutes = 0.5
+
+        mock_agent = MagicMock()
+        mock_agent.do_all_async = AsyncMock( return_value=mock_script )
+        mock_agent.podcast_id = "pod-norm"
+        mock_agent._podcast_state = {
+            "final_audio_path"  : audio_in,
+            "final_script_path" : script_in,
+        }
+        mock_agent._api_client = None
+
+        with patch( "cosa.agents.podcast_generator.voice_io.notify", new_callable=AsyncMock ) as mock_notify, \
+             patch( "cosa.agents.podcast_generator.voice_io.reconfigure" ), \
+             patch( "cosa.agents.podcast_generator.voice_io.clear_job_id" ), \
+             patch( "cosa.agents.podcast_generator.cosa_interface" ), \
+             patch( "cosa.agents.podcast_generator.orchestrator.PodcastOrchestratorAgent", return_value=mock_agent ), \
+             patch( "os.path.exists", return_value=True ):
+            await podcast._execute()
+
+        # All three input shapes normalize to the same relative paths
+        assert podcast.artifacts[ "audio_path" ]  == "podcasts/u/final.mp3"
+        assert podcast.artifacts[ "script_path" ] == "podcasts/u/script.md"
+
+        completion_call = next(
+            c for c in mock_notify.call_args_list
+            if c.kwargs.get( "abstract" ) and "Podcast Activity Report" in c.kwargs[ "abstract" ]
+        )
+        abstract = completion_call.kwargs[ "abstract" ]
+        assert "/app/audio?path=podcasts/u/final.mp3"             in abstract
+        assert "/api/io/file?path=podcasts/u/final.mp3&download=true" in abstract
+        assert "/app/docs?path=podcasts/u/script.md"              in abstract
 
     @pytest.mark.asyncio
     async def test_completion_notify_not_called_on_cancellation( self ):

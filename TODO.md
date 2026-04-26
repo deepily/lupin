@@ -1,6 +1,13 @@
 # TODO
 
-Last updated: 2026-04-24 EDT session-end (Session 616112aa — v0.1.7 async-pool code complete. Phase 1 fe932ba, Phase 2 9adfc26, Phase 2 fix 9eb764b, Phase 3 2379233, docs polish d35a330. Phase 2 :8000 gate ran GREEN vs yesterday's Phase 1 baseline. Evening jobs scheduled before stepping away.)
+Last updated: 2026-04-25 EDT session-end (Session 6c798a07 — Podcast generator URL bug fix. Completion abstract now emits clickable Listen → /app/audio (player page), Download → /api/io/file&download=true, View Script → /app/docs links. CoSA-side fix at agents/podcast_generator/job.py; tests updated in parent at src/tests/unit/test_podcast_completion_report.py. History.md auto-archived 2026-04-14 → 04-21 — 12 sessions, 12,979 tokens.)
+
+---
+
+## ✅ COMPLETED — Session 6c798a07 (2026-04-25)
+
+- [x] [LUPIN] **Podcast generator completion abstract — clickable URLs** — Listen routes to in-app `/app/audio` player page (HTML5 player + script subtitle + embedded download); Download → `/api/io/file?path=...&download=true`; View Script → `/app/docs?path=...`. Path-normalization helper `_to_rel()` handles abs / `io/` / `/` input shapes, mirrors `presentation_generator/job.py` pattern. Artifacts now store relative paths (UI job-card consumption). 6/6 podcast completion unit tests pass + 26/26 broader podcast-related. **Code in CoSA submodule** (managed separately): `src/cosa/agents/podcast_generator/job.py`. **Parent Lupin**: `src/tests/unit/test_podcast_completion_report.py` (test updates + new parametrized normalization test).
+- [x] [LUPIN] **History archive** — 24,283 → 11,715 tokens (97.1% → 46.8%); created `history/2026-04-14-to-21-history.md` (12 sessions, 12,979 tokens); index updated.
 
 ---
 
