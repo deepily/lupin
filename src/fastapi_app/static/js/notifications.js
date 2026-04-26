@@ -2651,7 +2651,7 @@ class NotificationsUI {
             const schedulingParams = this._getSchedulingParams( 'research' );
             let body = { query: topic, budget: budget, dry_run: dryRun, ...schedulingParams };
             if ( withPodcast ) {
-                body.target_languages = [ 'en' ];
+                body.target_languages = [ 'en', 'es-MX' ];
             } else if ( withPresentation ) {
                 body.target_duration_minutes = 15;
             }
@@ -2738,7 +2738,7 @@ class NotificationsUI {
                 },
                 body: JSON.stringify({
                     research_source: source,
-                    target_languages: [ 'en' ],
+                    target_languages: [ 'en', 'es-MX' ],
                     dry_run: dryRun,
                     ...this._getSchedulingParams( 'podcast' )
                 })

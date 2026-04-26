@@ -1,5 +1,51 @@
 # Lupin Project History
 
+### 2026.04.26 - Session ee896fa3 | cosa-voice MCP startup fix + podcast tuning + server-lifecycle skill
+
+**Context**: Three discrete pieces of work in one session — (1) MCP server failed to connect at session start; (2) user wanted podcast speakers more animated/faster-feeling and the submission UI to default to dual-language; (3) post-fix, user asked to canonize the bounce-vs-update knowledge as a skill.
+
+#### Checkpoint | 2026.04.26 13:36 EDT | MCP startup fix + podcast tuning + server-lifecycle skill build
+
+**Stage 1 — cosa-voice MCP failing to connect**
+- Root cause: `~/.lupin/config` had a duplicate `email`/`password` pair under `[lupin-mobile]` because the `[cosa]` section header was missing before the second pair. `configparser.read()` raised `DuplicateOptionError`, which crashed the MCP server during `_validate_repo_account()` at `cosa_voice_mcp.py:295`.
+- Fix: user inserted the missing `[cosa]` section header. Verified via manual stdio boot — server reached "Session ready" + FastMCP handshake.
+- No project-tree changes (config is in user home).
+
+**Stage 2 — Podcast generator tuning** (3 files in parent + 1 in CoSA submodule)
+- `src/conf/lupin-app.ini` :663, :670 — ElevenLabs `style` 0.40 → **0.65** (Nora), 0.50 → **0.70** (Quentin) for more expressive delivery
+- `src/conf/lupin-app-splainer.ini` :210, :215 — `Default:` annotations resync'd
+- `src/cosa/agents/podcast_generator/config.py` :219, :236 (CoSA submodule, managed separately) — Nora tone "highly animated, fast-paced, and inquisitive"; Quentin tone "energetic, warm, and authoritative"
+- `src/fastapi_app/static/js/notifications.js` :2666, :2753 — `target_languages: [ 'en' ]` → `[ 'en', 'es-MX' ]` for default dual-language submissions
+- Verification: `py_compile` clean on `config.py`; new INI values confirmed live in container after `docker restart lupin-rest-dev`. Subjective audio quality is ear-test only — explicitly not automatable.
+
+**Stage 3 — `server-lifecycle` skill + memory consolidation**
+- New skill at `.claude/skills/server-lifecycle/` with `SKILL.md` + `references/change-impact-matrix.md`. Encodes the per-server reload-regime asymmetry: `:7999` dev runs `--reload` ON (`.py` only), `:8000` test runs `reload=False` deliberately so concurrent dev work doesn't poison a running test on the snapshot.
+- Three behavioral rules baked in: (1) NEVER volunteer a `:7999` bounce; (2) queue-check courtesy before `:7999` SIGKILL; (3) `:8000` is NEVER bounced ad-hoc — monopolize-mode protocol via `/api/test-suite/submit` only.
+- Decision matrix: `.py` (dev: auto-reload, test: bounce), `.ini` (both: bounce), static (both: hard-refresh), `docker-compose.yml`/`Dockerfile`/`requirements.txt`/`.env` (down/up or build/up — `restart` alone silently does nothing).
+- `CLAUDE.md` § RUNNING/TESTING FASTAPI APPLICATIONS — added pointer line to the skill.
+- Memory: slimmed `feedback_dev_server_bounce_via_docker.md` to a pointer; cross-linked the three keep-memories (`feedback_dev_server_bounce_courtesy.md`, `feedback_fastapi_auto_reload.md`, `feedback_test_server_monopolize_mode.md`).
+
+**ASR gotcha noted**: user's MacBook ASR mistranscribed "Docker" as "doctor" mid-session ("use the doctor command"). Captured in skill as a phonetic-neighbor heuristic.
+
+**Anti-pattern caught**: I improvised a SIGTERM dance on the host-visible Python PID before realizing both servers are containerized. The "bounce" worked only because Docker's restart policy respawned the container — but the canonical command is `docker restart lupin-rest-dev`. Now codified in the skill.
+
+#### Files Modified (parent Lupin only — CoSA submodule managed separately)
+- `src/conf/lupin-app.ini`
+- `src/conf/lupin-app-splainer.ini`
+- `src/fastapi_app/static/js/notifications.js` (split-staged: only my 2 hunks committed; parallel-session WIP left unstaged)
+- `CLAUDE.md`
+- `.claude/skills/server-lifecycle/SKILL.md` (new)
+- `.claude/skills/server-lifecycle/references/change-impact-matrix.md` (new)
+- `history.md`
+
+**CoSA submodule** (managed in its own context): `src/cosa/agents/podcast_generator/config.py`
+
+**Status**: Checkpoint committed; session continues.
+
+**Commit**: 3f37b03
+
+---
+
 ### 2026.04.25 - Session 6c798a07 | Bug Fix: Podcast generator completion abstract — clickable URLs (Listen → in-app player, Download, View Script)
 
 **Context**: User submitted a podcast generation job (pg-6bcf412d), it completed, but the completion notification's abstract showed bare filesystem paths in backticks instead of clickable URLs — no way to play or download the generated MP3 from the UI. Two-stage fix in one session.
