@@ -1601,6 +1601,45 @@
         }
 
         /* ========================================
+           PER-SESSION CONVERSATION MODE TOGGLE
+           Default = notification mode (🔔). Active = conversation mode (📞).
+           Server-canonical: bridge file → WebSocket conversation_mode_changed.
+           ======================================== */
+        .sender-conversation-mode-btn {
+            background: rgba( 108, 117, 125, 0.15 );
+            border: 1px solid rgba( 108, 117, 125, 0.3 );
+            border-radius: 4px;
+            cursor: pointer;
+            padding: 2px 8px;
+            margin-left: 6px;
+            font-size: 0.85em;
+            opacity: 0.8;
+            transition: all 0.2s ease;
+        }
+
+        .sender-conversation-mode-btn:hover {
+            opacity: 1;
+            background: rgba( 108, 117, 125, 0.25 );
+            border-color: rgba( 108, 117, 125, 0.5 );
+            transform: scale( 1.05 );
+        }
+
+        .sender-conversation-mode-btn:active {
+            transform: scale( 0.95 );
+        }
+
+        .sender-conversation-mode-btn.is-active {
+            background: rgba( 25, 135, 84, 0.25 );
+            border-color: rgba( 25, 135, 84, 0.6 );
+            opacity: 1;
+        }
+
+        .sender-conversation-mode-btn.is-active:hover {
+            background: rgba( 25, 135, 84, 0.35 );
+            border-color: rgba( 25, 135, 84, 0.85 );
+        }
+
+        /* ========================================
            SESSION NAME EDIT MODAL (Voice-First)
            ======================================== */
 

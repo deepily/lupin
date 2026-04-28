@@ -1,5 +1,48 @@
 # Lupin Project History
 
+### 2026.04.27 - Session aabece5e | Conversation Mode for Claude Code (per-session toggle via cosa-voice MCP)
+
+**Context**: User invoked `/p-is-p-00-start-here` then pivoted into a free-form design conversation about ergonomic friction during voice-driven dialogue from the cosa-voice notification UI session pane: every assistant turn required manually saying "speak your answer as high priority", breaking natural back-and-forth. Outcome: a new session-level toggle ("conversation mode" vs default "notification mode") with four convergent activation surfaces (voice phrase, slash command, MCP tool, UI toggle button), server-canonical state in the existing `~/.claude/sessions/cc-{PPID}.json` bridge, and WebSocket sync to keep multiple UI tabs aligned. Pattern 3 Feature Dev, ~1 week scope, executed end-to-end in this session via plan-then-auto-mode.
+
+**Accomplishments**:
+
+- **Phase 0 — R&D companion doc** at `src/rnd/v0.1.7/2026.04.27-conversation-mode-design.md`: locked decisions table, integration map from Phase 1 Explore agents, gotcha catalog, test plan.
+- **Phase 1 — Bridge schema + helpers** in `src/lupin_cli/claude_code/hooks/lib/session_bridge.py`: added `find_session_path_by_id()`, `get_conversation_mode()`, `set_conversation_mode()` following the existing read-modify-write JSON pattern. Inline smoke extended. 10 new pytest tests in `test_session_bridge_lookup.py` covering round-trip, per-session_id isolation, missing-bridge graceful failure, field preservation.
+- **Phase 2 — MCP tools + behavioral instructions** in `src/lupin_mcp/cosa_voice_mcp.py`: extended `instructions=` block with the conversation-mode rule (Claude reads `get_session_info()['conversation_mode_active']`, auto-`notify(full_text, suppress_ding=True)` after every turn when on, strips fenced code blocks + tool-call narration, no length cap). Added `enter_conversation_mode()` and `exit_conversation_mode()` `@mcp.tool` functions + `_flip_conversation_mode()` helper. `get_session_info()` now returns `conversation_mode_active` from the bridge. 6 new pytest tests in `test_cosa_voice_mcp_conversation_mode.py`.
+- **Phase 3 — HTTP endpoint + WebSocket event**: new router `src/cosa/rest/routers/conversation_mode.py` (CoSA-side per existing convention; plan deviation logged — `src/fastapi_app/routers/` doesn't exist). `GET/POST /api/cosa-voice/conversation-mode/{session_id}` with `@require_api_key_or_jwt` + `emit_to_user(authenticated_user_id, "conversation_mode_changed", {...})` broadcast. Wired in `src/fastapi_app/main.py` (import + include_router). INI allowlist updated: `websocket available events` += `conversation_mode_changed` in `lupin-app.ini` + `lupin-app-splainer.ini`. 7 new pytest tests in `test_conversation_mode_router.py` (mocked WebSocketManager).
+- **Phase 4 — UI toggle widget**: `notifications.js` got `CONVERSATION_MODES_KEY` localStorage (object keyed by session_id, mirrors `SESSION_NAMES_KEY` pattern), `conversationModes` cache, WebSocket subscription update, `case "conversation_mode_changed"` dispatch, `toggleConversationMode()`/`handleConversationModeChanged()`/`_setConversationModeLocal()` methods, and a per-session toggle button in the sender-card header (`data-session-id` selector for cross-tab updates). `notifications.css` got `.sender-conversation-mode-btn` styles matching the gist-btn pattern with green `.is-active` variant. Icon corrected from 🔕 (muted bell — semantically backwards) to 🔔 (plain bell — notifications happening) per user feedback.
+- **Phase 5 — Slash commands**: `/conversation-mode-on` and `/conversation-mode-off` at `.claude/commands/`. Both registered.
+- **Phase 6 — E2E test file written, execution gated**: `src/tests/e2e_ui/test_conversation_mode.py` Playwright tests for cache hydration + DOM presence. NOT submitted to `:8000` (per E2E two-phase gate — needs user-confirmed slot via `/api/test-suite/submit`).
+- **Bind mount fix discovered live**: first toggle attempt in browser returned 404 because `:7999` Docker container had no bind mount for `~/.claude/sessions/`. Added `~/.claude/sessions:/home/rruiz/.claude/sessions` (rw) to `docker-compose.yml`, recreated container via `docker compose up -d --force-recreate lupin-rest-dev` (a plain `docker restart` won't re-evaluate volumes). Verified bridge files now visible inside container.
+- **23 new pytest tests across 3 files, 52/52 pass** including pre-existing session_bridge suite.
+
+**Files Modified (parent Lupin only — CoSA submodule managed separately)**:
+- `src/lupin_cli/claude_code/hooks/lib/session_bridge.py`
+- `src/lupin_mcp/cosa_voice_mcp.py`
+- `src/fastapi_app/main.py`
+- `src/fastapi_app/static/js/notifications.js` (layered on pre-existing parallel-session WIP)
+- `src/fastapi_app/static/css/notifications.css`
+- `src/conf/lupin-app.ini`
+- `src/conf/lupin-app-splainer.ini`
+- `src/tests/unit/test_session_bridge_lookup.py`
+- `docker-compose.yml`
+- `history.md`
+
+**Files Created (parent Lupin)**:
+- `src/rnd/v0.1.7/2026.04.27-conversation-mode-design.md`
+- `src/tests/unit/test_cosa_voice_mcp_conversation_mode.py`
+- `src/tests/unit/test_conversation_mode_router.py`
+- `src/tests/e2e_ui/test_conversation_mode.py`
+- `.claude/commands/conversation-mode-on.md`
+- `.claude/commands/conversation-mode-off.md`
+
+**CoSA submodule** (managed in its own context — not committed from this session):
+- `src/cosa/rest/routers/conversation_mode.py` (new)
+
+**Status**: Implementation complete across Phases 0-5. Phase 6 file written; E2E execution awaits user-confirmed `:8000` slot. No commits yet.
+
+---
+
 ### 2026.04.27 - Session 09f4c557 | Docker image hygiene: 130 GB → 31.6 GB (Tier 0+1 + cuda-compat fix + drop recursive chown + audioop-lts) + Lance DB cleanup
 
 **Context**: Day-long arc. Started reviewing CJ-flow phase-3 test results; ended having cut the production image from 130 GB to 31.6 GB across three iterative rebuilds, reclaimed 16.67 GB on the lancedb, fixed two regressions caught at sanity-boot time (CUDA Error 804 on RTX 4090s; `pydub` import failing on Python 3.13), and bounced both servers onto the new image.
@@ -45,13 +88,41 @@
 
 ---
 
-### 2026.04.27 - Session 49c27830 | Bug Fix Mode
+### 2026.04.27 - Session 49c27830 | Bug Fix Mode — Notification dispatch unification (cross-user CC-listener fallback)
 
-#### Fixes
-(Individual fixes will be added here)
+**Context**: USER-REPORTED bug — 3 user-initiated messages from the LookML CC notifications panel UI targeting CC session `b2ce9133` were silently dropped. Forensic dive surfaced a duplicated dispatch pattern across 6 sites with inconsistent behavior. Day's arc: narrow fix → audit → planned full unification → executed Phases A-F.
 
-#### Session Summary
-(Will be completed at session close)
+**Fixes**:
+
+- **Narrow fix — `POST /api/notify` fire-and-forget cross-user listener fallback**: 3 `user_initiated_message` rows persisted with `state='created'` because `notify_user` short-circuited on `is_user_connected(target_system_id)=False` even though `cc-listener-{job_id}` was active under a shared service-account user_id. Added inline cross-user fallback (`src/cosa/rest/routers/notifications.py:504-575`). 5 unit tests in `src/tests/unit/test_notify_cc_listener_fallback.py`.
+
+- **Full fix — Notification dispatch unification (Phases A-F)**: Comprehensive audit found 6 sites with the same dispatch pattern, 2 missing the listener fallback entirely. Extracted `WebSocketManager.emit_to_user_or_listener_sync(user_id, job_id, event, data) -> dict` (~95 lines incl. docstring) as a sibling to the canonical `emit_to_user_and_admins_sync` precedent. Migrated 5 dispatch sites onto the helper:
+  1. `notify_user` fire-and-forget — replaced narrow fix with helper call
+  2. `notification_expired` SSE timeout broadcast — gained the listener fallback
+  3. `notification_responded` response-submission broadcast — gained the listener fallback
+  4. `send_job_message` (`queues.py`) — collapsed 40-line dual-emit to ~20 lines
+  5. `_emit_notification_added` (notification_fifo_queue.py) — collapsed targeted-user + listener emits
+
+- **Wrapped yesterday's 7-test fix**: marked the 7 self-inflicted E2E test regressions from the 2026-04-26 :8000 sweep as Completed in bug-fix-queue.md.
+
+**Files (CoSA, user commits separately)**:
+- `src/cosa/rest/websocket_manager.py` (new helper)
+- `src/cosa/rest/routers/notifications.py` (Migrations 1, 2, 3)
+- `src/cosa/rest/routers/queues.py` (Migration 4)
+- `src/cosa/rest/notification_fifo_queue.py` (Migration 5)
+
+**Files (Lupin)**:
+- `src/tests/unit/test_websocket_manager_dispatch.py` (NEW — 9 helper unit tests)
+- `src/tests/unit/test_notify_cc_listener_fallback.py` (UPDATED — 5 helper-aware + 2 new structural)
+- `bug-fix-queue.md` (Completed entries: dispatch unification + 7-test fix; narrow-fix entry marked superseded)
+
+**Tests**: Lupin unit suite **3672 passed, 1 xfailed, 0 failed** (was 3638 pre-session → +34 tests). With CoSA notification fifo queue tests: **3677 passed**. WebSocket smoke **50/50 pass**. Final grep audit: **zero** `emit_to_session_sync` calls in 3 migrated routers; helper is the single chokepoint.
+
+**Plan**: `~/.claude/plans/dazzling-napping-frost.md` (full Phase A-F design + verification steps).
+
+**Deploy status**: Helper + 5 migrations are backwards-compatible. `:7999`/`:8000` still on pre-fix bytecode (held off bouncing — user is rebuilding v1.0.0 image and other CC sessions are active). Live deployment pending.
+
+**Out-of-scope follow-ups filed**: TFE/BFE post-resume proposal-review UX gap; `:7999` StatReload watcher recovery; CC-listener answer-response wiring; service-account → operator routing helper.
 
 ---
 

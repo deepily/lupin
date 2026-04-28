@@ -70,7 +70,8 @@ from cosa.utils.notification_utils import (
 from cosa.agents.utils.sender_id import detect_project as _detect_project_shared
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, wait_for_session_id, get_session_metadata as _get_cc_metadata,
-    clear_cached_session_id, _find_session_file, _read_session_file
+    clear_cached_session_id, _find_session_file, _read_session_file,
+    get_conversation_mode, set_conversation_mode
 )
 from lupin_cli.claude_code.hooks.lib.hook_common import log_to_stream
 
@@ -560,7 +561,26 @@ def _wait_for_sender_id( timeout: float = 12.0 ) -> str:
 
 mcp = FastMCP(
     name="CoSA Voice Bridge",
-    instructions=f"Voice I/O for Claude Code [Session: {SENDER_ID}]"
+    instructions=(
+        f"Voice I/O for Claude Code [Session: {SENDER_ID}]\n\n"
+        f"## Conversation Mode\n\n"
+        f"This session has a 'conversation mode' toggle backed by the bridge file. "
+        f"At session start (and after any /clear), check `get_session_info()` once to read "
+        f"the `conversation_mode_active` flag and act accordingly:\n\n"
+        f"- **notification mode** (default, conversation_mode_active=false): respond normally; "
+        f"speaking via TTS only happens when YOU explicitly call notify(), converse(), or ask_*().\n"
+        f"- **conversation mode** (conversation_mode_active=true): the user is at a distance, "
+        f"listening via TTS rather than reading the terminal. After every assistant turn, call "
+        f"`notify(message=<full text of your response>, suppress_ding=True, priority='high')` "
+        f"so the response is spoken aloud. Strip fenced code blocks and tool-call narration from "
+        f"the spoken text (those are TTS-hostile). No length cap — speak the full response.\n\n"
+        f"To toggle modes, call `enter_conversation_mode()` or `exit_conversation_mode()`. "
+        f"The user may say 'enter conversation mode' / 'exit conversation mode' (or close paraphrases) "
+        f"in voice — pattern-match those phrases and call the corresponding tool, then continue with "
+        f"the new mode in effect.\n\n"
+        f"The toggle state survives /clear within this session (stored in the bridge file). "
+        f"A fresh Claude Code session starts in notification mode."
+    )
 )
 
 
@@ -1141,30 +1161,105 @@ def get_session_info() -> dict:
 
     Returns:
         dict with project name, session_id, sender_id, server_url, version,
-        and claude_code metadata from the session bridge
+        conversation_mode_active flag, and claude_code metadata from the session bridge
     """
     resolved_sender = _wait_for_sender_id()
     info = {
-        "project"        : PROJECT,
-        "project_source" : _PROJECT_SOURCE,
-        "session_id"     : SESSION_ID,
-        "sender_id"      : resolved_sender,
-        "server_url"     : SERVER_URL,
-        "version"        : __version__
+        "project"                  : PROJECT,
+        "project_source"           : _PROJECT_SOURCE,
+        "session_id"               : SESSION_ID,
+        "sender_id"                : resolved_sender,
+        "server_url"               : SERVER_URL,
+        "version"                  : __version__,
+        "conversation_mode_active" : False
     }
 
     # Include CC session bridge metadata when available
     try:
         cc_meta = _get_cc_metadata()
-        info["claude_code"] = {
+        info[ "claude_code" ] = {
             "session_id"        : cc_meta.get( "session_id", "" ),
             "stable_session_id" : cc_meta.get( "stable_session_id", "" ),
             "source"            : cc_meta.get( "source", "unknown" )
         }
+        # Read conversation_mode_active from the same bridge metadata
+        info[ "conversation_mode_active" ] = bool( cc_meta.get( "conversation_mode_active", False ) )
     except Exception:
         pass
 
     return info
+
+
+def _flip_conversation_mode( active: bool ) -> dict:
+    """
+    Internal helper: flip conversation_mode_active in this session's bridge file.
+
+    Resolves the bridge by stable_session_id (preferred for /clear-resistance), falling
+    back to session_id then SESSION_ID prefix. Writes via session_bridge.set_conversation_mode.
+
+    NOTE: This does NOT broadcast a WebSocket conversation_mode_changed event.
+    Real-time UI sync arrives via Phase 3's HTTP endpoint when the UI toggle button is
+    clicked. When this MCP tool flips the state, other connected UI clients see the
+    new value on their next page reload (via the GET endpoint) or get_session_info() poll.
+
+    Requires:
+        - active is a bool
+
+    Ensures:
+        - Returns dict with status="ok" and conversation_mode_active=<new state> on success
+        - Returns dict with status="error" and reason on failure
+        - Never raises exceptions
+    """
+    try:
+        cc_meta = _get_cc_metadata()
+        sid = cc_meta.get( "stable_session_id" ) or cc_meta.get( "session_id" ) or SESSION_ID
+    except Exception:
+        sid = SESSION_ID
+
+    if not sid:
+        return { "status": "error", "reason": "No session_id available" }
+
+    ok = set_conversation_mode( sid, active )
+    if not ok:
+        return { "status": "error", "reason": "Bridge file not found or write failed", "session_id": sid }
+
+    return {
+        "status"                   : "ok",
+        "session_id"               : sid,
+        "conversation_mode_active" : active,
+        "ui_sync"                  : "deferred (other tabs reflect on reload until Phase 3 WS broadcast lands)"
+    }
+
+
+@mcp.tool
+def enter_conversation_mode() -> dict:
+    """
+    Enter conversation mode for this session.
+
+    When conversation mode is on, after every assistant turn you should call
+    `notify(message=<full_response_text>, suppress_ding=True, priority='high')` so the
+    response is spoken aloud (the user is listening at a distance via TTS, not reading
+    the terminal). Strip fenced code blocks and tool-call narration from the spoken text.
+
+    State is stored in the bridge file and survives /clear within this session.
+
+    Returns:
+        dict with status, session_id, conversation_mode_active=True on success
+    """
+    return _flip_conversation_mode( True )
+
+
+@mcp.tool
+def exit_conversation_mode() -> dict:
+    """
+    Exit conversation mode (revert to default notification mode) for this session.
+
+    In notification mode, TTS only fires when YOU explicitly call notify(), converse(), or ask_*().
+
+    Returns:
+        dict with status, session_id, conversation_mode_active=False on success
+    """
+    return _flip_conversation_mode( False )
 
 
 if __name__ == "__main__":

@@ -11,6 +11,18 @@
 // Also mirrored in notifications.html inline <script> as FILE_DRIVEN_TEST_TYPES_HTML.
 const FILE_DRIVEN_TEST_TYPES = new Set( [ 'smoke_direct', 'pytest_direct' ] );
 
+// Delete-handler routing for job cards. Replaces the prior `_isHistory` boolean
+// flag pattern with a queueName-keyed lookup table — single chokepoint, easy to
+// extend, no string-template branching in the renderer.
+// See src/rnd/v0.1.7/2026.04.26-cj-flow-card-rendering-unification/04-frontend-flag-removal.md
+const DELETE_HANDLERS = {
+    todo    : ( jobId, queueName ) => window.notificationsUI.deleteQueueJob( jobId, queueName ),
+    run     : ( jobId, queueName ) => window.notificationsUI.deleteQueueJob( jobId, queueName ),
+    done    : ( jobId, queueName ) => window.notificationsUI.deleteQueueJob( jobId, queueName ),
+    dead    : ( jobId, queueName ) => window.notificationsUI.deleteQueueJob( jobId, queueName ),
+    history : ( jobId )            => window.notificationsUI.deleteHistoryJob( jobId )
+};
+
 class NotificationsUI {
     constructor() {
         // Configuration
@@ -143,10 +155,16 @@ class NotificationsUI {
         this.SESSION_NAMES_KEY = 'notifications_session_names';  // Persist user-edited session names
         this.RESUME_MODEL_PREF_KEY  = 'notifications_resume_model';   // Default model for stalled-job resume (TFE/BFE)
         this.RESUME_EFFORT_PREF_KEY = 'notifications_resume_effort';  // Default thinking-effort for stalled-job resume
+        this.CONVERSATION_MODES_KEY = 'notifications_conversation_modes';  // Per-session conversation/notification toggle (object keyed by session_id)
         this.CURRENT_VERSION = '2.0.0'; // Increment to invalidate old cache - date grouping release
 
         // Session names cache (loaded from localStorage)
         this.sessionNames = JSON.parse( localStorage.getItem( this.SESSION_NAMES_KEY ) ) || {};
+
+        // Conversation mode cache (per-session: { [sessionId]: bool }). Read-through cache for instant
+        // render — server-canonical state lives in the cosa-voice bridge file and arrives via the
+        // conversation_mode_changed WebSocket event.
+        this.conversationModes = JSON.parse( localStorage.getItem( this.CONVERSATION_MODES_KEY ) ) || {};
 
         // User role and filter state
         this.userRoles = [];  // NEW: User's roles from JWT
@@ -2199,6 +2217,7 @@ class NotificationsUI {
                 "notification_queue_update",
                 "notification_responded",  // Phase 2.2 SSE - multi-device sync
                 "notification_expired",    // Phase 2.2 SSE - timeout handling
+                "conversation_mode_changed",  // Per-session conversation/notification toggle (cosa-voice MCP)
                 // job_paused/job_resumed removed — now handled as job_state_transition events
                 "auth_success",
                 "auth_error",
@@ -2327,6 +2346,12 @@ class NotificationsUI {
                 case "notification_play_sound":
                     // Subscribed event — no-op handler to prevent "Unhandled message type" console noise
                     this.log( `[QUEUE WS] notification_play_sound received (priority: ${envelope.priority || 'default'})` );
+                    break;
+
+                case "conversation_mode_changed":
+                    // Per-session conversation/notification toggle update (cosa-voice MCP).
+                    // Server is canonical; we hydrate the localStorage cache and update the matching toggle widget.
+                    this.handleConversationModeChanged( envelope );
                     break;
 
                 case "sys_time_update":
@@ -6025,60 +6050,33 @@ class NotificationsUI {
 
     renderHistoryCard( job ) {
         /**
-         * Adapt a PostgreSQL job history record to renderJobCard() format.
+         * Render a history-pane job card.
+         *
+         * After the 2026-04-26 unification (A1+B+C), this is a thin splicer:
+         * `/api/job-history` returns the same flat shape as `/api/get-queue/done`
+         * (per src/cosa/rest/job_persistence.py:_build_history_row), so no
+         * adapter normalization is needed here. We just normalize `job_id`
+         * (history rows use `id_hash` as primary key but the response now also
+         * sets `job_id` for parity), call the unified renderer with
+         * queueName='history', and splice the prominent history-specific
+         * action buttons (Delete / Retry) at card close.
          *
          * Requires:
-         *     - job is a dict from /api/job-history with id_hash, metadata_json, etc.
+         *     - job is a flat dict from /api/job-history (Phase 1 shape, 2026-04-26+)
          *
          * Ensures:
-         *     - Normalizes DB record shape to renderJobCard expected shape
-         *     - Maps status to queue name for correct styling
-         *     - Appends management action buttons (delete, retry)
+         *     - Returns full card HTML rendered via the unified renderJobCard path
+         *     - Appends management action buttons (delete, optional retry)
          */
-        const metadata = job.metadata_json || {};
+        // Render using the unified renderer with queueName='history'.
+        // renderJobCard's queueName-driven branches handle history-aware
+        // behavior (completion badges, interactions indicator, delete routing).
+        let cardHtml = this.renderJobCard( job, 'history' );
 
-        // Normalize history record to match renderJobCard expected shape
-        const normalized = {
-            job_id           : job.id_hash,
-            question_text    : job.question_text || '',
-            timestamp        : job.created_at,
-            agent_type       : metadata.agent_type || job.job_type || '',
-            response_text    : metadata.response_text || null,
-            abstract         : metadata.abstract || null,
-            report_path               : metadata.report_link || null,
-            remediation_snapshot_path : metadata.remediation_snapshot_path || null,
-            yaml_path                 : metadata.yaml_path || ( metadata.artifacts && metadata.artifacts.yaml_path ) || null,
-            pptx_path                 : metadata.pptx_path || ( metadata.artifacts && metadata.artifacts.pptx_path ) || null,
-            cost_summary              : metadata.cost_summary || null,
-            is_cache_hit     : job.is_cache_hit || false,
-            has_interactions  : false,
-            started_at       : job.started_at,
-            completed_at     : job.completed_at,
-            duration_seconds : job.duration_seconds,
-            status           : job.status,
-            error            : job.error,
-            session_id       : job.session_id,
-            user_email       : job.user_email || metadata.user_email || null,
-            scheduled_at     : metadata.scheduled_at || null,
-            monopolize       : metadata.monopolize || false,
-            paused           : metadata.paused || false,
-            _isHistory       : true
-        };
-
-        // Map history status to queue name for styling
-        const statusToQueue = {
-            completed   : 'done',
-            failed      : 'dead',
-            interrupted : 'dead',
-            pending     : 'todo',
-            running     : 'run'
-        };
-        const queueName = statusToQueue[ job.status ] || 'done';
-
-        // Render using existing renderJobCard
-        let cardHtml = this.renderJobCard( normalized, queueName );
-
-        // Inject management action buttons before the last closing </div> of the card
+        // Inject management action buttons before the last closing </div> of the card.
+        // These are the prominent styled "🗑 Delete" / "↻ Retry" buttons distinct
+        // from the small ✕ in the card header. Kept as a splice (rather than inlined
+        // into renderJobCard) to preserve their visual UX placement at card-bottom.
         const actionsHtml = this.renderHistoryActions( job );
         const lastDivClose = cardHtml.lastIndexOf( '</div>' );
         if ( lastDivClose > 0 ) {
@@ -6118,6 +6116,31 @@ class NotificationsUI {
                 ${retryBtn}${deleteBtn}
             </div>
         `;
+    }
+
+    _dispatchDelete( jobId, queueName ) {
+        /**
+         * Single chokepoint for card-level delete actions.
+         *
+         * Looks up the appropriate handler in DELETE_HANDLERS by queueName and
+         * invokes it. Replaces the prior `job._isHistory` ternary that branched
+         * inline in renderJobCard's HTML template — keeps the lookup private to
+         * the class and makes future logging/instrumentation a one-liner.
+         *
+         * Requires:
+         *     - jobId: string (the job's id_hash; for history this is the row id)
+         *     - queueName: one of 'todo', 'run', 'done', 'dead', 'history'
+         *
+         * Ensures:
+         *     - On valid queueName, invokes the registered handler
+         *     - On unknown queueName, logs an error and is a no-op
+         */
+        const handler = DELETE_HANDLERS[ queueName ];
+        if ( !handler ) {
+            console.error( `[Notifications ERROR] No delete handler for queueName=${queueName}` );
+            return;
+        }
+        handler( jobId, queueName );
     }
 
     async deleteHistoryJob( jobId ) {
@@ -6847,7 +6870,7 @@ class NotificationsUI {
         // All external lookups (websocket handlers, interaction appenders)
         // address live cards by bare jobId, so this prefix only applies to
         // history renders — `toggleJobCard` applies the same rule.
-        const idKey = job._isHistory ? `history-${jobId}` : jobId;
+        const idKey = queueName === 'history' ? `history-${jobId}` : jobId;
 
         // ═══════════════════════════════════════════════════════════════════
         // Phase 7: Enhanced indicators based on queue type
@@ -6897,7 +6920,10 @@ class NotificationsUI {
 
         // Done job: completion badge
         let completionBadge = '';
-        if ( queueName === 'done' ) {
+        // Completion badges: ✓ for completed, ✗ for failed.
+        // Renders in the done bucket (queueName='done') AND the history pane
+        // (queueName='history'), since history mirrors terminal-state cards.
+        if ( queueName === 'done' || queueName === 'history' ) {
             const jobStatus = job.status || 'completed';
             if ( jobStatus === 'completed' ) {
                 completionBadge = '<span class="completion-badge success" title="Completed">✓</span>';
@@ -6907,7 +6933,9 @@ class NotificationsUI {
         }
 
         // Dead job: error badge
-        if ( queueName === 'dead' ) {
+        // Renders in the dead bucket and for any history row whose status is
+        // 'failed' / 'interrupted' / 'dead' (terminal failure state).
+        if ( queueName === 'dead' || ( queueName === 'history' && [ 'failed', 'interrupted', 'dead' ].includes( job.status ) ) ) {
             completionBadge = '<span class="completion-badge failed" title="Failed">✗</span>';
         }
 
@@ -6938,9 +6966,11 @@ class NotificationsUI {
             completionBadge = '<span class="completion-badge stopped" title="Stopped — user cancelled">✕ Stopped</span>';
         }
 
-        // Interaction indicator for done queue
+        // Interaction indicator for any terminal-state pane (done or history).
+        // Backend now returns accurate has_interactions count from the
+        // notifications table — see Phase 1 (2026-04-26).
         let interactionIndicator = '';
-        if ( queueName === 'done' && job.has_interactions ) {
+        if ( ( queueName === 'done' || queueName === 'history' ) && job.has_interactions ) {
             interactionIndicator = '<span class="interaction-indicator" title="Has interaction history">💬</span>';
         }
 
@@ -6972,10 +7002,13 @@ class NotificationsUI {
         if ( queueName === 'run' ) {
             cancelBtnHtml     = `<button type="button" class="job-cancel-button" id="job-cancel-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.cancelJob('${jobId}')" title="Cancel this job">✕</button>`;
             headerCancelClass = ' has-cancel';
-        } else if ( queueName === 'todo' || queueName === 'done' || queueName === 'dead' ) {
-            const deleteAction = job._isHistory
-                ? `window.notificationsUI.deleteHistoryJob('${jobId}')`
-                : `window.notificationsUI.deleteQueueJob('${jobId}', '${queueName}')`;
+        } else if ( [ 'todo', 'done', 'dead' ].includes( queueName ) ) {
+            // Small ✕ delete button rendered for live-bucket cards. History
+            // cards intentionally OMIT this button — they get the prominent
+            // "🗑 Delete" / "↻ Retry" buttons spliced by renderHistoryActions
+            // at card-bottom. Rendering both produced a confusing double-delete
+            // (user feedback 2026-04-26).
+            const deleteAction = `window.notificationsUI._dispatchDelete('${jobId}', '${queueName}')`;
             cancelBtnHtml     = `<button type="button" class="job-cancel-button" id="job-cancel-${idKey}" onclick="event.stopPropagation(); ${deleteAction}" title="Remove this job">✕</button>`;
             headerCancelClass = ' has-cancel';
         }
@@ -7082,7 +7115,7 @@ class NotificationsUI {
                         </div>
                     </div>
                     ` : ''}
-                    ${queueName === 'done' ? `
+                    ${( queueName === 'done' || queueName === 'history' ) ? `
                     <div class="job-interactions-section" id="job-interactions-${idKey}">
                         <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${idKey}', event)">
                             <span>📋 Notification Conversation</span>
@@ -8787,6 +8820,91 @@ class NotificationsUI {
     }
 
     /**
+     * Toggle conversation mode for a session via the cosa-voice HTTP endpoint.
+     *
+     * The server bridge file is canonical. We POST the desired state, then update our
+     * local cache + widget eagerly for responsiveness; the WebSocket
+     * conversation_mode_changed broadcast that follows is the authoritative confirmation
+     * (it lands in handleConversationModeChanged() and reconciles).
+     *
+     * @param {string} sessionId - Per-session_id key (8-char hex from sender_id)
+     */
+    async toggleConversationMode( sessionId ) {
+        if ( !sessionId ) return;
+        const current = !!this.conversationModes[ sessionId ];
+        const next    = !current;
+        try {
+            const response = await this.authedFetch(
+                `/api/cosa-voice/conversation-mode/${encodeURIComponent( sessionId )}`,
+                {
+                    method  : 'POST',
+                    headers : { 'Content-Type': 'application/json' },
+                    body    : JSON.stringify( { active: next } )
+                }
+            );
+            if ( !response.ok ) {
+                const errText = await response.text().catch( () => '' );
+                this.error( `[CONVERSATION-MODE] toggle failed (${response.status}): ${errText}` );
+                return;
+            }
+            // Optimistic local update — WS broadcast will reaffirm
+            this._setConversationModeLocal( sessionId, next );
+        } catch ( e ) {
+            this.error( `[CONVERSATION-MODE] toggle exception: ${e}` );
+        }
+    }
+
+    /**
+     * Apply a conversation_mode_changed WebSocket envelope.
+     *
+     * Server-canonical state — overwrites localStorage cache + redraws all toggle widgets
+     * matching this session_id (multiple sender cards may share the session_id if the
+     * UI happens to render duplicates).
+     *
+     * @param {object} envelope - WebSocket message envelope:
+     *     { type, session_id, conversation_mode_active, timestamp }
+     */
+    handleConversationModeChanged( envelope ) {
+        const sessionId = envelope?.session_id;
+        const active    = !!envelope?.conversation_mode_active;
+        if ( !sessionId ) {
+            this.log( '[CONVERSATION-MODE] WS event missing session_id, ignoring' );
+            return;
+        }
+        this._setConversationModeLocal( sessionId, active );
+        this.log( `[CONVERSATION-MODE] session ${sessionId} → ${active ? 'conversation' : 'notification'} mode (via WS)` );
+    }
+
+    /**
+     * Update the local cache + DOM widget for a session's conversation mode.
+     * Internal helper — NOT a server write. Used by both optimistic toggle and WS sync.
+     *
+     * @param {string} sessionId - Session ID
+     * @param {boolean} active - Target state
+     */
+    _setConversationModeLocal( sessionId, active ) {
+        this.conversationModes[ sessionId ] = !!active;
+        try {
+            localStorage.setItem( this.CONVERSATION_MODES_KEY, JSON.stringify( this.conversationModes ) );
+        } catch ( e ) {
+            this.log( `[CONVERSATION-MODE] localStorage write failed (cache only): ${e}` );
+        }
+
+        // Redraw any matching toggle button(s). data-session-id selector matches both
+        // the sender-card itself and the per-session toggle button.
+        const buttons = document.querySelectorAll(
+            `.sender-conversation-mode-btn[data-session-id="${sessionId}"]`
+        );
+        buttons.forEach( btn => {
+            btn.textContent = active ? '📞' : '🔔';
+            btn.title       = active
+                ? 'Conversation mode ON — every Claude response is spoken (click to switch to notification mode)'
+                : 'Notification mode (default) — only explicit notify() calls speak (click to switch to conversation mode)';
+            btn.classList.toggle( 'is-active', active );
+        } );
+    }
+
+    /**
      * Show the voice-first session name edit modal.
      * Modal auto-starts recording for audio-first UX.
      * @param {string} sessionId - Session ID (hex string)
@@ -9243,6 +9361,11 @@ class NotificationsUI {
 
         // Build session display string (only if session_id present)
         // Session name is clickable for inline editing, gist button triggers LLM summary
+        const conversationModeActive = sessionId ? !!this.conversationModes[ sessionId ] : false;
+        const conversationModeIcon   = conversationModeActive ? '📞' : '🔔';
+        const conversationModeTitle  = conversationModeActive
+            ? 'Conversation mode ON — every Claude response is spoken (click to switch to notification mode)'
+            : 'Notification mode (default) — only explicit notify() calls speak (click to switch to conversation mode)';
         const sessionDisplay = sessionId
             ? `<span class="sender-session-id"
                      onclick="event.stopPropagation();">#${sessionId}</span><span class="sender-session-copy copy-btn"
@@ -9251,6 +9374,10 @@ class NotificationsUI {
                <button class="sender-gist-btn"
                        onclick="event.stopPropagation(); window.notificationsUI.generateSessionGist('${escapedSenderId}')"
                        title="Generate smart gist from conversation">✨</button>
+               <button class="sender-conversation-mode-btn${conversationModeActive ? ' is-active' : ''}"
+                       data-session-id="${sessionId}"
+                       onclick="event.stopPropagation(); window.notificationsUI.toggleConversationMode('${sessionId}')"
+                       title="${conversationModeTitle}">${conversationModeIcon}</button>
                <span class="sender-session-name"
                      onclick="event.stopPropagation(); window.notificationsUI.editSessionName('${sessionId}')"
                      title="Click to rename">${sessionName || ''}</span>`

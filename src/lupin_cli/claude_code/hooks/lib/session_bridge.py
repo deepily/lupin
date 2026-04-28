@@ -499,6 +499,135 @@ def find_session_by_id( session_id ):
     return None
 
 
+def find_session_path_by_id( session_id ):
+    """
+    Scan ~/.claude/sessions/cc-*.json for a session_id match and return the file path.
+
+    Sibling of find_session_by_id() that returns the Path instead of the data dict,
+    enabling read-modify-write workflows (e.g., conversation_mode toggle).
+
+    Supports both full UUID and 8-char prefix matching. Skips files from dead PIDs.
+
+    Requires:
+        - session_id is a non-empty string
+
+    Ensures:
+        - Returns Path if a match is found
+        - Returns None if no match or session_id is empty
+        - Skips bridge files whose PID is dead
+        - Never raises exceptions
+
+    Args:
+        session_id: Full session UUID or 8-char prefix to match
+
+    Returns:
+        Path or None: Bridge file path on match, or None
+    """
+    if not session_id or not SESSION_DIR.exists():
+        return None
+
+    for path in SESSION_DIR.glob( "cc-*.json" ):
+        if "buffer" in path.name or "listener" in path.name:
+            continue
+
+        file_pid = _extract_pid_from_filename( path.name )
+        if file_pid is not None and not _is_pid_alive( file_pid ):
+            continue
+
+        try:
+            with open( path ) as f:
+                data = json.load( f )
+
+            all_ids = list( data.get( "session_ids", [] ) )
+            for field in ( "session_id", "stable_session_id" ):
+                val = data.get( field, "" )
+                if val and val not in all_ids:
+                    all_ids.append( val )
+
+            for known_id in all_ids:
+                if known_id == session_id or known_id[:8] == session_id[:8]:
+                    return path
+
+        except ( json.JSONDecodeError, OSError ):
+            continue
+
+    return None
+
+
+def get_conversation_mode( session_id ):
+    """
+    Read conversation_mode_active flag from the bridge file for a given session_id.
+
+    Conversation mode is the session-level toggle that, when True, makes Claude
+    auto-call notify(full_text, suppress_ding=True) after every assistant turn.
+    Default state is False (notification mode — current selective TTS behavior).
+
+    Requires:
+        - session_id is a non-empty string (full UUID or 8-char prefix)
+
+    Ensures:
+        - Returns True only if bridge file exists and conversation_mode_active is truthy
+        - Returns False on any failure (missing bridge, parse error, missing field)
+        - Never raises exceptions
+
+    Args:
+        session_id: Session ID to look up
+
+    Returns:
+        bool: True if conversation mode is active, False otherwise
+    """
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return False
+
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        return bool( data.get( "conversation_mode_active", False ) )
+    except ( json.JSONDecodeError, OSError ):
+        return False
+
+
+def set_conversation_mode( session_id, active ):
+    """
+    Write conversation_mode_active flag to the bridge file for a given session_id.
+
+    Read-modify-write the bridge JSON to set the flag, preserving all other fields.
+    Does NOT create a new bridge file if missing — bridge must already exist
+    (created by SessionStart hook).
+
+    Requires:
+        - session_id is a non-empty string (full UUID or 8-char prefix)
+        - active is a bool
+
+    Ensures:
+        - Returns True if bridge was found and successfully updated
+        - Returns False if bridge not found or write failed
+        - Never raises exceptions
+        - Preserves all existing fields in the bridge JSON
+
+    Args:
+        session_id: Session ID to look up
+        active: Target state for conversation_mode_active
+
+    Returns:
+        bool: True on successful write, False otherwise
+    """
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return False
+
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        data[ "conversation_mode_active" ] = bool( active )
+        with open( path, "w" ) as f:
+            json.dump( data, f, indent=2 )
+        return True
+    except ( json.JSONDecodeError, OSError ):
+        return False
+
+
 def find_session_by_tmux( tmux_session ):
     """
     Scan ~/.claude/sessions/cc-*.json for a tmux_session match.
@@ -553,3 +682,25 @@ if __name__ == "__main__":
     print( f"Metadata: {json.dumps( get_session_metadata(), indent=2 )}" )
     print( f"Session dir: {SESSION_DIR}" )
     print( f"Fallback ID: {_fallback_session_id}" )
+
+    # Conversation mode smoke (round-trip on tmpdir, no real bridge mutation)
+    import tempfile
+    with tempfile.TemporaryDirectory() as _tmp:
+        _tmp_dir = Path( _tmp )
+        _sid = "smoketst-1234-5678-9abc-def012345678"
+        _bridge = _tmp_dir / f"cc-{os.getpid()}.json"
+        with open( _bridge, "w" ) as _f:
+            json.dump( { "session_id": _sid, "stable_session_id": _sid, "cwd": "/tmp" }, _f )
+        _orig_dir = SESSION_DIR
+        try:
+            globals()[ "SESSION_DIR" ] = _tmp_dir
+            assert get_conversation_mode( _sid ) is False, "Default should be False"
+            assert set_conversation_mode( _sid, True ) is True, "Set True should succeed"
+            assert get_conversation_mode( _sid ) is True, "Read after set True should be True"
+            assert set_conversation_mode( _sid, False ) is True, "Set False should succeed"
+            assert get_conversation_mode( _sid ) is False, "Read after set False should be False"
+            assert get_conversation_mode( "nonexistent" ) is False, "Missing session_id returns False"
+            assert set_conversation_mode( "nonexistent", True ) is False, "Set on missing bridge returns False"
+            print( "Conversation mode smoke: ✓ all assertions passed" )
+        finally:
+            globals()[ "SESSION_DIR" ] = _orig_dir

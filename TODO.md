@@ -1,12 +1,42 @@
 # TODO
 
-Last updated: 2026-04-27 EDT session-end (Sessions ee896fa3 + 09f4c557 — ee896fa3 serialized the adversarial+fitness plan-review R&D; 09f4c557 cut the docker image 130 GB → 31.6 GB via Tier 0+1 + cuda-compat fix + drop recursive chown + audioop-lts, ran lance cleanup reclaiming 16.67 GB, and bounced both servers onto lupin:1.0.0.)
+Last updated: 2026-04-27 EDT session-end (Sessions ee896fa3 + 09f4c557 + 49c27830 + aabece5e — ee896fa3 serialized the adversarial+fitness plan-review R&D; 09f4c557 cut the docker image 130 GB → 31.6 GB via Tier 0+1 + cuda-compat fix + drop recursive chown + audioop-lts, ran lance cleanup reclaiming 16.67 GB, and bounced both servers onto lupin:1.0.0; 49c27830 fixed a USER-REPORTED notification dispatch bug — extracted `WebSocketManager.emit_to_user_or_listener_sync` helper and migrated 5 dispatch sites onto it (eliminated duplicated cross-user CC-listener fallback logic), 11 new tests, full unit suite 3672/0 fail; aabece5e shipped conversation mode for Claude Code — per-session toggle in cosa-voice MCP with four activation surfaces, server-canonical bridge state, WebSocket sync, 23 new pytest tests + 1 E2E file gated for :8000 execution.)
 
 ---
 
 ## 📦 Cross-project — `planning-is-prompting` follow-up
 
 - [ ] [LUPIN→PIP] **Phase 1: Lift adversarial+fitness review prompts into PIP** — author `planning-is-prompting/workflow/plan-review.md` from the spec in `src/rnd/v0.1.7/2026.04.27-promote-plan-review-pattern-to-pip.md` (§ "Phase 1 deliverable shape"). Pick up in a `planning-is-prompting`-rooted Claude session. Phase 2 (convention establishment in `p-is-p-02-documenting-the-implementation.md`) is the linchpin and must follow Phase 1 immediately.
+
+---
+
+## ✅ COMPLETED — Session aabece5e (2026-04-27, late evening)
+
+- [x] [LUPIN] **Conversation mode for Claude Code (cosa-voice MCP)** — per-session toggle that, when on, makes Claude auto-`notify(full_text, suppress_ding=True)` after every turn so the user can hold a voice dialogue at a distance without re-prompting. Pattern 3 Feature Dev, ~1 week scope, executed end-to-end via plan-then-auto-mode. Four convergent activation surfaces: voice phrase ("enter/exit conversation mode" pattern-matched in cosa-voice server-instructions), slash command (`/conversation-mode-on` / `/conversation-mode-off`), MCP tool (`enter_conversation_mode()` / `exit_conversation_mode()`), UI toggle button (📞/🔔 in sender-card header). Server-canonical state in `~/.claude/sessions/cc-{PPID}.json` bridge file (extends existing schema with `conversation_mode_active: bool`). WebSocket `conversation_mode_changed` event broadcasts toggle changes to all UI tabs of the authenticated user via `emit_to_user()`. New router `src/cosa/rest/routers/conversation_mode.py` (CoSA-side per existing convention — plan deviation logged because `src/fastapi_app/routers/` doesn't exist). Bind-mount fix added live: `:7999` Docker container had no `~/.claude/sessions/` mount; added rw mount in `docker-compose.yml` and recreated container. 23 new pytest tests across 3 files, 52/52 pass. R&D doc at `src/rnd/v0.1.7/2026.04.27-conversation-mode-design.md`.
+
+## 🌅 FOLLOW-UPS — for the user (no urgency, conversation mode work)
+
+- [ ] [LUPIN] **Phase 6 E2E execution** — `src/tests/e2e_ui/test_conversation_mode.py` is written but not submitted. Schedule via `POST /api/test-suite/submit` with non-overlapping `scheduled_at` slot once `:8000` is free.
+- [ ] [LUPIN] **Bind mount `~/.claude/sessions` on `:8000` test container** — only added to `:7999` dev today. The Phase 6 E2E run on `:8000` will need the same mount or the endpoint will 404. Add to `docker-compose.yml` line ~108 (lupin-rest-test volumes block) before scheduling Phase 6.
+- [ ] [LUPIN] **CoSA submodule commit** — new file `src/cosa/rest/routers/conversation_mode.py` waits for separate CoSA-side commit per nested-repo rules.
+- [ ] [LUPIN] **Watch for discipline drift in Option B** — design accepted MCP-tool + behavioral-instruction approach (Option B) over a deterministic Claude Code stop hook (Option C). If Claude consistently forgets to auto-`notify()` after every turn when conversation mode is on, escalate to Option C as belt-and-suspenders (PostAssistantTurn hook reads bridge flag and POSTs to TTS endpoint).
+- [ ] [LUPIN] **Live UX validation** — actually USE conversation mode for a prolonged voice dialogue from the notification UI session pane to validate the ergonomic and the TTS hygiene defaults (strip code blocks, skip tool-call narration, no length cap). Tune defaults if needed.
+- [ ] [LUPIN] **Manifest-tracking discipline** — this session never updated `.claude-session.md` while editing files; surfaced at session-end as a missing section. Worth a future session to either bake manifest-update into the auto-mode flow or relax the manifest mandate when auto-mode is the only writer.
+
+---
+
+## ✅ COMPLETED — Session 49c27830 (2026-04-27, afternoon — Bug Fix Mode)
+
+- [x] [LUPIN] **Notification dispatch unification — extracted `WebSocketManager.emit_to_user_or_listener_sync` + migrated 5 sites** — Started from a USER-REPORTED bug (3 user-initiated messages from the LookML CC notifications panel UI silently dropped because `notify_user` short-circuited on `is_user_connected(target_system_id)=False` even though the `cc-listener-{job_id}` was active under a different shared service-account user_id). Day's arc: narrow fire-and-forget fix (5 unit tests) → comprehensive audit found 6 dispatch sites with duplicated logic and 2 sites missing the listener fallback entirely → planned full unification (`~/.claude/plans/dazzling-napping-frost.md`) → executed Phases A-F. Helper added at `src/cosa/rest/websocket_manager.py` as a sibling to the canonical `emit_to_user_and_admins_sync` precedent. Migrations: (1) `notify_user` fire-and-forget — replaced narrow inline fix with helper; (2) `notification_expired` SSE-timeout broadcast — gained listener fallback; (3) `notification_responded` response-submission broadcast — gained listener fallback; (4) `send_job_message` (queues.py) — collapsed 40-line dual-emit; (5) `_emit_notification_added` (notification_fifo_queue.py) — collapsed targeted-user + listener emits. Result: zero `emit_to_session_sync` calls remain in 3 migrated routers (helper is single chokepoint). Lupin unit suite 3672/0 fail (was 3638 → +34 tests across A-E). Wrapped yesterday's 7-test fix entry in bug-fix-queue.md. Files: CoSA × 4 (websocket_manager.py + 3 routers + notification_fifo_queue.py — separate user commit), Lupin × 3 (test_websocket_manager_dispatch.py NEW, test_notify_cc_listener_fallback.py UPDATED, bug-fix-queue.md / history.md).
+
+## 🌅 FOLLOW-UPS — for the user (notification dispatch work)
+
+- [ ] [LUPIN] **Bounce :7999 (and later :8000) onto the new bytecode** when v1.0.0 image rebuild is settled — the helper + 5 migrations are backwards-compatible but currently unloaded. Once bytecode is live, run the live :8000 probe from the plan's "Verification" section to confirm `delivered_via_listener` end-to-end.
+- [ ] [LUPIN] **CoSA submodule commit** — 4 files (`websocket_manager.py`, `routers/notifications.py`, `routers/queues.py`, `notification_fifo_queue.py`) wait for separate CoSA-side commit per nested-repo rules. Plan + diagnosis lives in `~/.claude/plans/dazzling-napping-frost.md`.
+- [ ] [LUPIN] **TFE/BFE post-resume proposal-review UX** — filed in bug-fix-queue.md. End-user can't make a proper accept/reject determination on proposed fixes after clicking Resume from Checkpoint; needs WHY-context per proposal, clustering, per-proposal skip vs full cancel, confidence levels.
+- [ ] [LUPIN] **`:7999` uvicorn StatReload watcher recovery** — watcher hasn't fired in 24+ hours despite source touches that should trigger reload. Bouncing recovers it but the underlying mute is unresolved. Worth investigating before next `--reload`-dependent work.
+- [ ] [LUPIN] **CC listener answer-response wiring** (out-of-scope feature) — CC listeners receive response-required notifications (yes/no, multiple_choice, open_ended) via the now-unified dispatch but cannot ANSWER them — no callback wiring exists between the listener and `/api/notify/response`. Filing for visibility; would unlock cross-user yes/no flows.
+- [ ] [LUPIN] **Service-account → operator routing helper** — the `agent_notification_dispatcher._resolve_routing` pattern (orthogonal to today's user-or-listener helper) handles service-account → operator email swaps. Refactoring it into a shared utility alongside the new dispatch helper would eliminate another thread of dispatch ad-hoc-ery.
 
 ---
 

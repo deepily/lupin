@@ -18,7 +18,8 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
-    find_session_by_id, find_session_by_tmux
+    find_session_by_id, find_session_by_tmux,
+    find_session_path_by_id, get_conversation_mode, set_conversation_mode
 )
 from lupin_cli.claude_code.hooks.register_session import main
 
@@ -684,6 +685,140 @@ class TestStaleLockfileCleanup:
 
             # Lockfile should still exist (it's our current lockfile — never purged)
             assert os.path.exists( lockfile )
+
+
+# ── Tests: conversation mode (find_session_path_by_id, get/set) ──────────────
+
+class TestFindSessionPathById:
+
+    def test_returns_path_on_full_uuid_match( self ):
+        """Full UUID match returns the bridge file Path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid  = "abc12345-6789-abcd-ef01-234567890abc"
+            data = _make_session_data( sid )
+            written = _write_session_file( sessions_dir, os.getpid(), data )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                result = find_session_path_by_id( sid )
+
+            assert result == written
+
+    def test_returns_path_on_8char_prefix_match( self ):
+        """8-char prefix returns Path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid  = "deadbeef-1111-2222-3333-444455556666"
+            data = _make_session_data( sid )
+            written = _write_session_file( sessions_dir, os.getpid(), data )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                result = find_session_path_by_id( "deadbeef" )
+
+            assert result == written
+
+    def test_returns_none_on_no_match( self ):
+        """No match returns None."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            data = _make_session_data( "aaaaaaaa-1111-2222-3333-444455556666" )
+            _write_session_file( sessions_dir, os.getpid(), data )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                assert find_session_path_by_id( "bbbbbbbb" ) is None
+
+    def test_empty_session_id_returns_none( self ):
+        """Empty session_id returns None."""
+        assert find_session_path_by_id( "" ) is None
+        assert find_session_path_by_id( None ) is None
+
+
+class TestConversationMode:
+
+    def test_default_is_false( self ):
+        """Bridge without conversation_mode_active reads as False."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid = "session1-1111-2222-3333-444455556666"
+            data = _make_session_data( sid )
+            _write_session_file( sessions_dir, os.getpid(), data )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                assert get_conversation_mode( sid ) is False
+
+    def test_set_then_get_round_trip( self ):
+        """set_conversation_mode(True) then get_conversation_mode returns True; flipping back returns False."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid = "rndtrip1-1111-2222-3333-444455556666"
+            data = _make_session_data( sid )
+            _write_session_file( sessions_dir, os.getpid(), data )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                assert set_conversation_mode( sid, True ) is True
+                assert get_conversation_mode( sid ) is True
+                assert set_conversation_mode( sid, False ) is True
+                assert get_conversation_mode( sid ) is False
+
+    def test_per_session_isolation( self ):
+        """Two sessions in same SESSION_DIR have independent flags."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid_a = "aaaaaaaa-1111-2222-3333-444455556666"
+            sid_b = "bbbbbbbb-1111-2222-3333-444455556666"
+            # Use two distinct PIDs; patch _is_pid_alive so test is deterministic
+            # regardless of which fake PIDs are signalable by the test user.
+            _write_session_file( sessions_dir, 90001, _make_session_data( sid_a ) )
+            _write_session_file( sessions_dir, 90002, _make_session_data( sid_b ) )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
+                assert set_conversation_mode( sid_a, True ) is True
+                # Session A is on, B should still be off (default)
+                assert get_conversation_mode( sid_a ) is True
+                assert get_conversation_mode( sid_b ) is False
+                # Flip B, A must remain on
+                assert set_conversation_mode( sid_b, True ) is True
+                assert get_conversation_mode( sid_a ) is True
+                assert get_conversation_mode( sid_b ) is True
+
+    def test_get_on_missing_session_returns_false( self ):
+        """get_conversation_mode for unknown session_id returns False (no exception)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                assert get_conversation_mode( "nonexistent" ) is False
+
+    def test_set_on_missing_session_returns_false( self ):
+        """set_conversation_mode for unknown session_id returns False (no bridge created)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                assert set_conversation_mode( "nonexistent", True ) is False
+                # No file should have been created
+                assert not list( sessions_dir.glob( "cc-*.json" ) )
+
+    def test_set_preserves_other_fields( self ):
+        """set_conversation_mode round-trip preserves session_id, cwd, etc."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid = "preserve-1111-2222-3333-444455556666"
+            data = _make_session_data( sid, tmux_session="my-tmux", cwd="/some/path" )
+            data[ "session_topic" ] = "important topic"
+            _write_session_file( sessions_dir, os.getpid(), data )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                set_conversation_mode( sid, True )
+
+            # Re-read directly to confirm preservation
+            with open( sessions_dir / f"cc-{os.getpid()}.json" ) as f:
+                after = json.load( f )
+
+            assert after[ "session_id" ] == sid
+            assert after[ "tmux_session" ] == "my-tmux"
+            assert after[ "cwd" ] == "/some/path"
+            assert after[ "session_topic" ] == "important topic"
+            assert after[ "conversation_mode_active" ] is True
 
 
 # ── Standalone ───────────────────────────────────────────────────────────────
