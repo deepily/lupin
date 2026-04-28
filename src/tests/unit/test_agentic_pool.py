@@ -315,6 +315,142 @@ class TestCompletion:
 
 
 # =============================================================================
+# Stall transition — voice-gate timeout regression (Bug 11 ported to pool path)
+#
+# Phase 2's pool refactor moved agentic dispatch to _on_agentic_complete but
+# did not port the stall check from the legacy serial path
+# (_handle_agentic_job, line ~898). Result: TFE/BFE jobs that stalled at the
+# voice gate were persisted as status='completed' with NO checkpoint blob,
+# silently breaking checkpoint-resume.
+#
+# Fix landed 2026-04-26 — _on_agentic_complete now branches on
+# job.state == JobState.STALLED before falling through to _transition_to_done,
+# routing to the new _transition_to_stalled helper which emits
+# RUNNING → STALLED with checkpoint preserved.
+# =============================================================================
+
+class TestStallTransition:
+
+    def _make_stalling_job( self, checkpoint=None, plan_path=None ):
+        """Build a MockAgenticJob whose do_all sets self.state = JobState.STALLED
+        and stores the supplied checkpoint into self.artifacts (mirroring how
+        TestFixExpediterJob and BugFixExpediterJob handle voice-gate timeouts)."""
+        ck   = checkpoint if checkpoint is not None else { "phase_name": "review", "phase_ordinal": 2 }
+        plan = plan_path if plan_path is not None else "io/swe-team/plans/2026-04-26/c1-plan.md"
+
+        def do_all_fn( j ):
+            j.state                 = JobState.STALLED
+            j.artifacts[ "checkpoint" ] = ck
+            j.artifacts[ "plan_path" ]  = plan
+            return "TFE stalled at voice gate. 3 proposals await your review. Resume when ready."
+
+        job = MockAgenticJob( do_all_fn=do_all_fn, answer="TFE stalled at voice gate. 3 proposals await your review. Resume when ready." )
+        # Initialize artifacts dict (MockAgenticJob doesn't, but real jobs do)
+        job.artifacts = { }
+        return job
+
+    def test_stalled_job_routes_through_stalled_transition( self, rq ):
+        """A pool-completed job whose state is STALLED must call
+        _transition_to_stalled, NOT _transition_to_done. Regression for the
+        Phase-2 pool path missing the stall check."""
+        rq._transition_to_stalled = MagicMock( wraps=rq._transition_to_stalled )
+        rq._transition_to_done    = MagicMock( wraps=rq._transition_to_done )
+
+        job = self._make_stalling_job()
+        rq.push( job )
+        rq._submit_agentic_job( job )
+
+        assert _wait_until( lambda: rq._transition_to_stalled.called, timeout=3.0 )
+        assert not rq._transition_to_done.called, (
+            "Stalled job must NOT fall through to _transition_to_done — "
+            "that path hardcodes status='completed' and drops the checkpoint blob."
+        )
+
+    def test_stalled_job_lands_in_done_queue( self, rq ):
+        """Stalled jobs are routed to the done queue (not dead) so the UI's
+        Resume button appears. Mirrors the legacy serial path's Bug 11 behavior."""
+        job = self._make_stalling_job()
+        rq.push( job )
+        rq._submit_agentic_job( job )
+
+        assert _wait_until( lambda: rq.jobs_done_queue.size() == 1 )
+        assert rq.jobs_dead_queue.size() == 0
+        assert rq.size() == 0
+        # Job state preserved on the queued instance
+        done_job = rq.jobs_done_queue.head()
+        assert done_job.state == JobState.STALLED
+
+    def test_stall_transition_emits_state_change_with_stalled( self, rq ):
+        """The transition emits emit_job_state_transition(...RUNNING, STALLED, ...)
+        — NOT COMPLETED — so the queue_util persistence dispatch routes to
+        persist_job_stalled_from_metadata."""
+        with patch( "cosa.rest.running_fifo_queue.emit_job_state_transition" ) as mock_emit:
+            job = self._make_stalling_job()
+            rq.push( job )
+            rq._submit_agentic_job( job )
+
+            assert _wait_until( lambda: mock_emit.called, timeout=3.0 )
+
+        # Find the call made by _transition_to_stalled (positional args layout
+        # matches running_fifo_queue.emit_job_state_transition signature)
+        positional_emits = [ c for c in mock_emit.call_args_list if len( c.args ) >= 4 ]
+        assert positional_emits, "Expected at least one emit_job_state_transition call"
+        last_args = positional_emits[ -1 ].args
+        # Args: (websocket_mgr, job_id, from_state, to_state, user_id, metadata)
+        from_state, to_state = last_args[ 2 ], last_args[ 3 ]
+        assert from_state == JobState.RUNNING
+        assert to_state   == JobState.STALLED, (
+            f"Expected to_state=STALLED for a stalled job; got {to_state}. "
+            f"This is the bug: pool path was emitting COMPLETED for stalled jobs."
+        )
+
+    def test_stall_metadata_includes_checkpoint_and_plan_path( self, rq ):
+        """The metadata blob handed to emit_job_state_transition MUST contain
+        the checkpoint (so persistence writes it to job_history.metadata_json)
+        and plan_path (for the UI's plan-link affordance). Without these the
+        Resume endpoint can't rehydrate the job."""
+        ck   = { "phase_name": "review_proposals", "phase_ordinal": 3, "state_blob": "..." }
+        plan = "io/swe-team/plans/2026-04-26/c1-plan.md"
+
+        with patch( "cosa.rest.running_fifo_queue.emit_job_state_transition" ) as mock_emit:
+            job = self._make_stalling_job( checkpoint=ck, plan_path=plan )
+            rq.push( job )
+            rq._submit_agentic_job( job )
+
+            assert _wait_until( lambda: mock_emit.called, timeout=3.0 )
+
+        last_call = mock_emit.call_args_list[ -1 ]
+        # Metadata is the 6th positional arg
+        metadata = last_call.args[ 5 ]
+        assert metadata[ "checkpoint" ] == ck, (
+            "Stall metadata must carry the checkpoint blob — without it the "
+            "resume endpoint short-circuits in get_checkpoint_for_job()."
+        )
+        assert metadata[ "plan_path" ] == plan
+        assert metadata[ "status" ]    == JobState.STALLED.value
+        # Sanity: not the completed-path values
+        assert metadata[ "error" ]     is None
+        assert metadata[ "agent_type" ] == job.job_type
+
+    def test_normal_completion_still_goes_to_done_transition( self, rq ):
+        """Regression: a job whose state is NOT STALLED still goes through
+        _transition_to_done — the new stall branch is gated, not a global
+        replacement."""
+        rq._transition_to_stalled = MagicMock( wraps=rq._transition_to_stalled )
+        rq._transition_to_done    = MagicMock( wraps=rq._transition_to_done )
+
+        # No stall — vanilla success path
+        job = MockAgenticJob( do_all_fn=lambda j: "result-ok", answer="result-ok" )
+        rq.push( job )
+        rq._submit_agentic_job( job )
+
+        assert _wait_until( lambda: rq._transition_to_done.called, timeout=3.0 )
+        assert not rq._transition_to_stalled.called, (
+            "Non-stalled jobs must not be misrouted to the stall transition."
+        )
+
+
+# =============================================================================
 # Defensive callback — Q4 in design doc
 # =============================================================================
 

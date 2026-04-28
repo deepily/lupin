@@ -50,7 +50,9 @@
 | 8ed95029 | 2026-04-18T13:20:00 | 2026-04-18T13:30:00 | stale |
 | b802e633 | 2026-04-21T00:00:00 | 2026-04-21T01:00:00 | closed |
 | 9b840935 | 2026-04-22T14:55:15 | 2026-04-22T16:50:00 | closed |
-| 52a71953 | 2026-04-24T15:50:00 | 2026-04-24T17:40:00 | committed |
+| 52a71953 | 2026-04-24T15:50:00 | 2026-04-24T17:42:00 | closed |
+| 2026-04-26-card-render-stall | 2026-04-26T11:00:00 | 2026-04-26T13:50:00 | closed |
+| 49c27830 | 2026-04-27T11:30:00 | 2026-04-27T11:45:00 | active |
 
 ---
 
@@ -91,9 +93,19 @@
   - **Files likely involved**: `src/cosa/agents/receptionist_agent.py` (prompt + model wiring), `src/conf/lupin-app.ini` (receptionist's LLM spec key), `src/cosa/rest/dead_queue_watchdog.py:34-56` (classifier regex set), `src/cosa/rest/dead_queue_watchdog.py:176-180` (eligibility decision branch).
   - **Not a regression from Phase 1/Phase 2** — the dead-queue entry is from 11:48 EDT on :8000, which ran pre-bounce code (Phase 1 code loaded at 11:16). Phase 2 pool work landed on :7999 only, via 13:50 bounce. This is an existing Receptionist/BFE-config issue, filed as a separate ticket.
 
-- [ ] **Repair 9 pre-existing CoSA unit test failures unrelated to notification fifo** — surfaced while running adjacent tests during session 9b840935. Two categories:
+- [ ] **TFE/BFE post-resume proposal-review UX — cluster + propose-fixes presentation lacks context for end-user decision** (filed 2026-04-27, USER-REPORTED). After clicking "Resume from checkpoint" on `tfe-66aab80b`, the user was presented with a series of proposed fixes at the voice gate but lacked the information needed to make a proper accept/reject determination, leading them to cancel the resumed job. **Concrete asks** (per user feedback):
+  - Surface WHY each fix is being proposed — what failure trace, what file, what test
+  - Group/cluster related proposals visibly so user can see "these 3 changes all address the same root cause"
+  - Show the diff per proposal (or at least the touched files)
+  - Differentiate confidence levels — "this fix has been tried successfully on similar failures" vs. "speculative one-shot"
+  - Make "skip this proposal" a first-class action distinct from "cancel the entire resume"
+  - **Files likely involved**: `src/cosa/agents/test_fix_expediter/orchestrator.py` (proposal generation), `src/fastapi_app/static/js/notifications.js` (action-required card rendering for voice-gate notifications), and the prompt template that emits the proposal payload. `_isResumableWithOverrides` + `renderResumeOverrideControls` (notifications.js:7281+) are nearby.
+  - **Out of scope of this entry**: the resume MECHANISM itself works (clickable link rehydrated the job, voice gate fired); this is purely a presentation/UX gap.
+
+- [ ] **Repair pre-existing CoSA unit test failures unrelated to notification fifo** — surfaced while running adjacent tests during session 9b840935. After accurate diagnosis on 2026-04-26 the original "9 cosmetic failures" item splits into:
   - `test_fifo_queue.py::TestFifoQueue::test_websocket_emission` (1 test) — expects `_emit_queue_update` on parent `FifoQueue`; parent was refactored to not have it. Either restore `_emit_queue_update` on parent with inline emission, or update the test to match current behavior (push is bare append, emission is per-subclass).
-  - `test_notifications_router.py::TestNotificationsRouter::*` (8 tests) — expect config key `"app_timezone"` (underscore); code at `routers/notifications.py:112` uses `"app timezone"` (space). Update the test assertions to match. This is cosmetic test-drift, not a runtime issue.
+  - `test_notifications_router.py::TestNotificationsRouter::test_get_local_timestamp_success` (1 test) — was config-key drift `"app_timezone"` (underscore) vs production `"app timezone"` (space). **FIXED 2026-04-26 by Phase 1 of CJ Flow card-rendering unification** (test asserts `"app timezone"` now).
+  - `test_notifications_router.py::TestNotificationsRouter::*` (7 tests: `test_notify_user_*`) — **NOT** config-key drift as originally diagnosed. Tests patch `cosa.rest.routers.notifications.email_to_system_id` (returning a UUID), but production code now imports `get_user_by_email` from `cosa.rest.user_service` and reads `user_data["id"]` for the system ID. Different mock target, different return shape. Genuinely a separate refactor — out of scope for the 2026-04-26 unification work.
 - [x] ~~**`/plan-bug-fix-mode-wrap` skill not triggered — session-end invoked instead**~~ → fixed commit 5f2713a | By: eb50bd56 | 2026-04-16
 
 
@@ -116,6 +128,101 @@
 ---
 
 ### Completed
+
+- [x] **Notification dispatch unification — extracted `WebSocketManager.emit_to_user_or_listener_sync` helper, migrated 5 dispatch sites** → pending commit + pending :7999 bounce | By: 49c27830 | 2026-04-27
+  - **Background**: Today's narrow fix (entry below) patched ONE dispatch site. A comprehensive audit revealed the same dispatch pattern existed in 6 places across `notifications.py`, `queues.py`, and `notification_fifo_queue.py`, with subtly different and inconsistent behavior. Two sites (`notification_expired` and `notification_responded` lifecycle broadcasts) were missing the cross-user listener fallback entirely. The next contributor adding a 7th dispatch site would have repeated the bug.
+  - **Approach**: Extracted a single canonical method `WebSocketManager.emit_to_user_or_listener_sync(user_id, job_id, event, data) -> dict` that encapsulates the "always emit to user + always emit to cc-listener-{job_id} if active" pattern. Returns `{user_delivered, listener_delivered, any_delivered}`. Mirrors the precedent set by `emit_to_user_and_admins_sync` (canonical dual-emit for queue/job state events, RnD doc 2026-04-11).
+  - **Migrations** (all 5 sites collapsed onto the helper):
+    1. `notify_user` fire-and-forget branch (`notifications.py:504-575` → ~50 lines collapsed to ~30 with the helper)
+    2. `notification_expired` SSE timeout broadcast (`notifications.py:806`) — gained the listener fallback (was emit_to_user only)
+    3. `notification_responded` response-submission broadcast (`notifications.py:1019`) — gained the listener fallback (was emit_to_user only)
+    4. `send_job_message` (`queues.py:966-1004` → 40 lines collapsed to ~20)
+    5. `_emit_notification_added` in `notification_fifo_queue.py:407-421` — collapsed targeted-user + listener emits onto the helper; broadcast branch retained for the user_id=None case
+  - **Files (CoSA, user commits separately)**:
+    - `src/cosa/rest/websocket_manager.py` — added `emit_to_user_or_listener_sync` (~95 lines incl. docstring)
+    - `src/cosa/rest/routers/notifications.py` — Migrations 1, 2, 3
+    - `src/cosa/rest/routers/queues.py` — Migration 4
+    - `src/cosa/rest/notification_fifo_queue.py` — Migration 5
+  - **Files (Lupin)**:
+    - `src/tests/unit/test_websocket_manager_dispatch.py` — NEW, 9 unit tests covering the 6-row behavior contract matrix + 3 failure-isolation cases
+    - `src/tests/unit/test_notify_cc_listener_fallback.py` — UPDATED. Existing 5 tests still pass via helper-based path. Added 2 structural-check tests for `notification_responded` and `notification_expired` (verify source code uses the helper, not the legacy `emit_to_user`)
+  - **Tests**:
+    - `pytest src/tests/unit/test_websocket_manager_dispatch.py` → **9/9 pass**
+    - `pytest src/tests/unit/test_notify_cc_listener_fallback.py` → **7/7 pass** (5 existing + 2 new structural)
+    - `pytest src/tests/unit/` → **3672 passed, 1 xfailed, 0 failed** (was 3638 → +34 tests over Phases A-E)
+    - `pytest src/tests/unit/ src/cosa/tests/unit/rest/test_notification_fifo_queue.py` → **3677 passed, 1 xfailed, 0 failed**
+    - `bash src/scripts/run-websocket-smoke-tests.sh` → **50/50 pass** (regression sanity)
+  - **Audit**: `grep emit_to_session_sync` in 3 migrated routers → ZERO matches (all dispatch routes through the helper now). `grep emit_to_user_or_listener_sync` → 7 call sites across 4 files (1 helper definition + 6 callers). `grep emit_to_user_sync` in migrated files → 1 match: `queues.py:1028` (the user-only echo acknowledgment, intentionally NOT migrated — listener already received the original message).
+  - **Out-of-scope follow-ups documented in plan**: (1) wire CC listeners to ANSWER response-required notifications (no callback wiring exists today); (2) migrate `queue_util.emit_job_state_transition` callers to `emit_to_user_and_admins_sync` (separate RnD plan from 2026-04-11); (3) refactor `agent_notification_dispatcher._resolve_routing` operator-fallback into a shared utility; (4) investigate the `:7999` uvicorn StatReload watcher recovery (watcher hasn't fired in ~24h despite source touches).
+  - **Plan**: `~/.claude/plans/dazzling-napping-frost.md`
+  - **Deploy status — NOT YET LIVE on :7999**: same as today's narrow fix entry below — uvicorn StatReload watcher hasn't fired. Held off bouncing per user's "rebuilding v1.0.0 image" request. The migrations are backwards-compatible — `_emit_notification_added` and `send_job_message` previously had inline dual-emits; the helper preserves that behavior. So even on the unmigrated running bytecode, the fire-and-forget path's narrow fix from earlier today is what the user actually depended on.
+
+- [x] **UI Claude Code Notifications Panel → CC console — `notify_user` missing cross-user `cc-listener-{job_id}` fallback** → pending commit + pending :7999 bounce | By: 49c27830 | 2026-04-27 (SUPERSEDED by the unification entry above — this narrow fix was rolled INTO the helper as Migration 1)
+  - **USER-REPORTED**: 3 user-initiated messages sent from the LookML CC notifications panel UI targeting CC session `b2ce9133` were persisted to PostgreSQL with `state='created'` but NEVER reached the Claude Code console.
+  - **Messages** (13:46-47 EDT):
+    - "Testing testing, is this thing on?"
+    - "Hello, anybody home?"
+    - "Okay let's contemplate what the output from the last run of the evaluation harness ..."
+  - **Root cause** (from server log OFFLINE DIAG):
+    - `target_user=claude.code@lookml.deepily.ai` resolves to UUID `f71f5b8a-...`
+    - `is_user_connected(f71f5b8a-...)` returns `False` — that user has zero active sessions
+    - HOWEVER, `cc-listener-b2ce9133` IS in `ws_manager.active_connections` — registered under user `931e9dae-...` (`claude.code@lupin.deepily.ai`, the SHARED CC service account)
+    - `notify_user` at `notifications.py:478-520` short-circuits with `status="user_not_available"` based on `is_user_connected(target_system_id)` alone, never trying the listener fallback
+    - The sibling endpoint `send_job_message` at `queues.py:986-1004` correctly emits to `cc-listener-{job_id}` as a cross-user fallback. `notify_user` was missing the equivalent.
+  - **Fix**: Added cross-user CC-listener fallback to `notify_user` (CoSA-side). When `not is_connected and job_id and f"cc-listener-{job_id}" in ws_manager.active_connections`: emit `notification_queue_update` to that listener session via `emit_to_session_sync`, mark state as `delivered`, return `status="delivered_via_listener"`. Mirrors the pattern in `send_job_message`. Best-effort state update (non-fatal if it fails). Listener emit failure cleanly falls through to existing `user_not_available` (DB row remains for forensic recovery).
+  - **Files (CoSA, user commits separately)**: `src/cosa/rest/routers/notifications.py` (~70 lines added in `notify_user` offline branch)
+  - **Files (Lupin)**: `src/tests/unit/test_notify_cc_listener_fallback.py` — NEW, 5 unit tests:
+    1. `test_cc_listener_fallback_fires_when_target_offline_and_listener_active` — primary regression repro
+    2. `test_user_not_available_when_listener_also_absent` — preserves existing offline behavior
+    3. `test_normal_user_path_still_fires_when_target_connected` — connected-user path takes precedence
+    4. `test_no_job_id_no_listener_attempt` — guard: must not try listener without job_id
+    5. `test_listener_emit_failure_falls_through_to_user_not_available` — graceful degradation
+  - **Verification**: `pytest src/tests/unit/test_notify_cc_listener_fallback.py` → **5/5 pass**. Full Lupin unit suite → **3638 passed, 1 xfailed, 0 failed** (was 3633 pre-fix).
+  - **Deploy status — NOT YET LIVE on :7999**: uvicorn StatReload watcher has not fired in ~24h despite source touch (last reload was for `tests/unit/test_agentic_pool.py` yesterday). Live probe of the new fallback path returned `user_not_available` → confirms running bytecode is still pre-fix. The fix needs a `:7999` bounce to take effect. **Held off bouncing** because (a) user is rebuilding v1.0.0 image, (b) LookML CC session `b2ce9133` is actively running on :7999. User should bounce when convenient.
+
+- [x] **7 self-inflicted E2E test regressions from 2026-04-26 :8000 sweep** → pending commit | By: 2026-04-26-card-render-stall | 2026-04-27
+  - **Trigger**: 2026-04-26 18:45 EDT scheduled :8000 sweep (`ts-f180a14d`) returned 30 failures + 7 errors. After accurate triage, **7 of 37 were mine** (the rest were pre-existing infra: CUDA OOM, no-docker-in-container, no-PEFT, argparse SystemExit, live-agent contention, websocket suite hot-swap config-block mismatch).
+  - **Group G — my own new test file out of sync with my own follow-up Q1 fix (3 tests)**: `test_history_card_parity.py` looked for `[id^='job-cancel-history-']` (the small ✕ button DOM id). The Q1 fix removed `'history'` from the small-✕ gate at `notifications.js:6992` AFTER the test file was authored, so the tests were probing a DOM element that no longer exists. **Fix**: rewrote 3 tests to target the prominent splice button via `.history-action-buttons .delete-btn`; added explicit regression-guard assertion that the small ✕ is GONE on history; renamed `test_history_card_delete_button_uses_dispatch` → `test_history_card_delete_button_routes_to_history_endpoint` (semantic correction — the splice button calls `deleteHistoryJob` directly, not via the `_dispatchDelete` chokepoint).
+  - **Group H — CSS-class drift from queueName='history' architectural change (4 tests)**: `test_job_history_ui.py::test_failed_job_has_dead_styling` + `test_repair_loop_ui.py × 3` asserted `status-dead` / `status-done` on history cards. Pre-Phase-2, history cards used the status→queueName mapping which produced those classes. After my Phase 2 change to pass `queueName='history'` directly, `notifications.js:6835` derives `statusClass = \`status-${queueName}\``, so the outer class is uniformly `status-history` — the failed/completed signal is now carried by the inner `.completion-badge.failed` (✗) / `.completion-badge.success` (✓) element. **Fix**: updated 4 test assertions to expect `status-history` outer + the appropriate inner completion-badge — preserves the tests' INTENT (verify the card visually represents failed-state vs completed-state) under the new outer/inner class split.
+  - **Files (Lupin)**: `src/tests/e2e_ui/test_history_card_parity.py`, `src/tests/e2e_ui/test_job_history_ui.py`, `src/tests/e2e_ui/test_repair_loop_ui.py`
+  - **Verification (:7999-eligible)**: `pytest --collect-only` on all 3 files → 47 tests collect cleanly, 0 errors. `pytest src/tests/unit/` → 3633 passed, 1 xfailed, 0 failed (regression sanity).
+  - **Verification (:8000 — STAGED)**: actual E2E execution requires a scheduled :8000 sweep, deferred while user is rebuilding the v1.0.0 image (per user 2026-04-27).
+
+- [x] **TFE/agentic voice-gate stall persistence regression — Phase 2 pool path drops checkpoint, persists status='completed'** → pending commit | By: 2026-04-26-card-render-stall | 2026-04-26
+  - **USER-REPORTED**: TFE job `tfe-99595e2c` on :8000 history showed "TFE stalled at voice gate. 3 proposals await your review. Resume when ready." in `response_text` but had `status='completed'` and **no `checkpoint` in metadata_json**, hiding the inline `▶ Resume from Checkpoint` button on the history card. User had previously resumed jobs like this — implying a regression.
+  - **Root cause**: CJ Flow Phase 2 (commit `9adfc26`-area, 2026-04-23) introduced the pool-based agentic dispatcher. The new pool callback `_on_agentic_complete()` at `src/cosa/rest/running_fifo_queue.py:427-489` calls `_transition_to_done()` unconditionally — it does NOT check `if job.state == JobState.STALLED:`, the way the legacy serial path `_handle_agentic_job()` did at line ~898 (Bug 11, 2026-04-15). So every agentic job that goes through the pool — whether it actually stalled or completed normally — got persisted as `RUNNING → COMPLETED` with `_transition_to_done`'s metadata blob, which has NO `checkpoint` field. Persistence dispatch at `queue_util.py:96` then routed `to_state=COMPLETED` to `persist_job_completed_from_metadata`, writing `status='completed'` to the row and stripping the would-be-stall metadata.
+  - **Confirmation that everything else is wired**: `JobState.STALLED` exists in `job_state.py`; `persist_job_stalled_from_metadata()` exists at `job_persistence.py:275`; the dispatch site at `queue_util.py:99` correctly routes `to_state == JobState.STALLED` to it; the resume endpoint at `agentic_job_factory.py:resume_job` reads `metadata_json.checkpoint` and `original_args` to rehydrate. TFE's `do_all()` at `test_fix_expediter/job.py:165` correctly sets `self.state = JobState.STALLED` and stashes the checkpoint into `self.artifacts['checkpoint']`. Only the pool-callback dispatch was missing the branch.
+  - **Fix**: Added `_transition_to_stalled(job, formatted_output)` helper to `running_fifo_queue.py` (mirrors `_transition_to_done` but emits `JobState.STALLED` with `checkpoint` + `plan_path` in metadata). Updated `_on_agentic_complete` to gate on `job.state == JobState.STALLED` before falling through to `_transition_to_done`. Single-file change in CoSA.
+  - **Backfill caveat**: Existing pre-fix history rows (like `tfe-99595e2c`) remain `status='completed'` with no checkpoint — the fix doesn't repair them. They're not resumable via the inline button. The standalone "🔄 Resume Stalled TFE Job" form on the notifications page may still find them via plan-doc path if `metadata_json.report_link` points at one. Filing a separate one-shot data-migration job is OUT OF SCOPE for this fix.
+  - **Files (CoSA, user commits separately)**: `src/cosa/rest/running_fifo_queue.py` (~10-line guard in `_on_agentic_complete`, ~75-line new `_transition_to_stalled` helper)
+  - **Files (Lupin)**: `src/tests/unit/test_agentic_pool.py` — NEW `TestStallTransition` class with 5 unit tests
+  - **Tests**: `pytest src/tests/unit/test_agentic_pool.py` → **31 passed** (5 new + 26 existing). Full Lupin unit `pytest src/tests/unit/` → **3633 passed, 1 xfailed, 0 failed** (was 3628 before this session). All 5 new tests verify: (1) STALLED state routes to `_transition_to_stalled`, (2) stalled job lands in done queue (not dead), (3) `emit_job_state_transition` called with `RUNNING→STALLED`, (4) metadata blob includes `checkpoint` + `plan_path`, (5) regression — non-stalled completions still go through `_transition_to_done`.
+  - **Live deploy status**: Container source mount confirmed (`docker exec lupin-rest-test grep -c '_transition_to_stalled' /var/lupin/src/cosa/rest/running_fifo_queue.py` → 2 matches). However the test container runs as `python3 -m fastapi_app.main` (no `--reload`), so :8000 needs another bounce to pick up the new bytecode. **Bounce required before user can validate the fix on :8000.**
+
+- [x] **CJ Flow accordion: history bucket renders inconsistently with done bucket (third unification attempt)** → pending commit | By: 2026-04-26-card-render-stall | 2026-04-26
+  - **USER-REPORTED**: history-pane cards missing 💬 interaction indicator + "📋 Notification Conversation" section showing a "Loading..." spinner that never resolved. Diagnosed as the **third unification attempt** in the rendering pipeline — Sessions 21a62c05 (2026-01-29) and 1b8c1cc0 (2026-04-10, commit `3faec04`) had each declared "single source of truth via renderJobCard()" but left residual gaps. This session closes them.
+  - **Three-axis cleanup (A1 + B + C)**:
+    - **A1 (Backend)**: `/api/job-history` returns the same FLAT shape as `/api/get-queue/done`. Was: top-level `id_hash, job_type, status, ...` + `metadata_json` JSONB blob holding the rich fields. Now: 31 top-level keys including `job_id, agent_type, response_text, abstract, report_path, cost_summary, scheduled_at, monopolize, has_interactions, paused, …` (matching done-bucket field set verbatim). `metadata_json` retained for backward compat (additive change, no removed fields). Aliases `report_link` → `report_path` for naming alignment.
+    - **B (Frontend)**: Eliminated the `_isHistory` boolean flag (was set in `renderHistoryCard` line 6065, read in `renderJobCard` lines 6850 + 6976). Replaced with `DELETE_HANDLERS` lookup table keyed by `queueName` and a single `_dispatchDelete(jobId, queueName)` chokepoint. DOM-id namespacing now uses `queueName === 'history' ? 'history-${jobId}' : jobId`. Added `'history'` to renderJobCard's queueName-driven branches for completion badges (✓/✗), interactions indicator (💬), and the "Notification Conversation" section gate.
+    - **C (Backend)**: `has_interactions` is now an accurate count from a bulk SQL query against the indexed `notifications.job_id` column, NOT the prior `bool(job.session_id)` proxy that gave false positives. Added `count_by_job_ids(job_ids: list[str]) -> dict[str, int]` to `notification_repository.py`. Single batched query per page; sub-100ms expected.
+  - **Adapter collapse (Phase 3, Option A — conservative)**: `renderHistoryCard()` shrunk from ~50 lines to ~10 — dropped all metadata_json fallback unpacking (Phase 1 makes it unnecessary), kept the splice of `renderHistoryActions()` to preserve the prominent "🗑 Delete" / "↻ Retry" buttons placement. **Option B (full deletion)** deferred — the splice removal would change UX placement.
+  - **Q1 follow-up (same session)**: User reported two delete buttons on history cards (small ✕ in header + prominent 🗑 Delete in footer). Diagnosed as pre-Phase-2 redundancy I'd carried forward when adding `'history'` to the small-✕ gate. Removed `'history'` from the gate at `notifications.js:6992` — small ✕ now renders for live buckets only (`[ 'todo', 'done', 'dead' ]`); history cards rely solely on the prominent splice buttons.
+  - **Files (CoSA, user commits separately)**:
+    - `src/cosa/rest/db/repositories/notification_repository.py` — added `count_by_job_ids()` (~37 lines)
+    - `src/cosa/rest/job_persistence.py` — added `_count_notifications_for_jobs()`, `_unpack_metadata_json()`, `_build_history_row()` helpers; rewrote `query_job_history()` row builder
+    - `src/cosa/rest/routers/queues.py` — added `_count_interactions_for_jobs()`; replaced `bool(job.session_id)` proxy at done-bucket handler line 477 and dead-bucket handler line 540
+    - `src/cosa/tests/unit/rest/test_notifications_router.py` — fixed 1 timezone-config-key test (`app_timezone` → `app timezone`)
+  - **Files (Lupin)**:
+    - `src/fastapi_app/static/js/notifications.js` — DELETE_HANDLERS + `_dispatchDelete`; `_isHistory` flag removed; `renderHistoryCard` shrunk; queueName-driven branches expanded for `'history'`; small-✕ gate restricted to live buckets
+    - `src/fastapi_app/static/html/notifications.html` — cache-bust `v=20260422b` → `v=20260426b` (two bumps in same session)
+    - `src/tests/unit/test_job_persistence.py` — +20 tests (TestUnpackMetadataJson + TestBuildHistoryRow + TestCountNotificationsForJobs)
+    - `src/tests/unit/test_notification_repository_count.py` — NEW, 5 tests
+    - `src/tests/integration/test_job_history_shape_parity.py` — NEW, 5 tests (staged for :8000)
+    - `src/tests/e2e_ui/test_history_card_parity.py` — NEW, 7 tests (staged for :8000)
+    - `src/rnd/v0.1.7/2026.04.26-cj-flow-card-rendering-unification/` — 9 R&D docs (01-design-overview, 02-api-shape-normalization, 03-has-interactions-accuracy, 04-frontend-flag-removal, 05-adapter-collapse, 06-testing-strategy, 90-phase1-execution-log, 91-phase2-execution-log, 92-phase3-execution-log)
+  - **Tests (:7999 — AI-discretionary, ran)**: Lupin unit `pytest src/tests/unit/` → **3633 passed, 1 xfailed, 0 failed**; WebSocket smoke `bash src/scripts/run-websocket-smoke-tests.sh` → **50/50 PASS**; live shape probes on `/api/job-history` confirmed 31 top-level keys + accurate `has_interactions` (8/10 True, 2/10 False on real data — vs the prior all-True proxy)
+  - **Tests (:8000 — staged, NOT run)**: integration shape parity (5 tests in `test_job_history_shape_parity.py`); E2E UI parity (7 tests in `test_history_card_parity.py`); visual regression. **Need user-confirmed scheduled_at slot via `/api/test-suite/submit` to run.**
+  - **Live deploy status**: :7999 picks up changes via auto-reload + cache-bust. :8000 was bounced early in this session (`docker rm -f lupin-rest-test && docker compose up -d lupin-rest-test`) so Phase 1 backend changes + Phase 2 frontend changes are live. The Q1 small-✕ fix and the TFE stall fix landed AFTER that bounce, so the test server still serves the pre-fix bytecode for those two — needs another bounce.
 
 - [x] **cosa-voice MCP misidentifies nested repos as "lupin" + UI shows [UNKNOWN] for hyphenated projects** → commit: f549b20 (Lupin), CoSA submodule files committed by user separately | By: 52a71953 | 2026-04-24
   - **Bug #1 (CoSA)**: `detect_project()` substring matching collapsed `/lupin/src/cosa/`, `/lupin/src/lupin-mobile/`, `/lupin/src/lupin-plugin-firefox/` all to `"lupin"`. Replaced with git-repo-boundary walk-up. Extended `KNOWN_PROJECTS` for the two new nested repos.

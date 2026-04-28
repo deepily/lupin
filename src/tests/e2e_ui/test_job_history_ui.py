@@ -234,13 +234,18 @@ class TestJobHistoryDataDisplay:
 
     def test_failed_job_has_dead_styling( self, seeded_history_page ):
         """
-        Failed job card has status-dead CSS class (statusToQueue mapping).
+        Failed job card in the history pane carries the unified
+        `status-history` outer class (post 2026-04-26 unification — was
+        `status-dead` under the old status→queue mapping). The failed-state
+        signal is now carried by the inner ✗ completion badge, not the
+        outer status-* class.
 
         Requires:
             - Seeded set includes a failed job (std-003)
 
         Ensures:
-            - Card for the failed job has 'status-dead' class
+            - Card has the unified `status-history` outer class
+            - Card contains a `.completion-badge.failed` (✗) inner element
         """
         page, records = seeded_history_page
         expand_history_section( page )
@@ -249,7 +254,16 @@ class TestJobHistoryDataDisplay:
         card = page.locator( f".job-card[data-job-id='{failed_rec[ 'id_hash' ]}']" )
         assert card.count() > 0, "Failed job card not found"
         classes = card.get_attribute( "class" ) or ""
-        assert "status-dead" in classes, f"Expected 'status-dead' in classes, got: {classes}"
+        # Outer class is uniform across history rows post-unification
+        assert "status-history" in classes, (
+            f"Expected 'status-history' in classes; got: {classes!r}"
+        )
+        # Inner ✗ completion badge preserves the failed-state semantic signal
+        failed_badge = card.locator( ".completion-badge.failed" )
+        assert failed_badge.count() > 0, (
+            "Expected a `.completion-badge.failed` (✗) inside the failed history card — "
+            "this is the new failed-state signal after the outer class was unified to status-history."
+        )
 
     def test_empty_history_shows_message( self, logged_in_page ):
         """
