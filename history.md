@@ -85,7 +85,36 @@ Plus new global skill (not in repo): `~/.claude/skills/conversation-mode-guardra
 - Per-session TTS queue isolation (so B's new audio plays while A's queued audio stays paused on displacement) — current model is global pauseTTS, user manually resumes. Separate UX cycle.
 - Hard programmatic enforcement of the user-only-initiation rule (e.g., require a "user-utterance attestation" field on the MCP call). v1.1 documents the rule in three layers; this is a future enhancement if drift is observed.
 - Toast UI for displaced sessions — payload carries `displaced=true, displaced_by=<sid>` already, just no UI rendering yet.
-- **Bug observed at checkpoint time (deferred — investigation pending)**: user reported two notification panes both labeled with session_id `c7333045` but different sender labels (one "Lupin", one "Cosa"). Hypothesis to investigate: project-aware sender_id derivation may be producing two distinct sender keys (e.g. `claude.code@lupin.deepily.ai#c7333045` and `claude.code@cosa.deepily.ai#c7333045`) for the same underlying CC process, depending on the cwd at notify-call time. Worth checking `parseSenderId` + project-detection in MCP + how cwd flips when Claude reads files in `src/cosa/`.
+- **Bug observed at checkpoint time (deferred — investigation pending)**: user reported two notification panes both labeled with session_id `c7333045` but different sender labels (one "Lupin", one "Cosa"). Hypothesis to investigate: project-aware sender_id derivation may be producing two distinct sender keys (e.g. `claude.code@lupin.deepily.ai#c7333045` and `claude.code@cosa.deepily.ai#c7333045`) for the same underlying CC process, depending on the cwd at notify-call time. Worth checking `parseSenderId` + project-detection in MCP + how cwd flips when Claude reads files in `src/cosa/`. ✅ **RESOLVED** — see follow-up checkpoint below.
+
+#### Checkpoint | 2026.04.28 17:05 EDT | Follow-up — duplicate sender_id bug root-caused + fixed
+
+**Context**: After the `f2cef9f` checkpoint, dug into the duplicate-pane bug listed in pending follow-ups. Empirical pull from the live `:7999` notification store confirmed BOTH `claude.code@lupin.deepily.ai#c7333045` (31 entries — "Received: ..." messages from the cc-listener) AND `claude.code@cosa.deepily.ai#c7333045` (40 entries — "Done: Bash: ..." messages from the PostToolUse hook) coexist in the DB for the same underlying CC session. Two distinct sender groupings, two cards in the UI accordion.
+
+**Root cause**: `build_sender_id_for_cc()` in `src/lupin_cli/claude_code/hooks/lib/session_bridge.py` calls `build_sender_id("claude.code", suffix=...)` without an explicit `project`, so `build_sender_id` falls back to `detect_project()` which uses **live `os.getcwd()`**. Hook scripts inherit cwd from the spawning Claude Code process, but Claude Code preserves the **bash subshell's mutated cwd across tool invocations** — so once the user runs `cd /path/to/lupin/src/cosa && git status` in any Bash command, every subsequent PostToolUse hook spawn sees cwd inside `src/cosa/`. Since `src/cosa/` is a git submodule with its own `.git`, `detect_project()` walks up and returns `"cosa"` instead of `"lupin"`, pivoting the sender_id mid-session.
+
+**Fix**: New `_resolve_project_from_bridge_cwd()` helper that reads the bridge file's stable SessionStart `cwd` snapshot (written once at session bootstrap, never drifts) and walks up from THAT path to find the `.git` ancestor. `build_sender_id_for_cc()` passes the resolved project explicitly, falling back to live-cwd detection only if the bridge can't be resolved (preserves degraded-mode behavior).
+
+**Empirical confirmation** (in this Python process, before/after fix):
+```
+CWD=/lupin                    → claude.code@lupin.deepily.ai#c7333045 ✓
+CWD=/lupin/src/cosa  (drift)  → claude.code@lupin.deepily.ai#c7333045 ✓ (was @cosa pre-fix)
+```
+
+**Audit clean**: every hook sender_id call site (`stop.py:223`, `register_session.py:643`, `permission_request.py:154`, and indirectly `hook_common.send_tts → build_sender_id_for_cc` from `post_tool_use.py`) inherits the fix automatically. The single direct `detect_project()` call at `register_session.py:457` only fires at SessionStart when cwd is stable — safe. `cc_notification_listener.py` hardcodes `lupin.deepily.ai` — already stable. MCP module-level `SENDER_ID` is set once at MCP startup and the MCP process cwd doesn't drift — safe.
+
+**Test totals**: 6 new regression tests in `TestBuildSenderIdForCcBridgeCwdAnchoring` (test_session_bridge_lookup.py) — covers full-uuid match, walk-up from subdirectory, build_sender_id-uses-bridge-cwd-not-live-cwd (the key regression assertion), missing-bridge fallback, missing-cwd-field fallback, planning-is-prompting alias. 57/57 PASS in the file overall.
+
+**Pre-rebuild Phase A2 sanity baseline** locked in `/tmp/baseline-unit-pre-rebuild.log` (3720 unit pass + 1 xfailed) and `/tmp/baseline-ws-smoke-pre-rebuild.log` (50/50 ws smoke pass).
+
+**Files Modified (parent Lupin only)**:
+- `src/lupin_cli/claude_code/hooks/lib/session_bridge.py` (new `_resolve_project_from_bridge_cwd()` + modified `build_sender_id_for_cc()`)
+- `src/tests/unit/test_session_bridge_lookup.py` (+6 regression tests)
+
+**Memory updates**:
+- `feedback_lupin_only_never_cosa.md` — appended a new bullet reinforcing that submodule state must not surface in checkpoints, status reports, or "what's pending" summaries (rule existed; tightened from the user reminder).
+
+**Existing DB notifications**: the 40 historical "cosa"-flavored notifications in PostgreSQL retain their old sender_ids and continue rendering as a "Cosa" pane until they age out via natural retention. New notifications going forward all anchor on the bridge cwd. No migration scripted — natural decay handles cleanup.
 
 ---
 

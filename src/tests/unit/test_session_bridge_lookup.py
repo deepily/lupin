@@ -20,7 +20,8 @@ if _src_path not in sys.path:
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     find_session_by_id, find_session_by_tmux,
     find_session_path_by_id, get_conversation_mode, set_conversation_mode,
-    find_active_conversation_sessions
+    find_active_conversation_sessions,
+    build_sender_id_for_cc, _resolve_project_from_bridge_cwd
 )
 from lupin_cli.claude_code.hooks.register_session import main
 
@@ -1024,6 +1025,162 @@ class TestFindActiveConversationSessions:
             assert len( results ) == 1
             _path, sid = results[0]
             assert sid == "stable000-1234-5555-6666-777788889999"
+
+
+# ── Tests: build_sender_id_for_cc (bridge-cwd anchoring) ─────────────────────
+
+
+class TestBuildSenderIdForCcBridgeCwdAnchoring:
+    """
+    Regression guard for the duplicate-sender_id bug observed 2026-04-28
+    (session c7333045): live `os.getcwd()` drifts across hook invocations
+    once the user runs `cd src/cosa` in a Bash tool call (Claude Code
+    preserves the bash subshell's cwd across tool calls), causing the
+    same CC session to emit notifications under TWO sender_ids alternately
+    (one with project="lupin", one with project="cosa") — which renders
+    as duplicate panes in the notifications UI.
+
+    Fix: build_sender_id_for_cc resolves the project from the bridge file's
+    SessionStart `cwd` field (stable for the session's lifetime) instead of
+    live `os.getcwd()`.
+    """
+
+    def _make_repo( self, sessions_dir, repo_path, project_name ):
+        """Create a fake project repo at repo_path with .git so detect_project finds it."""
+        repo_path.mkdir( parents=True, exist_ok=True )
+        ( repo_path / ".git" ).mkdir( exist_ok=True )
+
+    def test_resolve_project_from_bridge_cwd_returns_repo_basename( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path( tmp )
+            sessions_dir = tmp_root / "sessions"
+            sessions_dir.mkdir()
+
+            # Synthetic project tree: /<tmp>/lupin/.git
+            project_root = tmp_root / "lupin"
+            self._make_repo( sessions_dir, project_root, "lupin" )
+
+            sid = "11111111-2222-3333-4444-555566667777"
+            data = _make_session_data( sid, cwd=str( project_root ) )
+            bridge_path = _write_session_file( sessions_dir, os.getpid(), data )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._find_session_file",
+                        return_value=( bridge_path, "ppid" ) ):
+                project = _resolve_project_from_bridge_cwd()
+
+            assert project == "lupin"
+
+    def test_resolve_project_walks_up_from_bridge_cwd_to_find_git( self ):
+        """If bridge cwd is INSIDE the repo (not at root), walk up to find .git."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path( tmp )
+            sessions_dir = tmp_root / "sessions"
+            sessions_dir.mkdir()
+
+            project_root = tmp_root / "lupin"
+            self._make_repo( sessions_dir, project_root, "lupin" )
+            # Bridge cwd is a SUBDIRECTORY (e.g., user launched claude from src/)
+            sub_dir = project_root / "src" / "fastapi_app"
+            sub_dir.mkdir( parents=True, exist_ok=True )
+
+            sid = "22222222-2222-3333-4444-555566667777"
+            data = _make_session_data( sid, cwd=str( sub_dir ) )
+            bridge_path = _write_session_file( sessions_dir, os.getpid(), data )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._find_session_file",
+                        return_value=( bridge_path, "ppid" ) ):
+                project = _resolve_project_from_bridge_cwd()
+
+            assert project == "lupin"
+
+    def test_build_sender_id_uses_bridge_cwd_not_live_cwd( self ):
+        """
+        The bug repro: bridge says cwd=/lupin/, but the live cwd is /lupin/src/cosa/.
+        Pre-fix would return 'cosa' sender_id. Fix ensures 'lupin'.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path( tmp )
+            sessions_dir = tmp_root / "sessions"
+            sessions_dir.mkdir()
+
+            # Build the nested-repo structure the real Lupin tree has:
+            #   /<tmp>/lupin/.git
+            #   /<tmp>/lupin/src/cosa/.git  (submodule has its own .git)
+            project_root = tmp_root / "lupin"
+            self._make_repo( sessions_dir, project_root, "lupin" )
+            cosa_dir = project_root / "src" / "cosa"
+            self._make_repo( sessions_dir, cosa_dir, "cosa" )
+
+            sid = "abc12345-2222-3333-4444-555566667777"
+            data = _make_session_data( sid, cwd=str( project_root ) )
+            bridge_path = _write_session_file( sessions_dir, os.getpid(), data )
+
+            saved_cwd = os.getcwd()
+            try:
+                # Drift the live cwd into the cosa submodule
+                os.chdir( str( cosa_dir ) )
+                with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                     patch( "lupin_cli.claude_code.hooks.lib.session_bridge._find_session_file",
+                            return_value=( bridge_path, "ppid" ) ):
+                    sender_id = build_sender_id_for_cc( session_id=sid )
+            finally:
+                os.chdir( saved_cwd )
+
+            # MUST be lupin, NOT cosa, regardless of live cwd
+            assert sender_id == "claude.code@lupin.deepily.ai#abc12345", \
+                f"sender_id pivoted with cwd! Got {sender_id!r}, expected lupin-flavored"
+
+    def test_resolve_project_returns_none_on_missing_bridge( self ):
+        """No bridge file → None (so caller falls back to live-cwd detection — legacy behavior preserved)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp ) / "sessions"
+            sessions_dir.mkdir()
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                # No bridge file written; _find_session_file returns None
+                project = _resolve_project_from_bridge_cwd()
+            assert project is None
+
+    def test_resolve_project_returns_none_when_bridge_missing_cwd_field( self ):
+        """Malformed bridge (no cwd field) → None (graceful)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp ) / "sessions"
+            sessions_dir.mkdir()
+
+            sid = "33333333-2222-3333-4444-555566667777"
+            # Write a bridge with NO cwd
+            path = sessions_dir / f"cc-{os.getpid()}.json"
+            with open( path, "w" ) as f:
+                json.dump( { "session_id": sid, "stable_session_id": sid }, f )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._find_session_file",
+                        return_value=( path, "ppid" ) ):
+                project = _resolve_project_from_bridge_cwd()
+
+            assert project is None
+
+    def test_resolve_project_applies_planning_alias( self ):
+        """planning-is-prompting → 'plan' (matches detect_project semantics)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path( tmp )
+            sessions_dir = tmp_root / "sessions"
+            sessions_dir.mkdir()
+
+            project_root = tmp_root / "planning-is-prompting"
+            self._make_repo( sessions_dir, project_root, "planning-is-prompting" )
+
+            sid = "44444444-2222-3333-4444-555566667777"
+            data = _make_session_data( sid, cwd=str( project_root ) )
+            bridge_path = _write_session_file( sessions_dir, os.getpid(), data )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._find_session_file",
+                        return_value=( bridge_path, "ppid" ) ):
+                project = _resolve_project_from_bridge_cwd()
+
+            assert project == "plan"
 
 
 # ── Standalone ───────────────────────────────────────────────────────────────

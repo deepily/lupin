@@ -380,6 +380,58 @@ def wait_for_session_id( timeout: float = 10.0, poll_interval: float = 0.5 ) -> 
     return _fallback_session_id
 
 
+def _resolve_project_from_bridge_cwd() -> Optional[str]:
+    """
+    Resolve project name from the bridge file's SessionStart cwd field.
+
+    The bridge file is written once at SessionStart and its `cwd` snapshot
+    represents where the `claude` CLI was launched. That value is stable
+    for the lifetime of the CC session. By contrast, `os.getcwd()` inside
+    a hook process can drift across hook invocations because Claude Code
+    preserves the Bash subshell's cwd across tool calls — running
+    `cd src/cosa && git status` once mutates the cwd Claude Code passes
+    to subsequent hook spawns, and `detect_project()` (which uses
+    `os.getcwd()`) starts returning "cosa" instead of "lupin." That
+    pivot duplicates the user's notification UI panes (one per
+    sender_id) for what should be a single session.
+
+    Walks up from the bridge's `cwd` looking for a `.git` ancestor.
+    Returns the lowercase basename of that ancestor with the
+    `_PROJECT_ALIASES` normalization applied (matches `detect_project()`
+    semantics exactly, just sourced from the bridge instead of live cwd).
+
+    Ensures:
+        - Returns the project name from the bridge file's SessionStart cwd
+        - Returns None if no bridge file resolves, the bridge has no cwd
+          field, the cwd path doesn't exist, or no .git ancestor is found
+        - Never raises exceptions
+    """
+    result = _find_session_file()
+    if not result:
+        return None
+    path, _source = result
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        bridge_cwd = data.get( "cwd" )
+        if not bridge_cwd:
+            return None
+
+        from cosa.agents.utils.sender_id import _PROJECT_ALIASES
+
+        candidate = Path( bridge_cwd ).resolve()
+        for parent in [ candidate, *candidate.parents ]:
+            if ( parent / ".git" ).exists():
+                name = parent.name.lower()
+                return _PROJECT_ALIASES.get( name, name )
+        # No .git ancestor — fall back to the basename so callers always
+        # get a sensible default rather than None.
+        basename = candidate.name.lower()
+        return _PROJECT_ALIASES.get( basename, basename )
+    except ( json.JSONDecodeError, OSError, ValueError, ImportError ):
+        return None
+
+
 def build_sender_id_for_cc( session_id: Optional[str] = None ) -> Optional[str]:
     """
     Build a Claude Code sender_id for notification routing.
@@ -387,8 +439,18 @@ def build_sender_id_for_cc( session_id: Optional[str] = None ) -> Optional[str]:
     Uses the CC session_id (truncated to first 8 hex chars) as the suffix,
     producing sender_ids like: claude.code@lupin.deepily.ai#a1b2c3d4
 
-    This ensures hooks and MCP server produce identical sender_ids when
-    they share the same CC session.
+    The project segment is resolved from the bridge file's SessionStart cwd
+    snapshot (via `_resolve_project_from_bridge_cwd`), NOT live `os.getcwd()`.
+    The bridge is stable for the session lifetime; live cwd drifts across
+    hook invocations once the user runs `cd` inside a Bash tool call. Without
+    this stabilization, the same CC session produces sender_ids alternating
+    between e.g. `claude.code@lupin.deepily.ai#abc12345` and
+    `claude.code@cosa.deepily.ai#abc12345` depending on where the bash
+    subshell happens to be standing — which the notifications UI renders
+    as duplicate sender cards for what is logically one session.
+
+    Falls back to live-cwd detection (the legacy behavior) only if the
+    bridge can't be resolved.
 
     Requires:
         - cosa.agents.utils.sender_id must be importable
@@ -398,6 +460,7 @@ def build_sender_id_for_cc( session_id: Optional[str] = None ) -> Optional[str]:
         - Returns None on any failure (import error, resolution failure)
         - When session_id arg is provided, uses it directly (for SessionStart hook)
         - When session_id arg is None, resolves via get_claude_session_id()
+        - Project segment is bridge-cwd-anchored (stable across hook spawns)
 
     Args:
         session_id: Optional explicit CC session_id (full UUID from hook payload).
@@ -415,7 +478,12 @@ def build_sender_id_for_cc( session_id: Optional[str] = None ) -> Optional[str]:
         # Truncate to first 8 chars — UUID hex guarantees [a-f0-9]
         suffix = session_id[:8] if session_id else None
 
-        return build_sender_id( "claude.code", suffix=suffix )
+        # Stable: resolve project from bridge's SessionStart cwd snapshot.
+        # If the bridge can't be resolved (env-var path, no bridge file, etc.)
+        # the helper returns None and build_sender_id falls back to live cwd.
+        project = _resolve_project_from_bridge_cwd()
+
+        return build_sender_id( "claude.code", project=project, suffix=suffix )
 
     except Exception:
         return None
