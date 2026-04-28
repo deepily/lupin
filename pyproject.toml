@@ -74,6 +74,9 @@ dependencies = [
   # --- Audio / media ---
   "pyaudio>=0.2,<1",
   "pydub==0.25.1",
+  "audioop-lts; python_version >= '3.13'", # Python 3.13 removed stdlib audioop;
+                                           # pydub 0.25.1 imports it. This is the
+                                           # community-maintained drop-in shim.
 
   # --- Visualization ---
   "seaborn==0.13.2",

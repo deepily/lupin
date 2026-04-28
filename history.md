@@ -1,5 +1,50 @@
 # Lupin Project History
 
+### 2026.04.27 - Session 09f4c557 | Docker image hygiene: 130 GB → 31.6 GB (Tier 0+1 + cuda-compat fix + drop recursive chown + audioop-lts) + Lance DB cleanup
+
+**Context**: Day-long arc. Started reviewing CJ-flow phase-3 test results; ended having cut the production image from 130 GB to 31.6 GB across three iterative rebuilds, reclaimed 16.67 GB on the lancedb, fixed two regressions caught at sanity-boot time (CUDA Error 804 on RTX 4090s; `pydub` import failing on Python 3.13), and bounced both servers onto the new image.
+
+**Accomplishments**:
+- **Tier 0+1 hygiene pass**: Python 3.11.5 → 3.13.7 via `uv python install` (~20 s vs 15-min source build), single `uv sync --locked` from new `pyproject.toml` + `uv.lock` (293 packages) vs 20+ pip layers, BuildKit cache mounts, fail-loud Python patcher replacing silent `sed -i` for pytest-playwright-visual-snapshot. Image: 130 GB → 72.1 GB.
+- **CUDA Error 804 fix**: `apt purge cuda-compat-12-4` after FROM. Base image's R550-class libcuda shim was getting bind-mounted by nvidia-container-toolkit and engaging Forward Compatibility (Tesla-only). On consumer RTX 4090s: error 804. Removing it lets cu124 wheels run on R535 driver via Minor Version Compatibility (unrestricted). Validated via runtime experiment (commit derivative, GPU sanity green).
+- **Drop recursive `chown -R`**: single `USER rruiz` switch after front-loaded root block + `--chown=rruiz:rruiz` on every COPY. Eliminated the 31.5 GB chown layer that copy-on-write was creating from inode-metadata-only changes. Bonus: BuildKit uv cache mount retargeted to `/home/rruiz/.cache/uv,uid=1001,gid=1001` saved another 8.5 GB. Image: 72.1 GB → 31.6 GB.
+- **Audioop-lts fix**: full FastAPI app import sanity boot caught `pydub 0.25.1` failing on Python 3.13 (stdlib `audioop` removed). Added `audioop-lts==0.2.2` shim, rebuilt. 3-stage sanity now green (GPU + flash-attn + audioop + 155 FastAPI routes register). lupin:1.0.0 promoted to the audioop-fixed build (image ID `1b0805cfb3aa`).
+- **docker-compose.yml**: both pins (lines 34 + 93) → `lupin:1.0.0`. Dev :7999 + test :8000 bounced onto the new image, both healthy.
+- **Lance DB cleanup**: created `src/scripts/cleanup_lupin_lancedb.py` (uses `tbl.optimize(cleanup_older_than=...)`, the modern combined compaction+cleanup API). First run with 7-day cutoff reclaimed 16.67 GB (43.4 GB → 26.7 GB; `input_and_output_tbl` had 11,819 versions, 5,093 cleaned). Verified zero `.checkout()` calls anywhere = no time-travel breakage. Pre-cleanup backup in `io/backups/` deleted after smoke tests (+43 GB on /mnt/DATA01).
+- **R&D plan docs serialized** in `src/rnd/v0.1.7/`: `2026.04.26-dockerfile-cpython-3.11.9-upgrade.md` (narrower predecessor), `2026.04.27-cuda-driver-vs-image-torch-cu124-mismatch.md` (Error 804 handoff to Docker expert), `2026.04.27-drop-recursive-chown-image-bloat-audit.md` (chown plan + execution log).
+- **Memory feedback rules added**: `feedback_no_auto_promote_tags.md` (park rebuild outputs at candidate tag, never overwrite working tag without confirmation), `feedback_backups_only_to_dedicated_drive.md` (per-script backups go to dedicated drive only, never `io/backups`).
+- **User-driven script refinements**: `cleanup_lupin_lancedb.py` updated to default `--older-than-days 1` (was 7), backup function removed entirely (Lupin already has nightly ecosystem-level backups).
+- **Dockerfile follow-up**: added missing `COPY --chown=rruiz:rruiz src/lupin_cli /var/lupin/src/lupin_cli` (caught by FastAPI import sanity at validation time; production worked because of the runtime bind-mount of `./src`). Takes effect on next rebuild.
+- **Image cleanup**: removed 6 unused images (genie-in-the-box 0.6/0.7/0.8, peft 0.2/0.3, hf-tgi), zapped 25 zombie containers from 2023-2024, ran `docker builder prune -af` (84 GB build cache freed). Net /mnt/DATA01 free: 78 GB → 93 GB after the lance backup delete.
+
+**Files Modified** (parent Lupin only):
+- `docker/lupin/Dockerfile` (rewritten end-to-end across 3 iterations)
+- `docker/lupin/scripts/patch-pytest-playwright-visual-snapshot.py` (NEW)
+- `pyproject.toml` (NEW — 293-package lock)
+- `uv.lock` (NEW — generated, 528 KB)
+- `.dockerignore` (lancedb + postgresql-dev-data exclusions)
+- `src/scripts/cleanup_lupin_lancedb.py` (NEW + later refactor)
+- `docker-compose.yml` (both image pins → lupin:1.0.0)
+- `src/rnd/v0.1.7/2026.04.26-dockerfile-cpython-3.11.9-upgrade.md` (NEW)
+- `src/rnd/v0.1.7/2026.04.26-dockerfile-cpython-3.11.9-upgrade-to-3.13.13.md` (NEW — expert plan)
+- `src/rnd/v0.1.7/2026.04.27-cuda-driver-vs-image-torch-cu124-mismatch.md` (NEW)
+- `src/rnd/v0.1.7/2026.04.27-cuda-driver-vs-image-torch-cu124-mismatch-omit-cuda-compat-12-4.md` (NEW — expert reply)
+- `src/rnd/v0.1.7/2026.04.27-drop-recursive-chown-image-bloat-audit.md` (NEW)
+- `history.md` (this entry)
+
+**Image Trajectory**:
+| Image | Size | Δ vs 0.9.0 |
+|---|---:|---:|
+| lupin:0.9.0 (pre-Tier-0) | 130 GB | baseline |
+| lupin:1.0.0 (Tier 0+1 + cuda-compat) | 72.1 GB | −45% |
+| lupin:1.0.0 (+ drop chown + audioop-lts) | **31.6 GB** | **−76%** |
+
+**Commits**:
+- `3950d0a` (Checkpoint: docker image — Tier 0+1 + cuda-compat fix + drop recursive chown — 130 GB → 31.6 GB)
+- pending: cleanup script + audioop fix in pyproject/uv.lock + docker-compose pins + Dockerfile lupin_cli + history
+
+---
+
 ### 2026.04.27 - Session 49c27830 | Bug Fix Mode
 
 #### Fixes

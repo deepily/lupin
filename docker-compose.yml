@@ -31,7 +31,7 @@ services:
   # Always runs [Lupin: Development] config with lupin_db_dev.
   # uvicorn --reload enabled for live code changes during development.
   lupin-rest-dev:
-    image: lupin:0.9.0
+    image: lupin:1.0.0
     container_name: lupin-rest-dev
     restart: unless-stopped
     user: "1001:1001"
@@ -49,6 +49,11 @@ services:
       - ~/.lora_env:/home/rruiz/.lora_env:ro
       - ~/.lupin:/home/rruiz/.lupin:ro
       - ~/.claude/.credentials.json:/home/rruiz/.claude/.credentials.json:ro
+      # Read-write so the cosa-voice conversation-mode endpoint can flip
+      # conversation_mode_active in the per-session bridge files written by
+      # SessionStart hook. Container runs as rruiz (UID matches host) so file
+      # ownership is preserved on writes.
+      - ~/.claude/sessions:/home/rruiz/.claude/sessions
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: development
@@ -90,7 +95,7 @@ services:
   # Companion credentials (admin user + API key) auto-seeded from dev DB
   # on every startup via seed_test_companions.py.
   lupin-rest-test:
-    image: lupin:0.9.0
+    image: lupin:1.0.0
     container_name: lupin-rest-test
     restart: unless-stopped
     user: "1001:1001"

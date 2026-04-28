@@ -240,6 +240,7 @@ ENV LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path
 COPY --chown=rruiz:rruiz src/cosa         /var/lupin/src/cosa
 COPY --chown=rruiz:rruiz src/fastapi_app  /var/lupin/src/fastapi_app
 COPY --chown=rruiz:rruiz src/lib          /var/lupin/src/lib
+COPY --chown=rruiz:rruiz src/lupin_cli    /var/lupin/src/lupin_cli
 COPY --chown=rruiz:rruiz src/lupin_mcp    /var/lupin/src/lupin_mcp
 COPY --chown=rruiz:rruiz src/scripts      /var/lupin/src/scripts
 COPY --chown=rruiz:rruiz src/migrations   /var/lupin/src/migrations

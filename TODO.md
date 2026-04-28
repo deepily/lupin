@@ -1,12 +1,30 @@
 # TODO
 
-Last updated: 2026-04-27 EDT session-end (Session ee896fa3 — R&D doc serialized for promoting the adversarial+fitness review pattern to planning-is-prompting; Phase 1 lift deferred to a PIP-rooted Claude session.)
+Last updated: 2026-04-27 EDT session-end (Sessions ee896fa3 + 09f4c557 — ee896fa3 serialized the adversarial+fitness plan-review R&D; 09f4c557 cut the docker image 130 GB → 31.6 GB via Tier 0+1 + cuda-compat fix + drop recursive chown + audioop-lts, ran lance cleanup reclaiming 16.67 GB, and bounced both servers onto lupin:1.0.0.)
 
 ---
 
 ## 📦 Cross-project — `planning-is-prompting` follow-up
 
 - [ ] [LUPIN→PIP] **Phase 1: Lift adversarial+fitness review prompts into PIP** — author `planning-is-prompting/workflow/plan-review.md` from the spec in `src/rnd/v0.1.7/2026.04.27-promote-plan-review-pattern-to-pip.md` (§ "Phase 1 deliverable shape"). Pick up in a `planning-is-prompting`-rooted Claude session. Phase 2 (convention establishment in `p-is-p-02-documenting-the-implementation.md`) is the linchpin and must follow Phase 1 immediately.
+
+---
+
+## ✅ COMPLETED — Session 09f4c557 (2026-04-27, evening)
+
+- [x] [LUPIN] **Docker image hygiene + rebuilds — 130 GB → 31.6 GB** — Tier 0+1 (Python 3.13.7 + uv-managed venv + uv sync vs 20+ pip layers + BuildKit cache mounts), cuda-compat-12-4 purge fix (CUDA Error 804 on consumer RTX 4090s), drop recursive chown (single USER rruiz switch + --chown= per COPY + uv-cache mount uid retarget), audioop-lts fix (pydub on Python 3.13). Three rebuilds across the day: 130 → 72 → 31.6 GB. lupin:1.0.0 promoted to the audioop-fixed build. New artifacts: `pyproject.toml`, `uv.lock`, `docker/lupin/scripts/patch-pytest-playwright-visual-snapshot.py`. Plans serialized to `src/rnd/v0.1.7/`.
+- [x] [LUPIN] **docker-compose.yml pinned both services to `lupin:1.0.0`** (lines 34 + 93) — dev :7999 + test :8000 bounced onto new image, both healthy. lupin:0.9.0 retained as fallback.
+- [x] [LUPIN] **Lance DB cleanup script** — `src/scripts/cleanup_lupin_lancedb.py` created (uses `tbl.optimize(cleanup_older_than=...)` — modern combined compaction+cleanup API). First run with 7-day cutoff reclaimed 16.67 GB (43.4 → 26.7 GB). Pre-cleanup backup deleted after smoke tests. Script later refactored to default `--older-than-days 1` and dropped per-script backup function (Lupin has nightly ecosystem-level backups).
+- [x] [LUPIN] **Disk cleanup**: removed 6 unused images (genie-in-the-box 0.6/0.7/0.8, peft 0.2/0.3, hf-tgi), 25 zombie containers, 84 GB build cache. /mnt/DATA01: 78 GB → 93 GB free.
+- [x] [LUPIN] **Memory feedback rules added**: `feedback_no_auto_promote_tags.md` (park rebuild outputs at candidate tag), `feedback_backups_only_to_dedicated_drive.md` (per-script backups → dedicated drive only).
+- [x] [LUPIN] **Dockerfile follow-up: added `COPY --chown=rruiz:rruiz src/lupin_cli /var/lupin/src/lupin_cli`** — lupin_cli was missing from COPY list (production worked because of bind-mount; image isn't self-contained without it). Takes effect on next rebuild.
+
+## 🌅 FOLLOW-UPS — for the user (no urgency)
+
+- [ ] [LUPIN] **Tonight's full test suite run on lupin:1.0.0** — user plans to run all tests this evening to validate the new image under realistic load. Surface any new regressions (especially additional Python 3.13 incompats lurking in import chains we didn't exercise during sanity boots).
+- [ ] [LUPIN] **Provide dedicated backup drive's mount path** — when convenient. Future maintenance scripts that do need to back up will default there. `feedback_backups_only_to_dedicated_drive.md` captures the policy.
+- [ ] [LUPIN] **Tier 2 / Tier 3 docker hygiene (rainy day)** — multi-stage builder/runtime split (drops cuda-toolkit-12-4 from runtime, ~6 GB saved); HF models via runtime mount / GCS-FUSE (~13 GB saved); pinned base-image digest + Renovate; checksum-pinned d2/MARP/Claude Code installers; BuildKit secret mounts for `src/conf/keys`. Captured as out-of-scope in `src/rnd/v0.1.7/2026.04.27-drop-recursive-chown-image-bloat-audit.md`.
+- [ ] [LUPIN] **Periodic / scheduled lance cleanup** — wire `tbl.optimize(cleanup_older_than=timedelta(days=1))` into FastAPI lifespan as a daily background task. Integration point: `src/fastapi_app/main.py:388` alongside existing `clock_loop`, `websocket_heartbeat_loop`, `websocket_cleanup_loop`. Adds INI key like `solution snapshots cleanup older than days = 1`.
 
 ---
 
