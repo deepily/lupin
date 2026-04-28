@@ -19,7 +19,8 @@ if _src_path not in sys.path:
 
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     find_session_by_id, find_session_by_tmux,
-    find_session_path_by_id, get_conversation_mode, set_conversation_mode
+    find_session_path_by_id, get_conversation_mode, set_conversation_mode,
+    find_active_conversation_sessions
 )
 from lupin_cli.claude_code.hooks.register_session import main
 
@@ -732,6 +733,45 @@ class TestFindSessionPathById:
         assert find_session_path_by_id( "" ) is None
         assert find_session_path_by_id( None ) is None
 
+    def test_finds_bridge_when_host_pids_untrusted( self ):
+        """
+        When _can_trust_host_pids() returns False (e.g., reader is inside a Docker
+        container reading bridge files written by hooks on the host), bridge files
+        whose host PIDs look "dead" from the container's PID namespace must NOT
+        be filtered out — otherwise every bridge gets discarded and the lookup
+        404s. Regression guard for the conversation-mode 404 we hit today.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid     = "c7333045-5640-412d-9c5a-43ee6b0e7d72"
+            data    = _make_session_data( sid )
+            # Write under a HOST PID that does NOT exist in this test process
+            written = _write_session_file( sessions_dir, 99999999, data )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=False ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=False ):
+                result = find_session_path_by_id( sid )
+
+            assert result == written
+
+    def test_filters_dead_bridge_when_host_pids_trusted( self ):
+        """
+        Counterpart: when _can_trust_host_pids() returns True (host-side caller),
+        bridge files with dead PIDs ARE filtered out — preserving stale-file
+        pruning for hook scripts and the local MCP server.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid  = "deadbeef-1111-2222-3333-444455556666"
+            data = _make_session_data( sid )
+            _write_session_file( sessions_dir, 99999999, data )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=True ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=False ):
+                assert find_session_path_by_id( sid ) is None
+
 
 class TestConversationMode:
 
@@ -819,6 +859,171 @@ class TestConversationMode:
             assert after[ "cwd" ] == "/some/path"
             assert after[ "session_topic" ] == "important topic"
             assert after[ "conversation_mode_active" ] is True
+
+
+# ── Tests: find_active_conversation_sessions (mutex enforcement helper) ────────
+
+
+class TestFindActiveConversationSessions:
+    """
+    The mutex-enforcement helper used by the conversation-mode endpoint to find
+    every bridge whose conversation_mode_active=true at the moment a new session
+    activates. It must:
+      - Return empty list when no bridge has it set
+      - Return all matching bridges with canonical session_id
+      - Honor exclude_session_id (full UUID OR 8-char prefix)
+      - Honor the host-PID-namespace gate (skip dead PIDs when trustable;
+        keep all when running inside a container reading host bridges)
+      - Skip non-bridge files (cc-buffer-*, cc-listener-*) and parse errors
+    """
+
+    def _write_active( self, sessions_dir, pid, sid, active=True ):
+        data = _make_session_data( sid )
+        data[ "conversation_mode_active" ] = active
+        return _write_session_file( sessions_dir, pid, data )
+
+    def test_empty_dir_returns_empty_list( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                assert find_active_conversation_sessions() == []
+
+    def test_no_active_bridges_returns_empty_list( self ):
+        """All bridges with conversation_mode_active=false → empty."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            self._write_active( sessions_dir, os.getpid(), "aaaa1111-2222-3333-4444-555566667777", active=False )
+            self._write_active( sessions_dir, os.getpid() + 1, "bbbb2222-3333-4444-5555-666677778888", active=False )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                assert find_active_conversation_sessions() == []
+
+    def test_returns_single_active_bridge( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid_a = "11111111-2222-3333-4444-555566667777"
+            sid_b = "22222222-3333-4444-5555-666677778888"
+            written_a = self._write_active( sessions_dir, os.getpid(), sid_a, active=True )
+            self._write_active( sessions_dir, os.getpid() + 1, sid_b, active=False )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                results = find_active_conversation_sessions()
+
+            assert len( results ) == 1
+            assert results[0] == ( written_a, sid_a )
+
+    def test_returns_all_active_bridges( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid_a = "11111111-2222-3333-4444-555566667777"
+            sid_b = "22222222-3333-4444-5555-666677778888"
+            sid_c = "33333333-4444-5555-6666-777788889999"
+            self._write_active( sessions_dir, 90001, sid_a, active=True )
+            self._write_active( sessions_dir, 90002, sid_b, active=True )
+            self._write_active( sessions_dir, 90003, sid_c, active=False )
+
+            # Patch _is_pid_alive so the synthetic PIDs all "look alive"
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
+                results = find_active_conversation_sessions()
+
+            sids = sorted( sid for _path, sid in results )
+            assert sids == sorted( [ sid_a, sid_b ] )
+
+    def test_exclude_session_id_full_uuid_filters_out( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid_a = "11111111-2222-3333-4444-555566667777"
+            sid_b = "22222222-3333-4444-5555-666677778888"
+            self._write_active( sessions_dir, 90001, sid_a, active=True )
+            self._write_active( sessions_dir, 90002, sid_b, active=True )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
+                results = find_active_conversation_sessions( exclude_session_id=sid_a )
+
+            sids = [ sid for _path, sid in results ]
+            assert sids == [ sid_b ]
+
+    def test_exclude_session_id_8char_prefix_filters_out( self ):
+        """Mirrors find_session_path_by_id: 8-char prefix is enough."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid_a = "deadbeef-2222-3333-4444-555566667777"
+            sid_b = "11111111-2222-3333-4444-555566667777"
+            self._write_active( sessions_dir, 90001, sid_a, active=True )
+            self._write_active( sessions_dir, 90002, sid_b, active=True )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
+                results = find_active_conversation_sessions( exclude_session_id="deadbeef" )
+
+            sids = [ sid for _path, sid in results ]
+            assert sids == [ sid_b ]
+
+    def test_skips_buffer_and_listener_files( self ):
+        """Non-bridge files in SESSION_DIR are ignored."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid_a = "11111111-2222-3333-4444-555566667777"
+            self._write_active( sessions_dir, os.getpid(), sid_a, active=True )
+
+            # Sibling junk files that happen to live in SESSION_DIR
+            ( sessions_dir / "cc-buffer-bbb.jsonl" ).write_text( "not json" )
+            ( sessions_dir / "cc-listener-ccc.log" ).write_text( "not json either" )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                results = find_active_conversation_sessions()
+
+            assert len( results ) == 1
+            assert results[0][1] == sid_a
+
+    def test_container_mode_keeps_dead_pid_bridges( self ):
+        """
+        When _can_trust_host_pids() is False (reader inside a Docker container),
+        bridges whose host PIDs look "dead" must NOT be filtered out — same
+        regression guard as test_finds_bridge_when_host_pids_untrusted but
+        for the mutex helper.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid_a = "c7333045-5640-412d-9c5a-43ee6b0e7d72"
+            self._write_active( sessions_dir, 99999999, sid_a, active=True )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=False ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=False ):
+                results = find_active_conversation_sessions()
+
+            assert len( results ) == 1
+            assert results[0][1] == sid_a
+
+    def test_host_mode_filters_dead_pid_bridges( self ):
+        """Counterpart: host-side caller WITH dead PIDs → those bridges filtered out."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid_a = "deadbeef-1111-2222-3333-444455556666"
+            self._write_active( sessions_dir, 99999999, sid_a, active=True )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=True ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=False ):
+                assert find_active_conversation_sessions() == []
+
+    def test_prefers_stable_session_id_in_returned_tuple( self ):
+        """When a bridge has stable_session_id, that's what's returned (matches find_session_path_by_id semantics)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            data = _make_session_data( "transient-1234-5555-6666-777788889999" )
+            data[ "stable_session_id" ] = "stable000-1234-5555-6666-777788889999"
+            data[ "conversation_mode_active" ] = True
+            _write_session_file( sessions_dir, os.getpid(), data )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                results = find_active_conversation_sessions()
+
+            assert len( results ) == 1
+            _path, sid = results[0]
+            assert sid == "stable000-1234-5555-6666-777788889999"
 
 
 # ── Standalone ───────────────────────────────────────────────────────────────

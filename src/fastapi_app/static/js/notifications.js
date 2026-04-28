@@ -8865,14 +8865,107 @@ class NotificationsUI {
      *     { type, session_id, conversation_mode_active, timestamp }
      */
     handleConversationModeChanged( envelope ) {
-        const sessionId = envelope?.session_id;
-        const active    = !!envelope?.conversation_mode_active;
-        if ( !sessionId ) {
+        const rawSessionId = envelope?.session_id;
+        const active       = !!envelope?.conversation_mode_active;
+        const displaced    = envelope?.displaced === true;
+        const displacedBy  = envelope?.displaced_by || null;
+        if ( !rawSessionId ) {
             this.log( '[CONVERSATION-MODE] WS event missing session_id, ignoring' );
             return;
         }
+        // Normalize to 8-char prefix — the UI's data-session-id (set in
+        // createSenderCard via parseSenderId) is keyed by the 8-char form
+        // extracted from sender_id like "claude.code@lupin.deepily.ai#c7333045".
+        // Server-side displace events emit the FULL UUID read from the bridge
+        // file; without this normalization, downstream selector lookups
+        // .sender-conversation-mode-btn[data-session-id="<full-uuid>"] miss
+        // the actual button DOM, leaving the toggle icon stuck on the
+        // displaced session. (Bug surfaced 2026-04-28 during multi-session
+        // mutex testing.)
+        const sessionId = ( typeof rawSessionId === 'string' && rawSessionId.length > 8 )
+            ? rawSessionId.substring( 0, 8 )
+            : rawSessionId;
         this._setConversationModeLocal( sessionId, active );
-        this.log( `[CONVERSATION-MODE] session ${sessionId} → ${active ? 'conversation' : 'notification'} mode (via WS)` );
+
+        // Mutex side effect: when this session was displaced by another, pause
+        // any in-flight TTS so the user's audio focus doesn't trail behind
+        // the toggle they just made on the OTHER session. The user can resume
+        // manually via the global play or per-notification corner button.
+        if ( displaced && this.activeTTSItem && !this.isTTSPaused ) {
+            this.log( `[CONVERSATION-MODE] session ${sessionId} displaced by ${displacedBy} — pausing in-flight TTS` );
+            this.pauseTTS();
+        }
+
+        // Pin/unpin the active conversation pane in the notifications accordion
+        if ( active ) {
+            this._pinSenderCardForSession( sessionId );
+        } else {
+            this._unpinSenderCardForSession( sessionId );
+        }
+
+        this.log( `[CONVERSATION-MODE] session ${sessionId} → ${active ? 'conversation' : 'notification'} mode (via WS${displaced ? ', displaced' : ''})` );
+    }
+
+    /**
+     * Pin the sender card whose session_id matches the given id to DOM index 0
+     * of #notifications-list, marking it with data-pinned-conv-mode="true" so
+     * the soft-glow CSS rule applies and the sort-respecting insertion logic
+     * keeps it at the top regardless of activity from other sessions.
+     *
+     * Unpins any previously-pinned card so the invariant "at most one pinned
+     * card at a time" holds (matches the server-side mutex).
+     *
+     * @param {string} sessionId - The session whose card should be pinned
+     */
+    _pinSenderCardForSession( sessionId ) {
+        if ( !sessionId ) return;
+
+        const container = document.getElementById( 'notifications-list' );
+        if ( !container ) return;
+
+        // Unpin any previously-pinned card belonging to a DIFFERENT session
+        // (server-side mutex guarantees only one is active at a time, but the
+        // UI reconciles defensively in case events arrive out of order).
+        const previouslyPinned = container.querySelectorAll( '.sender-card[data-pinned-conv-mode="true"]' );
+        previouslyPinned.forEach( card => {
+            if ( card.getAttribute( 'data-session-id' ) !== sessionId ) {
+                card.removeAttribute( 'data-pinned-conv-mode' );
+            }
+        } );
+
+        // Find the target card by session_id (data attribute set in createSenderCard).
+        const card = container.querySelector( `.sender-card[data-session-id="${sessionId}"]` );
+        if ( !card ) {
+            // Card may not exist yet (first notification for this session arrives
+            // later). When createSenderCard runs, it consults conversationModes
+            // and pins itself if active=true at insertion time.
+            this.log( `[CONVERSATION-MODE] _pinSenderCardForSession(${sessionId}) — no card yet, pin deferred to createSenderCard` );
+            return;
+        }
+
+        card.setAttribute( 'data-pinned-conv-mode', 'true' );
+        if ( container.firstChild !== card ) {
+            container.insertBefore( card, container.firstChild );
+        }
+    }
+
+    /**
+     * Remove the data-pinned-conv-mode attribute from the matching sender card,
+     * letting it resume normal activity-based sorting. Called on deactivate
+     * (active=false) and on displaced events.
+     *
+     * @param {string} sessionId - The session whose card should be unpinned
+     */
+    _unpinSenderCardForSession( sessionId ) {
+        if ( !sessionId ) return;
+        const container = document.getElementById( 'notifications-list' );
+        if ( !container ) return;
+        const card = container.querySelector(
+            `.sender-card[data-session-id="${sessionId}"][data-pinned-conv-mode="true"]`
+        );
+        if ( card ) {
+            card.removeAttribute( 'data-pinned-conv-mode' );
+        }
     }
 
     /**
@@ -9319,7 +9412,23 @@ class NotificationsUI {
         const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         const card = document.getElementById( cardId );
 
-        if ( container && card && container.firstChild !== card ) {
+        if ( !container || !card ) return;
+
+        // Pinned-card invariant: never insert a non-pinned card above a pinned
+        // conversation-mode card. If a pinned card exists AND we're moving a
+        // DIFFERENT card, place it as the second child (immediately after the
+        // pinned card) instead of clobbering position 0.
+        const pinned = container.querySelector( '.sender-card[data-pinned-conv-mode="true"]' );
+        if ( pinned && pinned !== card ) {
+            const target = pinned.nextSibling;
+            if ( target !== card ) {
+                container.insertBefore( card, target );
+                this.log( `Moved ${senderId} card to position 1 (after pinned conversation card)` );
+            }
+            return;
+        }
+
+        if ( container.firstChild !== card ) {
             container.insertBefore( card, container.firstChild );
             this.log( `Moved ${senderId} card to top` );
         }
@@ -9374,10 +9483,6 @@ class NotificationsUI {
                <button class="sender-gist-btn"
                        onclick="event.stopPropagation(); window.notificationsUI.generateSessionGist('${escapedSenderId}')"
                        title="Generate smart gist from conversation">✨</button>
-               <button class="sender-conversation-mode-btn${conversationModeActive ? ' is-active' : ''}"
-                       data-session-id="${sessionId}"
-                       onclick="event.stopPropagation(); window.notificationsUI.toggleConversationMode('${sessionId}')"
-                       title="${conversationModeTitle}">${conversationModeIcon}</button>
                <span class="sender-session-name"
                      onclick="event.stopPropagation(); window.notificationsUI.editSessionName('${sessionId}')"
                      title="Click to rename">${sessionName || ''}</span>`
@@ -9399,6 +9504,10 @@ class NotificationsUI {
         const ccVoiceInput = isCCSession ? `
             <div class="cc-voice-input" data-session-hash="${sessionId}" data-sender-id="${senderId}">
                 <div class="cc-voice-input-row">
+                    <button type="button" class="sender-conversation-mode-btn${conversationModeActive ? ' is-active' : ''}"
+                            data-session-id="${sessionId}"
+                            onclick="event.stopPropagation(); window.notificationsUI.toggleConversationMode('${sessionId}')"
+                            title="${conversationModeTitle}">${conversationModeIcon}</button>
                     <button type="button" class="stt-button cc-session-stt"
                             id="cc-session-stt-${sessionId}"
                             title="Click to record (30s max, ESC to cancel)">🎤</button>
@@ -9431,13 +9540,30 @@ class NotificationsUI {
             </div>
         `;
 
-        // Insert at top for runtime updates, append for initial load (preserves API sort order)
+        // If THIS card belongs to the active conversation-mode session, mark it
+        // pinned at insert time so the soft-glow CSS rule kicks in immediately
+        // and the sort-respecting insertion logic keeps it at the top. This
+        // covers the initial-page-load case where conversationModes is hydrated
+        // from localStorage and the session might already be active.
+        const shouldPin = sessionId && !!this.conversationModes[ sessionId ];
+        if ( shouldPin ) {
+            card.setAttribute( 'data-pinned-conv-mode', 'true' );
+        }
+
+        // Insert at top for runtime updates, append for initial load (preserves API sort order).
+        // Pinning invariant: a pinned card always lives at index 0; non-pinned
+        // cards inserted at "top" go to index 1 when a pinned card exists.
         if ( insertAtTop ) {
-            container.insertBefore( card, container.firstChild );
+            const pinned = container.querySelector( '.sender-card[data-pinned-conv-mode="true"]' );
+            if ( pinned && pinned !== card ) {
+                container.insertBefore( card, pinned.nextSibling );
+            } else {
+                container.insertBefore( card, container.firstChild );
+            }
         } else {
             container.appendChild( card );
         }
-        this.log( `Created sender card for ${projectName}${sessionId ? '#' + sessionId : ''} (${senderId})` );
+        this.log( `Created sender card for ${projectName}${sessionId ? '#' + sessionId : ''} (${senderId})${shouldPin ? ' [PINNED conversation mode]' : ''}` );
     }
 
     /**
@@ -9649,6 +9775,59 @@ class NotificationsUI {
                 <span class="message-time">${timeStr}</span>
                 <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${this.renderMarkdownInline( cleanMessage )}${expiredBadge}${abstractIndicator}</span>
             `;
+        }
+
+        // Corner pause button — appears in upper-right of the message bubble while
+        // its TTS is playing (gated by .tts-playing on the messageDiv, which is
+        // already toggled by start/stopTTSPlayingIndicator across the audio
+        // lifecycle). Click flips between pause and resume; the data-paused
+        // attribute carries the toggle state.
+        const cornerBtnId = notification.id || notification.id_hash || '';
+        if ( cornerBtnId && !isResponse ) {
+            const cornerBtn = document.createElement( 'button' );
+            cornerBtn.type      = 'button';
+            cornerBtn.className = 'notification-corner-pause-btn';
+            cornerBtn.dataset.notificationId = cornerBtnId;
+            cornerBtn.dataset.paused         = 'false';
+            cornerBtn.title       = 'Pause this notification\'s playback';
+            cornerBtn.textContent = '⏸';
+            cornerBtn.setAttribute( 'aria-label', 'Pause notification audio' );
+            cornerBtn.addEventListener( 'click', ( e ) => {
+                e.stopPropagation();
+                const nid = cornerBtn.dataset.notificationId;
+                this.log( `[CORNER-PAUSE] click — nid=${nid}, isTTSPaused=${this.isTTSPaused}, activeTTSItem=${!!this.activeTTSItem}` );
+
+                // Route through the canonical pauseTTS()/resumeTTS() helpers —
+                // those handle BOTH playback modes (Web Audio API for instant
+                // mode, HTML Audio for reliable mode). The earlier attempt at
+                // calling this.currentAudio.pause() failed because instant mode
+                // produces audio via AudioContext + AudioBufferSource and the
+                // HTML5 Audio handle is a stale reference there. The global
+                // pause button uses these same helpers — corner button now
+                // mirrors that behavior so they stay in sync.
+                if ( this.isTTSPaused ) {
+                    this.resumeTTS();
+                } else {
+                    this.pauseTTS();
+                }
+
+                // Optimistic local UI update — the source of truth is
+                // this.isTTSPaused, which the helpers above just flipped.
+                if ( this.isTTSPaused ) {
+                    cornerBtn.dataset.paused = 'true';
+                    cornerBtn.textContent    = '▶';
+                    cornerBtn.title          = 'Resume this notification\'s playback';
+                    cornerBtn.setAttribute( 'aria-label', 'Resume notification audio' );
+                    messageDiv.classList.add( 'is-paused-current' );
+                } else {
+                    cornerBtn.dataset.paused = 'false';
+                    cornerBtn.textContent    = '⏸';
+                    cornerBtn.title          = 'Pause this notification\'s playback';
+                    cornerBtn.setAttribute( 'aria-label', 'Pause notification audio' );
+                    messageDiv.classList.remove( 'is-paused-current' );
+                }
+            } );
+            messageDiv.appendChild( cornerBtn );
         }
 
         // Add to top (newest first)
@@ -10313,6 +10492,8 @@ class NotificationsUI {
         // Create list item with styling from original queue.html
         const listItem = document.createElement( "li" );
         listItem.id = notificationId;
+        // position:relative anchors the absolutely-positioned corner pause button.
+        listItem.style.position = "relative";
         listItem.style.marginBottom = "8px";
         listItem.style.padding = "5px";
         listItem.style.border = "1px solid transparent";
@@ -10352,10 +10533,14 @@ class NotificationsUI {
                           style="cursor: not-allowed; opacity: 0.4; transition: opacity 0.2s; font-size: 14px;" 
                           title="Stop notification audio" role="button" tabindex="-1" aria-label="Stop notification audio">⏹️</span>
                 </span>
-                <span class="delete-notification" data-notification-id="${notificationId}" 
-                      style="cursor: pointer; opacity: 0.6; transition: opacity 0.2s; font-size: 14px; color: #dc3545; margin-left: 4px;" 
+                <span class="delete-notification" data-notification-id="${notificationId}"
+                      style="cursor: pointer; opacity: 0.6; transition: opacity 0.2s; font-size: 14px; color: #dc3545; margin-left: 4px;"
                       title="Delete notification" role="button" tabindex="0" aria-label="Delete notification">🗑️</span>
             </div>
+            <button type="button" class="notification-corner-pause-btn"
+                    data-notification-id="${notificationId}"
+                    title="Pause this notification's playback"
+                    aria-label="Pause notification audio">⏸</button>
         `;
         
         // Store notification data for replay functionality
@@ -10374,8 +10559,9 @@ class NotificationsUI {
         const resumeButton = listItem.querySelector( '.audio-resume-btn' );
         const pauseButton = listItem.querySelector( '.audio-pause-btn' );
         const stopButton = listItem.querySelector( '.audio-stop-btn' );
+        const cornerPauseButton = listItem.querySelector( '.notification-corner-pause-btn' );
         const deleteButton = listItem.querySelector( '.delete-notification' );
-        
+
         if ( restartButton ) {
             this.addAudioControlListeners( restartButton, 'restart', notificationId );
         }
@@ -10387,6 +10573,19 @@ class NotificationsUI {
         }
         if ( stopButton ) {
             this.addAudioControlListeners( stopButton, 'stop', notificationId );
+        }
+        if ( cornerPauseButton ) {
+            // Corner pause button toggles between pause and resume based on the
+            // listItem's current paused-state class. CSS gates visibility to
+            // li.is-playing-current so the button only appears while audio is
+            // loaded; we just dispatch the right action here.
+            cornerPauseButton.addEventListener( 'click', ( e ) => {
+                e.stopPropagation();
+                const action = listItem.classList.contains( 'is-paused-current' )
+                    ? 'resume'
+                    : 'pause';
+                this.handleAudioControl( action, notificationId );
+            } );
         }
         
         if ( deleteButton ) {
@@ -10542,7 +10741,14 @@ class NotificationsUI {
         const resumeBtn = panel.querySelector( '.audio-resume-btn' );
         const pauseBtn = panel.querySelector( '.audio-pause-btn' );
         const stopBtn = panel.querySelector( '.audio-stop-btn' );
-        
+
+        // Mirror the same state machine onto the absolutely-positioned corner
+        // pause button on the parent <li>. CSS gates visibility to
+        // li.is-playing-current; the icon flips between ⏸ (playing) and ▶
+        // (paused) so the user can resume in place from a distance.
+        const listItem      = panel.closest( 'li' );
+        const cornerPauseBtn = listItem?.querySelector( '.notification-corner-pause-btn' );
+
         // Remove all existing state classes
         [restartBtn, resumeBtn, pauseBtn, stopBtn].forEach( btn => {
             if ( btn ) {
@@ -10561,8 +10767,17 @@ class NotificationsUI {
                 this.updateButtonVisualState( resumeBtn, false );
                 this.updateButtonVisualState( pauseBtn, false );
                 this.updateButtonVisualState( stopBtn, false );
+                // Corner pause button: hide and reset to ⏸ for next playback
+                if ( listItem ) {
+                    listItem.classList.remove( 'is-playing-current', 'is-paused-current' );
+                }
+                if ( cornerPauseBtn ) {
+                    cornerPauseBtn.textContent = '⏸';
+                    cornerPauseBtn.title       = 'Pause this notification\'s playback';
+                    cornerPauseBtn.setAttribute( 'aria-label', 'Pause notification audio' );
+                }
                 break;
-                
+
             case 'playing':
                 // [⏮️ disabled] [▶️ disabled] [⏸️ enabled] [⏹️ enabled]
                 restartBtn?.classList.add( 'audio-control-disabled' );
@@ -10573,8 +10788,18 @@ class NotificationsUI {
                 this.updateButtonVisualState( resumeBtn, false );
                 this.updateButtonVisualState( pauseBtn, true );
                 this.updateButtonVisualState( stopBtn, true );
+                // Corner pause button: visible (playing), shows ⏸
+                if ( listItem ) {
+                    listItem.classList.add( 'is-playing-current' );
+                    listItem.classList.remove( 'is-paused-current' );
+                }
+                if ( cornerPauseBtn ) {
+                    cornerPauseBtn.textContent = '⏸';
+                    cornerPauseBtn.title       = 'Pause this notification\'s playback';
+                    cornerPauseBtn.setAttribute( 'aria-label', 'Pause notification audio' );
+                }
                 break;
-                
+
             case 'paused':
                 // [⏮️ enabled] [▶️ enabled] [⏸️ disabled] [⏹️ enabled]
                 restartBtn?.classList.add( 'audio-control-enabled' );
@@ -10585,6 +10810,15 @@ class NotificationsUI {
                 this.updateButtonVisualState( resumeBtn, true );
                 this.updateButtonVisualState( pauseBtn, false );
                 this.updateButtonVisualState( stopBtn, true );
+                // Corner pause button: visible (paused), shows ▶
+                if ( listItem ) {
+                    listItem.classList.add( 'is-playing-current', 'is-paused-current' );
+                }
+                if ( cornerPauseBtn ) {
+                    cornerPauseBtn.textContent = '▶';
+                    cornerPauseBtn.title       = 'Resume this notification\'s playback';
+                    cornerPauseBtn.setAttribute( 'aria-label', 'Resume notification audio' );
+                }
                 break;
         }
     }
@@ -15050,6 +15284,8 @@ class NotificationsUI {
 
     /**
      * Move a sender card to the top of the notifications list.
+     * Respects the pinned conversation-mode card if one exists — non-pinned
+     * cards land at position 1 instead of 0 in that case.
      * @param {string} senderId - Sender ID
      */
     moveSenderCardToTop( senderId ) {
@@ -15057,7 +15293,18 @@ class NotificationsUI {
         const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         const card = document.getElementById( cardId );
 
-        if ( container && card && container.firstChild !== card ) {
+        if ( !container || !card ) return;
+
+        const pinned = container.querySelector( '.sender-card[data-pinned-conv-mode="true"]' );
+        if ( pinned && pinned !== card ) {
+            const target = pinned.nextSibling;
+            if ( target !== card ) {
+                container.insertBefore( card, target );
+            }
+            return;
+        }
+
+        if ( container.firstChild !== card ) {
             container.insertBefore( card, container.firstChild );
         }
     }

@@ -578,6 +578,19 @@ mcp = FastMCP(
         f"The user may say 'enter conversation mode' / 'exit conversation mode' (or close paraphrases) "
         f"in voice — pattern-match those phrases and call the corresponding tool, then continue with "
         f"the new mode in effect.\n\n"
+        f"**USER-ONLY INITIATION (HARD RULE)**: NEVER call `enter_conversation_mode()` or "
+        f"`exit_conversation_mode()` on your own initiative. You may only call them in DIRECT "
+        f"response to an explicit user instruction (voice phrase like 'enter conversation mode' / "
+        f"'exit conversation mode' or close paraphrases, typed request, slash command). Do NOT "
+        f"preemptively toggle on your own judgment (e.g. 'since this is a long task, let me enter "
+        f"conversation mode' is FORBIDDEN). The mic is the user's to direct, not yours to grab. If "
+        f"unsure whether the user actually asked, prefer NOT calling the tool and ask for clarification.\n\n"
+        f"**MUTUAL EXCLUSION**: At most one CC session at a time can hold conversation mode across "
+        f"all of the user's sessions. When the user activates conversation mode in this session "
+        f"while another session holds it, the other session is automatically displaced — its UI "
+        f"reverts to notification mode, any in-flight TTS pauses, and its sender card unpins. "
+        f"The displacement is broadcast via the `conversation_mode_changed` WebSocket event with "
+        f"`displaced=true, displaced_by=<this session's id>`.\n\n"
         f"The toggle state survives /clear within this session (stored in the bridge file). "
         f"A fresh Claude Code session starts in notification mode."
     )
@@ -1192,23 +1205,36 @@ def get_session_info() -> dict:
 
 def _flip_conversation_mode( active: bool ) -> dict:
     """
-    Internal helper: flip conversation_mode_active in this session's bridge file.
+    Internal helper: flip conversation_mode_active for this session.
 
-    Resolves the bridge by stable_session_id (preferred for /clear-resistance), falling
-    back to session_id then SESSION_ID prefix. Writes via session_bridge.set_conversation_mode.
+    Routes through the canonical HTTP endpoint POST
+    /api/cosa-voice/conversation-mode/{session_id} when reachable, so:
+      - Mutual exclusion across the user's sessions is enforced (any other
+        active session is displaced atomically).
+      - The conversation_mode_changed WebSocket event broadcasts to all of
+        the user's connected browser tabs for real-time UI sync.
+      - Activate/deactivate flows behave identically whether triggered from
+        the UI button, voice phrase, slash command, or this MCP tool.
 
-    NOTE: This does NOT broadcast a WebSocket conversation_mode_changed event.
-    Real-time UI sync arrives via Phase 3's HTTP endpoint when the UI toggle button is
-    clicked. When this MCP tool flips the state, other connected UI clients see the
-    new value on their next page reload (via the GET endpoint) or get_session_info() poll.
+    Falls back to a direct bridge-file write (today's pre-2026-04-28 behavior)
+    when the HTTP endpoint is unreachable — preserves voice/MCP availability
+    when the FastAPI server is offline. Degraded mode: no broadcast, no mutex
+    enforcement; UI sync deferred until next page reload.
+
+    Resolves session_id by stable_session_id (preferred for /clear-resistance),
+    falling back to session_id then SESSION_ID prefix.
 
     Requires:
         - active is a bool
 
     Ensures:
-        - Returns dict with status="ok" and conversation_mode_active=<new state> on success
+        - Returns dict with status="ok", session_id, conversation_mode_active=<new state>
+          on success (whether via HTTP or fallback)
         - Returns dict with status="error" and reason on failure
         - Never raises exceptions
+        - When HTTP succeeded: returned dict includes "displaced_sessions" (list)
+          and "ui_sync" = "broadcast"
+        - When fallback was used: returned dict includes "ui_sync" = "deferred (HTTP unreachable)"
     """
     try:
         cc_meta = _get_cc_metadata()
@@ -1219,16 +1245,57 @@ def _flip_conversation_mode( active: bool ) -> dict:
     if not sid:
         return { "status": "error", "reason": "No session_id available" }
 
-    ok = set_conversation_mode( sid, active )
-    if not ok:
-        return { "status": "error", "reason": "Bridge file not found or write failed", "session_id": sid }
+    # ── Primary path: canonical HTTP endpoint ─────────────────────────────
+    try:
+        from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
+        project = _get_project()
+        email, password = get_hook_credentials( project )
 
-    return {
-        "status"                   : "ok",
-        "session_id"               : sid,
-        "conversation_mode_active" : active,
-        "ui_sync"                  : "deferred (other tabs reflect on reload until Phase 3 WS broadcast lands)"
-    }
+        # Login to obtain a JWT (each call — no caching for low-frequency toggles)
+        login_resp = requests.post(
+            f"{SERVER_URL}/auth/login",
+            json    = { "email": email, "password": password },
+            timeout = 5
+        )
+        if login_resp.status_code != 200:
+            raise RuntimeError( f"login HTTP {login_resp.status_code}" )
+
+        access_token = login_resp.json()[ "tokens" ][ "access_token" ]
+
+        # Call the canonical endpoint
+        toggle_resp = requests.post(
+            f"{SERVER_URL}/api/cosa-voice/conversation-mode/{sid}",
+            json    = { "active": active },
+            headers = { "Authorization": f"Bearer {access_token}" },
+            timeout = 5
+        )
+        if toggle_resp.status_code != 200:
+            raise RuntimeError( f"endpoint HTTP {toggle_resp.status_code}: {toggle_resp.text[:200]}" )
+
+        body = toggle_resp.json()
+        return {
+            "status"                   : "ok",
+            "session_id"               : sid,
+            "conversation_mode_active" : bool( body.get( "active", active ) ),
+            "displaced_sessions"       : body.get( "displaced_sessions", [] ),
+            "ui_sync"                  : "broadcast"
+        }
+
+    except ( requests.ConnectionError, requests.Timeout, RuntimeError, KeyError, FileNotFoundError, ValueError ) as http_err:
+        # ── Fallback: direct bridge write (degraded mode) ────────────────
+        ok = set_conversation_mode( sid, active )
+        if not ok:
+            return {
+                "status"     : "error",
+                "reason"     : f"HTTP path failed ({http_err}) AND bridge fallback failed",
+                "session_id" : sid
+            }
+        return {
+            "status"                   : "ok",
+            "session_id"               : sid,
+            "conversation_mode_active" : active,
+            "ui_sync"                  : f"deferred (HTTP unreachable: {type( http_err ).__name__})"
+        }
 
 
 @mcp.tool
@@ -1236,15 +1303,27 @@ def enter_conversation_mode() -> dict:
     """
     Enter conversation mode for this session.
 
+    USER-ONLY INITIATION (HARD RULE): Call this ONLY in direct response to an
+    explicit user instruction — voice phrase like "enter conversation mode" (or
+    close paraphrases), typed request, or slash command. NEVER call on your own
+    initiative. Preemptive activation ("since this is a long task...") is
+    forbidden. The mic is the user's to direct, not yours to grab.
+
     When conversation mode is on, after every assistant turn you should call
     `notify(message=<full_response_text>, suppress_ding=True, priority='high')` so the
     response is spoken aloud (the user is listening at a distance via TTS, not reading
     the terminal). Strip fenced code blocks and tool-call narration from the spoken text.
 
+    Mutual exclusion: at most one CC session at a time can hold conversation mode
+    across the user's sessions. Activating here will atomically displace any other
+    active session — its UI reverts, in-flight TTS pauses, sender card unpins.
+
     State is stored in the bridge file and survives /clear within this session.
 
     Returns:
-        dict with status, session_id, conversation_mode_active=True on success
+        dict with status, session_id, conversation_mode_active=True on success;
+        when HTTP path is reachable, also includes "displaced_sessions" list and
+        "ui_sync"="broadcast" (other tabs sync via WebSocket immediately)
     """
     return _flip_conversation_mode( True )
 
@@ -1253,6 +1332,11 @@ def enter_conversation_mode() -> dict:
 def exit_conversation_mode() -> dict:
     """
     Exit conversation mode (revert to default notification mode) for this session.
+
+    USER-ONLY INITIATION (HARD RULE): Call this ONLY in direct response to an
+    explicit user instruction — voice phrase like "exit conversation mode" (or
+    close paraphrases), typed request, or slash command. NEVER call on your own
+    initiative. The user owns the toggle; you respond to it, not drive it.
 
     In notification mode, TTS only fires when YOU explicitly call notify(), converse(), or ask_*().
 

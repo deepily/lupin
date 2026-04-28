@@ -79,6 +79,30 @@ def _is_pid_alive( pid: int ) -> bool:
         return False
 
 
+def _can_trust_host_pids() -> bool:
+    """
+    Whether the current process shares its PID namespace with the bridge writers.
+
+    Bridge files are written by Claude Code hooks running on the host, named
+    cc-{HOST_PID}.json. When the reader runs inside a Docker container, those
+    host PIDs are invisible — every kill(host_pid, 0) raises ProcessLookupError,
+    so a naive _is_pid_alive() filter discards every bridge file as "dead."
+
+    The Lupin FastAPI server reads bridge files for the conversation-mode
+    endpoint while running inside the lupin-rest-dev container; this helper lets
+    that path skip the liveness filter while preserving it for host-side callers
+    (hook scripts, MCP server) that genuinely need staleness pruning.
+
+    Ensures:
+        - Returns False when running inside a Docker container (/.dockerenv exists)
+        - Returns True otherwise — host-side callers can trust kill(pid, 0)
+
+    Returns:
+        bool: True if PID-liveness checks against bridge filenames are meaningful
+    """
+    return not Path( "/.dockerenv" ).exists()
+
+
 def _extract_pid_from_filename( filename: str ) -> Optional[int]:
     """
     Extract PID from a session bridge filename like 'cc-12345.json'.
@@ -526,13 +550,16 @@ def find_session_path_by_id( session_id ):
     if not session_id or not SESSION_DIR.exists():
         return None
 
+    trust_host_pids = _can_trust_host_pids()
+
     for path in SESSION_DIR.glob( "cc-*.json" ):
         if "buffer" in path.name or "listener" in path.name:
             continue
 
-        file_pid = _extract_pid_from_filename( path.name )
-        if file_pid is not None and not _is_pid_alive( file_pid ):
-            continue
+        if trust_host_pids:
+            file_pid = _extract_pid_from_filename( path.name )
+            if file_pid is not None and not _is_pid_alive( file_pid ):
+                continue
 
         try:
             with open( path ) as f:
@@ -552,6 +579,88 @@ def find_session_path_by_id( session_id ):
             continue
 
     return None
+
+
+def find_active_conversation_sessions( exclude_session_id=None ):
+    """
+    Scan all bridge files for sessions whose conversation_mode_active=true.
+
+    Used by the conversation-mode HTTP endpoint to enforce the "at most one
+    active conversation mode session at a time" invariant — when a session
+    activates, all OTHER active sessions are deactivated atomically.
+
+    Honors the same staleness filtering as find_session_path_by_id:
+    skips buffer/listener files, skips bridges whose host PID is dead
+    (when host PIDs are trustworthy — see _can_trust_host_pids).
+
+    Requires:
+        - exclude_session_id is None or a non-empty string
+
+    Ensures:
+        - Returns a list of (Path, session_id) tuples for every bridge with
+          conversation_mode_active=true (never None; empty list if none)
+        - When exclude_session_id is provided, bridges matching that id
+          (full UUID OR 8-char prefix, mirroring find_session_path_by_id)
+          are NOT included in the returned list
+        - session_id in each tuple is the canonical id from the bridge file
+          (prefers stable_session_id, falls back to session_id)
+        - Never raises exceptions
+        - Skips bridge files that fail to parse or open
+
+    Args:
+        exclude_session_id: Optional session id (full UUID or 8-char prefix)
+            to exclude from results — typically the session that's about to
+            be activated, so it isn't displaced by its own enable call
+
+    Returns:
+        list[ tuple[ Path, str ] ]: List of (bridge_path, session_id) tuples
+    """
+    if not SESSION_DIR.exists():
+        return []
+
+    trust_host_pids = _can_trust_host_pids()
+    results = []
+
+    for path in SESSION_DIR.glob( "cc-*.json" ):
+        if "buffer" in path.name or "listener" in path.name:
+            continue
+
+        if trust_host_pids:
+            file_pid = _extract_pid_from_filename( path.name )
+            if file_pid is not None and not _is_pid_alive( file_pid ):
+                continue
+
+        try:
+            with open( path ) as f:
+                data = json.load( f )
+
+            if not bool( data.get( "conversation_mode_active", False ) ):
+                continue
+
+            sid = data.get( "stable_session_id" ) or data.get( "session_id" )
+            if not sid:
+                continue
+
+            if exclude_session_id:
+                # Match either full id or 8-char prefix (mirrors find_session_path_by_id)
+                all_ids = list( data.get( "session_ids", [] ) )
+                for field in ( "session_id", "stable_session_id" ):
+                    val = data.get( field, "" )
+                    if val and val not in all_ids:
+                        all_ids.append( val )
+                excluded = any(
+                    known_id == exclude_session_id or known_id[:8] == exclude_session_id[:8]
+                    for known_id in all_ids
+                )
+                if excluded:
+                    continue
+
+            results.append( ( path, sid ) )
+
+        except ( json.JSONDecodeError, OSError ):
+            continue
+
+    return results
 
 
 def get_conversation_mode( session_id ):

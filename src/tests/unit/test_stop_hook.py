@@ -365,6 +365,75 @@ class TestLoopPrevention:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# TestConversationModeGate (Bug B — Session c7333045, 2026-04-28)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestConversationModeGate:
+    """
+    When the session is in conversation mode the hook must be a silent no-op:
+    no voice-buffer drain, no notify_user_sync prompt, no TTS, no block. The
+    user is holding a continuous voice dialogue at a distance and any of those
+    side effects interrupts the flow.
+    """
+
+    @patch( "lupin_cli.claude_code.hooks.stop.send_tts" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
+    @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge" )
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_conversation_mode", return_value=True )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
+    def test_conversation_mode_skips_everything( self, mock_read, mock_log, mock_conv,
+                                                  mock_session, mock_resolve, mock_drain,
+                                                  mock_emit, mock_notify, mock_send_tts ):
+        """conversation_mode_active=True → emit {}, NO drain, NO notify, NO TTS."""
+        mock_read.return_value = {
+            "stop_hook_active" : False,
+            "session_id"       : "abc12345"
+        }
+
+        with pytest.raises( SystemExit ):
+            main()
+
+        # The gate fired with the resolved session_id
+        mock_conv.assert_called_once_with( "abc12345" )
+        # Allow the stop, no block payload
+        mock_emit.assert_called_once_with( {} )
+        # NONE of the side-effecting paths fire
+        mock_drain.assert_not_called()
+        mock_notify.assert_not_called()
+        mock_send_tts.assert_not_called()
+
+    @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop._ask_anything_else", return_value={} )
+    @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_conversation_mode", return_value=False )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
+    def test_notification_mode_runs_normal_flow( self, mock_read, mock_log, mock_conv,
+                                                  mock_session, mock_resolve, mock_emit,
+                                                  mock_ask, mock_reset, mock_drain ):
+        """conversation_mode_active=False → falls through to standard flow (drain runs)."""
+        mock_read.return_value = {
+            "stop_hook_active" : False,
+            "session_id"       : "abc12345"
+        }
+
+        main()
+
+        mock_conv.assert_called_once_with( "abc12345" )
+        # Standard flow: drain ran, ask_anything_else fired (empty buffer path)
+        mock_drain.assert_called_once_with( "abc12345" )
+        mock_ask.assert_called_once()
+        mock_emit.assert_called_once_with( {} )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # TestBlockCounter (Phase 4)
 # ═════════════════════════════════════════════════════════════════════════════
 

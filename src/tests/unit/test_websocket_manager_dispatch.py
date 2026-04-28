@@ -23,12 +23,24 @@ from cosa.rest.websocket_manager import WebSocketManager
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_ws_manager( *, user_online: bool, listener_active: bool, job_id: str = "b2ce9133" ):
+def _make_ws_manager(
+    *,
+    user_online: bool,
+    listener_active: bool,
+    job_id: str = "b2ce9133",
+    user_id: str = "user-uuid-1",
+    listener_in_user_sessions: bool = False,
+):
     """Build a WebSocketManager with mocked sync emit primitives.
 
     Args:
         user_online: drives is_user_connected() return value
         listener_active: if True, `cc-listener-{job_id}` is in active_connections
+        job_id: the job id used to derive the listener session id
+        user_id: the user_id under which the user (and optionally the listener) is keyed
+        listener_in_user_sessions: if True, register the cc-listener session under
+            `user_sessions[user_id]` to model the local-dev case where the listener
+            authenticates with the same credentials as the human user
 
     The two underlying primitives (emit_to_user_sync, emit_to_session_sync)
     are MagicMocks so each test can verify what was called.
@@ -37,11 +49,19 @@ def _make_ws_manager( *, user_online: bool, listener_active: bool, job_id: str =
     # with the helper, the primitives, and active_connections.
     mgr = WebSocketManager.__new__( WebSocketManager )
 
-    mgr.active_connections = { f"cc-listener-{job_id}": MagicMock() } if listener_active else {}
+    listener_sid           = f"cc-listener-{job_id}"
+    mgr.active_connections = { listener_sid: MagicMock() } if listener_active else {}
+
+    # user_sessions is a dict mapping user_id → list of session_ids. The dispatch
+    # helper reads it to detect when the listener session is already covered by
+    # the user fan-out (the duplicate-emit guard).
+    mgr.user_sessions = {}
+    if listener_in_user_sessions:
+        mgr.user_sessions[ user_id ] = [ listener_sid ]
 
     # Patch the primitives that the helper calls
-    mgr.is_user_connected   = MagicMock( return_value=user_online )
-    mgr.emit_to_user_sync   = MagicMock()
+    mgr.is_user_connected    = MagicMock( return_value=user_online )
+    mgr.emit_to_user_sync    = MagicMock()
     mgr.emit_to_session_sync = MagicMock()
 
     return mgr
@@ -201,3 +221,39 @@ class TestEmitToUserOrListenerSync:
         mgr.emit_to_session_sync.assert_called_once()
         # is_user_connected should NOT be called when user_id is None
         mgr.is_user_connected.assert_not_called()
+
+    # -----------------------------------------------------------------------
+    # Duplicate-emit guard (Bug A — Session c7333045, 2026-04-28)
+    # -----------------------------------------------------------------------
+
+    def test_listener_emit_skipped_when_already_in_user_fanout( self ):
+        """
+        When the cc-listener session is registered under the same user_id as
+        the message target (the local-dev case where the listener authenticates
+        with the human user's credentials), emit_to_user_sync ALREADY fans out
+        to that listener via user_sessions[user_id]. A follow-on
+        emit_to_session_sync would deliver the same envelope a second time —
+        producing two "Received: ..." echoes and double tmux injection per
+        voice message.
+
+        Regression guard: the helper detects the overlap up front and skips
+        the targeted listener emit, but still reports listener_delivered=True
+        because the user fan-out covered it.
+        """
+        mgr = _make_ws_manager(
+            user_online               = True,
+            listener_active           = True,
+            listener_in_user_sessions = True,
+        )
+        result = mgr.emit_to_user_or_listener_sync(
+            user_id = "user-uuid-1",
+            job_id  = "b2ce9133",
+            event   = "notification_queue_update",
+            data    = { "notification": { "id": "n-dedup" } },
+        )
+
+        # User fan-out fires once and counts as listener delivery too
+        assert result == { "user_delivered": True, "listener_delivered": True, "any_delivered": True }
+        mgr.emit_to_user_sync.assert_called_once()
+        # CRITICAL: listener-targeted emit MUST NOT fire — that's the duplicate
+        mgr.emit_to_session_sync.assert_not_called()

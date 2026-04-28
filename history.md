@@ -1,5 +1,70 @@
 # Lupin Project History
 
+### 2026.04.28 - Session c7333045 | Conversation Mode v1.1 — 404 fix + Mutex + Pinning + Corner Pause Button
+
+#### Checkpoint | 2026.04.28 16:31 EDT | Mid-session checkpoint — multi-bug pass + mutex/pinning feature complete
+
+**Context**: User opened the session reporting two bugs from yesterday's conversation-mode v1 (commit 48dc03e): UI toggle was misplaced (in the sender-card header instead of next to the per-session record button), and clicking it returned 404 from the FastAPI server. Investigation surfaced more issues during the day (duplicate "Received:" notification echo, stop-hook interrupting voice flow, corner pause button missing, mid-stream playback control wrong API). After bugs landed, user requested a v1.1 follow-up: mutual exclusion across CC sessions ("only one session can monopolize the mic") + pinning the active session's pane to the top of the notifications accordion + soft-glow visual cue. Plan landed at `~/.claude/plans/drifting-skipping-porcupine.md`; execution covered 5 phases.
+
+**Accomplishments**:
+
+- **Bug — 404 from container PID-namespace**: `find_session_path_by_id` was discarding every bridge file because `_is_pid_alive(host_pid)` always returned False inside the `lupin-rest-dev` container (different PID namespace from the host). Added `_can_trust_host_pids()` helper that returns False when `/.dockerenv` exists, gating the PID-alive filter. Live `:7999` round-trip POST/GET/POST/GET now returns 200; bug verified fixed in production listener log (1 event per voice message instead of 2).
+- **Bug — UI toggle position**: moved the `sender-conversation-mode-btn` button from the `.sender-card-header` (next to gist) into the `.cc-voice-input-row` immediately to the left of the `.cc-session-stt` mic button, sized to match `.cc-voice-input .stt-button` (height 34px, min-width 40px, padding 4px 8px).
+- **Bug A — Duplicate "Received:" echo**: long-standing dispatch bug in `emit_to_user_or_listener_sync` (CoSA `websocket_manager.py`). When the cc-listener authenticates as the same user as the sender, its session was already in `user_sessions[user_id]` so `emit_to_user_sync` reached it via fan-out — and then `emit_to_session_sync` delivered the same envelope a second time. Added a `listener_in_user_fanout` check that skips the targeted listener emit when the session is already covered. New regression test `test_listener_emit_skipped_when_already_in_user_fanout` in `test_websocket_manager_dispatch.py`. Verified live: every voice message now produces exactly one `_handle_event` invocation in the listener log instead of two.
+- **Bug B — Stop-hook gate on conversation mode**: added a check at the top of `stop.py::main()` that calls `get_conversation_mode(session_id)` and emits `{}` immediately when true. Voice-buffer drain, `notify_user_sync`, and TTS calls all bypassed when conversation mode is on, so Claude's stop-hook can't interrupt the voice flow. 2 new tests covering both directions of the gate.
+- **Feature — Corner pause button on currently-playing notification**: rendered an absolutely-positioned `.notification-corner-pause-btn` in the upper-right of the message div with size matching the surrounding chrome. Visibility gated by `.sender-message.tts-playing` (the existing class that the audio lifecycle already toggles via `startTTSPlayingIndicator`/`stopTTSPlayingIndicator`). Click handler iterations: first attempt called `currentAudio.pause()` which hit a stale HTML5 Audio handle while real playback runs through Web Audio AudioContext; switched to `pauseTTS()`/`resumeTTS()` (the same APIs the global pause button uses) — fixed.
+- **Feature — Mutual exclusion across CC sessions** (Phases 0–4 + 2.5 of `~/.claude/plans/drifting-skipping-porcupine.md`):
+  - **Phase 0**: §11 addendum to `src/rnd/v0.1.7/2026.04.27-conversation-mode-design.md` documenting locked decisions, architecture diagram, invariants, and risks.
+  - **Phase 1**: New `find_active_conversation_sessions(exclude_session_id)` helper in `session_bridge.py` that scans `SESSION_DIR.glob("cc-*.json")` for active bridges, honors `_can_trust_host_pids()`, supports full-UUID-or-8-char-prefix exclude. 9 new tests in `TestFindActiveConversationSessions`.
+  - **Phase 2 (CoSA)**: `routers/conversation_mode.py` POST endpoint takes a module-level `asyncio.Lock` on activate, scans for other active bridges, deactivates each + broadcasts `conversation_mode_changed {session_id, active=false, displaced=true, displaced_by=<sid>}`, then activates ours and broadcasts. Response gains `displaced_sessions` array. 6 new auto-displace tests covering single/multi/no-displacement/deactivate-no-scan/broadcast-failure/self-no-displace.
+  - **Phase 2.5**: `_flip_conversation_mode` in `cosa_voice_mcp.py` refactored to POST the canonical HTTP endpoint (with credential lookup + JWT login + Bearer-authed toggle POST) instead of writing the bridge directly. Falls back to `set_conversation_mode` direct-write on any HTTP failure (server down, login 401, endpoint 5xx) — preserves degraded-mode availability. **User-only-initiation guardrail** layered in three places: (a) extended MCP `instructions=` block with a USER-ONLY-INITIATION + MUTUAL-EXCLUSION rule; (b) extended `enter_conversation_mode()` and `exit_conversation_mode()` tool docstrings with the same hard rule; (c) created new global skill at `~/.claude/skills/conversation-mode-guardrails/SKILL.md`. 4 new tests covering HTTP success / ConnectionError fallback / login 401 fallback / endpoint 500 fallback.
+  - **Phase 3**: `handleConversationModeChanged` extended with displaced-event handling — calls `pauseTTS()` if `activeTTSItem` is playing, pins/unpins matching sender card, normalizes session_id to 8-char prefix at WS event entry (fixed a keying mismatch where server emits full UUID but UI keys by 8-char). New `_pinSenderCardForSession` and `_unpinSenderCardForSession` helpers. Both copies of `moveSenderCardToTop` (lines 9317 + 15163) and `createSenderCard`'s top-insertion path now respect the pinned card invariant — non-pinned cards land at index 1 when a pinned card holds index 0. `createSenderCard` also auto-pins its own card on creation when the session is in `conversationModes` with true (initial-load hydration case).
+  - **Phase 4**: `.sender-card[data-pinned-conv-mode="true"]` CSS — soft green border + box-shadow matching the corner-pause-button accent palette + linear-gradient header tint.
+- **Cache-bust progression** for `notifications.html`: `20260426b` → `20260428a` (after CSS toggle re-style) → `b` (corner pause first attempt) → `c` (click handler v2) → `d` (pauseTTS rewire) → `e` (Phase 3 pin/unpin) → `f` (8-char normalization fix). All visible in the file's history.
+- **Test totals**: 130/130 PASS across `test_session_bridge_lookup.py` (51), `test_conversation_mode_router.py` (13), `test_cosa_voice_mcp_conversation_mode.py` (10), `test_websocket_manager_dispatch.py` (10), `test_stop_hook.py` (46). 22 net new tests (9 + 6 + 4 + 1 + 2).
+- **Live verification**: API smoke confirmed `displaced_sessions` field in POST response and self-activation correctly avoids displacing self. Multi-tab browser smoke confirmed displaced session's toggle flips back to bell + pin drops + mid-stride TTS pauses (after the 8-char normalization fix in `?v=20260428f`).
+- **Memory updates**: `feedback_conversation_mode_user_only_initiation.md` (hard rule: never call enter/exit_conversation_mode preemptively); `feedback_enumerate_all_activation_paths.md` (when planning multi-path features, enumerate every activation surface up front — don't default any path to "follow-on activity").
+
+**Files Modified (parent Lupin only — CoSA submodule managed separately)**:
+
+Hooks + lib:
+- `src/lupin_cli/claude_code/hooks/lib/session_bridge.py` (container PID gate + `find_active_conversation_sessions` helper)
+- `src/lupin_cli/claude_code/hooks/stop.py` (Bug B — conversation-mode gate)
+
+MCP:
+- `src/lupin_mcp/cosa_voice_mcp.py` (Phase 2.5 — HTTP-first `_flip_conversation_mode` with fallback + USER-ONLY-INITIATION + MUTUAL-EXCLUSION instructions / tool docstrings)
+
+UI:
+- `src/fastapi_app/static/js/notifications.js` (toggle button moved + corner pause button render+wire + pin/unpin helpers + handleConversationModeChanged extended for displaced/pause + 8-char normalization + sort-respecting moveSenderCardToTop both copies + createSenderCard pinned-aware insertion)
+- `src/fastapi_app/static/css/notifications.css` (corner pause button rules + pinned-card glow border + header gradient)
+- `src/fastapi_app/static/html/notifications.html` (cache-bust to `?v=20260428f`)
+
+R&D:
+- `src/rnd/v0.1.7/2026.04.27-conversation-mode-design.md` (§11 mutex + pinning addendum)
+
+Tests (Lupin-side):
+- `src/tests/unit/test_session_bridge_lookup.py` (+11 tests)
+- `src/tests/unit/test_conversation_mode_router.py` (+6 tests)
+- `src/tests/unit/test_cosa_voice_mcp_conversation_mode.py` (+4 tests)
+- `src/tests/unit/test_websocket_manager_dispatch.py` (+1 test)
+- `src/tests/unit/test_stop_hook.py` (+2 tests)
+
+CoSA-side (separate submodule commit needed):
+- `src/cosa/rest/websocket_manager.py` (Bug A — listener-already-in-user-fanout dedup)
+- `src/cosa/rest/routers/conversation_mode.py` (Phase 2 — auto-displace endpoint with asyncio.Lock + WS displaced payload + displaced_sessions response field)
+
+Plus new global skill (not in repo): `~/.claude/skills/conversation-mode-guardrails/SKILL.md`.
+
+**Pending follow-ups**:
+
+- E2E Playwright extension for the new mutex + pinning + auto-pause scenarios — gated behind a user-confirmed `:8000` slot per the E2E two-phase gate.
+- Per-session TTS queue isolation (so B's new audio plays while A's queued audio stays paused on displacement) — current model is global pauseTTS, user manually resumes. Separate UX cycle.
+- Hard programmatic enforcement of the user-only-initiation rule (e.g., require a "user-utterance attestation" field on the MCP call). v1.1 documents the rule in three layers; this is a future enhancement if drift is observed.
+- Toast UI for displaced sessions — payload carries `displaced=true, displaced_by=<sid>` already, just no UI rendering yet.
+- **Bug observed at checkpoint time (deferred — investigation pending)**: user reported two notification panes both labeled with session_id `c7333045` but different sender labels (one "Lupin", one "Cosa"). Hypothesis to investigate: project-aware sender_id derivation may be producing two distinct sender keys (e.g. `claude.code@lupin.deepily.ai#c7333045` and `claude.code@cosa.deepily.ai#c7333045`) for the same underlying CC process, depending on the cwd at notify-call time. Worth checking `parseSenderId` + project-detection in MCP + how cwd flips when Claude reads files in `src/cosa/`.
+
+---
+
 ### 2026.04.28 - Session ba7138c4 | Test-Suite Anomaly Remediation (Phase 0 + WG-2/3/4/5/7/8b/9; WG-1 prep + 4 OOS plans)
 
 #### Checkpoint | 2026.04.28 12:00 EDT | Mid-session checkpoint — autonomous remediation pass complete

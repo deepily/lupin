@@ -34,7 +34,8 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     reset_stop_block_count, get_turn_elapsed_seconds, MAX_STOP_BLOCKS
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
-    get_claude_session_id, build_sender_id_for_cc, resolve_stable_session_id
+    get_claude_session_id, build_sender_id_for_cc, resolve_stable_session_id,
+    get_conversation_mode
 )
 from lupin_cli.notifications.notify_user_sync import notify_user_sync
 from lupin_cli.notifications.notification_models import (
@@ -314,6 +315,21 @@ def main():
 
     # Resolve session_id: payload first, then session bridge fallback
     session_id = resolve_stable_session_id( payload.get( "session_id", "" ) ) or get_claude_session_id()
+
+    # Conversation mode: silently allow the stop with no side effects.
+    # When the session is in conversation mode, every assistant turn already
+    # auto-notify()s the full response via TTS, so the user is at a distance
+    # holding a continuous voice dialogue. Prompting "Anything else?" or
+    # firing any TTS here interrupts the flow — the user explicitly wants
+    # the hook to be a no-op in this state. Gate before voice-buffer drain
+    # and any notify_user_sync call so nothing escapes.
+    if get_conversation_mode( session_id ):
+        log_to_stream( "stop", {}, extra={
+            "phase"      : "conversation_mode_skip",
+            "session_id" : session_id
+        } )
+        emit_json( {} )
+        sys.exit( 0 )
 
     # Loop prevention: if stop_hook_active is True, we already blocked once —
     # don't block again (would create infinite loop)
