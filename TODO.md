@@ -1,6 +1,12 @@
 # TODO
 
-Last updated: 2026-04-25 EDT session-end (Session 6c798a07 — Podcast generator URL bug fix. Completion abstract now emits clickable Listen → /app/audio (player page), Download → /api/io/file&download=true, View Script → /app/docs links. CoSA-side fix at agents/podcast_generator/job.py; tests updated in parent at src/tests/unit/test_podcast_completion_report.py. History.md auto-archived 2026-04-14 → 04-21 — 12 sessions, 12,979 tokens.)
+Last updated: 2026-04-27 EDT session-end (Session ee896fa3 — R&D doc serialized for promoting the adversarial+fitness review pattern to planning-is-prompting; Phase 1 lift deferred to a PIP-rooted Claude session.)
+
+---
+
+## 📦 Cross-project — `planning-is-prompting` follow-up
+
+- [ ] [LUPIN→PIP] **Phase 1: Lift adversarial+fitness review prompts into PIP** — author `planning-is-prompting/workflow/plan-review.md` from the spec in `src/rnd/v0.1.7/2026.04.27-promote-plan-review-pattern-to-pip.md` (§ "Phase 1 deliverable shape"). Pick up in a `planning-is-prompting`-rooted Claude session. Phase 2 (convention establishment in `p-is-p-02-documenting-the-implementation.md`) is the linchpin and must follow Phase 1 immediately.
 
 ---
 

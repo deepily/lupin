@@ -1,5 +1,39 @@
 # Lupin Project History
 
+### 2026.04.27 - Session 49c27830 | Bug Fix Mode
+
+#### Fixes
+(Individual fixes will be added here)
+
+#### Session Summary
+(Will be completed at session close)
+
+---
+
+### 2026.04.27 - Session ee896fa3 (continued) | R&D: Promote adversarial+fitness review pattern to planning-is-prompting
+
+**Context**: Single-purpose continuation day for session ee896fa3 (running since 2026-04-26). User observed that the two-pass review prompts written ahead of CJ Flow phases 1–3 (`05-adversarial-review-prompt.md` + `06-fitness-review-prompt.md`) caught design gaps and ownership-language ambiguities before any code was written, and asked whether the pattern should be formalized as a reusable skill in the planning-is-prompting repo. After ultrathink-grade review the answer is yes, with a hybrid architecture (PIP canonical + per-project wrapper) and a Pattern 1/2-only trigger.
+
+**Accomplishments**:
+- Read the source artifacts (`05-adversarial-review-prompt.md`, `06-fitness-review-prompt.md`, `00-working-contract.md`) and confirmed the technique abstracts cleanly across projects
+- Synthesized architecture proposal: `planning-is-prompting/workflow/plan-review.md` (canonical) + `<project>/.claude/skills/plan-review/SKILL.md` (thin wrapper) — matches existing PIP slash-command-wrapper pattern
+- Identified Phase 2 (convention establishment) as the linchpin — without `EXECUTOR: AI/HUMAN`, `Q-N` decision anchors, and `TBD` markers being *established* in `p-is-p-02-documenting-the-implementation.md`, the review's greps return false negatives
+- Promoted REUSE detection (deficiency type 5 in pass 2) to first-class status — forcing function for de-duplication that AI-authored plans systematically miss
+- Enumerated 5 risks (convention dependency, review fatigue, review-as-procrastination, fix-yet-gate violation, pattern drift) with explicit counter-measures
+- Defined a 4-phase implementation pathway with Phase 1 (lift) cheapest, Phase 2 (conventions) highest-leverage
+- Serialized the full proposal to `src/rnd/v0.1.7/2026.04.27-promote-plan-review-pattern-to-pip.md` (278 lines, ~19 KB) — self-contained, includes Phase 1 deliverable shape spec + 6 open questions for PIP-context resolution
+
+**Files Modified** (parent Lupin only):
+- `src/rnd/v0.1.7/2026.04.27-promote-plan-review-pattern-to-pip.md` (NEW)
+- `history.md` (this entry)
+- `.claude-session.md` (touched-files log)
+
+**Status**: R&D proposal serialized. Phase 1 (lifting the prompts into PIP `workflow/plan-review.md` parameterized) deferred to a `planning-is-prompting`-rooted Claude session.
+
+**Commit**: [pending]
+
+---
+
 ### 2026.04.26 - Session ee896fa3 | cosa-voice MCP startup fix + podcast tuning + server-lifecycle skill
 
 **Context**: Three discrete pieces of work in one session — (1) MCP server failed to connect at session start; (2) user wanted podcast speakers more animated/faster-feeling and the submission UI to default to dual-language; (3) post-fix, user asked to canonize the bounce-vs-update knowledge as a skill.
