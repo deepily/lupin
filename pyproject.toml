@@ -70,6 +70,9 @@ dependencies = [
   "tiktoken>=0.7,<1",
   "xmlschema>=3.4,<4",
   "xmltodict==0.14.2",
+  "lxml>=5,<6",                           # xmlschema's optional fast parser; required by CalendaringAgent
+                                          # (was in src/cosa/requirements.txt but uv sync builds from
+                                          # pyproject.toml + uv.lock, so the dep was never reaching the image)
 
   # --- Audio / media ---
   "pyaudio>=0.2,<1",

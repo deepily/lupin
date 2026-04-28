@@ -1,5 +1,77 @@
 # Lupin Project History
 
+### 2026.04.28 - Session ba7138c4 | Test-Suite Anomaly Remediation (Phase 0 + WG-2/3/4/5/7/8b/9; WG-1 prep + 4 OOS plans)
+
+#### Checkpoint | 2026.04.28 12:00 EDT | Mid-session checkpoint — autonomous remediation pass complete
+
+**Context**: User invoked the session for postmortem analysis of the 2026-04-27 22:35 EDT scheduled `:8000` test-suite run (`ts-90890bae`) which produced 4422 P / 23 F / 19 E / 47 S, 1 orphaned Calculator job in `run` queue, 8 reaped Calculator jobs in `dead`, and a stalled downstream TFE (`tfe-d9786eea`) that timed out at the proposing voice gate after generating 23 fix proposals. After the analysis, user approved a remediation plan covering 9 working groups + 4 out-of-scope follow-ups, then went out for errands with autonomous-execution authorization. This checkpoint captures everything landed during the unsupervised window.
+
+**Accomplishments**:
+
+- **Phase 0 — Documentation-First serialization** at `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/`: 15 docs total (1 design + 9 per-WG + 90-execution-log + 4 OOS plans).
+- **WG-2 — Smoke-test prereq skip discipline**: `_docker_available()` now catches `FileNotFoundError`/`OSError` so the autouse fixture's `pytest.skip` path is reached when the docker binary is absent (test container reality). `LivePipelineTestBase.run_scenarios` converts silent `False` returns at the credential gate + `ConnectionError` handler to `pytest.skip()` calls when pytest is importable; standalone CLI usage preserved. Effect: 7 prior ERRORs + 9 inheriting live-pipeline FAILs become SKIPs.
+- **WG-3 — BURN GPU-touching tests**: deleted `src/tests/smoke/test_embedding_benchmark.py` and `src/tests/smoke/test_local_embedding_smoke.py`. Audit grep clean afterward. Per the never-grab-GPU mandate (corollary added to memory): tests that touch CUDA/embedding-engines must be **deleted, not guarded**; tests should call `/api/embeddings/batch` instead. Earlier draft of the plan proposed VRAM headroom guards — user course-corrected. Effect: 6 prior FAILs eliminated.
+- **WG-4 — Optional `peft` import guard**: wrapped `peft` import in `peft_trainer.py` in `try/except ImportError` with `PEFT_AVAILABLE` flag + None fallbacks (matches `claude-agent-sdk` pattern in `dispatcher.py`). Effect: 3 `test_lora_env_update_smoke` collection-time failures resolved.
+- **WG-5 — Optional `lxml` dep + audit**: added `lxml>=5,<6` to `pyproject.toml` NLP/parsing block. `lxml` was in `src/cosa/requirements.txt` but `uv sync --locked --no-install-project` reads from `pyproject.toml + uv.lock`, so the dep was never reaching the image. Audit grep surfaced two more unguarded ML imports in `src/cosa/training/` (peft_trainer, quantizer) — backlog only since training-tier files are operator-launched.
+- **WG-1 — Docker fonts (Dockerfile edit only; rebuild deferred)**: authoritative font enumeration via `playwright install-deps chromium --dry-run` against the existing `lupin:1.0.0` image identified 9 missing font packages + 8 X11/font support libs. Added to `docker/lupin/Dockerfile` apt list with refresh-instruction comment. Image rebuild + visual baseline regen + retag deferred for user to time per `feedback_no_auto_promote_tags` (never overwrite working tag automatically).
+- **WG-7 — Websocket false-FAIL parser fix**: added `_parse_non_pytest_stdout(suite_type, stdout)` to `TestSuiteJob` that recognizes the websocket runner's `[INFO] Total Tests: N / Passed: X / Failed: Y / ALL SMOKE TESTS PASSED!` format. Called as a fallback when `_parse_junit_xml(None)` returns zero-counts. Effect: the 22:35 websocket suite (which logged `ALL SMOKE TESTS PASSED · 50/50 (100%)`) is now classified PASS instead of the previous 0/0/0/0 FAIL.
+- **WG-8b — Consumer-thread heartbeat in pool-status**: `RunningFifoQueue.last_consumer_heartbeat_at` updated by `consumer_worker` at the top of each loop iteration. `/api/queue/pool-status` now reports `last_consumer_heartbeat_at`, `seconds_since_heartbeat`, `consumer_stall_threshold_secs`, `consumer_stalled`. New INI key `cj flow consumer stall threshold seconds = 120` + splainer. Effect: stalled consumer is now observable for operators (or future watchdogs) without requiring runtime instrumentation. WG-8a (orphan + 8 dead Calculator cleanup on `:8000`) and WG-8c (empty-`error` field audit) deferred — 8c subsumed into OOS-4 since both anomalies share the same dead-queue routing investigation.
+- **WG-9 — TFE voice-gate auto-fallback policy**: 4 modes added (`stall` default, `top_1`, `top_n`, `none`). On `VoiceGateTimeoutError`, the orchestrator branches via `_apply_voice_gate_timeout_policy(proposals)` — sorts by confidence (input order tiebreak), returns 0/1/N proposals or re-raises per policy. Two new INI keys + splainers (`test fix expediter voice gate timeout policy` + `… auto ratify top n`). Effect: after-hours autonomous TFE runs can opt into auto-ratifying the highest-confidence proposal instead of stalling and discarding all proposals. Default unchanged (stall) — preserves prior production behavior.
+- **23 new unit tests across 3 files, all PASS**: 9 in `test_tfe_voice_gate_fallback.py` (WG-9), 8 in `test_test_suite_websocket_parser.py` (WG-7), 6 in `test_consumer_heartbeat.py` (WG-8b).
+- **147 regression tests PASS** across adjacent unit suites (TFE config + propose, test_suite job + watchdog + pytest_direct, consumer_timed, agentic_pool, fifo_queue_thread_safety, running_queue_threshold) — no breakage.
+- **11 changed/new files `py_compile` clean**: full POST-EDIT-VERIFICATION sweep.
+- **4 OOS plans drafted (no code work — awaiting ratification)**: `03-oos-1-tfe-bfe-pattern-matcher.md` (cluster coverage invariant + proposal de-dup; explains why 22:35 TFE produced 23 proposals against 8 empty clusters), `03-oos-2-websocket-pytest-junitxml.md` (replace bash runner with native pytest; eliminates WG-7 fallback), `03-oos-3-survivor-deep-dive.md` (conditional, only if WG-6 surfaces non-trivial bugs), `03-oos-4-test-suite-in-dead-anomaly.md` (subsumes WG-8c; finds rogue dead-queue routing path).
+- **Memory updates**: `feedback_never_grab_gpu.md` expanded with the "tests must be deleted, not guarded" corollary. New: `feedback_plan_self_audit_against_memory.md` (audit plan against memory rules pre-ExitPlanMode), `feedback_phase0_serialization_prominence.md` (Phase 0 doc serialization belongs at top of plan, not buried as "pre-flight").
+
+**Files Modified (parent Lupin only — CoSA submodule managed separately)**:
+
+Top-level config / image:
+- `pyproject.toml` (WG-5: +`lxml>=5,<6`)
+- `docker/lupin/Dockerfile` (WG-1: 9 fonts + 8 X11/font libs)
+- `src/conf/lupin-app.ini` (WG-9 + WG-8b: 3 new INI keys)
+- `src/conf/lupin-app-splainer.ini` (WG-9 + WG-8b: 3 new splainer entries)
+
+CoSA-side (separate submodule commit needed):
+- `src/cosa/training/peft_trainer.py` (WG-4: import guard)
+- `src/cosa/agents/test_fix_expediter/config.py` (WG-9: 2 new fields + key map)
+- `src/cosa/agents/test_fix_expediter/orchestrator.py` (WG-9: timeout-policy branch + helper)
+- `src/cosa/agents/test_suite/job.py` (WG-7: `_parse_non_pytest_stdout` + fallback wiring)
+- `src/cosa/rest/running_fifo_queue.py` (WG-8b: heartbeat field + pool-status enrichment)
+- `src/cosa/rest/queue_consumer.py` (WG-8b: heartbeat write at consumer-loop top)
+
+Lupin-side tests:
+- `src/tests/smoke/test_container_preflight.py` (WG-2a: catch FileNotFoundError)
+- `src/tests/smoke/utilities/live_pipeline_base.py` (WG-2b: pytest.skip on missing creds + ConnectionError)
+- `src/tests/unit/test_tfe_voice_gate_fallback.py` (NEW — 9 tests)
+- `src/tests/unit/test_test_suite_websocket_parser.py` (NEW — 8 tests)
+- `src/tests/unit/test_consumer_heartbeat.py` (NEW — 6 tests)
+
+Lupin-side deletions (WG-3 BURN):
+- `src/tests/smoke/test_embedding_benchmark.py` (DELETED)
+- `src/tests/smoke/test_local_embedding_smoke.py` (DELETED)
+
+R&D docs (15 files):
+- `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/01-design.md`
+- `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/02-wg-{1..9}-*.md` (9 files)
+- `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/03-oos-{1..4}-*.md` (4 files)
+- `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/90-execution-log.md`
+
+Tracking docs:
+- `history.md` (this entry)
+- `TODO.md` (added Session ba7138c4 follow-ups block)
+- `.claude-session.md` (appended Session ba7138c4 section)
+
+**Files Deliberately NOT staged** (pre-existing uncommitted changes from prior session, not mine — confirmed via git diff content shows real code changes dated before 2026-04-28):
+- `src/fastapi_app/static/css/notifications.css`
+- `src/fastapi_app/static/html/notifications.html`
+- `src/fastapi_app/static/js/notifications.js`
+- `src/lupin_cli/claude_code/hooks/lib/session_bridge.py`
+- `src/tests/unit/test_session_bridge_lookup.py`
+
+**Commit**: bb9298c
+
+---
+
 ### 2026.04.27 - Session aabece5e | Conversation Mode for Claude Code (per-session toggle via cosa-voice MCP)
 
 **Context**: User invoked `/p-is-p-00-start-here` then pivoted into a free-form design conversation about ergonomic friction during voice-driven dialogue from the cosa-voice notification UI session pane: every assistant turn required manually saying "speak your answer as high priority", breaking natural back-and-forth. Outcome: a new session-level toggle ("conversation mode" vs default "notification mode") with four convergent activation surfaces (voice phrase, slash command, MCP tool, UI toggle button), server-canonical state in the existing `~/.claude/sessions/cc-{PPID}.json` bridge, and WebSocket sync to keep multiple UI tabs aligned. Pattern 3 Feature Dev, ~1 week scope, executed end-to-end in this session via plan-then-auto-mode.

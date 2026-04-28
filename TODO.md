@@ -1,6 +1,23 @@
 # TODO
 
-Last updated: 2026-04-27 EDT session-end (Sessions ee896fa3 + 09f4c557 + 49c27830 + aabece5e — ee896fa3 serialized the adversarial+fitness plan-review R&D; 09f4c557 cut the docker image 130 GB → 31.6 GB via Tier 0+1 + cuda-compat fix + drop recursive chown + audioop-lts, ran lance cleanup reclaiming 16.67 GB, and bounced both servers onto lupin:1.0.0; 49c27830 fixed a USER-REPORTED notification dispatch bug — extracted `WebSocketManager.emit_to_user_or_listener_sync` helper and migrated 5 dispatch sites onto it (eliminated duplicated cross-user CC-listener fallback logic), 11 new tests, full unit suite 3672/0 fail; aabece5e shipped conversation mode for Claude Code — per-session toggle in cosa-voice MCP with four activation surfaces, server-canonical bridge state, WebSocket sync, 23 new pytest tests + 1 E2E file gated for :8000 execution.)
+Last updated: 2026-04-28 EDT mid-session checkpoint (Session ba7138c4 — Test-suite anomaly remediation: Phase 0 R&D docs created, WG-2/3/4/5/7/8b/9 landed, WG-1 Dockerfile prepped (rebuild deferred), 4 OOS plans drafted awaiting ratification. 23 new unit tests + 147 regression tests all PASS. 2 GPU-touching smoke tests deleted per the never-grab-GPU mandate.)
+
+---
+
+## 🌅 FOLLOW-UPS — for the user (Session ba7138c4 — test-suite anomaly remediation)
+
+- [ ] [LUPIN] **WG-1 image rebuild** — `docker build -f docker/lupin/Dockerfile -t lupin:1.0.0-fonts .` (~15-30 min), bump `docker-compose.yml` to candidate tag, bounce dev (`docker restart lupin-rest-dev`), regenerate baselines (`./src/scripts/run-e2e-ui-tests.sh --bg --update-snapshots -k visual`), verify with `./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual`, then user-confirmed retag to `lupin:1.0.0`. Per `feedback_no_auto_promote_tags`: never overwrite the working tag automatically.
+- [ ] [LUPIN] **WG-8a orphan + dead-Calculator cleanup on `:8000`** — 1 orphan in `run` (Calculator "Compare 12 oz at $3.49…", id 1eab4ee7… 2026-04-27 21:41:34 EDT) + 8 reaped Calculators in `dead`. Use `DELETE /api/queue/{run|dead}/{job_id}`. Or skip — the verification re-run will overwrite them.
+- [ ] [LUPIN] **WG-6 survivor verification** — re-run smoke after WG-1 image rebuild. If `test_notification_proxy_script_matching` and/or `test_tfe_error_capture_smoke` still FAIL, capture full stderr/stack and escalate to OOS-3.
+- [ ] [LUPIN] **`:8000` verification re-run** — pick a non-overlapping `scheduled_at` slot. Submit via `POST /api/test-suite/submit { test_types: "all", auto_fix_on_failure: false }`. Acceptance: 0 e2e ERRORs, smoke FAILs ≤ 2, websocket suite PASS, 0 orphans in run, TFE either auto-ratifies (if WG-9 default flipped) or stalls cleanly.
+- [ ] [LUPIN] **(Optional) flip TFE voice-gate timeout policy to `top_1`** — INI key `test fix expediter voice gate timeout policy` defaults to `stall` (preserves prior behavior). For after-hours autonomous runs the default discards 23 generated proposals on timeout. Setting to `top_1` makes the highest-confidence proposal auto-ratify on timeout. See `02-wg-9-tfe-voice-gate-fallback.md` for the four supported modes.
+- [ ] [LUPIN] **Ratify any/all of the 4 OOS plans** — drafted in `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/03-oos-{1..4}-*.md`:
+  - **OOS-1**: TFE/BFE pattern-matcher upgrade (cluster coverage invariant + proposal de-dup) — explains why the 22:35 TFE produced 23 proposals against 8 empty clusters
+  - **OOS-2**: Refactor websocket smoke runner to pytest+junit-xml (eliminates the WG-7 stdout-pattern fallback)
+  - **OOS-3**: Conditional — only triggered if WG-6 surfaces non-trivial bugs
+  - **OOS-4**: Why 21:06 test_suite job ended up in `dead` not `done`; subsumes the empty-`error` field anomaly on the 8 reaped Calculator dead jobs
+- [ ] [LUPIN] **Commits** — 7 logical commits suggested in `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/90-execution-log.md`. Per `feedback_never_auto_commit_push`, none done autonomously.
+- [ ] [LUPIN] **CoSA submodule commit** — files in `src/cosa/training/peft_trainer.py`, `src/cosa/agents/test_fix_expediter/{config,orchestrator}.py`, `src/cosa/agents/test_suite/job.py`, `src/cosa/rest/{running_fifo_queue,queue_consumer}.py` are CoSA-side. Per nested-repo rules, separate CoSA-side commit needed.
 
 ---
 

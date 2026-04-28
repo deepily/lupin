@@ -43,6 +43,11 @@ try:
 except ImportError:
     cu = None
 
+try:
+    import pytest as _pytest
+except ImportError:
+    _pytest = None
+
 
 class LivePipelineTestBase:
     """
@@ -688,6 +693,10 @@ class LivePipelineTestBase:
         # Get credentials
         email, password = self._get_credentials()
         if not email or not password:
+            msg = ( f"{self.CREDENTIAL_ENV_PREFIX}_{{EMAIL,PASSWORD}} not set; "
+                    f"source ~/.lupin/test-env.sh before running this test." )
+            if _pytest is not None:
+                _pytest.skip( msg )
             print( f"Missing environment variables. Set:" )
             print( f"  export {self.CREDENTIAL_ENV_PREFIX}_EMAIL='your@email.com'" )
             print( f"  export {self.CREDENTIAL_ENV_PREFIX}_PASSWORD='<your-password>'" )
@@ -787,6 +796,8 @@ class LivePipelineTestBase:
             return failed == 0
 
         except requests.exceptions.ConnectionError:
+            if _pytest is not None:
+                _pytest.skip( f"server unreachable at {self.BASE_URL}" )
             print( f"\nConnection failed - is the server running on {self.BASE_URL}?" )
             return False
         except Exception as e:

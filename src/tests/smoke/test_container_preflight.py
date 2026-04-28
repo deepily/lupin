@@ -29,12 +29,18 @@ CONTAINER = os.environ.get( "PREFLIGHT_CONTAINER", "lupin-rest-test" )
 
 
 def _docker_available():
-    result = subprocess.run(
-        [ "docker", "info" ],
-        capture_output=True,
-        timeout=5
-    )
-    return result.returncode == 0
+    try:
+        result = subprocess.run(
+            [ "docker", "info" ],
+            capture_output=True,
+            timeout=5
+        )
+        return result.returncode == 0
+    except ( FileNotFoundError, OSError, subprocess.TimeoutExpired ):
+        # docker binary missing from PATH (test container reality), or daemon
+        # unreachable — treat as "not available" so the autouse fixture's
+        # pytest.skip path is taken instead of erroring out at setup.
+        return False
 
 
 def _docker_exec( *args ):

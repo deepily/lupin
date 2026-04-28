@@ -97,6 +97,12 @@ RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
 #     which would otherwise need root). Hardcoded list derived from
 #     `playwright install-deps chromium --dry-run` — refresh when playwright
 #     bumps a major version.
+#   - Playwright fonts (WG-1, 2026-04-28): the original 3950d0a hardcoded list
+#     omitted the fonts that `--with-deps` previously installed. Without them
+#     Chromium falls back to system defaults → emoji tofu + metric drift in
+#     visual-baseline tests (12 ERRORs in the 2026-04-27 run). Authoritative
+#     list re-extracted via `playwright install-deps chromium --dry-run`
+#     against the existing image. Refresh when playwright bumps a major.
 # ----------------------------------------------------------------------------
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -109,9 +115,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libportaudio2 libportaudiocpp0 portaudio19-dev \
         libasound-dev libsndfile1-dev ffmpeg \
         libnss3 libnspr4 libdbus-1-3 \
-        libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+        libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libcups2 libdrm2 \
         libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
-        libgbm1 libpango-1.0-0 libcairo2 libasound2
+        libgbm1 libpango-1.0-0 libcairo2 libasound2 \
+        libx11-6 libxcb1 libxext6 libwayland-client0 \
+        libfontconfig1 libfreetype6 xvfb \
+        fonts-noto-color-emoji fonts-unifont xfonts-cyrillic xfonts-scalable \
+        fonts-liberation fonts-ipafont-gothic fonts-wqy-zenhei \
+        fonts-tlwg-loma-otf fonts-freefont-ttf
 
 # ----------------------------------------------------------------------------
 # GitHub CLI via signed apt repo (root, system /usr/bin)
