@@ -1,5 +1,29 @@
 # Lupin Project History
 
+### 2026.04.28 - Session 30072c25 | Docker Build Diagnostics — Postgres Bind-Mount Permission + uv.lock / pydantic-ai[slim] Drift
+
+**Context**: User opened the session reporting `docker build -f docker/lupin/Dockerfile -t lupin:1.0.0-fonts .` failed with `error from sender: open src/conf/long-term-memory/postgresql-dev-data: permission denied`. After landing the diagnosis + permanent-relocation plan, user prepended `sudo` and re-ran — surfacing a second blocker: `uv sync --locked --no-install-project` failing at stage 13/47 because `pydantic-ai==0.6.2` does not have a `slim` extra. User requested the second issue be written up as a self-contained problem-statement document for an external expert.
+
+**Accomplishments**:
+
+- **Postgres bind-mount diagnosis**: `src/conf/long-term-memory/postgresql-dev-data` is mode `0700` owned by UID 70 (postgres-in-container) — unreadable by host user `rruiz`. `.dockerignore` already carries 6 exclusion patterns + a header comment documenting that "BuildKit's sender will try to open the dir during context evaluation" — the patterns aren't enough because BuildKit's walker stats the dir before applying the ignore. Fixing perms in place is impossible (Postgres requires `0700` to start). Two-step strategy: (1) `sudo docker build` for the immediate unblock, (2) relocate the bind-mount outside the build context permanently. Confirmed target via cosa-voice `ask_multiple_choice`: `/mnt/DATA01/lupin-data/postgresql-dev-data` (same physical disk as repo, no cross-disk copy, user-writable parent). 5-file edit set scoped: `docker-compose.yml:17`, delete `.dockerignore` lines 1–11, delete `.gitignore:47`, delete `src/scripts/conf/rsync-exclude.txt:85`, update `src/scripts/run-postgresql-dev.sh:236` help text.
+- **uv.lock / pydantic-ai[slim] diagnosis**: `pyproject.toml:53` declares `pydantic-ai[slim]==0.6.2`. `uv.lock:2087` faithfully records the ask: `extras = ["slim"]`. But the resolved `pydantic-ai==0.6.2` metadata at `uv.lock:3097-3106` has NO `[package.optional-dependencies]` table — the meta-package exposes zero extras at the meta level. The 14 extras listed (anthropic, openai, google, mcp, ...) are all on the *transitive* `pydantic-ai-slim` dep. So the lockfile is internally inconsistent — it pins an extra that doesn't exist on the resolved package metadata. `uv 0.8.x` `--locked` correctly refuses to silently re-resolve. Recommended fix (Option 1 of 4): drop `[slim]` from `pyproject.toml`, regenerate `uv.lock`, commit atomically. Functionally a no-op — `pydantic-ai==0.6.2` already pulls `pydantic-ai-slim` transitively with all 14 sub-extras.
+- **Expert problem-statement document** at `src/rnd/v0.1.7/2026.04.28-uv-lock-pydantic-ai-slim-extra-mismatch.md` — self-contained for an external Python-packaging / `uv` expert. Sections: TL;DR, environment table (CUDA/Python/uv/pydantic-ai versions), observable symptom (annotated build output), evidence (5 file:line citations with verbatim TOML), hypothesis (3 candidates with `uv` lock-writer leniency as primary suspect), 4 ranked solutions with tradeoffs, 5 open questions, deterministic reproducer (~10 lines, runnable in a `tmp` dir).
+
+**Files Modified (parent Lupin only — no CoSA-side edits, no INI changes, no test changes)**:
+
+R&D:
+- `src/rnd/v0.1.7/2026.04.28-uv-lock-pydantic-ai-slim-extra-mismatch.md` (NEW)
+
+**Pending follow-ups**:
+
+- Postgres bind-mount permanent relocation — plan finalized at `~/.claude/plans/compressed-percolating-prism.md`, target `/mnt/DATA01/lupin-data/postgresql-dev-data`. Awaiting execution slot (irreversible without rollback path; user-gate before move).
+- `uv.lock` surgical fix: drop `[slim]` extra at `pyproject.toml:53`, regenerate `uv.lock`, commit `pyproject.toml + uv.lock` atomically. Verify rebuild advances past stage 13/47.
+- Optional: route the uv.lock R&D doc to an external `uv` / packaging expert for root-cause input on lockfile-vs-metadata inconsistency (open questions: did `pydantic-ai==0.6.2` ever expose `slim`? did `uv` tighten extras-validation between lock-time and sync-time? should we file a `uv` bug?).
+- **Memory update saved**: `feedback_expert_handoff_problem_statement.md` (when the user asks for an expert-handoff doc, format as: TL;DR → environment table → observable symptom → file:line evidence → hypothesis → ranked solutions with tradeoffs → open questions → deterministic reproducer).
+
+---
+
 ### 2026.04.28 - Session c7333045 | Conversation Mode v1.1 — 404 fix + Mutex + Pinning + Corner Pause Button
 
 #### Checkpoint | 2026.04.28 16:31 EDT | Mid-session checkpoint — multi-bug pass + mutex/pinning feature complete

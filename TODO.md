@@ -1,6 +1,14 @@
 # TODO
 
-Last updated: 2026-04-28 EDT mid-session checkpoint (Session ba7138c4 — Test-suite anomaly remediation: Phase 0 R&D docs created, WG-2/3/4/5/7/8b/9 landed, WG-1 Dockerfile prepped (rebuild deferred), 4 OOS plans drafted awaiting ratification. 23 new unit tests + 147 regression tests all PASS. 2 GPU-touching smoke tests deleted per the never-grab-GPU mandate.)
+Last updated: 2026-04-28 EDT (Session 30072c25 — Docker build diagnostics: postgres bind-mount permission diagnosed, uv.lock pydantic-ai[slim] mismatch diagnosed and serialized as expert-handoff doc)
+
+---
+
+## 🌅 FOLLOW-UPS — for the user (Session 30072c25 — docker build diagnostics)
+
+- [ ] [LUPIN] **`uv.lock` surgical fix (build-blocking)** — drop `[slim]` extra at `pyproject.toml:53` (`"pydantic-ai[slim]==0.6.2"` → `"pydantic-ai==0.6.2"`), regenerate via `uv lock`, commit `pyproject.toml + uv.lock` atomically. Functionally a no-op (transitive `pydantic-ai-slim` dep already pulls all 14 sub-extras). Verify: rebuild advances past stage 13/47. See `src/rnd/v0.1.7/2026.04.28-uv-lock-pydantic-ai-slim-extra-mismatch.md` for full evidence + 4-option ranking.
+- [ ] [LUPIN] **Postgres bind-mount permanent relocation** — move `src/conf/long-term-memory/postgresql-dev-data/` → `/mnt/DATA01/lupin-data/postgresql-dev-data/` (outside build context, same physical disk). Plan at `~/.claude/plans/compressed-percolating-prism.md`: stop postgres container, `mv` data dir (preserves UID 70 / `0700`), edit 5 files (`docker-compose.yml:17`, delete `.dockerignore` lines 1–11, delete `.gitignore:47`, delete `src/scripts/conf/rsync-exclude.txt:85`, update `src/scripts/run-postgresql-dev.sh:236`), restart postgres, verify build works WITHOUT `sudo`. Rollback path documented. Pre-flight: fresh `pg_dump` via `src/scripts/backup-postgres.sh`.
+- [ ] [LUPIN] **(Optional) Route uv.lock R&D doc to external `uv` expert** — open questions (in the doc itself): did `pydantic-ai==0.6.2` ever expose a `slim` extra? did `uv` tighten extras-validation between lock-time and sync-time? should we file a `uv` bug for the lock-writer-accepts-impossible-extras inconsistency?
 
 ---
 
