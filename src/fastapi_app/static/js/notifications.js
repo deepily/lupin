@@ -121,6 +121,12 @@ class NotificationsUI {
         // Event deduplication
         this.processedEvents = new Set();
         this.maxProcessedEvents = 100; // Prevent memory leaks
+
+        // Per-session voice persona map: sender_id → { name, voice_id, icon, color, borrowed }
+        // Hydrated from notification.voice_persona as notifications arrive.
+        // Used by playTTS to pass voice_id so each session speaks with its own voice.
+        // See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
+        this.senderPersonaMap = new Map();
         
         // Notification sound system
         this.notificationSounds = {};
@@ -3423,10 +3429,13 @@ class NotificationsUI {
         // Store job completion data in cache for replay functionality
         this.storeJobCompletionForReplay( envelope, actualText );
         
-        // Play TTS audio based on current mode
-        this.playTTS( actualText || "Job completed", mode );
+        // Play TTS audio based on current mode. Use the persona for the
+        // job's sender (when known) so each session's job completions
+        // speak with that session's assigned voice.
+        const jobVoiceId = this.getVoiceIdForSender( envelope.sender_id );
+        this.playTTS( actualText || "Job completed", mode, jobVoiceId );
     }
-    
+
     async storeJobCompletionForReplay( envelope, actualText ) {
         /**
          * Store job completion data in JobCompletionCache for replay functionality.
@@ -3880,9 +3889,9 @@ class NotificationsUI {
         await this.playTTS( testText, mode );
     }
     
-    async playTTS( text, mode ) {
-        this.log( `Playing TTS: "${text}" in ${mode} mode` );
-        
+    async playTTS( text, mode, voiceId = null ) {
+        this.log( `Playing TTS: "${text}" in ${mode} mode${ voiceId ? ` (voice: ${voiceId})` : "" }` );
+
         try {
             // Check cache first if available
             if ( this.audioCacheInitialized ) {
@@ -3899,15 +3908,15 @@ class NotificationsUI {
             } else {
                 this.log( `⚠️ Cache not initialized - skipping cache check for: "${text.substring( 0, 30 )}..."` );
             }
-            
+
             // Store current text for caching after TTS generation
             this.currentTTSText = text;
-            
+
             // Cache miss or cache not available - generate TTS as normal
             if ( mode === this.TTS_MODE_INSTANT ) {
-                await this.playInstantTTS( text );
+                await this.playInstantTTS( text, voiceId );
             } else {
-                await this.playReliableTTS( text );
+                await this.playReliableTTS( text, voiceId );
             }
         } catch ( error ) {
             this.error( `TTS playback failed in ${mode} mode:`, error );
@@ -3946,7 +3955,7 @@ class NotificationsUI {
         });
     }
     
-    async playInstantTTS( text ) {
+    async playInstantTTS( text, voiceId = null ) {
         this.log( "Starting instant TTS (11labs streaming)..." );
 
         // Start pulsing indicator on notification card
@@ -3960,7 +3969,15 @@ class NotificationsUI {
             this.startTime = Date.now();
             this.metricsTTSStartTime = Date.now();
 
-            // Request TTS via 11labs streaming endpoint
+            // Request TTS via 11labs streaming endpoint.
+            // Body key is `voice_id` (server reads `voice_id`, NOT `voice`).
+            // When voiceId is null, omit the field so the server falls back to
+            // its configured default (Sam, the system default voice).
+            const ttsBody = {
+                text       : text,
+                session_id : this.audioSessionId  // Ensure session_id is included
+            };
+            if ( voiceId ) ttsBody.voice_id = voiceId;
             const response = await fetch( '/api/get-speech-elevenlabs', {
                 method: 'POST',
                 headers: {
@@ -3968,11 +3985,7 @@ class NotificationsUI {
                     'Authorization': this.getAuthHeader(),
                     'X-Session-ID': this.audioSessionId
                 },
-                body: JSON.stringify({
-                    text: text,
-                    voice: 'default',
-                    session_id: this.audioSessionId  // Ensure session_id is included
-                })
+                body: JSON.stringify( ttsBody )
             });
             
             if ( !response.ok ) {
@@ -3999,7 +4012,7 @@ class NotificationsUI {
         }
     }
     
-    async playReliableTTS( text ) {
+    async playReliableTTS( text, voiceId = null ) {
         this.log( "Starting reliable TTS (OpenAI batch)..." );
 
         // Start pulsing indicator on notification card
@@ -4017,7 +4030,14 @@ class NotificationsUI {
             // Ensure token is valid before API call (auto-refresh if expired)
             await this.ensureValidToken();
 
-            // Request TTS via OpenAI batch endpoint
+            // Request TTS via OpenAI batch endpoint.
+            // Body key is `voice_id` (server reads `voice_id`, NOT `voice`).
+            // Omit when voiceId is null so server-side default applies.
+            const ttsBody = {
+                text       : text,
+                session_id : this.audioSessionId  // Add missing session_id
+            };
+            if ( voiceId ) ttsBody.voice_id = voiceId;
             const response = await fetch( '/api/get-speech', {
                 method: 'POST',
                 headers: {
@@ -4025,11 +4045,7 @@ class NotificationsUI {
                     'Authorization': this.getAuthHeader(),
                     'X-Session-ID': this.audioSessionId
                 },
-                body: JSON.stringify({
-                    text: text,
-                    voice: 'default',
-                    session_id: this.audioSessionId  // Add missing session_id
-                })
+                body: JSON.stringify( ttsBody )
             });
 
             if ( !response.ok ) {
@@ -5333,6 +5349,14 @@ class NotificationsUI {
         // New notification - add to local cache
         this.notificationState.notifications.push( notification );
         this.log( `Processing new notification: ${notification.type}/${notification.priority} - ${notification.message}` );
+
+        // Hydrate sender → voice persona map. The server stamps voice_persona on
+        // every outbound notification envelope; we cache it here so playTTS and
+        // sender-card badge rendering can look it up without re-fetching the bridge.
+        // See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md §4.3
+        if ( notification.voice_persona && notification.sender_id ) {
+            this.senderPersonaMap.set( notification.sender_id, notification.voice_persona );
+        }
 
         // Session topic control message — update header span, skip history card
         const notifType = notification.type || notification.notification_type;
@@ -8666,6 +8690,37 @@ class NotificationsUI {
     }
 
     /**
+     * Look up the voice_id for a given sender_id from the per-session
+     * persona map. Returns null when no persona is known (server-side
+     * default kicks in — Sam, the system default).
+     *
+     * Hydration happens in handleNotificationUpdate as soon as a
+     * notification with a voice_persona payload arrives. The server
+     * stamps voice_persona on every outbound envelope (see
+     * src/cosa/rest/routers/notifications.py _voice_persona_for_sender_id).
+     *
+     * @param {string|null} senderId - Sender id (e.g., claude.code@lupin.deepily.ai#c7333045)
+     * @returns {string|null} voice_id or null
+     */
+    getVoiceIdForSender( senderId ) {
+        if ( !senderId ) return null;
+        const persona = this.senderPersonaMap.get( senderId );
+        return persona && persona.voice_id ? persona.voice_id : null;
+    }
+
+    /**
+     * Look up the full persona object for a given sender_id.
+     * Used by sender-card badge rendering.
+     *
+     * @param {string|null} senderId
+     * @returns {object|null} persona dict or null
+     */
+    getPersonaForSender( senderId ) {
+        if ( !senderId ) return null;
+        return this.senderPersonaMap.get( senderId ) || null;
+    }
+
+    /**
      * Save a session name to localStorage.
      * @param {string} sessionId - Session ID (hex string)
      * @param {string} name - Session name to save
@@ -9493,6 +9548,22 @@ class NotificationsUI {
         const activeClass = group?.isActive ? ' sender-card-active' : '';
         const activeTitle = group?.isActive ? 'Active session' : 'Inactive session';
 
+        // Voice persona badge: when this session has a per-session voice
+        // assigned, render a colored chip in the header so the user can
+        // visually identify which session is which (audio + visual cues).
+        // Falls through to '' (no badge) when no persona is known —
+        // typically because the session predates the feature or because
+        // the SessionStart hook's /allocate call failed (server falls back
+        // to Sam, the system default voice, which has no badge).
+        const persona = this.getPersonaForSender( senderId );
+        const personaBadge = persona ? `
+            <span class="persona-badge${persona.borrowed ? ' borrowed' : ''}"
+                  style="background-color: ${persona.color || '#888'};"
+                  title="${persona.name}${persona.borrowed ? ' (borrowed — pool exhausted)' : ''} — ${persona.profile || ''}">
+                <span class="persona-badge-icon">${persona.icon || '🎙️'}</span>
+                <span class="persona-badge-name">${persona.name || ''}</span>
+            </span>` : '';
+
         const card = document.createElement( 'div' );
         // Card ID must escape # character in addition to @ and .
         card.id = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
@@ -9526,6 +9597,7 @@ class NotificationsUI {
                 <span class="sender-status">${statusIndicator}</span>
                 <span class="sender-project-name">${projectName}</span>
                 ${sessionDisplay}
+                ${personaBadge}
                 <span class="sender-stats-group">
                     <span class="sender-new-count"></span>
                     <span class="sender-message-count">(0)</span>
@@ -12086,8 +12158,12 @@ class NotificationsUI {
         // Persist queue state (item was removed from queue)
         this.saveTTSQueueState();
 
-        // Start TTS playback
-        this.playTTS( item.ttsText, this.getCurrentTTSMode() ).catch( error => {
+        // Start TTS playback. Look up the per-session voice persona for the
+        // notification's sender_id so the TTS is spoken with that session's
+        // assigned voice. Falls back to server-default (Sam) when no persona
+        // is known (e.g., notifications from non-CC sources).
+        const ttsVoiceId = this.getVoiceIdForSender( item.notification && item.notification.sender_id );
+        this.playTTS( item.ttsText, this.getCurrentTTSMode(), ttsVoiceId ).catch( error => {
             this.error( 'TTS queue: Playback failed:', error );
             this.onTTSPlaybackComplete();  // Move to next item even on error
         } );

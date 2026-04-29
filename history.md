@@ -1,5 +1,57 @@
 # Lupin Project History
 
+### 2026.04.28 - Session 30072c25 | Per-Session Voice Personas for CC Notifications UI
+
+**Context**: Conversation Mode v1.1 (Apr 27–28, commits 48dc03e + f2cef9f) gave each Claude Code session a per-session toggle to make Claude auto-narrate every turn via TTS. It works, but exposed a UX gap: when 2+ CC sessions run in parallel (multi-repo work), the user can't audibly tell them apart — every session speaks with the same default voice (Sam, `G7ILShrCNLfmS0A37SXS`). User asked for each new CC session to be uniformly randomly assigned a voice/persona at SessionStart from a configured pool, with a colored badge in the sender-card header so sessions are distinguishable both audibly and visually.
+
+**Accomplishments**:
+
+- **R&D + design** at `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` + paired `90-execution.md` (BFE-style execution log). Architecture: bridge file (`~/.claude/sessions/cc-{PPID}.json`) is canonical, per-request dead-PID filter is the implicit sweeper, no separate goroutine. Design audited against `feedback_conversation_mode_user_only_initiation.md` — voice persona allocation is a hook-driven harness mechanism, not a Claude-initiated MCP call, so the rule is not violated.
+- **Voice pool**: 6 allocatable personas (Nora, Quentin, Rachel, Adam, Domi, Arnold) with name + voice_id + emoji icon + CSS hex color + texture profile. Sam reserved as the system-wide TTS default for any request lacking a `voice_id` — NOT in the allocatable pool. User-confirmed pool composition mid-plan.
+- **Allocation algorithm**: `random.choice(pool − occupied)` uniform random draw from the unallocated subset. Pool exhaustion (>6 active sessions) triggers deterministic hash-modulo borrow with a visible "borrowed" badge variant (dashed border, ↻ suffix).
+- **End-to-end wiring**: SessionStart hook synchronously POSTs `/api/cosa-voice/voice-persona/{sid}/allocate` (auth: hook_credentials → JWT → Bearer) before its own send_tts; bridge is the persistence anchor with fail-soft fallback to Sam if server unreachable. SessionEnd hook POSTs `/release`. Notifications router stamps `voice_persona` on the outbound WS envelope by looking up bridge for the resolved sender_id. UI hydrates `senderPersonaMap` from notification arrivals, threads `voice_id` through `playTTS`→`playInstantTTS`/`playReliableTTS`, renders persona badge in sender-card header. `/clear` carry-forward in `register_session.py` Phase 2 preserves voice across context clears.
+- **Bundled bug fix**: `notifications.js` was sending `{ voice: "default" }` to `/api/get-speech-elevenlabs` — server reads `voice_id` (not `voice`), so UI parameter was silently ignored. Fixed body key `voice` → `voice_id` in both `playInstantTTS` and `playReliableTTS`. Caught by Phase 2 design-review agent.
+- **Test totals**: 102/102 PASS in 0.80s — 25 new unit tests (`test_voice_persona_helpers.py`: pool parsing, allocation against parametrized N=0/1/2/5 occupancy, borrow determinism, malformed-bridge skip, bridge round-trip), 7 new live :7999 smoke tests (`test_voice_persona_allocation.py`: pool returns 6 voices, allocate yields non-Sam, idempotent re-allocate, release frees slot, 404 on unknown session, 2-session uniqueness check), 70 regression tests (existing `test_session_bridge_lookup.py` + `test_conversation_mode_router.py`) — no breakage.
+- **The one verification I cannot automate**: spawning 3 concurrent `claude code` sessions in different terminals to confirm three distinct voices speak + three distinct colored badges render. Subjective audio-perception check; flagged as a TODO follow-up for the user.
+
+**Files Modified (parent Lupin only — no CoSA git ops, no tests touched outside this feature)**:
+
+R&D:
+- `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` (NEW)
+- `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/90-execution.md` (NEW)
+
+Configuration:
+- `src/conf/lupin-app.ini` ([Voice Personas] block: 1 pool key + 6 personas × 4 fields = 25 new keys)
+- `src/conf/lupin-app-splainer.ini` (matching splainer descriptions for all 25 new keys)
+
+Hooks + lib:
+- `src/lupin_cli/claude_code/hooks/lib/session_bridge.py` (`get_voice_persona`, `set_voice_persona`, `find_active_voice_persona_sessions` + extended smoke block)
+- `src/lupin_cli/claude_code/hooks/register_session.py` (`_allocate_voice_persona_via_http` helper + Phase 4.5 hook step + `/clear` voice_persona carry-forward)
+- `src/lupin_cli/claude_code/hooks/session_end.py` (`_release_voice_persona` helper + Phase 1.5 release call)
+
+CoSA REST (edits only — submodule git managed separately per `feedback_lupin_only_never_cosa`):
+- `src/cosa/rest/voice_persona_helpers.py` (NEW pure-function module: load_pool / pick_unallocated / borrowed_for_sid / allocate)
+- `src/cosa/rest/routers/voice_persona.py` (NEW router — GET /pool, GET /{sid}, POST /{sid}/allocate, POST /{sid}/release; asyncio.Lock for atomic allocation)
+- `src/cosa/rest/notification_fifo_queue.py` (`NotificationItem.voice_persona` field + to_dict + push_notification kwarg)
+- `src/cosa/rest/routers/notifications.py` (`_voice_persona_for_sender_id` resolver + 3 callsite injections: queued path, response-required path, cc-listener inline broadcast)
+
+FastAPI:
+- `src/fastapi_app/main.py` (import + register voice_persona router)
+- `src/fastapi_app/static/js/notifications.js` (`senderPersonaMap` + `getVoiceIdForSender`/`getPersonaForSender` helpers + handleNotificationUpdate hydration + body-key fix `voice` → `voice_id` in playInstantTTS/playReliableTTS + voiceId threaded through playTTS chain + 2 callsite wirings + persona badge in sender-card header)
+- `src/fastapi_app/static/css/notifications.css` (`.persona-badge` styling + `.persona-badge.borrowed` dashed-border variant)
+
+Tests:
+- `src/tests/unit/test_voice_persona_helpers.py` (NEW — 25 tests across 6 classes)
+- `src/tests/smoke/test_voice_persona_allocation.py` (NEW — 7 live :7999 tests)
+
+Documentation:
+- `CLAUDE.md` (DOCUMENTATION TOUCHPOINTS rows for voice_persona router + INI keys)
+- `TODO.md` (added persona-UX-experience follow-up)
+
+**Commit**: [pending — uncommitted at session close]
+
+---
+
 ### 2026.04.28 - Session ba53b0d2 | Bug Fix Mode — Conversation-mode response acknowledgment
 
 **Context**: User reports that in cosa-voice conversation mode, Claude often acts on a user prompt but never speaks back — the user has no way to know the prompt was received. Existing directives say "after every assistant turn, call notify(...)" but never explicitly require a *receipt acknowledgment before tool work begins*. This session adds the missing per-turn "acknowledge receipt before tool work" rule across the three redundancy layers (MCP server-instructions, slash-command, global guardrails skill) plus an auto-memory feedback entry, then verifies via grep cross-check.

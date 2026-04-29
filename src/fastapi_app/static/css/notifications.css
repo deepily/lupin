@@ -1721,6 +1721,57 @@
         }
 
         /* ========================================
+         * Per-Session Voice Persona Badge
+         * (2026-04-28 — sender card header chip showing
+         *  the voice this CC session was assigned at SessionStart)
+         * Design: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
+         * ======================================== */
+
+        .persona-badge {
+            display          : inline-flex;
+            align-items      : center;
+            gap              : 4px;
+            margin-left      : 8px;
+            padding          : 2px 8px;
+            border-radius    : 12px;
+            font-size        : 0.8em;
+            font-weight      : 500;
+            color            : #fff;
+            text-shadow      : 0 1px 1px rgba( 0, 0, 0, 0.25 );
+            border           : 1px solid rgba( 255, 255, 255, 0.15 );
+            box-shadow       : 0 1px 2px rgba( 0, 0, 0, 0.15 );
+            cursor           : default;
+            white-space      : nowrap;
+            user-select      : none;
+            line-height      : 1.2;
+            /* background-color is set inline from persona.color */
+        }
+
+        .persona-badge-icon {
+            font-size: 1.0em;
+        }
+
+        .persona-badge-name {
+            letter-spacing: 0.02em;
+        }
+
+        /* Borrowed badge: pool was exhausted, this session is sharing a
+         * voice with another. Dashed border + reduced opacity signals
+         * "not exclusively yours". */
+        .persona-badge.borrowed {
+            border-style    : dashed;
+            border-color    : rgba( 255, 255, 255, 0.5 );
+            opacity         : 0.85;
+        }
+
+        .persona-badge.borrowed::after {
+            content     : "↻";
+            margin-left : 2px;
+            font-size   : 0.85em;
+            opacity     : 0.8;
+        }
+
+        /* ========================================
            SESSION NAME EDIT MODAL (Voice-First)
            ======================================== */
 

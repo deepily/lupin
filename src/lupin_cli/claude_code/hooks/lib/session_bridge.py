@@ -805,6 +805,153 @@ def set_conversation_mode( session_id, active ):
         return False
 
 
+def get_voice_persona( session_id ):
+    """
+    Read voice_persona dict from the bridge file for a given session_id.
+
+    The voice_persona is a per-session voice/persona allocation written by the
+    SessionStart hook (via the /api/cosa-voice/voice-persona/{sid}/allocate
+    endpoint). Each new Claude Code session is uniformly randomly assigned a
+    voice from a 6-voice pool so the user can audibly distinguish parallel
+    sessions. Sam (the global default) is reserved as the system-wide voice
+    for any TTS request lacking a voice_id and is NOT in the allocatable pool.
+
+    See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
+
+    Requires:
+        - session_id is a non-empty string (full UUID or 8-char prefix)
+
+    Ensures:
+        - Returns the voice_persona dict if the bridge exists and the field is
+          a non-empty dict
+        - Returns None on any failure (missing bridge, parse error, missing
+          field, field is null/empty/non-dict)
+        - Never raises exceptions
+
+    Args:
+        session_id: Session ID to look up
+
+    Returns:
+        dict or None: The persona dict (with keys voice_id, name, icon, color,
+            borrowed, assigned_at) when present; None otherwise
+    """
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return None
+
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        persona = data.get( "voice_persona" )
+        if isinstance( persona, dict ) and persona:
+            return persona
+        return None
+    except ( json.JSONDecodeError, OSError ):
+        return None
+
+
+def set_voice_persona( session_id, persona ):
+    """
+    Write voice_persona to the bridge file for a given session_id.
+
+    Read-modify-write the bridge JSON to set the field, preserving all other
+    fields. Pass `persona=None` to clear the field (release the slot).
+
+    Requires:
+        - session_id is a non-empty string (full UUID or 8-char prefix)
+        - persona is a dict (to set) or None (to clear)
+
+    Ensures:
+        - Returns True if bridge was found and successfully updated
+        - Returns False if bridge not found or write failed
+        - Never raises exceptions
+        - Preserves all existing fields in the bridge JSON
+        - When persona is None, the voice_persona key is set to null (not
+          deleted) so consumers can distinguish "explicitly released" from
+          "field never existed"
+
+    Args:
+        session_id: Session ID to look up
+        persona: dict to write, or None to clear
+
+    Returns:
+        bool: True on successful write, False otherwise
+    """
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return False
+
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        data[ "voice_persona" ] = persona
+        with open( path, "w" ) as f:
+            json.dump( data, f, indent=2 )
+        return True
+    except ( json.JSONDecodeError, OSError ):
+        return False
+
+
+def find_active_voice_persona_sessions():
+    """
+    Scan all bridge files for sessions whose voice_persona is non-null.
+
+    Used by the voice-persona HTTP endpoints to compute pool occupancy:
+    `/allocate` excludes occupied persona names so each session gets a
+    unique voice; `/pool` returns a snapshot for diagnostics.
+
+    Honors the same staleness filtering as find_active_conversation_sessions:
+    skips buffer/listener files, skips bridges whose host PID is dead
+    (when host PIDs are trustworthy — see _can_trust_host_pids). A dead-PID
+    bridge with a non-null voice_persona is treated as "free" — its slot
+    is implicitly reclaimed by being filtered out here.
+
+    Ensures:
+        - Returns a list of (Path, session_id, persona) tuples for every
+          bridge with a non-null voice_persona dict
+        - session_id is the canonical id (stable_session_id preferred)
+        - persona is the dict as stored in the bridge
+        - Never raises exceptions
+        - Skips bridge files that fail to parse or open
+
+    Returns:
+        list[ tuple[ Path, str, dict ] ]: (bridge_path, session_id, persona)
+    """
+    if not SESSION_DIR.exists():
+        return []
+
+    trust_host_pids = _can_trust_host_pids()
+    results         = []
+
+    for path in SESSION_DIR.glob( "cc-*.json" ):
+        if "buffer" in path.name or "listener" in path.name:
+            continue
+
+        if trust_host_pids:
+            file_pid = _extract_pid_from_filename( path.name )
+            if file_pid is not None and not _is_pid_alive( file_pid ):
+                continue
+
+        try:
+            with open( path ) as f:
+                data = json.load( f )
+
+            persona = data.get( "voice_persona" )
+            if not isinstance( persona, dict ) or not persona:
+                continue
+
+            sid = data.get( "stable_session_id" ) or data.get( "session_id" )
+            if not sid:
+                continue
+
+            results.append( ( path, sid, persona ) )
+
+        except ( json.JSONDecodeError, OSError ):
+            continue
+
+    return results
+
+
 def find_session_by_tmux( tmux_session ):
     """
     Scan ~/.claude/sessions/cc-*.json for a tmux_session match.
@@ -879,5 +1026,26 @@ if __name__ == "__main__":
             assert get_conversation_mode( "nonexistent" ) is False, "Missing session_id returns False"
             assert set_conversation_mode( "nonexistent", True ) is False, "Set on missing bridge returns False"
             print( "Conversation mode smoke: ✓ all assertions passed" )
+
+            # Voice persona smoke (round-trip + active-scan)
+            _persona = {
+                "name"        : "Adam",
+                "voice_id"    : "pNInz6obpgDQGcFmaJgB",
+                "icon"        : "🌑",
+                "color"       : "#3F51B5",
+                "borrowed"    : False,
+                "assigned_at" : "2026-04-28T20:30:00Z"
+            }
+            assert get_voice_persona( _sid ) is None, "Default persona is None"
+            assert set_voice_persona( _sid, _persona ) is True, "Set persona should succeed"
+            assert get_voice_persona( _sid ) == _persona, "Round-trip persona equals original"
+            _active = find_active_voice_persona_sessions()
+            assert len( _active ) >= 1, "Should find at least our session"
+            assert any( p[ "name" ] == "Adam" for _, _, p in _active ), "Adam should be in active set"
+            assert set_voice_persona( _sid, None ) is True, "Clear persona should succeed"
+            assert get_voice_persona( _sid ) is None, "Cleared persona reads as None"
+            assert get_voice_persona( "nonexistent" ) is None, "Missing session returns None"
+            assert set_voice_persona( "nonexistent", _persona ) is False, "Set on missing bridge returns False"
+            print( "Voice persona smoke: ✓ all assertions passed" )
         finally:
             globals()[ "SESSION_DIR" ] = _orig_dir

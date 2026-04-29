@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-04-28 EDT (Session c7333045 — Conversation Mode v1.1 + bridge-cwd anchoring + EmbeddingProvider HTTP-routing + history archive)
+Last updated: 2026-04-28 EDT (Session 30072c25 — Per-Session Voice Personas for CC notifications UI)
 
 ---
 
@@ -23,6 +23,13 @@ Last updated: 2026-04-28 EDT (Session c7333045 — Conversation Mode v1.1 + brid
 - [ ] [LUPIN] **Hard programmatic enforcement of user-only-initiation rule** for `enter/exit_conversation_mode()` MCP tools — v1.1 documents the rule in three layers; future enhancement could add a "user-utterance attestation" field on the MCP call if drift is observed.
 - [ ] [LUPIN] **E2E Playwright extension for new mutex + pinning + auto-pause scenarios** — gated behind a user-confirmed `:8000` slot per the E2E two-phase gate.
 - [ ] [LUPIN] **Multi-worker uvicorn lock coordination** — module-level `asyncio.Lock` in conversation_mode router only serializes within one process. If Lupin ever moves to `--workers N`, lock must move to Redis or DB advisory lock. Not relevant today.
+- [ ] [LUPIN] **Make LanceDB cleanup a schedulable evening job on the test server** — wrap `src/scripts/cleanup_lupin_lancedb.py` (the existing `Table.optimize(cleanup_older_than=...)` script that recovered 42 GB on 2026-04-27) as a `test_suite/job.py`-shaped schedulable agentic job, runnable nightly via `POST /api/test-suite/submit` with a `scheduled_at` slot. Constraint: must run on `:8000` test server (monopolize-mode) so it doesn't fight with active writers — script already accepts `--require-stopped` flag, but a scheduled wrapper should also call the canonical `_transition_to_done`/`_transition_to_dead` paths and emit completion notifications. Default cutoff `--older-than-days 7` (conservative); operators can override per-submission. Acceptance: nightly schedule runs, logs version counts before/after, surfaces total disk reclaimed in completion notification, fails fast if the test container has active LanceDB writers.
+
+---
+
+## 🌅 FOLLOW-UPS — for the user (Session 30072c25 — per-session voice personas)
+
+- [ ] [LUPIN] **Experience the new persona-driven UX end-to-end** — spawn 3 concurrent `claude code` sessions in different terminals, trigger a notification from each, and confirm: (a) three distinct voices speak via TTS, (b) three distinct colored badges render in the notifications-UI sender-card headers (icon + persona name + tinted background), (c) badges persist across `/clear` (no re-roll). This is the perceptual end-to-end check the test pyramid cannot automate. Design + verification matrix at `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` and `90-execution.md`.
 
 ---
 

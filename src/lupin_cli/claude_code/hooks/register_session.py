@@ -504,6 +504,80 @@ def _check_cosa_voice_status():
     return "\n".join( lines )
 
 
+def _allocate_voice_persona_via_http( server_url, project, stable_session_id ):
+    """
+    Allocate a voice persona for the given session by calling the cosa-voice
+    HTTP endpoint at /api/cosa-voice/voice-persona/{sid}/allocate.
+
+    The server endpoint atomically picks an unallocated persona from the pool
+    (under asyncio.Lock), writes it to the bridge file, and broadcasts a
+    voice_persona_assigned WebSocket event.
+
+    Fail-soft: any failure (server unreachable, auth failure, pool empty)
+    logs a warning to stderr and returns None. The session continues
+    without a persona; the speech router will fall back to Sam (the global
+    default voice) on TTS dispatch.
+
+    Requires:
+        - server_url is a non-empty string (e.g. http://localhost:7999)
+        - project is a non-empty string used to look up hook credentials
+        - stable_session_id is a non-empty string
+
+    Ensures:
+        - Returns the persona dict on success
+        - Returns None on any failure (logged to stderr)
+        - Never raises exceptions
+        - Uses 2-second timeouts for both /auth/login and /allocate
+
+    Args:
+        server_url: Lupin server URL
+        project: Project key (for credential lookup)
+        stable_session_id: Stable session ID to allocate for
+
+    Returns:
+        dict or None: The persona dict, or None on failure
+    """
+    try:
+        from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
+        email, password = get_hook_credentials( project )
+
+        # Step 1: login to get JWT
+        login_body = json.dumps( { "email": email, "password": password } ).encode()
+        login_req  = urllib.request.Request(
+            f"{server_url}/auth/login",
+            data    = login_body,
+            method  = "POST",
+            headers = { "Content-Type": "application/json" }
+        )
+        with urllib.request.urlopen( login_req, timeout=2 ) as resp:
+            login_data = json.loads( resp.read().decode() )
+        access_token = login_data.get( "tokens", {} ).get( "access_token" )
+        if not access_token:
+            print( f"[register_session] WARNING: voice persona allocate — login response missing access_token",
+                   file=sys.stderr )
+            return None
+
+        # Step 2: POST /allocate
+        alloc_req = urllib.request.Request(
+            f"{server_url}/api/cosa-voice/voice-persona/{stable_session_id}/allocate",
+            data    = b"",  # empty body (endpoint takes session_id from path)
+            method  = "POST",
+            headers = {
+                "Content-Type"  : "application/json",
+                "Authorization" : f"Bearer {access_token}"
+            }
+        )
+        with urllib.request.urlopen( alloc_req, timeout=2 ) as resp:
+            alloc_data = json.loads( resp.read().decode() )
+        return alloc_data.get( "voice_persona" )
+
+    except ( urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError,
+             KeyError, FileNotFoundError, OSError, ValueError ) as e:
+        print( f"[register_session] WARNING: voice persona allocate failed ({type( e ).__name__}: {e})",
+               file=sys.stderr )
+        return None
+
+
 def main():
 
     # ── Phase 1: Read hook input ──────────────────────────────────────────
@@ -598,6 +672,16 @@ def main():
             "tmux_session"      : tmux_session,
         }
 
+        # Carry voice_persona forward across /clear so the user keeps the
+        # same allocated voice. Without this, the SessionStart on a /clear
+        # would lose the persona (since session_data is rebuilt from scratch
+        # above) and Phase 4.5 would re-roll a new voice — confusing the
+        # user mid-session. Keying on stable_session_id alone isn't enough;
+        # the bridge WRITE must also preserve the field.
+        # See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md §5
+        if is_context_clear and old_data and isinstance( old_data.get( "voice_persona" ), dict ):
+            session_data[ "voice_persona" ] = old_data[ "voice_persona" ]
+
         try:
             with open( session_file, "w" ) as f:
                 json.dump( session_data, f, indent=2 )
@@ -635,6 +719,37 @@ def main():
                     os.remove( fpath )
     except Exception:
         pass  # Best-effort cleanup
+
+    # ── Phase 4.5: Allocate voice persona (synchronous, fail-soft) ───────
+    # New CC session → assign a uniformly random voice from the 6-voice pool
+    # so the user can audibly distinguish parallel sessions in the
+    # notifications UI accordion. Sam is reserved as the system default for
+    # any TTS request lacking a voice_id (and thus is NOT in the pool).
+    #
+    # If voice_persona was carried forward across /clear (set in Phase 2),
+    # skip allocation — the user keeps the same voice across context clears.
+    # If allocation fails (server unreachable, auth issue, pool empty), the
+    # bridge stays without a persona; the speech router falls back to Sam,
+    # exactly today's behavior. No SessionStart blocking.
+    #
+    # Design: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
+    if session_id and "voice_persona" not in session_data:
+        try:
+            project = detect_project()
+        except Exception:
+            project = "lupin"
+        try:
+            voice_persona_server_url = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
+            allocated = _allocate_voice_persona_via_http(
+                voice_persona_server_url, project, stable_session_id
+            )
+            if allocated is not None:
+                # The /allocate endpoint already wrote the persona to the
+                # bridge file; no further write needed here.
+                session_data[ "voice_persona" ] = allocated
+        except Exception as e:
+            print( f"[register_session] WARNING: voice persona phase failed ({type( e ).__name__}: {e})",
+                   file=sys.stderr )
 
     # ── Phase 5: Send TTS notification (with explicit sender_id) ────────
     short_id = session_id[:8] if session_id else "unknown"
