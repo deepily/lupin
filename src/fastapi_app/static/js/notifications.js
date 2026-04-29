@@ -2223,7 +2223,10 @@ class NotificationsUI {
                 "notification_queue_update",
                 "notification_responded",  // Phase 2.2 SSE - multi-device sync
                 "notification_expired",    // Phase 2.2 SSE - timeout handling
-                "conversation_mode_changed",  // Per-session conversation/notification toggle (cosa-voice MCP)
+                // conversation_mode_changed / voice_persona_assigned / voice_persona_released
+                // arrive via notification_queue_update (custom notification_type values),
+                // not as top-level WS events. See:
+                // src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md
                 // job_paused/job_resumed removed — now handled as job_state_transition events
                 "auth_success",
                 "auth_error",
@@ -2352,12 +2355,6 @@ class NotificationsUI {
                 case "notification_play_sound":
                     // Subscribed event — no-op handler to prevent "Unhandled message type" console noise
                     this.log( `[QUEUE WS] notification_play_sound received (priority: ${envelope.priority || 'default'})` );
-                    break;
-
-                case "conversation_mode_changed":
-                    // Per-session conversation/notification toggle update (cosa-voice MCP).
-                    // Server is canonical; we hydrate the localStorage cache and update the matching toggle widget.
-                    this.handleConversationModeChanged( envelope );
                     break;
 
                 case "sys_time_update":
@@ -5338,7 +5335,43 @@ class NotificationsUI {
             this.log( "No notification data in WebSocket event" );
             return;
         }
-        
+
+        // Custom-typed state-update notifications (not user-facing messages).
+        // Routed through the canonical notification subsystem rather than as
+        // ad-hoc top-level WS events. Each case handles its own state update
+        // and returns early so the message-render path is skipped.
+        // See: src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md
+        switch ( notification.type ) {
+            case "voice_persona_assigned":
+                if ( notification.sender_id && notification.voice_persona ) {
+                    this.senderPersonaMap.set( notification.sender_id, notification.voice_persona );
+                    // Layer A: patch any existing card header in place so the
+                    // badge appears without a re-render. No-op when card not yet built.
+                    this._setPersonaBadgeOnCard( notification.sender_id, notification.voice_persona );
+                }
+                return;
+
+            case "voice_persona_released":
+                if ( notification.sender_id ) {
+                    this.senderPersonaMap.delete( notification.sender_id );
+                    // Layer A: remove the badge from any existing card header
+                    this._setPersonaBadgeOnCard( notification.sender_id, null );
+                }
+                return;
+
+            case "conversation_mode_changed":
+                // Re-shape from notification.payload to the legacy envelope keys
+                // that handleConversationModeChanged reads (session_id,
+                // conversation_mode_active, displaced, displaced_by).
+                this.handleConversationModeChanged({
+                    session_id              : notification.payload?.session_id,
+                    conversation_mode_active: notification.payload?.active,
+                    displaced               : notification.payload?.displaced,
+                    displaced_by            : notification.payload?.displaced_by
+                });
+                return;
+        }
+
         // Check for duplicates (same logic as old queue.js)
         const exists = this.notificationState.notifications.find( n => n.id_hash === notification.id_hash );
         if ( exists ) {
@@ -7080,7 +7113,7 @@ class NotificationsUI {
                     <div class="job-partial-artifacts" style="${( queueName === 'dead' && ( job.plan_path || ( job.remediation_snapshot_path && !job.report_path ) ) ) ? '' : 'display: none'}">
                         ${queueName === 'dead' && job.plan_path ? `
                             <div class="partial-artifact">
-                                <a href="/app/docs?path=${encodeURIComponent( job.plan_path || '' )}" target="_blank" class="report-link-btn">📋 Partial Plan (written before failure)</a>
+                                <a href="/app/docs?path=${encodeURIComponent( job.plan_path || '' )}" target="_blank" class="report-link-btn">📋 Partial plan written before failure</a>
                             </div>
                         ` : ''}
                         ${queueName === 'dead' && job.remediation_snapshot_path && !job.report_path ? `
@@ -8721,6 +8754,79 @@ class NotificationsUI {
     }
 
     /**
+     * Build the persona-badge HTML string for a given persona dict.
+     * Returns '' when persona is null/undefined so callers can safely
+     * inject the result into a template literal.
+     *
+     * Centralizes the markup so createSenderCard and the live DOM-patch
+     * path (handleNotificationUpdate dispatch for voice_persona_assigned)
+     * produce identical badges.
+     *
+     * @param {object|null} persona — { name, color, icon, profile, borrowed }
+     * @returns {string} badge HTML, or '' when persona is null
+     */
+    _renderPersonaBadgeHTML( persona ) {
+        if ( !persona ) return '';
+        const borrowedClass = persona.borrowed ? ' borrowed' : '';
+        const borrowedTitle = persona.borrowed ? ' (borrowed — pool exhausted)' : '';
+        const profile       = persona.profile ? ` — ${persona.profile}` : '';
+        return `<span class="persona-badge${borrowedClass}"
+                  style="background-color: ${persona.color || '#888'};"
+                  title="${persona.name || ''}${borrowedTitle}${profile}">
+                <span class="persona-badge-icon">${persona.icon || '🎙️'}</span>
+                <span class="persona-badge-name">${persona.name || ''}</span>
+            </span>`;
+    }
+
+    /**
+     * Patch an EXISTING sender-card header in place to reflect the given
+     * persona. Used after voice_persona_assigned/released arrives so the
+     * badge appears (or disappears) without waiting for a re-render.
+     *
+     * Behavior:
+     *   - persona truthy + no badge present → insert badge before stats group
+     *   - persona truthy + badge already present → replace badge
+     *   - persona null → remove existing badge if present
+     *   - card not found → no-op (card may be rendered later via createSenderCard,
+     *     which will read senderPersonaMap and pick up the persona then)
+     *
+     * @param {string} senderId
+     * @param {object|null} persona
+     */
+    _setPersonaBadgeOnCard( senderId, persona ) {
+        if ( !senderId ) return;
+        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
+        const card   = document.getElementById( cardId );
+        if ( !card ) return;
+        const header = card.querySelector( ':scope > .sender-card-header' );
+        if ( !header ) return;
+
+        const existingBadge = header.querySelector( ':scope > .persona-badge' );
+
+        if ( !persona ) {
+            if ( existingBadge ) existingBadge.remove();
+            return;
+        }
+
+        const html = this._renderPersonaBadgeHTML( persona );
+        if ( existingBadge ) {
+            existingBadge.outerHTML = html;
+            return;
+        }
+
+        // Insert before stats group (matches createSenderCard ordering)
+        const statsGroup = header.querySelector( ':scope > .sender-stats-group' );
+        const tmp = document.createElement( 'template' );
+        tmp.innerHTML = html.trim();
+        const badgeNode = tmp.content.firstChild;
+        if ( statsGroup ) {
+            header.insertBefore( badgeNode, statsGroup );
+        } else {
+            header.appendChild( badgeNode );
+        }
+    }
+
+    /**
      * Save a session name to localStorage.
      * @param {string} sessionId - Session ID (hex string)
      * @param {string} name - Session name to save
@@ -9551,18 +9657,13 @@ class NotificationsUI {
         // Voice persona badge: when this session has a per-session voice
         // assigned, render a colored chip in the header so the user can
         // visually identify which session is which (audio + visual cues).
-        // Falls through to '' (no badge) when no persona is known —
-        // typically because the session predates the feature or because
-        // the SessionStart hook's /allocate call failed (server falls back
-        // to Sam, the system default voice, which has no badge).
+        // Returns '' when no persona is known — typically because the
+        // session predates the feature, the SessionStart hook's /allocate
+        // call failed (server falls back to Sam, the system default voice),
+        // or senderPersonaMap hasn't been hydrated yet for this sender.
+        // Live arrivals patch the DOM in place via _setPersonaBadgeOnCard.
         const persona = this.getPersonaForSender( senderId );
-        const personaBadge = persona ? `
-            <span class="persona-badge${persona.borrowed ? ' borrowed' : ''}"
-                  style="background-color: ${persona.color || '#888'};"
-                  title="${persona.name}${persona.borrowed ? ' (borrowed — pool exhausted)' : ''} — ${persona.profile || ''}">
-                <span class="persona-badge-icon">${persona.icon || '🎙️'}</span>
-                <span class="persona-badge-name">${persona.name || ''}</span>
-            </span>` : '';
+        const personaBadge = this._renderPersonaBadgeHTML( persona );
 
         const card = document.createElement( 'div' );
         // Card ID must escape # character in addition to @ and .
@@ -10261,6 +10362,18 @@ class NotificationsUI {
 
             const senders = await sendersResponse.json();
             this.log( `Found ${senders.length} senders with visible history` );
+
+            // Layer B: pre-populate senderPersonaMap from the senders-visible
+            // response BEFORE createSenderCard runs. The server stamps voice_persona
+            // per sender via _voice_persona_for_sender_id; without this hydration
+            // step, a force-refreshed page would render every card without a badge
+            // until the first live notification arrives.
+            // See: src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md §10
+            for ( const senderInfo of senders ) {
+                if ( senderInfo.sender_id && senderInfo.voice_persona ) {
+                    this.senderPersonaMap.set( senderInfo.sender_id, senderInfo.voice_persona );
+                }
+            }
 
             // Load date-grouped conversation for each sender
             // Set flag so createSenderCard() appends (preserving API sort order) instead of prepending

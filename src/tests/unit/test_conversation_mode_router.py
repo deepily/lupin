@@ -4,11 +4,18 @@ Unit tests for the cosa-voice conversation mode router.
 
 Tests the GET / POST endpoints at /api/cosa-voice/conversation-mode/{session_id}:
     - GET reads conversation_mode_active from the session bridge
-    - POST writes the flag AND broadcasts a conversation_mode_changed WS event
+    - POST writes the flag AND queues a conversation_mode_changed notification
     - 404 when bridge file is missing
     - 500 when bridge found but write fails
 
-Uses a tmp SESSION_DIR via patch + a mock WebSocketManager so tests don't
+The router was migrated 2026-04-29 from ad-hoc `ws_manager.emit_to_user(...)`
+calls to the canonical notification subsystem via `notification_queue.push_notification(
+type="conversation_mode_changed", payload={...})`. Tests verify the migrated
+contract: a single push_notification call carrying the payload dict, instead
+of a top-level WS event with positional args. See:
+    src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md
+
+Uses a tmp SESSION_DIR via patch + a mock NotificationFifoQueue so tests don't
 mutate real bridge files or require a live server.
 """
 import json
@@ -16,7 +23,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -41,6 +48,11 @@ def _write_session_file( sessions_dir, pid, session_id ):
     with open( path, "w" ) as f:
         json.dump( data, f )
     return path
+
+
+def _push_kwargs( mock_nq, call_index=0 ):
+    """Extract kwargs from the Nth push_notification call on a mock queue."""
+    return mock_nq.push_notification.call_args_list[ call_index ].kwargs
 
 
 # ── Tests: GET endpoint ──────────────────────────────────────────────────────
@@ -104,8 +116,8 @@ class TestGetConversationModeEndpoint:
 class TestSetConversationModeEndpoint:
 
     @pytest.mark.asyncio
-    async def test_post_writes_bridge_and_broadcasts( self ):
-        """POST writes flag to bridge and emits conversation_mode_changed to authenticated user."""
+    async def test_post_writes_bridge_and_pushes_notification( self ):
+        """POST writes flag to bridge and pushes conversation_mode_changed notification."""
         from cosa.rest.routers.conversation_mode import (
             set_conversation_mode_endpoint, ConversationModeBody
         )
@@ -115,15 +127,14 @@ class TestSetConversationModeEndpoint:
             sid = "post1111-1111-2222-3333-444455556666"
             path = _write_session_file( sessions_dir, os.getpid(), sid )
 
-            mock_ws = AsyncMock()
-            mock_ws.emit_to_user.return_value = True
+            mock_nq = MagicMock()
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
                 resp = await set_conversation_mode_endpoint(
                     session_id=sid,
                     body=ConversationModeBody( active=True ),
                     authenticated_user_id="user@test.com",
-                    ws_manager=mock_ws
+                    notification_queue=mock_nq
                 )
 
             # Bridge mutated
@@ -131,12 +142,14 @@ class TestSetConversationModeEndpoint:
                 data = json.load( f )
             assert data[ "conversation_mode_active" ] is True
 
-            # Broadcast called with right args
-            mock_ws.emit_to_user.assert_awaited_once_with(
-                "user@test.com",
-                "conversation_mode_changed",
-                { "session_id": sid, "conversation_mode_active": True }
-            )
+            # Single push_notification call carrying the migrated shape
+            mock_nq.push_notification.assert_called_once()
+            kw = _push_kwargs( mock_nq )
+            assert kw[ "type"     ] == "conversation_mode_changed"
+            assert kw[ "user_id"  ] == "user@test.com"
+            assert kw[ "payload"  ] == { "session_id": sid, "active": True }
+            assert kw[ "suppress_ding" ]      is True
+            assert kw[ "response_requested" ] is False
 
             # Response shape
             body = json.loads( resp.body.decode() )
@@ -146,7 +159,7 @@ class TestSetConversationModeEndpoint:
 
     @pytest.mark.asyncio
     async def test_post_with_active_false_round_trip( self ):
-        """POST active=False clears the flag and broadcasts."""
+        """POST active=False clears the flag and pushes a notification."""
         from cosa.rest.routers.conversation_mode import (
             set_conversation_mode_endpoint, ConversationModeBody
         )
@@ -161,15 +174,14 @@ class TestSetConversationModeEndpoint:
             with open( path, "w" ) as f:
                 json.dump( data, f )
 
-            mock_ws = AsyncMock()
-            mock_ws.emit_to_user.return_value = True
+            mock_nq = MagicMock()
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
                 resp = await set_conversation_mode_endpoint(
                     session_id=sid,
                     body=ConversationModeBody( active=False ),
                     authenticated_user_id="user@test.com",
-                    ws_manager=mock_ws
+                    notification_queue=mock_nq
                 )
 
             with open( path ) as f:
@@ -188,7 +200,7 @@ class TestSetConversationModeEndpoint:
 
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
-            mock_ws = AsyncMock()
+            mock_nq = MagicMock()
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
                 with pytest.raises( HTTPException ) as exc_info:
@@ -196,15 +208,15 @@ class TestSetConversationModeEndpoint:
                         session_id="nonexistent",
                         body=ConversationModeBody( active=True ),
                         authenticated_user_id="user@test.com",
-                        ws_manager=mock_ws
+                        notification_queue=mock_nq
                     )
 
             assert exc_info.value.status_code == 404
-            mock_ws.emit_to_user.assert_not_awaited()
+            mock_nq.push_notification.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_post_succeeds_even_if_broadcast_fails( self ):
-        """POST is canonical write; broadcast failure is logged but does not fail the request."""
+    async def test_post_succeeds_even_if_push_fails( self ):
+        """POST is canonical write; notification-push failure is logged but does not fail the request."""
         from cosa.rest.routers.conversation_mode import (
             set_conversation_mode_endpoint, ConversationModeBody
         )
@@ -214,15 +226,15 @@ class TestSetConversationModeEndpoint:
             sid = "post3333-1111-2222-3333-444455556666"
             path = _write_session_file( sessions_dir, os.getpid(), sid )
 
-            mock_ws = AsyncMock()
-            mock_ws.emit_to_user.side_effect = RuntimeError( "ws connection broken" )
+            mock_nq = MagicMock()
+            mock_nq.push_notification.side_effect = RuntimeError( "queue dispatch broken" )
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
                 resp = await set_conversation_mode_endpoint(
                     session_id=sid,
                     body=ConversationModeBody( active=True ),
                     authenticated_user_id="user@test.com",
-                    ws_manager=mock_ws
+                    notification_queue=mock_nq
                 )
 
             # Bridge write still happened
@@ -242,14 +254,14 @@ class TestAutoDisplaceOnActivate:
     """
     The mutex contract: when session B activates, ANY other bridge with
     conversation_mode_active=true must be flipped off, with a separate
-    conversation_mode_changed WS event carrying displaced=true and
-    displaced_by=<B's session_id>. The activate-then-displace sequence is
-    serialized by an asyncio.Lock at module scope.
+    conversation_mode_changed notification carrying displaced=True and
+    displaced_by=<B's session_id> in the payload. The activate-then-displace
+    sequence is serialized by an asyncio.Lock at module scope.
     """
 
     @pytest.mark.asyncio
     async def test_activate_displaces_existing_active_session( self ):
-        """A is active; activate B → A flipped off + displaced event + B activated."""
+        """A is active; activate B → A flipped off + displaced notification + B activated."""
         from cosa.rest.routers.conversation_mode import (
             set_conversation_mode_endpoint, ConversationModeBody
         )
@@ -268,8 +280,7 @@ class TestAutoDisplaceOnActivate:
             with open( path_a, "w" ) as f:
                 json.dump( data_a, f )
 
-            mock_ws = AsyncMock()
-            mock_ws.emit_to_user.return_value = True
+            mock_nq = MagicMock()
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
@@ -277,7 +288,7 @@ class TestAutoDisplaceOnActivate:
                     session_id=sid_b,
                     body=ConversationModeBody( active=True ),
                     authenticated_user_id="user@test.com",
-                    ws_manager=mock_ws
+                    notification_queue=mock_nq
                 )
 
             # A's bridge flipped off
@@ -290,24 +301,24 @@ class TestAutoDisplaceOnActivate:
                 data_b = json.load( f )
             assert data_b[ "conversation_mode_active" ] is True
 
-            # Two WS broadcasts: first the displaced event for A, then the activate for B
-            calls = mock_ws.emit_to_user.await_args_list
-            assert len( calls ) == 2
+            # Two push_notification calls: first the displaced for A, then activate for B
+            assert mock_nq.push_notification.call_count == 2
 
-            # First call: displaced event for A
-            user_arg, event_arg, payload_arg = calls[0].args
-            assert user_arg == "user@test.com"
-            assert event_arg == "conversation_mode_changed"
-            assert payload_arg == {
-                "session_id"               : sid_a,
-                "conversation_mode_active" : False,
-                "displaced"                : True,
-                "displaced_by"             : sid_b
+            # First call: displaced notification for A
+            kw_first = _push_kwargs( mock_nq, 0 )
+            assert kw_first[ "type"    ] == "conversation_mode_changed"
+            assert kw_first[ "user_id" ] == "user@test.com"
+            assert kw_first[ "payload" ] == {
+                "session_id"   : sid_a,
+                "active"       : False,
+                "displaced"    : True,
+                "displaced_by" : sid_b
             }
 
-            # Second call: B's activate event (no displaced flag)
-            _u, _e, payload_b = calls[1].args
-            assert payload_b == { "session_id": sid_b, "conversation_mode_active": True }
+            # Second call: B's activate notification (no displaced flag)
+            kw_second = _push_kwargs( mock_nq, 1 )
+            assert kw_second[ "type"    ] == "conversation_mode_changed"
+            assert kw_second[ "payload" ] == { "session_id": sid_b, "active": True }
 
             # Response payload includes the displaced session id
             body = json.loads( resp.body.decode() )
@@ -316,8 +327,8 @@ class TestAutoDisplaceOnActivate:
             assert body[ "displaced_sessions" ] == [ sid_a ]
 
     @pytest.mark.asyncio
-    async def test_activate_with_no_other_active_emits_only_activate_event( self ):
-        """No other bridges active → only B's activate event broadcasts; displaced_sessions is empty."""
+    async def test_activate_with_no_other_active_pushes_only_activate( self ):
+        """No other bridges active → only B's activate notification pushed; displaced_sessions is empty."""
         from cosa.rest.routers.conversation_mode import (
             set_conversation_mode_endpoint, ConversationModeBody
         )
@@ -327,28 +338,27 @@ class TestAutoDisplaceOnActivate:
             sid_b = "soloact-1-1111-2222-3333-444455556666"
             _write_session_file( sessions_dir, os.getpid(), sid_b )
 
-            mock_ws = AsyncMock()
-            mock_ws.emit_to_user.return_value = True
+            mock_nq = MagicMock()
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
                 resp = await set_conversation_mode_endpoint(
                     session_id=sid_b,
                     body=ConversationModeBody( active=True ),
                     authenticated_user_id="user@test.com",
-                    ws_manager=mock_ws
+                    notification_queue=mock_nq
                 )
 
-            # Exactly one broadcast — the activate
-            assert mock_ws.emit_to_user.await_count == 1
-            _u, _e, payload = mock_ws.emit_to_user.await_args.args
-            assert payload == { "session_id": sid_b, "conversation_mode_active": True }
+            # Exactly one push — the activate
+            assert mock_nq.push_notification.call_count == 1
+            kw = _push_kwargs( mock_nq )
+            assert kw[ "payload" ] == { "session_id": sid_b, "active": True }
 
             body = json.loads( resp.body.decode() )
             assert body[ "displaced_sessions" ] == []
 
     @pytest.mark.asyncio
     async def test_activate_displaces_multiple_active_sessions( self ):
-        """Three pre-active sessions → all three displaced, four total broadcasts (3 displaced + 1 activate)."""
+        """Three pre-active sessions → all three displaced, four total pushes (3 displaced + 1 activate)."""
         from cosa.rest.routers.conversation_mode import (
             set_conversation_mode_endpoint, ConversationModeBody
         )
@@ -372,8 +382,7 @@ class TestAutoDisplaceOnActivate:
                 paths.append( p )
             _write_session_file( sessions_dir, 80100, sid_b )
 
-            mock_ws = AsyncMock()
-            mock_ws.emit_to_user.return_value = True
+            mock_nq = MagicMock()
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
@@ -381,7 +390,7 @@ class TestAutoDisplaceOnActivate:
                     session_id=sid_b,
                     body=ConversationModeBody( active=True ),
                     authenticated_user_id="user@test.com",
-                    ws_manager=mock_ws
+                    notification_queue=mock_nq
                 )
 
             # All three pre-active bridges flipped off
@@ -390,19 +399,19 @@ class TestAutoDisplaceOnActivate:
                     data = json.load( f )
                 assert data[ "conversation_mode_active" ] is False
 
-            # 3 displaced events + 1 activate event = 4 total
-            assert mock_ws.emit_to_user.await_count == 4
+            # 3 displaced pushes + 1 activate push = 4 total
+            assert mock_nq.push_notification.call_count == 4
 
             # Last call is the activate event for B
-            last_payload = mock_ws.emit_to_user.await_args_list[-1].args[2]
-            assert last_payload == { "session_id": sid_b, "conversation_mode_active": True }
+            last_kw = _push_kwargs( mock_nq, -1 )
+            assert last_kw[ "payload" ] == { "session_id": sid_b, "active": True }
 
             body = json.loads( resp.body.decode() )
             assert sorted( body[ "displaced_sessions" ] ) == sorted( sids )
 
     @pytest.mark.asyncio
     async def test_deactivate_does_not_scan_or_displace( self ):
-        """active=false bypasses the lock + scan; only emits its own deactivate event."""
+        """active=false bypasses the lock + scan; only pushes its own deactivate notification."""
         from cosa.rest.routers.conversation_mode import (
             set_conversation_mode_endpoint, ConversationModeBody
         )
@@ -420,8 +429,7 @@ class TestAutoDisplaceOnActivate:
             with open( path_a, "w" ) as f:
                 json.dump( data_a, f )
 
-            mock_ws = AsyncMock()
-            mock_ws.emit_to_user.return_value = True
+            mock_nq = MagicMock()
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
@@ -429,7 +437,7 @@ class TestAutoDisplaceOnActivate:
                     session_id=sid_b,
                     body=ConversationModeBody( active=False ),
                     authenticated_user_id="user@test.com",
-                    ws_manager=mock_ws
+                    notification_queue=mock_nq
                 )
 
             # A is untouched — deactivate path skips the scan
@@ -437,18 +445,18 @@ class TestAutoDisplaceOnActivate:
                 data_a = json.load( f )
             assert data_a[ "conversation_mode_active" ] is True
 
-            # Exactly one broadcast — B's deactivate event
-            assert mock_ws.emit_to_user.await_count == 1
-            _u, _e, payload = mock_ws.emit_to_user.await_args.args
-            assert payload == { "session_id": sid_b, "conversation_mode_active": False }
+            # Exactly one push — B's deactivate event
+            assert mock_nq.push_notification.call_count == 1
+            kw = _push_kwargs( mock_nq )
+            assert kw[ "payload" ] == { "session_id": sid_b, "active": False }
 
             body = json.loads( resp.body.decode() )
             assert body[ "active" ] is False
             assert body[ "displaced_sessions" ] == []
 
     @pytest.mark.asyncio
-    async def test_displace_broadcast_failure_does_not_block_activate( self ):
-        """If displaced-event broadcast raises, the bridge writes still happen and B still activates."""
+    async def test_displace_push_failure_does_not_block_activate( self ):
+        """If displaced-event push raises, the bridge writes still happen and B still activates."""
         from cosa.rest.routers.conversation_mode import (
             set_conversation_mode_endpoint, ConversationModeBody
         )
@@ -465,9 +473,9 @@ class TestAutoDisplaceOnActivate:
             with open( path_a, "w" ) as f:
                 json.dump( data_a, f )
 
-            # First emit (displaced event for A) raises; second (activate for B) succeeds
-            mock_ws = AsyncMock()
-            mock_ws.emit_to_user.side_effect = [ RuntimeError( "ws ded" ), True ]
+            # First push (displaced for A) raises; second (activate for B) succeeds
+            mock_nq = MagicMock()
+            mock_nq.push_notification.side_effect = [ RuntimeError( "queue ded" ), None ]
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
@@ -475,10 +483,10 @@ class TestAutoDisplaceOnActivate:
                     session_id=sid_b,
                     body=ConversationModeBody( active=True ),
                     authenticated_user_id="user@test.com",
-                    ws_manager=mock_ws
+                    notification_queue=mock_nq
                 )
 
-            # Both bridge writes succeeded despite WS failure
+            # Both bridge writes succeeded despite push failure
             with open( path_a ) as f:
                 assert json.load( f )[ "conversation_mode_active" ] is False
             with open( path_b ) as f:
@@ -505,19 +513,18 @@ class TestAutoDisplaceOnActivate:
             with open( path_a, "w" ) as f:
                 json.dump( data, f )
 
-            mock_ws = AsyncMock()
-            mock_ws.emit_to_user.return_value = True
+            mock_nq = MagicMock()
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
                 resp = await set_conversation_mode_endpoint(
                     session_id=sid_a,
                     body=ConversationModeBody( active=True ),
                     authenticated_user_id="user@test.com",
-                    ws_manager=mock_ws
+                    notification_queue=mock_nq
                 )
 
-            # Only one broadcast — self's activate event. No spurious displaced event.
-            assert mock_ws.emit_to_user.await_count == 1
+            # Only one push — self's activate event. No spurious displaced event.
+            assert mock_nq.push_notification.call_count == 1
 
             body = json.loads( resp.body.decode() )
             assert body[ "displaced_sessions" ] == []
