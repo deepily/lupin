@@ -9054,6 +9054,15 @@ class NotificationsUI {
             }
             // Optimistic local update — WS broadcast will reaffirm
             this._setConversationModeLocal( sessionId, next );
+
+            // UX expediter: when ENTERING conversation mode (not exiting),
+            // shift focus to the recording button. Clicking into conversation
+            // mode is a strong signal the user wants to speak; pre-focusing
+            // the mic shaves a step off "click toggle → click mic → speak".
+            if ( next ) {
+                const recBtn = document.getElementById( `cc-session-stt-${sessionId}` );
+                if ( recBtn ) recBtn.focus();
+            }
         } catch ( e ) {
             this.error( `[CONVERSATION-MODE] toggle exception: ${e}` );
         }

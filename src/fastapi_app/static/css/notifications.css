@@ -1968,9 +1968,20 @@
             line-height: 1.4;
         }
 
-        /* Incoming messages (from Claude Code) - left aligned */
+        /* Incoming messages (from Claude Code) - left aligned.
+         * Subtle persona-tinted gradient overlay on the existing grey base so
+         * each AI bubble carries a hint of its speaker identity — helps
+         * disambiguate who's talking when sessions are pinned at the top of
+         * the accordion in conversation mode. The grey fallback values match
+         * #e9ecef exactly, so personaless cards render visually unchanged. */
         .sender-message.incoming {
-            background-color: #e9ecef;
+            background:
+                linear-gradient(
+                    to bottom,
+                    rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.22 ),
+                    rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.06 )
+                ),
+                #e9ecef;
             margin-right: 40px;
             border-bottom-left-radius: 2px;
         }
@@ -2226,7 +2237,13 @@
         }
 
         .date-accordion-messages .sender-message.incoming {
-            background-color: #e9ecef;
+            background:
+                linear-gradient(
+                    to bottom,
+                    rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.22 ),
+                    rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.06 )
+                ),
+                #e9ecef;
             margin-right: 30px;
             border-bottom-left-radius: 2px;
         }
