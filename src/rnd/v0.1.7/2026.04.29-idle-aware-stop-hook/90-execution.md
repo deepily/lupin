@@ -199,4 +199,4 @@ The design doc's state machine, schema, and reset-trigger table all matched impl
 
 | Commit hash | Files | Notes |
 |---|---|---|
-| pending | all of the above | awaiting user commit-auth |
+| f4c99e9 | all of the above (16 files / +2546 / -8) | Lupin parent only; not pushed (user-deferred); CoSA submodule untouched |
