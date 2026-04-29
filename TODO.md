@@ -12,20 +12,31 @@ Last updated: 2026-04-28 EDT (Session 30072c25 — Docker build diagnostics: pos
 
 ---
 
-## 🌅 FOLLOW-UPS — for the user (Session ba7138c4 — test-suite anomaly remediation)
+## ✅ COMPLETED — Session ba7138c4 (2026.04.28, all-day test-suite anomaly remediation)
 
-- [ ] [LUPIN] **WG-1 image rebuild** — `docker build -f docker/lupin/Dockerfile -t lupin:1.0.0-fonts .` (~15-30 min), bump `docker-compose.yml` to candidate tag, bounce dev (`docker restart lupin-rest-dev`), regenerate baselines (`./src/scripts/run-e2e-ui-tests.sh --bg --update-snapshots -k visual`), verify with `./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual`, then user-confirmed retag to `lupin:1.0.0`. Per `feedback_no_auto_promote_tags`: never overwrite the working tag automatically.
-- [ ] [LUPIN] **WG-8a orphan + dead-Calculator cleanup on `:8000`** — 1 orphan in `run` (Calculator "Compare 12 oz at $3.49…", id 1eab4ee7… 2026-04-27 21:41:34 EDT) + 8 reaped Calculators in `dead`. Use `DELETE /api/queue/{run|dead}/{job_id}`. Or skip — the verification re-run will overwrite them.
-- [ ] [LUPIN] **WG-6 survivor verification** — re-run smoke after WG-1 image rebuild. If `test_notification_proxy_script_matching` and/or `test_tfe_error_capture_smoke` still FAIL, capture full stderr/stack and escalate to OOS-3.
-- [ ] [LUPIN] **`:8000` verification re-run** — pick a non-overlapping `scheduled_at` slot. Submit via `POST /api/test-suite/submit { test_types: "all", auto_fix_on_failure: false }`. Acceptance: 0 e2e ERRORs, smoke FAILs ≤ 2, websocket suite PASS, 0 orphans in run, TFE either auto-ratifies (if WG-9 default flipped) or stalls cleanly.
-- [ ] [LUPIN] **(Optional) flip TFE voice-gate timeout policy to `top_1`** — INI key `test fix expediter voice gate timeout policy` defaults to `stall` (preserves prior behavior). For after-hours autonomous runs the default discards 23 generated proposals on timeout. Setting to `top_1` makes the highest-confidence proposal auto-ratify on timeout. See `02-wg-9-tfe-voice-gate-fallback.md` for the four supported modes.
-- [ ] [LUPIN] **Ratify any/all of the 4 OOS plans** — drafted in `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/03-oos-{1..4}-*.md`:
-  - **OOS-1**: TFE/BFE pattern-matcher upgrade (cluster coverage invariant + proposal de-dup) — explains why the 22:35 TFE produced 23 proposals against 8 empty clusters
-  - **OOS-2**: Refactor websocket smoke runner to pytest+junit-xml (eliminates the WG-7 stdout-pattern fallback)
-  - **OOS-3**: Conditional — only triggered if WG-6 surfaces non-trivial bugs
-  - **OOS-4**: Why 21:06 test_suite job ended up in `dead` not `done`; subsumes the empty-`error` field anomaly on the 8 reaped Calculator dead jobs
-- [ ] [LUPIN] **Commits** — 7 logical commits suggested in `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/90-execution-log.md`. Per `feedback_never_auto_commit_push`, none done autonomously.
-- [ ] [LUPIN] **CoSA submodule commit** — files in `src/cosa/training/peft_trainer.py`, `src/cosa/agents/test_fix_expediter/{config,orchestrator}.py`, `src/cosa/agents/test_suite/job.py`, `src/cosa/rest/{running_fifo_queue,queue_consumer}.py` are CoSA-side. Per nested-repo rules, separate CoSA-side commit needed.
+- [x] [LUPIN] **WG-1 docker image rebuild + retag** — `lupin:1.0.0-fonts` built, both containers recreated, retagged to `:1.0.0` after visual-regression verification.
+- [x] [LUPIN] **WG-8a orphan + dead-Calculator cleanup** — user manually nuked.
+- [x] [LUPIN] **`:8000` verification re-run (ts-976bdc44)** — 4524P / 15F / 12E / 54S, completed cleanly.
+- [x] [LUPIN] **WG-6 survivor verification** — both `test_notification_proxy_script_matching` and `test_tfe_error_capture_smoke` STILL FAIL → OOS-3 trigger confirmed.
+- [x] [LUPIN] **OOS-4 hotfix Parts A + B** at `src/cosa/rest/running_fifo_queue.py:276,294`.
+- [x] [LUPIN] **CalculatorAgent codeless replay fix** at `src/cosa/memory/solution_snapshot.py:run_code()` — user's intuition confirmed.
+- [x] [LUPIN] **dev/test container parity fix** — added `~/.lupin` + `~/.claude/sessions` bind mounts to `lupin-rest-test`. Plus seeded `claude.code@lupin.deepily.ai` into `lupin_db_test`.
+- [x] [LUPIN] **WG-9 forward-compat breadcrumbs** — splainer note + `_delegate_to_predictor()` stub + `05-voice-gate-policy-evolution.md`.
+- [x] [LUPIN] **All 4 OOS plans drafted with prewarm forensic findings**.
+- [x] [LUPIN] **Orchestration plan** at `04-execution-orchestration.md`.
+
+## 🌅 FOLLOW-UPS — for the user (Session ba7138c4 follow-on)
+
+- [ ] [LUPIN] **READ `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/06-resume-from-here.md` FIRST** if returning after `/clear`.
+- [ ] [LUPIN] **Schedule e2e baseline regen run** — `POST /api/test-suite/submit { test_types: "e2e", pytest_args: "--update-snapshots -k visual", scheduled_at: <slot> }`. Container chromium renders subtly different from host; baselines need to lock to container rendering.
+- [ ] [LUPIN] **Investigate 13 surviving smoke FAILs** — real agent failures (not infra). Includes `test_calculator_live_pipeline` which should now PASS via codeless-replay fix; needs re-run to confirm.
+- [ ] [LUPIN] **Ratify OOS-3** — both WG-6 survivors confirmed STILL FAIL.
+- [ ] [LUPIN] **Ratify OOS-1/2/4** — prewarm findings folded into the plan docs. OOS-1's Finding A is a one-line typo at `test_fix_expediter/job.py:549`; standalone hotfix candidate.
+- [ ] [LUPIN] **CoSA submodule commit** — running_fifo_queue.py + solution_snapshot.py (this session) + 6 prior CoSA edits from c4e5d4f. Separate cosa-context session per `feedback_lupin_only_never_cosa`.
+- [ ] [LUPIN] **Push parent commits** — `bb9298c` + this checkpoint pending.
+- [ ] [LUPIN] **(Optional) flip TFE voice-gate timeout policy to `top_1`** for after-hours autonomous runs.
+- [ ] [LUPIN] **Memory update**: expand `feedback_never_grab_gpu.md` with SolutionSnapshot constructor warning (loads ~1 GB of embedding models on cuda:0).
+- [ ] [LUPIN] **T46 — delete deprecated `enter_running_loop()`** in `src/cosa/rest/running_fifo_queue.py:122` (~30 LOC; user authorized for after current job).
 
 ---
 

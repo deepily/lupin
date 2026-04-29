@@ -31,7 +31,7 @@ services:
   # Always runs [Lupin: Development] config with lupin_db_dev.
   # uvicorn --reload enabled for live code changes during development.
   lupin-rest-dev:
-    image: lupin:1.0.0
+    image: lupin:1.0.0                       # 2026-04-28: retagged from 1.0.0-fonts → 1.0.0 after WG-1 verification
     container_name: lupin-rest-dev
     restart: unless-stopped
     user: "1001:1001"
@@ -113,6 +113,15 @@ services:
       - ./.claude/worktrees:/var/lupin/.claude/worktrees
       - ~/.lora_env:/home/rruiz/.lora_env:ro
       - ~/.claude/.credentials.json:/home/rruiz/.claude/.credentials.json:ro
+      # 2026-04-28: dev-test parity fix. cosa-voice MCP validates lupin-project
+      # credentials at startup by reading ~/.lupin/config; tests that hit the
+      # notification dispatch path need this. Same mount as lupin-rest-dev.
+      - ~/.lupin:/home/rruiz/.lupin:ro
+      # 2026-04-28: dev-test parity fix (also flagged in TODO Session aabece5e
+      # follow-ups). Conversation-mode endpoint reads the per-session bridge
+      # files written by SessionStart hook; without this mount the endpoint
+      # can't see them and tests that exercise conversation_mode_active fail.
+      - ~/.claude/sessions:/home/rruiz/.claude/sessions
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: testing

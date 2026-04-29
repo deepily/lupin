@@ -188,6 +188,86 @@ Tracking docs:
 
 **Commit**: bb9298c
 
+#### Checkpoint | 2026.04.28 19:35 EDT | A-phase + B-phase end-to-end + OOS-4 hotfix + CalculatorAgent codeless replay fix
+
+**Context**: After morning checkpoint (`bb9298c`), user authorized end-to-end execution of the orchestration plan. A-phase walked through Docker rebuild → compose bumps → container recreates → visual-regression alignment proof. B-phase verification re-run on `:8000` exposed two more bugs that needed fix-and-retry cycles before passing: (1) cosa-voice MCP validation failed inside `lupin-rest-test` because two bind mounts (`~/.lupin`, `~/.claude/sessions`) were dev-only AND `claude.code@lupin.deepily.ai` user wasn't seeded into `lupin_db_test`; (2) consumer's bare-exception `failed_job = self.head()` mis-attributed Calculator crashes to the test_suite_job running in the agentic pool, dead-lettering the wrong job (OOS-4 Finding A surfaced as a real production failure). User course-correction surfaced a third regression: CalculatorAgent's snapshots have `code = ['']` BY DESIGN (codeless agent — dispatches CalcIntent to pure-Python helpers), but `solution_snapshot.run_code()` was missing the matching CalculatorAgent special-case that already existed in `run_formatter()`. Fixed all three. Final verification re-run completed cleanly: 4524 P / 15 F / 12 E / 54 S, websocket suite went from false-FAIL to PASS, test_suite_job survived 5 calc dead-letters with proper error fields populated.
+
+**Accomplishments**:
+
+- **A-phase complete**:
+  - **A1**: User built `lupin:1.0.0-fonts` (31.7 GB, image_id 8f523bcc8ac2). Pre-build, identified two blockers: (1) `pydantic-ai[slim]==0.6.2` lockfile had a non-existent `slim` extra that uv 0.8.x's tightened `--locked` check rejected; (2) Postgres bind-mount permission collision in build context (sudo workaround required). Fixed lockfile via surgical `uv lock --upgrade-package pydantic-ai` (only pydantic-ai subtree + lxml from WG-5 changed; 295 packages preserved).
+  - **A5**: Both `lupin-rest-dev` (port 7999) and `lupin-rest-test` (port 8000) recreated on the new image. 29 fonts + Noto Color Emoji confirmed in container.
+  - **A6/A7**: Visual baseline regen wasn't actually needed — pre-existing baselines already align with proper-font chromium rendering. Verified by running canonical e2e script with `-k visual` (no `--update-snapshots`): 13/13 PASSED in 39s.
+  - **A8**: Retagged `lupin:1.0.0-fonts` → `lupin:1.0.0`. Old image preserved as `lupin:1.0.0-audioop` and `riqui/lupin:1.0.0` for rollback.
+- **B-phase verification** (`ts-976bdc44`, 18:05 EDT submission, 75 min runtime, completed cleanly in DONE queue):
+  - websocket: **0/0/0/0 FAIL → 50P PASS** (WG-7 parser fix landed perfectly)
+  - smoke: 23F + 7E → **15F + 0E** (WG-2 + WG-3 + WG-5 wins; 8 fewer FAILs, 7 ERRORs eliminated)
+  - 0 jobs orphaned in run after run completed
+  - test_suite_job survived 5 Calculator dead-letters (vs ts-1c41e064 which got mis-attributed kill before OOS-4 hotfix)
+- **OOS-4 hotfix landed** (Parts A + B paired in same try-block) at `src/cosa/rest/running_fifo_queue.py:276`:
+  - Part A: `failed_job = self.head()` → `failed_job = job` (use the parameter, mirror happy-path fix already at line 203)
+  - Part B: added `failed_job.error = str( e )` so dead-queue listings have populated error fields (was empty for the 8 reaped Calc jobs in 22:35 baseline)
+- **CalculatorAgent codeless replay fix** at `src/cosa/memory/solution_snapshot.py:run_code()`:
+  - Added codeless-agent short-circuit: when `agent_class_name == "CalculatorAgent"`, synthesize `code_response_dict = {"return_code": 0, "output": self.answer}` instead of raising on the empty-code guard. Mirrors the existing `run_formatter()` special-case at lines 943-953.
+  - Diagnosis: user's intuition that "the agent isn't broken; the playback is" was correct. CalculatorAgent dispatches CalcIntent to pure-Python helpers — no Python source to save. Snapshots persist `code = ['']` legitimately. Replay path's empty-code guard mistook this for corruption.
+  - 4 corrupted-looking calc snapshots deleted from lancedb (35 → 31 rows) before the codeless-replay fix landed; the deletion was treating a symptom — agent re-cached them on next run, proving the playback was the root cause.
+  - 6 new unit tests in `src/tests/unit/test_solution_snapshot_codeless_replay.py`. All PASS in 1.93s with no GPU touch (use `SolutionSnapshot.__new__()` + direct attribute set to bypass the constructor's CUDA model load — see GPU-rule near-miss below).
+- **dev/test container parity fix**: added `~/.lupin:/home/rruiz/.lupin:ro` and `~/.claude/sessions:/home/rruiz/.claude/sessions` bind mounts to `lupin-rest-test` in `docker-compose.yml`. cosa-voice MCP credentials + conversation-mode bridge files now visible inside test container.
+- **Test-DB user seeding**: added `CC_LISTENER_LUPIN = "claude.code@lupin.deepily.ai"` to `COMPANION_EMAILS` in `src/scripts/seed_test_companions.py`. Test container restart auto-seeded the user into `lupin_db_test` (5 → 6 users).
+- **Forward-compat breadcrumbs** (WG-9 deferred work):
+  - Splainer note in `lupin-app-splainer.ini` reserving `delegate` mode for future UPE integration.
+  - Stub `_delegate_to_predictor()` method in `test_fix_expediter/orchestrator.py` raising `NotImplementedError` with pointer to design doc.
+  - New R&D doc `05-voice-gate-policy-evolution.md` capturing the layered architecture target (Layer 0 system default + Layer 1 per-agent + UPE delegate + post-hoc feedback loop). UPE online-learning ~2 dev branches out per user.
+- **OOS prewarms** (forensic-only; folded into existing OOS plan docs):
+  - **OOS-1 Finding A**: ONE-LINE typo at `test_fix_expediter/job.py:549` — `getattr(c, "failures", [])` should be `getattr(c, "failure_indices", [])`. Explains the 22:35 "0 failure(s) per cluster" rendering bug. The 23 proposals were all grounded; the report just lied about cluster sizes.
+  - **OOS-1 Finding B**: 1-3 alternatives per cluster is by design at the prompt level (`prompts/proposal.py:20`). Recommendation: new INI key `test fix expediter max proposals per cluster = 1`.
+  - **OOS-4 Findings A-D**: 5 dead-queue write paths (only `_transition_to_dead` canonical), the empty-error root cause at line 270 catch, watchdog confirmed NOT moving source to dead, integration-e2e empty-failures regression (separate snapshot-writer bug).
+  - **OOS-2 reality check**: original "M (1-2 days)" estimate was optimistic. The 5500 LOC of bespoke websocket smoke infrastructure uses a fundamentally non-pytest "record and continue" pattern. Realistic effort 4-6 days for full migration; ~half-day for adapter-layer stop-gap.
+- **Orchestration plan**: new R&D doc `04-execution-orchestration.md` capturing the 4-phase A→B→C→D execution plan with role assignments (USER vs CLAUDE vs BOTH).
+- **GPU-rule near-miss**: `SolutionSnapshot.__init__()` loads ~1 GB of embedding models onto cuda:0 (nomic-embed-text-v1.5 + CodeRankEmbed). First test draft constructed via normal path → triggered GPU load → caught and rewrote to bypass `__init__` via `SolutionSnapshot.__new__()` + direct attribute set. Should expand `feedback_never_grab_gpu.md` with the SolutionSnapshot constructor warning.
+
+**Files Modified (parent Lupin only — CoSA submodule changes need separate cosa-context commit)**:
+
+Top-level config / image / deps:
+- `pyproject.toml` (dropped `[slim]` extra from pydantic-ai)
+- `uv.lock` (regenerated for pydantic-ai subtree; 295 packages preserved)
+- `docker-compose.yml` (lupin-rest-dev image bumped through `:1.0.0-fonts` candidate then back to `:1.0.0` after retag; lupin-rest-test added `~/.lupin` + `~/.claude/sessions` bind mounts)
+- `src/conf/lupin-app-splainer.ini` (voice-gate timeout-policy splainer note reserving `delegate` for UPE integration)
+- `src/scripts/seed_test_companions.py` (added CC_LISTENER_LUPIN to COMPANION_EMAILS)
+
+CoSA-side (separate submodule commit needed):
+- `src/cosa/rest/running_fifo_queue.py` (OOS-4 hotfix Parts A + B at line 276 + 294 area)
+- `src/cosa/memory/solution_snapshot.py` (CalculatorAgent codeless replay short-circuit in run_code())
+- `src/cosa/agents/test_fix_expediter/orchestrator.py` (WG-9 `_delegate_to_predictor()` stub for future UPE integration)
+
+Lupin-side tests:
+- `src/tests/unit/test_solution_snapshot_codeless_replay.py` (NEW — 6 tests, no GPU touch)
+
+R&D docs:
+- `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/03-oos-1-tfe-bfe-pattern-matcher.md` (prewarm Findings A-D folded in)
+- `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/03-oos-2-websocket-pytest-junitxml.md` (prewarm Findings A-F + revised effort estimate)
+- `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/03-oos-4-test-suite-in-dead-anomaly.md` (prewarm Findings A-D folded in)
+- `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/04-execution-orchestration.md` (NEW — 4-phase plan)
+- `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/05-voice-gate-policy-evolution.md` (NEW — WG-9 forward-compat design)
+
+Lancedb cleanup (data, not git-tracked):
+- 4 corrupted CalculatorAgent rows deleted from `src/conf/long-term-memory/lupin.lancedb` (35 → 31). They re-populated via agent path during ts-976bdc44 (proving the playback was the bug, not the data).
+
+**Test results**:
+- 6/6 new unit tests in test_solution_snapshot_codeless_replay.py PASS in 1.93s, no GPU touch
+- 64/64 regression tests PASS (consumer_timed + agentic_pool + fifo_queue_thread_safety + running_queue_threshold + consumer_heartbeat) after OOS-4 hotfix
+- ts-976bdc44 verification re-run: 4524P / 15F / 12E / 54S; test_suite_job survived to completion
+
+**Remaining open issues** (full breakdown in `06-resume-from-here.md`):
+1. **12 e2e visual ERRORs persist** — container chromium renders subtly different from host even with same fonts. Fix: schedule a regen run via `pytest_args="--update-snapshots -k visual"` so baselines lock to container rendering.
+2. **13 smoke FAILs** — real agent-level failures (not infra). Need OOS-3 deep dive for the 2 confirmed survivors (test_notification_proxy_script_matching + test_tfe_error_capture_smoke).
+3. **CoSA submodule commit pending** — 4 files (running_fifo_queue.py, solution_snapshot.py, test_fix_expediter/orchestrator.py + config.py from prior c4e5d4f, agents/test_suite/job.py from prior).
+4. **Push parent commit** pending (per `feedback_never_auto_commit_push`).
+5. **T46 deferred**: delete deprecated `enter_running_loop()` (~30 LOC; user authorized for after current job).
+6. **Memory updates pending**: `feedback_never_grab_gpu.md` should grow the SolutionSnapshot constructor warning.
+
+**Commit**: 892652c
+
 ---
 
 ### 2026.04.27 - Session aabece5e | Conversation Mode for Claude Code (per-session toggle via cosa-voice MCP)

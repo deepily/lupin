@@ -50,7 +50,13 @@ dependencies = [
   # --- Web framework ---
   "fastapi>=0.115,<1",
   "pydantic[email]>=2.9,<3",
-  "pydantic-ai[slim]==0.6.2",
+  "pydantic-ai==0.6.2",                   # 2026-04-28: dropped [slim] — pydantic-ai==0.6.2 has
+                                          # NO `slim` extra at the meta-package level (per PyPI
+                                          # metadata); the 14 sub-extras are already pulled in
+                                          # transitively via pydantic-ai-slim. Old uv lock writer
+                                          # was permissive about unknown extras; uv 0.8.x's
+                                          # --locked check now enforces consistency. See
+                                          # src/rnd/v0.1.7/2026.04.28-uv-lock-pydantic-ai-slim-extra-mismatch.md
 
   # --- Database ---
   "sqlalchemy==2.0.40",
