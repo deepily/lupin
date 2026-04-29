@@ -1,6 +1,17 @@
 # TODO
 
-Last updated: 2026-04-29 EDT (Session 78abd1aa — passlib/bcrypt `__about__` AttributeError diagnosis)
+Last updated: 2026-04-29 EDT (Session 9977a1ba — Persona Theming + WS-Event Cleanup + Rachel TTS bug fix)
+
+---
+
+## 🌅 FOLLOW-UPS — for the user (Session 9977a1ba — Persona Theming Round 1 + WS cleanup)
+
+- [ ] [LUPIN] **Persona theming Round 2 — Tier 3 widgets**: tint `.sender-conversation-mode-btn` border (when not in active conv-mode green), `.sender-gist-btn` border, `.cc-voice-input-row` chrome with `var(--persona-color, ...)`. Held until you've lived with Round 1 (Foundation + Tier 1 + Tier 2) for a session.
+- [ ] [LUPIN] **Persona theming Round 3 — Tier 4 outgoing message bubbles**: replace bootstrap-blue `#007bff` outgoing-bubble background with `var(--persona-color)`. Boldest change, held for explicit go-ahead.
+- [ ] [LUPIN] **frontend-design plugin polish pass** against live `:7999` after Round 1 settles. The plugin is installed but I haven't invoked it yet — a clean fit for distributing one persona color across many surfaces without it feeling overdone.
+- [ ] [LUPIN] **UserPromptSubmit hook to backstop conv-mode acknowledge-receipt rule**: ~15-line hook script alongside `src/lupin_cli/claude_code/hooks/`; reads bridge file, if `conversation_mode_active` is true, emit a `<system-reminder>` block reminding Claude to ack receipt before tool work. Architecture sketched in this session, not implemented. Real-time enforcement complement to the existing static-doc layers.
+- [ ] [LUPIN/CoSA] **Commit the CoSA-side companion edits** for this session's Lupin work, from inside CoSA context: (a) `src/cosa/rest/routers/voice_persona.py` + `conversation_mode.py` migrations to `push_notification`, (b) `src/cosa/rest/notification_fifo_queue.py` `payload` field addition, (c) `src/cosa/rest/routers/notifications.py` `valid_types` extension + senders-visible voice_persona stamping, (d) `src/cosa/rest/routers/speech.py` Rachel-voice-id sentinel fix.
+- [ ] [LUPIN] **Existing Rachel session bridges retain old color** until released and re-allocated (color is copied into bridge at allocation time). To force the new `#7B1FA2` purple immediately on an active Rachel session, `/release` then `/allocate`.
 
 ---
 
@@ -77,6 +88,12 @@ Last updated: 2026-04-29 EDT (Session 78abd1aa — passlib/bcrypt `__about__` At
 
 - [x] [LUPIN] **Cross-job sender_id leak in notify** — FIXED Phase 4 backlog #1 (2026-04-29). ContextVars added to `agent_notification_dispatcher.py`; DR's `cosa_interface` exposes `set_dispatch_context()` helper; DR `job.py` calls it at execution start so concurrent DR jobs each see their own sender_id via per-asyncio-task isolation. Other 7 agent types (Podcast, ClaudeCode, BFE, R2P, Presentation, R2Presentation, TestSuite) still use the legacy module-global pattern — no documented leak yet but should migrate for hygiene; the dispatcher ContextVar plumbing is already in place, just need to call set_dispatch_context() in each agent's job.py.
 - [x] [LUPIN] **Followup cleanup: have AgenticJobBase subclasses re-raise instead of swallowing** — DONE Phase 4 backlog #5 (2026-04-29). All 9 subclasses (DR, Podcast, Presentation, R2P, R2Presentation, BFE, TFE, TestSuite, SWE Team, ClaudeCode, ClaudeCode SDK) now re-raise from their `do_all` exception handlers after setting `state=FAILED` + persisting error/answer_conversational. The cluster 2.3 FAILED-state branch in `_on_agentic_complete` remains as defensive belt against future regressions. 3 unit tests updated to wrap `do_all()` in `pytest.raises(...)` matching the new contract.
+
+## 🌅 FOLLOW-UPS — for the user (Session d34f2f74 — Idle-aware Stop hook)
+
+- [ ] [LUPIN] **Activate idle-aware Stop hook** — start a fresh CC session; the new hooks load at session boot, so this current session keeps the legacy immediate-ask behavior in memory until exit. Defaults `enabled=true, backoff_minutes=[5,10,20,40,60]` apply automatically. To override, add an `idle_detection` block to `~/.claude/settings.json` (schema in `src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md`).
+- [ ] [LUPIN] **Manual end-to-end checklist for idle-aware Stop hook** (post-merge verification) — see `src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/90-execution.md` Phase 5 checklist (8 steps): set test schedule `[1, 2, 4]` in settings, verify "Anything else?" fires after 1 min idle, "no" advances backoff_index, prompt fires again at 2 min, user prompt resets to 0, conversation-mode skips ask. Restore default schedule afterward.
+- [ ] [LUPIN] **Optional: add `~/.claude/CLAUDE.md` notification-system note for idle detection** — Phase 5 deferred this as out-of-scope (global file, cross-project risk). User can add a brief note themselves if desired.
 
 ## 🌅 FOLLOW-UPS — for the user (Session d34f2f74 — Phase 4 backlog completion)
 

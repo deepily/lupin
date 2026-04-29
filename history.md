@@ -1,5 +1,39 @@
 # Lupin Project History
 
+### 2026.04.29 - Session 9977a1ba | Persona Theming Round 1 + WS-Event Cleanup + UI Polish + Rachel TTS bug fix
+
+#### Session-End | 2026.04.29 evening | Four commits across cleanup + theming + polish
+
+**Accomplishments**:
+
+1. **WS-event cleanup migration** (`70959c5`): four ad-hoc `ws_manager.emit_to_user(...)` callsites in `voice_persona.py` + `conversation_mode.py` migrated to the canonical `push_notification(type=..., payload={...})` subsystem. Client-side: top-level `conversation_mode_changed` case relocated into `handleNotificationUpdate` by `notification.type`; new dispatches added for `voice_persona_assigned` / `voice_persona_released`. Schema: `payload: Optional[dict]` field on `NotificationItem`; `valid_types` extended. Plus persona hydration Layer A (live DOM patch on assignment) + Layer B (`/senders-visible` carries `voice_persona` for refresh-survival). New 5-test WS-frame capture E2E suite. R&D: `src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md` + `90-execution.md`.
+
+2. **Persona theming Round 1** (`06e5795`): CSS custom-property foundation (`--persona-color`, `--persona-color-rgb` set on each `.sender-card`) via new `_hexToRgb` helper. Tier 1 chrome — card border + outer glow + active stripe + active dot all tinted via `var(--persona-color, fallback)`. Tier 2 header — subtle persona-tinted top-to-bottom gradient (was flat `#f8f9fa`). Badge relocated from beside session-name to first child of `.sender-stats-group` (right-aligned). Personaless cards unchanged via fallback values. R&D: `02-theming-round1-design.md` + `91-theming-execution.md`. Pinned-conv-mode green glow retained for mic-mutex semantic via more-specific selector.
+
+3. **UI tweaks rounds 1–2** (`d8bce7f` + `21e92f1`): incoming AI bubbles get persona-tinted gradient mirroring header (alphas 0.10/0.02 — quieter than header's 0.14/0.04). Focus shift to recording mic on conversation-mode entry (not exit) and on send (Send button or Enter) for follow-up dictation. Action-required notification persona badge added to active + minimized renders; TTS queue's voice_id lookup now reads from persisted envelope (`item.notification.voice_persona.voice_id`) with map-lookup fallback — resilient to localStorage-restored items.
+
+4. **Server-side Rachel TTS bug fix** (CoSA, NOT in any of my Lupin commits — `src/cosa/rest/routers/speech.py`): legacy code special-cased Rachel's voice_id `21m00Tcm4TlvDq8ikWAM` as the "no voice specified" sentinel, overriding it with the configured default (Sam) — so Rachel sessions silently spoke as Sam despite badges showing Rachel. Replaced with `None` sentinel; explicit voice_id values pass through unchanged. Rachel now speaks as Rachel.
+
+5. **Persona color disambiguation iterations**: Rachel went `#4CAF50` (green) → `#009688` (teal) → `#0288D1` (sky blue) → `#7B1FA2` (Material purple 700) — first three iterations all read green-adjacent against the Bootstrap-success-green conv-mode pin at Tier 1 alphas. Saved `feedback_no_green_in_persona_pool.md` codifying the rule (green RGB component < 30% AND green not in top 2 channels). Nora `#E91E63` → `#F06292` (lighter pink) and Domi `#C2185B` → `#880E4F` (darker wine) for unambiguous Nora/Domi separation. Note: the `#7B1FA2` swap landed via parallel session's `400288f` commit — not authored by this session.
+
+**Memory entries saved**:
+- `feedback_terse_answer_direct_questions.md` — narrow factual lookups get just the answer, no padding with adjacent context
+- `feedback_no_green_in_persona_pool.md` — persona pool may not contain green hues; reserved for the conv-mode pin
+
+**Commits authored** (Lupin parent): `70959c5`, `06e5795`, `d8bce7f`, `21e92f1` — plus pending Nora/Domi color tweaks awaiting this session-end commit.
+
+**Files Modified** (this session-end commit, parent Lupin only): `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini` (Nora + Domi color swaps with provenance notes), `history.md` (this entry).
+
+**CoSA submodule edits NOT in any of my commits** (per `feedback_lupin_only_never_cosa.md` — manage from CoSA context): `src/cosa/rest/routers/speech.py` (Rachel TTS sentinel fix), plus the 4 voice_persona / conversation_mode router migrations from earlier in the session.
+
+**Open follow-ups** (parked, not in scope this session):
+- Tier 3 widgets theming (toggle button border, gist button, voice input row chrome).
+- Tier 4 message bubbles (outgoing background → persona color).
+- frontend-design plugin polish pass against live :7999.
+- UserPromptSubmit hook to backstop the conv-mode acknowledge-receipt rule (architecture sketched in conversation, not implemented).
+
+---
+
 ### 2026.04.29 - Session 78abd1aa | passlib/bcrypt `__about__` AttributeError diagnosis + remediation
 
 #### Checkpoint | 2026.04.29 17:19 EDT | Pin `bcrypt==4.3.0`, drop xfail markers, queue docker rebuild
