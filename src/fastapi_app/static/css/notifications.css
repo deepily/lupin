@@ -1526,29 +1526,52 @@
            SENDER-AWARE NOTIFICATION CARDS (Phase 5)
            ======================================== */
 
+        /* Persona theming Round 1 (Tier 1): card chrome — border + shadow tinted
+         * with the per-session voice persona color when --persona-color-rgb is
+         * set on the card root (see notifications.js createSenderCard +
+         * _setPersonaBadgeOnCard). Cards without a persona fall back to the
+         * neutral grey palette via the var() default values.
+         * See: src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/02-theming-round1-design.md §3 */
         .sender-card {
             margin-bottom: 12px;
-            border: 1px solid #dee2e6;
+            border: 1px solid rgba( var( --persona-color-rgb, 222, 226, 230 ), 0.55 );
             border-radius: 8px;
             background-color: #ffffff;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            box-shadow:
+                0 0 0 1px rgba( var( --persona-color-rgb, 0, 0, 0 ), 0.06 ),
+                0 2px 6px  rgba( var( --persona-color-rgb, 0, 0, 0 ), 0.12 );
             overflow: hidden;
+            transition: border-color 0.25s ease, box-shadow 0.25s ease;
         }
 
+        /* Persona theming Round 1 (Tier 2): header background — subtle
+         * persona-tinted top-to-bottom gradient when --persona-color-rgb is
+         * set; falls back to the original flat #f8f9fa for personaless cards.
+         * The pinned-conversation-mode rule at the top of this file is more
+         * specific (selector .sender-card[data-pinned-conv-mode="true"]
+         * .sender-card-header) and wins automatically when both apply. */
         .sender-card-header {
             display: flex;
             align-items: center;
             gap: 10px;
             padding: 10px 15px;
-            background-color: #f8f9fa;
+            background: linear-gradient(
+                to bottom,
+                rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.14 ),
+                rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.04 )
+            );
             border-bottom: 1px solid #e9ecef;
             cursor: pointer;
             user-select: none;
-            transition: background-color 0.2s ease;
+            transition: background 0.2s ease;
         }
 
         .sender-card-header:hover {
-            background-color: #e9ecef;
+            background: linear-gradient(
+                to bottom,
+                rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.22 ),
+                rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.08 )
+            );
         }
 
         .sender-status {
@@ -1894,9 +1917,12 @@
             line-height: 1;
         }
 
-        /* Active session - green indicator */
+        /* Persona theming Round 1 (Tier 1): active-session indicator dot uses
+         * persona color when set, falls back to the original green for
+         * personaless cards. Conversation-mode pin keeps green via the more
+         * specific .sender-card[data-pinned-conv-mode="true"] rule. */
         .sender-card-active .sender-active-indicator {
-            color: #28a745;
+            color: var( --persona-color, #28a745 );
         }
 
         /* Inactive session - gray indicator */
@@ -1904,13 +1930,21 @@
             color: #adb5bd;
         }
 
-        /* Active sender card - left border highlight */
+        /* Persona theming Round 1 (Tier 1): left stripe always carries the
+         * persona color so identity is visible across active AND inactive
+         * cards. Active cards use the full persona color; inactive cards use
+         * the same color (per user feedback 2026-04-29 — "all themed cards
+         * should show the colored left border, not just the active one").
+         * Personaless cards fall back to transparent so non-themed senders
+         * render unchanged. The active vs inactive distinction now relies on
+         * the indicator dot (filled ●  vs hollow ○) and the box-shadow
+         * intensity, not the left stripe. */
         .sender-card-active {
-            border-left: 3px solid #28a745;
+            border-left: 3px solid var( --persona-color, #28a745 );
         }
 
         .sender-card:not(.sender-card-active) {
-            border-left: 3px solid transparent;
+            border-left: 3px solid var( --persona-color, transparent );
         }
 
         .sender-card-messages {

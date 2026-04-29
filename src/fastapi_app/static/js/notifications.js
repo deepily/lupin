@@ -8754,6 +8754,32 @@ class NotificationsUI {
     }
 
     /**
+     * Convert a hex color (e.g., "#E91E63") into the comma-separated RGB
+     * triplet form ("233, 30, 99") that CSS `rgba()` consumes.
+     *
+     * Used to produce --persona-color-rgb on each sender card so Tier 1
+     * (border + shadow) and Tier 2 (header gradient) CSS rules can apply
+     * persona color with arbitrary alpha via rgba(var(--persona-color-rgb), 0.55).
+     *
+     * Returns null on malformed input — caller should skip setting the var.
+     *
+     * @param {string|null} hex — "#RRGGBB" or "#RGB"
+     * @returns {string|null} "r, g, b" or null on parse failure
+     */
+    _hexToRgb( hex ) {
+        if ( !hex || typeof hex !== "string" ) return null;
+        let h = hex.trim().replace( /^#/, "" );
+        if ( h.length === 3 ) {
+            h = h.split( "" ).map( c => c + c ).join( "" );
+        }
+        if ( h.length !== 6 || !/^[0-9a-fA-F]{6}$/.test( h ) ) return null;
+        const r = parseInt( h.substring( 0, 2 ), 16 );
+        const g = parseInt( h.substring( 2, 4 ), 16 );
+        const b = parseInt( h.substring( 4, 6 ), 16 );
+        return `${r}, ${g}, ${b}`;
+    }
+
+    /**
      * Build the persona-badge HTML string for a given persona dict.
      * Returns '' when persona is null/undefined so callers can safely
      * inject the result into a template literal.
@@ -8801,11 +8827,29 @@ class NotificationsUI {
         const header = card.querySelector( ':scope > .sender-card-header' );
         if ( !header ) return;
 
-        const existingBadge = header.querySelector( ':scope > .persona-badge' );
+        // Locate the existing badge (now inside .sender-stats-group as its first
+        // child — see createSenderCard). Search the whole header so we also
+        // catch legacy-positioned badges from cards rendered before the
+        // 2026-04-29 right-align relocation.
+        const existingBadge = header.querySelector( '.persona-badge' );
+        const statsGroup    = header.querySelector( ':scope > .sender-stats-group' );
 
         if ( !persona ) {
             if ( existingBadge ) existingBadge.remove();
+            // Foundation: also clear the persona-color custom properties on the
+            // card so Tier 1/2 CSS rules fall back to their defaults.
+            card.style.removeProperty( "--persona-color"     );
+            card.style.removeProperty( "--persona-color-rgb" );
             return;
+        }
+
+        // Foundation: set --persona-color and --persona-color-rgb on the card
+        // so Tier 1 (border + shadow) and Tier 2 (header gradient) CSS rules
+        // pick up the persona color via var() with no inline-style coupling.
+        if ( persona.color ) {
+            card.style.setProperty( "--persona-color", persona.color );
+            const rgb = this._hexToRgb( persona.color );
+            if ( rgb ) card.style.setProperty( "--persona-color-rgb", rgb );
         }
 
         const html = this._renderPersonaBadgeHTML( persona );
@@ -8814,13 +8858,13 @@ class NotificationsUI {
             return;
         }
 
-        // Insert before stats group (matches createSenderCard ordering)
-        const statsGroup = header.querySelector( ':scope > .sender-stats-group' );
+        // Insert as the FIRST child of .sender-stats-group so the badge sits
+        // in the right-aligned cluster (stats group has margin-left: auto).
         const tmp = document.createElement( 'template' );
         tmp.innerHTML = html.trim();
         const badgeNode = tmp.content.firstChild;
         if ( statsGroup ) {
-            header.insertBefore( badgeNode, statsGroup );
+            statsGroup.insertBefore( badgeNode, statsGroup.firstChild );
         } else {
             header.appendChild( badgeNode );
         }
@@ -9671,6 +9715,17 @@ class NotificationsUI {
         card.className = `sender-card${activeClass}`;
         card.setAttribute( 'data-project', parsed.project );
         card.setAttribute( 'data-session-id', sessionId || '' );
+
+        // Foundation: set --persona-color + --persona-color-rgb on the card
+        // root so Tier 1 (border + shadow) and Tier 2 (header gradient) CSS
+        // rules can apply persona color via var() — without these vars set,
+        // the rules fall back to their pre-theming defaults (grey/green).
+        // See: src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/02-theming-round1-design.md §2.1
+        if ( persona && persona.color ) {
+            card.style.setProperty( "--persona-color", persona.color );
+            const rgb = this._hexToRgb( persona.color );
+            if ( rgb ) card.style.setProperty( "--persona-color-rgb", rgb );
+        }
         // Build CC voice input row (only for claude.code sessions with a session ID)
         const isCCSession  = parsed.agentType === 'claude.code' && sessionId;
         const ccVoiceInput = isCCSession ? `
@@ -9698,8 +9753,8 @@ class NotificationsUI {
                 <span class="sender-status">${statusIndicator}</span>
                 <span class="sender-project-name">${projectName}</span>
                 ${sessionDisplay}
-                ${personaBadge}
                 <span class="sender-stats-group">
+                    ${personaBadge}
                     <span class="sender-new-count"></span>
                     <span class="sender-message-count">(0)</span>
                     <span class="sender-last-activity">Last: --</span>
