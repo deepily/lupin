@@ -1718,6 +1718,8 @@ class NotificationsUI {
         sendBtn.disabled = true;
         input.value      = '';
 
+        let success = false;
+
         try {
             await this.ensureValidToken();
 
@@ -1765,6 +1767,8 @@ class NotificationsUI {
                 this.addNotificationToSenderGroup( outgoing, true );
             }
 
+            success = true;
+
         } catch ( error ) {
             this.error( `[CC-VOICE] Failed to send to session ${sessionHash}:`, error );
             input.style.borderColor = '#dc3545';
@@ -1772,7 +1776,16 @@ class NotificationsUI {
         } finally {
             input.disabled   = false;
             sendBtn.disabled = false;
-            input.focus();
+            if ( success ) {
+                // UX: post-send focus shift to the mic so the user can
+                // immediately dictate a follow-up thought without an extra click.
+                const recBtn = document.getElementById( `cc-session-stt-${sessionHash}` );
+                if ( recBtn ) recBtn.focus();
+                else input.focus();
+            } else {
+                // Send failed — keep focus in the input so user can retry typing.
+                input.focus();
+            }
         }
     }
 
@@ -12167,10 +12180,16 @@ class NotificationsUI {
         card.id = `action-required-minimized-${notification.id}`;
         card.dataset.notificationId = notification.id;
 
+        // Persona badge — right-aligned by sitting between the flex-grow message
+        // and the timeout. Read voice_persona directly off the persisted envelope
+        // so refresh-restored cards render correctly without map dependency.
+        const personaBadge = this._renderPersonaBadgeHTML( notification.voice_persona );
+
         card.innerHTML = `
             <div class="minimized-position">#${queuePosition}</div>
             <div class="minimized-icon">${typeIcon}</div>
             <div class="minimized-message">${truncatedMessage}</div>
+            ${personaBadge}
             <div class="minimized-timeout">${timeoutDisplay}</div>
         `;
 
@@ -12335,11 +12354,15 @@ class NotificationsUI {
         // Persist queue state (item was removed from queue)
         this.saveTTSQueueState();
 
-        // Start TTS playback. Look up the per-session voice persona for the
-        // notification's sender_id so the TTS is spoken with that session's
-        // assigned voice. Falls back to server-default (Sam) when no persona
-        // is known (e.g., notifications from non-CC sources).
-        const ttsVoiceId = this.getVoiceIdForSender( item.notification && item.notification.sender_id );
+        // Start TTS playback. Pull voice_id directly off the persisted notification
+        // envelope first (server stamps voice_persona via _voice_persona_for_sender_id) —
+        // strictly more reliable than the senderPersonaMap path because it doesn't
+        // depend on the map being hydrated at activation time, which fails for
+        // localStorage-restored action-required notifications and for any sender
+        // that hasn't yet been hit by Layer B's senders-visible pre-hydration.
+        // Falls back to map lookup, then to server-default (Sam).
+        const ttsVoiceId = ( item.notification && item.notification.voice_persona && item.notification.voice_persona.voice_id )
+            || this.getVoiceIdForSender( item.notification && item.notification.sender_id );
         this.playTTS( item.ttsText, this.getCurrentTTSMode(), ttsVoiceId ).catch( error => {
             this.error( 'TTS queue: Playback failed:', error );
             this.onTTSPlaybackComplete();  // Move to next item even on error
@@ -13231,6 +13254,13 @@ class NotificationsUI {
             ? `<span class="mc-project-badge">[${project}]</span> `
             : '';
 
+        // Persona badge — read voice_persona straight off the persisted notification
+        // envelope (server stamps it via _voice_persona_for_sender_id). This avoids
+        // any race between map hydration and action-required restore on refresh.
+        // Right-aligned via insertion as the first child of .action-required-timer-controls
+        // (the existing flex right-cluster).
+        const personaBadge = this._renderPersonaBadgeHTML( notification.voice_persona );
+
         card.innerHTML = `
             <div class="action-required-header">
                 <button class="action-required-cancel-btn" data-notification-id="${notification.id}" title="Cancel and use default (Esc)">
@@ -13238,6 +13268,7 @@ class NotificationsUI {
                 </button>
                 <div class="action-required-title">${projectBadge}${notification.title || notification.message}</div>
                 <div class="action-required-timer-controls">
+                    ${personaBadge}
                     <button class="action-required-pause-btn" id="pause-btn-${notification.id}" title="Pause timer and audio (P)">
                         \u23F8\uFE0F
                     </button>

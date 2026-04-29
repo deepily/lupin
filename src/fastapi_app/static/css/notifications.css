@@ -1969,19 +1969,17 @@
         }
 
         /* Incoming messages (from Claude Code) - left aligned.
-         * Subtle persona-tinted gradient overlay on the existing grey base so
-         * each AI bubble carries a hint of its speaker identity — helps
-         * disambiguate who's talking when sessions are pinned at the top of
-         * the accordion in conversation mode. The grey fallback values match
-         * #e9ecef exactly, so personaless cards render visually unchanged. */
+         * Persona-tinted gradient mirroring the .sender-card-header direction
+         * and fallback values, but at slightly lighter alphas (0.10 / 0.02 vs
+         * the header's 0.14 / 0.04) so the bubble reads as a quieter cousin
+         * of the header tint — same family, less weight. Personaless cards
+         * fall back to a faint #f8f9fa wash on the white card surface. */
         .sender-message.incoming {
-            background:
-                linear-gradient(
-                    to bottom,
-                    rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.22 ),
-                    rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.06 )
-                ),
-                #e9ecef;
+            background: linear-gradient(
+                to bottom,
+                rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.10 ),
+                rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
+            );
             margin-right: 40px;
             border-bottom-left-radius: 2px;
         }
@@ -2237,13 +2235,11 @@
         }
 
         .date-accordion-messages .sender-message.incoming {
-            background:
-                linear-gradient(
-                    to bottom,
-                    rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.22 ),
-                    rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.06 )
-                ),
-                #e9ecef;
+            background: linear-gradient(
+                to bottom,
+                rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.10 ),
+                rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
+            );
             margin-right: 30px;
             border-bottom-left-radius: 2px;
         }
