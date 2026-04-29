@@ -67,6 +67,12 @@ Last updated: 2026-04-28 EDT (Session 30072c25 — Per-Session Voice Personas fo
 - [ ] [LUPIN] **Memory update**: expand `feedback_never_grab_gpu.md` with SolutionSnapshot constructor warning (loads ~1 GB of embedding models on cuda:0).
 - [ ] [LUPIN] **T46 — delete deprecated `enter_running_loop()`** in `src/cosa/rest/running_fifo_queue.py:122` (~30 LOC; user authorized for after current job).
 
+## 🌅 FOLLOW-UPS — for the user (Session d34f2f74 — Phase 2 smoke FAIL DEFERs)
+
+- [ ] [LUPIN] **Cross-job sender_id leak in notify** — During the 22:39 run, notifications for `dr-de05b9d0` were sometimes emitted with `sender_id=...#dr-d5e4408a` (a different concurrent DR job's sender). Suggests a thread-local or module-global sender_id is being mutated by the wrong worker. Not blocking 2.2/2.3 (those are fixed) but worth fixing for clean debugging. Investigate `_dispatcher.sender_id` mutation in `src/cosa/agents/deep_research/cosa_interface.py:107` and the parallel writes from concurrent DR jobs in the agentic pool.
+- [ ] [LUPIN] **Followup cleanup: have AgenticJobBase subclasses re-raise instead of swallowing** — `DeepResearchJob.do_all()` (and likely Podcast, Presentation, etc.) catches its own exceptions, sets `state=FAILED`, and returns the error string. Cluster 2.3 fix added a defensive FAILED-state branch in `_on_agentic_complete` to compensate. Cleaner architecture: `do_all` re-raises so `Future.exception()` carries the real exception. Once all subclasses are converted, the FAILED-state fallback in `_on_agentic_complete` can be removed (or left as pure belt-and-suspenders).
+- [ ] [LUPIN] **Recreate test+dev containers to pick up new `LUPIN_INTERACTIVE_TESTS` env var** — added to `docker-compose.yml` in cluster 2.7 fix. `docker restart` does NOT pick up env-var changes; need `docker compose down && docker compose up -d` (or `docker rm -f <name>` + `docker compose up -d`). Without recreation, `test_swe_team_proxy` will continue to self-abort even though the docker-compose.yml is correct.
+
 ---
 
 ## 📦 Cross-project — `planning-is-prompting` follow-up

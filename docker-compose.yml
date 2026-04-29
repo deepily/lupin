@@ -63,6 +63,9 @@ services:
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}
+      # Mirrors the test container — enables proxy-integration tests when
+      # they're invoked manually against :7999 during development.
+      LUPIN_INTERACTIVE_TESTS: "true"
       # GitHub CLI token pass-through for TFE/BFE Phase 5 (`gh pr create`).
       # Optional — empty default means no hard requirement if the operator
       # doesn't have GH_TOKEN set. Phase 5 will fail loudly if auth missing.
@@ -132,6 +135,10 @@ services:
       LUPIN_DEV_EMAIL: ricardo.felipe.ruiz@gmail.com
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}
+      # Enables proxy-integration tests (test_swe_team_proxy etc.). Tests
+      # self-abort when this is unset. The test container is dedicated to
+      # automated test runs, so it should always have this on.
+      LUPIN_INTERACTIVE_TESTS: "true"
       # GitHub CLI token pass-through for TFE/BFE Phase 5 (`gh pr create`).
       # Optional — empty default means no hard requirement if the operator
       # doesn't have GH_TOKEN set. Phase 5 will fail loudly if auth missing.

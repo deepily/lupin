@@ -882,5 +882,5 @@ class LivePipelineTestBase:
             - Returns True if all tests pass, False otherwise
         """
         parser = self.build_argparser()
-        args   = parser.parse_args( argv )
+        args, _ = parser.parse_known_args( argv )
         return self.run_scenarios( args )

@@ -211,7 +211,15 @@ def notify_user_async(
                 # Check if user_not_available and retries remaining
                 status = data.get( "status", "queued" )
 
-                if status == "user_not_available" and not is_last_attempt:
+                # Fire-and-forget progress notifications are persisted to the
+                # notifications DB unconditionally; the user will see them on the
+                # notification history when they connect. Retrying on
+                # `user_not_available` is wasted effort that inflates dispatch
+                # latency by N×retry_intervals (≈30-40s in test environments
+                # where the target user has no live UI). Only retry user-availability
+                # for non-progress types where a live recipient is required.
+                is_progress = ( request.notification_type == NotificationType.PROGRESS )
+                if status == "user_not_available" and not is_last_attempt and not is_progress:
                     # User still connecting - retry
                     if debug:
                         print( f"[DEBUG] user_not_available (attempt {attempt_idx}), will retry...", file=sys.stderr )

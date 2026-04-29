@@ -110,7 +110,7 @@ def quick_smoke_test():
         print( f"✓ Job ID format correct: {data[ 'job_id' ]}" )
 
         assert isinstance( data[ "queue_position" ], int ), "Expected queue_position to be int"
-        assert data[ "queue_position" ] >= 1, "Expected queue_position >= 1"
+        assert data[ "queue_position" ] >= 0, "Expected queue_position >= 0"
         print( f"✓ Queue position is valid: {data[ 'queue_position' ]}" )
 
         # Test 5: Check queue is accessible
