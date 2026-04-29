@@ -5,6 +5,7 @@ Tests CodeEmbeddingEngine, ProseEmbeddingEngine, and EmbeddingProvider
 with all GPU operations mocked — runs without GPU.
 """
 
+import os
 import pytest
 import numpy as np
 from unittest.mock import Mock, patch, MagicMock, PropertyMock
@@ -15,13 +16,22 @@ from unittest.mock import Mock, patch, MagicMock, PropertyMock
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _reset_singletons():
-    """Reset all singleton instances so each test starts clean."""
+    """Reset all singleton instances so each test starts clean.
+
+    Also resets the class-level `_is_in_process_engine_owner` flag (added
+    2026-04-28 with the process-aware HTTP-routing refactor) and clears
+    LUPIN_APP_SERVER_URL, so each test gets a hermetic starting state.
+    """
     from cosa.memory.local_embedding_engine import CodeEmbeddingEngine, ProseEmbeddingEngine
     from cosa.memory.embedding_provider import EmbeddingProvider
 
     CodeEmbeddingEngine._instance  = None
     ProseEmbeddingEngine._instance = None
     EmbeddingProvider._instance    = None
+
+    # New: reset the process-aware routing flag and any URL override.
+    EmbeddingProvider._is_in_process_engine_owner = False
+    os.environ.pop( "LUPIN_APP_SERVER_URL", None )
 
 
 def _make_prose_mocks( torch, batch_size=1, seq_len=10, hidden_dim=768 ):
@@ -461,10 +471,22 @@ class TestVramReport:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestEmbeddingProvider:
-    """Test suite for EmbeddingProvider routing and metrics."""
+    """Test suite for EmbeddingProvider routing and metrics.
+
+    These tests exercise the in-process-engine path representatively, so
+    they explicitly declare the flag True in setup. The new HTTP-routing
+    path is covered by TestEmbeddingProviderRoutingFlag /
+    TestEmbeddingProviderHttpPath / TestEmbeddingProviderDynamicUrl below.
+    """
 
     def setup_method( self ):
         _reset_singletons()
+        # Existing routing tests assume the in-process engine path. The new
+        # 2026-04-28 process-aware routing flag defaults to False (HTTP
+        # path); flip it to True here so these legacy tests continue
+        # exercising the local-engine code branch they were designed for.
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        EmbeddingProvider._is_in_process_engine_owner = True
 
     @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
     def test_singleton_returns_same_instance( self, mock_cm ):
@@ -672,3 +694,297 @@ class TestConvenienceFunctions:
         from cosa.memory.embedding_provider import get_embedding_provider, EmbeddingProvider
         provider = get_embedding_provider( debug=False )
         assert isinstance( provider, EmbeddingProvider )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Process-aware routing tests (added 2026-04-28)
+#
+# These cover the new `_is_in_process_engine_owner` flag, the HTTP-fallback
+# path that activates when the flag is False, and the runtime URL resolution
+# that lets a test running on the :8000 test server target :8000 dynamically
+# without restarting the Python process.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestEmbeddingProviderRoutingFlag:
+    """The class-level flag controls in-process vs HTTP routing."""
+
+    def setup_method( self ):
+        _reset_singletons()  # leaves flag=False, which is what these tests want
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_owner_flag_default_is_false( self, mock_cm ):
+        """Fresh process should default to HTTP routing — never grab GPU implicitly."""
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        # Just observe; reset_singletons already cleared it.
+        assert EmbeddingProvider._is_in_process_engine_owner is False
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_declare_in_process_engine_owner_flips_flag( self, mock_cm ):
+        """declare_in_process_engine_owner() flips the class-level flag True."""
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        EmbeddingProvider.declare_in_process_engine_owner()
+        assert EmbeddingProvider._is_in_process_engine_owner is True
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_declare_in_process_engine_owner_idempotent( self, mock_cm ):
+        """Calling declare twice doesn't break (idempotent)."""
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        EmbeddingProvider.declare_in_process_engine_owner()
+        EmbeddingProvider.declare_in_process_engine_owner()
+        assert EmbeddingProvider._is_in_process_engine_owner is True
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_owner_flag_true_routes_to_engine_not_http( self, mock_cm ):
+        """When flag=True, generate_embedding calls the engine and NOT requests.post."""
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        EmbeddingProvider.declare_in_process_engine_owner()
+
+        provider = EmbeddingProvider( debug=False )
+        mock_prose = Mock()
+        mock_prose.encode_query.return_value = [ [ 0.1 ] * 768 ]
+        provider._prose_engine = mock_prose
+
+        with patch( "requests.post" ) as mock_post:
+            result = provider.generate_embedding( "owner-path text", content_type="prose" )
+
+        mock_prose.encode_query.assert_called_once_with( [ "owner-path text" ] )
+        mock_post.assert_not_called()
+        assert len( result ) == 768
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_owner_flag_false_routes_to_http_not_engine( self, mock_cm ):
+        """When flag=False, generate_embedding calls requests.post and NOT the engine."""
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        # flag stays False from setup
+
+        provider = EmbeddingProvider( debug=False )
+        mock_prose = Mock()
+        mock_prose.encode_query.return_value = [ [ 0.99 ] * 768 ]  # would-be local result
+        provider._prose_engine = mock_prose
+
+        # Mock the HTTP path: api key + 200 response
+        with patch.object( EmbeddingProvider, "_http_api_key", return_value="fake-key" ), \
+             patch( "requests.post" ) as mock_post:
+            mock_post.return_value = Mock(
+                status_code=200,
+                json=Mock( return_value={ "embedding": [ 0.5 ] * 768 } )
+            )
+            result = provider.generate_embedding( "http-path text", content_type="prose" )
+
+        mock_prose.encode_query.assert_not_called()
+        mock_post.assert_called_once()
+        assert result == [ 0.5 ] * 768  # came from HTTP, not local engine
+
+
+class TestEmbeddingProviderHttpPath:
+    """When HTTP is used, verify endpoint, auth, and error handling."""
+
+    def setup_method( self ):
+        _reset_singletons()  # flag stays False — HTTP path
+
+    def _build_provider_with_api_key( self, mock_cm, api_key="test-key" ):
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        provider = EmbeddingProvider( debug=False )
+        # Patch _http_api_key on the class so all instances see the mock
+        EmbeddingProvider._http_api_key = staticmethod( lambda: api_key )
+        return provider
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_http_calls_correct_endpoint_with_api_key_header( self, mock_cm ):
+        """generate_embedding (non-owner) POSTs to /api/embeddings/generate with X-API-Key."""
+        provider = self._build_provider_with_api_key( mock_cm, api_key="my-secret-key" )
+
+        with patch( "requests.post" ) as mock_post:
+            mock_post.return_value = Mock(
+                status_code=200,
+                json=Mock( return_value={ "embedding": [ 0.1 ] * 768 } )
+            )
+            provider.generate_embedding( "hello", content_type="prose" )
+
+        assert mock_post.call_count == 1
+        call = mock_post.call_args
+        url = call.args[0]
+        assert url.endswith( "/api/embeddings/generate" )
+        assert call.kwargs[ "headers" ][ "X-API-Key" ] == "my-secret-key"
+        assert call.kwargs[ "json" ] == { "text": "hello", "content_type": "prose" }
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_http_no_api_key_raises_clear_error( self, mock_cm ):
+        """No API key file → RuntimeError with descriptive message."""
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        provider = EmbeddingProvider( debug=False )
+        EmbeddingProvider._http_api_key = staticmethod( lambda: None )
+
+        with pytest.raises( RuntimeError ) as exc_info:
+            provider.generate_embedding( "hello", content_type="prose" )
+
+        msg = str( exc_info.value )
+        assert "API key" in msg
+        assert "declare_in_process_engine_owner" in msg
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_http_connection_error_raises_clear_error( self, mock_cm ):
+        """ConnectionError from requests → RuntimeError with the URL + cause."""
+        import requests as _req
+
+        provider = self._build_provider_with_api_key( mock_cm )
+
+        with patch( "requests.post", side_effect=_req.ConnectionError( "refused" ) ):
+            with pytest.raises( RuntimeError ) as exc_info:
+                provider.generate_embedding( "hello", content_type="prose" )
+
+        msg = str( exc_info.value )
+        assert "unreachable" in msg
+        assert "ConnectionError" in msg
+        assert "/api/embeddings/generate" in msg
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_http_5xx_raises_clear_error( self, mock_cm ):
+        """5xx response → RuntimeError with status code and URL."""
+        provider = self._build_provider_with_api_key( mock_cm )
+
+        with patch( "requests.post" ) as mock_post:
+            mock_post.return_value = Mock(
+                status_code=503,
+                text="server unavailable"
+            )
+            with pytest.raises( RuntimeError ) as exc_info:
+                provider.generate_embedding( "hello", content_type="prose" )
+
+        msg = str( exc_info.value )
+        assert "503" in msg
+        assert "server unavailable" in msg
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_http_malformed_response_raises_clear_error( self, mock_cm ):
+        """Response missing 'embedding' key → RuntimeError."""
+        provider = self._build_provider_with_api_key( mock_cm )
+
+        with patch( "requests.post" ) as mock_post:
+            mock_post.return_value = Mock(
+                status_code=200,
+                json=Mock( return_value={ "wrong_key": "wrong" } )
+            )
+            with pytest.raises( RuntimeError ) as exc_info:
+                provider.generate_embedding( "hello", content_type="prose" )
+
+        assert "malformed response" in str( exc_info.value )
+
+
+class TestEmbeddingProviderDynamicUrl:
+    """LUPIN_APP_SERVER_URL is read at call time, not at module load.
+
+    This is the explicit user requirement — a test running on the :8000 test
+    server can set the env var and have HTTP routing target :8000 without
+    restarting the Python process.
+    """
+
+    def setup_method( self ):
+        _reset_singletons()
+
+    def _build_provider_with_api_key( self, mock_cm, api_key="test-key" ):
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        provider = EmbeddingProvider( debug=False )
+        EmbeddingProvider._http_api_key = staticmethod( lambda: api_key )
+        return provider
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_default_url_when_env_unset( self, mock_cm ):
+        """No LUPIN_APP_SERVER_URL → defaults to http://localhost:7999."""
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        os.environ.pop( "LUPIN_APP_SERVER_URL", None )
+        assert EmbeddingProvider._resolve_server_url() == "http://localhost:7999"
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_custom_url_from_env( self, mock_cm ):
+        """LUPIN_APP_SERVER_URL=http://localhost:8000 → resolver returns it."""
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        os.environ[ "LUPIN_APP_SERVER_URL" ] = "http://localhost:8000"
+        try:
+            assert EmbeddingProvider._resolve_server_url() == "http://localhost:8000"
+        finally:
+            os.environ.pop( "LUPIN_APP_SERVER_URL", None )
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_url_resolved_at_call_time_not_module_load( self, mock_cm ):
+        """KEY assertion: changing env between two HTTP calls hits two different URLs."""
+        provider = self._build_provider_with_api_key( mock_cm )
+
+        os.environ[ "LUPIN_APP_SERVER_URL" ] = "http://localhost:7999"
+        try:
+            with patch( "requests.post" ) as mock_post:
+                mock_post.return_value = Mock(
+                    status_code=200,
+                    json=Mock( return_value={ "embedding": [ 0.1 ] * 768 } )
+                )
+                provider.generate_embedding( "first", content_type="prose" )
+                first_url = mock_post.call_args.args[0]
+
+                # Mid-process URL change — the user's stated requirement
+                os.environ[ "LUPIN_APP_SERVER_URL" ] = "http://localhost:8000"
+                provider.generate_embedding( "second", content_type="prose" )
+                second_url = mock_post.call_args.args[0]
+        finally:
+            os.environ.pop( "LUPIN_APP_SERVER_URL", None )
+
+        assert first_url.startswith( "http://localhost:7999" )
+        assert second_url.startswith( "http://localhost:8000" )
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_empty_env_falls_back_to_default( self, mock_cm ):
+        """LUPIN_APP_SERVER_URL='' (empty string) → fallback to default."""
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        os.environ[ "LUPIN_APP_SERVER_URL" ] = ""
+        try:
+            assert EmbeddingProvider._resolve_server_url() == "http://localhost:7999"
+        finally:
+            os.environ.pop( "LUPIN_APP_SERVER_URL", None )
+
+
+class TestEmbeddingProviderBatchHttpPath:
+    """Batch path mirrors single-text path through /api/embeddings/batch."""
+
+    def setup_method( self ):
+        _reset_singletons()
+
+    def _build_provider_with_api_key( self, mock_cm, api_key="test-key" ):
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        provider = EmbeddingProvider( debug=False )
+        EmbeddingProvider._http_api_key = staticmethod( lambda: api_key )
+        return provider
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_batch_routes_to_batch_endpoint( self, mock_cm ):
+        """generate_embeddings_batch (non-owner) POSTs to /api/embeddings/batch."""
+        provider = self._build_provider_with_api_key( mock_cm )
+
+        with patch( "requests.post" ) as mock_post:
+            mock_post.return_value = Mock(
+                status_code=200,
+                json=Mock( return_value={ "embeddings": [ [ 0.1 ] * 768, [ 0.2 ] * 768 ] } )
+            )
+            result = provider.generate_embeddings_batch( [ "a", "b" ], content_type="prose" )
+
+        url = mock_post.call_args.args[0]
+        assert url.endswith( "/api/embeddings/batch" )
+        assert mock_post.call_args.kwargs[ "json" ] == { "texts": [ "a", "b" ], "content_type": "prose" }
+        assert len( result ) == 2
+
+    @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
+    def test_batch_owner_path_unaffected( self, mock_cm ):
+        """flag=True keeps batch on the in-process engine, no HTTP."""
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        EmbeddingProvider.declare_in_process_engine_owner()
+
+        provider = EmbeddingProvider( debug=False )
+        mock_prose = Mock()
+        mock_prose.encode_query.return_value = [ [ 0.1 ] * 768, [ 0.2 ] * 768 ]
+        provider._prose_engine = mock_prose
+
+        with patch( "requests.post" ) as mock_post:
+            result = provider.generate_embeddings_batch( [ "a", "b" ], content_type="prose" )
+
+        mock_prose.encode_query.assert_called_once_with( [ "a", "b" ] )
+        mock_post.assert_not_called()
+        assert len( result ) == 2

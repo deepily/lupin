@@ -1,6 +1,28 @@
 # TODO
 
-Last updated: 2026-04-28 EDT (Session 30072c25 — Docker build diagnostics: postgres bind-mount permission diagnosed, uv.lock pydantic-ai[slim] mismatch diagnosed and serialized as expert-handoff doc)
+Last updated: 2026-04-28 EDT (Session c7333045 — Conversation Mode v1.1 + bridge-cwd anchoring + EmbeddingProvider HTTP-routing + history archive)
+
+---
+
+## ✅ COMPLETED — Session c7333045 (2026-04-28, all-day mixed bug fix + feature work)
+
+- [x] [LUPIN] **Bug A: Duplicate "Received:" echo** — `WebSocketManager.emit_to_user_or_listener_sync()` listener-already-in-user-fanout dedup guard. Verified live on listener log: 2 events → 1 event per voice message.
+- [x] [LUPIN] **Bug B: Stop-hook gate on conversation mode** — `stop.py::main()` early-emit `{}` when `get_conversation_mode(session_id)=True`. 2 new unit tests covering both directions.
+- [x] [LUPIN] **Bug: 404 from container PID-namespace** — `find_session_path_by_id` now skips `_is_pid_alive` when running in container (`/.dockerenv` exists).
+- [x] [LUPIN] **Bug: UI toggle position** — moved sender-conversation-mode-btn from sender-card-header into cc-voice-input-row alongside record button.
+- [x] [LUPIN] **Bug: Duplicate Lupin/Cosa pane for one session** — `build_sender_id_for_cc()` now anchors on bridge SessionStart cwd snapshot via new `_resolve_project_from_bridge_cwd()` helper. 6 new regression tests.
+- [x] [LUPIN] **Feature: Corner pause button** on currently-playing notification — absolutely-positioned `.notification-corner-pause-btn`, click routes through `pauseTTS()`/`resumeTTS()` (Web Audio AudioContext-aware).
+- [x] [LUPIN] **Feature: Mutex + pinning across CC sessions** (5 phases of `~/.claude/plans/drifting-skipping-porcupine.md`) — coordinated bridge files, asyncio.Lock auto-displace, `displaced=true` WS payload, in-flight TTS auto-pause, soft-glow border, sort-respecting card insertion. MCP `_flip_conversation_mode` refactored to call canonical HTTP endpoint with HTTP fallback to direct write. User-only-initiation guardrail in 3 layers (instructions block + tool docstrings + new global skill).
+- [x] [LUPIN] **EmbeddingProvider HTTP-routing refactor** — `_is_in_process_engine_owner` flag + `declare_in_process_engine_owner()` classmethod, FastAPI startup wires it, runtime URL via `_resolve_server_url()` reading `LUPIN_APP_SERVER_URL` per-call. 16 new tests across 4 new test classes. SolutionSnapshot init requires zero changes.
+- [x] [LUPIN] **History archive** — `2026-04-22-to-24-history.md` created (~10k tokens). Main file 21,442 → 9,889 tokens.
+
+## 🌅 FOLLOW-UPS — for the user (Session c7333045)
+
+- [ ] [LUPIN] **Per-session TTS queue isolation** (so B's new audio plays while A's queued audio stays paused on displacement) — current model is global `pauseTTS` on displacement, user manually resumes. Separate UX cycle.
+- [ ] [LUPIN] **Toast UI for displaced sessions** — `conversation_mode_changed` event payload already carries `displaced=true, displaced_by=<sid>`; UI just doesn't render it yet.
+- [ ] [LUPIN] **Hard programmatic enforcement of user-only-initiation rule** for `enter/exit_conversation_mode()` MCP tools — v1.1 documents the rule in three layers; future enhancement could add a "user-utterance attestation" field on the MCP call if drift is observed.
+- [ ] [LUPIN] **E2E Playwright extension for new mutex + pinning + auto-pause scenarios** — gated behind a user-confirmed `:8000` slot per the E2E two-phase gate.
+- [ ] [LUPIN] **Multi-worker uvicorn lock coordination** — module-level `asyncio.Lock` in conversation_mode router only serializes within one process. If Lupin ever moves to `--workers N`, lock must move to Redis or DB advisory lock. Not relevant today.
 
 ---
 

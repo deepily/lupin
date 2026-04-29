@@ -63,7 +63,7 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, conversation_mode
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, conversation_mode, voice_persona
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 from cosa.rest.job_persistence import mark_interrupted_jobs
 
@@ -536,6 +536,16 @@ async def lifespan( app: FastAPI ):
     print( "Done!" )
     _log_vram( "Prose Embedding" )
 
+    # Mark this process as the in-process owner of the GPU embedding singletons.
+    # After this point, EmbeddingProvider.generate_embedding() in THIS process
+    # routes directly to the loaded engines. Every other process (scripts,
+    # tests, MCP, CC subagents) keeps the default flag=False and routes via
+    # HTTP to /api/embeddings/{generate,batch} — so no second process ever
+    # lazy-loads a duplicate GPU model.
+    from cosa.memory.embedding_provider import EmbeddingProvider
+    EmbeddingProvider.declare_in_process_engine_owner()
+    print( "[EmbeddingProvider] Declared in-process engine owner — local routing enabled for this FastAPI process" )
+
     # 3. Whisper STT — Load + warmup transcription (LAST, largest GPU footprint)
     global whisper_pipeline
     print( "Loading distill whisper engine... ", end="" )
@@ -785,6 +795,7 @@ app.include_router(decision_proxy.router)
 app.include_router(pages.router)
 app.include_router(peer.router)
 app.include_router(conversation_mode.router)
+app.include_router(voice_persona.router)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
