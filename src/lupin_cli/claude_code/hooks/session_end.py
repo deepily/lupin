@@ -228,6 +228,20 @@ def main():
             print( f"[session_end] WARNING: voice persona release wrapper failed ({type( e ).__name__}: {e})",
                    file=sys.stderr )
 
+    # ── Phase 1.6: Kill any pending idle-detection waiter ─────────────────
+    # The waiter is a detached subprocess that may be sleeping for many
+    # minutes; without explicit cleanup it would orphan-fire its prompt
+    # against a session that no longer exists. The waiter's own dead-PPID
+    # check would catch it eventually, but explicit kill at SessionEnd is
+    # cleaner. See: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+    if session_id:
+        try:
+            from lupin_cli.claude_code.hooks.lib.session_bridge import kill_idle_waiter
+            kill_idle_waiter( session_id )
+        except Exception as e:
+            print( f"[session_end] WARNING: idle waiter kill failed ({type( e ).__name__}: {e})",
+                   file=sys.stderr )
+
     # ── Phase 2: Stop CC Notification Listener ────────────────────────────
     if session_id:
         listener_pid = _find_listener_pid( session_id )

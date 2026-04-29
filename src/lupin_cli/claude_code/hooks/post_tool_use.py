@@ -31,7 +31,10 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     build_additional_context, enrich_voice_context,
     TOOLS_SILENT, TOOLS_ANNOUNCE
 )
-from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id, resolve_stable_session_id
+from lupin_cli.claude_code.hooks.lib.session_bridge import (
+    get_claude_session_id, resolve_stable_session_id,
+    kill_idle_waiter, set_idle_detection_field,
+)
 
 
 def main():
@@ -54,6 +57,19 @@ def main():
     # Resolve session_id: payload first (future-proof), then session bridge fallback
     session_id = resolve_stable_session_id( payload.get( "session_id", "" ) ) or get_claude_session_id()
     pg_id      = build_progress_group_id( "pu", session_id )
+
+    # Idle-aware Stop hook: when Claude calls a cosa-voice notify/ask tool
+    # mid-turn, kill any pending idle waiter and bump last_interaction_at.
+    # Claude is actively talking — a phantom waiter waking up now would
+    # interrupt. Don't respawn here; the next Stop hook will respawn at
+    # turn-end. See: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+    if tool_name.startswith( "mcp__cosa-voice__" ):
+        import datetime as _dt
+        kill_idle_waiter( session_id )
+        set_idle_detection_field(
+            session_id,
+            last_interaction_at = _dt.datetime.now().astimezone().isoformat( timespec="seconds" ),
+        )
 
     # Smart TTS filtering (respects HOOK_TTS_ENABLED)
     if tool_name in TOOLS_SILENT:

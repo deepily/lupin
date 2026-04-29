@@ -32,7 +32,10 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     format_voice_context, enrich_voice_context, build_additional_context,
     write_turn_start_marker
 )
-from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id, resolve_stable_session_id
+from lupin_cli.claude_code.hooks.lib.session_bridge import (
+    get_claude_session_id, resolve_stable_session_id,
+    kill_idle_waiter, set_idle_detection_field,
+)
 
 
 def main():
@@ -47,6 +50,20 @@ def main():
 
     # Resolve session_id: payload first (future-proof), then session bridge fallback
     session_id = resolve_stable_session_id( payload.get( "session_id", "" ) ) or get_claude_session_id()
+
+    # Idle-aware Stop hook: user activity resets the idle-detection timer.
+    # Kill any pending waiter (UserPromptSubmit means the user is back, so
+    # the deferred "Anything else?" is moot), reset backoff_index to 0
+    # (next idle cycle starts fresh), and bump last_interaction_at. The
+    # next Stop hook will respawn a fresh waiter at index 0 when this turn
+    # ends. See: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+    import datetime as _dt
+    kill_idle_waiter( session_id )
+    set_idle_detection_field(
+        session_id,
+        last_interaction_at = _dt.datetime.now().astimezone().isoformat( timespec="seconds" ),
+        backoff_index       = 0,
+    )
 
     # Record turn start time for stop hook duration gating
     write_turn_start_marker( session_id )

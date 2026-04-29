@@ -35,13 +35,18 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, build_sender_id_for_cc, resolve_stable_session_id,
-    get_conversation_mode
+    get_conversation_mode, get_session_metadata,
+    get_idle_detection, set_idle_detection_field, kill_idle_waiter,
 )
 from lupin_cli.notifications.notify_user_sync import notify_user_sync
 from lupin_cli.notifications.notification_models import (
     NotificationRequest, ResponseType, NotificationPriority
 )
 from cosa.utils.notification_utils import extract_qualifier_comment
+from lupin_cli.claude_code.hooks.lib.idle_settings import load_idle_settings
+from lupin_cli.claude_code.hooks.lib.anything_else_ask import (
+    fire_anything_else_ask, summarize_task as _shared_summarize_task,
+)
 
 
 def _summarize_task( last_assistant_message ):
@@ -196,6 +201,124 @@ def _get_session_context( cwd ):
             pass
 
     return topic, branch
+
+
+def _arm_idle_waiter( session_id, last_assistant_message, cwd ):
+    """
+    Spawn a deferred-ask waiter instead of firing "Anything else?" immediately.
+
+    The waiter sleeps for `backoff_minutes[backoff_index]` minutes (from
+    settings.idle_detection), then re-checks the bridge for reset signals.
+    If still idle, it fires the same "Anything else?" prompt the legacy
+    immediate-ask path would have fired.
+
+    Pre-computes the Gister gist NOW (Stop hook context) and stores it on
+    the bridge so the waiter doesn't need to call Gister at wake time.
+
+    Reads `backoff_index` from the bridge — preserves backoff progression
+    across multiple Stop fires when the user never came back to interact.
+    UserPromptSubmit hook resets it to 0 on user activity.
+
+    See: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+
+    Requires:
+        - session_id is a non-empty string
+        - last_assistant_message is a string or None (for gist computation)
+        - cwd is a string path or None
+
+    Ensures:
+        - Kills any prior waiter for this session (idempotent)
+        - Bumps last_interaction_at, stores gist + waiter spawn metadata in bridge
+        - Spawns detached idle_waiter.py subprocess
+        - Returns the spawned waiter PID, or None on spawn failure
+        - Never raises — spawn failure logs and returns None
+
+    Args:
+        session_id            : CC session ID
+        last_assistant_message: Claude's last response text (for gist)
+        cwd                   : Working dir for git-branch resolution
+
+    Returns:
+        int or None: Spawned waiter PID, or None on failure
+    """
+    import datetime
+    import subprocess
+    from pathlib import Path
+
+    # Pre-compute gist while we have last_assistant_message (waiter doesn't)
+    gist = _shared_summarize_task( last_assistant_message )
+
+    # Read current backoff_index — preserved across Stop fires until UserPromptSubmit
+    # resets it to 0. UserPromptSubmit fires only on user activity; consecutive
+    # Stops without user activity should resume the backoff schedule, not restart it.
+    state         = get_idle_detection( session_id ) or { }
+    current_index = state.get( "backoff_index", 0 ) or 0
+
+    # Resolve CC PID from bridge (set by SessionStart). Fallback to hook's
+    # grandparent walk if bridge doesn't have it.
+    meta   = get_session_metadata()
+    cc_pid = meta.get( "ppid" ) or os.getppid()
+
+    # Kill any stale waiter so we don't end up with parallel asks
+    kill_idle_waiter( session_id )
+
+    # Bump last_interaction_at + store gist + carry cwd for the waiter's
+    # session-context resolution at wake-time
+    set_idle_detection_field(
+        session_id,
+        last_interaction_at = datetime.datetime.now().astimezone().isoformat( timespec="seconds" ),
+        last_task_gist      = gist,
+        last_task_cwd       = cwd,
+    )
+
+    # Spawn the waiter — mirrors register_session.py:_spawn_listener pattern
+    short    = session_id[ :8 ] if session_id else "unknown"
+    log_path = Path( os.path.expanduser( f"~/.claude/sessions/cc-idle-waiter-{short}.log" ) )
+
+    cmd = [
+        sys.executable, "-m", "lupin_cli.claude_code.hooks.lib.idle_waiter",
+        "--session-id"   , session_id,
+        "--ppid"         , str( cc_pid ),
+        "--backoff-index", str( current_index ),
+    ]
+    # Test-mode hook: if env tells us to use a short sleep, propagate it
+    test_sleep = os.environ.get( "LUPIN_IDLE_WAITER_TEST_SLEEP_SECS" )
+    if test_sleep:
+        cmd.extend( [ "--sleep-secs", test_sleep ] )
+
+    env = os.environ.copy()
+    env[ "PYTHONUNBUFFERED" ] = "1"
+    if _src_path and _src_path not in env.get( "PYTHONPATH", "" ):
+        env[ "PYTHONPATH" ] = _src_path + ":" + env.get( "PYTHONPATH", "" )
+    if cwd:
+        env[ "CC_HOOK_CWD" ] = cwd
+
+    try:
+        log_file = open( log_path, "a" )
+    except OSError:
+        log_file = subprocess.DEVNULL
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout            = log_file if log_file is not subprocess.DEVNULL else subprocess.DEVNULL,
+            stderr            = log_file if log_file is not subprocess.DEVNULL else subprocess.DEVNULL,
+            env               = env,
+            start_new_session = True,
+        )
+        log_to_stream( "stop", {}, extra={
+            "phase"         : "idle_waiter_armed",
+            "waiter_pid"    : proc.pid,
+            "backoff_index" : current_index,
+            "ppid"          : cc_pid,
+        } )
+        return proc.pid
+    except Exception as e:
+        log_to_stream( "stop", {}, extra={
+            "phase" : "idle_waiter_spawn_failed",
+            "error" : str( e ),
+        } )
+        return None
 
 
 def _ask_anything_else( session_id, last_assistant_message=None, cwd=None ):
@@ -353,11 +476,35 @@ def main():
             send_tts( "Stop — blocking with voice input" )
             emit_json( build_stop_block( enrich_voice_context( voice_ctx ) ) )
     else:
-        # No voice input → Phase 2: ask user "Anything else?" via notification
+        # No voice input → ask user "Anything else?" via notification.
+        # Two paths gated by ~/.claude/settings.json idle_detection.enabled:
+        #   - enabled=true (default, NEW): arm a deferred waiter and allow stop
+        #     immediately. The waiter sleeps for backoff_minutes[index] minutes,
+        #     then re-checks the bridge and fires the same prompt only if the
+        #     session is still idle. See:
+        #     src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+        #   - enabled=false (LEGACY): fire the prompt immediately as before.
         reset_stop_block_count( session_id )
         last_assistant_message = payload.get( "last_assistant_message" )
-        result = _ask_anything_else( session_id, last_assistant_message, cwd=payload.get( "cwd" ) )
-        emit_json( result )
+        cwd                    = payload.get( "cwd" )
+
+        try:
+            settings = load_idle_settings()
+        except ValueError as e:
+            # Malformed schedule in settings.json — log and fall back to legacy
+            # immediate-ask. User-facing message would be confusing here.
+            log_to_stream( "stop", {}, extra={
+                "phase" : "idle_settings_invalid",
+                "error" : str( e ),
+            } )
+            settings = { "enabled": False, "backoff_minutes": [] }
+
+        if settings[ "enabled" ]:
+            _arm_idle_waiter( session_id, last_assistant_message, cwd )
+            emit_json( {} )  # allow stop; waiter will fire later if still idle
+        else:
+            result = _ask_anything_else( session_id, last_assistant_message, cwd=cwd )
+            emit_json( result )
 
 if __name__ == "__main__":
     main()

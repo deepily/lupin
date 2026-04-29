@@ -3,8 +3,8 @@ name: testing-patterns
 description: Testing patterns for Lupin project. Use when writing tests, running pytest, debugging test failures, choosing between smoke/unit/integration tests, checking test coverage, or fixing failing tests.
 metadata:
   author: lupin-team
-  version: "1.2"
-  last-updated: "2026-03-14"
+  version: "1.3"
+  last-updated: "2026-04-29"
 ---
 
 # Testing Patterns
@@ -107,6 +107,38 @@ python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-c
 2. **Unit tests mock dependencies** - Don't hit real database/APIs
 3. **Smoke tests are quick sanity checks** - Not comprehensive
 4. **WebSocket tests have separate runner** - Don't mix with pytest
+5. **Parameterize the Lupin REST base URL** — every test that hits a Lupin endpoint MUST read `LUPIN_API_URL` from env at runtime. Never hardcode `localhost:7999` or `localhost:8000`. Same test must run unchanged on dev / test / mocked endpoints.
+
+## Server URL Configuration (RUNTIME-EVALUATED)
+
+**The rule**: Every test reads its target Lupin REST URL from an env var at execution time. The exact same test code runs against:
+
+| Context | `LUPIN_API_URL` value | How it's set |
+|---|---|---|
+| Local dev (manual `pytest`) | unset → defaults to `http://localhost:7999` | nothing to do |
+| Test server scheduled batch (`/api/test-suite/submit` → `:8000`) | `http://localhost:8000` | exported by the test-suite agent's pytest subprocess invocation |
+| Unit tests (mocked) | `http://test.example/` or unused | use `requests_mock` / `responses`; no network |
+| CI / GitHub Actions | environment-specific override | exported by CI workflow |
+
+**Recipe (use in every test that hits the REST API)**:
+
+```python
+import os
+BASE_URL = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" ).rstrip( "/" )
+```
+
+**Or prefer the existing helper** (handles `~/.lupin/config` env-block lookup, API key resolution, and URL fallback in one shot):
+
+```python
+from cosa.utils.config_loader import get_api_config
+config   = get_api_config( env=os.environ.get( "LUPIN_ENV", "local" ) )
+BASE_URL = config[ "api_url" ].rstrip( "/" )
+api_key  = load_api_key( config[ "api_key_file" ] )
+```
+
+The existing `notify_user_async.py` / `notify_user_sync.py` already use this pattern — mirror them rather than re-rolling.
+
+**Why runtime-evaluated, not import-time**: env vars set by the test-suite agent's subprocess invocation are visible at test execution. If a test resolves the URL at import time (e.g. as a module-level constant before the agent's env wiring takes effect), the override silently fails. Read at function call time, OR at module level only when the env is guaranteed-set before import.
 
 ## Test Coverage
 
@@ -173,6 +205,7 @@ grep -E '(passed|failed|error)' /tmp/e2e-ui-latest.log
 
 - **NEVER** use `curl` for pipeline or integration testing — use automated test scripts
 - **NEVER** manually POST to `/api/push` + poll `/api/get-queue/done` — use `LivePipelineTestBase`
+- **NEVER** hardcode `localhost:7999` or `localhost:8000` in test code. Always read `LUPIN_API_URL` from env at runtime so the same test runs on dev / test / mocked endpoints. Code review should reject any literal port string in a test file.
 - **Don't** run integration tests without the wrapper script
 - **Don't** test external APIs in unit tests (use mocks)
 - **Don't** skip smoke tests - they catch major breakage fast

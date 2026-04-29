@@ -219,7 +219,26 @@ class TestShouldAskAnythingElse:
 # TestVoiceDrain
 # ═════════════════════════════════════════════════════════════════════════════
 
+def _disable_idle_detection_fixture():
+    """
+    Shared autouse fixture body: disables idle_detection so tests that exercise
+    the legacy immediate-ask path keep hitting it after the 2026-04-29 idle-aware
+    Stop hook landing. See:
+        src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+    Apply via @pytest.fixture(autouse=True) wrapping in each test class that
+    expects _ask_anything_else (legacy) instead of _arm_idle_waiter (deferred).
+    """
+    return ( "lupin_cli.claude_code.hooks.stop.load_idle_settings",
+             lambda: { "enabled": False, "backoff_minutes": [ ] } )
+
+
 class TestVoiceDrain:
+
+    @pytest.fixture( autouse=True )
+    def _disable_idle( self, monkeypatch ):
+        target, value = _disable_idle_detection_fixture()
+        monkeypatch.setattr( target, value )
+
     """Tests for voice buffer drain in Stop hook."""
 
     @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
@@ -286,6 +305,12 @@ class TestEmptyPayload:
 # ═════════════════════════════════════════════════════════════════════════════
 
 class TestVoiceBlocking:
+
+    @pytest.fixture( autouse=True )
+    def _disable_idle( self, monkeypatch ):
+        target, value = _disable_idle_detection_fixture()
+        monkeypatch.setattr( target, value )
+
     """Tests for voice-driven stop blocking."""
 
     @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
@@ -369,6 +394,12 @@ class TestLoopPrevention:
 # ═════════════════════════════════════════════════════════════════════════════
 
 class TestConversationModeGate:
+
+    @pytest.fixture( autouse=True )
+    def _disable_idle( self, monkeypatch ):
+        target, value = _disable_idle_detection_fixture()
+        monkeypatch.setattr( target, value )
+
     """
     When the session is in conversation mode the hook must be a silent no-op:
     no voice-buffer drain, no notify_user_sync prompt, no TTS, no block. The
@@ -499,6 +530,21 @@ class TestBlockCounter:
 
 class TestNotifyUserSync:
     """Tests for the notify_user_sync 'Anything else?' branch."""
+
+    @pytest.fixture( autouse=True )
+    def _disable_idle_detection( self, monkeypatch ):
+        """
+        These tests exercise the legacy immediate-ask path. After the
+        2026-04-29 idle-aware Stop hook landing, that path only fires when
+        ~/.claude/settings.json idle_detection.enabled is False. Force-disable
+        for the whole class so the tests keep exercising the immediate-ask
+        flow they were written against.
+        See: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+        """
+        monkeypatch.setattr(
+            "lupin_cli.claude_code.hooks.stop.load_idle_settings",
+            lambda: { "enabled": False, "backoff_minutes": [ ] }
+        )
 
     @patch( "lupin_cli.claude_code.hooks.stop._should_ask_anything_else", return_value=True )
     @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )

@@ -37,6 +37,7 @@ Usage from hook scripts:
 import json
 import os
 import re
+import signal as signal_mod
 import time
 import uuid
 from pathlib import Path
@@ -889,6 +890,195 @@ def set_voice_persona( session_id, persona ):
             json.dump( data, f, indent=2 )
         return True
     except ( json.JSONDecodeError, OSError ):
+        return False
+
+
+def get_idle_detection( session_id ):
+    """
+    Read the idle_detection block from the bridge file for a given session_id.
+
+    The idle_detection block tracks per-session state for the deferred
+    "Anything else?" prompt with exponential backoff. See:
+        src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+
+    Schema:
+        {
+          "last_interaction_at" : ISO8601 with tz,
+          "backoff_index"       : int (index into settings backoff_minutes),
+          "waiter_pid"          : int (detached helper PID) or None,
+          "waiter_started_at"   : ISO8601 (set by waiter on sleep-start)
+        }
+
+    Requires:
+        - session_id is a non-empty string (full UUID or 8-char prefix)
+
+    Ensures:
+        - Returns the idle_detection dict if the bridge exists and the field is
+          a non-empty dict
+        - Returns None on any failure (missing bridge, parse error, missing
+          field, field is null/empty/non-dict)
+        - Never raises exceptions
+
+    Args:
+        session_id: Session ID to look up
+
+    Returns:
+        dict or None: The idle_detection dict when present; None otherwise
+    """
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return None
+
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        block = data.get( "idle_detection" )
+        if isinstance( block, dict ) and block:
+            return block
+        return None
+    except ( json.JSONDecodeError, OSError ):
+        return None
+
+
+def set_idle_detection_field( session_id, **fields ):
+    """
+    Merge fields into the idle_detection block on the bridge file.
+
+    Read-modify-write: reads the bridge, merges `fields` into the existing
+    idle_detection sub-dict (creating the sub-dict if absent), writes back.
+    Other top-level fields and other idle_detection sub-fields are preserved.
+
+    Race semantics: same as `set_voice_persona` and other writers in this
+    module — no fcntl, no tmpfile+rename. Two concurrent set_*_field calls
+    on the same bridge could lose one update (read-modify-write window). For
+    the idle-detection use case this is acceptable: resets are idempotent,
+    the worst case is one missed bump that the next event replays.
+
+    Requires:
+        - session_id is a non-empty string
+        - fields contains only JSON-serializable values
+
+    Ensures:
+        - Returns True if bridge was found and successfully updated
+        - Returns False if bridge not found or write failed
+        - Never raises exceptions
+        - Other top-level bridge fields preserved
+        - Existing idle_detection fields not mentioned in `fields` preserved
+
+    Args:
+        session_id: Session ID to look up
+        **fields: keyword args; each becomes a field in idle_detection
+
+    Returns:
+        bool: True on successful write, False otherwise
+    """
+    if not fields:
+        return True  # Nothing to do — caller passed no updates
+
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return False
+
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        block = data.get( "idle_detection" )
+        if not isinstance( block, dict ):
+            block = { }
+        block.update( fields )
+        data[ "idle_detection" ] = block
+        with open( path, "w" ) as f:
+            json.dump( data, f, indent=2 )
+        return True
+    except ( json.JSONDecodeError, OSError ):
+        return False
+
+
+def clear_idle_waiter_pid( session_id ):
+    """
+    Atomically clear the waiter_pid field and return the old PID.
+
+    Used by callers that want to kill the waiter — they get the PID to
+    SIGTERM, AND the bridge field is cleared so a concurrent spawn knows
+    the slot is free. The kill itself is the caller's responsibility (see
+    `kill_idle_waiter` for the convenience wrapper).
+
+    Requires:
+        - session_id is a non-empty string
+
+    Ensures:
+        - Returns the prior waiter_pid value (int) if there was one
+        - Returns None if there was no waiter_pid, or the bridge couldn't
+          be read/written
+        - Never raises exceptions
+        - On success: idle_detection.waiter_pid is set to None in the bridge
+
+    Args:
+        session_id: Session ID to look up
+
+    Returns:
+        int or None: The prior waiter_pid (for the caller to kill), or None
+    """
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return None
+
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        block = data.get( "idle_detection" )
+        if not isinstance( block, dict ):
+            return None
+        old_pid = block.get( "waiter_pid" )
+        if old_pid is None:
+            return None
+        block[ "waiter_pid" ] = None
+        data[ "idle_detection" ] = block
+        with open( path, "w" ) as f:
+            json.dump( data, f, indent=2 )
+        return int( old_pid ) if isinstance( old_pid, int ) else None
+    except ( json.JSONDecodeError, OSError, ValueError ):
+        return None
+
+
+def kill_idle_waiter( session_id, signal=None ):
+    """
+    Kill any live idle-waiter helper for this session.
+
+    Convenience wrapper: calls `clear_idle_waiter_pid` to atomically claim
+    the prior PID, then sends SIGTERM (or the supplied signal) to it. PID
+    liveness is checked first to avoid signaling unrelated processes that
+    may have inherited the PID.
+
+    Requires:
+        - session_id is a non-empty string
+        - signal is None (defaults to SIGTERM) or a valid signal int
+
+    Ensures:
+        - Returns True if a waiter was killed
+        - Returns False if there was no waiter or the kill failed
+        - Never raises exceptions
+
+    Args:
+        session_id: Session ID to look up
+        signal: Signal to send (default SIGTERM)
+
+    Returns:
+        bool: True if a waiter PID was found and signal-sent, False otherwise
+    """
+    sig = signal if signal is not None else signal_mod.SIGTERM
+
+    pid = clear_idle_waiter_pid( session_id )
+    if pid is None:
+        return False
+
+    if not _is_pid_alive( pid ):
+        return False
+
+    try:
+        os.kill( pid, sig )
+        return True
+    except ( ProcessLookupError, PermissionError, OSError ):
         return False
 
 

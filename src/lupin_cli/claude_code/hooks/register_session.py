@@ -682,6 +682,26 @@ def main():
         if is_context_clear and old_data and isinstance( old_data.get( "voice_persona" ), dict ):
             session_data[ "voice_persona" ] = old_data[ "voice_persona" ]
 
+        # Initialize idle_detection block — tracks per-session state for the
+        # deferred "Anything else?" prompt with exponential backoff.
+        # See: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+        import datetime as _dt
+        idle_block = {
+            "last_interaction_at" : _dt.datetime.now().astimezone().isoformat( timespec="seconds" ),
+            "backoff_index"       : 0,
+            "waiter_pid"          : None,
+        }
+        # Carry forward backoff_index across /clear (the user shouldn't lose
+        # backoff progression just because they cleared context). Reset
+        # last_interaction_at to now (the clear itself is activity) and
+        # waiter_pid to None (any old waiter is now orphaned and will exit
+        # on its next wake when it sees the new bridge state).
+        if is_context_clear and old_data and isinstance( old_data.get( "idle_detection" ), dict ):
+            old_idle = old_data[ "idle_detection" ]
+            if isinstance( old_idle.get( "backoff_index" ), int ):
+                idle_block[ "backoff_index" ] = old_idle[ "backoff_index" ]
+        session_data[ "idle_detection" ] = idle_block
+
         try:
             with open( session_file, "w" ) as f:
                 json.dump( session_data, f, indent=2 )
