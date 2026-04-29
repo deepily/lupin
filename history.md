@@ -5,7 +5,7 @@
 #### Checkpoint | 2026.04.29 17:19 EDT | Pin `bcrypt==4.3.0`, drop xfail markers, queue docker rebuild
 
 **Files** (Lupin parent, 4 modified): `pyproject.toml` (line 69 tightened from `bcrypt>=4.0,<5` to `bcrypt==4.3.0`), `src/scripts/reset_user_password.py` (dropped now-stale host-vs-container bcrypt-version docstring note), `src/tests/integration/test_admin_users.py` (removed two `@pytest.mark.xfail` markers — `test_list_users_search_filter` + `test_update_user_roles_remove_admin` — that referenced the passlib/bcrypt mismatch), `TODO.md` (new follow-up entry for docker rebuild).
-**Commit**: 687b16b
+**Commit**: 093b7ca
 **CoSA submodule edits NOT in this commit** (per `feedback_lupin_only_never_cosa`): `src/cosa/requirements.txt:16` (`bcrypt==5.0.0` → `bcrypt==4.3.0`) — informational only; the Lupin Docker build resolves from `pyproject.toml` + `uv.lock`, not from the COSA requirements file.
 **NOT staged** (parallel session, idle-aware stop hook): `.claude/skills/testing-patterns/SKILL.md`, `src/lupin_cli/claude_code/hooks/lib/session_bridge.py`, `src/lupin_cli/claude_code/hooks/lib/anything_else_ask.py` (untracked), `src/lupin_cli/claude_code/hooks/lib/idle_settings.py` (untracked), `src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/` (untracked dir).
 
@@ -23,9 +23,34 @@
 
 **Next step (logged in TODO.md)**: Rebuild `lupin:1.0.0` to pick up the locked `bcrypt==4.3.0` from pyproject. Park at candidate tag (e.g. `lupin:1.0.0-bcrypt-4.3.0`) per `feedback_no_auto_promote_tags`. After rebuild: confirm trapped warning quieter on startup, re-run unit + smoke on `:7999`, schedule integration suite on `:8000` to verify the now-unxfailed tests.
 
+#### Session Summary
+
+- **Checkpoints**: 1 (commit `093b7ca`)
+- **Files committed**: 5 (4 source + history.md)
+- **Outstanding**: docker rebuild → TODO.md (Session 78abd1aa follow-ups)
+- **Session closed**: 2026.04.29 18:00 EDT
+
 ---
 
-### 2026.04.29 - Session d34f2f74 | Test-Suite Anomaly Remediation Phases 1+2+3 + Discretionary Backlog Cleanup
+### 2026.04.29 - Session d34f2f74 | Test-Suite Anomaly Remediation Phases 1+2+3 + Discretionary Backlog Cleanup + Idle-Aware Stop Hook
+
+#### Session-End | 2026.04.29 18:00 EDT | Idle-aware Stop hook with exponential backoff (Phase 0–5, all green)
+
+**Plan-driven work** (5-phase implementation per `~/.claude/plans/peppy-tickling-wolf.md` → serialized to `src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md`):
+
+- **Phase 0**: R&D doc serialization — `01-design.md` with state machine + race analysis + alternatives, paired `90-execution.md` skeleton.
+- **Phase 1**: Bridge helpers (`get_idle_detection`, `set_idle_detection_field`, `clear_idle_waiter_pid`, `kill_idle_waiter`) + `idle_settings.py` loader with 8-case validation (rejects bogus schedules loudly per `feedback_no_defensive_programming`).
+- **Phase 2**: Detached-subprocess `idle_waiter.py` with chunked-sleep + PPID-poll + reset-detection state machine; `anything_else_ask.py` shared helper extracted from `stop.py:_ask_anything_else()` (the existing prompt flow is reused unchanged — what changed is *when* it fires, not *what* it asks).
+- **Phase 3**: 5 hooks modified — `stop.py` defers via `_arm_idle_waiter()` instead of fire-immediately (gated by `settings.idle_detection.enabled`, default true), `user_prompt_submit.py` kills waiter + resets `backoff_index=0`, `post_tool_use.py` kills waiter on `mcp__cosa-voice__*` calls, `register_session.py` initializes the idle_detection block on SessionStart with `/clear` carry-forward, `session_end.py` kills waiter at session end.
+- **Phase 4**: 32 new tests pass (18 bridge + 12 waiter logic + 2 smoke with real subprocess), 103 existing `test_stop_hook.py` + `test_session_bridge*.py` pass after autouse-fixture migration of 4 affected classes (legacy immediate-ask path now gated, but still covered with `enabled=False` settings stub). 135 tests total, 0 regressions. All tests parameterize `LUPIN_API_URL` per the new `feedback_tests_parameterize_base_url` rule + `.claude/skills/testing-patterns/SKILL.md` v1.3.
+- **Phase 5**: Documentation (90-execution.md finalized with phase status + surprises + verification snapshot). Global `~/.claude/CLAUDE.md` update deferred-by-design (out-of-scope risk for global file).
+
+**Commit**: [pending]
+**Files** (Lupin parent only, no CoSA): 9 modified + 7 new + 1 R&D directory; ~492 insertions / ~9 deletions.
+**New behavior**: ask "Anything else?" only after N min of true inactivity. Backoff `[5, 10, 20, 40, 60]` min on consecutive "no" responses. Resets on user input / Stop / cosa-voice tool calls. Conversation mode skipped (TTS dialogue is itself active).
+**Activates**: on next CC session start (hooks loaded at session boot; this session keeps the old in-memory copies).
+
+---
 
 #### Checkpoint | 2026.04.29 16:22 | Phase 3 + Phase 4 backlog Lupin parent files (CoSA edits deferred)
 
