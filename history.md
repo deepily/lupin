@@ -1,5 +1,30 @@
 # Lupin Project History
 
+### 2026.04.29 - Session 78abd1aa | passlib/bcrypt `__about__` AttributeError diagnosis + remediation
+
+#### Checkpoint | 2026.04.29 17:19 EDT | Pin `bcrypt==4.3.0`, drop xfail markers, queue docker rebuild
+
+**Files** (Lupin parent, 4 modified): `pyproject.toml` (line 69 tightened from `bcrypt>=4.0,<5` to `bcrypt==4.3.0`), `src/scripts/reset_user_password.py` (dropped now-stale host-vs-container bcrypt-version docstring note), `src/tests/integration/test_admin_users.py` (removed two `@pytest.mark.xfail` markers — `test_list_users_search_filter` + `test_update_user_roles_remove_admin` — that referenced the passlib/bcrypt mismatch), `TODO.md` (new follow-up entry for docker rebuild).
+**Commit**: 687b16b
+**CoSA submodule edits NOT in this commit** (per `feedback_lupin_only_never_cosa`): `src/cosa/requirements.txt:16` (`bcrypt==5.0.0` → `bcrypt==4.3.0`) — informational only; the Lupin Docker build resolves from `pyproject.toml` + `uv.lock`, not from the COSA requirements file.
+**NOT staged** (parallel session, idle-aware stop hook): `.claude/skills/testing-patterns/SKILL.md`, `src/lupin_cli/claude_code/hooks/lib/session_bridge.py`, `src/lupin_cli/claude_code/hooks/lib/anything_else_ask.py` (untracked), `src/lupin_cli/claude_code/hooks/lib/idle_settings.py` (untracked), `src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/` (untracked dir).
+
+**Context**: User reported a recurring, context-free log line — `(trapped) error reading bcrypt version` followed by `AttributeError: module 'bcrypt' has no attribute '__about__'` from `passlib/handlers/bcrypt.py:620` — alongside an unrelated `[WS-AUDIO] Skipping disconnect for slow zebra` line. Asked for a hypothesis.
+
+**Diagnosis** (Explore agent + WebFetch confirmation):
+- **Root cause**: passlib 1.7.4 + bcrypt 5.0.0 incompatibility. passlib's `_load_backend_mixin` reads `bcrypt.__about__.__version__` for backend version logging; bcrypt 5.0.0 removed `__about__` entirely. The traceback is "trapped" by passlib's try/except, hashing/verification still work — purely cosmetic.
+- **Secondary impact (NOT cosmetic)**: Two integration tests in `test_admin_users.py` were `@pytest.mark.xfail`-marked with reason "multiple_test_users fixture returns [] due to passlib/bcrypt version mismatch (bcrypt.__about__ missing)". Same version drift was silently breaking the bulk-user fixture, masked by xfail.
+- **Constraint inconsistency surfaced**: `pyproject.toml:69` had `bcrypt>=4.0,<5` (upper bound `<5`), but `src/cosa/requirements.txt:16` had `bcrypt==5.0.0` — and the running container had 5.0.0 from a stale build. `uv.lock` already had `bcrypt==4.3.0` correctly resolved; the running image just predated the lock update.
+- **Adjacent `[WS-AUDIO]` line is unrelated**: WS reconnect uses JWT (`get_current_user`), not password verify. Coincidental log interleaving.
+
+**Web validation of pin choice**: pyca/bcrypt issue [#1079](https://github.com/pyca/bcrypt/issues/1079) (passlib 1.7.4 + bcrypt 5.0.0 — reporter's stated workaround is `bcrypt==4.3.0`); [PyPI release history](https://pypi.org/project/bcrypt/) confirmed 4.3.0 (Feb 28, 2025) is the latest 4.x with cp313 wheels; pyca/bcrypt issue [#684](https://github.com/pyca/bcrypt/issues/684) confirmed the trapped warning is a 4.1.1+ artifact (cosmetic only, functional fix landed in 4.1.1). Initial half-correct pin recommendation `4.2.1` was upgraded to `4.3.0` after web search.
+
+**Plan doc**: `~/.claude/plans/let-s-start-a-new-generic-badger.md` (canonical) + viewer-accessible copy at `io/plans/2026.04.29-bcrypt-passlib-version-mismatch-plan.md` (gitignored, not committed). Document-viewer URL: `http://localhost:7999/static/html/document-viewer.html?path=plans/2026.04.29-bcrypt-passlib-version-mismatch-plan.md`.
+
+**Next step (logged in TODO.md)**: Rebuild `lupin:1.0.0` to pick up the locked `bcrypt==4.3.0` from pyproject. Park at candidate tag (e.g. `lupin:1.0.0-bcrypt-4.3.0`) per `feedback_no_auto_promote_tags`. After rebuild: confirm trapped warning quieter on startup, re-run unit + smoke on `:7999`, schedule integration suite on `:8000` to verify the now-unxfailed tests.
+
+---
+
 ### 2026.04.29 - Session d34f2f74 | Test-Suite Anomaly Remediation Phases 1+2+3 + Discretionary Backlog Cleanup
 
 #### Checkpoint | 2026.04.29 16:22 | Phase 3 + Phase 4 backlog Lupin parent files (CoSA edits deferred)

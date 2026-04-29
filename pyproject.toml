@@ -66,7 +66,7 @@ dependencies = [
   # --- Auth (some pins are pre-3.13-wheel-era; bump if uv lock fails) ---
   "PyJWT==2.10.1",
   "passlib==1.7.4",
-  "bcrypt>=4.0,<5",                       # bumped from 3.2.2 (pre-Rust, no cp313 wheels)
+  "bcrypt==4.3.0",                        # pinned at 4.3.0 (last 4.x, cp313 wheels) — 5.x breaks passlib 1.7.4 (__about__ removed); see io/plans/2026.04.29-bcrypt-passlib-version-mismatch-plan.md
   "cffi==2.0.0",
   "pycparser==2.23",
 

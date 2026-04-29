@@ -1,6 +1,12 @@
 # TODO
 
-Last updated: 2026-04-28 EDT (Session 30072c25 — Per-Session Voice Personas for CC notifications UI)
+Last updated: 2026-04-29 EDT (Session 78abd1aa — passlib/bcrypt `__about__` AttributeError diagnosis)
+
+---
+
+## 🌅 FOLLOW-UPS — for the user (Session 78abd1aa — passlib/bcrypt mismatch)
+
+- [ ] [LUPIN] **Rebuild `lupin:1.0.0` docker image to land `bcrypt==4.3.0`** — `pyproject.toml:69` tightened from `bcrypt>=4.0,<5` to `bcrypt==4.3.0`; `uv.lock` already pins 4.3.0; running container is on 5.0.0 only because it was built from an older lock state. Per `feedback_no_auto_promote_tags`, park the rebuild at a candidate tag (e.g. `lupin:1.0.0-bcrypt-4.3.0`) and don't overwrite the working `lupin:1.0.0` until verified. After rebuild: (a) confirm `(trapped) error reading bcrypt version` no longer fires on container startup logs, (b) re-run unit + smoke on `:7999`, (c) schedule integration suite on `:8000` to re-run the now-unxfailed `test_list_users_search_filter` and `test_update_user_roles_remove_admin` from `src/tests/integration/test_admin_users.py`. Plan: `io/plans/2026.04.29-bcrypt-passlib-version-mismatch-plan.md`.
 
 ---
 
