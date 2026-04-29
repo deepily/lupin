@@ -53,6 +53,7 @@
 | 52a71953 | 2026-04-24T15:50:00 | 2026-04-24T17:42:00 | closed |
 | 2026-04-26-card-render-stall | 2026-04-26T11:00:00 | 2026-04-26T13:50:00 | closed |
 | 49c27830 | 2026-04-27T11:30:00 | 2026-04-27T11:45:00 | active |
+| ba53b0d2 | 2026-04-28T21:25:00 | 2026-04-28T21:40:00 | active |
 
 ---
 
@@ -128,6 +129,13 @@
 ---
 
 ### Completed
+
+- [x] **Conversation mode: codify "acknowledge receipt before tool work" rule across 4 redundancy layers** → commit: [pending] | By: ba53b0d2 | 2026-04-28
+  - **Fix**: Added explicit two-obligation per-turn contract for conversation mode — (1) ack receipt BEFORE tool work begins via `notify()`, (2) speak closing turn in full via `notify()`. Closes the contract gap that allowed silent tool-only turns to leave the user in audio limbo.
+  - **In-repo files**: `src/lupin_mcp/cosa_voice_mcp.py:570-585` (MCP `instructions=` block), `.claude/commands/conversation-mode-on.md:18-33` (slash command, split step 3 into 3a + 3b)
+  - **Out-of-repo files** (NOT committed — global Claude Code config): `~/.claude/skills/conversation-mode-guardrails/SKILL.md` (NEW "Per-turn speaking contract" section), `~/.claude/projects/.../memory/feedback_acknowledge_receipt_before_tool_work.md` (NEW auto-memory) + `MEMORY.md` index pointer
+  - **Verification**: grep cross-check confirmed rule in all 4 layers; `py_compile` clean on `cosa_voice_mcp.py`
+  - **Effective-when**: Layer 1 (MCP) takes effect after cosa-voice MCP server restart. Layers 2/3/4 take effect immediately on next session start.
 
 - [x] **Notification dispatch unification — extracted `WebSocketManager.emit_to_user_or_listener_sync` helper, migrated 5 dispatch sites** → pending commit + pending :7999 bounce | By: 49c27830 | 2026-04-27
   - **Background**: Today's narrow fix (entry below) patched ONE dispatch site. A comprehensive audit revealed the same dispatch pattern existed in 6 places across `notifications.py`, `queues.py`, and `notification_fifo_queue.py`, with subtly different and inconsistent behavior. Two sites (`notification_expired` and `notification_responded` lifecycle broadcasts) were missing the cross-user listener fallback entirely. The next contributor adding a 7th dispatch site would have repeated the bug.

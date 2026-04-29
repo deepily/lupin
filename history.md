@@ -6,7 +6,22 @@
 
 ### Fixes
 
-(Individual fixes will be added here)
+#### Fix 1: Codify "acknowledge receipt before tool work" rule across 4 redundancy layers
+
+- **Source**: ad-hoc (user-reported during conversation-mode investigation)
+- **Symptom**: In conversation mode, Claude often opens a turn with tool calls and never calls `notify()` — leaving the user (listening at a distance via TTS) with no audio confirmation that the prompt was received. Original directives addressed only "speak the closing response" via "after every assistant turn, call notify(...)" — the gap was tool-only turns that never produce user-facing text.
+- **Root cause**: Contract gap. The MCP `instructions=` block and `/conversation-mode-on` slash command only described one obligation (closing-turn full-response speak). Receipt acknowledgment before tool work was not an explicit clause anywhere, so silent tool-only turns slipped through.
+- **Fix**: Added explicit two-obligation contract — (1) ack receipt BEFORE tool work begins, (2) speak closing turn in full — across 4 redundancy layers matching the existing USER-ONLY INITIATION pattern:
+  1. `src/lupin_mcp/cosa_voice_mcp.py` MCP `instructions=` block (`cosa_voice_mcp.py:570-585`) — split conversation-mode bullet into two sub-obligations
+  2. `.claude/commands/conversation-mode-on.md` — split step 3 into 3a "ack before tool work" + 3b "speak closing turn in full"
+  3. `~/.claude/skills/conversation-mode-guardrails/SKILL.md` — NEW "Per-turn speaking contract" section (rule was absent from global skill)
+  4. `~/.claude/projects/.../memory/feedback_acknowledge_receipt_before_tool_work.md` — NEW auto-memory feedback file + index pointer in MEMORY.md
+- **In-repo touched files**: `src/lupin_mcp/cosa_voice_mcp.py`, `.claude/commands/conversation-mode-on.md`
+- **Out-of-repo touched files** (NOT committed — global Claude Code config): `~/.claude/skills/conversation-mode-guardrails/SKILL.md`, `~/.claude/projects/.../memory/feedback_acknowledge_receipt_before_tool_work.md`, `~/.claude/projects/.../memory/MEMORY.md`
+- **Verification**: grep cross-check confirmed "Acknowledge receipt BEFORE tool work begins" string present in all 4 layers (MCP `:574`, slash command `:18`, skill `:52`, memory file frontmatter + body). `py_compile` clean on `cosa_voice_mcp.py`.
+- **Test**: documentation-only change → no automated tier applies (no behavior code touched). Compile-clean is the verification floor; effective-test will be the user's lived experience in next conversation-mode session after MCP server reload.
+- **Effective-when**: Layer 1 takes effect after the cosa-voice MCP server restarts (loads new `instructions=` block on startup). Layers 2/3/4 take effect immediately on next session start.
+- **Commit**: [pending]
 
 ### Session Summary
 
