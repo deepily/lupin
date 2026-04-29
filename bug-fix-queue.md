@@ -130,7 +130,7 @@
 
 ### Completed
 
-- [x] **Conversation mode: codify "acknowledge receipt before tool work" rule across 4 redundancy layers** → commit: [pending] | By: ba53b0d2 | 2026-04-28
+- [x] **Conversation mode: codify "acknowledge receipt before tool work" rule across 4 redundancy layers** → commit: 4513f08 | By: ba53b0d2 | 2026-04-28
   - **Fix**: Added explicit two-obligation per-turn contract for conversation mode — (1) ack receipt BEFORE tool work begins via `notify()`, (2) speak closing turn in full via `notify()`. Closes the contract gap that allowed silent tool-only turns to leave the user in audio limbo.
   - **In-repo files**: `src/lupin_mcp/cosa_voice_mcp.py:570-585` (MCP `instructions=` block), `.claude/commands/conversation-mode-on.md:18-33` (slash command, split step 3 into 3a + 3b)
   - **Out-of-repo files** (NOT committed — global Claude Code config): `~/.claude/skills/conversation-mode-guardrails/SKILL.md` (NEW "Per-turn speaking contract" section), `~/.claude/projects/.../memory/feedback_acknowledge_receipt_before_tool_work.md` (NEW auto-memory) + `MEMORY.md` index pointer

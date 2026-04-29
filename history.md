@@ -21,7 +21,7 @@
 - **Verification**: grep cross-check confirmed "Acknowledge receipt BEFORE tool work begins" string present in all 4 layers (MCP `:574`, slash command `:18`, skill `:52`, memory file frontmatter + body). `py_compile` clean on `cosa_voice_mcp.py`.
 - **Test**: documentation-only change → no automated tier applies (no behavior code touched). Compile-clean is the verification floor; effective-test will be the user's lived experience in next conversation-mode session after MCP server reload.
 - **Effective-when**: Layer 1 takes effect after the cosa-voice MCP server restarts (loads new `instructions=` block on startup). Layers 2/3/4 take effect immediately on next session start.
-- **Commit**: [pending]
+- **Commit**: 4513f08
 
 ### Session Summary
 
