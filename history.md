@@ -1,6 +1,33 @@
 # Lupin Project History
 
-### 2026.04.29 - Session d34f2f74 | Test-Suite Anomaly Remediation Phases 1+2 — OOS-1A + 14 smoke FAILs
+### 2026.04.29 - Session d34f2f74 | Test-Suite Anomaly Remediation Phases 1+2+3 + Discretionary Backlog Cleanup
+
+#### Checkpoint | 2026.04.29 16:22 | Phase 3 + Phase 4 backlog Lupin parent files (CoSA edits deferred)
+
+**Files** (Lupin parent, 8 modified, 0 new): TODO.md, history.md, src/conf/lupin-app.ini (Phase 3 cap key + 1 small Rachel persona color tweak from in-progress persona theming work), src/conf/lupin-app-splainer.ini, src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/03-oos-4-test-suite-in-dead-anomaly.md (Resolution status table for Findings A/B/C/D), src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/07-final-execution-plan.md (status header reflecting actual completion state), src/tests/unit/test_test_suite_job.py (TestArtifacts io_base patches + test_exception_sets_failed pytest.raises wrapper), src/tests/unit/test_tfe_forensics.py (do_all re-raise contract updates)
+**Commit**: 7e8be00
+**CoSA submodule edits NOT in this commit** (deferred to separate cosa-context session per `feedback_lupin_only_never_cosa`):
+- Phase 3: `src/cosa/agents/test_fix_expediter/config.py`, `prompts/proposal.py`, `orchestrator.py`
+- Phase 4 backlog #1: `src/cosa/agents/utils/agent_notification_dispatcher.py` (ContextVar plumbing), `src/cosa/agents/deep_research/cosa_interface.py` (set_dispatch_context helper), `src/cosa/agents/deep_research/job.py`
+- Phase 4 backlog #2: `src/cosa/rest/queue_consumer.py` (heartbeat refresh + bounded wait)
+- Phase 4 backlog #4: `src/cosa/rest/running_fifo_queue.py` (4 non-canonical paths refactored to `_transition_to_dead`)
+- Phase 4 backlog #5 (do_all re-raise across 9 subclasses): `deep_research/job.py`, `podcast_generator/job.py`, `presentation_generator/job.py`, `deep_research_to_podcast/job.py`, `deep_research_to_presentation/job.py`, `swe_team/job.py`, `test_fix_expediter/job.py`, `test_suite/job.py`, `bug_fix_expediter/job.py`, `claude_code/job.py`
+
+**NOT staged** (in-progress user work, ownership unclear): `src/fastapi_app/static/css/notifications.css`, `src/fastapi_app/static/js/notifications.js` — these are persona-theming continuations after commit `d8bce7f` and don't belong in this Phase 3+4 checkpoint.
+
+#### Phase 4 — Discretionary backlog (5 items, all done)
+
+**Item 1 — Cross-job sender_id leak in DR notifications**: Concurrent DR jobs in the agentic pool were sharing `cosa_interface.SENDER_ID` (module global) and `_dispatcher.sender_id` (shared instance attribute), so the most-recently-launched job's sender leaked onto earlier still-running jobs' notifications. Fix: added `ContextVar`s for sender_id / target_user / session_name to `agent_notification_dispatcher.py`. Dispatcher resolver methods prefer ContextVar over `self.*`. DR's `cosa_interface` exposes `set_dispatch_context()` helper; DR `job.py` calls it at execution start. ContextVars are asyncio-task-local AND thread-local so the agentic pool's per-worker `asyncio.run()` contexts are naturally isolated. Live verification via concurrent-task test confirms per-task isolation works.
+
+**Item 2 — Consumer-stalls-after-test-suite-job heartbeat**: Consumer thread set heartbeat at the OUTER while loop top, then blocked indefinitely in `condition.wait()` when queue was empty (e.g., after a test_suite job completed). Heartbeat went stale, stall detector (120s threshold) flagged healthy idle consumer as stalled. Fix: bound the previously-indefinite waits to `idle_wake_interval_secs` (derived as `stall_threshold // 4` = 30s default), and tick the heartbeat at the top of EACH inner loop iteration (not just outer). Healthy idle consumer now refreshes heartbeat at least every 30 seconds.
+
+**Item 3 — OOS-4 Finding D: integration-e2e-remediation.json empty failures[]**: Surveyed all `*-integration-e2e-remediation.json` files since 2026-04-24 — all show `failed=4, in-array=0`. Tracked to `test_test_suite_job.py::TestArtifacts::test_artifacts_populated`: the unit test mocked `_run_suite` returning `{passed:10, failed:2}` but lacked `failure_details` and didn't patch `cu.get_project_root` — so `do_all()` wrote a real remediation.json to host filesystem with the inconsistent shape. Fix: added `@patch("cu.get_project_root")` + `mock_root.return_value = str(tmp_path)` so the test isolates its writes; also included `failure_details` entries in the mock data so the writer's iteration produces a consistent file shape. Verified with `BEFORE/AFTER` count of remediation files in `io/test-suite/` — 0 new files written by the fixed test.
+
+**Item 4 — OOS-4 Finding C: 4 non-canonical dead-queue write paths**: Refactored all 4 sites in `running_fifo_queue.py` (`_process_job` exception handler, `_handle_error_case`, two paths in `_handle_agentic_job` legacy method) to delegate to the canonical `_transition_to_dead` primitive. Reduced ~150 lines of duplicate metadata-build / WS-emit / queue-push logic to ~5 one-line calls. Behavioral change: fast-lane errors now also fire the auto-fix watchdog (was previously only on agentic path), but watchdog filters by eligible_types so only agentic types actually trigger BFE. Only one `jobs_dead_queue.push` site remains (the canonical one inside `_transition_to_dead`).
+
+**Item 5 — AgenticJobBase `do_all` swallow cleanup**: All 9 subclasses (DR, Podcast, Presentation, R2P, R2Presentation, BFE, TFE, TestSuite, SWE Team, ClaudeCode, ClaudeCode SDK) had a swallow-and-return pattern in their exception handler — they caught the exception, set `state=FAILED`, and returned the error string instead of re-raising. This forced the agentic-pool callback at `_on_agentic_complete` to handle "job ran without raising but state==FAILED" via the defensive FAILED-state branch added in cluster 2.3. Cleanup: re-raise from each subclass's exception handler after persisting state/error/answer_conversational. `Future.exception()` now correctly carries the real exception, and the pool callback's exception branch fires directly. The cluster 2.3 FAILED-state branch remains as defensive belt against future regressions. 3 unit tests updated to wrap `do_all()` in `pytest.raises(...)` matching the new contract.
+
+**Verification (Phase 4)**: 503+ unit tests pass across all touched modules (TFE, agentic-pool, fifo-queue, running-queue-threshold, consumer-heartbeat, test-suite-job). py_compile clean across all 13 touched files (2 dispatcher infra + 5 from item 4 refactor + 9 from item 5 + 1 unit test fix). Live concurrent-task isolation test confirms ContextVar-based per-task sender state.
 
 #### Checkpoint | 2026.04.29 14:15 | Phase 1+2 Lupin parent files (CoSA edits deferred to cosa-context session)
 

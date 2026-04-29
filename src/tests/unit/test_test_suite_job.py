@@ -363,7 +363,10 @@ class TestStateTransitions:
         mock_voice_io.clear_job_id = MagicMock()
         mock_voice_io.notify = AsyncMock( side_effect=RuntimeError( "boom" ) )
 
-        result = job.do_all()
+        # Backlog item 5 (2026-04-29): do_all() re-raises (canonical Future
+        # contract). State + error are still set on the job object.
+        with pytest.raises( RuntimeError ):
+            job.do_all()
 
         assert job.state == JobState.FAILED
         assert job.error is not None
@@ -489,13 +492,34 @@ class TestVoiceIOIntegration:
 class TestArtifacts:
     """Tests for artifact population after execution."""
 
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.job.TestSuiteJob._run_suite" )
     @patch( "cosa.agents.test_suite.voice_io" )
-    def test_artifacts_populated( self, mock_voice_io, mock_run_suite, job ):
+    def test_artifacts_populated( self, mock_voice_io, mock_run_suite, mock_root, job, tmp_path ):
         """Artifacts should contain suite_results and cost_summary."""
+        # Pin io_base to tmp_path so do_all() writes results.md + remediation.json
+        # under pytest's temp dir instead of polluting real io/test-suite/. Without
+        # this, every unit-test run leaves a stray *-integration-e2e-remediation.json
+        # in the project filesystem (OOS-4 Finding D, fixed 2026-04-29).
+        mock_root.return_value = str( tmp_path )
+        # Include failure_details in the mock so the writer's iteration at
+        # job.py:511-515 produces a consistent snapshot (failed count matches
+        # the failures[] array length). Previously omitted, which produced the
+        # inconsistent "failed=4, failures=[]" file shape.
         mock_run_suite.return_value = {
-            "passed" : 10, "failed" : 2, "skipped" : 1, "errors" : 0,
-            "exit_code" : 1, "log_path" : "/tmp/test.log", "duration" : 5.0,
+            "passed"          : 10,
+            "failed"          : 2,
+            "skipped"         : 1,
+            "errors"          : 0,
+            "exit_code"       : 1,
+            "log_path"        : "/tmp/test.log",
+            "duration"        : 5.0,
+            "failure_details" : [
+                { "classname": "test.module.TestClass", "name": "test_one",
+                  "type": "FAILED", "message": "mock failure 1", "traceback": "" },
+                { "classname": "test.module.TestClass", "name": "test_two",
+                  "type": "FAILED", "message": "mock failure 2", "traceback": "" },
+            ],
         }
         mock_voice_io.reconfigure = MagicMock()
         mock_voice_io.set_job_id = MagicMock()
@@ -511,10 +535,13 @@ class TestArtifacts:
         assert cost[ "total_passed" ] == 20  # 10 per suite * 2 suites
         assert cost[ "total_failed" ] == 4   # 2 per suite * 2 suites
 
+    @patch( "cosa.agents.test_suite.job.cu.get_project_root" )
     @patch( "cosa.agents.test_suite.job.TestSuiteJob._run_suite" )
     @patch( "cosa.agents.test_suite.voice_io" )
-    def test_log_paths_in_artifacts( self, mock_voice_io, mock_run_suite, job ):
+    def test_log_paths_in_artifacts( self, mock_voice_io, mock_run_suite, mock_root, job, tmp_path ):
         """Log paths should be stored in artifacts."""
+        # Pin io_base to tmp_path (OOS-4 Finding D) — see test_artifacts_populated above.
+        mock_root.return_value = str( tmp_path )
         mock_run_suite.return_value = {
             "passed" : 10, "failed" : 0, "skipped" : 0, "errors" : 0,
             "exit_code" : 0, "log_path" : "/tmp/test.log", "duration" : 5.0,

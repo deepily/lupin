@@ -1,6 +1,6 @@
 # 07 — Final Execution Plan (Findings A → 14 Smokes → Finding B)
 
-**Status**: Phases 1 + 2 complete (Lupin + CoSA edits, no commits). Phase 3 not yet started.
+**Status**: ALL PHASES COMPLETE — Phases 1+2 committed in `84262bb` (parent Lupin only); Phase 3 + Phase 4 backlog uncommitted. CoSA submodule edits across all phases pending separate cosa-context session.
 **Author session**: ba7138c4 (continuation), execution session d34f2f74
 **Last update**: 2026-04-29
 **Read-on-resume**: Yes — this is the canonical "what to do next" doc post-RUN 2. Pair with `90-execution-log.md` for per-cluster findings + diffs.
@@ -10,9 +10,10 @@
 | Phase | Status | Detail |
 |---|---|---|
 | 0 | ✅ Done (this doc itself) | — |
-| 1 | ✅ Edits landed | OOS-1A typo fix in TFE `job.py` + adjacent defensive-programming cleanup. Awaiting CoSA-context commit. |
-| 2 | ✅ All 14 smoke FAILs resolved | See `90-execution-log.md` Phase 2 section. Mix of CoSA + Lupin edits. Awaiting commits in both contexts. |
-| 3 | ⏸️ Not started | OOS-1B INI proposal-cap. Pending user buy-in. |
+| 1 | ✅ Done (in `84262bb`, CoSA pending) | OOS-1A typo fix in TFE `job.py` + adjacent defensive-programming cleanup. |
+| 2 | ✅ Done — all 14 smoke FAILs resolved (in `84262bb`, CoSA pending) | See `90-execution-log.md` Phase 2 section. |
+| 3 | ✅ Done (uncommitted) | OOS-1B INI proposal-cap. INI key + splainer + TFEConfig field + parameterized PROPOSAL_SYSTEM_PROMPT builder + orchestrator wiring + smoke tests. |
+| 4 (discretionary backlog) | ✅ All 5 items done (uncommitted) | Item 1: cross-job sender_id leak (ContextVars). Item 2: consumer-stalls heartbeat refresh. Item 3: OOS-4 Finding D test-side-effect leak. Item 4: OOS-4 Finding C dead-queue path refactor. Item 5: AgenticJobBase do_all re-raise cleanup. See history.md Phase 4 section. |
 
 ---
 

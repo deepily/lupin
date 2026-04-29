@@ -163,6 +163,17 @@ Then localize per the if/then in Finding D. Likely a one-line parser fix or a sh
 
 A → C-logging → wait for evidence → B+C-fix → D (independently, anytime). Part A is the cheapest highest-value win (one-line + assertion + test) — would do it standalone before anything else.
 
+---
+
+## Resolution status (2026-04-29 Session d34f2f74 Phase 4 backlog)
+
+| Finding | Status | Resolution |
+|---|---|---|
+| A — Empty error field on dead Calculator jobs | ✅ Subsumed | Refactored sites that had this pattern through `_transition_to_dead` (which sets `job.error` canonically). See Finding C resolution. |
+| B — Refactor 4 non-canonical paths through `_transition_to_dead` (Finding C) | ✅ FIXED | Phase 4 backlog item #4. All 4 sites in `running_fifo_queue.py` now delegate to `_transition_to_dead`. Only the canonical push site remains. ~150 lines of duplicate logic eliminated. |
+| C — `test_suite-in-dead` trace logging | ⏸️ Not pursued | The 4-non-canonical-paths refactor (Finding C/Part B) addresses the structural risk. Trace logging would help if a NEW non-canonical path is reintroduced — kept as discretionary follow-up if symptom recurs. |
+| D — Integration-e2e remediation regression | ✅ FIXED | Phase 4 backlog item #3. Root cause was `test_test_suite_job.py::TestArtifacts::test_artifacts_populated` writing real remediation files to host filesystem (missing `mock_root` patch + missing `failure_details` in mock data). Fixed both — test now uses `tmp_path`. The 124+ stale files in `io/test-suite/` are bulk-cleanup-eligible (TODO). |
+
 ## Evidence
 
 ### Anomaly A — `test_suite` job at 21:06 is in `dead` queue with `status=completed`
