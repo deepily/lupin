@@ -1,5 +1,38 @@
 # Lupin Project History
 
+### 2026.04.30 - Session 406cadbf | cc_notification_listener hardcoded sender_id fix
+
+#### Checkpoint | 2026.04.30 ~12:50 EDT | One-line bug fix + R&D doc
+
+**Context**: User reported that a fresh CC session started inside `src/cosa/` (session ID `77dac746`) was rendering as **two sender cards** in the notifications UI for the same session_id — one correctly under `[COSA]`, plus a ghost card under `[LUPIN]` that appeared the moment the listener fired its first voice-receipt ACK ("Received: Why haven't you updated your..."). The receipt notification used a different `sender_id` than the SessionStart-era notifications, so the UI grouped them as separate senders.
+
+**Diagnosis**: `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py:453` builds the gist-response notification's `sender_id` with the project segment **literally hardcoded to `"lupin"`**: `f"claude.code@lupin.deepily.ai#{self.session_id_hash}"`. The 2026.04.24 nested-repo detection fix (R&D doc `2026.04.24-cosa-voice-nested-repo-detection-fix.md`) repaired `detect_project()` inside CoSA's `sender_id.py` and added the `build_sender_id_for_cc()` bridge-anchored helper at `session_bridge.py:436` (whose docstring literally describes this dual-card-per-session symptom), but the audit didn't sweep parent Lupin code for hardcoded `lupin.deepily.ai` strings — so this listener offender was missed. Family of bug, missed singleton.
+
+**Fix**: replaced the hardcoded line with `build_sender_id_for_cc( session_id=self.session_id_hash ) or f"claude.code@lupin.deepily.ai#{self.session_id_hash}"` (Option 1 — symmetric with the parallel correct path at `permission_request.py:123` → `send_tts()` → `build_sender_id_for_cc()`). The `or` fallback preserves the legacy hardcoded value as a worst-case fallback if bridge resolution returns `None`, so failure-mode is no worse than today. Added the import. Net diff: +1 import line, ±1 logic line.
+
+**Sweep check**: grepped parent Lupin source for `lupin.deepily.ai` literals (excluded `src/tests/`, `src/cosa/`, `src/rnd/`). Singleton offender — only `cc_notification_listener.py:453` constructs CC-session sender_ids. Other hits are benign (cosa_voice_mcp.py docstring example, README, Firefox plugin server URL, seed_proxy_decisions.py for `swe.*` agents).
+
+**Verification**:
+
+| Layer | Result |
+|---|---|
+| `py_compile` | OK |
+| Import chain | OK |
+| `pytest src/tests/smoke/test_cc_notification_listener.py` | passing (mocks `_send_gist_response`, no assertion regression) |
+| `pytest src/tests/unit/test_session_bridge_lookup.py` (incl. `TestBuildSenderIdForCcBridgeCwdAnchoring` × 6) | passing |
+| Combined | **93/93 passed in 0.20s** |
+| Live re-test | User-gated (restart CC session in `src/cosa/`, check UI for ghost card) |
+
+**Files** (Lupin parent only — no CoSA): `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` (the fix), `src/rnd/v0.1.7/2026.04.30-cc-listener-hardcoded-sender-id-fix.md` (NEW R&D doc), `history.md` (this entry), `.claude-session.md` (manifest).
+
+**Deployment note**: the listener is a long-lived subprocess spawned by SessionStart hook. In-flight CC sessions still run pre-fix code; the fix takes effect on next SessionStart. User confirmed they will restart a CoSA-context session to validate.
+
+**Out of scope** (separate concerns from user's report):
+- The CoSA session's Claude failed to call `set_session_topic()` until prompted — Phase B startup discipline issue, not code.
+- This Lupin parent's first `set_session_topic` call this session got `bridge=ok / ui_push=HTTP 401` — succeeded silently in the bridge but didn't reach UI. Retry succeeded. Worth a follow-up if it's recurring.
+
+---
+
 ### 2026.04.29 - Session 9977a1ba | Persona Theming Round 1 + WS-Event Cleanup + UI Polish + Rachel TTS bug fix
 
 #### Session-End | 2026.04.29 evening | Four commits across cleanup + theming + polish

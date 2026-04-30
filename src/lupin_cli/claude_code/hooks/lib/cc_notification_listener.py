@@ -44,6 +44,7 @@ from cosa.agents.utils.proxy_agents.base_config import (
     DEFAULT_SERVER_HOST,
     DEFAULT_SERVER_PORT,
 )
+from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -449,8 +450,7 @@ class CCNotificationListener( BaseWebSocketListener ):
             )
             from lupin_cli.notifications.notify_user_async import notify_user_async
 
-            # Build sender_id matching the CC session format
-            sender_id = f"claude.code@lupin.deepily.ai#{self.session_id_hash}"
+            sender_id = build_sender_id_for_cc( session_id=self.session_id_hash ) or f"claude.code@lupin.deepily.ai#{self.session_id_hash}"
 
             request = AsyncNotificationRequest(
                 message           = f"Received: {gist}",
