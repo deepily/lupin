@@ -17,6 +17,7 @@ from unittest.mock import patch
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     sanitize_for_wrap,
     conv_mode_wrap,
+    conv_mode_reminder_block,
     _CONV_MODE_WRAP_SENTINEL,
 )
 
@@ -220,3 +221,47 @@ class TestConvModeWrapIdempotency:
         twice = conv_mode_wrap( once,  source="terminal-typed", session_id="abc12345" )
         assert once == twice
         assert twice.count( _CONV_MODE_WRAP_SENTINEL ) == 1
+
+
+# ── conv_mode_reminder_block ──────────────────────────────────────────────────
+
+class TestConvModeReminderBlock:
+
+    def test_returns_empty_when_session_id_none( self ):
+        assert conv_mode_reminder_block( "terminal-typed", None ) == ""
+
+    def test_returns_empty_when_session_id_empty( self ):
+        assert conv_mode_reminder_block( "terminal-typed", "" ) == ""
+
+    @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_conversation_mode" )
+    def test_returns_empty_when_conv_mode_inactive( self, mock_get ):
+        mock_get.return_value = False
+        assert conv_mode_reminder_block( "terminal-typed", "abc12345" ) == ""
+
+    @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_conversation_mode" )
+    def test_returns_empty_on_bridge_read_error( self, mock_get ):
+        mock_get.side_effect = RuntimeError( "bridge fail" )
+        # Fail-closed
+        assert conv_mode_reminder_block( "terminal-typed", "abc12345" ) == ""
+
+    @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_conversation_mode" )
+    def test_returns_block_when_active_terminal_typed( self, mock_get ):
+        mock_get.return_value = True
+        result = conv_mode_reminder_block( "terminal-typed", "abc12345" )
+        assert result.startswith( "<system-reminder>" )
+        assert result.endswith( "</system-reminder>" )
+        assert _CONV_MODE_WRAP_SENTINEL in result
+        # No voice-message tag in reminder-only output
+        assert "<voice-message" not in result
+
+    @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_conversation_mode" )
+    def test_block_source_attribution_idle_prompt( self, mock_get ):
+        mock_get.return_value = True
+        result = conv_mode_reminder_block( "hook-idle-prompt", "abc12345" )
+        assert "Idle-aware" in result
+
+    @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_conversation_mode" )
+    def test_block_source_attribution_voice( self, mock_get ):
+        mock_get.return_value = True
+        result = conv_mode_reminder_block( "voice", "abc12345" )
+        assert "voice message from a distance" in result

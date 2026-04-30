@@ -48,27 +48,42 @@
 - Sanitization is conservative (case-insensitive, `text.lower().find(...)`); no regex, no parsing — minimum-blast-radius per `feedback_sanitize_at_boundary_not_format_strip`.
 - Fail-closed on bridge read error: pass through unwrapped rather than wrap on stale state.
 
-**Commit**: TBD (filled in after commit lands below).
+**Commit**: `02af97b` (5 files, 916+/1-).
 
 ---
 
 ## Phase 2 — Thread helper through injection points
 
-**Status**: ⏳ pending Phase 1
+**Status**: ✅ complete (2026-04-30)
 **Files**:
-- `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py`
-- `src/lupin_cli/claude_code/hooks/user_prompt_submit.py`
-- `src/lupin_cli/claude_code/hooks/lib/anything_else_ask.py`
-- `src/lupin_cli/claude_code/hooks/permission_request.py`
-- `src/lupin_cli/claude_code/hooks/pre_tool_use.py` (audit)
-- `src/lupin_cli/claude_code/hooks/post_tool_use.py` (audit)
+- `src/lupin_cli/claude_code/hooks/lib/hook_common.py` — added `conv_mode_reminder_block(source, session_id)` helper for reminder-only emission (used by hooks that can't transform user prompt directly), threaded `conv_mode_wrap` into `inject_qualifier_via_tmux` with source="hook-idle-prompt"
+- `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` — `_inject_via_tmux` now wraps `message_text` via `conv_mode_wrap(text, source="voice", session_id=self.session_id_hash)` before tmux send-keys
+- `src/lupin_cli/claude_code/hooks/user_prompt_submit.py` — emits `conv_mode_reminder_block("terminal-typed", session_id)` via `additionalContext`; combines with voice_ctx when both present
+- `src/tests/unit/test_conv_mode_wrap.py` — extended with `TestConvModeReminderBlock` (8 tests) covering the new helper
+- `src/tests/unit/test_conv_mode_wrap_threading.py` (NEW) — integration-style tests for each threading site (4 tests across 3 test classes)
 
 **Verification**:
-- [ ] py_compile clean across all touched files
-- [ ] Sweep grep for additional injection sites documented in design doc §7
-- [ ] Existing listener smoke test passes (no regression in mock-tmux path)
+- [x] py_compile clean across all 3 touched files (`hook_common.py`, `cc_notification_listener.py`, `user_prompt_submit.py`)
+- [x] Import chain clean (`from ...hook_common import conv_mode_wrap, conv_mode_reminder_block, sanitize_for_wrap` + listener import)
+- [x] Phase 1 + Phase 2 unit + integration tests pass — **39/39 in 0.34s**
+- [x] Existing test_cc_notification_listener.py + test_session_bridge_lookup.py regression — **93/93 in 0.16s** (no regression)
+- [x] Combined Phase 1+2 + regression — **132 tests green**
 
-**Notes**: TBD on landing.
+**Sweep results** (per design doc §7 mandate):
+- `cc_notification_listener._inject_via_tmux` → INBOUND, threaded ✅
+- `inject_qualifier_via_tmux` (hook_common) → INBOUND, threaded ✅
+- `user_prompt_submit.py` → INBOUND (via additionalContext), threaded ✅ (reminder-only path; hooks can't transform user's prompt text directly per Claude Code hook contract)
+- `anything_else_ask.fire_anything_else_ask` → OUTBOUND (NotificationRequest sent to user UI for yes/no), NOT threaded ✅
+- `permission_request.py` → OUTBOUND (TTS to user via send_tts/_forward_to_user), NOT threaded ✅
+- `pre_tool_use.py` + `post_tool_use.py` → INBOUND (drain voice buffer + emit additionalContext), but **deferred from Phase 2** — adding the reminder per-tool-call would inject it dozens of times per turn, which is noisy. Reminder fires at user-prompt-submit (natural turn boundary) only. Revisit if discipline drift is observed at tool-use boundaries.
+- Listener `_send_gist_response` (the path fixed in commit `2eaeffc` earlier today) → OUTBOUND TTS receipt, NOT threaded ✅
+
+**Notes**:
+- The Claude Code UserPromptSubmit hook contract does NOT allow transforming the user's typed prompt — only emitting `additionalContext` (appended) or `decision: block`. So `user_prompt_submit` uses `conv_mode_reminder_block` to emit the reminder block alongside the user's prompt rather than wrapping the prompt itself. Functionally equivalent: Claude sees the reminder when conv mode is active.
+- `anything_else_ask` was listed in the design doc Phase 2 file list but audit shows it's outbound-only. The inbound path that flows from the "Anything else?" qualifier reply is `inject_qualifier_via_tmux`, which IS threaded. Design doc §7 sweep-check table updated.
+- Voice content threaded via `source="voice"` (full XML wrap with `<voice-message>` tag); qualifier inject via `source="hook-idle-prompt"` (system-reminder-only since the qualifier is a typed-style reply, not raw voice).
+
+**Commit**: TBD (filled in after commit lands).
 
 ---
 

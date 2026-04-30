@@ -30,7 +30,7 @@ if _src_path not in sys.path:
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, drain_and_acknowledge,
     format_voice_context, enrich_voice_context, build_additional_context,
-    write_turn_start_marker
+    write_turn_start_marker, conv_mode_reminder_block
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, resolve_stable_session_id,
@@ -72,9 +72,24 @@ def main():
     messages  = drain_and_acknowledge( session_id )
     voice_ctx = format_voice_context( messages )
 
-    if voice_ctx:
+    # Phase 2 — Layer 1 threading: append conv-mode reminder to additionalContext
+    # for terminal-typed prompts when conv mode is active. The user's actual
+    # typed prompt cannot be transformed via this hook (Claude Code only
+    # accepts additionalContext, not prompt replacement) — but appending the
+    # reminder via additionalContext is functionally equivalent: Claude sees
+    # the reminder alongside the user prompt and applies the conv-mode
+    # contract on its response.
+    # See: src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
+    reminder = conv_mode_reminder_block( "terminal-typed", session_id )
+
+    if voice_ctx and reminder:
+        enriched = enrich_voice_context( voice_ctx )
+        emit_json( build_additional_context( enriched + "\n\n" + reminder ) )
+    elif voice_ctx:
         enriched = enrich_voice_context( voice_ctx )
         emit_json( build_additional_context( enriched ) )
+    elif reminder:
+        emit_json( build_additional_context( reminder ) )
     else:
         emit_json( {} )
 

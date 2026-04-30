@@ -616,6 +616,20 @@ def inject_qualifier_via_tmux( session_id, text, delay=TMUX_INJECTION_DELAY ):
             } )
             return
 
+        # Phase 2 — Layer 1 threading: wrap qualifier text with conv-mode
+        # envelope when active. The qualifier comes from the user's reply
+        # to the idle-aware Stop hook's "Anything else?" prompt and is
+        # injected back into Claude's input — clear inbound path.
+        # See: src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
+        try:
+            text = conv_mode_wrap(
+                text,
+                source     = "hook-idle-prompt",
+                session_id = session_id
+            )
+        except Exception:
+            pass  # Non-fatal — fall through with raw text
+
         subprocess.Popen(
             [ "bash", "-c",
               'sleep "$1" && tmux send-keys -t "$2" -l -- "$3" && sleep 0.25 && tmux send-keys -t "$2" Enter',
@@ -1094,6 +1108,46 @@ def conv_mode_wrap( text, *, source, session_id=None ):
         f'{reminder_body}\n'
         f'</system-reminder>'
     )
+
+
+def conv_mode_reminder_block( source, session_id ):
+    """
+    Return just the <system-reminder> block when conv mode is active.
+
+    Variant of conv_mode_wrap for callers that need to inject the reminder
+    alone rather than wrap a specific text payload — e.g., the
+    user_prompt_submit hook, which can only emit additionalContext but
+    cannot transform the user's typed prompt.
+
+    Requires:
+        - source is one of: "voice", "terminal-typed",
+          "hook-idle-prompt", "hook-permission-prompt"
+        - session_id is a non-empty string OR None
+
+    Ensures:
+        - Returns empty string if conv mode is off, session_id missing,
+          or any error reading the bridge (fail-closed)
+        - Returns formatted <system-reminder>…</system-reminder> block
+          otherwise (no wrapping <voice-message> tag, no leading
+          newline padding)
+
+    Args:
+        source:     Which injection point's reminder body to use
+        session_id: Session ID to look up in the bridge
+
+    Returns:
+        str: Reminder block or empty string
+    """
+    if not session_id: return ""
+
+    try:
+        from lupin_cli.claude_code.hooks.lib.session_bridge import get_conversation_mode
+        if not get_conversation_mode( session_id ): return ""
+    except Exception:
+        return ""
+
+    body = _system_reminder_body( source )
+    return f'<system-reminder>\n{body}\n</system-reminder>'
 
 
 # ── Quick smoke test ─────────────────────────────────────────────────────────

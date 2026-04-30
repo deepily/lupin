@@ -385,6 +385,20 @@ class CCNotificationListener( BaseWebSocketListener ):
             self._log( f"{self.LOG_PREFIX} No tmux session found -- skipping injection" )
             return
 
+        # Phase 2 — Layer 1 threading: wrap with conv-mode envelope when active.
+        # See: src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
+        # Pass-through (unwrapped) when conv mode is off — gate is in conv_mode_wrap.
+        try:
+            from lupin_cli.claude_code.hooks.lib.hook_common import conv_mode_wrap
+            message_text = conv_mode_wrap(
+                message_text,
+                source     = "voice",
+                session_id = self.session_id_hash
+            )
+        except Exception as e:
+            # Wrap failure is non-fatal — fall through with raw text
+            self._log( f"{self.LOG_PREFIX} conv_mode_wrap failed (passing through unwrapped): {e}" )
+
         try:
             # Step 1: Type the message text (literal mode — no key interpretation)
             subprocess.run(
