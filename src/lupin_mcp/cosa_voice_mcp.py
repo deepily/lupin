@@ -674,6 +674,39 @@ def converse(
         return f"[error: {response.status}]"
 
 
+def strip_fenced_code_blocks( text: str ) -> str:
+    """
+    Strip triple-backtick fenced code blocks from text.
+
+    Used by _notify_impl to clean up conv-mode auto-narration messages
+    before TTS — code is universally bad voice content. Per design doc
+    Phase 3 spec.
+
+    Requires:
+        - text is a string (or empty)
+
+    Ensures:
+        - Returns text with all ```lang...``` blocks removed (any language tag)
+        - Preserves single-backtick inline `code` spans (those are fine for TTS)
+        - Returns empty string if input is None or empty
+        - Multiple consecutive blocks all stripped
+        - Idempotent
+
+    Args:
+        text: Markdown-formatted text potentially containing fenced code
+
+    Returns:
+        str: Text with fenced code blocks stripped
+    """
+    if not text: return ""
+    import re
+    # Match triple-backtick code blocks: optional language tag on the same
+    # line as the opening fence, then content (lazy across newlines via
+    # DOTALL), then a closing fence. Trailing whitespace/newline consumed
+    # so consecutive blocks don't leave gaps.
+    return re.sub( r"```[^\n`]*\n.*?\n```\s*", "", text, flags=re.DOTALL )
+
+
 def _notify_impl(
     message: str,
     notification_type: str = "progress",
@@ -682,7 +715,8 @@ def _notify_impl(
     job_id: Optional[ str ] = None,
     suppress_ding: bool = False,
     progress_group_id: Optional[ str ] = None,
-    session_name: Optional[ str ] = None
+    session_name: Optional[ str ] = None,
+    _internal_call: bool = False
 ) -> str:
     """
     Core notify implementation — plain Python function callable from anywhere.
@@ -692,6 +726,14 @@ def _notify_impl(
     the actual logic so that both the MCP tool and internal callers (e.g.,
     set_session_topic) can invoke it directly.
 
+    Phase 3 of the conv-mode three-layer enforcement plan adds a bidirectional
+    gate: when conv mode is active for the calling session, force suppress_ding
+    + priority=high + strip fenced code blocks; when conv mode is OFF and the
+    sender is a CC session asking for suppress_ding, invert it so the user
+    hears an audible cross-talk cue. Internal callers bypass via
+    _internal_call=True.
+    See: src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
+
     Requires:
         - message is a non-empty string
         - notification_type is a valid NotificationType value
@@ -700,6 +742,7 @@ def _notify_impl(
     Ensures:
         - Returns a status string (never raises)
         - Sends notification via HTTP POST to /api/notify
+        - Conv-mode gate applied unless _internal_call=True
 
     Args:
         message: What to announce to the user
@@ -712,11 +755,47 @@ def _notify_impl(
             Notifications sharing this ID update a single element instead of appending new ones.
         session_name: Optional human-readable session name for UI header display.
             When set, updates the sender-session-name span in notification history card.
+        _internal_call: When True, bypass the conv-mode gate entirely (params pass through
+            unchanged). Used by internal callers like set_session_topic that have their own
+            specific param requirements.
 
     Returns:
         Delivery status message
     """
     logger.debug( f"_notify_impl() called: {message[:50]}..." )
+
+    # ── Phase 3 bidirectional conv-mode gate ────────────────────────────────
+    # Per src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md §2.5
+    if not _internal_call:
+        # Dynamic session_id resolution (matches _flip_conversation_mode pattern)
+        try:
+            cc_meta = _get_cc_metadata()
+            sid = cc_meta.get( "stable_session_id" ) or cc_meta.get( "session_id" ) or SESSION_ID
+        except Exception:
+            sid = SESSION_ID
+
+        try:
+            from lupin_cli.claude_code.hooks.lib.session_bridge import get_conversation_mode
+            active = get_conversation_mode( sid ) if sid else False
+        except Exception:
+            active = False
+
+        sender = _wait_for_sender_id() or ""
+
+        if active:
+            # Conv mode ON — enforce conv-mode params
+            suppress_ding = True
+            if priority not in ( "high", "urgent" ):
+                priority = "high"
+            message = strip_fenced_code_blocks( message )
+            logger.debug( "_notify_impl conv-mode ON: forced priority=high, suppress_ding=True, stripped fenced code" )
+        elif sender.startswith( "claude.code@" ) and suppress_ding:
+            # Conv mode OFF + CC sender + caller asked for silent TTS = cross-talk leak.
+            # Audible-cue intervention: force ding ON so user knows this session leaked.
+            # Priority pass-through preserved so legitimate priority='high' alerts
+            # (notification_type='alert' for build-broke / urgent errors) still ding.
+            suppress_ding = False
+            logger.info( f"_notify_impl conv-mode cross-talk cue: suppress_ding inverted for {sender}" )
 
     try:
         request = AsyncNotificationRequest(
@@ -1164,7 +1243,8 @@ def set_session_topic( topic: str ) -> dict:
             notification_type = "session_topic",
             priority          = "low",
             session_name      = display_topic,
-            suppress_ding     = True
+            suppress_ding     = True,
+            _internal_call    = True   # Bypass conv-mode gate per Phase 3 design doc
         )
         ui_ok = not ( result.startswith( "[validation error" ) or result.startswith( "Failed:" ) )
 

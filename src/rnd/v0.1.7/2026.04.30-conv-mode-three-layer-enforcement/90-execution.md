@@ -83,23 +83,36 @@
 - `anything_else_ask` was listed in the design doc Phase 2 file list but audit shows it's outbound-only. The inbound path that flows from the "Anything else?" qualifier reply is `inject_qualifier_via_tmux`, which IS threaded. Design doc §7 sweep-check table updated.
 - Voice content threaded via `source="voice"` (full XML wrap with `<voice-message>` tag); qualifier inject via `source="hook-idle-prompt"` (system-reminder-only since the qualifier is a typed-style reply, not raw voice).
 
-**Commit**: TBD (filled in after commit lands).
+**Commit**: `a9ff8bc` (7 files, 411+/14-).
 
 ---
 
-## Phase 3 — `_notify_impl` param override
+## Phase 3 — `_notify_impl` bidirectional gate
 
-**Status**: ⏳ pending Phase 2
+**Status**: ✅ complete (2026-04-30)
 **Files**:
-- `src/lupin_mcp/cosa_voice_mcp.py`
-- `src/tests/unit/test_notify_impl_conv_mode_override.py` (NEW)
+- `src/lupin_mcp/cosa_voice_mcp.py` — added `strip_fenced_code_blocks(text)` standalone helper, extended `_notify_impl` with `_internal_call: bool = False` kwarg, implemented bidirectional gate logic (active/inactive/cross-talk-cue branches) using dynamic session_id resolution via `_get_cc_metadata` + fallback. Updated `set_session_topic` caller to pass `_internal_call=True`.
+- `src/tests/unit/test_notify_impl_conv_mode_override.py` (NEW) — 16 unit tests across 5 test classes.
 
 **Verification**:
-- [ ] py_compile clean
-- [ ] Unit tests: active overrides params, inactive passes through, code-block stripping correctness, internal callers (set_session_topic) not affected
-- [ ] Existing MCP smoke test still passes
+- [x] py_compile clean
+- [x] Import chain clean (`from lupin_mcp.cosa_voice_mcp import _notify_impl, strip_fenced_code_blocks`)
+- [x] Unit tests pass — **16/16 in 0.83s**:
+  - `TestStripFencedCodeBlocks` × 8: empty, None, no-fences, single-block-with-lang, single-block-no-lang, multi-block, inline-code-preserved, idempotency
+  - `TestNotifyImplGateInternalCallBypass` × 1: `_internal_call=True` bypasses gate even when conv mode active
+  - `TestNotifyImplGateConvModeActive` × 3: forces priority=high + suppress_ding=True, strips code blocks, preserves urgent priority (no downgrade)
+  - `TestNotifyImplGateConvModeInactiveCrossTalkCue` × 3: CC sender + suppress_ding=True → inverted to False, CC sender + suppress_ding=False → pass-through, non-CC sender → pass-through
+  - `TestNotifyImplGateBridgeReadError` × 1: fail-closed; cross-talk cue still fires for CC sender when bridge unreachable (audible ding > silent leak)
+- [x] Combined Phase 1+2+3 + regression — **148 tests in 1.25s**, no regression
 
-**Notes**: TBD on landing.
+**Notes**:
+- `strip_fenced_code_blocks` regex: `r"\`\`\`[^\n\`]*\n.*?\n\`\`\`\s*"` with DOTALL — matches optional language tag on opening fence line, lazy content across newlines, closing fence + trailing whitespace. Idempotent.
+- Dynamic session_id resolution mirrors `_flip_conversation_mode` pattern (`cc_meta.get("stable_session_id")` first, then `session_id`, then module-level `SESSION_ID` as fallback).
+- Cross-talk audible cue scoped to `claude.code@` senders only — agentic-job senders (`agentic.job@...`, `swe.lead@...`, etc.) pass through unchanged.
+- Bridge-read-error path: treated as inactive but the cross-talk cue STILL fires for CC senders requesting suppress_ding=True. Failure mode chosen: audible ding > silent leak when conv-mode state can't be confirmed.
+- `set_session_topic` now passes `_internal_call=True` — its intentional `priority="low"` + `suppress_ding=True` survive the gate.
+
+**Commit**: TBD (filled in after commit lands).
 
 ---
 
