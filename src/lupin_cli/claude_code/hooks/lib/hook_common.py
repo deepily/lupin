@@ -934,6 +934,168 @@ def build_permission_decision( behavior, message=None, interrupt=False ):
     }
 
 
+# ── Conversation Mode Wrap (Layer 1) ──────────────────────────────────────────
+#
+# Per src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
+# Phase 1: helper to wrap inbound text with the conv-mode XML envelope when
+# the session bridge has conversation_mode_active=true. Sanitization at the
+# boundary closes the prompt-injection escape vector (§2.4a of design doc).
+
+# Markers stripped by sanitize_for_wrap to prevent user content from escaping
+# the wrapper or injecting a fake system-reminder. First-marker-wins; case
+# insensitive.
+_SANITIZE_MARKERS = ( "</voice-message", "<system-reminder" )
+
+# Sentinel substring used to detect already-wrapped strings for idempotency
+# (the appended system-reminder always contains this exact phrase).
+_CONV_MODE_WRAP_SENTINEL = "Conversation mode is active. After your response"
+
+
+def sanitize_for_wrap( text ):
+    """
+    Strip user content from the first occurrence of </voice-message or
+    <system-reminder (case-insensitive) to end-of-string. Closes the
+    prompt-injection escape vector at the wrapper boundary.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - Returns text unchanged if neither marker present
+        - Returns text[ :first_marker_index ] if either marker present
+        - Whichever marker appears first wins (first-marker-wins)
+        - Match is case-insensitive (lower() comparison)
+        - Empty input returns empty
+
+    Args:
+        text: Raw user content prior to wrapping
+
+    Returns:
+        str: Sanitized content safe for substitution into the wrapper
+    """
+    if not text: return text
+
+    lower   = text.lower()
+    indices = [ lower.find( m ) for m in _SANITIZE_MARKERS ]
+    indices = [ i for i in indices if i >= 0 ]
+    if not indices: return text
+
+    return text[ :min( indices ) ]
+
+
+def _system_reminder_body( source ):
+    """
+    Build the conv-mode system-reminder body for a given injection source.
+
+    Body text varies by source so the reminder names where the input came
+    from (helpful for Claude's framing and for transcript readability).
+
+    Requires:
+        - source is one of: "voice", "terminal-typed",
+          "hook-idle-prompt", "hook-permission-prompt"
+
+    Ensures:
+        - Returns a non-empty string body (without wrapping <system-reminder>
+          tags — those are added by conv_mode_wrap)
+        - Always contains the _CONV_MODE_WRAP_SENTINEL substring
+
+    Args:
+        source: Which injection point the text came from
+
+    Returns:
+        str: System-reminder body text
+    """
+    base = (
+        "Conversation mode is active. After your response, call "
+        "`notify(message=<full text of your reply>, suppress_ding=True, priority='high')`. "
+        "Strip fenced code blocks from the spoken text. The user is listening via TTS."
+    )
+    if source == "voice":
+        return "The user spoke the above as a voice message from a distance. " + base
+    if source == "terminal-typed":
+        return base
+    if source == "hook-idle-prompt":
+        return "(Idle-aware Stop hook synthesized the above prompt.) " + base
+    if source == "hook-permission-prompt":
+        return "(Permission-request hook synthesized the above prompt.) " + base
+    return base
+
+
+def conv_mode_wrap( text, *, source, session_id=None ):
+    """
+    Wrap inbound text with the conv-mode XML envelope when the session is
+    in conversation mode. Pass-through unchanged when conv mode is off OR
+    when the session_id can't be resolved.
+
+    Per Phase 1 of src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md.
+
+    Sanitization runs FIRST (when active) to close the prompt-injection
+    escape vector documented as F2 in the adversarial-review pass.
+
+    Idempotency: if the input already contains the wrapper sentinel, it is
+    returned unchanged (safe to call multiple times on the same string).
+
+    Requires:
+        - text is a string
+        - source is one of: "voice", "terminal-typed",
+          "hook-idle-prompt", "hook-permission-prompt" (keyword-only)
+        - session_id is a non-empty string OR None (keyword-only). Caller
+          must provide session_id explicitly; this helper does not resolve
+          it implicitly to keep behavior predictable in subprocess contexts
+          (e.g. cc_notification_listener).
+
+    Ensures:
+        - Returns text unchanged if conversation_mode_active is False for
+          this session
+        - Returns text unchanged if session_id is None or empty
+        - Returns text unchanged if input already contains the wrapper
+          sentinel (idempotency)
+        - Returns text unchanged if any error occurs reading the bridge
+          (fail-closed — safer than wrapping on stale state)
+        - Otherwise returns wrapped output with sanitized user content
+
+    Args:
+        text:       Raw text being injected into Claude's input stream
+        source:     Which injection point the text came from (keyword-only)
+        session_id: Session ID to look up in the bridge (keyword-only)
+
+    Returns:
+        str: Wrapped text or original text (when gate is closed)
+    """
+    if not text or not session_id: return text
+
+    # Idempotency — don't re-wrap an already-wrapped string
+    if _CONV_MODE_WRAP_SENTINEL in text: return text
+
+    try:
+        from lupin_cli.claude_code.hooks.lib.session_bridge import get_conversation_mode
+        if not get_conversation_mode( session_id ): return text
+    except Exception:
+        # Fail-closed — any error reading the bridge means we pass through
+        # unwrapped (safer than wrapping based on possibly-stale state).
+        return text
+
+    clean         = sanitize_for_wrap( text )
+    reminder_body = _system_reminder_body( source )
+
+    if source == "voice":
+        return (
+            f'<voice-message from-distance="true" priority="high" suppress-ding="true">\n'
+            f'{clean}\n'
+            f'</voice-message>\n'
+            f'<system-reminder>\n'
+            f'{reminder_body}\n'
+            f'</system-reminder>'
+        )
+
+    return (
+        f'{clean}\n\n'
+        f'<system-reminder>\n'
+        f'{reminder_body}\n'
+        f'</system-reminder>'
+    )
+
+
 # ── Quick smoke test ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
