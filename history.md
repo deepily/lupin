@@ -25,7 +25,9 @@
 
 **Files** (Lupin parent only — no CoSA): `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` (the fix), `src/rnd/v0.1.7/2026.04.30-cc-listener-hardcoded-sender-id-fix.md` (NEW R&D doc), `history.md` (this entry), `.claude-session.md` (manifest).
 
-**Deployment note**: the listener is a long-lived subprocess spawned by SessionStart hook. In-flight CC sessions still run pre-fix code; the fix takes effect on next SessionStart. User confirmed they will restart a CoSA-context session to validate.
+**Deployment note**: the listener is a long-lived subprocess spawned by SessionStart hook. In-flight CC sessions still run pre-fix code; the fix takes effect on next SessionStart.
+
+**V5 user-verified 2026-04-30**: user restarted a CoSA-context CC session post-commit `2eaeffc`; no ghost `[LUPIN]` card appeared. Bug fully resolved.
 
 **Out of scope** (separate concerns from user's report):
 - The CoSA session's Claude failed to call `set_session_topic()` until prompted — Phase B startup discipline issue, not code.
