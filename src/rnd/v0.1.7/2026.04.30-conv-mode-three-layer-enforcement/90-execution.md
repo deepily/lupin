@@ -112,26 +112,44 @@
 - Bridge-read-error path: treated as inactive but the cross-talk cue STILL fires for CC senders requesting suppress_ding=True. Failure mode chosen: audible ding > silent leak when conv-mode state can't be confirmed.
 - `set_session_topic` now passes `_internal_call=True` — its intentional `priority="low"` + `suppress_ding=True` survive the gate.
 
-**Commit**: TBD (filled in after commit lands).
+**Commit**: `3e030dc` (4 files, 407+/11-).
 
 ---
 
 ## Phase 4 — Stop-hook auto-narrate
 
-**Status**: ⏳ pending Phase 3
+**Status**: ✅ complete (2026-04-30)
 **Files**:
-- `src/lupin_cli/claude_code/hooks/stop.py`
-- `src/lupin_cli/claude_code/hooks/lib/session_bridge.py` (extend)
-- `src/tests/unit/test_stop_hook_auto_narrate.py` (NEW)
-- extend `src/tests/unit/test_session_bridge_lookup.py`
+- `src/lupin_cli/claude_code/hooks/stop.py` — added `_read_last_assistant_message`, `_turn_has_notify_call`, `_extract_narratable_text`, `_try_auto_narrate` helpers; modified the conv-mode skip in `main()` to call `_try_auto_narrate` BEFORE allowing the stop. Added imports for new bridge helpers.
+- `src/lupin_cli/claude_code/hooks/lib/session_bridge.py` — added `get_last_autonarrated_turn_id` + `set_last_autonarrated_turn_id` bridge round-trip helpers (placed before `get_voice_persona`).
+- `src/lupin_cli/claude_code/hooks/lib/hook_common.py` — extended `send_tts` with `suppress_ding=False` kwarg (defaults preserve legacy behavior; auto-narrate passes `suppress_ding=True`).
+- `src/tests/unit/test_stop_hook_auto_narrate.py` (NEW) — 23 tests across 5 test classes.
 
 **Verification**:
-- [ ] py_compile clean
-- [ ] Unit tests: dedup via turn id, skip when notify present, transcript parsing, code-block stripping
-- [ ] Bridge round-trip + per-session isolation
-- [ ] Idle-aware Stop hook coexistence verified (no double-fire, no interaction)
+- [x] py_compile clean across `session_bridge.py`, `hook_common.py`, `stop.py`
+- [x] Import chain clean (`from ...session_bridge import get_last_autonarrated_turn_id, set_last_autonarrated_turn_id; from ...stop import _try_auto_narrate, _read_last_assistant_message, _turn_has_notify_call, _extract_narratable_text`)
+- [x] Unit tests pass — **23/23**:
+  - `TestReadLastAssistantMessage` × 6: missing file, empty path, empty file, no-assistant, malformed lines skipped, multi-message → last wins
+  - `TestTurnHasNotifyCall` × 4: with notify ToolUseBlock, with other tool use, no content (3 shapes), text-only
+  - `TestExtractNarratableText` × 3: concatenates text blocks (skips tool-use), strips fenced code, empty content
+  - `TestTryAutoNarrate` × 6: skip-no-transcript-path, skip-missing-transcript, skip-claude-self-narrated, skip-dedup-match, fires-send-tts-with-conv-mode-params + stamps turn id, skip-no-narratable-text
+  - `TestLastAutonarratedTurnIdBridge` × 4: round-trip preserves other fields, set on missing bridge returns False, get on missing returns None, per-session isolation
+- [x] Combined Phase 1+2+3+4 + regression — **171/171 in 30.1s** (slow run-time due to cosa_voice_mcp module-init when `_extract_narratable_text` lazy-imports `strip_fenced_code_blocks`; functional, acceptable)
 
-**Notes**: TBD on landing.
+**Notes**:
+- The conv-mode skip block in stop.py main() previously did an unconditional pass-through (line 449 pre-edit). Now it calls `_try_auto_narrate` first, then logs + emits empty {} (allows the stop). The "Anything else?" prompt path remains intentionally skipped in conv mode (would interrupt voice dialogue) — that decision from the original 2026.04.27 design stands.
+- `_try_auto_narrate` is gated by:
+  1. `transcript_path` resolvable (from payload OR bridge metadata fallback)
+  2. Last assistant message exists in transcript
+  3. Last turn does NOT contain `mcp__cosa-voice__notify` ToolUseBlock (Claude self-narrated → skip)
+  4. `last_autonarrated_turn_id` in bridge ≠ current turn id (re-fire dedup)
+  5. Extracted text non-empty after fence-strip
+  All gates fail-closed: any unmet condition skips and logs to `log_to_stream` with the specific reason. Errors caught and logged but never re-raised.
+- `send_tts` extended with `suppress_ding=False` default param. Auto-narrate calls `send_tts(narration, priority="high", suppress_ding=True)` for conv-mode shape. Existing callers pass through unchanged.
+- Coexistence with idle-aware Stop hook: auto-narrate runs FIRST, then the conv-mode block emits {} and exits BEFORE the idle-detection / "Anything else?" path. No interaction; idle-waiter never arms in conv mode (existing design from 2026.04.29-idle-aware-stop-hook).
+- Test runtime 30s: dominated by `test_stop_hook_auto_narrate.py` due to `from lupin_mcp.cosa_voice_mcp import strip_fenced_code_blocks` triggering MCP module init (account validation HTTP call). Could be optimized by extracting `strip_fenced_code_blocks` to a lighter module — deferred as out-of-scope optimization.
+
+**Commit**: TBD (filled in after commit lands).
 
 ---
 

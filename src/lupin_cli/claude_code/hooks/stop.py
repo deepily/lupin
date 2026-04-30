@@ -37,6 +37,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, build_sender_id_for_cc, resolve_stable_session_id,
     get_conversation_mode, get_session_metadata,
     get_idle_detection, set_idle_detection_field, kill_idle_waiter,
+    get_last_autonarrated_turn_id, set_last_autonarrated_turn_id,
 )
 from lupin_cli.notifications.notify_user_sync import notify_user_sync
 from lupin_cli.notifications.notification_models import (
@@ -423,6 +424,229 @@ def _ask_anything_else( session_id, last_assistant_message=None, cwd=None ):
         return {}
 
 
+# ── Phase 4 — Layer 3 Stop-hook auto-narrate ──────────────────────────────────
+#
+# Per src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
+# Phase 4: when conv mode is active and Claude's last assistant turn ended
+# WITHOUT a notify() call, synthesize one so the user (listening at distance)
+# hears the response. Safety net for the case where Claude's cached belief
+# about conv mode drifts and it writes console-only.
+
+import json as _json   # local alias to avoid shadowing
+
+
+def _read_last_assistant_message( transcript_path ):
+    """
+    Read transcript JSONL, return the last assistant-role message dict.
+
+    Claude Code transcripts are line-delimited JSON; each message has
+    `type` ("user" or "assistant") and `message.content` (a list of
+    content blocks). Iterate all lines, remember the most recent
+    assistant message.
+
+    Requires:
+        - transcript_path is a non-empty string path
+
+    Ensures:
+        - Returns the last assistant message dict or None
+        - Returns None on missing file, parse error, or no assistant
+        - Never raises
+
+    Args:
+        transcript_path: Path to JSONL transcript file
+
+    Returns:
+        dict or None: Last assistant message
+    """
+    if not transcript_path or not os.path.isfile( transcript_path ):
+        return None
+    last_assistant = None
+    try:
+        with open( transcript_path ) as f:
+            for line in f:
+                line = line.strip()
+                if not line: continue
+                try:
+                    msg = _json.loads( line )
+                except _json.JSONDecodeError:
+                    continue
+                if msg.get( "type" ) == "assistant":
+                    last_assistant = msg
+    except OSError:
+        return None
+    return last_assistant
+
+
+def _turn_has_notify_call( assistant_msg ):
+    """
+    Check if the assistant message contains a mcp__cosa-voice__notify
+    ToolUseBlock. If yes, Claude self-narrated and auto-narrate should
+    pass through.
+
+    Requires:
+        - assistant_msg is a dict from _read_last_assistant_message
+
+    Ensures:
+        - Returns True if any content block has type="tool_use" and
+          name=="mcp__cosa-voice__notify"
+        - Returns False otherwise (incl. on shape mismatch / missing fields)
+        - Never raises
+
+    Args:
+        assistant_msg: Assistant message dict
+
+    Returns:
+        bool: Whether Claude self-narrated
+    """
+    try:
+        content = assistant_msg.get( "message", { } ).get( "content", [ ] )
+        for block in content:
+            if isinstance( block, dict ):
+                if block.get( "type" ) == "tool_use" and block.get( "name" ) == "mcp__cosa-voice__notify":
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+def _extract_narratable_text( assistant_msg ):
+    """
+    Extract speakable text from an assistant message: concatenate text
+    blocks, strip fenced code blocks, trim whitespace.
+
+    Requires:
+        - assistant_msg is a dict from _read_last_assistant_message
+
+    Ensures:
+        - Returns concatenated text from all "text" content blocks
+        - Fenced code blocks stripped via strip_fenced_code_blocks
+          (imported from lupin_mcp.cosa_voice_mcp — same impl Phase 3 uses)
+        - Returns empty string if no text content or on shape mismatch
+
+    Args:
+        assistant_msg: Assistant message dict
+
+    Returns:
+        str: Narratable text (may be empty)
+    """
+    try:
+        content = assistant_msg.get( "message", { } ).get( "content", [ ] )
+        parts   = [ ]
+        for block in content:
+            if isinstance( block, dict ) and block.get( "type" ) == "text":
+                text = block.get( "text", "" )
+                if text:
+                    parts.append( text )
+        joined = "\n\n".join( parts ).strip()
+        if not joined:
+            return ""
+        try:
+            from lupin_mcp.cosa_voice_mcp import strip_fenced_code_blocks
+            joined = strip_fenced_code_blocks( joined )
+        except Exception:
+            pass  # Stripping is best-effort
+        return joined.strip()
+    except Exception:
+        return ""
+
+
+def _try_auto_narrate( session_id, payload ):
+    """
+    Phase 4 Layer 3 safety net: if Claude's last assistant turn in conv
+    mode ended without a notify() call, synthesize one via send_tts.
+
+    See: src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
+
+    Requires:
+        - session_id is a non-empty string
+        - payload is a dict (Stop-hook payload)
+        - conv mode is already verified active by the caller
+
+    Ensures:
+        - Reads transcript_path from payload (or bridge metadata fallback)
+        - If last assistant turn already contains notify() ToolUseBlock,
+          pass through (Claude self-narrated)
+        - If last_autonarrated_turn_id matches current turn id, pass through
+          (already narrated this turn — re-fire dedup)
+        - Otherwise: extract narratable text, strip code, call send_tts
+          with priority='high' + suppress_ding=True (conv-mode params),
+          stamp the turn id in the bridge for future dedup
+        - Never raises (failures are logged via log_to_stream)
+    """
+    transcript_path = payload.get( "transcript_path" ) or ""
+    if not transcript_path:
+        try:
+            meta            = get_session_metadata()
+            transcript_path = meta.get( "transcript_path" ) or ""
+        except Exception:
+            transcript_path = ""
+    if not transcript_path:
+        log_to_stream( "stop", { }, extra={
+            "phase"      : "auto_narrate_skip",
+            "reason"     : "no transcript_path",
+            "session_id" : session_id,
+        } )
+        return
+
+    last_msg = _read_last_assistant_message( transcript_path )
+    if not last_msg:
+        log_to_stream( "stop", { }, extra={
+            "phase"      : "auto_narrate_skip",
+            "reason"     : "no assistant message in transcript",
+            "session_id" : session_id,
+        } )
+        return
+
+    if _turn_has_notify_call( last_msg ):
+        log_to_stream( "stop", { }, extra={
+            "phase"      : "auto_narrate_skip",
+            "reason"     : "claude self-narrated",
+            "session_id" : session_id,
+        } )
+        return
+
+    turn_id = last_msg.get( "uuid" ) or last_msg.get( "id" ) or ""
+    if turn_id and get_last_autonarrated_turn_id( session_id ) == str( turn_id ):
+        log_to_stream( "stop", { }, extra={
+            "phase"      : "auto_narrate_skip",
+            "reason"     : "already auto-narrated this turn",
+            "session_id" : session_id,
+            "turn_id"    : turn_id,
+        } )
+        return
+
+    narration = _extract_narratable_text( last_msg )
+    if not narration:
+        log_to_stream( "stop", { }, extra={
+            "phase"      : "auto_narrate_skip",
+            "reason"     : "no narratable text",
+            "session_id" : session_id,
+        } )
+        return
+
+    # Synthesize narration with conv-mode params
+    try:
+        send_tts(
+            narration,
+            priority      = "high",
+            suppress_ding = True
+        )
+        if turn_id:
+            set_last_autonarrated_turn_id( session_id, turn_id )
+        log_to_stream( "stop", { }, extra={
+            "phase"      : "auto_narrate_fired",
+            "session_id" : session_id,
+            "turn_id"    : turn_id,
+            "char_count" : len( narration ),
+        } )
+    except Exception as e:
+        log_to_stream( "stop", { }, extra={
+            "phase"      : "auto_narrate_error",
+            "session_id" : session_id,
+            "error"      : str( e ),
+        } )
+
+
 def main():
 
     payload = read_hook_input()
@@ -439,14 +663,20 @@ def main():
     # Resolve session_id: payload first, then session bridge fallback
     session_id = resolve_stable_session_id( payload.get( "session_id", "" ) ) or get_claude_session_id()
 
-    # Conversation mode: silently allow the stop with no side effects.
-    # When the session is in conversation mode, every assistant turn already
-    # auto-notify()s the full response via TTS, so the user is at a distance
-    # holding a continuous voice dialogue. Prompting "Anything else?" or
-    # firing any TTS here interrupts the flow — the user explicitly wants
-    # the hook to be a no-op in this state. Gate before voice-buffer drain
-    # and any notify_user_sync call so nothing escapes.
+    # Conversation mode: skip the "Anything else?" prompt path (would
+    # interrupt the user's voice dialogue), but FIRST run the Phase 4
+    # auto-narrate safety net — synthesize a notify() if Claude's last
+    # turn ended without one (silent-console-only failure mode). Per
+    # src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
     if get_conversation_mode( session_id ):
+        try:
+            _try_auto_narrate( session_id, payload )
+        except Exception as e:
+            log_to_stream( "stop", { }, extra={
+                "phase"      : "auto_narrate_error",
+                "session_id" : session_id,
+                "error"      : str( e ),
+            } )
         log_to_stream( "stop", {}, extra={
             "phase"      : "conversation_mode_skip",
             "session_id" : session_id

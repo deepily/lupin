@@ -806,6 +806,77 @@ def set_conversation_mode( session_id, active ):
         return False
 
 
+def get_last_autonarrated_turn_id( session_id ):
+    """
+    Read last_autonarrated_turn_id from the bridge file for dedup.
+
+    Used by the Stop-hook auto-narrate (Phase 4 of conv-mode-three-layer-
+    enforcement plan) to avoid re-narrating the same assistant turn if the
+    Stop hook fires twice on the same turn (which can happen).
+
+    Requires:
+        - session_id is a non-empty string
+
+    Ensures:
+        - Returns the stamped turn id (string) if present in bridge
+        - Returns None if bridge missing, field absent, or any error
+        - Never raises
+
+    Args:
+        session_id: Session ID to look up
+
+    Returns:
+        str or None: Last auto-narrated turn id, or None
+    """
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return None
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        return data.get( "last_autonarrated_turn_id" )
+    except ( json.JSONDecodeError, OSError ):
+        return None
+
+
+def set_last_autonarrated_turn_id( session_id, turn_id ):
+    """
+    Write last_autonarrated_turn_id to the bridge file.
+
+    Stamps the turn id after the Stop-hook auto-narrate fires so subsequent
+    Stop-hook invocations on the same turn don't re-narrate.
+
+    Requires:
+        - session_id is a non-empty string
+        - turn_id is a non-empty string
+
+    Ensures:
+        - Returns True if bridge was found and successfully updated
+        - Returns False if bridge missing or write failed
+        - Never raises
+        - Preserves all other bridge fields
+
+    Args:
+        session_id: Session ID to look up
+        turn_id:    Turn identifier to stamp
+
+    Returns:
+        bool: True on successful write
+    """
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return False
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        data[ "last_autonarrated_turn_id" ] = str( turn_id )
+        with open( path, "w" ) as f:
+            json.dump( data, f, indent=2 )
+        return True
+    except ( json.JSONDecodeError, OSError ):
+        return False
+
+
 def get_voice_persona( session_id ):
     """
     Read voice_persona dict from the bridge file for a given session_id.

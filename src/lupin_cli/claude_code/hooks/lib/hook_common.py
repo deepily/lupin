@@ -244,7 +244,7 @@ def build_progress_group_id( prefix, session_id ):
     return f"{prefix}-{hex_part}"
 
 
-def send_tts( message, priority="low", sender_id=None, progress_group_id=None ):
+def send_tts( message, priority="low", sender_id=None, progress_group_id=None, suppress_ding=False ):
     """
     Send fire-and-forget TTS notification via lupin_cli.notifications.
 
@@ -300,6 +300,7 @@ def send_tts( message, priority="low", sender_id=None, progress_group_id=None ):
             target_user        = target_email,
             sender_id          = sender_id,
             progress_group_id  = progress_group_id,
+            suppress_ding      = suppress_ding,
             timeout            = 3
         )
 
