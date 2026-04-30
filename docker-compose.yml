@@ -14,7 +14,10 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./src/conf/long-term-memory/postgresql-dev-data:/var/lib/postgresql/data
+      # Postgres data lives outside the build context so BuildKit's context loader
+      # never has to stat a 0700-owned dir. Same physical disk, same UID 70 / 0700.
+      # Relocated 2026-04-30 (Session b195a160).
+      - /mnt/DATA01/include/www.deepily.ai/projects/lupin-data/postgresql-dev-data:/var/lib/postgresql/data
       - ./src/scripts/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
       - ./src/scripts/sql/seed_dev_data.sql:/docker-entrypoint-initdb.d/02-seed.sql
       - ./src/scripts/sql/init-test-db.sql:/docker-entrypoint-initdb.d/03-init-test-db.sql

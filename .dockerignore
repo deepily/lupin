@@ -1,14 +1,6 @@
-# PostgreSQL data directories (Docker volumes - should not be in image)
-# Multiple patterns + globs because BuildKit's sender will try to open the dir
-# during context evaluation; mode 700 owned by postgres-in-container is unreadable
-# by the host build user. Strongest match wins; explicit + ** + glob covers all
-# code paths in BuildKit + classic builder.
-src/conf/long-term-memory/postgresql-dev-data
-src/conf/long-term-memory/postgresql-dev-data/
-src/conf/long-term-memory/postgresql-dev-data/**
-**/postgresql-dev-data
-**/postgresql-dev-data/
-**/postgresql-dev-data/**
+# Postgres data directory was relocated outside the build context on 2026-04-30
+# (now at /mnt/DATA01/include/www.deepily.ai/projects/lupin-data/postgresql-dev-data),
+# so BuildKit no longer needs ignore patterns for it. Keep .lancedb.backup-* exclusion.
 src/conf/long-term-memory/*.lancedb.backup-*
 
 # Lance DB — NEVER baked into the image (was 41 GB of dead weight in lupin:0.9.0).

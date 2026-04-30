@@ -1,6 +1,81 @@
 # TODO
 
-Last updated: 2026-04-29 EDT (Session 9977a1ba — Persona Theming + WS-Event Cleanup + Rachel TTS bug fix)
+Last updated: 2026-04-30 EDT (Session b195a160 — Postmortem of 2026-04-29 17:39 EDT all-test run)
+
+---
+
+## 🩺 POSTMORTEM FOLLOW-UPS — Session b195a160 (2026-04-30, while user at doctor)
+
+**Postmortem doc**: `src/rnd/v0.1.7/2026.04.30-postmortem-2026.04.29-all-test-run.md`
+
+### ✅ Closed in this session (uncommitted; please review + commit)
+
+- [x] [LUPIN] **Cluster A — SWE-team unit re-raise contract drift** (3 unit failures closed). `src/tests/unit/test_swe_team_job.py::TestErrorHandling` 3 tests wrapped in `pytest.raises(...)` per the Phase 4 #5 re-raise contract. Verified: 22/22 of `test_swe_team_job.py` pass; full unit suite 3803/0 fail.
+- [x] [LUPIN→CoSA] **Cluster B — `auto_round` import gate** (3 smoke failures closed). `src/cosa/training/quantizer.py:8` un-gated `from auto_round import AutoRound` replaced with try/except + `AUTO_ROUND_AVAILABLE` flag (mirrors peft_trainer pattern). `quantize_model()` now raises a clear `RuntimeError` if called without auto_round installed. Verified by simulating no-auto_round import; peft_trainer imports cleanly. **CoSA submodule edit — needs separate cosa-context commit** per nested-repo rules.
+- [x] [LUPIN] **Cluster C — TFE smoke re-raise contract drift** (1 smoke failure closed). `src/tests/smoke/test_tfe_error_capture_smoke.py:105` wrapped `tfe.do_all()` in try/except so forensic assertions still run after re-raise. Verified live on `:7999`: 1/1 pass.
+
+**Net**: 7 method-level failures (3 unit + 3 smoke + 1 smoke) of yesterday's 15 should now be closed at next all-test run. Predicted next-run table in §6 of postmortem doc.
+
+### ✅ Postgres bind-mount permanent relocation — DONE (uncommitted)
+
+- [x] [LUPIN] **Postgres data dir relocated** from `src/conf/long-term-memory/postgresql-dev-data` to **`/mnt/DATA01/include/www.deepily.ai/projects/lupin-data/postgresql-dev-data`** (your specified target, NOT the original plan's `/mnt/DATA01/lupin-data/`). Same physical disk → `rename(2)` only, no copy. Same inode (`24777760`), UID 70, mode 0700 preserved. Pre-flight pg_dump backup at `src/conf/long-term-memory/postgresql-backup.sql` (11 MB).
+- [x] [LUPIN] **5 files edited** (uncommitted): `docker-compose.yml` (mount path), `.dockerignore` (deleted 11 postgres-specific patterns + comment), `.gitignore` (deleted dir line, kept backup-file line), `src/scripts/conf/rsync-exclude.txt` (deleted dir line), `src/scripts/run-postgresql-dev.sh` (updated displayed path). Each edit left a breadcrumb comment with the relocation date + reason.
+- [x] [LUPIN] **Verified**: postgres healthy on new mount, 119 users in dev DB intact, both dev+test DBs present, dev+test API containers reconnected, BuildKit context loader passes the 0700-permission gate.
+
+### ✅ uv.lock regenerated (uncommitted)
+
+- [x] [LUPIN] **uv.lock regenerated via `uv lock`**. Pre-existing pyproject.toml line 53 was already correct (`pydantic-ai==0.6.2`, `[slim]` had been dropped 2026-04-28). Actual lockfile drift was bcrypt spec: `>=4.0,<5` → `==4.3.0`. The "no extra named slim" warning was a misleading symptom of the broader lockfile-pyproject mismatch — once `uv lock` ran, the warning was gone. Pre-regen lockfile backed up at `/tmp/uv.lock.before-relock-*`.
+
+### ✅ Image rebuild — DONE (parked at candidate tag, NOT promoted)
+
+- [x] [LUPIN] **`lupin:1.0.0-bcrypt-4.3.0` built** (31.7 GB, image ID `2283718c1317`). Per `feedback_no_auto_promote_tags`, parked at the candidate tag — `lupin:1.0.0` is unchanged (still pointing at `8f523bcc8ac2` from 44 hours ago). Verified: `bcrypt 4.3.0` inside the new image (was 5.0.0 in `:1.0.0`).
+
+### 🚦 Recommended next steps when you're back
+
+1. **Smoke-verify the new image** before promoting: `docker run --rm lupin:1.0.0-bcrypt-4.3.0 /opt/venv/bin/python -c "import lupin"` (or whatever quick health probe you prefer). Bonus: confirm the `(trapped) error reading bcrypt version` log is gone on container start.
+2. **Promote the tag**: `docker tag lupin:1.0.0-bcrypt-4.3.0 lupin:1.0.0`
+3. **Recompose dev :7999**: `docker compose down lupin-rest-dev && docker compose up -d lupin-rest-dev`
+4. **Recompose test :8000**: `docker compose down lupin-rest-test && docker compose up -d lupin-rest-test`
+5. Verify each came up healthy + `LUPIN_INTERACTIVE_TESTS=true` is now in the test container env: `docker exec lupin-rest-test env | grep LUPIN_INTERACTIVE_TESTS`
+6. After step 5, the Tier 3 follow-ups below should become CLOSED automatically.
+
+### 🛠️ Tier 1 — Easy, your call (NOT applied this session)
+
+- [ ] [LUPIN] **Cluster D — Add `--auto-proxy` skip-marker** in `test_presentation_live_smoke.py` + `test_research_to_presentation_live_smoke.py`. Without it, scheduled all-runs burn 30+ minutes of `:8000` slot waiting for human gate approvals that never arrive. Skipping is preferable; the test correctly warns at startup. Behavioral judgment, deferred to your decision.
+- [ ] [LUPIN] **Cluster K — Notification-proxy verifier transient threshold**: `test_notification_proxy_script_matching` failed 1/19 fuzzy scenarios on a transient empty-XML LLM hiccup. Either (a) accept >=18/19 instead of 19/19, or (b) bump retry count from 1 to 2 in the verifier.
+
+### 🔍 Tier 2 — Investigation (NOT applied this session)
+
+- [ ] [LUPIN] **Cluster E — Stale auto-discovered YAML 404** in `test_presentation_render_only` (PR_RENDER_ONLY_FAST scenario). Test discovered `/var/lupin/io/presentations/.../2026.04.29-at-20:42-UTC-...yaml` but `:8000` returned 404. Need to decide: pin to fixture YAML, validate path before submission, or bind-mount `io/presentations/` into `:8000` test container.
+- [ ] [LUPIN] **Cluster F — `slide_count` not surfaced in R2P artifacts**. `test_research_to_presentation_live` 8/9 sub-checks pass, only `slide_count` missing. R2P pipeline cost $2.29 for the run; fix prevents repeat waste. Read `_finalize_completion()` in R2P job and either surface `artifacts["slide_count"]` or update test's expected-key path.
+- [ ] [LUPIN] **Cluster J — `'NoneType' object has no attribute 'split'`** in `test_test_suite_live_pipeline`. HTTP 500 from `/api/push` when test_suite mode is active. Hypothesis: `config_mgr.get(..., default="...")` returning None for a key that should fall back. `traceback.print_exc()` output is in `:8000` container stdout — grep the container logs at the failure timestamp (2026-04-29 17:39 EDT vicinity) for full traceback.
+
+### 🐳 Tier 3 — User-action only (carries over from yesterday's TODO; will close after step 3+4 above)
+
+- [ ] [LUPIN] **Container recreation for `LUPIN_INTERACTIVE_TESTS=true` env var**. Will be addressed by recompose steps 3+4 above. **Predicted impact**: closes Cluster H (test_swe_team_proxy 3/3 cancels), very likely Cluster G (12 expediter http_error_503 cascades), possibly Cluster I (presentation routing).
+- [ ] [LUPIN] **Cluster I config audit — `presentation_generator` agentic-router registration**. After container recreation, re-check whether `EXP_PRES_MISSING` scenario in `test_proxy_integration` still returns "Could not match voice command" with truncated agent list. If yes, the loaded agentic-commands JSON may differ from `src/conf/training/agent-router-agentic-commands.json:68` — the file IS present in source. Likely a config-loader cache issue resolved by recreate; verify before adding new code.
+
+### 🛠️ Tier 1 — Easy, your call (NOT applied this session)
+
+- [ ] [LUPIN] **Cluster D — Add `--auto-proxy` skip-marker** in `test_presentation_live_smoke.py` + `test_research_to_presentation_live_smoke.py`. Without it, scheduled all-runs burn 30+ minutes of `:8000` slot waiting for human gate approvals that never arrive. Skipping is preferable; the test correctly warns at startup. Behavioral judgment, deferred to your decision.
+- [ ] [LUPIN] **Cluster K — Notification-proxy verifier transient threshold**: `test_notification_proxy_script_matching` failed 1/19 fuzzy scenarios on a transient empty-XML LLM hiccup. Either (a) accept >=18/19 instead of 19/19, or (b) bump retry count from 1 to 2 in the verifier.
+
+### 🔍 Tier 2 — Investigation (NOT applied this session)
+
+- [ ] [LUPIN] **Cluster E — Stale auto-discovered YAML 404** in `test_presentation_render_only` (PR_RENDER_ONLY_FAST scenario). Test discovered `/var/lupin/io/presentations/.../2026.04.29-at-20:42-UTC-...yaml` but `:8000` returned 404. Need to decide: pin to fixture YAML, validate path before submission, or bind-mount `io/presentations/` into `:8000` test container.
+- [ ] [LUPIN] **Cluster F — `slide_count` not surfaced in R2P artifacts**. `test_research_to_presentation_live` 8/9 sub-checks pass, only `slide_count` missing. R2P pipeline cost $2.29 for the run; fix prevents repeat waste. Read `_finalize_completion()` in R2P job and either surface `artifacts["slide_count"]` or update test's expected-key path.
+- [ ] [LUPIN] **Cluster J — `'NoneType' object has no attribute 'split'`** in `test_test_suite_live_pipeline`. HTTP 500 from `/api/push` when test_suite mode is active. Hypothesis: `config_mgr.get(..., default="...")` returning None for a key that should fall back. `traceback.print_exc()` output is in `:8000` container stdout — grep the container logs at the failure timestamp (2026-04-29 17:39 EDT vicinity) for full traceback.
+
+### 🐳 Tier 3 — User-action only (carries over from yesterday's TODO)
+
+- [ ] [LUPIN] **Container recreation for `LUPIN_INTERACTIVE_TESTS=true` env var** (already on TODO from Session d34f2f74). Run `docker compose down && docker compose up -d` on `:8000` test container. Without this, `LUPIN_INTERACTIVE_TESTS=true` from yesterday's docker-compose.yml fix never reaches the running process. **Predicted impact**: closes Cluster H (test_swe_team_proxy 3/3 cancels), very likely Cluster G (12 expediter http_error_503 cascades), possibly Cluster I (presentation routing).
+- [ ] [LUPIN] **Cluster I config audit — `presentation_generator` agentic-router registration**. After container recreation, re-check whether `EXP_PRES_MISSING` scenario in `test_proxy_integration` still returns "Could not match voice command" with truncated agent list. If yes, the loaded agentic-commands JSON may differ from `src/conf/training/agent-router-agentic-commands.json:68` — the file IS present in source. Likely a config-loader cache issue resolved by recreate; verify before adding new code.
+
+---
+
+## 🎨 PERSONA POOL — Arnold color tweak
+
+- [ ] [LUPIN] **Repaint Arnold from dark red → orangey-peach** — current dark-red Arnold is indistinguishable from both Nora's pink-300 (`#F06292`) and Domi's pink-900 (`#880E4F`) backgrounds at low alphas in Tier 1 chrome. Goal hue family: peach / coral / orange-pink (e.g. Material orange 300 `#FFB74D`, deep-orange 200 `#FFAB91`, or a custom warm-peach `#FFAB6E`). Audit against `feedback_no_green_in_persona_pool` (peach is fine — green RGB component stays well below 30%). Update `src/conf/lupin-app.ini` persona pool entry + splainer note + any hard-coded references.
 
 ---
 
@@ -52,9 +127,9 @@ Last updated: 2026-04-29 EDT (Session 9977a1ba — Persona Theming + WS-Event Cl
 
 ## 🌅 FOLLOW-UPS — for the user (Session 30072c25 — docker build diagnostics)
 
-- [ ] [LUPIN] **`uv.lock` surgical fix (build-blocking)** — drop `[slim]` extra at `pyproject.toml:53` (`"pydantic-ai[slim]==0.6.2"` → `"pydantic-ai==0.6.2"`), regenerate via `uv lock`, commit `pyproject.toml + uv.lock` atomically. Functionally a no-op (transitive `pydantic-ai-slim` dep already pulls all 14 sub-extras). Verify: rebuild advances past stage 13/47. See `src/rnd/v0.1.7/2026.04.28-uv-lock-pydantic-ai-slim-extra-mismatch.md` for full evidence + 4-option ranking.
-- [ ] [LUPIN] **Postgres bind-mount permanent relocation** — move `src/conf/long-term-memory/postgresql-dev-data/` → `/mnt/DATA01/lupin-data/postgresql-dev-data/` (outside build context, same physical disk). Plan at `~/.claude/plans/compressed-percolating-prism.md`: stop postgres container, `mv` data dir (preserves UID 70 / `0700`), edit 5 files (`docker-compose.yml:17`, delete `.dockerignore` lines 1–11, delete `.gitignore:47`, delete `src/scripts/conf/rsync-exclude.txt:85`, update `src/scripts/run-postgresql-dev.sh:236`), restart postgres, verify build works WITHOUT `sudo`. Rollback path documented. Pre-flight: fresh `pg_dump` via `src/scripts/backup-postgres.sh`.
-- [ ] [LUPIN] **(Optional) Route uv.lock R&D doc to external `uv` expert** — open questions (in the doc itself): did `pydantic-ai==0.6.2` ever expose a `slim` extra? did `uv` tighten extras-validation between lock-time and sync-time? should we file a `uv` bug for the lock-writer-accepts-impossible-extras inconsistency?
+- [x] [LUPIN] **`uv.lock` surgical fix (build-blocking)** — DONE 2026-04-30 (Session b195a160). pyproject.toml:53 was already correct (dropped 2026-04-28). `uv lock` regen on 2026-04-30 closed the bcrypt spec drift (`>=4.0,<5` → `==4.3.0`). Build now advances past stage 13/47 to completion. New image at `lupin:1.0.0-bcrypt-4.3.0` (parked tag).
+- [x] [LUPIN] **Postgres bind-mount permanent relocation** — DONE 2026-04-30 (Session b195a160). Moved to `/mnt/DATA01/include/www.deepily.ai/projects/lupin-data/postgresql-dev-data` (NOT the original `/mnt/DATA01/lupin-data/` target — user redirected at execution time to nest under projects-root). 5 files edited. See current "🩺 POSTMORTEM FOLLOW-UPS" section at top of TODO.md for details.
+- [ ] [LUPIN] **(Optional) Route uv.lock R&D doc to external `uv` expert** — open questions (in the doc itself): did `pydantic-ai==0.6.2` ever expose a `slim` extra? did `uv` tighten extras-validation between lock-time and sync-time? should we file a `uv` bug for the lock-writer-accepts-impossible-extras inconsistency? **Lower priority now** that the build is unblocked, but the questions remain interesting for `uv` toolchain governance.
 
 ---
 

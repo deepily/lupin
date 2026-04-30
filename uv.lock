@@ -2061,7 +2061,7 @@ requires-dist = [
     { name = "alembic", specifier = "==1.18.1" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
     { name = "autoawq", specifier = ">=0.2.6" },
-    { name = "bcrypt", specifier = ">=4.0,<5" },
+    { name = "bcrypt", specifier = "==4.3.0" },
     { name = "cffi", specifier = "==2.0.0" },
     { name = "claude-agent-sdk", specifier = "==0.1.56" },
     { name = "fastapi", specifier = ">=0.115,<1" },

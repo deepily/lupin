@@ -102,7 +102,14 @@ def quick_smoke_test():
         _force_execute_failure(
             tfe, RuntimeError( "smoke-test-forced-failure-MARKER-a9f3c" )
         )
-        result = tfe.do_all()
+        # AgenticJobBase subclasses now re-raise from do_all() after persisting
+        # state/error/answer_conversational (Phase 4 backlog #5, Session d34f2f74).
+        # Catch the re-raise so the forensic assertions below can still run.
+        try:
+            tfe.do_all()
+            assert False, "do_all() should have re-raised RuntimeError"
+        except RuntimeError as e:
+            assert "smoke-test-forced-failure-MARKER-a9f3c" in str( e )
 
         assert tfe.state == JobState.FAILED, f"expected FAILED, got {tfe.state}"
         assert tfe.error is not None, "self.error must be populated on failure"
