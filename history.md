@@ -1,5 +1,42 @@
 # Lupin Project History
 
+### 2026.05.01 - Session f742b1bc | WS "unable to connect" outage — root cause was uvicorn --reload watching the wrong tree
+
+#### Checkpoint | 2026.05.01 ~10:55 EDT | One-config-line fix to `main.py` ends 30s-2min browser outages
+
+Picked up from last night's bug doc (`src/rnd/v0.1.7/2026.04.30-ws-restart-auth-cascade-bug.md`) which had paused with three deferred questions. User's answers immediately ruled out the original hypothesis: trigger was "passage of time" (not a manual restart or `--reload` from a save), the browser was showing its own `ERR_CONNECTION_REFUSED` page (not a Lupin-side `auth_error` or JS disconnect banner), and the outage was 30 seconds to a couple of minutes (not permanent until reload). That combination meant port 7999 was actually unbound at those moments — which on a healthy container can only happen during a uvicorn reload window.
+
+**Diagnosis**: docker container `lupin-rest-dev` was healthy with `RestartCount: 0` and 56-min uptime, but `docker logs` showed uvicorn `StatReload` firing repeatedly on test files in `src/tests/` — `test_voice_persona_helpers.py` and `test_voice_persona_allocation.py`. One concrete burst on 2026-05-01 between 02:08 and 02:15 UTC: 8 reloads in 7 minutes. Each reload tears down the server and rebuilds it; the rebuild takes 12-18 seconds before `Application startup complete` re-fires. During that window port 7999 is unbound — exactly the user's "browser unable to connect" symptom.
+
+**Why uvicorn was watching test files at all**: `src/fastapi_app/main.py:846-853` was launching `uvicorn.run()` with `reload=not is_production_or_test` and **no scope-narrowing**, so the entire `/var/lupin/src` tree was watched, including `tests/` and the LanceDB long-term-memory store at `conf/long-term-memory/lupin.lancedb/...` (which writes constantly at runtime).
+
+**Fix** (`src/fastapi_app/main.py:846-862`): switched from default-watch-everything to a `reload_dirs` whitelist of the five runtime code dirs:
+
+```python
+reload_kwargs = {}
+if not is_production_or_test:
+    reload_kwargs[ "reload" ] = True
+    reload_kwargs[ "reload_dirs" ] = [ "fastapi_app", "cosa", "lib", "lupin_cli", "lupin_mcp" ]
+uvicorn.run( "fastapi_app.main:app", host="0.0.0.0", port=port, workers=1, log_level="info", **reload_kwargs )
+```
+
+Verification: post-bounce `Will watch for changes in these directories` banner shows exactly those five paths. Touched both test files + a LanceDB-path probe; uvicorn fired zero StatReload events. Container healthy on `:7999`.
+
+**False starts worth recording** (all in the bug doc §Resolution):
+1. First patch used `reload_excludes=["tests/*", ...]` — failed because uvicorn's StatReload uses `Path.match()` where `*` is a single path-segment matcher, so `tests/*` does NOT match `tests/unit/foo.py`.
+2. Second patch used `reload_excludes=["tests/**/*", ..., "**/*.lance/**"]` — pegged the python process at 99% CPU during reload-watcher init because the deep-glob walks every subdirectory of every `.lance` directory and LanceDB has thousands of those (`gist_cache.lance/_versions/`, `_transactions/`, `data/` × many tables). Container hung past `[LUPIN] Starting FastAPI server` for several minutes.
+3. Final patch (`reload_dirs` whitelist) is robust and trivially fast.
+
+**Bugs A + B from the original bug doc still open** (cosmetic, log-hygiene only): mislabeled "Token verification failed" message and cascading `send_json` on closed socket at `websocket.py:458-466`. Both `<10` line fixes; held for a follow-up commit since they don't affect the user-visible symptom.
+
+**Open question parked**: even with reload now ignoring `tests/`, the underlying question of *what* is bumping test-file mtimes at irregular intervals (02:08, 02:14, 09:12 EDT today) without anyone running tests is unexplained. Plausible suspects: backup script, IDE indexer, hook, periodic git op. Not urgent; tracked in TODO.md.
+
+**Conversation-mode hygiene self-correction**: user explicitly probed mid-session ("are you in conversation mode, true or false?") after I'd been writing long substantive paragraphs in terminal text *and* duplicating them via `notify()` — the exact anti-pattern from yesterday's `feedback_no_duplicate_notify_in_conversation_mode.md` memory. Acknowledged the violation and corrected mid-turn: terminal text now stays minimal, closing-turn `notify()` carries the full voice content, mid-turn `notify()` is reserved for distinct progress/error content.
+
+**Files** (parent Lupin only — 4): `src/fastapi_app/main.py` · `src/rnd/v0.1.7/2026.04.30-ws-restart-auth-cascade-bug.md` (added §Resolution) · `TODO.md` · `.claude-session.md` · `history.md` (this entry).
+
+---
+
 ### 2026.04.30 - Session e8713aeb | Spit-and-polish: cc-strip-icons hover clipping, hookEventName schema fix, voice persona renames
 
 #### Checkpoint | 2026.04.30 22:40 EDT | Three small bugs landed in one focus mode UI/hooks/persona pass

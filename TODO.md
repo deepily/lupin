@@ -1,6 +1,18 @@
 # TODO
 
-Last updated: 2026-04-30 EDT (Session 488ca8bd — CC session focus mode, Phase 0+1 + E2E test file written, :8000 batch deferred to user)
+Last updated: 2026-05-01 EDT (Session f742b1bc — WS "unable to connect" outage root-caused + fixed)
+
+---
+
+## 🐛 WS RESTART AUTH CASCADE — User-visible symptom resolved (Session f742b1bc, 2026-05-01)
+
+**Bug doc**: `src/rnd/v0.1.7/2026.04.30-ws-restart-auth-cascade-bug.md` (see §Resolution)
+
+- [x] [LUPIN] **Get answers to 3 open questions** — answered 2026-05-01 morning. Trigger was "passage of time" + browser `ERR_CONNECTION_REFUSED` page, which redirected the investigation away from this doc's WS-cascade hypothesis. — Session f742b1bc
+- [x] [LUPIN] **Root-cause and land user-visible fix** — `src/fastapi_app/main.py:846-862`. uvicorn `--reload` was watching all of `/var/lupin/src` and tearing the server down for 12-18s on every test-file mtime bump and LanceDB write — that 12-18s unbound port window is what produced the browser's "unable to connect" page. Switched to `reload_dirs=["fastapi_app","cosa","lib","lupin_cli","lupin_mcp"]` whitelist. Verified end-to-end. — Session f742b1bc
+- [ ] [LUPIN] **Land Fix 1 (cosmetic)** — `src/cosa/rest/routers/websocket.py:458-466`. Bug A (mislabeled "Token verification failed" — actually a post-verify send_json failure) + Bug B (cascading send_json on already-closed socket). Log-hygiene only, both <10 line fixes; user-visible symptom is gone but the cascade trace can still appear during a real container restart. Fits v0.1.7 spit-and-polish branch intent.
+- [ ] [LUPIN] **What's bumping test file mtimes?** — even with reload now ignoring `tests/`, the underlying question is unanswered: `test_voice_persona_helpers.py` and `test_voice_persona_allocation.py` had mtimes touched at 02:08, 02:14, 09:12 today without anyone running tests. Plausible suspects: backup script, IDE indexer, hook, periodic git op. Not urgent; trace if it surfaces another way.
+- [ ] [LUPIN] **Add WS-smoke regression test** (deferred) — simulate 1012 close + reconnect within 5s and assert `auth_success` received. Belongs in `src/tests/websocket_smoke/`. Lower priority now that the user-visible symptom is gone, but still worth the regression coverage.
 
 ---
 

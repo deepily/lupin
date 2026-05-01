@@ -843,11 +843,20 @@ if __name__ == "__main__":
     lupin_env = os.environ.get( "LUPIN_ENV", "" ).lower()
     is_production_or_test = lupin_env in ["production", "test", "testing"]
 
+    # reload_dirs whitelist: only watch runtime code paths. Without this, --reload
+    # would scan the entire src/ tree (including tests/, rnd/, and the LanceDB
+    # long-term-memory store), causing repeated 12-18s server restarts whenever
+    # any of those files was touched — surfacing in the browser as
+    # ERR_CONNECTION_REFUSED for 30s-2min at a time.
+    reload_kwargs = {}
+    if not is_production_or_test:
+        reload_kwargs[ "reload" ] = True
+        reload_kwargs[ "reload_dirs" ] = [ "fastapi_app", "cosa", "lib", "lupin_cli", "lupin_mcp" ]
     uvicorn.run(
         "fastapi_app.main:app",
         host="0.0.0.0",
         port=port,
         workers=1,  # Single worker required for in-memory notification state (pending_responses dict)
-        reload=not is_production_or_test,
-        log_level="info"
+        log_level="info",
+        **reload_kwargs
     )
