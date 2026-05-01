@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-04-22T16:50:00-04:00
+**Last Updated**: 2026-05-01T11:00:00-04:00
 
 ---
 
@@ -52,14 +52,36 @@
 | 9b840935 | 2026-04-22T14:55:15 | 2026-04-22T16:50:00 | closed |
 | 52a71953 | 2026-04-24T15:50:00 | 2026-04-24T17:42:00 | closed |
 | 2026-04-26-card-render-stall | 2026-04-26T11:00:00 | 2026-04-26T13:50:00 | closed |
-| 49c27830 | 2026-04-27T11:30:00 | 2026-04-27T11:45:00 | active |
+| 49c27830 | 2026-04-27T11:30:00 | 2026-04-27T11:45:00 | stale |
 | ba53b0d2 | 2026-04-28T21:25:00 | 2026-04-28T21:50:00 | closed |
+| 31172845 | 2026-05-01T11:00:00 | 2026-05-01T11:00:00 | active |
 
 ---
 
 ### Queued
 
 (Available for any session to claim)
+
+- [ ] **Notification 503 cascade for offline users in expediter flow** (filed 2026-05-01 by session 31172845, evidence in execution log Phase 5)
+  - **Server**: `src/cosa/rest/routers/notifications.py:727-731` raises HTTP 503 when target_user is offline AND no `response_default` set.
+  - **Client**: `src/cosa/agents/runtime_argument_expeditor/expeditor.py:821-833` `_batch_collect_args` does NOT set `response_default` (only per-question `default_value` inside `response_options`).
+  - **Symptom**: ~21 cancellations across `test_expeditor_mock_job_smoke`, `test_proxy_integration[expediter scenarios]`, `test_swe_team_proxy` smoke tests when the test user has no WS connection. Confirmed reproducing in 2026-05-01 fresh container logs.
+  - **4 fix options documented**: `src/rnd/v0.1.7/2026.05.01-postmortem-fixes-90-execution-log.md` §Phase 5. Option B (client-side `response_default = JSON-encoded answer defaults`) is the most surgical; Option C (auto-proxy maintains a WS connection for the test user) is the most architecturally correct. Picking requires a longer design conversation.
+
+- [ ] **Test_suite mode HTTP 500 — actual NoneType.split source** (filed 2026-05-01 by session 31172845, evidence in execution log Phase 2)
+  - **Defensive fix already landed** (CoSA branch reorder in `todo_fifo_queue.py:634-655`) but my hypothesis was wrong: `MODE_TO_AGENT` and `AGENTIC_MODE_MAP` are disjoint as of 2026-05-01, so the dispatch reorder doesn't change behavior for the test_suite case.
+  - **Real bug location is unknown** — needs reproduction with a live `--auto-proxy` server running so the expediter actually returns args_dict (vs. cancellation). Reproduction recipe: `python src/tests/smoke/test_proxy_integration.py --group test_suite --auto-proxy --no-confirm` against :7999.
+  - **Next session should**: instrument `agentic_job_factory.py:267-295` and the TestSuiteJob constructor with explicit None-checks + tracebacks, reproduce, capture the actual stack.
+
+- [ ] **Server-side preflight surrogate for /api/test-suite/submit** (filed 2026-05-01 by session 31172845, evidence in execution log Phase 7)
+  - The submit endpoint cannot synchronously run `preflight-test-container.sh` because the FastAPI server runs INSIDE the test container without docker daemon access.
+  - **3 architectural options**: (a) server-side surrogate that checks fixture presence + bind-mount paths from inside the container, (b) pre-submit hook in whatever client invokes the endpoint (UI/slash command/scheduler), (c) mount docker socket into test container (security concern).
+  - **Workaround for now** (added as docstring in `src/cosa/rest/routers/test_suite.py:104-125`): callers run preflight on the host before posting an `all` or live-smoke schedule.
+
+- [ ] **`claude-agent-sdk` install state in test container** (filed 2026-05-01 — context: the integration suite has ~12 skips at `test_sdk_validation.py` due to "claude-agent-sdk not installed". Verify whether the SDK is intentionally absent OR should be installed; a single-place skipif decorator at the top of the file would be cleaner than per-test guards. Out of 2026-05-01 session scope.)
+
+- [ ] **Smoke harness label improvement: distinguish http_error_503 from "User cancelled"** (filed 2026-05-01 by session 31172845, optional follow-up to Phase 5)
+  - `src/tests/smoke/utilities/live_pipeline_base.py` — when polled job-done config has `notification_status` starting with `http_error_`, surface as a distinct label (e.g. "Infra failure: 503") rather than "User cancelled unexpectedly". Also add a pre_run_hook /api/notify health probe so the suite aborts early on a notification dispatch outage instead of running 21 scenarios that will all 503.
 
 - [ ] **`POST /api/notify/response` ERR_CONNECTION_RESET + audio WebSocket connect failure** (possibly related to session 9b840935's notification fixes — filed 2026-04-22, USER-REPORTED while manually testing)
   - **Browser console traces**:
@@ -124,7 +146,13 @@
 
 (Claimed by a specific session)
 
-(none)
+- [ ] **Post-mortem remediation: 2026-04-30 22:15-EDT all-suite run (9 smoke failures, 6 root-cause clusters)** | Owner: 31172845 | Since: 2026-05-01T11:00:00
+  - **Plan**: `/home/rruiz/.claude/plans/spicy-plotting-coral.md` (approved 2026-05-01)
+  - **Will be serialized to**: `src/rnd/v0.1.7/2026.05.01-postmortem-fixes-plan.md` + `2026.05.01-postmortem-fixes-90-execution-log.md`
+  - **8 phases**: Phase 0 docs → Phase 1A smoke skip refactor → Phase 2 (Cluster D test_suite mode HTTP 500) → Phase 3 (Cluster G presentation routing) → Phase 4 (Cluster F notify_user_sync timeout) → Phase 5 (Cluster A 503 cascade — diagnosis only) → Phase 1B integration skip cleanup → Phase 6 (Cluster B INI-driven extra pytest_args) → Phase 7 (Cluster C synchronous preflight)
+  - **Carryovers folded in**: Clusters D + G are unfixed from the 2026-04-29 post-mortem; both re-failed in this run.
+  - **Defaults chosen (user away)**: Cluster B → Option B INI-driven; Cluster C → synchronous preflight; Phase 1B → delete the 6 obsolete deep_research_orchestrator non-standard-format tests.
+  - **Per memory**: I edit CoSA submodule files; user commits in CoSA session afterward. No auto-commits.
 
 ---
 

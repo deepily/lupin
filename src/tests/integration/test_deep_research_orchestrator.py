@@ -148,10 +148,17 @@ async def run_with_rate_limit_handling( coro, phase_name: str, debug: bool = Fal
 
 # =============================================================================
 # Integration Test Phases
+#
+# NOTE (2026-05-01): These six `phase_*` functions were originally named
+# `test_phase_*` and decorated with `@pytest.mark.skip`. They are NOT
+# pytest tests — they are async helpers with required parameters
+# (query, budget, debug, agent) called by the standalone CLI runner at
+# the bottom of this file. Renaming dropped the `test_` prefix so pytest
+# no longer collects them; the skip decorators were therefore removed as
+# dead code. This eliminates 6 of the integration suite's runtime skips.
 # =============================================================================
 
-@pytest.mark.skip( reason="Non-standard test format (raw async functions with params) — standalone CLI runner only" )
-async def test_phase_instantiation(
+async def phase_instantiation(
     query: str,
     budget: float,
     debug: bool
@@ -200,8 +207,7 @@ async def test_phase_instantiation(
     return result
 
 
-@pytest.mark.skip( reason="Non-standard test format — standalone CLI runner only" )
-async def test_phase_clarification(
+async def phase_clarification(
     agent: ResearchOrchestratorAgent,
     debug: bool
 ) -> TestResult:
@@ -255,8 +261,7 @@ async def test_phase_clarification(
     return result
 
 
-@pytest.mark.skip( reason="Non-standard test format — standalone CLI runner only" )
-async def test_phase_planning(
+async def phase_planning(
     agent: ResearchOrchestratorAgent,
     debug: bool
 ) -> TestResult:
@@ -312,8 +317,7 @@ async def test_phase_planning(
     return result
 
 
-@pytest.mark.skip( reason="Non-standard test format — standalone CLI runner only" )
-async def test_phase_research(
+async def phase_research(
     agent: ResearchOrchestratorAgent,
     debug: bool
 ) -> TestResult:
@@ -375,8 +379,7 @@ async def test_phase_research(
     return result
 
 
-@pytest.mark.skip( reason="Non-standard test format — standalone CLI runner only" )
-async def test_phase_synthesis(
+async def phase_synthesis(
     agent: ResearchOrchestratorAgent,
     debug: bool
 ) -> TestResult:
@@ -431,8 +434,7 @@ async def test_phase_synthesis(
     return result
 
 
-@pytest.mark.skip( reason="Non-standard test format — standalone CLI runner only" )
-async def test_phase_revision(
+async def phase_revision(
     agent: ResearchOrchestratorAgent,
     debug: bool
 ) -> TestResult:
@@ -522,7 +524,7 @@ async def run_integration_tests(
 
         # Phase 1: Instantiation (no API call)
         if debug: print( "\n[Phase 1] Testing instantiation..." )
-        result = await test_phase_instantiation( query, budget, debug )
+        result = await phase_instantiation( query, budget, debug )
         results.append( result )
         if debug and result.passed:
             print( f"  [+] Passed: state={result.details.get( 'state' )}" )
@@ -542,7 +544,7 @@ async def run_integration_tests(
 
         # Phase 2: Clarification (1 API call)
         if debug: print( "\n[Phase 2] Testing clarification..." )
-        result = await test_phase_clarification( agent, debug )
+        result = await phase_clarification( agent, debug )
         results.append( result )
         if debug and result.passed:
             print( f"  [+] Passed: needs_feedback={result.details.get( 'needs_feedback' )}" )
@@ -551,7 +553,7 @@ async def run_integration_tests(
 
         # Phase 3: Planning (1 API call)
         if debug: print( "\n[Phase 3] Testing planning..." )
-        result = await test_phase_planning( agent, debug )
+        result = await phase_planning( agent, debug )
         results.append( result )
         if debug and result.passed:
             print( f"  [+] Passed: complexity={result.details.get( 'complexity' )}, subqueries={result.details.get( 'num_subqueries' )}" )
@@ -561,7 +563,7 @@ async def run_integration_tests(
         # Phase 4: Research (1 API call with web search) - optional
         if not skip_research:
             if debug: print( "\n[Phase 4] Testing research (web search)..." )
-            result = await test_phase_research( agent, debug )
+            result = await phase_research( agent, debug )
             results.append( result )
             if debug and result.passed:
                 print( f"  [+] Passed: sources={result.details.get( 'num_sources' )}, confidence={result.details.get( 'confidence' )}" )
@@ -576,7 +578,7 @@ async def run_integration_tests(
 
         # Phase 5: Synthesis (1 API call)
         if debug: print( "\n[Phase 5] Testing synthesis..." )
-        result = await test_phase_synthesis( agent, debug )
+        result = await phase_synthesis( agent, debug )
         results.append( result )
         if debug and result.passed:
             print( f"  [+] Passed: report_length={result.details.get( 'report_length' )}" )
@@ -585,7 +587,7 @@ async def run_integration_tests(
 
         # Phase 6: Revision (1 API call)
         if debug: print( "\n[Phase 6] Testing revision..." )
-        result = await test_phase_revision( agent, debug )
+        result = await phase_revision( agent, debug )
         results.append( result )
         if debug and result.passed:
             print( f"  [+] Passed: revised_length={result.details.get( 'revised_length' )}" )
@@ -657,7 +659,7 @@ class TestDeepResearchOrchestratorIntegration:
     @pytest.mark.integration
     def test_instantiation( self ):
         """Test that orchestrator can be instantiated."""
-        result = asyncio.run( test_phase_instantiation(
+        result = asyncio.run( phase_instantiation(
             query  = "What is quantum computing?",
             budget = 0.50,
             debug  = False
@@ -674,7 +676,7 @@ class TestDeepResearchOrchestratorIntegration:
                 user_id          = "pytest",
                 budget_limit_usd = 0.50,
             )
-            result = await test_phase_clarification( agent, debug=False )
+            result = await phase_clarification( agent, debug=False )
 
             # Allow rate limit as partial success
             if result.error and "Rate" in result.error:
@@ -692,7 +694,7 @@ class TestDeepResearchOrchestratorIntegration:
                 user_id          = "pytest",
                 budget_limit_usd = 0.50,
             )
-            result = await test_phase_planning( agent, debug=False )
+            result = await phase_planning( agent, debug=False )
 
             if result.error and "Rate" in result.error:
                 pytest.skip( "Rate limited - partial test" )
@@ -710,7 +712,7 @@ class TestDeepResearchOrchestratorIntegration:
                 user_id          = "pytest",
                 budget_limit_usd = 0.50,
             )
-            result = await test_phase_research( agent, debug=False )
+            result = await phase_research( agent, debug=False )
 
             if result.error and "Rate" in result.error:
                 pytest.skip( "Rate limited - partial test" )
@@ -729,7 +731,7 @@ class TestDeepResearchOrchestratorIntegration:
             )
             # Add mock findings for synthesis
             agent.findings = []
-            result = await test_phase_synthesis( agent, debug=False )
+            result = await phase_synthesis( agent, debug=False )
 
             if result.error and "Rate" in result.error:
                 pytest.skip( "Rate limited - partial test" )
@@ -746,7 +748,7 @@ class TestDeepResearchOrchestratorIntegration:
                 user_id          = "pytest",
                 budget_limit_usd = 0.50,
             )
-            result = await test_phase_revision( agent, debug=False )
+            result = await phase_revision( agent, debug=False )
 
             if result.error and "Rate" in result.error:
                 pytest.skip( "Rate limited - partial test" )

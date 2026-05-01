@@ -216,13 +216,23 @@ def _send_sync_notification(
             print( f"[DEBUG] API params: {params}", file=sys.stderr )
             print( f"[DEBUG] API key: {api_key[:20]}...{api_key[-10:] if api_key else 'None'}", file=sys.stderr )
 
-        # Send notification with SSE stream
+        # Send notification with SSE stream.
+        # timeout=(connect_timeout, read_timeout) — split tuple so that an
+        # unreachable URL fails FAST (3s connect) instead of waiting up to
+        # request.timeout_seconds + 10s on TCP SYN retries. Without this split,
+        # the idle_waiter smoke test (which deliberately points at an
+        # unreachable URL with a 15s subprocess budget) gets SIGKILL'd because
+        # OS-level connect timeout dominates the read budget. Connect timeout
+        # of 3s is plenty for any localhost or LAN target. Read timeout
+        # remains tied to the user's notification window (e.g. 180s for a
+        # confirmation prompt), which is the latency we actually need to
+        # survive — the user clicking "yes" within their attention budget.
         response = requests.post(
             url,
             params  = params,
             headers = headers,
             stream  = True,  # Critical for SSE streaming
-            timeout = request.timeout_seconds + 10  # +10s for network overhead
+            timeout = ( 3, request.timeout_seconds + 10 )
         )
 
         if response.status_code != 200:

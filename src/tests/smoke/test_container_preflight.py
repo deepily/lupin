@@ -38,9 +38,23 @@ def _docker_available():
         return result.returncode == 0
     except ( FileNotFoundError, OSError, subprocess.TimeoutExpired ):
         # docker binary missing from PATH (test container reality), or daemon
-        # unreachable — treat as "not available" so the autouse fixture's
-        # pytest.skip path is taken instead of erroring out at setup.
+        # unreachable — treat as "not available".
         return False
+
+
+# Module-level gate: preflight is by-design a host-only tier. It tests
+# docker-compose.yml drift against the running container, which requires the
+# host's docker daemon. When this file is collected inside the test container
+# itself, the docker socket is not mounted, so all 7 probes would skip
+# individually and report as 7 skip lines in the suite summary. Lifting the
+# gate to module-level collapses that to ONE skip entry — same coverage from
+# the host, cleaner report on :8000 / :7999 in-container invocations.
+if not _docker_available():
+    pytest.skip(
+        "docker daemon not reachable — preflight runs from host only "
+        "(by-design when invoked from inside the test container)",
+        allow_module_level=True
+    )
 
 
 def _docker_exec( *args ):
@@ -50,12 +64,6 @@ def _docker_exec( *args ):
         text=True,
         timeout=15
     )
-
-
-@pytest.fixture( scope="module", autouse=True )
-def _require_docker():
-    if not _docker_available():
-        pytest.skip( "docker daemon not reachable — preflight requires a running docker" )
 
 
 def test_container_is_running():

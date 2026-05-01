@@ -1,6 +1,24 @@
 # TODO
 
-Last updated: 2026-05-01 EDT (Session 31172845 added post-mortem remediation phases; Session f742b1bc previously logged WS outage fix)
+Last updated: 2026-05-01 EDT (Session 911b1cdc added persona rename + display_name + conv-mode exit-reminder follow-ups; Session 31172845 added post-mortem remediation phases; Session f742b1bc previously logged WS outage fix)
+
+---
+
+## 🎙 PERSONA + CONV-MODE EXIT-REMINDER FOLLOW-UPS (Session 911b1cdc, 2026-05-01)
+
+### Pending
+
+- [ ] [LUPIN] **End-to-end test the cross-session conv-mode exit-reminder injection** — requires fresh listener subprocesses (existing listeners still run pre-edit code). Start two new CC sessions, enter conv mode in one, then in the other. The displaced session should receive the `<system-reminder>` block typed into its tmux pane and on its next turn stop calling `notify()` and stop wrapping replies in `<voice-message>` format.
+- [ ] [LUPIN] **Frontend localStorage reconciliation for `conversation_mode_active`** — separate from this session's server-side exit-reminder fix. The browser caches per-session conv-mode state in `localStorage[notifications_conversation_modes]` and only updates from WS events; missed displace events leave stale entries. Pick fix path (A: hydrate-on-load via new `GET /api/cosa-voice/conversation-mode/active-sessions`; B: server-pushed `conversation_mode_snapshot` WS event on auth) and implement.
+
+### What landed (this session)
+
+- ✅ Persona `Mr. NPR` → `mr radio` rename in INI + splainer + 2 test files
+- ✅ `display_name_for()` helper + `_HONORIFIC_TOKENS` set; stamped on all 3 persona-dict construction sites + defensive stamp on legacy bridges
+- ✅ `_renderPersonaBadgeHTML` updated to use `display_name` with `name` fallback
+- ✅ `conv_mode_exit_reminder()` helper + listener `exit_conversation_mode` action handler + `wrap=True/False` on `_inject_via_tmux`
+- ✅ Conversation-mode router pushes parallel `action:exit_conversation_mode` notification at displacement time (best-effort)
+- ✅ Tests: +7 `TestDisplayNameFor`, +1 pool-stamping, +7 `TestConvModeExitReminder`, +2 listener action tests; updated 3 displacement assertions for new push count
 
 ---
 
