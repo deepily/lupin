@@ -1,6 +1,36 @@
 # TODO
 
-Last updated: 2026-05-01 EDT (Session f742b1bc — WS "unable to connect" outage root-caused + fixed)
+Last updated: 2026-05-01 EDT (Session 31172845 added post-mortem remediation phases; Session f742b1bc previously logged WS outage fix)
+
+---
+
+## 🩺 POSTMORTEM REMEDIATION FOR USER (Session 31172845, 2026-05-01)
+
+**Plan**: `src/rnd/v0.1.7/2026.05.01-postmortem-fixes-plan.md`
+**Execution log**: `src/rnd/v0.1.7/2026.05.01-postmortem-fixes-90-execution-log.md`
+
+### User actions required
+
+- [ ] [LUPIN] **Commit parent-Lupin changes** in this session's manifest (`.claude-session.md` Session 31172845 row). Files: `bug-fix-queue.md`, `history.md`, `TODO.md`, `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/lupin_cli/notifications/notify_user_sync.py`, `src/tests/integration/test_deep_research_orchestrator.py`, `src/tests/smoke/test_container_preflight.py`, `src/tests/smoke/conftest.py` (NEW), `src/tests/unit/test_*.py` (4 NEW files), `src/rnd/v0.1.7/2026.05.01-postmortem-*.md` (3 NEW files). **CAUTION**: parallel session f742b1bc has its own files in the manifest — use `git diff --cached --stat` to verify only my files staged before commit.
+- [ ] [LUPIN-COSA] **Commit CoSA submodule changes** in a separate CoSA session: `src/cosa/rest/todo_fifo_queue.py` (Cluster D defensive reorder), `src/cosa/rest/routers/mock_job.py` (Cluster G presentation routing), `src/cosa/agents/test_suite/job.py` (Cluster B per-suite extra args), `src/cosa/rest/routers/test_suite.py` (Cluster C docstring).
+- [ ] [LUPIN] **Schedule next `:8000` all-suite run** to validate fixes (after all commits land + container recreation if needed). Use `POST /api/test-suite/submit` with confirmed scheduled_at. Run `src/scripts/preflight-test-container.sh` from host first (Cluster C workaround).
+- [ ] [LUPIN] **Pick fix option for Cluster A (notification 503)** — see bug-fix-queue.md "Notification 503 cascade". 4 options documented (Option B is most surgical; Option C is most correct). Decision required before that bug can be fixed.
+- [ ] [LUPIN] **Pick architectural option for Cluster C** — see bug-fix-queue.md "Server-side preflight surrogate". 3 options.
+- [ ] [LUPIN] **Investigate `claude-agent-sdk` install state** in test container — see bug-fix-queue.md. Reduces 12 integration skips if the SDK is now installed.
+
+### What landed (this session)
+
+- ✅ Phase 0: docs serialized (plan + execution log + skip-count corrections in post-mortem)
+- ✅ Phase 1A: smoke skip refactor (preflight: 7 skips → 1 module-level skip)
+- ⚠️ Phase 2 (Cluster D): defensive branch reorder + 15 unit tests; **real NoneType.split source still unknown** (filed)
+- ✅ Phase 3 (Cluster G): presentation keyword fallback + 12 unit tests
+- ✅ Phase 4 (Cluster F): notify_user_sync connect-timeout split + 2 unit tests; **smoke regression GREEN** (idle_waiter test)
+- ✅ Phase 5 (Cluster A): root cause identified (filed for design conversation)
+- ✅ Phase 1B: 6 obsolete pytest.mark.skip eliminated via test_phase_* → phase_* renames
+- ✅ Phase 6 (Cluster B): INI-driven per-suite extra pytest_args + smoke conftest.py (5 flag registrations) + 4 unit tests
+- ⚠️ Phase 7 (Cluster C): docstring + filed for architectural decision
+
+**Net impact (when committed + scheduled run lands)**: 9 → ~3-5 smoke failures expected. 51 → ~45 skip count.
 
 ---
 
@@ -16,9 +46,9 @@ Last updated: 2026-05-01 EDT (Session f742b1bc — WS "unable to connect" outage
 
 ---
 
-## 📚 HISTORY ARCHIVE — Critical (deferred from Session 406cadbf, 2026-04-30)
+## 📚 HISTORY ARCHIVE — Resolved by parallel session (Session f742b1bc, 2026-05-01)
 
-- [ ] [LUPIN] **history.md archival** — at 22,241 tokens (88.9% of 25k limit) at session-end. CRITICAL per session-end workflow. User declined inline archival; deferred to next session-start. Run `/history-management mode=archive` to move older sessions to `history/YYYY-MM-history.md` archive files. Will breach the 25k limit soon at current velocity.
+- [x] [LUPIN] **history.md archival** — peaked at **24,126 tokens (96.5% of 25k limit)** after Session f742b1bc's checkpoint entry pushed it from 22.2k → 24.1k. User declined inline archival; deferred to next session. **Resolved mid-workflow by parallel session 31172845** — produced `history/2026-04-25-to-28-history.md` archive file; history.md now at **12,156 tokens (48.6%, HEALTHY)**. Next session-start should still verify archive looks clean before appending. — Session f742b1bc / handled by 31172845
 
 ---
 
