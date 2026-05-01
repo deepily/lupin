@@ -1,5 +1,90 @@
 # Lupin Project History
 
+### 2026.04.30 - Session 406cadbf | Conversation-Mode Three-Layer Mic-Monopoly Enforcement (Phases 1-5) + cc_listener hardcoded sender_id fix
+
+#### Checkpoint | 2026.04.30 ~20:10 EDT | 7 commits across two thematically distinct fixes
+
+**Context**: Started as a bug-fix session on the cc_notification_listener ghost-card symptom (a CoSA-context CC session was rendering as TWO sender cards in the UI, one correctly under [COSA] and a ghost under [LUPIN] with the same session_id). Root cause was a hardcoded `lupin.deepily.ai` literal in the listener — a regression-shaped miss of the 2026.04.24 nested-repo detection fix. Then pivoted to the architectural-gap conversation that's been outstanding since the conv-mode mic-monopoly mutex (v1.1, Session c7333045 on 2026.04.28): the mutex coordinates the bridge file and UI but **not Claude's in-session belief about `conversation_mode_active`** — so a displaced session's Claude keeps emitting conv-mode-shaped `notify()` calls, producing the multi-session cross-talk symptom user reported on 2026-04-29 ("multiple sessions responding to me through TTS as though I had multiple monopolized conversation engagements running simultaneously"). User's framing: "if it's not code-based and deterministic, then I think that Claude could simply drift away from remembering what state it is in." Designed and shipped a three-layer enforcement net.
+
+**Two thematically distinct fixes** in one session:
+
+#### A. `cc_notification_listener` hardcoded sender_id fix (commits `2eaeffc` + `2ae7f1a`)
+
+- **Bug**: `cc_notification_listener.py:453` constructed the gist-response `sender_id` with `f"claude.code@lupin.deepily.ai#{self.session_id_hash}"` — project segment **literally hardcoded to "lupin"** regardless of which repo the CC session is running in. Nested-repo CC sessions got a ghost `[LUPIN]` sender card alongside their correct `[COSA]` card for the same session_id. Same family as the 2026.04.24 nested-repo bug; missed offender during that fix's audit.
+- **Fix** (commit `2eaeffc`): replaced the hardcoded line with `build_sender_id_for_cc(session_id=self.session_id_hash) or f"claude.code@lupin.deepily.ai#{self.session_id_hash}"` (Option 1 — symmetric with the parallel correct path at `permission_request.py:123` → `send_tts()`). The `or` fallback preserves failure-mode parity. Net diff: +1 import line, ±1 logic line.
+- **Sweep check**: grepped parent Lupin source for hardcoded `lupin.deepily.ai` literals (excluded tests/CoSA/rnd). Singleton offender; other hits benign (docstring examples, Firefox plugin server URL, swe.* agent seed data). Saved memory `feedback_sweep_for_pattern_offenders.md` codifying the lesson.
+- **V5 user-verified** (commit `2ae7f1a`): user restarted a CoSA-context CC session post-commit; no ghost card appeared. Bug fully resolved end-to-end.
+- **R&D doc**: `src/rnd/v0.1.7/2026.04.30-cc-listener-hardcoded-sender-id-fix.md`
+
+#### B. Conversation-Mode Three-Layer Mic-Monopoly Enforcement (commits `02af97b` → `d7a6c9f`)
+
+**Architectural gap diagnosed**: the mutex coordinates THREE state surfaces — bridge file (canonical), UI cache (broadcast-driven), and Claude's in-session belief (set ONCE at SessionStart via `get_session_info()`, never refreshed). The first two were correctly wired; surface 3 was the gap. Confirmed by source-inspection of `_notify_impl` (no bridge consultation) and the static MCP `instructions=` block ("check `get_session_info()` once at session start"). User proposed fix architecture: push the state into a per-call gate at the MCP boundary; verify Claude's behavior at every text-injection and notify boundary.
+
+**User-driven design supersedure** during plan drafting: my first F2 fix (drop `<voice-message>` XML wrap, switch to append-only system-reminder) was overcorrecting. User pushed back: *"I think you're throwing the baby out with the bathwater. Sanitize the input by stripping everything from `</voice-message` to the end, in addition to dropping anything after and including `<system-reminder`."* Reinstated the wrapping form + added `sanitize_for_wrap` boundary sanitization. Saved memory `feedback_sanitize_at_boundary_not_format_strip.md` codifying the lesson.
+
+**5 phases delivered** (each phase = one commit + ping):
+
+| Phase | Commit | Layer | Key artifact |
+|---|---|---|---|
+| 1 | `02af97b` | Wrap helper + sanitization | `sanitize_for_wrap` + `conv_mode_wrap` in `hook_common.py` (27 unit tests) |
+| 2 | `a9ff8bc` | Thread through 3 inbound paths | listener tmux inject (voice), qualifier tmux inject (hook-idle-prompt), user_prompt_submit (terminal-typed via `conv_mode_reminder_block`) — pre/post tool use deferred (per-tool-call reminder noise rationale); permission_request, anything_else_ask confirmed outbound + exempt |
+| 3 | `3e030dc` | `_notify_impl` bidirectional gate | active forces `priority='high'` + `suppress_ding=True` + strips fenced code; inactive + CC sender + `suppress_ding=True` inverts ding for **audible cross-talk cue** (the original symptom fix); `_internal_call=True` escape hatch for `set_session_topic`; dynamic `cc_meta` session resolution |
+| 4 | `9a00d6b` | Stop-hook auto-narrate | reads transcript JSONL, checks for `mcp__cosa-voice__notify` ToolUseBlock, synthesizes `send_tts(narration, priority='high', suppress_ding=True)` if turn ended silent; dedup via `last_autonarrated_turn_id` bridge stamp; 5 fail-closed gates |
+| 5 | `d7a6c9f` | Cross-layer integration smoke | mock-driven 3-layer compose verification including the cross-talk-cue regression test |
+
+**Adversarial review pass** before execution: 9 findings raised against my own design doc — 3 critical (F1 layer 2 didn't fix symptom C, F2 wrapper injection vector, F3 inbound/outbound conflation), 3 important (F4 dynamic session resolution, F5 internal-callers exemption, F6 MCP HTTP fallback bypass documented as known limitation), 3 minor. All findings incorporated into the design doc; F2 then user-superseded as noted above. Re-audit pass confirmed coverage of all 13 applicable feedback memories.
+
+**Test totals**: 176/176 pass in 30.1s (83 new + 93 existing regression). Phase 6 (multi-session live verification + WebSocket smoke full run) outstanding, user-gated per `feedback_e2e_two_phase_gate`.
+
+**R&D docs**:
+- `src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md` — design + adversarial-review findings table + sweep check
+- `src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/90-execution.md` — phase-by-phase execution log with commit hashes + verification details + cumulative summary table
+- Viewer URLs: `http://localhost:7999/static/html/document-viewer.html?path=plans/2026.04.30-conv-mode-three-layer-{design,execution}.md` (real file copies in `io/plans/`, refreshed at every phase commit; not symlinks per user direction)
+
+**Memories saved this session**:
+- `feedback_sweep_for_pattern_offenders.md` — class-of-bugs fixes require codebase-wide grep, not just call-site patch
+- `feedback_sanitize_at_boundary_not_format_strip.md` — defending templated content against injection: prefer boundary input sanitization over giving up structural framing
+
+**Files modified** (Lupin parent only — no CoSA git ops):
+
+R&D:
+- `src/rnd/v0.1.7/2026.04.30-cc-listener-hardcoded-sender-id-fix.md` (NEW)
+- `src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md` (NEW)
+- `src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/90-execution.md` (NEW)
+
+Code (Phase 1+2+3+4):
+- `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` (hardcoded fix + Layer 1 voice wrap)
+- `src/lupin_cli/claude_code/hooks/lib/hook_common.py` (Layer 1 helpers + Layer 1 qualifier wrap + send_tts suppress_ding kwarg)
+- `src/lupin_cli/claude_code/hooks/lib/session_bridge.py` (Layer 3 dedup helpers)
+- `src/lupin_cli/claude_code/hooks/user_prompt_submit.py` (Layer 1 reminder via additionalContext)
+- `src/lupin_cli/claude_code/hooks/stop.py` (Layer 3 auto-narrate)
+- `src/lupin_mcp/cosa_voice_mcp.py` (Layer 2 bidirectional gate + strip_fenced_code_blocks helper)
+
+Tests:
+- `src/tests/unit/test_conv_mode_wrap.py` (NEW, Phase 1+2)
+- `src/tests/unit/test_conv_mode_wrap_threading.py` (NEW, Phase 2 integration)
+- `src/tests/unit/test_notify_impl_conv_mode_override.py` (NEW, Phase 3)
+- `src/tests/unit/test_stop_hook_auto_narrate.py` (NEW, Phase 4)
+- `src/tests/smoke/test_conv_mode_three_layer_integration.py` (NEW, Phase 5)
+
+Tracking:
+- `history.md` (this entry)
+- `TODO.md` (Phase 6 follow-up)
+- `.claude-session.md` (session manifest entries per phase)
+- `io/plans/2026.04.30-conv-mode-three-layer-{design,execution}.md` (viewer copies, gitignored)
+
+**Operational notes**:
+- TTS notify pipeline timed out 5× across the session before user bounced the server; recovered after bounce.
+- Phase 4 test runtime is ~30s due to lazy-import of `cosa_voice_mcp.strip_fenced_code_blocks` triggering MCP module init (account-validation HTTP). Could be optimized by extracting the helper to a lighter module — deferred.
+
+**Open follow-ups** (logged in TODO.md):
+- Phase 6 multi-session live verification matrix (10 rows, design doc §4 Phase 6)
+- Full WebSocket smoke suite run on user-confirmed slot
+- MCP HTTP-fallback mutex bypass at `cosa_voice_mcp.py:1295` (Risk #7, deferred follow-up)
+- Pre/post-tool-use Layer 1 threading (deferred per per-tool-call reminder noise rationale; revisit if drift observed)
+
+---
+
 ### 2026.04.30 - Session 488ca8bd | CC Notification Session Panel Display Modality — selector strip + exclusive focus mode (Phase 0 + Phase 1 + E2E test file written, :8000 scheduling deferred per user)
 
 #### Checkpoint | 2026.04.30 ~20:00 EDT | Phase 0 docs + Phase 1 implementation + Phase 2 E2E test file (gated for :8000 scheduled run)

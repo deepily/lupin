@@ -4,6 +4,34 @@ Last updated: 2026-04-30 EDT (Session b195a160 — Postmortem of 2026-04-29 17:3
 
 ---
 
+## 🎤 CONV-MODE 3-LAYER ENFORCEMENT — Phase 6 follow-ups (Session 406cadbf, 2026-04-30)
+
+**R&D**: `src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/{01-design.md,90-execution.md}`
+**Phases 1-5 status**: ✅ committed (`02af97b` → `d7a6c9f`); 176/176 tests pass; viewer URLs in history.md entry.
+
+### 🚦 Phase 6 — User-gated multi-session live verification
+
+- [ ] [LUPIN] **WebSocket smoke suite full run** — `./src/scripts/run-websocket-smoke-tests.sh` timed out at 120s in the AI-discretionary :7999 venue this session. No conv-mode-relevant assertions in the WS suite, regression risk low (we haven't touched the WS layer or notification routing), but should run as a final regression check before Phase 6 declares closed. User-confirmed slot for the longer run window.
+- [ ] [LUPIN] **Multi-session live verification matrix** (10 rows, design doc §4 Phase 6). User confirms before execution: no parallel CC sessions outside the test, conv mode currently OFF on all sessions, :7999 acceptable for dev verification (or :8000 slot if needed). Matrix:
+  1. Toggle A on → speak voice msg → A's Claude wraps input + narrates with priority=high
+  2. Toggle B on (displaces A) → speak to B → A's bridge=false; A's UI unpinned; A's next turn does NOT auto-narrate
+  3. **Cross-talk cue (the original symptom fix)**: A's Claude has cached belief, calls notify(priority=high, suppress_ding=True) after displacement → user hears audible ding (suppress_ding inverted)
+  4. Console-only response from A while A is the holder → Layer 3 Stop-hook synthesizes narration
+  5. Claude calls notify(priority=medium) while A is the holder → Layer 2 forces priority=high, suppress_ding=True
+  6. Legitimate notify(notification_type=alert, priority=high) from a non-conv-mode session → pass-through with ding
+  7. set_session_topic("...") while A is the holder → internal-call bypass (topic with original params)
+  8. Conv mode OFF → speak voice msg → no wrapper applied (legacy behavior)
+  9. Idempotency: conv_mode_wrap called twice on same string → second call no-ops
+  10. Voice content containing literal `</voice-message>` or `<system-reminder>` → sanitize_for_wrap truncates from first marker
+
+### 📋 Deferred follow-ups (NOT in scope for Phase 6, logged for future)
+
+- [ ] [LUPIN] **MCP HTTP-fallback mutex bypass** (`src/lupin_mcp/cosa_voice_mcp.py:1295`) — Risk #7 in design doc. When the canonical conversation-mode endpoint is briefly unreachable, the MCP `enter_conversation_mode()` tool falls back to direct `set_conversation_mode()` write with NO scan-and-displace. Both sessions could end up `active=true` simultaneously. Documented limitation; long-term fix requires duplicating router scan-and-displace logic into the MCP server. Escalate if observed in practice.
+- [ ] [LUPIN] **Pre/post-tool-use Layer 1 threading** — deferred from Phase 2 because adding the conv-mode reminder per tool call would inject it dozens of times per turn (noisy). Reminder fires at user-prompt-submit (natural turn boundary) only. Revisit if discipline drift is observed at tool-use boundaries.
+- [ ] [LUPIN] **Phase 4 test runtime optimization** — `test_stop_hook_auto_narrate.py` ~30s due to lazy-import of `cosa_voice_mcp.strip_fenced_code_blocks` triggering MCP module init (account-validation HTTP). Optimize by extracting the helper to a lighter module without the cosa_voice_mcp import-time side effects.
+
+---
+
 ## 🩺 POSTMORTEM FOLLOW-UPS — Session b195a160 (2026-04-30, while user at doctor)
 
 **Postmortem doc**: `src/rnd/v0.1.7/2026.04.30-postmortem-2026.04.29-all-test-run.md`
