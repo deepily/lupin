@@ -1,5 +1,29 @@
 # Lupin Project History
 
+### 2026.05.01 - Session 6562a2c9 | History archival + history/ index repair
+
+**Context**: Brief session-start ritual where user requested proactive history-file archival.
+
+**Accomplishments**:
+
+1. **Archived 3 sessions from 2026-04-29** (Persona Theming Round 1, passlib/bcrypt 4.3.0 pin diagnosis, Test-Suite Anomaly Remediation Phases 1+2+3 + Idle-Aware Stop Hook) to new `history/2026-04-29-history.md` (4,420 tokens). Trim removed lines 451-627 from main file.
+
+2. **Repaired `history/README.md` archive index** — three rows were missing despite archive files existing on disk: `2026-04-29-history.md` (NEW this session), `2026-04-25-to-28-history.md`, `2026-04-22-to-24-history.md`. Quick-stats bumped: 16 → 19 archives, 326+ → 346+ sessions documented, last-updated stamp 2026-04-16 → 2026-05-01.
+
+3. **Manifest hygiene** — appended Session 6562a2c9 section to `.claude-session.md` after detecting parallel session 5b732efe ("CC Notifications: add Today filter") was already active. Did not touch parallel session's section or its files.
+
+**Verification**: `history.md` 13,365 → 9,379 tokens (53% → 37.5% of 25k limit). Archive file 4,420 tokens (17.6%). Both healthy.
+
+**Files** (parent Lupin only — selectively staged):
+- `history.md` (trim + archive list entry)
+- `history/2026-04-29-history.md` (NEW)
+- `history/README.md` (added 3 missing archive rows + stats refresh)
+- `.claude-session.md` (this session's section)
+
+**Caveat surfaced for follow-up**: `TODO.md` is at 31,518 tokens (126% of 25k limit, 199 pending items). Triage deferred at user direction; logged in TODO.md.
+
+---
+
 ### 2026.05.01 - Session 911b1cdc | Persona rename + display_name helper + conv-mode displace exit-reminder push
 
 **Accomplishments**:
@@ -448,185 +472,9 @@ Recompose closes Cluster H (swe_team_proxy 3/3 cancels, explicit `LUPIN_INTERACT
 
 ---
 
-### 2026.04.29 - Session 9977a1ba | Persona Theming Round 1 + WS-Event Cleanup + UI Polish + Rachel TTS bug fix
-
-#### Session-End | 2026.04.29 evening | Four commits across cleanup + theming + polish
-
-**Accomplishments**:
-
-1. **WS-event cleanup migration** (`70959c5`): four ad-hoc `ws_manager.emit_to_user(...)` callsites in `voice_persona.py` + `conversation_mode.py` migrated to the canonical `push_notification(type=..., payload={...})` subsystem. Client-side: top-level `conversation_mode_changed` case relocated into `handleNotificationUpdate` by `notification.type`; new dispatches added for `voice_persona_assigned` / `voice_persona_released`. Schema: `payload: Optional[dict]` field on `NotificationItem`; `valid_types` extended. Plus persona hydration Layer A (live DOM patch on assignment) + Layer B (`/senders-visible` carries `voice_persona` for refresh-survival). New 5-test WS-frame capture E2E suite. R&D: `src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md` + `90-execution.md`.
-
-2. **Persona theming Round 1** (`06e5795`): CSS custom-property foundation (`--persona-color`, `--persona-color-rgb` set on each `.sender-card`) via new `_hexToRgb` helper. Tier 1 chrome — card border + outer glow + active stripe + active dot all tinted via `var(--persona-color, fallback)`. Tier 2 header — subtle persona-tinted top-to-bottom gradient (was flat `#f8f9fa`). Badge relocated from beside session-name to first child of `.sender-stats-group` (right-aligned). Personaless cards unchanged via fallback values. R&D: `02-theming-round1-design.md` + `91-theming-execution.md`. Pinned-conv-mode green glow retained for mic-mutex semantic via more-specific selector.
-
-3. **UI tweaks rounds 1–2** (`d8bce7f` + `21e92f1`): incoming AI bubbles get persona-tinted gradient mirroring header (alphas 0.10/0.02 — quieter than header's 0.14/0.04). Focus shift to recording mic on conversation-mode entry (not exit) and on send (Send button or Enter) for follow-up dictation. Action-required notification persona badge added to active + minimized renders; TTS queue's voice_id lookup now reads from persisted envelope (`item.notification.voice_persona.voice_id`) with map-lookup fallback — resilient to localStorage-restored items.
-
-4. **Server-side Rachel TTS bug fix** (CoSA, NOT in any of my Lupin commits — `src/cosa/rest/routers/speech.py`): legacy code special-cased Rachel's voice_id `21m00Tcm4TlvDq8ikWAM` as the "no voice specified" sentinel, overriding it with the configured default (Sam) — so Rachel sessions silently spoke as Sam despite badges showing Rachel. Replaced with `None` sentinel; explicit voice_id values pass through unchanged. Rachel now speaks as Rachel.
-
-5. **Persona color disambiguation iterations**: Rachel went `#4CAF50` (green) → `#009688` (teal) → `#0288D1` (sky blue) → `#7B1FA2` (Material purple 700) — first three iterations all read green-adjacent against the Bootstrap-success-green conv-mode pin at Tier 1 alphas. Saved `feedback_no_green_in_persona_pool.md` codifying the rule (green RGB component < 30% AND green not in top 2 channels). Nora `#E91E63` → `#F06292` (lighter pink) and Domi `#C2185B` → `#880E4F` (darker wine) for unambiguous Nora/Domi separation. Note: the `#7B1FA2` swap landed via parallel session's `400288f` commit — not authored by this session.
-
-**Memory entries saved**:
-- `feedback_terse_answer_direct_questions.md` — narrow factual lookups get just the answer, no padding with adjacent context
-- `feedback_no_green_in_persona_pool.md` — persona pool may not contain green hues; reserved for the conv-mode pin
-
-**Commits authored** (Lupin parent): `70959c5`, `06e5795`, `d8bce7f`, `21e92f1` — plus pending Nora/Domi color tweaks awaiting this session-end commit.
-
-**Files Modified** (this session-end commit, parent Lupin only): `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini` (Nora + Domi color swaps with provenance notes), `history.md` (this entry).
-
-**CoSA submodule edits NOT in any of my commits** (per `feedback_lupin_only_never_cosa.md` — manage from CoSA context): `src/cosa/rest/routers/speech.py` (Rachel TTS sentinel fix), plus the 4 voice_persona / conversation_mode router migrations from earlier in the session.
-
-**Open follow-ups** (parked, not in scope this session):
-- Tier 3 widgets theming (toggle button border, gist button, voice input row chrome).
-- Tier 4 message bubbles (outgoing background → persona color).
-- frontend-design plugin polish pass against live :7999.
-- UserPromptSubmit hook to backstop the conv-mode acknowledge-receipt rule (architecture sketched in conversation, not implemented).
-
----
-
-### 2026.04.29 - Session 78abd1aa | passlib/bcrypt `__about__` AttributeError diagnosis + remediation
-
-#### Checkpoint | 2026.04.29 17:19 EDT | Pin `bcrypt==4.3.0`, drop xfail markers, queue docker rebuild
-
-**Files** (Lupin parent, 4 modified): `pyproject.toml` (line 69 tightened from `bcrypt>=4.0,<5` to `bcrypt==4.3.0`), `src/scripts/reset_user_password.py` (dropped now-stale host-vs-container bcrypt-version docstring note), `src/tests/integration/test_admin_users.py` (removed two `@pytest.mark.xfail` markers — `test_list_users_search_filter` + `test_update_user_roles_remove_admin` — that referenced the passlib/bcrypt mismatch), `TODO.md` (new follow-up entry for docker rebuild).
-**Commit**: 093b7ca
-**CoSA submodule edits NOT in this commit** (per `feedback_lupin_only_never_cosa`): `src/cosa/requirements.txt:16` (`bcrypt==5.0.0` → `bcrypt==4.3.0`) — informational only; the Lupin Docker build resolves from `pyproject.toml` + `uv.lock`, not from the COSA requirements file.
-**NOT staged** (parallel session, idle-aware stop hook): `.claude/skills/testing-patterns/SKILL.md`, `src/lupin_cli/claude_code/hooks/lib/session_bridge.py`, `src/lupin_cli/claude_code/hooks/lib/anything_else_ask.py` (untracked), `src/lupin_cli/claude_code/hooks/lib/idle_settings.py` (untracked), `src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/` (untracked dir).
-
-**Context**: User reported a recurring, context-free log line — `(trapped) error reading bcrypt version` followed by `AttributeError: module 'bcrypt' has no attribute '__about__'` from `passlib/handlers/bcrypt.py:620` — alongside an unrelated `[WS-AUDIO] Skipping disconnect for slow zebra` line. Asked for a hypothesis.
-
-**Diagnosis** (Explore agent + WebFetch confirmation):
-- **Root cause**: passlib 1.7.4 + bcrypt 5.0.0 incompatibility. passlib's `_load_backend_mixin` reads `bcrypt.__about__.__version__` for backend version logging; bcrypt 5.0.0 removed `__about__` entirely. The traceback is "trapped" by passlib's try/except, hashing/verification still work — purely cosmetic.
-- **Secondary impact (NOT cosmetic)**: Two integration tests in `test_admin_users.py` were `@pytest.mark.xfail`-marked with reason "multiple_test_users fixture returns [] due to passlib/bcrypt version mismatch (bcrypt.__about__ missing)". Same version drift was silently breaking the bulk-user fixture, masked by xfail.
-- **Constraint inconsistency surfaced**: `pyproject.toml:69` had `bcrypt>=4.0,<5` (upper bound `<5`), but `src/cosa/requirements.txt:16` had `bcrypt==5.0.0` — and the running container had 5.0.0 from a stale build. `uv.lock` already had `bcrypt==4.3.0` correctly resolved; the running image just predated the lock update.
-- **Adjacent `[WS-AUDIO]` line is unrelated**: WS reconnect uses JWT (`get_current_user`), not password verify. Coincidental log interleaving.
-
-**Web validation of pin choice**: pyca/bcrypt issue [#1079](https://github.com/pyca/bcrypt/issues/1079) (passlib 1.7.4 + bcrypt 5.0.0 — reporter's stated workaround is `bcrypt==4.3.0`); [PyPI release history](https://pypi.org/project/bcrypt/) confirmed 4.3.0 (Feb 28, 2025) is the latest 4.x with cp313 wheels; pyca/bcrypt issue [#684](https://github.com/pyca/bcrypt/issues/684) confirmed the trapped warning is a 4.1.1+ artifact (cosmetic only, functional fix landed in 4.1.1). Initial half-correct pin recommendation `4.2.1` was upgraded to `4.3.0` after web search.
-
-**Plan doc**: `~/.claude/plans/let-s-start-a-new-generic-badger.md` (canonical) + viewer-accessible copy at `io/plans/2026.04.29-bcrypt-passlib-version-mismatch-plan.md` (gitignored, not committed). Document-viewer URL: `http://localhost:7999/static/html/document-viewer.html?path=plans/2026.04.29-bcrypt-passlib-version-mismatch-plan.md`.
-
-**Next step (logged in TODO.md)**: Rebuild `lupin:1.0.0` to pick up the locked `bcrypt==4.3.0` from pyproject. Park at candidate tag (e.g. `lupin:1.0.0-bcrypt-4.3.0`) per `feedback_no_auto_promote_tags`. After rebuild: confirm trapped warning quieter on startup, re-run unit + smoke on `:7999`, schedule integration suite on `:8000` to verify the now-unxfailed tests.
-
-#### Session Summary
-
-- **Checkpoints**: 1 (commit `093b7ca`)
-- **Files committed**: 5 (4 source + history.md)
-- **Outstanding**: docker rebuild → TODO.md (Session 78abd1aa follow-ups)
-- **Session closed**: 2026.04.29 18:00 EDT
-
----
-
-### 2026.04.29 - Session d34f2f74 | Test-Suite Anomaly Remediation Phases 1+2+3 + Discretionary Backlog Cleanup + Idle-Aware Stop Hook
-
-#### Session-End | 2026.04.29 18:00 EDT | Idle-aware Stop hook with exponential backoff (Phase 0–5, all green)
-
-**Plan-driven work** (5-phase implementation per `~/.claude/plans/peppy-tickling-wolf.md` → serialized to `src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md`):
-
-- **Phase 0**: R&D doc serialization — `01-design.md` with state machine + race analysis + alternatives, paired `90-execution.md` skeleton.
-- **Phase 1**: Bridge helpers (`get_idle_detection`, `set_idle_detection_field`, `clear_idle_waiter_pid`, `kill_idle_waiter`) + `idle_settings.py` loader with 8-case validation (rejects bogus schedules loudly per `feedback_no_defensive_programming`).
-- **Phase 2**: Detached-subprocess `idle_waiter.py` with chunked-sleep + PPID-poll + reset-detection state machine; `anything_else_ask.py` shared helper extracted from `stop.py:_ask_anything_else()` (the existing prompt flow is reused unchanged — what changed is *when* it fires, not *what* it asks).
-- **Phase 3**: 5 hooks modified — `stop.py` defers via `_arm_idle_waiter()` instead of fire-immediately (gated by `settings.idle_detection.enabled`, default true), `user_prompt_submit.py` kills waiter + resets `backoff_index=0`, `post_tool_use.py` kills waiter on `mcp__cosa-voice__*` calls, `register_session.py` initializes the idle_detection block on SessionStart with `/clear` carry-forward, `session_end.py` kills waiter at session end.
-- **Phase 4**: 32 new tests pass (18 bridge + 12 waiter logic + 2 smoke with real subprocess), 103 existing `test_stop_hook.py` + `test_session_bridge*.py` pass after autouse-fixture migration of 4 affected classes (legacy immediate-ask path now gated, but still covered with `enabled=False` settings stub). 135 tests total, 0 regressions. All tests parameterize `LUPIN_API_URL` per the new `feedback_tests_parameterize_base_url` rule + `.claude/skills/testing-patterns/SKILL.md` v1.3.
-- **Phase 5**: Documentation (90-execution.md finalized with phase status + surprises + verification snapshot). Global `~/.claude/CLAUDE.md` update deferred-by-design (out-of-scope risk for global file).
-
-**Commit**: [pending]
-**Files** (Lupin parent only, no CoSA): 9 modified + 7 new + 1 R&D directory; ~492 insertions / ~9 deletions.
-**New behavior**: ask "Anything else?" only after N min of true inactivity. Backoff `[5, 10, 20, 40, 60]` min on consecutive "no" responses. Resets on user input / Stop / cosa-voice tool calls. Conversation mode skipped (TTS dialogue is itself active).
-**Activates**: on next CC session start (hooks loaded at session boot; this session keeps the old in-memory copies).
-
----
-
-#### Checkpoint | 2026.04.29 16:22 | Phase 3 + Phase 4 backlog Lupin parent files (CoSA edits deferred)
-
-**Files** (Lupin parent, 8 modified, 0 new): TODO.md, history.md, src/conf/lupin-app.ini (Phase 3 cap key + 1 small Rachel persona color tweak from in-progress persona theming work), src/conf/lupin-app-splainer.ini, src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/03-oos-4-test-suite-in-dead-anomaly.md (Resolution status table for Findings A/B/C/D), src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/07-final-execution-plan.md (status header reflecting actual completion state), src/tests/unit/test_test_suite_job.py (TestArtifacts io_base patches + test_exception_sets_failed pytest.raises wrapper), src/tests/unit/test_tfe_forensics.py (do_all re-raise contract updates)
-**Commit**: 7e8be00
-**CoSA submodule edits NOT in this commit** (deferred to separate cosa-context session per `feedback_lupin_only_never_cosa`):
-- Phase 3: `src/cosa/agents/test_fix_expediter/config.py`, `prompts/proposal.py`, `orchestrator.py`
-- Phase 4 backlog #1: `src/cosa/agents/utils/agent_notification_dispatcher.py` (ContextVar plumbing), `src/cosa/agents/deep_research/cosa_interface.py` (set_dispatch_context helper), `src/cosa/agents/deep_research/job.py`
-- Phase 4 backlog #2: `src/cosa/rest/queue_consumer.py` (heartbeat refresh + bounded wait)
-- Phase 4 backlog #4: `src/cosa/rest/running_fifo_queue.py` (4 non-canonical paths refactored to `_transition_to_dead`)
-- Phase 4 backlog #5 (do_all re-raise across 9 subclasses): `deep_research/job.py`, `podcast_generator/job.py`, `presentation_generator/job.py`, `deep_research_to_podcast/job.py`, `deep_research_to_presentation/job.py`, `swe_team/job.py`, `test_fix_expediter/job.py`, `test_suite/job.py`, `bug_fix_expediter/job.py`, `claude_code/job.py`
-
-**NOT staged** (in-progress user work, ownership unclear): `src/fastapi_app/static/css/notifications.css`, `src/fastapi_app/static/js/notifications.js` — these are persona-theming continuations after commit `d8bce7f` and don't belong in this Phase 3+4 checkpoint.
-
-#### Phase 4 — Discretionary backlog (5 items, all done)
-
-**Item 1 — Cross-job sender_id leak in DR notifications**: Concurrent DR jobs in the agentic pool were sharing `cosa_interface.SENDER_ID` (module global) and `_dispatcher.sender_id` (shared instance attribute), so the most-recently-launched job's sender leaked onto earlier still-running jobs' notifications. Fix: added `ContextVar`s for sender_id / target_user / session_name to `agent_notification_dispatcher.py`. Dispatcher resolver methods prefer ContextVar over `self.*`. DR's `cosa_interface` exposes `set_dispatch_context()` helper; DR `job.py` calls it at execution start. ContextVars are asyncio-task-local AND thread-local so the agentic pool's per-worker `asyncio.run()` contexts are naturally isolated. Live verification via concurrent-task test confirms per-task isolation works.
-
-**Item 2 — Consumer-stalls-after-test-suite-job heartbeat**: Consumer thread set heartbeat at the OUTER while loop top, then blocked indefinitely in `condition.wait()` when queue was empty (e.g., after a test_suite job completed). Heartbeat went stale, stall detector (120s threshold) flagged healthy idle consumer as stalled. Fix: bound the previously-indefinite waits to `idle_wake_interval_secs` (derived as `stall_threshold // 4` = 30s default), and tick the heartbeat at the top of EACH inner loop iteration (not just outer). Healthy idle consumer now refreshes heartbeat at least every 30 seconds.
-
-**Item 3 — OOS-4 Finding D: integration-e2e-remediation.json empty failures[]**: Surveyed all `*-integration-e2e-remediation.json` files since 2026-04-24 — all show `failed=4, in-array=0`. Tracked to `test_test_suite_job.py::TestArtifacts::test_artifacts_populated`: the unit test mocked `_run_suite` returning `{passed:10, failed:2}` but lacked `failure_details` and didn't patch `cu.get_project_root` — so `do_all()` wrote a real remediation.json to host filesystem with the inconsistent shape. Fix: added `@patch("cu.get_project_root")` + `mock_root.return_value = str(tmp_path)` so the test isolates its writes; also included `failure_details` entries in the mock data so the writer's iteration produces a consistent file shape. Verified with `BEFORE/AFTER` count of remediation files in `io/test-suite/` — 0 new files written by the fixed test.
-
-**Item 4 — OOS-4 Finding C: 4 non-canonical dead-queue write paths**: Refactored all 4 sites in `running_fifo_queue.py` (`_process_job` exception handler, `_handle_error_case`, two paths in `_handle_agentic_job` legacy method) to delegate to the canonical `_transition_to_dead` primitive. Reduced ~150 lines of duplicate metadata-build / WS-emit / queue-push logic to ~5 one-line calls. Behavioral change: fast-lane errors now also fire the auto-fix watchdog (was previously only on agentic path), but watchdog filters by eligible_types so only agentic types actually trigger BFE. Only one `jobs_dead_queue.push` site remains (the canonical one inside `_transition_to_dead`).
-
-**Item 5 — AgenticJobBase `do_all` swallow cleanup**: All 9 subclasses (DR, Podcast, Presentation, R2P, R2Presentation, BFE, TFE, TestSuite, SWE Team, ClaudeCode, ClaudeCode SDK) had a swallow-and-return pattern in their exception handler — they caught the exception, set `state=FAILED`, and returned the error string instead of re-raising. This forced the agentic-pool callback at `_on_agentic_complete` to handle "job ran without raising but state==FAILED" via the defensive FAILED-state branch added in cluster 2.3. Cleanup: re-raise from each subclass's exception handler after persisting state/error/answer_conversational. `Future.exception()` now correctly carries the real exception, and the pool callback's exception branch fires directly. The cluster 2.3 FAILED-state branch remains as defensive belt against future regressions. 3 unit tests updated to wrap `do_all()` in `pytest.raises(...)` matching the new contract.
-
-**Verification (Phase 4)**: 503+ unit tests pass across all touched modules (TFE, agentic-pool, fifo-queue, running-queue-threshold, consumer-heartbeat, test-suite-job). py_compile clean across all 13 touched files (2 dispatcher infra + 5 from item 4 refactor + 9 from item 5 + 1 unit test fix). Live concurrent-task isolation test confirms ContextVar-based per-task sender state.
-
-#### Checkpoint | 2026.04.29 14:15 | Phase 1+2 Lupin parent files (CoSA edits deferred to cosa-context session)
-
-**Files** (parent Lupin only, 11 modified): docker-compose.yml, history.md, TODO.md, .claude-session.md, src/lupin_cli/notifications/notify_user_async.py, src/tests/smoke/test_deep_research_dry_run_smoke.py, src/tests/smoke/test_deep_research_submit_smoke.py, src/tests/smoke/test_podcast_generator_dry_run_smoke.py, src/tests/smoke/utilities/live_pipeline_base.py, src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/07-final-execution-plan.md (NEW), src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/90-execution-log.md
-**Commit**: 7df56e3
-**CoSA submodule edits NOT in this commit** (5 files, separate cosa-context session): src/cosa/agents/test_fix_expediter/job.py, src/cosa/training/peft_trainer.py, src/cosa/rest/running_fifo_queue.py, src/cosa/agents/notification_proxy/verification.py, src/cosa/agents/runtime_argument_expeditor/agent_registry.py
-**Note**: src/fastapi_app/static/js/notifications.js (cluster 2.9 UI string) is already at the correct value in HEAD — no change needed in this commit.
-
-**Context**: Continuation of session ba7138c4's test-suite remediation. RUN 2 (2026-04-28 22:39 EDT) landed 14 surviving smoke FAILs across 9 distinct issue clusters per `07-final-execution-plan.md`. Phase 1 was the OOS-1A one-line typo fix at `src/cosa/agents/test_fix_expediter/job.py:549`. Phase 2 was the cluster-by-cluster triage of all 14 fails.
-
-**Accomplishments**:
-
-- **Phase 1 (OOS-1A)**: Fixed TFE cluster-count typo (`getattr(c, "failure_count", len(getattr(c, "failures", []) or []))` → `len(c.failure_indices)`). Initial fix copied the plan verbatim and reintroduced defensive `getattr` cargo — user caught it. Re-fix used direct attribute access on the Pydantic model. Then expanded cleanup to the full surrounding block (lines 540-565): removed redundant `try/except` wrappers, dead-attribute fallbacks (`getattr(c, "id", ...)`), and dead-code `summary` field (replaced with `c.shared_error_signature` per the model docstring). Saved memory `feedback_audit_plans_at_execute_time.md` capturing the lesson: re-audit serialized plan diffs against feedback memories before applying.
-- **Phase 2 (all 14 smoke FAILs resolved)**:
-  - **2.1 LoRA env update × 3**: guarded `trl` and `auto_round` imports in `peft_trainer.py` (same pattern as existing `peft` guard from WG-4).
-  - **2.2 DR submit × 1**: assertion `queue_position >= 1` → `>= 0` (matches the dry-run sister test).
-  - **2.2 DR dry_run × 1**: deep dig revealed dry_run actually completed in 41s (not 6s). Root cause: `notify_user_async` retried on `user_not_available` for fire-and-forget progress notifications, inflating each notify by 5-7s × 6 notifies. Fix: gate the `user_not_available` retry on `notification_type != PROGRESS` (progress is persisted to DB unconditionally — retrying for live UI presence is wasted effort). Plus bumped test poll budget 30→90s as defensive headroom.
-  - **2.3 BFE Phase 6 × 1**: live :8000 admin probe revealed the forced-failure DR job was in done_queue with `status=failed`, NOT in dead_queue. Root cause: `DeepResearchJob.do_all()` catches its own exceptions, sets `state=FAILED`, and **returns the error string** instead of re-raising. `Future.exception()` returns None → pool callback at `running_fifo_queue.py:_on_agentic_complete` routes to `_transition_to_done` → failed job lands in done_queue → BFE auto-fix never fires. Fix: added FAILED-state branch parallel to existing STALLED branch in `_on_agentic_complete`. Defensive belt against any subclass that swallows; cleanup TODO logged to fix the underlying do_all swallow pattern.
-  - **2.4 Notification proxy verifier × 1**: single-retry on `Exception` from `from_xml` parse in `AnswerVerifier.verify` to absorb vLLM transient empty-XML responses.
-  - **2.5 Podcast dry-run × 1**: `pytest.skip()` on missing prereq directory. DR dry_run never writes files (mock-only) so the dependency is permanent fragility; skip is the right idiom.
-  - **2.6 Presentation × 3**: one-line fix at `live_pipeline_base.py:885` (`parse_args` → `parse_known_args`) so the shared base class tolerates pytest's positional + `--junit-xml=` args. Fixes all 3 presentation tests.
-  - **2.7 SWE team proxy × 1**: added `LUPIN_INTERACTIVE_TESTS: "true"` to both `lupin-rest-test` and `lupin-rest-dev` env blocks in `docker-compose.yml`. Requires container recreation (`docker compose down && up -d`) — `docker restart` does NOT pick up env changes.
-  - **2.8 Test suite live × 1**: `agent_registry.py` `get_cli_help` and `get_user_visible_args` crashed on test_suite's `cli_module=None` (intentional — test_suite has no CLI). Added early-return guard. Expediter caller already handles `help_text=None`, so the upstream contract was correct.
-  - **2.9 TFE error capture × 1**: UI string `"Partial Plan (written before failure)"` had drifted from the spec's `"Partial plan written before failure"`. Realigned `notifications.js:7111` to the spec wording.
-- **Process correction (cluster 2.2/2.3)**: I initially called these "M-effort, queue-transition bug, new OOS doc" and queued for follow-up. User pushed back ("Do not defer work dig into the log!!!" → "Keep going on 2.2 and 2.3"). Continued investigation found two simpler bugs both fixable in this session. The "M-effort" claim was premature pattern-matching on the symptom; cheap probes (admin queue GET, exception-banner grep, do_all source read, retry-condition check) would have found both bugs in 45 minutes. Lesson saved as `feedback_audit_plans_at_execute_time.md` and reinforced in the cluster docs.
-- **Verification**: 436 unit tests across TFE / agentic-pool / fifo-queue / notify domains pass. py_compile clean across all 12 touched files. Live :8000 verification of cluster fixes deferred to a fresh user-confirmed test-suite slot.
-
-**Files Modified (Lupin + CoSA — no commits per `feedback_never_auto_commit_push`)**:
-
-R&D:
-- `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/07-final-execution-plan.md` (status header updated)
-- `src/rnd/v0.1.7/2026.04.28-test-suite-anomaly-remediation/90-execution-log.md` (Phase 2 cluster-by-cluster log)
-
-Configuration:
-- `docker-compose.yml` (`LUPIN_INTERACTIVE_TESTS: "true"` on both test + dev containers)
-
-CoSA (submodule edits only — git managed separately per `feedback_lupin_only_never_cosa`):
-- `src/cosa/agents/test_fix_expediter/job.py` (Phase 1 OOS-1A typo + defensive-programming cleanup of full block)
-- `src/cosa/training/peft_trainer.py` (cluster 2.1 — guard `trl` + `auto_round` imports)
-- `src/cosa/rest/running_fifo_queue.py` (cluster 2.3 — FAILED-state branch in `_on_agentic_complete`)
-- `src/cosa/agents/notification_proxy/verification.py` (cluster 2.4 — single retry on LLM/parse exception)
-- `src/cosa/agents/runtime_argument_expeditor/agent_registry.py` (cluster 2.8 — `cli_module=None` early-return in two helpers)
-
-Lupin tests + lib:
-- `src/lupin_cli/notifications/notify_user_async.py` (cluster 2.2 root cause — skip `user_not_available` retry for PROGRESS)
-- `src/tests/smoke/test_deep_research_submit_smoke.py` (cluster 2.2 submit — assertion fix)
-- `src/tests/smoke/test_deep_research_dry_run_smoke.py` (cluster 2.2 dry_run — poll budget 30→90s)
-- `src/tests/smoke/test_podcast_generator_dry_run_smoke.py` (cluster 2.5 — `pytest.skip()` wrapper)
-- `src/tests/smoke/utilities/live_pipeline_base.py` (cluster 2.6 — `parse_known_args`)
-
-Frontend:
-- `src/fastapi_app/static/js/notifications.js` (cluster 2.9 — UI string realigned to spec)
-
-Tracking:
-- `TODO.md` (Phase 2 follow-ups: container recreation, cross-job sender_id leak, cleanup-pass for AgenticJobBase do_all swallow pattern)
-- Memory: `feedback_audit_plans_at_execute_time.md` (new), MEMORY.md index updated
-
-**Awaiting**:
-- User authorization to commit (parent Lupin context: docker-compose.yml + lupin tests + notifications.js + lupin_cli notify + R&D + TODO.md)
-- Separate cosa-context session for CoSA submodule commits (5 files)
-- Container recreation to pick up `LUPIN_INTERACTIVE_TESTS` env var (cluster 2.7 fix is not live until then)
-- User buy-in for Phase 3 (OOS-1B INI proposal-cap)
-
----
-
 ## Archives
 
+- [2026-04-29](history/2026-04-29-history.md) — 3 sessions (Persona Theming Round 1 + WS-event cleanup, passlib/bcrypt 4.3.0 pin diagnosis, Test-Suite Anomaly Remediation Phases 1+2+3 + Idle-Aware Stop Hook)
 - [2026-04-25 to 04-28](history/2026-04-25-to-28-history.md) — 11 sessions (per-session voice personas, conversation-mode v1.1, test-suite anomaly remediation, conversation-mode-for-CC, docker image hygiene 130→31.6 GB, notification dispatch unification, cosa-voice MCP fix, podcast completion URLs)
 - [2026-04-22 to 04-24](history/2026-04-22-to-24-history.md) — 6 sessions (PR Readiness 100%-green, CJ Flow Async Phase 0+1, cosa-voice nested-repo fix, [UNKNOWN] hyphen fix, TFE model flip, LanceDB-GCS CUDA OOM resolution)
 - [2026-04-14 to 04-21](history/2026-04-14-to-21-history.md) — 12 sessions (TFE Resume E2E, BFE Phase 6 obs, CJ Flow async design, Opus 4.7 + thinking-effort, bug fixes)

@@ -1,6 +1,6 @@
 # TODO
 
-Last updated: 2026-05-01 EDT (Session 911b1cdc added persona rename + display_name + conv-mode exit-reminder follow-ups; Session 31172845 added post-mortem remediation phases; Session f742b1bc previously logged WS outage fix)
+Last updated: 2026-05-01 EDT (Session 6562a2c9 archived 2026-04-29 sessions + repaired history/README.md index + flagged TODO.md hygiene; earlier sessions: 911b1cdc persona rename + conv-mode exit-reminder; 31172845 post-mortem remediation; f742b1bc WS outage fix)
 
 ---
 
@@ -182,7 +182,8 @@ Last updated: 2026-05-01 EDT (Session 911b1cdc added persona rename + display_na
 
 - [ ] [LUPIN] **(Cluster J adjacent) Investigate why `:7999` cannot reach `192.168.1.21:3001`** for the runtime-argument expediter's LLM. The :8000 test container CAN reach it (yesterday's run got past the LLM call). Worth checking if a service is supposed to be running at `192.168.1.21:3001` for dev workflows.
 - [ ] [LUPIN] **(Architectural) Per-test-file `pytest_args` declarations** — surfaced from Cluster D investigation. The all-suite scheduler doesn't know that `test_presentation_live*` always need `--auto-proxy --cost-cap-usd N`. Idea: declare via a pytest marker that the scheduler reads + merges. Bigger change; deferred.
-- [ ] [LUPIN] **(Hygiene) `history.md` archival** — at 20.8k tokens (83% of 25k limit) at this session-end. User chose "next session" at the WARNING prompt. Archive sessions older than ~14 days into a dated `history/` archive file at next session start.
+- [x] [LUPIN] **(Hygiene) `history.md` archival** — at 20.8k tokens (83% of 25k limit) at this session-end. User chose "next session" at the WARNING prompt. Archive sessions older than ~14 days into a dated `history/` archive file at next session start. **Resolved by Session 6562a2c9** (2026-05-01) — archived 2026-04-29 (3 sessions) to `history/2026-04-29-history.md`; main file 13.4k → 9.4k tokens; also repaired `history/README.md` index which had 3 missing rows.
+- [ ] [LUPIN] **(Hygiene) `TODO.md` triage — CRITICAL** — at **31,518 tokens (126% of 25k limit)** with **199 pending items** as of Session 6562a2c9 session-start (2026-05-01). Many items likely already complete from yesterday's bug-fix-mode + post-mortem cycles. Triage pass: scan top sections, mark resolved items as `[x]` with attribution, prune Completed-section entries older than 7 days. Target: bring file under 12k tokens (8-12k retention range per history-management workflow). Surfaced but deferred at user direction during Session 6562a2c9.
 - [ ] [LUPIN] **(Verification) Review the 21:30 EDT all-test-run outcome** — `ts-0fb8e488` scheduled for 2026-04-30T21:30:00-04:00. Expected delta vs yesterday's 15-failure baseline: 5–6 failures. Closes Tier 3 follow-ups if predictions hold.
 
 ---

@@ -12,6 +12,9 @@ This directory contains archived session history from the Lupin project, organiz
 
 | Archive | Period | Sessions | Key Topics |
 |---------|--------|----------|------------|
+| [2026-04-29](2026-04-29-history.md) | Apr 29, 2026 | 3 sessions | Persona Theming Round 1 + WS-event cleanup, passlib/bcrypt 4.3.0 pin diagnosis, Test-Suite Anomaly Remediation Phases 1+2+3 + Idle-Aware Stop Hook |
+| [2026-04-25-to-28](2026-04-25-to-28-history.md) | Apr 25-28, 2026 | 11 sessions | Per-session voice personas, conversation-mode v1.1, test-suite anomaly remediation, conversation-mode-for-CC, docker image hygiene 130→31.6 GB, notification dispatch unification, cosa-voice MCP fix, podcast completion URLs |
+| [2026-04-22-to-24](2026-04-22-to-24-history.md) | Apr 22-24, 2026 | 6 sessions | PR Readiness 100%-green, CJ Flow Async Phase 0+1, cosa-voice nested-repo fix, [UNKNOWN] hyphen fix, TFE model flip, LanceDB-GCS CUDA OOM resolution |
 | [2026-04-14-to-21](2026-04-14-to-21-history.md) | Apr 14-21, 2026 | 12 sessions | TFE Resume E2E live path, env-vars API, test-suite scheduling, Peer Queue Watch UI, BFE Phase 6 observability, CJ Flow "Delete All" buttons, Truncate BFE job ID badge, TFE Option A tier budgets, container preflight, TFE-to-CC Opus 4.7 + thinking-effort, telemetry demotion, BFE stderr parity, DELETE /queue/all 404 fix, CJ Flow Async Multi-Lane Design Review (v0.1.7) |
 | [2026-04-08-to-14](2026-04-08-to-14-history.md) | Apr 8-14, 2026 | 23 sessions | TFE E2E live path, BFE Phase 6 completion, checkpoint-resume, MCP-503 stall fix, SDK creds mount, TFE/BFE observability, lifecycle fixes |
 | [2026-03-26-to-04-07](2026-03-26-to-04-07-history.md) | Mar 26 - Apr 7, 2026 | 379-a47f938e | BFE Phase 6 (automated repair loop, dead-queue watchdog), CJ Flow persistence gaps fix, Presentation Generator Phases 6-10 (visual renderers: Matplotlib, D2, NanoBanana, Veo), Sonnet automated-testing default, UPE LanceDB test isolation, E2E background execution, SDK 0.1.36→0.1.56 upgrade, Test Suite CJ Flow agentic job, CJ Flow Scheduling UI + Voice Runtime Args |
@@ -59,10 +62,10 @@ This directory contains archived session history from the Lupin project, organiz
 
 ## Quick Stats
 
-- **Total Archives**: 16 files
+- **Total Archives**: 19 files
 - **Date Range**: May 2025 - April 2026
-- **Total Sessions Documented**: 326+
+- **Total Sessions Documented**: 346+
 
 ---
 
-*Last updated: 2026-04-16*
+*Last updated: 2026-05-01*
