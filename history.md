@@ -1,5 +1,64 @@
 # Lupin Project History
 
+### 2026.04.30 - Session 488ca8bd | CC Notification Session Panel Display Modality — selector strip + exclusive focus mode (Phase 0 + Phase 1 + E2E test file written, :8000 scheduling deferred per user)
+
+#### Checkpoint | 2026.04.30 ~20:00 EDT | Phase 0 docs + Phase 1 implementation + Phase 2 E2E test file (gated for :8000 scheduled run)
+
+**Context**: User wanted a different display modality for the CC notification session panels. Two pains: (a) volume — too much surface area when multiple CC sessions are active; (b) **vertical reorder churn** — every incoming notification bubbles the receiving session's card to the top of the stack, destroying focus mid-read on any one session. Conversation-mode pin only partially helps (engages only during audio). Inspired by the conv-mode mutex, user proposed the *visual* analog: an exclusive focus mode where only one session's card is rendered at a time.
+
+**Elicitation outcome** (Q1-Q6 via Socratic dialogue):
+- **Q1 — Conv-mode coupling**: orthogonal axes (independent on/off; either, both, or neither active)
+- **Q2 — Non-focused activity**: strip badge (icon glow + numeric unread count); no toasts, no audio interrupts
+- **Q3 — Selector strip**: always-on permanent chrome above `#notifications-list`; click-to-scroll in default mode, click-to-switch in focus mode
+- **Q4 — Focus toggle placement**: pill button embedded inside the strip itself
+- **Q5 — Reorder behavior**: default-view stack still reorders by recency (unchanged); strip icons mirror that ordering (leftmost = most recently updated session); focus-mode preserves the strip's recency-meter behavior so non-focused sessions getting fresh activity slide leftward, providing peripheral awareness without yanking focus
+- **Q6 — Appetite**: (ii) proper feature, 1-2 weeks; Pattern 3 with single R&D doc + execution log (BFE-style)
+
+**Phase 0 — Documentation Artifacts** (per DOCUMENTATION-FIRST PROTOCOL):
+- `src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md` (NEW) — 17-section design: pain, modality choice, conv-mode coupling table, DOM structure, strip icon spec (~40-44px circle, persona-color background, project initial), focus toggle UX, peripheral awareness, `localStorage` persistence (`notifications_cc_focus_state` key), edge cases, why client-only, coexistence with conv-mode pin, single ordering rule (leftmost = freshest in both modes), files-to-modify map, testing layers, deferred items, out-of-scope, revision log
+- `src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/90-execution-log.md` (NEW) — Phase 0 + Phase 1 + Phase 2 results: sweep findings, files modified, static verification table, surprises, plan-deviation note for WS-smoke layer
+
+**Phase 1 — Implementation** (Lupin parent only, no CoSA edits per `feedback_lupin_only_never_cosa`):
+- `src/fastapi_app/static/html/notifications.html` — `#cc-session-strip` chrome added above `#notifications-list` (icons container + toggle pill, `hidden` until first CC session card)
+- `src/fastapi_app/static/css/notifications.css` — new ~163-line section: sticky strip, persona-color icons via `var(--persona-color)`, `data-focused` / `data-unread` (with `cc-strip-icon-pulse` keyframe + `::after` numeric badge) / `data-conv-mode` (mic-overlay `::before`) states, `.cc-strip-toggle` pill, `.sender-card[data-focus-hidden="true"] { display: none; }`
+- `src/fastapi_app/static/js/notifications.js` — 14 new helper methods (`_addStripIcon`, `_removeStripIcon`, `_promoteStripIcon`, `_setStripIconPersonaColor`, `_setStripIconConvMode`, `_enterFocusMode`, `_exitFocusMode`, `_handleStripIconClick`, `_handleStripToggleClick`, `_bindStripToggle`, `_applyFocusHiddenToCard`, `_clearStripUnreadFor`, `_saveCcFocusState`, `_stripIconIdFor`); `CC_FOCUS_STATE_KEY` constant + `ccFocusState` hydration in constructor + toggle binding; hooks into `createSenderCard` (add icon + apply focus-hidden + bump unread on new non-focused session arrivals during focus), `moveSenderCardToTop` (promote icon + bump unread for non-focused), `deleteSenderConversation` (remove icon + auto-exit focus if focused session deleted), `_setPersonaBadgeOnCard` (mirror persona color to strip icon — bug caught during self-review: initial integration placed mirror after early-return paths, fixed by moving alongside the card's `--persona-color` setProperty/removeProperty calls so it fires on add/replace/release equally), `handleNotificationUpdate` switch case for `conversation_mode_changed`
+
+**Phase 1 sweep + verification on `:7999`** (AI-discretionary, all 8 checks ✅):
+- Sweep clean: no existing CSS/JS rule manipulates `.sender-card` display/visibility → no collision with new `data-focus-hidden` rule
+- `node --check notifications.js` → OK
+- `:7999/health` → 200; HTML/JS/CSS served → 200 each; 67 strip-helper matches in served JS, 19 strip-CSS-rule matches in served CSS, 4 strip-element matches in served HTML
+
+**Phase 2 — Test file written, scheduling DEFERRED per user** (gate per `feedback_e2e_two_phase_gate`):
+- `src/tests/e2e_ui/test_cc_session_strip_and_focus.py` (NEW) — 12 Playwright tests across 7 classes (`TestStripRenders`, `TestRecencyReorder`, `TestFocusMode`, `TestPeripheralAwareness`, `TestPersistence`, `TestConvModeOrthogonality`, `TestFocusModeEdgeCases`); covers 11 of 13 plan scenarios. Tests use deterministic DOM injection via `window.notificationsUI._helper(...)` rather than waiting on real multi-session WS notifications.
+- **Plan deviation** (documented in `90-execution-log.md` §"Plan deviation"): planned `src/tests/websocket_smoke/test_focus_state_persistence.py` NOT created — the two scenarios it would cover (focus state localStorage round-trip; badge update without focus swap) are DOM/localStorage behaviors, not raw-WS-protocol; properly belong in Playwright. The `src/tests/websocket_smoke/` suite is for connection/auth/event-system protocol tests. Both scenarios are already covered by `TestPersistence` + `TestPeripheralAwareness` in the new E2E file. Net coverage unchanged.
+- **Visual regression baselines** (4 PNGs under `__snapshots__/`) NOT yet captured — generated on first `--update-snapshots` run during the deferred E2E batch.
+- **Scheduling**: user opted to batch this E2E run with other test work later this evening. No `POST /api/test-suite/submit` from this session.
+
+**Pre-existing modifications NOT staged** (belong to parallel sessions per `.claude-session.md` v2.0):
+- `src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/90-execution.md`
+- `src/tests/smoke/test_presentation_*` (3 files)
+- `src/tests/unit/test_swe_team_orchestrator.py`
+- `src/rnd/v0.1.7/2026.04.30-swe-team-orchestrator-test-perf-fix.md`
+- `src/tests/fixtures/presentations/`
+- `src/tests/smoke/test_swe_team_dry_run_e2e.py`
+
+**Out of scope** (deferred per design §16):
+- Cross-device focus sync (would need server-side bridge field + WS event — wait for use case)
+- Strip overflow strategy beyond `overflow-x: auto` with thin scrollbar (revisit only if 8+ active CC sessions become routine)
+- Per-card "anchor" pinning (Q5 option-c from elicitation — separate small feature if reorder churn in default-stacked-view still bothers user)
+- Tier 3 / Tier 4 persona theming (held from Round 1 follow-ups in TODO.md; orthogonal to this work)
+
+**Plan**: `~/.claude/plans/i-want-to-start-parsed-blossom.md`
+
+**Files committed in this checkpoint** (Lupin parent only):
+- `src/fastapi_app/static/html/notifications.html`, `src/fastapi_app/static/css/notifications.css`, `src/fastapi_app/static/js/notifications.js`
+- `src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md`, `src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/90-execution-log.md` (both NEW)
+- `src/tests/e2e_ui/test_cc_session_strip_and_focus.py` (NEW)
+- `history.md` (this entry)
+- `.claude-session.md` (488ca8bd section + Last Updated — gitignored)
+
+---
+
 ### 2026.04.30 - Session b195a160 | Postmortem of 2026-04-29 all-test run + bcrypt 4.3.0 image rebuild + postgres relocation + dev/test recompose
 
 #### Checkpoint | 2026.04.30 ~13:15 EDT | Closed 7 of 15 yesterday-test-run failures + put new bcrypt-pinned image into rotation on both servers

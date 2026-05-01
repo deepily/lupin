@@ -626,6 +626,20 @@
                 <button class="toggle-button" id="notifications-toggle">▼</button>
             </div>
             <div class="section-content" id="notifications-section">
+                <!-- CC Session Selector Strip + Focus Mode (2026-04-30 — see src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md).
+                     Sticky chrome above #notifications-list. One icon per active CC session, leftmost = most recently
+                     updated. Embedded toggle pill enters/exits exclusive focus mode (only the focused session's
+                     card is rendered). Hidden until ≥1 CC sender card exists. -->
+                <div id="cc-session-strip" class="cc-session-strip" hidden>
+                    <div class="cc-strip-icons" id="cc-strip-icons"></div>
+                    <button type="button"
+                            class="cc-strip-toggle"
+                            id="cc-strip-toggle"
+                            data-focus-active="false"
+                            title="Focus mode: hide all sessions except the one you click">
+                        👁 Focus
+                    </button>
+                </div>
                 <div id="notifications-list">
                     <!-- Sender cards will be populated here -->
                 </div>

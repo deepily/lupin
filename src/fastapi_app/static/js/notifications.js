@@ -162,6 +162,7 @@ class NotificationsUI {
         this.RESUME_MODEL_PREF_KEY  = 'notifications_resume_model';   // Default model for stalled-job resume (TFE/BFE)
         this.RESUME_EFFORT_PREF_KEY = 'notifications_resume_effort';  // Default thinking-effort for stalled-job resume
         this.CONVERSATION_MODES_KEY = 'notifications_conversation_modes';  // Per-session conversation/notification toggle (object keyed by session_id)
+        this.CC_FOCUS_STATE_KEY     = 'notifications_cc_focus_state';      // CC session focus mode: { enabled, focused_sender_id }
         this.CURRENT_VERSION = '2.0.0'; // Increment to invalidate old cache - date grouping release
 
         // Session names cache (loaded from localStorage)
@@ -171,6 +172,26 @@ class NotificationsUI {
         // render — server-canonical state lives in the cosa-voice bridge file and arrives via the
         // conversation_mode_changed WebSocket event.
         this.conversationModes = JSON.parse( localStorage.getItem( this.CONVERSATION_MODES_KEY ) ) || {};
+
+        // CC focus mode state (client-only, per-browser). Persists across reload via localStorage.
+        // Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md
+        this.ccFocusState = JSON.parse( localStorage.getItem( this.CC_FOCUS_STATE_KEY ) )
+                            || { enabled: false, focused_sender_id: null };
+        // Per-sender unread counter for the strip's peripheral-awareness badge while focus is on.
+        this.ccStripUnreadCounts = {};
+        // Wire the strip toggle pill once. The button lives in notifications.html and
+        // is hidden alongside the strip until the first CC sender card arrives.
+        this._bindStripToggle();
+        // If focus mode was on at last save, restore the toggle pill's visual state
+        // immediately. Card-level data-focus-hidden is applied per-card by
+        // createSenderCard as the cards are hydrated.
+        if ( this.ccFocusState.enabled ) {
+            const toggle = document.getElementById( "cc-strip-toggle" );
+            if ( toggle ) {
+                toggle.setAttribute( "data-focus-active", "true" );
+                toggle.textContent = "👁 Focus: ON";
+            }
+        }
 
         // User role and filter state
         this.userRoles = [];  // NEW: User's roles from JWT
@@ -5376,6 +5397,10 @@ class NotificationsUI {
                 // Re-shape from notification.payload to the legacy envelope keys
                 // that handleConversationModeChanged reads (session_id,
                 // conversation_mode_active, displaced, displaced_by).
+                this._setStripIconConvMode(
+                    notification.payload?.session_id,
+                    !!notification.payload?.active
+                );
                 this.handleConversationModeChanged({
                     session_id              : notification.payload?.session_id,
                     conversation_mode_active: notification.payload?.active,
@@ -8853,6 +8878,8 @@ class NotificationsUI {
             // card so Tier 1/2 CSS rules fall back to their defaults.
             card.style.removeProperty( "--persona-color"     );
             card.style.removeProperty( "--persona-color-rgb" );
+            // Mirror the clear onto the strip icon.
+            this._setStripIconPersonaColor( senderId, null );
             return;
         }
 
@@ -8863,6 +8890,8 @@ class NotificationsUI {
             card.style.setProperty( "--persona-color", persona.color );
             const rgb = this._hexToRgb( persona.color );
             if ( rgb ) card.style.setProperty( "--persona-color-rgb", rgb );
+            // Mirror the persona-color update onto the strip icon.
+            this._setStripIconPersonaColor( senderId, persona.color );
         }
 
         const html = this._renderPersonaBadgeHTML( persona );
@@ -8880,6 +8909,355 @@ class NotificationsUI {
             statsGroup.insertBefore( badgeNode, statsGroup.firstChild );
         } else {
             header.appendChild( badgeNode );
+        }
+    }
+
+    // ============================================================
+    // CC SESSION SELECTOR STRIP + EXCLUSIVE FOCUS MODE
+    // Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md
+    // Permanent chrome above #notifications-list. One icon per active CC
+    // session. Leftmost = most recently updated. Embedded toggle pill
+    // enters/exits focus mode (only the focused session's card is rendered).
+    // Orthogonal to conversation mode.
+    // ============================================================
+
+    /**
+     * Build the DOM id used for a strip icon, derived from senderId
+     * with the same escaping rules used for sender-card ids.
+     */
+    _stripIconIdFor( senderId ) {
+        return `cc-strip-icon-${senderId.replace( /[@.#]/g, '-' )}`;
+    }
+
+    /**
+     * Add a CC session icon to the selector strip. Idempotent — calling
+     * twice for the same senderId is a no-op (the existing icon is
+     * promoted to leftmost via _promoteStripIcon if you want that effect).
+     *
+     * Requires:
+     *   - senderId is a non-empty string
+     *   - This is a claude.code session (caller filters)
+     */
+    _addStripIcon( senderId, projectName, persona, sessionId ) {
+        const iconsContainer = document.getElementById( "cc-strip-icons" );
+        const strip          = document.getElementById( "cc-session-strip" );
+        if ( !iconsContainer || !strip ) return;
+
+        const iconId = this._stripIconIdFor( senderId );
+        if ( document.getElementById( iconId ) ) return;  // idempotent
+
+        const initial = ( projectName || "?" ).charAt( 0 ).toUpperCase();
+        const color   = persona?.color || null;
+
+        const icon = document.createElement( "div" );
+        icon.id = iconId;
+        icon.className = "cc-strip-icon";
+        icon.setAttribute( "data-sender-id", senderId );
+        if ( sessionId ) icon.setAttribute( "data-session-id", sessionId );
+        icon.setAttribute( "title", `${projectName}${sessionId ? " #" + sessionId : ""}` );
+        icon.textContent = initial;
+        if ( color ) {
+            icon.style.setProperty( "--persona-color", color );
+        }
+
+        // Mark focused if focus mode is on and this senderId matches the
+        // persisted focused id (covers the case where a card for a
+        // previously-focused session arrives after a page reload).
+        if ( this.ccFocusState.enabled
+             && this.ccFocusState.focused_sender_id === senderId ) {
+            icon.setAttribute( "data-focused", "true" );
+        }
+
+        // Mirror conv-mode state if the bridge already says this session
+        // is in conv-mode (handled separately for live changes).
+        if ( sessionId && this.conversationModes && this.conversationModes[ sessionId ] ) {
+            icon.setAttribute( "data-conv-mode", "true" );
+        }
+
+        // Click dispatch — scroll-to-card in default mode, switch-focus in focus mode.
+        icon.addEventListener( "click", ( ev ) => {
+            ev.stopPropagation();
+            this._handleStripIconClick( senderId );
+        } );
+
+        // Insert at leftmost (newest icon = newest activity).
+        if ( iconsContainer.firstChild ) {
+            iconsContainer.insertBefore( icon, iconsContainer.firstChild );
+        } else {
+            iconsContainer.appendChild( icon );
+        }
+
+        // First icon → reveal the strip.
+        if ( strip.hasAttribute( "hidden" ) ) {
+            strip.removeAttribute( "hidden" );
+        }
+    }
+
+    /**
+     * Remove a CC session icon from the selector strip. If the removed
+     * session was the focused session, auto-exit focus mode so the user
+     * isn't stranded staring at a now-empty pane.
+     */
+    _removeStripIcon( senderId ) {
+        const iconsContainer = document.getElementById( "cc-strip-icons" );
+        const strip          = document.getElementById( "cc-session-strip" );
+        if ( !iconsContainer ) return;
+
+        const icon = document.getElementById( this._stripIconIdFor( senderId ) );
+        if ( icon ) icon.remove();
+
+        // If the deleted session was the focused one, exit focus mode.
+        if ( this.ccFocusState.enabled
+             && this.ccFocusState.focused_sender_id === senderId ) {
+            this._exitFocusMode();
+        }
+
+        delete this.ccStripUnreadCounts[ senderId ];
+
+        // Hide the whole strip when no icons remain.
+        if ( strip && iconsContainer.children.length === 0 ) {
+            strip.setAttribute( "hidden", "" );
+        }
+    }
+
+    /**
+     * Move the icon for senderId to leftmost (most-recent-activity slot).
+     * Called from moveSenderCardToTop's path so strip ordering stays
+     * synchronized with stack ordering. Idempotent — if the icon is
+     * already leftmost, no DOM mutation occurs.
+     *
+     * Side effect: when focus mode is on AND this senderId is NOT the
+     * focused session, increment the unread badge so the user gets
+     * peripheral awareness of activity on hidden sessions.
+     */
+    _promoteStripIcon( senderId ) {
+        const iconsContainer = document.getElementById( "cc-strip-icons" );
+        if ( !iconsContainer ) return;
+
+        const icon = document.getElementById( this._stripIconIdFor( senderId ) );
+        if ( !icon ) return;
+
+        if ( iconsContainer.firstChild !== icon ) {
+            iconsContainer.insertBefore( icon, iconsContainer.firstChild );
+        }
+
+        // Bump unread badge for non-focused sessions in focus mode.
+        if ( this.ccFocusState.enabled
+             && this.ccFocusState.focused_sender_id !== senderId ) {
+            const next = ( this.ccStripUnreadCounts[ senderId ] || 0 ) + 1;
+            this.ccStripUnreadCounts[ senderId ] = next;
+            icon.setAttribute( "data-unread", "true" );
+            icon.setAttribute( "data-unread-count", String( next ) );
+        }
+    }
+
+    /**
+     * Update the persona color on a strip icon. Mirror of
+     * _setPersonaBadgeOnCard's color-var update for cards.
+     * @param {string} senderId
+     * @param {string|null} color — hex string or null to revert
+     */
+    _setStripIconPersonaColor( senderId, color ) {
+        const icon = document.getElementById( this._stripIconIdFor( senderId ) );
+        if ( !icon ) return;
+
+        if ( color ) {
+            icon.style.setProperty( "--persona-color", color );
+        } else {
+            icon.style.removeProperty( "--persona-color" );
+        }
+    }
+
+    /**
+     * Set/clear the conv-mode mic overlay on a strip icon, looked up by
+     * sessionId (which is what the conversation_mode_changed event
+     * carries). Each strip icon has both data-sender-id and
+     * data-session-id for flexible lookup.
+     */
+    _setStripIconConvMode( sessionId, isOn ) {
+        if ( !sessionId ) return;
+        const icon = document.querySelector(
+            `#cc-strip-icons .cc-strip-icon[data-session-id="${sessionId}"]`
+        );
+        if ( !icon ) return;
+
+        if ( isOn ) {
+            icon.setAttribute( "data-conv-mode", "true" );
+        } else {
+            icon.removeAttribute( "data-conv-mode" );
+        }
+    }
+
+    /**
+     * Enter exclusive focus mode for the given senderId. All sender
+     * cards except the focused one are hidden via data-focus-hidden.
+     * Persists state to localStorage so reload restores the same focus.
+     */
+    _enterFocusMode( senderId ) {
+        if ( !senderId ) return;
+
+        this.ccFocusState = { enabled: true, focused_sender_id: senderId };
+        this._saveCcFocusState();
+
+        // Mark the toggle pill as active.
+        const toggle = document.getElementById( "cc-strip-toggle" );
+        if ( toggle ) {
+            toggle.setAttribute( "data-focus-active", "true" );
+            toggle.textContent = "👁 Focus: ON";
+        }
+
+        // Walk all strip icons: mark focused, clear focused on others.
+        const icons = document.querySelectorAll( "#cc-strip-icons .cc-strip-icon" );
+        icons.forEach( ( icon ) => {
+            const iconSender = icon.getAttribute( "data-sender-id" );
+            if ( iconSender === senderId ) {
+                icon.setAttribute( "data-focused", "true" );
+                this._clearStripUnreadFor( iconSender );  // visiting this session clears its badge
+            } else {
+                icon.removeAttribute( "data-focused" );
+            }
+        } );
+
+        // Walk all sender cards: hide all except the focused one.
+        const cards = document.querySelectorAll( "#notifications-list .sender-card" );
+        cards.forEach( ( card ) => {
+            const cardSender = card.getAttribute( "data-sender-id" )
+                               || card.id.replace( /^sender-card-/, "" );
+            // Card ids are senderId with [@.#] → "-", so we also need a
+            // tolerant comparison via the data-session-id we set on the
+            // strip icon. Simplest: compare card.id to the expected id.
+            const expectedId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
+            if ( card.id === expectedId ) {
+                card.removeAttribute( "data-focus-hidden" );
+            } else {
+                card.setAttribute( "data-focus-hidden", "true" );
+            }
+        } );
+    }
+
+    /**
+     * Exit focus mode — revert all cards to visible, clear focused state.
+     */
+    _exitFocusMode() {
+        this.ccFocusState = { enabled: false, focused_sender_id: null };
+        this._saveCcFocusState();
+
+        const toggle = document.getElementById( "cc-strip-toggle" );
+        if ( toggle ) {
+            toggle.setAttribute( "data-focus-active", "false" );
+            toggle.textContent = "👁 Focus";
+        }
+
+        // Clear focused-marker on all icons.
+        document.querySelectorAll( "#cc-strip-icons .cc-strip-icon[data-focused]" )
+                .forEach( ( icon ) => icon.removeAttribute( "data-focused" ) );
+
+        // Reveal all cards.
+        document.querySelectorAll( "#notifications-list .sender-card[data-focus-hidden]" )
+                .forEach( ( card ) => card.removeAttribute( "data-focus-hidden" ) );
+
+        // Visiting all sessions clears all unread badges.
+        document.querySelectorAll( "#cc-strip-icons .cc-strip-icon[data-unread]" )
+                .forEach( ( icon ) => {
+                    icon.removeAttribute( "data-unread" );
+                    icon.removeAttribute( "data-unread-count" );
+                } );
+        this.ccStripUnreadCounts = {};
+    }
+
+    /**
+     * Click dispatcher for a strip icon. Behavior depends on mode:
+     *   - Default mode → smooth-scroll the corresponding card into view
+     *   - Focus mode, different session → switch focus to clicked
+     *   - Focus mode, same session → no-op
+     */
+    _handleStripIconClick( senderId ) {
+        if ( this.ccFocusState.enabled ) {
+            if ( this.ccFocusState.focused_sender_id === senderId ) return;  // no-op
+            this._enterFocusMode( senderId );
+            return;
+        }
+
+        // Default mode → scroll to that card.
+        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
+        const card   = document.getElementById( cardId );
+        if ( card ) {
+            card.scrollIntoView( { behavior: "smooth", block: "start" } );
+        }
+    }
+
+    /**
+     * Click handler for the focus-toggle pill. Off → on (using leftmost
+     * icon's senderId or the persisted focused id); on → off.
+     */
+    _handleStripToggleClick() {
+        if ( this.ccFocusState.enabled ) {
+            this._exitFocusMode();
+            return;
+        }
+
+        // Determine which session to focus: prefer persisted choice, else
+        // leftmost icon (= most recently updated).
+        let targetSenderId = this.ccFocusState.focused_sender_id;
+        if ( !targetSenderId ) {
+            const firstIcon = document.querySelector( "#cc-strip-icons .cc-strip-icon" );
+            if ( firstIcon ) targetSenderId = firstIcon.getAttribute( "data-sender-id" );
+        }
+        if ( !targetSenderId ) {
+            this.log( "Focus toggle: no CC sessions to focus on" );
+            return;
+        }
+
+        this._enterFocusMode( targetSenderId );
+    }
+
+    /**
+     * Wire up the toggle pill's click handler. Called once from the
+     * constructor — the button exists in the HTML at page load.
+     */
+    _bindStripToggle() {
+        const toggle = document.getElementById( "cc-strip-toggle" );
+        if ( !toggle ) return;
+        toggle.addEventListener( "click", ( ev ) => {
+            ev.stopPropagation();
+            this._handleStripToggleClick();
+        } );
+    }
+
+    /**
+     * Apply data-focus-hidden to a card if focus is on and the card is
+     * not the focused sender. Called from createSenderCard so newly
+     * inserted cards respect existing focus mode.
+     */
+    _applyFocusHiddenToCard( card, senderId ) {
+        if ( !this.ccFocusState.enabled ) return;
+        if ( this.ccFocusState.focused_sender_id === senderId ) return;
+        card.setAttribute( "data-focus-hidden", "true" );
+    }
+
+    /**
+     * Clear the unread badge + counter for a single sender's strip icon.
+     */
+    _clearStripUnreadFor( senderId ) {
+        const icon = document.getElementById( this._stripIconIdFor( senderId ) );
+        if ( icon ) {
+            icon.removeAttribute( "data-unread" );
+            icon.removeAttribute( "data-unread-count" );
+        }
+        delete this.ccStripUnreadCounts[ senderId ];
+    }
+
+    /**
+     * Persist focus-mode state to localStorage.
+     */
+    _saveCcFocusState() {
+        try {
+            localStorage.setItem(
+                this.CC_FOCUS_STATE_KEY,
+                JSON.stringify( this.ccFocusState )
+            );
+        } catch ( err ) {
+            this.error( "Failed to persist cc focus state:", err );
         }
     }
 
@@ -9737,6 +10115,7 @@ class NotificationsUI {
         card.className = `sender-card${activeClass}`;
         card.setAttribute( 'data-project', parsed.project );
         card.setAttribute( 'data-session-id', sessionId || '' );
+        card.setAttribute( 'data-sender-id', senderId );  // for focus-mode walker lookup
 
         // Foundation: set --persona-color + --persona-color-rgb on the card
         // root so Tier 1 (border + shadow) and Tier 2 (header gradient) CSS
@@ -9813,6 +10192,26 @@ class NotificationsUI {
         } else {
             container.appendChild( card );
         }
+
+        // CC focus mode + selector strip hooks (Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md):
+        // 1. If focus mode is on and this isn't the focused session, hide the card.
+        // 2. If this is a CC session, register an icon in the strip.
+        // 3. If focus is on and this isn't focused, bump the unread badge so the
+        //    user gets peripheral awareness that a new session just appeared.
+        this._applyFocusHiddenToCard( card, senderId );
+        if ( isCCSession ) {
+            this._addStripIcon( senderId, projectName, persona, sessionId );
+            if ( this.ccFocusState.enabled
+                 && this.ccFocusState.focused_sender_id !== senderId ) {
+                const icon = document.getElementById( this._stripIconIdFor( senderId ) );
+                if ( icon ) {
+                    this.ccStripUnreadCounts[ senderId ] = 1;
+                    icon.setAttribute( "data-unread", "true" );
+                    icon.setAttribute( "data-unread-count", "1" );
+                }
+            }
+        }
+
         this.log( `Created sender card for ${projectName}${sessionId ? '#' + sessionId : ''} (${senderId})${shouldPin ? ' [PINNED conversation mode]' : ''}` );
     }
 
@@ -11295,6 +11694,10 @@ class NotificationsUI {
         if ( card ) {
             card.remove();
         }
+
+        // Remove the corresponding strip icon. If this session was the
+        // focused one, _removeStripIcon auto-exits focus mode.
+        this._removeStripIcon( senderId );
 
         // Remove from local state
         this.senderGroups.delete( senderId );
@@ -15573,6 +15976,11 @@ class NotificationsUI {
      * @param {string} senderId - Sender ID
      */
     moveSenderCardToTop( senderId ) {
+        // Synchronize the strip's recency ordering with the stack's
+        // recency ordering: leftmost icon = most recently updated. Also
+        // bumps the unread badge for non-focused sessions when focus is on.
+        this._promoteStripIcon( senderId );
+
         const container = document.getElementById( 'notifications-list' );
         const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         const card = document.getElementById( cardId );
