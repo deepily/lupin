@@ -18,7 +18,7 @@
   - `src/fastapi_app/static/js/notifications.js` (4 edit sites: helper + 3 call sites + typo fix)
   - `src/tests/e2e_ui/test_cc_session_strip_and_focus.py` (new `TestStripCleanupOnBulkDelete` class with 4 regression tests)
 - **Test**: 4 new tests + 13 pre-existing tests in the file — all 17 pass on `:8000` E2E (`ts-d7b35841`).
-- **Commit**: [pending]
+- **Commit**: 1b191f4
 
 ### Fix 2: Mic-icon overlay strands on conv-mode toggle OFF
 
@@ -30,7 +30,7 @@
   - `src/fastapi_app/static/js/notifications.js` (2 edit sites: WS router slimmed, `handleConversationModeChanged` extended)
   - `src/tests/e2e_ui/test_cc_session_strip_and_focus.py` (new `test_conv_mode_off_via_ws_clears_strip_icon_overlay` regression — drives the full WS path with a full-UUID payload for both ON and OFF transitions)
 - **Test**: New regression + same pre-existing 13 tests — all 18 pass on `:8000` E2E (`ts-d7b35841`, 71.7s).
-- **Commit**: [pending]
+- **Commit**: 1b191f4
 
 ### Caveats / Notes
 
