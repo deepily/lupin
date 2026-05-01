@@ -373,6 +373,66 @@ class TestConvModeOrthogonality:
         icon = page.locator( f"#cc-strip-icon-{sanitized}" )
         assert icon.get_attribute( "data-conv-mode" ) == "true"
 
+    def test_conv_mode_off_via_ws_clears_strip_icon_overlay( self, notifications_page_with_strip ):
+        """
+        Regression for the stranded-mic-icon bug (Session a6b318ea, 2026-05-01).
+
+        The conversation_mode_changed WS payload carries the full session UUID,
+        but strip-icon data-session-id is the 8-char prefix. The WS-router used
+        to call _setStripIconConvMode with the un-normalized full UUID, so the
+        querySelector missed and the OFF transition never cleared the mic
+        overlay. Fix: route the strip-icon update through
+        handleConversationModeChanged after normalization.
+
+        This test simulates the full WS path (handleNotificationUpdate switch
+        case) for ON then OFF, using the full UUID in the payload, and asserts
+        the icon overlay matches the expected state after each transition.
+        """
+        page         = notifications_page_with_strip
+        sender_a     = "claude.code@lupin.deepily.ai#offtest1"
+        session_hash = "offtest1"
+        full_uuid    = "offtest1-aaaa-bbbb-cccc-deadbeef0001"  # matches 8-char prefix
+
+        _inject_cc_sender_card( page, sender_a, session_hash=session_hash )
+
+        # Drive the WS-router path with full UUID (server-canonical shape).
+        # handleNotificationUpdate expects { notification: {...} } envelope.
+        page.evaluate(
+            """( fullUuid ) => {
+                window.notificationsUI.handleNotificationUpdate( {
+                    notification: {
+                        type    : "conversation_mode_changed",
+                        payload : { session_id: fullUuid, active: true }
+                    }
+                } );
+            }""",
+            full_uuid
+        )
+        page.wait_for_timeout( 50 )
+
+        sanitized = sender_a.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+        icon = page.locator( f"#cc-strip-icon-{sanitized}" )
+        assert icon.get_attribute( "data-conv-mode" ) == "true", \
+            "ON transition must set data-conv-mode despite full-UUID payload"
+
+        # OFF transition — same full UUID, active=false. This is the path that
+        # used to silently miss before the fix.
+        page.evaluate(
+            """( fullUuid ) => {
+                window.notificationsUI.handleNotificationUpdate( {
+                    notification: {
+                        type    : "conversation_mode_changed",
+                        payload : { session_id: fullUuid, active: false }
+                    }
+                } );
+            }""",
+            full_uuid
+        )
+        page.wait_for_timeout( 50 )
+
+        assert icon.get_attribute( "data-conv-mode" ) is None, \
+            "OFF transition must remove data-conv-mode — mic icon must not strand"
+
 
 # ---------------------------------------------------------------------------
 # Edge cases — focused session deletion auto-exits focus
@@ -402,3 +462,137 @@ class TestFocusModeEdgeCases:
 
         # Focus should have auto-exited.
         assert toggle.get_attribute( "data-focus-active" ) == "false"
+
+
+# ---------------------------------------------------------------------------
+# Regression: bulk-delete + per-day-delete strand strip icons
+# ---------------------------------------------------------------------------
+
+class TestStripCleanupOnBulkDelete:
+    """
+    Regression coverage for the focus-tray-strands-icons bug (Session a6b318ea,
+    2026-05-01). Three paths used to tear down sender cards without removing
+    their strip icons: clearAllNotifications(), removeSenderCard(),
+    clearSenderGroups(). All three now route through _removeStripIcon or
+    _clearAllStripIcons.
+    """
+
+    def test_clear_all_strip_icons_helper_empties_strip( self, notifications_page_with_strip ):
+        """
+        _clearAllStripIcons() removes every icon, hides the strip, and resets
+        unread counts. Serves as the unit test for the new helper.
+        """
+        page = notifications_page_with_strip
+        for tag in [ "aaaaaaaa", "bbbbbbbb", "cccccccc" ]:
+            _inject_cc_sender_card( page, f"claude.code@lupin.deepily.ai#{tag}" )
+
+        assert page.locator( "#cc-strip-icons .cc-strip-icon" ).count() == 3
+
+        page.evaluate( "() => window.notificationsUI._clearAllStripIcons()" )
+        page.wait_for_timeout( 50 )
+
+        assert page.locator( "#cc-strip-icons .cc-strip-icon" ).count() == 0
+        is_hidden = page.evaluate(
+            "() => document.getElementById( 'cc-session-strip' ).hasAttribute( 'hidden' )"
+        )
+        assert is_hidden, "Strip should hide once the last icon is gone"
+
+        unread_counts = page.evaluate(
+            "() => window.notificationsUI.ccStripUnreadCounts"
+        )
+        assert unread_counts == {}, "Unread counts must reset"
+
+    def test_remove_sender_card_also_removes_strip_icon( self, notifications_page_with_strip ):
+        """
+        removeSenderCard(senderId) is reached when softDeleteByDate deletes
+        the LAST date for a sender. Before the fix it left the strip icon
+        stranded; now it must call _removeStripIcon under the hood.
+        """
+        page     = notifications_page_with_strip
+        sender_a = "claude.code@lupin.deepily.ai#removeaaa"
+        sender_b = "claude.code@lupin.deepily.ai#removebbb"
+
+        _inject_cc_sender_card( page, sender_a )
+        _inject_cc_sender_card( page, sender_b )
+        assert page.locator( "#cc-strip-icons .cc-strip-icon" ).count() == 2
+
+        page.evaluate(
+            "( sid ) => window.notificationsUI.removeSenderCard( sid )",
+            sender_a
+        )
+        page.wait_for_timeout( 50 )
+
+        sanitized_a = sender_a.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+        sanitized_b = sender_b.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+
+        assert page.locator( f"#cc-strip-icon-{sanitized_a}" ).count() == 0, \
+            "removeSenderCard must take its strip icon with it"
+        assert page.locator( f"#cc-strip-icon-{sanitized_b}" ).count() == 1, \
+            "Sibling sender's icon must remain"
+
+    def test_clear_sender_groups_wipes_all_strip_icons( self, notifications_page_with_strip ):
+        """
+        clearSenderGroups() runs when the user changes the history-window
+        dropdown. Before the fix it left every strip icon stranded; now it
+        must call _clearAllStripIcons.
+        """
+        page = notifications_page_with_strip
+        for tag in [ "history01", "history02", "history03" ]:
+            _inject_cc_sender_card( page, f"claude.code@lupin.deepily.ai#{tag}" )
+        assert page.locator( "#cc-strip-icons .cc-strip-icon" ).count() == 3
+
+        page.evaluate( "() => window.notificationsUI.clearSenderGroups()" )
+        page.wait_for_timeout( 50 )
+
+        assert page.locator( "#cc-strip-icons .cc-strip-icon" ).count() == 0
+        is_hidden = page.evaluate(
+            "() => document.getElementById( 'cc-session-strip' ).hasAttribute( 'hidden' )"
+        )
+        assert is_hidden, "Strip should hide after history-window change wipes all senders"
+
+    def test_clear_all_notifications_wipes_strip_icons( self, notifications_page_with_strip ):
+        """
+        clearAllNotifications() is the "Clear All" button handler. Mock
+        window.confirm to return true and stub fetch so the bulk-DELETE
+        endpoint isn't actually hit; this isolates the UI behavior under
+        test from server state.
+        """
+        page = notifications_page_with_strip
+        for tag in [ "clearaaaa", "clearbbbb" ]:
+            _inject_cc_sender_card( page, f"claude.code@lupin.deepily.ai#{tag}" )
+        assert page.locator( "#cc-strip-icons .cc-strip-icon" ).count() == 2
+
+        # Stub out confirm() and the bulk-DELETE fetch so the test is
+        # purely UI-state — no DB mutation, no auth dependency.
+        page.evaluate( """
+            () => {
+                window.confirm = () => true;
+                const realFetch = window.fetch;
+                window.fetch = ( url, opts ) => {
+                    if ( typeof url === "string" && url.includes( "/api/notifications/bulk/" ) ) {
+                        return Promise.resolve( {
+                            ok     : true,
+                            status : 200,
+                            json   : () => Promise.resolve( { deleted_count: 2 } )
+                        } );
+                    }
+                    return realFetch( url, opts );
+                };
+                // Seed totalCount so clearAllNotifications doesn't early-return.
+                for ( const g of window.notificationsUI.senderGroups.values() ) {
+                    g.totalCount = 1;
+                }
+            }
+        """ )
+
+        page.evaluate(
+            "async () => { await window.notificationsUI.clearAllNotifications(); }"
+        )
+        page.wait_for_timeout( 200 )
+
+        assert page.locator( "#cc-strip-icons .cc-strip-icon" ).count() == 0, \
+            "Clear All must wipe every strip icon"
+        is_hidden = page.evaluate(
+            "() => document.getElementById( 'cc-session-strip' ).hasAttribute( 'hidden' )"
+        )
+        assert is_hidden, "Strip should hide after Clear All"

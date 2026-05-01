@@ -1,5 +1,44 @@
 # Lupin Project History
 
+### 2026.05.01 - Session a6b318ea | Bug Fix Mode | Focus-tray icon stranding (cleanup paths + conv-mode mic overlay)
+
+**Context**: Two related stranded-icon bugs in the CC notifications UI focus tray, surfaced + fixed in one session.
+
+### Fix 1: Focus tray strands icons after Clear All / per-day delete / history-window change
+
+- **Source**: User report (start of session) — "Clear All or ad-hoc deletion of a session pane DOES NOT update the focus tray; icons from deleted sessions are stranded."
+- **Symptom**: Three sibling code paths tore down sender cards but left their strip icons in `#cc-strip-icons`. The fourth path (per-sender × via `deleteSenderConversation`) was already correct.
+- **Root cause**: Three call sites mutated `senderGroups` + removed cards from `#notifications-list` but never invoked `_removeStripIcon` or its bulk equivalent:
+  - `clearAllNotifications()` at `notifications.js:11780` (Clear All button)
+  - `removeSenderCard(senderId)` at `notifications.js:10706` (called from `softDeleteByDate` when deleting the last day for a sender)
+  - `clearSenderGroups()` at `notifications.js:11036` (called when the history-window dropdown changes — same class-of-bug, included per the sweep-for-pattern-offenders rule)
+- **Fix**: Extracted `_clearAllStripIcons()` helper next to `_removeStripIcon` (exits focus mode if active, empties `#cc-strip-icons`, hides `#cc-session-strip`, resets `ccStripUnreadCounts`). Wired `_removeStripIcon(senderId)` into the per-sender `removeSenderCard` path; wired `_clearAllStripIcons()` into the two bulk paths.
+- **Bonus pre-existing typo**: The new test surfaced `removeSenderCard` calling the non-existent `this.updateNotificationCount()` — renamed to canonical `updateTotalNotificationsCount()` (used in 9 other sites). Latent throw that the old code never hit because the previous behavior never reached the strip-icon path.
+- **Files**:
+  - `src/fastapi_app/static/js/notifications.js` (4 edit sites: helper + 3 call sites + typo fix)
+  - `src/tests/e2e_ui/test_cc_session_strip_and_focus.py` (new `TestStripCleanupOnBulkDelete` class with 4 regression tests)
+- **Test**: 4 new tests + 13 pre-existing tests in the file — all 17 pass on `:8000` E2E (`ts-d7b35841`).
+- **Commit**: [pending]
+
+### Fix 2: Mic-icon overlay strands on conv-mode toggle OFF
+
+- **Source**: User voice report mid-session — "The microphone icon indicating who's got monopoly of the microphone is stranded in the focus tray. When a user toggles out of conversation mode the icon is not removed from the tray."
+- **Symptom**: Strip icon's `data-conv-mode="true"` attribute (which renders the mic overlay) never cleared on the OFF transition, even after the WS event arrived.
+- **Root cause**: Format mismatch on session_id key. The `conversation_mode_changed` WS payload carries the full session UUID (e.g. `a6b318ea-072c-474b-aa90-...`), but strip icons key by the 8-char prefix (`a6b318ea`). The WS-router at `notifications.js:5407` was passing the un-normalized full UUID to `_setStripIconConvMode`, so the `querySelector('#cc-strip-icons .cc-strip-icon[data-session-id="<full-uuid>"]')` missed every time. The same class of bug was already documented + fixed for `.sender-conversation-mode-btn` in `handleConversationModeChanged` on 2026-04-28 (comment at lines 9553-9564); the strip-icon update path was added later and bypassed that normalization.
+- **Fix**: Moved the `_setStripIconConvMode` call OUT of the WS router and INTO `handleConversationModeChanged` after the 8-char normalization, alongside `_pinSenderCardForSession`/`_unpinSenderCardForSession`. Single source of truth for session-keyed DOM widget updates.
+- **Files**:
+  - `src/fastapi_app/static/js/notifications.js` (2 edit sites: WS router slimmed, `handleConversationModeChanged` extended)
+  - `src/tests/e2e_ui/test_cc_session_strip_and_focus.py` (new `test_conv_mode_off_via_ws_clears_strip_icon_overlay` regression — drives the full WS path with a full-UUID payload for both ON and OFF transitions)
+- **Test**: New regression + same pre-existing 13 tests — all 18 pass on `:8000` E2E (`ts-d7b35841`, 71.7s).
+- **Commit**: [pending]
+
+### Caveats / Notes
+
+- The first E2E resubmit (`ts-1cae37ec`) crashed at startup (pytest exit=4) because the `-k 'A or B'` expression got mangled by shell-split in the test_suite agent's pytest_args handling. Switched to a file-path filter (`-v src/tests/e2e_ui/test_cc_session_strip_and_focus.py`) which runs all 17→18 tests in the file unambiguously. Worth filing as a small bug against the test_suite agent later if `-k` with quoting is intended to be supported.
+- The second resubmit (`ts-f6d91ccb`) failed 1 test for a wrong reason — my regression test passed a flat object to `handleNotificationUpdate` which expects `{notification: {...}}` envelope shape, so the switch case never fired. Test wrapper fixed; code fix was correct from the first edit.
+
+---
+
 ### 2026.05.01 - Session 5b732efe | CC notifications UI tweaks: Today filter + Arnold yellow + focus-mode flash + María rename
 
 **Context**: User-driven mini-batch of four UI tweaks during the v0.1.7 spit-and-polish cycle, executed under auto-mode.

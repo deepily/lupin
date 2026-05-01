@@ -5407,11 +5407,10 @@ class NotificationsUI {
             case "conversation_mode_changed":
                 // Re-shape from notification.payload to the legacy envelope keys
                 // that handleConversationModeChanged reads (session_id,
-                // conversation_mode_active, displaced, displaced_by).
-                this._setStripIconConvMode(
-                    notification.payload?.session_id,
-                    !!notification.payload?.active
-                );
+                // conversation_mode_active, displaced, displaced_by). The
+                // strip-icon mic overlay is updated INSIDE handleConversationModeChanged
+                // so it benefits from the full→8-char session_id normalization
+                // (mismatched-key bug logged at line 9553-9564).
                 this.handleConversationModeChanged({
                     session_id              : notification.payload?.session_id,
                     conversation_mode_active: notification.payload?.active,
@@ -9038,6 +9037,33 @@ class NotificationsUI {
     }
 
     /**
+     * Clear ALL strip icons in one shot. Used by bulk-clear paths
+     * (Clear All, history-window change) where every sender card is
+     * being torn down at once and per-sender _removeStripIcon would
+     * thrash. Side effects mirror _removeStripIcon's cleanup:
+     *   - Exits focus mode if active.
+     *   - Empties #cc-strip-icons and hides #cc-session-strip.
+     *   - Resets ccStripUnreadCounts.
+     */
+    _clearAllStripIcons() {
+        if ( this.ccFocusState && this.ccFocusState.enabled ) {
+            this._exitFocusMode();
+        }
+
+        const iconsContainer = document.getElementById( "cc-strip-icons" );
+        if ( iconsContainer ) {
+            iconsContainer.innerHTML = "";
+        }
+
+        const strip = document.getElementById( "cc-session-strip" );
+        if ( strip ) {
+            strip.setAttribute( "hidden", "" );
+        }
+
+        this.ccStripUnreadCounts = {};
+    }
+
+    /**
      * Move the icon for senderId to leftmost (most-recent-activity slot).
      * Called from moveSenderCardToTop's path so strip ordering stays
      * synchronized with stack ordering. Idempotent — if the icon is
@@ -9552,6 +9578,12 @@ class NotificationsUI {
         } else {
             this._unpinSenderCardForSession( sessionId );
         }
+
+        // Strip-icon mic overlay must follow the same normalized session_id —
+        // the WS payload carries the full UUID but icons are keyed by the
+        // 8-char prefix. Without this the OFF transition silently misses the
+        // selector and the mic icon strands in the focus tray.
+        this._setStripIconConvMode( sessionId, active );
 
         this.log( `[CONVERSATION-MODE] session ${sessionId} → ${active ? 'conversation' : 'notification'} mode (via WS${displaced ? ', displaced' : ''})` );
     }
@@ -10709,8 +10741,11 @@ class NotificationsUI {
         if ( card ) {
             card.remove();
         }
+        // Strip icon must follow the card. If this was the focused
+        // session, _removeStripIcon auto-exits focus mode.
+        this._removeStripIcon( senderId );
         this.senderGroups.delete( senderId );
-        this.updateNotificationCount();
+        this.updateTotalNotificationsCount();
         this.log( `Removed sender card for ${senderId}` );
     }
 
@@ -11043,6 +11078,10 @@ class NotificationsUI {
             const cards = container.querySelectorAll( '.sender-card' );
             cards.forEach( card => card.remove() );
         }
+
+        // Strip icons mirror sender cards — wipe them too so a history-
+        // window change doesn't leave stranded icons in the focus tray.
+        this._clearAllStripIcons();
 
         this.updateTotalNotificationsCount();
     }
@@ -11860,6 +11899,9 @@ class NotificationsUI {
         if ( notificationsList ) {
             notificationsList.innerHTML = '';
         }
+
+        // 6a. Wipe the focus-tray strip icons too — they mirror cards.
+        this._clearAllStripIcons();
 
         // 7. Update counter to zero
         const counter = document.getElementById( "notifications-count" );

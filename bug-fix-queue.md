@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-05-01T11:00:00-04:00
+**Last Updated**: 2026-05-01T15:53:00-04:00
 
 ---
 
@@ -55,6 +55,7 @@
 | 49c27830 | 2026-04-27T11:30:00 | 2026-04-27T11:45:00 | stale |
 | ba53b0d2 | 2026-04-28T21:25:00 | 2026-04-28T21:50:00 | closed |
 | 31172845 | 2026-05-01T11:00:00 | 2026-05-01T11:00:00 | active |
+| a6b318ea | 2026-05-01T15:53:00 | 2026-05-01T16:25:00 | active |
 
 ---
 
@@ -157,6 +158,17 @@
 ---
 
 ### Completed
+
+- [x] **Focus tray strands icons after Clear All / per-day delete / history-window change** → commit: [pending] | By: a6b318ea | 2026-05-01
+  - **Fix**: Extracted `_clearAllStripIcons()` helper next to `_removeStripIcon` (exits focus mode, empties `#cc-strip-icons`, hides strip, resets unread counts). Wired `_removeStripIcon(senderId)` into `removeSenderCard` (per-sender path) and `_clearAllStripIcons()` into `clearAllNotifications` + `clearSenderGroups` (bulk paths).
+  - **Bonus**: Fixed pre-existing `removeSenderCard` typo `this.updateNotificationCount()` → canonical `updateTotalNotificationsCount()` (used 9 other sites). Surfaced by the new test.
+  - **Files**: `src/fastapi_app/static/js/notifications.js`; regression tests in `src/tests/e2e_ui/test_cc_session_strip_and_focus.py::TestStripCleanupOnBulkDelete` (4 new tests).
+  - **Test**: 18/18 pass on `:8000` E2E (`ts-d7b35841`, 71.7s — full file, no regressions on the 13 pre-existing tests).
+
+- [x] **Mic-icon overlay strands on strip icon after conv-mode toggle OFF** → commit: [pending] | By: a6b318ea | 2026-05-01
+  - **Fix**: Moved `_setStripIconConvMode` call out of the `conversation_mode_changed` WS router and into `handleConversationModeChanged` after the full-UUID→8-char normalization. Same class-of-bug already fixed for `.sender-conversation-mode-btn` on 2026-04-28; the strip-icon path was added later and bypassed the normalization.
+  - **Files**: `src/fastapi_app/static/js/notifications.js`; regression test `test_conv_mode_off_via_ws_clears_strip_icon_overlay` exercises the full WS path with a full-UUID payload for both ON and OFF.
+  - **Test**: 18/18 pass on `:8000` E2E (`ts-d7b35841`, same run).
 
 - [x] **Conversation mode: codify "acknowledge receipt before tool work" rule across 4 redundancy layers** → commit: 4513f08 | By: ba53b0d2 | 2026-04-28
   - **Fix**: Added explicit two-obligation per-turn contract for conversation mode — (1) ack receipt BEFORE tool work begins via `notify()`, (2) speak closing turn in full via `notify()`. Closes the contract gap that allowed silent tool-only turns to leave the user in audio limbo.
