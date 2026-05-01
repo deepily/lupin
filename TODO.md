@@ -1,12 +1,37 @@
 # TODO
 
-Last updated: 2026-04-30 EDT (Session b195a160 afternoon — Tier-1+2 closures + slow-test rewrite + Cluster J)
+Last updated: 2026-04-30 EDT (Session 488ca8bd — CC session focus mode, Phase 0+1 + E2E test file written, :8000 batch deferred to user)
 
 ---
 
 ## 📚 HISTORY ARCHIVE — Critical (deferred from Session 406cadbf, 2026-04-30)
 
 - [ ] [LUPIN] **history.md archival** — at 22,241 tokens (88.9% of 25k limit) at session-end. CRITICAL per session-end workflow. User declined inline archival; deferred to next session-start. Run `/history-management mode=archive` to move older sessions to `history/YYYY-MM-history.md` archive files. Will breach the 25k limit soon at current velocity.
+
+---
+
+## 🎯 CC SESSION FOCUS MODE — Phase 2 + design follow-ups (Session 488ca8bd, 2026-04-30)
+
+**Plan**: `~/.claude/plans/i-want-to-start-parsed-blossom.md`
+**Design**: `src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md`
+
+### 🚦 Phase 2 — gated for tonight's :8000 batch (user-coordinated)
+
+- [ ] [LUPIN] **Schedule `src/tests/e2e_ui/test_cc_session_strip_and_focus.py` on :8000** (12 Playwright tests across 7 classes). Submit via `/api/test-suite/submit` with the user-confirmed slot — bundling with the other test work the user is batching this evening. First run will also generate the 4 visual-regression baselines via `--update-snapshots`.
+- [ ] [LUPIN] **Capture visual-regression baselines** (`__snapshots__/cc-session-strip-default-stacked.png`, `cc-session-strip-focus-mode-active.png`, `cc-strip-icon-with-conv-mode-overlay.png`, `cc-strip-icon-with-unread-badge.png`) on first scheduled run. Commit baselines after review.
+- [ ] [LUPIN] **Add Phase 2 results to `90-execution-log.md`** after the scheduled run completes — pass/fail per test, timing, any flakiness, baseline-capture confirmation.
+
+### 🛠️ Deferred design items (per design `01-design.md` §16)
+
+- [ ] [LUPIN] **Cross-device focus sync** — current design is `localStorage` per-browser. If user wants focus state to follow them between phone + laptop, add `cc_focus_state` field to bridge file (parallel to `conversation_mode_active`) + new `focus_state_changed` WS event. Gate: wait until use case actually emerges.
+- [ ] [LUPIN] **Strip overflow strategy** — currently `overflow-x: auto` with thin scrollbar. Revisit only if 8+ active CC sessions becomes routine and the horizontal scroll feels ugly. Alternatives: collapse-to-overflow-menu (hide-overflow + chevron) or two-row wrap.
+- [ ] [LUPIN] **Per-card "anchor" pinning** (Q5 option-c from elicitation) — separate small feature. If reorder churn in default-stacked-view (focus mode OFF) still bothers user even with focus-mode escape route, add a per-card pin button so individual cards can be frozen at a stable stack position while others reorder around them.
+- [ ] [LUPIN] **Tier 3 / Tier 4 persona theming follow-up** — already on TODO from Session 9977a1ba (held for Round 1 settling). Independent of focus mode but the strip + focus-mode work surfaces the question of how heavily to lean on persona color. Worth a single review pass after living with focus mode for a session or two.
+
+### 🔍 Watch-fors when batch run lands
+
+- The Playwright tests assume `window.notificationsUI._addStripIcon(...)` etc. are accessible from `page.evaluate()`. If these helper-name renames during a future refactor, the tests will need updating in lockstep — note in design doc revision log if so.
+- The strip's `overflow-x: auto` will produce different visual rendering across Chromium versions; visual-regression baselines may need re-capture if the test container's Chromium minor version drifts.
 
 ---
 
