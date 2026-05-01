@@ -38,16 +38,16 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 POOL_6 = [
-    { "name": "Nora",    "voice_id": "v_nora",    "icon": "🌸", "color": "#E91E63", "profile": "warm female"        },
-    { "name": "Quentin", "voice_id": "v_quentin", "icon": "🦉", "color": "#FFA000", "profile": "authoritative male" },
+    { "name": "Maria",    "voice_id": "v_maria",    "icon": "🌸", "color": "#E91E63", "profile": "warm female"        },
+    { "name": "Mr. NPR", "voice_id": "v_mrnpr", "icon": "🦉", "color": "#FFA000", "profile": "authoritative male" },
     { "name": "Rachel",  "voice_id": "v_rachel",  "icon": "🕊️", "color": "#4CAF50", "profile": "calm female"        },
-    { "name": "Adam",    "voice_id": "v_adam",    "icon": "🌑", "color": "#3F51B5", "profile": "deep male"          },
+    { "name": "Tiberius",    "voice_id": "v_tiberius",    "icon": "🌑", "color": "#3F51B5", "profile": "deep male"          },
     { "name": "Domi",    "voice_id": "v_domi",    "icon": "⚡", "color": "#C2185B", "profile": "young female"       },
     { "name": "Arnold",  "voice_id": "v_arnold",  "icon": "🪨", "color": "#C62828", "profile": "gravelly male"      }
 ]
 
 
-def _make_mock_config_mgr( pool_csv="Nora, Quentin, Rachel, Adam, Domi, Arnold", overrides=None ):
+def _make_mock_config_mgr( pool_csv="Maria, Mr. NPR, Rachel, Tiberius, Domi, Arnold", overrides=None ):
     """
     Build a mock ConfigurationManager that returns the configured pool plus
     matching per-persona keys. `overrides` lets a test inject a missing or
@@ -57,10 +57,10 @@ def _make_mock_config_mgr( pool_csv="Nora, Quentin, Rachel, Adam, Domi, Arnold",
     mgr = MagicMock()
 
     persona_table = {
-        "Nora"    : { "voice id": "v_nora",    "icon": "🌸", "color": "#E91E63", "profile": "warm female"        },
-        "Quentin" : { "voice id": "v_quentin", "icon": "🦉", "color": "#FFA000", "profile": "authoritative male" },
+        "Maria"    : { "voice id": "v_maria",    "icon": "🌸", "color": "#E91E63", "profile": "warm female"        },
+        "Mr. NPR" : { "voice id": "v_mrnpr", "icon": "🦉", "color": "#FFA000", "profile": "authoritative male" },
         "Rachel"  : { "voice id": "v_rachel",  "icon": "🕊️", "color": "#4CAF50", "profile": "calm female"        },
-        "Adam"    : { "voice id": "v_adam",    "icon": "🌑", "color": "#3F51B5", "profile": "deep male"          },
+        "Tiberius"    : { "voice id": "v_tiberius",    "icon": "🌑", "color": "#3F51B5", "profile": "deep male"          },
         "Domi"    : { "voice id": "v_domi",    "icon": "⚡", "color": "#C2185B", "profile": "young female"       },
         "Arnold"  : { "voice id": "v_arnold",  "icon": "🪨", "color": "#C62828", "profile": "gravelly male"      }
     }
@@ -91,7 +91,7 @@ def _write_bridge( sessions_dir, pid, data ):
     return path
 
 
-def _bridge_with_persona( session_id, persona_name, voice_id="v_nora", borrowed=False ):
+def _bridge_with_persona( session_id, persona_name, voice_id="v_maria", borrowed=False ):
     return {
         "session_id"        : session_id,
         "stable_session_id" : session_id,
@@ -117,8 +117,8 @@ class TestLoadPersonaPoolFromConfig:
         mgr = _make_mock_config_mgr()
         pool = load_persona_pool_from_config( mgr )
         assert len( pool ) == 6
-        assert [ p[ "name" ] for p in pool ] == [ "Nora", "Quentin", "Rachel", "Adam", "Domi", "Arnold" ]
-        assert pool[ 0 ][ "voice_id" ] == "v_nora"
+        assert [ p[ "name" ] for p in pool ] == [ "Maria", "Mr. NPR", "Rachel", "Tiberius", "Domi", "Arnold" ]
+        assert pool[ 0 ][ "voice_id" ] == "v_maria"
         assert pool[ 0 ][ "icon" ]     == "🌸"
         assert pool[ 0 ][ "color" ]    == "#E91E63"
         assert pool[ 0 ][ "profile" ]  == "warm female"
@@ -128,21 +128,21 @@ class TestLoadPersonaPoolFromConfig:
         assert load_persona_pool_from_config( mgr ) == []
 
     def test_missing_voice_id_skips_entry( self ):
-        # Override "cc session voice persona Adam voice id" to empty string —
-        # Adam should be silently skipped, others remain.
+        # Override "cc session voice persona Tiberius voice id" to empty string —
+        # Tiberius should be silently skipped, others remain.
         mgr = _make_mock_config_mgr(
-            overrides={ "cc session voice persona Adam voice id": "" }
+            overrides={ "cc session voice persona Tiberius voice id": "" }
         )
         pool  = load_persona_pool_from_config( mgr )
         names = [ p[ "name" ] for p in pool ]
-        assert "Adam" not in names
+        assert "Tiberius" not in names
         assert len( pool ) == 5
 
     def test_handles_whitespace_in_csv( self ):
-        mgr = _make_mock_config_mgr( pool_csv="  Nora ,Quentin  ,, Rachel " )
+        mgr = _make_mock_config_mgr( pool_csv="  Maria ,Mr. NPR  ,, Rachel " )
         pool = load_persona_pool_from_config( mgr )
         # Empty entry between two commas should be filtered out
-        assert [ p[ "name" ] for p in pool ] == [ "Nora", "Quentin", "Rachel" ]
+        assert [ p[ "name" ] for p in pool ] == [ "Maria", "Mr. NPR", "Rachel" ]
 
 
 # ── borrowed_persona_for_sid ─────────────────────────────────────────────────
@@ -189,9 +189,9 @@ class TestPickUnallocatedPersona:
 
     @pytest.mark.parametrize( "occupied,expected_remaining", [
         ( set(),                                                                                   6 ),
-        ( { "Nora" },                                                                              5 ),
-        ( { "Nora", "Quentin" },                                                                   4 ),
-        ( { "Nora", "Quentin", "Rachel", "Adam", "Domi" },                                         1 )
+        ( { "Maria" },                                                                              5 ),
+        ( { "Maria", "Mr. NPR" },                                                                   4 ),
+        ( { "Maria", "Mr. NPR", "Rachel", "Tiberius", "Domi" },                                         1 )
     ] )
     def test_partial_occupancy_picks_from_free_subset( self, occupied, expected_remaining ):
         # Repeat picks to ensure we never pick from `occupied`
@@ -231,7 +231,7 @@ class TestFindActiveVoicePersonaSessions:
             sessions_dir = Path( tmp )
             # Bridge with persona
             _write_bridge( sessions_dir, os.getpid(),
-                           _bridge_with_persona( "abc12345-aaaa-bbbb-cccc-dddddddddddd", "Nora" ) )
+                           _bridge_with_persona( "abc12345-aaaa-bbbb-cccc-dddddddddddd", "Maria" ) )
             # Bridge without persona
             data_no_persona = {
                 "session_id"        : "xyz98765-aaaa-bbbb-cccc-dddddddddddd",
@@ -247,7 +247,7 @@ class TestFindActiveVoicePersonaSessions:
 
             assert len( results ) == 1
             _, sid, p = results[ 0 ]
-            assert p[ "name" ] == "Nora"
+            assert p[ "name" ] == "Maria"
             assert sid.startswith( "abc12345" )
 
     def test_skips_dead_pid_bridges( self ):
@@ -255,7 +255,7 @@ class TestFindActiveVoicePersonaSessions:
             sessions_dir = Path( tmp )
             # Use PID 999999 (presumably not alive)
             _write_bridge( sessions_dir, 999999,
-                           _bridge_with_persona( "deadpid1-aaaa-bbbb-cccc-dddddddddddd", "Adam" ) )
+                           _bridge_with_persona( "deadpid1-aaaa-bbbb-cccc-dddddddddddd", "Tiberius" ) )
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
                 with patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
@@ -282,15 +282,15 @@ class TestAllocatePersonaForSession:
 
     def test_picks_unallocated_when_pool_partially_occupied( self ):
         """
-        Two bridges already hold Nora and Adam. allocate_persona_for_session
+        Two bridges already hold Maria and Tiberius. allocate_persona_for_session
         must pick from the remaining 4 voices.
         """
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
             _write_bridge( sessions_dir, os.getpid(),
-                           _bridge_with_persona( "aaaa1111-aaaa-bbbb-cccc-dddddddddddd", "Nora" ) )
+                           _bridge_with_persona( "aaaa1111-aaaa-bbbb-cccc-dddddddddddd", "Maria" ) )
             _write_bridge( sessions_dir, os.getpid() + 1,
-                           _bridge_with_persona( "bbbb2222-aaaa-bbbb-cccc-dddddddddddd", "Adam" ) )
+                           _bridge_with_persona( "bbbb2222-aaaa-bbbb-cccc-dddddddddddd", "Tiberius" ) )
 
             mgr = _make_mock_config_mgr()
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
@@ -298,7 +298,7 @@ class TestAllocatePersonaForSession:
                 allocated = allocate_persona_for_session( mgr, "newsid12-aaaa-bbbb-cccc-dddddddddddd" )
 
             assert allocated is not None
-            assert allocated[ "name" ] not in { "Nora", "Adam" }
+            assert allocated[ "name" ] not in { "Maria", "Tiberius" }
             assert allocated[ "borrowed" ] is False
             assert "assigned_at" in allocated
             assert allocated[ "assigned_at" ].endswith( "+00:00" )
@@ -315,7 +315,7 @@ class TestAllocatePersonaForSession:
         """Occupy all 6 names, then allocate_persona_for_session must borrow."""
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
-            for i, name in enumerate( [ "Nora", "Quentin", "Rachel", "Adam", "Domi", "Arnold" ] ):
+            for i, name in enumerate( [ "Maria", "Mr. NPR", "Rachel", "Tiberius", "Domi", "Arnold" ] ):
                 _write_bridge(
                     sessions_dir,
                     os.getpid() + i,
@@ -333,7 +333,7 @@ class TestAllocatePersonaForSession:
             assert result is not None
             assert result[ "borrowed" ] is True
             # Borrowed name is still in the pool
-            assert result[ "name" ] in { "Nora", "Quentin", "Rachel", "Adam", "Domi", "Arnold" }
+            assert result[ "name" ] in { "Maria", "Mr. NPR", "Rachel", "Tiberius", "Domi", "Arnold" }
 
 
 # ── Bridge round-trip (get/set_voice_persona) ────────────────────────────────
@@ -347,7 +347,7 @@ class TestBridgeRoundTrip:
             _write_bridge( sessions_dir, os.getpid(),
                            { "session_id": sid, "stable_session_id": sid, "cwd": "/tmp" } )
 
-            persona = { "name": "Adam", "voice_id": "v_adam", "icon": "🌑",
+            persona = { "name": "Tiberius", "voice_id": "v_tiberius", "icon": "🌑",
                         "color": "#3F51B5", "borrowed": False, "profile": "deep male" }
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):

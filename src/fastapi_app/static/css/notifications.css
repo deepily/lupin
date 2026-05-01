@@ -1979,7 +1979,15 @@
             flex: 1 1 auto;
             min-width: 0;
             overflow-x: auto;
+            /* Suppress the implicit Y scrollbar that overflow-x: auto would
+             * otherwise enable (CSS spec promotes the other axis to auto).
+             * Padding below leaves enough room that nothing visually clips. */
+            overflow-y: hidden;
             scrollbar-width: thin;
+            /* Internal breathing room so hover scale (1.08), focus scale (1.10),
+             * and the protruding ::before mic badge (-3px) / ::after unread badge
+             * (-4px) aren't clipped. */
+            padding: 6px 4px;
         }
 
         .cc-strip-icon {

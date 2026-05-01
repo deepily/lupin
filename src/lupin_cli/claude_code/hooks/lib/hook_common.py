@@ -418,19 +418,22 @@ def format_voice_context( messages ):
     return "\n".join( lines )
 
 
-def build_additional_context( context_text ):
+def build_additional_context( context_text, hook_event_name ):
     """
-    Build hookSpecificOutput dict with additionalContext for PostToolUse/PreToolUse.
+    Build hookSpecificOutput dict with additionalContext for UserPromptSubmit/PostToolUse/PreToolUse.
 
     Requires:
         - context_text is a string
+        - hook_event_name is the event identifier expected by Claude Code's
+          hook output schema, e.g. "UserPromptSubmit", "PostToolUse", "PreToolUse"
 
     Ensures:
         - Returns {} when context_text is empty or falsy (passthrough)
-        - Returns { "hookSpecificOutput": { "additionalContext": ... } } when non-empty
+        - Returns { "hookSpecificOutput": { "hookEventName": ..., "additionalContext": ... } } when non-empty
 
     Args:
         context_text: Formatted voice context string
+        hook_event_name: Hook event identifier required by Claude Code schema
 
     Returns:
         dict: Hook output ready for emit_json(), or empty dict
@@ -439,6 +442,7 @@ def build_additional_context( context_text ):
         return {}
     return {
         "hookSpecificOutput": {
+            "hookEventName"   : hook_event_name,
             "additionalContext": context_text
         }
     }

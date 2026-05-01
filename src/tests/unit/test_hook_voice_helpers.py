@@ -247,20 +247,26 @@ class TestBuildAdditionalContext:
 
     def test_empty_string_returns_empty_dict( self ):
         """Empty context string returns {} (passthrough)."""
-        assert build_additional_context( "" ) == {}
+        assert build_additional_context( "", "UserPromptSubmit" ) == {}
 
     def test_none_returns_empty_dict( self ):
         """None context returns {} (passthrough)."""
-        assert build_additional_context( None ) == {}
+        assert build_additional_context( None, "UserPromptSubmit" ) == {}
 
     def test_non_empty_returns_wrapped_dict( self ):
-        """Non-empty context is wrapped in hookSpecificOutput.additionalContext."""
-        result = build_additional_context( "[Voice]: hello" )
+        """Non-empty context is wrapped in hookSpecificOutput with hookEventName + additionalContext."""
+        result = build_additional_context( "[Voice]: hello", "UserPromptSubmit" )
         assert result == {
             "hookSpecificOutput": {
+                "hookEventName"   : "UserPromptSubmit",
                 "additionalContext": "[Voice]: hello"
             }
         }
+
+    def test_event_name_is_propagated( self ):
+        """The hook_event_name parameter must round-trip into the output dict."""
+        result = build_additional_context( "ctx", "PostToolUse" )
+        assert result[ "hookSpecificOutput" ][ "hookEventName" ] == "PostToolUse"
 
 
 # ═════════════════════════════════════════════════════════════════════════════

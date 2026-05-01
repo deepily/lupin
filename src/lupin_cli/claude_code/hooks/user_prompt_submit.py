@@ -84,12 +84,12 @@ def main():
 
     if voice_ctx and reminder:
         enriched = enrich_voice_context( voice_ctx )
-        emit_json( build_additional_context( enriched + "\n\n" + reminder ) )
+        emit_json( build_additional_context( enriched + "\n\n" + reminder, "UserPromptSubmit" ) )
     elif voice_ctx:
         enriched = enrich_voice_context( voice_ctx )
-        emit_json( build_additional_context( enriched ) )
+        emit_json( build_additional_context( enriched, "UserPromptSubmit" ) )
     elif reminder:
-        emit_json( build_additional_context( reminder ) )
+        emit_json( build_additional_context( reminder, "UserPromptSubmit" ) )
     else:
         emit_json( {} )
 

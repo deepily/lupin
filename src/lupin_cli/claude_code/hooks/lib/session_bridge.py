@@ -1290,7 +1290,7 @@ if __name__ == "__main__":
 
             # Voice persona smoke (round-trip + active-scan)
             _persona = {
-                "name"        : "Adam",
+                "name"        : "Tiberius",
                 "voice_id"    : "pNInz6obpgDQGcFmaJgB",
                 "icon"        : "🌑",
                 "color"       : "#3F51B5",
@@ -1302,7 +1302,7 @@ if __name__ == "__main__":
             assert get_voice_persona( _sid ) == _persona, "Round-trip persona equals original"
             _active = find_active_voice_persona_sessions()
             assert len( _active ) >= 1, "Should find at least our session"
-            assert any( p[ "name" ] == "Adam" for _, _, p in _active ), "Adam should be in active set"
+            assert any( p[ "name" ] == "Tiberius" for _, _, p in _active ), "Tiberius should be in active set"
             assert set_voice_persona( _sid, None ) is True, "Clear persona should succeed"
             assert get_voice_persona( _sid ) is None, "Cleared persona reads as None"
             assert get_voice_persona( "nonexistent" ) is None, "Missing session returns None"

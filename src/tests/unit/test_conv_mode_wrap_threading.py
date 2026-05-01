@@ -167,7 +167,8 @@ class TestUserPromptSubmitThreading:
         reminder_m.assert_called_once_with( "terminal-typed", "stable-sid-12345" )
 
         # When voice_ctx empty + reminder non-empty: emit additionalContext with reminder
-        build_ctx_m.assert_called_once_with( "REMINDER_BLOCK_SENTINEL" )
+        # (hook_event_name="UserPromptSubmit" required by Claude Code schema)
+        build_ctx_m.assert_called_once_with( "REMINDER_BLOCK_SENTINEL", "UserPromptSubmit" )
 
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.write_turn_start_marker" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.kill_idle_waiter" )
