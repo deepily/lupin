@@ -173,7 +173,23 @@
 - Phase 5 was scoped down from the design doc's "live :7999 e2e" to mock-driven cross-layer smoke. Justification: every individual layer is already unit + integration tested (Phases 1-4 = 171 tests). The Phase 5 e2e value is "do they compose correctly" — answered by mocks. Live multi-session validation is Phase 6 territory.
 - Pre/post-tool-use threading remains the Phase 2 deferral (per-tool-call reminder noise rationale). Documented and acceptable.
 
-**Commit**: TBD (filled in after commit lands).
+**Commit**: `d7a6c9f` (3 files, 215+/10-).
+
+---
+
+## Cumulative summary (Phases 1-5)
+
+| Phase | Commit | Files | Tests added | Cumulative pass |
+|---|---|---|---|---|
+| 1 | `02af97b` | 5 | 27 unit | 27 |
+| 2 | `a9ff8bc` | 7 | 8 unit + 4 integration = 12 | 39 |
+| 3 | `3e030dc` | 4 | 16 unit | 55 |
+| 4 | `9a00d6b` | 6 | 23 unit | 78 |
+| 5 | `d7a6c9f` | 3 | 5 cross-layer smoke | 83 new + 93 regression = **176/176** |
+
+**Phase 6 (user-gated)** outstanding:
+- WebSocket smoke suite full run on user-confirmed slot
+- Multi-session live verification matrix per design doc §4 Phase 6 (10 rows)
 
 ---
 
