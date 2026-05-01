@@ -1,0 +1,71 @@
+# Fixture YAML for test_presentation_render_only_smoke.
+#
+# Pinned to git (NOT auto-discovered) so the render-only test is deterministic
+# regardless of which jobs have run on the host — see Cluster E in the
+# 2026-04-29 postmortem doc (src/rnd/v0.1.7/2026.04.30-postmortem-2026.04.29-all-test-run.md).
+#
+# Small (3 slides, opening + body + closing) so render-only Phases 6-8 finish
+# in seconds. Source schema mirrors what presentation_generator/orchestrator.py
+# emits — if the schema changes upstream and this fixture goes stale, the test
+# will fail loudly at parse time (which is the correct failure mode).
+#
+# To regenerate from a real run if the schema drifts, copy the smallest
+# io/presentations/<user>/*.yaml into this path and trim slides[] to 3 entries.
+
+title: '[Fixture] Render-Only Smoke Test'
+speaker: ''
+date: '2026-04-30'
+duration_minutes: 3
+source_document: src/tests/fixtures/presentations/render-only-example.yaml
+total_slides: 3
+slides:
+- number: 1
+  arc_position: opening
+  type: title
+  title: '[Fixture] Render-Only Smoke Test'
+  subtitle: null
+  visual_type: text_only
+  visual_description: null
+  content_bullets: []
+  presenter_notes:
+    transition: null
+    talking_points:
+    - '[Fixture talking point 1]'
+    - '[Fixture talking point 2]'
+    timing_seconds: 60
+    emphasis: null
+- number: 2
+  arc_position: body
+  type: key_point
+  title: '[Fixture] Render-Only Body Slide'
+  subtitle: null
+  visual_type: text_only
+  visual_description: null
+  content_bullets:
+  - '[Fixture bullet 1]'
+  - '[Fixture bullet 2]'
+  - '[Fixture bullet 3]'
+  presenter_notes:
+    transition: '[Fixture transition to slide 2]'
+    talking_points:
+    - '[Fixture talking point 1]'
+    - '[Fixture talking point 2]'
+    timing_seconds: 60
+    emphasis: null
+- number: 3
+  arc_position: closing
+  type: qa
+  title: '[Fixture] Render-Only Closing Slide'
+  subtitle: null
+  visual_type: text_only
+  visual_description: null
+  content_bullets: []
+  presenter_notes:
+    transition: '[Fixture transition to slide 3]'
+    talking_points:
+    - '[Fixture talking point 1]'
+    - '[Fixture talking point 2]'
+    timing_seconds: 60
+    emphasis: null
+theme: default
+theme_overrides: {}

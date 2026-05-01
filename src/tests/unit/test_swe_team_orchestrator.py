@@ -355,8 +355,26 @@ class TestStateChangeCallback:
             OrchestratorState.DECOMPOSING,
         ) )
 
-    def test_dry_run_emits_state_changes( self ):
-        """Dry-run execution should emit state transitions."""
+    def test_dry_run_emits_state_changes( self, monkeypatch ):
+        """
+        Dry-run execution should emit state transitions.
+
+        Performance fix 2026-04-30 (Session b195a160): patches the same
+        cosa_interface entry points + zeroes MockAgentSDKSession.DELAY_MULTIPLIER
+        as the TestDryRunRegression autouse fixture. Without these patches this
+        test goes through the real notification dispatcher (~196s); with them it
+        runs in milliseconds. See
+        src/rnd/v0.1.7/2026.04.30-swe-team-orchestrator-test-perf-fix.md.
+        """
+        from cosa.agents.swe_team import cosa_interface
+        from cosa.agents.swe_team.mock_clients import MockAgentSDKSession
+
+        monkeypatch.setattr( cosa_interface, "notify_progress",  AsyncMock() )
+        monkeypatch.setattr( cosa_interface, "ask_confirmation", AsyncMock( return_value=True ) )
+        monkeypatch.setattr( cosa_interface, "request_decision", AsyncMock( return_value={ "answers": { "Escalation": "Continue to next task" } } ) )
+        monkeypatch.setattr( cosa_interface, "get_feedback",     AsyncMock( return_value=None ) )
+        monkeypatch.setattr( MockAgentSDKSession, "DELAY_MULTIPLIER", 0.0 )
+
         callback = AsyncMock()
         config = SweTeamConfig( dry_run=True )
         orch = SweTeamOrchestrator(
@@ -656,59 +674,133 @@ class TestConfigTrustMode:
 # =============================================================================
 
 class TestDryRunRegression:
-    """Ensure dry-run still works after all changes."""
+    """
+    Ensure dry-run still works after all changes — but FAST.
 
-    def test_dry_run_completes( self ):
-        """Dry-run should complete and return a result."""
-        config = SweTeamConfig( dry_run=True )
+    Performance fix 2026-04-30 (Session b195a160): the original 4 tests in this
+    class each called ``orch.run()`` against the REAL ``cosa_interface``
+    notification dispatcher. That dispatcher does
+    ``await asyncio.to_thread( _notify_user_async, request )`` per breadcrumb,
+    which under any system load takes 30s+ per call → 196s per test wall-clock,
+    with hard FAIL when the suite-level timeout fires. Diagnosis + design at
+    src/rnd/v0.1.7/2026.04.30-swe-team-orchestrator-test-perf-fix.md.
+
+    The autouse fixture below patches the four ``cosa_interface`` entry points
+    (notify_progress, ask_confirmation, request_decision, get_feedback) to
+    AsyncMock instances and zeroes the MockAgentSDKSession per-phase delays.
+    Each test now runs in single-digit milliseconds.
+    """
+
+    @pytest.fixture( autouse=True )
+    def _no_io( self, monkeypatch ):
+        """
+        Class-scoped autouse: kill all real IPC + zero mock-client sleeps.
+
+        - notify_progress / ask_confirmation / request_decision / get_feedback →
+          AsyncMock so the dispatcher is never hit.
+        - MockAgentSDKSession.DELAY_MULTIPLIER → 0.0 so the legitimate 3.4s of
+          per-phase asyncio.sleep is skipped in unit-test context.
+        """
+        from cosa.agents.swe_team import cosa_interface
+        from cosa.agents.swe_team.mock_clients import MockAgentSDKSession
+
+        notify_mock = AsyncMock()
+        ask_mock    = AsyncMock( return_value=True )
+        decide_mock = AsyncMock( return_value={ "answers": { "Escalation": "Continue to next task" } } )
+        feed_mock   = AsyncMock( return_value=None )
+
+        monkeypatch.setattr( cosa_interface, "notify_progress",  notify_mock )
+        monkeypatch.setattr( cosa_interface, "ask_confirmation", ask_mock )
+        monkeypatch.setattr( cosa_interface, "request_decision", decide_mock )
+        monkeypatch.setattr( cosa_interface, "get_feedback",     feed_mock )
+        monkeypatch.setattr( MockAgentSDKSession, "DELAY_MULTIPLIER", 0.0 )
+
+        # Expose mocks for tests that want to assert on them
+        self.notify_mock = notify_mock
+        self.ask_mock    = ask_mock
+        self.decide_mock = decide_mock
+        self.feed_mock   = feed_mock
+
+    # ------------------------------------------------------------------------
+    # Behavioral invariants — each test verifies ONE thing
+    # ------------------------------------------------------------------------
+
+    def test_dry_run_returns_summary_string( self ):
+        """orch.run() must return a non-empty summary string."""
         orch = SweTeamOrchestrator(
             task_description = "Add health check",
-            config           = config,
+            config           = SweTeamConfig( dry_run=True ),
         )
         result = asyncio.run( orch.run() )
         assert result is not None
+        assert isinstance( result, str ) and len( result ) > 0
+
+    def test_dry_run_summary_mentions_dry_run( self ):
+        """Result string carries a 'Dry-run complete' marker."""
+        orch = SweTeamOrchestrator(
+            task_description = "Add health check",
+            config           = SweTeamConfig( dry_run=True ),
+        )
+        result = asyncio.run( orch.run() )
         assert "Dry-run complete" in result
+
+    def test_dry_run_state_is_completed( self ):
+        """After run(), orchestrator state must be COMPLETED."""
+        orch = SweTeamOrchestrator(
+            task_description = "Add health check",
+            config           = SweTeamConfig( dry_run=True ),
+        )
+        asyncio.run( orch.run() )
         assert orch.current_state == OrchestratorState.COMPLETED
 
-    def test_dry_run_with_job_id( self ):
-        """Dry-run with job_id should complete normally."""
-        config = SweTeamConfig( dry_run=True )
+    def test_dry_run_emits_breadcrumbs_via_team_io( self ):
+        """Each MockAgentSDKSession phase must trigger a notify_progress call."""
         orch = SweTeamOrchestrator(
             task_description = "Add health check",
-            config           = config,
+            config           = SweTeamConfig( dry_run=True ),
+        )
+        asyncio.run( orch.run() )
+        # 6 mock-client phases + 1 "Starting SWE Team task" preamble = >=7 calls.
+        assert self.notify_mock.call_count >= 7
+
+    def test_dry_run_passes_job_id_to_notify( self ):
+        """When job_id is set, notify_progress must receive it (CJ Flow routing)."""
+        orch = SweTeamOrchestrator(
+            task_description = "Add health check",
+            config           = SweTeamConfig( dry_run=True ),
             job_id           = "swe-dryrun1",
         )
-        result = asyncio.run( orch.run() )
-        assert result is not None
+        asyncio.run( orch.run() )
         assert orch.job_id == "swe-dryrun1"
+        # At least one notify call should have job_id="swe-dryrun1".
+        job_id_kwargs = [ c.kwargs.get( "job_id" ) for c in self.notify_mock.call_args_list ]
+        assert "swe-dryrun1" in job_id_kwargs
 
-    def test_dry_run_with_state_callback( self ):
-        """Dry-run with on_state_change callback should emit transitions."""
+    def test_dry_run_state_callback_fires_through_completion( self ):
+        """on_state_change callback receives at least INIT→DELEGATING→COMPLETED."""
         transitions = []
 
         async def track_transitions( from_state, to_state, metadata=None ):
             transitions.append( ( from_state, to_state ) )
 
-        config = SweTeamConfig( dry_run=True )
         orch = SweTeamOrchestrator(
             task_description = "Add health check",
-            config           = config,
+            config           = SweTeamConfig( dry_run=True ),
             on_state_change  = track_transitions,
         )
-        result = asyncio.run( orch.run() )
-        assert result is not None
-        assert len( transitions ) >= 3  # INIT→DELEGATING, DELEGATING→COMPLETED at minimum
-        # First transition should be to INITIALIZING
-        assert transitions[ 0 ][ 1 ] == OrchestratorState.INITIALIZING
-        # Last transition should be to COMPLETED
+        asyncio.run( orch.run() )
+        assert len( transitions ) >= 3
+        assert transitions[ 0 ][ 1 ]  == OrchestratorState.INITIALIZING
         assert transitions[ -1 ][ 1 ] == OrchestratorState.COMPLETED
 
-    def test_dry_run_get_state_includes_new_fields( self ):
-        """get_state() should still work correctly after constructor changes."""
-        config = SweTeamConfig( dry_run=True )
+    def test_dry_run_get_state_shape( self ):
+        """get_state() returns the expected post-construction shape."""
+        # Note: this test does NOT call run() — it only exercises constructor
+        # state. Kept here for cohesion with the other dry-run tests; runs
+        # in microseconds.
         orch = SweTeamOrchestrator(
             task_description = "test",
-            config           = config,
+            config           = SweTeamConfig( dry_run=True ),
             job_id           = "swe-xyz",
         )
         state = orch.get_state()

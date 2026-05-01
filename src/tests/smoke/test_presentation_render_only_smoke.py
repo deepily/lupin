@@ -46,7 +46,6 @@ Created: 2026-04-07 (E2E testing strategy, Session 5946362f)
 """
 
 import argparse
-import glob
 import os
 import sys
 
@@ -85,36 +84,34 @@ RENDER_ONLY_SCENARIOS = [
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# YAML Auto-Discovery
+# YAML Fixture Resolution
+#
+# Auto-discovery removed 2026-04-30 (Session b195a160) — see Cluster E in
+# src/rnd/v0.1.7/2026.04.30-postmortem-2026.04.29-all-test-run.md. The discovered
+# YAML path was reachable from the test process but not from the server view,
+# producing a 404 mid-run. Pinning to a checked-in fixture removes the brittleness.
+# `--yaml-path` CLI flag still overrides the fixture for ad-hoc dev runs.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _find_latest_yaml( user_email ):
+FIXTURE_YAML_RELPATH = "src/tests/fixtures/presentations/render-only-example.yaml"
+
+
+def _resolve_fixture_yaml():
     """
-    Find the most recent presentation YAML in the test user's output directory.
+    Return the absolute path to the checked-in render-only fixture YAML.
 
     Requires:
-        - user_email is a non-empty string
-        - LUPIN_ROOT environment variable is set
+        - LUPIN_ROOT environment variable is set (or default /var/lupin works)
+        - The fixture file exists at the expected relpath
 
     Ensures:
-        - Returns absolute path to latest .yaml file, or None if none found
+        - Returns absolute path to the fixture, or None if it isn't readable
     """
     project_root = os.environ.get( "LUPIN_ROOT", "/var/lupin" )
-    presentations_dir = os.path.join( project_root, "io", "presentations", user_email )
-
-    if not os.path.isdir( presentations_dir ):
+    fixture_path = os.path.join( project_root, FIXTURE_YAML_RELPATH )
+    if not os.path.isfile( fixture_path ):
         return None
-
-    yaml_files = glob.glob( os.path.join( presentations_dir, "*.yaml" ) )
-    yaml_files += glob.glob( os.path.join( presentations_dir, "*.yml" ) )
-
-    if not yaml_files:
-        return None
-
-    # Sort by modification time, newest first
-    yaml_files.sort( key=os.path.getmtime, reverse=True )
-
-    return yaml_files[ 0 ]
+    return fixture_path
 
 
 def _to_relative_path( abs_path ):
@@ -270,7 +267,10 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
             "--yaml-path",
             type=str,
             default=None,
-            help="Explicit path to YAML intermediate. Default: auto-discover latest."
+            help=(
+                "Explicit path to YAML intermediate. "
+                f"Default: checked-in fixture at {FIXTURE_YAML_RELPATH}."
+            )
         )
         parser.add_argument(
             "--timeout",
@@ -299,23 +299,19 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
             self.DEFAULT_TIMEOUT = timeout_override
             self.REQUEST_TIMEOUT = timeout_override
 
-        # Resolve YAML path
+        # Resolve YAML path: explicit --yaml-path wins; otherwise use the
+        # checked-in fixture (Cluster E fix — auto-discovery removed).
         explicit_path = getattr( args, "yaml_path", None )
         if explicit_path:
             self._yaml_path = explicit_path
         else:
-            email = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_EMAIL" )
-            if email:
-                latest = _find_latest_yaml( email )
-                if latest:
-                    self._yaml_path = latest
-                    print( f"\n  Auto-discovered YAML: {os.path.basename( latest )}" )
-                else:
-                    print( f"\n  ABORT: No YAML files found in io/presentations/{email}/" )
-                    print( "  Run a full pipeline test (Tier 3) first to generate a YAML fixture." )
-                    return False
+            fixture = _resolve_fixture_yaml()
+            if fixture:
+                self._yaml_path = fixture
+                print( f"\n  Fixture YAML: {FIXTURE_YAML_RELPATH}" )
             else:
-                print( "\n  ABORT: LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL not set" )
+                print( f"\n  ABORT: Fixture YAML not found at {FIXTURE_YAML_RELPATH}." )
+                print( "  Verify LUPIN_ROOT is set correctly and the fixture is checked in." )
                 return False
 
         # Overlap guard

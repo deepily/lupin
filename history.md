@@ -1,5 +1,73 @@
 # Lupin Project History
 
+### 2026.04.30 - Session b195a160 (afternoon continuation) | Postmortem Tier-1+2 closures + slow-test rewrite + Cluster J root-cause
+
+#### Session-End | 2026.04.30 ~21:20 EDT | Closed Clusters D + E + F-step1 + F-step2 + K + slow-test + J | Scheduled :8000 all-test-run for 21:30
+
+**Context**: Continuation of session b195a160 from this morning (commit `177d1af` covered postmortem A/B/C closures + bcrypt 4.3.0 image rebuild + dev/test recompose). Afternoon arc closed every Tier-1 and Tier-2 follow-up from the postmortem doc plus discovered and fixed a hidden 196-second regression introduced by an earlier covert-E2E pattern. Final all-test-run scheduled on :8000 at 21:30 EDT to verify the postmortem-cluster collapse end-to-end.
+
+**Tier-1 + Tier-2 postmortem closures**:
+
+- **Cluster D — `--auto-proxy` fail-fast** (1 smoke fail). `test_presentation_live_smoke.py` + `test_research_to_presentation_live_smoke.py` now raise `RuntimeError` in <1s if invoked under pytest without `--auto-proxy` (env-var sentinel `PYTEST_CURRENT_TEST`). Was burning 900s/2400s timeouts per scheduled run waiting for human gate approvals. CLI dev mode keeps the warning + manual flow. Surfaced (deferred to user) the architectural follow-up: per-test-file pytest_arg declarations that the scheduler could merge.
+
+- **Cluster E — render-only YAML fixture pin** (1 smoke fail). Authored `src/tests/fixtures/presentations/render-only-example.yaml` (3-slide minimum, valid schema) and replaced `_find_latest_yaml()` glob auto-discovery with `_resolve_fixture_yaml()`. Auto-discovery was suspected (but not proven) to suffer from dev-vs-test bind-mount divergence — pinning to a checked-in fixture removes the brittleness regardless. `--yaml-path` CLI override preserved for ad-hoc dev runs. Dropped now-unused `glob` import.
+
+- **Cluster F-step1 — `slide_count` in PG artifacts** (CoSA). Added `self.artifacts["slide_count"] = presentation.total_slides` to `presentation_generator/job.py` LIVE branch (line 290) + sentinel `0` to dry-run branch.
+
+- **Cluster F-step2 — `slide_count` through `ChainedResult`** (CoSA, Path 1 chosen — formal field through state machine, not the dict-passthrough hack). Added `slide_count: Optional[int] = None` to `state.py:ChainedResult`. Orchestrator at `agent.py:214` now reads `pg_artifacts.get("slide_count")` into `self.result.slide_count`. R2P `job.py:256` writes `self.artifacts["slide_count"] = result.slide_count` (LIVE + dry-run branches). Test's `_check_slide_count` will now pass on the next R2P live run.
+
+- **Cluster K — 3-attempt verifier retry with gentle backoff** (CoSA). `notification_proxy/verification.py` loop bumped from 2-attempt to 3-attempt with `time.sleep(0.5 * attempt)` between attempts (0.5s, 1.0s). Yesterday's `FUZZY_BUDGET_2` failed on attempt 1+2 due to vLLM transient empty-XML; this gives 3rd-attempt insurance. Worst-case adds 1.5s for a triply-flaky scenario.
+
+**Discovered + fixed: `test_swe_team_orchestrator.py::TestDryRunRegression` 196-second covert-E2E** (parent + CoSA):
+
+- **Diagnosis**: full-suite run in load-stressed conditions flagged `test_dry_run_completes` as failed; standalone re-run took **196 seconds**. Reading the test confirmed it instantiated `SweTeamOrchestrator` WITHOUT a mocked `team_io`, so `orch.run()` called the REAL `cosa_interface.notify_progress` → `_dispatcher.notify_progress` → `asyncio.to_thread(_notify_user_async, ...)` for every breadcrumb. Under load each notify takes ~25-30s through the dispatcher's IPC path; 7 breadcrumbs × ~28s ≈ 196s. **The test was a covert end-to-end test masquerading as a unit test.**
+- **Fix (Path 1: full rewrite)**: split into Tier-1 (fast, mocked) + Tier-2 (slow, real) per the testing-venues rubric. Phase 0 serialized plan to `src/rnd/v0.1.7/2026.04.30-swe-team-orchestrator-test-perf-fix.md`. Phase 1 added `DELAY_MULTIPLIER = 1.0` class constant to `MockAgentSDKSession` (CoSA). Phase 2 rewrote `TestDryRunRegression` as 7 small tests + class-autouse fixture that AsyncMocks the 4 `cosa_interface` entry points + zeroes the mock-client delays. Phase 2.5 applied same `monkeypatch` to `test_dry_run_emits_state_changes` (line 386 — same pattern, different class). Phase 3 authored new Tier-2 smoke at `src/tests/smoke/test_swe_team_dry_run_e2e.py` (~80 lines, 240s budget, `:8000`-scheduled venue).
+- **Result**: 8 unit tests pass in **0.58 seconds total** (was ~980s for the same coverage area, **~1700× speedup**). Tier-2 smoke takes ~196s against the real dispatcher — that's the smoke doing its job, surfacing dispatcher health honestly. Bumped budget to 240s.
+
+**Cluster J — `'NoneType' object has no attribute 'split'`** (CoSA + parent regression test):
+
+- **Live traceback captured on `:7999`** (after a courtesy bounce of an unhealthy dev container): `queues.py:241 push → todo_fifo_queue.py:1096 _handle_agentic_command → expeditor.py:170 expedite → completion_client.py:237 llm_client.run → aiohttp ClientConnectorError to 192.168.1.21:3001`. The :7999 dev hit a NETWORK error first because that vLLM endpoint isn't reachable from dev — separate infra issue surfaced. On :8000 yesterday, the LLM call SUCCEEDED, control flowed past line 170 to line 340, and `None.split()` fired.
+- **Root cause** (static analysis from line 340 + 588 of `expeditor.py`): `agent_entry.get("display_name", agent_entry["cli_module"].split(...)...)` — Python's `dict.get(key, default)` evaluates the default arm **eagerly**. The `test_suite` registry entry has `cli_module=None` by design (API-only agent, no CLI), so the eager `None.split(".")` ran every time. Yesterday's :8000 traceback matches.
+- **Fix**: extracted `_resolve_display_name(agent_entry)` static method on `RuntimeArgumentExpeditor` with proper short-circuit (display_name first, cli_module derivation second, "agent" sentinel last). Both call sites now use the helper. Added 8 regression tests in `TestResolveDisplayName` covering the exact `test_suite` registry shape. Full expediter unit suite: 155/0 fail (was 147 → +8).
+- **Adjacent finding (NOT cluster J)**: dev `:7999` cannot reach `192.168.1.21:3001` for the runtime-argument expediter's LLM. Test `:8000` could yesterday. Worth a follow-up if it affects dev workflow.
+
+**Schedule for tonight**: `:8000` all-test-run scheduled 2026-04-30T21:30:00-04:00, job_id `ts-0fb8e488::50c73ba7-...`. Predicted delta vs yesterday's 15-failure baseline: **5–6 failures** (closing 7 method-level fails from A+B+C this morning, plus D+E+F+K+slow-test+J this afternoon, plus likely G+H+I via the recompose; held-open: J's adjacent dev-LLM infra issue + visibility on whether G/H/I close cleanly).
+
+**Files committed in this checkpoint** (parent Lupin only — 9 files):
+- `src/tests/smoke/test_presentation_live_smoke.py` (Cluster D)
+- `src/tests/smoke/test_presentation_render_only_smoke.py` (Cluster E)
+- `src/tests/smoke/test_research_to_presentation_live_smoke.py` (Cluster D)
+- `src/tests/smoke/test_swe_team_dry_run_e2e.py` (NEW — slow-test Tier-2)
+- `src/tests/unit/test_runtime_argument_expeditor.py` (Cluster J — 8 new tests)
+- `src/tests/unit/test_swe_team_orchestrator.py` (slow-test Tier-1 rewrite + monkeypatch on test_dry_run_emits_state_changes)
+- `src/tests/fixtures/presentations/render-only-example.yaml` (NEW — Cluster E fixture)
+- `src/rnd/v0.1.7/2026.04.30-swe-team-orchestrator-test-perf-fix.md` (NEW — slow-test plan doc)
+- `history.md` (this entry)
+
+**Note on TODO.md**: my afternoon TODO.md edits (postmortem follow-ups marked done, archive task added) landed in commit `b6a8915` ("Session 406cadbf session-end: final closure pass") because the parallel session's session-end ritual used a broader `git add` and swept up my staged-but-uncommitted TODO.md changes. Outcome is correct (TODO.md reflects this session's work and is in HEAD); minor parallel-session-hygiene issue worth flagging.
+
+**CoSA submodule edits NOT in this commit** (per `feedback_lupin_only_never_cosa` — manage from cosa-context):
+- `src/cosa/training/quantizer.py` (Cluster B from morning)
+- `src/cosa/agents/presentation_generator/job.py` (Cluster F-step1)
+- `src/cosa/agents/notification_proxy/verification.py` (Cluster K)
+- `src/cosa/agents/deep_research_to_presentation/state.py` (F-step2)
+- `src/cosa/agents/deep_research_to_presentation/agent.py` (F-step2)
+- `src/cosa/agents/deep_research_to_presentation/job.py` (F-step2)
+- `src/cosa/agents/swe_team/mock_clients.py` (slow-test DELAY_MULTIPLIER)
+- `src/cosa/agents/runtime_argument_expeditor/expeditor.py` (Cluster J)
+
+**Open follow-ups** (parked, in TODO.md):
+- Cluster J adjacent: investigate why `192.168.1.21:3001` (vLLM for runtime-argument expediter) isn't reachable from `:7999` dev.
+- Cluster I config audit: after the 21:30 EDT all-test-run, verify whether `EXP_PRES_MISSING` still returns "Could not match voice command" (presentation_generator routing in agentic-commands.json may need a reload or cache invalidation).
+- history.md archival: deferred this session; user chose "next session" at 20.8k tokens.
+- Architectural follow-up: per-test-file pytest_arg declarations the scheduler could merge (so tests like `test_presentation_live` always get `--auto-proxy` without manual repetition at submission).
+
+#### Schedule for verification
+
+- `ts-0fb8e488` — all-test-run on `:8000`, scheduled `2026-04-30T21:30:00-04:00`. Will return cosa-voice notification on completion (~25-45 min depending on dispatcher slowness).
+
+---
+
 ### 2026.04.30 - Session 406cadbf | Conversation-Mode Three-Layer Mic-Monopoly Enforcement (Phases 1-5) + cc_listener hardcoded sender_id fix
 
 #### Checkpoint | 2026.04.30 ~20:10 EDT | 7 commits across two thematically distinct fixes

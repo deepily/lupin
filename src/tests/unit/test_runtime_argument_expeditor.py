@@ -2239,3 +2239,82 @@ class TestRuntimeSchedulingConfirmation:
         raw = None
         result = bool( raw ) if raw else False
         assert result is False
+
+
+# =============================================================================
+# Cluster J Regression — _resolve_display_name helper
+# =============================================================================
+#
+# The prior single-expression
+#     agent_entry.get( "display_name", agent_entry["cli_module"].split(...) )
+# crashed with "'NoneType' object has no attribute 'split'" for the test_suite
+# registry entry where cli_module=None by design (test_suite is invoked
+# directly via API, not via CLI). Python evaluates dict.get(key, default)
+# defaults eagerly, so the .split() ran even when display_name was set.
+#
+# Fix at expeditor.py introduced _resolve_display_name() with the correct
+# short-circuit. These tests pin the contract.
+# See src/rnd/v0.1.7/2026.04.30-postmortem-2026.04.29-all-test-run.md §J.
+# =============================================================================
+
+class TestResolveDisplayName:
+    """Pin the _resolve_display_name helper's contract (Cluster J fix)."""
+
+    def test_test_suite_entry_returns_display_name( self ):
+        """The exact entry shape that triggered yesterday's :8000 NoneType.split."""
+        entry = {
+            "display_name" : "Test Suite",
+            "cli_module"   : None,        # ← intentional None for API-only agents
+        }
+        assert RuntimeArgumentExpeditor._resolve_display_name( entry ) == "Test Suite"
+
+    def test_display_name_preferred_when_both_set( self ):
+        """display_name wins over cli_module derivation."""
+        entry = {
+            "display_name" : "Deep Research",
+            "cli_module"   : "cosa.agents.deep_research.cli",
+        }
+        assert RuntimeArgumentExpeditor._resolve_display_name( entry ) == "Deep Research"
+
+    def test_cli_module_derivation_when_display_name_missing( self ):
+        """Last dotted segment becomes the name when display_name is absent."""
+        entry = { "cli_module": "cosa.agents.podcast_generator.cli" }
+        assert RuntimeArgumentExpeditor._resolve_display_name( entry ) == "cli"
+
+    def test_cli_module_underscore_to_space( self ):
+        """Underscores become spaces in derived names."""
+        entry = { "cli_module": "cosa.agents.research_to_presentation" }
+        assert RuntimeArgumentExpeditor._resolve_display_name( entry ) == "research to presentation"
+
+    def test_empty_display_name_falls_through_to_cli_module( self ):
+        """Empty string is falsy — falls through to cli_module derivation."""
+        entry = {
+            "display_name" : "",
+            "cli_module"   : "cosa.agents.bug_fix_expediter",
+        }
+        assert RuntimeArgumentExpeditor._resolve_display_name( entry ) == "bug fix expediter"
+
+    def test_both_missing_returns_agent_sentinel( self ):
+        """Neither display_name nor cli_module → 'agent' fallback."""
+        assert RuntimeArgumentExpeditor._resolve_display_name( {} ) == "agent"
+
+    def test_both_none_returns_agent_sentinel( self ):
+        """Both explicitly None → 'agent' fallback."""
+        entry = { "display_name": None, "cli_module": None }
+        assert RuntimeArgumentExpeditor._resolve_display_name( entry ) == "agent"
+
+    def test_does_not_crash_on_real_test_suite_registry_entry( self ):
+        """
+        Regression guard: this is the EXACT entry shape from
+        src/cosa/agents/runtime_argument_expeditor/agent_registry.py
+        for "agent router go to test suite". Before the fix, this crashed
+        with NoneType.split inside _confirm_and_iterate / _build_request_context.
+        """
+        entry = {
+            "job_prefix"     : "ts",
+            "cli_module"     : None,
+            "job_class_path" : "cosa.agents.test_suite.job.TestSuiteJob",
+            "display_name"   : "Test Suite",
+        }
+        result = RuntimeArgumentExpeditor._resolve_display_name( entry )
+        assert result == "Test Suite"

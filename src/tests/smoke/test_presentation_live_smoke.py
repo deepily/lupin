@@ -342,6 +342,18 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
                 _remove_pid_file()
                 return False
         else:
+            # When running under pytest (i.e. scheduled :8000 invocation), there's
+            # no human at the UI to approve the 4 gates — the test would burn its
+            # full 900s timeout for nothing. Fail fast in <1s so the scheduling
+            # bug is loud and visible. CLI dev mode still gets the warning + manual flow.
+            if os.environ.get( "PYTEST_CURRENT_TEST" ):
+                _remove_pid_file()
+                raise RuntimeError(
+                    "test_presentation_live_endpoint requires --auto-proxy when invoked under pytest. "
+                    "The 4 presentation-gate approvals cannot complete without an auto-answer proxy. "
+                    "Re-submit via /api/test-suite/submit with pytest_args including "
+                    "'--auto-proxy --cost-cap-usd <N>' (e.g. '--auto-proxy --cost-cap-usd 5.00')."
+                )
             print( "\n  WARNING: --auto-proxy not set. Gates will NOT be auto-answered." )
             print( "           Expect 4 manual approvals via notification UI or timeouts." )
 
