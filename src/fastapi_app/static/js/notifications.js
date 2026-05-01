@@ -8826,7 +8826,7 @@ class NotificationsUI {
      * path (handleNotificationUpdate dispatch for voice_persona_assigned)
      * produce identical badges.
      *
-     * @param {object|null} persona — { name, color, icon, profile, borrowed }
+     * @param {object|null} persona — { name, display_name, color, icon, profile, borrowed }
      * @returns {string} badge HTML, or '' when persona is null
      */
     _renderPersonaBadgeHTML( persona ) {
@@ -8834,11 +8834,17 @@ class NotificationsUI {
         const borrowedClass = persona.borrowed ? ' borrowed' : '';
         const borrowedTitle = persona.borrowed ? ' (borrowed — pool exhausted)' : '';
         const profile       = persona.profile ? ` — ${persona.profile}` : '';
+        // Pool names are stored lowercase, no-punctuation per project key
+        // convention (e.g. "mr radio"). The server stamps `display_name`
+        // (e.g. "Mr. Radio") via voice_persona_helpers.display_name_for for
+        // UI surfaces. Fall back to `name` only if `display_name` is absent
+        // (legacy envelope or hand-built persona dict).
+        const label = persona.display_name || persona.name || '';
         return `<span class="persona-badge${borrowedClass}"
                   style="background-color: ${persona.color || '#888'};"
-                  title="${persona.name || ''}${borrowedTitle}${profile}">
+                  title="${label}${borrowedTitle}${profile}">
                 <span class="persona-badge-icon">${persona.icon || '🎙️'}</span>
-                <span class="persona-badge-name">${persona.name || ''}</span>
+                <span class="persona-badge-name">${label}</span>
             </span>`;
     }
 

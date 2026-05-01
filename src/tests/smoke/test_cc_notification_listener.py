@@ -486,6 +486,35 @@ class TestEventHandling:
             } )
             mock_inject.assert_not_called()
 
+    def test_action_exit_conversation_mode_injects_reminder( self, listener ):
+        """
+        action:exit_conversation_mode triggers _inject_via_tmux with the
+        deactivation system-reminder body and wrap=False (so the bridge-gated
+        wrap path doesn't strip or re-wrap the system-reminder payload).
+        """
+        with patch.object( listener, '_inject_via_tmux' ) as mock_inject:
+            listener._handle_action( "exit_conversation_mode", {} )
+
+            assert mock_inject.call_count == 1
+            args, kwargs = mock_inject.call_args
+            # First positional is the reminder body
+            reminder = args[ 0 ] if args else kwargs.get( "message_text" )
+            assert reminder.startswith( "<system-reminder>" )
+            assert reminder.endswith( "</system-reminder>" )
+            assert "displaced" in reminder.lower()
+            # wrap=False bypasses the entry-side conv_mode_wrap pipeline
+            assert kwargs.get( "wrap" ) is False
+
+    def test_action_unknown_logs_without_raising( self, listener ):
+        """An unrecognized action: name logs and returns without raising."""
+        with patch.object( listener, '_inject_via_tmux' ) as mock_inject, \
+             patch.object( listener, '_log' ) as mock_log:
+            # Should not raise
+            listener._handle_action( "no_such_action", { "message": "" } )
+            mock_inject.assert_not_called()
+            # Logged something with "Unknown action"
+            assert any( "Unknown action" in str( c ) for c in mock_log.call_args_list )
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Test: SessionEnd Hook Functions

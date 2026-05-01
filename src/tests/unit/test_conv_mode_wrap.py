@@ -18,6 +18,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     sanitize_for_wrap,
     conv_mode_wrap,
     conv_mode_reminder_block,
+    conv_mode_exit_reminder,
     _CONV_MODE_WRAP_SENTINEL,
 )
 
@@ -265,3 +266,47 @@ class TestConvModeReminderBlock:
         mock_get.return_value = True
         result = conv_mode_reminder_block( "voice", "abc12345" )
         assert "voice message from a distance" in result
+
+
+# ── conv_mode_exit_reminder ───────────────────────────────────────────────────
+
+class TestConvModeExitReminder:
+    """
+    Deactivation reminder injected by the listener when the displaced
+    session receives an action:exit_conversation_mode push. Unlike the
+    entry-side helpers, this one is unconditional — no bridge read, no
+    session_id parameter, no fail-closed branch.
+    """
+
+    def test_returns_system_reminder_envelope( self ):
+        result = conv_mode_exit_reminder()
+        assert result.startswith( "<system-reminder>" )
+        assert result.endswith( "</system-reminder>" )
+
+    def test_body_instructs_stop_notify( self ):
+        result = conv_mode_exit_reminder()
+        assert "notify" in result
+        assert "Stop" in result or "stop" in result
+
+    def test_body_instructs_stop_voice_message_wrap( self ):
+        result = conv_mode_exit_reminder()
+        assert "voice-message" in result
+
+    def test_body_mentions_displacement( self ):
+        result = conv_mode_exit_reminder()
+        assert "displaced" in result.lower()
+
+    def test_idempotent_pure_function( self ):
+        # No bridge read, no I/O — same output every call
+        assert conv_mode_exit_reminder() == conv_mode_exit_reminder()
+
+    def test_no_voice_message_tag( self ):
+        # Pure system-reminder — never wraps in <voice-message>
+        result = conv_mode_exit_reminder()
+        assert "<voice-message" not in result
+
+    def test_does_not_collide_with_entry_sentinel( self ):
+        # The exit reminder must not contain the entry-side wrapper sentinel,
+        # otherwise conv_mode_wrap's idempotency check would incorrectly
+        # treat an entry-wrap of an exit-reminder as already-wrapped.
+        assert _CONV_MODE_WRAP_SENTINEL not in conv_mode_exit_reminder()

@@ -1115,6 +1115,43 @@ def conv_mode_wrap( text, *, source, session_id=None ):
     )
 
 
+def conv_mode_exit_reminder():
+    """
+    Build the deactivation system-reminder injected when a session is
+    displaced from conversation mode by another session.
+
+    Unlike conv_mode_wrap and conv_mode_reminder_block (which gate on the
+    bridge file's current state), this helper emits its body unconditionally.
+    The caller is responsible for invoking it only at the moment of an
+    out → in or in → out transition. Today the sole caller is the listener
+    subprocess responding to an `action:exit_conversation_mode` push from
+    the conversation-mode router's displace block.
+
+    The reminder is delivered as a synthetic user prompt via the listener's
+    tmux injection path. By the time the displaced session "comes up for
+    air" at its prompt, this text has been queued in tmux's input buffer;
+    when Claude Code processes the next prompt, it sees the reminder and
+    reverts to notification-mode behavior (no auto-notify, no voice-message
+    wrap on responses).
+
+    Ensures:
+        - Returns a non-empty <system-reminder>…</system-reminder> block
+        - Body explicitly tells the model to stop calling notify() and
+          stop wrapping responses in voice-message format
+        - Output is safe to inject via tmux send-keys -l (no special chars
+          that need escaping beyond what tmux literal mode handles)
+    """
+    body = (
+        "Conversation mode has just been deactivated for this session "
+        "(displaced by another session activating conversation mode). "
+        "Stop calling `notify()` at the end of your response. "
+        "Stop wrapping replies in voice-message format. "
+        "Resume normal terminal-only output. "
+        "Acknowledge this transition silently — do not announce it to the user."
+    )
+    return f'<system-reminder>\n{body}\n</system-reminder>'
+
+
 def conv_mode_reminder_block( source, session_id ):
     """
     Return just the <system-reminder> block when conv mode is active.

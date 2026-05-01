@@ -27,7 +27,8 @@ from cosa.rest.voice_persona_helpers import (
     load_persona_pool_from_config,
     pick_unallocated_persona,
     borrowed_persona_for_sid,
-    allocate_persona_for_session
+    allocate_persona_for_session,
+    display_name_for
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_voice_persona, set_voice_persona, find_active_voice_persona_sessions,
@@ -39,7 +40,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
 
 POOL_6 = [
     { "name": "Maria",    "voice_id": "v_maria",    "icon": "🌸", "color": "#E91E63", "profile": "warm female"        },
-    { "name": "Mr. NPR", "voice_id": "v_mrnpr", "icon": "🦉", "color": "#FFA000", "profile": "authoritative male" },
+    { "name": "mr radio", "voice_id": "v_mrnpr", "icon": "🦉", "color": "#FFA000", "profile": "authoritative male" },
     { "name": "Rachel",  "voice_id": "v_rachel",  "icon": "🕊️", "color": "#4CAF50", "profile": "calm female"        },
     { "name": "Tiberius",    "voice_id": "v_tiberius",    "icon": "🌑", "color": "#3F51B5", "profile": "deep male"          },
     { "name": "Domi",    "voice_id": "v_domi",    "icon": "⚡", "color": "#C2185B", "profile": "young female"       },
@@ -47,7 +48,7 @@ POOL_6 = [
 ]
 
 
-def _make_mock_config_mgr( pool_csv="Maria, Mr. NPR, Rachel, Tiberius, Domi, Arnold", overrides=None ):
+def _make_mock_config_mgr( pool_csv="Maria, mr radio, Rachel, Tiberius, Domi, Arnold", overrides=None ):
     """
     Build a mock ConfigurationManager that returns the configured pool plus
     matching per-persona keys. `overrides` lets a test inject a missing or
@@ -58,7 +59,7 @@ def _make_mock_config_mgr( pool_csv="Maria, Mr. NPR, Rachel, Tiberius, Domi, Arn
 
     persona_table = {
         "Maria"    : { "voice id": "v_maria",    "icon": "🌸", "color": "#E91E63", "profile": "warm female"        },
-        "Mr. NPR" : { "voice id": "v_mrnpr", "icon": "🦉", "color": "#FFA000", "profile": "authoritative male" },
+        "mr radio" : { "voice id": "v_mrnpr", "icon": "🦉", "color": "#FFA000", "profile": "authoritative male" },
         "Rachel"  : { "voice id": "v_rachel",  "icon": "🕊️", "color": "#4CAF50", "profile": "calm female"        },
         "Tiberius"    : { "voice id": "v_tiberius",    "icon": "🌑", "color": "#3F51B5", "profile": "deep male"          },
         "Domi"    : { "voice id": "v_domi",    "icon": "⚡", "color": "#C2185B", "profile": "young female"       },
@@ -109,6 +110,44 @@ def _bridge_with_persona( session_id, persona_name, voice_id="v_maria", borrowed
     }
 
 
+# ── display_name_for ─────────────────────────────────────────────────────────
+
+class TestDisplayNameFor:
+    """
+    Pool names are stored lowercase no-punctuation per project key convention
+    so they double as ConfigParser-safe key fragments. display_name_for
+    converts them back to proper-noun form for UI surfaces.
+    """
+
+    def test_honorific_mr_gets_period( self ):
+        assert display_name_for( "mr radio" ) == "Mr. Radio"
+
+    def test_other_honorifics( self ):
+        assert display_name_for( "dr who" )    == "Dr. Who"
+        assert display_name_for( "mrs jones" ) == "Mrs. Jones"
+        assert display_name_for( "ms smith" )  == "Ms. Smith"
+        assert display_name_for( "prof x" )    == "Prof. X"
+
+    def test_already_capitalized_round_trips( self ):
+        assert display_name_for( "Maria" )    == "Maria"
+        assert display_name_for( "Rachel" )   == "Rachel"
+        assert display_name_for( "Tiberius" ) == "Tiberius"
+
+    def test_lowercase_single_token( self ):
+        assert display_name_for( "rachel" ) == "Rachel"
+
+    def test_empty_returns_empty( self ):
+        assert display_name_for( "" )   == ""
+        assert display_name_for( None ) == ""
+
+    def test_collapses_extra_whitespace( self ):
+        assert display_name_for( "  mr   radio  " ) == "Mr. Radio"
+
+    def test_honorific_only_when_token_exact( self ):
+        # "mri" is not the honorific "mr" — should NOT get a period
+        assert display_name_for( "mri scan" ) == "Mri Scan"
+
+
 # ── load_persona_pool_from_config ────────────────────────────────────────────
 
 class TestLoadPersonaPoolFromConfig:
@@ -117,10 +156,20 @@ class TestLoadPersonaPoolFromConfig:
         mgr = _make_mock_config_mgr()
         pool = load_persona_pool_from_config( mgr )
         assert len( pool ) == 6
-        assert [ p[ "name" ] for p in pool ] == [ "Maria", "Mr. NPR", "Rachel", "Tiberius", "Domi", "Arnold" ]
+        assert [ p[ "name" ] for p in pool ] == [ "Maria", "mr radio", "Rachel", "Tiberius", "Domi", "Arnold" ]
         assert pool[ 0 ][ "voice_id" ] == "v_maria"
         assert pool[ 0 ][ "icon" ]     == "🌸"
         assert pool[ 0 ][ "color" ]    == "#E91E63"
+
+    def test_display_name_stamped_on_pool_entries( self ):
+        # display_name is stamped at construction so UI surfaces never need to
+        # know about the lowercase no-punctuation key convention.
+        mgr  = _make_mock_config_mgr()
+        pool = load_persona_pool_from_config( mgr )
+        by_name = { p[ "name" ]: p[ "display_name" ] for p in pool }
+        assert by_name[ "mr radio" ] == "Mr. Radio"
+        assert by_name[ "Maria" ]    == "Maria"
+        assert by_name[ "Rachel" ]   == "Rachel"
         assert pool[ 0 ][ "profile" ]  == "warm female"
 
     def test_empty_pool_csv_returns_empty_list( self ):
@@ -139,10 +188,10 @@ class TestLoadPersonaPoolFromConfig:
         assert len( pool ) == 5
 
     def test_handles_whitespace_in_csv( self ):
-        mgr = _make_mock_config_mgr( pool_csv="  Maria ,Mr. NPR  ,, Rachel " )
+        mgr = _make_mock_config_mgr( pool_csv="  Maria ,mr radio  ,, Rachel " )
         pool = load_persona_pool_from_config( mgr )
         # Empty entry between two commas should be filtered out
-        assert [ p[ "name" ] for p in pool ] == [ "Maria", "Mr. NPR", "Rachel" ]
+        assert [ p[ "name" ] for p in pool ] == [ "Maria", "mr radio", "Rachel" ]
 
 
 # ── borrowed_persona_for_sid ─────────────────────────────────────────────────
@@ -169,7 +218,7 @@ class TestBorrowedPersonaForSid:
 
     def test_borrowed_persona_has_all_fields( self ):
         b = borrowed_persona_for_sid( POOL_6, "sid" )
-        assert set( b.keys() ) == { "name", "voice_id", "icon", "color", "profile", "borrowed" }
+        assert set( b.keys() ) == { "name", "display_name", "voice_id", "icon", "color", "profile", "borrowed" }
         assert b[ "borrowed" ] is True
 
 
@@ -190,8 +239,8 @@ class TestPickUnallocatedPersona:
     @pytest.mark.parametrize( "occupied,expected_remaining", [
         ( set(),                                                                                   6 ),
         ( { "Maria" },                                                                              5 ),
-        ( { "Maria", "Mr. NPR" },                                                                   4 ),
-        ( { "Maria", "Mr. NPR", "Rachel", "Tiberius", "Domi" },                                         1 )
+        ( { "Maria", "mr radio" },                                                                   4 ),
+        ( { "Maria", "mr radio", "Rachel", "Tiberius", "Domi" },                                         1 )
     ] )
     def test_partial_occupancy_picks_from_free_subset( self, occupied, expected_remaining ):
         # Repeat picks to ensure we never pick from `occupied`
@@ -315,7 +364,7 @@ class TestAllocatePersonaForSession:
         """Occupy all 6 names, then allocate_persona_for_session must borrow."""
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
-            for i, name in enumerate( [ "Maria", "Mr. NPR", "Rachel", "Tiberius", "Domi", "Arnold" ] ):
+            for i, name in enumerate( [ "Maria", "mr radio", "Rachel", "Tiberius", "Domi", "Arnold" ] ):
                 _write_bridge(
                     sessions_dir,
                     os.getpid() + i,
@@ -333,7 +382,7 @@ class TestAllocatePersonaForSession:
             assert result is not None
             assert result[ "borrowed" ] is True
             # Borrowed name is still in the pool
-            assert result[ "name" ] in { "Maria", "Mr. NPR", "Rachel", "Tiberius", "Domi", "Arnold" }
+            assert result[ "name" ] in { "Maria", "mr radio", "Rachel", "Tiberius", "Domi", "Arnold" }
 
 
 # ── Bridge round-trip (get/set_voice_persona) ────────────────────────────────

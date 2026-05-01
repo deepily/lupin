@@ -301,8 +301,13 @@ class TestAutoDisplaceOnActivate:
                 data_b = json.load( f )
             assert data_b[ "conversation_mode_active" ] is True
 
-            # Two push_notification calls: first the displaced for A, then activate for B
-            assert mock_nq.push_notification.call_count == 2
+            # Three push_notification calls per displacement:
+            #   1) conversation_mode_changed (displaced=True) — UI sync for A
+            #   2) user_initiated_message (action:exit_conversation_mode) — listener
+            #      injects deactivation reminder into A's tmux pane so the
+            #      model's in-context state catches up to the bridge flip
+            #   3) activate for B
+            assert mock_nq.push_notification.call_count == 3
 
             # First call: displaced notification for A
             kw_first = _push_kwargs( mock_nq, 0 )
@@ -315,10 +320,16 @@ class TestAutoDisplaceOnActivate:
                 "displaced_by" : sid_b
             }
 
-            # Second call: B's activate notification (no displaced flag)
-            kw_second = _push_kwargs( mock_nq, 1 )
-            assert kw_second[ "type"    ] == "conversation_mode_changed"
-            assert kw_second[ "payload" ] == { "session_id": sid_b, "active": True }
+            # Second call: action push for A's listener
+            kw_action = _push_kwargs( mock_nq, 1 )
+            assert kw_action[ "type"   ] == "user_initiated_message"
+            assert kw_action[ "title"  ] == "action:exit_conversation_mode"
+            assert kw_action[ "job_id" ] == sid_a[:8]
+
+            # Third call: B's activate notification (no displaced flag)
+            kw_third = _push_kwargs( mock_nq, 2 )
+            assert kw_third[ "type"    ] == "conversation_mode_changed"
+            assert kw_third[ "payload" ] == { "session_id": sid_b, "active": True }
 
             # Response payload includes the displaced session id
             body = json.loads( resp.body.decode() )
@@ -399,12 +410,23 @@ class TestAutoDisplaceOnActivate:
                     data = json.load( f )
                 assert data[ "conversation_mode_active" ] is False
 
-            # 3 displaced pushes + 1 activate push = 4 total
-            assert mock_nq.push_notification.call_count == 4
+            # Per-displaced-session push pair (displaced WS event + action push) ×3
+            # plus the final activate push for B = 7 total.
+            assert mock_nq.push_notification.call_count == 7
 
             # Last call is the activate event for B
             last_kw = _push_kwargs( mock_nq, -1 )
             assert last_kw[ "payload" ] == { "session_id": sid_b, "active": True }
+
+            # Action pushes interleaved with displaced pushes — each displaced
+            # session got an action:exit_conversation_mode targeted at its hash
+            action_calls = [
+                _push_kwargs( mock_nq, i ) for i in range( 6 )
+                if _push_kwargs( mock_nq, i ).get( "title" ) == "action:exit_conversation_mode"
+            ]
+            assert len( action_calls ) == 3
+            action_job_ids = sorted( c[ "job_id" ] for c in action_calls )
+            assert action_job_ids == sorted( s[:8] for s in sids )
 
             body = json.loads( resp.body.decode() )
             assert sorted( body[ "displaced_sessions" ] ) == sorted( sids )
@@ -473,9 +495,12 @@ class TestAutoDisplaceOnActivate:
             with open( path_a, "w" ) as f:
                 json.dump( data_a, f )
 
-            # First push (displaced for A) raises; second (activate for B) succeeds
+            # First push (displaced for A) raises; second (action for A) and
+            # third (activate for B) succeed. Both displaced-event and action
+            # pushes are best-effort — failure of one does not block the other
+            # or the activate write.
             mock_nq = MagicMock()
-            mock_nq.push_notification.side_effect = [ RuntimeError( "queue ded" ), None ]
+            mock_nq.push_notification.side_effect = [ RuntimeError( "queue ded" ), None, None ]
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
