@@ -1,5 +1,34 @@
 # Lupin Project History
 
+### 2026.05.01 - Session 5b732efe | CC notifications UI tweaks: Today filter + Arnold yellow + focus-mode flash + María rename
+
+**Context**: User-driven mini-batch of four UI tweaks during the v0.1.7 spit-and-polish cycle, executed under auto-mode.
+
+**Accomplishments**:
+
+1. **"Today" filter for CC notifications history dropdown** — distinct from "Last 24 hours". Stored as a `'today'` sentinel in localStorage; new `getEffectiveHoursForQuery()` helper resolves it to numeric hours-since-local-midnight at query time (Math.ceil so 12:00:01 AM is included). Three query sites (loadConversationHistory, loadSenderConversation, bulk-delete) routed through the helper. Initial implementation had an HTML-escaping bug — `JSON.stringify('today')` produced literal `"today"` inside a double-quoted onclick attribute; fixed via `.replace(/"/g, "&quot;")` so string sentinels survive HTML attribute parsing while numbers/null pass through unchanged.
+
+2. **Arnold persona color recolored** to `#FFD600` (Material Yellow A700, sunshiny). Prior `#C62828` red overlapped visually with maria `#F06292` and Domi `#880E4F`. Yellow keeps Arnold distinct from mr radio's amber `#FFA000`.
+
+3. **Focus-mode entry flash** — when the focus-toggle pill goes OFF→ON, the focused card now pulses a persona-tinted box-shadow (1.5s ease-out animation via `data-focus-flash` attribute + `@keyframes sender-card-focus-flash`). Mid-mode strip-icon switches don't flash (user already knows which session they clicked). Implementation: new `flash` parameter on `_enterFocusMode(senderId, flash=false)` plus `_flashFocusedCard()` helper with restart-on-double-toggle support.
+
+4. **Persona key `Maria` → `maria` + display "María"** — lowercase no-punctuation key form aligns with the mr-radio convention. New `_DISPLAY_OVERRIDES = {"maria": "María"}` in `voice_persona_helpers.py` (CoSA submodule); `display_name_for()` consults overrides before generic title-case. Test fixtures and assertions updated in `test_voice_persona_helpers.py` (replaced "Maria" → "maria"; new `test_display_overrides_apply` confirms case-insensitive override match) and `test_voice_persona_allocation.py` (pool name set).
+
+**Files Modified** (parent Lupin only — CoSA submodule managed separately):
+- `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini` (Arnold color + Maria → maria pool/keys + matching splainer entries + Domi cross-reference)
+- `src/fastapi_app/static/js/notifications.js` (Today filter plumbing + focus-mode flash + HTML-escape bugfix)
+- `src/fastapi_app/static/css/notifications.css` (focus-flash @keyframes + selector)
+- `src/tests/unit/test_voice_persona_helpers.py`, `src/tests/smoke/test_voice_persona_allocation.py` (Maria → maria test fixtures + new override test)
+
+**CoSA submodule** (commit separately in CoSA session):
+- `src/cosa/rest/voice_persona_helpers.py` (added `_DISPLAY_OVERRIDES` map + override-first lookup; docstring updated)
+
+**Verification**: `node -c notifications.js` ✓ · `py_compile voice_persona_helpers.py` ✓ · `pytest src/tests/unit/test_voice_persona_helpers.py` → 34/34 passed (including new override test). `pytest src/tests/unit/test_voice_persona_helpers.py src/tests/unit/test_conv_mode_wrap.py src/tests/unit/test_conversation_mode_router.py` → 88/88 passed.
+
+**Caveats**: INI changes only affect *new* persona allocations — existing live sessions keep their stamped `name="Maria"` until reallocated (or a server bounce + new session). JS/CSS hot-reload via static file serving on hard browser refresh.
+
+---
+
 ### 2026.05.01 - Session 6562a2c9 | History archival + history/ index repair
 
 **Context**: Brief session-start ritual where user requested proactive history-file archival.

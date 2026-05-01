@@ -39,7 +39,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 POOL_6 = [
-    { "name": "Maria",    "voice_id": "v_maria",    "icon": "🌸", "color": "#E91E63", "profile": "warm female"        },
+    { "name": "maria",    "voice_id": "v_maria",    "icon": "🌸", "color": "#E91E63", "profile": "warm female"        },
     { "name": "mr radio", "voice_id": "v_mrnpr", "icon": "🦉", "color": "#FFA000", "profile": "authoritative male" },
     { "name": "Rachel",  "voice_id": "v_rachel",  "icon": "🕊️", "color": "#4CAF50", "profile": "calm female"        },
     { "name": "Tiberius",    "voice_id": "v_tiberius",    "icon": "🌑", "color": "#3F51B5", "profile": "deep male"          },
@@ -48,7 +48,7 @@ POOL_6 = [
 ]
 
 
-def _make_mock_config_mgr( pool_csv="Maria, mr radio, Rachel, Tiberius, Domi, Arnold", overrides=None ):
+def _make_mock_config_mgr( pool_csv="maria, mr radio, Rachel, Tiberius, Domi, Arnold", overrides=None ):
     """
     Build a mock ConfigurationManager that returns the configured pool plus
     matching per-persona keys. `overrides` lets a test inject a missing or
@@ -58,7 +58,7 @@ def _make_mock_config_mgr( pool_csv="Maria, mr radio, Rachel, Tiberius, Domi, Ar
     mgr = MagicMock()
 
     persona_table = {
-        "Maria"    : { "voice id": "v_maria",    "icon": "🌸", "color": "#E91E63", "profile": "warm female"        },
+        "maria"    : { "voice id": "v_maria",    "icon": "🌸", "color": "#E91E63", "profile": "warm female"        },
         "mr radio" : { "voice id": "v_mrnpr", "icon": "🦉", "color": "#FFA000", "profile": "authoritative male" },
         "Rachel"  : { "voice id": "v_rachel",  "icon": "🕊️", "color": "#4CAF50", "profile": "calm female"        },
         "Tiberius"    : { "voice id": "v_tiberius",    "icon": "🌑", "color": "#3F51B5", "profile": "deep male"          },
@@ -129,9 +129,20 @@ class TestDisplayNameFor:
         assert display_name_for( "prof x" )    == "Prof. X"
 
     def test_already_capitalized_round_trips( self ):
-        assert display_name_for( "Maria" )    == "Maria"
+        # "maria" deliberately omitted — it carries a display override (María)
+        # that is exercised in test_display_overrides_apply below.
         assert display_name_for( "Rachel" )   == "Rachel"
         assert display_name_for( "Tiberius" ) == "Tiberius"
+
+    def test_display_overrides_apply( self ):
+        """
+        Personas whose display form carries diacritics or punctuation that
+        the lowercase no-punctuation INI key cannot represent are routed
+        through _DISPLAY_OVERRIDES. The override is matched case-insensitively
+        on the pool key form.
+        """
+        assert display_name_for( "maria" ) == "María"
+        assert display_name_for( "Maria" ) == "María"  # case-insensitive override match
 
     def test_lowercase_single_token( self ):
         assert display_name_for( "rachel" ) == "Rachel"
@@ -156,7 +167,7 @@ class TestLoadPersonaPoolFromConfig:
         mgr = _make_mock_config_mgr()
         pool = load_persona_pool_from_config( mgr )
         assert len( pool ) == 6
-        assert [ p[ "name" ] for p in pool ] == [ "Maria", "mr radio", "Rachel", "Tiberius", "Domi", "Arnold" ]
+        assert [ p[ "name" ] for p in pool ] == [ "maria", "mr radio", "Rachel", "Tiberius", "Domi", "Arnold" ]
         assert pool[ 0 ][ "voice_id" ] == "v_maria"
         assert pool[ 0 ][ "icon" ]     == "🌸"
         assert pool[ 0 ][ "color" ]    == "#E91E63"
@@ -168,7 +179,7 @@ class TestLoadPersonaPoolFromConfig:
         pool = load_persona_pool_from_config( mgr )
         by_name = { p[ "name" ]: p[ "display_name" ] for p in pool }
         assert by_name[ "mr radio" ] == "Mr. Radio"
-        assert by_name[ "Maria" ]    == "Maria"
+        assert by_name[ "maria" ]    == "María"
         assert by_name[ "Rachel" ]   == "Rachel"
         assert pool[ 0 ][ "profile" ]  == "warm female"
 
@@ -188,10 +199,10 @@ class TestLoadPersonaPoolFromConfig:
         assert len( pool ) == 5
 
     def test_handles_whitespace_in_csv( self ):
-        mgr = _make_mock_config_mgr( pool_csv="  Maria ,mr radio  ,, Rachel " )
+        mgr = _make_mock_config_mgr( pool_csv="  maria ,mr radio  ,, Rachel " )
         pool = load_persona_pool_from_config( mgr )
         # Empty entry between two commas should be filtered out
-        assert [ p[ "name" ] for p in pool ] == [ "Maria", "mr radio", "Rachel" ]
+        assert [ p[ "name" ] for p in pool ] == [ "maria", "mr radio", "Rachel" ]
 
 
 # ── borrowed_persona_for_sid ─────────────────────────────────────────────────
@@ -238,9 +249,9 @@ class TestPickUnallocatedPersona:
 
     @pytest.mark.parametrize( "occupied,expected_remaining", [
         ( set(),                                                                                   6 ),
-        ( { "Maria" },                                                                              5 ),
-        ( { "Maria", "mr radio" },                                                                   4 ),
-        ( { "Maria", "mr radio", "Rachel", "Tiberius", "Domi" },                                         1 )
+        ( { "maria" },                                                                              5 ),
+        ( { "maria", "mr radio" },                                                                   4 ),
+        ( { "maria", "mr radio", "Rachel", "Tiberius", "Domi" },                                         1 )
     ] )
     def test_partial_occupancy_picks_from_free_subset( self, occupied, expected_remaining ):
         # Repeat picks to ensure we never pick from `occupied`
@@ -280,7 +291,7 @@ class TestFindActiveVoicePersonaSessions:
             sessions_dir = Path( tmp )
             # Bridge with persona
             _write_bridge( sessions_dir, os.getpid(),
-                           _bridge_with_persona( "abc12345-aaaa-bbbb-cccc-dddddddddddd", "Maria" ) )
+                           _bridge_with_persona( "abc12345-aaaa-bbbb-cccc-dddddddddddd", "maria" ) )
             # Bridge without persona
             data_no_persona = {
                 "session_id"        : "xyz98765-aaaa-bbbb-cccc-dddddddddddd",
@@ -296,7 +307,7 @@ class TestFindActiveVoicePersonaSessions:
 
             assert len( results ) == 1
             _, sid, p = results[ 0 ]
-            assert p[ "name" ] == "Maria"
+            assert p[ "name" ] == "maria"
             assert sid.startswith( "abc12345" )
 
     def test_skips_dead_pid_bridges( self ):
@@ -331,13 +342,13 @@ class TestAllocatePersonaForSession:
 
     def test_picks_unallocated_when_pool_partially_occupied( self ):
         """
-        Two bridges already hold Maria and Tiberius. allocate_persona_for_session
+        Two bridges already hold maria and Tiberius. allocate_persona_for_session
         must pick from the remaining 4 voices.
         """
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
             _write_bridge( sessions_dir, os.getpid(),
-                           _bridge_with_persona( "aaaa1111-aaaa-bbbb-cccc-dddddddddddd", "Maria" ) )
+                           _bridge_with_persona( "aaaa1111-aaaa-bbbb-cccc-dddddddddddd", "maria" ) )
             _write_bridge( sessions_dir, os.getpid() + 1,
                            _bridge_with_persona( "bbbb2222-aaaa-bbbb-cccc-dddddddddddd", "Tiberius" ) )
 
@@ -347,7 +358,7 @@ class TestAllocatePersonaForSession:
                 allocated = allocate_persona_for_session( mgr, "newsid12-aaaa-bbbb-cccc-dddddddddddd" )
 
             assert allocated is not None
-            assert allocated[ "name" ] not in { "Maria", "Tiberius" }
+            assert allocated[ "name" ] not in { "maria", "Tiberius" }
             assert allocated[ "borrowed" ] is False
             assert "assigned_at" in allocated
             assert allocated[ "assigned_at" ].endswith( "+00:00" )
@@ -364,7 +375,7 @@ class TestAllocatePersonaForSession:
         """Occupy all 6 names, then allocate_persona_for_session must borrow."""
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
-            for i, name in enumerate( [ "Maria", "mr radio", "Rachel", "Tiberius", "Domi", "Arnold" ] ):
+            for i, name in enumerate( [ "maria", "mr radio", "Rachel", "Tiberius", "Domi", "Arnold" ] ):
                 _write_bridge(
                     sessions_dir,
                     os.getpid() + i,
@@ -382,7 +393,7 @@ class TestAllocatePersonaForSession:
             assert result is not None
             assert result[ "borrowed" ] is True
             # Borrowed name is still in the pool
-            assert result[ "name" ] in { "Maria", "mr radio", "Rachel", "Tiberius", "Domi", "Arnold" }
+            assert result[ "name" ] in { "maria", "mr radio", "Rachel", "Tiberius", "Domi", "Arnold" }
 
 
 # ── Bridge round-trip (get/set_voice_persona) ────────────────────────────────

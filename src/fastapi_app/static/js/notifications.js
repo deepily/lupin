@@ -277,9 +277,20 @@ class NotificationsUI {
         // History window configuration (activity-anchored loading)
         this.HISTORY_WINDOW_KEY = 'notifications_history_window';
         const storedWindow = localStorage.getItem( this.HISTORY_WINDOW_KEY );
-        // Handle 'all' sentinel AND legacy empty string (migration from pre-fix code)
-        this.historyWindowHours = ( storedWindow === 'all' || storedWindow === '' ) ? null : ( parseInt( storedWindow ) || 48 ); // Default to 2 days
+        // Sentinel values:
+        //   null    → "All time" (no hours filter)
+        //   'today' → since the user's local-midnight (calendar day, NOT last 24h)
+        //   number  → fixed-hours window
+        // Handles 'all' sentinel AND legacy empty string (migration from pre-fix code).
+        if ( storedWindow === 'all' || storedWindow === '' ) {
+            this.historyWindowHours = null;
+        } else if ( storedWindow === 'today' ) {
+            this.historyWindowHours = 'today';
+        } else {
+            this.historyWindowHours = parseInt( storedWindow ) || 48; // Default to 2 days
+        }
         this.WINDOW_OPTIONS = [
+            { label: 'Today',         hours: 'today' },
             { label: 'Last 24 hours', hours: 24 },
             { label: 'Last 2 days',   hours: 48 },
             { label: 'Last week',     hours: 168 },
@@ -9098,8 +9109,14 @@ class NotificationsUI {
      * Enter exclusive focus mode for the given senderId. All sender
      * cards except the focused one are hidden via data-focus-hidden.
      * Persists state to localStorage so reload restores the same focus.
+     *
+     * @param {string} senderId - Session to focus on
+     * @param {boolean} flash - Briefly highlight the focused card on entry.
+     *   True for the off→on toggle (user just turned focus mode on; flash
+     *   draws their eye to which card now has it). False for mid-mode
+     *   focus switches (user clicked a strip icon — they already know).
      */
-    _enterFocusMode( senderId ) {
+    _enterFocusMode( senderId, flash = false ) {
         if ( !senderId ) return;
 
         this.ccFocusState = { enabled: true, focused_sender_id: senderId };
@@ -9126,19 +9143,41 @@ class NotificationsUI {
 
         // Walk all sender cards: hide all except the focused one.
         const cards = document.querySelectorAll( "#notifications-list .sender-card" );
+        const expectedId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         cards.forEach( ( card ) => {
-            const cardSender = card.getAttribute( "data-sender-id" )
-                               || card.id.replace( /^sender-card-/, "" );
-            // Card ids are senderId with [@.#] → "-", so we also need a
-            // tolerant comparison via the data-session-id we set on the
-            // strip icon. Simplest: compare card.id to the expected id.
-            const expectedId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
             if ( card.id === expectedId ) {
                 card.removeAttribute( "data-focus-hidden" );
             } else {
                 card.setAttribute( "data-focus-hidden", "true" );
             }
         } );
+
+        if ( flash ) this._flashFocusedCard( expectedId );
+    }
+
+    /**
+     * Briefly highlight the focused sender card so the user sees which
+     * card now holds focus. Implemented via a short data-focus-flash
+     * attribute that drives a CSS keyframe animation in notifications.css.
+     */
+    _flashFocusedCard( cardId ) {
+        const card = document.getElementById( cardId );
+        if ( !card ) return;
+
+        // Restart the animation if a previous flash is still in flight
+        // (e.g. user double-toggles): clearing then setting on the next
+        // frame forces the keyframe to replay from 0%.
+        card.removeAttribute( "data-focus-flash" );
+        // Force reflow so the re-set attribute is treated as a state change.
+        // eslint-disable-next-line no-unused-expressions
+        void card.offsetWidth;
+        card.setAttribute( "data-focus-flash", "true" );
+
+        const cleanup = () => card.removeAttribute( "data-focus-flash" );
+        card.addEventListener( "animationend", cleanup, { once: true } );
+        // Belt-and-suspenders: drop the attribute after a fixed timeout in case
+        // the animation never fires (e.g. card is detached mid-flash).
+        setTimeout( cleanup, 2000 );
     }
 
     /**
@@ -9214,7 +9253,7 @@ class NotificationsUI {
             return;
         }
 
-        this._enterFocusMode( targetSenderId );
+        this._enterFocusMode( targetSenderId, true );  // flash on off→on entry
     }
 
     /**
@@ -10822,8 +10861,9 @@ class NotificationsUI {
             // Get list of senders with visible (non-hidden) notifications
             const sendersUrl = `/api/notifications/senders-visible/${encodeURIComponent( this.currentUserEmail )}`;
             const queryParams = new URLSearchParams();
-            if ( this.historyWindowHours ) {
-                queryParams.append( 'hours', this.historyWindowHours );
+            const effectiveHours = this.getEffectiveHoursForQuery();
+            if ( effectiveHours !== null ) {
+                queryParams.append( 'hours', effectiveHours );
             }
             if ( this.isAdmin && this.queueFilterMode === 'others' ) {
                 queryParams.append( 'exclude_own_jobs', 'true' );
@@ -10883,8 +10923,9 @@ class NotificationsUI {
             const baseUrl = `/api/notifications/conversation-by-date/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUserEmail )}`;
             const params = new URLSearchParams();
 
-            if ( this.historyWindowHours ) {
-                params.append( 'hours', this.historyWindowHours );
+            const effectiveHours = this.getEffectiveHoursForQuery();
+            if ( effectiveHours !== null ) {
+                params.append( 'hours', effectiveHours );
             }
             if ( anchorTime ) {
                 params.append( 'anchor', anchorTime );
@@ -10937,8 +10978,27 @@ class NotificationsUI {
     }
 
     /**
+     * Resolve the active history window to a numeric hours value for backend queries.
+     * The 'today' sentinel is computed dynamically from the user's local midnight,
+     * so a notification from 12:01 AM today is included regardless of when the
+     * user picked "Today" — distinct from a fixed 24-hour rolling window.
+     *
+     * @returns {number|null} Numeric hours for the `hours` query param, or null
+     *   if no filter should be applied (sentinel maps to "All time").
+     */
+    getEffectiveHoursForQuery() {
+        if ( this.historyWindowHours === null ) return null;
+        if ( this.historyWindowHours === 'today' ) {
+            const now      = new Date();
+            const midnight = new Date( now.getFullYear(), now.getMonth(), now.getDate() );
+            return Math.max( 1, Math.ceil( ( now - midnight ) / 3600000 ) );
+        }
+        return this.historyWindowHours;
+    }
+
+    /**
      * Set the history window and reload conversations.
-     * @param {number|null} hours - Hours to look back, or null for all time
+     * @param {number|string|null} hours - Hours to look back, 'today' for since-midnight, or null for all time
      */
     async setHistoryWindow( hours ) {
         // Close dropdown menu first
@@ -10957,7 +11017,10 @@ class NotificationsUI {
         this.historyWindowHours = hours;
         localStorage.setItem( this.HISTORY_WINDOW_KEY, storageValue );
 
-        this.log( `History window set to: ${hours === null ? 'all time' : hours + ' hours'}` );
+        const logLabel = hours === null
+            ? 'all time'
+            : ( hours === 'today' ? `today (since local midnight, ~${this.getEffectiveHoursForQuery()}h)` : `${hours} hours` );
+        this.log( `History window set to: ${logLabel}` );
 
         // Update dropdown display
         this.updateHistoryWindowDisplay( hours );
@@ -11023,7 +11086,7 @@ class NotificationsUI {
             <div class="dropdown-menu" id="history-dropdown-menu">
                 ${this.WINDOW_OPTIONS.map( opt => `
                     <div class="dropdown-item ${opt.hours === this.historyWindowHours ? 'selected' : ''}"
-                         onclick="event.stopPropagation(); window.notificationsUI.setHistoryWindow(${opt.hours})">
+                         onclick="event.stopPropagation(); window.notificationsUI.setHistoryWindow(${JSON.stringify( opt.hours ).replace( /"/g, '&quot;' )})">
                         ${opt.label}
                     </div>
                 ` ).join( '' )}
@@ -11761,8 +11824,9 @@ class NotificationsUI {
         // 4. Call bulk delete endpoint with current filter
         try {
             const params = new URLSearchParams();
-            if ( this.historyWindowHours !== null ) {
-                params.append( 'hours', this.historyWindowHours );
+            const effectiveHours = this.getEffectiveHoursForQuery();
+            if ( effectiveHours !== null ) {
+                params.append( 'hours', effectiveHours );
             }
             if ( this.isAdmin && this.queueFilterMode === 'others' ) {
                 params.append( 'exclude_own_jobs', 'true' );
