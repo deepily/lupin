@@ -1,5 +1,31 @@
 # Lupin Project History
 
+### 2026.05.01 - Session 92ece47c | TODO size-management skill + first archival pass
+
+**Context**: User flagged TODO.md was at 31.5k tokens / 126% of the 25k limit at session-start. Global Claude config + planning-is-prompting workflow had no size-management protocol for TODO.md (only history.md did). User approved adopting the history.md adaptive-archival pattern, with one structural adjustment for TODO's status × age semantics.
+
+**Accomplishments**:
+- Authored design doc + execution log capturing the *status × age* asymmetry (history archival is mechanical / cut by date; TODO archival is semantic / cut by status × age — pending items load-bearing regardless of age).
+- Built `/todo-size-management` slash command mirroring `/history-management` shape (4 modes: check, archive, analyze, dry-run; thresholds at 17k WARNING / 19k CRITICAL; 8-12k retention target).
+- Ran live archival on current TODO.md: aggressive pass (whole CLOSED sections + `[x]`-bullet excision from MIXED sections). 21 whole + 10 MIXED-excerpt sections archived.
+- Result: TODO.md 31.6k → 19.4k tokens (-37%), 1,194 → 857 lines (-28%). 208 pending items preserved with zero leakage to archive (verified: source had 199 top-level + 9 indented `[ ]`, new TODO has same counts, archive has 0).
+- Filed cross-project follow-up to promote the algorithm to `planning-is-prompting/workflow/todo-size-management.md` (PIP currently says "TODO.md is NEVER archived" — promotion requires canonical-policy update).
+- Filed manual stale-pending triage as `[LUPIN]` follow-up to bring TODO.md the rest of the way to the 8-12k retention target.
+
+**Files modified/created**:
+- `.claude/commands/todo-size-management.md` (new skill)
+- `src/rnd/v0.1.7/2026.05.01-todo-size-management/01-design.md` (new)
+- `src/rnd/v0.1.7/2026.05.01-todo-size-management/90-execution-log.md` (new)
+- `todo-history/2026-04-10-to-2026-05-01-todo.md` (new archive — 447 lines / 12.9k tokens)
+- `TODO.md` (rewritten via the new skill — top-of-file follow-ups added)
+- `TODO.md.backup-2026-05-01-92ece47c` (rollback safety, untracked)
+
+**Caveats**:
+- 19.4k tokens is still above the 8-12k retention target. Reaching there requires manual triage of stale `[ ]` items in long-running OPEN/MIXED sections (v0.1.6 — FUTURE DEVELOPMENT, Pending — HIGH PRIORITY, etc.). The skill never auto-prunes pending work — that's by design.
+- Conservative mechanical pass alone was insufficient (only 14% reduction). The MIXED `[x]`-excision step is what got us to 38%. Continuation lines (sub-bullets) under `[x]` parents traveled with the parent into the archive — verified as zero pending leaked.
+
+---
+
 ### 2026.05.01 - Session a6b318ea | Bug Fix Mode | Focus-tray icon stranding (cleanup paths + conv-mode mic overlay)
 
 **Context**: Two related stranded-icon bugs in the CC notifications UI focus tray, surfaced + fixed in one session.
@@ -36,6 +62,32 @@
 
 - The first E2E resubmit (`ts-1cae37ec`) crashed at startup (pytest exit=4) because the `-k 'A or B'` expression got mangled by shell-split in the test_suite agent's pytest_args handling. Switched to a file-path filter (`-v src/tests/e2e_ui/test_cc_session_strip_and_focus.py`) which runs all 17→18 tests in the file unambiguously. Worth filing as a small bug against the test_suite agent later if `-k` with quoting is intended to be supported.
 - The second resubmit (`ts-f6d91ccb`) failed 1 test for a wrong reason — my regression test passed a flat object to `handleNotificationUpdate` which expects `{notification: {...}}` envelope shape, so the switch case never fired. Test wrapper fixed; code fix was correct from the first edit.
+
+### Polish & Follow-on Tweaks (uncommitted bundle, post-`c49778e`)
+
+After the wrap, user requested seven small UI polish tweaks against the same surfaces. All landed on `notifications.js` + `notifications.css` and verified against the same E2E file (most recent run `ts-7f6b3651`: 18/18 pass, 71.4s).
+
+1. **Mic-icon offsets `−3 → −6`** — pushes the conversation-mode mic overlay outward so the visible glyph reads as docked to the persona-circle perimeter rather than overlapping its interior.
+2. **Unread badge sizing + center-anchored on perimeter** — switched from edge-offset positioning (`top:-2; right:-2`, drifted inward as multi-digit counts widened the box) to center-anchored positioning (`top:6; left:34; transform: translate(-50%,-50%)`). Badge midpoint now sits on the persona perimeter at 45° regardless of 1- vs 2-digit width. Also reduced size (16×16 vs 18×18, font 10/regular vs 11/bold).
+3. **Pulse animation finite + restart on each notification** — `animation-iteration-count: infinite → 3`. JS in `_promoteStripIcon` now restarts the animation on each promote via remove+reflow+re-add of `data-unread`, so every new notification triggers a fresh 3-pulse cycle instead of running forever.
+4. **Corner Stop button on TTS message bubbles** — sibling to existing Pause/Resume corner button, sits to its left at `right: 32px` with red theme. Click invokes existing `stopTTSAndAdvance()` helper. Initial CSS visibility selector was over-broad (included `.is-paused-current`); fixed in same session to mirror pause-button's `.tts-playing`-only visibility so Stop hides cleanly when `stopTTSPlayingIndicator` removes that class.
+5. **Strip-icon tooltip includes persona display name** — tooltip now reads `"<project> #<sessionId> (<persona display name>)"` instead of just project + session. Uses `persona.display_name || persona.name` (matches existing `_renderPersonaBadgeHTML` precedence).
+6. **Filter progress-group-entry notifications from focus-tray unread badge** — plumbed `{ skipUnread: bool }` option through `_promoteStripIcon` and `moveSenderCardToTop`. `addNotificationToSenderGroup` sets `skipUnread: true` when `notification.progress_group_id` is present, so tool-call progress updates (the noise case) don't bump the badge or restart the pulse. Card still moves to top so recency ordering is preserved — only the visual nag is suppressed.
+7. **Stranded-stop-button bug** (caught in #4 above) — fixed in the same iteration; folded into the bundle.
+
+**Files** (parent Lupin only — CoSA submodule untouched):
+- `src/fastapi_app/static/css/notifications.css`
+- `src/fastapi_app/static/js/notifications.js`
+
+**Verification cadence**: 4 E2E runs on `:8000` across the bundle (`ts-605094aa`, `ts-8ff8181a`, `ts-7f6b3651`, plus the original `ts-d7b35841` baseline). Last run 18/18 pass.
+
+### Session Summary
+
+- **Total fixes**: 2 committed (`1b191f4` + `c49778e` hash-stamp) + 7 uncommitted polish tweaks (this bundle)
+- **Files changed**: 5 in committed bugs, 2 in polish bundle (3 if you count the manifest)
+- **Tests added**: 5 new regression cases across 2 classes — all green, no regressions on the 13 pre-existing tests in the strip/focus test file
+- **GitHub issues closed**: none (user-reported, no GH ticket)
+- **Status**: Session closed 2026-05-01
 
 ---
 

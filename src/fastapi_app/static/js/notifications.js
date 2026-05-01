@@ -8962,15 +8962,21 @@ class NotificationsUI {
         const iconId = this._stripIconIdFor( senderId );
         if ( document.getElementById( iconId ) ) return;  // idempotent
 
-        const initial = ( projectName || "?" ).charAt( 0 ).toUpperCase();
-        const color   = persona?.color || null;
+        const initial     = ( projectName || "?" ).charAt( 0 ).toUpperCase();
+        const color       = persona?.color || null;
+        const personaName = persona?.display_name || persona?.name || null;
 
         const icon = document.createElement( "div" );
         icon.id = iconId;
         icon.className = "cc-strip-icon";
         icon.setAttribute( "data-sender-id", senderId );
         if ( sessionId ) icon.setAttribute( "data-session-id", sessionId );
-        icon.setAttribute( "title", `${projectName}${sessionId ? " #" + sessionId : ""}` );
+        // Tooltip carries project + session + persona so users can identify
+        // who's behind each color-coded icon at a glance.
+        const titleParts = [ projectName ];
+        if ( sessionId   ) titleParts.push( "#" + sessionId );
+        if ( personaName ) titleParts.push( "(" + personaName + ")" );
+        icon.setAttribute( "title", titleParts.join( " " ) );
         icon.textContent = initial;
         if ( color ) {
             icon.style.setProperty( "--persona-color", color );
@@ -9072,8 +9078,15 @@ class NotificationsUI {
      * Side effect: when focus mode is on AND this senderId is NOT the
      * focused session, increment the unread badge so the user gets
      * peripheral awareness of activity on hidden sessions.
+     *
+     * @param {string} senderId
+     * @param {object} [options]
+     * @param {boolean} [options.skipUnread=false] — When true, do not bump
+     *   the unread badge. Used by callers handling "noisy" updates that
+     *   shouldn't draw attention (e.g., in-place progress-group entries
+     *   that are just tool-call progress, not user-actionable signals).
      */
-    _promoteStripIcon( senderId ) {
+    _promoteStripIcon( senderId, options = {} ) {
         const iconsContainer = document.getElementById( "cc-strip-icons" );
         if ( !iconsContainer ) return;
 
@@ -9084,11 +9097,19 @@ class NotificationsUI {
             iconsContainer.insertBefore( icon, iconsContainer.firstChild );
         }
 
+        if ( options.skipUnread ) return;
+
         // Bump unread badge for non-focused sessions in focus mode.
         if ( this.ccFocusState.enabled
              && this.ccFocusState.focused_sender_id !== senderId ) {
             const next = ( this.ccStripUnreadCounts[ senderId ] || 0 ) + 1;
             this.ccStripUnreadCounts[ senderId ] = next;
+            // Restart the pulse animation for every notification (not just
+            // the first). CSS rule fires when [data-unread="true"] applies;
+            // remove + reflow + re-add forces the browser to re-trigger
+            // the animation on already-marked icons.
+            icon.removeAttribute( "data-unread" );
+            void icon.offsetWidth;  // force reflow
             icon.setAttribute( "data-unread", "true" );
             icon.setAttribute( "data-unread-count", String( next ) );
         }
@@ -9996,7 +10017,11 @@ class NotificationsUI {
             // Only move card during runtime updates, not during initial page load
             // (initial load relies on API sort order preserved via appendChild)
             if ( !isNewSender && !this.isInitialLoad ) {
-                this.moveSenderCardToTop( senderId );
+                // Progress-group entries are tool-call progress updates —
+                // not user-actionable, so don't bump the focus-tray unread
+                // badge. Card still moves to top so recency reflects activity.
+                const isProgressGroup = !!notification.progress_group_id;
+                this.moveSenderCardToTop( senderId, { skipUnread: isProgressGroup } );
             }
         }
 
@@ -10554,6 +10579,25 @@ class NotificationsUI {
                 }
             } );
             messageDiv.appendChild( cornerBtn );
+
+            // Corner STOP button — sibling to pause/resume. Stops the active
+            // TTS playback AND advances the queue, so the user can dismiss
+            // a TTS rendering they no longer want without first pausing.
+            // stopTTSAndAdvance() calls stopAudio() then onTTSPlaybackComplete()
+            // which clears activeTTSItem and shifts the next queued item.
+            const stopBtn = document.createElement( 'button' );
+            stopBtn.type      = 'button';
+            stopBtn.className = 'notification-corner-stop-btn';
+            stopBtn.dataset.notificationId = cornerBtnId;
+            stopBtn.title       = 'Stop this notification\'s playback and advance';
+            stopBtn.textContent = '⏹';
+            stopBtn.setAttribute( 'aria-label', 'Stop notification audio' );
+            stopBtn.addEventListener( 'click', ( e ) => {
+                e.stopPropagation();
+                this.log( `[CORNER-STOP] click — nid=${stopBtn.dataset.notificationId}` );
+                this.stopTTSAndAdvance();
+            } );
+            messageDiv.appendChild( stopBtn );
         }
 
         // Add to top (newest first)
@@ -16086,12 +16130,17 @@ class NotificationsUI {
      * Respects the pinned conversation-mode card if one exists — non-pinned
      * cards land at position 1 instead of 0 in that case.
      * @param {string} senderId - Sender ID
+     * @param {object} [options]
+     * @param {boolean} [options.skipUnread=false] — Forwarded to
+     *   _promoteStripIcon. Set true for noisy in-place updates (progress-
+     *   group entries) that shouldn't bump the focus-tray unread badge.
      */
-    moveSenderCardToTop( senderId ) {
+    moveSenderCardToTop( senderId, options = {} ) {
         // Synchronize the strip's recency ordering with the stack's
         // recency ordering: leftmost icon = most recently updated. Also
-        // bumps the unread badge for non-focused sessions when focus is on.
-        this._promoteStripIcon( senderId );
+        // bumps the unread badge for non-focused sessions when focus is on
+        // (unless caller passed skipUnread for tool-call progress noise).
+        this._promoteStripIcon( senderId, options );
 
         const container = document.getElementById( 'notifications-list' );
         const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;

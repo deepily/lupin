@@ -427,6 +427,51 @@
             background: rgba( 255, 193, 7, 0.35 );
         }
 
+        /* Corner STOP button — sibling to pause/resume. Sits to the LEFT
+         * of the pause button (right: 32 = 4 + 24 + 4). Clicking stops
+         * the active TTS playback and advances the queue (dismisses this
+         * notification's rendering). */
+        .notification-corner-stop-btn {
+            display: none;
+            position: absolute;
+            top: 4px;
+            right: 32px;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: 1px solid rgba( 220, 53, 69, 0.5 );
+            border-radius: 50%;
+            background: rgba( 220, 53, 69, 0.15 );
+            color: #842029;
+            cursor: pointer;
+            font-size: 12px;
+            line-height: 1;
+            text-align: center;
+            transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+            z-index: 2;
+        }
+
+        /* Visibility rule mirrors .notification-corner-pause-btn exactly:
+         * gated by .tts-playing only. .is-paused-current persists across
+         * pause→stop and would strand this button if included here. The
+         * pause button hides correctly when stopTTSPlayingIndicator
+         * removes .tts-playing; we want the stop button to follow suit. */
+        li.is-playing-current .notification-corner-stop-btn,
+        .sender-message.tts-playing .notification-corner-stop-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .notification-corner-stop-btn:hover {
+            background: rgba( 220, 53, 69, 0.30 );
+            transform: scale( 1.1 );
+        }
+
+        .notification-corner-stop-btn:active {
+            transform: scale( 0.95 );
+        }
+
         /* ========================================
            PINNED CONVERSATION-MODE SENDER CARD
            Marks the sender card whose session currently holds conversation
@@ -2033,24 +2078,38 @@
 
         /* Unread peripheral-awareness badge: shown on non-focused icons
          * when their session receives notifications while focus mode is
-         * on. Numeric count rendered via ::after using data-unread-count. */
+         * on. Numeric count rendered via ::after using data-unread-count.
+         *
+         * The pulse runs 3 iterations on attribute (re-)apply rather than
+         * forever — JS restarts it via remove+reflow+re-add in
+         * _promoteStripIcon for each new notification. */
         .cc-strip-icon[data-unread="true"] {
-            animation: cc-strip-icon-pulse 1.6s ease-in-out infinite;
+            animation: cc-strip-icon-pulse 1.6s ease-in-out 3;
         }
 
+        /* Badge midpoint anchored on the persona-circle perimeter at the
+         * top-right (~45° above horizontal). Persona is 40×40, radius 20,
+         * center (20, 20); perimeter at 45° = (34.14, 5.86) ≈ (34, 6).
+         * transform: translate(-50%, -50%) centers the badge box on that
+         * anchor regardless of digit count making the box wider — single-
+         * digit and double-digit counts both stay centered on the perimeter
+         * instead of drifting inward as the box grows. (Edge-offset
+         * positioning broke this for 2-digit counts.) */
         .cc-strip-icon[data-unread="true"]::after {
             content: attr( data-unread-count );
             position: absolute;
-            top: -4px;
-            right: -4px;
-            min-width: 18px;
-            height: 18px;
-            padding: 0 5px;
+            top: 6px;
+            left: 34px;
+            right: auto;
+            transform: translate( -50%, -50% );
+            min-width: 16px;
+            height: 16px;
+            padding: 0 4px;
             background: #dc3545;
             color: #ffffff;
-            border-radius: 9px;
-            font-size: 11px;
-            font-weight: 700;
+            border-radius: 8px;
+            font-size: 10px;
+            font-weight: 400;
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -2059,14 +2118,16 @@
             line-height: 1;
         }
 
-        /* Conversation-mode overlay: small mic glyph at bottom-right of
-         * the icon when this session is in conv-mode. Orthogonal axis to
-         * focus — both can be true on the same or different sessions. */
+        /* Conversation-mode overlay: mic glyph at bottom-right. The
+         * indicator's center sits on the persona-circle perimeter
+         * (45° below horizontal); offsets pulled outward from -3 to
+         * -6 per design feedback so the visible glyph reads as docked
+         * to the persona's edge rather than overlapping its interior. */
         .cc-strip-icon[data-conv-mode="true"]::before {
             content: "🎤";
             position: absolute;
-            bottom: -3px;
-            right: -3px;
+            bottom: -6px;
+            right: -6px;
             width: 18px;
             height: 18px;
             background: rgba( 25, 135, 84, 0.95 );
@@ -2080,11 +2141,8 @@
             line-height: 1;
         }
 
-        /* When BOTH conv-mode AND unread fire, push the unread badge up
-         * a bit so the two indicators don't overlap. */
-        .cc-strip-icon[data-conv-mode="true"][data-unread="true"]::after {
-            top: -8px;
-        }
+        /* Mic at bottom-right + count badge at top-right are on opposite
+         * corners — no override needed for both-fire overlap. */
 
         @keyframes cc-strip-icon-pulse {
             0%, 100% {
