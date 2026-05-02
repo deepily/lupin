@@ -100,6 +100,22 @@
 **Files**: `src/fastapi_app/static/js/ws-channel.js`, `src/tests/ws_channel_unit/{__init__.py,test_ws_channel_unit.py}`, 15 files in `src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/`, `history.md`, `.claude-session.md`.
 **Commit**: 8fd0036
 
+#### Checkpoint | 2026.05.02 14:55 | WS reconnect circuit-breaker Phase 2 — WSChannel wired into NotificationsUI
+
+**Phase 2 deliverables** (the NotificationsUI integration; the legacy reconnect machinery is excised in place):
+
+- **MODIFIED** `src/fastapi_app/static/js/ws-channel.js` — additive Phase-1-spec gap fixes: new `authMessage: () => object` opt (channel calls the builder once on AUTHENTICATING and sends the JSON-stringified result via the live socket), and a new public `send(payload)` proxy method that auto-stringifies non-string payloads and no-ops when state is not OPEN. All 20 Phase-1 Layer-1 tests still pass — change is purely additive.
+- **MODIFIED** `src/fastapi_app/static/js/notifications.js` — the Diff Map applied at all 10 sites: deleted the legacy per-socket connect helpers + their separate auth-send methods + the shared retry-helper + the `isConnecting`/`connectionRetries` shared flags; replaced with two `WSChannel` facades constructed via dynamic-imported `createChannel`; `checkWebSocketHealth` converted to a watchdog that delegates to `channel._tickWatchdog()` (off-hours gate REMOVED, counter-zeroing REMOVED — both were proximate causes of the 461-attempts-without-cap incident); auth methods → `_buildQueueAuthMessage()` / `_buildAudioAuthMessage()` JSON builders; auth_error refresh paths redirected to `manualRetry()`; `handlePing` uses `channel.send()` (channel guards on state internally); `refreshWebSocketStatus` reads `channel.state` (string) and maps to existing UI status pill; `logout()` calls `channel.destroy()` (full teardown including window listeners + watchdog timer); `handleAuthFailure()` keeps `channel.close()` (navigating away).
+- **MODIFIED** `src/fastapi_app/static/html/notifications.html` — single-line cache-bust bump `?v=20260428f` → `?v=20260502a` (forces browser reload of the rewritten `notifications.js`).
+- **NEW** `src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/92-phase-2-execution-log.md` — Phase 2 execution log: pre-phase audit (Phase-1-API-gap discovery + ES-module load strategy), module extension table, verification matrix (5/8 green / 3/8 deferred), AI structural review against the Diff Map (all 10 sites mapped to file:line evidence).
+
+**Verification (5/8 green, 3/8 deferred to Phase-2b)**: grep `scheduleReconnect|connectionRetries|isConnecting` → ZERO hits ✅ · grep `this.queueChannel|this.audioChannel` → 2 ctor + 2 connect ✅ · py_compile N/A (no Python touched) · Layer-1 regression 20/20 in 0.99s ✅ · websocket_smoke regression 50/50 in 45s ✅ · Layer-3 in-page (10 new tests) DEFERRED · Layer-4 happy-path on `:8000` DEFERRED (slot-ask required) · Layer-3 intermittent-flap DEFERRED. Phase-2b will close all three deferred items before Phase 3 close. **Total Phase 2 regression: 70/70.**
+
+**Behavior change for users (per `08-rollout-and-rollback.md`)**: the 8 AM–Midnight off-hours gate on the health monitor is removed alongside the counter-zeroing. Reconnect attempts at 3 AM during a server restart now count against the 20-attempt budget instead of being skipped — strictly better than today: the breaker trips at ~6–10 min wall and the user sees a banner the next time they look at the tab (Phase 3 lands the banner DOM + Retry-now button).
+
+**Files**: `src/fastapi_app/static/js/ws-channel.js`, `src/fastapi_app/static/js/notifications.js`, `src/fastapi_app/static/html/notifications.html`, `src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/92-phase-2-execution-log.md`, `history.md`, `.claude-session.md`.
+**Commit**: acf5387
+
 ---
 
 ### 2026.05.01 - Session 92ece47c | TODO size-management skill + first archival pass

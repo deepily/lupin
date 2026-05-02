@@ -35,8 +35,8 @@ class NotificationsUI {
         this.TTS_MODE_DEFAULT = this.TTS_MODE_INSTANT;  // Default to instant (PCM 24000 streaming)
 
         // WebSocket connections
-        this.queueWS = null;
-        this.audioWS = null;
+        this.queueChannel = null;
+        this.audioChannel = null;
         this.claudeCodeWs = null;  // Claude Code Dispatcher WebSocket
 
         // Claude Code Dispatcher state
@@ -93,8 +93,11 @@ class NotificationsUI {
         this.firstChunkPlayed = false;
         
         // State management
-        this.isConnecting = false;
-        this.connectionRetries = 0;
+        // Note: per-channel reconnect attempts + circuit-breaker state live
+        // inside each WSChannel facade (this.queueChannel / this.audioChannel).
+        // Phase 2 of the WS reconnect circuit-breaker milestone removed the
+        // legacy shared retry-counter + reconnect-in-flight flags from this
+        // class — channels own those today.
         this.queueWsConnected = false;
         this.audioWsConnected = false;
         this.authRefreshAttempted = false; // Track refresh attempts to prevent loops
@@ -877,52 +880,38 @@ class NotificationsUI {
 
     checkWebSocketHealth() {
         /**
-         * Periodic health check for WebSocket connections.
+         * Watchdog for WebSocket connections.
          *
-         * Behavior:
-         *     1. Check if current time is within work hours (8 AM - Midnight)
-         *     2. If outside work hours: Skip check, update UI to show "Off-hours"
-         *     3. If inside work hours: Check both WebSocket states
-         *     4. If disconnected: Reset retry counter and trigger reconnection
-         *     5. If connected: Update UI to show "Healthy"
+         * Phase 2 of the WS reconnect circuit-breaker milestone converted this
+         * from a *scheduler* to a *watchdog*. The previous behavior — zeroing
+         * the shared retry counter and immediately re-arming a reconnect — was
+         * the proximate cause of the 461-attempts-without-cap incident. Per
+         * Q3 frozen in 01-design-review.md, the watchdog now:
          *
-         * Ensures:
-         *     - No reconnection attempts during off-hours (Midnight - 8 AM)
-         *     - Automatic recovery from server restarts
-         *     - Visual feedback in UI status indicator
+         *   1. NEVER touches any attempt counter (channels own their counters)
+         *   2. NEVER re-arms a reconnect directly (the per-channel scheduler is
+         *      internal); only delegates to channel._tickWatchdog() which
+         *      no-ops unless state==DISCONNECTED with no pending timer
+         *   3. NO off-hours gate. The 8 AM–Midnight gate was a workaround for
+         *      unbounded reconnect spam during overnight server restarts; the
+         *      circuit breaker (max 20 attempts ≈ 6–10 min wall) bounds the
+         *      spam regardless of clock time.
          */
-
-        // Check if we're in work hours (8 AM - Midnight)
         const now = new Date();
-        const hour = now.getHours();
+        const queueState = this.queueChannel ? this.queueChannel.state : "DISCONNECTED";
+        const audioState = this.audioChannel ? this.audioChannel.state : "DISCONNECTED";
 
-        if ( hour < this.WORK_HOURS_START || hour >= this.WORK_HOURS_END ) {
-            // Outside work hours - skip check
-            this.updateHealthStatus( "Off-hours (Midnight - 8 AM)", "status-info" );
-            return;
-        }
+        if ( this.queueChannel ) this.queueChannel._tickWatchdog();
+        if ( this.audioChannel ) this.audioChannel._tickWatchdog();
 
-        // Check queue WebSocket state
-        const queueNeedsReconnect = !this.queueWS || this.queueWS.readyState !== WebSocket.OPEN;
-
-        // Check audio WebSocket state
-        const audioNeedsReconnect = !this.audioWS || this.audioWS.readyState !== WebSocket.OPEN;
-
-        if ( queueNeedsReconnect || audioNeedsReconnect ) {
-            // Disconnection detected — reconnect only what's broken
-            const target = ( queueNeedsReconnect && audioNeedsReconnect ) ? 'both'
-                         : queueNeedsReconnect ? 'queue' : 'audio';
-            this.wsDiag( `Health check: Disconnected WebSockets detected (queue=${queueNeedsReconnect}, audio=${audioNeedsReconnect}) → reconnecting ${target}` );
-            this.updateHealthStatus( "Reconnecting...", "status-warning" );
-
-            // Reset retry counter to give reconnection a fresh start from health monitor
-            this.connectionRetries = 0;
-
-            // Trigger targeted reconnection
-            this.scheduleReconnect( target );
-        } else {
-            // Both WebSockets healthy
+        const queueOk = queueState === "CONNECTED";
+        const audioOk = audioState === "CONNECTED";
+        if ( queueOk && audioOk ) {
             this.updateHealthStatus( `✓ Healthy (checked ${now.toLocaleTimeString()})`, "status-success" );
+        } else if ( queueState === "OPEN_CIRCUIT" || audioState === "OPEN_CIRCUIT" ) {
+            this.updateHealthStatus( "Circuit open — click Retry-now", "status-error" );
+        } else {
+            this.updateHealthStatus( `Watchdog: queue=${queueState} audio=${audioState}`, "status-warning" );
         }
     }
 
@@ -1094,11 +1083,11 @@ class NotificationsUI {
         localStorage.removeItem( 'lupin_refresh_token' );
 
         // Disconnect WebSockets
-        if ( this.queueWS ) {
-            this.queueWS.close();
+        if ( this.queueChannel ) {
+            this.queueChannel.close();
         }
-        if ( this.audioWS ) {
-            this.audioWS.close();
+        if ( this.audioChannel ) {
+            this.audioChannel.close();
         }
 
         // Redirect to login with current page as redirect target
@@ -1120,14 +1109,15 @@ class NotificationsUI {
         localStorage.removeItem( 'lupin_access_token' );
         localStorage.removeItem( 'lupin_refresh_token' );
 
-        // Disconnect WebSockets gracefully
-        if ( this.queueWS ) {
-            this.queueWS.close();
-            this.queueWS = null;
+        // Disconnect WebSockets gracefully (Phase 2: destroy() also detaches
+        // window listeners + cancels watchdog timer, not just close).
+        if ( this.queueChannel ) {
+            this.queueChannel.destroy();
+            this.queueChannel = null;
         }
-        if ( this.audioWS ) {
-            this.audioWS.close();
-            this.audioWS = null;
+        if ( this.audioChannel ) {
+            this.audioChannel.destroy();
+            this.audioChannel = null;
         }
 
         // Update UI
@@ -1245,26 +1235,32 @@ class NotificationsUI {
     refreshWebSocketStatus() {
         /**
          * Update WebSocket connection status displays.
-         * Evaluates current readyState of both WebSocket connections.
          *
-         * WebSocket readyState values:
-         *     0 = CONNECTING, 1 = OPEN, 2 = CLOSING, 3 = CLOSED
+         * Phase 2: reads `channel.state` (string) from the WSChannel facade
+         * rather than `WebSocket.readyState` (numeric). Maps each channel
+         * state to the existing UI status pill text + class.
          */
-        const stateNames = [ 'Connecting', 'Connected', 'Closing', 'Disconnected' ];
-        const stateTypes = [ 'warning', 'good', 'warning', 'error' ];
+        const stateMap = {
+            DISCONNECTED   : [ 'Disconnected',     'error'   ],
+            CONNECTING     : [ 'Connecting...',    'warning' ],
+            AUTHENTICATING : [ 'Authenticating...', 'warning' ],
+            CONNECTED      : [ 'Connected',        'good'    ],
+            BACKOFF        : [ 'Reconnecting...',  'warning' ],
+            OPEN_CIRCUIT   : [ 'Circuit open',     'error'   ]
+        };
 
-        // Queue WebSocket status
-        if ( this.queueWS ) {
-            const state = this.queueWS.readyState;
-            this.updateStatus( 'queue-ws-status', stateNames[ state ], stateTypes[ state ] );
+        // Queue channel status
+        if ( this.queueChannel ) {
+            const entry = stateMap[ this.queueChannel.state ] || [ 'Unknown', 'warning' ];
+            this.updateStatus( 'queue-ws-status', entry[ 0 ], entry[ 1 ] );
         } else {
             this.updateStatus( 'queue-ws-status', 'Not initialized', 'error' );
         }
 
-        // Audio WebSocket status
-        if ( this.audioWS ) {
-            const state = this.audioWS.readyState;
-            this.updateStatus( 'audio-ws-status', stateNames[ state ], stateTypes[ state ] );
+        // Audio channel status
+        if ( this.audioChannel ) {
+            const entry = stateMap[ this.audioChannel.state ] || [ 'Unknown', 'warning' ];
+            this.updateStatus( 'audio-ws-status', entry[ 0 ], entry[ 1 ] );
         } else {
             this.updateStatus( 'audio-ws-status', 'Not initialized', 'error' );
         }
@@ -2140,6 +2136,17 @@ class NotificationsUI {
     // ========================================
     
     async connectWebSockets( target = 'both' ) {
+        // Phase 2 of the WS reconnect circuit-breaker milestone: this method
+        // now constructs (or reuses) two WSChannel state machines instead of
+        // raw WebSockets. Per-channel reconnect logic + 20-attempt circuit
+        // breaker live inside each channel facade. The legacy per-socket
+        // connect helpers + their separate auth-send methods + the shared
+        // retry-helper have been replaced by:
+        //   - the channel factory (createChannel from ws-channel.js)
+        //   - per-channel onclose -> internal backoff inside the channel
+        //   - the authMessage callback (channel sends auth on AUTHENTICATING)
+        //   - the _buildQueueAuthMessage / _buildAudioAuthMessage builders
+        // See src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/01-design-review.md
         this.log( `Connecting WebSockets (target=${target})...` );
 
         try {
@@ -2151,126 +2158,111 @@ class NotificationsUI {
             this.updateElement( "queue-session", this.queueSessionId );
             this.updateElement( "audio-session", this.audioSessionId );
 
-            // Connect only the requested WebSocket(s)
-            const promises = [];
-            if ( target === 'both' || target === 'queue' ) promises.push( this.connectQueueWebSocket() );
-            if ( target === 'both' || target === 'audio' ) promises.push( this.connectAudioWebSocket() );
+            // Lazy dynamic import of the channel factory (notifications.js is
+            // a regular script, not an ES module — dynamic import is the only
+            // way to pull in `createChannel` here).
+            if ( !this._createChannel ) {
+                const mod = await import( "/static/js/ws-channel.js?v=20260502a" );
+                this._createChannel = mod.createChannel;
+            }
 
-            await Promise.all( promises );
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 
-            this.log( `WebSocket(s) connected successfully (target=${target})` );
+            // Construct or recreate the queue channel
+            if ( ( target === 'both' || target === 'queue' ) && !this.queueChannel ) {
+                const queueUrl = `${protocol}//${window.location.host}/ws/queue/${this.queueSessionId}`;
+                this.queueChannel = this._createChannel( {
+                    url            : queueUrl,
+                    name           : "queue",
+                    authMessage    : () => this._buildQueueAuthMessage(),
+                    onMessage      : ( envelope ) => {
+                        // Channel already JSON-parsed the envelope. Re-pack into the
+                        // shape the legacy handleQueueMessage expects (event.data string).
+                        if ( envelope === null || envelope === undefined ) return;
+                        this.handleQueueMessage( { data : JSON.stringify( envelope ) } );
+                    },
+                    onAuthSuccess  : ( envelope ) => {
+                        // Channel transitions to CONNECTED before this fires; the
+                        // legacy auth_success branch in handleQueueMessage updates UI
+                        // and seeds notificationState — no extra hook needed here.
+                        this.queueWsConnected = true;
+                    },
+                    onCircuitOpen  : ( detail ) => this._showCircuitBanner( detail ),
+                    onStateChange  : ( newState ) => {
+                        // Map channel state to existing UI status pill so the
+                        // existing #queue-ws-status display keeps working.
+                        const map = {
+                            DISCONNECTED   : [ "Disconnected",     "error"   ],
+                            CONNECTING     : [ "Connecting...",    "warning" ],
+                            AUTHENTICATING : [ "Authenticating...", "warning" ],
+                            CONNECTED      : [ "Connected",        "good"    ],
+                            BACKOFF        : [ "Reconnecting...",  "warning" ],
+                            OPEN_CIRCUIT   : [ "Circuit open",     "error"   ]
+                        };
+                        const entry = map[ newState ];
+                        if ( entry ) this.updateStatus( "queue-ws-status", entry[ 0 ], entry[ 1 ] );
+                        if ( newState !== "CONNECTED" ) this.queueWsConnected = false;
+                    }
+                } );
+            }
+
+            // Construct or recreate the audio channel
+            if ( ( target === 'both' || target === 'audio' ) && !this.audioChannel ) {
+                const audioUrl = `${protocol}//${window.location.host}/ws/audio/${this.audioSessionId}`;
+                this.audioChannel = this._createChannel( {
+                    url            : audioUrl,
+                    name           : "audio",
+                    authMessage    : () => this._buildAudioAuthMessage(),
+                    onMessage      : ( envelope ) => {
+                        if ( envelope === null || envelope === undefined ) return;
+                        this.handleAudioMessage( { data : JSON.stringify( envelope ) } );
+                    },
+                    onAuthSuccess  : ( envelope ) => { this.audioWsConnected = true; },
+                    onCircuitOpen  : ( detail ) => this._showCircuitBanner( detail ),
+                    onStateChange  : ( newState ) => {
+                        const map = {
+                            DISCONNECTED   : [ "Disconnected",     "error"   ],
+                            CONNECTING     : [ "Connecting...",    "warning" ],
+                            AUTHENTICATING : [ "Authenticating...", "warning" ],
+                            CONNECTED      : [ "Connected",        "good"    ],
+                            BACKOFF        : [ "Reconnecting...",  "warning" ],
+                            OPEN_CIRCUIT   : [ "Circuit open",     "error"   ]
+                        };
+                        const entry = map[ newState ];
+                        if ( entry ) this.updateStatus( "audio-ws-status", entry[ 0 ], entry[ 1 ] );
+                        if ( newState !== "CONNECTED" ) this.audioWsConnected = false;
+                    }
+                } );
+            }
+
+            // Note: the audio channel handles binary frames at the WS level,
+            // but our channel's onmessage parses JSON. Audio binary chunks flow
+            // through a different pathway (handleAudioChunk on Blob); the
+            // channel-level onmessage only sees JSON envelopes. The legacy
+            // handleAudioMessage already handles both Blob and JSON paths.
+
+            // Initiate connect on each requested channel
+            if ( target === 'both' || target === 'queue' ) this.queueChannel.connect();
+            if ( target === 'both' || target === 'audio' ) this.audioChannel.connect();
+
+            this.log( `WebSocket(s) connect() invoked (target=${target}) — channel state machines own backoff` );
 
         } catch ( error ) {
-            this.error( "WebSocket connection failed:", error );
-            this.scheduleReconnect( target );
+            this.error( "WebSocket setup failed:", error );
+            // No external retry-helper fallback — channels handle their own
+            // backoff once constructed. If construction itself failed, surface
+            // to the user via the circuit-breaker banner.
+            this._showCircuitBanner( { name : "init", attempts : 0, reason : error && error.message || String( error ) } );
         }
     }
-    
-    async connectQueueWebSocket() {
-        return new Promise( ( resolve, reject ) => {
-            try {
-                const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-                const wsUrl = `${protocol}//${window.location.host}/ws/queue/${this.queueSessionId}`;
-                
-                this.log( `Connecting to queue WebSocket: ${wsUrl}` );
-                this.queueWS = new WebSocket( wsUrl );
-                
-                this.queueWS.onopen = () => {
-                    this.wsDiag( "Queue WebSocket TCP open, authenticating..." );
-                    this.queueWsConnected = true;
-                    this.updateStatus( "queue-ws-status", "Authenticating...", "warning" );
-                    this.authenticateQueueWebSocket();
-                };
 
-                this.queueWS.onmessage = ( event ) => {
-                    this.handleQueueMessage( event );
-                };
-
-                this.queueWS.onclose = ( event ) => {
-                    this.wsDiag( `Queue WebSocket closed: code=${event.code} reason=${event.reason}` );
-                    this.queueWsConnected = false;
-                    this.updateStatus( "queue-ws-status", "Disconnected", "error" );
-                    this.scheduleReconnect( 'queue' );
-                };
-
-                this.queueWS.onerror = ( error ) => {
-                    this.wsDiag( `Queue WebSocket error: ${error}` );
-                    this.queueWsConnected = false;
-                    this.updateStatus( "queue-ws-status", "Error", "error" );
-                    reject( error );
-                };
-                
-                // Resolve when connection is established
-                this.queueWS.addEventListener( 'open', resolve, { once: true } );
-                
-                // Set timeout for connection
-                setTimeout( () => {
-                    if ( this.queueWS.readyState !== WebSocket.OPEN ) {
-                        reject( new Error( "Queue WebSocket connection timeout" ) );
-                    }
-                }, 10000 );
-                
-            } catch ( error ) {
-                reject( error );
-            }
-        });
-    }
-    
-    async connectAudioWebSocket() {
-        return new Promise( ( resolve, reject ) => {
-            try {
-                const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-                const wsUrl = `${protocol}//${window.location.host}/ws/audio/${this.audioSessionId}`;
-                
-                this.log( `Connecting to audio WebSocket: ${wsUrl}` );
-                this.audioWS = new WebSocket( wsUrl );
-                
-                this.audioWS.onopen = () => {
-                    this.wsDiag( "Audio WebSocket TCP open, authenticating..." );
-                    this.audioWsConnected = true;
-                    this.updateStatus( "audio-ws-status", "Authenticating...", "warning" );
-                    this.authenticateAudioWebSocket();
-                };
-
-                this.audioWS.onmessage = ( event ) => {
-                    this.handleAudioMessage( event );
-                };
-
-                this.audioWS.onclose = ( event ) => {
-                    this.wsDiag( `Audio WebSocket closed: code=${event.code} reason=${event.reason}` );
-                    this.audioWsConnected = false;
-                    this.updateStatus( "audio-ws-status", "Disconnected", "error" );
-                    this.scheduleReconnect( 'audio' );
-                };
-
-                this.audioWS.onerror = ( error ) => {
-                    this.wsDiag( `Audio WebSocket error: ${error}` );
-                    this.audioWsConnected = false;
-                    this.updateStatus( "audio-ws-status", "Error", "error" );
-                    reject( error );
-                };
-                
-                // Resolve when connection is established
-                this.audioWS.addEventListener( 'open', resolve, { once: true } );
-                
-                // Set timeout for connection
-                setTimeout( () => {
-                    if ( this.audioWS && this.audioWS.readyState !== WebSocket.OPEN ) {
-                        this.audioWsConnected = false;
-                        this.updateStatus( "audio-ws-status", "Timeout", "error" );
-                        try { this.audioWS.close(); } catch ( e ) { /* ignore close errors */ }
-                        reject( new Error( "Audio WebSocket connection timeout" ) );
-                    }
-                }, 10000 );
-                
-            } catch ( error ) {
-                reject( error );
-            }
-        });
-    }
-    
-    authenticateQueueWebSocket() {
-        const authMessage = {
+    // ----------------------------------------------------------------------
+    // Phase 2 — auth-message builders. The channel's `authMessage` opt is
+    // invoked when state transitions to AUTHENTICATING; the channel sends
+    // the JSON-stringified return value via the live socket itself.
+    // ----------------------------------------------------------------------
+    _buildQueueAuthMessage() {
+        return {
             type: "auth_request",
             token: this.authToken.replace( "Bearer ", "" ), // Strip Bearer prefix for WebSocket auth
             session_id: this.queueSessionId,
@@ -2294,15 +2286,12 @@ class NotificationsUI {
                 "sys_ping"
             ]
         };
-        
-        this.queueWS.send( JSON.stringify( authMessage ) );
-        this.wsDiag( "Queue WebSocket auth_request sent" );
     }
 
-    authenticateAudioWebSocket() {
-        const authMessage = {
+    _buildAudioAuthMessage() {
+        return {
             type: "auth_request",
-            token: this.authToken.replace( "Bearer ", "" ), // Strip Bearer prefix for WebSocket auth
+            token: this.authToken.replace( "Bearer ", "" ),
             session_id: this.audioSessionId,
             subscribed_events: [
                 "audio_streaming_chunk",
@@ -2315,11 +2304,16 @@ class NotificationsUI {
                 "connect"
             ]
         };
-        
-        this.audioWS.send( JSON.stringify( authMessage ) );
-        this.wsDiag( "Audio WebSocket auth_request sent" );
     }
-    
+
+    // Placeholder for Phase 3 banner UI. Phase 2 logs the trip and surfaces
+    // the existing "Disconnected" status pill via onStateChange. The banner
+    // DOM element + wiring lands in Phase 3.
+    _showCircuitBanner( detail ) {
+        this.error( `[ws-circuit-open] ${detail.name || "?"} — attempts=${detail.attempts || 0}${detail.reason ? " reason=" + detail.reason : ""}` );
+        // Phase 3 will: show #ws-circuit-banner, enable Retry-now button.
+    }
+
     // ========================================
     // MESSAGE HANDLERS
     // ========================================
@@ -2335,7 +2329,8 @@ class NotificationsUI {
                     this.wsDiag( `Queue WebSocket authenticated for user: ${envelope.user_id}` );
                     this.updateStatus( "queue-ws-status", "Connected", "good" );
                     this.updateStatus( "auth-status", `Authenticated as ${envelope.user_id}`, "good" );
-                    this.connectionRetries = 0; // Reset backoff on successful auth
+                    // Phase 2: the per-channel retry counter reset is handled by the
+                    // WSChannel itself on auth_success — no shared counter to zero here.
 
                     // Store the server-provided user ID for notifications
                     this.notificationState.userId = envelope.user_id;
@@ -2357,9 +2352,13 @@ class NotificationsUI {
 
                         this.refreshAccessToken().then( ( success ) => {
                             if ( success ) {
-                                this.log( "Token refreshed - reconnecting WebSockets" );
+                                this.log( "Token refreshed - reconnecting WebSockets via manualRetry" );
                                 this.authRefreshAttempted = false;
-                                this.connectWebSockets();
+                                // Phase 2: bypass the channel's circuit breaker via
+                                // manualRetry() rather than calling connectWebSockets()
+                                // (which would no-op because the channels already exist).
+                                if ( this.queueChannel ) this.queueChannel.manualRetry();
+                                if ( this.audioChannel ) this.audioChannel.manualRetry();
                             } else {
                                 this.error( "Token refresh failed - redirecting to login" );
                                 this.handleAuthFailure();
@@ -2371,7 +2370,7 @@ class NotificationsUI {
                         this.handleAuthFailure();
                     }
                     break;
-                    
+
                 case "connect":
                     this.log( `Queue WebSocket connected: ${envelope.message}` );
                     break;
@@ -2473,9 +2472,11 @@ class NotificationsUI {
 
                         this.refreshAccessToken().then( ( success ) => {
                             if ( success ) {
-                                this.log( "Token refreshed - reconnecting WebSockets" );
+                                this.log( "Token refreshed - reconnecting WebSockets via manualRetry" );
                                 this.authRefreshAttempted = false;
-                                this.connectWebSockets();
+                                // Phase 2: same manualRetry pattern as the queue auth_error path.
+                                if ( this.queueChannel ) this.queueChannel.manualRetry();
+                                if ( this.audioChannel ) this.audioChannel.manualRetry();
                             } else {
                                 this.error( "Token refresh failed - redirecting to login" );
                                 this.handleAuthFailure();
@@ -2519,15 +2520,15 @@ class NotificationsUI {
     }
     
     async handlePing( connectionType ) {
-        const ws = connectionType === "queue" ? this.queueWS : this.audioWS;
-
-        // Send pong response (existing behavior)
-        if ( ws && ws.readyState === WebSocket.OPEN ) {
-            const pongMessage = {
+        // Phase 2: `channel.send()` no-ops when state is not CONNECTED, so
+        // the pre-existing readyState check is no longer needed. The channel
+        // facade encapsulates that guard.
+        const channel = connectionType === "queue" ? this.queueChannel : this.audioChannel;
+        if ( channel ) {
+            channel.send( {
                 type: "sys_pong",
                 timestamp: new Date().toISOString()
-            };
-            ws.send( JSON.stringify( pongMessage ) );
+            } );
         }
 
         // NEW: Piggyback token freshness check on heartbeat
@@ -5633,27 +5634,11 @@ class NotificationsUI {
     // ========================================
     // CONNECTION MANAGEMENT
     // ========================================
+    // (The legacy retry-helper was removed in Phase 2 of the WS reconnect
+    // circuit-breaker milestone — each WSChannel owns its own per-channel
+    // backoff schedule + 20-attempt circuit breaker, and the watchdog
+    // delegates to channel._tickWatchdog() rather than scheduling externally.)
 
-    scheduleReconnect( target = 'both' ) {
-        if ( this.isConnecting ) {
-            return; // Already attempting to reconnect
-        }
-
-        this.connectionRetries++;
-        // Exponential backoff: 2s, 4s, 8s, 16s, 30s... then cap at 60s after 10 failures
-        const maxDelay = this.connectionRetries > 10 ? 60000 : 30000;
-        const delay = Math.min( 1000 * Math.pow( 2, this.connectionRetries ), maxDelay );
-
-        this.wsDiag( `Scheduling reconnect attempt #${this.connectionRetries} for ${target} in ${delay}ms` );
-
-        setTimeout( () => {
-            this.isConnecting = true;
-            this.connectWebSockets( target ).finally( () => {
-                this.isConnecting = false;
-            });
-        }, delay );
-    }
-    
     // ========================================
     // AUTHENTICATION HELPERS (from original queue.js)
     // ========================================

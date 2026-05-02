@@ -124,6 +124,10 @@ export function createChannel( opts ) {
     const onAuthSuccess = typeof opts.onAuthSuccess === "function" ? opts.onAuthSuccess : null;
     const onCircuitOpen = typeof opts.onCircuitOpen === "function" ? opts.onCircuitOpen : null;
     const onStateChange = typeof opts.onStateChange === "function" ? opts.onStateChange : null;
+    // Phase 2 extension: authMessage builder. Channel calls authMessage() once on
+    // AUTHENTICATING and sends the JSON-stringified result via the live socket.
+    // If absent, channel does nothing — consumer is responsible for sending auth.
+    const authMessage   = typeof opts.authMessage   === "function" ? opts.authMessage   : null;
     const WSCtor        = opts.WebSocketCtor || ( typeof window !== "undefined" ? window.WebSocket : undefined );
 
     if ( typeof WSCtor !== "function" ) {
@@ -241,6 +245,17 @@ export function createChannel( opts ) {
             wasEverOpen = true;
             cancelHandshake();
             setState( STATE.AUTHENTICATING );
+            // Phase 2 extension: send the auth_request the moment we have an
+            // OPEN socket. The state-machine view is "AUTHENTICATING means
+            // we've sent auth and are awaiting auth_success."
+            if ( authMessage && ws && ws.readyState === WS_OPEN ) {
+                let payload = null;
+                try { payload = authMessage(); } catch ( e ) { /* swallow builder errors */ }
+                if ( payload !== null && payload !== undefined ) {
+                    try { ws.send( typeof payload === "string" ? payload : JSON.stringify( payload ) ); }
+                    catch ( e ) { /* socket may have raced to closing — onclose handles it */ }
+                }
+            }
         };
 
         socket.onmessage = function ( ev ) {
@@ -375,6 +390,19 @@ export function createChannel( opts ) {
     }
 
     // -----------------------------------------------------------------------
+    // send — public proxy to ws.send. Returns true if the payload was handed
+    // to a live socket; false if the channel is not OPEN. Caller decides
+    // whether to retry / queue. Phase 2 extension.
+    // -----------------------------------------------------------------------
+    function send( payload ) {
+        if ( !ws ) return false;
+        if ( ws.readyState !== WS_OPEN ) return false;
+        const data = typeof payload === "string" ? payload : JSON.stringify( payload );
+        try { ws.send( data ); return true; }
+        catch ( e ) { return false; }
+    }
+
+    // -----------------------------------------------------------------------
     // close — external close. Releases socket, does NOT schedule reconnect.
     // -----------------------------------------------------------------------
     function close() {
@@ -467,6 +495,7 @@ export function createChannel( opts ) {
         manualRetry   : manualRetry,
         close         : close,
         destroy       : destroy,
+        send          : send,
         get state()    { return state;    },
         get attempts() { return attempts; },
         get name()     { return name;     },
