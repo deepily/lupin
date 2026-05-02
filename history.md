@@ -133,6 +133,22 @@
 **Files**: `src/fastapi_app/static/html/notifications.html`, `src/fastapi_app/static/css/notifications.css`, `src/fastapi_app/static/js/notifications.js`, `src/tests/ws_channel_browser/{__init__.py,test_ws_circuit_banner.py}`, `src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/93-phase-3-execution-log.md`, `history.md`, `.claude-session.md`.
 **Commit**: b4eb821
 
+#### Checkpoint | 2026.05.02 15:35 | WS reconnect circuit-breaker Phase 4 — page lifecycle + 6 lifecycle tests
+
+**Phase 4 deliverables** (Page Lifecycle wiring on the consumer side + the Layer-3 tests that verify it):
+
+- **MODIFIED** `src/fastapi_app/static/js/ws-channel.js` — added a Phase 4 `manualRetry` no-op-on-CONNECTED guard (`if (state === STATE.CONNECTED) return;`) per `05-phase-4-page-lifecycle.md` §Risks row 3 mitigation. Without this, an `online` event firing on a flaky network mid-session would cleanup-and-reconnect already-OPEN channels, breaking live traffic for no benefit. The guard does NOT fire from OPEN_CIRCUIT (Phase 1 test 11 still works) or BACKOFF (the half-open probe fast-paths out).
+- **MODIFIED** `src/fastapi_app/static/js/notifications.js` — added `_attachPageLifecycle()` method per Phase 4 §Lifecycle Wiring: idempotent (early-return on `_pageLifecycleAttached` flag); wires `visibilitychange→visible` to `connect()` on both channels; `pageshow.persisted=true` to `manualRetry()` on both; `pagehide` to `close()` on both; Chrome `freeze`/`resume` to `close()`/`connect()` respectively; `online` to `manualRetry()` on both; `offline` to `close()` on both. Init wiring at `:409` calls `_attachPageLifecycle()` AFTER `connectWebSockets()` so both `this.queueChannel` and `this.audioChannel` exist when handlers reference them. Cross-channel calls are safe because the channels' own auto-attached listeners + the new manualRetry guard make every operation idempotent.
+- **NEW** `src/tests/ws_channel_browser/test_ws_lifecycle.py` — 6 Pytest+Playwright Layer-3 tests against `:7999`, same harness shape as the Phase 3 banner tests but with a richer `MockWebSocket` that tracks `instances` and exposes a `_close(code)` driver. Each test navigates to `/app/notifications`, waits for both `_circuitBannerWired` AND `_pageLifecycleAttached` flags, then dispatches a DOM event and asserts channel state / instance counts. Tests: `test_visibility_hidden_pauses_connect`, `test_visibility_visible_resumes_connect`, `test_pageshow_persisted_full_reset_lifecycle`, `test_offline_closes_sockets`, `test_online_triggers_retry_lifecycle`, `test_pagehide_closes_for_bfcache`.
+- **NEW** `src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/94-phase-4-execution-log.md` — Phase 4 execution log: pre-phase audit (init-order site resolved at phase entry; Phase 1 over-implementation acknowledged; manualRetry idempotency gap addressed), structural review against 12 spec invariants (all ✅), test results summary, Phase 4 sign-off.
+
+**Verification (8/8 green)**: grep `_attachPageLifecycle|visibilitychange|pageshow|pagehide|freeze|resume` in `notifications.js` ✅ · `test_visibility_hidden_pauses_connect` ✅ · `test_visibility_visible_resumes_connect` ✅ · `test_pageshow_persisted_full_reset_lifecycle` ✅ · `test_offline_closes_sockets` ✅ · `test_online_triggers_retry_lifecycle` ✅ · `test_pagehide_closes_for_bfcache` ✅ · earlier-phase regression ✅ (Layer-1 20/20 + websocket_smoke 50/50 + Layer-3 banner 4/4 still pass when run alongside the 6 new lifecycle tests; 10/10 combined Layer-3 in 3.37s).
+
+**AI structural review (12/12 invariants)**: every spec row verified against file:line evidence in `94-phase-4-execution-log.md` §AI Structural Review.
+
+**Files**: `src/fastapi_app/static/js/ws-channel.js`, `src/fastapi_app/static/js/notifications.js`, `src/tests/ws_channel_browser/test_ws_lifecycle.py`, `src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/94-phase-4-execution-log.md`, `history.md`, `.claude-session.md`.
+**Commit**: 0ca2eed
+
 ---
 
 ### 2026.05.01 - Session 92ece47c | TODO size-management skill + first archival pass

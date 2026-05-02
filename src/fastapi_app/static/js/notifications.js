@@ -403,6 +403,11 @@ class NotificationsUI {
             // Connect WebSockets
             await this.connectWebSockets();
 
+            // Wire Page Lifecycle events (Phase 4) — must run AFTER channel
+            // construction so this.queueChannel / this.audioChannel exist
+            // when the event handlers reference them. Idempotent.
+            this._attachPageLifecycle();
+
             // Load conversation history (after auth is complete)
             await this.loadConversationHistory();
 
@@ -2377,6 +2382,69 @@ class NotificationsUI {
                 }
             } );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 4 — Page Lifecycle integration. Wires browser lifecycle events
+    // into both WS channels at once. Each channel ALSO auto-attaches its own
+    // listeners at construction (per `ws-channel.js`); the Phase 4 handlers
+    // here orchestrate cross-channel actions and are deliberately idempotent
+    // — `manualRetry()` no-ops when state===CONNECTED, `close()` is a no-op
+    // when state===DISCONNECTED, etc. — so the duplication is benign.
+    //
+    // Init order: must be called AFTER `connectWebSockets()` so that
+    // `this.queueChannel` and `this.audioChannel` exist when handlers fire.
+    //
+    // Spec: src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/
+    //       05-phase-4-page-lifecycle.md §Lifecycle Wiring
+    // -----------------------------------------------------------------------
+    _attachPageLifecycle() {
+        if ( this._pageLifecycleAttached ) return;
+        this._pageLifecycleAttached = true;
+
+        // visibilitychange — re-arm channels' connect when tab becomes visible.
+        // Each channel's internal connect() guards on visibilityState==="hidden"
+        // and no-ops while hidden; we just call .connect() to re-arm on visible.
+        document.addEventListener( "visibilitychange", () => {
+            if ( document.visibilityState === "visible" ) {
+                if ( this.queueChannel ) this.queueChannel.connect();
+                if ( this.audioChannel ) this.audioChannel.connect();
+            }
+        } );
+
+        // pageshow — BFCache restore. Old WS objects are invalid; full reset.
+        window.addEventListener( "pageshow", ( ev ) => {
+            if ( ev && ev.persisted ) {
+                if ( this.queueChannel ) this.queueChannel.manualRetry();
+                if ( this.audioChannel ) this.audioChannel.manualRetry();
+            }
+        } );
+
+        // pagehide — release sockets so this page is BFCache-eligible.
+        window.addEventListener( "pagehide", () => {
+            if ( this.queueChannel ) this.queueChannel.close();
+            if ( this.audioChannel ) this.audioChannel.close();
+        } );
+
+        // Chrome-only freeze/resume (PageLifecycleAPI).
+        document.addEventListener( "freeze", () => {
+            if ( this.queueChannel ) this.queueChannel.close();
+            if ( this.audioChannel ) this.audioChannel.close();
+        } );
+        document.addEventListener( "resume", () => {
+            if ( this.queueChannel ) this.queueChannel.connect();
+            if ( this.audioChannel ) this.audioChannel.connect();
+        } );
+
+        // Network-aware: online → manualRetry; offline → close (release slots).
+        window.addEventListener( "online", () => {
+            if ( this.queueChannel ) this.queueChannel.manualRetry();
+            if ( this.audioChannel ) this.audioChannel.manualRetry();
+        } );
+        window.addEventListener( "offline", () => {
+            if ( this.queueChannel ) this.queueChannel.close();
+            if ( this.audioChannel ) this.audioChannel.close();
+        } );
     }
 
     // ========================================

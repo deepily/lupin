@@ -371,9 +371,18 @@ export function createChannel( opts ) {
     // -----------------------------------------------------------------------
     // manualRetry — user-driven half-open probe. Zeros all retry accounting
     // and immediately attempts a fresh connect.
+    //
+    // Phase 4 idempotency guard: when state === CONNECTED, manualRetry is a
+    // no-op. Rationale per `05-phase-4-page-lifecycle.md` §Risks row 3 — the
+    // `online` event firing on a flaky network mid-session would otherwise
+    // cleanup-and-reconnect already-OPEN channels, breaking live traffic
+    // for no benefit. The guard does NOT fire from OPEN_CIRCUIT (Phase 1
+    // test 11 still works) or from BACKOFF (the half-open probe fast-paths
+    // out of backoff to retry immediately).
     // -----------------------------------------------------------------------
     function manualRetry() {
         if ( destroyed ) return;
+        if ( state === STATE.CONNECTED ) return;
         attempts       = 0;
         recentFailures = [];
         cancelBackoff();
