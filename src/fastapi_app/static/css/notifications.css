@@ -2194,6 +2194,28 @@
             border-color: #212529;
         }
 
+        /* Hide-inactive pill active state — same affordance as focus-active
+         * (high-contrast dark fill) so both pills read consistently when ON.
+         * See: src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md */
+        .cc-strip-toggle[data-hide-inactive="true"] {
+            background: #495057;
+            border-color: #343a40;
+            color: #ffffff;
+            opacity: 1;
+        }
+
+        .cc-strip-toggle[data-hide-inactive="true"]:hover {
+            background: #343a40;
+            border-color: #212529;
+        }
+
+        /* Strip filter: icons whose senderId has no allocated voice persona
+         * disappear from the tray. Independent of [data-focus-hidden] —
+         * either rule can fire display: none, no interaction needed. */
+        .cc-strip-icon[data-inactive-hidden="true"] {
+            display: none;
+        }
+
         /* Focus-mode visibility filter: when focus is ON, every sender
          * card except the focused one is hidden via this attribute. The
          * underlying DOM still receives notifications and persona/conv-mode
@@ -2275,6 +2297,36 @@
             margin-left: 40px;
             flex-direction: row-reverse;
             border-bottom-right-radius: 2px;
+        }
+
+        /* PERSONALESS-CARD BUBBLE FILL (Option 4 — visible gray gradient).
+         *
+         * Personaless = "inactive session": its voice persona has been
+         * deallocated, so neither the card nor the strip icon carries a
+         * persona color. The default `.sender-message.incoming` gradient
+         * uses `rgba(--persona-color-rgb, 248, 249, 250)` at 0.10/0.02
+         * alpha — when the fallback fires, both stops collapse to the same
+         * near-white wash and the conversation pane reads as undifferentiated
+         * wallpaper.
+         *
+         * Override personaless cards' incoming bubbles with a real, visible
+         * vertical gray gradient (Bootstrap gray-200 → gray-100). Same bubble
+         * size, same content, same date/abstract icon layout — only the fill
+         * is changed. Each individual bubble now has internal gradient depth
+         * that gives the eye structure without striping or row separators.
+         *
+         * Gating mechanic: createSenderCard + _setPersonaBadgeOnCard
+         * setProperty/removeProperty --persona-color on .sender-card.style
+         * (notifications.js:10227, 8927). The substring match is the same
+         * signal used by every other fallback rule in this file.
+         *
+         * See: src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md §3.2 */
+        .sender-card:not([style*="--persona-color"]) .sender-message.incoming {
+            background: linear-gradient(
+                to bottom,
+                #e9ecef,
+                #f8f9fa
+            );
         }
 
         .sender-message.outgoing .message-time {

@@ -1,5 +1,92 @@
 # Lupin Project History
 
+### 2026.05.02 - Session 4ede5bad | Bug Fix Mode | Focus-tray inactive-session toggle + bubble differentiation
+
+**Context**: User opened `/plan-bug-fix-mode-start` in conversation mode with a two-tweak bundle against the CC notifications focus tray + conversation pane. Tweak 1: add a toggle pill in `#cc-session-strip` that hides strip icons for sessions whose voice persona has been deallocated (the "slate-gray, no persona" fallback — surfaces organically because `senderPersonaMap.get(senderId)` returns null and the CSS rule `background: var(--persona-color, #6c757d)` falls back to slate). Tweak 2: differentiate notification bubbles in the conversation pane for personaless cards (`.sender-message.incoming` was rendering as a flat near-white wash with no inter-bubble distinction).
+
+**Accomplishments**:
+
+### Fix 1: Hide-inactive toggle in focus tray (Tweak 1)
+
+- **Source**: USER-REQUESTED 2026-05-02 ~11:30 EDT.
+- **Active-session signal**: no new server endpoint needed — `senderPersonaMap.has(senderId)` is the canonical client-side signal (server stops stamping `voice_persona` on outbound envelopes when the bridge dies; `voice_persona_released` WS event removes the map entry; same signal already drives the CSS slate-gray fallback).
+- **Fix**: New `#cc-hide-inactive-toggle` button in `#cc-session-strip`. State persists in `localStorage` (`notifications_cc_hide_inactive_strip`). Helpers `_isStripIconInactive`, `_applyHideInactiveStripFilter`, `_setHideInactiveStrip`, `_bindHideInactiveToggle`. Filter re-applied in three places: end of `_addStripIcon` (one-icon update), inside `voice_persona_assigned` case (becomes-active → un-hide), inside `voice_persona_released` case (becomes-inactive → hide). CSS rule `.cc-strip-icon[data-inactive-hidden="true"] { display: none; }` is independent of the existing `[data-focus-hidden]` rule so focus-mode + hide-inactive coexist without interaction.
+
+### Fix 2: Bubble differentiation for personaless cards (Tweak 2)
+
+- **Iteration 1 — Option 1 (subtle)**: Tried a 1-px hairline between adjacent `.sender-message` siblings + alternating-row tint on `.incoming:nth-child(even)`, gated to `.sender-card:not([style*="--persona-color"])`. **User vetoed** — wanted same balloon size/format/icon layout, just a more visible inactive-state fill.
+- **Iteration 2 — Option 4 (gray gradient)**: Removed hairline + zebra rules. Replaced with a single rule on personaless cards: `.sender-card:not([style*="--persona-color"]) .sender-message.incoming { background: linear-gradient(to bottom, #e9ecef, #f8f9fa); }` (Bootstrap gray-200 → gray-100). Same bubble size, same date/abstract icon layout — only the fill changes. Persona-color cards retain their existing tinted gradient untouched.
+- **Substring-gating sweep**: confirmed `_setPersonaBadgeOnCard` (notifications.js:8897) calls `card.style.setProperty("--persona-color", ...)` on live persona arrival and `removeProperty("--persona-color")` on release, so the `:not([style*="--persona-color"])` selector responds correctly to runtime style mutation. No sync between persona events and CSS gating needed beyond what's already wired.
+
+### Fix 3 (caught during Iteration 2 review): Strip icon ordering reversed on initial page load
+
+- **Symptom**: with the 24-hour history filter showing all sessions, the strip rendered oldest-leftmost / newest-rightmost. Counterintuitive.
+- **Root cause**: `_addStripIcon` always prepended (`insertBefore(firstChild)`). During initial-page-load (where the API returns sender cards newest-first and `createSenderCard` is called once per sender), each prepend pushed the previously-first icon rightward — last-processed (oldest) ended up leftmost.
+- **Fix**: `_addStripIcon` now takes `insertAtTop` (default `true`). `createSenderCard` passes its own `insertAtTop` flag down. Initial load → `false` → `appendChild` → API order preserved (newest leftmost). Runtime arrivals → `true` → `insertBefore(firstChild)` → fresh icon at leftmost. Mirrors the existing sender-card list pattern (`notifications.js:10287-10296`).
+
+### Polish: pill order swap
+
+- User asked to put the Focus pill first, the All pill second (left to right). Single HTML edit reordered the two `<button>` siblings inside `#cc-session-strip`.
+
+### Findings: dedup hole in `addNotificationToSenderGroup` (filed for later, no fix this session)
+
+- User reported the closing notify text rendered TWICE in the same minute. Investigated — single MCP server, single CC listener, single `_notify_impl` call, single HTTP POST. **Root cause hypothesis**: `addNotificationToSenderGroup` (notifications.js:10065) blindly pushes to `dateGroup` and calls `addMessageToDateAccordion` without an `id_hash` dedup. Only the WS arrival path at `:5445` dedups. Other call sites that bypass the dedup: `loadSenderConversation` (`:11144`), `loadInitialNotifications` (`:11842`), the high-priority TTS-activation render at `:13007`. Conversation mode forces `priority=high` (`cosa_voice_mcp.py:788-789`), routing through the TTS-activation path — so any second delivery of the same envelope (re-fetch on tab refocus / on reconnect after one of the user's ongoing WS-reconnect-loop drops / a second tab) renders again. Suggested fix shape: drop a `dateGroup.some(n => n.id_hash === notification.id_hash)` early-return at the top of `addNotificationToSenderGroup`. Filed for the user to approve as a follow-up.
+
+### Files modified/created (Lupin parent only — no CoSA touched)
+
+- `src/fastapi_app/static/html/notifications.html` — new `#cc-hide-inactive-toggle` pill; pill order now Focus then All.
+- `src/fastapi_app/static/js/notifications.js` — `CC_HIDE_INACTIVE_KEY` localStorage key + `ccHideInactiveStrip` state + bootstrap mirror; `_bindHideInactiveToggle`, `_isStripIconInactive`, `_applyHideInactiveStripFilter`, `_setHideInactiveStrip`; `_addStripIcon` takes `insertAtTop` param; `voice_persona_assigned` and `voice_persona_released` re-apply filter; `createSenderCard` propagates `insertAtTop` to `_addStripIcon`.
+- `src/fastapi_app/static/css/notifications.css` — `[data-hide-inactive="true"]` toggle-active styling; `[data-inactive-hidden="true"]` `display: none`; gray-gradient rule on `.sender-card:not([style*="--persona-color"]) .sender-message.incoming`.
+- `src/tests/e2e_ui/test_cc_session_strip_and_focus.py` — `TestHideInactiveToggle` (5 cases), `TestPersonalessBubbleGradient` (3 cases), `TestStripOrdering` (2 cases). Helpers `_click_hide_inactive_toggle`, `_seed_persona`, `_release_persona` (mirror real WS event paths).
+- `src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md` (NEW) — full design with active-session detection rationale, 3 sweep tables, edge-case handling, iteration history (Option 1 → Option 4), strip-ordering fix note, 10-case test plan.
+- `src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/90-execution-log.md` (NEW) — phased checklist + iteration-2 changelog + surprises section.
+- `bug-fix-queue.md`, `history.md`, `.claude-session.md` — tracking files.
+
+### Verification
+
+- `pytest src/tests/unit/` — 3942 passed, 1 xfailed, 0 failed (132s, no regressions from JS/CSS/HTML edits).
+- `run-websocket-smoke-tests.sh` — 50/50 passed (44s, two runs).
+- JS `new Function(src)` parse — clean.
+- Test file `py_compile` — clean.
+- E2E (`TestHideInactiveToggle` + `TestPersonalessBubbleGradient` + `TestStripOrdering`) — :8000-only per testing-venues rubric, **deferred** until user schedules a slot via `/api/test-suite/submit`.
+- Visual check on `:7999` — user reviewed; both tweaks signed off after iteration 2.
+
+### Caveats / Notes
+
+- **`addNotificationToSenderGroup` dedup hole** is the most likely cause of the user's twice-rendered notify card. Not fixed this session per user instruction ("look into why that happened" — investigation only, no code changes).
+- The substring-match selector `:not([style*="--persona-color"])` is the same gating signal as every existing fallback in the file. If a future inline-style property is added to `.sender-card`, the gating may need updating.
+- Conversation mode was active throughout the session; per user-only-initiation rule I did NOT toggle it.
+
+#### Checkpoint 1 | 2026.05.02 12:30 EDT | Both tweaks shipped, tests added, dedup hole filed
+
+**Files**: notifications.{html,js,css}, test_cc_session_strip_and_focus.py, 01-design.md + 90-execution-log.md (NEW), bug-fix-queue.md, history.md, .claude-session.md
+**Commit**: b791383
+
+---
+
+### 2026.05.02 - Session 0022baba | Bug Fix Mode | WebSocket reconnect circuit breaker
+
+**Context**: User opened a session with `/plan-bug-fix-mode-start` and almost immediately reported a wall of browser console errors against the notifications UI — `ERR_CONNECTION_RESET` on multiple HTTP endpoints (`/api/notify/response`, `/api/get-queue/done`, `/api/get-queue/dead`, `/api/job-history`, `/api/stats/time-saved/global`) plus repeated WS connect failures (`code=1006 reason=`) on both `/ws/queue/foolish%20goat` and `/ws/audio/slow%20zebra`. Server-side probes from the host (`curl :7999/health` 200 in 1.3 ms; `docker ps` healthy 24min uptime; `active_connections = ['cc-listener-0022baba']` only) ruled out a Lupin server outage. User then surfaced the load-bearing clue: "And a ton of these from my tunneling app, ssh: `accept: Too many open files`". After a `ulimit -n 8192` bump did NOT recover the page, the symptom string flipped from bare `failed:` to `failed: Insufficient resources` with the reconnect counter past 461 attempts — diagnostic that confirmed the renderer (Chrome's per-tab ~255 WS slot pool) was now the binding constraint, not the SSH layer. User killed the tab, opened a fresh one; both WS authenticated on first attempt and sys_ping flowing.
+
+**Fixes (none applied yet)**:
+
+### Fix 1 (planned): WebSocket reconnect circuit breaker
+
+- **Source**: USER-REPORTED 2026-05-02 ~10:30 EDT during session-start. Diagnosed as the real root cause of the deferred 2026-04-22 entry "ERR_CONNECTION_RESET + audio WS connect failure" (now superseded in `bug-fix-queue.md`).
+- **Symptom**: notifications.js reconnect logic schedules `setTimeout` reconnects forever with backoff capped at 60s. When the network is genuinely down (SSH tunnel EMFILE today; could be any sustained outage), cumulative attempts saturate Chrome's renderer WS slot pool (~255), error reason flips to `Insufficient resources`, and the loop digs deeper instead of recovering. Only killing the tab process drains the renderer counters.
+- **Required behavior**: (1) cap consecutive failed-reconnect attempts per channel (proposed: 20), (2) on threshold breach STOP scheduling reconnects for that channel and surface a "Connection lost — refresh to retry" banner, (3) detect `Insufficient resources` in the WS error event explicitly and escalate immediately (don't wait for threshold), (4) reset attempt counter on `auth_success` so transient drops don't accumulate forever.
+- **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js` — `scheduleReconnect` (~5628), `connectQueueWebSocket` close handler (~2178), `connectAudioWebSocket` close handler (~2228), `connectWebSockets` (~2141-2150), `checkWebSocketHealth` (~907).
+- **Plan**: Phase 0 = serialize design doc to `src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/01-design.md`. Phase 1 = implement circuit breaker. Phase 2 = unit tests + integration test simulating rapid 1006s asserting the cap fires. Phase 3 = wrap + commit.
+- **Test**: [pending]
+- **Commit**: [pending]
+
+### Caveats / Notes
+
+- Fresh tab also showed two pre-existing 401s on `/api/stats/time-saved` and `/api/stats/time-saved/global`. Unrelated to the WS circuit breaker — separate concern, possibly admin-stats-endpoint auth gate. Not filed as a separate bug yet (need to confirm whether it's expected for non-admin users; user IS admin per `admin: true` in console).
+- Out of scope for the circuit breaker fix: SSH tunnel FD-exhaustion remediation. That belongs in the user's ssh config (`ulimit -n 8192` + `ServerAliveInterval 30` / `ServerAliveCountMax 3`), not Lupin code.
+
+---
+
 ### 2026.05.01 - Session 92ece47c | TODO size-management skill + first archival pass
 
 **Context**: User flagged TODO.md was at 31.5k tokens / 126% of the 25k limit at session-start. Global Claude config + planning-is-prompting workflow had no size-management protocol for TODO.md (only history.md did). User approved adopting the history.md adaptive-archival pattern, with one structural adjustment for TODO's status × age semantics.

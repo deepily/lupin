@@ -163,6 +163,7 @@ class NotificationsUI {
         this.RESUME_EFFORT_PREF_KEY = 'notifications_resume_effort';  // Default thinking-effort for stalled-job resume
         this.CONVERSATION_MODES_KEY = 'notifications_conversation_modes';  // Per-session conversation/notification toggle (object keyed by session_id)
         this.CC_FOCUS_STATE_KEY     = 'notifications_cc_focus_state';      // CC session focus mode: { enabled, focused_sender_id }
+        this.CC_HIDE_INACTIVE_KEY   = 'notifications_cc_hide_inactive_strip';  // Strip filter: hide icons for sessions with no allocated voice persona
         this.CURRENT_VERSION = '2.0.0'; // Increment to invalidate old cache - date grouping release
 
         // Session names cache (loaded from localStorage)
@@ -190,6 +191,20 @@ class NotificationsUI {
             if ( toggle ) {
                 toggle.setAttribute( "data-focus-active", "true" );
                 toggle.textContent = "👁 Focus: ON";
+            }
+        }
+        // Strip "hide inactive" filter: tray icons whose session has no allocated
+        // voice persona (deallocated bridges) get data-inactive-hidden="true" and
+        // disappear from the tray. Driven by the same signal that drives the
+        // CSS slate-gray fallback (--persona-color absent).
+        // Design: src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md
+        this.ccHideInactiveStrip = localStorage.getItem( this.CC_HIDE_INACTIVE_KEY ) === "true";
+        this._bindHideInactiveToggle();
+        if ( this.ccHideInactiveStrip ) {
+            const toggle = document.getElementById( "cc-hide-inactive-toggle" );
+            if ( toggle ) {
+                toggle.setAttribute( "data-hide-inactive", "true" );
+                toggle.textContent = "👁 Active";
             }
         }
 
@@ -5393,6 +5408,9 @@ class NotificationsUI {
                     // Layer A: patch any existing card header in place so the
                     // badge appears without a re-render. No-op when card not yet built.
                     this._setPersonaBadgeOnCard( notification.sender_id, notification.voice_persona );
+                    // Re-evaluate strip filter: this senderId may have just become
+                    // active and (if the toggle is on) needs to un-hide.
+                    this._applyHideInactiveStripFilter();
                 }
                 return;
 
@@ -5401,6 +5419,9 @@ class NotificationsUI {
                     this.senderPersonaMap.delete( notification.sender_id );
                     // Layer A: remove the badge from any existing card header
                     this._setPersonaBadgeOnCard( notification.sender_id, null );
+                    // Re-evaluate strip filter: this senderId is now inactive
+                    // and (if the toggle is on) should be hidden.
+                    this._applyHideInactiveStripFilter();
                 }
                 return;
 
@@ -8950,11 +8971,17 @@ class NotificationsUI {
      * twice for the same senderId is a no-op (the existing icon is
      * promoted to leftmost via _promoteStripIcon if you want that effect).
      *
+     * @param {boolean} insertAtTop — true for runtime adds (newest leftmost),
+     *   false for initial-load adds (the API delivers cards newest-first;
+     *   appending preserves that order in the strip). Mirrors the
+     *   sender-card list's `insertAtTop` semantics so strip ordering
+     *   tracks the list ordering.
+     *
      * Requires:
      *   - senderId is a non-empty string
      *   - This is a claude.code session (caller filters)
      */
-    _addStripIcon( senderId, projectName, persona, sessionId ) {
+    _addStripIcon( senderId, projectName, persona, sessionId, insertAtTop = true ) {
         const iconsContainer = document.getElementById( "cc-strip-icons" );
         const strip          = document.getElementById( "cc-session-strip" );
         if ( !iconsContainer || !strip ) return;
@@ -9002,8 +9029,11 @@ class NotificationsUI {
             this._handleStripIconClick( senderId );
         } );
 
-        // Insert at leftmost (newest icon = newest activity).
-        if ( iconsContainer.firstChild ) {
+        // Initial load: append in the order createSenderCard was called
+        // (the senders endpoint returns newest-first), so the strip mirrors
+        // the list ordering — newest leftmost. Runtime: prepend so a fresh
+        // arrival lands at leftmost regardless of existing ordering.
+        if ( insertAtTop && iconsContainer.firstChild ) {
             iconsContainer.insertBefore( icon, iconsContainer.firstChild );
         } else {
             iconsContainer.appendChild( icon );
@@ -9012,6 +9042,13 @@ class NotificationsUI {
         // First icon → reveal the strip.
         if ( strip.hasAttribute( "hidden" ) ) {
             strip.removeAttribute( "hidden" );
+        }
+
+        // Honor the hide-inactive toggle for this freshly-inserted icon.
+        // Cheap one-icon walk via the same helper used for bulk re-apply.
+        if ( this.ccHideInactiveStrip ) {
+            const shouldHide = this._isStripIconInactive( senderId );
+            if ( shouldHide ) icon.setAttribute( "data-inactive-hidden", "true" );
         }
     }
 
@@ -9314,6 +9351,72 @@ class NotificationsUI {
             ev.stopPropagation();
             this._handleStripToggleClick();
         } );
+    }
+
+    /**
+     * Wire the hide-inactive toggle pill once. Mirrors _bindStripToggle.
+     */
+    _bindHideInactiveToggle() {
+        const toggle = document.getElementById( "cc-hide-inactive-toggle" );
+        if ( !toggle ) return;
+        toggle.addEventListener( "click", ( ev ) => {
+            ev.stopPropagation();
+            this._setHideInactiveStrip( !this.ccHideInactiveStrip );
+        } );
+    }
+
+    /**
+     * Inactive predicate for a strip-icon's senderId.
+     *
+     * "Inactive" on the frontend == no allocated voice persona for this sender.
+     * The cosa-voice bridge file owns persona allocation; when the bridge dies
+     * the server stops stamping voice_persona on outbound notifications and the
+     * client clears senderPersonaMap on the voice_persona_released event. The
+     * same signal drives the CSS slate-gray fallback (--persona-color absent
+     * → background falls back to #6c757d at notifications.css:2044).
+     */
+    _isStripIconInactive( senderId ) {
+        return !this.senderPersonaMap.has( senderId );
+    }
+
+    /**
+     * Apply or clear data-inactive-hidden across every strip icon based on
+     * the current ccHideInactiveStrip flag. Called on toggle click, on
+     * _addStripIcon (single-icon update), and on persona-assigned/released
+     * WS events (state-change update).
+     */
+    _applyHideInactiveStripFilter() {
+        const icons = document.querySelectorAll( "#cc-strip-icons .cc-strip-icon" );
+        icons.forEach( ( icon ) => {
+            const senderId = icon.getAttribute( "data-sender-id" );
+            if ( !senderId ) return;
+            const shouldHide = this.ccHideInactiveStrip && this._isStripIconInactive( senderId );
+            if ( shouldHide ) {
+                icon.setAttribute( "data-inactive-hidden", "true" );
+            } else {
+                icon.removeAttribute( "data-inactive-hidden" );
+            }
+        } );
+    }
+
+    /**
+     * Update the hide-inactive flag, persist it, mirror the toggle pill's
+     * visual state, and re-apply the filter to existing icons.
+     */
+    _setHideInactiveStrip( enabled ) {
+        this.ccHideInactiveStrip = !!enabled;
+        try {
+            localStorage.setItem( this.CC_HIDE_INACTIVE_KEY, String( this.ccHideInactiveStrip ) );
+        } catch ( err ) {
+            this.error( "Failed to persist cc hide-inactive state:", err );
+        }
+        const toggle = document.getElementById( "cc-hide-inactive-toggle" );
+        if ( toggle ) {
+            toggle.setAttribute( "data-hide-inactive", String( this.ccHideInactiveStrip ) );
+            toggle.textContent = this.ccHideInactiveStrip ? "👁 Active" : "👁 All";
+        }
+        this._applyHideInactiveStripFilter();
+        this.log( `[STRIP] hide-inactive → ${this.ccHideInactiveStrip ? "ON" : "OFF"}` );
     }
 
     /**
@@ -10302,7 +10405,10 @@ class NotificationsUI {
         //    user gets peripheral awareness that a new session just appeared.
         this._applyFocusHiddenToCard( card, senderId );
         if ( isCCSession ) {
-            this._addStripIcon( senderId, projectName, persona, sessionId );
+            // insertAtTop drives BOTH the sender-card list ordering AND the
+            // strip ordering — initial-load passes false (preserve API
+            // order, newest-first), runtime passes true (newest leftmost).
+            this._addStripIcon( senderId, projectName, persona, sessionId, insertAtTop );
             if ( this.ccFocusState.enabled
                  && this.ccFocusState.focused_sender_id !== senderId ) {
                 const icon = document.getElementById( this._stripIconIdFor( senderId ) );

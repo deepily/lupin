@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-05-01T15:53:00-04:00
+**Last Updated**: 2026-05-02T10:50:00-04:00
 
 ---
 
@@ -56,6 +56,8 @@
 | ba53b0d2 | 2026-04-28T21:25:00 | 2026-04-28T21:50:00 | closed |
 | 31172845 | 2026-05-01T11:00:00 | 2026-05-01T11:00:00 | active |
 | a6b318ea | 2026-05-01T15:53:00 | 2026-05-01T17:35:00 | closed |
+| 0022baba | 2026-05-02T10:50:00 | 2026-05-02T10:50:00 | active |
+| 4ede5bad | 2026-05-02T11:30:00 | 2026-05-02T11:30:00 | active |
 
 ---
 
@@ -95,6 +97,7 @@
   - **Update 2026-04-22 15:26 EDT**: a second ERR_CONNECTION_RESET observed on `POST /auth/login` (totally unrelated route). Direct Python probe to the SAME endpoint at the same time returned a clean `401 Invalid email or password` in 14ms — server is healthy. Strongly suggests stale HTTP keep-alive TCP sockets in the browser after uvicorn auto-reload dropped connections during this session's `notifications.js` edits.
   - **Repro gate before investing investigation time**: (a) hard-refresh the page (Ctrl+Shift+R), (b) let :7999 sit idle with no source edits for 60+ seconds, (c) retry. If ERR_CONNECTION_RESET still appears → real bug, investigate. If not → close as "transient stale-keepalive artifact from auto-reload", no code bug.
   - **Deferred until**: session 9b840935's main fix is wrapped + committed, then revisit with the repro gate above.
+  - **Update 2026-05-02 (session 0022baba) — DIAGNOSED + SUPERSEDED**: Reproduced today during session start. Original "transient stale-keepalive" hypothesis was WRONG. Real chain of causation: (1) user's SSH tunnel hit `accept: Too many open files` (EMFILE), (2) tunnel layer aborted TCP handshakes → browser saw `ERR_CONNECTION_RESET` on HTTP and `code=1006 reason=` on WS, (3) `notifications.js` reconnect loop has NO circuit breaker — kept scheduling `setTimeout` reconnects with exponential backoff capped at 60s, (4) cumulative attempts saturated Chrome's renderer-side WS slot pool (~255 per tab), (5) error reason on retries flipped from bare `failed:` to `failed: Insufficient resources`, (6) loop could not self-recover — only killing the tab process drained the renderer counters. Server-side `:7999` was healthy throughout (`curl /health` 200 in 1.3 ms; `active_connections` showed only the CC listener — browser handshakes never reached uvicorn). Repro gate conditions in the bullet above are moot — this reproduces deterministically any time the network drops out long enough. **Real bug filed as new In Progress entry below**: "WebSocket reconnect loop has no circuit breaker..." (owner 0022baba). Closing this 2026-04-22 entry as superseded by that work.
 
 - [x] ~~**DRY refactor: extract emission helper on NotificationFifoQueue**~~ → claimed by 9b840935 on 2026-04-22 (moved to In Progress)
 - [x] ~~**Phase 2 pool: 2 bugs surfaced by 2026-04-24 Live API probe on :7999**~~ → **ROOT-CAUSED + FIXED** in same session (616112aa, 2026-04-24). Root cause: `_process_job(job)` at `running_fifo_queue.py:148` did `running_job = self.head()` instead of using the passed `job` parameter. Pre-Phase-2 (serial agentic processing), `self.head()` coincidentally == the newly-pushed job because agentic jobs always drained the running queue before the next push arrived. Phase 2 submits agentic jobs to a pool and returns immediately, so the running queue can hold MULTIPLE in-flight jobs — `self.head()` then returns the OLDEST job, not the one the consumer just pushed. Consequence: (a) newly-pushed job orphaned in run queue (Bug 2A phantom), (b) older job re-submitted to pool every time a new job arrives (Bug 2B duplicate done-queue entries, one per re-submit). Fix: `running_job = job` (explicit parameter use). Regression test `test_process_job_uses_passed_job_not_queue_head` added to `test_agentic_pool.py` (Session 616112aa). Post-fix Live API probe on :7999 (2026-04-24 14:34) submitted 1 DR dry-run → landed in done queue with exactly 1 copy, run queue clean, no dead-letters, pool-status terminal (inflight=0). Both bugs eliminated.
@@ -154,6 +157,30 @@
   - **Carryovers folded in**: Clusters D + G are unfixed from the 2026-04-29 post-mortem; both re-failed in this run.
   - **Defaults chosen (user away)**: Cluster B → Option B INI-driven; Cluster C → synchronous preflight; Phase 1B → delete the 6 obsolete deep_research_orchestrator non-standard-format tests.
   - **Per memory**: I edit CoSA submodule files; user commits in CoSA session afterward. No auto-commits.
+
+- [ ] **Focus tray: hide-inactive toggle + bubble differentiation for personaless cards** | Owner: 4ede5bad | Since: 2026-05-02T11:30:00-04:00
+  - **Source**: USER-REQUESTED 2026-05-02 ~11:30 EDT. Two-tweak bundle against the CC notifications focus tray + sender-card conversation pane.
+  - **Tweak 1 — hide-inactive toggle**: Add a small toggle pill next to existing focus-mode pill in `#cc-session-strip` that hides strip icons for inactive sessions (those with no `voice_persona` allocated → no `--persona-color` set on card → CSS already falls back to slate-gray `#6c757d`). Toggle state persists in `localStorage`. Reapplies on `_addStripIcon` (new icons obey current toggle), `voice_persona_assigned` (becomes-active), `voice_persona_released` (becomes-inactive).
+  - **Tweak 2 — bubble differentiation for personaless cards** (Option 1 — subtle): In personaless cards (no `--persona-color`), `.sender-message.incoming` flat-vanilla wash leaves the conversation pane indistinguishable bubble-to-bubble. Add a 1-px hairline separator between adjacent bubbles + a barely-visible alternate-row tint, gated to cards without `--persona-color` so persona-color cards keep their existing tinted gradient.
+  - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js` — `_addStripIcon` (~8957), new `_applyHideInactiveStripFilter()` helper, persona-event handlers (~5390-5440), strip-bar HTML init. `src/fastapi_app/static/css/notifications.css` — strip toggle styling, `[data-inactive-hidden]` rule, hairline + zebra rules gated on `:not([style*="--persona-color"])`. `src/fastapi_app/templates/notifications.html` — new toggle button in `#cc-session-strip`. Tests: `src/tests/e2e_ui/test_cc_session_strip_and_focus.py` extended.
+  - **Plan**: Phase 0 = serialize design doc to `src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md`. Phase 1 = Tweak 1 (toggle). Phase 2 = Tweak 2 Option 1 (visual differentiation). Phase 3 = E2E regression coverage. Phase 4 = wrap + commit (pending user sign-off on the look).
+
+- [ ] **WebSocket reconnect loop has no circuit breaker — saturates Chrome renderer with `Insufficient resources` after enough consecutive 1006s** | Owner: 0022baba | Since: 2026-05-02T10:50:00-04:00
+  - **Source**: USER-REPORTED 2026-05-02 ~10:30 EDT during a session-start, reproduced + diagnosed in same conversation. Root cause for the deferred 2026-04-22 entry above (now superseded — see annotation).
+  - **Repro**: Open notifications UI through an SSH tunnel that has hit its FD limit (`accept: Too many open files`). The tunnel layer aborts the TCP handshake; browser sees `ERR_CONNECTION_RESET` on HTTP and `code=1006 reason=` on WS. The notifications.js reconnect logic schedules another `setTimeout` per failure with exponential backoff capped at 60s. Once cumulative attempts exceed Chrome's per-tab ~255 WS slot cap, the renderer starts returning `failed: Insufficient resources` on every new attempt. Loop cannot self-recover because each new attempt deepens the hole; only killing the tab process drains the renderer-side counters.
+  - **Today's evidence** (full transcript in this session's history.md entry):
+    - Browser console showed reconnect attempts climbing past `#461 for audio` and `#454 for queue`, all 60s spacing, all `code=1006`.
+    - Error reason string transitioned from `failed:` (TCP RST/abort from tunnel) to `failed: Insufficient resources` (Chrome renderer-side cap hit).
+    - Server side: `lupin-rest-dev` healthy, `curl :7999/health` returned 200 in 1.3 ms throughout, `active_connections = ['cc-listener-0022baba']` only — browser WS handshakes never reached uvicorn.
+    - User killed the offending tab + opened a fresh tab (with already-bumped `ulimit -n 8192` on the SSH side) → both queue + audio WS authenticated on first attempt, sys_ping flowing both directions. Full recovery, zero retries, env=DEVELOPMENT confirmed.
+  - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js` — `scheduleReconnect` (~line 5628), `connectQueueWebSocket` close handler (~line 2178), `connectAudioWebSocket` close handler (~line 2228), `connectWebSockets` (~lines 2141-2150), `checkWebSocketHealth` (~line 907).
+  - **Required behavior** (circuit breaker design — to be elaborated in `src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/01-design.md`):
+    1. Cap consecutive failed-reconnect attempts (per-channel) at a small, configurable threshold (suggested 20).
+    2. After threshold breach: STOP scheduling reconnects for that channel, surface a user-actionable banner ("Connection lost — refresh to retry"), zero out the per-channel attempt counter so a manual page refresh starts clean.
+    3. Detect `Insufficient resources` in the WS error event explicitly — that condition is unrecoverable without a tab process restart, so escalate immediately (don't wait for the threshold).
+    4. Reset attempt counter on a successful `auth_success` — so transient drops don't accumulate forever.
+  - **Out of scope for this bug**: SSH tunnel FD-exhaustion remediation (host-side `ulimit -n 8192` + `ServerAliveInterval` is the right fix and lives in user's ssh config — not a Lupin code change). Also out of scope: the two `/api/stats/time-saved*` 401s noted today in the fresh-tab console — separate concern, possibly admin-stats-endpoint auth gate.
+  - **Plan**: Phase 0 = serialize design doc. Phase 1 = implement circuit breaker with the 4 behaviors above. Phase 2 = add unit tests for the reconnect-loop state machine; integration test that simulates rapid 1006s and asserts the cap fires. Phase 3 = wrap + commit.
 
 ---
 

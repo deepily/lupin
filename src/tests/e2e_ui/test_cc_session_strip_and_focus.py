@@ -93,10 +93,56 @@ def _click_strip_toggle( page ):
     page.wait_for_timeout( 100 )
 
 
+def _click_hide_inactive_toggle( page ):
+    page.locator( "#cc-hide-inactive-toggle" ).click()
+    page.wait_for_timeout( 100 )
+
+
 def _click_strip_icon( page, sender_id ):
     sanitized = sender_id.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
     page.locator( f"#cc-strip-icon-{sanitized}" ).click()
     page.wait_for_timeout( 100 )
+
+
+def _seed_persona( page, sender_id, color="#E91E63", name="mr radio" ):
+    """
+    Plant a voice persona for a sender so it counts as "active" under the
+    hide-inactive predicate. Mirrors what voice_persona_assigned would do.
+    Also patches the existing card root's --persona-color so the
+    :not([style*="--persona-color"]) gating fires correctly.
+    """
+    page.evaluate(
+        """( args ) => {
+            const ui = window.notificationsUI;
+            const persona = {
+                name         : args.name,
+                display_name : args.name,
+                color        : args.color,
+                voice_id     : "v_test",
+                icon         : "🎙️"
+            };
+            ui.senderPersonaMap.set( args.senderId, persona );
+            // Also patch the card root + strip icon as if voice_persona_assigned fired.
+            ui._setPersonaBadgeOnCard( args.senderId, persona );
+            ui._applyHideInactiveStripFilter();
+        }""",
+        { "senderId": sender_id, "color": color, "name": name }
+    )
+    page.wait_for_timeout( 50 )
+
+
+def _release_persona( page, sender_id ):
+    """Remove a sender's persona, mirroring voice_persona_released."""
+    page.evaluate(
+        """( sid ) => {
+            const ui = window.notificationsUI;
+            ui.senderPersonaMap.delete( sid );
+            ui._setPersonaBadgeOnCard( sid, null );
+            ui._applyHideInactiveStripFilter();
+        }""",
+        sender_id
+    )
+    page.wait_for_timeout( 50 )
 
 
 # ---------------------------------------------------------------------------
@@ -596,3 +642,295 @@ class TestStripCleanupOnBulkDelete:
             "() => document.getElementById( 'cc-session-strip' ).hasAttribute( 'hidden' )"
         )
         assert is_hidden, "Strip should hide after Clear All"
+
+
+# ---------------------------------------------------------------------------
+# Hide-inactive toggle (2026-05-02)
+# Design: src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md
+# ---------------------------------------------------------------------------
+
+class TestHideInactiveToggle:
+    """
+    The hide-inactive pill in #cc-session-strip filters out strip icons whose
+    senderId has no allocated voice persona (deallocated bridges).
+    """
+
+    def test_toggle_pill_present_in_dom( self, notifications_page_with_strip ):
+        page = notifications_page_with_strip
+        assert page.locator( "#cc-hide-inactive-toggle" ).count() == 1, \
+            "Hide-inactive toggle pill should exist alongside the focus toggle"
+
+    def test_toggle_hides_personaless_icons( self, notifications_page_with_strip ):
+        """3 icons seeded; 2 with personas, 1 without. Toggle ON → only the
+        personaless icon picks up data-inactive-hidden."""
+        page = notifications_page_with_strip
+        active_a   = "claude.code@lupin.deepily.ai#aaaaaaaa"
+        active_b   = "claude.code@lupin.deepily.ai#bbbbbbbb"
+        inactive_c = "claude.code@lupin.deepily.ai#cccccccc"
+        for sid in [ active_a, active_b, inactive_c ]:
+            _inject_cc_sender_card( page, sid )
+        _seed_persona( page, active_a, color="#E91E63" )
+        _seed_persona( page, active_b, color="#3F51B5" )
+        # inactive_c gets no persona
+
+        _click_hide_inactive_toggle( page )
+
+        def hidden( sid ):
+            sanitized = sid.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+            return page.evaluate(
+                f"() => document.getElementById( 'cc-strip-icon-{sanitized}' )?.getAttribute( 'data-inactive-hidden' )"
+            )
+
+        assert hidden( active_a   ) is None,   "Active-A icon must NOT be hidden"
+        assert hidden( active_b   ) is None,   "Active-B icon must NOT be hidden"
+        assert hidden( inactive_c ) == "true", "Personaless icon MUST be hidden under filter"
+
+    def test_toggle_persists_across_reload( self, notifications_page_with_strip ):
+        """Toggle ON, hard reload page, assert toggle is still ON and the
+        personaless icon is still hidden."""
+        page = notifications_page_with_strip
+        active   = "claude.code@lupin.deepily.ai#dddddddd"
+        inactive = "claude.code@lupin.deepily.ai#eeeeeeee"
+        _inject_cc_sender_card( page, active )
+        _inject_cc_sender_card( page, inactive )
+        _seed_persona( page, active, color="#E91E63" )
+
+        _click_hide_inactive_toggle( page )
+
+        # Reload the page; localStorage state must survive.
+        page.reload()
+        page.wait_for_load_state( "networkidle" )
+
+        # Re-seed because in-memory state resets on reload.
+        _inject_cc_sender_card( page, active )
+        _inject_cc_sender_card( page, inactive )
+        _seed_persona( page, active, color="#E91E63" )
+
+        toggle_state = page.evaluate(
+            "() => document.getElementById( 'cc-hide-inactive-toggle' ).getAttribute( 'data-hide-inactive' )"
+        )
+        assert toggle_state == "true", "Toggle should persist ON across reload"
+
+        sanitized = inactive.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+        attr = page.evaluate(
+            f"() => document.getElementById( 'cc-strip-icon-{sanitized}' )?.getAttribute( 'data-inactive-hidden' )"
+        )
+        assert attr == "true", "Personaless icon must still be hidden after reload"
+
+    def test_persona_release_hides_icon_when_toggle_on( self, notifications_page_with_strip ):
+        """Active session goes inactive (voice_persona_released path) — its
+        icon must pick up data-inactive-hidden when the toggle is ON."""
+        page = notifications_page_with_strip
+        sid = "claude.code@lupin.deepily.ai#ffffffff"
+        _inject_cc_sender_card( page, sid )
+        _seed_persona( page, sid, color="#E91E63" )
+
+        _click_hide_inactive_toggle( page )
+
+        sanitized = sid.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+        # Before release: icon should NOT be hidden (it has a persona)
+        before = page.evaluate(
+            f"() => document.getElementById( 'cc-strip-icon-{sanitized}' )?.getAttribute( 'data-inactive-hidden' )"
+        )
+        assert before is None
+
+        _release_persona( page, sid )
+
+        after = page.evaluate(
+            f"() => document.getElementById( 'cc-strip-icon-{sanitized}' )?.getAttribute( 'data-inactive-hidden' )"
+        )
+        assert after == "true", "Icon must hide once its persona is released and toggle is ON"
+
+    def test_persona_assign_unhides_icon_when_toggle_on( self, notifications_page_with_strip ):
+        """Inactive icon hidden by toggle — when persona is allocated
+        (voice_persona_assigned path) the data-inactive-hidden attr clears."""
+        page = notifications_page_with_strip
+        sid = "claude.code@lupin.deepily.ai#11111111"
+        _inject_cc_sender_card( page, sid )
+
+        _click_hide_inactive_toggle( page )
+
+        sanitized = sid.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+        before = page.evaluate(
+            f"() => document.getElementById( 'cc-strip-icon-{sanitized}' )?.getAttribute( 'data-inactive-hidden' )"
+        )
+        assert before == "true", "Personaless icon should be hidden under filter"
+
+        _seed_persona( page, sid, color="#FF9800" )
+
+        after = page.evaluate(
+            f"() => document.getElementById( 'cc-strip-icon-{sanitized}' )?.getAttribute( 'data-inactive-hidden' )"
+        )
+        assert after is None, "Icon must un-hide once a persona is allocated"
+
+
+# ---------------------------------------------------------------------------
+# Bubble differentiation for personaless cards (Option 4 — gray gradient, 2026-05-02)
+# Design: src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md §3.2
+# ---------------------------------------------------------------------------
+
+class TestPersonalessBubbleGradient:
+    """
+    Personaless cards (no --persona-color in inline style) render incoming
+    bubbles with a visible vertical gray gradient (gray-200 → gray-100). Same
+    bubble size, same content, same date/abstract icon layout — only the
+    fill changes. Persona-color cards stay untouched.
+    """
+
+    def _seed_incoming_messages( self, page, sender_id, count=2 ):
+        """Inject `count` incoming messages into the sender card's first
+        date accordion so we can assert backgroundImage on real DOM."""
+        page.evaluate(
+            """( args ) => {
+                const ui = window.notificationsUI;
+                const today = new Date().toISOString().slice( 0, 10 );
+                for ( let i = 0; i < args.count; i++ ) {
+                    ui.addMessageToDateAccordion( args.senderId, today, {
+                        id        : `msg-${args.senderId}-${i}`,
+                        id_hash   : `msg-${args.senderId}-${i}`,
+                        timestamp : new Date().toISOString(),
+                        message   : `Message ${i}`,
+                        type      : "task"
+                    }, false );
+                }
+            }""",
+            { "senderId": sender_id, "count": count }
+        )
+        page.wait_for_timeout( 100 )
+
+    def test_personaless_card_incoming_has_gray_gradient( self, notifications_page_with_strip ):
+        """Personaless card's incoming bubbles use a real gray gradient
+        (linear-gradient with two distinct gray stops), not the flat
+        near-white wash that the persona-color fallback produces."""
+        page = notifications_page_with_strip
+        sid = "claude.code@lupin.deepily.ai#22222222"
+        _inject_cc_sender_card( page, sid )
+        # Do NOT seed persona — this card stays personaless.
+        self._seed_incoming_messages( page, sid, count=2 )
+
+        sanitized = sid.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+        bg_image = page.evaluate(
+            f"""() => {{
+                const card = document.getElementById( 'sender-card-{sanitized}' );
+                const msg  = card.querySelector( '.date-accordion-messages .sender-message.incoming' );
+                return msg ? getComputedStyle( msg ).backgroundImage : null;
+            }}"""
+        )
+        assert bg_image, "Personaless incoming bubble must render a backgroundImage"
+        # Real gradient stops, not the same color twice. Browsers serialise
+        # the rule as `linear-gradient(to bottom, rgb(233, 236, 239), rgb(248, 249, 250))`
+        # — assert both Bootstrap gray-200 and gray-100 are present.
+        assert "233, 236, 239" in bg_image, f"gray-200 stop missing: {bg_image!r}"
+        assert "248, 249, 250" in bg_image, f"gray-100 stop missing: {bg_image!r}"
+
+    def test_persona_card_incoming_does_not_get_personaless_gradient( self, notifications_page_with_strip ):
+        """Persona-color cards keep their existing tinted gradient — the
+        personaless override must not fire when --persona-color is set."""
+        page = notifications_page_with_strip
+        sid = "claude.code@lupin.deepily.ai#33333333"
+        _inject_cc_sender_card( page, sid )
+        _seed_persona( page, sid, color="#E91E63" )
+        self._seed_incoming_messages( page, sid, count=2 )
+
+        sanitized = sid.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+        bg_image = page.evaluate(
+            f"""() => {{
+                const card = document.getElementById( 'sender-card-{sanitized}' );
+                const msg  = card.querySelector( '.date-accordion-messages .sender-message.incoming' );
+                return msg ? getComputedStyle( msg ).backgroundImage : null;
+            }}"""
+        )
+        assert bg_image, "Persona-color incoming bubble must still render a backgroundImage"
+        # Persona-color cards retain the original `rgba(--persona-color-rgb, ...)`
+        # gradient. The personaless override stops would inject `233, 236, 239`
+        # — that triplet must be absent.
+        assert "233, 236, 239" not in bg_image, \
+            f"Persona-color card was incorrectly hit by the personaless gradient: {bg_image!r}"
+
+    def test_persona_release_switches_to_gray_gradient( self, notifications_page_with_strip ):
+        """Live persona release reapplies the personaless gradient — single
+        regression test for the substring-gating selector responding to
+        runtime style mutation."""
+        page = notifications_page_with_strip
+        sid = "claude.code@lupin.deepily.ai#44444444"
+        _inject_cc_sender_card( page, sid )
+        _seed_persona( page, sid, color="#E91E63" )
+        self._seed_incoming_messages( page, sid, count=1 )
+
+        sanitized = sid.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+        before_release = page.evaluate(
+            f"""() => {{
+                const card = document.getElementById( 'sender-card-{sanitized}' );
+                const msg  = card.querySelector( '.date-accordion-messages .sender-message.incoming' );
+                return msg ? getComputedStyle( msg ).backgroundImage : null;
+            }}"""
+        )
+        assert "233, 236, 239" not in before_release, "Pre-release gradient should be persona-tinted"
+
+        _release_persona( page, sid )
+        page.wait_for_timeout( 50 )
+
+        after_release = page.evaluate(
+            f"""() => {{
+                const card = document.getElementById( 'sender-card-{sanitized}' );
+                const msg  = card.querySelector( '.date-accordion-messages .sender-message.incoming' );
+                return msg ? getComputedStyle( msg ).backgroundImage : null;
+            }}"""
+        )
+        assert "233, 236, 239" in after_release, \
+            f"After persona release, bubble should pick up the gray gradient: {after_release!r}"
+
+
+# ---------------------------------------------------------------------------
+# Strip ordering: initial-load preserves API order (newest leftmost)
+# ---------------------------------------------------------------------------
+
+class TestStripOrdering:
+    """During initial-page-load, _addStripIcon receives insertAtTop=false
+    so icons accumulate in API order (newest-first → newest leftmost).
+    During runtime, insertAtTop=true so newly-arriving icons land leftmost.
+    """
+
+    def test_initial_load_appends_in_api_order( self, notifications_page_with_strip ):
+        """Simulate initial-load by toggling isInitialLoad before injecting
+        sender cards. The first-injected sender (newest from API) should
+        end up leftmost in the strip; the last-injected (oldest) rightmost."""
+        page = notifications_page_with_strip
+        page.evaluate( "() => { window.notificationsUI.isInitialLoad = true; }" )
+
+        # Inject in API order (newest first, then progressively older).
+        ordered = [
+            "claude.code@lupin.deepily.ai#newesttt",
+            "claude.code@lupin.deepily.ai#middllll",
+            "claude.code@lupin.deepily.ai#oldesttt",
+        ]
+        for sid in ordered:
+            _inject_cc_sender_card( page, sid )
+
+        page.evaluate( "() => { window.notificationsUI.isInitialLoad = false; }" )
+
+        # Read DOM order. firstChild = leftmost.
+        ids = page.evaluate( """
+            () => Array.from(
+                document.querySelectorAll( '#cc-strip-icons .cc-strip-icon' )
+            ).map( el => el.getAttribute( 'data-sender-id' ) )
+        """ )
+        assert ids == ordered, \
+            f"Initial-load strip ordering should match API order; got {ids!r}, expected {ordered!r}"
+
+    def test_runtime_addition_lands_leftmost( self, notifications_page_with_strip ):
+        """Runtime path (insertAtTop=true): a fresh icon prepends to the
+        existing strip, regardless of when its sender was first seen."""
+        page = notifications_page_with_strip
+        # Seed two icons via the runtime path (default behavior).
+        first  = "claude.code@lupin.deepily.ai#aaaaaaa1"
+        second = "claude.code@lupin.deepily.ai#bbbbbbb2"
+        _inject_cc_sender_card( page, first  )
+        _inject_cc_sender_card( page, second )
+
+        # Most recently injected at runtime should be leftmost.
+        leftmost = page.evaluate(
+            "() => document.querySelector( '#cc-strip-icons .cc-strip-icon' )?.getAttribute( 'data-sender-id' )"
+        )
+        assert leftmost == second, \
+            f"Runtime injection should land leftmost; got {leftmost!r}, expected {second!r}"
