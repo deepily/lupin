@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>Notifications</title>
     <link rel="stylesheet" href="/static/css/lupin-base.css">
-    <link rel="stylesheet" href="/static/css/notifications.css?v=20260502a">
+    <link rel="stylesheet" href="/static/css/notifications.css?v=20260502b">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
 </head>
 <body>
@@ -29,7 +29,7 @@
              aria-live="polite" on the text; role="alert" on the container so
              screen readers announce on transition without stealing focus. -->
         <div id="ws-circuit-banner" class="ws-circuit-banner" hidden role="alert" data-testid="ws-circuit-banner">
-            <span class="ws-circuit-banner-text" aria-live="polite">
+            <span class="ws-circuit-banner-text" aria-live="polite" data-reason="default" data-testid="ws-circuit-banner-text">
                 Connection lost — server unreachable after repeated attempts. Check the network, then click Retry now.
             </span>
             <span class="ws-circuit-banner-dev-hint" hidden>
@@ -959,7 +959,7 @@
     <script src="/static/js/tts-audio-cache.js"></script>
     <script src="/static/js/job-completion-cache.js"></script>
     <script src="/static/js/audio-recorder.js"></script>
-    <script src="/static/js/notifications.js?v=20260502a"></script>
+    <script src="/static/js/notifications.js?v=20260502b"></script>
     <script>
         function toggleSection(sectionId) {
             const content = document.getElementById(sectionId);

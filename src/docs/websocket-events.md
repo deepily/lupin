@@ -402,6 +402,41 @@ The following events were removed in July 2025 and replaced by `job_state_transi
 
 ---
 
+## Close Code Semantics
+
+The server uses RFC 6455 application close codes (4000–4999) to signal
+auth-failure outcomes that the browser-side state machine
+(`src/fastapi_app/static/js/ws-channel.js`) treats as PERMANENT — the
+channel goes straight to `OPEN_CIRCUIT` and does NOT auto-retry.
+
+Codes were introduced in Phase 5 of the WS reconnect circuit-breaker
+milestone (`src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/06-phase-5-server-side-hardening.md`).
+Constants live in `src/cosa/rest/routers/websocket.py`.
+
+| Code | Constant | Meaning | Server emits when… | Client behavior |
+|------|----------|---------|---------------------|------------------|
+| 4001 | `CLOSE_CODE_AUTH_INVALID_TOKEN`       | Invalid / expired / malformed token; bad `auth_request` envelope | Auth flow on `/ws/queue/{session}` rejects the supplied token (any of: malformed JSON, missing `token` field, empty token, signature failure, `TokenExpiredException`) | `notifications.js` attempts a single `refreshAccessToken()` call FIRST. On refresh-success, `manualRetry()` runs on both channels (no banner shown). On refresh-failure, the auth-permanent banner is shown ("Authentication failed — please log in again."). |
+| 4002 | `CLOSE_CODE_AUTH_SESSION_CONFLICT`    | Single-session-per-user policy displaced this connection | A second connection arrives for a user already connected, AND `websocket enforce single session per user = True`. The OLD session receives 4002. | Banner: "Another session has taken over. Refresh to reclaim." Channel does NOT auto-retry. |
+| 4003 | `CLOSE_CODE_AUTH_SUBSCRIPTION_DENIED` | RBAC reject on one or more `subscribed_events` | RESERVED — no current branch emits 4003. The audio path filters denied events silently today. Reserved for future RBAC enforcement. | Banner: "Permission denied for one or more notification streams." Channel does NOT auto-retry. |
+
+For comparison, the standard close codes the server still uses unchanged:
+
+| Code | Meaning | Client behavior |
+|------|---------|------------------|
+| 1000 | Normal client-initiated close | No reconnect. State → `DISCONNECTED`. |
+| 1001 | Going away (server shutdown) | Reconnect per normal full-jitter backoff. |
+| 1006 / no-code | Abnormal closure (transport-level fault) | Reconnect per normal backoff. |
+| 1008 | Policy violation (e.g. invalid session ID format at the URL) | Reconnect per normal backoff. |
+
+### Browser-side reaction
+
+The full reaction logic lives in `ws-channel.js` (`PERMANENT_CLOSE_CODES` set + `socket.onclose` handler) and `notifications.js` (`_showCircuitBanner` / `_renderCircuitBanner`):
+
+- queue WS `onclose` with `event.code` in {4001, 4002, 4003} → `openCircuit("auth-permanent", code)` → `ws-circuit-open` event with `detail.reason="auth-permanent"` + `detail.code` → NotificationsUI: 4001 → try token refresh; else → render auth-permanent banner.
+- queue WS `onclose` with any other code (1000 / 1001 / 1006 / …) → `handleClose()` → `scheduleReconnect()` (full-jitter backoff, capped at 20 attempts before the breaker trips for transport reasons).
+
+---
+
 ## Related Documentation
 
 - [WebSocket Architecture](websocket-architecture.md) — System design and WebSocketManager API

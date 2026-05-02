@@ -287,7 +287,10 @@ export function createChannel( opts ) {
             cancelHandshake();
             const code = ev && typeof ev.code === "number" ? ev.code : 1006;
             if ( PERMANENT_CLOSE_CODES.has( code ) ) {
-                openCircuit();
+                // Phase 5: pass the actual close code + reason so the consumer
+                // (NotificationsUI) can route 4001 → token-refresh path,
+                // 4002 → "session displaced" banner, 4003 → "permission denied".
+                openCircuit( "auth-permanent", code );
                 return;
             }
             handleClose();
@@ -318,7 +321,7 @@ export function createChannel( opts ) {
             recentFailures.push( now );
             recentFailures = recentFailures.filter( function ( t ) { return now - t <= RAPID_FAIL_WINDOW_MS; } );
             if ( recentFailures.length >= RAPID_FAIL_COUNT ) {
-                openCircuit();
+                openCircuit( "rapid-fail", null );
                 return;
             }
         }
@@ -333,7 +336,7 @@ export function createChannel( opts ) {
         if ( destroyed ) return;
         attempts += 1;
         if ( attempts >= MAX_ATTEMPTS_PER_CHANNEL ) {
-            openCircuit();
+            openCircuit( "budget-exhausted", null );
             return;
         }
         setState( STATE.BACKOFF );
@@ -347,9 +350,20 @@ export function createChannel( opts ) {
 
     // -----------------------------------------------------------------------
     // openCircuit — terminal state until manualRetry(). Cancels timers,
-    // releases the socket, dispatches CIRCUIT_OPEN_EVENT.
+    // releases the socket, dispatches CIRCUIT_OPEN_EVENT with detail.reason
+    // so the consumer can route the response (Phase 5: auth-permanent →
+    // token-refresh path; budget-exhausted / rapid-fail → standard banner).
+    //
+    // Phase 5: detail now carries `reason` (string) and optional `code`
+    // (numeric WebSocket close code) alongside the existing name + attempts.
+    //
+    // @param {string} [reason] one of "auth-permanent" | "budget-exhausted" |
+    //   "rapid-fail" — defaults to "budget-exhausted" for backward compat
+    //   with any direct callers that did not pass a reason.
+    // @param {number} [code] the underlying WebSocket close code when the
+    //   reason is "auth-permanent" (e.g. 4001/4002/4003). null otherwise.
     // -----------------------------------------------------------------------
-    function openCircuit() {
+    function openCircuit( reason, code ) {
         cancelBackoff();
         cancelHandshake();
         if ( ws ) {
@@ -357,7 +371,12 @@ export function createChannel( opts ) {
             ws = null;
         }
         setState( STATE.OPEN_CIRCUIT );
-        const detail = { name : name, attempts : attempts };
+        const detail = {
+            name     : name,
+            attempts : attempts,
+            reason   : reason || "budget-exhausted",
+            code     : ( typeof code === "number" ) ? code : null
+        };
         if ( typeof window !== "undefined" && typeof window.dispatchEvent === "function" ) {
             try {
                 window.dispatchEvent( new CustomEvent( CIRCUIT_OPEN_EVENT, { detail : detail } ) );

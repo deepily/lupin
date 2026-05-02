@@ -2197,7 +2197,11 @@ class NotificationsUI {
                         // and seeds notificationState — no extra hook needed here.
                         this.queueWsConnected = true;
                     },
-                    onCircuitOpen  : ( detail ) => this._showCircuitBanner( detail ),
+                    // onCircuitOpen omitted — the window-level `ws-circuit-open`
+                    // listener registered by _wireCircuitBanner is the single
+                    // owner of the banner-render path. A per-channel callback
+                    // here would double-fire and break the 4001 token-refresh
+                    // single-attempt guard (Phase 5).
                     onStateChange  : ( newState ) => {
                         // Map channel state to existing UI status pill so the
                         // existing #queue-ws-status display keeps working.
@@ -2228,7 +2232,11 @@ class NotificationsUI {
                         this.handleAudioMessage( { data : JSON.stringify( envelope ) } );
                     },
                     onAuthSuccess  : ( envelope ) => { this.audioWsConnected = true; },
-                    onCircuitOpen  : ( detail ) => this._showCircuitBanner( detail ),
+                    // onCircuitOpen omitted — the window-level `ws-circuit-open`
+                    // listener registered by _wireCircuitBanner is the single
+                    // owner of the banner-render path. A per-channel callback
+                    // here would double-fire and break the 4001 token-refresh
+                    // single-attempt guard (Phase 5).
                     onStateChange  : ( newState ) => {
                         const map = {
                             DISCONNECTED   : [ "Disconnected",     "error"   ],
@@ -2323,10 +2331,69 @@ class NotificationsUI {
     // after a Retry-now click, even if the other channel is still climbing
     // back to CONNECTED — the residual state is visible in the WS-status
     // pills, not via a duplicate banner.
+    //
+    // Phase 5 extension: detail.reason / detail.code disambiguate the trip
+    // cause. For `reason === "auth-permanent"` AND `code === 4001`, attempt
+    // a token refresh BEFORE showing the banner — if refresh succeeds,
+    // manualRetry on both channels and the user never sees a banner flash.
+    // If refresh fails (or reason is 4002/4003), banner copy reflects the
+    // auth-permanent semantics.
     _showCircuitBanner( detail ) {
-        this.error( `[ws-circuit-open] ${detail.name || "?"} — attempts=${detail.attempts || 0}${detail.reason ? " reason=" + detail.reason : ""}` );
+        const reason = ( detail && detail.reason ) || "budget-exhausted";
+        const code   = ( detail && detail.code !== undefined ) ? detail.code : null;
+        this.error( `[ws-circuit-open] ${detail && detail.name || "?"} — attempts=${detail && detail.attempts || 0} reason=${reason}${code !== null ? " code=" + code : ""}` );
+
+        // Phase 5 — auth-permanent + code 4001 path: try token refresh FIRST.
+        // If refresh succeeds, manualRetry both channels and skip showing the
+        // banner. If refresh fails, fall through to the auth-permanent banner.
+        if ( reason === "auth-permanent" && code === 4001 && !this.authRefreshAttempted ) {
+            this.authRefreshAttempted = true;
+            this.log( "[ws-circuit-open] 4001 received — attempting token refresh before showing banner" );
+            this.refreshAccessToken().then( ( success ) => {
+                this.authRefreshAttempted = false;
+                if ( success ) {
+                    this.log( "[ws-circuit-open] token refresh succeeded — manualRetry both channels (no banner shown)" );
+                    if ( this.queueChannel ) this.queueChannel.manualRetry();
+                    if ( this.audioChannel ) this.audioChannel.manualRetry();
+                } else {
+                    this.error( "[ws-circuit-open] token refresh failed — showing auth-permanent banner" );
+                    this._renderCircuitBanner( reason, code );
+                }
+            } );
+            return;
+        }
+
+        this._renderCircuitBanner( reason, code );
+    }
+
+    // Internal: actually paint the banner. Split out from _showCircuitBanner
+    // so the 4001 token-refresh path can defer rendering until refresh resolves.
+    _renderCircuitBanner( reason, code ) {
         const banner = document.getElementById( "ws-circuit-banner" );
         if ( !banner ) return;
+
+        const textEl = banner.querySelector( ".ws-circuit-banner-text" );
+        if ( textEl ) {
+            // Phase 5: swap copy by reason. data-reason is exposed for tests
+            // and CSS hooks. Keys map to the spec:
+            //   - default          → network/budget-exhausted/rapid-fail
+            //   - auth-permanent   → 4001 (after refresh failure) or 4003
+            //   - session-conflict → 4002 (other tab/session won)
+            const copy = (
+                reason === "auth-permanent" && code === 4001 ? "Authentication failed — please log in again." :
+                reason === "auth-permanent" && code === 4002 ? "Another session has taken over. Refresh to reclaim." :
+                reason === "auth-permanent" && code === 4003 ? "Permission denied for one or more notification streams." :
+                reason === "auth-permanent"                  ? "Authentication failed — please log in again." :
+                "Connection lost — server unreachable after repeated attempts. Check the network, then click Retry now."
+            );
+            textEl.textContent = copy;
+            textEl.setAttribute(
+                "data-reason",
+                reason === "auth-permanent" && code === 4002 ? "session-conflict"
+              : reason === "auth-permanent"                  ? "auth-permanent"
+              : "default"
+            );
+        }
         banner.hidden = false;
 
         // Toggle dev-hint visibility based on environment label
