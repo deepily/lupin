@@ -85,6 +85,21 @@
 - Fresh tab also showed two pre-existing 401s on `/api/stats/time-saved` and `/api/stats/time-saved/global`. Unrelated to the WS circuit breaker — separate concern, possibly admin-stats-endpoint auth gate. Not filed as a separate bug yet (need to confirm whether it's expected for non-admin users; user IS admin per `admin: true` in console).
 - Out of scope for the circuit breaker fix: SSH tunnel FD-exhaustion remediation. That belongs in the user's ssh config (`ulimit -n 8192` + `ServerAliveInterval 30` / `ServerAliveCountMax 3`), not Lupin code.
 
+#### Checkpoint | 2026.05.02 13:35 | WS reconnect circuit-breaker Phase 1 — WSChannel module + Layer-1 unit tests
+
+**Phase 1 deliverables** (state machine module + 20 unit tests + execution log; `notifications.js` UNCHANGED in this phase per spec — module is consumer-less until Phase 2 wires it in):
+
+- **NEW** `src/fastapi_app/static/js/ws-channel.js` — ES module: `STATE` enum (DISCONNECTED/CONNECTING/AUTHENTICATING/CONNECTED/BACKOFF/OPEN_CIRCUIT), `fullJitterDelay` helper, `createChannel({url,name,onMessage,onAuthSuccess,onCircuitOpen,onStateChange,WebSocketCtor})` factory. Internal: closure-private state, generation token (drops late callbacks), readyState guard (load-bearing for Chromium 255-pending fix), single `onclose` reconnect scheduler, `onerror` is no-op (RFC 6455 §7.1.4), rapid-fail tripwire (5-in-30s with `wasEverOpen=false`), capped exp + full-jitter backoff (BASE=1000, CAP=30000, MAX=20), handshake-timeout watchdog (10s), permanent close codes 4001/4002/4003 → immediate OPEN_CIRCUIT, page-lifecycle handlers (online/offline/pageshow/pagehide/freeze/resume) auto-attached, visibility-hidden defer guard, `ws-circuit-open` and `ws-state-change` window events.
+- **NEW** `src/tests/ws_channel_unit/test_ws_channel_unit.py` (+ `__init__.py`) — 20 Layer-1 unit tests via Playwright `page.evaluate()` against an injected `MockWebSocket` + `TestClock` (no real network, no real timers, runs in `about:blank` with init-script injection). Covers: single-scheduler invariants, generation token, readyState guard, attempt-budget circuit, rapid-fail tripwire, jitter bounds (16000 trials), handshake timeout, cleanup-nulls-handlers, watchdog rules (never resets counter, only fires when truly idle), close-code 4001 immediate trip, all six page-lifecycle handlers. Located in a sibling dir (not `e2e_ui/`) to avoid the `:8000`-only `verify_test_environment` autouse fixture; deviation documented in execution log.
+- **NEW** `src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/` doc set (00-index, 00-working-contract, 01-design-review with Q1–Q12 frozen, 02..06 phase docs, 07-test-strategy 5-tier pyramid, 08-rollout, 99-plan-review-findings, 91-phase-1-execution-log, plus the original expert-brief and reviewer responses from claude/openai).
+
+**Verification (5/5 green)**: `node --check ws-channel.js` PARSE OK · 20/20 Layer-1 unit tests pass in 0.95s · `git diff src/fastapi_app/static/js/notifications.js` empty · `grep ws-channel src/fastapi_app/` returns only self-mentions · `bash src/scripts/run-websocket-smoke-tests.sh` 50/50 pass in 43.75s.
+
+**AI structural review (15/15)**: every Q1–Q12 frozen invariant verified against the implementation file:line; two soft notes recorded for Q2 (manualRetry-zeros-attempts is the synthesized design intent per §2 + Risk row 7) and Q3 (watchdog "never touches counter" interpreted as "never RESETS" — bumping via `scheduleReconnect` is the same path any close uses).
+
+**Files**: `src/fastapi_app/static/js/ws-channel.js`, `src/tests/ws_channel_unit/{__init__.py,test_ws_channel_unit.py}`, 15 files in `src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/`, `history.md`, `.claude-session.md`.
+**Commit**: 8fd0036
+
 ---
 
 ### 2026.05.01 - Session 92ece47c | TODO size-management skill + first archival pass
