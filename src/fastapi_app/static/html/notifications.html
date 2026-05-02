@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>Notifications</title>
     <link rel="stylesheet" href="/static/css/lupin-base.css">
-    <link rel="stylesheet" href="/static/css/notifications.css?v=20260428f">
+    <link rel="stylesheet" href="/static/css/notifications.css?v=20260502a">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
 </head>
 <body>
@@ -24,6 +24,22 @@
     </div>
 
     <div class="container">
+        <!-- WS reconnect circuit-breaker banner (Phase 3 of the WS circuit-breaker
+             milestone). Hidden until either WSChannel emits `ws-circuit-open`.
+             aria-live="polite" on the text; role="alert" on the container so
+             screen readers announce on transition without stealing focus. -->
+        <div id="ws-circuit-banner" class="ws-circuit-banner" hidden role="alert" data-testid="ws-circuit-banner">
+            <span class="ws-circuit-banner-text" aria-live="polite">
+                Connection lost — server unreachable after repeated attempts. Check the network, then click Retry now.
+            </span>
+            <span class="ws-circuit-banner-dev-hint" hidden>
+                (Dev tip: if you're using <code>ssh -L</code>, check whether the tunnel is still alive or has hit "Too many open files".)
+            </span>
+            <button type="button" id="ws-circuit-retry-btn" class="ws-circuit-retry-btn" data-testid="ws-circuit-retry-btn">
+                Retry now
+            </button>
+        </div>
+
         <h2><span id="env-label"></span>Notifications <span id="clock"></span></h2>
         
         <!-- Q&A Section -->

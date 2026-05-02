@@ -395,6 +395,11 @@ class NotificationsUI {
             // Initialize history dropdown UI
             this.initializeHistoryDropdown();
 
+            // Wire the WS circuit-breaker banner (Phase 3) — must be called
+            // before connectWebSockets so the listener is registered before
+            // any potential ws-circuit-open dispatch.
+            this._wireCircuitBanner();
+
             // Connect WebSockets
             await this.connectWebSockets();
 
@@ -2306,12 +2311,72 @@ class NotificationsUI {
         };
     }
 
-    // Placeholder for Phase 3 banner UI. Phase 2 logs the trip and surfaces
-    // the existing "Disconnected" status pill via onStateChange. The banner
-    // DOM element + wiring lands in Phase 3.
+    // Phase 3 — circuit-breaker banner UI.
+    //
+    // The banner is global (per Q10): one banner if EITHER channel is
+    // OPEN_CIRCUIT. Banner disappears on the FIRST channel's auth_success
+    // after a Retry-now click, even if the other channel is still climbing
+    // back to CONNECTED — the residual state is visible in the WS-status
+    // pills, not via a duplicate banner.
     _showCircuitBanner( detail ) {
         this.error( `[ws-circuit-open] ${detail.name || "?"} — attempts=${detail.attempts || 0}${detail.reason ? " reason=" + detail.reason : ""}` );
-        // Phase 3 will: show #ws-circuit-banner, enable Retry-now button.
+        const banner = document.getElementById( "ws-circuit-banner" );
+        if ( !banner ) return;
+        banner.hidden = false;
+
+        // Toggle dev-hint visibility based on environment label
+        const devHint = banner.querySelector( ".ws-circuit-banner-dev-hint" );
+        if ( devHint ) {
+            devHint.hidden = !( this.envLabel === "DEVELOPMENT" );
+        }
+
+        // Re-enable the retry button (clean slate after each trip)
+        const btn = document.getElementById( "ws-circuit-retry-btn" );
+        if ( btn ) btn.disabled = false;
+    }
+
+    _hideCircuitBanner() {
+        const banner = document.getElementById( "ws-circuit-banner" );
+        if ( !banner ) return;
+        banner.hidden = true;
+        // Re-enable the button regardless of disabled state, so a future trip
+        // starts from a clean state.
+        const btn = document.getElementById( "ws-circuit-retry-btn" );
+        if ( btn ) btn.disabled = false;
+    }
+
+    _wireCircuitBanner() {
+        // Idempotent — safe to call multiple times across init/auth-refresh paths.
+        if ( this._circuitBannerWired ) return;
+        this._circuitBannerWired = true;
+
+        // 1) Listen for the channel-emitted ws-circuit-open custom event.
+        window.addEventListener( "ws-circuit-open", ( ev ) => {
+            const detail = ( ev && ev.detail ) || { name: "?", attempts: 0 };
+            this._showCircuitBanner( detail );
+        } );
+
+        // 2) Wire the Retry-now button click. Disable visually during the
+        //    in-flight retry; the next STATE_CHANGE_EVENT (CONNECTED/auth_success
+        //    or another OPEN_CIRCUIT) re-enables it via _showCircuitBanner /
+        //    _hideCircuitBanner.
+        const btn = document.getElementById( "ws-circuit-retry-btn" );
+        if ( btn ) {
+            btn.addEventListener( "click", () => {
+                btn.disabled = true;
+                try {
+                    if ( this.queueChannel ) this.queueChannel.manualRetry();
+                    if ( this.audioChannel ) this.audioChannel.manualRetry();
+                } catch ( err ) {
+                    // Defensive try/finally so a synchronous throw in
+                    // manualRetry() doesn't strand the button forever (Phase 3
+                    // §Risks row 2). manualRetry() is built to swallow its own
+                    // failures — this catch is a belt-and-braces safety net.
+                    this.error( "manualRetry threw — re-enabling button:", err );
+                    btn.disabled = false;
+                }
+            } );
+        }
     }
 
     // ========================================
@@ -2331,6 +2396,9 @@ class NotificationsUI {
                     this.updateStatus( "auth-status", `Authenticated as ${envelope.user_id}`, "good" );
                     // Phase 2: the per-channel retry counter reset is handled by the
                     // WSChannel itself on auth_success — no shared counter to zero here.
+                    // Phase 3: hide the circuit-breaker banner on the FIRST successful
+                    // auth (per Q10 — global banner, not per-channel).
+                    this._hideCircuitBanner();
 
                     // Store the server-provided user ID for notifications
                     this.notificationState.userId = envelope.user_id;
@@ -2457,6 +2525,8 @@ class NotificationsUI {
                 case "auth_success":
                     this.wsDiag( `Audio WebSocket authenticated for user: ${envelope.user_id}` );
                     this.updateStatus( "audio-ws-status", "Connected", "good" );
+                    // Phase 3: same global-banner-hide as the queue auth_success path.
+                    this._hideCircuitBanner();
                     break;
 
                 case "auth_error":

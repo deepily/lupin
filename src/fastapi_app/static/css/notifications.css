@@ -4922,3 +4922,70 @@
     outline: 0;
     box-shadow: 0 0 0 0.2rem rgba( 13, 110, 253, 0.25 );
 }
+
+/* =====================================================================
+   WS reconnect circuit-breaker banner (Phase 3 of the WS circuit-breaker
+   milestone). Shown when either WSChannel emits `ws-circuit-open`.
+   ===================================================================== */
+
+.ws-circuit-banner {
+    background-color : #b00020;
+    color            : #ffffff;
+    padding          : 12px 16px;
+    display          : flex;
+    align-items      : center;
+    justify-content  : space-between;
+    gap              : 16px;
+    font-weight      : 500;
+    border-radius    : 4px;
+    margin-bottom    : 12px;
+}
+
+.ws-circuit-banner[hidden] {
+    display: none;
+}
+
+.ws-circuit-banner-text {
+    flex   : 1 1 auto;
+    line-height : 1.4;
+}
+
+.ws-circuit-banner-dev-hint {
+    flex      : 0 1 auto;
+    font-size : 0.875em;
+    opacity   : 0.85;
+    font-style: italic;
+}
+
+.ws-circuit-banner-dev-hint[hidden] {
+    display: none;
+}
+
+.ws-circuit-banner-dev-hint code {
+    background-color : rgba( 255, 255, 255, 0.15 );
+    padding          : 1px 5px;
+    border-radius    : 2px;
+    font-family      : "SFMono-Regular", Menlo, Consolas, "Courier New", monospace;
+    font-size        : 0.95em;
+}
+
+.ws-circuit-retry-btn {
+    background-color : transparent;
+    color            : inherit;
+    border           : 1px solid currentColor;
+    padding          : 6px 14px;
+    border-radius    : 3px;
+    cursor           : pointer;
+    font-weight      : 600;
+    font-size        : 0.95em;
+    flex             : 0 0 auto;
+}
+
+.ws-circuit-retry-btn:hover:not(:disabled) {
+    background-color : rgba( 255, 255, 255, 0.12 );
+}
+
+.ws-circuit-retry-btn:disabled {
+    opacity : 0.6;
+    cursor  : wait;
+}
