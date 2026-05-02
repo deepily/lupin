@@ -2,7 +2,7 @@
 
 **Phase**: 3 of 5 (banner DOM + Retry-now button + listener wiring)
 **Started**: 2026-05-02
-**Status**: complete (Layer-3 banner tests authored + green); only the `:8000` visual-snapshot row remains deferred (slot-ask required)
+**Status**: ✅ COMPLETE — all 7 verification rows green (Layer-3 banner tests + visual snapshot baseline established + verified)
 **Branch**: `wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe`
 **Owner**: AI
 
@@ -41,7 +41,7 @@
 | 4 | Layer-3 `test_retry_now_clears_breaker_and_reconnects` | EXECUTOR: AI | ✅ PASS | Trip → Retry-now click → synthetic `auth_success` via `handleQueueMessage` → banner hidden |
 | 5 | Layer-3 `test_retry_button_disables_during_reconnect` | EXECUTOR: AI | ✅ PASS | Click → `disabled` attr is true (visual feedback) |
 | 6 | Layer-3 `test_dev_hint_visible_only_in_dev` | EXECUTOR: AI | ✅ PASS | `envLabel === 'DEVELOPMENT'` shows hint; otherwise hidden (verified both branches in one test) |
-| 7 | E2E UI visual snapshot updated | EXECUTOR: AI | DEFERRED | `:8000` monopolize-mode (visual-regression suite); requires user slot-ask |
+| 7 | E2E UI visual snapshot established + verified | EXECUTOR: AI | ✅ PASS | New test `src/tests/e2e_ui/test_ws_circuit_banner_visual.py` scheduled on `:8000` via `POST /api/test-suite/submit` (`test_types=e2e`, `pytest_args="-k test_ws_circuit_banner_visual --update-snapshots"`). Job `ts-f98d589a` ran in 4.62s — captured baseline `io/test-suite/visual-baselines/test_ws_circuit_banner_visual/test_ws_circuit_banner_visual/ws_circuit_banner_open.png` (960x69 PNG, banner-only crop). Verify run `ts-580c3d6f` (without `--update-snapshots`) passed in 4.34s — pixel-identical match. Banner renders red bg + white text + italic dev-hint with monospaced `ssh -L` + bordered Retry-now button per spec. |
 | extra | `node --check` on both modified JS files | EXECUTOR: AI | ✅ PASS | PARSE OK on `notifications.js` and `ws-channel.js` |
 | extra | Layer-1 regression after Phase 3 edits | EXECUTOR: AI | ✅ PASS | 20/20 pass in 0.99s |
 | extra | websocket_smoke regression after Phase 3 edits | EXECUTOR: AI | ✅ PASS | 50/50 pass in 45s |
@@ -128,5 +128,5 @@
 | Greps (steps 1+2) green | ✅ |
 | Regression suites green (Layer-1 + websocket_smoke) | ✅ 70/70 |
 | Layer-3 banner tests green (4 cases) | ✅ 4/4 in 1.18s |
-| Visual snapshot (`:8000` E2E UI) | DEFERRED — slot-ask required (single remaining row) |
-| Commit hash filed | pending (awaiting user authorization) |
+| Visual snapshot baseline established + verified on `:8000` | ✅ baseline 19421-byte PNG; verify run pixel-identical |
+| Commit hashes filed | ✅ Phase 3 = `b4eb821` (amended `4b287cd`); Phase-3 follow-up visual test = `27bcacd`; baseline file commit = (this checkpoint) |
