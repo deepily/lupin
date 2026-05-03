@@ -2172,7 +2172,7 @@ class NotificationsUI {
             // a regular script, not an ES module — dynamic import is the only
             // way to pull in `createChannel` here).
             if ( !this._createChannel ) {
-                const mod = await import( "/static/js/ws-channel.js?v=20260502a" );
+                const mod = await import( "/static/js/ws-channel.js?v=20260503a" );
                 this._createChannel = mod.createChannel;
             }
 
@@ -2224,20 +2224,21 @@ class NotificationsUI {
             if ( ( target === 'both' || target === 'audio' ) && !this.audioChannel ) {
                 const audioUrl = `${protocol}//${window.location.host}/ws/audio/${this.audioSessionId}`;
                 this.audioChannel = this._createChannel( {
-                    url            : audioUrl,
-                    name           : "audio",
-                    authMessage    : () => this._buildAudioAuthMessage(),
-                    onMessage      : ( envelope ) => {
+                    url             : audioUrl,
+                    name            : "audio",
+                    authMessage     : () => this._buildAudioAuthMessage(),
+                    onMessage       : ( envelope ) => {
                         if ( envelope === null || envelope === undefined ) return;
                         this.handleAudioMessage( { data : JSON.stringify( envelope ) } );
                     },
-                    onAuthSuccess  : ( envelope ) => { this.audioWsConnected = true; },
+                    onBinaryMessage : ( blob ) => { this.handleAudioChunk( blob ); },
+                    onAuthSuccess   : ( envelope ) => { this.audioWsConnected = true; },
                     // onCircuitOpen omitted — the window-level `ws-circuit-open`
                     // listener registered by _wireCircuitBanner is the single
                     // owner of the banner-render path. A per-channel callback
                     // here would double-fire and break the 4001 token-refresh
                     // single-attempt guard (Phase 5).
-                    onStateChange  : ( newState ) => {
+                    onStateChange   : ( newState ) => {
                         const map = {
                             DISCONNECTED   : [ "Disconnected",     "error"   ],
                             CONNECTING     : [ "Connecting...",    "warning" ],
@@ -2253,11 +2254,13 @@ class NotificationsUI {
                 } );
             }
 
-            // Note: the audio channel handles binary frames at the WS level,
-            // but our channel's onmessage parses JSON. Audio binary chunks flow
-            // through a different pathway (handleAudioChunk on Blob); the
-            // channel-level onmessage only sees JSON envelopes. The legacy
-            // handleAudioMessage already handles both Blob and JSON paths.
+            // Audio binary frames (MP3/PCM chunks) flow via WSChannel's onBinaryMessage
+            // hook directly to handleAudioChunk; JSON envelopes flow through onMessage
+            // -> handleAudioMessage. Pre-WSChannel-facade, both shared a single
+            // ws.onmessage = handleAudioMessage that branched on Blob vs JSON. The
+            // facade splits them on the wire-frame type — the legacy Blob branch
+            // inside handleAudioMessage (audio handler) is now dead but kept as
+            // defense-in-depth for any direct-onmessage callers added later.
 
             // Initiate connect on each requested channel
             if ( target === 'both' || target === 'queue' ) this.queueChannel.connect();

@@ -1,5 +1,35 @@
 # Lupin Project History
 
+### 2026.05.03 - Session 656c8ba2 | WSChannel binary-frame regression — notifications-UI TTS playback fixed
+
+**Context**: User reported that notifications-UI TTS had stopped playing — the voice-persona-reference page worked (HTTP MP3 path) and the high-priority "ding" played, but no spoken audio ever rendered for `notify()`-triggered notifications. Two-step trace identified a regression introduced by Session 0022baba's WS reconnect circuit-breaker milestone (commits 234d7b7→1a9e3e0, 2026-05-02): the new `WSChannel` facade in `ws-channel.js` had no Blob/ArrayBuffer branch in `socket.onmessage` — `JSON.parse(Blob)` threw, the catch returned, and binary audio chunks were silently dropped. The legacy `handleAudioMessage` Blob branch (notifications.js:2649) became unreachable because the facade now intercepts before that handler runs. End-to-end manual verification confirmed the fix: 5 audio chunks (~218 KB) reaching `handleAudioChunk` with TTFA 277ms.
+
+**Accomplishments**:
+
+- **Diagnosis** — two-finding console capture pinpointed the regression vs the documented design. (1) Server-side `audio_streaming_status` and `audio_streaming_complete` text envelopes arrived fine; binary chunks did not. (2) Reading `cosa_voice_mcp.py:785-791` clarified that the parallel "no ding either" symptom in conversation mode is intentional design — `_notify_impl` force-overrides `suppress_ding=True` and rewrites `priority="high"` whenever conv mode is active. `_converse_impl` (the path `ask_yes_no` rides) skips the override, which is why blocking calls still ding. Documented as "Bug 2" but explicitly out of scope.
+- **Fix — `ws-channel.js`** — added `opts.onBinaryMessage` callback + JSDoc clause + a Blob/ArrayBuffer branch at the top of `socket.onmessage` that routes binary frames to the new callback (or no-ops if no callback wired). 11 lines.
+- **Fix — `notifications.js`** — wired `onBinaryMessage: blob => this.handleAudioChunk( blob )` into the audio-channel construction at line 2226; replaced the stale "different pathway" comment with the actual split documentation. 3 functional lines + comment update.
+- **Cache-buster bumps** — after first verification cycle came back as a stale cache, bumped `notifications.js` import path `ws-channel.js?v=20260502a → v=20260503a` and the HTML script tag `notifications.js?v=20260502b → v=20260503a` to force browsers to re-fetch both files.
+- **Regression tests** — added `_binary( data )` driver to the MockWebSocket harness in `test_ws_channel_unit.py` and 2 new Layer-1 tests: (a) Blob and ArrayBuffer frames invoke `onBinaryMessage`, never `onMessage`; sizes preserved. (b) JSON-string frames still invoke `onMessage`, never `onBinaryMessage`. Locks in the routing split.
+- **Verification (all on :7999, AI-discretionary)**: py_compile ✅ · WSChannel unit suite **22/22 in 1.42s** (20 pre-existing + 2 new) · WS smoke tests **50/50 in 44.59s, audio_perf 1.81ms avg** · End-to-end manual: high-priority `notify()` post-cache-bust hard-refresh → 5× `🔊 handleAudioChunk` lines (23936/56848/83776/28424/25470 bytes), TTFA 277ms, PCM playback complete, TTS spoke aloud as designed.
+
+**Files Modified (Lupin parent — 5 files, this entry, manifest update)**:
+
+- `src/fastapi_app/static/js/ws-channel.js` (+11 / -2)
+- `src/fastapi_app/static/js/notifications.js` (+8 / -8 — onBinaryMessage wire-up, opts re-aligned, stale comment replaced, ws-channel.js cache-buster bump)
+- `src/fastapi_app/static/html/notifications.html` (+1 / -1 — notifications.js cache-buster bump)
+- `src/tests/ws_channel_unit/test_ws_channel_unit.py` (+~85 lines — `_binary` harness driver + 2 regression tests + section banners)
+- `.claude-session.md` (manifest section for this session)
+
+**Caveats / Notes**:
+
+- The cache-buster lesson is generalizable: Chrome's Ctrl+Shift+R will refresh top-level `<script>` tags but does NOT always force re-fetch on dynamically-imported ES modules — bump the `?v=` query string at the import site whenever the module changes.
+- Bug 2 (no-ding-in-conv-mode) was explicitly left alone per the design intent at `cosa_voice_mcp.py:785-791`. If the user wants TTS-without-ding to be reconsidered (or wants the override behavior surfaced more visibly), it's a separate design conversation.
+- Skipped the R&D doc per `feedback_skip_rnd_doc_for_trivial_fixes` — single-cause regression, ~25 lines net, fully captured by this entry plus the regression tests' inline docstrings.
+- No CoSA submodule edits in this session (the prior session's `voice_persona.py` edit is still uncommitted in the submodule, owned by user).
+
+---
+
 ### 2026.05.03 - Session aacd24b4 | Voice persona /clear preservation fix — Phases 1.1 + 1.5 + 2 + 3 shipped
 
 **Context**: Picked up the Phase 0 plan that 4ede5bad serialized last night. Read `01-design.md` end-to-end, executed the four phases that don't depend on user-driven `/clear` repro, fixed an order-dependent flake in the unit suite that the new tests surfaced, and serialized next-step handoff doc for the remaining gate-identification phases.

@@ -92,6 +92,9 @@ export function fullJitterDelay( attempt, base, cap ) {
  *   - opts.url is a non-empty wss:// or ws:// URL string
  *   - opts.name is a non-empty channel name (e.g. "queue", "audio")
  *   - opts.onMessage (optional) is invoked on every successfully-parsed JSON envelope
+ *   - opts.onBinaryMessage (optional) is invoked when a binary frame arrives (Blob or
+ *     ArrayBuffer). Required by the audio channel — the audio WebSocket streams MP3/PCM
+ *     chunks as binary frames; without this callback, binary frames are silently dropped.
  *   - opts.onAuthSuccess (optional) is invoked on the first envelope with type === "auth_success"
  *   - opts.onCircuitOpen (optional) is invoked when the breaker trips
  *   - opts.onStateChange (optional) is invoked on every state transition
@@ -118,12 +121,13 @@ export function createChannel( opts ) {
         throw new Error( "ws-channel: opts.name is required (non-empty string)" );
     }
 
-    const url           = opts.url;
-    const name          = opts.name;
-    const onMessage     = typeof opts.onMessage     === "function" ? opts.onMessage     : null;
-    const onAuthSuccess = typeof opts.onAuthSuccess === "function" ? opts.onAuthSuccess : null;
-    const onCircuitOpen = typeof opts.onCircuitOpen === "function" ? opts.onCircuitOpen : null;
-    const onStateChange = typeof opts.onStateChange === "function" ? opts.onStateChange : null;
+    const url             = opts.url;
+    const name            = opts.name;
+    const onMessage       = typeof opts.onMessage       === "function" ? opts.onMessage       : null;
+    const onBinaryMessage = typeof opts.onBinaryMessage === "function" ? opts.onBinaryMessage : null;
+    const onAuthSuccess   = typeof opts.onAuthSuccess   === "function" ? opts.onAuthSuccess   : null;
+    const onCircuitOpen   = typeof opts.onCircuitOpen   === "function" ? opts.onCircuitOpen   : null;
+    const onStateChange   = typeof opts.onStateChange   === "function" ? opts.onStateChange   : null;
     // Phase 2 extension: authMessage builder. Channel calls authMessage() once on
     // AUTHENTICATING and sends the JSON-stringified result via the live socket.
     // If absent, channel does nothing — consumer is responsible for sending auth.
@@ -260,6 +264,16 @@ export function createChannel( opts ) {
 
         socket.onmessage = function ( ev ) {
             if ( myGen !== generation ) return;
+            // Binary frames (audio chunks) bypass JSON parse and route to onBinaryMessage.
+            // Without this branch, JSON.parse(Blob) throws, the catch returns, and the
+            // frame is silently dropped — the regression that broke notifications-UI TTS
+            // playback after the WSChannel facade was introduced.
+            if ( ev.data instanceof Blob || ev.data instanceof ArrayBuffer ) {
+                if ( onBinaryMessage ) {
+                    try { onBinaryMessage( ev.data ); } catch ( e ) { /* swallow */ }
+                }
+                return;
+            }
             let envelope = null;
             try { envelope = JSON.parse( ev.data ); } catch ( e ) { return; }
             if ( envelope && envelope.type === "auth_success" ) {

@@ -131,6 +131,14 @@ class MockWebSocket {
         queueMicrotask( () => { if ( typeof cb === "function" ) cb( { data : data } ); } );
     }
 
+    _binary( data ) {
+        // Drive a binary frame (Blob or ArrayBuffer) through onmessage without
+        // JSON-stringifying. Mirrors how speech.py's `await websocket.send_bytes(...)`
+        // surfaces on the browser side.
+        const cb = this.onmessage;
+        queueMicrotask( () => { if ( typeof cb === "function" ) cb( { data : data } ); } );
+    }
+
     _close( code, reason ) {
         if ( this._closed ) return;
         this._closed = true;
@@ -916,3 +924,96 @@ def test_close_4001_immediate_open_circuit( channel_page ):
         "close 4001 must NOT decrement attempts (test 20 invariant)"
     )
     assert result[ "circuitOpenFired" ] == 1, "ws-circuit-open dispatched exactly once on 4001"
+
+
+# ---------------------------------------------------------------------------
+# Test 22 — Blob frame routes to onBinaryMessage, NOT onMessage
+# ---------------------------------------------------------------------------
+#
+# Regression guard for the WSChannel binary-frame drop bug observed against the
+# notifications-UI audio pipeline. Pre-fix, socket.onmessage ran JSON.parse on
+# every ev.data — a Blob payload threw, the catch returned, and the binary
+# frame was silently dropped. The audio WS receives MP3/PCM chunks as binary
+# frames via speech.py's `await websocket.send_bytes(...)`, so this regression
+# meant zero audio chunks reached handleAudioChunk despite the server
+# successfully streaming them.
+
+def test_blob_frame_invokes_on_binary_message_not_on_message( channel_page ):
+    result = channel_page.evaluate( r"""
+        async () => {
+            MockWebSocket.reset();
+            const messageCalls = [];
+            const binaryCalls  = [];
+            const ch = window.__WSChannel.createChannel( {
+                url             : "ws://test/audio",
+                name            : "audio",
+                WebSocketCtor   : MockWebSocket,
+                onMessage       : ( env )  => { messageCalls.push( env ); },
+                onBinaryMessage : ( data ) => { binaryCalls.push( { kind : data.constructor.name, size : ( data.size !== undefined ? data.size : data.byteLength ) } ); }
+            } );
+            ch.connect();
+            const ws = MockWebSocket.instances[ 0 ];
+            ws._open();
+            await window.__flushMicro();
+            // Drive a Blob frame (mirrors speech.py audio chunk delivery)
+            const blob = new Blob( [ new Uint8Array( [ 0x01, 0x02, 0x03, 0x04 ] ) ] );
+            ws._binary( blob );
+            await window.__flushMicro();
+            // Drive an ArrayBuffer frame (defense-in-depth: same path)
+            const ab = new Uint8Array( [ 0x05, 0x06 ] ).buffer;
+            ws._binary( ab );
+            await window.__flushMicro();
+            return {
+                messageCallCount : messageCalls.length,
+                binaryCallCount  : binaryCalls.length,
+                binaryCalls      : binaryCalls
+            };
+        }
+    """ )
+    assert result[ "messageCallCount" ] == 0, "Binary frames must NOT reach onMessage (regression: pre-fix they were silently dropped via JSON.parse catch)"
+    assert result[ "binaryCallCount" ]  == 2, "Both Blob and ArrayBuffer frames must reach onBinaryMessage"
+    assert result[ "binaryCalls" ][ 0 ][ "kind" ] == "Blob",        "First frame routed as Blob"
+    assert result[ "binaryCalls" ][ 0 ][ "size" ] == 4,             "Blob size preserved"
+    assert result[ "binaryCalls" ][ 1 ][ "kind" ] == "ArrayBuffer", "Second frame routed as ArrayBuffer"
+    assert result[ "binaryCalls" ][ 1 ][ "size" ] == 2,             "ArrayBuffer byteLength preserved"
+
+
+# ---------------------------------------------------------------------------
+# Test 23 — JSON frame still routes to onMessage when both callbacks set
+# ---------------------------------------------------------------------------
+#
+# Pairs with test 22 to lock in the routing split: text frames go to
+# onMessage, binary frames go to onBinaryMessage, neither leaks into the
+# other.
+
+def test_json_frame_invokes_on_message_not_on_binary_message( channel_page ):
+    result = channel_page.evaluate( r"""
+        async () => {
+            MockWebSocket.reset();
+            const messageCalls = [];
+            const binaryCalls  = [];
+            const ch = window.__WSChannel.createChannel( {
+                url             : "ws://test/audio",
+                name            : "audio",
+                WebSocketCtor   : MockWebSocket,
+                onMessage       : ( env )  => { messageCalls.push( env && env.type ); },
+                onBinaryMessage : ( data ) => { binaryCalls.push( data ); }
+            } );
+            ch.connect();
+            const ws = MockWebSocket.instances[ 0 ];
+            ws._open();
+            await window.__flushMicro();
+            ws._msg( { type : "audio_streaming_status", status : "streaming" } );
+            await window.__flushMicro();
+            ws._msg( { type : "audio_streaming_complete", status : "success" } );
+            await window.__flushMicro();
+            return {
+                messageCallCount : messageCalls.length,
+                binaryCallCount  : binaryCalls.length,
+                envelopeTypes    : messageCalls
+            };
+        }
+    """ )
+    assert result[ "binaryCallCount" ]  == 0, "JSON frames must NOT leak into onBinaryMessage"
+    assert result[ "messageCallCount" ] == 2, "Both JSON envelopes must reach onMessage"
+    assert result[ "envelopeTypes" ]    == [ "audio_streaming_status", "audio_streaming_complete" ]
