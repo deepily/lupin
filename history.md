@@ -176,6 +176,55 @@
 **CoSA files NOT in this commit (require separate user-driven CoSA-context commit)**: `src/cosa/rest/routers/websocket.py`, `src/cosa/rest/websocket_manager.py`.
 **Commit**: c4d901f
 
+#### Session Summary | 2026.05.02 — bug-fix-mode CLOSED (0022baba)
+
+**Milestone shipped end-to-end this session**: WS reconnect circuit-breaker (5 phases, design + impl + tests + docs), resolving the user-reported `Insufficient resources` Chrome-renderer saturation bug filed at session-start.
+
+**Commits (8 total, in order)**:
+
+| # | Hash | Phase | One-line |
+|---|------|-------|----------|
+| 1 | `234d7b7` | 1 | WSChannel ES module + 20 Layer-1 unit tests + Phase 0 doc-set serialization |
+| 2 | `00c7c3b` | 2 | NotificationsUI integration: deleted legacy reconnect machinery, two WSChannel facades, watchdog conversion |
+| 3 | `4b287cd` | 3 | Banner DOM + CSS + Retry-now wiring + 4 Layer-3 banner tests |
+| 4 | `27bcacd` | 3 follow-up | Visual snapshot test file authored (`test_ws_circuit_banner_visual.py`) |
+| 5 | `92da8e2` | 3 close-out | Visual baseline established + verified pixel-identical on `:8000` (job `ts-f98d589a` then `ts-580c3d6f`) |
+| 6 | `8e6d61b` | 4 | Page-lifecycle wiring (`_attachPageLifecycle`) + manualRetry no-op-on-CONNECTED guard + 6 Layer-3 lifecycle tests |
+| 7 | `1a9e3e0` | 5 | Server close codes 4001/4002 (CoSA edits, NOT in this Lupin commit) + client banner reason differentiation + 4001 token-refresh path + 5 NEW close-code tests + docs |
+
+**Test pyramid (final state)**:
+- Layer-1 unit (`src/tests/ws_channel_unit/`): **20/20** in 0.99s
+- Layer-2 protocol (`src/tests/websocket_smoke/core/test_close_codes.py`): **1 pass + 1 conditional skip** in <1s
+- Layer-3 browser (`src/tests/ws_channel_browser/`): **14/14** in ~3s (4 banner + 6 lifecycle + 4 close-code)
+- websocket_smoke regression: **50/50** in 45s (preserved across all 5 phases)
+- E2E visual snapshot (`src/tests/e2e_ui/test_ws_circuit_banner_visual.py`): baseline established + verified on `:8000`
+
+**Files added (Lupin parent repo)**:
+- `src/fastapi_app/static/js/ws-channel.js` (NEW; 477 LOC)
+- `src/tests/ws_channel_unit/{__init__.py,test_ws_channel_unit.py}` (NEW; 20 unit tests)
+- `src/tests/ws_channel_browser/{__init__.py,test_ws_circuit_banner.py,test_ws_lifecycle.py,test_ws_close_codes.py}` (NEW; 14 Layer-3 tests)
+- `src/tests/websocket_smoke/core/test_close_codes.py` (NEW; Layer-2 close-code regression)
+- `src/tests/e2e_ui/test_ws_circuit_banner_visual.py` (NEW; visual snapshot)
+- `src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/` (NEW; full doc set: 00-index, 00-working-contract, 01-design-review with Q1–Q12 frozen, 02..06 phase docs, 07-test-strategy, 08-rollout, 99-plan-review-findings, 91-95 execution logs, plus expert-brief and reviewer responses)
+
+**Files modified (Lupin parent repo)**:
+- `src/fastapi_app/static/js/notifications.js` (rewrite of WS machinery in Phase 2; banner + lifecycle wiring in Phases 3-4; banner reason differentiation in Phase 5)
+- `src/fastapi_app/static/html/notifications.html` (banner DOM + CSS/JS cache-bust bumps)
+- `src/fastapi_app/static/css/notifications.css` (banner styling block)
+- `src/docs/websocket-events.md` (Close Code Semantics section)
+- `src/docs/websocket-architecture.md` (Auth Error Conditions table extended; cross-ref)
+- `bug-fix-queue.md` (today's WS-circuit-breaker bug marked RESOLVED)
+
+**Files modified in CoSA submodule (NOT in any Lupin commit — user must commit separately in CoSA context)**:
+- `src/cosa/rest/routers/websocket.py` (CLOSE_CODE_AUTH_* constants + 10 close-call sites get explicit code=4001)
+- `src/cosa/rest/websocket_manager.py` (line 147 single-session displaced socket close changed to code=4002)
+
+**Bug-fix mode**: closed for session 0022baba (queue table updated; in-progress entry marked resolved with commit-hash trail). Other sessions' bugs (13 pending in queue) untouched.
+
+**Carryover for next session**:
+- Commit the two CoSA-submodule files in a CoSA-context session.
+- Optional: archive `history.md` (currently 17,138 tokens — just over the 17k WARNING threshold). Workflow added an entry to `TODO.md`.
+
 ---
 
 ### 2026.05.01 - Session 92ece47c | TODO size-management skill + first archival pass

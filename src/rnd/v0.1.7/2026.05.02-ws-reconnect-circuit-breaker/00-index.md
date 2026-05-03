@@ -1,9 +1,11 @@
 # WebSocket Reconnect Circuit-Breaker — Doc Set Index
 
-**Status**: Plan drafted, plan-review findings embedded, awaiting user go-ahead.
+**Status**: ✅ ALL 5 PHASES COMPLETE on Lupin side — milestone closed in Session 0022baba on 2026-05-02. CoSA-submodule edits (two files) await separate user-driven CoSA-context commit (TODO entry filed).
 **Branch**: `wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe`
 **Format**: Pattern A/B/C (multi-doc design-set + paired execution logs).
-**last-reviewed-at**: 2026-05-02 (pre-implementation; updated on each review re-run)
+**last-reviewed-at**: 2026-05-02 (post-implementation; all 5 execution logs filled with verification evidence)
+**Lupin commits**: `234d7b7` (Phase 1) · `00c7c3b` (Phase 2) · `4b287cd` (Phase 3) · `27bcacd` + `92da8e2` (Phase 3 follow-ups: visual snapshot) · `8e6d61b` (Phase 4) · `1a9e3e0` (Phase 5).
+**Test totals**: 85 pass + 1 conditional skip (Layer-1 unit · Layer-2 protocol · Layer-3 browser · websocket_smoke regression · E2E visual snapshot baseline established + verified pixel-identical).
 
 ---
 

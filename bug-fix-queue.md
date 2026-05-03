@@ -56,7 +56,7 @@
 | ba53b0d2 | 2026-04-28T21:25:00 | 2026-04-28T21:50:00 | closed |
 | 31172845 | 2026-05-01T11:00:00 | 2026-05-01T11:00:00 | active |
 | a6b318ea | 2026-05-01T15:53:00 | 2026-05-01T17:35:00 | closed |
-| 0022baba | 2026-05-02T10:50:00 | 2026-05-02T10:50:00 | active |
+| 0022baba | 2026-05-02T10:50:00 | 2026-05-02T16:25:00 | closed |
 | 4ede5bad | 2026-05-02T11:30:00 | 2026-05-02T11:30:00 | active |
 
 ---
@@ -165,7 +165,9 @@
   - **Files (Lupin)**: `src/fastapi_app/static/js/notifications.js` — `_addStripIcon` (~8957), new `_applyHideInactiveStripFilter()` helper, persona-event handlers (~5390-5440), strip-bar HTML init. `src/fastapi_app/static/css/notifications.css` — strip toggle styling, `[data-inactive-hidden]` rule, hairline + zebra rules gated on `:not([style*="--persona-color"])`. `src/fastapi_app/templates/notifications.html` — new toggle button in `#cc-session-strip`. Tests: `src/tests/e2e_ui/test_cc_session_strip_and_focus.py` extended.
   - **Plan**: Phase 0 = serialize design doc to `src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md`. Phase 1 = Tweak 1 (toggle). Phase 2 = Tweak 2 Option 1 (visual differentiation). Phase 3 = E2E regression coverage. Phase 4 = wrap + commit (pending user sign-off on the look).
 
-- [ ] **WebSocket reconnect loop has no circuit breaker — saturates Chrome renderer with `Insufficient resources` after enough consecutive 1006s** | Owner: 0022baba | Since: 2026-05-02T10:50:00-04:00
+- [x] ~~**WebSocket reconnect loop has no circuit breaker — saturates Chrome renderer with `Insufficient resources` after enough consecutive 1006s**~~ → **RESOLVED** by 5-phase milestone in session 0022baba on 2026-05-02 (commits 234d7b7 → 1a9e3e0). All four required behaviors implemented + verified across 85 tests (Layer-1 / websocket_smoke / Layer-3 banner+lifecycle+close-codes / E2E visual snapshot). Doc set: `src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/`. CoSA-side close-code patches (4001/4002 in `routers/websocket.py` + `websocket_manager.py`) await separate user-driven CoSA-context commit. Original spec preserved below for context.
+
+  **Original entry** (preserved):
   - **Source**: USER-REPORTED 2026-05-02 ~10:30 EDT during a session-start, reproduced + diagnosed in same conversation. Root cause for the deferred 2026-04-22 entry above (now superseded — see annotation).
   - **Repro**: Open notifications UI through an SSH tunnel that has hit its FD limit (`accept: Too many open files`). The tunnel layer aborts the TCP handshake; browser sees `ERR_CONNECTION_RESET` on HTTP and `code=1006 reason=` on WS. The notifications.js reconnect logic schedules another `setTimeout` per failure with exponential backoff capped at 60s. Once cumulative attempts exceed Chrome's per-tab ~255 WS slot cap, the renderer starts returning `failed: Insufficient resources` on every new attempt. Loop cannot self-recover because each new attempt deepens the hole; only killing the tab process drains the renderer-side counters.
   - **Today's evidence** (full transcript in this session's history.md entry):
