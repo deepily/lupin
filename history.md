@@ -1,5 +1,60 @@
 # Lupin Project History
 
+### 2026.05.02 - Session 4ede5bad (continued) | Voice persona desync investigation + /clear preservation fix design
+
+**Context**: Same session pivoted from the focus-tray bug-fix work (entry below — checkpoint b791383) to a new bug report from the user: a notification carrying the **Mr Radio** persona badge was speaking in **Tiberius's** voice. Root cause investigation took the rest of the session; tonight's work is documentation only (Phase 0 of the fix plan), with code execution scheduled for tomorrow AM.
+
+**Accomplishments**:
+
+### Built voice-persona reference page (Phase 0 of the investigation — user-prioritized BEFORE diagnostics)
+
+- **Why it came first**: User course-corrected my initial "let me add diagnostic prints" plan with "I need a reference page that plays back samples of all voices." Without an absolute audio ground-truth, every later diagnostic conclusion depends on the user's ear-memory, which is unfalsifiable. Built the ruler before measuring. Saved as a feedback memory: `feedback_ground_truth_before_perception_debug`.
+- **New page**: `src/fastapi_app/static/html/test/voice-persona-reference.html` — admin-gated, fetches `/api/cosa-voice/voice-persona/pool`, renders six persona tiles with badge styling matching notification cards, ▶ Play sample per tile, "Play all in sequence" toolbar, currently-allocated personas footer.
+- **New endpoint**: `POST /api/cosa-voice/voice-persona/sample` in `src/cosa/rest/routers/voice_persona.py` — JWT-protected, pool-validated voice_id (rejects out-of-pool with 400 + helpful detail), calls ElevenLabs HTTP TTS API, returns `audio/mpeg` bytes inline. Verified end-to-end: 70KB MP3 / 128kbps mono on the Tiberius voice_id.
+- **dev-tools card**: `src/fastapi_app/static/html/dev-tools.html` updated under "Audio & TTS" section, count 14→15.
+
+### Diagnosed root cause via the reference page
+
+- User played all six samples, identified the leaked voice as **Tiberius** unambiguously. Pre-refresh: badge said Mr Radio, voice was Tiberius. Post-refresh: badge synced to Tiberius. So the *voice* was correct for the bridge state at the moment of the leak — the *badge* was the stale element.
+- **H1 confirmed**: `/clear` triggered the SessionStart hook in `src/lupin_cli/claude_code/hooks/register_session.py` to overwrite the bridge without preserving the existing `voice_persona`. The carry-forward at lines 682-683 didn't fire — one of `is_context_clear`, `old_data`, or `old_data["voice_persona"]` was falsy. New persona (Tiberius) was randomly drawn from the free pool. `voice_persona_assigned` event fired but `voice_persona_released` for the outgoing Mr Radio never did (the hook silently overwrites instead of explicitly releasing first), so the frontend's `senderPersonaMap` retained the stale Mr Radio entry until refresh.
+- **H2/H3/H4 disproved** — no stale persisted envelope, no bridge-lookup collision, no suffix-less sender_id path involved.
+
+### Serialized fix design for tomorrow AM execution
+
+- **Folder pattern** mirrors `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/` per `feedback_plans_include_tracking_docs`: design doc + paired execution log.
+- **NEW**: `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/01-design.md` — full design (210 lines, 15.5 KB) covering Context, gate-by-gate detection walkthrough at register_session.py:596-647, three server-side fixes with line-precise pointers, sweep check (same `is_context_clear` carry-forward at lines 699-703 for `idle_block.backoff_index`), plan-compliance audit against feedback memories.
+- **NEW**: `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/90-execution-log.md` — phase status table skeleton ready for tomorrow's session to append per fix.
+- **TODO.md** updated with "FIRST THING IN THE MORNING — 2026.05.03" pointer at top.
+- **Frontend Fix 4 PARKED** — notifications.js stale-badge propagation. User is doing heavy WebSocket refactor on that file; we don't touch it this round. With the planned server-side Fixes 2 + 3, the frontend desync window collapses dramatically (released → senderPersonaMap.delete → fresh hydration).
+
+### Files modified/created (Lupin parent only — CoSA submodule managed separately)
+
+- `src/fastapi_app/static/html/test/voice-persona-reference.html` (NEW)
+- `src/fastapi_app/static/html/dev-tools.html` (added persona-reference card)
+- `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/01-design.md` (NEW)
+- `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/90-execution-log.md` (NEW)
+- `TODO.md` (added morning pointer for 2026-05-03; moved today's voice-persona accomplishments to "MORNING FINISHED — 2026.05.02")
+- `history.md` (this entry)
+- `.claude-session.md` (manifest section updated with voice-persona files)
+
+### CoSA submodule (managed in CoSA context — NOT in this commit)
+
+- `src/cosa/rest/routers/voice_persona.py` — new `/voice-persona/sample` endpoint. Will need a separate CoSA-context commit alongside session 0022baba's `websocket.py` + `websocket_manager.py` close-code work.
+
+### Verification
+
+- `py_compile` on voice_persona.py — clean.
+- Import chain check (`from cosa.rest.routers import voice_persona`) — clean, 5 routes registered.
+- Live curl tests: pool endpoint returns 6 personas; sample endpoint returns valid MP3 (70 KB, 128 kbps mono); pool-membership guard rejects unknown voice_ids with 400 + helpful detail.
+- Documentation phase only — no fix code written tonight per user instruction. Tomorrow AM picks up the 3 server-side fixes from the design doc.
+
+### Caveats / Notes
+
+- The voice-leak symptom resolved itself for the user via browser refresh (the stale-badge frontend bug is the only remaining visible artifact). Tomorrow's server-side fixes prevent the recurrence at the source (preservation) and add defense-in-depth (release-on-overwrite) + UX (re-assigned announcement).
+- Original draft of the plan said "skip R&D doc, this is small" — user corrected with "propose step 0 serialization path and write to disc" — that plus `feedback_plans_include_tracking_docs` were the right framing. Lesson saved as a behavioral correction in the plan compliance audit (re-classify as non-trivial when the work has multiple separable layers like diagnostic + defense + UX + tests).
+
+---
+
 ### 2026.05.02 - Session 4ede5bad | Bug Fix Mode | Focus-tray inactive-session toggle + bubble differentiation
 
 **Context**: User opened `/plan-bug-fix-mode-start` in conversation mode with a two-tweak bundle against the CC notifications focus tray + conversation pane. Tweak 1: add a toggle pill in `#cc-session-strip` that hides strip icons for sessions whose voice persona has been deallocated (the "slate-gray, no persona" fallback — surfaces organically because `senderPersonaMap.get(senderId)` returns null and the CSS rule `background: var(--persona-color, #6c757d)` falls back to slate). Tweak 2: differentiate notification bubbles in the conversation pane for personaless cards (`.sender-message.incoming` was rendering as a flat near-white wash with no inter-bubble distinction).

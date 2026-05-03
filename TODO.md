@@ -1,6 +1,34 @@
 # TODO
 
-Last updated: 2026-05-01 EDT (Session 92ece47c built `todo-size-management` skill + archived 21 whole CLOSED + 10 MIXED-excerpt sections to `todo-history/2026-04-10-to-2026-05-01-todo.md`; TODO.md 31.6k → 19.4k tokens (-38%); 208 pending items preserved; design + execution log at `src/rnd/v0.1.7/2026.05.01-todo-size-management/`. Earlier sessions: 6562a2c9 archived 2026-04-29 sessions + repaired history/README.md index; 911b1cdc persona rename + conv-mode exit-reminder; 31172845 post-mortem remediation; f742b1bc WS outage fix)
+Last updated: 2026-05-02 EDT (Session 0022baba shipped the WS reconnect circuit-breaker milestone end-to-end — 5 phases, 8 commits 234d7b7→1a9e3e0, 85 tests + 1 conditional skip across the full pyramid. Bug-fix-mode CLOSED for 0022baba. Two CoSA-submodule files await separate user-driven CoSA-context commit. Earlier same-day: Session 4ede5bad serialized the voice-persona /clear preservation fix design + dev-tools voice-persona-reference page + new `POST /api/cosa-voice/voice-persona/sample` endpoint. Earlier session ee678ca8 wrote post-mortem of 19:00 EDT all-test run. Earlier 2026-05-01: Session 92ece47c built `todo-size-management` skill + archived 21 whole CLOSED + 10 MIXED-excerpt sections to `todo-history/2026-04-10-to-2026-05-01-todo.md`; TODO.md 31.6k → 19.4k tokens (-38%); 208 pending items preserved.)
+
+---
+
+## ☀️ FIRST THING IN THE MORNING — 2026.05.03
+
+### Pending
+
+- [ ] [LUPIN] **Commit the CoSA-submodule changes for the WS reconnect circuit-breaker milestone (Session 0022baba)** — two files modified by Phase 5: `src/cosa/rest/routers/websocket.py` (top-of-file `CLOSE_CODE_AUTH_INVALID_TOKEN=4001` / `..._SESSION_CONFLICT=4002` / `..._SUBSCRIPTION_DENIED=4003` constants + 10 queue auth-fail close-call sites get explicit `code=4001` with specific reason strings) and `src/cosa/rest/websocket_manager.py:147` (single-session displaced socket close changed from `code=1000` to `code=4002, reason="session_conflict_displaced"`). The Lupin parent commit `1a9e3e0` documents this dependency. To commit: `cd src/cosa && git status` (you'll see `voice_persona.py` from session 4ede5bad's parallel work alongside my two files — only stage mine), then `git add rest/routers/websocket.py rest/websocket_manager.py` + an explanatory commit message referencing the milestone. Verification step 3 (`pytest src/tests/websocket_smoke/core/test_close_codes.py::test_invalid_token_close_code -v`) confirms the 4001 close frame is live on `:7999`.
+- [ ] [LUPIN] **Archive `history.md`** — after today's 5-phase milestone, the file sits at 17,138 tokens (just over the 17k WARNING threshold). Run `/history-management mode=check` first to see velocity + recommended cut date, then `/history-management mode=archive` to slice older sessions to a dated archive in `history/`. Should reduce live file to ~8-12k tokens per project policy.
+- [ ] [LUPIN] **Land voice-persona /clear preservation fix** — design + execution-log scaffold at `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/`. Three server-side fixes (Fix 1: diagnose+repair preservation gates in `register_session.py:596-647, 682-683`; Fix 2: emit `voice_persona_released` on hook overwrite when persona can't be carried forward; Fix 3: `previous_persona_name` query param on `/allocate` → push "Voice re-assigned: X → Y" announcement) + unit tests at `src/tests/unit/test_register_session_preservation.py` (NEW). Frontend stale-badge propagation (notifications.js 5611-5631, 5664-5666, 9555-9575) is **PARKED** — user owns notifications.js during the WebSocket refactor. Append phase outcomes to `90-execution-log.md` as each lands. Read the design doc end-to-end before starting; it includes a sweep check (same carry-forward pattern at `register_session.py:699-703` for `idle_block.backoff_index`) and a plan-compliance audit.
+
+---
+
+## ☀️ MORNING FINISHED — 2026.05.02
+
+### Completed today
+
+- ✅ [LUPIN] Built dev-tools voice-persona-reference page at `src/fastapi_app/static/html/test/voice-persona-reference.html` — admin-gated, fetches `/api/cosa-voice/voice-persona/pool`, renders six persona tiles with badge styling matching notification cards, ▶ Play sample button per tile, "Play all in sequence" toolbar, "currently allocated personas" footer.
+- ✅ [LUPIN] Added new endpoint `POST /api/cosa-voice/voice-persona/sample` in `src/cosa/rest/routers/voice_persona.py` — JWT-protected, pool-validated voice_id (rejects out-of-pool with 400), calls ElevenLabs HTTP TTS API, returns `audio/mpeg` bytes inline.
+- ✅ [LUPIN] Added card under "Audio & TTS" on `src/fastapi_app/static/html/dev-tools.html`.
+- ✅ [LUPIN] Voice-leak diagnosis confirmed via reference page — leaked voice was Tiberius (H1 from plan); root cause is `/clear` preservation failure in `register_session.py`.
+- ✅ [LUPIN] Serialized fix design + execution-log scaffold to `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/`.
+
+### Pending → carried over to 2026-05-02 AM section above (test-suite post-mortem)
+
+The 19:00 EDT all-test-suite post-mortem work from the now-stale "FIRST THING IN THE MORNING — 2026.05.02" section was deferred to make room for the bug investigation that consumed today's session. Re-prioritize before the voice-persona fix tomorrow if the post-mortem failures are blocking other work.
+
+- [ ] [LUPIN] **Work through the 19:00 EDT 2026.05.01 all-test-suite post-mortem** — `src/rnd/v0.1.7/2026.05.01-postmortem-test-suite-19h00.md`. Categorized 10 failures (8 collapse to 3 root causes: A=auto-proxy not threaded, B=notification proxy 503, C=voice-persona pool rename echo) plus addendum on 39 skips (28 integration skips + 22 stale xfailed-now-passing markers). Cheapest-first sequence at end of doc; steps 1-3 alone should drop failure count from 10 → ~3. Note: prior session 31172845's fix for "notification 503 cascade" did not close the hole — re-investigate before assuming it's a regression.
 
 ---
 
