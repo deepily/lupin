@@ -1,5 +1,40 @@
 # Lupin Project History
 
+### 2026.05.03 - Session aacd24b4 | Voice persona /clear preservation fix — Phases 1.1 + 1.5 + 2 + 3 shipped
+
+**Context**: Picked up the Phase 0 plan that 4ede5bad serialized last night. Read `01-design.md` end-to-end, executed the four phases that don't depend on user-driven `/clear` repro, fixed an order-dependent flake in the unit suite that the new tests surfaced, and serialized next-step handoff doc for the remaining gate-identification phases.
+
+**Accomplishments**:
+
+- **Phase 1.1 — diagnostic stderr prints** added to `register_session.main()` at three sites (gate-result, gate-2-fail with bound exception, preserve-check). Will harvest gate state on the user's next `/clear` to identify which gate is silently failing.
+- **Phase 2 — release-on-overwrite helper**: new `_release_voice_persona_via_http()` mirrors the alloc helper (login → POST /release → fail-soft, 2s timeouts). Invoked when the carry-forward declines but the old bridge had a persona — emits `voice_persona_released` so the frontend's `senderPersonaMap` clears before the new persona arrives.
+- **Phase 3 — re-assigned announcement**: `voice_persona.py /allocate` gained an `Optional[str] previous_persona_name` query param. On `newly_allocated=True` AND a non-empty previous name, pushes a `task`-typed "Voice re-assigned: X → Y" notification (priority=medium, suppress_ding=False). Hook captures `old_data["voice_persona"]["display_name"]` at the same conditional that fires the release call and threads it through `_allocate_voice_persona_via_http` via `urllib.parse.quote`.
+- **Phase 1.5 — unit tests**: `src/tests/unit/test_register_session_preservation.py` (NEW) — 9 tests across 3 classes (8 pass + 1 xfail pinned to Phase 1.3's gate-3 broadening). Fixture redirects `HOME` to `tmp_path` and patches all side-effect helpers in `register_session` so `main()` runs in isolation. Covers fresh start, /clear with persona, /clear without persona, /clear with corrupted bridge (verifies the gate-2-fail diagnostic fires), legacy `session_ids[]` match (xfail).
+- **Side fix — flake in test_voice_persona_helpers.py**: `TestAllocatePersonaForSession::test_picks_unallocated_when_pool_partially_occupied` (and sibling `test_borrows_when_pool_fully_occupied`) write bridge files keyed by `os.getpid() + N`. Linux PID allocation isn't sequential, so on host-side runs `_can_trust_host_pids()=True` skipped the dead-PID bridges → undercounted occupied set → seed-7 picked an "occupied" voice. Pre-existing structural flake; my new test file shifted suite timing enough to surface it. Repaired with a class-level autouse fixture patching `_can_trust_host_pids → False` (mirrors the in-container path).
+- **Documentation**: `90-execution-log.md` filled with per-phase outcomes + side-fix writeup; new `91-next-steps.md` serialized covering the user-owned (CoSA-side commit, Phase 1.2 `/clear` repro to harvest diagnostics, optional curl smoke for Fix 3) and Claude-owned (Phase 1.3 minimal patch, Phase 1.4 sweep, remove diagnostics, final verification matrix) follow-ups.
+- **Verification (all on :7999 / discretionary)**: py_compile ✅ · import chain ✅ · helper smoke ✅ · new unit tests ✅ (8 pass + 1 xfail) · full unit suite **3950 passed, 2 xfailed, 0 failures (132s)** after the flake fix.
+
+**Files Modified (Lupin parent — 5 staged + this entry + 91-next-steps.md to commit)**:
+- `src/lupin_cli/claude_code/hooks/register_session.py` (+115 / -7)
+- `src/tests/unit/test_register_session_preservation.py` (NEW, ~270 lines)
+- `src/tests/unit/test_voice_persona_helpers.py` (+14 — class-level autouse fixture)
+- `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/90-execution-log.md` (+77 / -25)
+- `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/91-next-steps.md` (NEW)
+- `TODO.md` (marked CoSA WS commit done, voice-persona task to `[~]`)
+- `history.md` (this entry)
+
+**CoSA submodule (managed separately per `feedback_lupin_only_never_cosa`)**:
+- `src/cosa/rest/routers/voice_persona.py` (+25) — needs a CoSA-context commit. Parent commit `2000cb4` is the documenting reference.
+
+**Caveats / Notes**:
+- Phases 1.2/1.3/1.4 still pending — need user `/clear` repro on a planning session, then a minimal gate patch + sweep of `register_session.py:699-703` (idle-backoff carry-forward, same failure mode). Diagnostic prints removed in a follow-up commit once the patch lands and the xfail flips to xpass.
+- Frontend Fix 4 (notifications.js stale-badge propagation) remains PARKED per user — they own that file during the WS refactor lane.
+- History.md at 18.8k tokens (over WARNING) — user explicitly directed earlier to skip archival this session; deferred to TODO.
+
+**Checkpoint commit (mid-session)**: `2000cb4` — Phases 1.1 + 1.5 + 2 + 3.
+
+---
+
 ### 2026.05.02 - Session 4ede5bad (continued) | Voice persona desync investigation + /clear preservation fix design
 
 **Context**: Same session pivoted from the focus-tray bug-fix work (entry below — checkpoint b791383) to a new bug report from the user: a notification carrying the **Mr Radio** persona badge was speaking in **Tiberius's** voice. Root cause investigation took the rest of the session; tonight's work is documentation only (Phase 0 of the fix plan), with code execution scheduled for tomorrow AM.
