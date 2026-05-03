@@ -38,6 +38,7 @@ if _src_path not in sys.path:
 
 import urllib.request
 import urllib.error
+import urllib.parse
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts
@@ -504,7 +505,7 @@ def _check_cosa_voice_status():
     return "\n".join( lines )
 
 
-def _allocate_voice_persona_via_http( server_url, project, stable_session_id ):
+def _allocate_voice_persona_via_http( server_url, project, stable_session_id, previous_persona_name=None ):
     """
     Allocate a voice persona for the given session by calling the cosa-voice
     HTTP endpoint at /api/cosa-voice/voice-persona/{sid}/allocate.
@@ -528,11 +529,17 @@ def _allocate_voice_persona_via_http( server_url, project, stable_session_id ):
         - Returns None on any failure (logged to stderr)
         - Never raises exceptions
         - Uses 2-second timeouts for both /auth/login and /allocate
+        - When previous_persona_name is non-empty, threads it as a
+          query-string param so the server pushes a "Voice re-assigned"
+          announcement after the assigned broadcast
 
     Args:
         server_url: Lupin server URL
         project: Project key (for credential lookup)
         stable_session_id: Stable session ID to allocate for
+        previous_persona_name: Optional display_name of the outgoing persona
+            (when /clear preservation failed); causes the server to push a
+            "Voice re-assigned: X → Y" notification on successful allocation
 
     Returns:
         dict or None: The persona dict, or None on failure
@@ -557,9 +564,12 @@ def _allocate_voice_persona_via_http( server_url, project, stable_session_id ):
                    file=sys.stderr )
             return None
 
-        # Step 2: POST /allocate
+        # Step 2: POST /allocate (optionally with previous_persona_name)
+        alloc_url = f"{server_url}/api/cosa-voice/voice-persona/{stable_session_id}/allocate"
+        if previous_persona_name:
+            alloc_url = f"{alloc_url}?previous_persona_name={urllib.parse.quote( previous_persona_name )}"
         alloc_req = urllib.request.Request(
-            f"{server_url}/api/cosa-voice/voice-persona/{stable_session_id}/allocate",
+            alloc_url,
             data    = b"",  # empty body (endpoint takes session_id from path)
             method  = "POST",
             headers = {
@@ -578,6 +588,81 @@ def _allocate_voice_persona_via_http( server_url, project, stable_session_id ):
         return None
 
 
+def _release_voice_persona_via_http( server_url, project, stable_session_id ):
+    """
+    Release the currently-allocated voice persona for the given session by
+    calling the cosa-voice HTTP endpoint at
+    /api/cosa-voice/voice-persona/{sid}/release.
+
+    The server endpoint clears the voice_persona field on the bridge file and
+    broadcasts a voice_persona_released WebSocket event. The frontend uses the
+    event to drop the stale persona from senderPersonaMap so subsequent
+    notifications re-hydrate from the freshly-stamped envelope.
+
+    Fail-soft: any failure (server unreachable, auth failure, no persona to
+    release) logs a warning to stderr and returns False. The hook continues
+    with its bridge write either way.
+
+    Requires:
+        - server_url is a non-empty string (e.g. http://localhost:7999)
+        - project is a non-empty string used to look up hook credentials
+        - stable_session_id is a non-empty string
+
+    Ensures:
+        - Returns True on successful POST /release (HTTP 2xx)
+        - Returns False on any failure (logged to stderr)
+        - Never raises exceptions
+        - Uses 2-second timeouts for both /auth/login and /release
+
+    Args:
+        server_url: Lupin server URL
+        project: Project key (for credential lookup)
+        stable_session_id: Stable session ID to release
+
+    Returns:
+        bool: True on success, False on failure
+    """
+    try:
+        from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
+        email, password = get_hook_credentials( project )
+
+        # Step 1: login to get JWT
+        login_body = json.dumps( { "email": email, "password": password } ).encode()
+        login_req  = urllib.request.Request(
+            f"{server_url}/auth/login",
+            data    = login_body,
+            method  = "POST",
+            headers = { "Content-Type": "application/json" }
+        )
+        with urllib.request.urlopen( login_req, timeout=2 ) as resp:
+            login_data = json.loads( resp.read().decode() )
+        access_token = login_data.get( "tokens", {} ).get( "access_token" )
+        if not access_token:
+            print( f"[register_session] WARNING: voice persona release — login response missing access_token",
+                   file=sys.stderr )
+            return False
+
+        # Step 2: POST /release
+        rel_req = urllib.request.Request(
+            f"{server_url}/api/cosa-voice/voice-persona/{stable_session_id}/release",
+            data    = b"",
+            method  = "POST",
+            headers = {
+                "Content-Type"  : "application/json",
+                "Authorization" : f"Bearer {access_token}"
+            }
+        )
+        with urllib.request.urlopen( rel_req, timeout=2 ) as resp:
+            resp.read()  # drain
+        return True
+
+    except ( urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError,
+             KeyError, FileNotFoundError, OSError, ValueError ) as e:
+        print( f"[register_session] WARNING: voice persona release failed ({type( e ).__name__}: {e})",
+               file=sys.stderr )
+        return False
+
+
 def main():
 
     # ── Phase 1: Read hook input ──────────────────────────────────────────
@@ -594,7 +679,8 @@ def main():
     session_dir  = os.path.expanduser( "~/.claude/sessions" )
     session_file = None
     old_data     = None
-    is_context_clear = False
+    is_context_clear      = False
+    previous_persona_name = None  # Set when /clear preservation fails AND old bridge had a persona; threaded into Phase 4.5 alloc
 
     if session_id:
         os.makedirs( session_dir, exist_ok=True )
@@ -642,8 +728,9 @@ def main():
                     if old_session_id and old_session_id != session_id:
                         is_context_clear = True
                         _cleanup_old_listener( old_data, session_id )  # session_id = new transient UUID, keep its listener alive
-                except ( json.JSONDecodeError, OSError ):
-                    pass
+                    print( f"[register_session] gate-result: is_context_clear={is_context_clear} old_sid={old_session_id!r} new_sid={session_id!r}", file=sys.stderr )
+                except ( json.JSONDecodeError, OSError ) as e:
+                    print( f"[register_session] gate-2-fail: {type( e ).__name__}: {e}", file=sys.stderr )
         except OSError as e:
             # Cannot create lockfile at all (permissions, disk full).
             # Fall back to transient session_id — stability guarantee lost for this session.
@@ -679,8 +766,28 @@ def main():
         # user mid-session. Keying on stable_session_id alone isn't enough;
         # the bridge WRITE must also preserve the field.
         # See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md §5
+        print( f"[register_session] preserve-check: is_context_clear={is_context_clear} old_data_present={old_data is not None} vp_is_dict={isinstance( ( old_data or {} ).get( 'voice_persona' ), dict )}", file=sys.stderr )
         if is_context_clear and old_data and isinstance( old_data.get( "voice_persona" ), dict ):
             session_data[ "voice_persona" ] = old_data[ "voice_persona" ]
+
+        # Defense-in-depth: if the carry-forward above did NOT preserve the
+        # persona but the old bridge had one, explicitly release it via HTTP
+        # before the bridge write below. This emits a voice_persona_released
+        # WS event, prompting the frontend to drop the stale persona from
+        # senderPersonaMap so the about-to-arrive new persona doesn't render
+        # under the old badge. Also captures the outgoing display_name so
+        # Phase 4.5's alloc can request a "Voice re-assigned" announcement.
+        # Fail-soft.
+        if not session_data.get( "voice_persona" ) and old_data and isinstance( old_data.get( "voice_persona" ), dict ):
+            old_persona_dict = old_data[ "voice_persona" ]
+            if isinstance( old_persona_dict.get( "display_name" ), str ):
+                previous_persona_name = old_persona_dict[ "display_name" ]
+            try:
+                _release_project = detect_project()
+            except Exception:
+                _release_project = "lupin"
+            _release_server_url = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
+            _release_voice_persona_via_http( _release_server_url, _release_project, stable_session_id )
 
         # Initialize idle_detection block — tracks per-session state for the
         # deferred "Anything else?" prompt with exponential backoff.
@@ -761,7 +868,8 @@ def main():
         try:
             voice_persona_server_url = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
             allocated = _allocate_voice_persona_via_http(
-                voice_persona_server_url, project, stable_session_id
+                voice_persona_server_url, project, stable_session_id,
+                previous_persona_name=previous_persona_name
             )
             if allocated is not None:
                 # The /allocate endpoint already wrote the persona to the

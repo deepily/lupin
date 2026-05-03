@@ -340,6 +340,20 @@ class TestFindActiveVoicePersonaSessions:
 
 class TestAllocatePersonaForSession:
 
+    @pytest.fixture( autouse=True )
+    def _trust_synthetic_pids( self ):
+        """
+        Tests below write bridge files keyed by `os.getpid() + N`. Those PIDs
+        are NOT guaranteed live on Linux (allocation isn't sequential), so on
+        host-side runs `find_active_voice_persona_sessions` would skip the
+        synthetic-PID bridges as dead and undercount the occupied set —
+        defeating the test premise. Patching `_can_trust_host_pids` to False
+        bypasses the alive-PID filter, mirroring the in-container path.
+        """
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                    return_value=False ):
+            yield
+
     def test_picks_unallocated_when_pool_partially_occupied( self ):
         """
         Two bridges already hold maria and Tiberius. allocate_persona_for_session
