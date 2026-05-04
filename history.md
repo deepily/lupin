@@ -1,5 +1,61 @@
 # Lupin Project History
 
+### 2026.05.04 - Session ec746144 | Multiplexer rebuild — spine-bundle docs + full plan-review (REUSE + Pass 1 + Pass 2) all gates clean
+
+**Context**: User opened the session asking for a summary of the notifications-UI refactor's first phase. Instead of a stand-alone Phase 1 doc, the work productively reframed the entire 9-phase project into a **spine bundle** model: Phases 1-3 (toolchain + foundation services + transport) ship as a single design + review unit, then per-phase from Phase 4. After Q10 + Q11 amendments captured 2026-05-04, the spine bundle's three design docs went through the full canonical PIP `plan-review.md` machinery — REUSE pre-pass + Pass 1 (Fitness) + Pass 2 (Adversarial) — all three gates closed clean. User intends to clear memory next and start Phase 1 implementation from the documentation alone.
+
+**Accomplishments**:
+
+- **Phase 0 amendments** — Q10 (single per-phase gate) refined to bundle Phases 1-3 as the spine; Q11 (review owner) refined to align with canonical PIP `plan-review.md` (REUSE → Fitness → Adversarial; review fires after design-doc draft, before user approval). Both amendments landed in `01-phase0-decisions.md` with cross-reference table updates and full rationale. The two stale prompt clones at `src/rnd/v0.1.7/2026.05.03-testing-and-fitness-prompts/02-` and `/03-` were declared NOT canonical and removed from all anchor refs (the directory's `01-working-contract.md` remains as the Layer-2 anchor instance per PIP §1).
+- **Synthesis + execution-log updates** — `00-synthesis-and-roadmap.md` gained a "Phase bundling" subsection in §3 + plan-review-timing paragraph in §4.4 + Q10/Q11 row updates in §5 + new "spine boundary holds but Phase 4+ surface bigger than expected" risk in §6.
+- **Phase 2 design doc drafted** — `03-phase2-foundation-design.md` (NEW, ~18 KB, 318 lines post-fixes). Covers AuthManager (sync-block contract per DC1, `navigator.locks` dedup, EventBus refresh emissions), ApiClient (`AbortSignal.any` for timeout + manual abort), StorageService (typed JSON + first-class `getSessionId`/`setSessionId` per DC2), EventBus (singleton EventTarget + reserved-event-types subsection + listener-error isolation), BroadcastChannel wrapper (static `BROADCAST_WHITELIST` constant per DC4 + 4-step add procedure).
+- **Phase 3 design doc drafted** — `04-phase3-transport-design.md` (NEW, ~24 KB, 305 lines post-fixes). Covers ws-channel.ts port (Claude §1.1 binary-frame fix carried forward + §2.2 lifecycle removal + §2.5 JSON-round-trip removal), ConnectionStateMachine XState actor with 100ms grace period + full state×event transition matrix + `offline` state distinct from `failed`, three transport wrappers (Queue/Audio/ClaudeCode) with envelope-mapping contract, `boot.ts` Lifecycle Event Emission Contract (5-event map), `createTransports` factory signature pinned, AC-7 reconnect verification with explicit programmatic assertions.
+- **REUSE pre-pass** — clean-context Explore agent surveyed the spine bundle for prior art across `src/fastapi_app/static/` and `src/cosa/rest/routers/`. 17 findings: 4 extend-existing (route registration, dev-tools card, QueueTransport, WS smoke directory), 13 genuinely-new (with prior-art trail for 7 of them). Plus 4 design concerns surfaced (DC1-DC4) — sync-block AuthManager, session ID source, test runner commitment, BroadcastChannel whitelist shape.
+- **DC1 (sync block AuthManager) deep-dive** — User asked for pros/cons. Sync block wins decisively: `navigator.locks` already serializes; statistically the latency cost is rare; WS auth handshake is the killer use case (optimistic stale token costs 3 round-trips vs 2). UI observability solved orthogonally via EventBus emissions (`refresh_started/completed/failed`). DC2/DC3/DC4 resolved with corresponding doc edits.
+- **Pass 1 (Fitness)** — 17 findings (7 AMBIGUITY, 7 COMPLETENESS, 2 TESTABILITY, 1 RISK_SURFACE; zero design concerns). All applied + 6 enumerated Open Questions ratified (Phase 2 Q2/Q3/Q4 + Phase 3 Q2/Q3/Q4). Notable resolutions: Phase 1 npm install bootstrap row prepended; tsconfig paths pinned exactly; ESLint canonical rule snippet inlined; ConnectionStateMachine full transition matrix; boot.ts Lifecycle Emission Contract; AudioTransport stub signature pinned; ClaudeCodeTransport URL unblock procedure (grep + server-router verify + escalate-on-mismatch).
+- **Pass 2 (Adversarial)** — 6 ownership-language findings, all ACs/Rollback items lacking explicit `EXECUTOR: AI` tags. All 6 applied; 8 `EXECUTOR: AI` tags now distributed across the spine bundle. Greps clean: zero `EXECUTOR: HUMAN`, zero bare checkboxes, all `manual` hits annotated as legitimate non-Manual-E2E uses.
+- **All three gates closed clean**. Convergence re-grep after each pass: zero new TBDs, zero Open sub-questions introduced. Idempotency marker recorded in `90-execution-log.md`.
+
+**Files modified (Lupin parent only — CoSA submodule untouched)**:
+
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/00-synthesis-and-roadmap.md` (§3 Phase Bundling + §4.4 Plan-review timing + §5 Q10/Q11 + §6 risks)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` (Q10 + Q11 amendments + cross-ref table + Q11 forward-ref correction)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/02-phase1-scaffolding-design.md` (Approval coupling note, Plan-review pointer + slot table, all OQ resolutions, all 4 Phase 1 Pass 1 findings, all 3 Phase 1 Pass 2 findings, Prior art referenced section)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/03-phase2-foundation-design.md` (NEW — full Phase 2 design with all Pass 1 + Pass 2 fixes baked in + DC1-DC4 resolutions + Prior art referenced section)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/04-phase3-transport-design.md` (NEW — full Phase 3 design with all Pass 1 + Pass 2 fixes baked in + DC2 resolution + Prior art referenced section)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (Spine Bundle Plan-Review section: REUSE results + Pass 1 results + Pass 2 results + spine-bundle approval table + Phase 1 implementation prerequisites pointer list)
+- `~/.claude/plans/vectorized-bubbling-plum.md` (the originating planning round's plan file — sequencing strategy + DC analysis)
+- `.claude-session.md` (session ec746144 manifest section)
+- `history.md` (this entry)
+- `TODO.md` (spine-bundle approved — Phase 1 implementation pointer added)
+
+**No CoSA submodule edits this session** per `feedback_lupin_only_never_cosa`.
+
+**Verification (all on :7999, AI-discretionary)**:
+- Convergence re-grep after each gate (REUSE / Pass 1 / Pass 2): clean.
+- All 6 enumerated Open Questions across Phases 2 and 3 marked RESOLVED with explicit answers.
+- 8 `EXECUTOR: AI` tags distributed across the spine bundle's verification + rollback sections.
+- Zero `EXECUTOR: HUMAN`, zero bare checkboxes, zero unresolved TBDs (only meta-references to PIP machinery vocabulary remain — false positives by design).
+
+**Next session entry artifacts** (a fresh-context Claude reads these to start Phase 1 implementation):
+1. `~/.claude/CLAUDE.md` (Layer 1)
+2. Lupin `CLAUDE.md` + `CLAUDE.local.md`
+3. `src/rnd/v0.1.7/2026.05.03-testing-and-fitness-prompts/01-working-contract.md` (Layer 2)
+4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` (Layer 3 — Q1-Q11 + Q10/Q11 amendments)
+5. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/00-synthesis-and-roadmap.md`
+6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/02-phase1-scaffolding-design.md` (THIS PHASE)
+7. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (review history + spine-bundle approval status; Phase 1 implementation entry artifacts pointer at end)
+
+**Caveats / Notes**:
+
+- Phase 2 + Phase 3 design docs are spine-bundle members (approved alongside Phase 1) but their CODE does NOT land in the Phase 1 implementation session. Within-bundle cadence is per-phase: Phase 1 implements + verifies + commits before Phase 2 code starts; same Phase 2 → Phase 3.
+- The spine bundle approval explicitly does NOT commit to the rest of the phase plan (Phases 4-9). After Phase 3 ships, a natural go/no-go gate determines whether to draft more design docs.
+- Stale prompt clones at `src/rnd/v0.1.7/2026.05.03-testing-and-fitness-prompts/02-` and `/03-` are non-canonical and ignored. The directory's `01-working-contract.md` is the Layer-2 anchor instance and stays.
+
+**Checkpoint commit** (this session): see manifest for hash.
+
+---
+
 ### 2026.05.03 - Session 656c8ba2 | WSChannel binary-frame regression — notifications-UI TTS playback fixed
 
 **Context**: User reported that notifications-UI TTS had stopped playing — the voice-persona-reference page worked (HTTP MP3 path) and the high-priority "ding" played, but no spoken audio ever rendered for `notify()`-triggered notifications. Two-step trace identified a regression introduced by Session 0022baba's WS reconnect circuit-breaker milestone (commits 234d7b7→1a9e3e0, 2026-05-02): the new `WSChannel` facade in `ws-channel.js` had no Blob/ArrayBuffer branch in `socket.onmessage` — `JSON.parse(Blob)` threw, the catch returned, and binary audio chunks were silently dropped. The legacy `handleAudioMessage` Blob branch (notifications.js:2649) became unreachable because the facade now intercepts before that handler runs. End-to-end manual verification confirmed the fix: 5 audio chunks (~218 KB) reaching `handleAudioChunk` with TTFA 277ms.

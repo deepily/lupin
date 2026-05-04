@@ -1,9 +1,9 @@
 # Notifications UI Refactor — Synthesis & Roadmap
 
 **Date**: 2026-05-03
-**Status**: DRAFT — decisions required before any code lands
+**Status**: Phase 0 decisions captured (2026-05-03) → see `01-phase0-decisions.md`. Phase 1 design doc drafted (`02-phase1-scaffolding-design.md`) — awaiting user approval before code begins.
 **Inputs**: `2026.05.02-notifications-ui-js-refactor-analysis-claude.md` (Claude Opus 4.7) + `2026.05.02-notifications-ui-js-refactor-analysis-openai.md` (OpenAI deep-research)
-**Strategic posture**: **PARALLEL GREENFIELD REBUILD** — new module tree at a new URL; current `notifications.html` stays running and unchanged until cutover.
+**Strategic posture**: **PARALLEL GREENFIELD REBUILD** — new module tree at a new URL (`/app/multiplexer`); current `notifications.html` stays running and unchanged until cutover, then remains as unbounded fallback per Q9.
 
 ---
 
@@ -99,6 +99,16 @@ Both reviews recommend incremental in-place refactor (strangler pattern). The us
 - Phase 7 is mandatory before cutover, not after — observability before launch beats observability after regressions.
 - Phase 8 is the user's gate. Adversarial review is run by spawning a separate Claude agent that has not seen the implementation history; viability is the full automated pyramid.
 - Phase 9 is the cutover. Old URL stays alive as fallback for one release.
+
+### Phase bundling — the spine (Phases 1-3) lands as one approval unit
+
+Per Q10 amendment in `01-phase0-decisions.md` (2026-05-04): **Phases 1, 2, and 3 design docs bundle as the spine** and land as a single plan-review pass + single user approval gate. Phases 4-9 revert to the per-phase cadence.
+
+Why bundled: the toolchain decisions in Phase 1 (TS strictness, ESLint rule, esbuild output shape) constrain Phase 2 service contracts (AuthManager refresh callback, EventBus event shape), which constrain Phase 3 transport-wrapper interfaces. Designing them serially would pin earlier decisions before later constraints surface; designing them as a unit catches contract-interface gaps at design time. The clean-context Claude review (per Q11 amendment, canonical PIP `plan-review.md` machinery) sees the whole spine surface in one pass.
+
+Within the bundle, **implementation cadence stays per-phase**: Phase 1 implements + verifies + commits before Phase 2 code starts; same Phase 2 → Phase 3. This preserves the working-contract verification discipline (each phase ships a runnable artifact: Phase 1 = `/app/multiplexer` returns "hello"; Phase 2 = unit-tested foundation services; Phase 3 = `auth_success` handshake against :7999).
+
+After spine implementation completes, a natural go/no-go gate: if Phase 4-9 architectural assumptions held, per-phase from Phase 4. If something fundamental needs rework (e.g., transport contract turned out wrong), re-scope BEFORE committing to 6 more design docs.
 
 **What is NOT in this roadmap**:
 - ❌ Token storage migration (server-side change required; out of scope)
@@ -224,6 +234,8 @@ src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/
 
 Each phase design doc ends with: testing strategy for that phase (unit + smoke + integration + E2E layer per `feedback_comprehensive_automated_testing`), open questions, and rollback procedure. The execution log gets a new section per phase as it lands.
 
+**Plan-review timing** (per Q11 amendment 2026-05-04): the canonical PIP `plan-review.md` workflow fires **AFTER the per-phase design doc is drafted (= tracking-doc generation per `/p-is-p-02-documentation`) and BEFORE the user approves it / the 90-log section opens / code begins**. Sequence per phase: AI drafts design doc → AI fills `{{slots}}` → spawn REUSE pre-pass Agent → user-decision gate → spawn Pass 1 (Fitness) Agent → user-decision gate → spawn Pass 2 (Adversarial) Agent → user-decision gate → user approves → 90-log section opens → implementation. For the spine bundle (Phases 1-3), the slot fill lists all three design docs as `{{PLAN_DOC_PATHS}}` so a single review pass covers the whole spine. Phase 8 viability gate uses the same machinery + adds OpenAI deep-research per Q11. **The two prompt files at `src/rnd/v0.1.7/2026.05.03-testing-and-fitness-prompts/02-` and `/03-` are stale clones lifted from cj-flow and are NOT canonical** — ignore them; the canonical source is `planning-is-prompting/workflow/plan-review.md`. (The directory's `01-working-contract.md` is a Layer-2 anchor instance per PIP §1 and stays.)
+
 ### 4.5 Testing venue routing per phase
 
 Per Lupin's :7999 / :8000 venue policy:
@@ -244,6 +256,8 @@ Per Lupin's :7999 / :8000 venue policy:
 
 ## 5. Open questions for the user
 
+> **Resolved 2026-05-03** — all 11 decisions captured in `01-phase0-decisions.md` (the durable record). Original questions and recommended defaults preserved below for traceability. Q9 (cutover release count) overrode the recommended `1 release` default in favor of `unbounded` per user direction.
+
 | # | Question | Default if no answer |
 |---|---|---|
 | Q1 | **Name + URL** — `inbox` / `notifications-next` / `console` / `signal` / your pick? | (block — required) |
@@ -255,8 +269,8 @@ Per Lupin's :7999 / :8000 venue policy:
 | Q7 | **Token storage migration** — confirmed out of scope? | out of scope |
 | Q8 | **Service Worker / offline outbox** — confirmed out of scope this iteration? | out of scope |
 | Q9 | **Cutover policy** — keep old `notifications.html` alive for how many releases after cutover? | 1 release |
-| Q10 | **Per-phase user gate** — do you want to approve each phase's design doc before code begins, or once at the start? | per-phase approval (safer) |
-| Q11 | **Adversarial review owner** — separate Claude agent (clean context), or external (OpenAI/another model)? | separate Claude agent + OpenAI deep research, both, comparing |
+| Q10 | **Per-phase user gate** — do you want to approve each phase's design doc before code begins, or once at the start? | per-phase approval (safer). **Amended 2026-05-04**: Phases 1-3 bundle as the spine (single approval unit); Phases 4-9 individual gates. See `01-phase0-decisions.md` Q10 amendment. |
+| Q11 | **Adversarial review owner** — separate Claude agent (clean context), or external (OpenAI/another model)? | separate Claude agent + OpenAI deep research, both, comparing. **Amended 2026-05-04**: timing per canonical PIP `plan-review.md` (REUSE → Fitness → Adversarial; review fires AFTER design-doc draft, BEFORE user approval). See `01-phase0-decisions.md` Q11 amendment. Stale clones at `2026.05.03-testing-and-fitness-prompts/02-` + `/03-` are NOT canonical. |
 
 ---
 
@@ -271,18 +285,19 @@ Per Lupin's :7999 / :8000 venue policy:
 | **Adversarial review finds fundamental flaws at Phase 8** — late, expensive | Adversarial review of *tracking docs* at end of each phase, not just at Phase 8; cheap re-cast at design time |
 | **TypeScript adoption blocks contributors** — anyone who only knows JS | Strict mode but pragmatic types; `any` allowed at boundaries; no compiler-enforced patterns |
 | **`window.X` global access in templates carries over by habit** | Lint rule from Phase 1: ban `window.notifications*` and `window.inbox*` references in module code; events flow via EventBus |
+| **Spine boundary holds but Phase 4+ surface is bigger than expected** — store/render/parity work expands faster than planned per-phase pace can absorb | After spine implementation completes (end of Phase 3), reassess Phase 4-9 scope before drafting more design docs; spine-bundle approval explicitly does NOT commit to the rest of the phase plan; pivot to a pure per-phase cadence is the default escape hatch |
 
 ---
 
 ## 7. What ships in Phase 0 (this gate)
 
 This document + the 11 questions above answered. Once answered:
-1. `00-synthesis-and-roadmap.md` updated with decisions captured
-2. `01-phase0-decisions.md` written as the durable record
-3. `02-phase1-scaffolding-design.md` drafted as the Phase 1 entry doc
-4. User approves Phase 1 design → code begins
+1. ✅ `00-synthesis-and-roadmap.md` updated with decisions captured (2026-05-03)
+2. ✅ `01-phase0-decisions.md` written as the durable record (2026-05-03)
+3. ✅ `02-phase1-scaffolding-design.md` drafted as the Phase 1 entry doc (2026-05-03)
+4. ⏸ User approves Phase 1 design → code begins (PENDING)
 
-No code is written until §5 is fully answered.
+No code is written until §5 is fully answered. **Status: §5 fully answered; awaiting Phase 1 design-doc approval.**
 
 ---
 

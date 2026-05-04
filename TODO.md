@@ -1,6 +1,31 @@
 # TODO
 
-Last updated: 2026-05-02 EDT (Session 0022baba shipped the WS reconnect circuit-breaker milestone end-to-end — 5 phases, 8 commits 234d7b7→1a9e3e0, 85 tests + 1 conditional skip across the full pyramid. Bug-fix-mode CLOSED for 0022baba. Two CoSA-submodule files await separate user-driven CoSA-context commit. Earlier same-day: Session 4ede5bad serialized the voice-persona /clear preservation fix design + dev-tools voice-persona-reference page + new `POST /api/cosa-voice/voice-persona/sample` endpoint. Earlier session ee678ca8 wrote post-mortem of 19:00 EDT all-test run. Earlier 2026-05-01: Session 92ece47c built `todo-size-management` skill + archived 21 whole CLOSED + 10 MIXED-excerpt sections to `todo-history/2026-04-10-to-2026-05-01-todo.md`; TODO.md 31.6k → 19.4k tokens (-38%); 208 pending items preserved.)
+Last updated: 2026-05-04 (Session ec746144 closed the multiplexer notifications-UI rebuild's full plan-review pipeline. **Spine bundle (Phases 1-3) is approved-pending-final-OK**: REUSE pre-pass + Pass 1 Fitness + Pass 2 Adversarial all gates clean per canonical PIP `plan-review.md`. Full design docs ready for Phase 1 implementation in a fresh-context session. Earlier 2026-05-03: Session 656c8ba2 fixed the WSChannel binary-frame regression. Earlier 2026-05-02: Session 0022baba shipped WS reconnect circuit-breaker; Session 4ede5bad serialized voice-persona /clear preservation fix.)
+
+---
+
+## ☀️ FIRST THING IN THE MORNING — 2026.05.05 (or next session)
+
+### Pending — Multiplexer Phase 1 implementation
+
+- [ ] [LUPIN] **Begin Phase 1 implementation of the multiplexer rebuild** — spine-bundle approved 2026-05-04 after full PIP plan-review (REUSE + Pass 1 + Pass 2 all clean). Entry artifacts a fresh-context Claude must read in order:
+  1. `~/.claude/CLAUDE.md` (Layer 1 — TEST OWNERSHIP MANDATE + DOCUMENTATION-FIRST PROTOCOL)
+  2. Lupin `CLAUDE.md` + `CLAUDE.local.md`
+  3. `src/rnd/v0.1.7/2026.05.03-testing-and-fitness-prompts/01-working-contract.md` (Layer 2 — multiplexer working contract). **Note: only `01-working-contract.md` in that dir is canonical; `02-` and `03-` files are stale clones — ignore.**
+  4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` (Layer 3 — Q1-Q11 + Q10/Q11 amendments dated 2026-05-04)
+  5. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/00-synthesis-and-roadmap.md` (strategic context)
+  6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/02-phase1-scaffolding-design.md` (**THIS PHASE — implement against this**)
+  7. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (review history + spine-bundle approval status)
+
+  Phase 1 deliverables (per design doc Files-created table): `multiplexer.html`, `pages.py` route registration (CoSA edit — user commits in CoSA context), `tsconfig.json`, `src/scripts/build-multiplexer.sh` (esbuild driver), `boot.ts`, `.eslintrc.json`, dev-tools.html card edit, `package.json` + `package-lock.json` (project's first; devDeps: esbuild, typescript, tsx, eslint, c8, @typescript-eslint plugins). All 7 acceptance criteria (now `EXECUTOR: AI`-tagged) must produce pass output programmatically. Verification matrix is :7999 only — no :8000 work in Phase 1.
+
+  **Within-bundle cadence (per Q10 amendment)**: Phase 1 implements + verifies + commits BEFORE Phase 2 code starts. Phase 2 + Phase 3 design docs are approved (spine-bundle) but their CODE does not land in the Phase 1 session.
+
+---
+
+## ☀️ EARLIER PENDING — carried over from 2026-05-03
+
+### Pending
 
 ---
 
