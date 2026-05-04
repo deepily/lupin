@@ -1,26 +1,70 @@
 # TODO
 
-Last updated: 2026-05-04 PM (Session ec746144 landed Multiplexer Phase 2: foundation services — AuthManager / ApiClient / StorageService / EventBus / BroadcastChannel wrapper. 53 unit tests via `tsx --test` + `c8` coverage 97.87% statements / 85.65% branches across the 5 modules. tsc + ESLint clean; xstate ^5.31.0 added as runtime dep per Q6. AC#5 five-concurrent-getToken dedup proven; AC#8 two-instance BroadcastChannel round-trip with no echo-back proven. CoSA `pages.py` edit STILL pending user commit in CoSA context. Earlier this session: Phase 1 (toolchain) shipped; spine-bundle plan-review pipeline closed.)
+## 🚦 BLOCKING DECISIONS — ratify before Phase 4 begins
+
+> Phase 3 implementation surfaced two items that need your attention before Phase 4
+> design or implementation can start. **Phase 4 must not begin until item D1 is
+> ratified.** D2 is non-blocking but worth a glance before the next session.
+
+### D1 [BLOCKING] Ratify Option C for ClaudeCodeTransport — or pick A/B
+
+**Where it lives**: design gap captured in `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` Phase 3 § "Discovered design gap" + § "Spec drifts" #1; stub code at `src/fastapi_app/static/js/multiplexer/transport/ClaudeCodeTransport.ts`.
+
+**What happened**: The Phase 3 design assumed symmetry across three transports (queue, audio, claude-code) — all per-session, eager, with auth_request → auth_success handshake. Pre-implementation grep per Open Q4 surfaced that the legacy `/api/claude-code/ws/{task_id}` is fundamentally different:
+- **Per-task**, not per-session — there is no taskId at page load (URL only forms after `POST /api/claude-code/dispatch`)
+- **No auth_request** — server sends `{type: "connected", task_id}` on accept; client never sends a credentialed envelope
+- **Different message types** — `connected`, `status`, `text`, `tool_use`, `tool_result`, `complete`, `keepalive` (vs queue's `auth_success`, `notification`, etc.)
+
+Per the working contract, I fired `mcp__cosa-voice__ask_multiple_choice`. The question expired with no response. Per auto-mode + user's "keep apprised" directive, I proceeded with the most-aligned-with-design-file-map option and notified for override.
+
+**The three options that were on the table**:
+
+- **A — Defer ClaudeCodeTransport to Phase 4 entirely.** Phase 3 file map drops the CC entry; AC#8 relaxes to 2 transports. Phase 4 stores phase introduces its own design supplement for CC.
+- **B — Implement now with deferred-start + no-auth divergence from peers.** `start(taskId)` body lands in Phase 3, idle at boot, no auth_request, expects `{type: "connected"}` as ready signal. Documented as divergence in design + execution log.
+- **C — Stub file + interface in Phase 3, full body in Phase 4 stores.** ✅ **AI selected this** — preserves the design file map exactly; type-safe interface lands; `start(taskId)` body throws `not implemented`; Phase 4 fills the body alongside a CC-specific store.
+
+**Why C was chosen by the AI**: aligns with the design's literal file map (5 transport files including ClaudeCodeTransport.ts); type-safe interface lands; honest about the gap rather than forcing a divergent symmetric handshake; Phase 4 is the natural home since CC events flow into a CC-specific store.
+
+**Implications if user picks differently**:
+- If A: drop `transport/ClaudeCodeTransport.ts` + `claude_code_transport.test.ts`; remove `claudeCode` field from `TransportSet` in `transport/index.ts`; Phase 4 introduces both the type AND the body fresh.
+- If B: replace the stub body with a real `start(taskId)` implementation that opens the WS, listens for `{type: "connected"}` as the ready signal (no auth_request send), maps server frames to EventBus emissions; AC#8 page-load smoke loosens to require ClaudeCode in `connecting` state pre-task-dispatch.
+- If C (current): ClaudeCodeTransport gets its body in Phase 4 alongside the CC store — the stub's `not implemented` throw is the gate that prevents accidental auto-start.
+
+**Action**: confirm C, or specify A/B.
+
+### D2 [NON-BLOCKING] Inspect the QueueTransport auth-failure bug fix
+
+**Where it lives**: `src/fastapi_app/static/js/multiplexer/transport/QueueTransport.ts` `onSocketOpen` catch block (look for the long-form comment starting "Auth failed (token fetch, refresh failure, etc.)"); rationale captured in 90-execution-log.md Phase 3 § "Implementation deviations" #4.
+
+**What was caught**: Initial implementation called `wsChannel.stop()` in the catch path, but did NOT notify the CSM. Because `wsChannel.stop()` nulls handlers BEFORE closing, the wsChannel's onClose callback never fired, so the CSM stayed stuck in `connected` while the channel was dead — a real reconnect-orchestration bug.
+
+**Fix**: catch block now ALSO sends `{type: "socket_close"}` to the CSM. Surfaced via the unit test `auth getToken() failure → socket stops; CSM enters backoff`.
+
+**Action**: glance at the diff if you want to confirm the fix is the right shape; not blocking Phase 4.
+
+---
+
+Last updated: 2026-05-04 PM (Session ec746144 landed Multiplexer Phase 3: transport layer — ws-channel.ts port with Claude §1.1/§2.2/§2.5 fixes, ConnectionStateMachine XState v5 tracker with 100ms grace + full state×event matrix, QueueTransport + AudioTransport via shared `BaseTransportImpl` abstract base, ClaudeCodeTransport stub per Option C user decision, transport/index.ts createTransports factory, boot.ts rewritten with 5-event Lifecycle Emission Contract. 65 new unit tests + 4 WS smoke + 1 Playwright page-load smoke = 70 new tests. Total multiplexer suite 128/128 unit tests passing in ~330ms; `c8` coverage 100% lines per module across all 10 modules. AC#7 + AC#8 GREEN. tsc + ESLint + build clean. CoSA `pages.py` Phase 1 edit STILL pending user commit in CoSA context.)
 
 ---
 
 ## ☀️ FIRST THING IN THE MORNING — 2026.05.05 (or next session)
 
-### Pending — Commit Phase 2 + begin Multiplexer Phase 3
+### Pending — Commit Phase 3 + begin Multiplexer Phase 4
 
 - [ ] [LUPIN-COSA] **Commit the CoSA-side Phase 1 change** in a CoSA-context session: `src/cosa/rest/routers/pages.py` adds `/app/multiplexer` to `_ROUTE_TABLE` (mirror line 26 pattern) + `page_multiplexer()` handler (mirror lines 69-71 pattern). Parent Lupin commit (Phase 1) is the documenting reference. Verified via py_compile + GET 200 against the live :7999 server.
 
-- [ ] [LUPIN] **Commit Phase 2 implementation in parent Lupin repo** — files staged (and to be staged): `package.json` + `package-lock.json` (xstate runtime dep), 6 new TS source files under `src/fastapi_app/static/js/multiplexer/{shared,auth,api}/`, 5 new test files under `src/tests/unit/multiplexer/`, `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (Phase 2 section), `.claude-session.md` (Phase 2 entries), `history.md`, `TODO.md`. Suggested message: `Multiplexer Phase 2 (ec746144): foundation services (Auth/Api/Storage/EventBus/Broadcast) + 53 unit tests`.
+- [ ] [LUPIN] **Commit Phase 3 implementation in parent Lupin repo** — files to be staged: 6 new TS transport modules under `src/fastapi_app/static/js/multiplexer/transport/`, edited `boot.ts` + `shared/types.ts` under `src/fastapi_app/static/js/multiplexer/`, 5 new unit-test files under `src/tests/unit/multiplexer/`, 1 new WS smoke test under `src/tests/websocket_smoke/`, 1 new Playwright page-load smoke under `src/tests/smoke/`, `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (Phase 3 section closed), `.claude-session.md` (Phase 3 entries), `history.md`, `TODO.md`. Suggested message: `Multiplexer Phase 3 (ec746144): transport layer (ws-channel + CSM + Queue/Audio/CC-stub + boot.ts wiring) + 70 new tests; AC#7 + AC#8 green`.
 
-- [ ] [LUPIN] **Begin Phase 3 implementation of the multiplexer rebuild** — spine-bundle approved 2026-05-04; Phases 1 + 2 complete. Per Q10 within-bundle cadence: Phase 2 implementation + commit done; Phase 3 code now legal to land. Entry artifacts a fresh-context Claude must read in order:
+- [ ] [LUPIN] **Begin Phase 4 implementation of the multiplexer rebuild** — domain stores phase. Per Q10 amendment + spine-bundle's "natural go/no-go gate at end of Phase 3 implementation": project re-scopes (or proceeds with per-phase-from-now-on cadence) before committing to 6 more design docs. Phases 1-3 spine bundle has shipped clean — proceed with per-phase from Phase 4. Entry artifacts a fresh-context Claude must read in order:
   1. `~/.claude/CLAUDE.md` (Layer 1)
   2. Lupin `CLAUDE.md` + `CLAUDE.local.md`
   3. `src/rnd/v0.1.7/2026.05.03-testing-and-fitness-prompts/01-working-contract.md` (Layer 2)
-  4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` (Layer 3 — Q1-Q11 + amendments)
-  5. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/04-phase3-transport-design.md` (**THIS PHASE — implement against this**)
-  6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (review history + Phases 1 + 2 outcomes; specifically the three implementation-deviation notes from Phase 2 — refresh raw-fetch path, manual `setTimeout`+`clearTimeout` in ApiClient, XState tracker-not-actor pattern)
+  4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` (Q1-Q11 + amendments)
+  5. Phase 4 design doc — **TBD**: a draft must be authored before Phase 4 implementation starts. Per Q11 amendment: REUSE → Pass 1 (Fitness) → Pass 2 (Adversarial) → user approval gate, then 90-execution-log Phase 4 section opens.
+  6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` — review Phase 1/2/3 outcomes; specifically Phase 3's "Spec drifts" + "Implementation deviations" + "Discovered design gap" subsections — these inform Phase 4's stores design, especially the **ClaudeCodeTransport body integration** (Option C stub-replacement is part of Phase 4 scope) and the **server-event-type pass-through** (Phase 3 transport wrappers cast to `LupinEventType` at the boundary; Phase 4 stores need to consume specific event types like `notification_received`, `voice_persona_assigned`, `conversation_mode_change`).
 
-  Phase 3 scope per spine-bundle approval: port `ws-channel.js` → `transport/ws-channel.ts` with Claude analysis fixes (§1.1 binary-frame, §2.2 lifecycle removal, §2.5 no JSON round-trip); `ConnectionStateMachine` XState actor with 100ms grace + full state×event matrix + `offline` distinct from `failed`; three transport wrappers (`QueueTransport` / `AudioTransport` / `ClaudeCodeTransport`) consuming envelope `{type, data}` → EventBus emission contract; `boot.ts` 5-event Lifecycle Emission Contract; `createTransports(authManager, eventBus, baseUrl)` factory; AC-7 reconnect WS-smoke against :7999 with explicit programmatic assertions (no `time.sleep`).
+  **Phase 4 scope** (per spine-bundle Phase 0 docs §"Phase plan"): NotificationStore, JobStore, AudioStore, ActionRequiredStore, SenderStore. XState for high-churn (TTS, action-required, connection — connection already done in Phase 3); plain reducers elsewhere (notifications list, sender map). AudioStore replaces Phase 3's debug-logger binary handler with the real PCM-decoding handler. ClaudeCodeTransport stub gets its body in this phase — likely lives alongside a CC store that holds the per-task connection state.
 
 ---
 

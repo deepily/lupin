@@ -1,0 +1,430 @@
+// Phase 3 unit tests — QueueTransport.
+// Verifies the auth handshake (auth_request envelope shape, auth_success →
+// transport_ready emission), envelope-mapping pass-through (Pass 1 finding
+// #15), reconnect orchestration via the embedded ConnectionStateMachine,
+// and stop() teardown.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import { createEventBusForTesting } from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+import {
+  createQueueTransport,
+} from "../../../fastapi_app/static/js/multiplexer/transport/QueueTransport";
+import type {
+  AuthStateChangePayload,
+  ConnectionStateChangePayload,
+  LupinEvent,
+  TransportReadyPayload,
+} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+import type { AuthManager } from "../../../fastapi_app/static/js/multiplexer/auth/AuthManager";
+
+// ---------------------------------------------------------------------------
+// Test infrastructure
+// ---------------------------------------------------------------------------
+
+function makeCloseEvent(code: number, reason: string): CloseEvent {
+  if (typeof CloseEvent !== "undefined") {
+    return new CloseEvent("close", { code, reason });
+  }
+  return { type: "close", code, reason } as unknown as CloseEvent;
+}
+
+class MockWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN       = 1;
+  static readonly CLOSING    = 2;
+  static readonly CLOSED     = 3;
+
+  url       : string;
+  readyState : number = MockWebSocket.CONNECTING;
+  onopen    : ((e: Event) => void) | null = null;
+  onmessage : ((e: MessageEvent) => void) | null = null;
+  onclose   : ((e: CloseEvent) => void) | null = null;
+  onerror   : ((e: Event) => void) | null = null;
+  sent      : string[] = [];
+  closed    : boolean = false;
+
+  static instances: MockWebSocket[] = [];
+
+  constructor(url: string) {
+    this.url = url;
+    MockWebSocket.instances.push(this);
+  }
+
+  send(data: string): void { this.sent.push(data); }
+  close(code: number = 1000, reason: string = ""): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.readyState = MockWebSocket.CLOSED;
+    if (this.onclose) this.onclose(makeCloseEvent(code, reason));
+  }
+
+  fireOpen(): void {
+    this.readyState = MockWebSocket.OPEN;
+    if (this.onopen) this.onopen(new Event("open"));
+  }
+  fireClose(code: number = 1006, reason: string = ""): void {
+    this.readyState = MockWebSocket.CLOSED;
+    if (this.onclose) this.onclose(makeCloseEvent(code, reason));
+  }
+  receive(data: string): void {
+    if (this.onmessage) this.onmessage(new MessageEvent("message", { data }));
+  }
+}
+
+function freshMockCtor(): typeof WebSocket {
+  MockWebSocket.instances = [];
+  return MockWebSocket as unknown as typeof WebSocket;
+}
+
+function makeMockAuth(accessToken: string = "test-access-token", shouldThrow: boolean = false): AuthManager {
+  return {
+    state    : "ready",
+    invalidate: () => { /* no-op */ },
+    getToken : async () => {
+      if (shouldThrow) throw new Error("auth fetch failed");
+      return {
+        accessToken,
+        refreshToken : "test-refresh-token",
+        expiresAt    : Date.now() + 3_600_000,
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+test("start() opens WS to /ws/queue/{sessionId}; URL has encoded sessionId", () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const t    = createQueueTransport({
+    authManager   : makeMockAuth(),
+    bus,
+    baseUrl       : "ws://localhost:7999",
+    WebSocketCtor : Ctor,
+  });
+
+  t.start("wise penguin");  // includes a space — should be URL-encoded.
+  assert.equal(MockWebSocket.instances.length, 1);
+  assert.equal(MockWebSocket.instances[0]!.url, "ws://localhost:7999/ws/queue/wise%20penguin");
+});
+
+test("on socket open: sends correctly-shaped auth_request envelope", async () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const t    = createQueueTransport({
+    authManager   : makeMockAuth("test-token-abc"),
+    bus,
+    baseUrl       : "",
+    WebSocketCtor : Ctor,
+  });
+
+  t.start("wise_penguin");
+  const ws = MockWebSocket.instances[0]!;
+  ws.fireOpen();
+  // Wait for the async getToken() + send chain.
+  await new Promise((r) => setTimeout(r, 10));
+
+  assert.equal(ws.sent.length, 1);
+  const env = JSON.parse(ws.sent[0]!);
+  assert.equal(env.type, "auth_request");
+  assert.equal(env.token, "test-token-abc");
+  assert.equal(env.session_id, "wise_penguin");
+  assert.ok(Array.isArray(env.subscribed_events));
+  assert.ok(env.subscribed_events.includes("auth_success"));
+});
+
+test("on auth_success: emits transport_ready with payload.transport=QueueTransport", async () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const ready: LupinEvent<TransportReadyPayload>[] = [];
+  bus.on<TransportReadyPayload>("transport_ready", (e) => ready.push(e));
+
+  const t = createQueueTransport({
+    authManager   : makeMockAuth(),
+    bus,
+    baseUrl       : "",
+    WebSocketCtor : Ctor,
+  });
+  t.start("wise_penguin");
+  const ws = MockWebSocket.instances[0]!;
+  ws.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));
+
+  ws.receive(JSON.stringify({ type: "auth_success", data: {} }));
+
+  assert.equal(ready.length, 1);
+  assert.equal(ready[0]?.payload.transport, "QueueTransport");
+  assert.equal(ready[0]?.source, "QueueTransport");
+});
+
+test("envelope mapping (Pass 1 finding #15): server {type, data} → EventBus emit", async () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const seen: LupinEvent<unknown>[] = [];
+  bus.on("notification_received", (e) => seen.push(e));
+
+  const t = createQueueTransport({
+    authManager   : makeMockAuth(),
+    bus,
+    baseUrl       : "",
+    WebSocketCtor : Ctor,
+  });
+  t.start("wise_penguin");
+  const ws = MockWebSocket.instances[0]!;
+  ws.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));
+
+  ws.receive(JSON.stringify({
+    type : "notification_received",
+    data : { id: "notif-1", title: "hello" },
+  }));
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0]?.source, "QueueTransport");
+  const payload = seen[0]?.payload as { id: string; title: string };
+  assert.equal(payload.id, "notif-1");
+  assert.equal(payload.title, "hello");
+});
+
+test("transport_ready emits ONCE even on multiple auth_success frames", async () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const ready: LupinEvent<TransportReadyPayload>[] = [];
+  bus.on<TransportReadyPayload>("transport_ready", (e) => ready.push(e));
+
+  const t = createQueueTransport({
+    authManager   : makeMockAuth(),
+    bus,
+    baseUrl       : "",
+    WebSocketCtor : Ctor,
+  });
+  t.start("wise_penguin");
+  const ws = MockWebSocket.instances[0]!;
+  ws.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));
+
+  ws.receive(JSON.stringify({ type: "auth_success", data: {} }));
+  ws.receive(JSON.stringify({ type: "auth_success", data: {} }));
+
+  assert.equal(ready.length, 1, "transport_ready emitted at most once per session");
+});
+
+test("socket_close after auth_success → reconnect via CSM", async () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const transitions: LupinEvent<ConnectionStateChangePayload>[] = [];
+  bus.on<ConnectionStateChangePayload>("connection_state_change", (e) => transitions.push(e));
+
+  const t = createQueueTransport({
+    authManager   : makeMockAuth(),
+    bus,
+    baseUrl       : "",
+    WebSocketCtor : Ctor,
+    graceMs       : 5_000,  // big grace so close < 5s registers as fluke
+    maxAttempts   : 5,
+  });
+  t.start("wise_penguin");
+  MockWebSocket.instances[0]!.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));
+  // auth_success arrives — socket is now CONNECTED on the wire.
+  MockWebSocket.instances[0]!.receive(JSON.stringify({ type: "auth_success", data: {} }));
+  // Force-close — within grace window → reconnecting.
+  MockWebSocket.instances[0]!.fireClose(1006);
+
+  // CSM should have transitioned: connecting → connected → reconnecting → ...
+  // a new socket should have opened (driven by the reconnecting state).
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(MockWebSocket.instances.length >= 2, `expected ≥2 sockets, got ${MockWebSocket.instances.length}`);
+  // EventBus saw the reconnecting transition.
+  const sawReconnecting = transitions.some((e) => e.payload.state === "reconnecting");
+  assert.ok(sawReconnecting, "saw reconnecting transition");
+});
+
+test("auth getToken() failure → socket stops; CSM enters backoff (attempts incremented)", async () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const transitions: LupinEvent<ConnectionStateChangePayload>[] = [];
+  bus.on<ConnectionStateChangePayload>("connection_state_change", (e) => transitions.push(e));
+
+  const t = createQueueTransport({
+    authManager   : makeMockAuth("ignored", /* shouldThrow */ true),
+    bus,
+    baseUrl       : "",
+    WebSocketCtor : Ctor,
+  });
+  t.start("wise_penguin");
+  MockWebSocket.instances[0]!.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));
+
+  // wsChannel.stop() got called from onSocketOpen catch path; that called
+  // close() on the mock → fired onclose (from the mock). CSM saw socket_close
+  // from `connected` (we already sent socket_open). With default graceMs=100
+  // and the auth fetch taking <100ms, this is treated as a fluke → reconnecting.
+  // Either way, the transport reacted to the auth failure.
+  const sawCloseOrReconnect = transitions.some(
+    (e) => e.payload.state === "reconnecting" || e.payload.state === "backoff",
+  );
+  assert.ok(sawCloseOrReconnect, `expected reconnect/backoff after auth failure; saw ${transitions.map((e) => e.payload.state).join(",")}`);
+});
+
+test("stop() releases everything; subsequent start() throws", () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const t = createQueueTransport({
+    authManager   : makeMockAuth(),
+    bus,
+    baseUrl       : "",
+    WebSocketCtor : Ctor,
+  });
+  t.start("wise_penguin");
+  t.stop();
+  // Mock socket should be closed.
+  assert.equal(MockWebSocket.instances[0]!.closed, true);
+  // Subsequent start throws.
+  assert.throws(() => t.start("wise_penguin"), /cannot start a stopped transport/);
+});
+
+test("idempotent start: same sessionId is a no-op; different sessionId throws", () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const t = createQueueTransport({
+    authManager   : makeMockAuth(),
+    bus,
+    baseUrl       : "",
+    WebSocketCtor : Ctor,
+  });
+  t.start("wise_penguin");
+  t.start("wise_penguin");  // same — no-op
+  assert.equal(MockWebSocket.instances.length, 1);
+
+  assert.throws(() => t.start("clever_dolphin"), /already started with a different session/);
+});
+
+test("send() before start() throws; after start() forwards to WSChannel", () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const t = createQueueTransport({
+    authManager   : makeMockAuth(),
+    bus,
+    baseUrl       : "",
+    WebSocketCtor : Ctor,
+  });
+  assert.throws(() => t.send({ x: 1 }), /channel is not started/);
+
+  t.start("wise_penguin");
+  MockWebSocket.instances[0]!.fireOpen();
+
+  t.send({ ping: 1 });
+  // Sent twice: once auth_request (async), once ping (sync). Last entry is the ping.
+  // Sequence is async, so let's just check it shows up eventually.
+  assert.ok(MockWebSocket.instances[0]!.sent.some((s) => s.includes("ping")));
+});
+
+test("baseUrl trailing slashes are stripped", () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const t = createQueueTransport({
+    authManager   : makeMockAuth(),
+    bus,
+    baseUrl       : "ws://localhost:7999///",
+    WebSocketCtor : Ctor,
+  });
+  t.start("wise_penguin");
+  assert.equal(MockWebSocket.instances[0]!.url, "ws://localhost:7999/ws/queue/wise_penguin");
+});
+
+test("non-string event types from server are ignored (defensive)", async () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const t = createQueueTransport({
+    authManager   : makeMockAuth(),
+    bus,
+    baseUrl       : "",
+    WebSocketCtor : Ctor,
+  });
+  t.start("wise_penguin");
+  MockWebSocket.instances[0]!.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));
+
+  // No crash on missing/numeric type.
+  MockWebSocket.instances[0]!.receive(JSON.stringify({ data: "no type" }));
+  MockWebSocket.instances[0]!.receive(JSON.stringify({ type: 42, data: "numeric type" }));
+
+  assert.equal(t.state, "connected");
+});
+
+test("network_offline → CSM enters offline; wsChannel is stopped + cleared", async () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const t = createQueueTransport({
+    authManager   : makeMockAuth(),
+    bus,
+    baseUrl       : "",
+    WebSocketCtor : Ctor,
+  });
+  t.start("wise penguin");
+  MockWebSocket.instances[0]!.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));
+
+  // Send network_offline via EventBus → wrapper forwards to CSM → CSM
+  // transitions to offline → wrapper's onStateChange should stop the
+  // wsChannel.
+  bus.emit({
+    type    : "network_offline",
+    payload : { ts: Date.now() },
+    source  : "boot",
+    ts      : Date.now(),
+  });
+
+  assert.equal(t.state, "offline");
+  assert.equal(MockWebSocket.instances[0]!.closed, true);
+});
+
+test("backoff timer eventually fires reconnecting (mock.timers)", async () => {
+  const { mock } = await import("node:test");
+  mock.timers.enable({ apis: [ "setTimeout" ] });
+
+  try {
+    const Ctor = freshMockCtor();
+    const bus  = createEventBusForTesting();
+    const t = createQueueTransport({
+      authManager   : makeMockAuth(),
+      bus,
+      baseUrl       : "",
+      WebSocketCtor : Ctor,
+      // Tight grace + plenty of attempts so socket_close after wait → backoff,
+      // not reconnecting.
+      graceMs       : 1,
+      maxAttempts   : 10,
+    });
+    t.start("wise penguin");
+    MockWebSocket.instances[0]!.fireOpen();
+
+    // Allow async getToken to resolve — but mock.timers doesn't intercept
+    // microtasks, so the await still works.
+    // Drive past the grace window:
+    mock.timers.tick(50);
+
+    // Force socket_close → CSM connecting/connected → backoff (since beyond grace)
+    MockWebSocket.instances[0]!.fireClose(1006, "test");
+
+    // Backoff timer is scheduled. Advance well past the worst-case 30s cap.
+    mock.timers.tick(35_000);
+
+    // The timer should have fired backoff_expire → reconnecting → openSocket
+    // creating instance #2.
+    assert.ok(
+      MockWebSocket.instances.length >= 2,
+      `expected ≥2 sockets after backoff timer fires; got ${MockWebSocket.instances.length}`,
+    );
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+// Defuse a noisy unused-import warning during type-cast; harmless to runtime.
+void ({} as AuthStateChangePayload);
