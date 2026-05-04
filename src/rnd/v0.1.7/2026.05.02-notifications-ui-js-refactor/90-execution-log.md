@@ -493,7 +493,73 @@ All run via `npx c8 --include='src/fastapi_app/static/js/multiplexer/**/*.ts' --
   3. `src/rnd/v0.1.7/2026.05.03-testing-and-fitness-prompts/01-working-contract.md` (Layer 2)
   4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` (Q1-Q11 + amendments)
   5. Phase 4 design doc (TBD — to be drafted; spine bundle approval covered Phases 1-3 only; Phase 4 onward is per-phase per Q10 amendment)
-  6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (review history + Phase 1/2/3 outcomes; specifically Phase 3's "Spec drifts" + "Implementation deviations" + "Discovered design gap" subsections — these inform Phase 4's stores design, especially the ClaudeCode stub-replacement scope)
+  6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (review history + Phase 1/2/3 outcomes; specifically Phase 3's "Spec drifts" + "Implementation deviations" + "Discovered design gap" + "D1 ratification amendment" subsections — these inform Phase 4's stores design, especially that **ClaudeCode is OUT OF SCOPE for Phase 4 + all subsequent phases** per A-extended ratification 2026-05-04 PM)
+
+---
+
+## Phase 3 — D1 Ratification Amendment (2026-05-04 PM, session ec746144)
+
+**Status**: ✅ Applied. Source + test scope reduced; design doc + this log updated; verification re-run; awaiting commit.
+
+### Context
+
+After Phase 3 implementation shipped (commit `703ab5a`), the user investigated the legacy `/api/claude-code/ws/{task_id}` endpoint that the Phase 3 stub was designed against. Investigation surfaced four structural defects (URL mismatch between advertised + served paths, unconditional `websocket.accept()` with no auth handshake, module-level in-memory state in `active_sessions` + `websocket_connections`, parallel pre-cj-flow path bypassing the integrated `claude_code_queue.py`). The endpoint was filed for elimination in `bug-fix-queue.md` under a new "🔥 Top of Queue — IMMEDIATE" section above the regular Queued items.
+
+### Decision
+
+User ratified **Option A-extended** for D1: defer `ClaudeCodeTransport` from Phase 3 *and* from all subsequent multiplexer phases (not just Phase 4). The transport will be authored only when UI surfaces a missing-functionality gap, against the cleaned-up endpoint produced by tomorrow's bug-fix work — and built with proper URL + proper authentication, not against the current buggy endpoint.
+
+User quote (2026-05-04 PM): "I prefer to proceed as though this endpoint never existed. When the corresponding functionality turns up as missing from the UI using the new multiplexer code we'll finish building out, functionality with proper URL and proper authentication."
+
+### Changes applied
+
+| File | Action |
+|---|---|
+| `src/fastapi_app/static/js/multiplexer/transport/ClaudeCodeTransport.ts` | DELETED |
+| `src/tests/unit/multiplexer/claude_code_transport.test.ts` | DELETED |
+| `src/fastapi_app/static/js/multiplexer/transport/index.ts` | EDITED — `claudeCode` field removed from `TransportSet`; `createTransports()` returns `{queue, audio}` only; CC imports + barrel re-exports removed; new header comment explains the absence + points at bug-fix-queue entry |
+| `src/fastapi_app/static/js/multiplexer/shared/types.ts` | EDITED — `TransportReadyPayload` JSDoc no longer lists `ClaudeCodeTransport` |
+| `src/fastapi_app/static/js/multiplexer/boot.ts` | EDITED — header comment + transports comment + "transports.claudeCode intentionally NOT started here" line removed |
+| `src/fastapi_app/static/js/multiplexer/transport/QueueTransport.ts` | EDITED — `buildUrl` JSDoc generalized ("ClaudeCode-style" → "future per-task transports") |
+| `src/fastapi_app/static/js/multiplexer/transport/ConnectionStateMachine.ts` | EDITED — header comment lists only QueueTransport / AudioTransport as instance holders |
+| `src/fastapi_app/static/js/multiplexer/transport/AudioTransport.ts` | EDITED — header comment generalized ("Queue/ClaudeCode" → "QueueTransport") |
+| `src/tests/smoke/test_multiplexer_phase3_smoke.py` | EDITED — module docstring + AC#8 docstring + console error keyword filter no longer reference ClaudeCodeTransport |
+| `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/04-phase3-transport-design.md` | EDITED — top-of-doc post-implementation amendment banner added |
+| `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` | EDITED — this section added; Phase 4 entry-artifacts updated to reflect CC out of scope |
+| `bug-fix-queue.md` | EDITED — "🔥 Top of Queue — IMMEDIATE" section created with full bug catalogue |
+| `TODO.md` | EDITED — D1 marked ratified; Phase 4 entry-artifacts simplified |
+
+### Verification re-run (post-amendment)
+
+| Step | Result |
+|---|---|
+| Sweep grep for residual CC references in source/test | ✅ Clean (only the intentional explanatory comment in `transport/index.ts` referencing bug-fix-queue remains) |
+| `npx tsc --noEmit -p tsconfig.json` | ✅ PASS |
+| `npx eslint src/fastapi_app/static/js/multiplexer/` | ✅ PASS |
+| `npx tsx --test src/tests/unit/multiplexer/*.ts` | ✅ PASS — **122/122** (was 128; the 6 stub-locking CC tests went away with the file) |
+| `bash src/scripts/build-multiplexer.sh` | ✅ PASS — boot.js rebuilt, content-hashed, manifest.json updated |
+| `pytest src/tests/smoke/test_multiplexer_phase1_smoke.py src/tests/smoke/test_multiplexer_phase3_smoke.py src/tests/websocket_smoke/test_multiplexer_transport.py -v` | ✅ PASS — 12/12 (Phase 1 smoke 7 + Phase 3 smoke 1 + WS smoke 4) |
+| `npx c8` re-baseline coverage on the smaller surface | ✅ PASS — 100% lines per module across all 9 remaining modules (was 10) |
+
+### Sweep checklist (per `feedback_sweep_for_pattern_offenders`)
+
+The pattern fix isn't just "delete the CC files" — it's "remove every CC reference from the multiplexer scope so the codebase reads as though CC was never in scope."
+
+- [x] All `ClaudeCode*` symbol references in `src/fastapi_app/static/js/multiplexer/` (one intentional reference remains in `transport/index.ts` header explaining the absence + pointing at bug-fix-queue)
+- [x] All `claudeCode` field references in `src/fastapi_app/static/js/multiplexer/`
+- [x] All `claude-code` URL references in `src/fastapi_app/static/js/multiplexer/`
+- [x] All CC mentions in `src/tests/unit/multiplexer/*` (the test file was deleted; no other tests reference CC)
+- [x] All CC mentions in `src/tests/smoke/test_multiplexer_phase3_smoke.py` (docstring + AC#8 + console error filter)
+- [x] All CC mentions in `src/tests/websocket_smoke/test_multiplexer_transport.py` (zero hits — file never referenced CC)
+
+### Phase 4 implication
+
+The originally-planned Phase 4 stores phase included a CC store + wiring of the CC transport body. With the A-extended ratification:
+
+- **CC store is OUT OF SCOPE for Phase 4** — Phase 4 stores phase ships with 4 stores (NotificationStore, JobStore, AudioStore, ActionRequiredStore, SenderStore minus the planned CC store).
+- **CC transport body work is OUT OF SCOPE for all subsequent phases** until UI surfaces a missing-functionality gap.
+
+The Phase 4 design doc (TBD — to be authored next) will reflect this reduced scope.
 
 ---
 

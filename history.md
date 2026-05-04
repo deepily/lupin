@@ -1,5 +1,55 @@
 # Lupin Project History
 
+### 2026.05.04 PM - Session ec746144 | D1 Ratification — A-extended (ClaudeCodeTransport scope removed from Phase 3 + all subsequent phases)
+
+**Context**: Returning to D1 ratification after the post-/clear session-start. Initially the user asked to investigate the legacy `/api/claude-code/ws/{task_id}` endpoint that the Phase 3 stub was designed against. Investigation surfaced four structural defects (URL mismatch between `dispatch_task()`'s advertised URL and the served route; unconditional `websocket.accept()` with no auth handshake; module-level in-memory state in `active_sessions` + `websocket_connections`; parallel pre-cj-flow path bypassing `claude_code_queue.py`'s integrated submission). User filed the cluster of bugs to `bug-fix-queue.md` under a new "🔥 Top of Queue — IMMEDIATE" section for tomorrow morning's elimination, then ratified **D1 Option A-extended**: defer `ClaudeCodeTransport` indefinitely (out of scope for Phase 3 AND all subsequent multiplexer phases — not just Phase 4). A future CC transport will be built only when UI surfaces a missing-functionality gap, against the cleaned-up endpoint produced by the bug-fix work, with proper URL + proper authentication.
+
+**Accomplishments**:
+
+- **Bug-fix-queue entry filed** at `bug-fix-queue.md` — new "🔥 Top of Queue — IMMEDIATE" section above regular Queued items; 4 distinct bugs catalogued (URL mismatch, no-WS-auth, in-memory state, parallel pre-cj-flow path); suggested fix sequencing (retire vs. fix-in-place); explicit user promotion to top of queue per voice directive.
+- **One revert-style amendment over commit `703ab5a`** — surgically removed CC scope from Phase 3 ship without touching Phase 1/2 spine or Queue/Audio transports. 11 file changes total.
+- **Files deleted (2)**: `src/fastapi_app/static/js/multiplexer/transport/ClaudeCodeTransport.ts`, `src/tests/unit/multiplexer/claude_code_transport.test.ts`
+- **Files edited (9)**: `transport/index.ts` (CC field/factory entry/imports/re-exports removed; new header explains the absence + points at bug-fix-queue), `shared/types.ts` (TransportReadyPayload JSDoc), `boot.ts` (header + transports comment + claudeCode line), `transport/QueueTransport.ts` + `transport/ConnectionStateMachine.ts` + `transport/AudioTransport.ts` (CC mentions in comments removed), `tests/smoke/test_multiplexer_phase3_smoke.py` (3 docstring + assertion edits), Phase 3 design doc + execution log (banner + new "Phase 3 — D1 Ratification Amendment" subsection capturing user quote + decision rationale + change-list + verification table + sweep checklist), `TODO.md` (D1 BLOCKING DECISIONS section replaced with ratified-and-archived entry), `history.md` (this entry).
+- **Sweep clean** per `feedback_sweep_for_pattern_offenders` — `grep ClaudeCode|claude_code|claudeCode|claude-code` across `src/fastapi_app/static/js/multiplexer/` + `src/tests/unit/multiplexer/` + Phase 3 smoke + WS smoke returns ONE intentional reference (the explanatory header comment in `transport/index.ts` pointing at the bug-fix-queue entry).
+- **Verification re-run**: tsc (pass), ESLint (pass), unit tests **122/122** (was 128, the 6 stub-locking CC tests went away with the file), `bash src/scripts/build-multiplexer.sh` (pass — boot.js stable=54,421 bytes, slightly smaller than before), `c8` coverage 100% lines per module across all 9 remaining modules, Phase 1 + Phase 3 page-load smoke + WS smoke 12/12 (queue+audio handshake within 5s; queue reconnect after clean close; server-rejects-invalid-token negative path; Playwright page-load reaches `auth_success` within 10s).
+
+**Files modified (Lupin parent only — CoSA submodule untouched)**:
+
+- `bug-fix-queue.md` (NEW top-of-queue section with 4-bug catalogue)
+- `TODO.md` (D1 ratified + Phase 4 entry-artifacts updated)
+- `src/fastapi_app/static/js/multiplexer/transport/index.ts` (CC removed; header rewritten with bug-fix-queue pointer)
+- `src/fastapi_app/static/js/multiplexer/shared/types.ts` (CC mention dropped from TransportReadyPayload JSDoc)
+- `src/fastapi_app/static/js/multiplexer/boot.ts` (CC mentions cleaned from header + transports section)
+- `src/fastapi_app/static/js/multiplexer/transport/QueueTransport.ts` (`buildUrl` JSDoc generalized)
+- `src/fastapi_app/static/js/multiplexer/transport/ConnectionStateMachine.ts` (header lists Queue/Audio only)
+- `src/fastapi_app/static/js/multiplexer/transport/AudioTransport.ts` (header generalized)
+- `src/tests/smoke/test_multiplexer_phase3_smoke.py` (docstring + AC#8 doc + console error keyword filter)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/04-phase3-transport-design.md` (top-of-doc post-implementation amendment banner)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (new "Phase 3 — D1 Ratification Amendment" section + Phase 4 entry-artifacts updated)
+- `.claude-session.md` (post-/clear session-start + D1 ratification entries appended)
+- `history.md` (this entry)
+- DELETED: `src/fastapi_app/static/js/multiplexer/transport/ClaudeCodeTransport.ts`
+- DELETED: `src/tests/unit/multiplexer/claude_code_transport.test.ts`
+
+**No CoSA submodule edits this session** per `feedback_lupin_only_never_cosa`.
+
+**Verification (all on :7999, AI-discretionary)**:
+
+- `npx tsc --noEmit -p tsconfig.json` → exit 0
+- `npx eslint src/fastapi_app/static/js/multiplexer/` → exit 0
+- `npx tsx --test src/tests/unit/multiplexer/*.ts` → 122/122 PASS in ~318ms
+- `npx c8 --include='src/fastapi_app/static/js/multiplexer/**/*.ts' --exclude='boot.ts' --reporter=text npx tsx --test ...` → 100% lines per module across all 9 remaining modules; All files: 86.31% branch, 97.71% functions, 100% lines + statements
+- `bash src/scripts/build-multiplexer.sh` → boot.js stable=54,421 bytes (was 54,908 — 487 bytes smaller without CC stub) + content-hashed copy (`boot.2824b2886723.js`) + manifest.json
+- `pytest src/tests/smoke/test_multiplexer_phase1_smoke.py src/tests/smoke/test_multiplexer_phase3_smoke.py src/tests/websocket_smoke/test_multiplexer_transport.py -v` → 12/12 PASS in 7.52s
+
+**Caveats / Notes**:
+
+- Bug-fix-queue entry MUST be claimed before any future multiplexer CC work. The endpoint's structural defects are both correctness (URL mismatch) and security (no auth) issues; not a "smell" but real bugs.
+- Phase 4 stores phase scope is reduced: 4 stores instead of 5 stores + a CC store. AudioStore still replaces Phase 3's debug-logger binary handler with the real PCM-decoding handler. ClaudeCode store + transport body work explicitly out of scope.
+- Per `feedback_never_auto_commit_push`: user explicitly authorized this checkpoint commit ("document and checkpoint your changes") — that authorization covers ONLY this commit, not subsequent Phase 4 planning work.
+
+---
+
 ### 2026.05.04 PM - Session ec746144 | Multiplexer Phase 3 — transport layer (ws-channel + CSM + Queue/Audio/CC-stub) + 70 new tests; AC#7 + AC#8 green
 
 **Context**: Continued Phase 3 of the multiplexer notifications-UI greenfield refactor immediately after `/clear`. Phases 1 (TS toolchain) and 2 (foundation services) shipped earlier today and are committed (`d596626` + `6c26905` + `7eca02b`). Spine-bundle approval (REUSE + Pass 1 Fitness + Pass 2 Adversarial) closed clean 2026-05-04 covering all three Phase 1-3 design docs. Phase 3 is the **payoff** of the spine: by end-of-phase, the multiplexer page connects to `:7999` via two transports (queue + audio), authenticates, receives real events. ClaudeCodeTransport ships as a stub per Option C user decision (cosa-voice question timed out; AI proceeded with most-aligned-with-file-map option and explicit override-prompt notification).

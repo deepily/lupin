@@ -9,10 +9,6 @@ Verifies:
   AC#7 — observable side: auth_request → auth_success roundtrip on both
          queue and audio sockets.
 
-ClaudeCodeTransport is dormant by Phase 3 design (Option C stub recorded in
-90-execution-log.md). AC#8 is interpreted as "Queue + Audio reach transport_ready;
-ClaudeCode created but idle".
-
 The reconnect-after-disconnect bullets of AC#7 are covered by the
 ConnectionStateMachine unit tests under src/tests/unit/multiplexer/. The
 server-side server-compatibility bullets are covered by
@@ -80,7 +76,7 @@ def _login_and_build_storage_envelope() -> str:
 
 def test_phase3_page_load_transports_reach_auth_success():
     """
-    AC#8 (interpreted per Phase 3 design's ClaudeCode-stub Option C):
+    AC#8:
       - Load /app/multiplexer in Playwright headless.
       - Both queue + audio WSs open.
       - Both receive `auth_success` frames within 10s.
@@ -165,7 +161,7 @@ def test_phase3_page_load_transports_reach_auth_success():
             transport_errs = [
                 e for e in console_errors
                 if any( kw in e.lower() for kw in (
-                    "queuetransport", "audiotransport", "claudecodetransport",
+                    "queuetransport", "audiotransport",
                     "websocket", "connectionstatemachine", "auth_request",
                 ) )
             ]

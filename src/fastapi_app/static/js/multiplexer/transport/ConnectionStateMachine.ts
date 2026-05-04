@@ -2,8 +2,8 @@
 // XState v5 tracker (Phase 2 pattern) modeling the per-transport WebSocket
 // lifecycle: `connecting` → `connected` → (`reconnecting` | `backoff`) →
 // `connected` | `offline` | `failed`. Each transport (QueueTransport /
-// AudioTransport / ClaudeCodeTransport) holds its own instance — a disconnect
-// on one socket does NOT reset the others' backoff.
+// AudioTransport) holds its own instance — a disconnect on one socket does
+// NOT reset the others' backoff.
 //
 // Pattern decision (per Phase 2 AuthManager): the XState machine TRACKS state
 // (driven by external code that owns timers + WSChannel start/stop); it is

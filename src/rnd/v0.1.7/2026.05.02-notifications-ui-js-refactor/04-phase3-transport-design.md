@@ -1,11 +1,34 @@
 # Phase 3 Design — Multiplexer Transport Layer
 
 **Date**: 2026-05-04
-**Status**: DRAFT — spine-bundle member; pending bundled plan-review pass + user approval (per Q10 amendment in `01-phase0-decisions.md`)
+**Status**: IMPLEMENTED + POST-IMPLEMENTATION AMENDED — see banner below
 **Phase**: 3 of 9 (per `01-execution-plan.md` §"Phase plan")
 **Predecessors**: `00-synthesis-and-roadmap.md`, `01-execution-plan.md`, `01-phase0-decisions.md`, `02-phase1-scaffolding-design.md`, `03-phase2-foundation-design.md`
 **Bundle siblings**: `02-phase1-scaffolding-design.md` (toolchain) + `03-phase2-foundation-design.md` (services — provides AuthManager + ApiClient + EventBus contracts that this phase consumes)
 **Companion**: `90-execution-log.md` Phase 3 section (opens after spine-bundle approval)
+
+---
+
+## ⚠️ Post-implementation amendment — D1 ratification 2026-05-04 PM
+
+**Scope change**: `ClaudeCodeTransport` is REMOVED from Phase 3 + all subsequent multiplexer phases.
+
+**User directive (2026-05-04 PM)**: "I prefer to proceed as though this endpoint never existed. When the corresponding functionality turns up as missing from the UI using the new multiplexer code we'll finish building out, functionality with proper URL and proper authentication."
+
+**Why**: Pre-implementation grep (per Open Q4) surfaced that the legacy `/api/claude-code/ws/{task_id}` endpoint is structurally defective (advertised URL doesn't match served route; no WS authentication; module-level in-memory state; parallel pre-cj-flow path that bypasses `claude_code_queue.py`). The endpoint has been queued for elimination — see `bug-fix-queue.md` "🔥 Top of Queue — IMMEDIATE" entry filed by session ec746144.
+
+**What was removed** (one revert-style action over commit `703ab5a` Phase 3 ship):
+- `src/fastapi_app/static/js/multiplexer/transport/ClaudeCodeTransport.ts` (DELETED)
+- `src/tests/unit/multiplexer/claude_code_transport.test.ts` (DELETED)
+- `claudeCode` field removed from `TransportSet` in `transport/index.ts`; `createTransports()` returns `{queue, audio}` only
+- `ClaudeCodeTransport` mention removed from `TransportReadyPayload` JSDoc in `shared/types.ts`
+- CC mentions removed from comments in `boot.ts`, `QueueTransport.ts`, `AudioTransport.ts`, `ConnectionStateMachine.ts`, and `test_multiplexer_phase3_smoke.py`
+
+**Test count delta**: 128 unit tests → 122 unit tests (the 6 stub-locking CC tests go away). All other Phase 1-3 verification (tsc, ESLint, build, Phase 1+3 smoke, WS smoke) remains green.
+
+**What was kept as historical record**: the rest of this design doc retains its original 3-transport scope as a record of how we got here. The `ClaudeCodeTransport` rows in the file map, acceptance criteria, etc. below are SUPERSEDED by this amendment. Read this banner first; sections below describe the AS-DESIGNED scope, not the AS-SHIPPED scope.
+
+**Phase 4 implication**: the planned Phase 4 stores phase no longer needs to wire a CC transport body. A future Claude Code transport will be authored only when UI surfaces a missing-functionality gap, against the cleaned-up endpoint produced by tomorrow's bug-fix-queue work.
 
 ---
 

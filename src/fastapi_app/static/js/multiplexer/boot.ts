@@ -6,8 +6,6 @@
 //   2. Construct AuthManager + ApiClient + transports via the Phase 2/3
 //      factories (no globals beyond the shared singletons EventBus + storage).
 //   3. Start QueueTransport + AudioTransport with the resolved session ID.
-//      ClaudeCodeTransport is left dormant by design (Phase 3 stub; Phase 4
-//      stores call `transports.claudeCode.start(taskId)` after a CC dispatch).
 //   4. Attach DOM lifecycle listeners and emit the 5-event Lifecycle Emission
 //      Contract per design § "boot.ts Lifecycle Event Emission Contract".
 //
@@ -115,7 +113,7 @@ function bootMultiplexer(): void {
     bus              : eventBus,
   });
 
-  // Transports — Queue + Audio start; ClaudeCode is dormant per Phase 3 stub.
+  // Transports — Queue + Audio.
   const baseUrl    = buildWebSocketBaseUrl();
   const transports = createTransports(authManager, eventBus, baseUrl);
 
@@ -123,7 +121,6 @@ function bootMultiplexer(): void {
 
   transports.queue.start(sessionId);
   transports.audio.start(sessionId);
-  // transports.claudeCode intentionally NOT started here.
 
   // Phase 3 boot signal — preserves the Phase 1 console-line invariant for
   // Playwright smoke test continuity, and tags the resolved session.

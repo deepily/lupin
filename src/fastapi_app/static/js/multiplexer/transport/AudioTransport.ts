@@ -12,7 +12,7 @@
 //
 // Text envelopes (status events: `audio_streaming_status`,
 // `audio_streaming_complete`, `tts_error`, etc.) flow through the same
-// `payload`-mapping rule as Queue/ClaudeCode.
+// `payload`-mapping rule as QueueTransport.
 
 import type { Transport, BaseTransportOptions } from "./QueueTransport";
 import { BaseTransportImpl } from "./QueueTransport";

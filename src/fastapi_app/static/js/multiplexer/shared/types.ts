@@ -148,7 +148,7 @@ export interface ConnectionLifecyclePayload {
 // ---------------------------------------------------------------------------
 
 export interface TransportReadyPayload {
-  // Transport name: "QueueTransport" / "AudioTransport" / "ClaudeCodeTransport".
+  // Transport name: "QueueTransport" / "AudioTransport".
   // Mirrors the LupinEvent.source field for the same emission so consumers
   // can subscribe to "transport_ready" and dispatch by `payload.transport`.
   transport : string;

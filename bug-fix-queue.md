@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-05-02T10:50:00-04:00
+**Last Updated**: 2026-05-04T19:50:00-04:00
 
 ---
 
@@ -58,6 +58,27 @@
 | a6b318ea | 2026-05-01T15:53:00 | 2026-05-01T17:35:00 | closed |
 | 0022baba | 2026-05-02T10:50:00 | 2026-05-02T16:25:00 | closed |
 | 4ede5bad | 2026-05-02T11:30:00 | 2026-05-02T11:30:00 | active |
+
+---
+
+### 🔥 Top of Queue — IMMEDIATE (claim before all other queued work)
+
+- [ ] **🔥 IMMEDIATE — eliminate the `/api/claude-code/ws/{task_id}` WebSocket endpoint cluster of bugs** (filed 2026-05-04 by session ec746144, evidence in `src/cosa/rest/routers/claude_code.py` + Multiplexer Phase 3 design-gap subsection of `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md`). **User directive 2026-05-04 PM**: "this WebSocket endpoint has a terrible buggy smell — do not implement [the multiplexer ClaudeCodeTransport against it], log this bug for immediate elimination tomorrow AM." Surfaced while researching D1 ratification for Multiplexer Phase 4 planning; user halted ClaudeCodeTransport implementation pending this cleanup. **User explicitly promoted to top of queue on 2026-05-04 PM** — claim this BEFORE any other queued bug.
+
+  - **Bug 1 — Advertised WS URL does not match the served route.** `dispatch_task()` returns `websocket_url = f"/ws/claude-code/{task_id}"` at `claude_code.py:134` (smoke test echoes the same string at line 598), but the WebSocket is actually mounted at `/api/claude-code/ws/{task_id}` (router `prefix="/api/claude-code"` at line 25 + route `@router.websocket("/ws/{task_id}")` at line 506). Any client that trusts the dispatch response to build its WS URL will 404 at upgrade. Existing notifications.js client must be papering over this somewhere — needs trace + fix at the dispatcher (single source of truth) so `/dispatch` advertises the route it serves.
+
+  - **Bug 2 — No authentication on the WS endpoint.** `websocket_endpoint()` calls `await websocket.accept()` unconditionally at `claude_code.py:521`. There is no `auth_request` envelope expected, no JWT/Bearer token check, no session-id validation, no admission test against the existing `WebSocketManager` infra (which queue + audio both use). Anyone who can hit the port can connect, supply *any* `task_id` they like, and receive whatever streaming output is bound to that task — including injected SDK responses for other users' work. Compare to `routers/websocket.py` queue + audio paths which require `auth_request` → `auth_success` handshake with JWT-derived `Bearer mock_token_email_{email}` (or its post-mock-token-deprecation JWT successor). This is a pre-auth-mode-jwt artifact that never got migrated. Per `feedback_mock_tokens_are_legacy` the endpoint should use the same JWT path queue + audio use.
+
+  - **Bug 3 — Module-level in-memory state (`active_sessions`, `websocket_connections`).** Lines 28 + 31 hold task + WS state in process-local dicts. Not durable across restarts (server bounce kills every in-flight task's stream channel); not multi-worker safe (a worker that didn't accept the WS can't send to it); not visible to the queue/observability layer (CJ Flow can't see these tasks). Should route through `WebSocketManager` like every other long-lived WS in the system, and persist task state in the queue+job stores instead of router-module dicts. Likely also needs to migrate to the `ClaudeCodeJob` cj-flow integration that already exists rather than maintaining a parallel `active_sessions` dispatch path — `src/cosa/agents/claude_code/cosa_interface.py` is the cj-flow adapter; the `/api/claude-code/dispatch` path bypasses it.
+
+  - **Bug 4 — Inconsistency with the queue-oriented sibling endpoint.** `routers/claude_code_queue.py` already exists as the cj-flow-integrated submission path and explicitly contrasts itself with `/api/claude-code/dispatch` ("Unlike the direct /api/claude-code/dispatch endpoint…" — claude_code_queue.py:5). The `/dispatch` + `/ws/{task_id}` pair is a parallel, pre-cj-flow, in-memory dispatch path that should either be retired (callers migrated to the queue path with WS streaming added if missing) or brought into compliance with the same auth + persistence + manager-routing the queue path uses.
+
+  - **Suggested fix sequencing** (tomorrow AM):
+    1. Decide: retire `/api/claude-code/dispatch` + `/ws/{task_id}` in favor of `claude_code_queue.py` + the queue's standard WS path, OR fix in place. (Retire is cleaner; in-place fix preserves any existing UI consumers.)
+    2. If retiring: grep for callers of `/api/claude-code/dispatch` and `/ws/claude-code/` across `src/fastapi_app/static/`, plugin repos, and tests; migrate each. Delete `claude_code.py` router.
+    3. If fixing in place: (a) move state to `WebSocketManager` + queue/job stores; (b) require auth handshake on the WS like queue/audio; (c) align advertised URL with mounted route in one place; (d) add server-side smoke test asserting both auth-required + URL-correct.
+
+  - **Multiplexer Phase 4 dependency**: Phase 4 stores phase was supposed to wire `ClaudeCodeTransport` body. **HALTED pending this cleanup.** D1 ratification for Multiplexer rebuild is now coupled to this bug — once the endpoint is sane, we can re-decide whether the multiplexer needs a CC transport at all (vs. routing CC events through the existing queue WS as just another notification type).
 
 ---
 

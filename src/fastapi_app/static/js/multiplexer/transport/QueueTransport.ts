@@ -166,8 +166,8 @@ export abstract class BaseTransportImpl implements Transport {
   /**
    * Build the WebSocket URL for this transport. Default form:
    *   `{baseUrl}{endpointPath}/{encodedSessionId}`
-   * AudioTransport / QueueTransport do not need to override; ClaudeCode-style
-   * per-task transports may override to use a taskId in place of sessionId.
+   * AudioTransport / QueueTransport do not need to override; future per-task
+   * transports may override to use a taskId in place of sessionId.
    */
   protected buildUrl(sessionId: string): string {
     return `${this.baseUrl}${this.endpointPath}/${encodeURIComponent(sessionId)}`;
