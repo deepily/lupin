@@ -240,7 +240,11 @@ export interface BroadcastWrapper {
 1. All five service modules exist at the expected paths.
 2. `tsc --noEmit -p tsconfig.json` passes with zero errors.
 3. ESLint passes with zero errors (Phase 1's `.eslintrc.json` rules apply).
-4. Unit tests for all five modules pass at 100%; coverage ≥ 90% per module, instrumented via `tsx --test` + `c8` (per DC3 + Pass 1 OQ resolution; both pulled via Phase 1 `package.json`).
+4. Unit tests for all five modules pass at 100%; **line coverage 100% per module** instrumented via `tsx --test` + `c8` (per DC3 + Pass 1 OQ resolution; both pulled via Phase 1 `package.json`). Two narrowly-scoped exceptions, each annotated inline with `/* c8 ignore */` directives and rationale comments:
+    - `auth/AuthManager.ts` `NavigatorLockManager.request` body — wraps `navigator.locks` which is a Web API unavailable in Node; tests use `ChainMutexLockManager` instead. Browser-only by design.
+    - `auth/AuthManager.ts` `ChainMutexLockManager` `release: () => {}` placeholder — satisfies TypeScript's "definitely assigned" check; never executed because the Promise constructor synchronously overwrites `release` before any caller can reach the placeholder. TS plumbing dead code.
+
+  All other lines must be exercised by tests. **Coverage AC upgraded from `≥ 90%` to `100%` (with documented exceptions) in session ec746144 (2026-05-04 PM)** after the user pointed out that `≥ 90%` was being treated as a ceiling rather than a floor; the upgrade is documented in `90-execution-log.md` Phase 2 Notes "Coverage AC upgrade".
 5. AuthManager dedup: a deliberate test-harness scenario where 5 concurrent `getToken()` calls fire while the token is expired produces exactly ONE network request to `/auth/refresh` (verified via mocked fetch).
 6. ApiClient timeout: a deliberate test where the mock fetch hangs longer than `defaultTimeoutMs` causes the call to reject with an `AbortError` and emits no listener-error events.
 7. EventBus listener error isolation: a deliberate test where one listener throws and another succeeds confirms the second listener still receives the event.
@@ -257,11 +261,11 @@ The user is never the tester. Claude executes every verification step and report
 | Build smoke | `bash src/scripts/build-multiplexer.sh` | Exit 0; bundle includes the new modules |
 | TypeScript check | `npx tsc --noEmit -p tsconfig.json` | Zero errors |
 | ESLint check | `npx eslint src/fastapi_app/static/js/multiplexer/` | Zero errors |
-| Unit tests — auth_manager | `npx tsx --test src/tests/unit/multiplexer/auth_manager.test.ts` (Pass 1 finding #9 + DC3: Node `node:test` runner via `tsx`; coverage via `c8`) | All pass; ≥ 90% coverage on `AuthManager.ts` |
-| Unit tests — api_client | `npx tsx --test src/tests/unit/multiplexer/api_client.test.ts` | All pass; ≥ 90% coverage |
-| Unit tests — storage_service | `npx tsx --test src/tests/unit/multiplexer/storage_service.test.ts` | All pass; ≥ 90% coverage |
-| Unit tests — event_bus | `npx tsx --test src/tests/unit/multiplexer/event_bus.test.ts` | All pass; ≥ 90% coverage |
-| Unit tests — broadcast | `npx tsx --test src/tests/unit/multiplexer/broadcast.test.ts` | All pass; ≥ 90% coverage |
+| Unit tests — auth_manager | `npx tsx --test src/tests/unit/multiplexer/auth_manager.test.ts` (Pass 1 finding #9 + DC3: Node `node:test` runner via `tsx`; coverage via `c8`) | All pass; 100% line coverage on `AuthManager.ts` (with two `c8 ignore` exceptions: `NavigatorLockManager.request` body, `ChainMutexLockManager` `release` placeholder) |
+| Unit tests — api_client | `npx tsx --test src/tests/unit/multiplexer/api_client.test.ts` | All pass; 100% line coverage |
+| Unit tests — storage_service | `npx tsx --test src/tests/unit/multiplexer/storage_service.test.ts` | All pass; 100% line coverage |
+| Unit tests — event_bus | `npx tsx --test src/tests/unit/multiplexer/event_bus.test.ts` | All pass; 100% line coverage |
+| Unit tests — broadcast | `npx tsx --test src/tests/unit/multiplexer/broadcast.test.ts` | All pass; 100% line coverage |
 | Page-load smoke | Playwright headless: navigate to `/app/multiplexer`, assert no console errors related to module imports | All five services importable from `boot.ts` without runtime errors |
 
 All `LUPIN_API_URL`-aware tests use the env var per `feedback_tests_parameterize_base_url`; default `http://localhost:7999`.

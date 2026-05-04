@@ -1,24 +1,26 @@
 # TODO
 
-Last updated: 2026-05-04 (Session ec746144 landed Multiplexer Phase 1: TS toolchain (Node v22 + npm 10), esbuild build driver with `--watch=forever` + content-hashed output + manifest, `tsconfig.json` (strict + noUncheckedIndexedAccess), no-`window.X`-globals ESLint rule, `boot.ts` placeholder, `multiplexer.html` shell, `/app/multiplexer` route, dev-tools card. All 7 acceptance criteria PASS via `src/tests/smoke/test_multiplexer_phase1_smoke.py`. CoSA `pages.py` edit pending user commit in CoSA context. Earlier today: spine-bundle plan-review pipeline closed (REUSE + Pass 1 + Pass 2). Earlier 2026-05-03: Session 656c8ba2 fixed the WSChannel binary-frame regression. Earlier 2026-05-02: Session 0022baba shipped WS reconnect circuit-breaker; Session 4ede5bad serialized voice-persona /clear preservation fix.)
+Last updated: 2026-05-04 PM (Session ec746144 landed Multiplexer Phase 2: foundation services — AuthManager / ApiClient / StorageService / EventBus / BroadcastChannel wrapper. 53 unit tests via `tsx --test` + `c8` coverage 97.87% statements / 85.65% branches across the 5 modules. tsc + ESLint clean; xstate ^5.31.0 added as runtime dep per Q6. AC#5 five-concurrent-getToken dedup proven; AC#8 two-instance BroadcastChannel round-trip with no echo-back proven. CoSA `pages.py` edit STILL pending user commit in CoSA context. Earlier this session: Phase 1 (toolchain) shipped; spine-bundle plan-review pipeline closed.)
 
 ---
 
 ## ☀️ FIRST THING IN THE MORNING — 2026.05.05 (or next session)
 
-### Pending — Multiplexer Phase 2 implementation
+### Pending — Commit Phase 2 + begin Multiplexer Phase 3
 
-- [ ] [LUPIN-COSA] **Commit the CoSA-side Phase 1 change** in a CoSA-context session: `src/cosa/rest/routers/pages.py` adds `/app/multiplexer` to `_ROUTE_TABLE` (mirror line 26 pattern) + `page_multiplexer()` handler (mirror lines 69-71 pattern). Parent Lupin commit (this session) is the documenting reference. Verified via py_compile + GET 200 against the live :7999 server in this session.
+- [ ] [LUPIN-COSA] **Commit the CoSA-side Phase 1 change** in a CoSA-context session: `src/cosa/rest/routers/pages.py` adds `/app/multiplexer` to `_ROUTE_TABLE` (mirror line 26 pattern) + `page_multiplexer()` handler (mirror lines 69-71 pattern). Parent Lupin commit (Phase 1) is the documenting reference. Verified via py_compile + GET 200 against the live :7999 server.
 
-- [ ] [LUPIN] **Begin Phase 2 implementation of the multiplexer rebuild** — spine-bundle approved 2026-05-04, Phase 1 complete. Per Q10 within-bundle cadence: Phase 1 implementation + commit done; Phase 2 code now legal to land. Entry artifacts a fresh-context Claude must read in order:
+- [ ] [LUPIN] **Commit Phase 2 implementation in parent Lupin repo** — files staged (and to be staged): `package.json` + `package-lock.json` (xstate runtime dep), 6 new TS source files under `src/fastapi_app/static/js/multiplexer/{shared,auth,api}/`, 5 new test files under `src/tests/unit/multiplexer/`, `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (Phase 2 section), `.claude-session.md` (Phase 2 entries), `history.md`, `TODO.md`. Suggested message: `Multiplexer Phase 2 (ec746144): foundation services (Auth/Api/Storage/EventBus/Broadcast) + 53 unit tests`.
+
+- [ ] [LUPIN] **Begin Phase 3 implementation of the multiplexer rebuild** — spine-bundle approved 2026-05-04; Phases 1 + 2 complete. Per Q10 within-bundle cadence: Phase 2 implementation + commit done; Phase 3 code now legal to land. Entry artifacts a fresh-context Claude must read in order:
   1. `~/.claude/CLAUDE.md` (Layer 1)
   2. Lupin `CLAUDE.md` + `CLAUDE.local.md`
   3. `src/rnd/v0.1.7/2026.05.03-testing-and-fitness-prompts/01-working-contract.md` (Layer 2)
   4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` (Layer 3 — Q1-Q11 + amendments)
-  5. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/03-phase2-foundation-design.md` (**THIS PHASE — implement against this**)
-  6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (review history + Phase 1 outcome)
+  5. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/04-phase3-transport-design.md` (**THIS PHASE — implement against this**)
+  6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (review history + Phases 1 + 2 outcomes; specifically the three implementation-deviation notes from Phase 2 — refresh raw-fetch path, manual `setTimeout`+`clearTimeout` in ApiClient, XState tracker-not-actor pattern)
 
-  Phase 2 scope per spine-bundle approval: `AuthManager` (using `navigator.locks` for refresh dedup; sync-block contract per DC1), `ApiClient` (with `AbortSignal.any` for timeouts), `StorageService` (typed JSON helpers + first-class `getSessionId/setSessionId` per DC2), `EventBus` (`EventTarget`-based; `LupinEventType` string-literal union), `BroadcastChannel("lupin")` wrapper (static whitelist per DC4). Test runner = `tsx --test` (Node built-in `node:test`); coverage via `c8` ≥ 90% acceptance. All test infrastructure (`tsx`, `c8`) already installed in Phase 1.
+  Phase 3 scope per spine-bundle approval: port `ws-channel.js` → `transport/ws-channel.ts` with Claude analysis fixes (§1.1 binary-frame, §2.2 lifecycle removal, §2.5 no JSON round-trip); `ConnectionStateMachine` XState actor with 100ms grace + full state×event matrix + `offline` distinct from `failed`; three transport wrappers (`QueueTransport` / `AudioTransport` / `ClaudeCodeTransport`) consuming envelope `{type, data}` → EventBus emission contract; `boot.ts` 5-event Lifecycle Emission Contract; `createTransports(authManager, eventBus, baseUrl)` factory; AC-7 reconnect WS-smoke against :7999 with explicit programmatic assertions (no `time.sleep`).
 
 ---
 

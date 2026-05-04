@@ -1,5 +1,105 @@
 # Lupin Project History
 
+### 2026.05.04 PM - Session ec746144 | Multiplexer Phase 2 — coverage AC upgraded 90% → 100%; 6 tests added; 100% lines achieved
+
+**Context**: After the Phase 2 implementation entry below was written, the user pointed out that I'd been treating the `≥ 90% coverage per module` acceptance criterion as a ceiling rather than a floor. They directed me to upgrade the AC to `100%`, document the upgrade in the design corpus, and actually achieve it. Option A chosen (5-6 small tests + targeted `c8 ignore` annotations on browser-only + TS-plumbing dead code) over Option B (jsdom + polyfill + refactor).
+
+**Accomplishments**:
+
+- **AC upgrade landed across 8 references** in 3 docs: `03-phase2-foundation-design.md` AC#4 + 5 verification table rows updated; `02-phase1-scaffolding-design.md` `c8` devDep description carries upgrade pointer; `90-execution-log.md` Phase 2 AC4 row + new "Coverage AC upgrade — 90% → 100%" subsection added with full rationale, before/after table, and the explicit two-exception policy.
+- **2 `c8 ignore` annotations** in `auth/AuthManager.ts`: `NavigatorLockManager.request` body (browser-only — wraps `navigator.locks` which is unavailable in Node) bracketed with `/* c8 ignore start/stop */`; `ChainMutexLockManager` `release: () => { /* unreachable */ }` placeholder annotated with `/* c8 ignore next 3 */` (TS "definitely-assigned" plumbing — Promise constructor synchronously overwrites `release` before any caller can reach the body). Both annotations carry inline comments explaining why.
+- **1 `c8 ignore` annotation** in `shared/StorageService.ts` header comment to silence c8 instrumentation noise (c8's source-mapped first-byte attribution falls on the comment line because of how tsx transpiles ESM module headers; this is reporting noise, not actual uncovered code).
+- **6 new tests** filling the Node-testable gap: `api_client.test.ts` +4 (`put()`, `patch()`, relative-path-no-leading-slash, error-body-read-failure with mocked Response.text() throw); `auth_manager.test.ts` +1 (5xx refresh response — HTTP-status failure path distinct from the network-error path); `broadcast.test.ts` +1 (default channel factory exercises `globalThis.BroadcastChannel` instead of the test mock factory).
+- **Final coverage** (c8): All five modules at **100% statements + 100% lines + 100% functions** (except AuthManager 95.65% functions due to the unreachable `release` placeholder counted as an uninvoked function — by design). Branches 84-92% per module — residual is composed of `??`-default fallbacks always resolving one way and defensive null-guards. Test count 53 → 59.
+- **Verification re-run**: `npx tsc --noEmit -p tsconfig.json` exit 0; `npx eslint src/fastapi_app/static/js/multiplexer/` exit 0; `npx tsx --test` × all 5 files → 59/59 pass; `npx c8` → 100% lines/statements per module reported.
+
+**Files modified (Lupin parent only)**:
+
+- `src/fastapi_app/static/js/multiplexer/auth/AuthManager.ts` (2 `c8 ignore` regions added)
+- `src/fastapi_app/static/js/multiplexer/shared/StorageService.ts` (1 header `c8 ignore`)
+- `src/tests/unit/multiplexer/api_client.test.ts` (+4 tests)
+- `src/tests/unit/multiplexer/auth_manager.test.ts` (+1 test)
+- `src/tests/unit/multiplexer/broadcast.test.ts` (+1 test)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/03-phase2-foundation-design.md` (AC#4 + 5 verification rows)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/02-phase1-scaffolding-design.md` (`c8` devDep description carries upgrade pointer)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (Phase 2 AC4 row + post-AC-upgrade coverage table + new "Coverage AC upgrade — 90% → 100%" subsection)
+- `history.md` (this entry)
+
+**Caveats / Notes**:
+
+- The "Uncovered Line #s" column in c8's text report still lists numbers per module even when lines are at 100%. After the upgrade those listings represent unhit branches (specifically `??`-default branches and inside-the-wrapper-map null checks), not unhit lines.
+- AuthManager Funcs metric reads 95.65% because the `release: () => { /* unreachable */ }` placeholder is detected by c8 as a function declaration that is never invoked. The placeholder is `/* c8 ignore */`-annotated for line/statement metrics but c8's function-coverage metric counts it independently. This is honest: the function exists in the source, c8 sees it, it's never called. Reframing it to satisfy 100% Funcs would require either Node 22's `Promise.withResolvers()` (couples the module to a newer runtime) or a different concurrency primitive — not worth the churn for a metric quirk.
+- All other Phase 2 design / verification / commit obligations from the earlier entry (53/59 tests, tsc/eslint/build/Phase 1 smoke regressions all clean) remain in force. The CoSA `pages.py` Phase 1 commit is still pending user attention.
+
+---
+
+### 2026.05.04 PM - Session ec746144 | Multiplexer Phase 2 — foundation services (Auth/Api/Storage/EventBus/Broadcast) + 53 unit tests
+
+**Context**: User asked to continue Phase 2 of the notifications-UI greenfield refactor immediately after `/clear`. Phase 1 (TS toolchain + esbuild + scaffolding) shipped earlier today and the spine-bundle plan-review (REUSE + Pass 1 Fitness + Pass 2 Adversarial) closed clean across the three Phase 1-3 design docs. Per Q10 amendment, the within-bundle cadence requires Phase 1 implementation + commit before Phase 2 code lands; Phase 2 design doc `03-phase2-foundation-design.md` is the implementation contract. Phase 2 ships **services only** — no UI / no transport / no domain stores.
+
+**Accomplishments**:
+
+- **xstate ^5.31.0 installed as runtime dependency** per Q6 (XState for high-churn modules — auth, TTS, action-required, connection). First runtime dep in `package.json`.
+- **`shared/types.ts`** (NEW) — `LupinEventType` string-literal union covering Phase 2 emissions (`auth_state_change` / `refresh_started` / `refresh_completed` / `refresh_failed` / `storage_corrupt` / `listener_error`) + BroadcastChannel-whitelist references (`notification_received` / `voice_persona_assigned` / `voice_persona_released` / `conversation_mode_change`); `LupinEvent` envelope; `Token`; `AuthState` union; per-event payload interfaces; `StorageEnvelope`; `SessionIdEnvelope`; `ListenerErrorPayload`. Hybrid type-safety policy per OQ3 ratification.
+- **`shared/EventBus.ts`** (NEW) — `EventTarget`-backed singleton + `createEventBusForTesting()` factory. Per-(type, listener) wrapper Map for clean `off()` and unsubscribe-closure semantics. Per-listener error isolation: a throwing listener triggers a `listener_error` event referencing the original event; recursion-guard skips re-emission when the original event was already a `listener_error` (no infinite blow-up if a `listener_error` listener itself throws).
+- **`shared/StorageService.ts`** (NEW) — `lupin:` key prefix + schema-version envelopes; `storage_corrupt` event emitted **synchronously, in the same microtask as the `null` return** per Pass 1 finding #7; first-class `getSessionId()` / `setSessionId()` per DC2 (StorageService owns ALL storage; no raw `localStorage` elsewhere in the multiplexer tree); `InMemoryStorage` test backend + `createStorageServiceForTesting()` factory.
+- **`auth/AuthManager.ts`** (NEW) — XState v5 actor (`idle` → `ready` → `refreshing` → `ready` | `expired`). `LockManager` abstraction with `NavigatorLockManager` (browser, wraps `navigator.locks.request`) + `ChainMutexLockManager` (Node tests, promise-chain mutex). Sync-block `getToken()` per DC1: hot path (cached valid token) returns immediately; cold path acquires lock, double-checks token, fetches refresh under lock, releases. Concurrent callers queue at the lock → exactly ONE network round-trip per refresh. AbortError → `error: "timeout"` mapping per Pass 1 finding #6. Refresh round-trip uses raw `fetch()` (NOT ApiClient — circular dep avoidance, documented as deviation in execution log).
+- **`api/ApiClient.ts`** (NEW) — Authenticated fetch wrapper. **Manual `setTimeout` + `clearTimeout` in `finally`** instead of `AbortSignal.timeout()` because the latter leaves the underlying timer pending after settlement, which node:test detects as lingering work and cancels subsequent tests in the file. `AbortSignal.any([userSignal, timeoutCtrl.signal])` combines user abort + timeout. 401 response → `authManager.invalidate()` → `ApiError(401)`. `noAuth` opt-out for endpoints like `/auth/login`. baseUrl trailing-slash normalization. JSON / text / 204 No Content response handling. `LUPIN_API_URL` env-var aware (per `feedback_tests_parameterize_base_url`).
+- **`shared/broadcast.ts`** (NEW) — `BroadcastChannel("lupin")` wrapper. **Static `BROADCAST_WHITELIST`** per DC4 (5 entries: `auth_state_change` / `notification_received` / `voice_persona_assigned` / `voice_persona_released` / `conversation_mode_change`). Loop prevention via `source: "broadcast"` marker on inbound events. Idempotent `start()`. `BroadcastChannelLike` test interface for in-process MockChannel that simulates the cross-tab semantic (peers see each other's messages but not their own).
+- **5 unit-test files at `src/tests/unit/multiplexer/`** — 53 tests total, 100% pass: `event_bus.test.ts` (9), `storage_service.test.ts` (13), `auth_manager.test.ts` (11), `api_client.test.ts` (12), `broadcast.test.ts` (8). AC#5 five-concurrent-getToken-during-expired produces exactly 1 fetch — proven. AC#8 two-instance round-trip with no echo-back to source — proven via in-process MockChannel.
+- **Verification matrix** — all run on :7999 (AI-discretionary venue). All 8 ACs PASS. tsc `--noEmit` exit 0. ESLint exit 0 (after fixing 2 `_` → `()` unused-arg findings in AuthManager XState `assign` callbacks). Build artifact `boot.js` re-emits cleanly. c8 coverage: 97.87% statements / 85.65% branches / 94% functions / 97.87% lines across the 5 modules (per-module statements all ≥ 95%, well above AC#4's 90% gate; below-90% branch dips on 3 modules due to browser-only fallbacks unreachable from Node — `NavigatorLockManager`, `defaultChannelFactory`, `globalThis.fetch.bind`). Phase 1 smoke test (`test_multiplexer_phase1_smoke.py`) re-run: 7/7 still PASS — Phase 2 didn't break Phase 1.
+
+**Files modified (Lupin parent only — CoSA submodule untouched)**:
+
+- `package.json` + `package-lock.json` (xstate ^5.31.0 added as runtime dep)
+- `src/fastapi_app/static/js/multiplexer/shared/types.ts` (NEW)
+- `src/fastapi_app/static/js/multiplexer/shared/EventBus.ts` (NEW)
+- `src/fastapi_app/static/js/multiplexer/shared/StorageService.ts` (NEW)
+- `src/fastapi_app/static/js/multiplexer/shared/broadcast.ts` (NEW)
+- `src/fastapi_app/static/js/multiplexer/auth/AuthManager.ts` (NEW)
+- `src/fastapi_app/static/js/multiplexer/api/ApiClient.ts` (NEW)
+- `src/tests/unit/multiplexer/event_bus.test.ts` (NEW)
+- `src/tests/unit/multiplexer/storage_service.test.ts` (NEW)
+- `src/tests/unit/multiplexer/auth_manager.test.ts` (NEW)
+- `src/tests/unit/multiplexer/api_client.test.ts` (NEW)
+- `src/tests/unit/multiplexer/broadcast.test.ts` (NEW)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (Phase 2 section opened + closed; deliverables, verification, coverage tables; three implementation-deviation notes — refresh raw-fetch / manual timeout / XState tracker pattern)
+- `.claude-session.md` (session ec746144 manifest section appended with 18 Phase 2 entries)
+- `history.md` (this entry)
+- `TODO.md` (Phase 2 marked complete; Phase 3 implementation pointer added with 6-doc reading order)
+
+**No CoSA submodule edits this session** per `feedback_lupin_only_never_cosa`.
+
+**Verification (all on :7999, AI-discretionary)**:
+- `npx tsc --noEmit -p tsconfig.json` → exit 0.
+- `npx eslint src/fastapi_app/static/js/multiplexer/` → exit 0.
+- `npx tsx --test` across all 5 unit-test files → 53/53 PASS in 224ms (concurrent run); 53/53 PASS again post-edits.
+- `npx c8 --include='src/fastapi_app/static/js/multiplexer/**/*.ts' --exclude='boot.ts' npx tsx --test` → 97.87% statements per-module table.
+- `bash src/scripts/build-multiplexer.sh` → boot.js stable + content-hashed copy + manifest.json regenerated.
+- Phase 1 regression: `pytest src/tests/smoke/test_multiplexer_phase1_smoke.py -v` → 7/7 in 6.38s.
+
+**Implementation deviations from design (captured in execution log Phase 2 Notes)**:
+1. AuthManager refresh path uses raw `fetch()` not ApiClient — avoids ApiClient ↔ AuthManager circular dep; refresh endpoint takes refresh token in body, not in `Authorization` header, so auth-injection layer is unneeded; timeout-aware behavior preserved via `AbortSignal.timeout`.
+2. ApiClient timeout uses manual `setTimeout` + `clearTimeout` in `finally` not `AbortSignal.timeout()` — node:test detected the latter as lingering work and cancelled subsequent tests; production behavior identical to caller, marginally better timer hygiene.
+3. XState v5 used as state TRACKER (external code drives transitions) not autonomous actor — the lock-and-double-check sequence reads cleanly in one function this way; design's "XState actor" wording satisfied; public observability (state subscription) unchanged.
+
+**Caveats / Notes**:
+
+- Page-load smoke verification (Playwright `/app/multiplexer` no-console-errors-related-to-imports) is **deferred to Phase 3** since Phase 2's "Files created / edited" table does NOT include `boot.ts` and Phase 2 ships services only. Import resolvability proven via `tsc --noEmit` + 53 unit tests successfully importing each module. Phase 3 wires services into `boot.ts` and the page-load assertion runs naturally then.
+- Phase 1 smoke test still passes — Phase 2 import additions don't disturb the Phase 1 stable boot.js (boot.ts unchanged).
+- The Phase 1 commit (`d596626`) carried forward into this session; Phase 2 work begins from there.
+- 1 moderate npm audit warning (transitive) carried forward from Phase 1; no auto-fix without major-version bump risk.
+
+**Next session entry artifacts** (a fresh-context Claude reads these to start Phase 3 implementation):
+1. `~/.claude/CLAUDE.md` (Layer 1)
+2. Lupin `CLAUDE.md` + `CLAUDE.local.md`
+3. `src/rnd/v0.1.7/2026.05.03-testing-and-fitness-prompts/01-working-contract.md` (Layer 2)
+4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` (Layer 3 — Q1-Q11 + amendments)
+5. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/04-phase3-transport-design.md` (THIS PHASE — implement against this)
+6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (review history + Phase 1 + Phase 2 outcomes; **especially the three Phase 2 implementation-deviation notes**)
+
+---
+
 ### 2026.05.04 - Session ec746144 | Multiplexer rebuild — spine-bundle docs + full plan-review (REUSE + Pass 1 + Pass 2) all gates clean
 
 **Context**: User opened the session asking for a summary of the notifications-UI refactor's first phase. Instead of a stand-alone Phase 1 doc, the work productively reframed the entire 9-phase project into a **spine bundle** model: Phases 1-3 (toolchain + foundation services + transport) ship as a single design + review unit, then per-phase from Phase 4. After Q10 + Q11 amendments captured 2026-05-04, the spine bundle's three design docs went through the full canonical PIP `plan-review.md` machinery — REUSE pre-pass + Pass 1 (Fitness) + Pass 2 (Adversarial) — all three gates closed clean. User intends to clear memory next and start Phase 1 implementation from the documentation alone.

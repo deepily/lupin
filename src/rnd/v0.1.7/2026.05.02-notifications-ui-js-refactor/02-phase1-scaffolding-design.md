@@ -98,7 +98,7 @@ Target was zero. Both Open Questions resolved during REUSE pre-pass (DC3 in `90-
 - `typescript` — `tsc --noEmit` for type-checking (esbuild transpiles but doesn't type-check)
 - `tsx` — TypeScript execution (used by Phase 2's `tsx --test` test runner via `node:test`)
 - `eslint` — lint (Phase 1 ban rule)
-- `c8` — coverage tool (used by Phase 2 to verify ≥ 90% coverage acceptance criterion)
+- `c8` — coverage tool (used by Phase 2 to verify 100% line coverage acceptance criterion; AC was originally `≥ 90%` and upgraded to `100%` with two narrowly-scoped `c8 ignore` exceptions in session ec746144 — see `03-phase2-foundation-design.md` AC#4 + `90-execution-log.md` Phase 2 Notes "Coverage AC upgrade")
 - `@typescript-eslint/parser` + `@typescript-eslint/eslint-plugin` — required for ESLint to parse `.ts` files
 
 This makes Phase 2's coverage acceptance criterion immediately verifiable. If Phase 7 hardening review wants Vitest, add then.
