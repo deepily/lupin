@@ -1,25 +1,24 @@
 # TODO
 
-Last updated: 2026-05-04 (Session ec746144 closed the multiplexer notifications-UI rebuild's full plan-review pipeline. **Spine bundle (Phases 1-3) is approved-pending-final-OK**: REUSE pre-pass + Pass 1 Fitness + Pass 2 Adversarial all gates clean per canonical PIP `plan-review.md`. Full design docs ready for Phase 1 implementation in a fresh-context session. Earlier 2026-05-03: Session 656c8ba2 fixed the WSChannel binary-frame regression. Earlier 2026-05-02: Session 0022baba shipped WS reconnect circuit-breaker; Session 4ede5bad serialized voice-persona /clear preservation fix.)
+Last updated: 2026-05-04 (Session ec746144 landed Multiplexer Phase 1: TS toolchain (Node v22 + npm 10), esbuild build driver with `--watch=forever` + content-hashed output + manifest, `tsconfig.json` (strict + noUncheckedIndexedAccess), no-`window.X`-globals ESLint rule, `boot.ts` placeholder, `multiplexer.html` shell, `/app/multiplexer` route, dev-tools card. All 7 acceptance criteria PASS via `src/tests/smoke/test_multiplexer_phase1_smoke.py`. CoSA `pages.py` edit pending user commit in CoSA context. Earlier today: spine-bundle plan-review pipeline closed (REUSE + Pass 1 + Pass 2). Earlier 2026-05-03: Session 656c8ba2 fixed the WSChannel binary-frame regression. Earlier 2026-05-02: Session 0022baba shipped WS reconnect circuit-breaker; Session 4ede5bad serialized voice-persona /clear preservation fix.)
 
 ---
 
 ## ☀️ FIRST THING IN THE MORNING — 2026.05.05 (or next session)
 
-### Pending — Multiplexer Phase 1 implementation
+### Pending — Multiplexer Phase 2 implementation
 
-- [ ] [LUPIN] **Begin Phase 1 implementation of the multiplexer rebuild** — spine-bundle approved 2026-05-04 after full PIP plan-review (REUSE + Pass 1 + Pass 2 all clean). Entry artifacts a fresh-context Claude must read in order:
-  1. `~/.claude/CLAUDE.md` (Layer 1 — TEST OWNERSHIP MANDATE + DOCUMENTATION-FIRST PROTOCOL)
+- [ ] [LUPIN-COSA] **Commit the CoSA-side Phase 1 change** in a CoSA-context session: `src/cosa/rest/routers/pages.py` adds `/app/multiplexer` to `_ROUTE_TABLE` (mirror line 26 pattern) + `page_multiplexer()` handler (mirror lines 69-71 pattern). Parent Lupin commit (this session) is the documenting reference. Verified via py_compile + GET 200 against the live :7999 server in this session.
+
+- [ ] [LUPIN] **Begin Phase 2 implementation of the multiplexer rebuild** — spine-bundle approved 2026-05-04, Phase 1 complete. Per Q10 within-bundle cadence: Phase 1 implementation + commit done; Phase 2 code now legal to land. Entry artifacts a fresh-context Claude must read in order:
+  1. `~/.claude/CLAUDE.md` (Layer 1)
   2. Lupin `CLAUDE.md` + `CLAUDE.local.md`
-  3. `src/rnd/v0.1.7/2026.05.03-testing-and-fitness-prompts/01-working-contract.md` (Layer 2 — multiplexer working contract). **Note: only `01-working-contract.md` in that dir is canonical; `02-` and `03-` files are stale clones — ignore.**
-  4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` (Layer 3 — Q1-Q11 + Q10/Q11 amendments dated 2026-05-04)
-  5. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/00-synthesis-and-roadmap.md` (strategic context)
-  6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/02-phase1-scaffolding-design.md` (**THIS PHASE — implement against this**)
-  7. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (review history + spine-bundle approval status)
+  3. `src/rnd/v0.1.7/2026.05.03-testing-and-fitness-prompts/01-working-contract.md` (Layer 2)
+  4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` (Layer 3 — Q1-Q11 + amendments)
+  5. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/03-phase2-foundation-design.md` (**THIS PHASE — implement against this**)
+  6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (review history + Phase 1 outcome)
 
-  Phase 1 deliverables (per design doc Files-created table): `multiplexer.html`, `pages.py` route registration (CoSA edit — user commits in CoSA context), `tsconfig.json`, `src/scripts/build-multiplexer.sh` (esbuild driver), `boot.ts`, `.eslintrc.json`, dev-tools.html card edit, `package.json` + `package-lock.json` (project's first; devDeps: esbuild, typescript, tsx, eslint, c8, @typescript-eslint plugins). All 7 acceptance criteria (now `EXECUTOR: AI`-tagged) must produce pass output programmatically. Verification matrix is :7999 only — no :8000 work in Phase 1.
-
-  **Within-bundle cadence (per Q10 amendment)**: Phase 1 implements + verifies + commits BEFORE Phase 2 code starts. Phase 2 + Phase 3 design docs are approved (spine-bundle) but their CODE does not land in the Phase 1 session.
+  Phase 2 scope per spine-bundle approval: `AuthManager` (using `navigator.locks` for refresh dedup; sync-block contract per DC1), `ApiClient` (with `AbortSignal.any` for timeouts), `StorageService` (typed JSON helpers + first-class `getSessionId/setSessionId` per DC2), `EventBus` (`EventTarget`-based; `LupinEventType` string-literal union), `BroadcastChannel("lupin")` wrapper (static whitelist per DC4). Test runner = `tsx --test` (Node built-in `node:test`); coverage via `c8` ≥ 90% acceptance. All test infrastructure (`tsx`, `c8`) already installed in Phase 1.
 
 ---
 

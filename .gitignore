@@ -110,3 +110,7 @@ io/claude_code_hooks/
 
 # Visual regression snapshot failures (generated during test runs)
 src/tests/e2e_ui/snapshot_failures/
+
+# Multiplexer rebuild — TypeScript toolchain (Phase 1, 2026-05-04)
+node_modules/
+src/fastapi_app/static/dist/

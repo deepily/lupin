@@ -174,34 +174,65 @@ Fires after Pass 1 closes per PIP §3 ordering rationale.
 
 ## Phase 1 — Scaffolding
 
-**Status**: ⏸ Awaiting spine-bundle plan-review pass + user approval (Phases 1+2+3 bundled per Q10 amendment 2026-05-04). Design doc updated 2026-05-04 with Approval coupling note + Plan-review pointer (canonical PIP slots filled).
-**Started**: —
-**Completed**: —
+**Status**: ✅ Implementation + verification complete; awaiting commit (parent Lupin) + CoSA-context commit (user) for `pages.py`.
+**Started**: 2026-05-04
+**Completed**: 2026-05-04 (verification matrix; 7/7 acceptance criteria PASS)
 
 ### Deliverables (per `02-phase1-scaffolding-design.md`)
 
 | File | Status |
 |---|---|
-| `src/fastapi_app/static/html/multiplexer.html` | ⏸ Not yet created |
-| `src/cosa/rest/routers/pages.py` (route registration) | ⏸ Not yet edited |
-| `tsconfig.json` (project root) | ⏸ Not yet created |
-| `src/scripts/build-multiplexer.sh` | ⏸ Not yet created |
-| `src/fastapi_app/static/js/multiplexer/boot.ts` | ⏸ Not yet created |
-| `src/fastapi_app/static/js/multiplexer/.eslintrc.json` | ⏸ Not yet created |
-| `src/fastapi_app/static/html/dev-tools.html` (card add) | ⏸ Not yet edited |
-| `package.json` + `package-lock.json` (project's first) | ⏸ Per Phase 1 design Open Questions §1+§2 |
+| `src/fastapi_app/static/html/multiplexer.html` | ✅ Created |
+| `src/cosa/rest/routers/pages.py` (route registration) | ✅ Edited (CoSA — user commits in CoSA context) |
+| `tsconfig.json` (project root) | ✅ Created (strict + noUncheckedIndexedAccess + es2022 + bundler resolution) |
+| `src/scripts/build-multiplexer.sh` | ✅ Created (esbuild driver, content-hashed copy + manifest.json, `--watch=forever` for dev) |
+| `src/fastapi_app/static/js/multiplexer/boot.ts` | ✅ Created (logs `hello multiplexer`, sets `document.title = "Multiplexer"`) |
+| `src/fastapi_app/static/js/multiplexer/.eslintrc.json` | ✅ Created (no-restricted-properties + no-restricted-globals on `notificationsUI` / `multiplexerUI`) |
+| `src/fastapi_app/static/html/dev-tools.html` (card add) | ✅ Edited (card under `Audio & TTS` per design's 3-step section-resolution; footer count 15 → 16) |
+| `package.json` + `package-lock.json` (project's first) | ✅ Created (devDeps: esbuild 0.24.2, typescript 5.7.x, tsx 4.19.x, eslint 8.57.x, c8 10.1.x, @typescript-eslint 7.18.x). 189 packages installed. |
+| `.gitignore` (added `node_modules/` + `src/fastapi_app/static/dist/`) | ✅ Edited |
+| `src/tests/smoke/test_multiplexer_phase1_smoke.py` (NEW; pytest, 7 tests, parameterized by `LUPIN_API_URL`) | ✅ Created — preserves AC1–AC7 as a regression test |
 
 ### Commits
 
-(empty — phase not started)
+| Repo | Hash | Message |
+|---|---|---|
+| Lupin | (pending — this commit) | `[LUPIN] Phase 1 — Multiplexer scaffolding (TS toolchain, esbuild, /app/multiplexer)` |
+| CoSA | (pending — user commits in CoSA context) | `pages.py`: register `/app/multiplexer` route entry + `page_multiplexer()` handler |
 
 ### Verification results
 
-(empty — phase not started)
+All run on :7999 (AI-discretionary venue per design §"Verification" + `01-working-contract.md`).
+
+| AC | Verification step | Result |
+|---|---|---|
+| AC1 | `GET /app/multiplexer` → 200 + `text/html` | ✅ PASS |
+| AC2 | Build emits `boot.js` (96 B) + `boot.<hash>.js` + `manifest.json`, all non-zero | ✅ PASS |
+| AC3 | `bash build-multiplexer.sh --watch` starts and exits cleanly on SIGINT | ✅ PASS (after `--watch=forever` fix; see Notes) |
+| AC4 | Playwright headless: `document.title === "Multiplexer"`, placeholder body present, console contains `hello multiplexer` | ✅ PASS |
+| AC5 | `npx tsc --noEmit -p tsconfig.json` exit 0 | ✅ PASS |
+| AC6 | `npx eslint src/fastapi_app/static/js/multiplexer/` exit 0 | ✅ PASS |
+| AC7 | `/app/admin/dev-tools` markup contains card with `href="/app/multiplexer"` + `data-testid="devtools-link-multiplexer"` + title `Multiplexer (next-gen)` | ✅ PASS (markup-level verification; see Notes for spec-drift rationale) |
+
+Pytest summary: `7 passed in 5.86s` (`src/tests/smoke/test_multiplexer_phase1_smoke.py`).
 
 ### Notes
 
-(empty — phase not started)
+**Spec drifts re-audited at execute time** (per `feedback_audit_plans_at_execute_time`):
+
+1. **AC1 — `curl -I` (HEAD) text vs actual FastAPI route convention**. The design's literal text says `curl -I http://localhost:7999/app/multiplexer` returns 200. Verified at execute time: all `/app/*` page routes registered with `@router.get(...)` (including the pre-existing `/app/notifications`) return 405 Method Not Allowed on HEAD with `allow: GET`. This is a pre-existing FastAPI/`_ROUTE_TABLE` convention, not a Phase 1 bug. Substituted GET (the underlying intent — "route serves text/html with 200") which passes consistently with the existing `notifications` route.
+
+2. **AC3 — `--watch` vs `--watch=forever` for backgrounded esbuild**. esbuild's plain `--watch` mode auto-exits when stdin is closed (documented behavior, see esbuild docs); the build driver gets backgrounded by tooling so stdin is never a TTY in practice. Switched build script to `--watch=forever` which keeps the watcher alive across stdin close. Documented inline in the script's watch branch.
+
+3. **AC7 — Playwright click vs markup-level verification**. The design's literal text says Playwright should "click the card and assert URL becomes `/app/multiplexer`". `/app/admin/dev-tools` is gated by client-side `requireAdmin()` (auth.js:520-528) which redirects non-admins to `/app/auth/profile`. The only available test user (env var `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*`) has roles `['user']` only — it is NOT admin. Promoting that user to admin in the dev DB would be a state mutation we do not want. Markup-level verification (regex match on the served HTML for the card's `href` + `data-testid` + title) proves the same invariant — "card exists + correctly wired to `/app/multiplexer`" — without mutating dev DB state. Recorded for Phase 6+ where the full E2E flow runs against the `:8000` test container with a clean test DB and the admin fixture (`src/tests/e2e_ui/conftest.py:421`).
+
+**Toolchain**: Node v22.15.0, npm 10.9.2 (system); ESLint pinned to 8.57.x line because the design specified `.eslintrc.json` (deprecated in ESLint 9 in favor of flat config). `@typescript-eslint` 7.18.x matches the ESLint-8 peer-compat range.
+
+**ESLint and tsc warnings**: zero on the boot.ts shell as expected (the `.eslintrc.json` rules don't trigger on a 2-line module that doesn't reference any globals).
+
+**Build artifact sizes** (Phase 1 baseline): stable `boot.js` = 96 bytes (after esbuild minification of a 2-line input).
+
+**1 npm audit vulnerability** (moderate, transitive dep): not auto-fixing because `npm audit fix --force` would force major-version bumps that may break ESLint 8 compatibility. To revisit when Phase 2/3 add real code that triggers lint coverage.
 
 ---
 
