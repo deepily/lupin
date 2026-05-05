@@ -432,8 +432,17 @@ class TestAutoDisplaceOnActivate:
             assert sorted( body[ "displaced_sessions" ] ) == sorted( sids )
 
     @pytest.mark.asyncio
-    async def test_deactivate_does_not_scan_or_displace( self ):
-        """active=false bypasses the lock + scan; only pushes its own deactivate notification."""
+    async def test_deactivate_pushes_ui_sync_and_self_action( self ):
+        """active=false bypasses the lock + scan; pushes UI sync + self-targeted action.
+
+        Two pushes per self-exit:
+          1) conversation_mode_changed (active=false) — UI sync to all of B's tabs
+          2) user_initiated_message (action:exit_conversation_mode) — listener
+             injects deactivation reminder into B's own tmux pane so the model's
+             in-context state catches up to the bridge flip. Mirror of the
+             displace branch's per-displaced action push, applied to the
+             deactivating session itself.
+        """
         from cosa.rest.routers.conversation_mode import (
             set_conversation_mode_endpoint, ConversationModeBody
         )
@@ -467,10 +476,20 @@ class TestAutoDisplaceOnActivate:
                 data_a = json.load( f )
             assert data_a[ "conversation_mode_active" ] is True
 
-            # Exactly one push — B's deactivate event
-            assert mock_nq.push_notification.call_count == 1
-            kw = _push_kwargs( mock_nq )
-            assert kw[ "payload" ] == { "session_id": sid_b, "active": False }
+            # Two pushes — UI sync, then self-targeted action
+            assert mock_nq.push_notification.call_count == 2
+
+            # First call: UI-sync conversation_mode_changed for B
+            kw_ui = _push_kwargs( mock_nq, 0 )
+            assert kw_ui[ "type"    ] == "conversation_mode_changed"
+            assert kw_ui[ "payload" ] == { "session_id": sid_b, "active": False }
+
+            # Second call: self-targeted action push for B's own listener
+            kw_action = _push_kwargs( mock_nq, 1 )
+            assert kw_action[ "type"    ] == "user_initiated_message"
+            assert kw_action[ "title"   ] == "action:exit_conversation_mode"
+            assert kw_action[ "job_id"  ] == sid_b[:8]
+            assert kw_action[ "payload" ] == { "session_id": sid_b, "reason": "self" }
 
             body = json.loads( resp.body.decode() )
             assert body[ "active" ] is False

@@ -1117,18 +1117,26 @@ def conv_mode_wrap( text, *, source, session_id=None ):
 
 def conv_mode_exit_reminder():
     """
-    Build the deactivation system-reminder injected when a session is
-    displaced from conversation mode by another session.
+    Build the deactivation system-reminder injected when a session
+    transitions out of conversation mode.
+
+    Two transition causes — both produce the same reminder body:
+      1. Displaced — another session activated conversation mode and the
+         router's mutex displaced this one. Pushed by the activate branch
+         per-displaced session.
+      2. Self-exit — this session deactivated itself (UI toggle button,
+         MCP exit_conversation_mode(), voice phrase, slash command).
+         Pushed by the deactivate branch via symmetric self-targeted push.
 
     Unlike conv_mode_wrap and conv_mode_reminder_block (which gate on the
     bridge file's current state), this helper emits its body unconditionally.
-    The caller is responsible for invoking it only at the moment of an
-    out → in or in → out transition. Today the sole caller is the listener
-    subprocess responding to an `action:exit_conversation_mode` push from
-    the conversation-mode router's displace block.
+    The caller is responsible for invoking it only at the moment of a
+    transition. Both callers go through the listener subprocess responding
+    to an `action:exit_conversation_mode` push from the conversation-mode
+    router; see src/cosa/rest/routers/conversation_mode.py.
 
     The reminder is delivered as a synthetic user prompt via the listener's
-    tmux injection path. By the time the displaced session "comes up for
+    tmux injection path. By the time the deactivated session "comes up for
     air" at its prompt, this text has been queued in tmux's input buffer;
     when Claude Code processes the next prompt, it sees the reminder and
     reverts to notification-mode behavior (no auto-notify, no voice-message
@@ -1140,10 +1148,10 @@ def conv_mode_exit_reminder():
           stop wrapping responses in voice-message format
         - Output is safe to inject via tmux send-keys -l (no special chars
           that need escaping beyond what tmux literal mode handles)
+        - Body is reason-agnostic — same text for displace and self-exit
     """
     body = (
-        "Conversation mode has just been deactivated for this session "
-        "(displaced by another session activating conversation mode). "
+        "Conversation mode has just been deactivated for this session. "
         "Stop calling `notify()` at the end of your response. "
         "Stop wrapping replies in voice-message format. "
         "Resume normal terminal-only output. "

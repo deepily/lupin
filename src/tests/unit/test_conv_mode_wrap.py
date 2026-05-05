@@ -272,10 +272,13 @@ class TestConvModeReminderBlock:
 
 class TestConvModeExitReminder:
     """
-    Deactivation reminder injected by the listener when the displaced
-    session receives an action:exit_conversation_mode push. Unlike the
-    entry-side helpers, this one is unconditional — no bridge read, no
-    session_id parameter, no fail-closed branch.
+    Deactivation reminder injected by the listener when a session receives
+    an action:exit_conversation_mode push. Two transition causes share the
+    same reminder body: (1) displaced by another session activating, and
+    (2) self-exit via UI toggle / MCP / voice phrase / slash command.
+
+    Unlike the entry-side helpers, this one is unconditional — no bridge
+    read, no session_id parameter, no fail-closed branch.
     """
 
     def test_returns_system_reminder_envelope( self ):
@@ -292,9 +295,12 @@ class TestConvModeExitReminder:
         result = conv_mode_exit_reminder()
         assert "voice-message" in result
 
-    def test_body_mentions_displacement( self ):
+    def test_body_announces_deactivation( self ):
+        # Body must explicitly announce the deactivation transition so the
+        # model knows to revert to notification-mode behavior. Reason-agnostic
+        # — same wording for displace and self-exit.
         result = conv_mode_exit_reminder()
-        assert "displaced" in result.lower()
+        assert "deactivated" in result.lower()
 
     def test_idempotent_pure_function( self ):
         # No bridge read, no I/O — same output every call

@@ -2,6 +2,46 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-04-30 to 2026-05-02](history/2026-04-30-to-05-02-history.md).
 
+### 2026.05.05 PM - Session 05da2b39 | Bug fix: conversation-mode self-exit signal gap (resolves Session 2622c356's TODO line 100)
+
+#### Checkpoint | 2026.05.05 18:30 | Self-exit signal symmetry — router action push + helper wording + tests
+
+**Context**: When conversation mode was exited via a same-session transition (UI toggle button, MCP `exit_conversation_mode()`, voice phrase, slash command), the bridge file flipped to `false` but no in-context counter-signal reached the model. The model continued honoring the conversation-mode contract from prior `<system-reminder>` blocks still resident in its context window — wrapping replies in voice-message format, calling `notify()` after every turn — until those reminders scrolled out. The deactivation-reminder infrastructure already existed and worked correctly for the displace transition (Session A active → Session B activates → A receives `action:exit_conversation_mode` and the listener injects `conv_mode_exit_reminder()` into A's tmux pane verbatim, landed in Session 911b1cdc 2026-05-01). The router's deactivate branch never fired that same push for the self-exit case. Resolves the line-100 TODO item filed by Session 2622c356 earlier today.
+
+**Accomplishments**:
+
+- **R&D design doc + execution log** at `src/rnd/v0.1.7/2026.05.05-conv-mode-self-exit-signal-gap/` — `01-design.md` carries the full path map (working displace path with mermaid sequence + file:line evidence), the asymmetry evidence (`conversation_mode.py:162-229` two-branch table), the three-layer enforcement table explaining why the model retains the contract, sweep-check across all deactivation surfaces, proposed fix sketch, test deltas, 5 open questions, 4 risks. Companion `90-execution-log.md` with phase status table + Phase 4 verification result table.
+- **Helper wording (Lupin)** — `src/lupin_cli/claude_code/hooks/lib/hook_common.py` `conv_mode_exit_reminder()` body made reason-agnostic ("Conversation mode has just been deactivated for this session." — dropped the displace-specific parenthetical). Docstring updated to enumerate both transition causes (displace + self-exit).
+- **Router self-exit action push (CoSA — NOT staged from parent context)** — `src/cosa/rest/routers/conversation_mode.py` adds a new conditional block AFTER the existing `conversation_mode_changed` UI-sync push, gated on `not body.active`. Pushes `user_initiated_message` with `title="action:exit_conversation_mode"`, `job_id=session_id[:8]`, `payload={"session_id": session_id, "reason": "self"}`. Mirror of the displace branch's per-session action push. Self-exit transition now triggers the listener's `_inject_exit_conversation_reminder()` path the same way displace does.
+- **Test updates (Lupin)**: `test_conversation_mode_router.py` — renamed `test_deactivate_does_not_scan_or_displace` → `test_deactivate_pushes_ui_sync_and_self_action`, updated docstring, `call_count == 1` → `== 2`, added four second-push assertions on `type/title/job_id/payload`. `test_conv_mode_wrap.py` — rewrote `test_body_mentions_displacement` → `test_body_announces_deactivation` (asserts `"deactivated" in result.lower()`), updated `TestConvModeExitReminder` class docstring.
+- **TODO.md**: marked line 100 conv-mode-exit investigation `[x]` complete with session attribution.
+
+**Verification (auto-tier 100% green on `:7999` AI-discretionary)**:
+
+| Layer | Result |
+|---|---|
+| `py_compile` ×4 changed files | 4/4 OK |
+| Hook helper `quick_smoke_test` | PASS |
+| Unit — router (`test_conversation_mode_router.py`) | 13/13 (2.34s) |
+| Unit — wrap helper (`test_conv_mode_wrap.py`) | 41/41 (0.09s) |
+| Unit — MCP toggle (`test_cosa_voice_mcp_conversation_mode.py`) | 10/10 (1.87s) |
+| **Unit — full regression** (`pytest src/tests/unit/`) | **3950 passed**, 2 xfailed (130.80s) |
+| WS smoke `:7999` (`run-websocket-smoke-tests.sh`) | 50/50 (44.6s) |
+| Manual live `:7999` | Deferred — would disrupt active conv-mode dialogue (documented per test-ownership mandate; surfaces on next user-initiated off→on cycle) |
+| E2E UI (`test_conversation_mode.py`) | Out-of-plan-scope — user-scheduled `:8000` via `POST /api/test-suite/submit` |
+
+**Files**: `src/lupin_cli/claude_code/hooks/lib/hook_common.py`, `src/tests/unit/test_conversation_mode_router.py`, `src/tests/unit/test_conv_mode_wrap.py`, `src/rnd/v0.1.7/2026.05.05-conv-mode-self-exit-signal-gap/01-design.md` (new dir, file moved + 1 self-link fix), `src/rnd/v0.1.7/2026.05.05-conv-mode-self-exit-signal-gap/90-execution-log.md` (new) — **plus** `src/cosa/rest/routers/conversation_mode.py` (CoSA submodule edit, NOT staged here — separate CoSA-context commit required).
+**Commit**: ca20526
+
+**Outstanding follow-ups**:
+
+- **CoSA commit** — `src/cosa/rest/routers/conversation_mode.py` edit on disk; needs separate commit from CoSA context. Per nested-repo rules, parent Lupin context never runs git operations on the submodule.
+- **E2E UI verification** (`src/tests/e2e_ui/test_conversation_mode.py`) — submit via `POST /api/test-suite/submit` with confirmed `scheduled_at` slot when convenient. Out-of-plan scope per `:8000` monopolize-mode rule.
+
+**Process notes**: Multi-phase plan was approved via plan-mode (`~/.claude/plans/wild-napping-petal.md`); ran phases 0-4 end-to-end without per-phase gating per `feedback_approved_sequences_execute_end_to_end`. Conversation mode active throughout — closing-turn `notify()` payloads re-crafted as conversational prose per `feedback_recraft_speech_dont_pipe_terminal`.
+
+---
+
 ### 2026.05.05 PM - Session 2622c356 | Action-required widget — abstract popup affordance (📋 indicator) added before persona badge
 
 **Context**: Audit triggered by upcoming work shipping complex multiple-choice questions with substantial drill-down doc abstracts. Question: does the action-required widget (`renderActionRequiredNotification()` at the top of `notifications.html`) render and make actionable the `abstract` field that comes with cosa-voice MCP blocking tools (`ask_yes_no`, `ask_multiple_choice`, `converse`, `ask_open_ended_batch`)? Code audit confirmed the inline `.action-required-abstract` block already renders abstract markdown via `renderMarkdown()` (DOMPurify-sanitized GFM with `target="_blank"` link rewriting), capped at `max-height: 200px` + `overflow-y: auto`. Empirical test confirmed the inline render works. Gap surfaced: the `📋 abstract-indicator` icon affordance — wired into the south history bubbles via `initAbstractTooltip()` — was absent in the north active-slot widget, leaving no escape hatch for substantial drill-down doc abstracts that overflow the 200px inline cap.
