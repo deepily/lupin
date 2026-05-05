@@ -2,6 +2,59 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-04-30 to 2026-05-02](history/2026-04-30-to-05-02-history.md).
 
+### 2026.05.04 PM (late) - Session ec746144 | Multiplexer Phase 4 implementation — domain stores landed, all 10 ACs green
+
+**Context**: Continuation of session ec746144 after the Phase 4 plan-review pipeline closed (`3ec8f4c`) and user gave final-go-ahead via voice in conversation mode. Implemented all 5 domain stores + pcm-decoder + factory + boot wiring + Playwright smoke. Verified the 4 server-side prerequisites; P1 (server replay on auth_success) escalation resolved via Option C ("accept tradeoff, no rebuild"); 6 spec drifts caught at execute time and recorded.
+
+**Accomplishments**:
+
+- **All 7 source files written**:
+  - `pcm-decoder.ts` — synchronous Int16→Float32 decode + AudioBuffer creation (signature deviation: takes `audioContext` arg).
+  - `NotificationStore` — plain reducer over `notification_queue_update` + `notification_responded` + `notification_expired` + `sys_time_update` (local sweep); debounced unread-count persistence with `schemaVersion=1`.
+  - `JobStore` — plain reducer over `job_state_transition` + `job_removed`; 5-bucket layout; lazy `hydrateHistory(api)` per Q7 Option B; server JobState (9+ values) → 4-value UI status mapping (STATE_TO_UI_CONTAINER mirror).
+  - `SenderStore` — plain reducer over `notification_queue_update` discriminating on `notification.type`; full 5-field `VoicePersona` per D-E (`name, voice_id, icon, color, borrowed`).
+  - `ActionRequiredStore` — XState v5 tracker per active prompt; hybrid `setInterval(1000)` + `sys_time_update` clockOffset + `connection_state_change` freeze per D-F; `respond(idHash, response)` POSTs to `/api/notify/response`.
+  - `AudioStore` — XState v5 tracker (idle→decoding→playing/paused/ended/error); lazy AudioContext per Q6; named `binaryHandler` whose `Function.name === "audioStoreBinaryHandler"` for AC9; decodes via pcm-decoder.
+- **`stores/index.ts` factory** — `createStores(opts)` returns 5-store set with subscription order pinned per Pass 1 F12 (`notifications → senders → actionRequired → audio → jobs`); cross-store integration test asserts deterministic microtask-boundary ordering.
+- **`boot.ts` edited per D-D + D-C** — reordered to `createTransports` (factory only) → `createApiClient` → `createStores` → `transports.queue.start` → `transports.audio.start(sessionId, stores.audio.binaryHandler)`. Emits `boot_complete` EventBus event + mirrors to `console.log` with `{handlers: {audioBinary: stores.audio.binaryHandler.name}}`.
+- **`build-multiplexer.sh` edited** — added `--keep-names` to esbuild production flags so `Function.name` survives minification (required for AC9 `audioBinary === "audioStoreBinaryHandler"`).
+- **122 new test cases** (119 unit + 3 Playwright smoke): pcm-decoder 9 / NotificationStore 24 / JobStore 18 / SenderStore 13 / ActionRequiredStore 25 / AudioStore 23 / integration 7 / smoke 3. **Cumulative unit count 241/241 PASS** (was 122). AC4 floor 210 cumulative + 88 new — both exceeded.
+- **All 10 verification matrix layers green**: tsc clean + ESLint clean + 241/241 unit + c8 **100% lines per module across all 7 modules** + build (79,524 bytes raw / 24,343 bytes gzipped, well under 30 KB delta budget) + Phase 1 smoke 7/7 + Phase 3 smoke 1/1 + Phase 3 WS smoke 4/4 + Phase 4 smoke 3/3 + AC7 wiring proof.
+- **P1 prerequisite escalation resolved Option C**: server-side event replay on `auth_success` is NOT implemented (verified at `websocket.py:467-472` + `websocket_manager.py` 1339-line scan with zero replay/buffer/recent-events matches). User chose "accept tradeoff, no rebuild" via cosa-voice `ask_multiple_choice` voice response. NotificationStore active list starts empty on construct + populates from live events post `auth_success`. Promotion to Option A (server replay) or Option B (full-list persistence) deferred — `TODO.md` follow-up filed in § "✅ Q2 OPTION C RATIFIED — P1 server-replay deferred".
+- **6 spec drifts re-audited at execute time** documented in `90-execution-log.md` § "Spec drifts re-audited at execute time": (1) `notification_received` → `notification_queue_update` (server-canonical); (2) field normalization at store boundary (`timestamp`→`ts` ms, `response_requested`→`action_required`, `timeout_seconds`→`expires_at`); (3) voice persona events ride `notification_queue_update` with `notification.type` discriminator (per 2026-04-29 cleanup), not separate WS events; (4) `pcm16ToAudioBuffer` signature adds `audioContext` arg; (5) esbuild `--keep-names` required to preserve `Function.name`; (6) JobStore maps server JobState (9+ values) → 4-value UI status via `STATE_TO_UI_CONTAINER` mirror.
+
+**Files modified (Lupin parent only — CoSA submodule untouched per design § "No CoSA edits in Phase 4")**:
+
+- `src/fastapi_app/static/js/multiplexer/audio/pcm-decoder.ts` (NEW)
+- `src/fastapi_app/static/js/multiplexer/stores/{NotificationStore,JobStore,SenderStore,ActionRequiredStore,AudioStore,index}.ts` (6 NEW)
+- `src/fastapi_app/static/js/multiplexer/shared/types.ts` (edited — 6 server frame types + 6 store_* emission types + `boot_complete` + 7 new interfaces)
+- `src/fastapi_app/static/js/multiplexer/boot.ts` (edited per D-D + D-C)
+- `src/scripts/build-multiplexer.sh` (added `--keep-names`)
+- `src/tests/unit/multiplexer/{notification,job,sender,action_required,audio}_store.test.ts + pcm_decoder.test.ts + stores_integration.test.ts` (7 NEW)
+- `src/tests/smoke/test_multiplexer_phase4_smoke.py` (NEW)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` (Phase 4 section opened + closed; prerequisite verifications + P1 escalation resolution + 6 spec drifts + verification matrix all populated)
+- `TODO.md` (Q2 Option C ratification + post-Phase-4 follow-up for Option A/B promotion)
+- `.claude-session.md` (Phase 4 implementation touched-file log)
+- `history.md` (this entry)
+
+**Verification (all on :7999, AI-discretionary)**:
+
+- `npx tsc --noEmit -p tsconfig.json` → exit 0
+- `npx eslint src/fastapi_app/static/js/multiplexer/` → exit 0
+- `npx tsx --test src/tests/unit/multiplexer/*.ts` → **241 passed, 0 failed**
+- `npx c8 --include='...stores/**/*.ts' --include='...audio/pcm-decoder.ts' --reporter=text npx tsx --test ...` → **100% lines per module** across all 7 modules
+- `bash src/scripts/build-multiplexer.sh` → 79,524 bytes raw / 24,343 bytes gzipped
+- `pytest src/tests/smoke/test_multiplexer_phase{1,3,4}_smoke.py src/tests/websocket_smoke/test_multiplexer_transport.py -v` → **15 passed** (7 + 1 + 3 + 4)
+
+**Caveats / Notes**:
+
+- Per `feedback_never_auto_commit_push`: user authorized **commit only, no push** for this Phase 4 commit. Authorization is for this commit only; subsequent edits need fresh approval.
+- Phase 5 entry artifacts list updated in `90-execution-log.md` Phase 4 § Notes.
+- `05-phase4-stores-design.md` `last-reviewed-at` line will receive this commit's hash via a separate small post-commit edit per Pass 2 A9 + PIP §12 (not blocking — design doc is otherwise complete).
+- Phase 2 `broadcast.ts` cleanup remains a separate follow-up commit per `TODO.md` (deferred until after Phase 4 lands).
+
+---
+
 ### 2026.05.04 PM - Session ec746144 | Multiplexer Phase 4 plan-review pipeline closed — design ratified, awaiting user final-go-ahead for implementation
 
 **Context**: Continuation of session ec746144 after the D1 ratification commit (`c1c33bc`). Drafted Phase 4 stores design doc, ran the canonical PIP `plan-review.md` three-pass review pipeline (REUSE pre-pass + Pass 1 Fitness + Pass 2 Adversarial — all three Agent spawns in parallel, fresh context per spec), consolidated findings into one user-facing review document, walked through 7 user-decision blockers (D-A through D-G), then drove the Resolution Loop applying 21 minor wording/coverage findings. Design doc + supporting docs are now ratified and ready for implementation pending user final-go-ahead.

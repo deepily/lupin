@@ -26,8 +26,10 @@
 import { eventBus } from "./shared/EventBus";
 import { storage } from "./shared/StorageService";
 import { createAuthManager } from "./auth/AuthManager";
+import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
-import type { LifecyclePayload } from "./shared/types";
+import { createStores } from "./stores";
+import type { BootCompletePayload, LifecyclePayload } from "./shared/types";
 
 // Session-ID generator mirroring `notifications.js:2134`. 10 × 10 = 100
 // distinct combinations; the fallback if the server hasn't issued a session
@@ -113,14 +115,69 @@ function bootMultiplexer(): void {
     bus              : eventBus,
   });
 
-  // Transports — Queue + Audio.
+  // ApiClient: production singleton for ActionRequiredStore.respond + Phase 5+
+  // renderers (e.g. JobStore.hydrateHistory).
+  const apiBaseUrl = window.location.origin;
+  const apiClient  = createApiClient({
+    baseUrl          : apiBaseUrl,
+    defaultTimeoutMs : 10_000,
+    authManager,
+  });
+
+  // ---------------------------------------------------------------------
+  // Per D-D ratification 2026-05-04 PM (Option B):
+  //   1. createTransports(...) — factory only; transports NOT started yet
+  //   2. createStores(eventBus, storage, api) — stores subscribe via constructors
+  //   3. transports.queue.start(sessionId) — queue connects + handshakes
+  //   4. transports.audio.start(sessionId, audioStore.binaryHandler) — audio
+  //      connects with the production handler bound at start-time (never
+  //      reaches the Phase 3 default debug logger; zero race window)
+  // ---------------------------------------------------------------------
+
   const baseUrl    = buildWebSocketBaseUrl();
   const transports = createTransports(authManager, eventBus, baseUrl);
+
+  const stores = createStores({
+    eventBus,
+    storage,
+    api                 : apiClient,
+    audioContextFactory : () => {
+      // Production AudioContext factory. Browser autoplay policy may throw
+      // if no user gesture preceded — AudioStore catches and emits
+      // store_audio_state_change { state: "error", reason: "audiocontext-blocked" }.
+      const Ctor = (window as unknown as {
+        AudioContext       ?: { new (opts?: { sampleRate?: number }): AudioContext };
+        webkitAudioContext ?: { new (opts?: { sampleRate?: number }): AudioContext };
+      }).AudioContext ?? (window as unknown as {
+        webkitAudioContext ?: { new (opts?: { sampleRate?: number }): AudioContext };
+      }).webkitAudioContext;
+      if (!Ctor) throw new Error("AudioContext is not available");
+      return new Ctor({ sampleRate: 24000 });
+    },
+  });
 
   attachLifecycleListeners();
 
   transports.queue.start(sessionId);
-  transports.audio.start(sessionId);
+  transports.audio.start(sessionId, stores.audio.binaryHandler);
+
+  // Per D-C ratification 2026-05-04 PM (Option B): emit boot_complete on
+  // EventBus + mirror to console.log so AC9's Playwright check can verify the
+  // wiring without the no-globals violation `window.audioTransport.binaryHandler`
+  // access path. The handler name comes from `Function.name` on the bound
+  // method — for production code this MUST equal "audioStoreBinaryHandler".
+  const bootCompletePayload: BootCompletePayload = {
+    handlers : {
+      audioBinary : stores.audio.binaryHandler.name,
+    },
+  };
+  eventBus.emit<BootCompletePayload>({
+    type    : "boot_complete",
+    payload : bootCompletePayload,
+    source  : "boot",
+    ts      : Date.now(),
+  });
+  console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 3 boot signal — preserves the Phase 1 console-line invariant for
   // Playwright smoke test continuity, and tags the resolved session.

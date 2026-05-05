@@ -14,6 +14,38 @@ User ratified **Option A-extended** for D1 after investigating the legacy `/api/
 
 User ratified Q12 (added 2026-05-04 PM) during Phase 4 plan-review pipeline / D-G walkthrough. Multi-tab support is OUT OF SCOPE for the multiplexer; users wanting two views open a second window of the same tab. Sidesteps Phase 4 Q4 cross-tab BroadcastChannel question entirely. See `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` Q12 for the policy + rationale.
 
+## ✅ Q2 OPTION C RATIFIED — P1 server-replay deferred (2026-05-04 PM)
+
+During Phase 4 implementation kick-off, the design doc's pre-implementation prerequisite verifications surfaced that **server-side event replay on `auth_success` is NOT implemented** (`src/cosa/rest/routers/websocket.py:467-472` sends `auth_success` and falls straight into the receive loop; `websocket_manager.py` has no buffer/replay mechanism). Per design doc Q2 ratification this was a hard blocker requiring escalation.
+
+User decision via `ask_multiple_choice` (verbatim voice response): **"Yeah option C sounds good just as long as it's properly documented and added as a post phase for follow-up."**
+
+**What ships in Phase 4**: NotificationStore implements Q2 Option A as ratified (unread-count-only persistence with `schemaVersion: 1` envelope + 250ms tail debounce). Active list starts empty on construct; populated by live `notification_received` events from `auth_success` onward. Reload loses in-flight active notifications until a new event arrives.
+
+**Audit trail**:
+- Execution log: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` § "Pre-implementation prerequisite verifications" P1 row + § "P1 escalation + resolution"
+- Design doc Q2 ratification text remains valid; the "server replay" assertion is amended in the execution log resolution section
+
+### Post-Phase-4 follow-up — promote to Option A or B if dogfooding signals jarring reload UX
+
+**Defer until**: after Phase 4 implementation lands AND dogfooding produces reload-UX feedback. If reload's "no notifications until next event" gap feels jarring, evaluate:
+
+**Option A — Build server-side replay** (CoSA edit):
+- [ ] [LUPIN-COSA] Add bounded recent-event buffer in `src/cosa/rest/websocket_manager.py` (per-user deque, e.g., 50 most recent events with TTL)
+- [ ] [LUPIN-COSA] Flush buffered events to socket immediately after `auth_success` in `src/cosa/rest/routers/websocket.py` queue endpoint (lines 467-472 area)
+- [ ] [LUPIN-COSA] Verify replay does not duplicate live events for clients that were never disconnected (idempotency by `id_hash` on the consumer side already handles this)
+- [ ] [LUPIN] NotificationStore unit test: verify replay frames are reduced as normal (`changeKind: "added"` per `id_hash`); no special-casing required client-side
+- [ ] [LUPIN] Phase 4 smoke test extended: assert active list rebuilds within 1s of `auth_success` after reload
+
+**Option B — Pivot Q2 to full-list persistence** (no CoSA edit):
+- [ ] [LUPIN] Extend NotificationStore persistence envelope schema (bump to `schemaVersion: 2`) to carry `{count, lastSeenTs, activeList: Notification[]}`
+- [ ] [LUPIN] Add migration path from v1 → v2 (v1 envelopes get `activeList: []`; storage_corrupt fires on unknown future versions)
+- [ ] [LUPIN] Tail-debounce active list writes too (active list churn could be larger than count churn)
+- [ ] [LUPIN] Storage-volume audit: estimate worst-case envelope size against typical browser quota
+- [ ] [LUPIN] NotificationStore unit tests: verify hydration from persisted active list; verify schema-migration path
+
+**Triggering signal** (decision point): if user reports "I lost notifications on reload" during Phase 4-9 dogfooding, evaluate both options. Otherwise, accept the gap permanently — Option C stands.
+
 ### Phase 2 broadcast.ts cleanup — separate commit follow-up
 
 **Where it lives**: `src/fastapi_app/static/js/multiplexer/shared/broadcast.ts` (53 LOC) + `src/tests/unit/multiplexer/broadcast.test.ts` (8 unit tests). Header comment of broadcast.ts already updated 2026-05-04 PM with the "INERT IN PRODUCTION per Q12" note.

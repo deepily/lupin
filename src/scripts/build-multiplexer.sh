@@ -57,6 +57,11 @@ if [ "${1:-}" = "--watch" ]; then
 fi
 
 echo "build-multiplexer: production build → $OUTFILE"
+# --keep-names preserves Function.name on named function expressions through
+# minification. Required for AC9's `boot_complete.handlers.audioBinary ===
+# "audioStoreBinaryHandler"` invariant — without it the AudioStore's named
+# bound method gets renamed by esbuild's identifier mangler. Per Phase 4
+# § "Spec drifts re-audited at execute time".
 "$ESBUILD" \
   "$ENTRY" \
   --bundle \
@@ -64,6 +69,7 @@ echo "build-multiplexer: production build → $OUTFILE"
   --target=es2022 \
   --platform=browser \
   --minify \
+  --keep-names \
   --sourcemap \
   --outfile="$OUTFILE" \
   --log-level=warning

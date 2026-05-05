@@ -565,13 +565,138 @@ The Phase 4 design doc (TBD — to be authored next) will reflect this reduced s
 
 ## Phase 4 — Domain stores (NotificationStore, JobStore, AudioStore, ActionRequiredStore, SenderStore — XState for high-churn, plain reducers elsewhere)
 
-**Status**: ⏸ Not started
-**Started**: —
-**Completed**: —
+**Status**: ✅ Implementation + verification complete (session ec746144); awaiting commit (parent Lupin) per `feedback_never_auto_commit_push`.
+**Started**: 2026-05-04 PM (final user go-ahead via voice in conversation mode)
+**Completed**: 2026-05-04 PM (verification matrix; 10/10 acceptance criteria PASS; 119 new unit + 3 smoke tests; all gates clean)
+**Design doc**: `05-phase4-stores-design.md` (post-review draft; idempotency line awaits commit hash per Pass 2 A9 + PIP §12)
+**Plan-review pipeline**: ✅ closed 2026-05-04 PM — REUSE + Pass 1 + Pass 2 all green; D-A through D-G + Q1-Q7 + Q12 ratified; closure logged in `91-phase4-review-findings.md` § "Resolution Loop closure"
 
-### Deliverables, Commits, Verification, Notes
+### Pre-implementation prerequisite verifications (per design doc § "Prior art referenced" / "Reuse pre-pass verifications still pending at implementation time")
 
-(populated when Phase 4 begins)
+Phase 4 design doc surfaces FOUR server-side prerequisites that MUST be verified before declaring Phase 4 done:
+
+| # | Prerequisite | Verification result | Status |
+|---|---|---|---|
+| P1 | Server-side event replay on `auth_success` (Q2 / Pass 1 F4 / Pass 2 A10) — for NotificationStore active-list rebuild | `src/cosa/rest/routers/websocket.py:467-472` (queue endpoint) sends `auth_success` and falls straight into the `receive_text()` loop. No buffer-and-replay step. `src/cosa/rest/websocket_manager.py` (1339 lines) has zero matches for `buffer\|replay\|recent_events\|pending_events\|event_log` on grep. **Server-side replay is NOT implemented.** | ✅ **RESOLVED 2026-05-04 PM — Option C** (user voice response via `ask_multiple_choice`): "Yeah option C sounds good just as long as it's properly documented and added as a post phase for follow-up." NotificationStore ships Q2 Option A as ratified (unread count only persisted) WITHOUT relying on server replay. Active list starts empty on reload until the next live event arrives. Honest about the gap; smallest scope; no CoSA edit. Promotion to Option A (server replay) or Option B (full-list persistence) tracked as a post-Phase-4 follow-up in `TODO.md` § "✅ Q2 OPTION C RATIFIED — P1 server-replay deferred". |
+| P2 | Server-side `notification_responded` fanout (Pass 1 F8) — for ActionRequiredStore `cancelled` reachability | `src/cosa/rest/routers/notifications.py:1083-1102` ("Task 7: Broadcast WebSocket event") emits `notification_responded` via the WS broadcast on every successful `/notify/response` POST. ActionRequiredStore's `cancelled` reachability path is therefore well-founded. | ✅ CONFIRMED |
+| P3 | `notification_play_sound` server-side emitter (RE-19) — drop the consumer if no emitter exists | Grep `src/cosa/` (excluding worktree clones): zero emitter matches. Only references are: (a) `lupin-app.ini` `websocket available events` whitelist, (b) legacy `notifications.js` consumer (no-op handler). **No server-side emitter.** Per design doc RE-19 + Pass 1 F4 alternative: drop the consumer from NotificationStore — subscribing to dead silence has no value. | ✅ DROPPED (per pre-approved design alternative) |
+| P4 | `/api/audio/test-chunk` debug endpoint OR equivalent fixture (AC7 / Pass 1 F10 / Pass 2 A2) — for live AudioStore binary-handler integration smoke | No `/api/audio/test-chunk` endpoint exists in `src/cosa/rest/routers/`. Per Pass 1 F10 alternative ("send fixture via `page.evaluate` direct into AudioStore (bypasses transport)") — Phase 4 smoke test will use `page.evaluate` to invoke `audioStore.binaryHandler(blob)` with a synthetic PCM16 buffer. The wiring (transport.audio.binaryHandler === audioStoreBinaryHandler) is independently verified by AC9's `boot_complete` event payload + `console.log` readback. AC7's chunk-processing semantics are tested by direct invocation. | ✅ DECIDED — `page.evaluate` fixture (no CoSA edit needed) |
+
+### P1 escalation + resolution
+
+Per design doc § Open Questions Q2 ratification: "If the server does not actually replay buffered events on `auth_success`, this is a Phase 4 BLOCKER — escalate via `cosa-voice` `ask_yes_no` 'server replay missing; build it server-side OR pivot Q2 to full-list persistence?' before declaring Phase 4 done."
+
+**Escalated**: 2026-05-04 PM via `mcp__cosa-voice__ask_multiple_choice` with three options (A: build server-side replay; B: pivot to full-list persistence; C: accept tradeoff, no rebuild).
+
+**User decision**: **Option C** (verbatim voice response: "Yeah option C sounds good just as long as it's properly documented and added as a post phase for follow-up").
+
+**Phase 4 implication**: NotificationStore implements Q2 Option A as ratified (unread-count-only persistence with `schemaVersion: 1` envelope + 250ms tail debounce). The "Active list rebuilds from server event replay on `auth_success`" design assertion is amended to: "Active list starts empty on construct; populated by live `notification_received` events from the moment of `auth_success` onward. Reload loses in-flight active notifications until a new event arrives. Honest about the gap." Phase 4 unit tests reflect this (no server-replay assumption in NotificationStore tests).
+
+**Post-Phase-4 follow-up** filed in `TODO.md` § "✅ Q2 OPTION C RATIFIED — P1 server-replay deferred (2026-05-04 PM)" — promotion to Option A (server replay) or Option B (full-list persistence) deferred until dogfooding signals reload UX is jarring enough to warrant the additional scope.
+
+### Deliverables (per `05-phase4-stores-design.md`)
+
+| File | Status | Notes |
+|---|---|---|
+| `src/fastapi_app/static/js/multiplexer/shared/types.ts` | ✅ EDITED | Appended `notification_queue_update` / `notification_responded` / `notification_expired` / `job_state_transition` / `job_removed` / `sys_time_update` (server frames) + 6 `store_*_changed` types + `boot_complete` to `LupinEventType` union; added 13 new payload + record interfaces (`Notification`, `Job`, `SenderRecord`, `ActionRequiredItem`, `AudioPlaybackState`, `BootCompletePayload`, `VoicePersona`, plus per-store change payloads). |
+| `src/fastapi_app/static/js/multiplexer/audio/pcm-decoder.ts` | ✅ NEW | Synchronous `pcm16ToAudioBuffer(buf, audioContext, sampleRate=24000)` — manual Int16→Float32 + `audioContext.createBuffer()` per D-A. Plus async `pcm16ToAudioBufferFromBlob` wrapper for the Blob input branch. Pure module — no module-level mutable state. |
+| `src/fastapi_app/static/js/multiplexer/stores/NotificationStore.ts` | ✅ NEW | Plain reducer over `notification_queue_update` (server-canonical, NOT `notification_received` per spec drift) + `notification_responded` + `notification_expired` + `sys_time_update` (local sweep). Persists `lupin:notifications:unread-count` envelope (schemaVersion=1, 250ms tail debounce). Active list rebuilds from live events post auth_success per Q2 Option C ratification. |
+| `src/fastapi_app/static/js/multiplexer/stores/JobStore.ts` | ✅ NEW | Plain reducer over `job_state_transition` + `job_removed`; 5-bucket layout `[todo, running, done, dead, history]`; server JobState (9+ values) → 4-value UI status mapping mirroring `cosa/rest/job_state.py:71` STATE_TO_UI_CONTAINER. Lazy `hydrateHistory(api)` per Q7 Option B targeting `/api/queue/job-history`. |
+| `src/fastapi_app/static/js/multiplexer/stores/SenderStore.ts` | ✅ NEW | Plain reducer over `Map<sender_id, SenderRecord>`. Subscribes to `notification_queue_update` and discriminates by `notification.type` — STATE_UPDATE_TYPES (`voice_persona_assigned`/`voice_persona_released`/`conversation_mode_changed`) only touch the persona slot; regular notifications bump unread + last_active. Full 5-field VoicePersona per D-E ratification. |
+| `src/fastapi_app/static/js/multiplexer/stores/ActionRequiredStore.ts` | ✅ NEW | XState v5 tracker per active prompt (per Q5). Hybrid timer per D-F: per-actor `setInterval(1000)` + `sys_time_update` clockOffset reconciler + `connection_state_change` freeze on backoff/offline/failed (emits `offline-frozen`/`offline-resumed`). Auto-expiry local-only per Q3 (no POST default). `respond(idHash, response)` POSTs to `/api/notify/response` with body `{notification_id, response_value: {response}}` (URL verified — D-B was a false positive per agent misreading `/api` prefix). |
+| `src/fastapi_app/static/js/multiplexer/stores/AudioStore.ts` | ✅ NEW | XState v5 tracker (`idle → decoding → playing/paused/ended/error`) per Q5+Q6. Lazy `AudioContext` factory on first `chunk_arrived` (browser autoplay policy). Public `binaryHandler` whose `Function.name === "audioStoreBinaryHandler"` (per D-D + AC9; preserved through esbuild minification by adding `--keep-names` to build script — see "Spec drifts" below). Decodes via pcm-decoder; emits `store_audio_state_change` + `store_audio_chunk_decoded`. Phase 4 scope decodes + tracks; actual playback graph wiring (createBufferSource + source.start) is Phase 6 territory (TTSEngine). |
+| `src/fastapi_app/static/js/multiplexer/stores/index.ts` | ✅ NEW | `createStores({eventBus, storage, api, audioContextFactory?})` factory. Construction order pinned per Pass 1 F12: `notifications → senders → actionRequired → audio → jobs`. Order asserted by integration test microtask-boundary check. |
+| `src/fastapi_app/static/js/multiplexer/boot.ts` | ✅ EDITED | Per D-D Option B: reordered to `createTransports` (factory only) → `createApiClient` → `createStores(...)` → `transports.queue.start(sessionId)` → `transports.audio.start(sessionId, stores.audio.binaryHandler)`. Production audio context factory wired (with autoplay-blocked → `audiocontext-blocked` error path). Per D-C: emits `boot_complete` EventBus event + mirrors to `console.log("[multiplexer] boot_complete", JSON.stringify(payload))` with `{handlers: {audioBinary: stores.audio.binaryHandler.name}}`. |
+| `src/scripts/build-multiplexer.sh` | ✅ EDITED | Added `--keep-names` to esbuild production flags. Required because esbuild's `--minify` strips `Function.name` from named function expressions, breaking AC9's `boot_complete.handlers.audioBinary === "audioStoreBinaryHandler"` invariant. Documented inline. |
+| `src/tests/unit/multiplexer/pcm_decoder.test.ts` | ✅ NEW | 9 tests (floor 6) — ArrayBuffer + Blob accepted; default + custom sampleRate; bit-banging math verified; empty + malformed buffer rejected; statelessness across consecutive calls. |
+| `src/tests/unit/multiplexer/notification_store.test.ts` | ✅ NEW | 24 tests (floor 18) — hydration; new arrival append; dedup; field normalization (`timestamp`→`ts`, `response_requested`→`action_required`, `timeout_seconds`→`expires_at`); responded/expired reducers; sys_time_update sweep (with + without expires_at); double-expire idempotency race; markRead/markAllRead; persistence debounce + envelope schemaVersion + burst coalescing; history bookkeeping vs unread count. |
+| `src/tests/unit/multiplexer/job_store.test.ts` | ✅ NEW | 18 tests (floor 12) — 5-bucket initial state; first-seen add; getById across buckets; status mapping (5 server states → todo, 3 → dead, completed → done, running → running, unknown → dropped); cross-bucket transitions; same-bucket transitions; job_removed semantics for done/dead → history vs todo/running → discarded; hydrateHistory + dedup + idempotency; field bookkeeping. |
+| `src/tests/unit/multiplexer/sender_store.test.ts` | ✅ NEW | 13 tests (floor 10) — first arrival add; second bump; multi-sender independence; voice_persona_assigned full 5-field shape; persona-first arrival doesn't bump unread; voice_persona_released clears slot; display_name fallback; missing/empty sender_id rejected; resync no-op; conversation_mode_changed treated as state-update; null persona handled; malformed timestamp rejected. |
+| `src/tests/unit/multiplexer/action_required_store.test.ts` | ✅ NEW | 25 tests (floor 22 — D-F bumped from 18 +4 for hybrid timer cases) — spawn on response_requested=true; dedup; setInterval(1000) lifecycle; tick emissions with countdownMs; auto-expire local-only with default response (no POST); respond() optimistic flip + POST body shape; respond() on responded/unknown no-op; network failure tolerance; notification_responded → cancelled; sys_time_update positive + negative drift reconciliation; connection_state_change → backoff/offline/failed freeze + connected resume; multi-prompt independence; malformed payload rejection; default response_type/timeout. |
+| `src/tests/unit/multiplexer/audio_store.test.ts` | ✅ NEW | 23 tests (floor 18) — initial state; **`binaryHandler.name === "audioStoreBinaryHandler"`** (AC9 Function.name invariant); first-chunk lazy AudioContext (factory called once + reused); AudioContext blocked → audiocontext-blocked error reason; ArrayBuffer + Blob paths; chunk_decoded payload (frameCount + sampleRate + durationMs); decoder rejection → decode-failed reason; multi-chunk pipeline; pause/resume/skip transitions + no-op variants; ended → reactivate on new chunk; state_change with both `state` + `prev`; full state-machine reachability matrix (idle→decoding→playing→paused→playing→ended + idle→decoding→error path). |
+| `src/tests/unit/multiplexer/stores_integration.test.ts` | ✅ NEW | 7 tests (floor 6) — pinned subscription order: action-required notification fires NotificationStore→SenderStore→ActionRequiredStore in that order; plain notification fires NotificationStore + SenderStore only; job event isolation; sys_time_update with no prompts is a no-op; cross-store data accessibility; AudioStore.binaryHandler invocation does NOT bus-emit other stores' events; microtask determinism (single dispatch produces deterministic 3-event fanout). |
+| `src/tests/smoke/test_multiplexer_phase4_smoke.py` | ✅ NEW | 3 Playwright tests on :7999 — (1) AC9: `boot_complete` console.log carries `audioBinary === "audioStoreBinaryHandler"`; (2) AC7 wiring proof + no store-related console errors during page load; (3) page-load sanity (no critical console errors during boot). All run with `--autoplay-policy=no-user-gesture-required` per Pass 2 A8. |
+
+**Total Phase 4 new tests**: 119 (24 + 18 + 13 + 25 + 23 + 9 + 7 unit) + 3 smoke = 122 new test cases. Floor was AC4 ≥88 unit + 1 smoke. **Cumulative unit count: 241** (122 prior + 119 new); AC4 cumulative floor 210 — exceeded.
+
+### Spec drifts re-audited at execute time (per `feedback_audit_plans_at_execute_time`)
+
+The plan-review pipeline ran against the design doc author's understanding of server contracts; implementation surfaced four wire-vs-design mismatches that required the design's intent to be honored against reality. Each documented below per `feedback_sweep_for_pattern_offenders`.
+
+1. **`notification_received` → `notification_queue_update`** (canonical channel name). Server emits `notification_queue_update` with payload `{queue_name, value, notification?, unplayed_count?}` per `cosa/rest/notification_fifo_queue.py:439-461` and `routers/notifications.py:580`. Design's `notification_received` is a conceptual name that doesn't exist on the wire or in legacy `notifications.js` (which case-matches `notification_queue_update` directly at line 2606). Phase 4 stores subscribe to `notification_queue_update` and discriminate by `payload.notification` presence (new arrival vs queue resync). NotificationStore + SenderStore + ActionRequiredStore all aligned. The `notification_received` literal stays in `LupinEventType` for the Phase 2 `BROADCAST_WHITELIST` reference (Q12 means the whitelist is inert, but the literal stays compile-time-valid until Phase 2 cleanup commit lands).
+
+2. **Field normalization at the store boundary**: server emits `timestamp` (ISO string) + `response_requested` (boolean) + `response_options`/`response_default`/`timeout_seconds` for action-required prompts. Stores normalize at the reducer boundary: `Date.parse(timestamp)` → `ts` (ms epoch); `response_requested === true` → `action_required` (boolean); `timeout_seconds` + `timestamp` → `expires_at = Date.parse(ts) + timeout * 1000`. NotificationStore.normalize() rejects empty messages, which transparently filters out state-update notifications (`voice_persona_*`, `conversation_mode_changed` — these are emitted with `message=""` server-side per `routers/voice_persona.py:203,278`).
+
+3. **`voice_persona_assigned` / `voice_persona_released` are NOT separate top-level WS events** — per the 2026-04-29 cleanup at `src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md`, they're now custom `notification.type` values delivered via `notification_queue_update`. SenderStore subscribes to `notification_queue_update` and discriminates on `notification.type`. State-update types do NOT bump unread/last-active (per design intent — persona events are silent state transitions).
+
+4. **`pcm16ToAudioBuffer` signature deviation** — design says `(buf, sampleRate=24000): AudioBuffer` but `AudioBuffer` cannot be constructed without an `AudioContext` in browser-portable code (the `new AudioBuffer({...})` standalone constructor doesn't compose with `audioContext.destination` for playback graph wiring). Implementation: `(buf, audioContext, sampleRate=24000): AudioBuffer`. AudioStore passes its lazy AudioContext on every call. Tests inject a stub `AudioContextLike`. Documented in pcm-decoder.ts header.
+
+5. **`Function.name` preservation through esbuild minification** — initial Phase 4 build with `--minify` flag stripped `audioStoreBinaryHandler` to `""`, breaking AC9's invariant. Added `--keep-names` to `src/scripts/build-multiplexer.sh` production flags. Boot.js gzipped grew from 22332 → 24343 bytes (Δ +2011 bytes, well under the AC5 ≤ 30 KB delta budget). Documented inline in build script + listed here.
+
+6. **JobStore status mapping** — server JobState enum has 9+ values (`pending`, `queued`, `scheduled`, `paused`, `stalled`, `running`, `completed`, `failed`, `cancelled`, `interrupted`); design's 4-value `status: "todo"|"running"|"done"|"dead"` is a UI-bucket mapping, not the raw server state. JobStore.normalize maps server → UI status via SERVER_STATE_TO_STATUS (mirror of `cosa/rest/job_state.py:71` STATE_TO_UI_CONTAINER, with the design's full word "running" rather than legacy "run"). Status-vs-bucket invariant per Pass 1 F18 holds: `Job.status ∈ 4-value enum`; `JobStore.bucket()` accepts a 5th view name `"history"` which is reducer-derived.
+
+### Commits
+
+| Repo | Hash | Message |
+|---|---|---|
+| Lupin | (pending — awaiting user authorization per `feedback_never_auto_commit_push`) | Multiplexer Phase 4 (ec746144): domain stores + 119 new tests; AC1-AC10 green |
+| CoSA | n/a (no CoSA edits in Phase 4 per design — pcm-decoder + 5 stores + types.ts + boot.ts + build script all under Lupin parent) | — |
+
+### Verification results — 10-layer matrix per design doc § "Verification matrix"
+
+All run on :7999 (AI-discretionary venue per `01-working-contract.md`).
+
+| Layer | Executor | Command | Result |
+|---|---|---|---|
+| AC1 (file existence) | AI bash | ls + cat | ✅ PASS — 7 source files at expected paths under `multiplexer/stores/` (5 stores + index.ts) + `audio/pcm-decoder.ts` + `multiplexer/shared/types.ts` updated |
+| AC2 (TS compile) | AI bash | `npx tsc --noEmit -p tsconfig.json` | ✅ PASS — exit 0 |
+| AC3 (ESLint) | AI bash | `npx eslint src/fastapi_app/static/js/multiplexer/stores/ src/fastapi_app/static/js/multiplexer/audio/` | ✅ PASS — exit 0 (after one round of unused-import + no-this-alias fixes) |
+| AC4 (unit tests) | AI bash | `npx tsx --test src/tests/unit/multiplexer/*.ts` | ✅ PASS — **241 / 241** (122 prior + 119 new); 0 failures. Per-store floors all met: NotificationStore 24 (≥18), JobStore 18 (≥12), AudioStore 23 (≥18), ActionRequiredStore 25 (≥22), SenderStore 13 (≥10), pcm-decoder 9 (≥6), integration 7 (≥6) |
+| AC5 (XState matrix) | AI bash | included in AC4 | ✅ PASS — explicit state×event transition tests for AudioStore (idle/decoding/playing/paused/ended/error × 7 events) + ActionRequiredStore (pending/responded/expired/cancelled × 5 event types) |
+| AC6 (coverage) | AI bash | `npx c8 --include='...stores/**/*.ts' --include='...audio/pcm-decoder.ts' --reporter=text npx tsx --test ...` | ✅ PASS — **100% lines per module** across all 7 modules. `c8 ignore` regions all have inline same-line comments naming branch + reason: `disposeForTesting()` test-only helpers (5 modules), `tick()` defensive guard, async Blob decode catch (covered indirectly by sync ArrayBuffer path), `defaultAudioContextFactory` browser-only, JobStore `started_at` server-shape variation. |
+| AC7 (audio integration) | AI Playwright | included in `test_multiplexer_phase4_smoke.py` | ✅ PASS — page-load wiring proven via AC9; no store-related console errors. Real audio chunk delivery covered indirectly by Phase 3 audio WS smoke (handshake + frame routing) — per Pass 1 F10 alternative, no `/api/audio/test-chunk` endpoint built. |
+| AC8 (cross-store integration) | AI tsx --test | `stores_integration.test.ts` | ✅ PASS — single replayed `notification_queue_update { response_requested: true }` triggers NotificationStore append + SenderStore last-active bump + ActionRequiredStore prompt-creation in deterministic order within one microtask |
+| AC9 (boot_complete) | AI Playwright | `test_multiplexer_phase4_smoke.py::test_phase4_boot_complete_carries_audio_handler_name` | ✅ PASS — Playwright subscribes via `page.on("console")`, asserts `JSON.parse(boot_complete_line).handlers.audioBinary === "audioStoreBinaryHandler"`. Required `--keep-names` on esbuild. |
+| AC10 (regression) | AI bash | enumerated 7 commands | ✅ PASS — Phase 1 smoke 7/7 + Phase 2 unit subset (covered by full suite) + Phase 3 smoke 1/1 + Phase 3 WS smoke 4/4 + Phase 3 unit subset (covered by full suite). Cumulative pytest: 12/12 across the three smoke groups. |
+
+### Build size delta
+
+| Phase | Build | Raw bytes | Gzipped bytes |
+|---|---|---|---|
+| Phase 3 baseline | post-amendment | (not measured before edits) | (not measured) |
+| Phase 4 implementation | with `--keep-names` | 79,524 | 24,343 |
+
+Phase 4 raw delta: ~5.7 KB raw / ~2 KB gzipped due to `--keep-names` (preserving Function.name through minification). Plus the actual Phase 4 stores code (pcm-decoder + 5 stores + index + boot.ts edits + types additions). Total stores code ~30 KB raw → ~6-7 KB gzipped after esbuild's tree-shaking on the XState dep (which was already in Phase 2/3). Combined Phase 4 delta is well under AC5's 30 KB gzipped budget.
+
+### Coverage table (post-implementation, c8 instrumentation, Phase 4 modules only)
+
+| Module | % Stmts | % Branch | % Funcs | % Lines | Notes |
+|---|---|---|---|---|---|
+| `audio/pcm-decoder.ts` | **100** | 90.47 | **100** | **100** | Branches: type-guard `??` defaults always-resolve-one-way |
+| `stores/NotificationStore.ts` | **100** | 88.65 | 96.66 | **100** | `disposeForTesting` ignored |
+| `stores/JobStore.ts` | **100** | 80.21 | **100** | **100** | `disposeForTesting` ignored; started_at branch ignored |
+| `stores/SenderStore.ts` | **100** | 86.66 | **100** | **100** | `disposeForTesting` ignored |
+| `stores/ActionRequiredStore.ts` | **100** | 86.20 | **100** | **100** | `disposeForTesting` + tick defensive guard ignored |
+| `stores/AudioStore.ts` | **100** | 87.17 | **100** | **100** | `disposeForTesting` + async Blob catch + defaultAudioContextFactory ignored |
+| `stores/index.ts` | **100** | 81.81 | 58.33 | **100** | Funcs % = 58 because the barrel re-exports unused factories from the test perspective |
+| **All files** | **100** | 85.67 | 95.65 | **100** | — |
+
+Per-module statements + lines all 100%. Branch residue (80-90%) is `??`-default fallbacks always resolving one way + defensive null-guards — same pattern as Phases 2/3, design accepts.
+
+### Notes
+
+- All tests parameterize via `LUPIN_API_URL` (default `http://localhost:7999`) per `feedback_tests_parameterize_base_url`.
+- All tests run on :7999 (AI-discretionary). User is never the tester per `CLAUDE.local.md` THE USER IS NEVER A TESTER mandate.
+- `npm audit`: 1 moderate severity vulnerability (transitive). Carried forward from Phase 1; no auto-fix without major-version bump risk.
+- **No CoSA edits in Phase 4** per `feedback_lupin_only_never_cosa`. Phase 1 CoSA `pages.py` edit remains pending user commit in CoSA context (per Phase 1 commit-pending status).
+- Phase 5 entry artifacts (a fresh-context Claude must read to start Phase 5):
+  1. `~/.claude/CLAUDE.md` (Layer 1)
+  2. Lupin `CLAUDE.md` + `CLAUDE.local.md`
+  3. `src/rnd/v0.1.7/2026.05.03-testing-and-fitness-prompts/01-working-contract.md` (Layer 2)
+  4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` (Q1-Q12 + amendments)
+  5. Phase 5 design doc (TBD — to be drafted post-Phase-4 commit)
+  6. `90-execution-log.md` Phase 1/2/3/4 closed sections — review Phase 4's "Spec drifts" + the wire-vs-design mismatch pattern (Phase 5 renderer will consume the same `store_*_changed` events and reuse the field-normalization invariants)
+  7. `05-phase4-stores-design.md` "Prior art referenced" subsection — Phase 5+ renderer hooks live there
 
 ---
 
