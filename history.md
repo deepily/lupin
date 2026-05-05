@@ -2,6 +2,26 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-04-30 to 2026-05-02](history/2026-04-30-to-05-02-history.md).
 
+### 2026.05.05 PM - Session 2622c356 | Action-required widget — abstract popup affordance (📋 indicator) added before persona badge
+
+**Context**: Audit triggered by upcoming work shipping complex multiple-choice questions with substantial drill-down doc abstracts. Question: does the action-required widget (`renderActionRequiredNotification()` at the top of `notifications.html`) render and make actionable the `abstract` field that comes with cosa-voice MCP blocking tools (`ask_yes_no`, `ask_multiple_choice`, `converse`, `ask_open_ended_batch`)? Code audit confirmed the inline `.action-required-abstract` block already renders abstract markdown via `renderMarkdown()` (DOMPurify-sanitized GFM with `target="_blank"` link rewriting), capped at `max-height: 200px` + `overflow-y: auto`. Empirical test confirmed the inline render works. Gap surfaced: the `📋 abstract-indicator` icon affordance — wired into the south history bubbles via `initAbstractTooltip()` — was absent in the north active-slot widget, leaving no escape hatch for substantial drill-down doc abstracts that overflow the 200px inline cap.
+
+**Accomplishments**:
+
+- Added `abstractIndicatorHTML` const in `renderActionRequiredNotification()`, gated on non-empty abstract. Injected `${abstractIndicatorHTML}` into `.action-required-timer-controls` BEFORE `${personaBadge}` per user preference.
+- Click delegation set up by `initAbstractTooltip()` picks up the new span automatically — no new event listener required. Tier sizing via `notifications.css` activates Tier 3 (1100×850 viewport-bounded) for abstracts containing both `<pre>` and `<table>`, covering the multi-page drill-down doc shape.
+- Live-tested via `ask_yes_no` / `ask_multiple_choice` / `converse` — user confirmed the icon position, popup behavior, and drag-resize. `open_ended_batch` not visually probed but shares the same `renderActionRequiredNotification()` entry so identical behaviour expected.
+- Net behavior: progressive disclosure UX — short abstracts read inline in the 200px scrollable block, long ones get the popup escape hatch. Matches the south history bubble UX, now consistent across both regions.
+
+**Files changed (bundled into commit `73bee1b` alongside session 1a8900ee's claude-code-dispatch retirement; that commit's message did not separately call out this work)**:
+
+- `src/fastapi_app/static/js/notifications.js` — `abstractIndicatorHTML` const (~7 lines) + injection in `.action-required-timer-controls`.
+- `src/fastapi_app/static/html/notifications.html` — cache-buster bump (superseded in the same commit by parallel-session bump to `?v=20260505c`).
+
+**Conversation-mode lesson saved to memory**: the closing-turn `notify()` `message` field MUST be re-crafted as conversational prose (~80-120 words) when conversation mode is active; rich detail goes in the `abstract` parameter. Anti-pattern: piping the markdown terminal reply through `notify()` with code blocks stripped — that's passive filtering, not active re-shaping. See `feedback_recraft_speech_dont_pipe_terminal.md` in the auto-memory store.
+
+---
+
 ### 2026.05.05 AM - Session 1a8900ee | Retired the `/api/claude-code/dispatch` + `/api/claude-code/ws/{task_id}` fossil endpoint cluster
 
 **Context**: Bug-fix session against the 🔥 IMMEDIATE top-of-queue entry promoted by user directive 2026-05-04 PM (filed by session ec746144). The legacy Claude Code dispatcher cluster — six endpoints, ~620 lines, four catalogued structural defects (URL contract mismatch / no auth / module-level state / parallel pre-cj-flow path) — was a pre-CJ-Flow, pre-auth-mode-jwt, pre-WebSocketManager-canonicalization fossil that no convention-conformant work could be built on top of. Halted Multiplexer Phase 4's `ClaudeCodeTransport` design pending today's elimination.

@@ -91,6 +91,31 @@ The 6-endpoint legacy `/api/claude-code/dispatch` cluster was retired today. Two
 
 ---
 
+## 🪞 MCP SELF-INTROSPECTION FOLLOW-UPS (Session 2622c356, 2026-05-05 PM)
+
+Surfaced when user called Claude "Maria" (the assigned voice persona name). Claude had no programmatic way to know its own persona — `get_session_info()` returns session metadata but no persona field. Two related extensions filed; first one IMPLEMENTED, second still pending.
+
+### Pending
+
+- [ ] [LUPIN-COSA OR LUPIN] **Investigate explicit conversation-mode-exit notification to MCP client.** Question: when my own session's conversation-mode flag flips from true → false (whether via user voice phrase "exit conversation mode", slash command, or displacement by another session entering conv mode), does the MCP client receive an explicit transition signal? Current observation from session 2622c356: I find out by ABSENCE of the "Conversation mode is active" `<system-reminder>` on the next UserPromptSubmit hook firing — there's no explicit "you exited conversation mode" message. Also unclear whether the existing cross-session displacement reminder pipeline (`conv_mode_exit_reminder()` + `_inject_via_tmux`, landed in Session 911b1cdc 2026-05-01) covers the OWN-session-exits-by-user case or only cross-session displacement. **Plan**: (1) experimentally confirm by entering then exiting conversation mode in a single session and inspecting the `<system-reminder>` blocks that arrive on subsequent prompts; (2) if no explicit transition signal exists in either direction, propose one — could be a hook injection ("Conversation mode just exited; back to default notification mode") OR a stamped boolean field on the next get_session_info response (`conversation_mode_just_changed: true`, decremented after read) OR an explicit `notify()` from the bridge into Claude's prompt stream. Coordinate with the existing 🎙 PERSONA + CONV-MODE EXIT-REMINDER FOLLOW-UPS section above (Session 911b1cdc).
+
+### What landed (this session)
+
+- ✅ **`voice_persona` added to `get_session_info()` MCP response** — implemented in `src/lupin_mcp/cosa_voice_mcp.py` (Lupin parent, not CoSA submodule as I'd initially scoped — the cosa-voice MCP server source actually lives in Lupin parent under `src/lupin_mcp/`). 5-line addition to the bridge-metadata branch at line 1289+: reads `cc_meta.get("voice_persona")` from the same session bridge that the existing `conversation_mode_active` lookup uses (None if Phase 4.5 hook allocation failed; server falls back to "Sam" for TTS). Docstring updated to list the new field. `py_compile` clean.
+- ✅ **Voice Persona Self-Announcement (Phase A.5) protocol added to MCP server instructions** — appended to the `mcp = FastMCP(instructions=...)` field at line 605+. Instructs Claude to send a TTS greeting by persona `display_name` at session start: time-of-day-appropriate greeting + display_name + brief duty announcement (e.g. "Good morning, Maria reporting for duty, setting things up."). Skips if `voice_persona` is None. Fires once per Phase A startup including after /clear (persona persists across /clear).
+
+### Activation requirement
+
+Both changes are SERVER-SIDE in the cosa-voice MCP server source. They require the **MCP server process to be restarted** before they take effect:
+
+- The cosa-voice MCP runs as a stdio subprocess of Claude Code (`Type: stdio` per `claude mcp get cosa-voice`). The Python process loaded `cosa_voice_mcp.py` once at startup; it does not re-read the file on disk.
+- To pick up the new code, restart Claude Code (close + relaunch the CC session). `/clear` is NOT sufficient — that clears Claude's context but leaves the MCP subprocess intact.
+- The CURRENT session (2622c356) won't see the changes. A fresh session opened after restart will: hook allocates persona → `get_session_info()` returns `voice_persona` → Claude reads updated instructions → Claude TTS-announces by name at Phase A.
+
+If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that would be a less disruptive path than full Claude Code restart — worth checking before next session.
+
+---
+
 ## ☀️ FIRST THING IN THE MORNING — 2026.05.05 (or next session)
 
 ### Pending — Commit Phase 3 + begin Multiplexer Phase 4

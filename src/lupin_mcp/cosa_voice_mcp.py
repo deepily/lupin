@@ -601,7 +601,19 @@ mcp = FastMCP(
         f"The displacement is broadcast via the `conversation_mode_changed` WebSocket event with "
         f"`displaced=true, displaced_by=<this session's id>`.\n\n"
         f"The toggle state survives /clear within this session (stored in the bridge file). "
-        f"A fresh Claude Code session starts in notification mode."
+        f"A fresh Claude Code session starts in notification mode.\n\n"
+        f"## Voice Persona Self-Announcement (Phase A.5)\n\n"
+        f"After `get_session_info()` returns, if the `voice_persona` field is non-null, "
+        f"send a brief TTS greeting by your persona name. Phrasing recipe: time-of-day-"
+        f"appropriate greeting + persona's `display_name` (proper-noun form, e.g. 'Maria'; "
+        f"NOT `name` which is the lowercase pool key) + brief duty announcement. Examples:\n"
+        f"- 'Good morning, Maria reporting for duty, setting things up.'\n"
+        f"- 'Good afternoon, Henrietta here, ready to roll.'\n\n"
+        f"Send via `notify(notification_type='custom', priority='medium', suppress_ding=False)`. "
+        f"If `voice_persona` is None (allocation failed; server fell back to 'Sam'), skip the "
+        f"greeting — there's no name to use. Fires once per Phase A startup including after "
+        f"`/clear` (the persona persists across /clear, so re-announcing keeps the session "
+        f"audibly tagged for users running parallel CC sessions)."
     )
 )
 
@@ -1263,7 +1275,9 @@ def get_session_info() -> dict:
 
     Returns:
         dict with project name, session_id, sender_id, server_url, version,
-        conversation_mode_active flag, and claude_code metadata from the session bridge
+        conversation_mode_active flag, claude_code metadata from the session bridge,
+        and voice_persona dict (None if allocation failed; otherwise
+        {name, voice_id, icon, color, borrowed, display_name?})
     """
     resolved_sender = _wait_for_sender_id()
     info = {
@@ -1286,6 +1300,11 @@ def get_session_info() -> dict:
         }
         # Read conversation_mode_active from the same bridge metadata
         info[ "conversation_mode_active" ] = bool( cc_meta.get( "conversation_mode_active", False ) )
+        # voice_persona stamped into the bridge by register_session.py Phase 4.5;
+        # None if allocation failed (server falls back to "Sam" for TTS, per design).
+        # Shape per src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md:
+        # {name, voice_id, icon, color, borrowed, display_name?}
+        info[ "voice_persona" ] = cc_meta.get( "voice_persona" )
     except Exception:
         pass
 
