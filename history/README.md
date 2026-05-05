@@ -12,6 +12,7 @@ This directory contains archived session history from the Lupin project, organiz
 
 | Archive | Period | Sessions | Key Topics |
 |---------|--------|----------|------------|
+| [2026-04-30-to-05-02](2026-04-30-to-05-02-history.md) | Apr 30 - May 2, 2026 | ~13 sessions | cc-strip-icons hover clipping, Conversation-Mode Three-Layer Mic-Monopoly Enforcement, CC Notification Session Panel + exclusive focus mode, postmortem remediation, WS reconnect outage root cause, persona rename + display_name helper, history archival, Today filter + focus-mode flash, focus-tray icon stranding cleanup, TODO size-management skill, WS reconnect circuit breaker, focus-tray inactive-session toggle + bubble differentiation, voice persona desync investigation + /clear preservation fix |
 | [2026-04-29](2026-04-29-history.md) | Apr 29, 2026 | 3 sessions | Persona Theming Round 1 + WS-event cleanup, passlib/bcrypt 4.3.0 pin diagnosis, Test-Suite Anomaly Remediation Phases 1+2+3 + Idle-Aware Stop Hook |
 | [2026-04-25-to-28](2026-04-25-to-28-history.md) | Apr 25-28, 2026 | 11 sessions | Per-session voice personas, conversation-mode v1.1, test-suite anomaly remediation, conversation-mode-for-CC, docker image hygiene 130→31.6 GB, notification dispatch unification, cosa-voice MCP fix, podcast completion URLs |
 | [2026-04-22-to-24](2026-04-22-to-24-history.md) | Apr 22-24, 2026 | 6 sessions | PR Readiness 100%-green, CJ Flow Async Phase 0+1, cosa-voice nested-repo fix, [UNKNOWN] hyphen fix, TFE model flip, LanceDB-GCS CUDA OOM resolution |
@@ -62,10 +63,10 @@ This directory contains archived session history from the Lupin project, organiz
 
 ## Quick Stats
 
-- **Total Archives**: 19 files
-- **Date Range**: May 2025 - April 2026
-- **Total Sessions Documented**: 346+
+- **Total Archives**: 20 files
+- **Date Range**: May 2025 - May 2026
+- **Total Sessions Documented**: 359+
 
 ---
 
-*Last updated: 2026-05-01*
+*Last updated: 2026-05-04*

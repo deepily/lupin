@@ -2020,7 +2020,7 @@
         .cc-strip-icons {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 14px;
             flex: 1 1 auto;
             min-width: 0;
             overflow-x: auto;
@@ -2030,9 +2030,10 @@
             overflow-y: hidden;
             scrollbar-width: thin;
             /* Internal breathing room so hover scale (1.08), focus scale (1.10),
-             * and the protruding ::before mic badge (-3px) / ::after unread badge
-             * (-4px) aren't clipped. */
-            padding: 6px 4px;
+             * the focus ring (2px outer box-shadow), the focus drop-shadow
+             * (0 2px 8px), and the protruding ::before mic badge (-6px) /
+             * ::after unread badge (top: 6px) aren't clipped vertically. */
+            padding: 9px 4px;
         }
 
         .cc-strip-icon {
@@ -2104,7 +2105,7 @@
             transform: translate( -50%, -50% );
             min-width: 16px;
             height: 16px;
-            padding: 0 4px;
+            padding: 0 3px;
             background: #dc3545;
             color: #ffffff;
             border-radius: 8px;
