@@ -421,4 +421,6 @@ The REUSE pre-pass surfaced existing prior art for several Phase 4 components. T
 
 ---
 
-**Last reviewed**: 2026-05-04 (REUSE pre-pass + Pass 1 Fitness + Pass 2 Adversarial all closed; user ratified D-A through D-G + Q1-Q7 + Q12 single-tab policy + 21 minor wording/coverage fixes via Resolution Loop). Idempotency marker `last-reviewed-at` will receive the post-final-go-ahead commit hash per PIP §12 + Pass 2 A9 once user authorizes the Phase 4 commit.
+**Last reviewed**: 2026-05-04 (REUSE pre-pass + Pass 1 Fitness + Pass 2 Adversarial all closed; user ratified D-A through D-G + Q1-Q7 + Q12 single-tab policy + 21 minor wording/coverage fixes via Resolution Loop). Implementation landed in commit `8f1f11c` (2026-05-05).
+
+`last-reviewed-at: 2026-05-04 (8f1f11c)` per PIP §12 + Pass 2 A9.
