@@ -1,5 +1,53 @@
 # Lupin Project History
 
+### 2026.05.04 PM - Session 2c732075 | Notification abstract popup auto-sizing + document viewer scope expansion (`scope=docs`)
+
+**Context**: Two-part UX session. Part 1: the notification abstract popup was hard-capped at 450×400 px with a fixed inner `max-height: 300px`, forcing the user to drag-resize for any rich abstract (table + code + multiple sections). Part 2: extended the document viewer's reach so Claude Code can respond to "show me file X" with a `notify()` containing a viewer link, instead of dumping markdown into chat. The viewer was previously locked to `io/`-rooted artifacts (research reports, podcast scripts) only.
+
+**Accomplishments**:
+
+- **Three-tier `:has()`-driven popup auto-sizing** (`notifications.css`): Tier 1 default (450×400) preserved for prose-shaped abstracts (the ~90% case); Tier 2 (800×700) auto-applies when abstract contains `<table>` OR `<pre>`; Tier 3 (1100×850) when both present OR adjacent h2/h3 siblings indicate multi-section content. Inner `.abstract-tooltip-content` switched from fixed `max-height: 300px` to flex item (`flex: 1 1 auto; min-height: 0`) so it tracks the parent's tier-driven max-height. `display: block` → `display: flex` on `.visible` for column layout.
+- **Real positioning measurement** (`notifications.js`): replaced `tooltipHeight = 200` magic-number with `requestAnimationFrame` + `getBoundingClientRect()`; `visibility: hidden` flicker prevention; horizontal centering on indicator with viewport clamp. The fixed-200 estimate would have clipped Tier 2/3 popups off the viewport bottom.
+- **New `/api/docs/file` endpoint** (`src/cosa/rest/routers/docs_files.py` — NEW in CoSA subrepo, see Caveats): sibling to `io_files.py` serving project source-tree docs via whitelist + traversal protection. Whitelist: root files (`CLAUDE.md`, `history.md`, `TODO.md`, `README.md`, `bug-fix-queue.md`) + directory prefixes (`src/docs/`, `src/rnd/`, `src/workflow/`); allowed extensions `.md/.txt/.json/.yaml/.yml`. Sibling `/api/docs/health` reports project_root + per-entry on-disk presence. Router registered in `main.py` after `io_files`.
+- **Document viewer scope dispatch** (`document-viewer.html`): added `?scope=` URL param read with default `'io'`; dispatches fetch to `/api/docs/file` when `scope=docs`, else `/api/io/file`. Empty-path error hint updated.
+- **Smoke test** (`src/tests/smoke/test_docs_files_endpoint.py` — NEW): 7 :7999-eligible tests covering health shape, src/docs prefix happy-path (`src/docs/notification-api.md`), root-level mount-aware skip, whitelist-rejection, traversal-block, unsupported-extension reject, missing-file 404. Reads `LUPIN_API_URL` env var per project convention.
+- **Notification convention captured** in user-scope `~/.claude/CLAUDE.md` (new `### DOCUMENT VIEWER LINKS` subsection) + `~/.claude/skills/cosa-voice-notifications/SKILL.md` (new `### Document Viewer Links` subsection within Fire-and-Forget Notifications). Pattern: `notify(message="Sure! Here you go", abstract="[Open: <name>](/app/docs?path=<path>&scope=docs)", suppress_ding=True)`. Out-of-scope files (e.g., `~/.claude/plans/*.md`) → ask user to serialize to `src/rnd/` first per plan-serialization mandate.
+
+**Files modified (Lupin parent — committed here)**:
+
+- `src/fastapi_app/main.py` (router import + `app.include_router(docs_files.router)`)
+- `src/fastapi_app/static/css/notifications.css` (popup tier rules + flex inner content)
+- `src/fastapi_app/static/js/notifications.js` (rAF + getBoundingClientRect positioning)
+- `src/fastapi_app/static/html/document-viewer.html` (scope dispatch)
+- `src/tests/smoke/test_docs_files_endpoint.py` (NEW)
+- `.claude-session.md` (new session 2c732075 section + touched-file log)
+- `history.md` (this entry)
+
+**Files modified (CoSA subrepo — separate commit required)**:
+
+- `src/cosa/rest/routers/docs_files.py` (NEW) — must be committed in the cosa subrepo for the new endpoint to be available in deployment. The `from cosa.rest.routers import ... docs_files, ...` import in `main.py` will fail at startup until cosa-side commit lands.
+
+**Files modified (user-scope, not committed to project)**:
+
+- `~/.claude/CLAUDE.md` — DOCUMENT VIEWER LINKS subsection
+- `~/.claude/skills/cosa-voice-notifications/SKILL.md` — Document Viewer Links subsection
+
+**Verification (all on :7999, AI-discretionary)**:
+
+- `python -c "import py_compile; ..."` on `docs_files.py` + `main.py` → exit 0
+- `node --check notifications.js` → exit 0
+- `pytest src/tests/smoke/test_docs_files_endpoint.py -v` → 6 passed + 1 skipped (root-level mount unavailable in :7999 container by current Docker config — expected, see Caveats)
+- `GET /api/docs/health` → 200 with `project_root=/var/lupin`, `src/*` prefixes available, root-level files unmounted
+- `GET /api/docs/file?path=src/docs/notification-api.md` → 200 with `text/markdown; charset=utf-8`
+
+**Caveats / Notes**:
+
+- The :7999 Docker container only bind-mounts `src/`, not the project root. Whitelist still includes root-level `*.md` for forward-compatibility — they 404 today, will start serving the day a project-root mount is added. Smoke test detects this via the health endpoint and skips the root-level test accordingly.
+- Per `feedback_lupin_only_never_cosa`: parent Lupin commit does NOT include `src/cosa/rest/routers/docs_files.py` (`src/cosa` is in parent `.gitignore`). User must commit that file in the cosa subrepo separately.
+- Per `feedback_never_auto_commit_push`: user explicitly authorized this checkpoint commit ("document and checkpoint your work") — that authorization covers ONLY this commit, not subsequent work.
+
+---
+
 ### 2026.05.04 PM - Session ec746144 | D1 Ratification — A-extended (ClaudeCodeTransport scope removed from Phase 3 + all subsequent phases)
 
 **Context**: Returning to D1 ratification after the post-/clear session-start. Initially the user asked to investigate the legacy `/api/claude-code/ws/{task_id}` endpoint that the Phase 3 stub was designed against. Investigation surfaced four structural defects (URL mismatch between `dispatch_task()`'s advertised URL and the served route; unconditional `websocket.accept()` with no auth handshake; module-level in-memory state in `active_sessions` + `websocket_connections`; parallel pre-cj-flow path bypassing `claude_code_queue.py`'s integrated submission). User filed the cluster of bugs to `bug-fix-queue.md` under a new "🔥 Top of Queue — IMMEDIATE" section for tomorrow morning's elimination, then ratified **D1 Option A-extended**: defer `ClaudeCodeTransport` indefinitely (out of scope for Phase 3 AND all subsequent multiplexer phases — not just Phase 4). A future CC transport will be built only when UI surfaces a missing-functionality gap, against the cleaned-up endpoint produced by the bug-fix work, with proper URL + proper authentication.

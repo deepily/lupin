@@ -8329,22 +8329,32 @@ class NotificationsUI {
 
                 // Position near the indicator
                 const rect = indicator.getBoundingClientRect();
-                const tooltipHeight = 200; // Approximate initial height
-                const viewportHeight = window.innerHeight;
 
-                // Position below indicator, but flip above if near bottom
-                let top = rect.bottom + 8;
-                if ( top + tooltipHeight > viewportHeight ) {
-                    top = rect.top - tooltipHeight - 8;
-                }
-
-                // Keep within horizontal bounds
-                let left = Math.max( 10, rect.left - 100 );
-                left = Math.min( left, window.innerWidth - 420 );
-
-                tooltip.style.top = `${top}px`;
-                tooltip.style.left = `${left}px`;
+                // Show hidden first so :has()-driven tier sizing takes effect, then measure
+                tooltip.style.visibility = 'hidden';
                 tooltip.classList.add( 'visible' );
+
+                requestAnimationFrame( () => {
+                    const tipRect        = tooltip.getBoundingClientRect();
+                    const tooltipHeight  = tipRect.height;
+                    const tooltipWidth   = tipRect.width;
+                    const viewportHeight = window.innerHeight;
+                    const viewportWidth  = window.innerWidth;
+
+                    // Position below indicator, flip above if it would clip viewport bottom
+                    let top = rect.bottom + 8;
+                    if ( top + tooltipHeight > viewportHeight - 10 ) {
+                        top = Math.max( 10, rect.top - tooltipHeight - 8 );
+                    }
+
+                    // Center on indicator horizontally, clamp to viewport
+                    let left = rect.left + ( rect.width / 2 ) - ( tooltipWidth / 2 );
+                    left = Math.max( 10, Math.min( left, viewportWidth - tooltipWidth - 10 ) );
+
+                    tooltip.style.top        = `${top}px`;
+                    tooltip.style.left       = `${left}px`;
+                    tooltip.style.visibility = 'visible';
+                } );
 
             } else if ( !e.target.closest( '.abstract-tooltip' ) ) {
                 // Click outside closes tooltip

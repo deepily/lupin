@@ -149,10 +149,11 @@
             const target = document.getElementById( 'doc-viewer-target' );
             const params = new URLSearchParams( window.location.search );
             const path   = params.get( 'path' );
+            const scope  = params.get( 'scope' ) || 'io';
 
             if ( !path ) {
                 target.className = 'doc-viewer-error';
-                target.textContent = 'No document path specified. Use ?path=/io/...';
+                target.textContent = 'No document path specified. Use ?path=<file>&scope=io|docs';
                 return;
             }
 
@@ -160,8 +161,11 @@
             const filename = path.split( '/' ).pop();
             if ( filename ) document.title = filename + ' — Lupin';
 
+            // Dispatch by scope: io = io/-rooted artifacts, docs = whitelisted project docs
+            const apiPath = scope === 'docs' ? '/api/docs/file' : '/api/io/file';
+
             try {
-                const response = await fetch( '/api/io/file?path=' + encodeURIComponent( path ) );
+                const response = await fetch( apiPath + '?path=' + encodeURIComponent( path ) );
                 if ( !response.ok ) {
                     throw new Error( 'Failed to load document (HTTP ' + response.status + ')' );
                 }

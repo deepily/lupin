@@ -4240,8 +4240,9 @@
     z-index: 10001;
     width: auto;               /* Content-driven width */
     min-width: 200px;
-    max-width: min( 450px, calc( 100vw - 40px ) );   /* Viewport-safe max */
-    max-height: min( 400px, calc( 100vh - 100px ) ); /* Prevent overflow */
+    /* Tier 1 default — prose-shaped abstracts (the ~90% case) */
+    max-width: min( 450px, calc( 100vw - 40px ) );
+    max-height: min( 400px, calc( 100vh - 100px ) );
     padding: 0;
     background: #ffffff;
     border: 1px solid #dee2e6;
@@ -4250,14 +4251,31 @@
     font-size: 13px;
     line-height: 1.5;
     color: #333;
-    resize: both;              /* Enable user resizing */
+    resize: both;              /* Drag handle still available as manual override */
     overflow: hidden;          /* Required for CSS resize */
-    /* Hidden by default */
+    /* Flex column so inner content can scroll within parent's max-height */
+    flex-direction: column;
+    /* Hidden by default — display: flex applied via .visible */
     display: none;
 }
 
 .abstract-tooltip.visible {
-    display: block;
+    display: flex;
+}
+
+/* Tier 2 — table OR code block: medium technical content */
+.abstract-tooltip:has( .abstract-tooltip-content table ),
+.abstract-tooltip:has( .abstract-tooltip-content pre ) {
+    max-width:  min( 800px, calc( 100vw - 40px ) );
+    max-height: min( 700px, calc( 100vh - 80px ) );
+}
+
+/* Tier 3 — table AND code, or multi-section markdown: heavy technical content */
+.abstract-tooltip:has( .abstract-tooltip-content table ):has( .abstract-tooltip-content pre ),
+.abstract-tooltip:has( .abstract-tooltip-content h2 ~ h2 ),
+.abstract-tooltip:has( .abstract-tooltip-content h3 ~ h3 ) {
+    max-width:  min( 1100px, calc( 100vw - 40px ) );
+    max-height: min( 850px,  calc( 100vh - 60px ) );
 }
 
 .abstract-tooltip-header {
@@ -4287,8 +4305,9 @@
 }
 
 .abstract-tooltip-content {
-    height: auto;              /* Content-driven height */
-    max-height: 300px;         /* Cap with scroll for long content */
+    /* Flex item: fills remaining vertical space, scrolls when parent hits max-height */
+    flex: 1 1 auto;
+    min-height: 0;             /* required for flex children to enable overflow */
     overflow-y: auto;
     padding: 12px 14px;
     font-family: inherit;
