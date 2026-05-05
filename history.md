@@ -2,6 +2,64 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-04-30 to 2026-05-02](history/2026-04-30-to-05-02-history.md).
 
+### 2026.05.05 AM - Session 1a8900ee | Retired the `/api/claude-code/dispatch` + `/api/claude-code/ws/{task_id}` fossil endpoint cluster
+
+**Context**: Bug-fix session against the 🔥 IMMEDIATE top-of-queue entry promoted by user directive 2026-05-04 PM (filed by session ec746144). The legacy Claude Code dispatcher cluster — six endpoints, ~620 lines, four catalogued structural defects (URL contract mismatch / no auth / module-level state / parallel pre-cj-flow path) — was a pre-CJ-Flow, pre-auth-mode-jwt, pre-WebSocketManager-canonicalization fossil that no convention-conformant work could be built on top of. Halted Multiplexer Phase 4's `ClaudeCodeTransport` design pending today's elimination.
+
+**Strategy**: full retirement (not in-place fix). The cj-flow-integrated sibling `POST /api/claude-code/queue/submit` already exists with full convention compliance. Anything that couldn't be cleanly migrated today (per-turn streaming, INTERACTIVE inject/interrupt/end controls — both blocked by `ClaudeCodeJob`'s lack of bidirectional control) was preserved as **visibly disabled stubs** (yellow `.cc-retired-banner`, "(retired)" labels, disabled state, data-testids intact) per user mandate "obviously disabled so dependencies surface."
+
+**Accomplishments**:
+
+- **R&D plan** at `src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md` + paired `90-execution-log.md`. Six phases: Phase 0 (doc serialization) → Phase 1 (server retirement) → Phase 2 (frontend slim + banners) → Phase 3 (test annotations) → Phase 4 (docs + mobile breadcrumbs) → Phase 5 (verification) → Phase 6 (wrap).
+- **Server (CoSA)**: deleted `src/cosa/rest/routers/claude_code.py` entirely. Edited `src/fastapi_app/main.py` to remove `claude_code` router import (line 66) + `app.include_router(claude_code.router)` (line 779). `cosa.orchestration` module preserved (shared with `ClaudeCodeJob` cj-flow path). Updated `claude_code_queue.py` docstring to drop stale "Unlike the direct dispatch..." comparison.
+- **Frontend (Lupin)**: removed 6 dead methods + 2 state fields from `notifications.js` (~240 lines), rewired `submitClaudeCode` to queue-only. `notifications.html` dispatcher card slimmed: `INTERACTIVE` option removed from `#cc-task-type`, `#cc-execution-mode` disabled to single "CJ Flow (only path)" entry, `#cc-option-b-controls` interior replaced with retirement banner + four disabled stubs (data-testids preserved), `#cc-response` initial inner content set to retirement banner. `.cc-retired-banner` CSS rule added. Cache-bust `v=20260505c`.
+- **E2E tests (Lupin)**: did NOT add skip-marks (would have hidden the disabled stubs). Instead added retirement-pointer docstring comments to `test_cc_card_has_execution_mode_select` and `test_cc_card_has_session_controls` in `src/tests/e2e_ui/test_job_dispatch.py`. Tests still pass as element-existence checks.
+- **Docs**: `src/docs/rest-api-reference.md` Section 14 retitled with "RETIRED 2026-05-05" + 6 dead-endpoint rows replaced with status table. `src/docs/fastapi/api.md` regenerated from live :7999 OpenAPI spec (auto-derived; dead routes vanished). Retirement-pointer footnotes added to `src/rnd/v0.1.1/2026.01.08-cold-call-path-1-ui-card-plan.md`.
+- **Mobile breadcrumbs (no Dart edits)**: prominent retirement notices added to `src/lupin-mobile/src/rnd/v0.1.6-migration/2026.04.15-tier-3-queue-and-claude-code-plan.md` and `2026.04.15-resync-mobile-with-lupin-api-v0.1.6.md`. Mobile `claude_code_repository.dart:18` will 404 against post-retirement Lupin until the mobile session migrates it. Loudness intentional.
+- **bug-fix-queue.md**: 🔥 IMMEDIATE entry moved to "Recently Completed" with full fix summary; original 4-bug catalog preserved inside `<details>` for archeology.
+- **TODO.md**: follow-up filed — restore CC INTERACTIVE controls when `ClaudeCodeJob` gains `inject`/`interrupt`/`end_session`, mobile-port subtask.
+
+**Verification (programmatic, all GREEN)**:
+
+| Check | Result |
+|---|---|
+| 6 retired endpoints live-probed | All return **404** ✅ |
+| Survivor `/api/claude-code/queue/submit` (no JWT) | **401** ✅ |
+| `/health` | **200** ✅ |
+| Server-side residue grep | zero non-comment hits ✅ |
+| Frontend residue grep | zero non-comment hits ✅ |
+| `notifications.js` syntax | OK ✅ |
+| `from cosa.agents.claude_code.job import ClaudeCodeJob` | OK ✅ |
+| `pytest src/tests/unit/` | **3950 pass, 2 xfailed, 0 failed** (130s) ✅ |
+| `bash src/scripts/run-websocket-smoke-tests.sh` | **50/50 pass** (44s) ✅ |
+| `python src/tests/smoke/test_claude_code_dry_run_smoke.py` | **6/6 pass** (incl. INTERACTIVE) ✅ |
+
+**Outstanding manual gate**: live UI probe in browser (devtools Network) — confirm zero requests to retired URLs + retirement banners visible. Surfaced to user; not blocking the claim.
+
+**Multiplexer Phase 4 D1 ratification UNBLOCKED.** The structural defects that halted `ClaudeCodeTransport` design on 2026-05-04 PM are gone. Multiplexer team can now re-evaluate whether to build a dedicated CC transport or route CC progress events as standard `notification_queue_update` (since cj-flow already emits via the canonical WebSocketManager dispatch).
+
+**Files changed (Lupin commit, user owns the trigger)**:
+- `src/fastapi_app/main.py` (router de-wiring)
+- `src/fastapi_app/static/js/notifications.js` (6 method deletions + state + handlers + rewire)
+- `src/fastapi_app/static/html/notifications.html` (dispatcher card slim + banners + cache-bust)
+- `src/fastapi_app/static/css/notifications.css` (`.cc-retired-banner` rule)
+- `src/tests/e2e_ui/test_job_dispatch.py` (retirement-pointer docstrings on 2 tests)
+- `src/docs/rest-api-reference.md` (retired-endpoints table)
+- `src/docs/fastapi/api.md` (regenerated)
+- `src/rnd/v0.1.1/2026.01.08-cold-call-path-1-ui-card-plan.md` (retirement footnote)
+- `src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md` + `90-execution-log.md` (NEW)
+- `src/lupin-mobile/src/rnd/v0.1.6-migration/2026.04.15-tier-3-queue-and-claude-code-plan.md` (retirement footnote, mobile breadcrumb)
+- `src/lupin-mobile/src/rnd/v0.1.6-migration/2026.04.15-resync-mobile-with-lupin-api-v0.1.6.md` (retirement footnote)
+- `bug-fix-queue.md` (entry moved to Recently Completed)
+- `TODO.md` (follow-up filed)
+- `history.md` (this entry)
+
+**Files changed (CoSA submodule, user commits separately in CoSA session)**:
+- `src/cosa/rest/routers/claude_code.py` (DELETED)
+- `src/cosa/rest/routers/claude_code_queue.py` (docstring cleanup — stale comparison removed)
+
+---
+
 ### 2026.05.04 PM (late) - Session ec746144 | Multiplexer Phase 4 implementation — domain stores landed, all 10 ACs green
 
 **Context**: Continuation of session ec746144 after the Phase 4 plan-review pipeline closed (`3ec8f4c`) and user gave final-go-ahead via voice in conversation mode. Implemented all 5 domain stores + pcm-decoder + factory + boot wiring + Playwright smoke. Verified the 4 server-side prerequisites; P1 (server replay on auth_success) escalation resolved via Option C ("accept tradeoff, no rebuild"); 6 spec drifts caught at execute time and recorded.

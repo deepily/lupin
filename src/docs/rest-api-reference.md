@@ -161,18 +161,20 @@
 |--------|------|------|---------|
 | POST | `/api/deep-research-to-podcast/submit` | JWT | Submit chained research + podcast job |
 
-## 14. Claude Code (`/api/claude-code/*`)
+## 14. Claude Code (`/api/claude-code/*`) — RETIRED 2026-05-05
 
-| Method | Path | Auth | Summary |
-|--------|------|------|---------|
-| POST | `/api/claude-code/dispatch` | Public | Dispatch Claude Code task |
-| POST | `/api/claude-code/{task_id}/inject` | Public | Inject message into session |
-| POST | `/api/claude-code/{task_id}/interrupt` | Public | Interrupt running session |
-| POST | `/api/claude-code/{task_id}/end` | Public | End session |
-| GET | `/api/claude-code/{task_id}/status` | Public | Get task status |
-| WebSocket | `/api/claude-code/ws/{task_id}` | Public | Stream task output |
+> **Retired endpoints.** The legacy direct-dispatch + interactive-control cluster was eliminated on 2026-05-05 due to four catalogued structural defects (URL contract mismatch, no auth, module-level state, parallel pre-cj-flow path). Use **Section 15 (`/api/claude-code/queue/submit`)** instead — it is JWT-authenticated and rides the standard CJ Flow + WebSocketManager dispatch plane. See `src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md`.
 
-## 15. Claude Code Queue
+| Method | Path | Status |
+|--------|------|--------|
+| POST | `/api/claude-code/dispatch` | ❌ Retired 2026-05-05 → use `/api/claude-code/queue/submit` |
+| POST | `/api/claude-code/{task_id}/inject` | ❌ Retired 2026-05-05 → INTERACTIVE control parity pending on cj-flow path |
+| POST | `/api/claude-code/{task_id}/interrupt` | ❌ Retired 2026-05-05 → INTERACTIVE control parity pending on cj-flow path |
+| POST | `/api/claude-code/{task_id}/end` | ❌ Retired 2026-05-05 → INTERACTIVE control parity pending on cj-flow path |
+| GET | `/api/claude-code/{task_id}/status` | ❌ Retired 2026-05-05 → use job-card status via CJ Flow accordion |
+| WebSocket | `/api/claude-code/ws/{task_id}` | ❌ Retired 2026-05-05 → progress now arrives via `/ws/queue/{session_id}` notifications keyed by `cc-*` job_id |
+
+## 15. Claude Code Queue (active path)
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|

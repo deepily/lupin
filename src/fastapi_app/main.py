@@ -63,7 +63,7 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, conversation_mode, voice_persona
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, conversation_mode, voice_persona
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 from cosa.rest.job_persistence import mark_interrupted_jobs
 
@@ -776,7 +776,7 @@ app.include_router(queues.router)
 app.include_router(jobs.router)
 app.include_router(websocket.router)
 app.include_router(websocket_admin.router)
-app.include_router(claude_code.router)
+# claude_code router retired 2026-05-05 — see src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/
 app.include_router(claude_code_queue.router)
 app.include_router(embeddings.router)
 app.include_router(mode.router)

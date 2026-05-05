@@ -77,6 +77,20 @@ Last updated: 2026-05-04 PM (Session ec746144 landed Multiplexer Phase 3: transp
 
 ---
 
+## 🪦 CC DISPATCH RETIREMENT — Follow-ups (Session 1a8900ee, 2026-05-05)
+
+The 6-endpoint legacy `/api/claude-code/dispatch` cluster was retired today. Two parity gaps and one mobile dependency surfaced as deliberate-disable visible artifacts.
+
+- [ ] [LUPIN-COSA] **Restore Claude Code INTERACTIVE controls on the cj-flow path.** When `ClaudeCodeJob` (`src/cosa/agents/claude_code/job.py`) gains `inject(message)` / `interrupt()` / `end_session()` methods (with corresponding REST endpoints on `claude_code_queue.py`), un-disable the four UI stubs in `notifications.html` (the `#cc-inject-btn`/`#cc-interrupt-btn`/`#cc-end-btn`/`#cc-inject-input` elements inside `.cc-retired-banner`), restore JS handlers that POST to the new endpoints, restore the `INTERACTIVE` option in `#cc-task-type`, and update the two `test_job_dispatch.py` test docstrings (currently noted as existence-only checks). See plan: `src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md`.
+
+- [ ] [LUPIN-COSA] **Per-turn streaming on the cj-flow path** (optional follow-up). The legacy WS streamed `text` / `tool_use` / `tool_result` per turn. The cj-flow path currently emits only coarse start/complete/fail notifications. If user-facing demand surfaces, add per-turn `notify_progress` calls inside `ClaudeCodeJob._execute()` keyed by job_id, and update the dispatcher card's `#cc-response` panel (currently a retirement banner) to consume them. Not blocking; the queue path is functional without per-turn streaming.
+
+- [ ] [LUPIN-MOBILE] **Migrate `claude_code_repository.dart` off the retired endpoints.** Production code at `src/lupin-mobile/lib/features/claude_code/data/claude_code_repository.dart:18` POSTs to `/api/claude-code/dispatch`. Will 404 against any post-retirement Lupin server. Migrate to `POST /api/claude-code/queue/submit`. Update `claude_code_models.dart` request/response shapes; update BLoC + repository tests in `test/unit/claude_code/`. Decide UX for the disabled INTERACTIVE controls (mirror parent's "visibly disabled" pattern, hide, or stub). Mobile breadcrumbs already filed in `src/lupin-mobile/src/rnd/v0.1.6-migration/2026.04.15-tier-3-queue-and-claude-code-plan.md` and `2026.04.15-resync-mobile-with-lupin-api-v0.1.6.md`. **This work happens in a mobile session, not parent context.**
+
+- [ ] [LUPIN] **Live UI probe (manual gate).** Open `/app/notifications` in a browser with dev tools Network tab open, hard-refresh to bust cache, submit a BOUNDED dry-run via the dispatcher card. Confirm: (a) request goes only to `/api/claude-code/queue/submit`, (b) zero requests to `/api/claude-code/dispatch` or `/api/claude-code/ws/`, (c) yellow `.cc-retired-banner` is visible inside the dispatcher card with prominent retirement copy, (d) submitted job appears in the CJ Flow accordion. The programmatic verification is GREEN — this is the one remaining manual check the user owns.
+
+---
+
 ## ☀️ FIRST THING IN THE MORNING — 2026.05.05 (or next session)
 
 ### Pending — Commit Phase 3 + begin Multiplexer Phase 4

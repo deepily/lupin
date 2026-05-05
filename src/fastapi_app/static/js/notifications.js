@@ -37,10 +37,9 @@ class NotificationsUI {
         // WebSocket connections
         this.queueChannel = null;
         this.audioChannel = null;
-        this.claudeCodeWs = null;  // Claude Code Dispatcher WebSocket
-
-        // Claude Code Dispatcher state
-        this.currentClaudeCodeTaskId = null;
+        // Claude Code direct-dispatch WebSocket + task-id state retired 2026-05-05
+        // (see src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/). Submissions
+        // now route through /api/claude-code/queue/submit and surface in the CJ Flow accordion.
 
         // Session management
         this.queueSessionId = null;
@@ -1596,51 +1595,9 @@ class NotificationsUI {
             });
         }
 
-        // Inject button (Option B)
-        const injectBtn = document.getElementById( 'cc-inject-btn' );
-        if ( injectBtn ) {
-            injectBtn.addEventListener( 'click', () => {
-                this.injectClaudeCode();
-            });
-        }
-
-        // Interrupt button (Option B)
-        const interruptBtn = document.getElementById( 'cc-interrupt-btn' );
-        if ( interruptBtn ) {
-            interruptBtn.addEventListener( 'click', () => {
-                this.interruptClaudeCode();
-            });
-        }
-
-        // End Session button (Option B)
-        const endBtn = document.getElementById( 'cc-end-btn' );
-        if ( endBtn ) {
-            endBtn.addEventListener( 'click', () => {
-                this.endClaudeCodeSession();
-            });
-        }
-
-        // Show/hide Option B controls based on task type selection
-        const taskTypeSelect = document.getElementById( 'cc-task-type' );
-        if ( taskTypeSelect ) {
-            taskTypeSelect.addEventListener( 'change', ( e ) => {
-                const optionBControls = document.getElementById( 'cc-option-b-controls' );
-                if ( optionBControls ) {
-                    optionBControls.style.display = e.target.value === 'INTERACTIVE' ? 'block' : 'none';
-                }
-            });
-        }
-
-        // Enter key in inject input
-        const injectInput = document.getElementById( 'cc-inject-input' );
-        if ( injectInput ) {
-            injectInput.addEventListener( 'keydown', ( e ) => {
-                if ( e.key === 'Enter' ) {
-                    e.preventDefault();
-                    this.injectClaudeCode();
-                }
-            });
-        }
+        // Inject / Interrupt / End-session buttons + #cc-inject-input + INTERACTIVE-mode
+        // option-b toggle were retired 2026-05-05 with /api/claude-code/dispatch.
+        // See src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/.
 
         // Ctrl+Enter in prompt to submit
         const promptInput = document.getElementById( 'cc-prompt' );
@@ -3772,10 +3729,10 @@ class NotificationsUI {
     }
 
     async submitClaudeCode() {
+        // Direct-dispatch path retired 2026-05-05; queue submission is now the sole path.
         const project = document.getElementById( 'cc-project' ).value;
         const prompt = document.getElementById( 'cc-prompt' ).value;
         const taskType = document.getElementById( 'cc-task-type' ).value;
-        const executionMode = document.getElementById( 'cc-execution-mode' ).value;
         const dryRunCheckbox = document.getElementById( 'cc-dry-run' );
         const dryRun = dryRunCheckbox ? dryRunCheckbox.checked : false;
 
@@ -3792,12 +3749,7 @@ class NotificationsUI {
         if ( loadingEl ) loadingEl.style.display = 'inline-block';
         if ( submitBtn ) submitBtn.disabled = true;
 
-        // Route to appropriate submission method based on execution mode
-        if ( executionMode === 'queue' ) {
-            await this.submitClaudeCodeToQueue( project, prompt, taskType, dryRun, loadingEl, submitBtn, responseEl );
-        } else {
-            await this.submitClaudeCodeDirect( project, prompt, taskType, loadingEl, submitBtn, responseEl );
-        }
+        await this.submitClaudeCodeToQueue( project, prompt, taskType, dryRun, loadingEl, submitBtn, responseEl );
     }
 
     async submitClaudeCodeToQueue( project, prompt, taskType, dryRun, loadingEl, submitBtn, responseEl ) {
@@ -3849,9 +3801,6 @@ class NotificationsUI {
             // Clear cost display (not available until job completes)
             document.getElementById( 'cc-cost' ).textContent = '$0.00 (pending)';
 
-            // Hide Option B controls in queue mode (handled via notifications)
-            document.getElementById( 'cc-option-b-controls' ).style.display = 'none';
-
             // Refresh queues to show new job
             this.refreshAllQueues();
 
@@ -3864,241 +3813,15 @@ class NotificationsUI {
         }
     }
 
-    async submitClaudeCodeDirect( project, prompt, taskType, loadingEl, submitBtn, responseEl ) {
-        /**
-         * Submit Claude Code task for direct execution with WebSocket streaming.
-         * This is the original behavior - real-time output streaming.
-         */
-        if ( responseEl ) responseEl.textContent = 'Dispatching task...';
-
-        this.log( `Claude Code dispatch: project=${project}, type=${taskType}` );
-
-        try {
-            const response = await fetch( '/api/claude-code/dispatch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify( { project, prompt, task_type: taskType } )
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json();
-                throw new Error( errorData.detail || 'Dispatch failed' );
-            }
-
-            const data = await response.json();
-            this.currentClaudeCodeTaskId = data.task_id;
-
-            this.log( `Claude Code task dispatched: ${data.task_id}` );
-
-            // Update UI
-            document.getElementById( 'cc-task-id' ).textContent = data.task_id;
-            document.getElementById( 'cc-status' ).textContent = 'Dispatched';
-            document.getElementById( 'cc-session-info' ).style.display = 'flex';
-
-            // Clear response area
-            if ( responseEl ) responseEl.textContent = '';
-
-            // Connect to WebSocket for streaming
-            this.connectClaudeCodeWebSocket( data.task_id );
-
-        } catch ( error ) {
-            this.error( 'Claude Code dispatch failed:', error );
-            if ( responseEl ) responseEl.textContent = `Error: ${error.message}`;
-        } finally {
-            if ( loadingEl ) loadingEl.style.display = 'none';
-            if ( submitBtn ) submitBtn.disabled = false;
-        }
-    }
-
-    connectClaudeCodeWebSocket( taskId ) {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/api/claude-code/ws/${taskId}`;
-
-        this.log( `Connecting to Claude Code WebSocket: ${wsUrl}` );
-
-        this.claudeCodeWs = new WebSocket( wsUrl );
-
-        this.claudeCodeWs.onopen = () => {
-            this.log( 'Claude Code WebSocket connected' );
-            document.getElementById( 'cc-status' ).textContent = 'Connected';
-        };
-
-        this.claudeCodeWs.onmessage = ( event ) => {
-            try {
-                const data = JSON.parse( event.data );
-                this.handleClaudeCodeMessage( data );
-            } catch ( e ) {
-                this.error( 'Failed to parse Claude Code message:', e );
-            }
-        };
-
-        this.claudeCodeWs.onclose = ( event ) => {
-            this.log( `Claude Code WebSocket closed: code=${event.code}` );
-            const statusEl = document.getElementById( 'cc-status' );
-            if ( statusEl && statusEl.textContent === 'Running' ) {
-                statusEl.textContent = 'Disconnected';
-            }
-        };
-
-        this.claudeCodeWs.onerror = ( error ) => {
-            this.error( 'Claude Code WebSocket error:', error );
-        };
-    }
-
-    handleClaudeCodeMessage( data ) {
-        const responseArea = document.getElementById( 'cc-response' );
-        if ( !responseArea ) return;
-
-        switch ( data.type ) {
-            case 'connected':
-                this.log( `Claude Code connected: task=${data.task_id}` );
-                break;
-
-            case 'status':
-                document.getElementById( 'cc-status' ).textContent = data.state || 'Unknown';
-                break;
-
-            case 'text':
-                responseArea.textContent += data.content;
-                break;
-
-            case 'tool_use':
-                responseArea.textContent += `\n[TOOL: ${data.name}]\n`;
-                break;
-
-            case 'tool_result':
-                const content = typeof data.content === 'string' ? data.content : JSON.stringify( data.content );
-                responseArea.textContent += `${content}\n`;
-                break;
-
-            case 'complete':
-                document.getElementById( 'cc-status' ).textContent = data.success ? 'Complete' : 'Failed';
-                if ( data.cost_usd ) {
-                    document.getElementById( 'cc-cost' ).textContent = `$${data.cost_usd.toFixed( 4 )}`;
-                }
-                if ( data.error ) {
-                    responseArea.textContent += `\n[ERROR: ${data.error}]\n`;
-                }
-                break;
-
-            case 'error':
-                responseArea.textContent += `\n[ERROR: ${data.message}]\n`;
-                document.getElementById( 'cc-status' ).textContent = 'Error';
-                break;
-
-            case 'info':
-                responseArea.textContent += `[INFO: ${data.content}]\n`;
-                break;
-
-            case 'keepalive':
-                // Ignore keepalive messages
-                break;
-
-            default:
-                this.log( `Unknown Claude Code message type: ${data.type}` );
-        }
-
-        // Auto-scroll
-        responseArea.scrollTop = responseArea.scrollHeight;
-    }
-
-    async injectClaudeCode() {
-        const injectInput = document.getElementById( 'cc-inject-input' );
-        const message = injectInput ? injectInput.value.trim() : '';
-
-        if ( !message || !this.currentClaudeCodeTaskId ) {
-            if ( !message ) alert( 'Please enter a follow-up message' );
-            return;
-        }
-
-        this.log( `Injecting message: ${message.substring( 0, 50 )}...` );
-
-        try {
-            const response = await fetch( `/api/claude-code/${this.currentClaudeCodeTaskId}/inject`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify( { message } )
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json();
-                throw new Error( errorData.detail || 'Inject failed' );
-            }
-
-            // Clear input and show in response
-            if ( injectInput ) injectInput.value = '';
-            const responseEl = document.getElementById( 'cc-response' );
-            if ( responseEl ) {
-                responseEl.textContent += `\n[YOU: ${message}]\n`;
-                responseEl.scrollTop = responseEl.scrollHeight;
-            }
-
-            this.log( 'Message injected successfully' );
-
-        } catch ( error ) {
-            this.error( 'Inject failed:', error );
-            alert( `Inject failed: ${error.message}` );
-        }
-    }
-
-    async interruptClaudeCode() {
-        if ( !this.currentClaudeCodeTaskId ) return;
-
-        this.log( 'Interrupting Claude Code session' );
-
-        try {
-            const response = await fetch( `/api/claude-code/${this.currentClaudeCodeTaskId}/interrupt`, {
-                method: 'POST'
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json();
-                throw new Error( errorData.detail || 'Interrupt failed' );
-            }
-
-            const responseEl = document.getElementById( 'cc-response' );
-            if ( responseEl ) {
-                responseEl.textContent += '\n[INTERRUPTED]\n';
-            }
-
-            this.log( 'Session interrupted' );
-
-        } catch ( error ) {
-            this.error( 'Interrupt failed:', error );
-            alert( `Interrupt failed: ${error.message}` );
-        }
-    }
-
-    async endClaudeCodeSession() {
-        if ( !this.currentClaudeCodeTaskId ) return;
-
-        this.log( 'Ending Claude Code session' );
-
-        try {
-            const response = await fetch( `/api/claude-code/${this.currentClaudeCodeTaskId}/end`, {
-                method: 'POST'
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json();
-                throw new Error( errorData.detail || 'End session failed' );
-            }
-
-            document.getElementById( 'cc-status' ).textContent = 'Ended';
-            this.currentClaudeCodeTaskId = null;
-
-            if ( this.claudeCodeWs ) {
-                this.claudeCodeWs.close();
-                this.claudeCodeWs = null;
-            }
-
-            this.log( 'Session ended' );
-
-        } catch ( error ) {
-            this.error( 'End session failed:', error );
-            alert( `End session failed: ${error.message}` );
-        }
-    }
+    // submitClaudeCodeDirect / connectClaudeCodeWebSocket / handleClaudeCodeMessage /
+    // injectClaudeCode / interruptClaudeCode / endClaudeCodeSession retired 2026-05-05.
+    // The legacy /api/claude-code/dispatch + /api/claude-code/ws/{task_id} cluster
+    // (auth-free, URL-mismatched, module-state, parallel-pre-cj-flow) was eliminated.
+    // Survivor: /api/claude-code/queue/submit via submitClaudeCodeToQueue() above.
+    // INTERACTIVE inject/interrupt/end-session controls will return when ClaudeCodeJob
+    // gains bidirectional control. See:
+    //   src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md
+    //   bug-fix-queue.md "🔥 Top of Queue — IMMEDIATE" entry (now Completed).
 
     // ========================================
     // TTS FUNCTIONALITY
@@ -14129,6 +13852,13 @@ class NotificationsUI {
         // (the existing flex right-cluster).
         const personaBadge = this._renderPersonaBadgeHTML( notification.voice_persona );
 
+        // Abstract indicator — escape hatch from the inline 200px-capped
+        // .action-required-abstract block. Click delegation in initAbstractTooltip
+        // (~line 8319) opens the tier-sized .abstract-tooltip popup.
+        const abstractIndicatorHTML = ( notification.abstract && notification.abstract.trim().length > 0 )
+            ? `<span class="abstract-indicator" data-abstract="${encodeURIComponent( notification.abstract )}" title="View full abstract">📋</span>`
+            : '';
+
         card.innerHTML = `
             <div class="action-required-header">
                 <button class="action-required-cancel-btn" data-notification-id="${notification.id}" title="Cancel and use default (Esc)">
@@ -14136,6 +13866,7 @@ class NotificationsUI {
                 </button>
                 <div class="action-required-title">${projectBadge}${notification.title || notification.message}</div>
                 <div class="action-required-timer-controls">
+                    ${abstractIndicatorHTML}
                     ${personaBadge}
                     <button class="action-required-pause-btn" id="pause-btn-${notification.id}" title="Pause timer and audio (P)">
                         \u23F8\uFE0F

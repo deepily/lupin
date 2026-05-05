@@ -83,11 +83,19 @@ class TestClaudeCodeCard:
         """
         CC card has execution mode selector.
 
+        Note (2026-05-05 retirement): the element is now a DISABLED stub.
+        The legacy "Socket" / direct-dispatch option was retired with
+        /api/claude-code/dispatch on 2026-05-05; "CJ Flow (only path)" is the
+        sole remaining option. The disabled select is preserved as a visible
+        artifact of the retirement so any hidden dependency surfaces. See
+        src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md.
+        This test continues to assert element presence (not behavior).
+
         Requires:
             - Authenticated session
 
         Ensures:
-            - Execution mode select element exists
+            - Execution mode select element exists (now a disabled stub)
         """
         logged_in_page.goto( f"{BASE_URL}/app/notifications" )
         logged_in_page.wait_for_load_state( "networkidle" )
@@ -143,11 +151,23 @@ class TestClaudeCodeCard:
         """
         CC card has interactive session controls (inject, interrupt, end).
 
+        Note (2026-05-05 retirement): the inject / interrupt / end-session
+        controls have been retired alongside /api/claude-code/dispatch. They
+        remain in the DOM as DISABLED stubs inside a yellow .cc-retired-banner
+        with prominent retirement copy, so any hidden dependency surfaces as
+        a visible artifact. The cj-flow ClaudeCodeJob does not yet support
+        bidirectional inject / interrupt / end_session — see
+        src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md
+        and bug-fix-queue.md retirement entry. This test continues to assert
+        element presence (not behavior); a behavior-asserting test would have
+        to change when these controls are restored.
+
         Requires:
             - Authenticated session
 
         Ensures:
             - Inject input, inject button, interrupt button, end button exist
+              (now disabled stubs inside .cc-retired-banner)
         """
         logged_in_page.goto( f"{BASE_URL}/app/notifications" )
         logged_in_page.wait_for_load_state( "networkidle" )

@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-05-04T19:50:00-04:00
+**Last Updated**: 2026-05-05T11:15:00-04:00
 
 ---
 
@@ -54,16 +54,27 @@
 | 2026-04-26-card-render-stall | 2026-04-26T11:00:00 | 2026-04-26T13:50:00 | closed |
 | 49c27830 | 2026-04-27T11:30:00 | 2026-04-27T11:45:00 | stale |
 | ba53b0d2 | 2026-04-28T21:25:00 | 2026-04-28T21:50:00 | closed |
-| 31172845 | 2026-05-01T11:00:00 | 2026-05-01T11:00:00 | active |
+| 31172845 | 2026-05-01T11:00:00 | 2026-05-05T00:00:00 | closed |
 | a6b318ea | 2026-05-01T15:53:00 | 2026-05-01T17:35:00 | closed |
 | 0022baba | 2026-05-02T10:50:00 | 2026-05-02T16:25:00 | closed |
-| 4ede5bad | 2026-05-02T11:30:00 | 2026-05-02T11:30:00 | active |
+| 4ede5bad | 2026-05-02T11:30:00 | 2026-05-05T00:00:00 | closed |
 
 ---
 
 ### 🔥 Top of Queue — IMMEDIATE (claim before all other queued work)
 
-- [ ] **🔥 IMMEDIATE — eliminate the `/api/claude-code/ws/{task_id}` WebSocket endpoint cluster of bugs** (filed 2026-05-04 by session ec746144, evidence in `src/cosa/rest/routers/claude_code.py` + Multiplexer Phase 3 design-gap subsection of `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md`). **User directive 2026-05-04 PM**: "this WebSocket endpoint has a terrible buggy smell — do not implement [the multiplexer ClaudeCodeTransport against it], log this bug for immediate elimination tomorrow AM." Surfaced while researching D1 ratification for Multiplexer Phase 4 planning; user halted ClaudeCodeTransport implementation pending this cleanup. **User explicitly promoted to top of queue on 2026-05-04 PM** — claim this BEFORE any other queued bug.
+(empty — all promoted entries resolved)
+
+---
+
+### Recently Completed (was 🔥 IMMEDIATE)
+
+- [x] ~~**🔥 IMMEDIATE — eliminate the `/api/claude-code/ws/{task_id}` WebSocket endpoint cluster of bugs**~~ → **RESOLVED 2026-05-05** by session 1a8900ee. **Fix shape**: full retirement (option A from "Suggested fix sequencing" below). Deleted `src/cosa/rest/routers/claude_code.py`, removed `claude_code` import + `app.include_router(claude_code.router)` from `src/fastapi_app/main.py`. Frontend (`notifications.js` + `notifications.html` + `notifications.css`): killed 6 dead JS methods (`submitClaudeCodeDirect`, `connectClaudeCodeWebSocket`, `handleClaudeCodeMessage`, `injectClaudeCode`, `interruptClaudeCode`, `endClaudeCodeSession`) + 2 state fields, rewired `submitClaudeCode` to queue-only, slimmed dispatcher card with prominent yellow `.cc-retired-banner` over the Option B controls and inside `#cc-response`, disabled `#cc-execution-mode` select with retirement copy, removed `INTERACTIVE` option from `#cc-task-type`. INTERACTIVE inject/interrupt/end-session controls preserved as **disabled stubs** (data-testids intact) so dependencies surface visibly. Mobile breadcrumbs: footnotes added to two `lupin-mobile/src/rnd/v0.1.6-migration/*.md` files (no Dart edits — mobile session owns that work). Docs: rest-api-reference.md + auto-regenerated fastapi/api.md. R&D plan + execution log: `src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/`. **Verification**: 3950 unit pass / 50 WS-smoke pass / 6 queue-path smoke pass / live :7999 probes confirm 404 on all 6 dead URLs + 401 on survivor / `ClaudeCodeJob` import survives (orchestration module shared with cj-flow, intentionally kept). **Multiplexer Phase 4 D1 ratification UNBLOCKED.** **Mobile follow-up filed**: `lupin-mobile/lib/features/claude_code/data/claude_code_repository.dart:18` still calls retired `/api/claude-code/dispatch`; mobile feature 404s until ported in a separate mobile session.
+
+  <details>
+  <summary>Original bug catalog (preserved)</summary>
+
+  Filed 2026-05-04 by session ec746144, evidence in `src/cosa/rest/routers/claude_code.py` + Multiplexer Phase 3 design-gap subsection of `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md`. **User directive 2026-05-04 PM**: "this WebSocket endpoint has a terrible buggy smell — do not implement [the multiplexer ClaudeCodeTransport against it], log this bug for immediate elimination tomorrow AM." (filed 2026-05-04 by session ec746144, evidence in `src/cosa/rest/routers/claude_code.py` + Multiplexer Phase 3 design-gap subsection of `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md`). **User directive 2026-05-04 PM**: "this WebSocket endpoint has a terrible buggy smell — do not implement [the multiplexer ClaudeCodeTransport against it], log this bug for immediate elimination tomorrow AM." Surfaced while researching D1 ratification for Multiplexer Phase 4 planning; user halted ClaudeCodeTransport implementation pending this cleanup. **User explicitly promoted to top of queue on 2026-05-04 PM** — claim this BEFORE any other queued bug.
 
   - **Bug 1 — Advertised WS URL does not match the served route.** `dispatch_task()` returns `websocket_url = f"/ws/claude-code/{task_id}"` at `claude_code.py:134` (smoke test echoes the same string at line 598), but the WebSocket is actually mounted at `/api/claude-code/ws/{task_id}` (router `prefix="/api/claude-code"` at line 25 + route `@router.websocket("/ws/{task_id}")` at line 506). Any client that trusts the dispatch response to build its WS URL will 404 at upgrade. Existing notifications.js client must be papering over this somewhere — needs trace + fix at the dispatcher (single source of truth) so `/dispatch` advertises the route it serves.
 
@@ -79,6 +90,8 @@
     3. If fixing in place: (a) move state to `WebSocketManager` + queue/job stores; (b) require auth handshake on the WS like queue/audio; (c) align advertised URL with mounted route in one place; (d) add server-side smoke test asserting both auth-required + URL-correct.
 
   - **Multiplexer Phase 4 dependency**: Phase 4 stores phase was supposed to wire `ClaudeCodeTransport` body. **HALTED pending this cleanup.** D1 ratification for Multiplexer rebuild is now coupled to this bug — once the endpoint is sane, we can re-decide whether the multiplexer needs a CC transport at all (vs. routing CC events through the existing queue WS as just another notification type).
+
+  </details>
 
 ---
 
@@ -171,7 +184,7 @@
 
 (Claimed by a specific session)
 
-- [ ] **Post-mortem remediation: 2026-04-30 22:15-EDT all-suite run (9 smoke failures, 6 root-cause clusters)** | Owner: 31172845 | Since: 2026-05-01T11:00:00
+- [x] ~~**Post-mortem remediation: 2026-04-30 22:15-EDT all-suite run (9 smoke failures, 6 root-cause clusters)**~~ → marked done by user | By: 31172845 | 2026-05-05 | Original entry preserved below for context. | Owner: 31172845 | Since: 2026-05-01T11:00:00
   - **Plan**: `/home/rruiz/.claude/plans/spicy-plotting-coral.md` (approved 2026-05-01)
   - **Will be serialized to**: `src/rnd/v0.1.7/2026.05.01-postmortem-fixes-plan.md` + `2026.05.01-postmortem-fixes-90-execution-log.md`
   - **8 phases**: Phase 0 docs → Phase 1A smoke skip refactor → Phase 2 (Cluster D test_suite mode HTTP 500) → Phase 3 (Cluster G presentation routing) → Phase 4 (Cluster F notify_user_sync timeout) → Phase 5 (Cluster A 503 cascade — diagnosis only) → Phase 1B integration skip cleanup → Phase 6 (Cluster B INI-driven extra pytest_args) → Phase 7 (Cluster C synchronous preflight)
@@ -179,7 +192,7 @@
   - **Defaults chosen (user away)**: Cluster B → Option B INI-driven; Cluster C → synchronous preflight; Phase 1B → delete the 6 obsolete deep_research_orchestrator non-standard-format tests.
   - **Per memory**: I edit CoSA submodule files; user commits in CoSA session afterward. No auto-commits.
 
-- [ ] **Focus tray: hide-inactive toggle + bubble differentiation for personaless cards** | Owner: 4ede5bad | Since: 2026-05-02T11:30:00-04:00
+- [x] ~~**Focus tray: hide-inactive toggle + bubble differentiation for personaless cards**~~ → marked done by user | By: 4ede5bad | 2026-05-05 | Original entry preserved below for context. | Owner: 4ede5bad | Since: 2026-05-02T11:30:00-04:00
   - **Source**: USER-REQUESTED 2026-05-02 ~11:30 EDT. Two-tweak bundle against the CC notifications focus tray + sender-card conversation pane.
   - **Tweak 1 — hide-inactive toggle**: Add a small toggle pill next to existing focus-mode pill in `#cc-session-strip` that hides strip icons for inactive sessions (those with no `voice_persona` allocated → no `--persona-color` set on card → CSS already falls back to slate-gray `#6c757d`). Toggle state persists in `localStorage`. Reapplies on `_addStripIcon` (new icons obey current toggle), `voice_persona_assigned` (becomes-active), `voice_persona_released` (becomes-inactive).
   - **Tweak 2 — bubble differentiation for personaless cards** (Option 1 — subtle): In personaless cards (no `--persona-color`), `.sender-message.incoming` flat-vanilla wash leaves the conversation pane indistinguishable bubble-to-bubble. Add a 1-px hairline separator between adjacent bubbles + a barely-visible alternate-row tint, gated to cards without `--persona-color` so persona-color cards keep their existing tinted gradient.
