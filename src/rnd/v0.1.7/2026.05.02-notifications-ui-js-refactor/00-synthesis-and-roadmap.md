@@ -116,6 +116,7 @@ After spine implementation completes, a natural go/no-go gate: if Phase 4-9 arch
 - ❌ Switch to React/Vue/Svelte (vanilla TS + tagged templates is the chosen path)
 - ❌ XState as a global pattern (only for the high-churn modules)
 - ❌ Modifying `notifications.js` at the current URL (frozen until cutover; only voice-persona Fix 4 lands)
+- ❌ Multi-tab support — **single-tab application policy** per Q12 (ratified 2026-05-04 PM). Phase 2 `BroadcastChannel("lupin")` wrapper is inert; users wanting two views open a second window of the same tab. See `01-phase0-decisions.md` Q12 + `TODO.md` Phase 2 broadcast cleanup follow-up.
 
 ---
 

@@ -10,6 +10,25 @@ User ratified **Option A-extended** for D1 after investigating the legacy `/api/
 - Execution log subsection: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` "Phase 3 — D1 Ratification Amendment".
 - 11 file changes applied (2 deletions + 9 edits) over Phase 3 commit `703ab5a`; verification re-run with 122/122 unit tests + 12/12 smoke + tsc + ESLint + build all clean.
 
+## ✅ Q12 RATIFIED — Single-tab application (2026-05-04 PM)
+
+User ratified Q12 (added 2026-05-04 PM) during Phase 4 plan-review pipeline / D-G walkthrough. Multi-tab support is OUT OF SCOPE for the multiplexer; users wanting two views open a second window of the same tab. Sidesteps Phase 4 Q4 cross-tab BroadcastChannel question entirely. See `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` Q12 for the policy + rationale.
+
+### Phase 2 broadcast.ts cleanup — separate commit follow-up
+
+**Where it lives**: `src/fastapi_app/static/js/multiplexer/shared/broadcast.ts` (53 LOC) + `src/tests/unit/multiplexer/broadcast.test.ts` (8 unit tests). Header comment of broadcast.ts already updated 2026-05-04 PM with the "INERT IN PRODUCTION per Q12" note.
+
+**What's needed**: Phase 2 spine bundle is closed; ripping out broadcast.ts retroactively touches an approved phase boundary, so it ships as its own focused cleanup commit (not folded into the Phase 4 ratification commit).
+
+**Suggested cleanup**:
+- [ ] [LUPIN] Delete `src/fastapi_app/static/js/multiplexer/shared/broadcast.ts` + `src/tests/unit/multiplexer/broadcast.test.ts`
+- [ ] [LUPIN] Delete `BROADCAST_WHITELIST` constant + any `LupinEventType` union entries that exist solely for cross-tab whitelist references (per Phase 2 design doc DC4 — those entries currently exist in `shared/types.ts` for whitelist type-checking only)
+- [ ] [LUPIN] Update `02-phase1-scaffolding-design.md` + `03-phase2-foundation-design.md` with post-implementation amendment banners noting Q12 invalidates the broadcast.ts file row + AC8 cross-tab two-instance roundtrip test (mirror the D1 amendment banner pattern from Phase 3)
+- [ ] [LUPIN] Re-run Phase 1+2+3+4 verification suites; expected unit-test count drops by 8 (broadcast tests gone)
+- [ ] [LUPIN] Update execution log with cleanup section
+
+**Defer until**: after Phase 4 implementation lands (avoids interleaving Phase 4 review/implementation with Phase 2 retroactive surgery).
+
 ### D2 [NON-BLOCKING] Inspect the QueueTransport auth-failure bug fix
 
 **Where it lives**: `src/fastapi_app/static/js/multiplexer/transport/QueueTransport.ts` `onSocketOpen` catch block (look for the long-form comment starting "Auth failed (token fetch, refresh failure, etc.)"); rationale captured in 90-execution-log.md Phase 3 § "Implementation deviations" #4.

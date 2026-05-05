@@ -3,6 +3,18 @@
 // Loop prevention: events with `source: "broadcast"` are NOT re-broadcast.
 // Whitelist is a static constant per DC4 (cross-tab replication is a design
 // decision, not a runtime config knob).
+//
+// ⚠️ INERT IN PRODUCTION (per Q12 — single-tab application policy ratified
+// 2026-05-04 PM during Phase 4 plan-review): no production consumer wires
+// this module. boot.ts does NOT call broadcast.start(). The code + 8 unit
+// tests ship for two reasons:
+//   1. The Phase 2 spine bundle is closed; ripping out this module
+//      retroactively touches an approved phase boundary.
+//   2. Hedge against the policy reversing — if multi-tab support ever
+//      becomes scoped in, this wrapper is ready to wire.
+// Removal is tracked as a separate cleanup commit; see TODO.md "Phase 2
+// broadcast.ts removal" entry. See src/rnd/v0.1.7/2026.05.02-notifications-
+// ui-js-refactor/01-phase0-decisions.md Q12 for the policy decision.
 
 import type { EventBus } from "./EventBus";
 import type { LupinEvent, LupinEventType } from "./types";

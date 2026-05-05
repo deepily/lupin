@@ -168,6 +168,21 @@ This document is the durable record. Question IDs Q1–Q11 mirror `00-synthesis-
 
 ---
 
+## Q12 — Multi-tab support (added 2026-05-04 PM)
+
+**Decision** (2026-05-04 PM, ratified during Phase 4 plan-review pipeline / Q4): **OUT OF SCOPE.** The multiplexer is a single-tab application. Same UI bound to same server+port across multiple tabs has no real use case for this product, and the coordination cost (cross-tab state replication, ordering invariants, double-broadcast races) is disproportionate to the value.
+
+**Rationale**: A user who wants two views of the same notification surface opens a second WINDOW of the same tab; same browser process, same JavaScript context, same WebSocket. They get exactly one source of truth. Multi-tab adds N WebSocket connections + N stores + cross-tab coordination protocol for zero functional gain.
+
+**Implication**: `BroadcastChannel("lupin")` wrapper from Phase 2 (`src/fastapi_app/static/js/multiplexer/shared/broadcast.ts`) is INERT — the code exists but no consumer wires it. boot.ts does NOT call `broadcast.start()`. Phase 2's `BROADCAST_WHITELIST` constant exists but is never consulted at runtime. See `TODO.md` "Phase 2 cleanup" follow-up for removal tracking.
+
+**Forward refs**:
+- Phase 4 design doc drops the "Cross-tab via BroadcastChannel?" column from store summary table; Q4 ratified as "sidestepped per Q12"
+- Phase 5+ design docs MUST NOT add cross-tab features without re-opening this decision via a Q12 amendment
+- Phase 9 cutover: `notifications.html` (legacy) keeps its multi-tab behavior — Q12 governs the multiplexer only
+
+---
+
 ## Cross-reference summary
 
 | ID | Topic | Decision |
@@ -183,6 +198,7 @@ This document is the durable record. Question IDs Q1–Q11 mirror `00-synthesis-
 | Q9 | Cutover release count | Unbounded (manual removal only) |
 | Q10 | Per-phase gate | Yes, 9 gates total. **Amended 2026-05-04**: Phases 1-3 bundle as the spine (single approval unit); Phases 4-9 individual gates. |
 | Q11 | Review owner | Claude clean-context per phase + OpenAI at Phase 8. **Amended 2026-05-04**: timing per canonical PIP `plan-review.md` (REUSE → Fitness → Adversarial; review fires AFTER design doc draft, BEFORE user approval). Stale clones at `2026.05.03-testing-and-fitness-prompts/02-` + `/03-` are NOT canonical. |
+| Q12 | Multi-tab support | **OUT OF SCOPE.** Single-tab application policy ratified 2026-05-04 PM during Phase 4 plan-review (sidesteps Q4 cross-tab BroadcastChannel question). Phase 2 `broadcast.ts` is inert; Phase 2 cleanup tracked as `TODO.md` follow-up. |
 
 ## Self-audit
 

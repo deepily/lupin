@@ -2,6 +2,54 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-04-30 to 2026-05-02](history/2026-04-30-to-05-02-history.md).
 
+### 2026.05.04 PM - Session ec746144 | Multiplexer Phase 4 plan-review pipeline closed — design ratified, awaiting user final-go-ahead for implementation
+
+**Context**: Continuation of session ec746144 after the D1 ratification commit (`c1c33bc`). Drafted Phase 4 stores design doc, ran the canonical PIP `plan-review.md` three-pass review pipeline (REUSE pre-pass + Pass 1 Fitness + Pass 2 Adversarial — all three Agent spawns in parallel, fresh context per spec), consolidated findings into one user-facing review document, walked through 7 user-decision blockers (D-A through D-G), then drove the Resolution Loop applying 21 minor wording/coverage findings. Design doc + supporting docs are now ratified and ready for implementation pending user final-go-ahead.
+
+**Accomplishments**:
+
+- **`05-phase4-stores-design.md` drafted + ratified** (NEW, 410 lines). Phase 4 ships 5 domain stores: NotificationStore + JobStore + AudioStore (XState tracker per Q5+Q6) + ActionRequiredStore (XState tracker with hybrid setInterval+sys_time_update countdown per D-F) + SenderStore. Plus pcm-decoder.ts (synchronous `pcm16ToAudioBuffer(buf, 24000): AudioBuffer` per D-A — server emits raw PCM16, NOT encoded container; legacy `notifications.js:4580-4596` is the prior art). Boot.ts reordered per D-D so AudioStore handler passes through `transports.audio.start(sessionId, audioStore.binaryHandler)` natively (no race window). AC9 verifies binding via `boot_complete` EventBus event + `console.log` line per D-C (no globals; preserves Phase 1 invariant).
+- **Three-Agent review pipeline ran in parallel** in ~3.5 minutes total: REUSE pre-pass returned 20 verdicts (6 reuse-as-is patterns + 5 extend-existing + 7 genuinely-new + 2 design-conflict) + 4 Layer-3 design concerns; Pass 1 Fitness returned 18 findings (4 RISK SURFACE / 5 AMBIGUITY / 3 TESTABILITY / 4 EXTERNAL DEPS / 2 DECISION TRACE / 1 SCOPE) + explicit answers for all 7 Open Questions; Pass 2 Adversarial returned 11 ownership-language findings + 1 Layer-3 design concern (AC9 vs no-globals).
+- **`91-phase4-review-findings.md` consolidation doc** (NEW) — single user-facing artifact summarizing all three Agent reports + per-finding ratification status. After user ratification, doc grew a "Resolution Loop closure" section enumerating each of the 21 minor findings with where-applied citations + convergence re-grep results.
+- **D-A ratified** (Option 1): rewrote pcm-decoder contract to legacy raw PCM16 path. **D-B turned out moot** — agents misread server router prefix; URL was correct. **D-C ratified** (Option B): boot_complete EventBus event + console.log verification mechanism. **D-D ratified** (Option B): boot.ts reorder, zero new transport API. **D-E ratified**: extended SenderRecord.voice_persona to full 5-field shape `{name, voice_id, icon, color, borrowed}`. **D-F ratified** (Option 2): hybrid `setInterval(1000)` + `sys_time_update` reconcile + `connection_state_change` freeze for ActionRequiredStore countdown. **D-G/Q1-Q7 all ratified** with detail walkthroughs in CLI mode for Q2/Q4/Q5/Q6/Q7 (cosa-voice abstract rendering issue forced switch to terminal text for the deep-detail walks).
+- **Q12 architectural anchor added** to `01-phase0-decisions.md`: single-tab application policy. Sidesteps Q4 (cross-tab BroadcastChannel) entirely; Phase 2's `broadcast.ts` becomes inert; Phase 5+ design docs MUST NOT add cross-tab features without re-opening Q12. `00-synthesis-and-roadmap.md` §3 "What is NOT in this roadmap" gained the multi-tab exclusion. `multiplexer/shared/broadcast.ts` got a header note flagging it INERT IN PRODUCTION + pointing at Q12 + the cleanup TODO. `TODO.md` got a Q12 RATIFIED section + a follow-up checklist for the broadcast.ts removal cleanup commit.
+- **Resolution Loop closed cleanly per PIP §10**: 21 minor findings applied across NotificationStore reducer (no store-to-store; idempotent expiry; bump-on-every-arrival drop addressed-to-self), JobStore (status vs bucket clarification), AudioStore (lazy AudioContext + named binary handler), ActionRequiredStore (response_type field + server-fanout verification gate), SenderStore (5-field voice_persona + bump-on-every-arrival), AC4 (per-store test floor: 88 minimum), AC5 (state×event tables), AC6 (c8 ignore inline-comment EXECUTOR), AC7 (fixture mechanism + Playwright autoplay flag), AC9 (D-C wiring), AC10 (7 enumerated commands), Verification matrix (Executor column per row + boot.js delta ≤ 30 KB gzipped bound), Rollback (step 0 cosa-voice ask_yes_no before auto-revert), Out of scope (claude_code_event drops to floor; cross-tab N/A per Q12), Q2 (server-replay verification + escalation), Q5 (file:line cites for Phase 2/3 precedents). Plus "Prior art referenced" section appended per PIP §4 with all REUSE outcomes preserved.
+- **Convergence re-grep clean**: TBD hits down 11→3 (all benign — PIP slot meta-refs + Phase-5-deferred URL with verification gate); zero Open sub-questions; zero EXECUTOR: HUMAN; zero bare checkboxes; "Manual" hits describe legacy bit-banging math (not "manual test"). PIP §10 termination criterion met.
+- **Idempotency marker per PIP §12** populated as `last-reviewed-at: 2026-05-04`; commit hash will be appended after Phase 4 implementation commit per Pass 2 A9.
+
+**Files modified (Lupin parent only — CoSA submodule untouched)**:
+
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/05-phase4-stores-design.md` (NEW — design + 21 findings applied)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/91-phase4-review-findings.md` (NEW — consolidation + Resolution Loop closure)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` (Q12 amendment + cross-reference table row)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/00-synthesis-and-roadmap.md` (multi-tab exclusion in §3)
+- `src/fastapi_app/static/js/multiplexer/shared/broadcast.ts` (INERT-in-production header note pointing at Q12 + cleanup TODO)
+- `TODO.md` (Q12 RATIFIED section + Phase 2 broadcast.ts cleanup follow-up + D-1 entry preserved)
+- `.claude-session.md` (touched files + Last Activity + Latest Checkpoint)
+- `history.md` (this entry)
+
+**No CoSA submodule edits this session** per `feedback_lupin_only_never_cosa`.
+
+**Verification (Resolution Loop convergence per PIP §7, on :7999)**:
+
+- `grep -E "TBD|confirm during impl|decide at impl time|tbd"` → 3 hits (all benign meta-refs)
+- `grep "Open sub-question"` → 0 hits
+- `grep "Manual\|manual"` → 2 hits (both legacy "Manual Int16→Float32" bit-banging math, not test ownership)
+- `grep "EXECUTOR: HUMAN"` → 0 hits
+- `grep -E "^- \\[ \\] [^E]"` → 0 hits
+
+PIP §10 termination criterion (zero new structural findings) met. Pipeline closed.
+
+**Caveats / Notes**:
+
+- **No code written this session** — Phase 4 implementation is the next step pending user final-go-ahead. Per Q11 amendment step 11 (canonical PIP `plan-review.md` per-phase sequence), `90-execution-log.md` Phase 4 section opens AFTER user approval.
+- **Phase 4 implementation prerequisites surfaced during review** that the implementing AI MUST verify before close: (1) server-side event replay on `auth_success` (per Q2 / Pass 1 F4 — for NotificationStore active-list rebuild); (2) server-side `notification_responded` fanout (per Pass 1 F8 — for ActionRequiredStore `cancelled` reachability); (3) `notification_play_sound` server-side emitter (per REUSE finding — drop consumer if absent); (4) `/api/audio/test-chunk` debug endpoint (per AC7 + Pass 2 A2 — build sub-AC if missing).
+- **Phase 2 broadcast.ts cleanup is a separate commit** per user pick (Option ii in the Q12 follow-up walkthrough) — tracked in `TODO.md`, deferred until after Phase 4 implementation lands.
+- Per `feedback_never_auto_commit_push`: user explicitly authorized this checkpoint commit ("Document and checkpoint your work") — that authorization covers ONLY this commit, not the subsequent Phase 4 implementation commit.
+- Per `feedback_lupin_only_never_cosa`: parent Lupin commit only; src/cosa/ untouched.
+
+---
+
 ### 2026.05.04 PM - Session 2c732075 | Notification abstract popup auto-sizing + document viewer scope expansion (`scope=docs`)
 
 **Context**: Two-part UX session. Part 1: the notification abstract popup was hard-capped at 450×400 px with a fixed inner `max-height: 300px`, forcing the user to drag-resize for any rich abstract (table + code + multiple sections). Part 2: extended the document viewer's reach so Claude Code can respond to "show me file X" with a `notify()` containing a viewer link, instead of dumping markdown into chat. The viewer was previously locked to `io/`-rooted artifacts (research reports, podcast scripts) only.
