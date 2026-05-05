@@ -689,6 +689,20 @@ Per-module statements + lines all 100%. Branch residue (80-90%) is `??`-default 
 - All tests run on :7999 (AI-discretionary). User is never the tester per `CLAUDE.local.md` THE USER IS NEVER A TESTER mandate.
 - `npm audit`: 1 moderate severity vulnerability (transitive). Carried forward from Phase 1; no auto-fix without major-version bump risk.
 - **No CoSA edits in Phase 4** per `feedback_lupin_only_never_cosa`. Phase 1 CoSA `pages.py` edit remains pending user commit in CoSA context (per Phase 1 commit-pending status).
+
+### Phase 4 boot.js gzipped baseline (Phase 5 AC7 reference — captured 2026-05-05 per D-C+D-D ratification)
+
+| Artifact | Path | Raw bytes | `gzip -9 -c <path> \| wc -c` |
+|---|---|---|---|
+| **Content-hashed canonical** (per `manifest.json`) | `src/fastapi_app/static/dist/multiplexer/boot.840274d1ab2d.js` | 79,524 | **24,325 bytes** ⬅ Phase 5 AC7 baseline |
+| Unprefixed (loaded by `multiplexer.html`) | `src/fastapi_app/static/dist/multiplexer/boot.js` | 164,615 | 36,436 bytes |
+
+**Discrepancy flagged**: pre-design exploration §3.3 expected both files to be ~79 KB raw, but the unprefixed `boot.js` is currently 164,615 bytes (suggests inline sourcemap or dev-only artifacts). Phase 5 implementation cycle should investigate the build-pipeline divergence before AC7 runs; the canonical reference for Phase 5 AC7 is the **content-hashed file** (manifest-declared canonical).
+
+**Phase 5 AC7 contract** (frozen via D-C+D-D):
+- Measurement command (both ends, identical): `gzip -9 -c src/fastapi_app/static/dist/multiplexer/boot.<hash>.js | wc -c`
+- Phase 4 baseline (this row): **24,325 bytes**
+- Phase 5 ceiling: ≤ **24,325 + 30,720 = 55,045 bytes** (i.e., ≤ +30 KB gz delta per Q-I)
 - Phase 5 entry artifacts (a fresh-context Claude must read to start Phase 5):
   1. `~/.claude/CLAUDE.md` (Layer 1)
   2. Lupin `CLAUDE.md` + `CLAUDE.local.md`
@@ -702,13 +716,179 @@ Per-module statements + lines all 100%. Branch residue (80-90%) is `??`-default 
 
 ## Phase 5 — Renderer (tagged-template `html` helper + first pane: notifications list + CSS port)
 
-**Status**: ⏸ Not started
-**Started**: —
+**Status**: 🟡 Phase 0 in progress — design doc landed; awaiting Q-decision ratification
+**Started**: 2026-05-05 (Phase 0 = doc serialization + PIP runs; Phase 5 implementation cycle gated on user Q-ratification)
 **Completed**: —
 
 ### Deliverables, Commits, Verification, Notes
 
-(populated when Phase 5 begins)
+#### Phase 0 — Doc serialization + plan-review pipeline (in progress)
+
+**Parent plan**: `~/.claude/plans/compressed-snacking-babbage.md` (approved via ExitPlanMode 2026-05-05)
+
+**Design directive locked 2026-05-05** (user voice):
+- Skip pixel-perfect duplication and forensic snapshots — `/app/notifications` is frozen
+- Imitate layout/flow/order; lift `notifications.css` as starting-point styling; fresh HTML markup via tagged-template `html` helper
+- Feature parity, not pixel parity; visual regression baselines captured fresh at first Phase 5 E2E run on `:8000` scheduled
+
+**Phase 0 deliverables**:
+| # | Deliverable | Status |
+|---|---|---|
+| 1 | `06-phase5-renderer-design.md` landed at canonical R&D path | ✅ 2026-05-05 |
+| 2 | This Phase 5 section seeded in `90-execution-log.md` | ✅ 2026-05-05 |
+| 3 | `2026.05.05-phase5-pre-design-exploration.md` landed (Explore-agent findings, citation-depth backing for the design) | ✅ 2026-05-05 |
+| 4 | User ratifies Q-A through Q-L (or redirects) | ✅ 2026-05-05 (interactive session, all 12 ratified — see `06-phase5-renderer-design.md` "Decisions captured" section) |
+| 5 | Plan-review pipeline (REUSE → Pass 1 → Pass 2) → `92-phase5-review-findings.md` | ✅ 2026-05-05 (3 fresh-context Agents in parallel; consolidated 59 findings into 12 D-tier decisions) |
+| 6 | User approves PIP findings (D-A through D-L decided; Resolution Loop convergence) | ✅ 2026-05-05 — all 12 D-tier decisions ratified interactively; Resolution Loop round 1 fixes applied; convergence re-greps clean per PIP §10 termination rule; user gave final go-ahead 2026-05-05 |
+| 7 | Separate plan-mode cycle plans Phase 5 code execution | ⏸ Awaiting separate session — Phase 0 closed; ready for code-execution plan-mode cycle |
+
+**Q-decisions ratified 2026-05-05** (full context in `06-phase5-renderer-design.md` "Q-decisions — RATIFIED 2026-05-05" + "Decisions captured" sections):
+
+| Q | Decision | Notes |
+|---|---|---|
+| Q-A | Custom ~120 LOC tagged-template helper returning `DocumentFragment` | Conditional `lupin-html` TT policy |
+| Q-B | Hybrid render: hydrate=full, add/update/expire=keyed, tick=text-node-only | Bounds tick to O(1) without framework |
+| Q-C | Keep existing CSS class names verbatim | `.sender-card`, `.sender-message`, etc. |
+| Q-D | Separate `<link>` stylesheet | esbuild stays JS-only |
+| Q-E | Reuse `marked` + `DOMPurify` page globals | DOMPurify config verbatim port |
+| Q-F | `multiplexer-<thing>` flat data-testid pattern | Matches Phase 1 + dev-tools precedent |
+| Q-G | Progress-group history collapsed default + lazy-render on first toggle-expand click | Cached after first render |
+| Q-H | Action-required Option A: full fields visually inert | Two-phase rollout via `data-phase6-pending="true"` marker |
+| Q-I | `boot.js` ≤ +30 KB gz vs Phase 4 baseline | Per-phase commitment, revisable via Q-amendment |
+| Q-J | Register `lupin-html` Trusted Types policy unconditionally | Phase 7 enforcement = single CSP header line |
+| Q-K | Empty-state plain text "No notifications yet." | `data-testid="multiplexer-empty-state"` |
+| Q-L | Pre-add hidden `#jobs-pane` + `#tts-pane` Phase 6 mount points | With `data-phase6-pending="true"` markers + comment |
+
+**Re-ask sessions during Q-ratification** (operational note):
+- **Q-H** — first ask declined with comment requesting richer examples; re-asked with Options A/B/C breakdown + concrete DOM samples for `yes_no` and `multiple_choice`; ratified Option A.
+- **Q-I** — first ask declined with comment asking for full context on what `boot.js` size threshold means and why it matters; re-asked with byte-budget breakdown + alternatives table + AC7 measurement command; ratified +30 KB with operator note that threshold is revisable per-phase.
+
+**Plan-review pipeline run** (2026-05-05, Phase 0 deliverable #5):
+- 3 fresh-context Agents spawned in parallel: REUSE pre-pass + Pass 1 Fitness + Pass 2 Adversarial (per canonical PIP `plan-review.md` §3 ordering).
+- **REUSE**: 23 findings (3 reuse-as-is + 7 extend-existing + 12 genuinely-new + 5 design-conflict); 6 Layer 3 design concerns surfaced.
+- **Pass 1 Fitness**: 22 findings (5 Block + 12 Major + 5 Minor); 0 Layer 3 design concerns (Q-A through Q-L coherent against anchor decisions).
+- **Pass 2 Adversarial**: 14 findings (canonical `EXECUTOR:` tag schema absent from AC table — A1 root finding); 3 Layer 3 design concerns.
+- Consolidated into `92-phase5-review-findings.md` mirroring Phase 4's `91-phase4-review-findings.md` D-tier ratification format.
+- **12 D-tier decisions awaiting user ratification** (D-A through D-L): cover (a) Q-C silent override by `.ar-*` namespace, (b) Notification interface gaps blocking renderer features, (c) AC7 baseline byte-count not captured, (d) AC8 fixture mechanism unspecified, (e) AC11 split + scheduled_at gate clarification, (f) `formatCountdown` clock-offset double-application risk, (g) Phase 1 smoke regression on placeholder removal, (h) singular/plural store key TS bug, (i) wrong line citations in 3 places, (j) performance budget conflict, (k) `data-phase6-pending` marker invariant assertion, (l) action-required mount location pinning.
+- Expected Resolution Loop: 1-2 rounds after D-tier decisions land; ~30 mechanical wording/coverage fixes per PIP §7.
+
+**Notes**:
+- No code edits in Phase 0 — design doc + execution log + PIP findings are the artifacts; code is the next session.
+- Cadence mirrors Phase 4 (`3ec8f4c` design ratified → `8f1f11c` code, separate commits).
+- Spine-bundle approval (Phases 1-3) does not extend to Phase 5 — per-phase cadence per Q11 amendment.
+
+#### Phase 5 implementation cycle (2026-05-05)
+
+**Status**: ✅ Implementation + verification complete (session 532b16e1); awaiting commit (parent Lupin) per `feedback_never_auto_commit_push`.
+**Started**: 2026-05-05 PM (final user go-ahead via "Yeah go ahead and begin phase 5 implementation")
+**Completed**: 2026-05-05 PM (verification matrix; AC1-AC10b all PASS; 79 new render-tier unit tests + 3 Phase 5 smoke tests; 5 D-B unit tests added to existing notification_store.test.ts)
+**Plan doc**: `2026.05.05-phase5-code-execution-plan.md` (serialized from `~/.claude/plans/giggly-splashing-newell.md`)
+**Pre-implementation prerequisites verified**:
+- Phase 4 baseline byte count stable: `gzip -9 -c boot.840274d1ab2d.js | wc -c` = **24,325 bytes** ✓
+- Vendor assets present: `marked.min.js` (39KB) + `purify.min.js` (23KB) ✓
+- No new feedback memories block this work ✓
+
+##### Deliverables
+
+| File | Status | LOC | Notes |
+|---|---|---|---|
+| `multiplexer/render/html.ts` | ✅ NEW | ~250 | Tagged-template helper + `lupin-html` Trusted Types policy (Q-J); `KNOWN_TEMPLATES` WeakSet identity check (F11) |
+| `multiplexer/render/markdown.ts` | ✅ NEW | 91 | `renderMarkdown` (block) + `renderMarkdownInline` (inline) per D-J; verbatim DOMPurify config from `notifications.js:12203-12247`; canonical `DOMPURIFY_CONFIG` exported |
+| `multiplexer/render/time.ts` | ✅ NEW | 84 | `formatHM`, `formatDateKey`, `formatCountdown` PURE per D-H; `appTimezone` overrides via `Intl.DateTimeFormat` |
+| `multiplexer/render/dom.ts` | ✅ NEW | 116 | `keyedListMerge` keyed by `data-id-hash` (F12); algorithm rewritten to "collect-then-appendChild" pattern (handles `update()` callbacks that use `existing.replaceWith(fresh)`) |
+| `multiplexer/render/templates/notificationItem.ts` | ✅ NEW | 71 | `.sender-message` template; uses `renderMarkdownInline`; `expired-badge` + `abstract-indicator` + `progress-group-head` conditional |
+| `multiplexer/render/templates/dateAccordion.ts` | ✅ NEW | 49 | `.date-accordion` with header + messages container; calls `keyedListMerge` for child notifications |
+| `multiplexer/render/templates/senderCard.ts` | ✅ NEW | 121 | `.sender-card` with header chrome + persona badge; persona color via `style.setProperty("--persona-color")` (NOT inline `style="${...}"`); date-grouping logic |
+| `multiplexer/render/templates/actionRequiredReadOnly.ts` | ✅ NEW | 105 | All 4 inertness markers (`data-phase6-pending` + `aria-disabled` + `cursor: not-allowed` + microcopy); per-`response_type` rendering branches; uses `.action-required-*` classes per D-A |
+| `multiplexer/render/NotificationsListRenderer.ts` | ✅ NEW | ~330 | Lifecycle (mount/unmount per D-I plural keys); hybrid Q-B render strategy; Q-K empty state; D-L mount routing; Q-G + F14 progress-group lazy-cache via delegated click handler; F18 4 empty-state transitions |
+| `multiplexer/render/index.ts` | ✅ NEW | 12 | Barrel — `createNotificationsListRenderer({eventBus, stores})` factory matching `createStores`/`createTransports` shape (RE-12) |
+| `static/css/multiplexer/notifications-list.css` | ✅ NEW | 579 | Cherry-picked notifications.css essentials; ≤1200 LOC ceiling; stylelint clean; legacy class names verbatim per Q-C; `.action-required-*` per D-A |
+| `tests/unit/multiplexer/render/html.test.ts` | ✅ NEW | 23 tests | TT-policy mocked-present + mocked-absent + identity-check; escape/attr/raw/array/conditional/Node-passthrough |
+| `tests/unit/multiplexer/render/markdown.test.ts` | ✅ NEW | 5 tests | Block vs inline DOM-shape contrast (D-J); DOMPurify config snapshot equality; XSS regression; anchor target/rel rewriting |
+| `tests/unit/multiplexer/render/time.test.ts` | ✅ NEW | 9 tests | D-H purity invariant (`formatCountdown(5000)==="00:05"` regardless of `Date.now()`); timezone boundary cases |
+| `tests/unit/multiplexer/render/dom.test.ts` | ✅ NEW | 5 tests | keyed-merge reorder/identity/orphan removal; update callback fires on matches |
+| `tests/unit/multiplexer/render/templates_*.test.ts` | ✅ NEW | 4 files, 20 tests | Per-file floors met: senderCard 4 ≥3, dateAccordion 3 ≥3, notificationItem 6 ≥4, actionRequiredReadOnly 7 ≥4 (one per response_type) |
+| `tests/unit/multiplexer/render/notifications_list_renderer.test.ts` | ✅ NEW | 17 tests | Lifecycle, 4 empty-state transitions (F18), tick invariant via `data-test-canary` sentinel + 10-burst (AC4 + F5 + A13), progress-group lazy-cache (Q-G + F14), F13 mount-before-transport |
+| `tests/smoke/test_multiplexer_phase5_smoke.py` | ✅ NEW | 3 tests | AC8a (functional, 3 fixtures, paint <500ms, `data-phase6-pending` count ≥3), AC8b (perf gate 50-fixture <100ms), AC9 (boot_complete handler handshake) |
+
+##### Edits
+
+| File | Change |
+|---|---|
+| `static/html/multiplexer.html` | D-L two-child structure inside `#notifications-pane` + CSS link + marked/purify scripts + Q-L Phase 6 mount points (`#jobs-pane` + `#tts-pane` hidden) |
+| `static/js/multiplexer/boot.ts` | Renderer instantiation per F13 (between createStores and transports.start); BootCompletePayload extended with `notificationsRenderer: "mounted"` literal (F22 + RE-16); test hook `window.__multiplexerTestHook` (D-E) |
+| `static/html/dev-tools.html:145` | Description text — Phase 5 notifications-list pane live |
+| `tests/smoke/test_multiplexer_phase1_smoke.py` | D-G selector update (`multiplexer-phase1-placeholder` → `multiplexer-notifications-pane`); bundled with Phase 5 cycle to keep AC10 green |
+| `static/js/multiplexer/shared/types.ts` | D-B 5 optional Notification fields; RE-16 optional `notificationsRenderer` on BootCompletePayload.handlers |
+| `static/js/multiplexer/stores/NotificationStore.ts` | D-B `normalize()` copies 5 new fields through; `ServerNotificationFields` extended |
+| `tests/unit/multiplexer/notification_store.test.ts` | 5 new D-B round-trip tests (24 → 29 tests) |
+| `05-phase4-stores-design.md` | D-B amendment block appended documenting Phase 5-initiated interface bump |
+
+##### Config additions
+
+- `package.json`: added `happy-dom` + `@happy-dom/global-registrator` + `stylelint` + `stylelint-config-standard` as `devDependencies`. Phase 4 stores were pure-logic and didn't need DOM; Phase 5 renderer inherently does. AC10b stylelint requires the linter installed.
+- `.stylelintrc.json`: minimal config extending `stylelint-config-standard` with several rules disabled (color-hex-length, color-function-alias-notation, etc. — auto-fixed during port).
+
+##### Verification matrix — all on :7999 (AI-discretionary)
+
+| AC | Command | Result |
+|---|---|---|
+| AC1 | `npx tsc --noEmit -p tsconfig.json` | ✅ exit 0 |
+| AC2 | `npx eslint src/fastapi_app/static/js/multiplexer/` | ✅ exit 0 |
+| AC2a | `! grep -rn "hydrateHistory" src/fastapi_app/static/js/multiplexer/render/` | ✅ no matches |
+| AC3 | `npx tsx --test src/tests/unit/multiplexer/render/html.test.ts` | ✅ 23/23 (≥18) |
+| AC4 | `npx tsx --test .../notifications_list_renderer.test.ts` | ✅ 17/17 (≥16) |
+| AC5 | `npx tsx --test .../templates_*.test.ts .../{dom,time,markdown}.test.ts` | ✅ 39/39 (≥24 combined; per-file floors met) |
+| AC6 | `npx c8 --include 'render/**' --exclude '**/*.test.ts' --check-coverage --lines 90` | ✅ **98.29%** lines |
+| AC7 | `gzip -9 -c boot.<hash>.js \| wc -c` | ✅ **29,653 bytes** ≤ 55,045 ceiling (Δ +5,328 vs Phase 4) |
+| AC8a | `pytest test_phase5_functional_smoke -v` | ✅ 1/1 (paint 30.4ms; 3 fixtures rendered; data-phase6-pending=3) |
+| AC8b | `pytest test_phase5_perf_gate -v` | ✅ 1/1 (50-fixture first paint <100ms) |
+| AC9 | `pytest test_phase5_boot_complete_handler_handshake -v` | ✅ 1/1 (`notificationsRenderer:mounted` exactly once) |
+| AC10 | Enumerated 7 commands | ✅ Phase 1 7/7, Phase 3 1/1, WS 50/50, full unit suite **325/325** |
+| AC10b | `wc -l notifications-list.css` ≤1200 + `npx stylelint ...` | ✅ 579 LOC; stylelint clean |
+
+**Total cumulative unit count**: 325 (122 pre-Phase 5 + 203 new across Phase 5).
+
+##### Build size delta
+
+| Phase | Build | Raw bytes | Gzipped (`gzip -9`) | Δ vs Phase 4 |
+|---|---|---|---|---|
+| Phase 4 baseline | `boot.840274d1ab2d.js` | 79,524 | 24,325 | — |
+| Phase 5 | `boot.9335a9630687.js` | 96,608 | **29,653** | **+5,328 bytes** |
+
+Headroom against AC7 ceiling: 55,045 − 29,653 = 25,392 bytes (~83% of +30 KB budget unused).
+
+##### Coverage table (post-implementation, c8 instrumentation, render/ modules)
+
+| Module | % Stmts | % Branch | % Funcs | % Lines |
+|---|---|---|---|---|
+| All `render/**/*.ts` (10 files) | **98.29** | 79.67 | 91.40 | **98.29** |
+
+Per-module statements + lines all ≥98%. Branch residue is `??`-default fallbacks that always resolve one way under valid call patterns + defensive null-guards — same pattern as Phases 2/3/4.
+
+##### Spec drifts re-audited at execute time (per `feedback_audit_plans_at_execute_time`)
+
+1. **`notificationsRenderer` made optional in `BootCompletePayload.handlers`** — design said `notificationsRenderer: string` (required), but the type extension lands in Step 1 while boot.ts wiring lands in Step 7. Making the field optional keeps `tsc --noEmit` green throughout the build (no broken intermediate states for parallel-session work). Production wiring populates it unconditionally with the literal "mounted" string per F22.
+
+2. **Filter action-required notifications out of sender card section** — design didn't explicitly state this filter, but legacy `processNewNotification` routes action-required to a separate pane, NOT to the notifications-list. Filter applied in `NotificationsListRenderer.renderSenderSection` to match legacy behavior + D-L mount routing.
+
+3. **`keyedListMerge` algorithm rewritten** — original design implied a cursor-based loop (`parent.insertBefore(el, cursor)`). The cursor invariant breaks when an `update()` callback uses `existing.replaceWith(fresh)` because `cursor` becomes detached. Switched to a "collect target elements + appendChild" algorithm — appendChild on existing children moves them; on fresh, inserts. Cleaner + handles all callback shapes.
+
+4. **`renderActionRequiredReadOnly` countdown ms derivation** — design says "store emits `countdownMs` already-corrected on tick" (D-H purity). Initial render (before first tick) needs a starting value; renderer derives from `expires_at - Date.now()` at render-time — D-H restricts only the formatter, not the renderer's first-paint countdown.
+
+5. **`window.__multiplexerTestHook`** added in boot.ts to support `page.evaluate` fixture injection (D-E mechanism). NOT covered by ESLint no-globals rule (only `notificationsUI` + `multiplexerUI` are restricted). Production code MUST NOT consume; gated explicitly via comment.
+
+##### Implementation deviations from design
+
+1. **CSS port written from scratch rather than full notifications.css copy + strip** — final residual is 579 LOC (well under the 1200 ceiling). Cleaner result than mechanical strip + audit; maintains semantic equivalence with legacy via class-name verbatim port (Q-C).
+
+2. **`--persona-color-rgb` CSS custom property in gradient fallbacks** — legacy uses `rgba(var(--persona-color-rgb, ...), 0.10)` for sender card gradients. Phase 5 CSS preserves this pattern; SenderStore consumers can set `--persona-color-rgb` via `element.style.setProperty(...)` if they want gradient styling (Phase 6 may wire this; Phase 5 sets only `--persona-color`).
+
+3. **Auto-fix from stylelint applied** — `rgba` → `rgb` + `#ffffff` → `#fff` syntactic modernization; preserves semantics.
+
+##### Awaiting commit authorization
+
+Per `feedback_never_auto_commit_push`: NOT auto-committing. User authorization required for the single Phase 5 commit.
 
 ---
 

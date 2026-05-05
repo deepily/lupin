@@ -29,6 +29,7 @@ import { createAuthManager } from "./auth/AuthManager";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores } from "./stores";
+import { createNotificationsListRenderer } from "./render";
 import type { BootCompletePayload, LifecyclePayload } from "./shared/types";
 
 // Session-ID generator mirroring `notifications.js:2134`. 10 × 10 = 100
@@ -156,6 +157,22 @@ function bootMultiplexer(): void {
     },
   });
 
+  // Phase 5 — notifications-list renderer mounts BEFORE transports start
+  // (per F13 ordering invariant): subscribe to store_*_changed events first
+  // so any frame arriving immediately after transport.start() is captured by
+  // the live renderer rather than missing the initial paint window.
+  const renderer = createNotificationsListRenderer({
+    eventBus,
+    stores : {
+      notifications  : stores.notifications,
+      senders        : stores.senders,
+      actionRequired : stores.actionRequired,
+    },
+  });
+  const mountEl = document.getElementById("notifications-pane");
+  if (mountEl === null) throw new Error("multiplexer: #notifications-pane not found");
+  renderer.mount(mountEl);
+
   attachLifecycleListeners();
 
   transports.queue.start(sessionId);
@@ -166,9 +183,14 @@ function bootMultiplexer(): void {
   // wiring without the no-globals violation `window.audioTransport.binaryHandler`
   // access path. The handler name comes from `Function.name` on the bound
   // method — for production code this MUST equal "audioStoreBinaryHandler".
+  //
+  // Phase 5 RE-16 + F22 extension: literal "mounted" string for
+  // `notificationsRenderer` (NOT function-name introspection — fixed contract
+  // surface for AC9 Playwright equality check).
   const bootCompletePayload: BootCompletePayload = {
     handlers : {
-      audioBinary : stores.audio.binaryHandler.name,
+      audioBinary           : stores.audio.binaryHandler.name,
+      notificationsRenderer : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -178,6 +200,18 @@ function bootMultiplexer(): void {
     ts      : Date.now(),
   });
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
+
+  // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose
+  // the eventBus + stores for `page.evaluate` fixture injection from
+  // Playwright smoke tests. NOT covered by the no-globals ESLint rule (only
+  // `notificationsUI` + `multiplexerUI` are restricted; `__multiplexerTestHook`
+  // is a fresh test surface). Production code MUST NOT consume this global —
+  // it's strictly for `test_multiplexer_phase5_smoke.py` and similar.
+  ( window as unknown as { __multiplexerTestHook?: unknown } ).__multiplexerTestHook = {
+    eventBus,
+    stores,
+    bootCompleteTs : Date.now(),
+  };
 
   // Phase 3 boot signal — preserves the Phase 1 console-line invariant for
   // Playwright smoke test continuity, and tags the resolved session.

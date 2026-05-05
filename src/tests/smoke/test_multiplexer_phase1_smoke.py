@@ -119,7 +119,14 @@ def test_ac3_watch_mode_starts_and_exits():
 # ---------------------------------------------------------------------------
 
 def test_ac4_page_load_playwright():
-    """Playwright headless: title + placeholder body + console line."""
+    """Playwright headless: title + notifications-pane body + console line.
+
+    Phase 5 D-G update (2026-05-05): the original `multiplexer-phase1-placeholder`
+    element was removed when the Phase 5 renderer's mount points landed. Per
+    D-G ratification, this smoke test's selector is bundled with the Phase 5
+    implementation cycle so AC10 (Phase 1/3/4 verification suites still green)
+    stays executable.
+    """
     from playwright.sync_api import sync_playwright
 
     console_messages: list[ str ] = []
@@ -132,9 +139,9 @@ def test_ac4_page_load_playwright():
             page.goto( f"{BASE_URL}/app/multiplexer", wait_until="networkidle", timeout=15000 )
             # AC4(a): document.title === "Multiplexer" (set by boot.ts)
             assert page.title() == "Multiplexer", f"title was {page.title()!r}"
-            # AC4(b): placeholder body element exists
-            placeholder = page.locator( '[data-testid="multiplexer-phase1-placeholder"]' )
-            assert placeholder.count() == 1
+            # AC4(b): Phase 5 notifications-pane mount surface exists (D-G).
+            pane = page.locator( '[data-testid="multiplexer-notifications-pane"]' )
+            assert pane.count() == 1
             # AC4(c): console contains the boot line
             time.sleep( 0.3 )
             assert any( "hello multiplexer" in m for m in console_messages ), (

@@ -2,6 +2,61 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-04-30 to 2026-05-02](history/2026-04-30-to-05-02-history.md).
 
+### 2026.05.05 PM - Session 532b16e1 | Multiplexer Phase 5 — Renderer (notifications-list pane + tagged-template `html` helper + CSS port + action-required read-only)
+
+**Context**: The multiplexer is a TypeScript+esbuild greenfield rewrite of the legacy `/app/notifications` page. Phase 4 closed 2026-05-04 (commit `8f1f11c`) shipping the 5-store domain layer; Phase 5 ships the **renderer** — first UI pane (notifications list, read-only) plus the tagged-template `html` helper that all subsequent panes will reuse. Phase 0 (design + plan-review pipeline + Q-A through Q-L + D-A through D-L ratifications) closed earlier today; this session executed the implementation cycle end-to-end.
+
+**Accomplishments**:
+
+- **Code-execution plan serialized + approved** at `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/2026.05.05-phase5-code-execution-plan.md` (origin: `~/.claude/plans/giggly-splashing-newell.md`).
+- **D-B prerequisite landed first**: extended Phase 4 `Notification` interface with 5 optional fields (`voice_persona`, `abstract`, `progress_group_id`, `was_expired`, `time_display`) + `NotificationStore.normalize()` to copy through; +5 D-B round-trip tests added to `notification_store.test.ts` (24 → 29). RE-16 + F22 also extended `BootCompletePayload.handlers` with optional `notificationsRenderer` literal-string field. Amendment block appended to `05-phase4-stores-design.md`.
+- **Render module** at `src/fastapi_app/static/js/multiplexer/render/` (10 new files): `html.ts` (~250 LOC tagged-template helper + lupin-html Trusted Types policy with WeakSet identity check per Q-J + F11), `markdown.ts` (block + inline using page-loaded `marked` + `DOMPurify` per Q-E; DOMPurify config verbatim port from `notifications.js:12203-12247` per D-J), `time.ts` (pure formatters per D-H; `formatCountdown` reads no `Date.now()`), `dom.ts` (`keyedListMerge` keyed by `data-id-hash` per F12; "collect + appendChild" algorithm), 4 templates under `templates/` (D-A `.action-required-*` class names, all 4 inertness markers on the read-only widget), `NotificationsListRenderer.ts` orchestrator (D-I plural store keys, hybrid Q-B render, D-L mount routing, Q-K empty state, Q-G + F14 progress-group lazy-cache), barrel `index.ts`.
+- **CSS port** at `src/fastapi_app/static/css/multiplexer/notifications-list.css` (579 LOC, ≤1200 ceiling). Cherry-picked notifications.css essentials; stylelint clean. Class names verbatim per Q-C; `.action-required-*` per D-A.
+- **HTML page-shell** (`multiplexer.html`): D-L two-child structure inside `#notifications-pane` + Q-L Phase 6 mount points (`#jobs-pane` + `#tts-pane` hidden) + CSS link + marked/purify vendor scripts. Bundled D-G selector update on `test_multiplexer_phase1_smoke.py` keeps Phase 1 7/7 green.
+- **boot.ts wiring**: renderer mount between `createStores` and `transports.queue.start` per F13; `BootCompletePayload` extended with `notificationsRenderer: "mounted"` literal per F22; `window.__multiplexerTestHook` debug surface for Playwright `page.evaluate` fixture injection per D-E.
+- **Phase 5 smoke test** at `src/tests/smoke/test_multiplexer_phase5_smoke.py` — 3 tests covering AC8a (functional, 3 fixtures, paint <500ms, data-phase6-pending count ≥3 per D-K), AC8b (perf gate 50-fixture <100ms), AC9 (boot_complete handshake exact-once). Parameterized via `LUPIN_API_URL`.
+- **E2E visual baseline test** at `src/tests/e2e_ui/test_multiplexer_phase5_visual.py` — 1 test capturing `#notifications-pane` snapshot with 3 fixtures (plain + markdown + action-required); countdown text stabilized before snapshot to avoid 1Hz tick flakiness. AC11a + AC11b shape (scheduled `:8000` run via `POST /api/test-suite/submit` with `-k multiplexer_phase5` filter; baselines fresh per locked 2026-05-05 directive — feature parity, not pixel parity).
+- **Dev-tools card** description updated (`dev-tools.html:145`).
+- **Tracking docs**: `90-execution-log.md` Phase 5 implementation cycle subsection appended (deliverables, verification matrix, build size delta, coverage, spec drifts, deviations).
+
+**Verification matrix (auto-tier 100% green on `:7999` AI-discretionary)**:
+
+| AC | Result |
+|----|--------|
+| AC1 `tsc --noEmit` | ✅ exit 0 |
+| AC2 `eslint` | ✅ exit 0 |
+| AC2a `! grep hydrateHistory render/` | ✅ no matches |
+| AC3 html.test.ts | ✅ 23/23 (≥18) |
+| AC4 notifications_list_renderer.test.ts | ✅ 17/17 (≥16; tick invariant + 4 empty-state) |
+| AC5 templates+dom+time+markdown | ✅ 39/39 (≥24 combined; per-file floors met) |
+| AC6 c8 coverage on `render/` | ✅ **98.29%** lines (≥90%) |
+| AC7 `gzip -9` boot.js | ✅ **29,653 bytes** ≤ 55,045 ceiling (Δ +5,328 vs Phase 4) |
+| AC8a/AC8b/AC9 Phase 5 smoke | ✅ 3/3 |
+| AC10 Phase 1/3/4 + WS regression | ✅ Phase 1 7/7, Phase 3 1/1, WS 50/50, full unit suite **325/325** |
+| AC10b CSS LOC ≤1200 + stylelint | ✅ 579 LOC clean |
+| AC11a + AC11b | ⏸ Pending — scheduled `:8000` slot via `POST /api/test-suite/submit` with `-k multiplexer_phase5` |
+
+**Total cumulative unit count**: 325 (122 pre-Phase 5 + 203 new across Phase 5 — including 79 new render-tier tests + 5 D-B tests).
+
+**Build size delta**: Phase 4 baseline `boot.840274d1ab2d.js` = 24,325 bytes gz; Phase 5 `boot.<hash>.js` = 29,653 bytes gz; Δ +5,328 bytes (~17.7% of +30 KB budget; ~83% headroom remaining for Phases 6-7).
+
+**Files** — 16 new + 7 edited + tracking docs:
+- **NEW**: `src/fastapi_app/static/js/multiplexer/render/{html,markdown,time,dom,index,NotificationsListRenderer}.ts` + `templates/{senderCard,dateAccordion,notificationItem,actionRequiredReadOnly}.ts` (10); `src/fastapi_app/static/css/multiplexer/notifications-list.css`; `src/tests/unit/multiplexer/render/*.test.ts` (9); `src/tests/smoke/test_multiplexer_phase5_smoke.py`; `src/tests/e2e_ui/test_multiplexer_phase5_visual.py`; `.stylelintrc.json`; `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/2026.05.05-phase5-code-execution-plan.md`.
+- **EDIT**: `package.json` + `package-lock.json` (devDeps: happy-dom + @happy-dom/global-registrator + stylelint + stylelint-config-standard); `src/fastapi_app/static/html/{multiplexer,dev-tools}.html`; `src/fastapi_app/static/js/multiplexer/{boot.ts, shared/types.ts, stores/NotificationStore.ts}`; `src/tests/smoke/test_multiplexer_phase1_smoke.py` (D-G); `src/tests/unit/multiplexer/notification_store.test.ts` (5 D-B tests); `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/{05-phase4-stores-design.md, 90-execution-log.md}`.
+
+**Execute-time deviations** (all documented in `90-execution-log.md` Phase 5 § Spec drifts):
+
+1. `notificationsRenderer` made optional in `BootCompletePayload.handlers` — preserves intermediate-state cleanliness; production wiring populates unconditionally with `"mounted"` literal per F22.
+2. Filter action-required notifications out of sender section — match legacy `processNewNotification` routing.
+3. `keyedListMerge` rewritten to "collect + appendChild" — original cursor-based loop broke under `update()` callbacks using `existing.replaceWith(fresh)`.
+4. `window.__multiplexerTestHook` test hook in boot.ts — supports D-E fixture injection without ESLint no-globals violation.
+5. CSS port written from-scratch (cherry-picked) rather than mechanical strip — cleaner result via Q-C verbatim class names.
+6. Three new devDeps installed (happy-dom + global-registrator + stylelint + stylelint-config-standard).
+
+**Process notes**: Single-go-ahead end-to-end execution per `feedback_approved_sequences_execute_end_to_end` (user said "Yeah go ahead and begin phase 5 implementation"). Notification mode throughout. Commit gate honored as separate authorization point per `feedback_never_auto_commit_push` ("document and checkpoint your work" → explicit commit go-ahead).
+
+---
+
 ### 2026.05.05 PM - Session 05da2b39 | Bug fix: conversation-mode self-exit signal gap (resolves Session 2622c356's TODO line 100)
 
 #### Checkpoint | 2026.05.05 18:30 | Self-exit signal symmetry — router action push + helper wording + tests

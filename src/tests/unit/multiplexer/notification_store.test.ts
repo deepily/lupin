@@ -92,6 +92,12 @@ function emitNotification(bus: ReturnType<typeof createEventBusForTesting>, fiel
   response_options    ?: ReadonlyArray<string>;
   response_default    ?: string;
   timeout_seconds     ?: number;
+  // Phase 5 D-B (2026-05-05) — renderer-surfaced fields.
+  voice_persona       ?: { name: string; voice_id: string; icon: string; color: string; borrowed: boolean };
+  abstract            ?: string;
+  progress_group_id   ?: string;
+  was_expired         ?: boolean;
+  time_display        ?: string;
 }): void {
   bus.emit({
     type    : "notification_queue_update",
@@ -444,4 +450,42 @@ test("expireToHistory: read items do NOT decrement unread again", () => {
   bus.emit({ type: "notification_expired", payload: { id_hash: "n1" }, source: "test", ts: 0 });
   // Stays at 0, not -1.
   assert.equal(store.unreadCount(), 0);
+});
+
+// ===========================================================================
+// 23-27 : Phase 5 D-B (2026-05-05) — renderer-surfaced fields round-trip
+// ===========================================================================
+
+test("D-B normalize: voice_persona round-trips through the store", () => {
+  const { bus, store } = setupStore();
+  const persona = { name: "Tiberius", voice_id: "vid_42", icon: "🦊", color: "#ab1234", borrowed: false };
+  emitNotification(bus, { id_hash: "n1", message: "x", voice_persona: persona });
+  const list = store.list();
+  assert.equal(list.length, 1);
+  assert.deepEqual(list[0]!.voice_persona, persona);
+});
+
+test("D-B normalize: abstract round-trips through the store", () => {
+  const { bus, store } = setupStore();
+  const text = "Long-form abstract describing background context for this notification.";
+  emitNotification(bus, { id_hash: "n1", message: "x", abstract: text });
+  assert.equal(store.list()[0]!.abstract, text);
+});
+
+test("D-B normalize: progress_group_id round-trips through the store", () => {
+  const { bus, store } = setupStore();
+  emitNotification(bus, { id_hash: "n1", message: "x", progress_group_id: "pg_research_001" });
+  assert.equal(store.list()[0]!.progress_group_id, "pg_research_001");
+});
+
+test("D-B normalize: was_expired round-trips through the store", () => {
+  const { bus, store } = setupStore();
+  emitNotification(bus, { id_hash: "n1", message: "x", was_expired: true });
+  assert.equal(store.list()[0]!.was_expired, true);
+});
+
+test("D-B normalize: time_display round-trips through the store", () => {
+  const { bus, store } = setupStore();
+  emitNotification(bus, { id_hash: "n1", message: "x", time_display: "23:10 EST" });
+  assert.equal(store.list()[0]!.time_display, "23:10 EST");
 });

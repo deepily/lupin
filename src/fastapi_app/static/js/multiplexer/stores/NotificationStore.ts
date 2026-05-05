@@ -35,6 +35,7 @@ import type {
   Notification,
   NotificationChangeKind,
   StoreNotificationsChangedPayload,
+  VoicePersona,
 } from "../shared/types";
 
 // Persisted envelope shape (StorageService prepends `lupin:` prefix; key is
@@ -106,6 +107,12 @@ interface ServerNotificationFields {
   response_options    ?: ReadonlyArray<string>;
   response_default    ?: string;
   timeout_seconds     ?: number;        // when present, sets expires_at
+  // Phase 5 D-B (2026-05-05) — server-emitted renderer-surfaced fields.
+  voice_persona       ?: VoicePersona;
+  abstract            ?: string;
+  progress_group_id   ?: string;
+  was_expired         ?: boolean;
+  time_display        ?: string;
 }
 
 interface ResponsePayload {
@@ -365,6 +372,12 @@ class NotificationStoreImpl implements NotificationStore {
     if (raw.timeout_seconds !== undefined && raw.response_requested === true) {
       norm.expires_at = ts + raw.timeout_seconds * 1000;
     }
+    // Phase 5 D-B (2026-05-05) — copy renderer-surfaced fields when present.
+    if (raw.voice_persona !== undefined)     norm.voice_persona     = raw.voice_persona;
+    if (raw.abstract !== undefined)          norm.abstract          = raw.abstract;
+    if (raw.progress_group_id !== undefined) norm.progress_group_id = raw.progress_group_id;
+    if (raw.was_expired !== undefined)       norm.was_expired       = raw.was_expired;
+    if (raw.time_display !== undefined)      norm.time_display      = raw.time_display;
     return norm;
   }
 

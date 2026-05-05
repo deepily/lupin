@@ -228,10 +228,16 @@ export interface VoicePersona {
 // QueueTransport receives, store normalizes). Per execution log spec drift:
 // server emits `timestamp` (ISO string) → normalized to `ts` (ms epoch);
 // server emits `response_requested` (boolean) → normalized to
-// `action_required` (boolean). Server fields not consumed by stores
-// (`abstract`, `priority`, `notification_type`, `voice_persona`, `job_id`,
-// `progress_group_id`) are preserved on the raw envelope but not surfaced
-// here — Phase 5 renderer can reach back into the original payload if needed.
+// `action_required` (boolean). Server fields `priority`, `notification_type`,
+// and `job_id` remain preserved-on-the-raw-envelope-only (renderer reaches
+// back if needed).
+//
+// Phase 5 D-B (2026-05-05) extension: five additional optional fields below
+// — `voice_persona`, `abstract`, `progress_group_id`, `was_expired`,
+// `time_display` — promoted from raw-envelope to typed surface so the
+// renderer can consume them through the store API rather than reaching into
+// raw payload (per `92-phase5-review-findings.md` D-B). NotificationStore
+// `normalize()` copies each through when present.
 // ---------------------------------------------------------------------------
 
 export interface Notification {
@@ -247,6 +253,12 @@ export interface Notification {
   response_type?  : "yes_no" | "multiple_choice" | "open_ended" | "open_ended_batch";
   options?        : ReadonlyArray<string>;   // valid choices for multiple_choice; ["yes","no"] for yes_no
   default_value?  : string;          // returned on local expiry without POST
+  // Phase 5 D-B (2026-05-05) — renderer-surfaced fields.
+  voice_persona?    : VoicePersona;   // per-sender persona for --persona-color CSS var
+  abstract?         : string;         // detailed description; surfaced via 📋 indicator
+  progress_group_id?: string;         // groups messages with history accordion (Q-G)
+  was_expired?      : boolean;        // true → renders EXPIRED badge on sender-message
+  time_display?     : string;         // backend-provided "HH:MM TZ" override
 }
 
 export type NotificationChangeKind =
@@ -380,6 +392,13 @@ export interface StoreAudioChunkDecodedPayload {
 
 export interface BootCompletePayload {
   handlers : {
-    audioBinary : string;   // Function.name of the bound binary handler
+    audioBinary            : string;   // Function.name of the bound binary handler
+    // Phase 5 RE-16 + F22 extension (2026-05-05): literal string "mounted"
+    // emitted after `renderer.mount(mountEl)` completes. NOT a function-name
+    // introspection — fixed contract surface for AC9's Playwright check
+    // (`payload.handlers.notificationsRenderer === "mounted"`). Optional so
+    // intermediate boot states (mount throws, future no-renderer surfaces)
+    // remain typed correctly; production wiring populates it unconditionally.
+    notificationsRenderer? : string;
   };
 }

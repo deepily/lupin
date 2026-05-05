@@ -6,13 +6,32 @@
     <title>Multiplexer</title>
     <link rel="stylesheet" href="/static/css/lupin-base.css">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/notifications-list.css">
+    <script src="/static/js/vendor/marked.min.js"></script>
+    <script src="/static/js/vendor/purify.min.js"></script>
 </head>
 <body>
     <main class="container">
         <h1>Multiplexer</h1>
-        <p data-testid="multiplexer-phase1-placeholder">
-            Phase 1 scaffolding shell. Real UI panes arrive in Phases 5–6.
-        </p>
+
+        <!-- Phase 5 notifications-list pane (per D-L two-child structure) -->
+        <section id="notifications-pane" class="notifications-pane"
+                 data-testid="multiplexer-notifications-pane">
+            <!-- D-L: action-required widgets render here, ABOVE sender cards -->
+            <div id="action-required-section"
+                 data-testid="multiplexer-action-required-section"></div>
+            <!-- D-L: sender cards render here, BELOW action-required widgets -->
+            <div id="sender-cards-container"
+                 data-testid="multiplexer-sender-cards"></div>
+        </section>
+
+        <!-- Phase 6 mount points (Q-L pre-add) -->
+        <section id="jobs-pane" hidden
+                 data-testid="multiplexer-jobs-pane"
+                 data-phase6-pending="true"></section>
+        <section id="tts-pane" hidden
+                 data-testid="multiplexer-tts-pane"
+                 data-phase6-pending="true"></section>
     </main>
     <script type="module" src="/static/dist/multiplexer/boot.js"></script>
 </body>

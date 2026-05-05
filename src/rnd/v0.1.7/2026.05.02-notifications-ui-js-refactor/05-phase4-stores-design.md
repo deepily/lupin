@@ -424,3 +424,36 @@ The REUSE pre-pass surfaced existing prior art for several Phase 4 components. T
 **Last reviewed**: 2026-05-04 (REUSE pre-pass + Pass 1 Fitness + Pass 2 Adversarial all closed; user ratified D-A through D-G + Q1-Q7 + Q12 single-tab policy + 21 minor wording/coverage fixes via Resolution Loop). Implementation landed in commit `8f1f11c` (2026-05-05).
 
 `last-reviewed-at: 2026-05-04 (8f1f11c)` per PIP §12 + Pass 2 A9.
+
+---
+
+## Phase 5-initiated interface bump (2026-05-05) — D-B amendment
+
+Per Phase 5 D-B ratification (`92-phase5-review-findings.md` D-B), the Phase 4
+`Notification` interface in `shared/types.ts:237-250` was extended with five
+optional fields the renderer requires:
+
+| Field | Purpose |
+|---|---|
+| `voice_persona?: VoicePersona` | `--persona-color` CSS var on sender card |
+| `abstract?: string` | 📋 abstract indicator + popover |
+| `progress_group_id?: string` | Q-G lazy-render history accordion |
+| `was_expired?: boolean` | EXPIRED badge on `.sender-message` |
+| `time_display?: string` | Backend-provided "HH:MM TZ" override |
+
+`NotificationStore.normalize()` copies each through unchanged when the server
+field is present on the incoming `notification_queue_update` envelope. Five new
+unit tests in `notification_store.test.ts` (tests 23-27) verify per-field
+round-trip. No behavior change for existing consumers (all fields are
+optional).
+
+**Why this is a Phase 5 surface, not a Phase 4 bug**: pre-D-B the Phase 4
+design framed these as "preserved on the raw envelope but not surfaced here —
+Phase 5 renderer can reach back into the original payload if needed." D-B
+ratified Option A (extend the typed interface + normalizer) over Option B
+(`getRaw(idHash)` lazy access) on grounds of "cheapest path to feature-parity;
+Phase 4 interface stability not yet load-bearing for production use."
+
+**Implementation landed**: 2026-05-05 in the Phase 5 implementation cycle.
+Commit hash will be appended once the Phase 5 single commit lands per the
+Phase 4 precedent (8f1f11c) cadence.
