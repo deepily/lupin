@@ -886,9 +886,42 @@ Per-module statements + lines all ≥98%. Branch residue is `??`-default fallbac
 
 3. **Auto-fix from stylelint applied** — `rgba` → `rgb` + `#ffffff` → `#fff` syntactic modernization; preserves semantics.
 
-##### Awaiting commit authorization
+##### Commits
 
-Per `feedback_never_auto_commit_push`: NOT auto-committing. User authorization required for the single Phase 5 commit.
+| Hash | Scope | Files | Stats |
+|---|---|---|---|
+| `6ab9929` | Main Phase 5 — renderer + CSS port + smoke tests + AC11 visual test scaffolding | 37 | +6,195 / −50 |
+| `d17abb6` | Visual-test determinism fix (HH:MM drift) | 1 | +49 / −20 |
+
+##### AC11a + AC11b verification round (post-`6ab9929`, scheduled `:8000`)
+
+Five submissions to land a clean baseline. Each submission via `POST /api/test-suite/submit` against the `:8000` test container; verification via `docker logs lupin-rest-test` + filesystem inspection (no `/api/test-suite/status/<id>` endpoint exists server-side — see Spec drift §7 below).
+
+| # | `test_types` | `pytest_args` | Result | Lesson |
+|---|---|---|---|---|
+| 1 | `e2e_ui` ❌ | `--update-snapshots -k multiplexer_phase5` (as `args` field ❌) | `0 passed, 0 failed` — silent no-op | Schema is `test_types=e2e` (per `cosa/agents/test_suite/job.py:43` script-mapping) + `pytest_args=...` (per `cosa/rest/routers/test_suite.py:32`). My initial plan referenced wrong field names. |
+| 2 | `e2e` ✅ | `--update-snapshots -k multiplexer_phase5` (as `pytest_args`) ✅ | `1 passed, 1 error` | `pytest-playwright-visual-snapshot` first-run convention: `--update-snapshots` writes baseline + intentionally fails with "Snapshots updated. Please review images." (library convention). |
+| 3 | `e2e` | `-k multiplexer_phase5` (no `--update-snapshots`) | `1 passed, 1 error: Snapshots DO NOT match!` | Fixture used `new Date().toISOString()` for timestamps; `.message-time` and `.sender-last-activity` rendered with current HH:MM at every run → pixel-diff failed. |
+| 4 | `e2e` | `--update-snapshots -k multiplexer_phase5` (deterministic test, commit `d17abb6`) | `1 passed, 1 error` | First-run signal again — new baseline with fixed timestamps. |
+| 5 | `e2e` | `-k multiplexer_phase5` (deterministic test) | **`1 passed, 0 errors` (4.39s)** ✅ | AC11b green. |
+
+**Baseline PNG** (gitignored — `io/` excluded from git; artifact lives only on disk): `io/test-suite/visual-baselines/test_multiplexer_phase5_visual/test_multiplexer_phase5_notifications_pane_visual/multiplexer_phase5_notifications_pane.png` — 45,717 bytes, 1280×494, 8-bit RGB.
+
+**TFE side path**: Run #2's intentional first-run failure tripped the TestFixExpediter auto-fix watchdog (`auto_fix_on_failure: true` is the INI default in `[Lupin: Testing]`). The TFE attempted Phase 1 SDK delegation, hit "Command failed with exit code 1" repeatedly, and eventually returned to idle. Runs #3-5 explicitly set `auto_fix_on_failure: false` to keep the verification path clean. Net consequence: zero — TFE completed harmlessly; test outcome was unaffected.
+
+##### Spec drifts re-audited (continued, post-AC11)
+
+7. **`/api/test-suite/status/<id>` does not exist** — design AC11b assumed a status-polling endpoint; OpenAPI catalog confirms only `/api/test-suite/submit` exists. Test-suite jobs flow into CJ Flow's regular queues (todo → running → done/dead) and emit completion via the regular `notify` channel + `Test suite complete` log line in the container. AC11b verification path: parse container logs for the job_id's `Test suite complete` line + assert PNG exists on the host filesystem (which is bind-mounted into the container). Plan-text language updated implicitly via this execution log entry; the design doc itself doesn't get amended (the AC machinery still works — just via a different observation surface).
+
+8. **Visual-test determinism + library convention** — first-run with `--update-snapshots` is BY DESIGN a failed run per `pytest-playwright-visual-snapshot:plugin.py:370` (it writes the baseline + reports failure to force human review). AC11b's "final_state === passed" clause from the original plan is therefore unreachable on the first capture run; only subsequent regression runs (Run #5 above) hit `passed`. Plan-text language could be amended for future phases that follow the same pattern.
+
+9. **Snapshot path is `io/test-suite/visual-baselines/`, not `__snapshots__/`** — pytest-playwright-visual-snapshot's `screenshot_dir` config (set by repo conftest or pytest.ini) places baselines under `io/test-suite/visual-baselines/`. Original plan AC11b assumed `__snapshots__/`. The actual location is gitignored, which is correct for generated artifacts but means baselines do NOT travel with the commit — they are recaptured per environment. Future Phase 6 visual tests inherit this convention.
+
+##### Implementation deviations from design (continued)
+
+4. **Fixture envelope timestamps must be FIXED** for visual baseline determinism — `new Date().toISOString()` at fixture-injection time produces different `.message-time` text on every run. `time_display` server-canonical field on the fixture (introduced via D-B Notification interface extension) is the correct surface for forcing display text. Subsequent visual tests in Phase 6+ should follow this pattern.
+
+5. **`auto_fix_on_failure: false` for non-final visual-baseline submissions** — first-run with `--update-snapshots` reports "failure" by library convention; the TFE shouldn't waste cycles trying to "fix" a baseline-capture run. Future scheduled visual tests should default `auto_fix_on_failure: false` for `--update-snapshots` runs and rely on the next regression-check run for the green signal.
 
 ---
 

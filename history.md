@@ -34,7 +34,7 @@
 | AC8a/AC8b/AC9 Phase 5 smoke | ✅ 3/3 |
 | AC10 Phase 1/3/4 + WS regression | ✅ Phase 1 7/7, Phase 3 1/1, WS 50/50, full unit suite **325/325** |
 | AC10b CSS LOC ≤1200 + stylelint | ✅ 579 LOC clean |
-| AC11a + AC11b | ⏸ Pending — scheduled `:8000` slot via `POST /api/test-suite/submit` with `-k multiplexer_phase5` |
+| AC11a + AC11b | ✅ Verified (4-run path; see § "AC11 verification round" below) |
 
 **Total cumulative unit count**: 325 (122 pre-Phase 5 + 203 new across Phase 5 — including 79 new render-tier tests + 5 D-B tests).
 
@@ -53,7 +53,27 @@
 5. CSS port written from-scratch (cherry-picked) rather than mechanical strip — cleaner result via Q-C verbatim class names.
 6. Three new devDeps installed (happy-dom + global-registrator + stylelint + stylelint-config-standard).
 
-**Process notes**: Single-go-ahead end-to-end execution per `feedback_approved_sequences_execute_end_to_end` (user said "Yeah go ahead and begin phase 5 implementation"). Notification mode throughout. Commit gate honored as separate authorization point per `feedback_never_auto_commit_push` ("document and checkpoint your work" → explicit commit go-ahead).
+**AC11 verification round** (post-commit, scheduled `:8000` via `POST /api/test-suite/submit`):
+
+Five submissions to land a clean regression baseline:
+
+| # | Args | Result | Lesson |
+|---|------|--------|--------|
+| 1 | `test_types=e2e_ui` (typo), `args` (wrong field) | `0 passed, 0 failed` — silent no-op | Submit body shape is `test_types=e2e` + `pytest_args=...` per `cosa/rest/routers/test_suite.py:31-32`; script-mapping at `cosa/agents/test_suite/job.py:43` maps `"e2e" → run-e2e-ui-tests.sh` |
+| 2 | corrected schema, `--update-snapshots` | `1 passed, 1 error` | First-run with `--update-snapshots` writes baseline + `pytest-playwright-visual-snapshot` reports "Snapshots updated. Please review images." (expected library convention) |
+| 3 | regression check, no `--update-snapshots` | `1 passed, 1 error: Snapshots DO NOT match` | Fixture used `new Date().toISOString()` → `.message-time` HH:MM drifted between runs → pixel diff failed |
+| 4 | recapture baseline (deterministic test, commit `d17abb6`) | `1 passed, 1 error` | First-run signal again — new baseline with fixed timestamps |
+| 5 | regression check, deterministic test | **`1 passed, 0 errors` (4.39s)** ✅ | AC11b green |
+
+PNG: 45,717 bytes at `io/test-suite/visual-baselines/test_multiplexer_phase5_visual/test_multiplexer_phase5_notifications_pane_visual/multiplexer_phase5_notifications_pane.png` (`io/` is gitignored — generated artifact, not committed).
+
+**Determinism fix** (commit `d17abb6`): hardcoded fixture timestamps to a fixed `2026-05-05T18:00:00.000Z` base + added `time_display` field on each fixture so the renderer uses the fixed HH:MM string (no `formatHM(ts)` derivation); extended `_STABILIZE_DOM_JS` to also pin `.sender-last-activity` textContent (was only doing `.action-required-countdown`).
+
+**Note on `/api/test-suite/status/<id>`**: this endpoint does NOT exist server-side — test-suite jobs flow through CJ Flow + container logs, not a separate status endpoint. The original plan's AC11b spec referenced it; verification works via Docker container logs (`docker logs lupin-rest-test`) + filesystem inspection of `io/test-suite/visual-baselines/`.
+
+**TFE side note**: the runaway TFE that auto-triggered on Run #2's "failure" eventually completed (SDK delegation exceptions, but the consumer returned to idle); subsequent runs explicitly disabled it via `auto_fix_on_failure: false` to keep the verification path clean. (User reaction: tickled that TFE made itself useful 🤣.)
+
+**Process notes**: Single-go-ahead end-to-end execution per `feedback_approved_sequences_execute_end_to_end` (user said "Yeah go ahead and begin phase 5 implementation"). Notification mode throughout. Two commit gates honored as separate authorization points per `feedback_never_auto_commit_push`: main Phase 5 (`6ab9929`) and determinism fix (`d17abb6`).
 
 ---
 
