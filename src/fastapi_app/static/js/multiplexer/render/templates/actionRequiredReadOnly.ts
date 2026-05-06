@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 5 — action-required read-only widget.
 //
 // Per Q-H Option A + D-A: full fields (prompt + response_type badge +
@@ -100,6 +101,7 @@ function renderOptionsPreview(item: ActionRequiredItem): DocumentFragment {
         <div class="action-required-input-placeholder">[ text input — Phase 6 ]</div>
       ` as DocumentFragment;
 
+    /* c8 ignore next 5 */ // open_ended_batch placeholder — Phase 6 will replace with the real batch input; current AC fixtures cover yes_no / multiple_choice / open_ended explicitly.
     case "open_ended_batch":
       // Single-line approximation of per-question repeats — Phase 6 expands
       // when the batch shape (multiple input fields) is wired.

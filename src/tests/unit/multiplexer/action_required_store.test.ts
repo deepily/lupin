@@ -402,3 +402,174 @@ test("default timeout_seconds=30 when not specified", () => {
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timestamp: new Date(1_000_000).toISOString() });
   assert.equal(ctx.store.getById("ar1")!.expires_at, 1_000_000 + 30_000);
 });
+
+// ===========================================================================
+// Coverage backfill — defensive guard branches
+// ===========================================================================
+
+test("queue_update with no `notification` field is ignored (covers `if (!n) return`)", () => {
+  const ctx = setup();
+  ctx.bus.emit({
+    type    : "notification_queue_update",
+    payload : {}, // no `notification` field
+    source  : "test",
+    ts      : 0,
+  });
+  assert.equal(ctx.store.list().length, 0);
+});
+
+test("notification with no `message` falls back to empty prompt (covers `n.message ?? \"\"`)", () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", response_requested: true, timeout_seconds: 30 });
+  // No message field → prompt should be "".
+  assert.equal(ctx.store.getById("ar1")!.prompt, "");
+});
+
+test("notification_responded with only `notification_id` (no `id_hash`) — falls back via `??`", () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  ctx.bus.emit({
+    type    : "notification_responded",
+    payload : { notification_id: "ar1" },
+    source  : "test",
+    ts      : 0,
+  });
+  assert.equal(ctx.store.getById("ar1")!.state, "cancelled");
+});
+
+test("notification_responded with neither id_hash nor notification_id is dropped silently", () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  ctx.bus.emit({
+    type    : "notification_responded",
+    payload : {}, // no id_hash, no notification_id
+    source  : "test",
+    ts      : 0,
+  });
+  assert.equal(ctx.store.getById("ar1")!.state, "pending", "no transition without an id");
+});
+
+test("notification_responded for an entry already in non-pending non-responded state is a no-op", () => {
+  const ctx = setup({ now: 1_000_000 });
+  emitArPrompt(ctx.bus, {
+    id_hash: "ar1", message: "q", response_requested: true,
+    timeout_seconds: 1, timestamp: new Date(1_000_000).toISOString(),
+  });
+  // Auto-expire by advancing the clock past expiry and firing the timer.
+  ctx.setNow(1_002_000);
+  ctx.timers.fireAll();
+  assert.equal(ctx.store.getById("ar1")!.state, "expired");
+
+  // Now the server fanout arrives — should be a no-op (state stays expired).
+  ctx.bus.emit({
+    type    : "notification_responded",
+    payload : { id_hash: "ar1" },
+    source  : "test",
+    ts      : 0,
+  });
+  assert.equal(ctx.store.getById("ar1")!.state, "expired");
+});
+
+test("sys_time_update with `ts` only (no serverTime) — falls back via `??`", () => {
+  const ctx = setup({ now: 1_000_000 });
+  emitArPrompt(ctx.bus, {
+    id_hash: "ar1", message: "q", response_requested: true,
+    timeout_seconds: 60, timestamp: new Date(1_000_000).toISOString(),
+  });
+  ctx.bus.emit({
+    type    : "sys_time_update",
+    payload : { ts: 1_010_000 }, // no serverTime
+    source  : "test",
+    ts      : 0,
+  });
+  // clockOffset becomes 1_010_000 - 1_000_000 = 10_000. Fire a tick at the
+  // same now=1_000_000 — countdown should reflect the offset.
+  ctx.timers.fireAll();
+  // The countdown emission should be present in events.
+  const tickEvents = ctx.events.filter((e) => e.payload.changeKind === "tick");
+  assert.ok(tickEvents.length >= 1);
+});
+
+test("sys_time_update with non-number serverTime is ignored", () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  // Emit with a non-number serverTime — should be ignored.
+  ctx.bus.emit({
+    type    : "sys_time_update",
+    payload : { serverTime: "not-a-number" as unknown as number },
+    source  : "test",
+    ts      : 0,
+  });
+  // No throw, store unchanged.
+  assert.equal(ctx.store.getById("ar1")!.state, "pending");
+});
+
+test("freezeAll is idempotent — already-frozen entries are not re-emitted on a second freeze", () => {
+  const ctx = setup({ now: 1_000_000 });
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+
+  // First freeze — emits offline-frozen for ar1.
+  ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
+  const eventsAfterFirst = ctx.events.length;
+
+  // Second freeze (no thaw between) — already frozen, should NOT re-emit.
+  ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
+
+  const newOfflineFrozen = ctx.events
+    .slice(eventsAfterFirst)
+    .filter((e) => e.payload.changeKind === "offline-frozen");
+  assert.equal(newOfflineFrozen.length, 0, "second freeze is a no-op for already-frozen entries");
+});
+
+test("freezeAll skips terminal entries (responded prompt is not re-emitted as offline-frozen)", () => {
+  const ctx = setup({ now: 1_000_000 });
+  // Spawn two prompts — pending one + one we'll respond to.
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q1", response_requested: true, timeout_seconds: 30 });
+  emitArPrompt(ctx.bus, { id_hash: "ar2", message: "q2", response_requested: true, timeout_seconds: 30 });
+  // Respond to ar2 → terminal state, but entry stays in entries map until cleanup.
+  void ctx.store.respond("ar2", "ok");
+
+  // Capture events from this point only.
+  const eventsBefore = ctx.events.length;
+  // Trigger freezeAll via connection_offline.
+  ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
+
+  // Only ar1 should produce an offline-frozen emission; ar2 is terminal → skipped.
+  const newEvents = ctx.events.slice(eventsBefore).filter((e) => e.payload.changeKind === "offline-frozen");
+  assert.equal(newEvents.length, 1, "only the pending prompt is frozen");
+  assert.equal(newEvents[0]?.payload.id_hash, "ar1");
+});
+
+test("thawAll skips terminal entries AND skips already-non-frozen pending entries", () => {
+  const ctx = setup({ now: 1_000_000 });
+  // ar1: pending + frozen (will be thawed)
+  // ar2: pending + NOT frozen (manually unfrozen — covers !entry.frozen continue)
+  // ar3: terminal (responded — covers state !== pending continue)
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q1", response_requested: true, timeout_seconds: 30 });
+  emitArPrompt(ctx.bus, { id_hash: "ar2", message: "q2", response_requested: true, timeout_seconds: 30 });
+  emitArPrompt(ctx.bus, { id_hash: "ar3", message: "q3", response_requested: true, timeout_seconds: 30 });
+  void ctx.store.respond("ar3", "ok"); // terminal
+
+  // Freeze all (only ar1 + ar2 are pending and will be frozen; ar3 is terminal).
+  ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
+
+  // Thaw only ar1: emit "connection_online" then immediately re-freeze ar2 by
+  // calling connection_offline again? That doesn't work — events are global.
+  // Instead, simulate a partial thaw by responding to ar2 BEFORE thaw, so it
+  // becomes terminal — then thaw skips it via the state check, NOT the frozen
+  // check. To exercise the !entry.frozen continue branch we need a pending
+  // entry that wasn't frozen during freezeAll. The simplest path: spawn a new
+  // prompt AFTER freezeAll fired (its frozen=false and pending), then thaw.
+  emitArPrompt(ctx.bus, { id_hash: "ar4", message: "q4", response_requested: true, timeout_seconds: 30 });
+  // ar4 is now pending + NOT frozen. (freezeAll already fired before it spawned.)
+
+  const eventsBefore = ctx.events.length;
+  // Trigger thawAll via connection_online.
+  ctx.bus.emit({ type: "connection_online", payload: {}, source: "test", ts: 0 });
+
+  // Resumed events should include ar1 + ar2 (frozen pending), but NOT ar3
+  // (terminal — state-check continue) and NOT ar4 (already non-frozen — !frozen continue).
+  const resumed = ctx.events.slice(eventsBefore).filter((e) => e.payload.changeKind === "offline-resumed");
+  const idsResumed = resumed.map((e) => e.payload.id_hash).sort();
+  assert.deepEqual(idsResumed, ["ar1", "ar2"], "only frozen pending entries resume");
+});

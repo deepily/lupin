@@ -192,3 +192,127 @@ Pass 1 may legitimately re-flag a finding REUSE missed (different concern dimens
 ### Awaiting
 
 User ratification gate per PIP §6 + Q11 amendment. Cluster-walkthrough path recommended (mechanical batch for Minors / meaningful walk for Majors), mirroring the REUSE-step ratification pattern that worked well 2026-05-05.
+
+---
+
+## Pass 1 Fitness — closed 2026-05-06
+
+### Outcome
+
+All 17 Pass 1 Fitness findings ratified via cosa-voice walkthrough on 2026-05-06 AM (Session `5ced4868`, persona Mr. Radio 🦉, conversation mode active). The mechanical batch yes/no on the 7 Minors was attempted first per the design-doc TODO recommendation; user rejected the batch and asked for a per-row walk. All 7 Minors then walked individually; all 10 Majors walked individually thereafter.
+
+### Ratification path
+
+| Step | What | Tool |
+|---|---|---|
+| 1 | Mechanical batch yes/no on 7 Minors (F1, F2, F9, F10, F11, F12, F15) | `mcp__cosa-voice__ask_yes_no` (rejected by user with implicit redirect to per-row walk) |
+| 2 | Per-row walk on 7 Minors | `mcp__cosa-voice__ask_yes_no` × 7 — F1✓, F2✓, F9✓, F10✓, F11✓, F12✓, F15 (initial "no" with comment "Are you talking about test coverage? If so it needs to be 100%") |
+| 2a | F15 clarification + scope upgrade | `mcp__cosa-voice__ask_yes_no` — confirmed: yes this is c8 line/branch/function coverage; bump 90 → 100 with c8-ignore exception clause preserved |
+| 2b | F15 ratification produced a global rule | User attached comment to the yes: "In fact let's make this a global requirement and extremely explicit. We're not going anywhere until we get 100% coverage on everything." |
+| 2c | Scope decision for the global rule | `mcp__cosa-voice__ask_multiple_choice` — user picked **Option A: Multiplexer TypeScript only** (Option B all-frontend-TS and Option C Lupin-wide Python+TS were rejected) |
+| 3 | Per-row walk on 10 Majors | `mcp__cosa-voice__ask_yes_no` × 10 — F3✓, F4✓, F5✓, F6✓, F7✓, F8✓, F13✓, F14✓, F16✓, F17✓ |
+| 4 | Apply-phase authorization | `mcp__cosa-voice__ask_yes_no` — yes (proceed with apply) |
+
+### Findings disposition table
+
+| ID | Severity | Type | Disposition | Where applied (08-phase6a-jobs-surface-design.md) |
+|---|---|---|---|---|
+| F1 | Minor | COMPLETENESS | ✅ Applied | §Bucket template — concrete CSS class table for default expansion |
+| F2 | Minor | AMBIGUITY | ✅ Applied | §Job card template — `<pre hidden>` initial render + `WeakSet`-cached lazy-render mechanism with code example |
+| F3 | Major | AMBIGUITY | ✅ Applied | §JobsPaneRenderer — `.catch(...)` wrapper + `hydration_failed` EventBus event; AC5 Test 16 rejection-path race |
+| F4 | Major | AMBIGUITY | ✅ Applied | §JobsPaneRenderer — `JobsPaneRendererOptions` documented with narrow `{ jobs: JobStore }` + defensive throw |
+| F5 | Major | COMPLETENESS | ✅ Applied | §CSS port — 5-step audit protocol |
+| F6 | Major | TESTABILITY | ✅ Applied | AC5 Test 15 — concrete success-path race fixture |
+| F7 | Major | TESTABILITY | ✅ Applied | AC8a — parameterized `[data-phase6-pending="true"]` count assertion (0/2/3 sub-cases) |
+| F8 | Major | COMPLETENESS | ✅ Applied | AC10 — 5-step visual regression procedure with viewport pin + scope-leak grep checklist |
+| F9 | Minor | AMBIGUITY | ✅ Applied | §Empty state per bucket — explicit "no global fallback" per Q-A1 strict |
+| F10 | Minor | COMPLETENESS | ✅ Applied | §Bucket template — CSS rotation chevron mechanism |
+| F11 | Minor | COMPLETENESS | ✅ Applied | §Boot.ts wiring — runtime-unconditional clarification |
+| F12 | Minor | COMPLETENESS | ✅ Applied | §Boot.ts wiring — TS-optional + commit-ordering note |
+| F13 | Major | RISK_SURFACE | ✅ Applied | Risks table — full click-delegation isolation contract + `test_phase6a_click_handler_isolation` |
+| F14 | Major | DECISION_TRACEABILITY | ✅ Applied | Q-A2 row — legacy citation + bucket-mapping table |
+| F15 | Minor | COMPLETENESS | ✅ Applied + **GLOBAL UPGRADE** | AC6 — coverage floor 90→100; Phase 4+5 backfill scheduled. **Side-effect**: project `CLAUDE.md` "100% COVERAGE MANDATE" + `feedback_100pct_coverage_multiplexer.md` |
+| F16 | Major | TESTABILITY | ✅ Applied | AC8a — 3-fixture-job shape with id_hash, job_type, status, timestamps + bucket landings |
+| F17 | Major | ORDERING | ✅ Applied | §JobsPaneRenderer "Ordering contract" + Q-A7 row cross-reference |
+
+### Convergence sweep (PIP §7 step 3 — Pass 1 close-out grep targets)
+
+| Grep target | Expected result | Status |
+|---|---|---|
+| `grep -nE "TBD\|confirm during impl\|decide at impl time" 08-phase6a-jobs-surface-design.md` | residual hits in Q-decisions table (now ratified) + line 275 vestigial REUSE-era footnote (clean-up deferred) | ✅ |
+| `grep -nE "Open sub-question" 08-phase6a-jobs-surface-design.md` | zero | ✅ |
+| `grep -nE "EXECUTOR: HUMAN" 08-phase6a-jobs-surface-design.md` | only AC11a row (justified slot-availability) | ✅ |
+
+### Side-effect tasks paired with Pass 1 close
+
+- ✅ Project `CLAUDE.md` — "100% COVERAGE MANDATE" subsection added under TESTING.
+- ✅ Auto-memory `feedback_100pct_coverage_multiplexer.md` — ratified scope (Option A: multiplexer TS only) + retroactive backfill obligation.
+- ✅ `MEMORY.md` index — pointer line added.
+- ✅ `TODO.md` — "Phase 4 + Phase 5 c8 coverage backfill to 100% before Phase 6a implementation opens" entry added; old "Resume at Pass 1 gate" entry marked closed.
+- ✅ `08-phase6a-jobs-surface-design.md` — status header bumped to **PASS-1-CLOSED 2026-05-06**; Pass 1 close-out subsection appended.
+
+### Conversation-mode metadata
+
+- **Session ID**: `5ced4868`
+- **Voice persona**: Mr. Radio 🦉 (`#FFA000`, voice_id `Aa6nEBJJMKJwJkCx8VU2`)
+- **Mode**: conversation mode active throughout
+- **Notable user redirects**:
+  - Batch yes/no on 7 Minors rejected by user → per-row walk
+  - F15 "no" with attached comment "Are you talking about test coverage? If so it needs to be 100%" → triggered global-rule conversation
+  - F15 yes with attached comment "let's make this a global requirement and extremely explicit. We're not going anywhere until we get 100% coverage on everything" → ratified the mandate; scope walked via `ask_multiple_choice` Option A
+  - User went for a 15-min walk between F11 and F3; resumed cleanly via voice message on return
+
+### Next gate
+
+Pass 2 Adversarial Agent fires next, with the Pass-1-resolved `08-phase6a-jobs-surface-design.md` as input. Pass 2 sees:
+- The applied F1-F17 fixes (concrete CSS class table, lazy-render code, hydration error path, ordering contract, isolation contract, all AC body updates, the new "Pass 1 Fitness — closed" subsection at the bottom of the design doc)
+- The 100% coverage mandate (AC6 floor + Phase 4+5 backfill obligation)
+
+Pass 2 may legitimately surface new findings on adversarial fronts (security / threat model, denial-of-service, race-condition exhaustion, AC executability under hostile inputs), but it should NOT re-find the 17 Pass 1 rows (those are now applied to the doc).
+
+---
+
+## Pass 2 Adversarial Findings
+
+**Agent run**: 2026-05-06, clean-context general-purpose agent (ID `a751a0c0`), sequential per Q11 amendment (sees Pass-1-resolved doc state).
+**Status**: ⏸ **Awaiting user ratification gate**. Findings only — no fixes applied.
+**Tally**: 15 findings: **0 Block / 9 Major / 5 Minor / 1 Layer 3**
+**Cluster**: SECURITY (1), DOS (2), AMBIGUITY (2), CONTRACT_DRIFT (3), TESTABILITY (3), RACE (1), ACCESSIBILITY (1), OPERATIONAL (1), POLISH (1)
+
+### Findings table
+
+| ID | File:Line or §section | Deficiency type | What's missing / wrong | Proposed fix | Severity |
+|---|---|---|---|---|---|
+| F18 | line 99 (`status-{...|interrupted}`) + line 184 CSS | CONTRACT_DRIFT | `Job.status` per Phase 4 (`05-phase4-stores-design.md:141`) is exactly `"todo" \| "running" \| "done" \| "dead"` — 4 values, no `"interrupted"`. Card template + CSS port both list `status-interrupted`, but no reducer path can produce it. | Either (a) add `interrupted` to `Job.status` enum in Phase 4 + document the producer, or (b) drop `.job-card.status-interrupted` from CSS port + remove from template's class union. Pick one explicitly. | Major |
+| F19 | AC8a (line 289) — fixture `status: 'history'` | CONTRACT_DRIFT | `status: 'history'` violates `Job.status` type — `'history'` is a bucket name, not a status value. Test will fail TS strict-mode OR succeed via typecast that defeats the contract. The "history" job lands via `job_removed` reducer, so `status` should remain `'done'`. | Rewrite AC8a fixture: third job has `status: 'done'`; bucket landing is via `job_removed` reducer, not a `status:'history'` payload. | Major |
+| F20 | line 129 (`pre.innerText = JSON.stringify(job?.meta...)`) | DOS | `Job.meta` is server-controlled. `JSON.stringify` of a 100MB or pathologically-deep payload synchronously on the click thread → main-thread freeze. Risks-table covers cyclic refs but NOT size. | Add a size cap: `if (estimateSize(job.meta) > MAX_META_BYTES) { pre.innerText = "[meta too large to display]"; return; }` where `MAX_META_BYTES = 256_000`. Add an AC3 sub-test for oversized meta. | Major |
+| F21 | line 129 (`JSON.stringify(job?.meta)`) | SECURITY | A malicious `Job.meta` containing `__proto__` key gets serialized verbatim — fine for display via `innerText`, but if any later 6b/6c code does `Object.assign(target, job.meta)` or spread on it, prototype pollution is live. The doc is silent on whether `Job.meta` is structurally validated. | Add explicit invariant note: "`Job.meta` is opaque to 6a — never spread, never assigned to a non-Map carrier, only stringified for display." OR add a boundary-validator in Phase 4 that strips `__proto__`/`constructor`/`prototype` keys. | Minor |
+| F22 | AC9 (line 291) — `boot_complete` literal `jobsRenderer:mounted` | TESTABILITY | The actual emission is `console.log("[multiplexer] boot_complete", JSON.stringify({...}))`. JSON.stringify produces `"jobsRenderer":"mounted"` (with quotes + colon, no space) — NOT the literal `jobsRenderer:mounted` string the AC asserts. | Either (a) update AC9 to assert against the JSON form `"jobsRenderer":"mounted"` (note the quotes), or (b) emit a separate non-JSON line specifically for AC matching. Verify by running the actual `console.log` once before locking the assertion string. | Major |
+| F23 | line 122 (`header.closest("[data-id-hash]")`) + line 105 delete-button `data-id-hash` | AMBIGUITY | Both `.job-card` AND `.job-delete-button` carry `data-id-hash`. `closest("[data-id-hash]")` from a click target inside the header may return the button itself (depending on event target), not the card. `card.querySelector(".job-card-details")` on a button returns null → runtime error. Also: clicking the disabled `×` still bubbles → expands card (UX surprise per Q-A6). | Two fixes: (a) drop `data-id-hash` from the delete button (carry it only on `.job-card`); the delete handler in 6b uses `event.target.closest('.job-card').dataset.idHash`. (b) Stop propagation on the disabled button click, OR have the click handler early-return when target is `.job-delete-button`. | Major |
+| F24 | line 104 (`${formatDuration(job.created_at, job.completed_at)}`) + Reused-functions list | CONTRACT_DRIFT | `formatDuration` is referenced in template but does NOT appear in the Reused-functions list — only `formatHM` and `formatDateKey` are listed. As-written the design is silent. | Add a row to Reused functions citing the source, OR add a row to "Genuinely new" with an AC test, OR change the template to use a known formatter. Pick one. | Minor |
+| F25 | line 52 (`appTimezone?: string` in `JobsPaneRendererOptions`) | AMBIGUITY | `appTimezone?: string` declared but no consumer is shown in any rendering, hydration, or click path. Either it threads through to `formatHM`/`formatDateKey` (then say so) or it's vestigial dead config. With AC6 at 100%, an unused option becomes either compliance-theater coverage or vague c8-ignore. | Either remove the option entirely (KISS) or document its consumer (e.g., "passed to time formatters for TZ-aware bucket-header date display"). | Minor |
+| F26 | §JobsPaneRenderer mount (line 41-46) — `mount(root)` + `unmount()` | RACE | Mount idempotency unspecified. Hot-reload during dev or test calling `mount` twice without `unmount` → duplicate handlers → every store event paints twice. No idempotency guard. | Add to §JobsPaneRenderer: "calling `mount()` twice without an intervening `unmount()` throws `Error('JobsPaneRenderer already mounted')`." Add AC5 test: double-mount throws. | Major |
+| F27 | AC5 Test 15 (line 286) — "100ms delay" + "within 50ms" | TESTABILITY | The race test pins absolute timing. Flaky in CI under load (5-10ms scheduler jitter is common; 50ms window can miss on a slow runner). Test will green locally and red intermittently in scheduled E2E. | Replace timing assertions with promise-ordering controls: `new Promise(r => resolveHydrate = r)` so the test deterministically orders `job_removed` BEFORE `resolveHydrate()`. No real-time waits. Same fix applies to Test 16. | Major |
+| F28 | AC10 step 10.4 (line 292) — scope-leak grep checklist | OPERATIONAL | Grep targets (`* {`, `html {`, `body {`, `:root {`, `.card {`) are naive substring matches. False positives: `/* :root variables */` comment, `[attr*="*"]` selector, `.cardholder {` class. False negatives: `:where(:root) {`, `@layer base { :root {} }`, custom-property leaks. | Replace ad-hoc grep with: (a) stylelint rule `selector-disallowed-list: ['*', 'html', 'body', ':root']` scoped to `jobs-pane.css`, fails build on violation; (b) canary test asserting `getComputedStyle(document.body).backgroundColor` matches Phase 5 baseline post-load. Grep stays as coarse first pass. | Major |
+| F29 | AC10 step 10.5 (line 292) — "decide re-capture vs rollback" | AMBIGUITY | No operational owner named for the re-capture-vs-rollback decision. Re-capture risks masking a 6a regression as "intentional drift"; rollback risks discarding legitimate Phase 5 work. | Default: rollback the 6a CSS port commit and re-investigate; only re-capture after 6a CSS scope leak is independently disproven by a separate diagnostic (temporarily delete `jobs-pane.css` `<link>` and re-run regression). Add this decision-tree to AC10 step 10.5. | Major |
+| F30 | §Bucket template (lines 144-148) + Q-A9 | ACCESSIBILITY | `.jobs-bucket-header` gets `role="button"` + `tabindex="0"` but design specifies only click handling, not Enter/Space. Q-A9 covers Enter/Space for `.job-card-header` but is silent on bucket headers. Per WAI-ARIA 1.2, `role="button"` requires Enter+Space activation. | Add `keydown` handler: `if (e.key === "Enter" \|\| e.key === " ") { e.preventDefault(); toggleBucket(); }`. Add AC4 sub-test: keyboard-fired Enter on bucket header collapses; Space same; Tab moves focus; Escape no-op. Add `aria-expanded` on bucket header reflecting collapsed/expanded state. | Major |
+| F31 | AC10 enumeration (line 292) — items 1-10 + sub-steps 10.1-10.5 | POLISH | "10.1 / 10.2" sub-step numbering is ambiguous against item numbering "10". | Renumber sub-steps as "10a / 10b / 10c / 10d / 10e". Cosmetic but reduces ratifier and implementer cognitive load. | Minor |
+| F32 | line 358 (Reused functions: emoji TBD) | OPERATIONAL | Residual `TBD` line. REUSE pre-pass closed 2026-05-05 but this entry was not resolved. Pass 2 challenges the deferral: emoji selection is in the template TODAY (line 102: `⏳ \| ⚙ \| ✓ \| ✗`). | Edit line 358 either (a) cite the legacy source `notifications.js:5478` (already in REUSE table) and remove TBD, or (b) declare them as new design and add to "Genuinely new" rows. Stop deferring. | Minor |
+
+### Layer 3 Design Concerns
+
+| ID | Concern | What's at stake | Tradeoffs |
+|---|---|---|---|
+| C-6 | **Half-built delete button (Q-A6) UX risk** — 6a ships visible `×` with `aria-disabled` + `cursor: not-allowed`. If 6b slips or never ships, users see a button-shaped affordance that does nothing. No tooltip, no toast, no `title=""`. | UX trust degradation if shipped long-term in this state; visual regression vs legacy (which had a working delete) reads as a feature loss. | (1) Add `title="Delete coming in Phase 6b"` attribute now; (2) hide the button entirely until 6b (regress vs legacy parity); (3) ship 6a + 6b atomically (breaks slicing manifest). User must pick the long-term-stuck-at-6a posture. |
+
+### Standout findings (highest implementer cost if missed)
+
+- **F18 + F19 + F24**: contract drift between Phase 4 `Job` interface and 6a templates/ACs — surfaces as TS compile errors during implementation
+- **F22**: AC9 string-match against the actual `console.log` output — verify the exact emission form before locking the assertion
+- **F23**: `data-id-hash` collision on the delete button is the most likely runtime bug (TypeError on first click of disabled `×`)
+- **F26**: mount idempotency is unguarded — double-mount silently duplicates listeners
+- **F30**: only true accessibility hole — keyboard activation is contract-required for `role="button"`
+
+### Awaiting
+
+User ratification gate per PIP §6 + Q11 amendment. Cluster-walkthrough recommended (mechanical batch for Minors / meaningful walk for Majors), mirroring the Pass 1 pattern that worked.

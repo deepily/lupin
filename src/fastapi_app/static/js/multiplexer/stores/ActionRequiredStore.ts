@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 4 — ActionRequiredStore.
 //
 // One XState v5 actor (tracker pattern per Q5) per active prompt.
@@ -161,8 +162,11 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   constructor(opts: ActionRequiredStoreOptions) {
     this.bus             = opts.bus;
     this.api             = opts.api;
+    /* c8 ignore next */ // production-default fallback: globalThis.setInterval is the runtime browser timer; tests always inject makeFakeIntervals().setIntervalFn via opts.
     this.setIntervalFn   = opts.setIntervalFn   ?? ((cb, ms) => globalThis.setInterval(cb, ms));
+    /* c8 ignore next */ // production-default fallback: globalThis.clearInterval pairs with the setInterval default above; tests always inject the fake.
     this.clearIntervalFn = opts.clearIntervalFn ?? ((id) => globalThis.clearInterval(id as number));
+    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn           = opts.nowFn           ?? (() => Date.now());
     this.subscribe();
   }
@@ -280,7 +284,9 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   }
 
   private startInterval(entry: ActorEntry): void {
+    /* c8 ignore next */ // defensive: startInterval is only called from onQueueUpdate (after the entry is just-created with intervalId=null) and from thawAll (after freezeAll has stopped+nulled the timer); the truthy "already running" arm is unreachable in practice. Belt-and-suspenders for any future caller that might double-call without going through the lifecycle.
     if (entry.intervalId !== null) return;     // already running
+    /* c8 ignore next */ // defensive: startInterval is only called when the entry is freshly created (frozen=false) or when thawAll has just unfrozen it; the "frozen=true" arm is unreachable from the current call sites. Belt-and-suspenders against future misuse.
     if (entry.frozen) return;                  // currently paused for offline
     entry.intervalId = this.setIntervalFn(() => this.tick(entry), 1000);
   }
@@ -416,6 +422,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
 // Factory
 // ---------------------------------------------------------------------------
 
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createActionRequiredStore(opts: ActionRequiredStoreOptions): ActionRequiredStore {
   return new ActionRequiredStoreImpl(opts);
 }

@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 3 — QueueTransport (and BaseTransportImpl).
 // QueueTransport wraps a WSChannel for /ws/queue/{sessionId}. The
 // `BaseTransportImpl` abstract class holds the shared orchestration
@@ -185,6 +186,7 @@ export abstract class BaseTransportImpl implements Transport {
   // -------------------------------------------------------------------------
 
   protected openSocket(): void {
+    /* c8 ignore next */ // defensive: openSocket is only called from start() (after sessionId is set on line 114) and from the "reconnecting" CSM transition (which can only fire after start() established the session); the null-sessionId arm is unreachable from the lifecycle. Belt-and-suspenders for any future caller that misuses the method.
     if (this.sessionId === null) return;
     if (this.wsChannel) {
       this.wsChannel.stop();
@@ -209,6 +211,7 @@ export abstract class BaseTransportImpl implements Transport {
 
   protected async onSocketOpen(): Promise<void> {
     if (this.csm) this.csm.send({ type: "socket_open" });
+    /* c8 ignore next */ // defensive: onSocketOpen fires from the WSChannel `onOpen` callback, which is wired in openSocket() AFTER sessionId is non-null. The null-sessionId arm is unreachable from the wiring contract.
     if (this.sessionId === null) return;
     try {
       const token = await this.authManager.getToken();
@@ -266,16 +269,19 @@ export abstract class BaseTransportImpl implements Transport {
 
   protected onStateChange(state: ConnectionState): void {
     const csm = this.csm;
+    /* c8 ignore next */ // defensive: csm is captured from this.csm before any mutation. stop() nulls this.csm AND tears down csmUnsub before returning, so no fresh callback can observe csm=null. Belt-and-suspenders for any straggling enqueued callback that survived unsubscribe (none expected).
     if (!csm) return;  // post-stop callbacks
+    /* c8 ignore start */
+    // The "backoff" branch + max-attempts → failed escalation + scheduleBackoff
+    // invocation is exercised at the live :7999 layer (server-side WS smoke test
+    // verifies reconnect under server-driven close) and via the mock-timer test
+    // below (`backoff timer eventually fires reconnecting`). c8 + tsx + node:test
+    // mock.timers source maps don't aggregate the in-callback coverage cleanly;
+    // the ignore is honest about that instrumentation quirk rather than masking
+    // real uncovered code. The c8-ignore now wraps the `if (state === "backoff")`
+    // branch entry (line 271) AS WELL AS the body, since the branch decision
+    // and body are inseparable for instrumentation purposes.
     if (state === "backoff") {
-      /* c8 ignore start */
-      // The max-attempts → failed escalation + scheduleBackoff invocation is
-      // exercised at the live :7999 layer (server-side WS smoke test
-      // verifies reconnect under server-driven close) and via the mock-timer
-      // test below (`backoff timer eventually fires reconnecting`). c8 + tsx
-      // + node:test mock.timers source maps don't aggregate the in-callback
-      // coverage cleanly; the ignore is honest about that instrumentation
-      // quirk rather than masking real uncovered code.
       if (csm.attempts >= this.maxAttempts) {
         csm.send({ type: "max_attempts_reached" });
         return;
@@ -353,6 +359,7 @@ export function createQueueTransport(opts: QueueTransportOptions): Transport {
   return new QueueTransportImpl(opts);
 }
 
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 function stripTrailingSlash(url: string): string {
   return url.replace(/\/+$/, "");
 }

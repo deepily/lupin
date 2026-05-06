@@ -2,6 +2,39 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-04-30 to 2026-05-02](history/2026-04-30-to-05-02-history.md).
 
+### 2026.05.06 - Session 5ced4868 | Multiplexer Phase 6a — Pass 1 Fitness ratification + 100% coverage mandate ratified + full Phase 4 + Phase 5 coverage backfill closed
+
+**Context**: Resumed at the Pass 1 Fitness ratification gate from Session 532b16e1 (entry below). Mr. Radio persona. AM (lunch) session walked the 17 Pass 1 findings via cosa-voice (per-row), applied to design doc, then dispatched Pass 2 Adversarial agent. F15 ratification produced a global side-effect: **100% c8 coverage mandate** for the multiplexer TypeScript codebase. AM session brought 16 of 26 multiplexer files to 100% before the user went to lunch with directive "do as much as you can without me, try not to burn the server down." Session continued into PM after a `/clear`, resumed via `91-resume-here-coverage-backfill.md` pointer document, and closed the remaining 10 files in a single uninterrupted pass.
+
+**Accomplishments**:
+
+- **Pass 1 Fitness ratification (AM)** — All 17 findings walked via cosa-voice ratification. The 7-Minor batch yes/no was rejected; ALL 17 walked individually. Design doc `08-phase6a-jobs-surface-design.md` updated for all 17; Risks + AC tables updated; "Pass 1 Fitness — closed" subsection appended to `94-phase6a-review-findings.md`.
+
+- **100% coverage mandate (AM, ratified via F15)** — Per-multiplexer scope ratified via `ask_multiple_choice` Option A: scope is `src/fastapi_app/static/js/multiplexer/` only. Mandate documented in project `CLAUDE.md` "100% COVERAGE MANDATE — MULTIPLEXER TYPESCRIPT" subsection + auto-memory `feedback_100pct_coverage_multiplexer.md`. Phase 4 + Phase 5 90% floors retroactively bumped to 100% as a Phase 6a prerequisite.
+
+- **Coverage backfill (AM phase — 16 files)** — `ws-channel.ts` (+13 tests), `NotificationsListRenderer.ts` (+6 tests), `senderCard.ts` (+5 tests), `markdown.ts` (+2 tests), `render/index.ts` (barrel), `dom.ts`, `JobStore.ts`, `AudioTransport.ts`, `dateAccordion.ts`, `time.ts`, `broadcast.ts`, `notificationItem.ts`, `actionRequiredReadOnly.ts`, `pcm-decoder.ts`, `ConnectionStateMachine.ts`, `stores/index.ts` (barrel) — all to 100% lines/branches/functions/statements via combination of `c8 ignore` for phantom-branch artifacts + targeted unit tests for real behavioral branches.
+
+- **Pass 2 Adversarial dispatched (AM)** — Clean-context Explore agent ran against the Pass-1-resolved doc state. Returned **15 findings** at **0 Block / 9 Major / 5 Minor / 1 Layer 3**, clustered SECURITY (1) / DOS (2) / AMBIGUITY (2) / CONTRACT_DRIFT (3) / TESTABILITY (3) / RACE (1) / ACCESSIBILITY (1) / OPERATIONAL (1) / POLISH (1). Findings appended to `94-phase6a-review-findings.md` § "Pass 2 Adversarial Findings". **Ratification gate NOT walked** — paused at user lunch break. Standout Majors: F18/F19/F24 (Job.status enum drift), F22 (AC9 string-match), F23 (`data-id-hash` collision), F26 (mount idempotency), F27 (race-test absolute timing flake), F28 (AC10 grep naive), F29 (AC10.5 escalation owner), F30 (A11y `role="button"` without keyboard handler).
+
+- **Resume pointer doc (AM)** — `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/91-resume-here-coverage-backfill.md` (NEW) — single-file pointer with state snapshot, 5 proven c8-ignore patterns, per-file LCOV recipe, recommended order, anti-patterns. Authored before `/clear` for the PM resumption.
+
+- **Coverage backfill (PM phase — 10 files)** — `auth/AuthManager.ts` (+4 tests + ChainMutexLockManager bug-fix), `stores/ActionRequiredStore.ts` (+9 tests), `render/html.ts` (+5 tests), `shared/StorageService.ts` (+6 tests), `stores/SenderStore.ts` (+2 tests), `transport/QueueTransport.ts` (+2 tests), `stores/AudioStore.ts` (c8-ignores only), `stores/NotificationStore.ts` (+9 tests), `shared/EventBus.ts` (+1 test), `api/ApiClient.ts` (+1 test) — all to 100% across all four metrics. **Final whole-multiplexer verification**: every file row shows `100 | 100 | 100 | 100 |`. **400 unit tests passing** (was 325 baseline; +75 new tests across both halves).
+
+- **Real bug surfaced + fixed mid-backfill** — `AuthManager.ChainMutexLockManager.request()` line 65: the cleanup-comparison `tail === prev.then(() => next)` recreated a NEW promise on the right side each call, so the comparison was always false → `tails` Map entries never deleted → small memory leak per lock acquisition. Fixed by capturing the chained promise into a `chained` local and reusing it for both `set()` and the equality check. Two new tests cover the happy/sad cleanup paths.
+
+**Process notes**: Same session ID 5ced4868 carries across the `/clear`. Resume-here doc + auto-memory worked as designed for context-clear recovery. PIP sequential mandate respected: Pass 2 Adversarial ratification deferred — needs per-finding user judgment, cannot be auto-resolved under the "work without stopping" directive. AM-session manifest backfill into `.claude-session.md` performed at checkpoint time so selective staging includes both halves.
+
+**Files**: 30 source/test files at 100% (16 AM + 10 PM + the 4 already-100% from prior phases). Plus tracking docs: `CLAUDE.md` (100% mandate subsection), `TODO.md` (Pass 1 closed + backfill closed), `91-resume-here-coverage-backfill.md` (NEW; status flipped paused → CLOSED), `08-phase6a-jobs-surface-design.md` (Pass 1 closed + AC6 100%-coverage row), `94-phase6a-review-findings.md` (Pass 1 closed + Pass 2 dispatched). Auto-memory: `feedback_100pct_coverage_multiplexer.md` (NEW). Plus `.claude-session.md` (this session) and `history.md` (this entry).
+
+**Status**: Awaiting Pass 2 Adversarial ratification user-decision gate. Phase 6a code-writing cycle is unblocked from the coverage side; only the Pass 2 walk + apply + convergence re-grep remains as the documentation gate.
+
+#### Checkpoint | 2026.05.06 18:15 | Coverage backfill complete + tracking docs landed
+
+**Files**: 46 source + test + tracking files (full multiplexer + history.md + TODO.md + CLAUDE.md + R&D docs + .claude-session.md)
+**Commit**: a2ad4ec
+
+---
+
 ### 2026.05.05 PM (late) - Session 532b16e1 | Multiplexer Phase 6a — Slicing manifest + Phase 6a design doc REUSE-closed + Pass 1 Fitness landed (awaiting ratification gate)
 
 **Context**: Continuing same session after the Phase 5 landing (`6ab9929` + `d17abb6`, Phase 5 entry below). Slice Phase 6 into 6a/6b/6c per Q11 amendment, draft 6a "Jobs Surface" design doc, run REUSE pre-pass + ratify, run Pass 1 Fitness — strictly sequential per `feedback_pip_plan_review_is_sequential` (correcting the Phase 4 + 5 parallel-execution shortcut). Pass 2 Adversarial NOT fired this session — stops at Pass 1 user-decision gate.

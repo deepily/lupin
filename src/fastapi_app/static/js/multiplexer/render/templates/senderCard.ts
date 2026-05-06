@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line (TypeScript module-init transpile artifact in c8's source-map view; no actual code on this line).
 // Multiplexer Phase 5 — sender card template (`.sender-card`).
 //
 // Per Q-C: legacy class names verbatim — `.sender-card`, `.sender-card-header`,
@@ -102,6 +103,7 @@ interface DateGroup {
   items   : Notification[];
 }
 
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript optional-param + return-type erasure produces a fake branch).
 function groupByDateKey(notifications: ReadonlyArray<Notification>, appTimezone?: string): DateGroup[] {
   const buckets = new Map<string, Notification[]>();
   for (const n of notifications) {

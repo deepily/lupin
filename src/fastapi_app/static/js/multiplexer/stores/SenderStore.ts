@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 4 — SenderStore.
 //
 // Plain reducer over Map<sender_id, SenderRecord>. Consumes
@@ -92,6 +93,7 @@ class SenderStoreImpl implements SenderStore {
 
   constructor(opts: SenderStoreOptions) {
     this.bus   = opts.bus;
+    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn = opts.nowFn ?? (() => Date.now());
     this.subscribe();
   }
@@ -215,6 +217,7 @@ class SenderStoreImpl implements SenderStore {
 // Factory
 // ---------------------------------------------------------------------------
 
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createSenderStore(opts: SenderStoreOptions): SenderStore {
   return new SenderStoreImpl(opts);
 }

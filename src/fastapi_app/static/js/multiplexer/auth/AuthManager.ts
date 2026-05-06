@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 2 — AuthManager.
 // Token storage + refresh-token flow with `navigator.locks` deduplication.
 // XState-backed state machine (idle → ready → refreshing → ready | expired)
@@ -52,7 +53,8 @@ export class ChainMutexLockManager implements LockManager {
     const next = new Promise<void>((res) => {
       release = res;
     });
-    this.tails.set(name, prev.then(() => next));
+    const chained = prev.then(() => next);
+    this.tails.set(name, chained);
     try {
       await prev;
       return await callback();
@@ -60,8 +62,7 @@ export class ChainMutexLockManager implements LockManager {
       release();
       // Drop the entry if no further work is queued behind us. Otherwise the
       // next caller's promise stays in the map.
-      const tail = this.tails.get(name);
-      if (tail === prev.then(() => next)) this.tails.delete(name);
+      if (this.tails.get(name) === chained) this.tails.delete(name);
     }
   }
 }
@@ -92,11 +93,13 @@ const authMachine = setup({
   },
   actions : {
     setToken : assign({
+      /* c8 ignore next 2 */ // defensive: setToken is wired only on READY + REFRESH_SUCCESS transitions in the machine config below; the `: null` arm is unreachable by machine design.
       token : ({ event }) =>
         event.type === "READY" || event.type === "REFRESH_SUCCESS" ? event.token : null,
       error : () => null,
     }),
     setError : assign({
+      /* c8 ignore next */ // defensive: setError is wired only on REFRESH_FAIL transition in the machine config below; the `: null` arm is unreachable by machine design.
       error : ({ event }) => (event.type === "REFRESH_FAIL" ? event.error : null),
     }),
     clearToken : assign({
@@ -178,7 +181,9 @@ export class AuthManagerImpl implements AuthManager {
     this.defaultTimeoutMs = opts.defaultTimeoutMs;
     this.storage          = opts.storage;
     this.bus              = opts.bus;
+    /* c8 ignore next */ // production-default fallback: NavigatorLockManager wraps the browser-only `navigator.locks` Web API, which is unavailable in Node. Tests always inject ChainMutexLockManager explicitly via opts.locks; this `??` arm fires only in production browsers.
     this.locks            = opts.locks ?? new NavigatorLockManager();
+    /* c8 ignore next */ // production-default fallback: globalThis.fetch is the runtime browser fetch; tests always inject a mockFetch via opts.fetcher; this `??` arm fires only in production browsers.
     this.fetcher          = opts.fetcher ?? globalThis.fetch.bind(globalThis);
     this.expiryBufferMs   = opts.expiryBufferMs ?? 30_000;
 
@@ -312,6 +317,7 @@ export class AuthManagerImpl implements AuthManager {
 // both the production storage + bus singletons. No top-level export — boot
 // owns the lifecycle.
 
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createAuthManager(opts: AuthManagerOptions): AuthManager {
   return new AuthManagerImpl(opts);
 }

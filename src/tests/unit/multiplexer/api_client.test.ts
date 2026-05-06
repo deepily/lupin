@@ -272,6 +272,36 @@ test("absolute URL in path is used verbatim (no baseUrl prefix)", async () => {
   assert.equal(calls[0]?.url, "https://elsewhere.test/api/test");
 });
 
+test("response with NO content-type header returns text (fallback via `?? \"\"`)", async () => {
+  // Exercises the `response.headers.get("content-type") ?? ""` fallback when
+  // get() returns null. happy-dom's Response auto-sets a default Content-Type,
+  // so we hand-build a fetcher that returns a Response-like object with a
+  // headers.get() that returns null for "content-type" (and a text() body).
+  const { authManager } = fakeAuthManager();
+  const fakeResponse = {
+    status     : 200,
+    ok         : true,
+    statusText : "OK",
+    headers    : {
+      get: ( name: string ): string | null => {
+        if ( name.toLowerCase() === "content-type" ) return null; // <-- triggers `?? ""`
+        return null;
+      },
+    },
+    text: async (): Promise<string> => "fallback-text-body",
+    json: async (): Promise<unknown> => ({ should: "not be called" }),
+  };
+  const fetcher = ( async () => fakeResponse ) as unknown as typeof fetch;
+  const api = createApiClient({
+    baseUrl          : "http://localhost:7999",
+    defaultTimeoutMs : 5000,
+    authManager,
+    fetcher,
+  });
+  const result = await api.get<string>( "/api/notype" );
+  assert.equal( result, "fallback-text-body", "no-content-type response routed through text path" );
+});
+
 test("response with non-JSON content-type returns text", async () => {
   const { authManager } = fakeAuthManager();
   const { fetcher } = recordingFetcher(async () =>

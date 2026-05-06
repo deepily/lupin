@@ -118,9 +118,36 @@ If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that
 
 ## ☀️ FIRST THING IN THE MORNING — 2026.05.06
 
-### Pending — Multiplexer Phase 6a Pass 1 Fitness ratification gate
+### ✅ Closed — Multiplexer Phase 6a Pass 1 Fitness ratification gate (2026-05-06 AM)
 
-- [ ] [LUPIN] **Resume at the Pass 1 Fitness user-decision gate** for Multiplexer Phase 6a (Jobs Surface). Findings landed end-of-day 2026-05-05 in `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/94-phase6a-review-findings.md` § "Pass 1 Fitness Findings". **17 findings** (0 Block / 10 Major / 7 Minor / 0 Layer 3 design concerns). Cluster: COMPLETENESS (5), TESTABILITY (4), AMBIGUITY (3), DECISION TRACEABILITY (1), RISK SURFACE (1), ORDERING (1).
+All 17 findings ratified via cosa-voice walkthrough (Session `5ced4868`, Mr. Radio persona): 7 Minors walked individually after the batch yes/no was rejected; 10 Majors walked individually. Apply pass complete: design doc `08-phase6a-jobs-surface-design.md` updated for all 17; Risks table + AC table updated; "Pass 1 Fitness — closed" subsection appended to `94-phase6a-review-findings.md`.
+
+**F15 ratification produced a global side-effect**: 100% c8 coverage mandate for multiplexer TypeScript codebase. See project `CLAUDE.md` "100% COVERAGE MANDATE" subsection + `feedback_100pct_coverage_multiplexer.md` auto-memory.
+
+### ✅ Closed — Phase 4 + Phase 5 coverage backfill (2026-05-06 PM)
+
+**ALL 26 multiplexer TS files at 100%** lines + branches + functions + statements per `c8 --100`. **400 unit tests passing** (was 325 baseline; +75 new tests across the two backfill passes).
+
+**Files closed in PM session (10)**: `auth/AuthManager.ts`, `stores/ActionRequiredStore.ts`, `render/html.ts`, `shared/StorageService.ts`, `stores/SenderStore.ts`, `transport/QueueTransport.ts`, `stores/AudioStore.ts`, `stores/NotificationStore.ts`, `shared/EventBus.ts`, `api/ApiClient.ts`.
+
+**Per-file diff summary** lives at `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/91-resume-here-coverage-backfill.md` § "Files closed in PM session".
+
+**Pattern playbook** validated across both passes:
+- File-header phantom + function-declaration phantom + class closing-brace phantom — `/* c8 ignore next */` with named artifact reason
+- Production-default fallbacks (`opts.x ?? defaultX()`) — `/* c8 ignore next */ // production-default fallback: <reason>` (tests always inject; the `??` arm fires only in production browsers)
+- Defensive guards with provable invariants — `/* c8 ignore next */ // defensive: <invariant>` naming what makes the branch unreachable
+- Tagged-template literal phantoms — `/* c8 ignore start/stop */` wrapping the template block with explicit reason
+- Real behavioral branches — add targeted unit tests; never c8-ignore
+
+**One real bug surfaced + fixed during backfill**: `AuthManager.ChainMutexLockManager.request()` line 65 — the `tail === prev.then(() => next)` comparison created a NEW promise on the right side each time, so the cleanup `if` branch was always false → memory leak (entries never removed). Fixed by assigning the chained promise to a local `chained` variable and using that for both `set()` and the comparison.
+
+**Phase 6a code-writing cycle is unblocked from the coverage side.** Pass 2 Adversarial ratification remains as the documentation gate.
+
+### Pending — Multiplexer Phase 6a Pass 2 Adversarial pass (next gate after backfill OR in parallel with backfill)
+
+- [ ] [LUPIN] **Run Pass 2 Adversarial Agent** against the Pass-1-resolved design state in `08-phase6a-jobs-surface-design.md`. Per Q11 amendment + sequential PIP: clean-context Explore agent sees the Pass-1-resolved doc (NOT the original draft). Findings land in `94-phase6a-review-findings.md` § "Pass 2 Adversarial Findings". After ratification + apply + convergence re-grep, the design doc is implementation-ready. Plan-mode cycle then opens to plan Phase 6a code execution.
+
+### Reference — Pass 1 Fitness Findings (closed 2026-05-06)
 
   **Recommended ratification path** (mirrors REUSE-step pattern that worked well 2026-05-05):
   1. Mechanical batch yes/no for the 7 Minors (F1, F2, F9, F10, F11, F12, F15) via `mcp__cosa-voice__ask_yes_no`

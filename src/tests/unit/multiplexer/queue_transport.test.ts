@@ -384,6 +384,49 @@ test("network_offline → CSM enters offline; wsChannel is stopped + cleared", a
   assert.equal(MockWebSocket.instances[0]!.closed, true);
 });
 
+test("transport.state before start() returns the pre-CSM default 'connecting'", () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const t = createQueueTransport({
+    authManager   : makeMockAuth(),
+    bus,
+    baseUrl       : "ws://localhost:7999",
+    WebSocketCtor : Ctor,
+  });
+  // Before start(), `this.csm` is null — `state` getter falls back to
+  // `?? "connecting"` (covers QueueTransport.ts line ~103).
+  assert.equal(t.state, "connecting");
+});
+
+test("onMessage drops non-object/null envelopes silently (defensive)", async () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const events: { type: string }[] = [];
+  bus.on<unknown>("connect", ( e ) => events.push({ type: e.type }));
+  const t = createQueueTransport({
+    authManager   : makeMockAuth(),
+    bus,
+    baseUrl       : "",
+    WebSocketCtor : Ctor,
+  });
+  t.start("wise_penguin");
+  MockWebSocket.instances[0]!.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));
+
+  // Wire-level: WSChannel only forwards parsed objects to onMessage, but the
+  // BaseTransportImpl onMessage is itself defensive against null / non-object
+  // envelopes. We exercise the guard by sending JSON literals that parse to
+  // primitives — null, a number, a string. These reach onMessage as their
+  // parsed form (null / number / string) and must NOT throw or emit.
+  const before = events.length;
+  MockWebSocket.instances[0]!.receive("null");          // parses to null
+  MockWebSocket.instances[0]!.receive("42");            // parses to number
+  MockWebSocket.instances[0]!.receive("\"hello\"");     // parses to string
+  // None of those should produce any new emissions.
+  assert.equal(events.length, before, "primitive envelopes were dropped without emission");
+  assert.equal(t.state, "connected", "transport stayed alive");
+});
+
 test("backoff timer eventually fires reconnecting (mock.timers)", async () => {
   const { mock } = await import("node:test");
   mock.timers.enable({ apis: [ "setTimeout" ] });

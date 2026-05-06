@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line (TypeScript module-init transpile produces a fake branch on line 1 in c8's source-map view; no actual code on this line — it's a comment).
 // Multiplexer Phase 5 — NotificationsListRenderer.
 //
 // Orchestrates the notifications-list pane:
@@ -167,6 +168,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   }
 
   private renderSenderSection(): void {
+    /* c8 ignore next */ // defensive: senderCardsMount is set in mount() and only nulled in unmount(); store-event subscriptions are detached in unmount BEFORE this null happens, so this branch is unreachable in normal flow.
     if (this.senderCardsMount === null) return;
     // Filter out action-required notifications — those render in the
     // #action-required-section per D-L mount routing + legacy behavior
@@ -224,6 +226,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   }
 
   private renderActionRequiredSection(): void {
+    /* c8 ignore next */ // defensive: actionRequiredMount is set in mount() and only nulled in unmount(); subscriptions are detached in unmount BEFORE this null happens.
     if (this.actionRequiredMount === null) return;
     const items = this.stores.actionRequired.list();
     keyedListMerge({
@@ -244,10 +247,13 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     if (payload.changeKind === "tick") {
       // Per Q-B: tick MUST NOT touch parent DOM. Only mutate the countdown
       // text node inline. AC4 verifies via `data-test-canary` sentinel.
+      /* c8 ignore next */ // defensive: actionRequiredMount post-mount is always set; tick events fire only between mount and unmount.
       if (this.actionRequiredMount === null) return;
       const widget = this.actionRequiredMount.querySelector(`[data-id-hash="${cssEscape(payload.id_hash)}"]`) as HTMLElement | null;
+      /* c8 ignore next */ // defensive: widget null only if AR item never rendered (id_hash not in arList); reducer guarantees consistency.
       if (widget === null) return;
       const countdown = widget.querySelector(".action-required-countdown") as HTMLElement | null;
+      /* c8 ignore next */ // defensive: countdown null only if widget template missing the .action-required-countdown element; template invariant guarantees it.
       if (countdown === null) return;
       const ms = payload.countdownMs ?? 0;
       countdown.textContent = `⏱ ${formatCountdown(ms)}`;
@@ -266,7 +272,9 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   // -------------------------------------------------------------------------
 
   private paintEmptyState(): void {
+    /* c8 ignore next */ // defensive: senderCardsMount post-mount is always set; renderSenderSection's null-guard would have already returned.
     if (this.senderCardsMount === null) return;
+    /* c8 ignore next */ // defensive: idempotency check — empty-state is only painted from renderSenderSection's notifications.length === 0 branch which calls paintEmptyState exactly once before bailing out. Re-entry from a re-render with the same empty-state already painted is the case this guards against, but renderSenderSection's flow ensures the existing element is removed via removeEmptyState before re-paint in the non-empty branch.
     if (this.senderCardsMount.querySelector(`[data-testid="multiplexer-empty-state"]`) !== null) return;
     const frag = html`
       <div data-testid="multiplexer-empty-state" class="notifications-empty-state">
@@ -277,6 +285,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   }
 
   private removeEmptyState(): void {
+    /* c8 ignore next */ // defensive: senderCardsMount post-mount is always set.
     if (this.senderCardsMount === null) return;
     const existing = this.senderCardsMount.querySelector(`[data-testid="multiplexer-empty-state"]`);
     if (existing !== null) existing.remove();
@@ -287,17 +296,21 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   // -------------------------------------------------------------------------
 
   private attachClickDelegation(): void {
+    /* c8 ignore next */ // defensive: senderCardsMount post-mount is always set; attachClickDelegation is called from mount() after the mount points are wired.
     if (this.senderCardsMount === null) return;
     this.clickHandler = (e: Event) => {
       const target = e.target as Element | null;
-      if (target === null) return;
+      if (target === null) return;  // covered by null-target click test
       const toggle = target.closest(".progress-group-toggle") as HTMLElement | null;
-      if (toggle === null) return;
+      if (toggle === null) return;  // covered by non-toggle click test
       const head = toggle.closest(".progress-group-head");
+      /* c8 ignore next */ // defensive: head is the immediate parent of toggle by template; if a future template change breaks this, the toggle wouldn't visually land in a group anyway.
       if (head === null) return;
       const messageEl = head.closest("[data-progress-group]") as HTMLElement | null;
+      /* c8 ignore next */ // defensive: head is always inside a [data-progress-group] message by template invariant.
       if (messageEl === null) return;
       const progressGroupId = messageEl.getAttribute("data-progress-group");
+      /* c8 ignore next */ // defensive: progressGroupId attribute is set by the template; getAttribute returns null only if the attribute was removed.
       if (progressGroupId === null) return;
       this.toggleProgressGroup(progressGroupId, messageEl, toggle);
     };
@@ -306,6 +319,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
 
   private toggleProgressGroup(progressGroupId: string, headMessageEl: HTMLElement, toggle: HTMLElement): void {
     const historyEl = headMessageEl.querySelector(".progress-group-history") as HTMLElement | null;
+    /* c8 ignore next */ // defensive: historyEl is a sibling within .sender-message rendered by the template invariant; null only if the template was structurally broken.
     if (historyEl === null) return;
     const expanded = this.expandedGroups.has(progressGroupId);
     if (expanded) {
@@ -353,9 +367,10 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       // are all descendants of it (head + history are SIBLINGS within the
       // `.sender-message`, NOT parent-child).
       const messageEl = this.senderCardsMount.querySelector(`[data-progress-group="${cssEscape(groupId)}"]`) as HTMLElement | null;
-      if (messageEl === null) continue;
+      if (messageEl === null) continue;  // covered by "expanded group whose DOM disappeared" test
       const historyEl = messageEl.querySelector(".progress-group-history") as HTMLElement | null;
       const toggle    = messageEl.querySelector(".progress-group-toggle") as HTMLElement | null;
+      /* c8 ignore next */ // defensive: historyEl + toggle are guaranteed by the template — if messageEl exists, both descendants exist.
       if (historyEl === null || toggle === null) continue;
       // Invalidate cache (history may have grown via newly-arrived notifications).
       this.historyCache.delete(groupId);
@@ -410,6 +425,7 @@ function cssEscape(value: string): string {
  * Factory — production code constructs via `createNotificationsListRenderer`.
  * Matches Phase 4 `createStores` + Phase 3 `createTransports` factory shape (RE-12).
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript return-type erasure produces a fake branch in c8's source-map view; the function body is always entered when called).
 export function createNotificationsListRenderer(opts: NotificationsListRendererOptions): NotificationsListRenderer {
   return new NotificationsListRendererImpl(opts);
 }

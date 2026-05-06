@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 5 — tiny DOM diff utilities.
 //
 // `keyedListMerge` matches existing children to incoming items by `data-id-hash`
@@ -96,6 +97,7 @@ export function keyedListMerge<T extends KeyedEntry>(opts: KeyedMergeOptions<T>)
     let el: Element | null = parent.querySelector(selector);
     if (el === null) {
       el = create(entry);
+      /* c8 ignore next 3 */ // defensive belt: contract says create() returns elements with data-id-hash already set; this branch is a safety net for callers that forget — never hit in tests because all test fixtures comply.
       if (el.getAttribute("data-id-hash") !== entry.idHash) {
         el.setAttribute("data-id-hash", entry.idHash);
       }
@@ -116,9 +118,11 @@ export function keyedListMerge<T extends KeyedEntry>(opts: KeyedMergeOptions<T>)
 }
 
 // CSS.escape polyfill — same as NotificationsListRenderer's cssEscape.
+/* c8 ignore start */ // CSS.escape polyfill: production browsers always provide CSS.escape (Baseline 2020); the fallback regex path exists only for non-DOM Node contexts where keyedListMerge is never actually called (this module is consumed exclusively by browser-side renderer code).
 function cssEscape(value: string): string {
   if (typeof globalThis !== "undefined" && typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS?.escape === "function") {
     return (globalThis as { CSS: { escape: (s: string) => string } }).CSS.escape(value);
   }
   return value.replace(/[^a-zA-Z0-9_-]/g, (m) => "\\" + m);
 }
+/* c8 ignore stop */

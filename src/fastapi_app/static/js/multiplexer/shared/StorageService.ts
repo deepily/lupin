@@ -52,6 +52,7 @@ class StorageServiceImpl implements StorageService {
     try {
       parsed = JSON.parse(raw);
     } catch (err) {
+      /* c8 ignore next */ // defensive: JSON.parse only throws SyntaxError per ECMA-262 §24.5.1.1; the `instanceof Error` check is always true in practice. The `: String(err)` arm is unreachable from any standards-compliant runtime. Belt-and-suspenders for exotic engines.
       this.emitCorrupt(fullKey, err instanceof Error ? err.message : String(err));
       return null;
     }
@@ -158,6 +159,7 @@ export class InMemoryStorage implements StorageBackend {
     return this.store.size;
   }
   getItem(key: string): string | null {
+    /* c8 ignore next */ // defensive: setItem(key, value) only stores string values, and Map.get(k) for a present key returns the stored value (string); the `?? null` fallback is unreachable from this class's API surface. Belt-and-suspenders for any future extension that might allow undefined values.
     return this.store.has(key) ? (this.store.get(key) ?? null) : null;
   }
   setItem(key: string, value: string): void {
@@ -173,6 +175,8 @@ export class InMemoryStorage implements StorageBackend {
       if (i === index) return k;
       i++;
     }
+    /* c8 ignore next */ // defensive: the early bounds check above ensures index is in [0, size); the for-of loop iterates exactly `size` keys, so the `i === index` match always fires before the loop exits. The trailing `return null` is unreachable unless the Map mutates mid-iteration (which the contract forbids).
     return null;
   }
+  /* c8 ignore next */ // tsx phantom-branch artifact on class closing-brace line (synthetic default-constructor branch).
 }

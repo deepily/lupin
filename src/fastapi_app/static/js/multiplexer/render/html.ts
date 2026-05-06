@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 5 — `html` tagged-template helper.
 //
 // Returns a `DocumentFragment` (NOT a string) so the string-concat seam where
@@ -44,6 +45,7 @@ interface WindowWithTrustedTypes {
 let TT_POLICY: TrustedTypesPolicy | null = null;
 
 function getTrustedTypes(): TrustedTypesAPI | undefined {
+  /* c8 ignore next */ // defensive: globalThis is part of the ECMAScript standard since ES2020 and is always defined in modern V8 / Node / browsers; the truthy "undefined" arm is a belt-and-suspenders guard against exotic embedded runtimes.
   if (typeof globalThis === "undefined") return undefined;
   return (globalThis as unknown as WindowWithTrustedTypes).trustedTypes;
 }
@@ -144,6 +146,7 @@ function assemble(strings: TemplateStringsArray, values: readonly Value[]): Asse
   let nextSkipQuote = false;
 
   for (let i = 0; i < strings.length; i++) {
+    /* c8 ignore next */ // defensive: TemplateStringsArray indexing within length always returns a string; the `?? ""` fallback is unreachable from tagged-template call-site syntax. Belt-and-suspenders for sparse-array exotic inputs.
     let segment = strings[i] ?? "";
     if (nextSkipQuote) {
       segment = segment.replace(/^["']/, "");
@@ -177,6 +180,7 @@ function assemble(strings: TemplateStringsArray, values: readonly Value[]): Asse
 function applyAttributes(fragment: DocumentFragment, attrs: ReadonlyArray<AttrPlacement>): void {
   for (const { marker, attrName, value } of attrs) {
     const el = fragment.querySelector(`[${marker}]`);
+    /* c8 ignore next */ // defensive: `assemble()` emits the marker attribute into `combined` immediately before innerHTML parse; the marker is always present on a parsed element. The null arm fires only if a `raw()` payload broke the surrounding HTML structure such that the marker dropped — defensive isolation, never observed in practice.
     if (el === null) continue;
     el.removeAttribute(marker);
     if (value === null || value === undefined || value === false) continue;
@@ -206,6 +210,7 @@ function applyChildren(fragment: DocumentFragment, children: ReadonlyMap<string,
     node = walker.nextNode();
   }
   for (const c of targets) {
+    /* c8 ignore next */ // defensive: `targets` is built above from comments whose `nodeValue !== null && startsWith(prefix)` — every entry has a non-null nodeValue. The `?? ""` fallback is unreachable. Belt-and-suspenders for type-narrowing through the loop.
     const value = children.get(c.nodeValue ?? "");
     if (value === undefined) {
       c.remove();
@@ -232,6 +237,7 @@ function applyChildren(fragment: DocumentFragment, children: ReadonlyMap<string,
  *   - `raw(s)` opt-out flows through (sanitization is caller's responsibility)
  *   - When `window.trustedTypes` exists, the lupin-html policy gates the parse
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function html(strings: TemplateStringsArray, ...values: Value[]): DocumentFragment {
   ensurePolicy();
   KNOWN_TEMPLATES.add(strings);

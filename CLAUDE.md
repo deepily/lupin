@@ -281,6 +281,53 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 
 :7999 is an optimization for truly fast, truly read-only work. If you cannot prove a test meets all three :7999 criteria, schedule it on :8000.
 
+## 100% COVERAGE MANDATE — MULTIPLEXER TYPESCRIPT
+
+**MANDATE** (ratified 2026-05-06 during Phase 6a Pass 1 Fitness ratification): **100% c8 coverage (lines AND branches AND functions, via `c8 --100`) is a hard gate for the Lupin multiplexer TypeScript codebase.**
+
+### Scope
+
+**In scope** — every file under:
+- `src/fastapi_app/static/js/multiplexer/` (render, stores, transport, shared)
+- `src/tests/unit/multiplexer/` (test files themselves are not coverage-measured, but they exist to satisfy the floor on the source files)
+
+**Out of scope** — this mandate does NOT extend to:
+- Python code (`src/cosa/`, `src/fastapi_app/` Python, `src/scripts/`)
+- Non-multiplexer frontend JS/TS (legacy `static/js/` outside `multiplexer/`)
+- Anything in `src/lupin-mobile/`, `src/lupin-plugin-firefox/`, `src/cosa/`
+
+The user explicitly ratified Option A (multiplexer-only) via `ask_multiple_choice` on 2026-05-06. Options B (all-frontend-TS) and C (all-Lupin Python+TS) were rejected at that gate.
+
+### Rule
+
+| | Value |
+|---|---|
+| Coverage tool | `c8` (V8 coverage) |
+| Threshold | `--100` flag (≥100% lines AND ≥100% branches AND ≥100% functions AND ≥100% statements) |
+| Exception mechanism | `c8 ignore next` / `c8 ignore start...stop` BUT requires same-line comment with explicit reason |
+| Acceptable use case for `c8 ignore` | Genuinely-unreachable defensive branches (e.g., TypeScript-narrowed `unreachable!()` paths, type-guard fallbacks for `never` types) |
+| Prohibited use case for `c8 ignore` | "I didn't have time to write the test" — fix the test, not the gate |
+
+### Phase 4 + Phase 5 backfill obligation
+
+The 90% floors used in Phase 4 + Phase 5 ACs are **retroactively bumped to 100%**. Phase 4 + Phase 5 backfill to the 100% bar is a **prerequisite of Phase 6a implementation** — it must land before any Phase 6a code is written. See `TODO.md` entry "Phase 4 + Phase 5 c8 coverage backfill to 100%" for the schedulable task.
+
+### How this mandate appears in plans
+
+Every new plan AC that measures unit-test coverage on multiplexer TS files must read **"100% lines/branches/functions via `c8 --100`"** — never "≥90%", never "≥95%". When applying Pass 1 / Pass 2 fixes to multiplexer design docs, sweep AC6-equivalents and bump 90 → 100.
+
+### Precedence
+
+This mandate takes precedence over the older Phase 4 A1 contract floor (≥90%); the same-line-comment-required rule for `c8 ignore` from A1 is preserved (only the floor moves from 90 → 100).
+
+### Where to look
+
+- **Auto-memory**: `~/.claude/projects/.../memory/feedback_100pct_coverage_multiplexer.md` (durable record of the directive + scope decision)
+- **Origin design doc**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/08-phase6a-jobs-surface-design.md` AC6 row (first plan AC under the new mandate)
+- **Findings doc**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/94-phase6a-review-findings.md` "Pass 1 Fitness — closed 2026-05-06" subsection
+
+---
+
 ## TESTING
 
 Lupin uses a three-tier testing strategy for comprehensive validation. See §TESTING VENUES above for the :7999 / :8000 routing rules referenced per-suite below.

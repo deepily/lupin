@@ -489,3 +489,111 @@ test("D-B normalize: time_display round-trips through the store", () => {
   emitNotification(bus, { id_hash: "n1", message: "x", time_display: "23:10 EST" });
   assert.equal(store.list()[0]!.time_display, "23:10 EST");
 });
+
+// ---------------------------------------------------------------------------
+// Coverage backfill — additional defensive branches
+// ---------------------------------------------------------------------------
+
+test("normalize: title field round-trips through the store", () => {
+  // Exercises the truthy arm of `if (raw.title !== undefined)` in normalize().
+  const { bus, store } = setupStore();
+  emitNotification(bus, { id_hash: "n1", message: "x", title: "Hello there" });
+  assert.equal(store.list()[0]!.title, "Hello there");
+});
+
+test("normalize: notification with non-string `message` is rejected", () => {
+  // Exercises the `typeof raw.message !== \"string\"` arm in normalize().
+  const { bus, store } = setupStore();
+  bus.emit({
+    type    : "notification_queue_update",
+    payload : { notification: { id_hash: "n1", message: 42 as unknown as string } },
+    source  : "test",
+    ts      : 0,
+  });
+  assert.equal(store.list().length, 0);
+});
+
+test("normalize: invalid timestamp string yields null (notification dropped)", () => {
+  // Exercises the `Number.isNaN(ts)` arm in normalize().
+  const { bus, store } = setupStore();
+  emitNotification(bus, { id_hash: "n1", message: "x", timestamp: "not-a-date" });
+  assert.equal(store.list().length, 0);
+});
+
+test("notification_responded with only `notification_id` (no `id_hash`) — falls back via `??`", () => {
+  // Exercises the second arm of `e.payload.id_hash ?? e.payload.notification_id`
+  // in onResponded.
+  const { bus, store } = setupStore();
+  emitNotification(bus, { id_hash: "n1", message: "ping" });
+  bus.emit({
+    type    : "notification_responded",
+    payload : { notification_id: "n1" },
+    source  : "test",
+    ts      : 0,
+  });
+  assert.equal(store.list()[0]!.responded, true);
+});
+
+test("notification_responded with neither id_hash nor notification_id is dropped silently", () => {
+  // Exercises the truthy arm of `if (!id) return;` in onResponded.
+  const { bus, store } = setupStore();
+  emitNotification(bus, { id_hash: "n1", message: "ping" });
+  bus.emit({
+    type    : "notification_responded",
+    payload : {},
+    source  : "test",
+    ts      : 0,
+  });
+  assert.equal(store.list()[0]!.responded, undefined, "no transition without an id");
+});
+
+test("notification_responded for an already-responded notification is a no-op", () => {
+  // Exercises the truthy arm of `if (n.responded) return;` in onResponded.
+  const { bus, store } = setupStore();
+  emitNotification(bus, { id_hash: "n1", message: "ping" });
+  bus.emit({ type: "notification_responded", payload: { id_hash: "n1" }, source: "test", ts: 0 });
+  assert.equal(store.list()[0]!.responded, true);
+  // Second response — should be a no-op (no extra emit, state unchanged).
+  bus.emit({ type: "notification_responded", payload: { id_hash: "n1" }, source: "test", ts: 0 });
+  assert.equal(store.list()[0]!.responded, true);
+});
+
+test("notification_expired with only `notification_id` — falls back via `??`", () => {
+  // Exercises the `notification_id` arm of `e.payload.id_hash ?? e.payload.notification_id`
+  // in onExpired.
+  const { bus, store } = setupStore();
+  emitNotification(bus, { id_hash: "n1", message: "ping" });
+  bus.emit({
+    type    : "notification_expired",
+    payload : { notification_id: "n1" },
+    source  : "test",
+    ts      : 0,
+  });
+  assert.equal(store.list().length, 0, "n1 moved to history");
+});
+
+test("notification_expired with neither id is dropped silently", () => {
+  const { bus, store } = setupStore();
+  emitNotification(bus, { id_hash: "n1", message: "ping" });
+  bus.emit({
+    type    : "notification_expired",
+    payload : {},
+    source  : "test",
+    ts      : 0,
+  });
+  assert.equal(store.list().length, 1, "no expiry without an id");
+});
+
+test("notification_expired for unknown id is silently dropped (idempotency guard)", () => {
+  // Exercises the truthy arm of `if (!this.byId.has(idHash)) return;` in
+  // expireToHistory().
+  const { bus, store } = setupStore();
+  emitNotification(bus, { id_hash: "n1", message: "ping" });
+  bus.emit({
+    type    : "notification_expired",
+    payload : { id_hash: "unknown-id" },
+    source  : "test",
+    ts      : 0,
+  });
+  assert.equal(store.list().length, 1, "n1 untouched");
+});

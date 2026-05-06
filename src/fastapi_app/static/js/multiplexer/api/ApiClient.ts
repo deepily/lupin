@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 2 — ApiClient.
 // Authenticated fetch wrapper with `AbortSignal.any` for combined timeout +
 // manual abort, base-URL parametrization, and 401 → AuthManager.invalidate()
@@ -52,6 +53,7 @@ class ApiClientImpl implements ApiClient {
     this.baseUrl          = opts.baseUrl.replace(/\/+$/, "");
     this.defaultTimeoutMs = opts.defaultTimeoutMs;
     this.authManager      = opts.authManager;
+    /* c8 ignore next */ // production-default fallback: globalThis.fetch is the runtime browser fetch; tests always inject a recordingFetcher via opts.fetcher.
     this.fetcher          = opts.fetcher ?? globalThis.fetch.bind(globalThis);
   }
 
@@ -155,6 +157,7 @@ class ApiClientImpl implements ApiClient {
   }
 }
 
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createApiClient(opts: ApiClientOptions): ApiClient {
   return new ApiClientImpl(opts);
 }

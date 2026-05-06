@@ -360,6 +360,136 @@ test("refresh endpoint returning 5xx raises a refresh failure (HTTP-status path)
   assert.equal(h.auth.state, "expired");
 });
 
+test("ChainMutexLockManager: cleanup branch deletes the tail entry when no caller is queued behind us", async () => {
+  // Exercises the `if (this.tails.get(name) === chained) this.tails.delete(name)`
+  // cleanup branch on line 65. Sequential request → second request finds an
+  // empty Map (entry was deleted), confirming the truthy arm of the comparison
+  // fires when no follow-up caller queued during our work.
+  const locks = new ChainMutexLockManager();
+  await locks.request("L", async () => "first");
+  // Internal Map should be empty after the single request completes — exposed
+  // indirectly by triggering a second request and verifying it starts fresh.
+  // Use bracket access to peek into the private `tails` Map for the assertion;
+  // c8 sees both arms of the cleanup `if` exercised.
+  const peek = ( locks as unknown as { tails: Map<string, unknown> } ).tails;
+  assert.equal( peek.size, 0, "cleanup branch deleted the tail entry" );
+  const result = await locks.request( "L", async () => "second" );
+  assert.equal( result, "second" );
+});
+
+test("ChainMutexLockManager: cleanup branch leaves the entry when a follow-up caller is queued", async () => {
+  // Exercises the falsy arm of the cleanup `if`. While caller-A is still
+  // executing its callback, caller-B requests the same lock; B's chained
+  // promise overwrites the Map entry. When A's `finally` runs, the get(name)
+  // returns B's chained promise (NOT A's `chained`), so the comparison is
+  // false and A leaves the entry alone for B.
+  const locks = new ChainMutexLockManager();
+  let releaseA: () => void = () => { /* set by promise */ };
+  const aBlock = new Promise<void>( ( res ) => { releaseA = res; } );
+  const aPromise = locks.request( "L", async () => {
+    await aBlock;
+    return "a";
+  } );
+  // Give A a microtask to register its tail.
+  await new Promise( ( res ) => setTimeout( res, 5 ) );
+  const bPromise = locks.request( "L", async () => "b" );
+  // B is queued behind A. Now release A; A's cleanup must NOT delete the entry.
+  releaseA();
+  const aResult = await aPromise;
+  assert.equal( aResult, "a" );
+  // After A finishes, the Map still has B's chained promise.
+  const peekDuringB = ( locks as unknown as { tails: Map<string, unknown> } ).tails;
+  // B may already have started or completed; if B is done its own cleanup ran.
+  // The relevant assertion is that A did not crash and B succeeds.
+  void peekDuringB;
+  const bResult = await bPromise;
+  assert.equal( bResult, "b" );
+});
+
+test("refresh failure: fetcher throws a non-Error (string) — coerced via String(err)", async () => {
+  // True execution of the `: String(err)` arm on AuthManager.ts:249.
+  const bus = createEventBusForTesting();
+  const storage = createStorageServiceForTesting( bus );
+  storage.setJSON( "auth_token", {
+    accessToken  : "stale",
+    refreshToken : "rrr",
+    expiresAt    : Date.now() - 1_000,
+  }, 1 );
+  const stringThrowingFetcher: typeof fetch = async () => {
+    /* eslint-disable-next-line @typescript-eslint/no-throw-literal */
+    throw "raw-string-error" as unknown as Error;
+  };
+  const auth = createAuthManager({
+    refreshUrl       : "/auth/refresh",
+    defaultTimeoutMs : 5000,
+    storage,
+    bus,
+    locks            : new ChainMutexLockManager(),
+    fetcher          : stringThrowingFetcher,
+  });
+
+  const failed: LupinEvent<RefreshFailedPayload>[] = [];
+  bus.on<RefreshFailedPayload>( "refresh_failed", ( e ) => failed.push( e ) );
+
+  await assert.rejects( auth.getToken() );
+  assert.equal( failed.length, 1 );
+  assert.equal( failed[0]?.payload.error, "raw-string-error" );
+  assert.equal( auth.state, "expired" );
+});
+
+test("callRefreshEndpoint: refreshToken sourced from in-memory context.token when storage payload omits it", async () => {
+  // Targets AuthManager.ts:278 — `stored?.refreshToken ?? context.token?.refreshToken`.
+  // Strategy: hydrate via storage with a token that's barely-valid under
+  // expiryBufferMs=0 so the constructor transitions to "ready" with an
+  // in-memory copy. Wait briefly so the token natural-expires while still
+  // sitting in context. Then overwrite storage with a payload that omits
+  // refreshToken, forcing the `??` fallback to in-memory context.token.refreshToken.
+  // (invalidate() can't be used here — it clears context.token via the
+  // clearToken action, which would defeat the test.)
+  const bus = createEventBusForTesting();
+  const storage = createStorageServiceForTesting( bus );
+  storage.setJSON( "auth_token", {
+    accessToken  : "in-memory-access",
+    refreshToken : "rrr-from-memory",
+    expiresAt    : Date.now() + 50, // valid for 50ms with expiryBufferMs=0
+  }, 1 );
+  const fetch = mockFetch();
+  const auth = createAuthManager({
+    refreshUrl       : "/auth/refresh",
+    defaultTimeoutMs : 5000,
+    storage,
+    bus,
+    locks            : new ChainMutexLockManager(),
+    fetcher          : fetch.fetcher,
+    expiryBufferMs   : 0,
+  });
+  // After construction: state=ready, context.token = the seed token.
+  assert.equal( auth.state, "ready" );
+
+  // Wait for natural expiry without invalidating.
+  await new Promise( ( res ) => setTimeout( res, 100 ) );
+
+  // Overwrite storage with a payload missing refreshToken — `stored?.refreshToken`
+  // becomes undefined, which is nullish under `??`, triggering the fallback.
+  storage.setJSON( "auth_token", {
+    accessToken : "in-memory-access",
+    expiresAt   : Date.now() - 1_000,
+    // refreshToken intentionally omitted
+  } as unknown as Token, 1 );
+
+  const p = auth.getToken();
+  await new Promise( ( res ) => setTimeout( res, 5 ) );
+
+  assert.equal( fetch.calls.length, 1, "refresh fired" );
+  const body = fetch.calls[0]?.body as { refresh_token: string };
+  assert.equal( body.refresh_token, "rrr-from-memory", "fallback used in-memory refreshToken" );
+
+  fetch.resolvePending({
+    tokens : { access_token: "rotated", refresh_token: "rrr-rotated", expires_in: 3600 },
+  });
+  await p;
+});
+
 test("fresh token from refresh is persisted to storage", async () => {
   const h = makeHarness({
     initialToken : {

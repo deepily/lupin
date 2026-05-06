@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 2 — EventBus singleton.
 // EventTarget-backed pub/sub with per-listener error isolation.
 // All cross-module communication routes through this bus (per Phase 1 ESLint
@@ -98,6 +99,7 @@ export const eventBus: EventBus = new EventBusImpl();
 // Test-only factory. Production code MUST use the singleton above. Exposed so
 // unit tests can build isolated buses without singleton state leaking between
 // test cases.
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createEventBusForTesting(): EventBus {
   return new EventBusImpl();
 }

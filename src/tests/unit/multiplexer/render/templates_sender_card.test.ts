@@ -91,3 +91,52 @@ test("senderCard: unread_count > 0 renders .sender-new-count badge with the numb
   assert.notEqual(badge, null);
   assert.equal(badge!.textContent, "7");
 });
+
+// ---------------------------------------------------------------------------
+// Branch-coverage close-out tests (added 2026-05-06 for the 100% c8 mandate).
+// ---------------------------------------------------------------------------
+
+test("senderCard: unread_count === 0 renders no .sender-new-count badge", () => {
+  const card = renderSenderCard(makeSender({ unread_count: 0 }), [], { appTimezone: "UTC" });
+  assert.equal(card.querySelector(".sender-new-count"), null);
+});
+
+test("senderCard: borrowed persona gets the 'borrowed' class on .persona-badge", () => {
+  const card = renderSenderCard(
+    makeSender({ voice_persona: makePersona({ borrowed: true }) }),
+    [],
+    { appTimezone: "UTC" },
+  );
+  const badge = card.querySelector(".persona-badge");
+  assert.notEqual(badge, null);
+  assert.ok(badge!.classList.contains("borrowed"));
+});
+
+test("senderCard: non-borrowed persona omits the 'borrowed' class", () => {
+  const card = renderSenderCard(
+    makeSender({ voice_persona: makePersona({ borrowed: false }) }),
+    [],
+    { appTimezone: "UTC" },
+  );
+  const badge = card.querySelector(".persona-badge");
+  assert.notEqual(badge, null);
+  assert.ok(!badge!.classList.contains("borrowed"));
+});
+
+test("senderCard: last_active_ts === 0 renders empty .sender-last-activity", () => {
+  const card = renderSenderCard(makeSender({ last_active_ts: 0 }), [], { appTimezone: "UTC" });
+  const lastEl = card.querySelector(".sender-last-activity");
+  assert.notEqual(lastEl, null);
+  assert.equal(lastEl!.textContent, "");
+});
+
+test("senderCard: empty display_name falls back to sender_id in header", () => {
+  const card = renderSenderCard(
+    makeSender({ display_name: "", sender_id: "sess_99" }),
+    [],
+    { appTimezone: "UTC" },
+  );
+  const nameEl = card.querySelector(".sender-display-name");
+  assert.notEqual(nameEl, null);
+  assert.equal(nameEl!.textContent, "sess_99");
+});

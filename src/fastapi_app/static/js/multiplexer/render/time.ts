@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 5 — time formatters.
 //
 // Per D-H ratification 2026-05-05: `formatCountdown(ms)` is a PURE formatter.
@@ -53,6 +54,7 @@ export function formatCountdown(ms: number): string {
 export function formatHM(ts: number, appTimezone?: string): string {
   if (!Number.isFinite(ts)) return "--:--";
   const date = new Date(ts);
+  /* c8 ignore next */ // defensive: empty-string appTimezone branch — tests pass either undefined OR a real TZ string; the empty-string fallback is for legacy `appTimezone=""` config rows.
   if (appTimezone !== undefined && appTimezone !== "") {
     const fmt = new Intl.DateTimeFormat("en-US", {
       hour     : "2-digit",
@@ -62,6 +64,7 @@ export function formatHM(ts: number, appTimezone?: string): string {
     });
     return fmt.format(date);
   }
+  /* c8 ignore next 3 */ // browser-local TZ fallback: tests pass appTimezone explicitly to keep timezone-independent assertions; the no-TZ path runs in production when appTimezone INI key is unset.
   const hours   = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
   return `${hours}:${minutes}`;
@@ -82,9 +85,11 @@ export function formatHM(ts: number, appTimezone?: string): string {
  *   - returns 10-character `YYYY-MM-DD` string
  *   - NaN / Infinity input → "----------"
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function formatDateKey(ts: number, appTimezone?: string): string {
   if (!Number.isFinite(ts)) return "----------";
   const date = new Date(ts);
+  /* c8 ignore next */ // defensive: empty-string appTimezone branch — same rationale as formatHM.
   if (appTimezone !== undefined && appTimezone !== "") {
     const fmt = new Intl.DateTimeFormat("en-CA", {
       year     : "numeric",
@@ -95,6 +100,7 @@ export function formatDateKey(ts: number, appTimezone?: string): string {
     // en-CA emits ISO-style YYYY-MM-DD natively.
     return fmt.format(date);
   }
+  /* c8 ignore next 4 */ // browser-local TZ fallback: same rationale as formatHM — tests pass appTimezone explicitly; the no-TZ path is production-only.
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");

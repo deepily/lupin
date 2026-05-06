@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line (TypeScript module-init transpile produces a fake branch on line 1 in c8's source-map view; no actual code on this line — it's a comment).
 // Multiplexer Phase 3 — WSChannel.
 // Thin per-endpoint WebSocket wrapper. Transport-only: NO page-lifecycle
 // attachment (`document.visibilitychange` / `online` / `offline` / `pagehide`
@@ -219,13 +220,13 @@ export function createWSChannel(opts: WSChannelOptions): WSChannel {
 
 // CloseEvent global is browser-native but absent in Node (without
 // `--experimental-websocket`). Provide a duck-typed fallback so tests run
-// under tsx --test without polyfilling. Production browsers use the real
-// constructor; coverage of the browser branch is implicit (via every
-// real-browser session) so the if-branch is c8-ignored — covering it
-// from Node would require polyfilling CloseEvent globally, which adds
-// dev-friction without insight.
+// under tsx --test without polyfilling. Both branches are now covered by
+// unit tests: the false branch via the default Node test environment, the
+// true branch via the "makeCloseEvent uses native CloseEvent" test which
+// polyfills globalThis.CloseEvent before invoking the constructor-failure
+// path. Production browsers always hit the true branch.
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript return-type erasure produces a fake branch in c8's source-map view; both real branches inside the body ARE covered — verified via lcov).
 function makeCloseEvent(code: number, reason: string): CloseEvent {
-  /* c8 ignore next 3 */
   if (typeof CloseEvent !== "undefined") {
     return new CloseEvent("close", { code, reason });
   }

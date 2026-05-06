@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 4 — pcm-decoder.
 //
 // Pure(ish) PCM16 → AudioBuffer conversion.
@@ -96,6 +97,7 @@ export function pcm16ToAudioBuffer(
  *   - Error("pcm16: empty blob") if blob.size === 0
  *   - Whatever pcm16ToAudioBuffer throws downstream
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript optional-param + return-type erasure).
 export async function pcm16ToAudioBufferFromBlob(
   blob         : Blob,
   audioContext : AudioContextLike,

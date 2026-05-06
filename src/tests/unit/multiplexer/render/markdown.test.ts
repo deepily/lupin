@@ -108,3 +108,27 @@ test("anchors are post-processed with target='_blank' rel='noopener noreferrer'"
   assert.match(out, /target="_blank"/);
   assert.match(out, /rel="noopener noreferrer"/);
 });
+
+// ---------------------------------------------------------------------------
+// Branch-coverage close-out tests (added 2026-05-06 for the 100% c8 mandate).
+// ---------------------------------------------------------------------------
+
+test("ensureGlobals throws when window.marked is missing", () => {
+  const originalMarked = (globalThis as { marked?: unknown }).marked;
+  (globalThis as { marked?: unknown }).marked = undefined;
+  try {
+    assert.throws(() => renderMarkdown("hello"), /window\.marked.*loaded/);
+  } finally {
+    (globalThis as { marked?: unknown }).marked = originalMarked;
+  }
+});
+
+test("ensureGlobals throws when window.DOMPurify is missing", () => {
+  const originalDOMPurify = (globalThis as { DOMPurify?: unknown }).DOMPurify;
+  (globalThis as { DOMPurify?: unknown }).DOMPurify = undefined;
+  try {
+    assert.throws(() => renderMarkdownInline("hello"), /DOMPurify.*loaded/);
+  } finally {
+    (globalThis as { DOMPurify?: unknown }).DOMPurify = originalDOMPurify;
+  }
+});

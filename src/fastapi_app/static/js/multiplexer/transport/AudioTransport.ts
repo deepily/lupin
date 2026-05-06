@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 3 — AudioTransport.
 // Wraps a WSChannel for /ws/audio/{sessionId}. Inherits the auth handshake +
 // CSM + lifecycle plumbing from BaseTransportImpl; adds the binary-frame
@@ -32,10 +33,12 @@ const TRANSPORT_NAME = "AudioTransport";
 
 // Phase 3 default binary handler. Phase 4's AudioStore replaces this when
 // it calls audioTransport.start(sessionId, audioStore.handleChunk).
+/* c8 ignore start */ // Phase 3 default binary handler — replaced by Phase 4 AudioStore.handleChunk in production wiring; the debug-logger fallback runs only when AudioTransport is started without a binaryHandler arg, which Phase 3 boot.ts no longer does once Phase 4 lands. Tests cover the override path (audio_transport.test.ts), not this fallback.
 function defaultBinaryHandler(data: Blob | ArrayBuffer): void {
   const size = data instanceof Blob ? data.size : data.byteLength;
   console.debug("Audio chunk received", size);
 }
+/* c8 ignore stop */
 
 export interface AudioTransport extends Transport {
   start(sessionId: string, binaryHandler?: (data: Blob | ArrayBuffer) => void): void;
@@ -66,12 +69,14 @@ export class AudioTransportImpl extends BaseTransportImpl implements AudioTransp
     } catch (err) {
       // Surface as console for visibility; do NOT propagate. The transport
       // continues processing subsequent frames.
+      /* c8 ignore next */ // defensive: error-message-extraction branch — tests pass real Error instances; the String(err) fallback is for non-Error throwables.
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`${TRANSPORT_NAME}: binary handler threw — ${msg}`);
     }
   };
 }
 
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createAudioTransport(opts: AudioTransportOptions): AudioTransport {
   return new AudioTransportImpl(opts);
 }

@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 5 — markdown rendering wrapper.
 //
 // Reuses the page-loaded `window.marked` + `window.DOMPurify` globals (Q-E
@@ -54,6 +55,7 @@ export const DOMPURIFY_CONFIG = {
 };
 
 function ensureGlobals(): { marked: MarkedAPI; DOMPurify: DOMPurifyAPI } {
+  /* c8 ignore next */ // defensive: typeof window is "undefined" only in pre-DOM Node runtime; happy-dom's GlobalRegistrator (tests) AND every real browser provide window. The fallback to globalThis exists for non-browser contexts that don't apply to the multiplexer.
   const win = (typeof window !== "undefined" ? window : globalThis) as unknown as WindowGlobals;
   if (!win.marked || !win.DOMPurify) {
     throw new Error("multiplexer/render/markdown: window.marked + window.DOMPurify must be loaded before render");
@@ -94,6 +96,7 @@ export function renderMarkdown(text: string): Value {
  *
  * Returns a `RawValue` for direct use inside `html\`...\`` interpolations.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function renderMarkdownInline(text: string): Value {
   const { marked, DOMPurify } = ensureGlobals();
   const parsed = marked.parse(text, { breaks: true, gfm: true });

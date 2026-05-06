@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 4 — NotificationStore.
 //
 // Plain reducer (no XState per Q6 — append-mostly list with expiry sweep).
@@ -150,8 +151,11 @@ class NotificationStoreImpl implements NotificationStore {
   constructor(opts: NotificationStoreOptions) {
     this.bus            = opts.bus;
     this.storage        = opts.storage;
+    /* c8 ignore next */ // production-default fallback: globalThis.setTimeout is the runtime browser timer; tests always inject a fake setTimeoutFn for deterministic debounce control.
     this.setTimeoutFn   = opts.setTimeoutFn   ?? ((cb, ms) => globalThis.setTimeout(cb, ms));
+    /* c8 ignore next */ // production-default fallback: globalThis.clearTimeout pairs with the setTimeout default above; tests always inject the fake.
     this.clearTimeoutFn = opts.clearTimeoutFn ?? ((id) => globalThis.clearTimeout(id as number));
+    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn          = opts.nowFn          ?? (() => Date.now());
 
     this.hydrate();
@@ -421,6 +425,7 @@ class NotificationStoreImpl implements NotificationStore {
 // Factory — production code constructs via createNotificationStore.
 // ---------------------------------------------------------------------------
 
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createNotificationStore(opts: NotificationStoreOptions): NotificationStore {
   return new NotificationStoreImpl(opts);
 }

@@ -156,3 +156,68 @@ test("session id corruption returns null without throwing", () => {
   assert.equal(h.storage.getSessionId(), null);
   assert.equal(h.corruptEvents.length, 1);
 });
+
+// ---------------------------------------------------------------------------
+// Coverage backfill — defensive guard branches
+// ---------------------------------------------------------------------------
+
+test("getJSON: a literal `null` payload (typeof object && === null) is treated as malformed", () => {
+  // Exercises the `v === null` arm of `isEnvelope` (line ~127). JSON.parse("null")
+  // returns null, which has typeof "object" but is null — should fall into the
+  // malformed-envelope branch.
+  const h = makeHarness();
+  h.backend.setItem("lupin:foo", "null");
+  const got = h.storage.getJSON<unknown>("foo", 1);
+  assert.equal(got, null);
+  assert.equal(h.corruptEvents.length, 1, "null payload triggered storage_corrupt");
+  assert.match(h.corruptEvents[0]!.payload.error, /malformed envelope/);
+});
+
+test("createStorageServiceForTesting falls back to a default InMemoryStorage when no backend is provided", () => {
+  // Exercises the `backend ?? new InMemoryStorage()` fallback. Calling without
+  // a backend MUST still produce a working service.
+  const bus = createEventBusForTesting();
+  const storage = createStorageServiceForTesting(bus);
+  storage.setJSON<number>("k", 7, 1);
+  assert.equal(storage.getJSON<number>("k", 1), 7, "default-backed storage round-trips");
+});
+
+test("keys() with a backend whose key(i) returns null for some in-range index — null entries skipped", () => {
+  // Exercises `if (k === null) continue;` in keys(). InMemoryStorage's key()
+  // always returns a string for in-range indices, so we use a custom backend
+  // that intentionally returns null for one index.
+  const bus = createEventBusForTesting();
+  const customBackend: StorageBackend = {
+    getItem: () => null,
+    setItem: () => { /* noop */ },
+    removeItem: () => { /* noop */ },
+    key: ( i: number ) => i === 0 ? null : ( i === 1 ? "lupin:visible" : null ),
+    length: 2,
+  };
+  const storage = createStorageServiceForTesting(bus, customBackend);
+  // i=0 → null (skipped via continue)
+  // i=1 → "lupin:visible" (kept)
+  const ks = storage.keys();
+  assert.deepEqual(ks, ["visible"]);
+});
+
+test("InMemoryStorage.key(): negative index returns null", () => {
+  const m = new InMemoryStorage();
+  m.setItem("a", "1");
+  assert.equal(m.key(-1), null);
+});
+
+test("InMemoryStorage.key(): out-of-range positive index returns null", () => {
+  const m = new InMemoryStorage();
+  m.setItem("a", "1");
+  // size=1; index 5 >= size → null.
+  assert.equal(m.key(5), null);
+});
+
+test("InMemoryStorage.key(): in-range index returns the matching key", () => {
+  const m = new InMemoryStorage();
+  m.setItem("first", "1");
+  m.setItem("second", "2");
+  assert.equal(m.key(0), "first");
+  assert.equal(m.key(1), "second");
+});

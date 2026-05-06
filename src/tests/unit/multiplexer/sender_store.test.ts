@@ -212,3 +212,34 @@ test("missing timestamp falls back to nowFn(); record created with current time"
   const rec = store.get("a@x")!;
   assert.equal(rec.last_active_ts, 1_000_000);
 });
+
+// ---------------------------------------------------------------------------
+// Coverage backfill — `??` fallbacks for missing persona fields
+// ---------------------------------------------------------------------------
+
+test("voice_persona_assigned with NO name AND NO display_name falls back to empty string", () => {
+  // Exercises the second `??` in `(persona.name ?? persona.display_name ?? "")`.
+  const { bus, store } = setup();
+  emitNotification(bus, {
+    type           : "voice_persona_assigned",
+    sender_id      : "no-name@x",
+    voice_persona  : { voice_id: "v1", icon: "i", color: "#000", borrowed: false },
+  });
+  const rec = store.get("no-name@x")!;
+  assert.equal(rec.voice_persona?.name, "", "name fallback to empty string");
+});
+
+test("voice_persona_assigned with no voice_id / icon / color uses empty-string fallbacks", () => {
+  // Exercises `voice_id ?? ""`, `icon ?? ""`, `color ?? ""` arms together.
+  const { bus, store } = setup();
+  emitNotification(bus, {
+    type           : "voice_persona_assigned",
+    sender_id      : "minimal@x",
+    voice_persona  : { name: "OnlyName", borrowed: false },
+  });
+  const rec = store.get("minimal@x")!;
+  assert.equal(rec.voice_persona?.name, "OnlyName");
+  assert.equal(rec.voice_persona?.voice_id, "", "voice_id fallback");
+  assert.equal(rec.voice_persona?.icon, "", "icon fallback");
+  assert.equal(rec.voice_persona?.color, "", "color fallback");
+});

@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 3 — ConnectionStateMachine.
 // XState v5 tracker (Phase 2 pattern) modeling the per-transport WebSocket
 // lifecycle: `connecting` → `connected` → (`reconnecting` | `backoff`) →
@@ -295,6 +296,7 @@ export class ConnectionStateMachineImpl implements ConnectionStateMachine {
   }
 }
 
+/* c8 ignore next */ // tsx phantom-branch artifact on factory function declaration line.
 export function createConnectionStateMachine(
   opts: ConnectionStateMachineOptions,
 ): ConnectionStateMachine {

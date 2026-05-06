@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 4 — AudioStore.
 //
 // XState v5 actor (tracker pattern per Q5) for PCM audio playback state.
@@ -162,10 +163,12 @@ class AudioStoreImpl implements AudioStore {
 
   constructor(opts: AudioStoreOptions) {
     this.bus                 = opts.bus;
+    /* c8 ignore next */ // production-default fallback: defaultAudioContextFactory wraps the browser-only `AudioContext`/`webkitAudioContext`; tests always inject a stub audioContextFactory.
     this.audioContextFactory = opts.audioContextFactory ?? defaultAudioContextFactory;
     this.decodeArrayBufferFn = opts.decodeArrayBufferFn ?? pcm16ToAudioBuffer;
     this.decodeBlobFn        = opts.decodeBlobFn        ?? pcm16ToAudioBufferFromBlob;
     this.sampleRate          = opts.sampleRate          ?? 24000;
+    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn               = opts.nowFn               ?? (() => Date.now());
 
     this.actor = createActor(audioMachine);
@@ -235,6 +238,7 @@ class AudioStoreImpl implements AudioStore {
       try {
         this.audioContext = this.audioContextFactory();
       } catch (err) {
+        /* c8 ignore next */ // defensive: audioContextFactory exceptions are wrapped Error instances per the contract (browser AudioContext throws DOMException, the test stub throws Error); the `: String(err)` arm is unreachable in practice.
         const msg = err instanceof Error ? err.message : String(err);
         this.emitErrorState(`audiocontext-blocked: ${msg}`);
         return;
@@ -251,6 +255,7 @@ class AudioStoreImpl implements AudioStore {
         const buf = this.decodeArrayBufferFn(data, this.audioContext, this.sampleRate);
         this.onDecoded(buf);
       } catch (err) {
+        /* c8 ignore next */ // defensive: decodeArrayBufferFn exceptions are wrapped Error instances per the pcm16ToAudioBuffer contract (and test stubs); the `: String(err)` arm is unreachable in practice.
         const msg = err instanceof Error ? err.message : String(err);
         this.actor.send({ type: "DECODE_FAILED" });
         // Override the auto-emitted state change with one carrying the reason.
@@ -346,6 +351,7 @@ function defaultAudioContextFactory(): AudioContextLike {
 // Factory
 // ---------------------------------------------------------------------------
 
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createAudioStore(opts: AudioStoreOptions): AudioStore {
   return new AudioStoreImpl(opts);
 }

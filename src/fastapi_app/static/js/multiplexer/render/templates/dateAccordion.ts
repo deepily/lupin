@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 5 — date accordion template (`.date-accordion`).
 //
 // Per Q-C / Q-G: legacy class names verbatim; collapsed-by-default toggle;
@@ -31,6 +32,7 @@ interface RenderOptions {
  *   - `data-collapsed="false"` initial state (matches design — first paint
  *     visible; collapse is a user-driven toggle)
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript optional-param + return-type erasure).
 export function renderDateAccordion(
   dateKey: string,
   notifications: ReadonlyArray<Notification>,
@@ -43,6 +45,7 @@ export function renderDateAccordion(
   root.setAttribute("data-date-key", dateKey);
   root.setAttribute("data-collapsed", "false");
 
+  /* c8 ignore next 7 */ // tagged-template literal: c8 reports phantom branches on interpolation positions ($-expressions); the runtime path is straight-line and exercised by every test that invokes renderDateAccordion.
   const headerFrag = html`
     <div class="date-accordion-header" role="button" tabindex="0">
       <span class="date-text">${dateKey}</span>

@@ -272,6 +272,110 @@ test("empty interpolation list works (zero values)", () => {
 // 23 : real-world fixture — sender card-ish shape
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Coverage backfill — TT-policy `raw()` content path + ensurePolicy idempotency
+// ---------------------------------------------------------------------------
+
+test("TT policy: raw() value flows through TT_POLICY.createHTML via makeRawTemplateStrings", () => {
+  let createHTMLCalls = 0;
+  const inputs: string[] = [];
+  ( globalThis as { trustedTypes?: unknown }).trustedTypes = {
+    createPolicy: ( _name: string, hooks: { createHTML: ( s: string, t: TemplateStringsArray ) => string } ) => ({
+      createHTML: ( input: string, t: TemplateStringsArray ) => {
+        createHTMLCalls++;
+        inputs.push( input );
+        return hooks.createHTML( input, t );
+      },
+    }),
+  };
+  resetForTesting();
+
+  // First call: bootstraps the policy AND has a raw() child interpolation.
+  // Inside appendValue's isRaw branch, TT_POLICY !== null → goes through the
+  // policy with a synthesized TemplateStringsArray (makeRawTemplateStrings).
+  const sanitized = "<b>safe</b>";
+  const f = html`<p>${raw( sanitized )}</p>`;
+  // createHTML invoked at least twice: once for the outer template, once for
+  // the raw payload via makeRawTemplateStrings.
+  assert.ok( createHTMLCalls >= 2, "TT policy was invoked for both the outer and the raw() content" );
+  assert.ok( inputs.includes( sanitized ), "raw() payload was passed through TT.createHTML" );
+  assert.equal( frag( f ), "<p><b>safe</b></p>" );
+});
+
+test("ensurePolicy is idempotent — second html() call reuses existing TT_POLICY (early return)", () => {
+  let createPolicyCalls = 0;
+  ( globalThis as { trustedTypes?: unknown }).trustedTypes = {
+    createPolicy: ( _name: string, hooks: { createHTML: ( s: string, t: TemplateStringsArray ) => string } ) => {
+      createPolicyCalls++;
+      return {
+        createHTML: ( input: string, t: TemplateStringsArray ) => hooks.createHTML( input, t ),
+      };
+    },
+  };
+  resetForTesting();
+
+  // First call creates policy.
+  html`<p>${"a"}</p>`;
+  assert.equal( createPolicyCalls, 1 );
+
+  // Second call should NOT create a second policy — ensurePolicy early-returns
+  // because TT_POLICY !== null.
+  html`<p>${"b"}</p>`;
+  assert.equal( createPolicyCalls, 1, "createPolicy was NOT called again — TT_POLICY !== null short-circuited" );
+});
+
+test("real lupin-html policy: refuses to mint TrustedHTML for an unknown TemplateStringsArray", () => {
+  // Capture the REAL policy hooks the helper installed on first html() call,
+  // then attempt to mint TrustedHTML with a synthetic TemplateStringsArray
+  // that was never registered in KNOWN_TEMPLATES — the policy must throw.
+  let realPolicyHooks: { createHTML: ( input: string, strings: TemplateStringsArray ) => string } | null = null;
+  ( globalThis as { trustedTypes?: unknown }).trustedTypes = {
+    createPolicy: ( _name: string, hooks: { createHTML: ( s: string, t: TemplateStringsArray ) => string } ) => {
+      // Capture the hooks the helper installed (its identity-checking createHTML).
+      realPolicyHooks = hooks;
+      return {
+        createHTML: ( input: string, t: TemplateStringsArray ) => hooks.createHTML( input, t ),
+      };
+    },
+  };
+  resetForTesting();
+
+  // Bootstrap the policy via a legitimate call.
+  html`<p>seed</p>`;
+  assert.ok( realPolicyHooks !== null, "policy hooks captured" );
+
+  // Synthesize a fake TemplateStringsArray — never registered in KNOWN_TEMPLATES.
+  const fake = [ "<p>x</p>" ] as unknown as TemplateStringsArray;
+  Object.defineProperty( fake, "raw", { value: [ "<p>x</p>" ] });
+
+  // Calling the real hooks' createHTML with the fake strings array must throw.
+  assert.throws(
+    () => realPolicyHooks!.createHTML( "<p>x</p>", fake ),
+    /refused to mint TrustedHTML/,
+    "real policy refused unknown TemplateStringsArray",
+  );
+});
+
+test("attribute interpolation: Node value is skipped (not meaningful as attribute)", () => {
+  // Covers the `value instanceof Node || Array.isArray(value)` continue arm
+  // in applyAttributes (line ~192). Pass a Node as an attribute value — the
+  // attribute should NOT be set (silently skipped).
+  const span = document.createElement( "span" );
+  const f = html`<div class="${span}"></div>`;
+  const el = f.querySelector( "div" )!;
+  assert.equal( el.hasAttribute( "class" ), false, "Node value as attribute is skipped" );
+});
+
+test("attribute interpolation: Array value is skipped (not meaningful as attribute)", () => {
+  // Same continue arm — Array on the attribute side is not meaningful.
+  const arr: readonly string[] = [ "a", "b", "c" ];
+  const f = html`<div class="${arr}"></div>`;
+  const el = f.querySelector( "div" )!;
+  assert.equal( el.hasAttribute( "class" ), false, "Array value as attribute is skipped" );
+});
+
+// ---------------------------------------------------------------------------
+
 test("real-world fixture: sender card with whole-attribute interpolation + child list", () => {
   // Per design § DOM grouping (line 90), persona color is applied via
   // `element.style.setProperty("--persona-color", ...)` AFTER render — NOT

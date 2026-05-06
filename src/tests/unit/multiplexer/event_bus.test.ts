@@ -115,6 +115,21 @@ test("listener throwing emits a listener_error event referencing the original", 
   assert.equal(errors[0]?.source, "EventBus");
 });
 
+test("listener throwing a non-Error (string) — coerced via String(err) into the listener_error payload", () => {
+  // Exercises the `: String(err)` arm of `err instanceof Error ? err.message : String(err)`
+  // in handleListenerError().
+  const bus = createEventBusForTesting();
+  const errors: LupinEvent<ListenerErrorPayload>[] = [];
+  bus.on<ListenerErrorPayload>("listener_error", (e) => errors.push(e));
+  bus.on("auth_state_change", () => {
+    /* eslint-disable-next-line @typescript-eslint/no-throw-literal */
+    throw "raw-string-payload";
+  });
+  bus.emit(evt("auth_state_change", { state: "ready" as const }));
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]?.payload.error, "raw-string-payload");
+});
+
 test("listener_error listeners that themselves throw do NOT recurse", () => {
   const bus = createEventBusForTesting();
   // A listener_error subscriber that itself throws would otherwise emit another

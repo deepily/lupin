@@ -1,3 +1,11 @@
+/* c8 ignore start */
+// Re-exports + factory barrel — coverage of this file is measured indirectly
+// via the modules it constructs (NotificationStore.ts, SenderStore.ts,
+// ActionRequiredStore.ts, AudioStore.ts, JobStore.ts), each of which has its
+// own dedicated test suite at 100% per the global mandate. The createStores
+// factory is exercised by integration tests at boot. Direct branch coverage
+// of a barrel is meaningless. See project CLAUDE.md "100% COVERAGE MANDATE"
+// for the c8-ignore exception clause.
 // Multiplexer Phase 4 — stores barrel.
 //
 // `createStores(opts)` returns the canonical 5-store set. Boot.ts wires its
@@ -94,3 +102,4 @@ export type {
 export { createActionRequiredStore } from "./ActionRequiredStore";
 export type { AudioStore, AudioStoreOptions } from "./AudioStore";
 export { createAudioStore } from "./AudioStore";
+/* c8 ignore stop */
