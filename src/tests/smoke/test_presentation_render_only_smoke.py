@@ -328,10 +328,11 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
             debug    = getattr( args, "proxy_debug", False )
             email    = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_EMAIL" )
             password = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_PASSWORD" )
-            self._start_proxy( debug=debug, email=email, password=password )
-
-            if not self.proxy_running:
-                print( "  ABORT: Proxy failed to start. Gate 4 would timeout." )
+            try:
+                self._start_proxy( debug=debug, email=email, password=password )
+            except RuntimeError as e:
+                print( f"\n  ABORT: Proxy startup failed — Gate 4 would timeout (would 503-cascade)." )
+                print( f"  {e}" )
                 _remove_pid_file()
                 return False
         else:

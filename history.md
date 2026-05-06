@@ -32,7 +32,29 @@
 
 **Fixes**
 
-(Individual fixes will be added here)
+#### Checkpoint | 2026.05.05 23:00 EDT | Phases 0-4a complete; Phase 4b in flight on :8000
+
+**Investigation overturned the May-1 §Phase 5 diagnosis.** The auto-proxy DOES support WS-as-test-user (proven empirically — UUID `50c73ba7-...` appears in `WebSocketManager.user_sessions` when proxy runs with the test user's env-var creds). The 503 cascade root cause was **silent proxy-startup failure** in `EmbeddedProxyMixin._start_proxy`: 5-second blind sleep + `subprocess.poll()`-only liveness check + WARNING-only abort path.
+
+**4-phase fix shipped**:
+- **Phase 0** — design + execution log at `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/`
+- **Phase 1** — `embedded_proxy.py`: WS-auth verification poll + `_wait_for_proxy_ws_auth` + `_kill_proxy_subprocess` helpers; raises `RuntimeError` on subprocess death OR poll timeout (default 30s)
+- **Phase 2** — 7 caller sites converted to try/except + return False (sweep: `interactive_smoke_test.py`, `test_proxy_integration.py`, `test_expeditor_mock_job_smoke.py`, `test_swe_team_proxy.py`, `test_presentation_live_smoke.py`, `test_research_to_presentation_live_smoke.py`, `test_presentation_render_only_smoke.py`)
+- **Phase 3** — re-classify `notification_status` starting with `http_error_` as `infra_error` instead of `cancel: User cancelled unexpectedly` in 3 cascade-affected tests; closes adjacent "Smoke harness label improvement" bug
+
+**Verification**:
+- Phase 4a `:7999` AI-discretionary probes (both green): happy path = 1.63s WS-auth confirm; sad path = `RuntimeError` raised in 14.30s with full diagnostics; no zombies
+- Phase 4b `:8000` smoke suite scheduled (job_id `ts-5505dcf5...`, scheduled 22:56:04 EDT) — background poller running; results pending at checkpoint time
+- `py_compile` green on all 8 touched source/test files
+
+**Files** (this checkpoint):
+- `src/tests/smoke/utilities/embedded_proxy.py` (Phase 1)
+- `src/tests/smoke/utilities/interactive_smoke_test.py` + 6 test files (Phase 2)
+- `src/tests/smoke/test_proxy_integration.py` + `test_expeditor_mock_job_smoke.py` + `test_swe_team_proxy.py` (Phase 3 re-classification overlay on Phase 2)
+- `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/01-design.md` + `90-execution-log.md` (NEW R&D directory)
+- `TODO.md` (marked "Pick fix option for Cluster A" complete)
+
+**Commit**: 9d84523
 
 **Session Summary**
 
