@@ -52,7 +52,7 @@
   | WS smoke `:7999` (Phase 1F) | ✅ 50/50 in 44s |
   | Live /clear repro | ✅ verified live in session d5e3cf21: bridge `cc-287218.json` shows `voice_persona.assigned_at = 2026-05-05T23:14:43Z` (= 19:14 EDT, original assignment) preserved unchanged across **2 /clear cycles** (`session_ids` array contains 3 transient UUIDs: `d5e3cf21`, `a4e62678`, `e0819f3f`). User voice-confirmed mid-session in listener log line 31: "No change, you are still Tiberius." |
 - **Commit (§0.4 + tests)**: `82c098b` — "Checkpoint d5e3cf21: SessionEnd reason-guard — voice persona /clear preservation" (parent Lupin)
-- **Commit (Phase 1F + wrap)**: `5fd13d7` — "Fix: Voice persona /clear preservation — Phase 1F cleanup + wrap" (parent Lupin)
+- **Commit (Phase 1F + wrap)**: `f21b163` — "Fix: Voice persona /clear preservation — Phase 1F cleanup + wrap" (parent Lupin)
 
 **Session Summary**
 

@@ -225,7 +225,7 @@
 
 ### Completed
 
-- [x] **Voice persona switches on `/clear` — SessionEnd hook releases persona unconditionally** → commit: 82c098b (§0.4 fix + 8 unit tests) + 5fd13d7 (Phase 1F cleanup + live verification + wrap) | By: d5e3cf21 | 2026-05-06
+- [x] **Voice persona switches on `/clear` — SessionEnd hook releases persona unconditionally** → commit: 82c098b (§0.4 fix + 8 unit tests) + f21b163 (Phase 1F cleanup + live verification + wrap) | By: d5e3cf21 | 2026-05-06
   - **Root cause**: `src/lupin_cli/claude_code/hooks/session_end.py:224-226` unconditionally called `_release_voice_persona( session_id )` on every SessionEnd hook fire. Claude Code fires SessionEnd on `/clear` (`reason="clear"`), not only on process exit, so the bridge `voice_persona` field was nulled BEFORE the post-/clear SessionStart could carry it forward.
   - **Fix**: 3-line `reason`-guard in `session_end.py` — skip `_release_voice_persona` when `payload["reason"]` ∈ {"clear", "compact"}; release on `logout`/`prompt_input_exit`/`other`/missing-reason.
   - **Tests**: NEW `src/tests/unit/test_session_end.py` (8 tests, full reason matrix). `test_register_session_preservation.py` xfail removed; Phase 1F deleted `TestPhase1Diagnostics` class + stripped stderr asserts.
