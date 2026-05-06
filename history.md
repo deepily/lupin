@@ -47,8 +47,8 @@
   | Full unit suite | ✅ 3958 passed, 1 xfailed, 0 failed in 130.86s |
   | WS smoke `:7999` | ✅ 50/50 in 44.35s |
   | Live /clear repro | ⏸ deferred — user-driven verification opportunity |
-- **Commit**: [pending]
-- **Follow-up tasks**:
+- **Checkpoint commit**: `82c098b` — "Checkpoint d5e3cf21: SessionEnd reason-guard — voice persona /clear preservation" (parent Lupin)
+- **Follow-up tasks** (not in checkpoint):
   - Live verification: do another `/clear` and confirm persona persists (pre-/clear get_session_info will show Tiberius; post-/clear should also show Tiberius, with `assigned_at` unchanged from pre-/clear).
   - Once verified: remove the three `[register_session]` diagnostic prints (Phase 1F cleanup) — they served their purpose and are now dead weight.
 
