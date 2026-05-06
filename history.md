@@ -56,7 +56,7 @@
 
 **Session Summary**
 
-(Will be completed at session close)
+Closed out the voice-persona /clear preservation bug end-to-end. The day-of work spanned three checkpoint commits in addition to the Phase 1F wrap: `82c098b` landed the §0.4 reason-guard fix in `session_end.py` and 8 new unit tests in `test_session_end.py`; `4ae3b95` backfilled `82c098b` into history + manifest; `f21b163` wrapped Phase 1F (deleted three diagnostic prints from `register_session.py`, deleted `TestPhase1Diagnostics` class, stripped stderr asserts); `eb336a2` backfilled `f21b163` into the four tracking docs. Live verification was the headline outcome — bridge `cc-287218.json` shows `voice_persona.assigned_at = 2026-05-05T23:14:43Z` preserved unchanged across **2 /clear cycles** (3 transient session_ids in `session_ids` array), and the listener log captures the user's mid-session voice confirmation: *"No change, you are still Tiberius."* Verification ran clean across the full pyramid: 3956 unit + 1 xfailed in 130.76s, 14/14 targeted preservation/session_end tests, 50/50 WS smoke. Bug moved In Progress → Completed in `bug-fix-queue.md`; matching TODO.md item line 152 marked `[x]`. Manifest section status: `committed`. Bug fix mode pending closure via `/plan-bug-fix-mode-close` (user confirmed YES at session-end).
 
 ---
 
