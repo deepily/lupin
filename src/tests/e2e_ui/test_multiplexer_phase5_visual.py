@@ -43,16 +43,25 @@ from .conftest import BASE_URL
 # Test hook usage — see boot.ts `window.__multiplexerTestHook` (D-E)
 # ---------------------------------------------------------------------------
 
-# Inject 3 deterministic fixtures via eventBus.emit. Mirrors the smoke-test
-# pattern but landed in the visual baseline so subsequent runs detect any
-# unintended visual drift in renderer output.
+# Inject 3 deterministic fixtures via eventBus.emit. Uses FIXED timestamps
+# (NOT new Date()) so the rendered .message-time text is byte-identical across
+# runs — first run with --update-snapshots captures the baseline; subsequent
+# runs pixel-match against it without time-drift flakiness.
+#
+# Per pytest-playwright-visual-snapshot library: pixel-diff includes ALL
+# rendered text. Time displays, countdowns, and any other live data MUST be
+# fixed BEFORE the screenshot, or every run produces different pixels.
 _INJECT_FIXTURES_JS = """
 () => {
     const hook = window.__multiplexerTestHook;
     if ( !hook || !hook.eventBus ) {
         throw new Error( "test hook not present — boot.ts test surface missing" );
     }
-    const now = new Date();
+
+    // Fixed timestamps for byte-identical rendering across runs.
+    const FIXED_TS_BASE = '2026-05-05T18:00:00.000Z';  // 14:00 EDT
+    const FIXED_TS_2    = '2026-05-05T18:01:00.000Z';
+    const FIXED_TS_3    = '2026-05-05T18:02:00.000Z';
 
     // Fixture 1 — plain notification.
     hook.eventBus.emit( {
@@ -63,12 +72,13 @@ _INJECT_FIXTURES_JS = """
                 id_hash    : 'phase5_visual_plain',
                 message    : 'Plain notification body for visual baseline',
                 sender_id  : 'phase5-visual-sender-a',
-                timestamp  : now.toISOString(),
+                timestamp  : FIXED_TS_BASE,
+                time_display      : '14:00',
                 response_requested: false,
             }
         },
         source : 'phase5-visual',
-        ts     : Date.now(),
+        ts     : 1778011200000,  // fixed
     } );
 
     // Fixture 2 — markdown notification.
@@ -80,12 +90,13 @@ _INJECT_FIXTURES_JS = """
                 id_hash    : 'phase5_visual_md',
                 message    : '**bold** _italic_ markdown sample',
                 sender_id  : 'phase5-visual-sender-b',
-                timestamp  : new Date( now.getTime() + 1000 ).toISOString(),
+                timestamp  : FIXED_TS_2,
+                time_display      : '14:01',
                 response_requested: false,
             }
         },
         source : 'phase5-visual',
-        ts     : Date.now(),
+        ts     : 1778011260000,
     } );
 
     // Fixture 3 — action-required widget (read-only inert state).
@@ -97,7 +108,8 @@ _INJECT_FIXTURES_JS = """
                 id_hash    : 'phase5_visual_ar',
                 message    : 'Approve the deploy?',
                 sender_id  : 'phase5-visual-sender-c',
-                timestamp  : new Date( now.getTime() + 2000 ).toISOString(),
+                timestamp  : FIXED_TS_3,
+                time_display      : '14:02',
                 response_requested: true,
                 response_type    : 'yes_no',
                 response_options : [ 'yes', 'no' ],
@@ -105,9 +117,31 @@ _INJECT_FIXTURES_JS = """
             }
         },
         source : 'phase5-visual',
-        ts     : Date.now(),
+        ts     : 1778011320000,
     } );
 
+    return true;
+}
+"""
+
+
+# Force ALL dynamic / live-data DOM content to deterministic placeholders
+# AFTER the renderer paints but BEFORE the screenshot. The renderer's tick
+# handler keeps mutating `.action-required-countdown` at 1Hz; without this
+# stabilization, the screenshot timing window itself becomes a source of
+# byte drift even with fixed timestamps.
+#
+# This poke does NOT affect store state — only the displayed text.
+_STABILIZE_DOM_JS = """
+() => {
+    // Action-required countdown — pinned to a known value.
+    document.querySelectorAll( '.action-required-countdown' ).forEach( el => {
+        el.textContent = '⏱ 01:00';
+    } );
+    // Last-active timestamps in sender-card chrome — pinned to fixed time.
+    document.querySelectorAll( '.sender-last-activity' ).forEach( el => {
+        el.textContent = 'Last: 14:02';
+    } );
     return true;
 }
 """
@@ -171,16 +205,11 @@ def test_multiplexer_phase5_notifications_pane_visual(
         timeout=2000,
     )
 
-    # Stabilize the countdown text BEFORE snapshot — the action-required
-    # widget's countdown ticks at 1Hz and would produce flaky baselines.
-    # Force the displayed text to a deterministic placeholder via direct DOM
-    # poke (does not affect store state).
-    page.evaluate( """
-        () => {
-            const cd = document.querySelector( '.action-required-countdown' );
-            if ( cd ) cd.textContent = '⏱ 00:60';
-        }
-    """ )
+    # Stabilize ALL live-data DOM content (countdown ticks, sender-card
+    # last-activity timestamps) before snapshot — see _STABILIZE_DOM_JS.
+    # Without this, the visual diff fails on every run because text
+    # rendering varies with the moment the screenshot fires.
+    page.evaluate( _STABILIZE_DOM_JS )
 
     # Brief settle window for any post-inject layout repaint.
     time.sleep( 0.2 )
