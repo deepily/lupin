@@ -316,3 +316,71 @@ Pass 2 may legitimately surface new findings on adversarial fronts (security / t
 ### Awaiting
 
 User ratification gate per PIP §6 + Q11 amendment. Cluster-walkthrough recommended (mechanical batch for Minors / meaningful walk for Majors), mirroring the Pass 1 pattern that worked.
+
+---
+
+## Pass 2 Adversarial — closed 2026-05-06 PM
+
+**Ratifier**: User session `5ced4868` (post-/clear PM continuation), Mr. Radio persona
+**Method**: Sequential per Q11 amendment + `feedback_pip_plan_review_is_sequential` — 5 Minors batch-walked + 10 Majors walked individually (per-row `mcp__cosa-voice__ask_yes_no`/`ask_multiple_choice`) + C-6 Layer 3 walked via `ask_multiple_choice`
+**Outcome**: ALL 15 findings + 1 Layer 3 ratified; design doc updated; convergence re-grep clean
+
+### Disposition table
+
+| ID | Severity | Cluster | Disposition |
+|---|---|---|---|
+| **F18** | Major | CONTRACT_DRIFT | ✅ **Drop `interrupted`** (Option A — `Job.status` per Phase 4 = 4 values; no producer for `interrupted`). CSS port rule at `notifications.css:4022` NOT ported; template class union narrowed to `status-{todo\|running\|done\|dead}`; AC8a smoke fixture status list updated; REUSE-table row marked DROPPED with reason. |
+| **F19** | Major | CONTRACT_DRIFT | ✅ **Apply drafted fix** — AC8a third job uses `status: 'done'` (a valid `Job.status` value); history-bucket landing happens via the actual `job_removed` reducer path (NOT a fabricated `status: 'history'` payload). AC8a description rewritten to enforce all 3 fixture jobs use valid statuses + explicit `job_removed` event for the third job. |
+| **F20** | Major | DOS | ✅ **Apply drafted fix WITH refinement** — `MAX_META_BYTES` cap of 256_000 is **sourced from `ConfigurationManager` INI** (key `multiplexer max meta display bytes` under `[Lupin: Baseline]` + matching explanation in `lupin-app-splainer.ini`), exposed via the existing client-config FastAPI endpoint pattern, threaded into the renderer at boot via `configureMetaDisplayCap(serverConfig)`. Renderer falls back to 256_000 if config unreachable. AC3 sub-test added for oversized-meta path. `safeStringifyMeta()` helper documented with cheap pre-check + belt-and-suspenders post-stringify length check + cyclic-ref try/catch. |
+| **F21** | Minor | SECURITY | ✅ **Batch-approved** — explicit invariant note added to design doc (§lazy-render section): "`Job.meta` is opaque to 6a — never spread, never assigned to a non-Map carrier, only stringified for display." Re-checked in 6b/6c PIP cycles. |
+| **F22** | Major | TESTABILITY | ✅ **Option B — emit separate stable AC line**. After the existing `console.log("[multiplexer] boot_complete", JSON.stringify({...}))`, boot.ts emits a SECOND line per surface: `console.log("[multiplexer] jobsRenderer:mounted")` (mirror-emits `notificationsRenderer:mounted` for Phase 5 consistency). AC9 grep target is the literal stable string `[multiplexer] jobsRenderer:mounted` — robust against future serialization refactors. |
+| **F23** | Major | AMBIGUITY | ✅ **Combined fix** — (a) `data-id-hash` dropped from `.job-delete-button` element (carried only on `.job-card`); 6b delete handler reads it via `event.target.closest('.job-card').dataset.idHash`. (b) Click handler early-returns when target is `.job-delete-button` so the disabled `×` doesn't accidentally toggle the card on click. Click handler queries `.job-card` (by class) instead of `[data-id-hash]` (by attribute) so the collision can never resurface. |
+| **F24** | Minor | CONTRACT_DRIFT | ✅ **Batch-approved** — `formatDuration` declared as **Genuinely New** (not Reused) in Reused-functions list. Signature: `formatDuration(startTs: number, endTs?: number): string`. Added to `render/time.ts` as a sibling of `formatHM`/`formatDateKey`; Phase 6a unit test in `render/time.test.ts` covers the 4 humanization cases. |
+| **F25** | Minor | AMBIGUITY | ✅ **Batch-approved (documented)** — `appTimezone?: string` kept; option's consumer documented inline in the `JobsPaneRendererOptions` interface comment: "passed to `formatHM` / `formatDateKey` for TZ-aware bucket-header date display when bucket-header timestamps are surfaced." Falls back to browser-local when undefined. |
+| **F26** | Major | RACE | ✅ **Apply drafted fix** — `JobsPaneRenderer.mount()` interface comment explicitly documents idempotency: throws `Error('JobsPaneRenderer already mounted')` on second `mount()` without intervening `unmount()`. `unmount()` is idempotent (no-op when not mounted). AC5 Test 17 added: double-mount throws; post-unmount mount succeeds. |
+| **F27** | Major | TESTABILITY | ✅ **Apply drafted fix** — AC5 Test 15 + Test 16 rewritten to use deferred-promise ordering controls (`let resolveHydrate!: ...; const apiStub = { fetchJobsHistory: () => new Promise(r => { resolveHydrate = r; }) };`). No real-time waits; deterministic ordering of `job_removed` BEFORE `resolveHydrate(...)` / `rejectHydrate(...)`. CI runner speed irrelevant. |
+| **F28** | Major | OPERATIONAL | ✅ **Apply combined fix** — AC10 sub-step 10d now has THREE layers: layer-1 grep (5ms, fast first pass for obvious cases), layer-2 stylelint rule with `selector-disallowed-list` scoped to `jobs-pane.css` (200ms, CSS-parser-aware — catches @-rule nesting + comments + `:where()` cases that grep misses), layer-3 empirical canary test asserting `getComputedStyle(document.body)` matches Phase 5 baseline post-load (500ms, catches custom-property + cascade leaks even stylelint can't see). All three layers must be clean before proceeding. |
+| **F29** | Major | AMBIGUITY | ✅ **Apply drafted fix** — AC10 sub-step 10e now has explicit decision tree (10e.i / 10e.ii / 10e.iii). Default action: rollback the 6a CSS port commit and re-run. Re-capture is last-resort, only after independent disproof of leak (10e.ii — temporarily unlink jobs-pane.css from index.html and re-test). Re-capture (10e.iii) requires diagnosed root cause documented in regression PR + tagged baseline. No silent overwrites. |
+| **F30** | Major | ACCESSIBILITY | ✅ **Apply drafted fix** — bucket header gets keydown handler for Enter/Space activation (WAI-ARIA 1.2 §5.4 contract for `role="button"`); `aria-expanded` attribute reflects state and updates on every toggle; `aria-controls` references the toggleable region. AC4 floor bumped to ≥6 (added keyboard sub-test: Enter + Space toggle, Tab does NOT toggle, aria-expanded reflects state). Q-A9 keyboard pattern from card headers extended to bucket headers. |
+| **F31** | Minor | POLISH | ✅ **Batch-approved** — AC10 sub-steps renumbered from 10.1/10.2/.../10.5 to 10a/10b/10c/10d/10e. Cosmetic; reduces ratifier and implementer cognitive load against the item-10 numbering. |
+| **F32** | Minor | OPERATIONAL | ✅ **Batch-approved** — TBD line at original 358 resolved: emoji set `⏳ \| ⚙ \| ✓ \| ✗` cited as legacy `notifications.js:5478` (already in REUSE table as pattern source). No more deferral. |
+| **C-6** | Layer 3 | UX | ✅ **Add tooltip** (Option A) — `<button class="job-delete-button" title="Delete coming in Phase 6b">×</button>`. Slicing manifest preserved (Options B "hide entirely" + C "atomic 6a+6b" rejected). Hover shows the explanation; screen readers announce as "delete coming in phase 6b, button, disabled." |
+
+### Convergence sweep (PIP §7 step 3)
+
+Re-grep targets and results post-apply:
+
+| Pattern | Found | Status |
+|---|---|---|
+| `status-interrupted` (active design code) | only in "NOT ported" / DROPPED notes | ✅ reframed |
+| `status: 'history'` (AC8a fixture) | not present | ✅ clean |
+| `JSON.stringify(job?.meta` (uncapped) | not present | ✅ replaced with `safeStringifyMeta` |
+| `data-id-hash` on `.job-delete-button` | not present | ✅ clean |
+| `100ms delay` / `within 50ms` (AC5 race tests) | not present | ✅ replaced with deferred-promise pattern |
+| Sub-step `(10\.1\|10\.2\|10\.3\|10\.4\|10\.5)` numbering | not present | ✅ replaced with 10a/10b/10c/10d/10e |
+| TBD `emojis if any (TBD` line | not present | ✅ resolved |
+| `aria-expanded` on bucket header | present (4 occurrences in template + handler) | ✅ added |
+| `keydown` Enter/Space handler | present (in bucket-header keyboard activation block) | ✅ added |
+| `Delete coming in Phase 6b` tooltip | present (line 125 — delete button) | ✅ added |
+| `jobsRenderer:mounted` stable line emission | present (lines 390, 437) | ✅ added |
+| `already mounted` mount idempotency throw | present (lines 46, 385) | ✅ added |
+
+### Side-effect tasks paired with Pass 2 close
+
+- **Configuration**: add `multiplexer max meta display bytes = 256000` to `src/conf/lupin-app.ini` `[Lupin: Baseline]` + matching explanation in `src/conf/lupin-app-splainer.ini` (per Pass 2 F20 — happens during 6a code-writing cycle, not during this doc apply).
+- **FastAPI client-config endpoint**: ensure `multiplexer max meta display bytes` is in the response payload that `boot.ts` already fetches for other tunable client values (verify the endpoint exists during 6a code-writing — the design assumes it does per user comment).
+- **Stylelint config**: add `.stylelintrc.json` `overrides` block for `jobs-pane.css` with `selector-disallowed-list` rule (per Pass 2 F28 — happens during 6a code-writing cycle).
+- **`render/time.ts`**: implement `formatDuration(startTs, endTs?)` per Pass 2 F24 + add 4 unit-test cases.
+
+### Conversation-mode metadata
+
+- Mode active throughout ratification: NO (text + cosa-voice mix; user reading terminal at multiple points)
+- Ratification calls used: 1 batch yes/no (5 Minors) + 9 per-row yes/no (Majors F19, F20, F23, F26, F27, F28, F29, F30; F18 used multiple-choice; F22 used multiple-choice) + 1 deep `converse` clarification (F19 — user requested more depth before ratifying) + 1 multiple-choice (C-6 Layer 3)
+
+### Next gate
+
+Phase 6a documentation cycle CLOSED. Implementation plan-mode cycle opens next:
+- Plan mode session OR `/plan-bug-fix-mode-start` (if treating Phase 6a code-writing as a multi-phase implementation)
+- Documentation artifacts ready: `08-phase6a-jobs-surface-design.md` (this design doc, Pass-2-resolved), `94-phase6a-review-findings.md` (Pass 1 + Pass 2 closure trail), `90-execution-log.md` Phase 6a section seed (to be authored at implementation-cycle start)
+- AC table is the implementation contract: AC1-AC11b, all `EXECUTOR: AI` except AC11a's HUMAN slot-coordination column
+- Per `feedback_documentation_step_stops_at_doc`: this Pass-2-closure subsection is the END of the documentation cycle. Implementation begins ONLY after explicit user go-ahead (no auto-progression)

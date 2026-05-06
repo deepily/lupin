@@ -33,6 +33,11 @@
 **Files**: 46 source + test + tracking files (full multiplexer + history.md + TODO.md + CLAUDE.md + R&D docs + .claude-session.md)
 **Commit**: a2ad4ec
 
+#### Checkpoint | 2026.05.06 18:45 | Pass 2 Adversarial ratification CLOSED + resume-here pointer for Phase 6a code-writing
+
+**Files**: 5 (`08-phase6a-jobs-surface-design.md` Pass 2 edits + AC table updates + audit row + Risks-row for F21, `94-phase6a-review-findings.md` Pass 2 closure subsection, `92-resume-here-phase6a-codegen.md` NEW resume pointer + kick-off prompt, `.claude-session.md` PM-session-2 manifest entries, `history.md` this entry)
+**Commit**: 6fd95f5
+
 ---
 
 ### 2026.05.05 PM (late) - Session 532b16e1 | Multiplexer Phase 6a — Slicing manifest + Phase 6a design doc REUSE-closed + Pass 1 Fitness landed (awaiting ratification gate)

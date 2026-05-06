@@ -1,6 +1,6 @@
 # Phase 6a — Jobs Surface (jobs-pane renderer + JobStore.hydrateHistory invocation + 5-bucket layout)
 
-**Status**: 🟢 **PASS-1-CLOSED 2026-05-06** — Pass 1 Fitness 17 findings ratified (7 Minors batch-walked + 10 Majors walked individually); F15 ratification upgraded into the **global 100% coverage mandate** for multiplexer TypeScript (memory: `feedback_100pct_coverage_multiplexer.md`; project `CLAUDE.md` "100% COVERAGE MANDATE" section); AC table updated; Risks table updated; "Pass 1 Fitness — closed" subsection in `94-phase6a-review-findings.md`. Pass 2 Adversarial fires next against this Pass-1-resolved design state. Prior status: 🟡 REUSE-CLOSED 2026-05-05 (Q-A1-Q-A12 + Layer 3 concerns + 35 RE-rows all ratified — 27 reuse-as-is batch-approved + 8 meaningful rows walked one at a time; C-1 rejected; C-2-C-5 applied; RE-35 per-bucket-only-no-global-fallback per Q-A1).
+**Status**: 🟢 **PASS-2-CLOSED 2026-05-06 PM** — Pass 2 Adversarial 15 findings + 1 Layer 3 concern ratified (5 Minors batch-walked + 10 Majors walked individually + C-6 walked via multiple-choice); contract drift resolved (F18 dropped `interrupted`, F19 fixed AC8a fixture, F24 declared `formatDuration` as new, F32 cited emoji source); DOS surface mitigated (F20 `MAX_META_BYTES` cap sourced from ConfigurationManager INI); SECURITY invariant documented (F21 `Job.meta` opaque-to-6a); TESTABILITY hardened (F22 separate stable AC line, F27 deferred-promise race tests, F28 stylelint+canary three-layer scope-leak detection); RACE handled (F26 throw on double-mount); ACCESSIBILITY closed (F30 keydown handler + aria-expanded); OPERATIONAL polished (F29 default-to-rollback decision tree, F31 sub-step renumber); C-6 delete-button gets `title="Delete coming in Phase 6b"` tooltip. AC table updated (AC4 ≥6, AC5 ≥17, AC8a fixture rewritten, AC9 stable-line grep, AC10 sub-steps renumbered to 10a-10e with three-layer scope-leak + decision tree). Phase 6a documentation cycle CLOSED — implementation plan-mode cycle opens next. Prior status: 🟢 PASS-1-CLOSED 2026-05-06 AM — Pass 1 Fitness 17 findings ratified (7 Minors batch-walked + 10 Majors walked individually); F15 ratification upgraded into the **global 100% coverage mandate** for multiplexer TypeScript (memory: `feedback_100pct_coverage_multiplexer.md`; project `CLAUDE.md` "100% COVERAGE MANDATE" section). Prior: 🟡 REUSE-CLOSED 2026-05-05 (Q-A1-Q-A12 + Layer 3 concerns + 35 RE-rows all ratified).
 **Authored**: 2026-05-05
 **Q-ratification**: 2026-05-05 (this session — see §"Q-decisions — RATIFIED" below for the full ratification table)
 **Slice**: 6a (first of 3) per `07-phase6-slicing-manifest.md`
@@ -40,7 +40,21 @@ Test files mirror Phase 5 layout under `src/tests/unit/multiplexer/render/`.
 
 ```typescript
 interface JobsPaneRenderer {
+  /**
+   * Mount the renderer into the given root. Per Pass 2 F26: calling mount()
+   * twice without an intervening unmount() throws Error('JobsPaneRenderer
+   * already mounted'). The renderer maintains an internal `#mounted: boolean`
+   * flag set true on successful mount, cleared on unmount. Throwing (rather
+   * than silently no-op'ing on the second mount) makes the contract violation
+   * immediately visible at the call site that caused it (typical sources:
+   * Vite/HMR re-running boot.ts during dev, or a test that forgets unmount()
+   * between fixtures).
+   */
   mount(root: HTMLElement): void;
+  /**
+   * Unmount and detach all subscriptions. Idempotent — safe to call when not
+   * mounted (no-ops if `#mounted` is false).
+   */
   unmount(): void;
   forceRenderForTesting(): void;
 }
@@ -49,6 +63,12 @@ interface JobsPaneRendererOptions {
   eventBus    : EventBus;
   stores      : { jobs: JobStore };  // narrow object — only `jobs` is consumed (per Pass 1 F4)
   api         : JobHistoryApiClient;   // for hydrateHistory
+  // Per Pass 2 F25: passed to formatHM and formatDateKey for TZ-aware
+  // bucket-header date display when bucket-header timestamps are surfaced
+  // (e.g., "Created: 2026-05-06" labels in the history bucket header).
+  // Threaded through `formatHM(ts, appTimezone)` / `formatDateKey(ts, appTimezone)`
+  // call sites in jobBucket.ts. If undefined, formatters fall back to
+  // browser-local timezone (the existing default for both functions).
   appTimezone?: string;
 }
 ```
@@ -96,13 +116,13 @@ The renderer subscribes to `hydration_failed { source: "jobs" }` and may optiona
 **Class structure** (Q-C verbatim, ports from `notifications.css:3542-3653`):
 
 ```html
-<div class="job-card status-{todo|running|done|dead|interrupted}" data-id-hash="${job.id_hash}" data-job-type="${job.job_type}">
+<div class="job-card status-{todo|running|done|dead}" data-id-hash="${job.id_hash}" data-job-type="${job.job_type}">
   <div class="job-card-header">
     <span class="job-status-icon">⏳ | ⚙ | ✓ | ✗</span>
     <span class="job-type">${job.job_type}</span>
     <span class="job-id-short">#${job.id_hash.slice(0, 8)}</span>
     <span class="job-timing">${formatDuration(job.created_at, job.completed_at)}</span>
-    <button class="job-delete-button" data-id-hash="${job.id_hash}">×</button>
+    <button class="job-delete-button" aria-disabled="true" tabindex="-1" title="Delete coming in Phase 6b">×</button>
   </div>
   <div class="job-card-details collapsed">
     <!-- expanded on click; lazy-render per Q-G-style pattern (see "Lazy-render mechanism" below) -->
@@ -111,22 +131,67 @@ The renderer subscribes to `hydration_failed { source: "jobs" }` and may optiona
 </div>
 ```
 
-Per **F12**: `data-id-hash` carries the canonical key; `data-job-type` is auxiliary metadata (not a key). Click on `.job-card-header` toggles `.collapsed`; lazy-render the meta JSON on first expand (mirrors Q-G progress-group lazy-cache pattern from Phase 5).
+Per **F12**: `data-id-hash` carries the canonical key; **per Pass 2 F23**: `data-id-hash` is carried ONLY on `.job-card` — NOT on `.job-delete-button` (the delete handler in 6b reads it via `event.target.closest('.job-card').dataset.idHash`). `data-job-type` is auxiliary metadata (not a key). Click on `.job-card-header` toggles `.collapsed`; lazy-render the meta JSON on first expand (mirrors Q-G progress-group lazy-cache pattern from Phase 5).
 
-**Lazy-render mechanism** (per Pass 1 F2): the `<pre class="job-meta-json" hidden>` element renders **empty** in the initial template. On first click of `.job-card-header`:
+**`Job.meta` security invariant** (per Pass 2 F21): `Job.meta` is **opaque to 6a — never spread, never assigned to a non-Map carrier, only stringified for display**. The server controls `meta` content; if any later 6b/6c code does `Object.assign(target, job.meta)` or `{...job.meta}`, prototype pollution is live (a malicious `__proto__` key would inherit through). `Job.meta` interactions in 6a are limited to: (a) `JSON.stringify(job?.meta, null, 2)` for `<pre>` display; (b) reading specific known keys via `meta?.[knownKey]`. **Never** spread, **never** `Object.assign(target, meta)`, **never** structurally copy. This invariant is documented here AND must be re-checked in 6b/6c PIP cycles.
+
+**Lazy-render mechanism** (per Pass 1 F2 + Pass 2 F20 + F23): the `<pre class="job-meta-json" hidden>` element renders **empty** in the initial template. On first click of `.job-card-header`:
 
 ```typescript
 const expandedMetaCache = new WeakSet<HTMLPreElement>();
+
+// Pass 2 F20 — cap is sourced from ConfigurationManager INI key:
+// `multiplexer max meta display bytes` (suggested key) loaded from FastAPI
+// at boot via the existing client-config endpoint pattern (mirrors how
+// other tunable client values are threaded through). Default fallback if
+// boot config is unreachable: 256_000 (256 KB).
+let MAX_META_BYTES = 256_000;  // populated at boot from server config
+
+function configureMetaDisplayCap(serverConfig: { multiplexer_max_meta_display_bytes?: number }): void {
+  if (typeof serverConfig?.multiplexer_max_meta_display_bytes === "number") {
+    MAX_META_BYTES = serverConfig.multiplexer_max_meta_display_bytes;
+  }
+}
+
+function safeStringifyMeta(meta: unknown): string {
+  // Cheap pre-check: walk the object once, sum the lengths of string keys + string
+  // values + 8 bytes per number/boolean/null. Bail early if it exceeds the cap.
+  const estimated = estimateSize(meta, MAX_META_BYTES);
+  if (estimated > MAX_META_BYTES) {
+    return `[meta too large to display — ${formatBytes(estimated)}]`;
+  }
+  try {
+    const out = JSON.stringify(meta, null, 2);
+    // Belt-and-suspenders: stringify can produce a string larger than the
+    // estimate (escape-sequence expansion).
+    if (out.length > MAX_META_BYTES) return "[meta too large to display]";
+    return out;
+  } catch (err) {
+    // Cyclic-ref handling stays.
+    return `[meta serialization failed: ${(err as Error).message}]`;
+  }
+}
+
 function onJobCardHeaderClick(e: MouseEvent) {
-  const header = e.currentTarget as HTMLElement;
-  const card   = header.closest("[data-id-hash]") as HTMLElement;
+  const target = e.target as Element;
+  // Pass 2 F23: don't toggle the card when the user clicked the (currently-disabled)
+  // delete button. 6b will install the real delete handler that stops propagation;
+  // until then we early-return so the click is a visual no-op.
+  if (target.closest(".job-delete-button")) return;
+
+  // Pass 2 F23: query by class, NOT by attribute, so the delete-button-data-id-hash
+  // collision can never resurface.
+  const card   = target.closest(".job-card") as HTMLElement | null;
+  if (!card) return;
   const pre    = card.querySelector(".job-meta-json") as HTMLPreElement;
+
   // toggle collapsed class
   card.querySelector(".job-card-details")!.classList.toggle("collapsed");
+
   // populate once, cache via WeakSet
   if (!expandedMetaCache.has(pre)) {
     const job = stores.jobs.getById(card.dataset.idHash!);
-    pre.innerText = JSON.stringify(job?.meta ?? {}, null, 2);
+    pre.innerText = safeStringifyMeta(job?.meta ?? {});  // Pass 2 F20 — capped
     pre.removeAttribute("hidden");
     expandedMetaCache.add(pre);
   }
@@ -135,20 +200,55 @@ function onJobCardHeaderClick(e: MouseEvent) {
 
 Subsequent toggles are O(1) — the cached `<pre>` content is reused; only the `.collapsed` class flips. `WeakSet` prevents memory leaks when cards unmount (browser GC reclaims the entry once the DOM node is removed).
 
+**INI key + FastAPI wiring for F20 cap** (production): add to `src/conf/lupin-app.ini` under `[Lupin: Baseline]`:
+```ini
+multiplexer max meta display bytes = 256000
+```
+With matching explanation in `src/conf/lupin-app-splainer.ini`. Expose via the existing client-config FastAPI endpoint that already serves other tunable client values (the multiplexer's existing boot config fetch pattern). Renderer's `configureMetaDisplayCap()` is invoked by `boot.ts` AFTER the config fetch resolves, BEFORE renderer mount.
+
+**AC3 sub-test for oversized meta** (per Pass 2 F20): synthesize a 300_000-byte string in a test job's `meta`; click the card-header; assert the rendered `<pre>` text matches `/meta too large to display/` and the click handler does not freeze (resolves within 50ms in the test harness).
+
 ### Bucket template (`render/templates/jobBucket.ts`)
 
 **Class structure**:
 
 ```html
 <section class="jobs-bucket jobs-bucket-{todo|running|done|dead|history}" data-bucket="${bucketName}">
-  <header class="jobs-bucket-header" role="button" tabindex="0">
+  <header class="jobs-bucket-header"
+          role="button"
+          tabindex="0"
+          aria-expanded="${isExpanded}"
+          aria-controls="bucket-${bucketName}-content">
     <span class="jobs-bucket-label">${bucketName}</span>
     <span class="jobs-bucket-count">(${jobs.length})</span>
     <span class="jobs-bucket-toggle">▼</span>
   </header>
-  <div class="jobs-bucket-cards"></div>
+  <div id="bucket-${bucketName}-content" class="jobs-bucket-cards"></div>
 </section>
 ```
+
+**Bucket header keyboard activation** (per Pass 2 F30 — WAI-ARIA 1.2 §5.4 contract for `role="button"`):
+
+```typescript
+header.addEventListener("click", () => toggleBucket(bucket));
+header.addEventListener("keydown", (e: KeyboardEvent) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();   // prevents Space from scrolling the page
+    toggleBucket(bucket);
+  }
+});
+
+function toggleBucket(bucket: string) {
+  const header  = document.querySelector(`.jobs-bucket-header[data-bucket="${bucket}"]`) as HTMLElement;
+  const content = document.querySelector(`#bucket-${bucket}-content`) as HTMLElement;
+  const expanded = header.getAttribute("aria-expanded") === "true";
+  // Reflect new state on BOTH the aria attribute and the hidden/collapsed class
+  header.setAttribute("aria-expanded", String(!expanded));
+  content.classList.toggle("collapsed", expanded);   // collapse if was expanded
+}
+```
+
+Q-A9 ratified Enter/Space activation for `.job-card-header`; Pass 2 F30 extends the same contract to `.jobs-bucket-header` (Q-A9 was silent on bucket headers — that's the gap F30 closed). `aria-expanded` on the header reflects the collapsed/expanded state and updates on every toggle; required by WAI-ARIA for any `role="button"` that controls a region.
 
 **Default-expansion CSS rule** (per Pass 1 F1, derived from Q-A2 — see F14 citation below):
 
@@ -177,10 +277,9 @@ History bucket header gets a special "Load More" affordance (Q-A3 — page throu
 ### CSS port (`src/fastapi_app/static/css/multiplexer/jobs-pane.css`)
 
 Cherry-pick from `notifications.css` (line ranges from grep):
-- `.job-card`, `.job-card.status-*` (lines 3542-3653)
+- `.job-card`, `.job-card.status-*` (lines 3542-3653) — port the `status-todo`, `status-running`, `status-done`, `status-dead` rules ONLY; the legacy `.job-card.status-interrupted` rule at line 4022 is **NOT ported** (per Pass 2 F18: `Job.status` per Phase 4 is exactly `"todo" | "running" | "done" | "dead"` — no `interrupted` value, so the rule has no producer)
 - `.job-card-header`, `.job-card-header.has-cancel`, `.job-card-header:hover` (lines 3555-3568)
 - `.job-card-details`, `.job-card-details.collapsed` (lines 3644-3653)
-- `.job-card.status-interrupted` (line 4022)
 - `.job-card.status-done .job-delete-button`, `.job-card.status-dead .job-delete-button` (lines 4718-4719)
 - `.job-card.job-paused` (lines 4841-4846 — included for Q-A4 ratification: does Phase 6a paint paused state, or defer to 6b?)
 
@@ -188,7 +287,7 @@ Cherry-pick from `notifications.css` (line ranges from grep):
 
 1. Port each line range verbatim into `jobs-pane.css`.
 2. **Verify obsolete-context selectors are flagged**: legacy CSS may target HTML structures no longer present in 6a (e.g., `.job-card-header.has-cancel` — the cancel-button sibling is removed by Q-A6 visual-only state; `.job-card-header > .job-status-icon` deeply-nested layout assumed in legacy).
-3. **Run smoke test AC8a with fixture injecting a job per status** (`status-todo`, `status-running`, `status-done`, `status-dead`, `status-interrupted`, `job-paused`); assert no layout shift across viewports.
+3. **Run smoke test AC8a with fixture injecting a job per status** (`status-todo`, `status-running`, `status-done`, `status-dead`, `job-paused`); assert no layout shift across viewports.
 4. **Remove obsolete selectors as part of the port**: if a selector targets a class/structure that no longer exists in the 6a template (e.g., `.job-card-header.active`), DELETE the rule — do not leave dead CSS.
 5. **Audit recorded in execution log**: per-rule disposition table (kept / pruned / modified / new) lands in `90-execution-log.md` Phase 6a section at apply time.
 
@@ -282,14 +381,14 @@ Per-row `EXECUTOR: AI` per Pass 2 A1 schema; AC11a's `Human gate` column for slo
 | AC2 | ESLint clean | `EXECUTOR: AI` | — | `npx eslint src/fastapi_app/static/js/multiplexer/` exit 0 |
 | AC2a | `hydrateHistory` grep guard now LIFTS — Phase 6a explicitly INVOKES it | `EXECUTOR: AI` | — | `grep -rn "hydrateHistory" src/fastapi_app/static/js/multiplexer/render/` returns ≥1 match (in `JobsPaneRenderer.ts`); previous Phase 5 ban inverts to a require |
 | AC3 | Job card template tests ≥6 PASS (per response variant: empty meta, populated meta, status-{todo,running,done,dead}, click-toggle behavior) | `EXECUTOR: AI` | — | `npx tsx --test src/tests/unit/multiplexer/render/templates_job_card.test.ts` ≥6 PASS |
-| AC4 | Bucket template tests ≥4 PASS (collapsed-by-default for done/dead/history, expanded for todo/running, header toggle, count display) | `EXECUTOR: AI` | — | `npx tsx --test src/tests/unit/multiplexer/render/templates_job_bucket.test.ts` ≥4 PASS |
-| AC5 | JobsPaneRenderer tests ≥**16** PASS — mount/unmount, hydrate on mount triggers `hydrateHistory(api)` exactly once, store-event subscriptions, transition events update buckets via `keyedListMerge`, removed events route done/dead → history bucket, click-on-header toggles details lazy-cache, no tick events expected. **Test 15 (success-path race, per Pass 1 F6)**: (a) pre-seed JobStore with completed job `{id_hash: 'abc123', status: 'done'}`; (b) emit `job_removed { id_hash: 'abc123' }` → reducer moves to history bucket; (c) call `hydrateHistory(api)` with mock returning `{jobs: [{id_hash: 'abc123', status: 'done', ...}]}` after **100ms delay**; (d) within 50ms of hydrate call: verify state is still `{history: [job]}`; (e) wait for hydrate promise to settle; (f) assert final state is `{history: [job]}` with `count === 1` (no duplicate, no orphan). **Test 16 (rejection-path race, per Pass 1 F3)**: same fixture as Test 15 but mock returns a rejected promise after 100ms; assert (a) `hydration_failed` event emitted with `{source: "jobs"}`; (b) no unhandled-rejection in test harness; (c) state is `{history: [job]}` (in-session removed job preserved despite hydrate rejection). | `EXECUTOR: AI` | — | `npx tsx --test src/tests/unit/multiplexer/render/jobs_pane_renderer.test.ts` ≥16 PASS |
+| AC4 | Bucket template tests ≥**6** PASS (collapsed-by-default for done/dead/history, expanded for todo/running, header click toggle, count display, **plus per Pass 2 F30: keyboard activation sub-test — Enter and Space on the bucket header toggle the bucket; Tab does NOT toggle (verifies preventDefault scope); aria-expanded attribute on the bucket header reflects the collapsed/expanded state and updates on toggle**) | `EXECUTOR: AI` | — | `npx tsx --test src/tests/unit/multiplexer/render/templates_job_bucket.test.ts` ≥6 PASS |
+| AC5 | JobsPaneRenderer tests ≥**18** PASS — mount/unmount, hydrate on mount triggers `hydrateHistory(api)` exactly once, store-event subscriptions, transition events update buckets via `keyedListMerge`, removed events route done/dead → history bucket, click-on-header toggles details lazy-cache, no tick events expected. **Test 15 (success-path race, per Pass 1 F6 + Pass 2 F27 deferred-promise rewrite)**: (a) pre-seed JobStore with completed job `{id_hash: 'abc123', status: 'done'}`; (b) emit `job_removed { id_hash: 'abc123' }` → reducer moves to history bucket; (c) build a deferred promise via `let resolveHydrate!: (jobs: Job[]) => void; const apiStub = { fetchJobsHistory: () => new Promise<Job[]>(r => { resolveHydrate = r; }) };` and call `JobStore.hydrateHistory(apiStub)` (hydrate is now in flight, awaiting `resolveHydrate(...)`); (d) deterministically order: emit a SECOND `job_removed { id_hash: 'abc123' }` while the hydrate promise is unresolved (the race window); (e) call `resolveHydrate([{id_hash: 'abc123', status: 'done', ...}])` to land the response containing a stale persisted version of the in-session-removed job; (f) await the hydrate promise; (g) assert final state is `{history: [job]}` with `count === 1` — JobStore dedup by id_hash kept final state coherent. **No real-time waits** — promise ordering is deterministic. **Test 16 (rejection-path race, per Pass 1 F3 + Pass 2 F27 deferred-promise rewrite)**: same fixture as Test 15 but build the deferred promise as `let rejectHydrate!: (err: Error) => void; const apiStub = { fetchJobsHistory: () => new Promise<Job[]>((_, r) => { rejectHydrate = r; }) };`. Emit `job_removed` while hydrate is in flight, THEN call `rejectHydrate(new Error("network down"))`; await the rejection. Assert (a) `hydration_failed` event emitted with `{source: "jobs"}`; (b) no unhandled-rejection in test harness; (c) state is `{history: [job]}` (in-session removed job preserved despite hydrate rejection). **Test 17 (mount idempotency, per Pass 2 F26)**: assert `renderer.mount(root)` followed by a second `renderer.mount(root)` (without intervening `unmount()`) throws `Error('JobsPaneRenderer already mounted')`. After `unmount()`, `mount()` is fine again. **Test 18 (disabled-delete-button click no-op, per Pass 2 F23 — programmatic enforcement)**: render a job card; dispatch a `click` MouseEvent on the `.job-delete-button` element with `bubbles: true`. Assert: (a) NO exception thrown; (b) the card's `.job-card-details` retains its initial `.collapsed` class state (the click did NOT propagate into the card-toggle handler); (c) the `<pre class="job-meta-json">` retains `hidden` attribute (lazy-render did NOT fire); (d) repeating the click 3 times produces no state change. Closes the F23 gap so a future refactor can't silently regress the disabled-button-doesn't-toggle-card behavior. | `EXECUTOR: AI` | — | `npx tsx --test src/tests/unit/multiplexer/render/jobs_pane_renderer.test.ts` ≥18 PASS |
 | AC6 | Coverage **100% lines / branches / functions** on the new render/ files (`JobsPaneRenderer.ts`, `templates/jobCard.ts`, `templates/jobBucket.ts`) per the **global 100% coverage mandate for multiplexer TypeScript** ratified 2026-05-06 (project `CLAUDE.md` "100% COVERAGE MANDATE"; auto-memory `feedback_100pct_coverage_multiplexer.md`). `c8 ignore` regions allowed BUT require same-line comment with explicit reason per Phase 4 A1 contract — use case is genuinely-unreachable defensive branches. **Re-exported Phase 5 utilities** (`html`, `keyedListMerge`, time formatters) are EXCLUDED from this AC6 — their coverage is measured by Phase 5's AC6 (also retroactively bumped to 100% per the global mandate; Phase 4 + Phase 5 backfill is a prerequisite of Phase 6a implementation per TODO.md). | `EXECUTOR: AI` | — | `c8 --all --include='src/fastapi_app/static/js/multiplexer/render/{JobsPaneRenderer.ts,templates/job*.ts}' --100 npx tsx --test src/tests/unit/multiplexer/render/jobs_pane_renderer.test.ts src/tests/unit/multiplexer/render/templates_job_card.test.ts src/tests/unit/multiplexer/render/templates_job_bucket.test.ts` (the `--100` flag fails the run if any of lines/functions/branches/statements drop below 100%) |
 | AC7 | `boot.js` (content-hashed canonical) gzipped delta ≤ +30 KB vs Phase 5 baseline of **29,662 bytes** → ceiling = **60,382 bytes** | `EXECUTOR: AI` | — | `gzip -9 -c src/fastapi_app/static/dist/multiplexer/boot.<hash>.js \| wc -c` ≤ `60382`. Phase 5 baseline frozen in `90-execution-log.md` Phase 5 closure section (this slice opens its own AC7 baseline section) |
-| AC8a | Functional page-load smoke — page loads on `LUPIN_API_URL`; jobs renderer mount completes within 500ms of `boot_complete`. AI Playwright asserts: (1) `[data-testid="multiplexer-jobs-pane"]` is NOT hidden, (2) 5 bucket sections present (`[data-bucket="todo"]` through `[data-bucket="history"]`), (3) **3 fixture jobs injected (per Pass 1 F16)** via three separate `page.evaluate(() => eventBus.emit(...))` calls, each payload `{id_hash: '<uuid>', job_type: 'DeepResearchJob', status: 'running'\|'done'\|'history', created_at: <epoch>, completed_at?: <epoch>, meta: {}}`. Bucket landing: (a) running job → `bucket('running')` via `job_state_transition`; (b) done job → `bucket('done')` via `job_state_transition`; (c) third job injected as `job_removed { id_hash, from: 'done', to: 'history' }` → `bucket('history')`. Assert 3 `[data-id-hash]` elements present, one per bucket. (4) **per C-5 tightening + Pass 1 F7 parameterization**: `data-phase6-pending="true"` count is **EXACTLY** `1 + N` where `N` = action-required widgets injected by the test fixture. **Three sub-cases parameterized**: (a) 0 action-required injected → count === 1 (only `#tts-pane`); (b) 2 action-required injected → count === 3 (`#tts-pane` + 2 widgets); (c) 3 action-required injected → count === 4 (`#tts-pane` + 3 widgets). Assertion form: `document.querySelectorAll('[data-phase6-pending="true"]').length`. Test name: `test_phase6a_data_phase6_pending_exact_count`; parameterized over fixture counts. Hard-coded count beats `≥` so silent drift can't slip through. | `EXECUTOR: AI` | — | `pytest src/tests/smoke/test_multiplexer_phase6a_smoke.py::test_phase6a_functional_smoke src/tests/smoke/test_multiplexer_phase6a_smoke.py::test_phase6a_data_phase6_pending_exact_count -v` all PASS |
+| AC8a | Functional page-load smoke — page loads on `LUPIN_API_URL`; jobs renderer mount completes within 500ms of `boot_complete`. AI Playwright asserts: (1) `[data-testid="multiplexer-jobs-pane"]` is NOT hidden, (2) 5 bucket sections present (`[data-bucket="todo"]` through `[data-bucket="history"]`), (3) **3 fixture jobs injected (per Pass 1 F16 + Pass 2 F19)** — all 3 use **valid `Job.status` values** (`'running'`, `'done'`, `'done'`). Each payload `{id_hash: '<uuid>', job_type: 'DeepResearchJob', status: <see below>, created_at: <epoch>, completed_at?: <epoch>, meta: {}}`. Bucket landing paths: (a) **running job** with `status: 'running'` → `bucket('running')` via `job_state_transition` event; (b) **done job** with `status: 'done'` → `bucket('done')` via `job_state_transition` event; (c) **history job** with `status: 'done'` (NOT `'history'` — `'history'` is a bucket name, NOT a Job.status value per Phase 4 `Job.status = "todo"\|"running"\|"done"\|"dead"`). The history bucket landing happens via the actual reducer path real users see: AFTER the third job is hydrated as `status: 'done'`, fire a separate `job_removed { id_hash }` event → JobStore reducer marks it removed → renderer's `bucketFor()` reads the `removed_at` field (or equivalent) and places it in the history bucket. The third job's `status` field STAYS `'done'` end-to-end. Assert 3 `[data-id-hash]` elements present, one per bucket. (4) **per C-5 tightening + Pass 1 F7 parameterization**: `data-phase6-pending="true"` count is **EXACTLY** `1 + N` where `N` = action-required widgets injected by the test fixture. **Three sub-cases parameterized**: (a) 0 action-required injected → count === 1 (only `#tts-pane`); (b) 2 action-required injected → count === 3 (`#tts-pane` + 2 widgets); (c) 3 action-required injected → count === 4 (`#tts-pane` + 3 widgets). Assertion form: `document.querySelectorAll('[data-phase6-pending="true"]').length`. Test name: `test_phase6a_data_phase6_pending_exact_count`; parameterized over fixture counts. Hard-coded count beats `≥` so silent drift can't slip through. | `EXECUTOR: AI` | — | `pytest src/tests/smoke/test_multiplexer_phase6a_smoke.py::test_phase6a_functional_smoke src/tests/smoke/test_multiplexer_phase6a_smoke.py::test_phase6a_data_phase6_pending_exact_count -v` all PASS |
 | AC8b | Perf gate — pre-seed 50 jobs across buckets; first paint of all 50 cards within **150ms** of `boot_complete` (slightly looser than Phase 5's 100ms because 5 nested buckets cost more parent-traversal than the flat sender-cards container) | `EXECUTOR: AI` | — | `pytest src/tests/smoke/test_multiplexer_phase6a_smoke.py::test_phase6a_perf_gate -v` 1/1 PASS |
-| AC9 | `boot_complete` console line includes `jobsRenderer:mounted` (literal string, F22 pattern) | `EXECUTOR: AI` | — | `pytest src/tests/smoke/test_multiplexer_phase6a_smoke.py::test_phase6a_boot_complete_handler_handshake -v` 1/1 PASS |
-| AC10 | Phase 1/3/4/5 verification suites still green | `EXECUTOR: AI` | — | Enumerated: (1) `npx tsc --noEmit`; (2) `npx eslint`; (3) Phase 1 smoke 7/7 (post-D-G selector); (4) Phase 2 unit suite all PASS; (5) Phase 3 smoke 1/1; (6) WS smoke 50/50; (7) Phase 4 unit suite ≥88; (8) **Phase 5 unit suite all PASS** (cumulative 325 + 6a render tests); (9) Phase 5 smoke 3/3; (10) **Phase 5 visual baseline (regression check, no `--update-snapshots`) 1/1 PASS** — confirms 6a CSS port did not drift the notifications-list pane visual. **Per C-2 attribution rule + Pass 1 F8 5-step procedure**: (10.1) **Pre-6a**: capture Phase 5 baseline snapshot at **1920×1080** + list viewport. (10.2) **Post-6a CSS lands**: run Phase 5 visual regression check (no `--update-snapshots`) at the **same** viewport. (10.3) **If regression check fails**: examine `git diff src/fastapi_app/static/css/multiplexer/jobs-pane.css` + `git log --oneline \| head -1` (6a commit). (10.4) **Scope-leak grep checklist** in new file — grep for: `* {` (universal selector), `html {` / `body {` / `:root {` (root-level rules), generic `.card {` (class collisions). If any found → STOP; attribute failure to scope leak; revert CSS narrowing. (10.5) **If scope-leak grep is clean but visual still differs**: escalate as Phase 5 baseline drift (intentional or not); decide re-capture vs rollback. Diff inspection MUST attribute root cause to either (a) 6a CSS scope leak (revert 6a CSS narrowing), OR (b) genuine Phase 5 baseline drift (recapture baseline if intentional) BEFORE proceeding to commit. |
+| AC9 | **Per Pass 2 F22**: boot emits a SECOND, stable, non-JSON console.log line per surface — `console.log("[multiplexer] jobsRenderer:mounted")` — alongside the existing JSON-form `console.log("[multiplexer] boot_complete", JSON.stringify({...}))`. The AC asserts on the stable line, NOT on the JSON form (so the AC stays robust against future serialization refactors). Test greps for the literal string `[multiplexer] jobsRenderer:mounted` in captured console output. (Mirror-emit `[multiplexer] notificationsRenderer:mounted` for Phase 5 surface consistency; that line's coverage rolls into the Phase 5 AC.) | `EXECUTOR: AI` | — | `pytest src/tests/smoke/test_multiplexer_phase6a_smoke.py::test_phase6a_boot_complete_handler_handshake -v` 1/1 PASS |
+| AC10 | Phase 1/3/4/5 verification suites still green | `EXECUTOR: AI` | — | Enumerated: (1) `npx tsc --noEmit`; (2) `npx eslint`; (3) Phase 1 smoke 7/7 (post-D-G selector); (4) Phase 2 unit suite all PASS; (5) Phase 3 smoke 1/1; (6) WS smoke 50/50; (7) Phase 4 unit suite ≥88; (8) **Phase 5 unit suite all PASS** (cumulative 325 + 6a render tests); (9) Phase 5 smoke 3/3; (10) **Phase 5 visual baseline (regression check, no `--update-snapshots`) 1/1 PASS** — confirms 6a CSS port did not drift the notifications-list pane visual. **Per C-2 attribution rule + Pass 1 F8 5-step procedure (sub-steps renumbered 10a-10e per Pass 2 F31)**: **(10a) Pre-6a**: capture Phase 5 baseline snapshot at **1920×1080** + list viewport. **(10b) Post-6a CSS lands**: run Phase 5 visual regression check (no `--update-snapshots`) at the **same** viewport. **(10c) If regression check fails**: examine `git diff src/fastapi_app/static/css/multiplexer/jobs-pane.css` + `git log --oneline \| head -1` (6a commit). **(10d) Scope-leak detection (per Pass 2 F28 — three layers)**: layer-1 — fast grep first pass (catches obvious cases): `grep -E '^\s*(\*\|html\|body\|:root\|\.card)\s*\{' jobs-pane.css`. layer-2 — stylelint rule with CSS parser awareness: add to `.stylelintrc.json`: `{"overrides":[{"files":["src/fastapi_app/static/css/multiplexer/jobs-pane.css"],"rules":{"selector-disallowed-list":[["*","html","body",":root"],{"severity":"error"}]}}]}`. Build fails on violation; understands @-rule nesting + comments + `:where()` so it catches `@layer base { :root {} }` cases that grep misses, AND avoids false positives on `.cardholder` substring matches. layer-3 — empirical canary test: `test("AC10d.canary: jobs-pane.css load does not perturb document.body styles")` — read `getComputedStyle(document.body)` BEFORE jobs-pane.css loads (Phase 5 baseline) + AFTER; assert NO drift on `["color", "background-color", "font-family", "margin", "padding"]`. Catches custom-property leaks + cascade leaks that even stylelint can't see. If any layer flags → STOP; attribute failure to scope leak; revert CSS narrowing. **(10e) If all three layers are clean but visual still differs (per Pass 2 F29 default-to-rollback decision tree)**: **(10e.i) Default action — rollback the 6a CSS port commit and re-run.** If the rollback restores the Phase 5 baseline → 6a CSS is the cause. Investigate (likely a scope leak missed by 10d). Do NOT re-capture; fix the 6a CSS and re-test from 10b. If the rollback does NOT restore the baseline → Phase 5 baseline was already drifted before 6a. Independent investigation; capture is fine after diagnosis. **(10e.ii) Independent disproof of 6a scope leak (only if step 10e.i is inconclusive)**: temporarily remove the `<link rel="stylesheet" href="/static/css/multiplexer/jobs-pane.css">` from `multiplexer.html` (NOT just empty the file — fully unlink so the asset is unloaded); re-run regression. If baseline matches Phase 5 → loading jobs-pane.css IS the cause. The leak is in the file structure (e.g., an @-rule unprotected by `.jobs-pane` scoping); 10d layer-2 stylelint config likely needs strengthening. If baseline still mismatches → drift is somewhere else (e.g., a Phase 5 commit between baseline-capture and now). Safe to re-capture after locating the drift point. **(10e.iii) Re-capture (last-resort, after EITHER 10e.i or 10e.ii has fully diagnosed)**: document the drift cause in the regression PR; update the baseline image; tag the new baseline with the diagnosed source (e.g., "rev: post-6a, drift cause: intentional Phase 5 bubble-margin tweak ratified in PR #N"). Diff inspection MUST attribute root cause BEFORE proceeding to commit — no silent baseline overwrites. |
 | AC10b | CSS port residual LOC ≤ 800 (smaller than Phase 5's 1,200 ceiling because job cards have less chrome); stylelint clean | `EXECUTOR: AI` | — | `[ "$(wc -l src/fastapi_app/static/css/multiplexer/jobs-pane.css \| awk '{print $1}')" -le 800 ] && npx stylelint src/fastapi_app/static/css/multiplexer/jobs-pane.css` exit 0 |
 | **AC11a** | E2E submission — `POST /api/test-suite/submit` body `{"test_types": "e2e", "scheduled_at": "<user-confirmed slot>", "pytest_args": "--update-snapshots -k multiplexer_phase6a", "auto_fix_on_failure": false}` → HTTP 200 + valid `submission_id`. **Per Phase 5 spec drift §7-§9** documented learnings: status verification via Docker container logs, NOT `/api/test-suite/status/<id>` (endpoint does not exist) | `EXECUTOR: AI` | **HUMAN** — confirms `scheduled_at` slot non-overlapping. **NOT tester duty.** | `curl -X POST .../api/test-suite/submit -d '...'` returns 200 + `submission_id` |
 | **AC11b** | E2E post-run state — assert (a) `find io/test-suite/visual-baselines/test_multiplexer_phase6a_visual/ -type f -name "*.png" \| wc -l > 0`, (b) container log contains `Test suite complete` + `e2e: 1 passed, 0 errors` for Run #2 (regression check, no `--update-snapshots`). **Per Phase 5 spec drift §4-§5**: fixture envelopes use FIXED timestamps + `_STABILIZE_DOM_JS` pattern from the start | `EXECUTOR: AI` | — | Two-run sequence: (1) `--update-snapshots` captures baseline (1 passed, 1 error per library convention); (2) regression check passes (1 passed, 0 errors) |
@@ -319,6 +418,7 @@ Findings consolidated into `94-phase6a-review-findings.md` for batch user ratifi
 | Phase 5 visual baseline regression — 6a CSS port introduces a generic rule (e.g., `* { margin: 0 }`) that drifts `#notifications-pane` pixels | Medium | AC10 step #10 explicitly re-runs the Phase 5 visual regression check (no `--update-snapshots`) — pixel-match or fail. Encourages narrow-scope CSS in the new file. |
 | `Job.meta` is `Record<string, unknown>` — JSON.stringify of a deeply-cyclic object throws | Low | Wrap stringify in try/catch; fall back to `String(meta)` representation. AC3 unit test covers cyclic-meta fixture. |
 | **C-3/C-4 race**: `hydrateHistory(api)` runs asynchronously from `mount()`; live `job_removed` events can arrive while the hydrate promise is in flight, and the response may include a stale persisted version of an in-session-removed job | Medium | `JobStore.hydrateHistory` already dedups by `id_hash` (Phase 4 — `JobStore.ts:152-156`). AC5 floor bumped to ≥15 to cover the timing case explicitly: fire `job_removed` while hydrate promise is unresolved; assert no duplicate, no orphan. C-3 covers C-4 — same root race surfaced from two perspectives. |
+| **PROTOTYPE-POLLUTION FUTURE RISK** (per Pass 2 F21 close-out): `Job.meta` opaque-to-6a invariant ("never spread, never `Object.assign(target, meta)`, only stringified for display") is currently DOC-ONLY — no programmatic enforcement (no ESLint rule, no snapshot test). A future 6b/6c implementer could introduce `{...job.meta}` or `Object.assign(target, job.meta)` and only the design-doc text would catch it. A malicious server-controlled `__proto__` key would then inherit through to the assignment target — live prototype pollution. | Medium (low-probability, high-blast-radius) | **Pass 2 PIP cycles for 6b + 6c MUST include a dedicated re-grep step** searching the renderer + templates trees for `\{\.\.\.job\.meta`, `\{\.\.\.\w+\.meta`, `Object\.assign\([^,]+,\s*\w*\.meta\)`, and `Object\.assign\([^,]+,\s*job\.meta\)` patterns. Any match → flag as Major SECURITY finding in that pass. Until a programmatic enforcement (custom ESLint rule banning these patterns when the source operand types as `Job.meta`) is in place, the social contract + per-pass re-grep is the gate. Re-evaluate during 6b code-writing whether to invest in the ESLint rule (favored if the pattern recurs). |
 
 ## Critical files
 
@@ -335,7 +435,7 @@ Findings consolidated into `94-phase6a-review-findings.md` for batch user ratifi
 
 **Edited**:
 - `src/fastapi_app/static/html/multiplexer.html` (lift `data-phase6-pending` + `hidden` from `#jobs-pane`; populate section structure with `#jobs-buckets-container` + "Load history" button; add CSS `<link>` for `jobs-pane.css`)
-- `src/fastapi_app/static/js/multiplexer/boot.ts` (jobs renderer instantiation post-Phase-5-renderer-mount; `BootCompletePayload.handlers.jobsRenderer = "mounted"` per F22 pattern)
+- `src/fastapi_app/static/js/multiplexer/boot.ts` (jobs renderer instantiation post-Phase-5-renderer-mount; `BootCompletePayload.handlers.jobsRenderer = "mounted"` per F22 pattern. **Per Pass 2 F22**: emit a SECOND, stable, non-JSON console.log line per surface AFTER the existing `console.log("[multiplexer] boot_complete", JSON.stringify({...}))`: `console.log("[multiplexer] jobsRenderer:mounted")` (and mirror-emit `console.log("[multiplexer] notificationsRenderer:mounted")` for Phase 5 surface consistency). Stable string contract independent of JSON serialization; AC9 grep target. Also: invoke `configureMetaDisplayCap(serverConfig)` at boot — fetch the existing client-config endpoint that exposes `multiplexer max meta display bytes` to the renderer per Pass 2 F20.)
 - `src/fastapi_app/static/html/dev-tools.html:145` (description text)
 - `src/fastapi_app/static/js/multiplexer/render/index.ts` (export `createJobsPaneRenderer` from barrel)
 - `src/fastapi_app/static/js/multiplexer/shared/types.ts` (extend `BootCompletePayload.handlers` with optional `jobsRenderer?: string`)
@@ -351,11 +451,12 @@ Findings consolidated into `94-phase6a-review-findings.md` for batch user ratifi
 - `JobHistoryApiClient` — Phase 4 loose interface (`stores/JobStore.ts:74-76`); production passes the canonical `ApiClient` (Phase 2)
 - `keyedListMerge` from Phase 5 (`render/dom.ts`) keyed by `data-id-hash` (F12)
 - `html` tagged-template helper from Phase 5 (`render/html.ts`)
-- `formatHM`, `formatDateKey` from Phase 5 (`render/time.ts`) for `job.created_at` / `completed_at` display
+- `formatHM`, `formatDateKey` from Phase 5 (`render/time.ts`) for `job.created_at` / `completed_at` display (TZ-aware via `appTimezone` option per F25)
+- **`formatDuration(start, end?)` — RESOLVED per Pass 2 F24**: this function is referenced in the card template (line 104, `${formatDuration(job.created_at, job.completed_at)}`). Its source: NEW in Phase 6a, NOT reused — declared as Genuinely New in this row to close the F24 ambiguity. Add to `render/time.ts` as a sibling of `formatHM` / `formatDateKey`. Signature: `formatDuration(startTs: number, endTs?: number): string` returning a humanized "5m 12s" / "1h 47m" / "running for 23s" form depending on whether `endTs` is undefined (job still in flight) or finite. Phase 6a unit test in `render/time.test.ts` covers: (a) endTs undefined + recent start → "running for Ns"; (b) sub-minute completion → "Ns"; (c) sub-hour completion → "Nm Ms"; (d) multi-hour completion → "Nh Mm". Coverage rolls into the existing 100%-coverage mandate for Phase 5 `render/time.ts`.
 - EventBus subscription pattern from Phase 4/5 (`unsubscribers: Array<() => void>`)
 - Factory shape from Phase 5 `createNotificationsListRenderer` (RE-12)
-- Legacy CSS classes ported verbatim from `notifications.css:3542-3653, 4022, 4718-4725, 4841-4846` (Q-C)
-- Legacy job-card status-icon emojis if any (TBD — REUSE pre-pass to confirm)
+- Legacy CSS classes ported verbatim from `notifications.css:3542-3653, 4718-4725, 4841-4846` (Q-C). **Per Pass 2 F18**: line 4022 (`.job-card.status-interrupted`) is NOT ported — `Job.status` per Phase 4 has no `interrupted` value, so the rule has no producer.
+- **Job-card status-icon emojis — RESOLVED per Pass 2 F32**: the emoji set `⏳ | ⚙ | ✓ | ✗` (todo / running / done / dead) is in the template at line 102. Source disposition: legacy `notifications.js:5478` (already in REUSE table as pattern source) — emojis ported verbatim. Status now confirmed; the residual `TBD` line in the previous draft is removed.
 
 ## Pre-exit self-audit (against feedback memory)
 
@@ -365,6 +466,7 @@ Findings consolidated into `94-phase6a-review-findings.md` for batch user ratifi
 | `feedback_phase0_serialization_prominence` | ✅ Phase 0 = doc serialization (top of doc, mandatory before any code) |
 | `feedback_plans_include_tracking_docs` | ✅ Design doc (this) + execution log Phase 6a section seed + review-findings doc to come |
 | `feedback_comprehensive_automated_testing` | ✅ Test pyramid covers unit (job card / bucket / renderer) + smoke (functional + perf gate + boot_complete handshake) + scheduled E2E (visual baseline on `:8000` with deterministic-fixture pattern from start) |
+| **CLAUDE.md TEST OWNERSHIP MANDATE / CLAUDE.local.md "THE USER IS NEVER A TESTER"** | ✅ **Audited Pass-2-close 2026-05-06 PM**. Every AC is `EXECUTOR: AI` (AC1 tsc, AC2 eslint, AC2a hydrateHistory grep, AC3 jobCard ≥6, AC4 jobBucket ≥6, AC5 JobsPaneRenderer ≥18, AC6 c8 --100, AC7 gz delta, AC8a functional smoke, AC8b perf gate, AC9 stable boot_complete line, AC10 cross-suite + 10a-10e scope-leak, AC10b CSS LOC + stylelint, AC11a E2E submission, AC11b E2E post-run state). AC11a's HUMAN column is **slot-coordination ONLY** — explicitly carved out by the mandate as "calendar coordination, NOT tester duty, NOT budget approval." User role across the design doc: **architect/designer** (Q-decision ratifications, Pass 1 + Pass 2 finding dispositions) and **end user** (when the jobs pane ships) — NEVER tester. F22's "verify console.log emission" is implementation-time AI sanity-check, not user-tester duty. F18's "if legacy paints `interrupted`, we lose it" trade-off was a design-architecture decision (user-as-architect), not a tester deferral. C-6 tooltip is unit-testable via attribute assertion. Two prior-gap closures landed in this same Pass 2 close-out: Risks-table row added for F21 prototype-pollution future risk + AC5 Test 18 added for F23 disabled-delete-button click no-op. |
 | `feedback_tests_parameterize_base_url` | ✅ Smoke + E2E parameterize via `LUPIN_API_URL` |
 | `feedback_skip_rnd_doc_for_trivial_fixes` | ✅ NOT applicable — Phase 6a is non-trivial (~7 new files, new pane, new templates) |
 | `feedback_lupin_only_never_cosa` | ✅ All edits under `src/fastapi_app/static/{js,html,css}/multiplexer/` + `src/tests/` + `src/rnd/`. No CoSA touch |
@@ -443,9 +545,9 @@ REUSE pre-pass surfaced 35 prior-art rows + 5 Layer 3 design concerns (full tabl
 
 | 6a element | Legacy/Phase 5 anchor | What's reused |
 |---|---|---|
-| Bucket header click toggle (`.jobs-bucket-cards` collapse/expand) | `render/templates/dateAccordion.ts` | Apply Phase 5 accordion delegation pattern; new class names |
-| CSS port from legacy ranges | `notifications.css:3542-3653, 4022, 4718-4725, 4841-4846` | Cherry-pick verbatim per Phase 5 precedent |
-| `.job-card.status-interrupted` styling | `notifications.css:4022` | Port verbatim; visual-only in 6a (Q-A4) |
+| Bucket header click toggle (`.jobs-bucket-cards` collapse/expand) | `render/templates/dateAccordion.ts` | Apply Phase 5 accordion delegation pattern; new class names. **Per Pass 2 F30**: ALSO add Enter/Space keydown handler + `aria-expanded` reflection (WAI-ARIA 1.2 contract for `role="button"`) — extends Q-A9 keyboard pattern from card headers to bucket headers. |
+| CSS port from legacy ranges | `notifications.css:3542-3653, 4718-4725, 4841-4846` | Cherry-pick verbatim per Phase 5 precedent. **Per Pass 2 F18**: line 4022 (`.job-card.status-interrupted`) is NOT in the port range — `Job.status` per Phase 4 has no `interrupted` value, so the rule has no producer. |
+| ~~`.job-card.status-interrupted` styling~~ | ~~`notifications.css:4022`~~ | **DROPPED per Pass 2 F18** — `Job.status` per Phase 4 is exactly `"todo" \| "running" \| "done" \| "dead"`. No reducer produces `interrupted`, so the CSS rule has no painter. Row preserved (struck-through) as a documentation trail of the resolved drift. |
 | `.job-card.job-paused` styling | `notifications.css:4841-4846` | Port verbatim; visual-only in 6a (Q-A4) |
 | `BootCompletePayload.handlers.jobsRenderer` | `shared/types.ts:393-400` Phase 5 BootCompletePayload | Add optional field; mirror Phase 5 `notificationsRenderer` extension |
 | Empty-state per bucket (NO global fallback per Q-A1; RE-35 modified 2026-05-05) | `render/templates/actionRequiredReadOnly.ts` Phase 5 empty-state CSS | Per-bucket-only per Q-A1 strict ratification; visual styling (`text-align: center`, muted color) borrows from Phase 5 `notifications-empty-state` class for visual continuity. The "global fallback when all 5 empty" half of the agent's original RE-35 verdict was DROPPED — Q-A1 explicitly rejected the mixed-mode option. |
