@@ -2,6 +2,28 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-04-30 to 2026-05-02](history/2026-04-30-to-05-02-history.md).
 
+### 2026.05.05 PM (late) - Session 532b16e1 | Multiplexer Phase 6a — Slicing manifest + Phase 6a design doc REUSE-closed + Pass 1 Fitness landed (awaiting ratification gate)
+
+**Context**: Continuing same session after the Phase 5 landing (`6ab9929` + `d17abb6`, Phase 5 entry below). Slice Phase 6 into 6a/6b/6c per Q11 amendment, draft 6a "Jobs Surface" design doc, run REUSE pre-pass + ratify, run Pass 1 Fitness — strictly sequential per `feedback_pip_plan_review_is_sequential` (correcting the Phase 4 + 5 parallel-execution shortcut). Pass 2 Adversarial NOT fired this session — stops at Pass 1 user-decision gate.
+
+**Accomplishments**:
+
+- **Slicing decision artifact** at `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/07-phase6-slicing-manifest.md` (NEW). Splits Phase 6 into 6a (Jobs surface — most isolated; jobs-pane render + `JobStore.hydrateHistory(api)` invocation + 5-bucket layout), 6b (interactive widgets + TTS chrome), 6c (persona modal + focus tray + audio recorder). Permanent out-of-scope: `claude_code_event` consumer (D1 A-extended), cross-tab BroadcastChannel (Q12), forced cutover (Q9). Per-slice file naming convention pinned (`08-/09-/10-` design + `94-/95-/96-` review-findings).
+
+- **Phase 6a design doc** at `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/08-phase6a-jobs-surface-design.md` (NEW). 12 Q-A decisions ratified via cosa-voice walkthrough (Q-A1 per-bucket empty messages, Q-A2 expanded-todo+running, Q-A3 single-100-row hydrate, Q-A4 paused-deferred-to-6b, Q-A5 expand-inline-with-lazy-cache, Q-A6 visual-only-delete-button, Q-A7 eager-on-mount, Q-A8 flat-data-testid, Q-A9 full-header-click-target, Q-A10 newest-first, Q-A11 60,382-byte gz ceiling, Q-A12 N/A action-required). 11-row AC table (AC1 tsc / AC2 eslint / AC2a !grep `hydrateHistory` lifts to require / AC3-AC4 template tests / AC5 ≥15 renderer tests with C-3/C-4 race case / AC6 ≥90% lines / AC7 gz ≤60,382 / AC8a-AC9 smoke / AC10 cross-phase regression with C-2 attribution rule / AC10b ≤800 LOC / AC11a-AC11b scheduled :8000 visual baseline).
+
+- **REUSE pre-pass closed** with 35 RE-row dispositions ratified (23 reuse-as-is + 9 extend-existing + 3 genuinely-new) + 5 Layer 3 design concerns disposed (C-1 rejected as framed, C-2-C-5 applied to AC5/AC8a/AC10/Risks). RE-35 modified per Q-A1 strict ratification (per-bucket-only-no-global-fallback). "Prior art referenced" subsection finalized at bottom of the design doc with full disposition table.
+
+- **Pass 1 Fitness Findings** at `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/94-phase6a-review-findings.md` (NEW). Sequential — clean-context Explore agent ran AFTER REUSE close-out, sees REUSE-resolved doc state. **17 findings** at **0 Block / 10 Major / 7 Minor / 0 Layer 3** clustered: COMPLETENESS (5), TESTABILITY (4), AMBIGUITY (3), DECISION TRACEABILITY (1), RISK SURFACE (1), ORDERING (1). Standout Majors: F3 (`hydrateHistory` rejection path), F4 (renderer factory signature), F7 (AC8a count fixture mechanism), F14 (Q-A2 "Match legacy" file:line citation), F17 (Q-A7 mount sequence ordering). Findings doc also captures the corrected sequence (REUSE → user gate → apply → Pass 1 → user gate → apply → Pass 2 → user gate → apply per Q11 amendment, NOT parallel like Phase 4 + 5).
+
+**Process notes**: Session continuation — same session ID 532b16e1 carries over from Phase 5 work. Strict sequential PIP corrects the Phase 4/5 parallel-execution shortcut per `feedback_pip_plan_review_is_sequential`. Documentation step stops at the doc per `feedback_documentation_step_stops_at_doc` — no auto-advance to Pass 2, no code writing, no ExitPlanMode. User to resume tomorrow morning at the Pass 1 Fitness ratification gate (TODO.md "FIRST THING IN THE MORNING — 2026.05.06" section opens that path).
+
+**Files**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/07-phase6-slicing-manifest.md` (NEW), `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/08-phase6a-jobs-surface-design.md` (NEW), `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/94-phase6a-review-findings.md` (NEW). Plus `TODO.md` (FIRST THING IN THE MORNING — 2026.05.06 section added) and `history.md` (this entry).
+
+**Status**: Awaiting Pass 1 Fitness user-decision gate. Pass 2 Adversarial fires after gate clears + approved fixes apply + convergence re-grep.
+
+---
+
 ### 2026.05.05 PM - Session 45e6bf84 | Bug Fix Mode — Notification 503 Cascade for Offline Users (Expediter Flow)
 
 **Context**: Picked up Bug #2 from `bug-fix-queue.md` queue. Filed 2026-05-01 by session 31172845; evidence in `src/rnd/v0.1.7/2026.05.01-postmortem-fixes-90-execution-log.md` §Phase 5. Server raises HTTP 503 in `src/cosa/rest/routers/notifications.py:727-731` when `target_user` is offline AND no `response_default` is set; client expediter `_batch_collect_args` at `src/cosa/agents/runtime_argument_expeditor/expeditor.py:821-833` does NOT set `response_default`. Symptom: ~21 cancellations across `test_expeditor_mock_job_smoke`, `test_proxy_integration[expediter scenarios]`, `test_swe_team_proxy` smoke tests when test user has no WS connection. 4 fix options pre-documented; Option B (client `response_default = JSON-encoded answer defaults`) is most surgical, Option C (auto-proxy WS connection for test user) is most architecturally correct.

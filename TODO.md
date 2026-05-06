@@ -116,6 +116,28 @@ If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that
 
 ---
 
+## ☀️ FIRST THING IN THE MORNING — 2026.05.06
+
+### Pending — Multiplexer Phase 6a Pass 1 Fitness ratification gate
+
+- [ ] [LUPIN] **Resume at the Pass 1 Fitness user-decision gate** for Multiplexer Phase 6a (Jobs Surface). Findings landed end-of-day 2026-05-05 in `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/94-phase6a-review-findings.md` § "Pass 1 Fitness Findings". **17 findings** (0 Block / 10 Major / 7 Minor / 0 Layer 3 design concerns). Cluster: COMPLETENESS (5), TESTABILITY (4), AMBIGUITY (3), DECISION TRACEABILITY (1), RISK SURFACE (1), ORDERING (1).
+
+  **Recommended ratification path** (mirrors REUSE-step pattern that worked well 2026-05-05):
+  1. Mechanical batch yes/no for the 7 Minors (F1, F2, F9, F10, F11, F12, F15) via `mcp__cosa-voice__ask_yes_no`
+  2. Meaningful walkthrough for the 10 Majors (F3, F4, F5, F6, F7, F8, F13, F14, F16, F17) via per-row `ask_yes_no` or `ask_multiple_choice`
+
+  **After ratification**: I apply approved fixes to `08-phase6a-jobs-surface-design.md`, run convergence re-grep (TBD + Open-sub-question per PIP §7), append "Pass 1 Fitness — closed" subsection to `94-phase6a-review-findings.md`, then surface results before Pass 2 Adversarial fires (clean-context Agent, sees Pass-1-resolved state per Q11 amendment + sequential PIP).
+
+  **Standout Major findings to walk first**: F3 (`hydrateHistory` rejection path unspecified), F4 (`createJobsPaneRenderer({stores})` shape contract), F7 (AC8a `data-phase6-pending` count fixture mechanism), F14 (Q-A2 "Match legacy" lacks file:line citation), F17 (Q-A7 mount sequence ordering).
+
+  **Anchor docs to skim before the gate**:
+  - `01-phase0-decisions.md` Q11 amendment (sequential PIP mandate)
+  - `08-phase6a-jobs-surface-design.md` § "Q-decisions — RATIFIED" + § "Prior art referenced"
+  - `94-phase6a-review-findings.md` § "Pass 1 Fitness Findings" (the table itself)
+  - `feedback_pip_plan_review_is_sequential` auto-memory
+
+---
+
 ## ☀️ FIRST THING IN THE MORNING — 2026.05.05 (or next session)
 
 ### Pending — Commit Phase 3 + begin Multiplexer Phase 4
