@@ -58,7 +58,7 @@
 | a6b318ea | 2026-05-01T15:53:00 | 2026-05-01T17:35:00 | closed |
 | 0022baba | 2026-05-02T10:50:00 | 2026-05-02T16:25:00 | closed |
 | 4ede5bad | 2026-05-02T11:30:00 | 2026-05-05T00:00:00 | closed |
-| d5e3cf21 | 2026-05-05T19:30:00 | 2026-05-05T19:30:00 | active |
+| d5e3cf21 | 2026-05-05T19:30:00 | 2026-05-06T01:30:00 | active |
 | 45e6bf84 | 2026-05-05T21:03:44 | 2026-05-05T21:03:44 | active |
 
 ---
@@ -180,15 +180,6 @@
 
 (Claimed by a specific session)
 
-- [ ] **Voice persona switches on `/clear` — SessionEnd hook releases persona unconditionally** | Owner: d5e3cf21 | Since: 2026-05-05T19:30:00
-  - **Symptom**: User-observed persona flip during all-day session 532b16e1 (Tiberius → Domi after a `/clear`). Previous gate-3 hypothesis in `register_session.py` was disproved by Phase 1.2 diagnostic (`vp_is_dict=False` despite a persona being assigned earlier).
-  - **Root cause** (session d5e3cf21): `src/lupin_cli/claude_code/hooks/session_end.py:224-226` unconditionally calls `_release_voice_persona( session_id )`. Claude Code's SessionEnd hook fires on `/clear` (with `reason="clear"`), not only on process exit, so the bridge `voice_persona` field is nulled BEFORE the post-/clear SessionStart hook reads it. The carry-forward gate at `register_session.py:770` then correctly skips (predicate `isinstance(old_data.get("voice_persona"), dict)` is False), and Phase 4.5 `/allocate` rolls a fresh random persona.
-  - **Why session d5e3cf21 looked OK**: Pre-/clear sub-session was a fresh start that never had a persona allocated; the post-/clear `/allocate` happened to draw Tiberius from the pool by chance.
-  - **Fix shape**: ~3-line guard in `session_end.py` — read `payload.get("reason")` and skip `_release_voice_persona` when reason ∈ {"clear", "compact"}; only release on actual termination (`"exit"`, `"logout"`, etc.).
-  - **Test gaps**: No unit tests exist for `session_end.py` today (`ls src/tests/unit/test_session_end*` returns nothing). Add `test_session_end_skips_release_on_clear`, `test_session_end_skips_release_on_compact`, `test_session_end_releases_on_exit`.
-  - **Cleanup**: Once verified live, remove the three `[register_session]` diagnostic prints (gate-result, gate-2-fail, preserve-check) added in Phase 1.1 — they're dead weight after the fix lands.
-  - **xfail re-evaluation**: `test_legacy_session_ids_match_preserves` is pinned to the wrong (gate-3) hypothesis — replace with `test_session_end_skips_release_on_clear` rather than flip.
-
 - [ ] **Notification 503 cascade for offline users in expediter flow** | Owner: 45e6bf84 | Since: 2026-05-05T21:03:44
   - **Server**: `src/cosa/rest/routers/notifications.py:727-731` raises HTTP 503 when target_user is offline AND no `response_default` set.
   - **Client**: `src/cosa/agents/runtime_argument_expeditor/expeditor.py:821-833` `_batch_collect_args` does NOT set `response_default` (only per-question `default_value` inside `response_options`).
@@ -233,6 +224,14 @@
 ---
 
 ### Completed
+
+- [x] **Voice persona switches on `/clear` — SessionEnd hook releases persona unconditionally** → commit: 82c098b (§0.4 fix + 8 unit tests) + 5fd13d7 (Phase 1F cleanup + live verification + wrap) | By: d5e3cf21 | 2026-05-06
+  - **Root cause**: `src/lupin_cli/claude_code/hooks/session_end.py:224-226` unconditionally called `_release_voice_persona( session_id )` on every SessionEnd hook fire. Claude Code fires SessionEnd on `/clear` (`reason="clear"`), not only on process exit, so the bridge `voice_persona` field was nulled BEFORE the post-/clear SessionStart could carry it forward.
+  - **Fix**: 3-line `reason`-guard in `session_end.py` — skip `_release_voice_persona` when `payload["reason"]` ∈ {"clear", "compact"}; release on `logout`/`prompt_input_exit`/`other`/missing-reason.
+  - **Tests**: NEW `src/tests/unit/test_session_end.py` (8 tests, full reason matrix). `test_register_session_preservation.py` xfail removed; Phase 1F deleted `TestPhase1Diagnostics` class + stripped stderr asserts.
+  - **Cleanup**: Phase 1F removed the three `[register_session]` diagnostic prints (gate-result, gate-2-fail, preserve-check) once §0.4 was live-verified.
+  - **Live verification**: bridge `cc-287218.json` shows `voice_persona.assigned_at = 2026-05-05T23:14:43Z` preserved unchanged across 2 /clear cycles (3 transient UUIDs in `session_ids`). User voice-confirmed mid-session: "No change, you are still Tiberius."
+  - **R&D doc**: `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/`
 
 - [x] **Focus tray strands icons after Clear All / per-day delete / history-window change** → commit: 1b191f4 | By: a6b318ea | 2026-05-01
   - **Fix**: Extracted `_clearAllStripIcons()` helper next to `_removeStripIcon` (exits focus mode, empties `#cc-strip-icons`, hides strip, resets unread counts). Wired `_removeStripIcon(senderId)` into `removeSenderCard` (per-sender path) and `_clearAllStripIcons()` into `clearAllNotifications` + `clearSenderGroups` (bulk paths).

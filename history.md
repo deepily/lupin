@@ -32,25 +32,27 @@
 - **Files**:
   - `src/lupin_cli/claude_code/hooks/session_end.py` — added `reason = payload.get("reason", "")` and gated the `_release_voice_persona( session_id )` call on `reason not in ("clear", "compact")`. Hook payload's `reason` field discriminates `/clear` and `/compact` (intra-session lifecycle, persona must persist) from `logout`/`prompt_input_exit`/`other` (actual termination, release is correct). Missing-`reason` defaults to release for legacy hook-payload compat.
   - `src/tests/unit/test_session_end.py` — NEW. 8 unit tests covering the reason matrix: skips_release_on_clear, skips_release_on_compact, releases_on_logout, releases_on_other, releases_on_prompt_input_exit, releases_when_reason_missing, skips_release_when_session_id_empty, release_failure_is_swallowed. All green.
-  - `src/tests/unit/test_register_session_preservation.py` — removed stale xfail `test_legacy_session_ids_match_preserves` (pinned to disproved gate-3 hypothesis); updated scenario-5 docstring with pointer to test_session_end.py coverage.
+  - `src/tests/unit/test_register_session_preservation.py` — removed stale xfail `test_legacy_session_ids_match_preserves` (pinned to disproved gate-3 hypothesis); updated scenario-5 docstring with pointer to test_session_end.py coverage. **Phase 1F**: deleted `TestPhase1Diagnostics` class (its 2 tests — `test_gate_result_logs_after_clear_detected` and `test_preserve_check_logs_with_state` — were stderr-print pinnings); stripped stderr asserts from `test_clear_corrupted_bridge_no_preservation`.
   - `src/tests/unit/test_stop_hook.py` — TestConversationModeGate::test_conversation_mode_skips_everything: added missing `@patch( "..._try_auto_narrate" )` and updated docstring + assertion. Pre-existing fragility (test was relying on absence of narratable transcript content); my session's rich transcript exposed it.
+  - `src/lupin_cli/claude_code/hooks/register_session.py` — **Phase 1F cleanup**: removed three diagnostic `print(..., file=sys.stderr)` calls landed in Phase 1.1 (gate-result line 731, gate-2-fail line 733, preserve-check line 769); restored the gate-2 `except (json.JSONDecodeError, OSError):` block to its pre-Phase-1.1 silent `pass` shape. Diagnostic infrastructure served its purpose in Phase 1.2 (proved gate-3 fired correctly, pointed upstream to session_end.py); now dead weight after the §0.4 fix.
   - `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/01-design.md` — added §0 UPDATE block overturning the gate-3 hypothesis, documenting the §0.4 fix and §0.5 phase disposition.
-  - `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/90-execution-log.md` — Phase status table refreshed: Phase 1.2 ✅ (data captured + analyzed), Phase 1.3 ❌ OBSOLETE, Phase 1.4 NO-OP, new §0.4 + 1F + Verify rows added.
+  - `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/90-execution-log.md` — Phase status table refreshed across two checkpoints: Phase 1.2 ✅, Phase 1.3 ❌ OBSOLETE, Phase 1.4 NO-OP, §0.4 + tests + Verify ✅ landed (82c098b), Live verify ✅ landed (d5e3cf21), Phase 1F + tests + Verify ✅ landed (d5e3cf21). Open Questions section closed out (all answered or moot).
 - **Test**:
   | Layer | Result |
   |---|---|
-  | py_compile (session_end.py) | ✅ OK |
-  | Import chain (session_end module) | ✅ OK |
-  | Unit (new test_session_end.py) | ✅ 8/8 |
-  | Unit (test_register_session_preservation.py) | ✅ 8/8 (xfail removed cleanly) |
+  | py_compile (session_end.py + register_session.py) | ✅ OK (both checkpoints) |
+  | Import chain (session_end + register_session modules) | ✅ OK (both checkpoints) |
+  | Unit (test_session_end.py) | ✅ 8/8 |
+  | Unit (test_register_session_preservation.py — pre-Phase 1F) | ✅ 8/8 (xfail removed cleanly) |
+  | Unit (test_register_session_preservation.py — post-Phase 1F) | ✅ 6/6 (TestPhase1Diagnostics deleted, stderr asserts stripped) |
   | Unit (test_stop_hook.py TestConversationModeGate) | ✅ 2/2 (flake fixed) |
-  | Full unit suite | ✅ 3958 passed, 1 xfailed, 0 failed in 130.86s |
-  | WS smoke `:7999` | ✅ 50/50 in 44.35s |
-  | Live /clear repro | ⏸ deferred — user-driven verification opportunity |
-- **Checkpoint commit**: `82c098b` — "Checkpoint d5e3cf21: SessionEnd reason-guard — voice persona /clear preservation" (parent Lupin)
-- **Follow-up tasks** (not in checkpoint):
-  - Live verification: do another `/clear` and confirm persona persists (pre-/clear get_session_info will show Tiberius; post-/clear should also show Tiberius, with `assigned_at` unchanged from pre-/clear).
-  - Once verified: remove the three `[register_session]` diagnostic prints (Phase 1F cleanup) — they served their purpose and are now dead weight.
+  | Full unit suite (commit 82c098b) | ✅ 3958 passed, 1 xfailed, 0 failed in 130.86s |
+  | Full unit suite (Phase 1F) | ✅ 3956 passed, 1 xfailed, 0 failed in 130.76s (delta = 2 deleted Phase1Diagnostics tests) |
+  | WS smoke `:7999` (commit 82c098b) | ✅ 50/50 in 44.35s |
+  | WS smoke `:7999` (Phase 1F) | ✅ 50/50 in 44s |
+  | Live /clear repro | ✅ verified live in session d5e3cf21: bridge `cc-287218.json` shows `voice_persona.assigned_at = 2026-05-05T23:14:43Z` (= 19:14 EDT, original assignment) preserved unchanged across **2 /clear cycles** (`session_ids` array contains 3 transient UUIDs: `d5e3cf21`, `a4e62678`, `e0819f3f`). User voice-confirmed mid-session in listener log line 31: "No change, you are still Tiberius." |
+- **Commit (§0.4 + tests)**: `82c098b` — "Checkpoint d5e3cf21: SessionEnd reason-guard — voice persona /clear preservation" (parent Lupin)
+- **Commit (Phase 1F + wrap)**: `5fd13d7` — "Fix: Voice persona /clear preservation — Phase 1F cleanup + wrap" (parent Lupin)
 
 **Session Summary**
 

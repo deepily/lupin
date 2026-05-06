@@ -728,9 +728,8 @@ def main():
                     if old_session_id and old_session_id != session_id:
                         is_context_clear = True
                         _cleanup_old_listener( old_data, session_id )  # session_id = new transient UUID, keep its listener alive
-                    print( f"[register_session] gate-result: is_context_clear={is_context_clear} old_sid={old_session_id!r} new_sid={session_id!r}", file=sys.stderr )
-                except ( json.JSONDecodeError, OSError ) as e:
-                    print( f"[register_session] gate-2-fail: {type( e ).__name__}: {e}", file=sys.stderr )
+                except ( json.JSONDecodeError, OSError ):
+                    pass
         except OSError as e:
             # Cannot create lockfile at all (permissions, disk full).
             # Fall back to transient session_id — stability guarantee lost for this session.
@@ -766,7 +765,6 @@ def main():
         # user mid-session. Keying on stable_session_id alone isn't enough;
         # the bridge WRITE must also preserve the field.
         # See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md §5
-        print( f"[register_session] preserve-check: is_context_clear={is_context_clear} old_data_present={old_data is not None} vp_is_dict={isinstance( ( old_data or {} ).get( 'voice_persona' ), dict )}", file=sys.stderr )
         if is_context_clear and old_data and isinstance( old_data.get( "voice_persona" ), dict ):
             session_data[ "voice_persona" ] = old_data[ "voice_persona" ]
 

@@ -15,7 +15,7 @@ Five scenarios per design doc §3 Step 1.5:
     1. Fresh start (no lockfile, no bridge) → preservation N/A
     2. /clear with persona → persona preserved (release does NOT fire)
     3. /clear without persona → no preservation (release does NOT fire)
-    4. /clear with corrupted bridge → no preservation, gate-2 logged
+    4. /clear with corrupted bridge → no preservation (gate-2 except swallowed)
     5. (REMOVED 2026-05-05) Legacy session_ids[] match — was pinned to the
        gate-3 hypothesis disproved by Phase 1.2 diagnostics. The real bug is
        in session_end.py releasing the persona on /clear; see
@@ -182,8 +182,8 @@ class TestPreservationCases:
         assert "voice_persona" not in bridge
         patched_main[ "_release_voice_persona_via_http" ].assert_not_called()
 
-    def test_clear_corrupted_bridge_no_preservation( self, isolated_session_dir, patched_main, capsys ):
-        """/clear with corrupted bridge JSON → gate-2 swallows error, gate-2-fail diagnostic logged."""
+    def test_clear_corrupted_bridge_no_preservation( self, isolated_session_dir, patched_main ):
+        """/clear with corrupted bridge JSON → gate-2 except swallows error, no preservation."""
         _write_lockfile( isolated_session_dir, TEST_OLD_SESSION_ID )
         _bridge_path( isolated_session_dir ).write_text( "{not valid json" )
 
@@ -192,11 +192,6 @@ class TestPreservationCases:
         bridge = _read_bridge( isolated_session_dir )
         assert bridge is not None  # Hook still wrote a fresh bridge over the bad one
         assert "voice_persona" not in bridge
-
-        captured = capsys.readouterr()
-        assert "[register_session] gate-2-fail:" in captured.err
-        # Phase 1.1 diagnostic should also fire the preserve-check
-        assert "[register_session] preserve-check:" in captured.err
 
     # Removed 2026-05-05 (Session d5e3cf21): the legacy session_ids[] match xfail
     # was pinned to the gate-3 hypothesis disproved by Phase 1.2 diagnostics. Real
@@ -208,38 +203,15 @@ class TestPreservationCases:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# TestPhase1Diagnostics — verify Phase 1.1 instrumentation fires correctly
+# TestPhase1Diagnostics — REMOVED 2026-05-05 (Phase 1F)
 # ═════════════════════════════════════════════════════════════════════════════
-
-class TestPhase1Diagnostics:
-    """Phase 1.1 stderr prints — ensure they fire on the relevant code paths."""
-
-    def test_gate_result_logs_after_clear_detected( self, isolated_session_dir, patched_main, capsys ):
-        """gate-result print fires inside the FileExistsError path with old + new ids."""
-        _write_lockfile( isolated_session_dir, TEST_OLD_SESSION_ID )
-        _write_bridge( isolated_session_dir, {
-            "session_id"        : TEST_OLD_SESSION_ID,
-            "stable_session_id" : TEST_OLD_SESSION_ID,
-            "session_ids"       : [ TEST_OLD_SESSION_ID ]
-        } )
-
-        register_session.main()
-
-        captured = capsys.readouterr()
-        assert "[register_session] gate-result:" in captured.err
-        assert "is_context_clear=True"           in captured.err
-        assert TEST_OLD_SESSION_ID               in captured.err
-        assert TEST_NEW_SESSION_ID               in captured.err
-
-    def test_preserve_check_logs_with_state( self, isolated_session_dir, patched_main, capsys ):
-        """preserve-check print fires unconditionally inside the session_id branch."""
-        register_session.main()
-
-        captured = capsys.readouterr()
-        assert "[register_session] preserve-check:" in captured.err
-        assert "is_context_clear=False"             in captured.err  # Fresh start
-        assert "old_data_present=False"             in captured.err
-        assert "vp_is_dict=False"                   in captured.err
+# The Phase 1.1 stderr prints (gate-result, gate-2-fail, preserve-check) were
+# diagnostic instrumentation added to capture which gate failed on /clear.
+# They served their purpose in Phase 1.2 (proved gate-3 fired correctly,
+# pointed to upstream session_end.py:224 release-on-clear bug). With the §0.4
+# reason-guard fix landed in session_end.py and live-verified, the diagnostic
+# prints + their tests were removed in Phase 1F.
+# See: src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/01-design.md §0.5
 
 
 # ═════════════════════════════════════════════════════════════════════════════
