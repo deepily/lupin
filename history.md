@@ -58,6 +58,14 @@
 
 Closed out the voice-persona /clear preservation bug end-to-end. The day-of work spanned three checkpoint commits in addition to the Phase 1F wrap: `82c098b` landed the §0.4 reason-guard fix in `session_end.py` and 8 new unit tests in `test_session_end.py`; `4ae3b95` backfilled `82c098b` into history + manifest; `f21b163` wrapped Phase 1F (deleted three diagnostic prints from `register_session.py`, deleted `TestPhase1Diagnostics` class, stripped stderr asserts); `eb336a2` backfilled `f21b163` into the four tracking docs. Live verification was the headline outcome — bridge `cc-287218.json` shows `voice_persona.assigned_at = 2026-05-05T23:14:43Z` preserved unchanged across **2 /clear cycles** (3 transient session_ids in `session_ids` array), and the listener log captures the user's mid-session voice confirmation: *"No change, you are still Tiberius."* Verification ran clean across the full pyramid: 3956 unit + 1 xfailed in 130.76s, 14/14 targeted preservation/session_end tests, 50/50 WS smoke. Bug moved In Progress → Completed in `bug-fix-queue.md`; matching TODO.md item line 152 marked `[x]`. Manifest section status: `committed`. Bug fix mode pending closure via `/plan-bug-fix-mode-close` (user confirmed YES at session-end).
 
+### Session Closed
+- **Total Fixes**: 1 (Voice persona switches on `/clear` — SessionEnd hook releases persona unconditionally)
+- **Files Changed**: `src/lupin_cli/claude_code/hooks/session_end.py`, `src/lupin_cli/claude_code/hooks/register_session.py`, `src/tests/unit/test_session_end.py` (NEW), `src/tests/unit/test_register_session_preservation.py`, `src/tests/unit/test_stop_hook.py`, plus R&D docs (`01-design.md` §0 update, `90-execution-log.md` full table refresh) and tracking docs (`history.md`, `bug-fix-queue.md`, `TODO.md`, `.claude-session.md`)
+- **GitHub Issues Closed**: none (ad-hoc bug from active R&D investigation)
+- **Commits**: `82c098b` (§0.4 fix + 8 unit tests), `4ae3b95` (backfill), `f21b163` (Phase 1F wrap), `eb336a2` (backfill), `0bdec51` (session-end Session Summary), `a90d576` (backfill)
+
+**Status**: Session closed 2026.05.06
+
 ---
 
 ### 2026.05.05 PM - Session 532b16e1 | Multiplexer Phase 5 — Renderer (notifications-list pane + tagged-template `html` helper + CSS port + action-required read-only)
